@@ -1,5 +1,3 @@
-# chromium-18.0.1025.29
-
 ## Build Instructions (Windows)
 
 This page has detailed information on building Chromium on Windows, including tips for troubleshooting and for speeding up the build.
@@ -47,54 +45,54 @@ This page has detailed information on building Chromium on Windows, including ti
 *   Windows XP SP3 or later.
 *   A 64 bit OS is highly recommended as building on 32 bit OS is constantly becoming harder, is a lot slower and is not actively maintained.
 *   (Optional) Visual Studio Express, Standard, or Pro 2008 or 2010.
-    *   If you don't own a copy of Visual Studio, you can (freely) download Visual Studio 2008 Express w/SP1
+    *   If you don't own a copy of Visual Studio, you can (freely) download [Visual Studio 2008 Express w/SP1](http://web.archive.org/web/20120510032223/http://download.microsoft.com/download/a/5/4/a54badb6-9c3f-478d-8657-93b3fc9fe62d/vcsetup.exe)
     *   For non-Express versions:
         *   Make sure that "X64 Compilers and Tools" are installed as part of Visual Studio - **Important!** If you don't install this now, you won't be able to correct your installation later without uninstalling due to a bug in VS2008 SP1.
-    *   For VS 2008, if you're using the Standard Edition, make sure to also install C# development. Otherwise cl.exe won't be copied. See KB969866.
+    *   For VS 2008, if you're using the Standard Edition, make sure to also install C# development. Otherwise cl.exe won't be copied. See [KB969866](http://web.archive.org/web/20120510032223/http://support.microsoft.com/kb/969866).
     *   For Express versions, keep in mind that debugging is extremely limited.
-*   Visual C++ compiler is included to Windows SDK 7.1 so it is possible to build Chromium without having Visual Studio installed. You will have to build from the command line, supply your favorite code editor and use WinDBG for debugging if you choose to go this way.
+*   Visual C++ compiler is included to Windows SDK 7.1 so it is possible to build Chromium without having Visual Studio installed. You will have to build from the command line, supply your favorite code editor and use [WinDBG](http://web.archive.org/web/20120510032223/http://www.microsoft.com/whdc/DevTools/Debugging/default.mspx) for debugging if you choose to go this way.
 *   Additional downloads:
-    *   Windows 7.1 SDK
-    *   June 2010 DirectX SDK
-    *   (Optional) WDK.
+    *   [Windows 7.1 SDK](http://web.archive.org/web/20120510032223/https://www.microsoft.com/downloads/en/details.aspx?FamilyID=6b6c21d2-2006-4afa-9702-529fa782d63b)
+    *   [June 2010 DirectX SDK](http://web.archive.org/web/20120510032223/http://www.microsoft.com/download/en/details.aspx?displaylang=en&id=6812)
+    *   (Optional) [WDK](http://web.archive.org/web/20120510032223/http://msdn.microsoft.com/en-us/windows/hardware/gg487463.aspx).
         *   WDK is required unless you are using Visual Studio Professional or above.
-    *   KB articles: KB957912, KB958842, KB960075, KB967631, KB971092, and KB2519277.
+    *   KB articles: [KB957912](http://web.archive.org/web/20120510032223/https://connect.microsoft.com/VisualStudio/Downloads/DownloadDetails.aspx?DownloadID=15363), [KB958842](http://web.archive.org/web/20120510032223/https://connect.microsoft.com/VisualStudio/Downloads/DownloadDetails.aspx?DownloadID=16558), [KB960075](http://web.archive.org/web/20120510032223/https://connect.microsoft.com/VisualStudio/Downloads/DownloadDetails.aspx?DownloadID=16927), [KB967631](http://web.archive.org/web/20120510032223/https://connect.microsoft.com/VisualStudio/Downloads/DownloadDetails.aspx?DownloadID=17105), [KB971092](http://web.archive.org/web/20120510032223/http://www.microsoft.com/downloads/details.aspx?familyid=294de390-3c94-49fb-a014-9a38580e64cb), and [KB2519277](http://web.archive.org/web/20120510032223/https://www.microsoft.com/en-us/download/details.aspx?displaylang=en&id=4422).
     *   Install them according to the setup instructions below.
-*   (Optional) Cygwin
+*   (Optional) [Cygwin](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/how-tos/cygwin)
 
 > #### <a name="important-vs2010"></a>Important: As of May 2012 the preferred toolchain is Visual Studio 2010. Visual Studio 2008 support will be deprecated in the near future
 
 #### <a name="setting-up-for-vs2008"></a>Setting up the environment for Visual Studio 2008
 
 1.  **Install Visual Studio 2008**
-2.  **Install VS2008 SP1** (unless you already have SP1, e.g. because you downloaded VS2008 Express w/SP1 via the link above).
-3.  **Install KB967631, KB960075, and KB957912.**
-4.  **Install the Windows 7.1 SDK**
+2.  **Install [VS2008 SP1](http://web.archive.org/web/20120510032223/https://www.microsoft.com/downloads/details.aspx?familyid=FBEE1648-7106-44A7-9649-6D9F6D58056E)** (unless you already have SP1, e.g. because you downloaded VS2008 Express w/SP1 via the link above).
+3.  **Install [KB967631](http://web.archive.org/web/20120510032223/https://connect.microsoft.com/VisualStudio/Downloads/DownloadDetails.aspx?DownloadID=17105), [KB960075](http://web.archive.org/web/20120510032223/https://connect.microsoft.com/VisualStudio/Downloads/DownloadDetails.aspx?DownloadID=16927), and [KB957912](http://web.archive.org/web/20120510032223/https://connect.microsoft.com/VisualStudio/Downloads/DownloadDetails.aspx?DownloadID=15363).**
+4.  **Install the [Windows 7.1 SDK](http://web.archive.org/web/20120510032223/https://www.microsoft.com/downloads/en/details.aspx?FamilyID=6b6c21d2-2006-4afa-9702-529fa782d63b)**
     *   Read the instructions on the SDK download page! Read it again!
     *   You might need to reboot. You can save space by not installing the documentation and code samples.
 5.  **Integrate the SDK with Visual Studio**
     *   Start > All Programs > Microsoft Windows SDK > Visual Studio Registration > Windows SDK Configuration Tool.
     *   If this program crashes, try running it from the command line with: `windowssdkver -version:v7.1 -legacy`
-    *   If build still fails, try registering the SDK manually.
-    *   If you had a previous version of the SDK installed before installing, verify that your VC++ directories are set to use the newest and not an earlier SDK. See registering the SDK manually for details.
-6.  **If you are not using Visual Studio 2008 Express, install KB971092.** Yes, that's a 365 MB update. :/
-7.  **If you are using Visual Studio 2008 Team System and plan to use the profiler, install KB958842.**
-8.  **Install the June 2010 DirectX SDK**
+    *   If build still fails, try [registering the SDK manually](#manually-registering-sdk).
+    *   If you had a previous version of the SDK installed before installing, verify that your VC++ directories are set to use the newest and not an earlier SDK. See [registering the SDK manually](#manually-registering-sdk) for details.
+6.  **If you are not using Visual Studio 2008 Express, install [KB971092](http://web.archive.org/web/20120510032223/http://www.microsoft.com/downloads/details.aspx?familyid=294de390-3c94-49fb-a014-9a38580e64cb).** Yes, that's a 365 MB update. :/
+7.  **If you are using Visual Studio 2008 Team System and plan to use the profiler, install [KB958842](http://web.archive.org/web/20120510032223/https://connect.microsoft.com/VisualStudio/Downloads/DownloadDetails.aspx?DownloadID=16558).**
+8.  **Install the [June 2010 DirectX SDK](http://web.archive.org/web/20120510032223/http://www.microsoft.com/download/en/details.aspx?displaylang=en&id=6812)**
     *   Open Tools > Options > Projects and Solutions > VC++ Directories.
     *   Under "Include files" add `$(DXSDK_DIR)include` to the start of the list.
     *   Under "Library files" add `$(DXSDK_DIR)lib\x86` to the start of the list.
     *   Make sure the DirectX include and lib directories appear first in the search path, otherwise you may get build errors (e.g. error C3861: 'XInputEnable': identifier not found).
 9.  **If you use Visual Studio 2008 Express:**
-    *   Install the WDK for the ATL headers and libs.
+    *   Install the [WDK](http://web.archive.org/web/20120510032223/http://msdn.microsoft.com/en-us/windows/hardware/gg487463.aspx) for the ATL headers and libs.
     *   Verify MSVC|Tools|Options|Projects and Solutions|VC++ Directories has Include: `[WDK]include\atl71` and Lib: `[WDK]lib\Atl\i386` where `[WDK]` is the WDK install directory.
-10. **(Optional) Install cygwin.**
+10. **(Optional) Install [cygwin](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/how-tos/cygwin).**
 
 #### <a name="setting-up-for-vs2010"></a>Setting up the environment for Visual Studio 2010
 
 1.  **Install Visual Studio 2010 / Visual C++ 2010 Express**
-2.  **Install VS2010 SP1.**
-3.  **Install the Windows 7.1 SDK.**
-    *   You may need this repair to restore the libraries if the SDK was already installed when you installed SP1.
+2.  **Install [VS2010 SP1](http://web.archive.org/web/20120510032223/https://www.microsoft.com/downloads/en/details.aspx?FamilyID=75568aa6-8107-475d-948a-ef22627e57a5).**
+3.  **Install the [Windows 7.1 SDK](http://web.archive.org/web/20120510032223/https://www.microsoft.com/downloads/en/details.aspx?FamilyID=6b6c21d2-2006-4afa-9702-529fa782d63b).**
+    *   You may need [this repair to restore the libraries](http://web.archive.org/web/20120510032223/https://www.microsoft.com/download/en/details.aspx?displaylang=en&id=4422) if the SDK was already installed when you installed SP1.
 4.  **Specify the version of the Windows SDK** by setting the `msbuild_toolset` variable in `%USERPROFILE%\.gyp\include.gypi`. Create the file if needed:
     ```json
     {
@@ -106,9 +104,9 @@ This page has detailed information on building Chromium on Windows, including ti
 5.  As of 2011-04-01, VS2010 is not detected automatically by GYP, so to generate the .sln/.vcxproj, you need to **set/export `GYP_MSVS_VERSION=2010`** (or create new Windows environment variable)
     *   Note: `2010e` for express versions.
 6.  `gclient runhooks`
-    *   There is an issue in gyp: GYP-222 AdditionalManifestFiles element should be in Manifest instead of Mt
+    *   There is an issue in gyp: [GYP-222](http://web.archive.org/web/20120510032223/http://code.google.com/p/gyp/issues/detail?id=222) AdditionalManifestFiles element should be in Manifest instead of Mt
     *   No tooltip due by lack of manifest file in EXE/DLL.
-7.  **Install the June 2010 DirectX SDK**
+7.  **Install the [June 2010 DirectX SDK](http://web.archive.org/web/20120510032223/http://www.microsoft.com/download/en/details.aspx?displaylang=en&id=6812)**
     *   Add `$(DXSDK_DIR)\include;` to the beginning of the `IncludePath` property in `%LOCALAPPDATA%\Microsoft\MSBuild\v4.0\Microsoft.Cpp.Win32.user.props`.
     *   Add `$(DXSDK_DIR)\lib\x86;` to the beginning of the `LibraryPath` property in the same file. At this point the .props file will look like this:
         ```xml
@@ -134,7 +132,7 @@ This page has detailed information on building Chromium on Windows, including ti
     *   Make sure the DirectX include and lib directories appear first in the search path, otherwise you may get build errors (e.g. error C3861: 'XInputEnable': identifier not found).
 
 8.  **If you're using Visual C++ 2010 Express:**
-    *   Install the WDK for the ATL/MFC headers and libs (else you will get "Missing library atlthunk.lib" and "Missing header altbase.h" errors).
+    *   Install the [WDK](http://web.archive.org/web/20120510032223/http://msdn.microsoft.com/en-us/windows/hardware/gg487463.aspx) for the ATL/MFC headers and libs (else you will get "Missing library atlthunk.lib" and "Missing header altbase.h" errors).
     *   After you've done this, create a system-wide environment variable named `WDK_DIR` via Run...->SystemPropertiesAdvanced->Environment Variables...->New...(in System variables), with the name of `WDK_DIR` and the location you installed the WDK (e.g. `C:\WinDDK\7600.16385.1`).
     *   Add the following paths (highlighted) to `%LOCALAPPDATA%\Microsoft\MSBuild\v4.0\Microsoft.Cpp.Win32.user.props`:
         ```xml
@@ -157,7 +155,7 @@ This page has detailed information on building Chromium on Windows, including ti
         </Project>
         ```
     *   Do not edit the files above via the Visual Studio UI (via View->Property Manager) because it may overwrite recursive `$(IncludePath)` and `$(LibraryPath)` breaking (potentially) Windows SDK selection via the `msbuild_toolset` variable.
-9.  **(Optional) Install cygwin.**
+9.  **(Optional) Install [cygwin](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/how-tos/cygwin).**
 
 #### <a name="using-vc-from-sdk"></a>Using Visual C++ compiler from Windows SDK 7.1
 
@@ -167,8 +165,8 @@ Follow the steps from "Setting up the environment for Visual Studio 2010" above 
 
 ### <a name="building-chromium"></a>Building Chromium
 
-1.  Get the Chromium depot_tools.
-2.  Check out the source code using either the bootstrap tarball or a direct svn checkout.
+1.  [Get the Chromium depot_tools](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/how-tos/install-depot-tools).
+2.  [Check out the source code](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/how-tos/get-the-code) using either the bootstrap tarball or a direct svn checkout.
 3.  Open the `chrome/chrome.sln` solution file in Visual Studio and build the solution. This can take from 10 minutes to 2 hours. More likely 1 hour.
 4.  If you just want the Chromium browser, and none of the tests, you can speed up your build by right-clicking the `chrome` project in the solution explorer and selecting Build. You may want to make sure this project is the Startup project (which will display as bold) by right-clicking it and selecting Set as Startup Project. This will make Chromium (as opposed to some random test) build and run when you press F5.
 
@@ -181,13 +179,13 @@ In decreasing order of speedup:
 *   Use a true multicore processor, i.e. an Intel Core Duo or later (not a Pentium 4 HT).
 *   Use an x64 OS (otherwise incremental linking is disabled).
 *   Have at least 8 GB RAM. If you have less than 4 GB, you may find builds to be prohibitively slow.
-*   Turn on precompiled headers and the component build.
-*   Use `src/build/some.gyp` to only load the targets you care about.
+*   Turn on [precompiled headers](http://web.archive.org/web/20120510032223/http://code.google.com/p/chromium/wiki/WindowsPrecompiledHeaders) and the [component build](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/how-tos/component-build).
+*   Use [`src/build/some.gyp`](http://web.archive.org/web/20120510032223/http://src.chromium.org/viewvc/chrome/trunk/src/build/some.gyp?view=markup) to only load the targets you care about.
 *   Disable your anti-virus software for `.ilk`, `.pdb`, `.cc`, `.h` files and only check for viruses on modify. Disable scanning the directory where your sources reside.
 *   Store and build the Chromium code on a second hard drive that does not have swap (Control Panel->System and Security->System->Advanced->Performance/Settings->Advanced->Virtual memory/Change). During compilation and linking there are a lot of memory been used and disk I/O happening. It's not a good idea to have all I/Os staying in the way on the same disk that memory manager doing its swap.
-*   Consider using ninja - it's an alternative command-line build tool that's much faster than Visual Studio, especially for incremental builds.
-*   Reduce number of parallel builds. The Chromium requires a lot of memory to link; if you build to many sub-projects simultaneously your PC will slow to crawl during the linking phase because of the linkers fighting for the swap. Go into MSVC's Tools\Options\Projects and Solutions\Build and Run and reduce "maximum number of parallel project builds". By default it is equal to number of virtual processors (e. g. it will be 16 on the two I7s because of the hyper-threading). Recommended number for 12 GB of RAM is lower than 8 (see discussions here). Reduce more for less RAM.
-*   You may also want to tune your `include.gypi` file to limit number of `cl.exe` spawned and reduce context switches (see discussions here). For example, to limit only 5 `cl.exe` and 5 linkers, the `include.gypi` under your home folder's `.gyp` should have:
+*   Consider using [ninja](http://web.archive.org/web/20120510032223/http://code.google.com/p/chromium/wiki/NinjaBuild) - it's an alternative command-line build tool that's much faster than Visual Studio, especially for incremental builds.
+*   Reduce number of parallel builds. The Chromium requires a lot of memory to link; if you build to many sub-projects simultaneously your PC will slow to crawl during the linking phase because of the linkers fighting for the swap. Go into MSVC's Tools\Options\Projects and Solutions\Build and Run and reduce "maximum number of parallel project builds". By default it is equal to number of virtual processors (e. g. it will be 16 on the two I7s because of the hyper-threading). Recommended number for 12 GB of RAM is lower than 8 (see [discussions here](http://web.archive.org/web/20120510032223/http://groups.google.com/a/chromium.org/group/chromium-dev/browse_thread/thread/735ea0a2c0b7c26f/a2020eaf733615dd)). Reduce more for less RAM.
+*   You may also want to tune your `include.gypi` file to limit number of `cl.exe` spawned and reduce context switches (see [discussions here](http://web.archive.org/web/20120510032223/http://groups.google.com/a/chromium.org/group/chromium-dev/browse_thread/thread/735ea0a2c0b7c26f/a2020eaf733615dd)). For example, to limit only 5 `cl.exe` and 5 linkers, the `include.gypi` under your home folder's `.gyp` should have:
     ```json
     {
       'variables': {
@@ -203,7 +201,7 @@ In decreasing order of speedup:
     }
     ```
 *   Defragment your hard drive regularly.
-*   You may want to try incremental linking if you're adventurous. It makes linking very fast when you're working incrementally, but is somewhat flaky, and you may need to do cleans after syncs to avoid spurious errors.
+*   You may want to try [incremental linking](http://web.archive.org/web/20120510032223/http://code.google.com/p/chromium/wiki/WindowsIncrementalLinking) if you're adventurous. It makes linking very fast when you're working incrementally, but is somewhat flaky, and you may need to do cleans after syncs to avoid spurious errors.
 
 #### <a name="optional"></a>Optional
 
@@ -213,7 +211,7 @@ You can use Rebuild and Clean on individual projects to rebuild them. However, b
 
 ##### <a name="build-with-ninja"></a>Build Chromium with Ninja
 
-If you like building from the command line, consider using ninja instead - it's much faster, especially for incremental builds! The only downside is that the intermediate object files are not the same as Visual Studio, so you can't switch back and forth between the Visual Studio IDE and Ninja for building.
+If you like building from the command line, consider using [ninja](http://web.archive.org/web/20120510032223/http://code.google.com/p/chromium/wiki/NinjaBuild) instead - it's much faster, especially for incremental builds! The only downside is that the intermediate object files are not the same as Visual Studio, so you can't switch back and forth between the Visual Studio IDE and Ninja for building.
 
 ##### <a name="build-with-vs-cli"></a>Build Chromium using Visual Studio from the Command Line
 
@@ -231,7 +229,7 @@ You can also use `devenv.com` with the same command-line. This will show the out
 
 ##### <a name="build-with-msbuild"></a>Build Chromium with MSBuild
 
-If you use Visual Studio 2010 or the compiler from Windows SDK 7.1 you can build Chromium with MSBuild.
+If you use Visual Studio 2010 or the compiler from Windows SDK 7.1 you can build Chromium with [MSBuild](http://web.archive.org/web/20120510032223/http://msdn.microsoft.com/en-us/library/wea2sca5(v=vs.90).aspx).
 
 1.  Launch Visual Studio 2010 Command Prompt (for Visual Studio 2010) or Windows SDK 7.1 Command Prompt (if you don't have Visual Studio installed) instead of cmd.
 2.  If you are using Windows SDK 7.1 Command Prompt run `"set TARGET_CPU="` to enable building x64 projects.
@@ -256,16 +254,16 @@ To enable whole program optimization / link-time code generation, make sure to s
 3.  `src\build\all.sln`
 4.  Select 'Release' configuration
 5.  Right-click on 'chrome' project and click 'Build'. You don't want to build the tests.
-6.  The WPO configuration settings are defined in `release_impl_official.gypi`.
+6.  The WPO configuration settings are defined in [`release_impl_official.gypi`](http://web.archive.org/web/20120510032223/http://src.chromium.org/viewvc/chrome/trunk/src/build/internal/release_impl_official.gypi?&view=markup).
 
 ##### <a name="unit-tests"></a>Unit tests
 
-Some unit tests (such as `gfx_unittests`) require at least Vista/2008 with Platform Update installed or Windows 7 to execute all of the tests completely.
+Some unit tests (such as `gfx_unittests`) require at least Vista/2008 with [Platform Update](http://web.archive.org/web/20120510032223/http://support.microsoft.com/kb/971644) installed or Windows 7 to execute all of the tests completely.
 
 ##### <a name="other-tricks"></a>Other tricks
 
-See Visual Studio Macros page and debugging pages.
-Blog post on setting a right-hand print margin.
+See [Visual Studio Macros](http://web.archive.org/web/20120510032223/http://code.google.com/p/chromium/wiki/WindowsVisualStudioMacros) page and [debugging](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/how-tos/debugging) pages.
+[Blog post](http://web.archive.org/web/20120510032223/http://terboven.spaces.live.com/Blog/cns!EA3D3C756483FECB!194.entry) on setting a right-hand print margin.
 
 ---
 
@@ -273,9 +271,9 @@ Blog post on setting a right-hand print margin.
 
 The `chrome.exe` executable can be found at `src/build/Debug/chrome.exe` or `src/build/Release/chrome.exe`, depending on the selected build configuration.
 
-Because of Chromium's unique architecture, there are a number of special challenges associated with development. See Debugging Chromium for more information.
+Because of Chromium's unique architecture, there are a number of special challenges associated with development. See [Debugging Chromium](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/how-tos/debugging) for more information.
 
-Once you're comfortable with building Chromium, read the Contributing Code page for information about writing code for Chromium and contributing it.
+Once you're comfortable with building Chromium, read the [Contributing Code](http://web.archive.org/web/20120510032223/http://www.chromium.org/developers/contributing-code) page for information about writing code for Chromium and contributing it.
 
 #### <a name="packaging"></a>Packaging
 
@@ -311,10 +309,10 @@ Some common things to think about when you have weird compilation failures:
 *   If you get errors like these:
     *   `C:\Program Files\Microsoft SDKs\Windows\v6.1\Include\unknwn.idl(108) : error MIDL2025 : syntax error : expecting ] or , near "annotation"`
     *   `browser\download\download_util.cc(469) : error C2065: 'ITaskbarList3' : undeclared identifier`
-    You either have the wrong Platform SDK or it is incorrectly registered. Try installing the Windows 7 SDK or, if already installed, try registering the SDK manually.
+    You either have the wrong Platform SDK or it is incorrectly registered. Try installing the [Windows 7 SDK](http://web.archive.org/web/20120510032223/http://www.microsoft.com/downloads/details.aspx?FamilyID=c17ba869-9671-4330-a63e-1fd44e0e2505) or, if already installed, try [registering the SDK manually](#manually-registering-sdk).
 *   If you get errors like this:
     *   `error C2039: '_Swap_adl' : is not a member of 'std'`
-    Then you've likely run into a conflict between the Windows SDK and a security patch. See this MSDN blog post for more details try reinstalling Visual Studio SP1.
+    Then you've likely run into a conflict between the Windows SDK and a security patch. See this [MSDN blog post](http://web.archive.org/web/20120510032223/http://blogs.msdn.com/windowssdk/archive/2009/08/07/installing-windows-sdk-for-server-2008-v6-1-after-vs2008-sp1-causes-conflicts-with-security-update-kb971092.aspx) for more details try [reinstalling Visual Studio SP1](#reinstalling-vs2008-sp1).
 *   If you get errors like this:
     ```
     3>c:\program files (x86)\microsoft directx sdk (june 2010)\include\d3d11shader.h(35) : error C2146: syntax error : missing ';' before identifier 'D3D11_RESOURCE_RETURN_TYPE'
@@ -373,12 +371,12 @@ GYP picks up the proper version SDK automatically according to the 'msbuild_tool
 
 #### <a name="reinstalling-vs2008-sp1"></a>Reinstalling Visual Studio SP1 (VS2008)
 
-If you get errors like this: `error C2039: '_Swap_adl' : is not a member of 'std'` then you've likely run into a conflict between the Windows SDK and a security patch. See this MSDN blog post for more details. The workaround is to re-download and over-install SP1 for Visual Studio 2008. Note that at this point you're going to need to re-install all of the hotfixes from above and you should verify that the SDK directories are correct and fix them if not (see "Manually registering the Platform SDK" above).
+If you get errors like this: `error C2039: '_Swap_adl' : is not a member of 'std'` then you've likely run into a conflict between the Windows SDK and a security patch. See this [MSDN blog post](http://web.archive.org/web/20120510032223/http://blogs.msdn.com/windowssdk/archive/2009/08/07/installing-windows-sdk-for-server-2008-v6-1-after-vs2008-sp1-causes-conflicts-with-security-update-kb971092.aspx) for more details. The workaround is to re-download and over-install SP1 for Visual Studio 2008. Note that at this point you're going to need to re-install all of the hotfixes from above and you should verify that the SDK directories are correct and fix them if not (see "Manually registering the Platform SDK" above).
 
 #### <a name="special-sp-prep-tool"></a>Special Service Pack Preparation Tool for Visual Studio 2008
 
 If you are having weird compilation problems on Visual Studio 2008, you may have missed some small prints when downloading the Service Pack 1. Here's an excerpt for you:
-> If you previously installed a Visual Studio 2008 Hotfix or Visual Studio 2008 SP1 pre-release, you must run the Service Pack Preparation tool before installing Visual Studio 2008 SP1.
+> If you previously installed a Visual Studio 2008 Hotfix or Visual Studio 2008 SP1 pre-release, you must run the [Service Pack Preparation tool](http://web.archive.org/web/20120510032223/http://www.microsoft.com/downloads/details.aspx?FamilyId=A494B0E0-EB07-4FF1-A21C-A4663E456D9D) before installing Visual Studio 2008 SP1.
 
 #### <a name="nacl-doesnt-run"></a>Native Client Doesn't Run
 
@@ -405,7 +403,7 @@ tmptar/tar: sdk/nacl-sdk/bin/i686-nacl-ar.exe: Cannot hard link to `sdk/nacl-sdk
 #### <a name="vs2010sp1-after-sdk71"></a>Installing VisualStudio 2010 SP1 after Windows SDK 7.1
 
 There is a bug in VisualStudio 2010 SP1 that it will corrupt existing Windows SDK 7.1 installation. Microsoft KB 2519277 is the fix:
-[http://support.microsoft.com/?kbid=2519277](http://support.microsoft.com/?kbid=2519277).
+[http://support.microsoft.com/?kbid=2519277](http://web.archive.org/web/20120510032223/http://support.microsoft.com/?kbid=2519277).
 
 #### <a name="sdk71-non-default-folder"></a>Installing Windows SDK 7.1 into non-default folder
 
@@ -423,4 +421,4 @@ If the first run of `gclient` produces the error:
 
 `You can also get the "prebacked" version used at http://src.chromium.org/chrome/trunk/tools/third_party/`
 
-See this link for instructions on turning off Windows Indexing.
+See [this link](http://web.archive.org/web/20120510032223/http://tortoisesvn.tigris.org/faq.html#cantmove2) for instructions on turning off Windows Indexing.
