@@ -1,0 +1,21 @@
+<html>
+<head>
+<title>Preloader</title>
+<script src="prerender_events_common.js"></script>
+
+<script>
+  function UnloadHandler() {
+    document.title = 'Unloaded';
+  }
+
+  addEventListener('unload', UnloadHandler, false);
+</script>
+
+</head>
+<body>
+<script>
+  AddPrerender('REPLACE_WITH_DESTINATION_URL', 0);
+</script>
+<a href="REPLACE_WITH_DESTINATION_URL">Link To Click</a>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+config("find_bad_constructs") {
+  cflags = [
+    "-Xclang", "-load",
+    "-Xclang",
+  ]
+
+  if (is_mac) {
+    cflags += rebase_path(
+      "//third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.dylib",
+      ".", root_build_dir)
+  } else if (is_linux) {
+    cflags += rebase_path(
+      "//third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so",
+      ".", root_build_dir)
+  }
+
+  cflags += [
+    "-Xclang", "-add-plugin",
+    "-Xclang", "find-bad-constructs",
+  ]
+}
