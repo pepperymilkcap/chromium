@@ -5,14 +5,13 @@
 #ifndef PPAPI_CPP_FULLSCREEN_H_
 #define PPAPI_CPP_FULLSCREEN_H_
 
-#include "ppapi/cpp/instance_handle.h"
-
 /// @file
 /// This file defines the API for handling transitions of a module instance to
 /// and from fullscreen mode.
 
 namespace pp {
 
+class Instance;
 class Size;
 
 /// The Fullscreen class allowing you to check and toggle fullscreen mode.
@@ -20,9 +19,9 @@ class Fullscreen {
  public:
   /// A constructor for creating a <code>Fullscreen</code>.
   ///
-  /// @param[in] instance The instance with which this resource will be
-  /// associated.
-  explicit Fullscreen(const InstanceHandle& instance);
+  /// @param[in] instance The instance that will own the new
+  /// <code>Fullscreen</code>.
+  Fullscreen(Instance* instance);
 
   /// Destructor.
   virtual ~Fullscreen();
@@ -64,7 +63,7 @@ class Fullscreen {
   bool GetScreenSize(Size* size);
 
  private:
-  InstanceHandle instance_;
+  Instance* instance_;
 };
 
 }  // namespace pp

@@ -12,152 +12,90 @@ are in chrome/common/extensions/api.
 Usage example:
   compiler.py --root /home/Work/src --namespace extensions windows.json
     tabs.json
-  compiler.py --destdir gen --root /home/Work/src
+  compiler.py --destdir gen --suffix _api --root /home/Work/src
     --namespace extensions windows.json tabs.json
 """
 
+import cpp_util
+import cc_generator
+import cpp_type_generator
+import h_generator
+import json
+import model
 import optparse
-import os
+import os.path
 import sys
-
-from cpp_bundle_generator import CppBundleGenerator
-from cpp_generator import CppGenerator
-from cpp_type_generator import CppTypeGenerator
-from dart_generator import DartGenerator
-import json_schema
-from model import Model
-from ppapi_generator import PpapiGenerator
-from schema_loader import SchemaLoader
-
-# Names of supported code generators, as specified on the command-line.
-# First is default.
-GENERATORS = ['cpp', 'cpp-bundle', 'dart', 'ppapi']
-
-def GenerateSchema(generator,
-                   filenames,
-                   root,
-                   destdir,
-                   root_namespace,
-                   dart_overrides_dir):
-  schema_loader = SchemaLoader(
-      os.path.dirname(os.path.relpath(os.path.normpath(filenames[0]), root)),
-      os.path.dirname(filenames[0]))
-  # Merge the source files into a single list of schemas.
-  api_defs = []
-  for filename in filenames:
-    schema = os.path.normpath(filename)
-    api_def = schema_loader.LoadSchema(os.path.split(schema)[1])
-
-    # If compiling the C++ model code, delete 'nocompile' nodes.
-    if generator == 'cpp':
-      api_def = json_schema.DeleteNodes(api_def, 'nocompile')
-    api_defs.extend(api_def)
-
-  api_model = Model()
-
-  # For single-schema compilation make sure that the first (i.e. only) schema
-  # is the default one.
-  default_namespace = None
-
-  # Load the actual namespaces into the model.
-  for target_namespace, schema_filename in zip(api_defs, filenames):
-    relpath = os.path.relpath(os.path.normpath(schema_filename), root)
-    namespace = api_model.AddNamespace(target_namespace,
-                                       relpath,
-                                       include_compiler_options=True)
-    if default_namespace is None:
-      default_namespace = namespace
-
-    path, filename = os.path.split(schema_filename)
-    short_filename, extension = os.path.splitext(filename)
-
-    # Filenames are checked against the unix_names of the namespaces they
-    # generate because the gyp uses the names of the JSON files to generate
-    # the names of the .cc and .h files. We want these to be using unix_names.
-    if namespace.unix_name != short_filename:
-      sys.exit("Filename %s is illegal. Name files using unix_hacker style." %
-               schema_filename)
-
-  # Construct the type generator with all the namespaces in this model.
-  type_generator = CppTypeGenerator(api_model,
-                                    schema_loader,
-                                    default_namespace=default_namespace)
-
-  if generator == 'cpp-bundle':
-    cpp_bundle_generator = CppBundleGenerator(root,
-                                              api_model,
-                                              api_defs,
-                                              type_generator,
-                                              root_namespace,
-                                              namespace.source_file_dir)
-    generators = [
-      ('generated_api.cc', cpp_bundle_generator.api_cc_generator),
-      ('generated_api.h', cpp_bundle_generator.api_h_generator),
-      ('generated_schemas.cc', cpp_bundle_generator.schemas_cc_generator),
-      ('generated_schemas.h', cpp_bundle_generator.schemas_h_generator)
-    ]
-  elif generator == 'cpp':
-    cpp_generator = CppGenerator(type_generator, root_namespace)
-    generators = [
-      ('%s.h' % namespace.unix_name, cpp_generator.h_generator),
-      ('%s.cc' % namespace.unix_name, cpp_generator.cc_generator)
-    ]
-  elif generator == 'dart':
-    generators = [
-      ('%s.dart' % namespace.unix_name, DartGenerator(
-          dart_overrides_dir))
-    ]
-  elif generator == 'ppapi':
-    generator = PpapiGenerator()
-    generators = [
-      (os.path.join('api', 'ppb_%s.idl' % namespace.unix_name),
-       generator.idl_generator),
-    ]
-  else:
-    raise Exception('Unrecognised generator %s' % generator)
-
-  output_code = []
-  for filename, generator in generators:
-    code = generator.Generate(namespace).Render()
-    if destdir:
-      with open(os.path.join(destdir, namespace.source_file_dir,
-          filename), 'w') as f:
-        f.write(code)
-    output_code += [filename, '', code, '']
-
-  return '\n'.join(output_code)
-
 
 if __name__ == '__main__':
   parser = optparse.OptionParser(
       description='Generates a C++ model of an API from JSON schema',
-      usage='usage: %prog [option]... schema')
+      usage='usage: %prog [option]... schema [referenced_schema]...')
   parser.add_option('-r', '--root', default='.',
       help='logical include root directory. Path to schema files from specified'
-      ' dir will be the include path.')
+      'dir will be the include path.')
   parser.add_option('-d', '--destdir',
       help='root directory to output generated files.')
   parser.add_option('-n', '--namespace', default='generated_api_schemas',
       help='C++ namespace for generated files. e.g extensions::api.')
-  parser.add_option('-g', '--generator', default=GENERATORS[0],
-      choices=GENERATORS,
-      help='The generator to use to build the output code. Supported values are'
-      ' %s' % GENERATORS)
-  parser.add_option('-D', '--dart-overrides-dir', dest='dart_overrides_dir',
-      help='Adds custom dart from files in the given directory (Dart only).')
+  parser.add_option('-s', '--suffix', default='',
+      help='Filename and C++ namespace suffix for generated files.')
 
-  (opts, filenames) = parser.parse_args()
+  (opts, args) = parser.parse_args()
+  if not args:
+    sys.exit(parser.get_usage())
+  dest_dir = opts.destdir
+  root_namespace = opts.namespace
+  filename_suffix = opts.suffix
 
-  if not filenames:
-    sys.exit(0) # This is OK as a no-op
+  schema = os.path.normpath(args[0])
+  referenced_schemas = args[1:]
 
-  # Unless in bundle mode, only one file should be specified.
-  if opts.generator != 'cpp-bundle' and len(filenames) > 1:
-    # TODO(sashab): Could also just use filenames[0] here and not complain.
-    raise Exception(
-        "Unless in bundle mode, only one file can be specified at a time.")
+  api_model = model.Model()
 
-  result = GenerateSchema(opts.generator, filenames, opts.root, opts.destdir,
-                          opts.namespace, opts.dart_overrides_dir)
-  if not opts.destdir:
-    print result
+  # Load type dependencies into the model.
+  for referenced_schema_path in referenced_schemas:
+    with open(referenced_schema_path, 'r') as referenced_schema_file:
+      referenced_api_defs = json.loads(referenced_schema_file.read())
+
+    for namespace in referenced_api_defs:
+      api_model.AddNamespace(namespace,
+          os.path.relpath(referenced_schema_path, opts.root))
+
+  # Actually generate for source file.
+  with open(schema, 'r') as schema_file:
+    api_defs = json.loads(schema_file.read())
+
+  for target_namespace in api_defs:
+    # Gets the relative path from opts.root to the schema to correctly determine
+    # the include path.
+    relpath = os.path.relpath(schema, opts.root)
+    namespace = api_model.AddNamespace(target_namespace, relpath)
+    if not namespace:
+      continue
+
+    out_file = cpp_util.CppName(namespace.name).lower() + filename_suffix
+    type_generator = cpp_type_generator.CppTypeGenerator(root_namespace,
+                                                         namespace, out_file)
+    for referenced_namespace in api_model.namespaces.values():
+      type_generator.AddNamespace(referenced_namespace,
+          cpp_util.CppName(referenced_namespace.name).lower() + filename_suffix)
+    cc_generator = cc_generator.CCGenerator(namespace, type_generator)
+    cc_code = cc_generator.Generate().Render()
+    h_generator = h_generator.HGenerator(namespace, type_generator)
+    h_code = h_generator.Generate().Render()
+
+    if dest_dir:
+      with open(os.path.join(dest_dir, namespace.source_file_dir,
+          out_file + '.cc'), 'w') as cc_file:
+        cc_file.write(cc_code)
+      with open(os.path.join(dest_dir, namespace.source_file_dir,
+          out_file + '.h'), 'w') as h_file:
+        h_file.write(h_code)
+    else:
+      print '%s.h' % out_file
+      print
+      print h_code
+      print
+      print '%s.cc' % out_file
+      print
+      print cc_code

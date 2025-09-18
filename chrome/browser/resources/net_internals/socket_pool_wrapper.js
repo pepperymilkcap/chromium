@@ -131,7 +131,7 @@ var SocketPoolWrapper = (function() {
       tablePrinter.addHeaderCell('Active');
       tablePrinter.addHeaderCell('Idle');
       tablePrinter.addHeaderCell('Connect Jobs');
-      tablePrinter.addHeaderCell('Backup Timer');
+      tablePrinter.addHeaderCell('Backup Job');
       tablePrinter.addHeaderCell('Stalled');
 
       for (var groupName in this.origPool.groups) {
@@ -152,8 +152,7 @@ var SocketPoolWrapper = (function() {
         idleCell.link = sourceListLink(group.idle_sockets);
         connectingCell.link = sourceListLink(group.connect_jobs);
 
-        tablePrinter.addCell(
-            group.backup_job_timer_is_running ? 'started' : 'stopped');
+        tablePrinter.addCell(group.has_backup_job);
         tablePrinter.addCell(group.is_stalled);
       }
       return tablePrinter;
@@ -167,7 +166,7 @@ var SocketPoolWrapper = (function() {
   function sourceListLink(sources) {
     if (!sources.length)
       return null;
-    return '#events&q=id:' + sources.join(',');
+    return '#events&q=id:' + sources.join('%20id:');
   }
 
   return SocketPoolWrapper;

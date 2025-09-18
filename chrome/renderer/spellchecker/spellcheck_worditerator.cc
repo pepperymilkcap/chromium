@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,13 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
-#include "third_party/icu/source/common/unicode/normlzr.h"
-#include "third_party/icu/source/common/unicode/schriter.h"
-#include "third_party/icu/source/common/unicode/uscript.h"
-#include "third_party/icu/source/i18n/unicode/ulocdata.h"
+#include "unicode/normlzr.h"
+#include "unicode/schriter.h"
+#include "unicode/uscript.h"
+#include "unicode/ulocdata.h"
 
 // SpellcheckCharAttribute implementation:
 
@@ -32,8 +32,7 @@ void SpellcheckCharAttribute::SetDefaultLanguage(const std::string& language) {
   CreateRuleSets(language);
 }
 
-base::string16 SpellcheckCharAttribute::GetRuleSet(
-    bool allow_contraction) const {
+string16 SpellcheckCharAttribute::GetRuleSet(bool allow_contraction) const {
   return allow_contraction ?
       ruleset_allow_contraction_ : ruleset_disallow_contraction_;
 }
@@ -65,7 +64,7 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
       // For instance, U+05F4 is MidLetter. So, this may be
       // better, but it leads to an empty set error in Thai.
       // "$ALetter   = [[\\p{script=%s}] & [\\p{Word_Break = ALetter}]];"
-      "$ALetter      = [\\p{script=%s}%s];"
+      "$ALetter      = [\\p{script=%s}];"
       "$MidNumLet    = [\\p{Word_Break = MidNumLet}];"
       "$MidLetter    = [\\p{Word_Break = MidLetter}%s];"
       "$MidNum       = [\\p{Word_Break = MidNum}];"
@@ -155,11 +154,6 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
   if (script_code_ == USCRIPT_HANGUL || script_code_ == USCRIPT_THAI)
     aletter_plus = kWithDictionary;
 
-  // Treat numbers as word characters except for Arabic and Hebrew.
-  const char* aletter_extra = " [0123456789]";
-  if (script_code_ == USCRIPT_HEBREW || script_code_ == USCRIPT_ARABIC)
-    aletter_extra = "";
-
   const char kMidLetterExtra[] = "";
   // For Hebrew, treat single/double quoation marks as MidLetter.
   const char kMidLetterExtraHebrew[] = "\"'";
@@ -174,24 +168,21 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
       "$ALetterEx ($MidLetterEx | $MidNumLetEx) $ALetterEx {200};";
   const char kDisallowContraction[] = "";
 
-  ruleset_allow_contraction_ = base::ASCIIToUTF16(
+  ruleset_allow_contraction_ = ASCIIToUTF16(
       base::StringPrintf(kRuleTemplate,
                          aletter,
-                         aletter_extra,
                          midletter_extra,
                          aletter_plus,
                          kAllowContraction));
-  ruleset_disallow_contraction_ = base::ASCIIToUTF16(
+  ruleset_disallow_contraction_ = ASCIIToUTF16(
       base::StringPrintf(kRuleTemplate,
                          aletter,
-                         aletter_extra,
                          midletter_extra,
                          aletter_plus,
                          kDisallowContraction));
 }
 
-bool SpellcheckCharAttribute::OutputChar(UChar c,
-                                         base::string16* output) const {
+bool SpellcheckCharAttribute::OutputChar(UChar c, string16* output) const {
   // Call the language-specific function if necessary.
   // Otherwise, we call the default one.
   switch (script_code_) {
@@ -209,8 +200,7 @@ bool SpellcheckCharAttribute::OutputChar(UChar c,
   }
 }
 
-bool SpellcheckCharAttribute::OutputArabic(UChar c,
-                                           base::string16* output) const {
+bool SpellcheckCharAttribute::OutputArabic(UChar c, string16* output) const {
   // Discard characters not from Arabic alphabets. We also discard vowel marks
   // of Arabic (Damma, Fatha, Kasra, etc.) to prevent our Arabic dictionary from
   // marking an Arabic word including vowel marks as misspelled. (We need to
@@ -221,8 +211,7 @@ bool SpellcheckCharAttribute::OutputArabic(UChar c,
   return true;
 }
 
-bool SpellcheckCharAttribute::OutputHangul(UChar c,
-                                           base::string16* output) const {
+bool SpellcheckCharAttribute::OutputHangul(UChar c, string16* output) const {
   // Decompose a Hangul character to a Hangul vowel and consonants used by our
   // spellchecker. A Hangul character of Unicode is a ligature consisting of a
   // Hangul vowel and consonants, e.g. U+AC01 "Gag" consists of U+1100 "G",
@@ -269,8 +258,7 @@ bool SpellcheckCharAttribute::OutputHangul(UChar c,
   return true;
 }
 
-bool SpellcheckCharAttribute::OutputHebrew(UChar c,
-                                           base::string16* output) const {
+bool SpellcheckCharAttribute::OutputHebrew(UChar c, string16* output) const {
   // Discard characters except Hebrew alphabets. We also discard Hebrew niqquds
   // to prevent our Hebrew dictionary from marking a Hebrew word including
   // niqquds as misspelled. (Same as Arabic vowel marks, we need to check
@@ -284,8 +272,7 @@ bool SpellcheckCharAttribute::OutputHebrew(UChar c,
   return true;
 }
 
-bool SpellcheckCharAttribute::OutputDefault(UChar c,
-                                            base::string16* output) const {
+bool SpellcheckCharAttribute::OutputDefault(UChar c, string16* output) const {
   // Check the script code of this character and output only if it is the one
   // used by the spellchecker language.
   UErrorCode status = U_ZERO_ERROR;
@@ -306,7 +293,7 @@ SpellcheckWordIterator::SpellcheckWordIterator()
 }
 
 SpellcheckWordIterator::~SpellcheckWordIterator() {
-  Reset();
+  Close();
 }
 
 bool SpellcheckWordIterator::Initialize(
@@ -317,12 +304,7 @@ bool SpellcheckWordIterator::Initialize(
   DCHECK(attribute);
   UErrorCode open_status = U_ZERO_ERROR;
   UParseError parse_status;
-  base::string16 rule(attribute->GetRuleSet(allow_contraction));
-
-  // If there is no rule set, the attributes were invalid.
-  if (rule.empty())
-    return false;
-
+  string16 rule(attribute->GetRuleSet(allow_contraction));
   iterator_ = ubrk_openRules(rule.c_str(), rule.length(), NULL, 0,
                              &parse_status, &open_status);
   if (U_FAILURE(open_status))
@@ -339,7 +321,7 @@ bool SpellcheckWordIterator::IsInitialized() const {
   return !!iterator_;
 }
 
-bool SpellcheckWordIterator::SetText(const base::char16* text, size_t length) {
+bool SpellcheckWordIterator::SetText(const char16* text, size_t length) {
   DCHECK(!!iterator_);
 
   // Set the text to be split by this iterator.
@@ -360,7 +342,7 @@ bool SpellcheckWordIterator::SetText(const base::char16* text, size_t length) {
   return true;
 }
 
-bool SpellcheckWordIterator::GetNextWord(base::string16* word_string,
+bool SpellcheckWordIterator::GetNextWord(string16* word_string,
                                          int* word_start,
                                          int* word_length) {
   DCHECK(!!text_ && length_ > 0);
@@ -398,7 +380,7 @@ bool SpellcheckWordIterator::GetNextWord(base::string16* word_string,
   return false;
 }
 
-void SpellcheckWordIterator::Reset() {
+void SpellcheckWordIterator::Close() {
   if (iterator_) {
     ubrk_close(iterator_);
     iterator_ = NULL;
@@ -407,7 +389,7 @@ void SpellcheckWordIterator::Reset() {
 
 bool SpellcheckWordIterator::Normalize(int input_start,
                                        int input_length,
-                                       base::string16* output_string) const {
+                                       string16* output_string) const {
   // We use NFKC (Normalization Form, Compatible decomposition, followed by
   // canonical Composition) defined in Unicode Standard Annex #15 to normalize
   // this token because it it the most suitable normalization algorithm for our

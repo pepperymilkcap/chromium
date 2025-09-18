@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -54,6 +54,36 @@ class GpuTest(pyauto.PyUITest):
     self.NavigateToURL(url)
     self.assertTrue(self.WaitUntil(
       lambda: self._GetGpuPID() is not None), msg='No process for GPU')
+
+  def testNoGpuProcessOnStart(self):
+    """Verify that no gpu process is spawned when first starting browser."""
+    self.AppendTab(pyauto.GURL('about:blank'))
+    self.assertFalse(self._GetGpuPID())
+
+  def test2dCanvas(self):
+    """Verify that gpu process is spawned when viewing a 2D canvas."""
+    self.assertTrue(self._IsHardwareAccelerated('Canvas'))
+    self._VerifyGPUProcessOnPage('CanvasDemo.html')
+
+  def test3dCss(self):
+    """Verify that gpu process is spawned when viewing a 3D CSS page."""
+    self.assertTrue(self._IsHardwareAccelerated('3D CSS'))
+    self._VerifyGPUProcessOnPage('3dCss.html')
+
+  def testCompositing(self):
+    """Verify gpu process in compositing example."""
+    self.assertTrue(self._IsHardwareAccelerated('WebGL'))
+    self._VerifyGPUProcessOnPage('WebGLTeapot.html')
+
+  def testWebGL(self):
+    """Verify that gpu process is spawned in webgl example."""
+    self.assertTrue(self._IsHardwareAccelerated('WebGL'))
+    self._VerifyGPUProcessOnPage('WebGLField.html')
+
+  def testGpuWithVideo(self):
+    """Verify that gpu process is started when viewing video."""
+    self.assertTrue(self._IsHardwareAccelerated('WebGL'))
+    self._VerifyGPUProcessOnPage('color2.ogv')
 
   def testSingleGpuProcess(self):
     """Verify there's only one gpu process shared across all uses."""

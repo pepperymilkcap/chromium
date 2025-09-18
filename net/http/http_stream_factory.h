@@ -11,17 +11,11 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
-#include "net/base/request_priority.h"
-#include "net/http/http_server_properties.h"
 #include "net/socket/ssl_client_socket.h"
-// This file can be included from net/http even though
-// it is in net/websockets because it doesn't
-// introduce any link dependency to net/websockets.
-#include "net/websockets/websocket_handshake_stream_base.h"
 
 class GURL;
 
@@ -38,7 +32,7 @@ class HostPortPair;
 class HttpAuthController;
 class HttpResponseInfo;
 class HttpServerProperties;
-class HttpStreamBase;
+class HttpStream;
 class ProxyInfo;
 class SSLCertRequestInfo;
 class SSLInfo;
@@ -59,7 +53,7 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
    public:
     virtual ~Delegate() {}
 
-    // This is the success case for RequestStream.
+    // This is the success case.
     // |stream| is now owned by the delegate.
     // |used_ssl_config| indicates the actual SSL configuration used for this
     // stream, since the HttpStreamRequest may have modified the configuration
@@ -69,19 +63,7 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
     virtual void OnStreamReady(
         const SSLConfig& used_ssl_config,
         const ProxyInfo& used_proxy_info,
-        HttpStreamBase* stream) = 0;
-
-    // This is the success case for RequestWebSocketHandshakeStream.
-    // |stream| is now owned by the delegate.
-    // |used_ssl_config| indicates the actual SSL configuration used for this
-    // stream, since the HttpStreamRequest may have modified the configuration
-    // during stream processing.
-    // |used_proxy_info| indicates the actual ProxyInfo used for this stream,
-    // since the HttpStreamRequest performs the proxy resolution.
-    virtual void OnWebSocketHandshakeStreamReady(
-        const SSLConfig& used_ssl_config,
-        const ProxyInfo& used_proxy_info,
-        WebSocketHandshakeStreamBase* stream) = 0;
+        HttpStream* stream) = 0;
 
     // This is the failure to create a stream case.
     // |used_ssl_config| indicates the actual SSL configuration used for this
@@ -144,7 +126,7 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
         const HttpResponseInfo& response_info,
         const SSLConfig& used_ssl_config,
         const ProxyInfo& used_proxy_info,
-        HttpStreamBase* stream) = 0;
+        HttpStream* stream) = 0;
   };
 
   virtual ~HttpStreamRequest() {}
@@ -157,9 +139,6 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   virtual int RestartTunnelWithProxyAuth(
       const AuthCredentials& credentials) = 0;
 
-  // Called when the priority of the parent transaction changes.
-  virtual void SetPriority(RequestPriority priority) = 0;
-
   // Returns the LoadState for the request.
   virtual LoadState GetLoadState() const = 0;
 
@@ -167,7 +146,7 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   virtual bool was_npn_negotiated() const = 0;
 
   // Protocol negotiated with the server.
-  virtual NextProto protocol_negotiated() const = 0;
+  virtual SSLClientSocket::NextProto protocol_negotiated() const = 0;
 
   // Returns true if this stream is being fetched over SPDY.
   virtual bool using_spdy() const = 0;
@@ -179,54 +158,41 @@ class NET_EXPORT HttpStreamFactory {
   virtual ~HttpStreamFactory();
 
   void ProcessAlternateProtocol(
-      const base::WeakPtr<HttpServerProperties>& http_server_properties,
+      HttpServerProperties* http_server_properties,
       const std::string& alternate_protocol_str,
       const HostPortPair& http_host_port_pair);
-
-  GURL ApplyHostMappingRules(const GURL& url, HostPortPair* endpoint);
 
   // Virtual interface methods.
 
   // Request a stream.
-  // Will call delegate->OnStreamReady on successful completion.
+  // Will callback to the HttpStreamRequestDelegate upon completion.
   virtual HttpStreamRequest* RequestStream(
       const HttpRequestInfo& info,
-      RequestPriority priority,
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
-      const BoundNetLog& net_log) = 0;
-
-  // Request a WebSocket handshake stream.
-  // Will call delegate->OnWebSocketHandshakeStreamReady on successful
-  // completion.
-  virtual HttpStreamRequest* RequestWebSocketHandshakeStream(
-      const HttpRequestInfo& info,
-      RequestPriority priority,
-      const SSLConfig& server_ssl_config,
-      const SSLConfig& proxy_ssl_config,
-      HttpStreamRequest::Delegate* delegate,
-      WebSocketHandshakeStreamBase::CreateHelper* create_helper,
       const BoundNetLog& net_log) = 0;
 
   // Requests that enough connections for |num_streams| be opened.
   virtual void PreconnectStreams(int num_streams,
                                  const HttpRequestInfo& info,
-                                 RequestPriority priority,
                                  const SSLConfig& server_ssl_config,
                                  const SSLConfig& proxy_ssl_config) = 0;
+
+  virtual void AddTLSIntolerantServer(const HostPortPair& server) = 0;
+  virtual bool IsTLSIntolerantServer(const HostPortPair& server) const = 0;
 
   // If pipelining is supported, creates a Value summary of the currently active
   // pipelines. Caller assumes ownership of the returned value. Otherwise,
   // returns an empty Value.
   virtual base::Value* PipelineInfoToValue() const = 0;
 
-  virtual const HostMappingRules* GetHostMappingRules() const = 0;
-
   // Static settings
 
   // Reset all static settings to initialized values. Used to init test suite.
   static void ResetStaticSettingsToInit();
+
+  static GURL ApplyHostMappingRules(const GURL& url, HostPortPair* endpoint);
 
   // Turns spdy on or off.
   static void set_spdy_enabled(bool value) {
@@ -263,53 +229,60 @@ class NET_EXPORT HttpStreamFactory {
   // Check if a HostPortPair is excluded from using spdy.
   static bool HasSpdyExclusion(const HostPortPair& endpoint);
 
-  // Sets http/1.1 as the only protocol supported via NPN or Alternate-Protocol.
-  static void EnableNpnHttpOnly();
-
-  // Sets http/1.1, quic, and spdy/3 as the protocols supported via
-  // NPN or Alternate-Protocol.
-  static void EnableNpnSpdy3();
-
-  // Sets http/1.1, quic, spdy/3, and spdy/3.1 as the protocols
-  // supported via NPN or Alternate-Protocol.
-  static void EnableNpnSpdy31();
-
-  // Sets http/1.1, quic, spdy/2, spdy/3, and spdy/3.1 as the
-  // protocols supported via NPN or Alternate-Protocol.
-  static void EnableNpnSpdy31WithSpdy2();
-
-  // Sets http/1.1, quic, spdy/3, spdy/3.1, and spdy/4a2 as the
-  // protocols supported via NPN or Alternate-Protocol.
-  static void EnableNpnSpdy4a2();
-
-  // Sets http/1.1, quic, spdy/3, spdy/3.1, spdy/4a2, and http/2 draft
-  // 04 as the protocols supported via NPN or Alternate-Protocol.
-  static void EnableNpnHttp2Draft04();
-
-  // Sets the protocols supported by NPN (next protocol negotiation) during the
-  // SSL handshake as well as by HTTP Alternate-Protocol.
-  static void SetNextProtos(const std::vector<NextProto>& value);
+  // Sets the next protocol negotiation value used during the SSL handshake.
+  static void set_next_protos(const std::vector<std::string>& value) {
+    if (!next_protos_)
+      next_protos_ = new std::vector<std::string>;
+    *next_protos_ = value;
+  }
   static bool has_next_protos() { return next_protos_ != NULL; }
   static const std::vector<std::string>& next_protos() {
     return *next_protos_;
   }
 
+  // Sets the HttpStreamFactoryImpl into a mode where it can ignore certificate
+  // errors.  This is for testing.
+  static void set_ignore_certificate_errors(bool value) {
+    ignore_certificate_errors_ = value;
+  }
+  static bool ignore_certificate_errors() {
+    return ignore_certificate_errors_;
+  }
+
+  static void SetHostMappingRules(const std::string& rules);
+
+  static void set_http_pipelining_enabled(bool value) {
+    http_pipelining_enabled_ = value;
+  }
+  static bool http_pipelining_enabled() { return http_pipelining_enabled_; }
+
+  static void set_testing_fixed_http_port(int port) {
+    testing_fixed_http_port_ = port;
+  }
+  static uint16 testing_fixed_http_port() { return testing_fixed_http_port_; }
+
+  static void set_testing_fixed_https_port(int port) {
+    testing_fixed_https_port_ = port;
+  }
+  static uint16 testing_fixed_https_port() { return testing_fixed_https_port_; }
+
  protected:
   HttpStreamFactory();
 
  private:
-  // |protocol| must be a valid protocol value.
-  static bool IsProtocolEnabled(AlternateProtocol protocol);
-  static void SetProtocolEnabled(AlternateProtocol protocol);
-  static void ResetEnabledProtocols();
+  static const HostMappingRules& host_mapping_rules();
 
+  static const HostMappingRules* host_mapping_rules_;
   static std::vector<std::string>* next_protos_;
-  static bool enabled_protocols_[NUM_VALID_ALTERNATE_PROTOCOLS];
   static bool spdy_enabled_;
   static bool use_alternate_protocols_;
   static bool force_spdy_over_ssl_;
   static bool force_spdy_always_;
   static std::list<HostPortPair>* forced_spdy_exclusions_;
+  static bool ignore_certificate_errors_;
+  static bool http_pipelining_enabled_;
+  static uint16 testing_fixed_http_port_;
+  static uint16 testing_fixed_https_port_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpStreamFactory);
 };

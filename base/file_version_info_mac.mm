@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 
 FileVersionInfoMac::FileVersionInfoMac(NSBundle *bundle)
     : bundle_([bundle retain]) {
@@ -25,79 +25,70 @@ FileVersionInfo* FileVersionInfo::CreateFileVersionInfoForCurrentModule() {
 
 // static
 FileVersionInfo* FileVersionInfo::CreateFileVersionInfo(
-    const base::FilePath& file_path) {
+    const FilePath& file_path) {
   NSString* path = base::SysUTF8ToNSString(file_path.value());
   NSBundle* bundle = [NSBundle bundleWithPath:path];
   return new FileVersionInfoMac(bundle);
 }
 
-base::string16 FileVersionInfoMac::company_name() {
-  return base::string16();
+string16 FileVersionInfoMac::company_name() {
+  return string16();
 }
 
-base::string16 FileVersionInfoMac::company_short_name() {
-  return base::string16();
+string16 FileVersionInfoMac::company_short_name() {
+  return string16();
 }
 
-base::string16 FileVersionInfoMac::internal_name() {
-  return base::string16();
+string16 FileVersionInfoMac::internal_name() {
+  return string16();
 }
 
-base::string16 FileVersionInfoMac::product_name() {
+string16 FileVersionInfoMac::product_name() {
   return GetString16Value(kCFBundleNameKey);
 }
 
-base::string16 FileVersionInfoMac::product_short_name() {
+string16 FileVersionInfoMac::product_short_name() {
   return GetString16Value(kCFBundleNameKey);
 }
 
-base::string16 FileVersionInfoMac::comments() {
-  return base::string16();
+string16 FileVersionInfoMac::comments() {
+  return string16();
 }
 
-base::string16 FileVersionInfoMac::legal_copyright() {
+string16 FileVersionInfoMac::legal_copyright() {
   return GetString16Value(CFSTR("CFBundleGetInfoString"));
 }
 
-base::string16 FileVersionInfoMac::product_version() {
-  // On OS X, CFBundleVersion is used by LaunchServices, and must follow
-  // specific formatting rules, so the four-part Chrome version is in
-  // CFBundleShortVersionString. On iOS, however, CFBundleVersion can be the
-  // full version, but CFBundleShortVersionString has a policy-enfoced limit
-  // of three version components.
-#if defined(OS_IOS)
-  return GetString16Value(CFSTR("CFBundleVersion"));
-#else
+string16 FileVersionInfoMac::product_version() {
   return GetString16Value(CFSTR("CFBundleShortVersionString"));
-#endif  // defined(OS_IOS)
 }
 
-base::string16 FileVersionInfoMac::file_description() {
-  return base::string16();
+string16 FileVersionInfoMac::file_description() {
+  return string16();
 }
 
-base::string16 FileVersionInfoMac::legal_trademarks() {
-  return base::string16();
+string16 FileVersionInfoMac::legal_trademarks() {
+  return string16();
 }
 
-base::string16 FileVersionInfoMac::private_build() {
-  return base::string16();
+string16 FileVersionInfoMac::private_build() {
+  return string16();
 }
 
-base::string16 FileVersionInfoMac::file_version() {
+string16 FileVersionInfoMac::file_version() {
   return product_version();
 }
 
-base::string16 FileVersionInfoMac::original_filename() {
+string16 FileVersionInfoMac::original_filename() {
   return GetString16Value(kCFBundleNameKey);
 }
 
-base::string16 FileVersionInfoMac::special_build() {
-  return base::string16();
+string16 FileVersionInfoMac::special_build() {
+  return string16();
 }
 
-base::string16 FileVersionInfoMac::last_change() {
-  return GetString16Value(CFSTR("SCMRevision"));
+string16 FileVersionInfoMac::last_change() {
+  return GetString16Value(CFSTR("SVNRevision"));
 }
 
 bool FileVersionInfoMac::is_official_build() {
@@ -108,7 +99,7 @@ bool FileVersionInfoMac::is_official_build() {
 #endif
 }
 
-base::string16 FileVersionInfoMac::GetString16Value(CFStringRef name) {
+string16 FileVersionInfoMac::GetString16Value(CFStringRef name) {
   if (bundle_) {
     NSString *ns_name = base::mac::CFToNSCast(name);
     NSString* value = [bundle_ objectForInfoDictionaryKey:ns_name];
@@ -116,5 +107,5 @@ base::string16 FileVersionInfoMac::GetString16Value(CFStringRef name) {
       return base::SysNSStringToUTF16(value);
     }
   }
-  return base::string16();
+  return string16();
 }

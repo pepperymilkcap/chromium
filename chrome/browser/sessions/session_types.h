@@ -1,29 +1,113 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SESSIONS_SESSION_TYPES_H_
 #define CHROME_BROWSER_SESSIONS_SESSION_TYPES_H_
+#pragma once
 
-#include <algorithm>
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
-#include "base/strings/string16.h"
-#include "base/time/time.h"
+#include "base/stl_util.h"
+#include "base/string16.h"
+#include "base/time.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "components/sessions/serialized_navigation_entry.h"
 #include "content/public/common/page_transition_types.h"
-#include "sync/protocol/session_specifics.pb.h"
+#include "content/public/common/referrer.h"
+#include "googleurl/src/gurl.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
-#include "url/gurl.h"
+
+class Profile;
 
 namespace content {
-class BrowserContext;
 class NavigationEntry;
 }
+
+// TabNavigation  -------------------------------------------------------------
+
+// TabNavigation corresponds to the parts of NavigationEntry needed to restore
+// the NavigationEntry during session restore and tab restore.
+//
+// TabNavigation is cheap and supports copy semantics.
+class TabNavigation {
+ public:
+  enum TypeMask {
+    HAS_POST_DATA = 1
+  };
+
+  TabNavigation();
+  TabNavigation(int index,
+                const GURL& virtual_url,
+                const content::Referrer& referrer,
+                const string16& title,
+                const std::string& state,
+                content::PageTransition transition);
+  TabNavigation(const TabNavigation& tab);
+  ~TabNavigation();
+  TabNavigation& operator=(const TabNavigation& tab);
+
+  // Converts this TabNavigation into a NavigationEntry with a page id of
+  // |page_id|. The caller owns the returned NavigationEntry.
+  content::NavigationEntry* ToNavigationEntry(int page_id,
+                                              Profile* profile) const;
+
+  // Resets this TabNavigation from |entry|.
+  void SetFromNavigationEntry(const content::NavigationEntry& entry);
+
+  // Virtual URL of the page. See NavigationEntry::GetVirtualURL() for details.
+  void set_virtual_url(const GURL& url) { virtual_url_ = url; }
+  const GURL& virtual_url() const { return virtual_url_; }
+
+  // The referrer.
+  const content::Referrer& referrer() const { return referrer_; }
+
+  // The title of the page.
+  void set_title(const string16& title) { title_ = title; }
+  const string16& title() const { return title_; }
+
+  // State bits.
+  const std::string& state() const { return state_; }
+
+  // Transition type.
+  void set_transition(content::PageTransition transition) {
+    transition_ = transition;
+  }
+  content::PageTransition transition() const { return transition_; }
+
+  // A mask used for arbitrary boolean values needed to represent a
+  // NavigationEntry. Currently only contains HAS_POST_DATA or 0.
+  void set_type_mask(int type_mask) { type_mask_ = type_mask; }
+  int type_mask() const { return type_mask_; }
+
+  // The index in the NavigationController. If this is -1, it means this
+  // TabNavigation is bogus.
+  //
+  // This is used when determining the selected TabNavigation and only useful
+  // by BaseSessionService and SessionService.
+  void set_index(int index) { index_ = index; }
+  int index() const { return index_; }
+
+  // Converts a set of TabNavigations into a set of NavigationEntrys. The
+  // caller owns the NavigationEntrys.
+  static void CreateNavigationEntriesFromTabNavigations(
+      Profile* profile,
+      const std::vector<TabNavigation>& navigations,
+      std::vector<content::NavigationEntry*>* entries);
+
+ private:
+  friend class BaseSessionService;
+
+  GURL virtual_url_;
+  content::Referrer referrer_;
+  string16 title_;
+  std::string state_;
+  content::PageTransition transition_;
+  int type_mask_;
+
+  int index_;
+};
 
 // SessionTab ----------------------------------------------------------------
 
@@ -31,29 +115,6 @@ class NavigationEntry;
 struct SessionTab {
   SessionTab();
   ~SessionTab();
-
-  // Since the current_navigation_index can be larger than the index for number
-  // of navigations in the current sessions (chrome://newtab is not stored), we
-  // must perform bounds checking.
-  // Returns a normalized bounds-checked navigation_index.
-  int normalized_navigation_index() const {
-    return std::max(0, std::min(current_navigation_index,
-                                static_cast<int>(navigations.size() - 1)));
-  }
-
-  // Set all the fields of this object from the given sync data and
-  // timestamp.  Uses SerializedNavigationEntry::FromSyncData to fill
-  // |navigations|.  Note that the sync protocol buffer doesn't
-  // contain all SerializedNavigationEntry fields.
-  void SetFromSyncData(const sync_pb::SessionTab& sync_data,
-                       base::Time timestamp);
-
-  // Convert this object into its sync protocol buffer equivalent.
-  // Uses SerializedNavigationEntry::ToSyncData to convert |navigations|.  Note
-  // that the protocol buffer doesn't contain all SerializedNavigationEntry
-  // fields, and that the returned protocol buffer doesn't have any
-  // favicon data.
-  sync_pb::SessionTab ToSyncData() const;
 
   // Unique id of the window.
   SessionID window_id;
@@ -72,8 +133,8 @@ struct SessionTab {
   // Identifies the index of the current navigation in navigations. For
   // example, if this is 2 it means the current navigation is navigations[2].
   //
-  // NOTE: when the service is creating SessionTabs, initially this corresponds
-  // to SerializedNavigationEntry.index, not the index in navigations. When done
+  // NOTE: when the service is creating SessionTabs, initially this
+  // corresponds to TabNavigation.index, not the index in navigations. When done
   // creating though, this is set to the index in navigations.
   //
   // NOTE 2: this value can be larger than the size of |navigations|, due to
@@ -87,17 +148,10 @@ struct SessionTab {
   // If non-empty, this tab is an app tab and this is the id of the extension.
   std::string extension_app_id;
 
-  // If non-empty, this string is used as the user agent whenever the tab's
-  // NavigationEntries need it overridden.
-  std::string user_agent_override;
-
   // Timestamp for when this tab was last modified.
   base::Time timestamp;
 
-  std::vector<sessions::SerializedNavigationEntry> navigations;
-
-  // For reassociating sessionStorage.
-  std::string session_storage_persistent_id;
+  std::vector<TabNavigation> navigations;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionTab);
@@ -109,11 +163,6 @@ struct SessionTab {
 struct SessionWindow {
   SessionWindow();
   ~SessionWindow();
-
-  // Convert this object into its sync protocol buffer equivalent. Note that
-  // not all fields are synced here, because they don't all make sense or
-  // translate when restoring a SessionWindow on another device.
-  sync_pb::SessionWindow ToSyncData() const;
 
   // Identifier of the window.
   SessionID window_id;
@@ -149,8 +198,6 @@ struct SessionWindow {
 
   // Is the window maximized, minimized, or normal?
   ui::WindowShowState show_state;
-
-  std::string app_name;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionWindow);

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_LOCATION_BAR_CONTENT_SETTING_DECORATION_H_
 #define CHROME_BROWSER_UI_COCOA_LOCATION_BAR_CONTENT_SETTING_DECORATION_H_
+#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/location_bar/image_decoration.h"
@@ -51,8 +52,9 @@ class ContentSettingDecoration : public ImageDecoration {
 
   void SetToolTip(NSString* tooltip);
 
-  // Returns an attributed string with the animated text.
-  base::scoped_nsobject<NSAttributedString> CreateAnimatedText();
+  // Returns an attributed string with the animated text. Caller is responsible
+  // for releasing.
+  NSAttributedString* CreateAnimatedText();
 
   // Measure the width of the animated text.
   CGFloat MeasureTextWidth();
@@ -62,12 +64,13 @@ class ContentSettingDecoration : public ImageDecoration {
   LocationBarViewMac* owner_;  // weak
   Profile* profile_;  // weak
 
-  base::scoped_nsobject<NSString> tooltip_;
+  scoped_nsobject<NSString> tooltip_;
 
   // Used when the decoration has animated text.
-  base::scoped_nsobject<ContentSettingAnimationState> animation_;
+  scoped_nsobject<ContentSettingAnimationState> animation_;
   CGFloat text_width_;
-  base::scoped_nsobject<NSAttributedString> animated_text_;
+  scoped_nsobject<NSAttributedString> animated_text_;
+  scoped_nsobject<NSGradient> gradient_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingDecoration);
 };

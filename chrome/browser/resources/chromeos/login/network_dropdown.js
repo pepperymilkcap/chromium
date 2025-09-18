@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,6 @@
  */
 
 cr.define('cr.ui', function() {
-  /**
-   * Whether keyboard flow is in use. When setting to true, up/down arrow key
-   * will be used to move focus instead of opening the drop down.
-   */
-  var useKeyboardFlow = false;
-
   /**
    * Creates a new container for the drop down menu items.
    * @constructor
@@ -23,7 +17,7 @@ cr.define('cr.ui', function() {
   DropDownContainer.prototype = {
     __proto__: HTMLDivElement.prototype,
 
-    /** @override */
+    /** @inheritDoc */
     decorate: function() {
       this.classList.add('dropdown-container');
       // Selected item in the menu list.
@@ -85,30 +79,20 @@ cr.define('cr.ui', function() {
 
   DropDown.ITEM_DIVIDER_ID = -2;
 
-  DropDown.KEYCODE_DOWN = 40;
-  DropDown.KEYCODE_ENTER = 13;
-  DropDown.KEYCODE_ESC = 27;
-  DropDown.KEYCODE_SPACE = 32;
-  DropDown.KEYCODE_TAB = 9;
-  DropDown.KEYCODE_UP = 38;
-
   DropDown.prototype = {
     __proto__: HTMLDivElement.prototype,
 
-    /** @override */
+    /** @inheritDoc */
     decorate: function() {
       this.appendChild(this.createOverlay_());
       this.appendChild(this.title_ = this.createTitle_());
-      var container = new DropDownContainer();
-      container.id = this.id + '-dropdown-container';
-      this.appendChild(container);
+      this.appendChild(new DropDownContainer());
 
       this.addEventListener('keydown', this.keyDownHandler_);
 
       this.title_.id = this.id + '-dropdown';
       this.title_.setAttribute('role', 'button');
       this.title_.setAttribute('aria-haspopup', 'true');
-      this.title_.setAttribute('aria-owns', container.id);
     },
 
     /**
@@ -128,12 +112,18 @@ cr.define('cr.ui', function() {
       this.container.hidden = !show;
       if (show) {
         this.container.selectItem(this.container.firstItem, false);
+        this.title_.setAttribute('aria-pressed', 'true');
       } else {
+        this.title_.setAttribute('aria-pressed', 'false');
         this.title_.removeAttribute('aria-activedescendant');
       }
+    },
 
-      // Flag for keyboard flow util to forward the up/down keys.
-      this.title_.classList.toggle('needs-up-down-keys', show);
+    /**
+     * Returns title button.
+     */
+    get titleButton() {
+      return this.children[1];
     },
 
     /**
@@ -149,8 +139,8 @@ cr.define('cr.ui', function() {
      * @param {string} icon Icon in dataURL format.
      */
     setTitle: function(title, icon) {
-      this.title_.firstElementChild.src = icon;
-      this.title_.lastElementChild.textContent = title;
+      this.titleButton.firstElementChild.src = icon;
+      this.titleButton.lastElementChild.textContent = title;
     },
 
     /**
@@ -201,7 +191,6 @@ cr.define('cr.ui', function() {
           span.classList.add('bold');
         var image = this.ownerDocument.createElement('img');
         image.alt = '';
-        image.classList.add('dropdown-image');
         if (item.icon)
           image.src = item.icon;
       }
@@ -223,6 +212,7 @@ cr.define('cr.ui', function() {
           wrapperDiv.setAttribute('aria-disabled', 'true');
         wrapperDiv.classList.add('dropdown-item-container');
         var imageDiv = this.ownerDocument.createElement('div');
+        imageDiv.classList.add('dropdown-image');
         imageDiv.appendChild(image);
         wrapperDiv.appendChild(imageDiv);
         wrapperDiv.appendChild(itemElement);
@@ -233,7 +223,7 @@ cr.define('cr.ui', function() {
           item.controller.isShown = false;
           if (item.iid >= 0)
             chrome.send('networkItemChosen', [item.iid]);
-          this.parentNode.parentNode.title_.focus();
+          this.parentNode.parentNode.titleButton.focus();
         });
         wrapperDiv.addEventListener('mouseover', function f(e) {
           this.parentNode.selectItem(this, true);
@@ -255,7 +245,7 @@ cr.define('cr.ui', function() {
       var overlay = this.ownerDocument.createElement('div');
       overlay.classList.add('dropdown-overlay');
       overlay.addEventListener('click', function() {
-        this.parentNode.title_.focus();
+        this.parentNode.titleButton.focus();
         this.parentNode.isShown = false;
       });
       return overlay;
@@ -269,7 +259,6 @@ cr.define('cr.ui', function() {
     createTitle_: function() {
       var image = this.ownerDocument.createElement('img');
       image.alt = '';
-      image.classList.add('dropdown-image');
       var text = this.ownerDocument.createElement('div');
 
       var el = this.ownerDocument.createElement('div');
@@ -297,14 +286,10 @@ cr.define('cr.ui', function() {
 
       el.addEventListener('keydown', function f(e) {
         if (this.inFocus && !this.controller.isShown &&
-            (e.keyCode == DropDown.KEYCODE_ENTER ||
-             e.keyCode == DropDown.KEYCODE_SPACE ||
-             (!useKeyboardFlow && (e.keyCode == DropDown.KEYCODE_UP ||
-                                   e.keyCode == DropDown.KEYCODE_DOWN)))) {
+            (e.keyCode == 13 || e.keyCode == 32)) {
+          // Enter or space has been pressed.
           this.opening = true;
           this.controller.isShown = true;
-          e.stopPropagation();
-          e.preventDefault();
         }
       });
       return el;
@@ -319,56 +304,48 @@ cr.define('cr.ui', function() {
       if (!this.isShown)
         return;
       var selected = this.container.selectedItem;
-      var handled = false;
       switch (e.keyCode) {
-        case DropDown.KEYCODE_UP: {
+        case 38: {  // Key up.
           do {
             selected = selected.previousSibling;
             if (!selected)
               selected = this.container.lastElementChild;
           } while (selected.iid < 0);
           this.container.selectItem(selected, false);
-          handled = true;
           break;
         }
-        case DropDown.KEYCODE_DOWN: {
+        case 40: {  // Key down.
           do {
             selected = selected.nextSibling;
             if (!selected)
               selected = this.container.firstItem;
           } while (selected.iid < 0);
           this.container.selectItem(selected, false);
-          handled = true;
           break;
         }
-        case DropDown.KEYCODE_ESC: {
+        case 27: {  // Esc.
           this.isShown = false;
-          handled = true;
           break;
         }
-        case DropDown.KEYCODE_TAB: {
+        case 9: {  // Tab.
           this.isShown = false;
-          handled = true;
           break;
         }
-        case DropDown.KEYCODE_ENTER: {
-          if (!this.title_.opening) {
-            this.title_.focus();
+        case 13: {  // Enter.
+          var button = this.titleButton;
+          if (!button.opening) {
+            button.focus();
             this.isShown = false;
             var item =
-                this.title_.controller.container.selectedItem.lastElementChild;
+                button.controller.container.selectedItem.lastElementChild;
             if (item.iid >= 0 && !item.classList.contains('disabled-item'))
               chrome.send('networkItemChosen', [item.iid]);
+          } else {
+            button.opening = false;
           }
-          handled = true;
           break;
         }
       }
-      if (handled) {
-        e.stopPropagation();
-        e.preventDefault();
-      }
-      this.title_.opening = false;
     }
   };
 
@@ -397,12 +374,14 @@ cr.define('cr.ui', function() {
    * the previous one.
    * @param {string} elementId Id of network drop-down element.
    * @param {boolean} isOobe Whether drop-down is used by an Oobe screen.
+   * @param {integer} lastNetworkType Last active network type. Pass -1 if it
+   *   isn't known.
    */
-  DropDown.show = function(elementId, isOobe) {
+  DropDown.show = function(elementId, isOobe, lastNetworkType) {
     $(elementId).isShown = false;
     if (DropDown.activeElementId_ != elementId) {
       DropDown.activeElementId_ = elementId;
-      chrome.send('networkDropdownShow', [elementId, isOobe]);
+      chrome.send('networkDropdownShow', [elementId, isOobe, lastNetworkType]);
     }
   };
 
@@ -414,7 +393,7 @@ cr.define('cr.ui', function() {
   DropDown.hide = function(elementId) {
     if (DropDown.activeElementId_ == elementId) {
       DropDown.activeElementId_ = '';
-      chrome.send('networkDropdownHide');
+      chrome.send('networkDropdownHide', []);
     }
   };
 
@@ -422,14 +401,7 @@ cr.define('cr.ui', function() {
    * Refreshes network drop-down. Should be called on language change.
    */
   DropDown.refresh = function() {
-    chrome.send('networkDropdownRefresh');
-  };
-
-  /**
-   * Sets the keyboard flow flag.
-   */
-  DropDown.enableKeyboardFlow = function() {
-    useKeyboardFlow = true;
+    chrome.send('networkDropdownRefresh', []);
   };
 
   return {

@@ -1,10 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/strings/stringprintf.h"
-#include "base/time/time.h"
+#include "base/perftimer.h"
+#include "base/stringprintf.h"
+#include "base/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -12,10 +14,8 @@
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/perf/perf_test.h"
-#include "chrome/test/perf/perf_ui_test_suite.h"
 #include "chrome/test/ui/ui_perf_test.h"
 #include "net/base/net_util.h"
-#include "testing/perf/perf_test.h"
 #include "ui/gfx/rect.h"
 
 using base::TimeDelta;
@@ -28,8 +28,8 @@ class NewTabUIStartupTest : public UIPerfTest {
     show_window_ = true;
   }
 
-  virtual void SetUp() {}
-  virtual void TearDown() {}
+  void SetUp() {}
+  void TearDown() {}
 
   static const int kNumCycles = 5;
 
@@ -38,21 +38,22 @@ class NewTabUIStartupTest : public UIPerfTest {
     std::string times;
     for (int i = 0; i < kNumCycles; ++i)
       base::StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
-    perf_test::PrintResultList(
-        "new_tab", std::string(), label, times, "ms", important);
+    perf_test::PrintResultList("new_tab", "", label, times, "ms", important);
   }
 
-  void InitProfile(PerfUITestSuite::ProfileType profile_type) {
+  void InitProfile(UITestBase::ProfileType profile_type) {
+    profile_type_ = profile_type;
+
     // Install the location of the test profile file.
-    set_template_user_data(
-        PerfUITestSuite::GetPathForProfileType(profile_type));
+    set_template_user_data(UITest::ComputeTypicalUserDataSource(
+        profile_type));
   }
 
   // Run the test, by bringing up a browser and timing the new tab startup.
   // |want_warm| is true if we should output warm-disk timings, false if
   // we should report cold timings.
   void RunStartupTest(const char* label, bool want_warm, bool important,
-                      PerfUITestSuite::ProfileType profile_type) {
+                      UITestBase::ProfileType profile_type) {
     InitProfile(profile_type);
 
     TimeDelta timings[kNumCycles];
@@ -100,7 +101,7 @@ class NewTabUIStartupTest : public UIPerfTest {
   }
 
   void RunNewTabTimingTest() {
-    InitProfile(PerfUITestSuite::DEFAULT_THEME);
+    InitProfile(UITestBase::DEFAULT_THEME);
 
     TimeDelta scriptstart_times[kNumCycles];
     TimeDelta domcontentloaded_times[kNumCycles];
@@ -158,41 +159,61 @@ class NewTabUIStartupTest : public UIPerfTest {
 };
 
 // FLAKY: http://crbug.com/69940
-TEST_F(NewTabUIStartupTest, DISABLED_PerfRefCold) {
+TEST_F(NewTabUIStartupTest, FLAKY_PerfRefCold) {
   UseReferenceBuild();
   RunStartupTest("tab_cold_ref", false /* cold */, true /* important */,
-                 PerfUITestSuite::DEFAULT_THEME);
+                 UITestBase::DEFAULT_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
-TEST_F(NewTabUIStartupTest, DISABLED_PerfCold) {
+TEST_F(NewTabUIStartupTest, FLAKY_PerfCold) {
   RunStartupTest("tab_cold", false /* cold */, true /* important */,
-                 PerfUITestSuite::DEFAULT_THEME);
+                 UITestBase::DEFAULT_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
-TEST_F(NewTabUIStartupTest, DISABLED_PerfRefWarm) {
+TEST_F(NewTabUIStartupTest, FLAKY_PerfRefWarm) {
   UseReferenceBuild();
   RunStartupTest("tab_warm_ref", true /* warm */, true /* not important */,
-                 PerfUITestSuite::DEFAULT_THEME);
+                 UITestBase::DEFAULT_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
-TEST_F(NewTabUIStartupTest, DISABLED_PerfWarm) {
+TEST_F(NewTabUIStartupTest, FLAKY_PerfWarm) {
   RunStartupTest("tab_warm", true /* warm */, true /* not important */,
-                 PerfUITestSuite::DEFAULT_THEME);
+                 UITestBase::DEFAULT_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
-TEST_F(NewTabUIStartupTest, DISABLED_ComplexThemeCold) {
+TEST_F(NewTabUIStartupTest, FLAKY_ComplexThemeCold) {
   RunStartupTest("tab_complex_theme_cold", false /* cold */,
                  false /* not important */,
-                 PerfUITestSuite::COMPLEX_THEME);
+                 UITestBase::COMPLEX_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
-TEST_F(NewTabUIStartupTest, DISABLED_NewTabTimingTestsCold) {
+TEST_F(NewTabUIStartupTest, FLAKY_NewTabTimingTestsCold) {
   RunNewTabTimingTest();
 }
+
+#if defined(TOOLKIT_USES_GTK)
+TEST_F(NewTabUIStartupTest, GtkThemeCold) {
+  RunStartupTest("tab_gtk_theme_cold", false /* cold */,
+                 false /* not important */,
+                 UITestBase::NATIVE_THEME);
+}
+
+TEST_F(NewTabUIStartupTest, NativeFrameCold) {
+  RunStartupTest("tab_custom_frame_cold", false /* cold */,
+                 false /* not important */,
+                 UITestBase::CUSTOM_FRAME);
+}
+
+TEST_F(NewTabUIStartupTest, NativeFrameGtkThemeCold) {
+  RunStartupTest("tab_custom_frame_gtk_theme_cold", false /* cold */,
+                 false /* not important */,
+                 UITestBase::CUSTOM_FRAME_NATIVE_THEME);
+}
+#endif
 
 }  // namespace

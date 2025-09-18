@@ -6,7 +6,7 @@
 
 #include "content/renderer/render_view_impl.h"
 
-using blink::WebFrame;
+using WebKit::WebFrame;
 
 namespace content {
 
@@ -44,7 +44,7 @@ bool RenderViewObserver::Send(IPC::Message* message) {
   return false;
 }
 
-RenderView* RenderViewObserver::render_view() const {
+RenderView* RenderViewObserver::render_view() {
   return render_view_;
 }
 

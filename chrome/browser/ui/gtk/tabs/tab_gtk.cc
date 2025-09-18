@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/memory/singleton.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_input_event_box.h"
@@ -19,8 +19,9 @@
 #include "chrome/browser/ui/tabs/tab_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/accelerators/accelerator_gtk.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
-#include "ui/base/gtk/scoped_region.h"
+#include "ui/base/gtk/scoped_handle_gtk.h"
 #include "ui/gfx/path.h"
 
 using content::WebContents;
@@ -28,7 +29,7 @@ using content::WebContents;
 namespace {
 
 // Returns the width of the title for the current font, in pixels.
-int GetTitleWidth(gfx::Font* font, base::string16 title) {
+int GetTitleWidth(gfx::Font* font, string16 title) {
   DCHECK(font);
   if (title.empty())
     return 0;
@@ -42,11 +43,11 @@ class TabGtk::TabGtkObserverHelper {
  public:
   explicit TabGtkObserverHelper(TabGtk* tab)
       : tab_(tab) {
-    base::MessageLoopForUI::current()->AddObserver(tab_);
+    MessageLoopForUI::current()->AddObserver(tab_);
   }
 
   ~TabGtkObserverHelper() {
-    base::MessageLoopForUI::current()->RemoveObserver(tab_);
+    MessageLoopForUI::current()->RemoveObserver(tab_);
   }
 
  private:
@@ -66,8 +67,8 @@ TabGtk::TabGtk(TabDelegate* delegate)
       last_mouse_down_(NULL),
       drag_widget_(NULL),
       title_width_(0),
-      destroy_factory_(this),
-      drag_end_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(destroy_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(drag_end_factory_(this)) {
   event_box_ = gtk_input_event_box_new();
   g_signal_connect(event_box_, "button-press-event",
                    G_CALLBACK(OnButtonPressEventThunk), this);
@@ -197,7 +198,7 @@ gboolean TabGtk::OnDragButtonReleased(GtkWidget* widget,
   // get a follow up event to tell us the drag has finished (either a
   // drag-failed or a drag-end).  So we post a task to manually end the drag.
   // If GTK+ does send the drag-failed or drag-end event, we cancel the task.
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&TabGtk::EndDrag, drag_end_factory_.GetWeakPtr(), false));
   return TRUE;
@@ -278,7 +279,7 @@ void TabGtk::SetBounds(const gfx::Rect& bounds) {
 
   if (gtk_input_event_box_get_window(GTK_INPUT_EVENT_BOX(event_box_))) {
     gfx::Path mask;
-    TabResources::GetHitTestMask(bounds.width(), bounds.height(), false, &mask);
+    TabResources::GetHitTestMask(bounds.width(), bounds.height(), &mask);
     ui::ScopedRegion region(mask.CreateNativeRegion());
     gdk_window_input_shape_combine_region(
         gtk_input_event_box_get_window(GTK_INPUT_EVENT_BOX(event_box_)),
@@ -300,8 +301,7 @@ void TabGtk::ContextMenuClosed() {
 void TabGtk::UpdateTooltipState() {
   // Only show the tooltip if the title is truncated.
   if (title_width_ > title_bounds().width()) {
-    gtk_widget_set_tooltip_text(widget(),
-                                base::UTF16ToUTF8(GetTitle()).c_str());
+    gtk_widget_set_tooltip_text(widget(), UTF16ToUTF8(GetTitle()).c_str());
   } else {
     gtk_widget_set_has_tooltip(widget(), FALSE);
   }
@@ -326,11 +326,6 @@ void TabGtk::DestroyDragWidget() {
 }
 
 void TabGtk::StartDragging(gfx::Point drag_offset) {
-  // If the drag is processed after the selection change it's possible
-  // that the tab has been deselected, in which case we don't want to drag.
-  if (!IsSelected())
-    return;
-
   CreateDragWidget();
 
   GtkTargetList* list = ui::GetTargetListFromCodeMask(ui::CHROME_TAB);
@@ -350,7 +345,7 @@ void TabGtk::EndDrag(bool canceled) {
   // We must let gtk clean up after we handle the drag operation, otherwise
   // there will be outstanding references to the drag widget when we try to
   // destroy it.
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&TabGtk::DestroyDragWidget, destroy_factory_.GetWeakPtr()));
 

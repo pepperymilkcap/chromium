@@ -5,16 +5,11 @@
 #ifndef MEDIA_WEBM_WEBM_CONSTANTS_H_
 #define MEDIA_WEBM_WEBM_CONSTANTS_H_
 
-#include "base/basictypes.h"
-#include "media/base/media_export.h"
-
 namespace media {
 
 // WebM element IDs.
 // This is a subset of the IDs in the Matroska spec.
 // http://www.matroska.org/technical/specs/index.html
-const int kWebMIdAESSettingsCipherMode = 0x47E8;
-const int kWebMIdAlphaMode = 0x53C0;
 const int kWebMIdAspectRatioType = 0x54B3;
 const int kWebMIdAttachedFile = 0x61A7;
 const int kWebMIdAttachmentLink = 0x7446;
@@ -24,7 +19,7 @@ const int kWebMIdBitDepth = 0x6264;
 const int kWebMIdBlock = 0xA1;
 const int kWebMIdBlockAddID = 0xEE;
 const int kWebMIdBlockAdditions = 0x75A1;
-const int kWebMIdBlockAdditional = 0xA5;
+const int kWebMIdBlockAdditional = 0xA4;
 const int kWebMIdBlockDuration = 0x9B;
 const int kWebMIdBlockGroup = 0xA0;
 const int kWebMIdBlockMore = 0xA6;
@@ -57,7 +52,6 @@ const int kWebMIdChapterTranslateID = 0x69A5;
 const int kWebMIdChapterUID = 0x73C4;
 const int kWebMIdCluster = 0x1F43B675;
 const int kWebMIdCodecDecodeAll = 0xAA;
-const int kWebMIdCodecDelay = 0x56AA;
 const int kWebMIdCodecID = 0x86;
 const int kWebMIdCodecName = 0x258688;
 const int kWebMIdCodecPrivate = 0x63A2;
@@ -66,7 +60,6 @@ const int kWebMIdColorSpace = 0x2EB524;
 const int kWebMIdContentCompAlgo = 0x4254;
 const int kWebMIdContentCompression = 0x5034;
 const int kWebMIdContentCompSettings = 0x4255;
-const int kWebMIdContentEncAESSettings = 0x47E7;
 const int kWebMIdContentEncAlgo = 0x47E1;
 const int kWebMIdContentEncKeyID = 0x47E2;
 const int kWebMIdContentEncoding = 0x6240;
@@ -92,7 +85,6 @@ const int kWebMIdCueTrack = 0xF7;
 const int kWebMIdCueTrackPositions = 0xB7;
 const int kWebMIdDateUTC = 0x4461;
 const int kWebMIdDefaultDuration = 0x23E383;
-const int kWebMIdDiscardPadding = 0x75A2;
 const int kWebMIdDisplayHeight = 0x54BA;
 const int kWebMIdDisplayUnit = 0x54B2;
 const int kWebMIdDisplayWidth = 0x54B0;
@@ -120,7 +112,6 @@ const int kWebMIdFlagEnabled = 0xB9;
 const int kWebMIdFlagForced = 0x55AA;
 const int kWebMIdFlagInterlaced = 0x9A;
 const int kWebMIdFlagLacing = 0x9C;
-const int kWebMIdFrameRate = 0x2383E3;
 const int kWebMIdInfo = 0x1549A966;
 const int kWebMIdJoinBlocks = 0xE9;
 const int kWebMIdLaceNumber = 0xCC;
@@ -150,7 +141,6 @@ const int kWebMIdSeek = 0x4DBB;
 const int kWebMIdSeekHead = 0x114D9B74;
 const int kWebMIdSeekID = 0x53AB;
 const int kWebMIdSeekPosition = 0x53AC;
-const int kWebMIdSeekPreRoll = 0x56BB;
 const int kWebMIdSegment = 0x18538067;
 const int kWebMIdSegmentFamily = 0x4444;
 const int kWebMIdSegmentFilename = 0x7384;
@@ -200,29 +190,7 @@ const int kWebMIdVideo = 0xE0;
 const int kWebMIdVoid = 0xEC;
 const int kWebMIdWritingApp = 0x5741;
 
-const int64 kWebMReservedId = 0x1FFFFFFF;
 const int64 kWebMUnknownSize = GG_LONGLONG(0x00FFFFFFFFFFFFFF);
-
-const uint8 kWebMFlagKeyframe = 0x80;
-
-// Current encrypted WebM request for comments specification is here
-// http://wiki.webmproject.org/encryption/webm-encryption-rfc
-const uint8 kWebMFlagEncryptedFrame = 0x1;
-const int kWebMIvSize = 8;
-const int kWebMSignalByteSize = 1;
-
-// Current specification for WebVTT embedded in WebM
-// http://wiki.webmproject.org/webm-metadata/temporal-metadata/webvtt-in-webm
-
-const int kWebMTrackTypeVideo = 1;
-const int kWebMTrackTypeAudio = 2;
-const int kWebMTrackTypeSubtitlesOrCaptions = 0x11;
-const int kWebMTrackTypeDescriptionsOrMetadata = 0x21;
-
-MEDIA_EXPORT extern const char kWebMCodecSubtitles[];
-MEDIA_EXPORT extern const char kWebMCodecCaptions[];
-MEDIA_EXPORT extern const char kWebMCodecDescriptions[];
-MEDIA_EXPORT extern const char kWebMCodecMetadata[];
 
 }  // namespace media
 

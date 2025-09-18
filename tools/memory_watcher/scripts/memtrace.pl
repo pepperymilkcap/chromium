@@ -1,7 +1,5 @@
 #!/usr/bin/perl
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
+
 #
 # Blame callstacks for each memory allocation.
 # Similar to memprof.pl, will also try to filter out unuseful stacks.
@@ -43,7 +41,7 @@ sub process_raw($) {
     my $line = $_;
 #print "$line";
     chomp($line);
-    if ($line =~ m/([0-9]*) bytes, ([0-9]*) allocs/) {
+    if ($line =~ m/([0-9]*) bytes, ([0-9]*) items/) {
 
 #print "START\n";
       # Dump "prior" frame here

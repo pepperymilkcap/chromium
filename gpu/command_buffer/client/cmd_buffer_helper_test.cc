@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,11 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
+#include "gpu/command_buffer/service/mocks.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
-#include "gpu/command_buffer/service/mocks.h"
-#include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_MACOSX)
@@ -28,7 +27,8 @@ using testing::DoAll;
 using testing::Invoke;
 using testing::_;
 
-const int32 kTotalNumCommandEntries = 10;
+const int32 kTotalNumCommandEntries = 12;
+const int32 kUsableNumCommandEntries = 10;
 const int32 kCommandBufferSizeBytes =
     kTotalNumCommandEntries * sizeof(CommandBufferEntry);
 const int32 kUnusedCommandId = 5;  // we use 0 and 2 currently.
@@ -38,6 +38,26 @@ const int32 kUnusedCommandId = 5;  // we use 0 and 2 currently.
 // (calling it directly, not through the RPC mechanism).
 class CommandBufferHelperTest : public testing::Test {
  protected:
+  // Helper so mock can handle the Jump command.
+  class DoJumpCommand {
+   public:
+    explicit DoJumpCommand(GpuScheduler* gpu_scheduler)
+        : gpu_scheduler_(gpu_scheduler) {
+    }
+
+    error::Error DoCommand(
+        unsigned int command,
+        unsigned int arg_count,
+        const void* cmd_data) {
+      const cmd::Jump* jump_cmd = static_cast<const cmd::Jump*>(cmd_data);
+      gpu_scheduler_->parser()->set_get(jump_cmd->offset);
+      return error::kNoError;
+    };
+
+   private:
+    GpuScheduler* gpu_scheduler_;
+  };
+
   virtual void SetUp() {
     api_mock_.reset(new AsyncAPIMock);
     // ignore noops in the mock - we don't want to inspect the internals of the
@@ -45,14 +65,8 @@ class CommandBufferHelperTest : public testing::Test {
     EXPECT_CALL(*api_mock_, DoCommand(cmd::kNoop, _, _))
         .WillRepeatedly(Return(error::kNoError));
 
-    {
-      TransferBufferManager* manager = new TransferBufferManager();
-      transfer_buffer_manager_.reset(manager);
-      EXPECT_TRUE(manager->Initialize());
-    }
-    command_buffer_.reset(
-        new CommandBufferService(transfer_buffer_manager_.get()));
-    EXPECT_TRUE(command_buffer_->Initialize());
+    command_buffer_.reset(new CommandBufferService);
+    command_buffer_->Initialize();
 
     gpu_scheduler_.reset(new GpuScheduler(
         command_buffer_.get(), api_mock_.get(), NULL));
@@ -60,6 +74,12 @@ class CommandBufferHelperTest : public testing::Test {
         &GpuScheduler::PutChanged, base::Unretained(gpu_scheduler_.get())));
     command_buffer_->SetGetBufferChangeCallback(base::Bind(
         &GpuScheduler::SetGetBuffer, base::Unretained(gpu_scheduler_.get())));
+
+    do_jump_command_.reset(new DoJumpCommand(gpu_scheduler_.get()));
+    EXPECT_CALL(*api_mock_, DoCommand(cmd::kJump, _, _))
+        .WillRepeatedly(
+            Invoke(do_jump_command_.get(), &DoJumpCommand::DoCommand));
+
 
     api_mock_->set_engine(gpu_scheduler_.get());
 
@@ -69,7 +89,7 @@ class CommandBufferHelperTest : public testing::Test {
 
   virtual void TearDown() {
     // If the GpuScheduler posts any tasks, this forces them to run.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
 
   const CommandParser* GetParser() const {
@@ -138,13 +158,13 @@ class CommandBufferHelperTest : public testing::Test {
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool autorelease_pool_;
 #endif
-  base::MessageLoop message_loop_;
+  MessageLoop message_loop_;
   scoped_ptr<AsyncAPIMock> api_mock_;
-  scoped_ptr<TransferBufferManagerInterface> transfer_buffer_manager_;
   scoped_ptr<CommandBufferService> command_buffer_;
   scoped_ptr<GpuScheduler> gpu_scheduler_;
   scoped_ptr<CommandBufferHelper> helper_;
   Sequence sequence_;
+  scoped_ptr<DoJumpCommand> do_jump_command_;
 };
 
 // Checks that commands in the buffer are properly executed, and that the
@@ -206,7 +226,7 @@ TEST_F(CommandBufferHelperTest, TestCommandWrapping) {
 TEST_F(CommandBufferHelperTest, TestCommandWrappingExactMultiple) {
   const int32 kCommandSize = 5;
   const size_t kNumArgs = kCommandSize - 1;
-  COMPILE_ASSERT(kTotalNumCommandEntries % kCommandSize == 0,
+  COMPILE_ASSERT(kUsableNumCommandEntries % kCommandSize == 0,
                  Not_multiple_of_num_command_entries);
   CommandBufferEntry args1[kNumArgs];
   for (size_t ii = 0; ii < kNumArgs; ++ii) {
@@ -313,21 +333,6 @@ TEST_F(CommandBufferHelperTest, FreeRingBuffer) {
 
   // Check that the commands did happen.
   Mock::VerifyAndClearExpectations(api_mock_.get());
-}
-
-TEST_F(CommandBufferHelperTest, Noop) {
-  for (int ii = 1; ii < 4; ++ii) {
-    CommandBufferOffset put_before = get_helper_put();
-    helper_->Noop(ii);
-    CommandBufferOffset put_after = get_helper_put();
-    EXPECT_EQ(ii, put_after - put_before);
-  }
-}
-
-TEST_F(CommandBufferHelperTest, IsContextLost) {
-  EXPECT_FALSE(helper_->IsContextLost());
-  command_buffer_->SetParseError(error::kGenericError);
-  EXPECT_TRUE(helper_->IsContextLost());
 }
 
 }  // namespace gpu

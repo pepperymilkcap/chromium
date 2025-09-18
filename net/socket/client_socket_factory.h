@@ -4,11 +4,11 @@
 
 #ifndef NET_SOCKET_CLIENT_SOCKET_FACTORY_H_
 #define NET_SOCKET_CLIENT_SOCKET_FACTORY_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/base/rand_callback.h"
@@ -23,6 +23,7 @@ class HostPortPair;
 class SSLClientSocket;
 struct SSLClientSocketContext;
 struct SSLConfig;
+class SSLHostInfo;
 class StreamSocket;
 
 // An interface used to instantiate StreamSocket objects.  Used to facilitate
@@ -33,13 +34,13 @@ class NET_EXPORT ClientSocketFactory {
 
   // |source| is the NetLog::Source for the entity trying to create the socket,
   // if it has one.
-  virtual scoped_ptr<DatagramClientSocket> CreateDatagramClientSocket(
+  virtual DatagramClientSocket* CreateDatagramClientSocket(
       DatagramSocket::BindType bind_type,
       const RandIntCallback& rand_int_cb,
       NetLog* net_log,
       const NetLog::Source& source) = 0;
 
-  virtual scoped_ptr<StreamSocket> CreateTransportClientSocket(
+  virtual StreamSocket* CreateTransportClientSocket(
       const AddressList& addresses,
       NetLog* net_log,
       const NetLog::Source& source) = 0;
@@ -47,17 +48,29 @@ class NET_EXPORT ClientSocketFactory {
   // It is allowed to pass in a |transport_socket| that is not obtained from a
   // socket pool. The caller could create a ClientSocketHandle directly and call
   // set_socket() on it to set a valid StreamSocket instance.
-  virtual scoped_ptr<SSLClientSocket> CreateSSLClientSocket(
-      scoped_ptr<ClientSocketHandle> transport_socket,
+  virtual SSLClientSocket* CreateSSLClientSocket(
+      ClientSocketHandle* transport_socket,
       const HostPortPair& host_and_port,
       const SSLConfig& ssl_config,
+      SSLHostInfo* ssl_host_info,
       const SSLClientSocketContext& context) = 0;
+
+  // Deprecated function (http://crbug.com/37810) that takes a StreamSocket.
+  virtual SSLClientSocket* CreateSSLClientSocket(
+      StreamSocket* transport_socket,
+      const HostPortPair& host_and_port,
+      const SSLConfig& ssl_config,
+      SSLHostInfo* ssl_host_info,
+      const SSLClientSocketContext& context);
 
   // Clears cache used for SSL session resumption.
   virtual void ClearSSLSessionCache() = 0;
 
   // Returns the default ClientSocketFactory.
   static ClientSocketFactory* GetDefaultFactory();
+
+  // Instructs the default ClientSocketFactory to use the system SSL library.
+  static void UseSystemSSL();
 };
 
 }  // namespace net

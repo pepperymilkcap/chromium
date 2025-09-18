@@ -4,30 +4,22 @@
 
 #ifndef CHROME_BROWSER_APP_CONTROLLER_MAC_H_
 #define CHROME_BROWSER_APP_CONTROLLER_MAC_H_
-
-#if defined(__OBJC__)
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 #include <vector>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/observer_list.h"
-#include "base/prefs/pref_change_registrar.h"
-#include "base/time/time.h"
-#include "ui/base/work_area_watcher_observer.h"
 
-class AppControllerProfileObserver;
-@class AppShimMenuController;
+@class AboutWindowController;
 class BookmarkMenuBridge;
 class CommandUpdater;
 class GURL;
 class HistoryMenuBridge;
 class Profile;
 @class ProfileMenuController;
-namespace ui {
-class WorkAreaWatcherObserver;
-}
 
 // The application controller object, created by loading the MainMenu nib.
 // This handles things like responding to menus when there are no windows
@@ -42,21 +34,15 @@ class WorkAreaWatcherObserver;
   // build the user-data specific main menu items.
   Profile* lastProfile_;
 
-  // The ProfileObserver observes the ProfileInfoCache and gets notified
-  // when a profile has been deleted.
-  scoped_ptr<AppControllerProfileObserver> profileInfoCacheObserver_;
-
   // Management of the bookmark menu which spans across all windows
   // (and Browser*s).
   scoped_ptr<BookmarkMenuBridge> bookmarkMenuBridge_;
   scoped_ptr<HistoryMenuBridge> historyMenuBridge_;
-
-  // Controller that manages main menu items for packaged apps.
-  base::scoped_nsobject<AppShimMenuController> appShimMenuController_;
+  AboutWindowController* aboutController_;  // Weak.
 
   // The profile menu, which appears right before the Help menu. It is only
   // available when multiple profiles is enabled.
-  base::scoped_nsobject<ProfileMenuController> profileMenuController_;
+  scoped_nsobject<ProfileMenuController> profileMenuController_;
 
   // If we're told to open URLs (in particular, via |-application:openFiles:| by
   // Launch Services) before we've launched the browser, we queue them up in
@@ -80,16 +66,6 @@ class WorkAreaWatcherObserver;
 
   // Indicates wheter an NSPopover is currently being shown.
   BOOL hasPopover_;
-
-  // If we are expecting a workspace change in response to a reopen
-  // event, the time we got the event. A null time otherwise.
-  base::TimeTicks reopenTime_;
-
-  // Observers that listen to the work area changes.
-  ObserverList<ui::WorkAreaWatcherObserver> workAreaChangeObservers_;
-
-  scoped_ptr<PrefChangeRegistrar> profilePrefRegistrar_;
-  PrefChangeRegistrar localPrefRegistrar_;
 }
 
 @property(readonly, nonatomic) BOOL startupComplete;
@@ -104,18 +80,18 @@ class WorkAreaWatcherObserver;
 // window closure from causing the application to quit.
 - (void)stopTryingToTerminateApplication:(NSApplication*)app;
 
-// Returns true if there is a modal window (either window- or application-
+// Returns true if there is not a modal window (either window- or application-
 // modal) blocking the active browser. Note that tab modal dialogs (HTTP auth
 // sheets) will not count as blocking the browser. But things like open/save
 // dialogs that are window modal will block the browser.
-- (BOOL)keyWindowIsModal;
+- (BOOL)keyWindowIsNotModal;
 
 // Show the preferences window, or bring it to the front if it's already
 // visible.
 - (IBAction)showPreferences:(id)sender;
 
 // Redirect in the menu item from the expected target of "File's
-// Owner" (NSApplication) for a Branded About Box
+// Owner" (NSAppliation) for a Branded About Box
 - (IBAction)orderFrontStandardAboutPanel:(id)sender;
 
 // Toggles the "Confirm to Quit" preference.
@@ -132,27 +108,6 @@ class WorkAreaWatcherObserver;
 
 - (BookmarkMenuBridge*)bookmarkMenuBridge;
 
-// Subscribes/unsubscribes from the work area change notification.
-- (void)addObserverForWorkAreaChange:(ui::WorkAreaWatcherObserver*)observer;
-- (void)removeObserverForWorkAreaChange:(ui::WorkAreaWatcherObserver*)observer;
-
-// Initializes the AppShimMenuController. This enables changing the menu bar for
-// apps.
-- (void)initAppShimMenuController;
-
 @end
-
-#endif  // __OBJC__
-
-// Functions that may be accessed from non-Objective-C C/C++ code.
-
-namespace app_controller_mac {
-
-// True if we are currently handling an IDC_NEW_{TAB,WINDOW} command. Used in
-// SessionService::Observe() to get around windows/linux and mac having
-// different models of application lifetime.
-bool IsOpeningNewWindow();
-
-}  // namespace app_controller_mac
 
 #endif

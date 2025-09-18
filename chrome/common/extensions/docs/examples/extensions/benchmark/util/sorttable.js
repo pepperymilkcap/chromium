@@ -32,6 +32,8 @@ sorttable = {
     if (arguments.callee.done) return;
     // flag this function so we don't do the same thing twice
     arguments.callee.done = true;
+    // kill the timer
+    if (_timer) clearInterval(_timer);
 
     if (!document.createElement || !document.getElementsByTagName) return;
 

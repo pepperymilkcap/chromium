@@ -4,13 +4,13 @@
 
 #ifndef CHROME_SERVICE_SERVICE_PROCESS_H_
 #define CHROME_SERVICE_SERVICE_PROCESS_H_
+#pragma once
 
 #include <string>
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/service/cloud_print/cloud_print_proxy.h"
@@ -31,16 +31,20 @@ class CommandLine;
 // process can live independently of the browser process.
 // ServiceProcess Design Notes
 // https://sites.google.com/a/chromium.org/dev/developers/design-documents/service-processes
-class ServiceProcess : public cloud_print::CloudPrintProxy::Client {
+class ServiceProcess : public CloudPrintProxy::Client {
  public:
   ServiceProcess();
   virtual ~ServiceProcess();
 
   // Initialize the ServiceProcess with the message loop that it should run on.
   // ServiceProcess takes ownership of |state|.
-  bool Initialize(base::MessageLoopForUI* message_loop,
+  bool Initialize(MessageLoopForUI* message_loop,
                   const CommandLine& command_line,
                   ServiceProcessState* state);
+
+  // Functions for Cloud Print virtual driver on Mac.
+  void EnableVirtualPrintDriver();
+  void DisableVirtualPrintDriver();
 
   bool Teardown();
   // TODO(sanjeevr): Change various parts of the code such as
@@ -86,7 +90,7 @@ class ServiceProcess : public cloud_print::CloudPrintProxy::Client {
   // connections.
   bool HandleClientDisconnect();
 
-  cloud_print::CloudPrintProxy* GetCloudPrintProxy();
+  CloudPrintProxy* GetCloudPrintProxy();
 
   // CloudPrintProxy::Client implementation.
   virtual void OnCloudPrintProxyEnabled(bool persist_state) OVERRIDE;
@@ -124,8 +128,7 @@ class ServiceProcess : public cloud_print::CloudPrintProxy::Client {
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
   scoped_ptr<base::Thread> io_thread_;
   scoped_ptr<base::Thread> file_thread_;
-  scoped_refptr<base::SequencedWorkerPool> blocking_pool_;
-  scoped_ptr<cloud_print::CloudPrintProxy> cloud_print_proxy_;
+  scoped_ptr<CloudPrintProxy> cloud_print_proxy_;
   scoped_ptr<ServiceProcessPrefs> service_prefs_;
   scoped_ptr<ServiceIPCServer> ipc_server_;
   scoped_ptr<ServiceProcessState> service_process_state_;
@@ -134,7 +137,7 @@ class ServiceProcess : public cloud_print::CloudPrintProxy::Client {
   base::WaitableEvent shutdown_event_;
 
   // Pointer to the main message loop that host this object.
-  base::MessageLoop* main_message_loop_;
+  MessageLoop* main_message_loop_;
 
   // Count of currently enabled services in this process.
   int enabled_services_;

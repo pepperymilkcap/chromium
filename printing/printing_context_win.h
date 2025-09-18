@@ -14,13 +14,10 @@
 #include "build/build_config.h"
 #include "printing/printing_context.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/shell_dialogs/print_settings_dialog_win.h"
 
 namespace printing {
 
-class PRINTING_EXPORT PrintingContextWin
-    : public PrintingContext,
-      public ui::PrintSettingsDialogWin::Observer {
+class PRINTING_EXPORT PrintingContextWin : public PrintingContext {
  public:
   explicit PrintingContextWin(const std::string& app_locale);
   ~PrintingContextWin();
@@ -32,20 +29,17 @@ class PRINTING_EXPORT PrintingContextWin
       bool has_selection,
       const PrintSettingsCallback& callback) OVERRIDE;
   virtual Result UseDefaultSettings() OVERRIDE;
-  virtual gfx::Size GetPdfPaperSizeDeviceUnits() OVERRIDE;
-  virtual Result UpdatePrinterSettings(bool external_preview) OVERRIDE;
+  virtual Result UpdatePrinterSettings(
+      const base::DictionaryValue& job_settings,
+      const PageRanges& ranges) OVERRIDE;
   virtual Result InitWithSettings(const PrintSettings& settings) OVERRIDE;
-  virtual Result NewDocument(const base::string16& document_name) OVERRIDE;
+  virtual Result NewDocument(const string16& document_name) OVERRIDE;
   virtual Result NewPage() OVERRIDE;
   virtual Result PageDone() OVERRIDE;
   virtual Result DocumentDone() OVERRIDE;
   virtual void Cancel() OVERRIDE;
   virtual void ReleaseContext() OVERRIDE;
   virtual gfx::NativeDrawingContext context() const OVERRIDE;
-
-  // PrintSettingsDialogWin::Observer implementation:
-  virtual void PrintSettingsConfirmed(PRINTDLGEX* dialog_options) OVERRIDE;
-  virtual void PrintSettingsCancelled(PRINTDLGEX* dialog_options) OVERRIDE;
 
 #if defined(UNIT_TEST) || defined(PRINTING_IMPLEMENTATION)
   // Sets a fake PrintDlgEx function pointer in tests.
@@ -58,6 +52,10 @@ class PRINTING_EXPORT PrintingContextWin
   static bool AllocateContext(const std::wstring& printer_name,
                               const DEVMODE* dev_mode,
                               gfx::NativeDrawingContext* context);
+
+  // Retrieves the content of a GetPrinter call.
+  static void GetPrinterHelper(HANDLE printer, int level,
+                               scoped_array<uint8>* buffer);
 
  private:
   // Class that manages the PrintDlgEx() callbacks. This is meant to be a
@@ -93,12 +91,6 @@ class PRINTING_EXPORT PrintingContextWin
   // Function pointer that defaults to PrintDlgEx. It can be changed using
   // SetPrintDialog() in tests.
   HRESULT (__stdcall *print_dialog_func_)(LPPRINTDLGEX);
-
-  // Where to notify when the dialog is closed.
-  PrintSettingsCallback callback_;
-
-  // Wrapper around native print dialog that runs it on a background thread.
-  scoped_refptr<ui::PrintSettingsDialogWin> print_settings_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintingContextWin);
 };

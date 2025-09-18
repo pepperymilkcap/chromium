@@ -29,15 +29,16 @@
 .app-contents > span {
   display: block;
   overflow: hidden;
+  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .app-img-container {
-  /* -webkit-mask-image set by JavaScript to the image source. */
-  -webkit-mask-size: 100% 100%;
   margin-left: auto;
   margin-right: auto;
+  /* -webkit-mask-image set by JavaScript to the image source */
+  -webkit-mask-size: 100% 100%;
 }
 
 .app-img-container > * {
@@ -46,8 +47,6 @@
 }
 
 .app-icon-div {
-  -webkit-box-align: center;
-  -webkit-box-pack: center;
   background-color: white;
   border: 1px solid #d5d5d5;
   border-radius: 5px;
@@ -57,6 +56,8 @@
   position: relative;
   vertical-align: middle;
   z-index: 0;
+  -webkit-box-align: center;
+  -webkit-box-pack: center;
 }
 
 .app-icon-div .app-img-container {
@@ -84,80 +85,87 @@
   z-index: 1000;
 }
 
-.app-context-menu > [checked]::before {
-  height: 5px;
-}
-
 .launch-click-target {
   cursor: pointer;
+}
+
+/* Notifications */
+
+.app-notification {
+  color: #999999;  
+  display: block;
+  font-size: 11px;
+  white-space: nowrap;
+  -webkit-transition: color 150ms linear;
+}
+
+.app-notification:hover {
+  text-decoration: underline;
+}
+
+/* Promo */
+/* Show the promo if the webstore has a promo and is the only app on the page.
+ */
+.tile:only-of-type > .has-promo > .app-contents > span {
+  display: none;
+}
+
+.tile:only-of-type > .has-promo .app-img-container > .apps-promo-logo {
+  display: block;
+}
+
+.apps-promo-logo {
+  display: none;
+  height: 128px;
+  width: 128px;
+}
+
+.tile:only-of-type > .has-promo .app-img-container > img:first-child {
+  display: none;
 }
 
 .app-img-container > img:first-child {
   display: block;
 }
 
-.app .invisible {
-  visibility: hidden;
+/* TODO(estade): animation? */
+.tile:only-of-type > .has-promo > .apps-promo-extras {
+  display: block;
 }
 
-#app-launcher-promo {
-  background-color: white;
-  border: 1px solid lightgray;
-  border-bottom-width: 3px;
-  border-radius: 2px;
-  border-top-width: 2px;
-  bottom: 90px;
-  font-family: Arial, Helvetica, sans-serif;
-  height: 120px;
-  left: 50%;
-  margin-left: -300px;
-  position: fixed;
-  width: 600px;
-}
-
-#app-launcher-promo > .close-button {
+.apps-promo-extras {
+  display: none;
+  /* 128 * 5/4 */
+  left: 160px;
   position: absolute;
-  right: 10px;
-  top: 10px;
-  width: 14px;
+  text-align: left;
+  top: 0;
 }
 
-.apps-promo-text {
-  color: #222;
-  font-size: 16px;
-  left: 30px;
-  line-height: 24px;
-  position: absolute;
-  top: 30px;
+html[dir="rtl"] .apps-promo-extras {
+  left: auto;
+  right: 160px;
 }
 
-.apps-promo-learn-more {
-  background-color: rgb(77, 144, 254);
-  border: 1px solid rgb(47, 91, 183);
-  border-radius: 2px;
-  color: white;
-  cursor: default;
-  font-size: 11px;
+.apps-promo-heading {
   font-weight: bold;
-  height: 27px;
-  left: 30px;
-  line-height: 27px;
-  padding: 0 8px;
-  position: absolute;
+  margin-bottom: 5px;
+  -webkit-margin-start: 3px;
+}
+
+.g-button-basic {
+  border-width: 6px 10px 12px 6px;
+  color: #fff !important;
+  display: inline-block;
+  font-size: 1.3em;
+  font-weight: bold;
+  padding: 2px 10px;
   text-align: center;
   text-decoration: none;
-  top: 70px;
-  width: 90px;
+  white-space: nowrap;
+  -webkit-border-image: url('images/app_promo_button.png') 6 10 12 6;
 }
 
-.apps-promo-learn-more:hover {
-  background-image: -webkit-linear-gradient(
-      top, rgb(77, 144, 254), rgb(53, 122, 232));
-  border: 1px solid rgb(47, 91, 183);
-}
-
-#app-launcher-promo > img {
-  bottom: 0;
-  position: absolute;
-  right: 30px;
+.app .invisible {
+  visibility: hidden;
 }

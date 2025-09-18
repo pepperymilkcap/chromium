@@ -25,37 +25,7 @@ def Main(args):
     sys.exit(0)
   sys.path.insert(0, nacl_build_dir)
   import download_toolchains
-
-  # TODO (robertm): Finish getting PNaCl ready for prime time.
-  # BUG:
-  # We remove this --optional-pnacl argument, and instead replace it with
-  # --no-pnacl for most cases.  However, if the bot name is an sdk
-  # bot then we will go ahead and download it.  This prevents increasing the
-  # gclient sync time for developers, or standard Chrome bots.
-  if '--optional-pnacl' in args:
-    args.remove('--optional-pnacl')
-    use_pnacl = False
-    buildbot_name = os.environ.get('BUILDBOT_BUILDERNAME', '')
-    if 'pnacl' in buildbot_name and 'sdk' in buildbot_name:
-      use_pnacl = True
-    if use_pnacl:
-      print '\n*** DOWNLOADING PNACL TOOLCHAIN ***\n'
-    else:
-      args.append('--no-pnacl')
-
-  # Only download the ARM gcc toolchain if we are building for ARM
-  # TODO(olonho): we need to invent more reliable way to get build
-  # configuration info, to know if we're building for ARM.
-  if 'target_arch=arm' in os.environ.get('GYP_DEFINES', ''):
-      args.append('--arm-untrusted')
-
-  # Append the name of the file to use as a version and hash source.
-  # NOTE:  While not recommended, it is possible to redirect this file to
-  # a chrome location to avoid branching NaCl if just a toolchain needs
-  # to be bumped.
-  args.append(os.path.join(nacl_dir, 'TOOL_REVISIONS'))
-
-  download_toolchains.main(args)
+  download_toolchains.Main(args)
   return 0
 
 

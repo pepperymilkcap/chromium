@@ -1,20 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/file_path.h"
 #include "base/file_version_info.h"
 #include "base/file_version_info_win.h"
-#include "base/files/file_path.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "chrome_frame/navigation_constraints.h"
-#include "chrome_frame/registry_list_preferences_holder.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/utils.h"
 
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/gmock/include/gmock/gmock.h"
 
 using base::win::RegKey;
 
@@ -24,7 +23,7 @@ const wchar_t kSuffix[] = L"-fix";
 // Registry override in the UtilsTest will cause shell APIs to fail
 // So separate this test from the rest
 TEST(SimpleUtilTests, GetTempInternetFiles) {
-  base::FilePath path = GetIETemporaryFilesFolder();
+  FilePath path = GetIETemporaryFilesFolder();
   EXPECT_FALSE(path.empty());
 }
 
@@ -32,6 +31,10 @@ class UtilTests : public testing::Test {
  protected:
   void SetUp() {
     DeleteAllSingletons();
+  }
+
+  void TearDown() {
+    registry_virtualization_.RemoveAllOverrides();
   }
 
   // This is used to manage life cycle of PolicySettings singleton.
@@ -47,7 +50,7 @@ TEST_F(UtilTests, GetModuleVersionTest) {
 
   // Use the method that goes to disk
   scoped_ptr<FileVersionInfo> base_info(
-      FileVersionInfo::CreateFileVersionInfo(base::FilePath(path)));
+      FileVersionInfo::CreateFileVersionInfo(FilePath(path)));
   EXPECT_TRUE(base_info.get() != NULL);
 
   // Use the method that doesn't go to disk
@@ -239,11 +242,11 @@ class MockNavigationConstraints : public NavigationConstraints {
 // Matcher which returns true if the URL passed in starts with the prefix
 // specified.
 MATCHER_P(UrlPathStartsWith, url_prefix, "url starts with prefix") {
-  return StartsWith(base::UTF8ToWide(arg.spec()), url_prefix, false);
+  return StartsWith(UTF8ToWide(arg.spec()), url_prefix, false);
 }
 
 ACTION_P3(HandleZone, mock, url_prefix, zone) {
-  if (StartsWith(base::UTF8ToWide(arg0.spec()), url_prefix, false))
+  if (StartsWith(UTF8ToWide(arg0.spec()), url_prefix, false))
     return zone != URLZONE_UNTRUSTED;
   return false;
 }
@@ -449,11 +452,6 @@ TEST_F(UtilTests, RendererTypeForUrlTest) {
   DWORD saved_default_renderer = 0;
   config_key.ReadValueDW(kEnableGCFRendererByDefault, &saved_default_renderer);
 
-  // We need to manually reset the holder between checks.
-  // TODO(robertshield): Remove this when the RegistryWatcher is wired up.
-  RegistryListPreferencesHolder& renderer_type_preferences_holder =
-      GetRendererTypePreferencesHolderForTesting();
-
   // Make sure the host is the default renderer.
   config_key.WriteValue(kEnableGCFRendererByDefault, static_cast<DWORD>(0));
   EXPECT_FALSE(IsGcfDefaultRenderer());
@@ -461,7 +459,6 @@ TEST_F(UtilTests, RendererTypeForUrlTest) {
   opt_for_gcf.DeleteValue(kTestFilter);  // Just in case this exists
   EXPECT_EQ(RENDERER_TYPE_UNDETERMINED, RendererTypeForUrl(kTestUrl));
   opt_for_gcf.WriteValue(kTestFilter, L"");
-  renderer_type_preferences_holder.ResetForTesting();
   EXPECT_EQ(RENDERER_TYPE_CHROME_OPT_IN_URL, RendererTypeForUrl(kTestUrl));
 
   // Now set GCF as the default renderer.
@@ -469,19 +466,15 @@ TEST_F(UtilTests, RendererTypeForUrlTest) {
   EXPECT_TRUE(IsGcfDefaultRenderer());
 
   opt_for_host.DeleteValue(kTestFilter);  // Just in case this exists
-  renderer_type_preferences_holder.ResetForTesting();
   EXPECT_EQ(RENDERER_TYPE_CHROME_DEFAULT_RENDERER,
             RendererTypeForUrl(kTestUrl));
   opt_for_host.WriteValue(kTestFilter, L"");
-  renderer_type_preferences_holder.ResetForTesting();
   EXPECT_EQ(RENDERER_TYPE_UNDETERMINED, RendererTypeForUrl(kTestUrl));
 
   // Cleanup.
   opt_for_gcf.DeleteValue(kTestFilter);
   opt_for_host.DeleteValue(kTestFilter);
   config_key.WriteValue(kEnableGCFRendererByDefault, saved_default_renderer);
-  renderer_type_preferences_holder.ResetForTesting();
-  RendererTypeForUrl(L"");
 }
 
 TEST_F(UtilTests, XUaCompatibleDirectiveTest) {

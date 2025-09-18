@@ -4,11 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_DROPDOWN_BAR_HOST_H_
 #define CHROME_BROWSER_UI_VIEWS_DROPDOWN_BAR_HOST_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -22,9 +23,9 @@ namespace content {
 class WebContents;
 }
 
-namespace gfx {
+namespace ui {
 class SlideAnimation;
-}  // namespace gfx
+}  // namespace ui
 
 namespace views {
 class ExternalFocusTracker;
@@ -36,7 +37,7 @@ class Widget;
 //
 // The DropdownBarHost implements the container widget for the UI that
 // is shown at the top of browser contents. It uses the appropriate
-// implementation from dropdown_bar_host_win.cc or dropdown_bar_host_aura.cc to
+// implementation from dropdown_bar_host_win.cc or dropdown_bar_host_gtk.cc to
 // draw its content and is responsible for showing, hiding, animating, closing,
 // and moving the bar if needed, for example if the widget is
 // obscuring the selection results in FindBar.
@@ -44,19 +45,12 @@ class Widget;
 ////////////////////////////////////////////////////////////////////////////////
 class DropdownBarHost : public ui::AcceleratorTarget,
                         public views::FocusChangeListener,
-                        public gfx::AnimationDelegate {
+                        public ui::AnimationDelegate {
  public:
   explicit DropdownBarHost(BrowserView* browser_view);
   virtual ~DropdownBarHost();
 
-  // Initializes the DropdownBarHost. This creates the widget that |view| paints
-  // into.
-  // |host_view| is the view whose position in the |browser_view_| view
-  // hierarchy determines the z-order of the widget relative to views with
-  // layers and views with associated NativeViews.
-  void Init(views::View* host_view,
-            views::View* view,
-            DropdownBarHostDelegate* delegate);
+  void Init(views::View* view, DropdownBarHostDelegate* delegate);
 
   // Whether we are animating the position of the dropdown widget.
   bool IsAnimating() const;
@@ -90,9 +84,9 @@ class DropdownBarHost : public ui::AcceleratorTarget,
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) = 0;
   virtual bool CanHandleAccelerators() const = 0;
 
-  // gfx::AnimationDelegate implementation:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
+  // ui::AnimationDelegate implementation:
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
 
   // During testing we can disable animations by setting this flag to true,
   // so that opening and closing the dropdown bar is shown instantly, instead of
@@ -113,10 +107,6 @@ class DropdownBarHost : public ui::AcceleratorTarget,
   virtual void UnregisterAccelerators();
 
  protected:
-  // Called when the drop down bar visibility, aka the value of IsVisible(),
-  // changes.
-  virtual void OnVisibilityChanged();
-
   // Returns the dropdown bar view.
   views::View* view() const { return view_; }
 
@@ -157,21 +147,16 @@ class DropdownBarHost : public ui::AcceleratorTarget,
   void SetWidgetPositionNative(const gfx::Rect& new_pos, bool no_redraw);
 
   // Returns a keyboard event suitable for forwarding.
-  content::NativeWebKeyboardEvent GetKeyboardEvent(
+  NativeWebKeyboardEvent GetKeyboardEvent(
       const content::WebContents* contents,
-      const ui::KeyEvent& key_event);
+      const views::KeyEvent& key_event);
 
   // Returns the animation for the dropdown.
-  gfx::SlideAnimation* animation() {
+  ui::SlideAnimation* animation() {
     return animation_.get();
   }
 
  private:
-  // Set the view whose position in the |browser_view_| view hierarchy
-  // determines the z-order of |host_| relative to views with layers and
-  // views with associated NativeViews.
-  void SetHostViewNative(views::View* host_view);
-
   // The BrowserView that created us.
   BrowserView* browser_view_;
 
@@ -184,7 +169,7 @@ class DropdownBarHost : public ui::AcceleratorTarget,
   int animation_offset_;
 
   // The animation class to use when opening the Dropdown widget.
-  scoped_ptr<gfx::SlideAnimation> animation_;
+  scoped_ptr<ui::SlideAnimation> animation_;
 
   // The focus manager we register with to keep track of focus changes.
   views::FocusManager* focus_manager_;

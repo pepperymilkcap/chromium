@@ -6,7 +6,6 @@
 #define PPAPI_CPP_GRAPHICS_3D_CLIENT_H_
 
 #include "ppapi/c/pp_stdint.h"
-#include "ppapi/cpp/instance_handle.h"
 
 /// @file
 /// This file defines the API for callbacks related to 3D.
@@ -35,7 +34,7 @@ class Graphics3DClient {
   virtual void Graphics3DContextLost() = 0;
 
  private:
-  InstanceHandle associated_instance_;
+  Instance* associated_instance_;
 };
 
 }  // namespace pp

@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_PROGRESS_BAR_H_
 #define UI_VIEWS_CONTROLS_PROGRESS_BAR_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -20,10 +21,6 @@ class VIEWS_EXPORT ProgressBar : public View {
 
   double current_value() const { return current_value_; }
 
-  // Gets a normalized current value in [0.0, 1.0] range based on current value
-  // range and the min/max display value range.
-  double GetNormalizedValue() const;
-
   // Sets the inclusive range of values to be displayed.  Values outside of the
   // range will be capped when displayed.
   void SetDisplayRange(double min_display_value, double max_display_value);
@@ -35,11 +32,11 @@ class VIEWS_EXPORT ProgressBar : public View {
   // Sets the tooltip text.  Default behavior for a progress bar is to show no
   // tooltip on mouse hover. Calling this lets you set a custom tooltip.  To
   // revert to default behavior, call this with an empty string.
-  void SetTooltipText(const base::string16& tooltip_text);
+  void SetTooltipText(const string16& tooltip_text);
 
   // Overridden from View:
   virtual bool GetTooltipText(const gfx::Point& p,
-                              base::string16* tooltip) const OVERRIDE;
+                              string16* tooltip) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
  private:
@@ -47,7 +44,7 @@ class VIEWS_EXPORT ProgressBar : public View {
 
   // Overridden from View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
   // Inclusive range used when displaying values.
@@ -58,7 +55,7 @@ class VIEWS_EXPORT ProgressBar : public View {
   double current_value_;
 
   // Tooltip text.
-  base::string16 tooltip_text_;
+  string16 tooltip_text_;
 
   DISALLOW_COPY_AND_ASSIGN(ProgressBar);
 };

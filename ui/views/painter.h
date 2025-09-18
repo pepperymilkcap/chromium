@@ -1,95 +1,52 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_PAINTER_H_
 #define UI_VIEWS_PAINTER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/views/views_export.h"
 
 namespace gfx {
 class Canvas;
-class ImageSkia;
 class Insets;
-class Rect;
-class Size;
 }
-
-// A macro to define arrays of IDR constants used with CreateImageGridPainter.
-#define IMAGE_GRID(x) { x ## _TOP_LEFT,    x ## _TOP,    x ## _TOP_RIGHT, \
-                        x ## _LEFT,        x ## _CENTER, x ## _RIGHT, \
-                        x ## _BOTTOM_LEFT, x ## _BOTTOM, x ## _BOTTOM_RIGHT, }
+class SkBitmap;
 
 namespace views {
-
-class View;
 
 // Painter, as the name implies, is responsible for painting in a particular
 // region. Think of Painter as a Border or Background that can be painted
 // in any region of a View.
 class VIEWS_EXPORT Painter {
  public:
-  Painter();
-  virtual ~Painter();
-
   // A convenience method for painting a Painter in a particular region.
   // This translates the canvas to x/y and paints the painter.
-  static void PaintPainterAt(gfx::Canvas* canvas,
-                             Painter* painter,
-                             const gfx::Rect& rect);
-
-  // Convenience that paints |focus_painter| only if |view| HasFocus() and
-  // |focus_painter| is non-NULL.
-  static void PaintFocusPainter(View* view,
-                                gfx::Canvas* canvas,
-                                Painter* focus_painter);
+  static void PaintPainterAt(int x, int y, int w, int h,
+                             gfx::Canvas* canvas, Painter* painter);
 
   // Creates a painter that draws a gradient between the two colors.
   static Painter* CreateHorizontalGradient(SkColor c1, SkColor c2);
   static Painter* CreateVerticalGradient(SkColor c1, SkColor c2);
 
-  // Creates a painter that draws a multi-color gradient. |colors| contains the
-  // gradient colors and |pos| the relative positions of the colors. The first
-  // element in |pos| must be 0.0 and the last element 1.0. |count| contains
-  // the number of elements in |colors| and |pos|.
-  static Painter* CreateVerticalMultiColorGradient(SkColor* colors,
-                                                   SkScalar* pos,
-                                                   size_t count);
-
   // Creates a painter that divides |image| into nine regions. The four corners
-  // are rendered at the size specified in insets (eg. the upper-left corner is
-  // rendered at 0 x 0 with a size of insets.left() x insets.top()). The center
-  // and edge images are stretched to fill the painted area.
-  static Painter* CreateImagePainter(const gfx::ImageSkia& image,
-                                     const gfx::Insets& insets);
+  // are rendered at the size specified in insets (for example, the upper
+  // left corners is rendered at 0x0 with a size of
+  // insets.left()xinsets.right()). The four edges are stretched to fill the
+  // destination size.
+  // Ownership is passed to the caller.
+  static Painter* CreateImagePainter(const SkBitmap& image,
+                                     const gfx::Insets& insets,
+                                     bool paint_center);
 
-  // Creates a painter that paints images in a scalable grid. The images must
-  // share widths by column and heights by row. The corners are painted at full
-  // size, while center and edge images are stretched to fill the painted area.
-  // The center image may be zero (to be skipped). This ordering must be used:
-  // Top-Left/Top/Top-Right/Left/[Center]/Right/Bottom-Left/Bottom/Bottom-Right.
-  static Painter* CreateImageGridPainter(const int image_ids[]);
-
-  // Factory methods for creating painters intended for rendering focus.
-  static scoped_ptr<Painter> CreateDashedFocusPainter();
-  static scoped_ptr<Painter> CreateDashedFocusPainterWithInsets(
-      const gfx::Insets& insets);
-  static scoped_ptr<Painter> CreateSolidFocusPainter(SkColor color,
-                                                     const gfx::Insets& insets);
-
-  // Returns the minimum size this painter can paint without obvious graphical
-  // problems (e.g. overlapping images).
-  virtual gfx::Size GetMinimumSize() const = 0;
+  virtual ~Painter() {}
 
   // Paints the painter in the specified region.
-  virtual void Paint(gfx::Canvas* canvas, const gfx::Size& size) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Painter);
+  virtual void Paint(int w, int h, gfx::Canvas* canvas) = 0;
 };
 
 // HorizontalPainter paints 3 images into a box: left, center and right. The
@@ -101,11 +58,14 @@ class VIEWS_EXPORT HorizontalPainter : public Painter {
   // Constructs a new HorizontalPainter loading the specified image names.
   // The images must be in the order left, right and center.
   explicit HorizontalPainter(const int image_resource_names[]);
-  virtual ~HorizontalPainter();
 
-  // Painter:
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual void Paint(gfx::Canvas* canvas, const gfx::Size& size) OVERRIDE;
+  virtual ~HorizontalPainter() {}
+
+  // Paints the images.
+  virtual void Paint(int w, int h, gfx::Canvas* canvas) OVERRIDE;
+
+  // Height of the images.
+  int height() const { return height_; }
 
  private:
   // The image chunks.
@@ -115,8 +75,10 @@ class VIEWS_EXPORT HorizontalPainter : public Painter {
     RIGHT
   };
 
+  // The height.
+  int height_;
   // NOTE: the images are owned by ResourceBundle. Don't free them.
-  const gfx::ImageSkia* images_[3];
+  SkBitmap* images_[3];
 
   DISALLOW_COPY_AND_ASSIGN(HorizontalPainter);
 };

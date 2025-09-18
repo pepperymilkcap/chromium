@@ -4,23 +4,24 @@
 
 #ifndef CHROME_BROWSER_UI_FIND_BAR_FIND_BAR_STATE_FACTORY_H_
 #define CHROME_BROWSER_UI_FIND_BAR_FIND_BAR_STATE_FACTORY_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/singleton.h"
-#include "base/strings/string16.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "base/string16.h"
+#include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class Profile;
 class FindBarState;
 
-class FindBarStateFactory : public BrowserContextKeyedServiceFactory {
+class FindBarStateFactory : public ProfileKeyedServiceFactory {
  public:
   static FindBarState* GetForProfile(Profile* profile);
 
   // Retrieves the last prepopulate text for a given Profile.  If the profile is
   // incognito and has an empty prepopulate text, falls back to the
   // prepopulate text from the normal profile.
-  static base::string16 GetLastPrepopulateText(Profile* profile);
+  static string16 GetLastPrepopulateText(Profile* profile);
 
   static FindBarStateFactory* GetInstance();
 
@@ -30,11 +31,10 @@ class FindBarStateFactory : public BrowserContextKeyedServiceFactory {
   FindBarStateFactory();
   virtual ~FindBarStateFactory();
 
-  // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  // ProfileKeyedServiceFactory:
+  virtual ProfileKeyedService* BuildServiceInstanceFor(
+      Profile* profile) const OVERRIDE;
+  virtual bool ServiceHasOwnInstanceInIncognito() OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarStateFactory);
 };

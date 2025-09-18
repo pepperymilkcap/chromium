@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,9 +35,8 @@ var TestView = (function() {
     g_browser.addConnectionTestsObserver(this);
   }
 
-  TestView.TAB_ID = 'tab-handle-tests';
-  TestView.TAB_NAME = 'Tests';
-  TestView.TAB_HASH = '#tests';
+  // ID for special HTML element in category_tabs.html
+  TestView.TAB_HANDLE_ID = 'tab-handle-tests';
 
   // IDs for special HTML elements in test_view.html
   TestView.MAIN_BOX_ID = 'test-view-tab-content';
@@ -66,12 +65,12 @@ var TestView = (function() {
       this.summaryDiv_.innerHTML = '';
 
       var p = addNode(this.summaryDiv_, 'p');
-      addTextNode(p, 'Started connection test suite suite on ');
-      timeutil.addNodeWithDate(p, new Date());
+      addTextNode(p, 'Started connection test suite suite on ' +
+                     (new Date()).toLocaleString());
 
       // Add a table that will hold the individual test results.
       var table = addNode(this.summaryDiv_, 'table');
-      table.className = 'styled-table';
+      table.className = 'styledTable';
       var thead = addNode(table, 'thead');
       thead.innerHTML = '<tr><th>Result</th><th>Experiment</th>' +
                         '<th>Error</th><th>Time (ms)</th></tr>';
@@ -142,8 +141,8 @@ var TestView = (function() {
         addTextNode(r.passFailCell, 'PASS');
       } else {
         addTextNode(r.resultCell,
-                    netErrorToString(result) + ' (' + result + ')');
-        r.passFailCell.style.color = '#e00';
+                    getKeyWithValue(NetError, result) + ' (' + result + ')');
+        r.passFailCell.style.color = 'red';
         addTextNode(r.passFailCell, 'FAIL');
       }
 

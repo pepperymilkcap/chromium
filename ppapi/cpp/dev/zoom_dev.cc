@@ -6,7 +6,6 @@
 
 #include "ppapi/c/dev/ppb_zoom_dev.h"
 #include "ppapi/cpp/instance.h"
-#include "ppapi/cpp/instance_handle.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
 
@@ -19,7 +18,8 @@ static const char kPPPZoomInterface[] = PPP_ZOOM_DEV_INTERFACE;
 void Zoom(PP_Instance instance,
           double factor,
           PP_Bool text_only) {
-  void* object = Instance::GetPerInstanceObject(instance, kPPPZoomInterface);
+  void* object =
+      pp::Instance::GetPerInstanceObject(instance, kPPPZoomInterface);
   if (!object)
     return;
   static_cast<Zoom_Dev*>(object)->Zoom(factor, PP_ToBool(text_only));
@@ -36,19 +36,18 @@ template <> const char* interface_name<PPB_Zoom_Dev>() {
 }  // namespace
 
 Zoom_Dev::Zoom_Dev(Instance* instance) : associated_instance_(instance) {
-  Module::Get()->AddPluginInterface(kPPPZoomInterface, &ppp_zoom);
-  instance->AddPerInstanceObject(kPPPZoomInterface, this);
+  pp::Module::Get()->AddPluginInterface(kPPPZoomInterface, &ppp_zoom);
+  associated_instance_->AddPerInstanceObject(kPPPZoomInterface, this);
 }
 
 Zoom_Dev::~Zoom_Dev() {
-  Instance::RemovePerInstanceObject(associated_instance_,
-                                    kPPPZoomInterface, this);
+  associated_instance_->RemovePerInstanceObject(kPPPZoomInterface, this);
 }
 
 void Zoom_Dev::ZoomChanged(double factor) {
   if (has_interface<PPB_Zoom_Dev>())
     get_interface<PPB_Zoom_Dev>()->ZoomChanged(
-        associated_instance_.pp_instance(), factor);
+        associated_instance_->pp_instance(), factor);
 }
 
 void Zoom_Dev::ZoomLimitsChanged(double minimum_factor,
@@ -56,7 +55,7 @@ void Zoom_Dev::ZoomLimitsChanged(double minimum_factor,
   if (!has_interface<PPB_Zoom_Dev>())
     return;
   get_interface<PPB_Zoom_Dev>()->ZoomLimitsChanged(
-      associated_instance_.pp_instance(), minimum_factor, maximium_factor);
+      associated_instance_->pp_instance(), minimum_factor, maximium_factor);
 }
 
 }  // namespace pp

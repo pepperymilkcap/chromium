@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_DRAGGED_TAB_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_DRAGGED_TAB_VIEW_H_
+#pragma once
 
 #include <vector>
 
@@ -77,11 +78,11 @@ class DraggedTabView : public views::View {
   // The size of the tab renderer.
   gfx::Size tab_size_;
 
-  // A handle to the DIB containing the current screenshot of the WebContents
+  // A handle to the DIB containing the current screenshot of the TabContents
   // we are dragging.
   scoped_ptr<NativeViewPhotobooth> photobooth_;
 
-  // Size of the WebContents being dragged.
+  // Size of the TabContents being dragged.
   gfx::Size contents_size_;
 
   DISALLOW_COPY_AND_ASSIGN(DraggedTabView);

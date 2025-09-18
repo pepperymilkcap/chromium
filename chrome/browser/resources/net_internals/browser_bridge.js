@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,14 +23,9 @@ var BrowserBridge = (function() {
     // List of observers for various bits of browser state.
     this.connectionTestsObservers_ = [];
     this.hstsObservers_ = [];
+    this.httpThrottlingObservers_ = [];
     this.constantsObservers_ = [];
     this.crosONCFileParseObservers_ = [];
-    this.storeDebugLogsObservers_ = [];
-    this.setNetworkDebugModeObservers_ = [];
-    // Unprocessed data received before the constants.  This serves to protect
-    // against passing along data before having information on how to interpret
-    // it.
-    this.earlyReceivedData_ = [];
 
     this.pollableDataHelpers_ = {};
     this.pollableDataHelpers_.proxySettings =
@@ -48,15 +43,6 @@ var BrowserBridge = (function() {
     this.pollableDataHelpers_.socketPoolInfo =
         new PollableDataHelper('onSocketPoolInfoChanged',
                                this.sendGetSocketPoolInfo.bind(this));
-    this.pollableDataHelpers_.sessionNetworkStats =
-      new PollableDataHelper('onSessionNetworkStatsChanged',
-                             this.sendGetSessionNetworkStats.bind(this));
-    this.pollableDataHelpers_.historicNetworkStats =
-      new PollableDataHelper('onHistoricNetworkStatsChanged',
-                             this.sendGetHistoricNetworkStats.bind(this));
-    this.pollableDataHelpers_.quicInfo =
-        new PollableDataHelper('onQuicInfoChanged',
-                               this.sendGetQuicInfo.bind(this));
     this.pollableDataHelpers_.spdySessionInfo =
         new PollableDataHelper('onSpdySessionInfoChanged',
                                this.sendGetSpdySessionInfo.bind(this));
@@ -78,14 +64,10 @@ var BrowserBridge = (function() {
     this.pollableDataHelpers_.httpPipeliningStatus =
         new PollableDataHelper('onHttpPipeliningStatusChanged',
                                this.sendGetHttpPipeliningStatus.bind(this));
-    this.pollableDataHelpers_.extensionInfo =
-        new PollableDataHelper('onExtensionInfoChanged',
-                               this.sendGetExtensionInfo.bind(this));
-    if (cr.isChromeOS) {
-      this.pollableDataHelpers_.systemLog =
-          new PollableDataHelper('onSystemLogChanged',
-                               this.getSystemLog.bind(this, 'syslog'));
-    }
+
+    // NetLog entries are all sent to the |SourceTracker|, which both tracks
+    // them and manages its own observer list.
+    this.sourceTracker = new SourceTracker();
 
     // Setting this to true will cause messages from the browser to be ignored,
     // and no messages will be sent to the browser, either.  Intended for use
@@ -187,10 +169,8 @@ var BrowserBridge = (function() {
       this.send('hstsQuery', [domain]);
     },
 
-    sendHSTSAdd: function(domain, sts_include_subdomains,
-                          pkp_include_subdomains, pins) {
-      this.send('hstsAdd', [domain, sts_include_subdomains,
-                            pkp_include_subdomains, pins]);
+    sendHSTSAdd: function(domain, include_subdomains, pins) {
+      this.send('hstsAdd', [domain, include_subdomains, pins]);
     },
 
     sendHSTSDelete: function(domain) {
@@ -205,24 +185,12 @@ var BrowserBridge = (function() {
       this.send('getSocketPoolInfo');
     },
 
-    sendGetSessionNetworkStats: function() {
-      this.send('getSessionNetworkStats');
-    },
-
-    sendGetHistoricNetworkStats: function() {
-      this.send('getHistoricNetworkStats');
-    },
-
     sendCloseIdleSockets: function() {
       this.send('closeIdleSockets');
     },
 
     sendFlushSocketPools: function() {
       this.send('flushSocketPools');
-    },
-
-    sendGetQuicInfo: function() {
-      this.send('getQuicInfo');
     },
 
     sendGetSpdySessionInfo: function() {
@@ -245,20 +213,16 @@ var BrowserBridge = (function() {
       this.send('getPrerenderInfo');
     },
 
-    sendGetHttpPipeliningStatus: function() {
-      this.send('getHttpPipeliningStatus');
-    },
-
-    sendGetExtensionInfo: function() {
-      this.send('getExtensionInfo');
-    },
-
     enableIPv6: function() {
       this.send('enableIPv6');
     },
 
     setLogLevel: function(logLevel) {
       this.send('setLogLevel', ['' + logLevel]);
+    },
+
+    enableHttpThrottling: function(enable) {
+      this.send('enableHttpThrottling', [enable]);
     },
 
     refreshSystemLogs: function() {
@@ -273,12 +237,8 @@ var BrowserBridge = (function() {
       this.send('importONCFile', [fileContent, passcode]);
     },
 
-    storeDebugLogs: function() {
-      this.send('storeDebugLogs');
-    },
-
-    setNetworkDebugMode: function(subsystem) {
-      this.send('setNetworkDebugMode', [subsystem]);
+    sendGetHttpPipeliningStatus: function() {
+      this.send('getHttpPipeliningStatus');
     },
 
     //--------------------------------------------------------------------------
@@ -289,25 +249,7 @@ var BrowserBridge = (function() {
       // Does nothing if disabled.
       if (this.disabled_)
         return;
-
-      // If no constants have been received, and params does not contain the
-      // constants, delay handling the data.
-      if (Constants == null && command != 'receivedConstants') {
-        this.earlyReceivedData_.push({ command: command, params: params });
-        return;
-      }
-
       this[command](params);
-
-      // Handle any data that was received early in the order it was received,
-      // once the constants have been processed.
-      if (this.earlyReceivedData_ != null) {
-        for (var i = 0; i < this.earlyReceivedData_.length; i++) {
-          var command = this.earlyReceivedData_[i];
-          this[command.command](command.params);
-        }
-        this.earlyReceivedData_ = null;
-      }
     },
 
     receivedConstants: function(constants) {
@@ -316,7 +258,7 @@ var BrowserBridge = (function() {
     },
 
     receivedLogEntries: function(logEntries) {
-      EventsTracker.getInstance().addLogEntries(logEntries);
+      this.sourceTracker.onReceivedLogEntries(logEntries);
     },
 
     receivedProxySettings: function(proxySettings) {
@@ -335,19 +277,6 @@ var BrowserBridge = (function() {
       this.pollableDataHelpers_.socketPoolInfo.update(socketPoolInfo);
     },
 
-    receivedSessionNetworkStats: function(sessionNetworkStats) {
-      this.pollableDataHelpers_.sessionNetworkStats.update(sessionNetworkStats);
-    },
-
-    receivedHistoricNetworkStats: function(historicNetworkStats) {
-      this.pollableDataHelpers_.historicNetworkStats.update(
-          historicNetworkStats);
-    },
-
-    receivedQuicInfo: function(quicInfo) {
-      this.pollableDataHelpers_.quicInfo.update(quicInfo);
-    },
-
     receivedSpdySessionInfo: function(spdySessionInfo) {
       this.pollableDataHelpers_.spdySessionInfo.update(spdySessionInfo);
     },
@@ -364,6 +293,10 @@ var BrowserBridge = (function() {
 
     receivedServiceProviders: function(serviceProviders) {
       this.pollableDataHelpers_.serviceProviders.update(serviceProviders);
+    },
+
+    receivedPassiveLogEntries: function(entries) {
+      this.sourceTracker.onReceivedPassiveLogEntries(entries);
     },
 
     receivedStartConnectionTestSuite: function() {
@@ -400,18 +333,15 @@ var BrowserBridge = (function() {
         this.crosONCFileParseObservers_[i].onONCFileParse(error);
     },
 
-    receivedStoreDebugLogs: function(status) {
-      for (var i = 0; i < this.storeDebugLogsObservers_.length; i++)
-        this.storeDebugLogsObservers_[i].onStoreDebugLogs(status);
-    },
-
-    receivedSetNetworkDebugMode: function(status) {
-      for (var i = 0; i < this.setNetworkDebugModeObservers_.length; i++)
-        this.setNetworkDebugModeObservers_[i].onSetNetworkDebugMode(status);
-    },
-
     receivedHttpCacheInfo: function(info) {
       this.pollableDataHelpers_.httpCacheInfo.update(info);
+    },
+
+    receivedHttpThrottlingEnabledPrefChanged: function(enabled) {
+      for (var i = 0; i < this.httpThrottlingObservers_.length; i++) {
+        this.httpThrottlingObservers_[i].onHttpThrottlingEnabledPrefChanged(
+            enabled);
+      }
     },
 
     receivedPrerenderInfo: function(prerenderInfo) {
@@ -421,14 +351,6 @@ var BrowserBridge = (function() {
     receivedHttpPipeliningStatus: function(httpPipeliningStatus) {
       this.pollableDataHelpers_.httpPipeliningStatus.update(
           httpPipeliningStatus);
-    },
-
-    receivedExtensionInfo: function(extensionInfo) {
-      this.pollableDataHelpers_.extensionInfo.update(extensionInfo);
-    },
-
-    getSystemLogCallback: function(systemLog) {
-      this.pollableDataHelpers_.systemLog.update(systemLog);
     },
 
     //--------------------------------------------------------------------------
@@ -509,39 +431,6 @@ var BrowserBridge = (function() {
     addSocketPoolInfoObserver: function(observer, ignoreWhenUnchanged) {
       this.pollableDataHelpers_.socketPoolInfo.addObserver(observer,
                                                            ignoreWhenUnchanged);
-    },
-
-    /**
-     * Adds a listener of the network session. |observer| will be called back
-     * when data is received, through:
-     *
-     *   observer.onSessionNetworkStatsChanged(sessionNetworkStats)
-     */
-    addSessionNetworkStatsObserver: function(observer, ignoreWhenUnchanged) {
-      this.pollableDataHelpers_.sessionNetworkStats.addObserver(
-          observer, ignoreWhenUnchanged);
-    },
-
-    /**
-     * Adds a listener of persistent network session data. |observer| will be
-     * called back when data is received, through:
-     *
-     *   observer.onHistoricNetworkStatsChanged(historicNetworkStats)
-     */
-    addHistoricNetworkStatsObserver: function(observer, ignoreWhenUnchanged) {
-      this.pollableDataHelpers_.historicNetworkStats.addObserver(
-          observer, ignoreWhenUnchanged);
-    },
-
-    /**
-     * Adds a listener of the QUIC info. |observer| will be called back
-     * when data is received, through:
-     *
-     *   observer.onQuicInfoChanged(quicInfo)
-     */
-    addQuicInfoObserver: function(observer, ignoreWhenUnchanged) {
-      this.pollableDataHelpers_.quicInfo.addObserver(
-          observer, ignoreWhenUnchanged);
     },
 
     /**
@@ -640,23 +529,13 @@ var BrowserBridge = (function() {
     },
 
     /**
-     * Adds a listener for storing log file status. The observer will be called
-     * back with:
+     * Adds a listener for HTTP throttling-related events. |observer| will be
+     * called back when HTTP throttling is enabled/disabled, through:
      *
-     *   observer.onStoreDebugLogs(status);
+     *   observer.onHttpThrottlingEnabledPrefChanged(enabled);
      */
-    addStoreDebugLogsObserver: function(observer) {
-      this.storeDebugLogsObservers_.push(observer);
-    },
-
-    /**
-     * Adds a listener for network debugging mode status. The observer
-     * will be called back with:
-     *
-     *   observer.onSetNetworkDebugMode(status);
-     */
-    addSetNetworkDebugModeObserver: function(observer) {
-      this.setNetworkDebugModeObservers_.push(observer);
+    addHttpThrottlingObserver: function(observer) {
+      this.httpThrottlingObservers_.push(observer);
     },
 
     /**
@@ -689,30 +568,6 @@ var BrowserBridge = (function() {
     addHttpPipeliningStatusObserver: function(observer, ignoreWhenUnchanged) {
       this.pollableDataHelpers_.httpPipeliningStatus.addObserver(
           observer, ignoreWhenUnchanged);
-    },
-
-    /**
-     * Adds a listener of extension information. |observer| will be called
-     * back when data is received, through:
-     *
-     *   observer.onExtensionInfoChanged(extensionInfo)
-     */
-    addExtensionInfoObserver: function(observer, ignoreWhenUnchanged) {
-      this.pollableDataHelpers_.extensionInfo.addObserver(
-          observer, ignoreWhenUnchanged);
-    },
-
-    /**
-     * Adds a listener of system log information. |observer| will be called
-     * back when data is received, through:
-     *
-     *   observer.onSystemLogChanged(systemLogInfo)
-     */
-    addSystemLogObserver: function(observer, ignoreWhenUnchanged) {
-      if (this.pollableDataHelpers_.systemLog) {
-        this.pollableDataHelpers_.systemLog.addObserver(
-            observer, ignoreWhenUnchanged);
-      }
     },
 
     /**

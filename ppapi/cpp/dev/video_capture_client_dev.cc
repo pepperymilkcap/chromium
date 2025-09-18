@@ -6,7 +6,6 @@
 
 #include "ppapi/c/dev/ppp_video_capture_dev.h"
 #include "ppapi/cpp/instance.h"
-#include "ppapi/cpp/instance_handle.h"
 #include "ppapi/cpp/module.h"
 
 namespace pp {
@@ -19,7 +18,7 @@ void OnDeviceInfo(PP_Instance instance,
                   PP_Resource resource,
                   const struct PP_VideoCaptureDeviceInfo_Dev* info,
                   uint32_t buffer_count,
-                  const PP_Resource buffers[]) {
+                  const PP_Resource* buffers) {
   VideoCaptureClient_Dev* client = static_cast<VideoCaptureClient_Dev*>(
       Instance::GetPerInstanceObject(instance, kPPPVideoCaptureInterface));
   if (!client)
@@ -67,14 +66,13 @@ PPP_VideoCapture_Dev ppp_video_capture = {
 
 VideoCaptureClient_Dev::VideoCaptureClient_Dev(Instance* instance)
     : instance_(instance) {
-  Module::Get()->AddPluginInterface(kPPPVideoCaptureInterface,
-                                    &ppp_video_capture);
-  instance->AddPerInstanceObject(kPPPVideoCaptureInterface, this);
+  pp::Module::Get()->AddPluginInterface(kPPPVideoCaptureInterface,
+                                        &ppp_video_capture);
+  instance_->AddPerInstanceObject(kPPPVideoCaptureInterface, this);
 }
 
 VideoCaptureClient_Dev::~VideoCaptureClient_Dev() {
-  Instance::RemovePerInstanceObject(instance_,
-                                    kPPPVideoCaptureInterface, this);
+  instance_->RemovePerInstanceObject(kPPPVideoCaptureInterface, this);
 }
 
 }  // namespace pp

@@ -4,15 +4,14 @@
 
 #include "base/i18n/number_formatting.h"
 #include "base/memory/scoped_vector.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/sessions/session_service.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/typed_urls_helper.h"
 
-using base::ASCIIToUTF16;
 using typed_urls_helper::AddUrlToHistory;
 using typed_urls_helper::AddUrlToHistoryWithTimestamp;
 using typed_urls_helper::AddUrlToHistoryWithTransition;
@@ -32,8 +31,8 @@ class TwoClientTypedUrlsSyncTest : public SyncTest {
   virtual ~TwoClientTypedUrlsSyncTest() {}
 
   bool CheckClientsEqual() {
-    history::URLRows urls = GetTypedUrlsFromClient(0);
-    history::URLRows urls2 = GetTypedUrlsFromClient(1);
+    std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
+    std::vector<history::URLRow> urls2 = GetTypedUrlsFromClient(1);
     AssertURLRowVectorsAreEqual(urls, urls2);
     // Now check the visits.
     for (size_t i = 0; i < urls.size() && i < urls2.size(); i++) {
@@ -47,7 +46,7 @@ class TwoClientTypedUrlsSyncTest : public SyncTest {
 
   bool CheckNoDuplicateVisits() {
     for (int i = 0; i < num_clients(); ++i) {
-      history::URLRows urls = GetTypedUrlsFromClient(i);
+      std::vector<history::URLRow> urls = GetTypedUrlsFromClient(i);
       for (size_t j = 0; j < urls.size(); ++j) {
         history::VisitVector visits = GetVisitsFromClient(i, urls[j].id());
         if (!AreVisitsUnique(visits))
@@ -58,7 +57,7 @@ class TwoClientTypedUrlsSyncTest : public SyncTest {
   }
 
   int GetVisitCountForFirstURL(int index) {
-    history::URLRows urls = GetTypedUrlsFromClient(index);
+    std::vector<history::URLRow> urls = GetTypedUrlsFromClient(index);
     if (urls.size() == 0)
       return 0;
     else
@@ -71,14 +70,14 @@ class TwoClientTypedUrlsSyncTest : public SyncTest {
 
 // TCM: 3728323
 IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, Add) {
-  const base::string16 kHistoryUrl(
+  const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-one-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Populate one client with a URL, should sync to the other.
   GURL new_url(kHistoryUrl);
   AddUrlToHistory(0, new_url);
-  history::URLRows urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(1U, urls.size());
   ASSERT_EQ(new_url, urls[0].url());
 
@@ -90,39 +89,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, Add) {
 }
 
 IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, AddExpired) {
-  const base::string16 kHistoryUrl(
-      ASCIIToUTF16("http://www.add-one-history.google.com/"));
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-
-  // Populate one client with a URL, should sync to the other.
-  GURL new_url(kHistoryUrl);
-  // Create a URL with a timestamp 1 year before today.
-  base::Time timestamp = base::Time::Now() - base::TimeDelta::FromDays(365);
-  AddUrlToHistoryWithTimestamp(0,
-                               new_url,
-                               content::PAGE_TRANSITION_TYPED,
-                               history::SOURCE_BROWSED,
-                               timestamp);
-  history::URLRows urls = GetTypedUrlsFromClient(0);
-  ASSERT_EQ(1U, urls.size());
-  ASSERT_EQ(new_url, urls[0].url());
-
-  // Let sync finish.
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-
-  // Second client should still have no URLs since this one is expired.
-  urls = GetTypedUrlsFromClient(1);
-  ASSERT_EQ(0U, urls.size());
-}
-
-// Flake on mac: http://crbug/115526
-#if defined(OS_MACOSX)
-#define MAYBE_AddExpiredThenUpdate DISABLED_AddExpiredThenUpdate
-#else
-#define MAYBE_AddExpiredThenUpdate AddExpiredThenUpdate
-#endif
-IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, MAYBE_AddExpiredThenUpdate) {
-  const base::string16 kHistoryUrl(
+  const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-one-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
@@ -145,29 +112,19 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, MAYBE_AddExpiredThenUpdate) {
   // Second client should still have no URLs since this one is expired.
   urls = GetTypedUrlsFromClient(1);
   ASSERT_EQ(0U, urls.size());
-
-  // Now drive an update on the first client.
-  AddUrlToHistory(0, new_url);
-
-  // Let sync finish again.
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-
-  // Second client should have the URL now.
-  urls = GetTypedUrlsFromClient(1);
-  ASSERT_EQ(1U, urls.size());
 }
 
 // TCM: 3705291
 // flaky, see crbug.com/108511
-IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DISABLED_AddThenDelete) {
-  const base::string16 kHistoryUrl(
+IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, FLAKY_AddThenDelete) {
+  const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-one-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Populate one client with a URL, should sync to the other.
   GURL new_url(kHistoryUrl);
   AddUrlToHistory(0, new_url);
-  history::URLRows urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(1U, urls.size());
   ASSERT_EQ(new_url, urls[0].url());
 
@@ -189,12 +146,12 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DISABLED_AddThenDelete) {
 
 // TCM: 3643277
 IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DisableEnableSync) {
-  const base::string16 kUrl1(ASCIIToUTF16("http://history1.google.com/"));
-  const base::string16 kUrl2(ASCIIToUTF16("http://history2.google.com/"));
+  const string16 kUrl1(ASCIIToUTF16("http://history1.google.com/"));
+  const string16 kUrl2(ASCIIToUTF16("http://history2.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Disable typed url sync for one client, leave it active for the other.
-  GetClient(0)->DisableSyncForDatatype(syncer::TYPED_URLS);
+  GetClient(0)->DisableSyncForDatatype(syncable::TYPED_URLS);
 
   // Add one URL to non-syncing client, add a different URL to the other,
   // wait for sync cycle to complete. No data should be exchanged.
@@ -202,10 +159,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DisableEnableSync) {
   GURL url2(kUrl2);
   AddUrlToHistory(0, url1);
   AddUrlToHistory(1, url2);
-  ASSERT_TRUE(GetClient(1)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(AwaitQuiescence());
 
   // Make sure that no data was exchanged.
-  history::URLRows post_sync_urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> post_sync_urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(1U, post_sync_urls.size());
   ASSERT_EQ(url1, post_sync_urls[0].url());
   post_sync_urls = GetTypedUrlsFromClient(1);
@@ -213,22 +170,22 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DisableEnableSync) {
   ASSERT_EQ(url2, post_sync_urls[0].url());
 
   // Enable typed url sync, make both URLs are synced to each client.
-  GetClient(0)->EnableSyncForDatatype(syncer::TYPED_URLS);
+  GetClient(0)->EnableSyncForDatatype(syncable::TYPED_URLS);
   ASSERT_TRUE(AwaitQuiescence());
 
   AssertAllProfilesHaveSameURLsAsVerifier();
 }
 
 // flaky, see crbug.com/108511
-IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DISABLED_AddOneDeleteOther) {
-  const base::string16 kHistoryUrl(
+IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, FLAKY_AddOneDeleteOther) {
+  const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-one-delete-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Populate one client with a URL, should sync to the other.
   GURL new_url(kHistoryUrl);
   AddUrlToHistory(0, new_url);
-  history::URLRows urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(1U, urls.size());
   ASSERT_EQ(new_url, urls[0].url());
 
@@ -252,15 +209,15 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DISABLED_AddOneDeleteOther) {
 
 // flaky, see crbug.com/108511
 IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest,
-                       DISABLED_AddOneDeleteOtherAddAgain) {
-  const base::string16 kHistoryUrl(
+                       FLAKY_AddOneDeleteOtherAddAgain) {
+  const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-delete-add-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Populate one client with a URL, should sync to the other.
   GURL new_url(kHistoryUrl);
   AddUrlToHistory(0, new_url);
-  history::URLRows urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(1U, urls.size());
   ASSERT_EQ(new_url, urls[0].url());
 
@@ -313,7 +270,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest,
   // before syncing client 0, so we have both of client 1's URLs in the sync DB
   // at the time that client 0 does model association.
   ASSERT_TRUE(GetClient(1)->SetupSync()) << "SetupSync() failed";
-  GetClient(1)->AwaitFullSyncCompletion();
+  GetClient(1)->AwaitFullSyncCompletion("Initial client sync");
   ASSERT_TRUE(GetClient(0)->SetupSync()) << "SetupSync() failed";
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
 
@@ -321,7 +278,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest,
   // At this point, we should have no duplicates (total visit count should be
   // 2). We only need to check client 0 since we already verified that both
   // clients are identical above.
-  history::URLRows urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(1U, urls.size());
   ASSERT_EQ(new_url, urls[0].url());
   ASSERT_TRUE(CheckNoDuplicateVisits());
@@ -348,7 +305,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest,
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(CheckClientsEqual());
-  history::URLRows urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(0U, urls.size());
 
   // Now, add a typed visit to the first client.
@@ -368,7 +325,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest,
 // Tests transitioning a URL from non-typed to typed when one of the clients
 // has never seen that URL before (so no merge is necessary).
 IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, UpdateToNonTypedURL) {
-  const base::string16 kHistoryUrl(
+  const string16 kHistoryUrl(
       ASCIIToUTF16("http://www.add-delete-add-history.google.com/"));
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
@@ -376,7 +333,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, UpdateToNonTypedURL) {
   GURL new_url(kHistoryUrl);
   AddUrlToHistoryWithTransition(0, new_url, content::PAGE_TRANSITION_LINK,
                                 history::SOURCE_BROWSED);
-  history::URLRows urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(0U, urls.size());
 
   // Let sync finish.
@@ -423,7 +380,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest,
 
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  history::URLRows urls = GetTypedUrlsFromClient(1);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(1);
   ASSERT_EQ(1U, urls.size());
   ASSERT_EQ(browsed_url, urls[0].url());
 
@@ -444,29 +401,22 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest,
 
 IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, BookmarksWithTypedVisit) {
   GURL bookmark_url("http://www.bookmark.google.com/");
-  GURL bookmark_icon_url("http://www.bookmark.google.com/favicon.ico");
   ASSERT_TRUE(SetupClients());
-  // Create a bookmark.
+  // Create a bookmark - this should yield a row in the DB.
   const BookmarkNode* node = bookmarks_helper::AddURL(
       0, bookmarks_helper::IndexedURLTitle(0), bookmark_url);
-  bookmarks_helper::SetFavicon(0, node, bookmark_icon_url,
-      bookmarks_helper::CreateFavicon(SK_ColorWHITE),
-      bookmarks_helper::FROM_UI);
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  // A row in the DB for client 1 should have been created as a result of the
-  // sync.
+  bookmarks_helper::SetFavicon(0, node, bookmarks_helper::CreateFavicon(254));
   history::URLRow row;
-  ASSERT_TRUE(GetUrlFromClient(1, bookmark_url, &row));
-
-  // Now, add a typed visit for client 0 to the bookmark URL and sync it over
-  // - this should not cause a crash.
+  ASSERT_TRUE(GetUrlFromClient(0, bookmark_url, &row));
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  // Now, add a typed visit to the bookmark URL and sync it over - this should
+  // not cause a crash.
   AddUrlToHistory(0, bookmark_url);
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
 
   AssertAllProfilesHaveSameURLsAsVerifier();
-  history::URLRows urls = GetTypedUrlsFromClient(0);
+  std::vector<history::URLRow> urls = GetTypedUrlsFromClient(0);
   ASSERT_EQ(1U, urls.size());
   ASSERT_EQ(bookmark_url, urls[0].url());
   ASSERT_EQ(1, GetVisitCountForFirstURL(0));

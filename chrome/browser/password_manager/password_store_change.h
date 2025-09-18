@@ -4,10 +4,11 @@
 
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_CHANGE_H__
 #define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_CHANGE_H__
+#pragma once
 
 #include <vector>
 
-#include "components/autofill/core/common/password_form.h"
+#include "webkit/forms/password_form.h"
 
 class PasswordStoreChange {
  public:
@@ -17,13 +18,13 @@ class PasswordStoreChange {
     REMOVE,
   };
 
-  PasswordStoreChange(Type type, const autofill::PasswordForm& form)
+  PasswordStoreChange(Type type, const webkit::forms::PasswordForm& form)
       : type_(type), form_(form) {
   }
   virtual ~PasswordStoreChange() {}
 
   Type type() const { return type_; }
-  const autofill::PasswordForm& form() const { return form_; }
+  const webkit::forms::PasswordForm& form() const { return form_; }
 
   bool operator==(const PasswordStoreChange& other) const {
     return type() == other.type() &&
@@ -45,7 +46,7 @@ class PasswordStoreChange {
 
  private:
   Type type_;
-  autofill::PasswordForm form_;
+  webkit::forms::PasswordForm form_;
 };
 
 typedef std::vector<PasswordStoreChange> PasswordStoreChangeList;

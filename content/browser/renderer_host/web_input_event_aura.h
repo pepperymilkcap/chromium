@@ -4,42 +4,32 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_WEB_INPUT_EVENT_AURA_H_
 #define CONTENT_BROWSER_RENDERER_HOST_WEB_INPUT_EVENT_AURA_H_
+#pragma once
 
-#include "content/common/content_export.h"
-#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
-namespace ui {
+namespace aura {
 class GestureEvent;
 class KeyEvent;
 class MouseEvent;
-class MouseWheelEvent;
 class ScrollEvent;
 class TouchEvent;
 }
 
 namespace content {
 
-// Used for scrolling. This matches Firefox behavior.
-const int kPixelsPerTick = 53;
+WebKit::WebMouseEvent MakeWebMouseEvent(aura::MouseEvent* event);
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEvent(aura::MouseEvent* event);
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEvent(aura::ScrollEvent* event);
+WebKit::WebKeyboardEvent MakeWebKeyboardEvent(aura::KeyEvent* event);
+WebKit::WebGestureEvent MakeWebGestureEvent(aura::GestureEvent* event);
 
-#if defined(USE_X11) || defined(USE_OZONE)
-CONTENT_EXPORT blink::WebUChar GetControlCharacter(
-    int windows_key_code, bool shift);
-#endif
-CONTENT_EXPORT blink::WebMouseEvent MakeWebMouseEvent(
-    ui::MouseEvent* event);
-CONTENT_EXPORT blink::WebMouseWheelEvent MakeWebMouseWheelEvent(
-    ui::MouseWheelEvent* event);
-CONTENT_EXPORT blink::WebMouseWheelEvent MakeWebMouseWheelEvent(
-    ui::ScrollEvent* event);
-CONTENT_EXPORT blink::WebKeyboardEvent MakeWebKeyboardEvent(
-    ui::KeyEvent* event);
-CONTENT_EXPORT blink::WebGestureEvent MakeWebGestureEvent(
-    ui::GestureEvent* event);
-CONTENT_EXPORT blink::WebGestureEvent MakeWebGestureEvent(
-    ui::ScrollEvent* event);
-CONTENT_EXPORT blink::WebGestureEvent MakeWebGestureEventFlingCancel();
+// Updates the WebTouchEvent based on the TouchEvent. It returns the updated
+// WebTouchPoint contained in the WebTouchEvent, or NULL if no point was
+// updated.
+WebKit::WebTouchPoint* UpdateWebTouchEvent(aura::TouchEvent* event,
+                                           WebKit::WebTouchEvent* web_event);
 
-}  // namespace content
+}
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_WEB_INPUT_EVENT_AURA_H_

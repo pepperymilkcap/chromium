@@ -28,8 +28,10 @@ class MEDIA_EXPORT VideoCaptureHandlerProxy
     : public VideoCapture::EventHandler {
  public:
   struct VideoCaptureState {
-    VideoCaptureState() : started(false), frame_rate(0) {}
+    VideoCaptureState() : started(false), width(0), height(0), frame_rate(0) {}
     bool started;
+    int width;
+    int height;
     int frame_rate;
   };
 
@@ -41,6 +43,7 @@ class MEDIA_EXPORT VideoCaptureHandlerProxy
 
   // Retrieves the state of the VideoCapture. Must be called on main thread.
   const VideoCaptureState& state() const { return state_; }
+  VideoCapture::EventHandler* proxied() const { return proxied_; }
 
   // VideoCapture::EventHandler implementation, called on VC thread.
   virtual void OnStarted(VideoCapture* capture) OVERRIDE;
@@ -48,8 +51,12 @@ class MEDIA_EXPORT VideoCaptureHandlerProxy
   virtual void OnPaused(VideoCapture* capture) OVERRIDE;
   virtual void OnError(VideoCapture* capture, int error_code) OVERRIDE;
   virtual void OnRemoved(VideoCapture* capture) OVERRIDE;
-  virtual void OnFrameReady(VideoCapture* capture,
-                            const scoped_refptr<VideoFrame>& frame) OVERRIDE;
+  virtual void OnBufferReady(
+      VideoCapture* capture,
+      scoped_refptr<VideoCapture::VideoFrameBuffer> buffer) OVERRIDE;
+  virtual void OnDeviceInfoReceived(
+      VideoCapture* capture,
+      const VideoCaptureParams& device_info) OVERRIDE;
 
  private:
   // Called on main thread.
@@ -69,9 +76,14 @@ class MEDIA_EXPORT VideoCaptureHandlerProxy
   void OnRemovedOnMainThread(
       VideoCapture* capture,
       const VideoCaptureState& state);
-  void OnFrameReadyOnMainThread(VideoCapture* capture,
-                                const VideoCaptureState& state,
-                                const scoped_refptr<VideoFrame>& frame);
+  void OnBufferReadyOnMainThread(
+      VideoCapture* capture,
+      const VideoCaptureState& state,
+      scoped_refptr<VideoCapture::VideoFrameBuffer> buffer);
+  void OnDeviceInfoReceivedOnMainThread(
+      VideoCapture* capture,
+      const VideoCaptureState& state,
+      const VideoCaptureParams& device_info);
 
   // Only accessed from main thread.
   VideoCapture::EventHandler* proxied_;

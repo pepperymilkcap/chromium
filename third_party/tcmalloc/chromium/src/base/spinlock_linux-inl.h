@@ -31,7 +31,6 @@
  * This file is a Linux-specific part of spinlock_internal.cc
  */
 
-#include <errno.h>
 #include <sched.h>
 #include <time.h>
 #include <limits.h>
@@ -87,16 +86,16 @@ void SpinLockDelay(volatile Atomic32 *w, int32 value, int loop) {
     struct timespec tm;
     tm.tv_sec = 0;
     if (have_futex) {
-      // Wait between 0-16ms.
-      tm.tv_nsec = base::internal::SuggestedDelayNS(loop);
-      // Note: since Unlock() is optimized to not do a compare-and-swap,
-      // we can't expect explicit wake-ups. Therefore we shouldn't wait too
-      // long here.
+      tm.tv_nsec = 1000000;   // 1ms; really we're trying to sleep for one
+                              // kernel clock tick
+    } else {
+      tm.tv_nsec = 2000001;   // above 2ms so linux 2.4 doesn't spin
+    }
+    if (have_futex) {
       syscall(__NR_futex, reinterpret_cast<int *>(const_cast<Atomic32 *>(w)),
                 FUTEX_WAIT | futex_private_flag,
                 value, reinterpret_cast<struct kernel_timespec *>(&tm));
     } else {
-      tm.tv_nsec = 2000001;   // above 2ms so linux 2.4 doesn't spin
       nanosleep(&tm, NULL);
     }
     errno = save_errno;

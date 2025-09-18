@@ -1,5 +1,5 @@
 # -*- python -*-
-# Copyright (c) 2012 The Native Client Authors. All rights reserved.
+# Copyright (c) 2011 The Native Client Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,10 +13,11 @@ env.Replace(TEST_DIR='${SOURCE_ROOT}/ppapi/native_client/tests/ppapi_browser/' +
 
 manifest_good_sources = env.ComponentObject('manifest_good.cc'),
 
-manifest_good_target = env.ProgramNameForNmf('manifest_good')
+manifest_good_target = ('manifest_good_%s' %
+                        env.get('TARGET_FULLARCH'))
 env.ComponentProgram(manifest_good_target,
                      [manifest_good_sources],
-                     EXTRA_LIBS=['ppapi',
+                     EXTRA_LIBS=['${PPAPI_LIBS}',
                                  'ppapi_test_lib',
                                  'pthread',
                                  'platform',
@@ -24,10 +25,11 @@ env.ComponentProgram(manifest_good_target,
 
 manifest_bad_sources = env.ComponentObject('manifest_bad.cc'),
 
-manifest_bad_target = env.ProgramNameForNmf('manifest_bad')
+manifest_bad_target = ('manifest_bad_%s' %
+                       env.get('TARGET_FULLARCH'))
 env.ComponentProgram(manifest_bad_target,
                      [manifest_bad_sources],
-                     EXTRA_LIBS=['ppapi',
+                     EXTRA_LIBS=['${PPAPI_LIBS}',
                                  'ppapi_test_lib',
                                  'pthread',
                                  'platform',
@@ -36,7 +38,8 @@ env.ComponentProgram(manifest_bad_target,
 env.Publish(manifest_good_target, 'run', [
     'manifest.html',
     manifest_bad_target,
-    '${SCONSTRUCT_DIR}/tests/ppapi_browser/progress_event_listener.js',
+    ('${SCONSTRUCT_DIR}/tests/ppapi_browser/progress_events/' +
+     'ppapi_progress_events.js'),
     '${SCONSTRUCT_DIR}/tools/browser_tester/browserdata/nacltest.js',
 ])
 
@@ -57,9 +60,7 @@ file_mapping += [
 node = env.PPAPIBrowserTester(
     'manifest_browser_test.out',
     url='manifest.html',
-    nmfs=['${TEST_DIR}/manifest_top.nmf',
-          '${TEST_DIR}/manifest_subdir.nmf',
-          '${TEST_DIR}/manifest_arch_specific.nmf'],
+    nmfs=['${TEST_DIR}/manifest_top.nmf', '${TEST_DIR}/manifest_subdir.nmf'],
     files=env.ExtractPublishedFiles(manifest_good_target),
     map_files=file_mapping)
 

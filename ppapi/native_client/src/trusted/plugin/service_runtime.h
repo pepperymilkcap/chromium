@@ -11,69 +11,32 @@
 #ifndef NATIVE_CLIENT_SRC_TRUSTED_PLUGIN_SERVICE_RUNTIME_H_
 #define NATIVE_CLIENT_SRC_TRUSTED_PLUGIN_SERVICE_RUNTIME_H_
 
-#include <set>
-
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_scoped_ptr.h"
 #include "native_client/src/include/nacl_string.h"
+#include "native_client/src/shared/imc/nacl_imc.h"
 #include "native_client/src/shared/platform/nacl_sync.h"
 #include "native_client/src/shared/srpc/nacl_srpc.h"
-#include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
-#include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
 #include "native_client/src/trusted/reverse_service/reverse_service.h"
+#include "native_client/src/trusted/plugin/utility.h"
+#include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
 #include "native_client/src/trusted/weak_ref/weak_ref.h"
 
 #include "ppapi/cpp/completion_callback.h"
 
-#include "ppapi/native_client/src/trusted/plugin/utility.h"
-
-struct NaClFileInfo;
-
 namespace nacl {
 class DescWrapper;
-}  // namespace
-
-namespace pp {
-class FileIO;
+struct SelLdrLauncher;
 }  // namespace
 
 namespace plugin {
 
+class BrowserInterface;
 class ErrorInfo;
 class Manifest;
 class Plugin;
 class SrpcClient;
 class ServiceRuntime;
-
-// Struct of params used by StartSelLdr.  Use a struct so that callback
-// creation templates aren't overwhelmed with too many parameters.
-struct SelLdrStartParams {
-  SelLdrStartParams(const nacl::string& url,
-                    ErrorInfo* error_info,
-                    bool uses_irt,
-                    bool uses_ppapi,
-                    bool enable_dev_interfaces,
-                    bool enable_dyncode_syscalls,
-                    bool enable_exception_handling,
-                    bool enable_crash_throttling)
-      : url(url),
-        error_info(error_info),
-        uses_irt(uses_irt),
-        uses_ppapi(uses_ppapi),
-        enable_dev_interfaces(enable_dev_interfaces),
-        enable_dyncode_syscalls(enable_dyncode_syscalls),
-        enable_exception_handling(enable_exception_handling),
-        enable_crash_throttling(enable_crash_throttling) {
-  }
-  nacl::string url;
-  ErrorInfo* error_info;
-  bool uses_irt;
-  bool uses_ppapi;
-  bool enable_dev_interfaces;
-  bool enable_dyncode_syscalls;
-  bool enable_exception_handling;
-  bool enable_crash_throttling;
-};
 
 // Callback resources are essentially our continuation state.
 
@@ -94,16 +57,19 @@ struct PostMessageResource {
 struct OpenManifestEntryResource {
  public:
   OpenManifestEntryResource(const std::string& target_url,
-                            struct NaClFileInfo* finfo,
+                            int32_t* descp,
                             ErrorInfo* infop,
+                            bool* portablep,
                             bool* op_complete)
       : url(target_url),
-        file_info(finfo),
+        out_desc(descp),
         error_info(infop),
+        is_portable(portablep),
         op_complete_ptr(op_complete) {}
   std::string url;
-  struct NaClFileInfo* file_info;
+  int32_t* out_desc;
   ErrorInfo* error_info;
+  bool* is_portable;
   bool* op_complete_ptr;
 };
 
@@ -119,26 +85,6 @@ struct CloseManifestEntryResource {
   int32_t desc;
   bool* op_complete_ptr;
   bool* op_result_ptr;
-};
-
-struct QuotaRequest {
- public:
-  QuotaRequest(PP_Resource pp_resource,
-               int64_t start_offset,
-               int64_t quota_bytes_requested,
-               int64_t* quota_bytes_granted,
-               bool* op_complete)
-      : resource(pp_resource),
-        offset(start_offset),
-        bytes_requested(quota_bytes_requested),
-        bytes_granted(quota_bytes_granted),
-        op_complete_ptr(op_complete) { }
-
-  PP_Resource resource;
-  int64_t offset;
-  int64_t bytes_requested;
-  int64_t* bytes_granted;
-  bool* op_complete_ptr;
 };
 
 // Do not invoke from the main thread, since the main methods will
@@ -168,22 +114,13 @@ class PluginReverseInterface: public nacl::ReverseInterface {
 
   virtual bool EnumerateManifestKeys(std::set<nacl::string>* out_keys);
 
-  virtual bool OpenManifestEntry(nacl::string url_key,
-                                 struct NaClFileInfo *info);
+  virtual bool OpenManifestEntry(nacl::string url_key, int32_t* out_desc);
 
   virtual bool CloseManifestEntry(int32_t desc);
 
   virtual void ReportCrash();
 
   virtual void ReportExitStatus(int exit_status);
-
-  virtual int64_t RequestQuotaForWrite(nacl::string file_id,
-                                       int64_t offset,
-                                       int64_t bytes_to_write);
-
-  void AddQuotaManagedFile(const nacl::string& file_id,
-                           const pp::FileIO& file_io);
-  void AddTempQuotaManagedFile(const nacl::string& file_id);
 
  protected:
   virtual void Log_MainThreadContinuation(LogToJavaScriptConsoleResource* p,
@@ -212,7 +149,6 @@ class PluginReverseInterface: public nacl::ReverseInterface {
   ServiceRuntime* service_runtime_;
   NaClMutex mu_;
   NaClCondVar cv_;
-  std::set<int64_t> quota_files_;
   bool shutting_down_;
 
   pp::CompletionCallback init_done_cb_;
@@ -232,32 +168,17 @@ class ServiceRuntime {
   // The destructor terminates the sel_ldr process.
   ~ServiceRuntime();
 
-  // Spawn the sel_ldr instance. On success, returns true.
-  // On failure, returns false and |error_string| is set to something
+  // Spawn a sel_ldr instance and establish an SrpcClient to it.  The nexe
+  // to be started is passed through |nacl_file_desc|.  On success, returns
+  // true.  On failure, returns false and |error_string| is set to something
   // describing the error.
-  bool StartSelLdr(const SelLdrStartParams& params);
-
-  // If starting sel_ldr from a background thread, wait for sel_ldr to
-  // actually start.
-  void WaitForSelLdrStart();
-
-  // Signal to waiting threads that StartSelLdr is complete.
-  // Done externally, in case external users want to write to shared
-  // memory that is yet to be fenced.
-  void SignalStartSelLdrDone();
-
-  // Establish an SrpcClient to the sel_ldr instance and load the nexe.
-  // The nexe to be started is passed through |nacl_file_desc|.
-  // On success, returns true. On failure, returns false and |error_string|
-  // is set to something describing the error.
-  bool LoadNexeAndStart(nacl::DescWrapper* nacl_file_desc,
-                        ErrorInfo* error_info,
-                        const pp::CompletionCallback& crash_cb);
+  bool Start(nacl::DescWrapper* nacl_file_desc, ErrorInfo* error_info);
 
   // Starts the application channel to the nexe.
   SrpcClient* SetupAppChannel();
 
-  bool Log(int severity, const nacl::string& msg);
+  bool Kill();
+  bool Log(int severity, nacl::string msg);
   Plugin* plugin() const { return plugin_; }
   void Shutdown();
 
@@ -268,11 +189,8 @@ class ServiceRuntime {
   int exit_status();  // const, but grabs mutex etc.
   void set_exit_status(int exit_status);
 
-  nacl::string GetCrashLogOutput();
-
-  // To establish quota callbacks the pnacl coordinator needs to communicate
-  // with the reverse interface.
-  PluginReverseInterface* rev_interface() const { return rev_interface_; }
+  nacl::DescWrapper* async_receive_desc() { return async_receive_desc_.get(); }
+  nacl::DescWrapper* async_send_desc() { return async_send_desc_.get(); }
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(ServiceRuntime);
@@ -280,21 +198,24 @@ class ServiceRuntime {
 
   NaClSrpcChannel command_channel_;
   Plugin* plugin_;
-  bool main_service_runtime_;
+  bool should_report_uma_;
+  BrowserInterface* browser_interface_;
   nacl::ReverseService* reverse_service_;
-  nacl::scoped_ptr<nacl::SelLdrLauncherBase> subprocess_;
+  nacl::scoped_ptr<nacl::SelLdrLauncher> subprocess_;
+
+  // We need two IMC sockets rather than one because IMC sockets are
+  // not full-duplex on Windows.
+  // See http://code.google.com/p/nativeclient/issues/detail?id=690.
+  // TODO(mseaborn): We should not have to work around this.
+  nacl::scoped_ptr<nacl::DescWrapper> async_receive_desc_;
+  nacl::scoped_ptr<nacl::DescWrapper> async_send_desc_;
 
   nacl::WeakRefAnchor* anchor_;
 
   PluginReverseInterface* rev_interface_;
 
-  // Mutex to protect exit_status_.
-  // Also, in conjunction with cond_ it is used to signal when
-  // StartSelLdr is complete with either success or error.
   NaClMutex mu_;
-  NaClCondVar cond_;
   int exit_status_;
-  bool start_sel_ldr_done_;
 };
 
 }  // namespace plugin

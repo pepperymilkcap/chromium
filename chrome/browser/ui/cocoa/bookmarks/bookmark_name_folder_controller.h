@@ -4,10 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_NAME_FOLDER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_NAME_FOLDER_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 
@@ -31,7 +32,7 @@ class BookmarkModelObserverForCocoa;
   const BookmarkNode* parent_;
   int newIndex_;
 
-  base::scoped_nsobject<NSString> initialName_;
+  scoped_nsobject<NSString> initialName_;
 
   // Ping me when things change out from under us.
   scoped_ptr<BookmarkModelObserverForCocoa> observer_;

@@ -12,22 +12,23 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
-#include <iphlpapi.h>
 #include <winsock2.h>
+#include <iphlpapi.h>
 #pragma comment(lib, "iphlpapi.lib")
 #elif defined(OS_POSIX)
 #include <fcntl.h>
 #if !defined(OS_ANDROID)
 #include <ifaddrs.h>
 #endif
-#include <net/if.h>
 #include <netdb.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #endif
 
+#include "base/base64.h"
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
@@ -35,47 +36,42 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_offset_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_number_conversions.h"
+#include "base/string_piece.h"
+#include "base/string_split.h"
+#include "base/string_tokenizer.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
-#include "base/sys_byteorder.h"
-#include "base/time/time.h"
-#include "base/values.h"
+#include "base/sys_string_conversions.h"
+#include "base/time.h"
+#include "base/utf_offset_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "googleurl/src/gurl.h"
+#include "googleurl/src/url_canon.h"
+#include "googleurl/src/url_canon_ip.h"
+#include "googleurl/src/url_parse.h"
 #include "grit/net_resources.h"
-#include "url/gurl.h"
-#include "url/url_canon.h"
-#include "url/url_canon_ip.h"
-#include "url/url_parse.h"
-#if defined(OS_ANDROID)
-#include "net/android/network_library.h"
-#endif
 #include "net/base/dns_util.h"
 #include "net/base/escape.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_module.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #if defined(OS_WIN)
 #include "net/base/winsock_init.h"
 #endif
 #include "net/http/http_content_disposition.h"
-#include "third_party/icu/source/common/unicode/uidna.h"
-#include "third_party/icu/source/common/unicode/uniset.h"
-#include "third_party/icu/source/common/unicode/uscript.h"
-#include "third_party/icu/source/common/unicode/uset.h"
-#include "third_party/icu/source/i18n/unicode/datefmt.h"
-#include "third_party/icu/source/i18n/unicode/regex.h"
-#include "third_party/icu/source/i18n/unicode/ulocdata.h"
+#include "unicode/datefmt.h"
+#include "unicode/regex.h"
+#include "unicode/ucnv.h"
+#include "unicode/uidna.h"
+#include "unicode/ulocdata.h"
+#include "unicode/uniset.h"
+#include "unicode/uscript.h"
+#include "unicode/uset.h"
 
 using base::Time;
 
@@ -83,10 +79,8 @@ namespace net {
 
 namespace {
 
-typedef std::vector<size_t> Offsets;
-
 // what we prepend to get a file URL
-static const base::FilePath::CharType kFileURLPrefix[] =
+static const FilePath::CharType kFileURLPrefix[] =
     FILE_PATH_LITERAL("file:///");
 
 // The general list of blocked ports. Will be blocked unless a specific
@@ -166,6 +160,204 @@ static const int kAllowedFtpPorts[] = {
   22,   // ssh
 };
 
+std::string::size_type CountTrailingChars(
+    const std::string& input,
+    const std::string::value_type trailing_chars[]) {
+  const size_t last_good_char = input.find_last_not_of(trailing_chars);
+  return (last_good_char == std::string::npos) ?
+      input.length() : (input.length() - last_good_char - 1);
+}
+
+// Similar to Base64Decode. Decodes a Q-encoded string to a sequence
+// of bytes. If input is invalid, return false.
+bool QPDecode(const std::string& input, std::string* output) {
+  std::string temp;
+  temp.reserve(input.size());
+  for (std::string::const_iterator it = input.begin(); it != input.end();
+       ++it) {
+    if (*it == '_') {
+      temp.push_back(' ');
+    } else if (*it == '=') {
+      if ((input.end() - it < 3) ||
+          !IsHexDigit(static_cast<unsigned char>(*(it + 1))) ||
+          !IsHexDigit(static_cast<unsigned char>(*(it + 2))))
+        return false;
+      unsigned char ch = HexDigitToInt(*(it + 1)) * 16 +
+                         HexDigitToInt(*(it + 2));
+      temp.push_back(static_cast<char>(ch));
+      ++it;
+      ++it;
+    } else if (0x20 < *it && *it < 0x7F) {
+      // In a Q-encoded word, only printable ASCII characters
+      // represent themselves. Besides, space, '=', '_' and '?' are
+      // not allowed, but they're already filtered out.
+      DCHECK_NE('=', *it);
+      DCHECK_NE('?', *it);
+      DCHECK_NE('_', *it);
+      temp.push_back(*it);
+    } else {
+      return false;
+    }
+  }
+  output->swap(temp);
+  return true;
+}
+
+enum RFC2047EncodingType {Q_ENCODING, B_ENCODING};
+bool DecodeBQEncoding(const std::string& part,
+                      RFC2047EncodingType enc_type,
+                      const std::string& charset,
+                      std::string* output) {
+  std::string decoded;
+  if (!((enc_type == B_ENCODING) ?
+      base::Base64Decode(part, &decoded) : QPDecode(part, &decoded)))
+    return false;
+
+  if (decoded.empty()) {
+    output->clear();
+    return true;
+  }
+
+  UErrorCode err = U_ZERO_ERROR;
+  UConverter* converter(ucnv_open(charset.c_str(), &err));
+  if (U_FAILURE(err))
+    return false;
+
+  // A single byte in a legacy encoding can be expanded to 3 bytes in UTF-8.
+  // A 'two-byte character' in a legacy encoding can be expanded to 4 bytes
+  // in UTF-8. Therefore, the expansion ratio is 3 at most. Add one for a
+  // trailing '\0'.
+  size_t output_length = decoded.length() * 3 + 1;
+  char* buf = WriteInto(output, output_length);
+  output_length = ucnv_toAlgorithmic(UCNV_UTF8, converter, buf, output_length,
+                                     decoded.data(), decoded.length(), &err);
+  ucnv_close(converter);
+  if (U_FAILURE(err))
+    return false;
+  output->resize(output_length);
+  return true;
+}
+
+bool DecodeWord(const std::string& encoded_word,
+                const std::string& referrer_charset,
+                bool* is_rfc2047,
+                std::string* output) {
+  *is_rfc2047 = false;
+  output->clear();
+  if (encoded_word.empty())
+    return true;
+
+  if (!IsStringASCII(encoded_word)) {
+    // Try UTF-8, referrer_charset and the native OS default charset in turn.
+    if (IsStringUTF8(encoded_word)) {
+      *output = encoded_word;
+    } else {
+      string16 utf16_output;
+      if (!referrer_charset.empty() &&
+          base::CodepageToUTF16(encoded_word, referrer_charset.c_str(),
+                                base::OnStringConversionError::FAIL,
+                                &utf16_output)) {
+        *output = UTF16ToUTF8(utf16_output);
+      } else {
+        *output = WideToUTF8(base::SysNativeMBToWide(encoded_word));
+      }
+    }
+
+    return true;
+  }
+
+  // RFC 2047 : one of encoding methods supported by Firefox and relatively
+  // widely used by web servers.
+  // =?charset?<E>?<encoded string>?= where '<E>' is either 'B' or 'Q'.
+  // We don't care about the length restriction (72 bytes) because
+  // many web servers generate encoded words longer than the limit.
+  std::string tmp;
+  *is_rfc2047 = true;
+  int part_index = 0;
+  std::string charset;
+  StringTokenizer t(encoded_word, "?");
+  RFC2047EncodingType enc_type = Q_ENCODING;
+  while (*is_rfc2047 && t.GetNext()) {
+    std::string part = t.token();
+    switch (part_index) {
+      case 0:
+        if (part != "=") {
+          *is_rfc2047 = false;
+          break;
+        }
+        ++part_index;
+        break;
+      case 1:
+        // Do we need charset validity check here?
+        charset = part;
+        ++part_index;
+        break;
+      case 2:
+        if (part.size() > 1 ||
+            part.find_first_of("bBqQ") == std::string::npos) {
+          *is_rfc2047 = false;
+          break;
+        }
+        if (part[0] == 'b' || part[0] == 'B') {
+          enc_type = B_ENCODING;
+        }
+        ++part_index;
+        break;
+      case 3:
+        *is_rfc2047 = DecodeBQEncoding(part, enc_type, charset, &tmp);
+        if (!*is_rfc2047) {
+          // Last minute failure. Invalid B/Q encoding. Rather than
+          // passing it through, return now.
+          return false;
+        }
+        ++part_index;
+        break;
+      case 4:
+        if (part != "=") {
+          // Another last minute failure !
+          // Likely to be a case of two encoded-words in a row or
+          // an encoded word followed by a non-encoded word. We can be
+          // generous, but it does not help much in terms of compatibility,
+          // I believe. Return immediately.
+          *is_rfc2047 = false;
+          return false;
+        }
+        ++part_index;
+        break;
+      default:
+        *is_rfc2047 = false;
+        return false;
+    }
+  }
+
+  if (*is_rfc2047) {
+    if (*(encoded_word.end() - 1) == '=') {
+      output->swap(tmp);
+      return true;
+    }
+    // encoded_word ending prematurelly with '?' or extra '?'
+    *is_rfc2047 = false;
+    return false;
+  }
+
+  // We're not handling 'especial' characters quoted with '\', but
+  // it should be Ok because we're not an email client but a
+  // web browser.
+
+  // What IE6/7 does: %-escaped UTF-8.
+  tmp = UnescapeURLComponent(encoded_word, UnescapeRule::SPACES);
+  if (IsStringUTF8(tmp)) {
+    output->swap(tmp);
+    return true;
+    // We can try either the OS default charset or 'origin charset' here,
+    // As far as I can tell, IE does not support it. However, I've seen
+    // web servers emit %-escaped string in a legacy encoding (usually
+    // origin charset).
+    // TODO(jungshik) : Test IE further and consider adding a fallback here.
+  }
+  return false;
+}
+
 // Does some simple normalization of scripts so we can allow certain scripts
 // to exist together.
 // TODO(brettw) bug 880223: we should allow some other languages to be
@@ -183,7 +375,7 @@ UScriptCode NormalizeScript(UScriptCode code) {
   }
 }
 
-bool IsIDNComponentInSingleScript(const base::char16* str, int str_len) {
+bool IsIDNComponentInSingleScript(const char16* str, int str_len) {
   UScriptCode first_script = USCRIPT_INVALID_CODE;
   bool is_first = true;
 
@@ -270,7 +462,7 @@ bool IsComponentCoveredByLang(const icu::UnicodeSet& component_characters,
                               const std::string& lang) {
   CR_DEFINE_STATIC_LOCAL(
       const icu::UnicodeSet, kASCIILetters, ('a', 'z'));
-  icu::UnicodeSet* lang_set = NULL;
+  icu::UnicodeSet* lang_set;
   // We're called from both the UI thread and the history thread.
   {
     base::AutoLock lock(g_lang_set_lock.Get());
@@ -304,7 +496,7 @@ bool IsComponentCoveredByLang(const icu::UnicodeSet& component_characters,
 
 // Returns true if the given Unicode host component is safe to display to the
 // user.
-bool IsIDNComponentSafe(const base::char16* str,
+bool IsIDNComponentSafe(const char16* str,
                         int str_len,
                         const std::string& languages) {
   // Most common cases (non-IDN) do not reach here so that we don't
@@ -324,7 +516,7 @@ bool IsIDNComponentSafe(const base::char16* str,
   UErrorCode status = U_ZERO_ERROR;
 #ifdef U_WCHAR_IS_UTF16
   icu::UnicodeSet dangerous_characters(icu::UnicodeString(
-      L"[[\\ \u00ad\u00bc\u00bd\u01c3\u0337\u0338"
+      L"[[\\ \u00bc\u00bd\u01c3\u0337\u0338"
       L"\u05c3\u05f4\u06d4\u0702\u115f\u1160][\u2000-\u200b]"
       L"[\u2024\u2027\u2028\u2029\u2039\u203a\u2044\u205f]"
       L"[\u2154-\u2156][\u2159-\u215b][\u215f\u2215\u23ae"
@@ -341,7 +533,7 @@ bool IsIDNComponentSafe(const base::char16* str,
       0, status);
 #else
   icu::UnicodeSet dangerous_characters(icu::UnicodeString(
-      "[[\\u0020\\u00ad\\u00bc\\u00bd\\u01c3\\u0337\\u0338"
+      "[[\\u0020\\u00bc\\u00bd\\u01c3\\u0337\\u0338"
       "\\u05c3\\u05f4\\u06d4\\u0702\\u115f\\u1160][\\u2000-\\u200b]"
       "[\\u2024\\u2027\\u2028\\u2029\\u2039\\u203a\\u2044\\u205f]"
       "[\\u2154-\\u2156][\\u2159-\\u215b][\\u215f\\u2215\\u23ae"
@@ -390,7 +582,7 @@ bool IsIDNComponentSafe(const base::char16* str,
   // the remainder.
   component_characters.removeAll(common_characters);
 
-  base::StringTokenizer t(languages, ",");
+  StringTokenizer t(languages, ",");
   while (t.GetNext()) {
     if (IsComponentCoveredByLang(component_characters, t.token()))
       return true;
@@ -398,85 +590,45 @@ bool IsIDNComponentSafe(const base::char16* str,
   return false;
 }
 
-// A wrapper to use LazyInstance<>::Leaky with ICU's UIDNA, a C pointer to
-// a UTS46/IDNA 2008 handling object opened with uidna_openUTS46().
-//
-// We use UTS46 with BiDiCheck to migrate from IDNA 2003 to IDNA 2008 with
-// the backward compatibility in mind. What it does:
-//
-// 1. Use the up-to-date Unicode data.
-// 2. Define a case folding/mapping with the up-to-date Unicode data as
-//    in IDNA 2003.
-// 3. Use transitional mechanism for 4 deviation characters (sharp-s,
-//    final sigma, ZWJ and ZWNJ) for now.
-// 4. Continue to allow symbols and punctuations.
-// 5. Apply new BiDi check rules more permissive than the IDNA 2003 BiDI rules.
-// 6. Do not apply STD3 rules
-// 7. Do not allow unassigned code points.
-//
-// It also closely matches what IE 10 does except for the BiDi check (
-// http://goo.gl/3XBhqw ).
-// See http://http://unicode.org/reports/tr46/ and references therein
-// for more details.
-struct UIDNAWrapper {
-  UIDNAWrapper() {
-    UErrorCode err = U_ZERO_ERROR;
-    // TODO(jungshik): Change options as different parties (browsers,
-    // registrars, search engines) converge toward a consensus.
-    value = uidna_openUTS46(UIDNA_CHECK_BIDI, &err);
-    if (U_FAILURE(err))
-      value = NULL;
-  }
-
-  UIDNA* value;
-};
-
-static base::LazyInstance<UIDNAWrapper>::Leaky
-    g_uidna = LAZY_INSTANCE_INITIALIZER;
-
 // Converts one component of a host (between dots) to IDN if safe. The result
 // will be APPENDED to the given output string and will be the same as the input
 // if it is not IDN or the IDN is unsafe to display.  Returns whether any
 // conversion was performed.
-bool IDNToUnicodeOneComponent(const base::char16* comp,
+bool IDNToUnicodeOneComponent(const char16* comp,
                               size_t comp_len,
                               const std::string& languages,
-                              base::string16* out) {
+                              string16* out) {
   DCHECK(out);
   if (comp_len == 0)
     return false;
 
   // Only transform if the input can be an IDN component.
-  static const base::char16 kIdnPrefix[] = {'x', 'n', '-', '-'};
+  static const char16 kIdnPrefix[] = {'x', 'n', '-', '-'};
   if ((comp_len > arraysize(kIdnPrefix)) &&
-      !memcmp(comp, kIdnPrefix, arraysize(kIdnPrefix) * sizeof(base::char16))) {
-    UIDNA* uidna = g_uidna.Get().value;
-    DCHECK(uidna != NULL);
+      !memcmp(comp, kIdnPrefix, arraysize(kIdnPrefix) * sizeof(char16))) {
+    // Repeatedly expand the output string until it's big enough.  It looks like
+    // ICU will return the required size of the buffer, but that's not
+    // documented, so we'll just grow by 2x. This should be rare and is not on a
+    // critical path.
     size_t original_length = out->length();
-    int output_length = 64;
-    UIDNAInfo info = UIDNA_INFO_INITIALIZER;
-    UErrorCode status;
-    do {
-      out->resize(original_length + output_length);
-      status = U_ZERO_ERROR;
-      // This returns the actual length required. If this is more than 64
-      // code units, |status| will be U_BUFFER_OVERFLOW_ERROR and we'll try
-      // the conversion again, but with a sufficiently large buffer.
-      output_length = uidna_labelToUnicode(
-          uidna, comp, static_cast<int32_t>(comp_len), &(*out)[original_length],
-          output_length, &info, &status);
-    } while ((status == U_BUFFER_OVERFLOW_ERROR && info.errors == 0));
+    for (int extra_space = 64; ; extra_space *= 2) {
+      UErrorCode status = U_ZERO_ERROR;
+      out->resize(out->length() + extra_space);
+      int output_chars = uidna_IDNToUnicode(comp,
+          static_cast<int32_t>(comp_len), &(*out)[original_length], extra_space,
+          UIDNA_DEFAULT, NULL, &status);
+      if (status == U_ZERO_ERROR) {
+        // Converted successfully.
+        out->resize(original_length + output_chars);
+        if (IsIDNComponentSafe(out->data() + original_length, output_chars,
+                               languages))
+          return true;
+      }
 
-    if (U_SUCCESS(status) && info.errors == 0) {
-      // Converted successfully. Ensure that the converted component
-      // can be safely displayed to the user.
-      out->resize(original_length + output_length);
-      if (IsIDNComponentSafe(out->data() + original_length, output_length,
-                             languages))
-        return true;
+      if (status != U_BUFFER_OVERFLOW_ERROR)
+        break;
     }
-
-    // Something went wrong. Revert to original string.
+    // Failed, revert back to original string.
     out->resize(original_length);
   }
 
@@ -487,11 +639,12 @@ bool IDNToUnicodeOneComponent(const base::char16* comp,
 }
 
 // Clamps the offsets in |offsets_for_adjustment| to the length of |str|.
-void LimitOffsets(const base::string16& str, Offsets* offsets_for_adjustment) {
+void LimitOffsets(const string16& str,
+                  std::vector<size_t>* offsets_for_adjustment) {
   if (offsets_for_adjustment) {
     std::for_each(offsets_for_adjustment->begin(),
                   offsets_for_adjustment->end(),
-                  base::LimitOffset<base::string16>(str.length()));
+                  LimitOffset<string16>(str.length()));
   }
 }
 
@@ -502,25 +655,25 @@ void LimitOffsets(const base::string16& str, Offsets* offsets_for_adjustment) {
 //
 // We may want to skip this step in the case of file URLs to allow unicode
 // UNC hostnames regardless of encodings.
-base::string16 IDNToUnicodeWithOffsets(const std::string& host,
-                                       const std::string& languages,
-                                       Offsets* offsets_for_adjustment) {
-  // Convert the ASCII input to a base::string16 for ICU.
-  base::string16 input16;
+string16 IDNToUnicodeWithOffsets(const std::string& host,
+                                 const std::string& languages,
+                                 std::vector<size_t>* offsets_for_adjustment) {
+  // Convert the ASCII input to a string16 for ICU.
+  string16 input16;
   input16.reserve(host.length());
   input16.insert(input16.end(), host.begin(), host.end());
 
   // Do each component of the host separately, since we enforce script matching
   // on a per-component basis.
-  base::string16 out16;
+  string16 out16;
   {
-    base::OffsetAdjuster offset_adjuster(offsets_for_adjustment);
+    OffsetAdjuster offset_adjuster(offsets_for_adjustment);
     for (size_t component_start = 0, component_end;
          component_start < input16.length();
          component_start = component_end + 1) {
       // Find the end of the component.
       component_end = input16.find('.', component_start);
-      if (component_end == base::string16::npos)
+      if (component_end == string16::npos)
         component_end = input16.length();  // For getting the last component.
       size_t component_length = component_end - component_start;
       size_t new_component_start = out16.length();
@@ -534,7 +687,7 @@ base::string16 IDNToUnicodeWithOffsets(const std::string& host,
       size_t new_component_length = out16.length() - new_component_start;
 
       if (converted_idn && offsets_for_adjustment) {
-        offset_adjuster.Add(base::OffsetAdjuster::Adjustment(component_start,
+        offset_adjuster.Add(OffsetAdjuster::Adjustment(component_start,
             component_length, new_component_length));
       }
 
@@ -548,48 +701,51 @@ base::string16 IDNToUnicodeWithOffsets(const std::string& host,
   return out16;
 }
 
-// Called after transforming a component to set all affected elements in
-// |offsets_for_adjustment| to the correct new values.  |original_offsets|
-// represents the offsets before the transform; |original_component_begin| and
-// |original_component_end| represent the pre-transform boundaries of the
-// affected component.  |transformed_offsets| should be a vector created by
-// adjusting |original_offsets| to be relative to the beginning of the component
-// in question (via an OffsetAdjuster) and then transformed along with the
-// component.  Note that any elements in this vector which didn't originally
-// point into the component may contain arbitrary values and should be ignored.
-// |transformed_component_begin| and |transformed_component_end| are the
-// endpoints of the transformed component and are used in combination with the
-// two offset vectors to calculate the resulting absolute offsets, which are
-// stored in |offsets_for_adjustment|.
-void AdjustForComponentTransform(const Offsets& original_offsets,
-                                 size_t original_component_begin,
-                                 size_t original_component_end,
-                                 const Offsets& transformed_offsets,
-                                 size_t transformed_component_begin,
-                                 size_t transformed_component_end,
-                                 Offsets* offsets_for_adjustment) {
-  if (!offsets_for_adjustment)
-    return;  // Nothing to do.
+// Transforms |original_offsets| by subtracting |component_begin| from all
+// offsets.  Any offset which was not at least this large to begin with is set
+// to std::string::npos.
+std::vector<size_t> OffsetsIntoComponent(
+    const std::vector<size_t>& original_offsets,
+    size_t component_begin) {
+  DCHECK_NE(std::string::npos, component_begin);
+  std::vector<size_t> offsets_into_component(original_offsets);
+  for (std::vector<size_t>::iterator i(offsets_into_component.begin());
+       i != offsets_into_component.end(); ++i) {
+    if (*i != std::string::npos)
+      *i = (*i < component_begin) ? std::string::npos : (*i - component_begin);
+  }
+  return offsets_into_component;
+}
 
-  for (size_t i = 0; i < original_offsets.size(); ++i) {
+// Called after we transform a component and append it to an output string.
+// Maps |transformed_offsets|, which represent offsets into the transformed
+// component itself, into appropriate offsets for the output string, by adding
+// |output_component_begin| to each.  Determines which offsets need mapping by
+// checking to see which of the |original_offsets| were within the designated
+// original component, using its provided endpoints.
+void AdjustForComponentTransform(
+    const std::vector<size_t>& original_offsets,
+    size_t original_component_begin,
+    size_t original_component_end,
+    const std::vector<size_t>& transformed_offsets,
+    size_t output_component_begin,
+    std::vector<size_t>* offsets_for_adjustment) {
+  if (!offsets_for_adjustment)
+    return;
+
+  DCHECK_NE(std::string::npos, original_component_begin);
+  DCHECK_NE(std::string::npos, original_component_end);
+  DCHECK_NE(string16::npos, output_component_begin);
+  size_t offsets_size = offsets_for_adjustment->size();
+  DCHECK_EQ(offsets_size, original_offsets.size());
+  DCHECK_EQ(offsets_size, transformed_offsets.size());
+  for (size_t i = 0; i < offsets_size; ++i) {
     size_t original_offset = original_offsets[i];
     if ((original_offset >= original_component_begin) &&
         (original_offset < original_component_end)) {
-      // This offset originally pointed into the transformed component.
-      // Adjust the transformed relative offset by the new beginning point of
-      // the transformed component.
       size_t transformed_offset = transformed_offsets[i];
-      (*offsets_for_adjustment)[i] =
-          (transformed_offset == base::string16::npos) ?
-              base::string16::npos :
-              (transformed_offset + transformed_component_begin);
-    } else if ((original_offset >= original_component_end) &&
-               (original_offset != std::string::npos)) {
-      // This offset pointed after the transformed component.  Adjust the
-      // original absolute offset by the difference between the new and old
-      // component lengths.
-      (*offsets_for_adjustment)[i] =
-          original_offset - original_component_end + transformed_component_end;
+      (*offsets_for_adjustment)[i] = (transformed_offset == string16::npos) ?
+          string16::npos : (output_component_begin + transformed_offset);
     }
   }
 }
@@ -604,7 +760,7 @@ void AdjustComponent(int delta, url_parse::Component* component) {
 }
 
 // Adjusts all the components of |parsed| by |delta|, except for the scheme.
-void AdjustAllComponentsButScheme(int delta, url_parse::Parsed* parsed) {
+void AdjustComponents(int delta, url_parse::Parsed* parsed) {
   AdjustComponent(delta, &(parsed->username));
   AdjustComponent(delta, &(parsed->password));
   AdjustComponent(delta, &(parsed->host));
@@ -615,36 +771,26 @@ void AdjustAllComponentsButScheme(int delta, url_parse::Parsed* parsed) {
 }
 
 // Helper for FormatUrlWithOffsets().
-base::string16 FormatViewSourceUrl(const GURL& url,
-                                   const Offsets& original_offsets,
-                                   const std::string& languages,
-                                   FormatUrlTypes format_types,
-                                   UnescapeRule::Type unescape_rules,
-                                   url_parse::Parsed* new_parsed,
-                                   size_t* prefix_end,
-                                   Offsets* offsets_for_adjustment) {
+string16 FormatViewSourceUrl(const GURL& url,
+                             const std::vector<size_t>& original_offsets,
+                             const std::string& languages,
+                             FormatUrlTypes format_types,
+                             UnescapeRule::Type unescape_rules,
+                             url_parse::Parsed* new_parsed,
+                             size_t* prefix_end,
+                             std::vector<size_t>* offsets_for_adjustment) {
   DCHECK(new_parsed);
   const char kViewSource[] = "view-source:";
   const size_t kViewSourceLength = arraysize(kViewSource) - 1;
+  std::vector<size_t> offsets_into_url(
+      OffsetsIntoComponent(original_offsets, kViewSourceLength));
 
-  // Format the underlying URL and adjust offsets.
-  const std::string& url_str(url.possibly_invalid_spec());
-  Offsets offsets_into_underlying_url(original_offsets);
-  {
-    base::OffsetAdjuster adjuster(&offsets_into_underlying_url);
-    adjuster.Add(base::OffsetAdjuster::Adjustment(0, kViewSourceLength, 0));
-  }
-  base::string16 result(base::ASCIIToUTF16(kViewSource) +
-      FormatUrlWithOffsets(GURL(url_str.substr(kViewSourceLength)), languages,
-                           format_types, unescape_rules, new_parsed, prefix_end,
-                           &offsets_into_underlying_url));
-  AdjustForComponentTransform(original_offsets, kViewSourceLength,
-                              url_str.length(), offsets_into_underlying_url,
-                              kViewSourceLength, result.length(),
-                              offsets_for_adjustment);
-  LimitOffsets(result, offsets_for_adjustment);
+  GURL real_url(url.possibly_invalid_spec().substr(kViewSourceLength));
+  string16 result(ASCIIToUTF16(kViewSource) +
+      FormatUrlWithOffsets(real_url, languages, format_types, unescape_rules,
+                           new_parsed, prefix_end, &offsets_into_url));
 
-  // Adjust positions of the parsed components.
+  // Adjust position values.
   if (new_parsed->scheme.is_nonempty()) {
     // Assume "view-source:real-scheme" as a scheme.
     new_parsed->scheme.len += kViewSourceLength;
@@ -652,11 +798,13 @@ base::string16 FormatViewSourceUrl(const GURL& url,
     new_parsed->scheme.begin = 0;
     new_parsed->scheme.len = kViewSourceLength - 1;
   }
-  AdjustAllComponentsButScheme(kViewSourceLength, new_parsed);
-
+  AdjustComponents(kViewSourceLength, new_parsed);
   if (prefix_end)
     *prefix_end += kViewSourceLength;
-
+  AdjustForComponentTransform(original_offsets, kViewSourceLength,
+      url.possibly_invalid_spec().length(), offsets_into_url, kViewSourceLength,
+      offsets_for_adjustment);
+  LimitOffsets(result, offsets_for_adjustment);
   return result;
 }
 
@@ -665,8 +813,9 @@ class AppendComponentTransform {
   AppendComponentTransform() {}
   virtual ~AppendComponentTransform() {}
 
-  virtual base::string16 Execute(const std::string& component_text,
-                                 Offsets* offsets_into_component) const = 0;
+  virtual string16 Execute(
+      const std::string& component_text,
+      std::vector<size_t>* offsets_into_component) const = 0;
 
   // NOTE: No DISALLOW_COPY_AND_ASSIGN here, since gcc < 4.3.0 requires an
   // accessible copy constructor in order to call AppendFormattedComponent()
@@ -680,9 +829,9 @@ class HostComponentTransform : public AppendComponentTransform {
   }
 
  private:
-  virtual base::string16 Execute(
+  virtual string16 Execute(
       const std::string& component_text,
-      Offsets* offsets_into_component) const OVERRIDE {
+      std::vector<size_t>* offsets_into_component) const {
     return IDNToUnicodeWithOffsets(component_text, languages_,
                                    offsets_into_component);
   }
@@ -697,12 +846,11 @@ class NonHostComponentTransform : public AppendComponentTransform {
   }
 
  private:
-  virtual base::string16 Execute(
+  virtual string16 Execute(
       const std::string& component_text,
-      Offsets* offsets_into_component) const OVERRIDE {
+      std::vector<size_t>* offsets_into_component) const {
     return (unescape_rules_ == UnescapeRule::NONE) ?
-        base::UTF8ToUTF16AndAdjustOffsets(component_text,
-                                          offsets_into_component) :
+        UTF8ToUTF16AndAdjustOffsets(component_text, offsets_into_component) :
         UnescapeAndDecodeUTF8URLComponentWithOffsets(component_text,
             unescape_rules_, offsets_into_component);
   }
@@ -710,75 +858,66 @@ class NonHostComponentTransform : public AppendComponentTransform {
   const UnescapeRule::Type unescape_rules_;
 };
 
-// Transforms the portion of |spec| covered by |original_component| according to
-// |transform|.  Appends the result to |output|.  If |output_component| is
-// non-NULL, its start and length are set to the transformed component's new
-// start and length.  For each element in |original_offsets| which is at least
-// as large as original_component.begin, the corresponding element of
-// |offsets_for_adjustment| is transformed appropriately.
 void AppendFormattedComponent(const std::string& spec,
                               const url_parse::Component& original_component,
-                              const Offsets& original_offsets,
+                              const std::vector<size_t>& original_offsets,
                               const AppendComponentTransform& transform,
-                              base::string16* output,
+                              string16* output,
                               url_parse::Component* output_component,
-                              Offsets* offsets_for_adjustment) {
+                              std::vector<size_t>* offsets_for_adjustment) {
   DCHECK(output);
   if (original_component.is_nonempty()) {
     size_t original_component_begin =
         static_cast<size_t>(original_component.begin);
     size_t output_component_begin = output->length();
-    std::string component_str(spec, original_component_begin,
-                              static_cast<size_t>(original_component.len));
-
-    // Transform |component_str| and adjust the offsets accordingly.
-    Offsets offsets_into_component(original_offsets);
-    {
-      base::OffsetAdjuster adjuster(&offsets_into_component);
-      adjuster.Add(base::OffsetAdjuster::Adjustment(0, original_component_begin,
-                                                    0));
-    }
-    output->append(transform.Execute(component_str, &offsets_into_component));
-    AdjustForComponentTransform(original_offsets, original_component_begin,
-                                static_cast<size_t>(original_component.end()),
-                                offsets_into_component, output_component_begin,
-                                output->length(), offsets_for_adjustment);
-
-    // Set positions of the parsed component.
-    if (output_component) {
+    if (output_component)
       output_component->begin = static_cast<int>(output_component_begin);
+
+    std::vector<size_t> offsets_into_component =
+        OffsetsIntoComponent(original_offsets, original_component_begin);
+    output->append(transform.Execute(std::string(spec, original_component_begin,
+        static_cast<size_t>(original_component.len)), &offsets_into_component));
+
+    if (output_component) {
       output_component->len =
           static_cast<int>(output->length() - output_component_begin);
     }
+    AdjustForComponentTransform(original_offsets, original_component_begin,
+                                static_cast<size_t>(original_component.end()),
+                                offsets_into_component, output_component_begin,
+                                offsets_for_adjustment);
   } else if (output_component) {
     output_component->reset();
   }
 }
 
-void SanitizeGeneratedFileName(base::FilePath::StringType* filename,
-                               bool replace_trailing) {
-  const base::FilePath::CharType kReplace[] = FILE_PATH_LITERAL("-");
-  if (filename->empty())
-    return;
-  if (replace_trailing) {
+char* do_strdup(const char* src) {
+#if defined(OS_WIN)
+  return _strdup(src);
+#else
+  return strdup(src);
+#endif
+}
+
+void SanitizeGeneratedFileName(std::string& filename) {
+  if (!filename.empty()) {
+    // Remove "." from the beginning and end of the file name to avoid tricks
+    // with hidden files, "..", and "."
+    TrimString(filename, ".", &filename);
+#if defined(OS_WIN)
     // Handle CreateFile() stripping trailing dots and spaces on filenames
     // http://support.microsoft.com/kb/115827
-    size_t length = filename->size();
-    size_t pos = filename->find_last_not_of(FILE_PATH_LITERAL(" ."));
-    filename->resize((pos == std::string::npos) ? 0 : (pos + 1));
-    TrimWhitespace(*filename, TRIM_TRAILING, filename);
-    if (filename->empty())
-      return;
-    size_t trimmed = length - filename->size();
-    if (trimmed)
-      filename->insert(filename->end(), trimmed, kReplace[0]);
+    std::string::size_type pos = filename.find_last_not_of(" .");
+    if (pos == std::string::npos)
+      filename.resize(0);
+    else
+      filename.resize(++pos);
+#endif
+    // Replace any path information by changing path separators with
+    // underscores.
+    ReplaceSubstringsAfterOffset(&filename, 0, "/", "_");
+    ReplaceSubstringsAfterOffset(&filename, 0, "\\", "_");
   }
-  base::TrimString(*filename, FILE_PATH_LITERAL("."), filename);
-  if (filename->empty())
-    return;
-  // Replace any path information by changing path separators.
-  ReplaceSubstringsAfterOffset(filename, 0, FILE_PATH_LITERAL("/"), kReplace);
-  ReplaceSubstringsAfterOffset(filename, 0, FILE_PATH_LITERAL("\\"), kReplace);
 }
 
 // Returns the filename determined from the last component of the path portion
@@ -801,20 +940,12 @@ std::string GetFileNameFromURL(const GURL& url,
 
   // The URL's path should be escaped UTF-8, but may not be.
   std::string decoded_filename = unescaped_url_filename;
-  if (!IsStringUTF8(decoded_filename)) {
+  if (!IsStringASCII(decoded_filename)) {
+    bool ignore;
     // TODO(jshin): this is probably not robust enough. To be sure, we need
     // encoding detection.
-    base::string16 utf16_output;
-    if (!referrer_charset.empty() &&
-        base::CodepageToUTF16(unescaped_url_filename,
-                              referrer_charset.c_str(),
-                              base::OnStringConversionError::FAIL,
-                              &utf16_output)) {
-      decoded_filename = base::UTF16ToUTF8(utf16_output);
-    } else {
-      decoded_filename = base::WideToUTF8(
-          base::SysNativeMBToWide(unescaped_url_filename));
-    }
+    DecodeWord(unescaped_url_filename, referrer_charset, &ignore,
+               &decoded_filename);
   }
   // If the URL contains a (possibly empty) query, assume it is a generator, and
   // allow the determined extension to be overwritten.
@@ -823,67 +954,72 @@ std::string GetFileNameFromURL(const GURL& url,
   return decoded_filename;
 }
 
+#if defined(OS_WIN)
 // Returns whether the specified extension is automatically integrated into the
 // windows shell.
-bool IsShellIntegratedExtension(const base::FilePath::StringType& extension) {
-  base::FilePath::StringType extension_lower = StringToLowerASCII(extension);
+bool IsShellIntegratedExtension(const string16& extension) {
+  string16 extension_lower = StringToLowerASCII(extension);
 
-  // http://msdn.microsoft.com/en-us/library/ms811694.aspx
-  // Right-clicking on shortcuts can be magical.
-  if ((extension_lower == FILE_PATH_LITERAL("local")) ||
-      (extension_lower == FILE_PATH_LITERAL("lnk")))
+  static const wchar_t* const integrated_extensions[] = {
+    // See <http://msdn.microsoft.com/en-us/library/ms811694.aspx>.
+    L"local",
+    // Right-clicking on shortcuts can be magical.
+    L"lnk",
+  };
+
+  for (int i = 0; i < arraysize(integrated_extensions); ++i) {
+    if (extension_lower == integrated_extensions[i])
+      return true;
+  }
+
+  // See <http://www.juniper.net/security/auto/vulnerabilities/vuln2612.html>.
+  // That vulnerability report is not exactly on point, but files become magical
+  // if their end in a CLSID.  Here we block extensions that look like CLSIDs.
+  if (!extension_lower.empty() && extension_lower[0] == L'{' &&
+      extension_lower[extension_lower.length() - 1] == L'}')
     return true;
 
-  // http://www.juniper.net/security/auto/vulnerabilities/vuln2612.html
-  // Files become magical if they end in a CLSID, so block such extensions.
-  if (!extension_lower.empty() &&
-      (extension_lower[0] == FILE_PATH_LITERAL('{')) &&
-      (extension_lower[extension_lower.length() - 1] == FILE_PATH_LITERAL('}')))
-    return true;
   return false;
 }
 
 // Returns whether the specified file name is a reserved name on windows.
 // This includes names like "com2.zip" (which correspond to devices) and
 // desktop.ini and thumbs.db which have special meaning to the windows shell.
-bool IsReservedName(const base::FilePath::StringType& filename) {
+bool IsReservedName(const string16& filename) {
   // This list is taken from the MSDN article "Naming a file"
   // http://msdn2.microsoft.com/en-us/library/aa365247(VS.85).aspx
   // I also added clock$ because GetSaveFileName seems to consider it as a
   // reserved name too.
-  static const char* const known_devices[] = {
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5",
-    "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4",
-    "lpt5", "lpt6", "lpt7", "lpt8", "lpt9", "clock$"
+  static const wchar_t* const known_devices[] = {
+    L"con", L"prn", L"aux", L"nul", L"com1", L"com2", L"com3", L"com4", L"com5",
+    L"com6", L"com7", L"com8", L"com9", L"lpt1", L"lpt2", L"lpt3", L"lpt4",
+    L"lpt5", L"lpt6", L"lpt7", L"lpt8", L"lpt9", L"clock$"
   };
-#if defined(OS_WIN)
-  std::string filename_lower = StringToLowerASCII(base::WideToUTF8(filename));
-#elif defined(OS_POSIX)
-  std::string filename_lower = StringToLowerASCII(filename);
-#endif
+  string16 filename_lower = StringToLowerASCII(filename);
 
-  for (size_t i = 0; i < arraysize(known_devices); ++i) {
+  for (int i = 0; i < arraysize(known_devices); ++i) {
     // Exact match.
     if (filename_lower == known_devices[i])
       return true;
     // Starts with "DEVICE.".
-    if (filename_lower.find(std::string(known_devices[i]) + ".") == 0)
+    if (filename_lower.find(string16(known_devices[i]) + L".") == 0)
       return true;
   }
 
-  static const char* const magic_names[] = {
+  static const wchar_t* const magic_names[] = {
     // These file names are used by the "Customize folder" feature of the shell.
-    "desktop.ini",
-    "thumbs.db",
+    L"desktop.ini",
+    L"thumbs.db",
   };
 
-  for (size_t i = 0; i < arraysize(magic_names); ++i) {
+  for (int i = 0; i < arraysize(magic_names); ++i) {
     if (filename_lower == magic_names[i])
       return true;
   }
 
   return false;
 }
+#endif  // OS_WIN
 
 // Examines the current extension in |file_name| and modifies it if necessary in
 // order to ensure the filename is safe.  If |file_name| doesn't contain an
@@ -900,37 +1036,27 @@ bool IsReservedName(const base::FilePath::StringType& filename) {
 //    integrating with the user's shell.
 void EnsureSafeExtension(const std::string& mime_type,
                          bool ignore_extension,
-                         base::FilePath* file_name) {
+                         FilePath* file_name) {
   // See if our file name already contains an extension.
-  base::FilePath::StringType extension = file_name->Extension();
+  FilePath::StringType extension = file_name->Extension();
   if (!extension.empty())
     extension.erase(extension.begin());  // Erase preceding '.'.
 
   if ((ignore_extension || extension.empty()) && !mime_type.empty()) {
-    base::FilePath::StringType preferred_mime_extension;
-    std::vector<base::FilePath::StringType> all_mime_extensions;
+    FilePath::StringType mime_extension;
     // The GetPreferredExtensionForMimeType call will end up going to disk.  Do
     // this on another thread to avoid slowing the IO thread.
     // http://crbug.com/61827
     // TODO(asanka): Remove this ScopedAllowIO once all callers have switched
     // over to IO safe threads.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    net::GetPreferredExtensionForMimeType(mime_type, &preferred_mime_extension);
-    net::GetExtensionsForMimeType(mime_type, &all_mime_extensions);
-    // If the existing extension is in the list of valid extensions for the
-    // given type, use it. This avoids doing things like pointlessly renaming
-    // "foo.jpg" to "foo.jpeg".
-    if (std::find(all_mime_extensions.begin(),
-                  all_mime_extensions.end(),
-                  extension) != all_mime_extensions.end()) {
-      // leave |extension| alone
-    } else if (!preferred_mime_extension.empty()) {
-      extension = preferred_mime_extension;
-    }
+    net::GetPreferredExtensionForMimeType(mime_type, &mime_extension);
+    if (!mime_extension.empty())
+      extension = mime_extension;
   }
 
 #if defined(OS_WIN)
-  static const base::FilePath::CharType default_extension[] =
+  static const FilePath::CharType default_extension[] =
       FILE_PATH_LITERAL("download");
 
   // Rename shell-integrated extensions.
@@ -941,39 +1067,6 @@ void EnsureSafeExtension(const std::string& mime_type,
 #endif
 
   *file_name = file_name->ReplaceExtension(extension);
-}
-
-bool FilePathToString16(const base::FilePath& path, base::string16* converted) {
-#if defined(OS_WIN)
-  return base::WideToUTF16(
-      path.value().c_str(), path.value().size(), converted);
-#elif defined(OS_POSIX)
-  std::string component8 = path.AsUTF8Unsafe();
-  return !component8.empty() &&
-         base::UTF8ToUTF16(component8.c_str(), component8.size(), converted);
-#endif
-}
-
-bool IPNumberPrefixCheck(const IPAddressNumber& ip_number,
-                         const unsigned char* ip_prefix,
-                         size_t prefix_length_in_bits) {
-  // Compare all the bytes that fall entirely within the prefix.
-  int num_entire_bytes_in_prefix = prefix_length_in_bits / 8;
-  for (int i = 0; i < num_entire_bytes_in_prefix; ++i) {
-    if (ip_number[i] != ip_prefix[i])
-      return false;
-  }
-
-  // In case the prefix was not a multiple of 8, there will be 1 byte
-  // which is only partially masked.
-  int remaining_bits = prefix_length_in_bits % 8;
-  if (remaining_bits != 0) {
-    unsigned char mask = 0xFF << (8 - remaining_bits);
-    int i = num_entire_bytes_in_prefix;
-    if ((ip_number[i] & mask) != (ip_prefix[i] & mask))
-      return false;
-  }
-  return true;
 }
 
 }  // namespace
@@ -992,11 +1085,11 @@ size_t GetCountOfExplicitlyAllowedPorts() {
   return g_explicitly_allowed_ports.Get().size();
 }
 
-GURL FilePathToFileURL(const base::FilePath& path) {
+GURL FilePathToFileURL(const FilePath& path) {
   // Produce a URL like "file:///C:/foo" for a regular file, or
   // "file://///server/path" for UNC. The URL canonicalizer will fix up the
   // latter case to be the canonical UNC form: "file://server/path"
-  base::FilePath::StringType url_string(kFileURLPrefix);
+  FilePath::StringType url_string(kFileURLPrefix);
   url_string.append(path.value());
 
   // Now do replacement of some characters. Since we assume the input is a
@@ -1056,8 +1149,98 @@ std::string GetSpecificHeader(const std::string& headers,
   return ret;
 }
 
-base::string16 IDNToUnicode(const std::string& host,
-                            const std::string& languages) {
+bool DecodeCharset(const std::string& input,
+                   std::string* decoded_charset,
+                   std::string* value) {
+  StringTokenizer t(input, "'");
+  t.set_options(StringTokenizer::RETURN_DELIMS);
+  std::string temp_charset;
+  std::string temp_value;
+  int numDelimsSeen = 0;
+  while (t.GetNext()) {
+    if (t.token_is_delim()) {
+      ++numDelimsSeen;
+      continue;
+    } else {
+      switch (numDelimsSeen) {
+        case 0:
+          temp_charset = t.token();
+          break;
+        case 1:
+          // Language is ignored.
+          break;
+        case 2:
+          temp_value = t.token();
+          break;
+        default:
+          return false;
+      }
+    }
+  }
+  if (numDelimsSeen != 2)
+    return false;
+  if (temp_charset.empty() || temp_value.empty())
+    return false;
+  decoded_charset->swap(temp_charset);
+  value->swap(temp_value);
+  return true;
+}
+
+bool DecodeFilenameValue(const std::string& input,
+                         const std::string& referrer_charset,
+                         std::string* output) {
+  std::string tmp;
+  // Tokenize with whitespace characters.
+  StringTokenizer t(input, " \t\n\r");
+  t.set_options(StringTokenizer::RETURN_DELIMS);
+  bool is_previous_token_rfc2047 = true;
+  while (t.GetNext()) {
+    if (t.token_is_delim()) {
+      // If the previous non-delimeter token is not RFC2047-encoded,
+      // put in a space in its place. Otheriwse, skip over it.
+      if (!is_previous_token_rfc2047) {
+        tmp.push_back(' ');
+      }
+      continue;
+    }
+    // We don't support a single multibyte character split into
+    // adjacent encoded words. Some broken mail clients emit headers
+    // with that problem, but most web servers usually encode a filename
+    // in a single encoded-word. Firefox/Thunderbird do not support
+    // it, either.
+    std::string decoded;
+    if (!DecodeWord(t.token(), referrer_charset, &is_previous_token_rfc2047,
+                    &decoded))
+      return false;
+    tmp.append(decoded);
+  }
+  output->swap(tmp);
+  return true;
+}
+
+bool DecodeExtValue(const std::string& param_value, std::string* decoded) {
+  if (param_value.find('"') != std::string::npos)
+    return false;
+
+  std::string charset;
+  std::string value;
+  if (!DecodeCharset(param_value, &charset, &value))
+    return false;
+
+  // RFC 5987 value should be ASCII-only.
+  if (!IsStringASCII(value)) {
+    decoded->clear();
+    return true;
+  }
+
+  std::string unescaped = UnescapeURLComponent(value,
+      UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
+
+  return base::ConvertToUtf8AndNormalize(unescaped, charset, decoded);
+}
+
+string16 IDNToUnicode(const std::string& host,
+                      const std::string& languages) {
   return IDNToUnicodeWithOffsets(host, languages, NULL);
 }
 
@@ -1084,7 +1267,7 @@ std::string CanonicalizeHost(const std::string& host,
   return canon_host;
 }
 
-std::string GetDirectoryListingHeader(const base::string16& title) {
+std::string GetDirectoryListingHeader(const string16& title) {
   static const base::StringPiece header(
       NetModule::GetResource(IDR_DIR_HEADER_HTML));
   // This can be null in unit tests.
@@ -1096,16 +1279,20 @@ std::string GetDirectoryListingHeader(const base::string16& title) {
     result.assign(header.data(), header.size());
 
   result.append("<script>start(");
-  base::EscapeJSONString(title, true, &result);
+  base::JsonDoubleQuote(title, true, &result);
   result.append(");</script>\n");
 
   return result;
 }
 
-inline bool IsHostCharAlphanumeric(char c) {
+inline bool IsHostCharAlpha(char c) {
   // We can just check lowercase because uppercase characters have already been
   // normalized.
-  return ((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9'));
+  return (c >= 'a') && (c <= 'z');
+}
+
+inline bool IsHostCharDigit(char c) {
+  return (c >= '0') && (c <= '9');
 }
 
 bool IsCanonicalizedHostCompliant(const std::string& host,
@@ -1114,48 +1301,50 @@ bool IsCanonicalizedHostCompliant(const std::string& host,
     return false;
 
   bool in_component = false;
-  bool most_recent_component_started_alphanumeric = false;
-  bool last_char_was_underscore = false;
+  bool most_recent_component_started_alpha = false;
+  bool last_char_was_hyphen_or_underscore = false;
 
   for (std::string::const_iterator i(host.begin()); i != host.end(); ++i) {
     const char c = *i;
     if (!in_component) {
-      most_recent_component_started_alphanumeric = IsHostCharAlphanumeric(c);
-      if (!most_recent_component_started_alphanumeric && (c != '-'))
+      most_recent_component_started_alpha = IsHostCharAlpha(c);
+      if (!most_recent_component_started_alpha && !IsHostCharDigit(c) &&
+          (c != '-'))
         return false;
       in_component = true;
     } else {
       if (c == '.') {
-        if (last_char_was_underscore)
+        if (last_char_was_hyphen_or_underscore)
           return false;
         in_component = false;
-      } else if (IsHostCharAlphanumeric(c) || (c == '-')) {
-        last_char_was_underscore = false;
-      } else if (c == '_') {
-        last_char_was_underscore = true;
+      } else if (IsHostCharAlpha(c) || IsHostCharDigit(c)) {
+        last_char_was_hyphen_or_underscore = false;
+      } else if ((c == '-') || (c == '_')) {
+        last_char_was_hyphen_or_underscore = true;
       } else {
         return false;
       }
     }
   }
 
-  return most_recent_component_started_alphanumeric ||
-      (!desired_tld.empty() && IsHostCharAlphanumeric(desired_tld[0]));
+  return most_recent_component_started_alpha ||
+      (!desired_tld.empty() && IsHostCharAlpha(desired_tld[0]));
 }
 
-std::string GetDirectoryListingEntry(const base::string16& name,
+std::string GetDirectoryListingEntry(const string16& name,
                                      const std::string& raw_bytes,
                                      bool is_dir,
                                      int64 size,
                                      Time modified) {
   std::string result;
   result.append("<script>addRow(");
-  base::EscapeJSONString(name, true, &result);
+  base::JsonDoubleQuote(name, true, &result);
   result.append(",");
   if (raw_bytes.empty()) {
-    base::EscapeJSONString(EscapePath(base::UTF16ToUTF8(name)), true, &result);
+    base::JsonDoubleQuote(EscapePath(UTF16ToUTF8(name)),
+                                   true, &result);
   } else {
-    base::EscapeJSONString(EscapePath(raw_bytes), true, &result);
+    base::JsonDoubleQuote(EscapePath(raw_bytes), true, &result);
   }
   if (is_dir) {
     result.append(",1,");
@@ -1164,81 +1353,45 @@ std::string GetDirectoryListingEntry(const base::string16& name,
   }
 
   // Negative size means unknown or not applicable (e.g. directory).
-  base::string16 size_string;
+  string16 size_string;
   if (size >= 0)
     size_string = FormatBytesUnlocalized(size);
-  base::EscapeJSONString(size_string, true, &result);
+  base::JsonDoubleQuote(size_string, true, &result);
 
   result.append(",");
 
-  base::string16 modified_str;
+  string16 modified_str;
   // |modified| can be NULL in FTP listings.
   if (!modified.is_null()) {
     modified_str = base::TimeFormatShortDateAndTime(modified);
   }
-  base::EscapeJSONString(modified_str, true, &result);
+  base::JsonDoubleQuote(modified_str, true, &result);
 
   result.append(");</script>\n");
 
   return result;
 }
 
-base::string16 StripWWW(const base::string16& text) {
-  const base::string16 www(base::ASCIIToUTF16("www."));
+string16 StripWWW(const string16& text) {
+  const string16 www(ASCIIToUTF16("www."));
   return StartsWith(text, www, true) ? text.substr(www.length()) : text;
-}
-
-base::string16 StripWWWFromHost(const GURL& url) {
-  DCHECK(url.is_valid());
-  return StripWWW(base::ASCIIToUTF16(url.host()));
-}
-
-bool IsSafePortablePathComponent(const base::FilePath& component) {
-  base::string16 component16;
-  base::FilePath::StringType sanitized = component.value();
-  SanitizeGeneratedFileName(&sanitized, true);
-  base::FilePath::StringType extension = component.Extension();
-  if (!extension.empty())
-    extension.erase(extension.begin());  // Erase preceding '.'.
-  return !component.empty() &&
-         (component == component.BaseName()) &&
-         (component == component.StripTrailingSeparators()) &&
-         FilePathToString16(component, &component16) &&
-         file_util::IsFilenameLegal(component16) &&
-         !IsShellIntegratedExtension(extension) &&
-         (sanitized == component.value()) &&
-         !IsReservedName(component.value());
-}
-
-bool IsSafePortableRelativePath(const base::FilePath& path) {
-  if (path.empty() || path.IsAbsolute() || path.EndsWithSeparator())
-    return false;
-  std::vector<base::FilePath::StringType> components;
-  path.GetComponents(&components);
-  if (components.empty())
-    return false;
-  for (size_t i = 0; i < components.size() - 1; ++i) {
-    if (!IsSafePortablePathComponent(base::FilePath(components[i])))
-      return false;
-  }
-  return IsSafePortablePathComponent(path.BaseName());
 }
 
 void GenerateSafeFileName(const std::string& mime_type,
                           bool ignore_extension,
-                          base::FilePath* file_path) {
+                          FilePath* file_path) {
   // Make sure we get the right file extension
   EnsureSafeExtension(mime_type, ignore_extension, file_path);
 
 #if defined(OS_WIN)
   // Prepend "_" to the file name if it's a reserved name
-  base::FilePath::StringType leaf_name = file_path->BaseName().value();
+  FilePath::StringType leaf_name = file_path->BaseName().value();
   DCHECK(!leaf_name.empty());
   if (IsReservedName(leaf_name)) {
-    leaf_name = base::FilePath::StringType(FILE_PATH_LITERAL("_")) + leaf_name;
+    leaf_name = FilePath::StringType(FILE_PATH_LITERAL("_")) + leaf_name;
     *file_path = file_path->DirName();
-    if (file_path->value() == base::FilePath::kCurrentDirectory) {
-      *file_path = base::FilePath(leaf_name);
+    if (file_path->value() == FilePath::kCurrentDirectory) {
+      *file_path = FilePath(leaf_name);
     } else {
       *file_path = file_path->Append(leaf_name);
     }
@@ -1246,19 +1399,18 @@ void GenerateSafeFileName(const std::string& mime_type,
 #endif
 }
 
-base::string16 GetSuggestedFilename(const GURL& url,
-                                    const std::string& content_disposition,
-                                    const std::string& referrer_charset,
-                                    const std::string& suggested_name,
-                                    const std::string& mime_type,
-                                    const std::string& default_name) {
+string16 GetSuggestedFilename(const GURL& url,
+                              const std::string& content_disposition,
+                              const std::string& referrer_charset,
+                              const std::string& suggested_name,
+                              const std::string& mime_type,
+                              const std::string& default_name) {
   // TODO: this function to be updated to match the httpbis recommendations.
   // Talk to abarth for the latest news.
 
   // We don't translate this fallback string, "download". If localization is
   // needed, the caller should provide localized fallback in |default_name|.
-  static const base::FilePath::CharType kFinalFallbackName[] =
-    FILE_PATH_LITERAL("download");
+  static const char* kFinalFallbackName = "download";
   std::string filename;  // In UTF-8
   bool overwrite_extension = false;
 
@@ -1281,74 +1433,69 @@ base::string16 GetSuggestedFilename(const GURL& url,
   // Finally try the URL hostname, but only if there's no default specified in
   // |default_name|.  Some schemes (e.g.: file:, about:, data:) do not have a
   // host name.
-  if (filename.empty() &&
-      default_name.empty() &&
-      url.is_valid() &&
-      !url.host().empty()) {
+  if (filename.empty() && default_name.empty() &&
+      url.is_valid() && !url.host().empty()) {
     // TODO(jungshik) : Decode a 'punycoded' IDN hostname. (bug 1264451)
     filename = url.host();
   }
 
-  bool replace_trailing = false;
-  base::FilePath::StringType result_str, default_name_str;
 #if defined(OS_WIN)
-  replace_trailing = true;
-  result_str = base::UTF8ToUTF16(filename);
-  default_name_str = base::UTF8ToUTF16(default_name);
-#else
-  result_str = filename;
-  default_name_str = default_name;
+  std::string::size_type trimmed_trailing_character_count =
+      CountTrailingChars(filename, " .");
 #endif
-  SanitizeGeneratedFileName(&result_str, replace_trailing);
-  if (result_str.find_last_not_of(FILE_PATH_LITERAL("-_")) ==
-      base::FilePath::StringType::npos) {
-    result_str = !default_name_str.empty() ? default_name_str :
-      base::FilePath::StringType(kFinalFallbackName);
+  SanitizeGeneratedFileName(filename);
+  // Sanitization can cause the filename to disappear (e.g.: if the filename
+  // consisted entirely of spaces and '.'s), in which case we use the default.
+  if (filename.empty()) {
+#if defined(OS_WIN)
+    trimmed_trailing_character_count = 0;
+#endif
     overwrite_extension = false;
+    if (default_name.empty())
+      filename = kFinalFallbackName;
   }
-  file_util::ReplaceIllegalCharactersInPath(&result_str, '-');
-  base::FilePath result(result_str);
-  GenerateSafeFileName(mime_type, overwrite_extension, &result);
 
-  base::string16 result16;
-  if (!FilePathToString16(result, &result16)) {
-    result = base::FilePath(default_name_str);
-    if (!FilePathToString16(result, &result16)) {
-      result = base::FilePath(kFinalFallbackName);
-      FilePathToString16(result, &result16);
-    }
-  }
-  return result16;
+#if defined(OS_WIN)
+  string16 path = UTF8ToUTF16(filename.empty() ? default_name : filename);
+  // On Windows we want to preserve or replace all characters including
+  // whitespace to prevent file extension obfuscation on trusted websites
+  // e.g. Gmail might think evil.exe. is safe, so we don't want it to become
+  // evil.exe when we download it
+  string16::size_type path_length_before_trim = path.length();
+  TrimWhitespace(path, TRIM_TRAILING, &path);
+  trimmed_trailing_character_count += path_length_before_trim - path.length();
+  file_util::ReplaceIllegalCharactersInPath(&path, '-');
+  path.append(trimmed_trailing_character_count, '-');
+  FilePath result(path);
+  GenerateSafeFileName(mime_type, overwrite_extension, &result);
+  return result.value();
+#else
+  std::string path = filename.empty() ? default_name : filename;
+  file_util::ReplaceIllegalCharactersInPath(&path, '-');
+  FilePath result(path);
+  GenerateSafeFileName(mime_type, overwrite_extension, &result);
+  return UTF8ToUTF16(result.value());
+#endif
 }
 
-base::FilePath GenerateFileName(const GURL& url,
-                                const std::string& content_disposition,
-                                const std::string& referrer_charset,
-                                const std::string& suggested_name,
-                                const std::string& mime_type,
-                                const std::string& default_file_name) {
-  base::string16 file_name = GetSuggestedFilename(url,
-                                                  content_disposition,
-                                                  referrer_charset,
-                                                  suggested_name,
-                                                  mime_type,
-                                                  default_file_name);
+FilePath GenerateFileName(const GURL& url,
+                          const std::string& content_disposition,
+                          const std::string& referrer_charset,
+                          const std::string& suggested_name,
+                          const std::string& mime_type,
+                          const std::string& default_file_name) {
+  string16 file_name = GetSuggestedFilename(url,
+                                            content_disposition,
+                                            referrer_charset,
+                                            suggested_name,
+                                            mime_type,
+                                            default_file_name);
 
 #if defined(OS_WIN)
-  base::FilePath generated_name(file_name);
+  FilePath generated_name(file_name);
 #else
-  base::FilePath generated_name(
-      base::SysWideToNativeMB(base::UTF16ToWide(file_name)));
+  FilePath generated_name(base::SysWideToNativeMB(UTF16ToWide(file_name)));
 #endif
-
-#if defined(OS_CHROMEOS)
-  // When doing file manager operations on ChromeOS, the file paths get
-  // normalized in WebKit layer, so let's ensure downloaded files have
-  // normalized names. Otherwise, we won't be able to handle files with NFD
-  // utf8 encoded characters in name.
-  file_util::NormalizeFileNameEncoding(&generated_name);
-#endif
-
   DCHECK(!generated_name.empty());
 
   return generated_name;
@@ -1463,202 +1610,48 @@ std::string GetHostAndOptionalPort(const GURL& url) {
   return url.host();
 }
 
-bool IsHostnameNonUnique(const std::string& hostname) {
-  // CanonicalizeHost requires surrounding brackets to parse an IPv6 address.
-  const std::string host_or_ip = hostname.find(':') != std::string::npos ?
-      "[" + hostname + "]" : hostname;
-  url_canon::CanonHostInfo host_info;
-  std::string canonical_name = CanonicalizeHost(host_or_ip, &host_info);
-
-  // If canonicalization fails, then the input is truly malformed. However,
-  // to avoid mis-reporting bad inputs as "non-unique", treat them as unique.
-  if (canonical_name.empty())
-    return false;
-
-  // If |hostname| is an IP address, check to see if it's in an IANA-reserved
-  // range.
-  if (host_info.IsIPAddress()) {
-    IPAddressNumber host_addr;
-    if (!ParseIPLiteralToNumber(hostname.substr(host_info.out_host.begin,
-                                                host_info.out_host.len),
-                                &host_addr)) {
-      return false;
-    }
-    switch (host_info.family) {
-      case url_canon::CanonHostInfo::IPV4:
-      case url_canon::CanonHostInfo::IPV6:
-        return IsIPAddressReserved(host_addr);
-      case url_canon::CanonHostInfo::NEUTRAL:
-      case url_canon::CanonHostInfo::BROKEN:
-        return false;
-    }
-  }
-
-  // Check for a registry controlled portion of |hostname|, ignoring private
-  // registries, as they already chain to ICANN-administered registries,
-  // and explicitly ignoring unknown registries.
-  //
-  // Note: This means that as new gTLDs are introduced on the Internet, they
-  // will be treated as non-unique until the registry controlled domain list
-  // is updated. However, because gTLDs are expected to provide significant
-  // advance notice to deprecate older versions of this code, this an
-  // acceptable tradeoff.
-  return 0 == registry_controlled_domains::GetRegistryLength(
-                  canonical_name,
-                  registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
-                  registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
+std::string NetAddressToString(const struct addrinfo* net_address) {
+  return NetAddressToString(net_address->ai_addr, net_address->ai_addrlen);
 }
 
-// Don't compare IPv4 and IPv6 addresses (they have different range
-// reservations). Keep separate reservation arrays for each IP type, and
-// consolidate adjacent reserved ranges within a reservation array when
-// possible.
-// Sources for info:
-// www.iana.org/assignments/ipv4-address-space/ipv4-address-space.xhtml
-// www.iana.org/assignments/ipv6-address-space/ipv6-address-space.xhtml
-// They're formatted here with the prefix as the last element. For example:
-// 10.0.0.0/8 becomes 10,0,0,0,8 and fec0::/10 becomes 0xfe,0xc0,0,0,0...,10.
-bool IsIPAddressReserved(const IPAddressNumber& host_addr) {
-  static const unsigned char kReservedIPv4[][5] = {
-      { 0,0,0,0,8 }, { 10,0,0,0,8 }, { 100,64,0,0,10 }, { 127,0,0,0,8 },
-      { 169,254,0,0,16 }, { 172,16,0,0,12 }, { 192,0,2,0,24 },
-      { 192,88,99,0,24 }, { 192,168,0,0,16 }, { 198,18,0,0,15 },
-      { 198,51,100,0,24 }, { 203,0,113,0,24 }, { 224,0,0,0,3 }
-  };
-  static const unsigned char kReservedIPv6[][17] = {
-      { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,8 },
-      { 0x40,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2 },
-      { 0x80,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2 },
-      { 0xc0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3 },
-      { 0xe0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4 },
-      { 0xf0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5 },
-      { 0xf8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,6 },
-      { 0xfc,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7 },
-      { 0xfe,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,9 },
-      { 0xfe,0x80,0,0,0,0,0,0,0,0,0,0,0,0,0,0,10 },
-      { 0xfe,0xc0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,10 },
-  };
-  size_t array_size = 0;
-  const unsigned char* array = NULL;
-  switch (host_addr.size()) {
-    case kIPv4AddressSize:
-      array_size = arraysize(kReservedIPv4);
-      array = kReservedIPv4[0];
-      break;
-    case kIPv6AddressSize:
-      array_size = arraysize(kReservedIPv6);
-      array = kReservedIPv6[0];
-      break;
+std::string NetAddressToString(const struct sockaddr* net_address,
+                               socklen_t address_len) {
+#if defined(OS_WIN)
+  EnsureWinsockInit();
+#endif
+
+  // This buffer is large enough to fit the biggest IPv6 string.
+  char buffer[INET6_ADDRSTRLEN];
+
+  int result = getnameinfo(net_address, address_len, buffer, sizeof(buffer),
+                           NULL, 0, NI_NUMERICHOST);
+
+  if (result != 0) {
+    DVLOG(1) << "getnameinfo() failed with " << result << ": "
+             << gai_strerror(result);
+    buffer[0] = '\0';
   }
-  if (!array)
-    return false;
-  size_t width = host_addr.size() + 1;
-  for (size_t i = 0; i < array_size; ++i, array += width) {
-    if (IPNumberPrefixCheck(host_addr, array, array[width-1]))
-      return true;
-  }
-  return false;
+  return std::string(buffer);
 }
 
-// Extracts the address and port portions of a sockaddr.
-bool GetIPAddressFromSockAddr(const struct sockaddr* sock_addr,
-                              socklen_t sock_addr_len,
-                              const uint8** address,
-                              size_t* address_len,
-                              uint16* port) {
-  if (sock_addr->sa_family == AF_INET) {
-    if (sock_addr_len < static_cast<socklen_t>(sizeof(struct sockaddr_in)))
-      return false;
-    const struct sockaddr_in* addr =
-        reinterpret_cast<const struct sockaddr_in*>(sock_addr);
-    *address = reinterpret_cast<const uint8*>(&addr->sin_addr);
-    *address_len = kIPv4AddressSize;
-    if (port)
-      *port = base::NetToHost16(addr->sin_port);
-    return true;
+std::string NetAddressToStringWithPort(const struct addrinfo* net_address) {
+  return NetAddressToStringWithPort(
+      net_address->ai_addr, net_address->ai_addrlen);
+}
+std::string NetAddressToStringWithPort(const struct sockaddr* net_address,
+                                       socklen_t address_len) {
+  std::string ip_address_string = NetAddressToString(net_address, address_len);
+  if (ip_address_string.empty())
+    return std::string();  // Failed.
+
+  int port = GetPortFromSockaddr(net_address, address_len);
+
+  if (ip_address_string.find(':') != std::string::npos) {
+    // Surround with square brackets to avoid ambiguity.
+    return base::StringPrintf("[%s]:%d", ip_address_string.c_str(), port);
   }
 
-  if (sock_addr->sa_family == AF_INET6) {
-    if (sock_addr_len < static_cast<socklen_t>(sizeof(struct sockaddr_in6)))
-      return false;
-    const struct sockaddr_in6* addr =
-        reinterpret_cast<const struct sockaddr_in6*>(sock_addr);
-    *address = reinterpret_cast<const unsigned char*>(&addr->sin6_addr);
-    *address_len = kIPv6AddressSize;
-    if (port)
-      *port = base::NetToHost16(addr->sin6_port);
-    return true;
-  }
-
-  return false;  // Unrecognized |sa_family|.
-}
-
-std::string IPAddressToString(const uint8* address,
-                              size_t address_len) {
-  std::string str;
-  url_canon::StdStringCanonOutput output(&str);
-
-  if (address_len == kIPv4AddressSize) {
-    url_canon::AppendIPv4Address(address, &output);
-  } else if (address_len == kIPv6AddressSize) {
-    url_canon::AppendIPv6Address(address, &output);
-  } else {
-    CHECK(false) << "Invalid IP address with length: " << address_len;
-  }
-
-  output.Complete();
-  return str;
-}
-
-std::string IPAddressToStringWithPort(const uint8* address,
-                                      size_t address_len,
-                                      uint16 port) {
-  std::string address_str = IPAddressToString(address, address_len);
-
-  if (address_len == kIPv6AddressSize) {
-    // Need to bracket IPv6 addresses since they contain colons.
-    return base::StringPrintf("[%s]:%d", address_str.c_str(), port);
-  }
-  return base::StringPrintf("%s:%d", address_str.c_str(), port);
-}
-
-std::string NetAddressToString(const struct sockaddr* sa,
-                               socklen_t sock_addr_len) {
-  const uint8* address;
-  size_t address_len;
-  if (!GetIPAddressFromSockAddr(sa, sock_addr_len, &address,
-                                &address_len, NULL)) {
-    NOTREACHED();
-    return std::string();
-  }
-  return IPAddressToString(address, address_len);
-}
-
-std::string NetAddressToStringWithPort(const struct sockaddr* sa,
-                                       socklen_t sock_addr_len) {
-  const uint8* address;
-  size_t address_len;
-  uint16 port;
-  if (!GetIPAddressFromSockAddr(sa, sock_addr_len, &address,
-                                &address_len, &port)) {
-    NOTREACHED();
-    return std::string();
-  }
-  return IPAddressToStringWithPort(address, address_len, port);
-}
-
-std::string IPAddressToString(const IPAddressNumber& addr) {
-  return IPAddressToString(&addr.front(), addr.size());
-}
-
-std::string IPAddressToStringWithPort(const IPAddressNumber& addr,
-                                      uint16 port) {
-  return IPAddressToStringWithPort(&addr.front(), addr.size(), port);
-}
-
-std::string IPAddressToPackedString(const IPAddressNumber& addr) {
-  return std::string(reinterpret_cast<const char *>(&addr.front()),
-                     addr.size());
+  return base::StringPrintf("%s:%d", ip_address_string.c_str(), port);
 }
 
 std::string GetHostName() {
@@ -1677,8 +1670,8 @@ std::string GetHostName() {
 }
 
 void GetIdentityFromURL(const GURL& url,
-                        base::string16* username,
-                        base::string16* password) {
+                        string16* username,
+                        string16* password) {
   UnescapeRule::Type flags =
       UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS;
   *username = UnescapeAndDecodeUTF8URLComponent(url.username(), flags, NULL);
@@ -1691,31 +1684,30 @@ std::string GetHostOrSpecFromURL(const GURL& url) {
 
 void AppendFormattedHost(const GURL& url,
                          const std::string& languages,
-                         base::string16* output) {
-  Offsets offsets;
+                         string16* output) {
+  std::vector<size_t> offsets;
   AppendFormattedComponent(url.possibly_invalid_spec(),
       url.parsed_for_possibly_invalid_spec().host, offsets,
       HostComponentTransform(languages), output, NULL, NULL);
 }
 
-base::string16 FormatUrlWithOffsets(
-    const GURL& url,
-    const std::string& languages,
-    FormatUrlTypes format_types,
-    UnescapeRule::Type unescape_rules,
-    url_parse::Parsed* new_parsed,
-    size_t* prefix_end,
-    Offsets* offsets_for_adjustment) {
+string16 FormatUrlWithOffsets(const GURL& url,
+                              const std::string& languages,
+                              FormatUrlTypes format_types,
+                              UnescapeRule::Type unescape_rules,
+                              url_parse::Parsed* new_parsed,
+                              size_t* prefix_end,
+                              std::vector<size_t>* offsets_for_adjustment) {
   url_parse::Parsed parsed_temp;
   if (!new_parsed)
     new_parsed = &parsed_temp;
   else
     *new_parsed = url_parse::Parsed();
-  Offsets original_offsets;
+  std::vector<size_t> original_offsets;
   if (offsets_for_adjustment)
     original_offsets = *offsets_for_adjustment;
 
-  // Special handling for view-source:.  Don't use content::kViewSourceScheme
+  // Special handling for view-source:.  Don't use chrome::kViewSourceScheme
   // because this library shouldn't depend on chrome.
   const char* const kViewSource = "view-source";
   // Reject "view-source:view-source:..." to avoid deep recursion.
@@ -1723,8 +1715,7 @@ base::string16 FormatUrlWithOffsets(
   if (url.SchemeIs(kViewSource) &&
       !StartsWithASCII(url.possibly_invalid_spec(), kViewSourceTwice, false)) {
     return FormatViewSourceUrl(url, original_offsets, languages, format_types,
-                               unescape_rules, new_parsed, prefix_end,
-                               offsets_for_adjustment);
+        unescape_rules, new_parsed, prefix_end, offsets_for_adjustment);
   }
 
   // We handle both valid and invalid URLs (this will give us the spec
@@ -1733,7 +1724,7 @@ base::string16 FormatUrlWithOffsets(
   const url_parse::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
 
   // Scheme & separators.  These are ASCII.
-  base::string16 url_string;
+  string16 url_string;
   url_string.insert(url_string.end(), spec.begin(),
       spec.begin() + parsed.CountCharactersBefore(url_parse::Parsed::USERNAME,
                                                   true));
@@ -1760,11 +1751,11 @@ base::string16 FormatUrlWithOffsets(
     // Update the offsets based on removed username and/or password.
     if (offsets_for_adjustment && !offsets_for_adjustment->empty() &&
         (parsed.username.is_nonempty() || parsed.password.is_nonempty())) {
-      base::OffsetAdjuster offset_adjuster(offsets_for_adjustment);
+      OffsetAdjuster offset_adjuster(offsets_for_adjustment);
       if (parsed.username.is_nonempty() && parsed.password.is_nonempty()) {
         // The seeming off-by-one and off-by-two in these first two lines are to
         // account for the ':' after the username and '@' after the password.
-        offset_adjuster.Add(base::OffsetAdjuster::Adjustment(
+        offset_adjuster.Add(OffsetAdjuster::Adjustment(
             static_cast<size_t>(parsed.username.begin),
             static_cast<size_t>(parsed.username.len + parsed.password.len + 2),
             0));
@@ -1773,7 +1764,7 @@ base::string16 FormatUrlWithOffsets(
             parsed.username.is_nonempty() ? &parsed.username : &parsed.password;
         // The seeming off-by-one in below is to account for the '@' after the
         // username/password.
-        offset_adjuster.Add(base::OffsetAdjuster::Adjustment(
+        offset_adjuster.Add(OffsetAdjuster::Adjustment(
             static_cast<size_t>(nonempty_component->begin),
             static_cast<size_t>(nonempty_component->len + 1), 0));
       }
@@ -1782,13 +1773,32 @@ base::string16 FormatUrlWithOffsets(
     AppendFormattedComponent(spec, parsed.username, original_offsets,
         NonHostComponentTransform(unescape_rules), &url_string,
         &new_parsed->username, offsets_for_adjustment);
-    if (parsed.password.is_valid())
+    if (parsed.password.is_valid()) {
+      size_t colon = parsed.username.end();
+      DCHECK_EQ(static_cast<size_t>(parsed.password.begin - 1), colon);
+      std::vector<size_t>::const_iterator colon_iter =
+          std::find(original_offsets.begin(), original_offsets.end(), colon);
+      if (colon_iter != original_offsets.end()) {
+        (*offsets_for_adjustment)[colon_iter - original_offsets.begin()] =
+            url_string.length();
+      }
       url_string.push_back(':');
+    }
     AppendFormattedComponent(spec, parsed.password, original_offsets,
         NonHostComponentTransform(unescape_rules), &url_string,
         &new_parsed->password, offsets_for_adjustment);
-    if (parsed.username.is_valid() || parsed.password.is_valid())
+    if (parsed.username.is_valid() || parsed.password.is_valid()) {
+      size_t at_sign = (parsed.password.is_valid() ?
+          parsed.password : parsed.username).end();
+      DCHECK_EQ(static_cast<size_t>(parsed.host.begin - 1), at_sign);
+      std::vector<size_t>::const_iterator at_sign_iter =
+          std::find(original_offsets.begin(), original_offsets.end(), at_sign);
+      if (at_sign_iter != original_offsets.end()) {
+        (*offsets_for_adjustment)[at_sign_iter - original_offsets.begin()] =
+            url_string.length();
+      }
       url_string.push_back('@');
+    }
   }
   if (prefix_end)
     *prefix_end = static_cast<size_t>(url_string.length());
@@ -1816,10 +1826,6 @@ base::string16 FormatUrlWithOffsets(
     AppendFormattedComponent(spec, parsed.path, original_offsets,
         NonHostComponentTransform(unescape_rules), &url_string,
         &new_parsed->path, offsets_for_adjustment);
-  } else {
-    base::OffsetAdjuster offset_adjuster(offsets_for_adjustment);
-    offset_adjuster.Add(base::OffsetAdjuster::Adjustment(
-        url_string.length(), parsed.path.len, 0));
   }
   if (parsed.query.is_valid())
     url_string.push_back('?');
@@ -1828,20 +1834,35 @@ base::string16 FormatUrlWithOffsets(
       &new_parsed->query, offsets_for_adjustment);
 
   // Ref.  This is valid, unescaped UTF-8, so we can just convert.
-  if (parsed.ref.is_valid())
+  if (parsed.ref.is_valid()) {
     url_string.push_back('#');
-  AppendFormattedComponent(spec, parsed.ref, original_offsets,
-      NonHostComponentTransform(UnescapeRule::NONE), &url_string,
-      &new_parsed->ref, offsets_for_adjustment);
+    size_t original_ref_begin = static_cast<size_t>(parsed.ref.begin);
+    size_t output_ref_begin = url_string.length();
+    new_parsed->ref.begin = static_cast<int>(output_ref_begin);
+
+    std::vector<size_t> offsets_into_ref(
+        OffsetsIntoComponent(original_offsets, original_ref_begin));
+    if (parsed.ref.len > 0) {
+      url_string.append(UTF8ToUTF16AndAdjustOffsets(
+          spec.substr(original_ref_begin, static_cast<size_t>(parsed.ref.len)),
+          &offsets_into_ref));
+    }
+
+    new_parsed->ref.len =
+        static_cast<int>(url_string.length() - new_parsed->ref.begin);
+    AdjustForComponentTransform(original_offsets, original_ref_begin,
+        static_cast<size_t>(parsed.ref.end()), offsets_into_ref,
+        output_ref_begin, offsets_for_adjustment);
+  }
 
   // If we need to strip out http do it after the fact. This way we don't need
   // to worry about how offset_for_adjustment is interpreted.
-  if (omit_http && StartsWith(url_string, base::ASCIIToUTF16(kHTTP), true)) {
+  if (omit_http && StartsWith(url_string, ASCIIToUTF16(kHTTP), true)) {
     const size_t kHTTPSize = arraysize(kHTTP) - 1;
     url_string = url_string.substr(kHTTPSize);
     if (offsets_for_adjustment && !offsets_for_adjustment->empty()) {
-      base::OffsetAdjuster offset_adjuster(offsets_for_adjustment);
-      offset_adjuster.Add(base::OffsetAdjuster::Adjustment(0, kHTTPSize, 0));
+      OffsetAdjuster offset_adjuster(offsets_for_adjustment);
+      offset_adjuster.Add(OffsetAdjuster::Adjustment(0, kHTTPSize, 0));
     }
     if (prefix_end)
       *prefix_end -= kHTTPSize;
@@ -1850,24 +1871,24 @@ base::string16 FormatUrlWithOffsets(
     DCHECK(new_parsed->scheme.is_valid());
     int delta = -(new_parsed->scheme.len + 3);  // +3 for ://.
     new_parsed->scheme.reset();
-    AdjustAllComponentsButScheme(delta, new_parsed);
+    AdjustComponents(delta, new_parsed);
   }
 
   LimitOffsets(url_string, offsets_for_adjustment);
   return url_string;
 }
 
-base::string16 FormatUrl(const GURL& url,
-                         const std::string& languages,
-                         FormatUrlTypes format_types,
-                         UnescapeRule::Type unescape_rules,
-                         url_parse::Parsed* new_parsed,
-                         size_t* prefix_end,
-                         size_t* offset_for_adjustment) {
-  Offsets offsets;
+string16 FormatUrl(const GURL& url,
+                   const std::string& languages,
+                   FormatUrlTypes format_types,
+                   UnescapeRule::Type unescape_rules,
+                   url_parse::Parsed* new_parsed,
+                   size_t* prefix_end,
+                   size_t* offset_for_adjustment) {
+  std::vector<size_t> offsets;
   if (offset_for_adjustment)
     offsets.push_back(*offset_for_adjustment);
-  base::string16 result = FormatUrlWithOffsets(url, languages, format_types,
+  string16 result = FormatUrlWithOffsets(url, languages, format_types,
       unescape_rules, new_parsed, prefix_end, &offsets);
   if (offset_for_adjustment)
     *offset_for_adjustment = offsets[0];
@@ -1877,9 +1898,8 @@ base::string16 FormatUrl(const GURL& url,
 bool CanStripTrailingSlash(const GURL& url) {
   // Omit the path only for standard, non-file URLs with nothing but "/" after
   // the hostname.
-  return url.IsStandard() && !url.SchemeIsFile() &&
-      !url.SchemeIsFileSystem() && !url.has_query() && !url.has_ref()
-      && url.path() == "/";
+  return url.IsStandard() && !url.SchemeIsFile() && !url.has_query() &&
+      !url.has_ref() && url.path() == "/";
 }
 
 GURL SimplifyUrlForRequest(const GURL& url) {
@@ -1936,10 +1956,155 @@ ScopedPortException::~ScopedPortException() {
     NOTREACHED();
 }
 
-bool HaveOnlyLoopbackAddresses() {
+enum IPv6SupportStatus {
+  IPV6_CANNOT_CREATE_SOCKETS,
+  IPV6_CAN_CREATE_SOCKETS,
+  IPV6_GETIFADDRS_FAILED,
+  IPV6_GLOBAL_ADDRESS_MISSING,
+  IPV6_GLOBAL_ADDRESS_PRESENT,
+  IPV6_INTERFACE_ARRAY_TOO_SHORT,
+  IPV6_SUPPORT_MAX  // Bounding values for enumeration.
+};
+
+static void IPv6SupportResults(IPv6SupportStatus result) {
+  static bool run_once = false;
+  if (!run_once) {
+    run_once = true;
+    UMA_HISTOGRAM_ENUMERATION("Net.IPv6Status", result, IPV6_SUPPORT_MAX);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("Net.IPv6Status_retest", result,
+                              IPV6_SUPPORT_MAX);
+  }
+}
+
+// TODO(jar): The following is a simple estimate of IPv6 support.  We may need
+// to do a test resolution, and a test connection, to REALLY verify support.
+// static
+bool IPv6Supported() {
 #if defined(OS_ANDROID)
-  return android::HaveOnlyLoopbackAddresses();
+  // TODO: We should fully implement IPv6 probe once 'getifaddrs' API available;
+  // Another approach is implementing the similar feature by
+  // java.net.NetworkInterface through JNI.
+  NOTIMPLEMENTED();
+  // so we don't get a 'defined but not used' warning/err
+  IPv6SupportResults(IPV6_GETIFADDRS_FAILED);
+  return true;
 #elif defined(OS_POSIX)
+  int test_socket = socket(AF_INET6, SOCK_STREAM, 0);
+  if (test_socket == -1) {
+    IPv6SupportResults(IPV6_CANNOT_CREATE_SOCKETS);
+    return false;
+  }
+  close(test_socket);
+
+  // Check to see if any interface has a IPv6 address.
+  struct ifaddrs* interface_addr = NULL;
+  int rv = getifaddrs(&interface_addr);
+  if (rv != 0) {
+     IPv6SupportResults(IPV6_GETIFADDRS_FAILED);
+     return true;  // Don't yet block IPv6.
+  }
+
+  bool found_ipv6 = false;
+  for (struct ifaddrs* interface = interface_addr;
+       interface != NULL;
+       interface = interface->ifa_next) {
+    if (!(IFF_UP & interface->ifa_flags))
+      continue;
+    if (IFF_LOOPBACK & interface->ifa_flags)
+      continue;
+    struct sockaddr* addr = interface->ifa_addr;
+    if (!addr)
+      continue;
+    if (addr->sa_family != AF_INET6)
+      continue;
+    // Safe cast since this is AF_INET6.
+    struct sockaddr_in6* addr_in6 =
+        reinterpret_cast<struct sockaddr_in6*>(addr);
+    struct in6_addr* sin6_addr = &addr_in6->sin6_addr;
+    if (IN6_IS_ADDR_LOOPBACK(sin6_addr) || IN6_IS_ADDR_LINKLOCAL(sin6_addr))
+      continue;
+    found_ipv6 = true;
+    break;
+  }
+  freeifaddrs(interface_addr);
+  if (!found_ipv6) {
+    IPv6SupportResults(IPV6_GLOBAL_ADDRESS_MISSING);
+    return false;
+  }
+
+  IPv6SupportResults(IPV6_GLOBAL_ADDRESS_PRESENT);
+  return true;
+#elif defined(OS_WIN)
+  EnsureWinsockInit();
+  SOCKET test_socket = socket(AF_INET6, SOCK_STREAM, 0);
+  if (test_socket == INVALID_SOCKET) {
+    IPv6SupportResults(IPV6_CANNOT_CREATE_SOCKETS);
+    return false;
+  }
+  closesocket(test_socket);
+
+  // Check to see if any interface has a IPv6 address.
+  // The GetAdaptersAddresses MSDN page recommends using a size of 15000 to
+  // avoid reallocation.
+  ULONG adapters_size = 15000;
+  scoped_ptr_malloc<IP_ADAPTER_ADDRESSES> adapters;
+  ULONG error;
+  int num_tries = 0;
+  do {
+    adapters.reset(
+        reinterpret_cast<PIP_ADAPTER_ADDRESSES>(malloc(adapters_size)));
+    // Return only unicast addresses.
+    error = GetAdaptersAddresses(AF_UNSPEC,
+                                 GAA_FLAG_SKIP_ANYCAST |
+                                 GAA_FLAG_SKIP_MULTICAST |
+                                 GAA_FLAG_SKIP_DNS_SERVER |
+                                 GAA_FLAG_SKIP_FRIENDLY_NAME,
+                                 NULL, adapters.get(), &adapters_size);
+    num_tries++;
+  } while (error == ERROR_BUFFER_OVERFLOW && num_tries <= 3);
+  if (error == ERROR_NO_DATA) {
+    IPv6SupportResults(IPV6_GLOBAL_ADDRESS_MISSING);
+    return false;
+  }
+  if (error != ERROR_SUCCESS) {
+    IPv6SupportResults(IPV6_GETIFADDRS_FAILED);
+    return true;  // Don't yet block IPv6.
+  }
+
+  PIP_ADAPTER_ADDRESSES adapter;
+  for (adapter = adapters.get(); adapter; adapter = adapter->Next) {
+    if (adapter->OperStatus != IfOperStatusUp)
+      continue;
+    if (adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK)
+      continue;
+    PIP_ADAPTER_UNICAST_ADDRESS unicast_address;
+    for (unicast_address = adapter->FirstUnicastAddress;
+         unicast_address;
+         unicast_address = unicast_address->Next) {
+      if (unicast_address->Address.lpSockaddr->sa_family != AF_INET6)
+        continue;
+      // Safe cast since this is AF_INET6.
+      struct sockaddr_in6* addr_in6 = reinterpret_cast<struct sockaddr_in6*>(
+          unicast_address->Address.lpSockaddr);
+      struct in6_addr* sin6_addr = &addr_in6->sin6_addr;
+      if (IN6_IS_ADDR_LOOPBACK(sin6_addr) || IN6_IS_ADDR_LINKLOCAL(sin6_addr))
+        continue;
+      IPv6SupportResults(IPV6_GLOBAL_ADDRESS_PRESENT);
+      return true;
+    }
+  }
+
+  IPv6SupportResults(IPV6_GLOBAL_ADDRESS_MISSING);
+  return false;
+#else
+  NOTIMPLEMENTED();
+  return true;
+#endif  // defined(various platforms)
+}
+
+bool HaveOnlyLoopbackAddresses() {
+#if defined(OS_POSIX) && !defined(OS_ANDROID)
   struct ifaddrs* interface_addr = NULL;
   int rv = getifaddrs(&interface_addr);
   if (rv != 0) {
@@ -1984,30 +2149,6 @@ bool HaveOnlyLoopbackAddresses() {
 #endif  // defined(various platforms)
 }
 
-AddressFamily GetAddressFamily(const IPAddressNumber& address) {
-  switch (address.size()) {
-    case kIPv4AddressSize:
-      return ADDRESS_FAMILY_IPV4;
-    case kIPv6AddressSize:
-      return ADDRESS_FAMILY_IPV6;
-    default:
-      return ADDRESS_FAMILY_UNSPECIFIED;
-  }
-}
-
-int ConvertAddressFamily(AddressFamily address_family) {
-  switch (address_family) {
-    case ADDRESS_FAMILY_UNSPECIFIED:
-      return AF_UNSPEC;
-    case ADDRESS_FAMILY_IPV4:
-      return AF_INET;
-    case ADDRESS_FAMILY_IPV6:
-      return AF_INET6;
-  }
-  NOTREACHED();
-  return AF_UNSPEC;
-}
-
 bool ParseIPLiteralToNumber(const std::string& ip_literal,
                             IPAddressNumber* ip_number) {
   // |ip_literal| could be either a IPv4 or an IPv6 literal. If it contains
@@ -2033,12 +2174,6 @@ bool ParseIPLiteralToNumber(const std::string& ip_literal,
   return family == url_canon::CanonHostInfo::IPV4;
 }
 
-namespace {
-
-const unsigned char kIPv4MappedPrefix[] =
-    { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF };
-}
-
 IPAddressNumber ConvertIPv4NumberToIPv6Number(
     const IPAddressNumber& ipv4_number) {
   DCHECK(ipv4_number.size() == 4);
@@ -2047,25 +2182,11 @@ IPAddressNumber ConvertIPv4NumberToIPv6Number(
   // <80 bits of zeros>  + <16 bits of ones> + <32-bit IPv4 address>.
   IPAddressNumber ipv6_number;
   ipv6_number.reserve(16);
-  ipv6_number.insert(ipv6_number.end(),
-                     kIPv4MappedPrefix,
-                     kIPv4MappedPrefix + arraysize(kIPv4MappedPrefix));
+  ipv6_number.insert(ipv6_number.end(), 10, 0);
+  ipv6_number.push_back(0xFF);
+  ipv6_number.push_back(0xFF);
   ipv6_number.insert(ipv6_number.end(), ipv4_number.begin(), ipv4_number.end());
   return ipv6_number;
-}
-
-bool IsIPv4Mapped(const IPAddressNumber& address) {
-  if (address.size() != kIPv6AddressSize)
-    return false;
-  return std::equal(address.begin(),
-                    address.begin() + arraysize(kIPv4MappedPrefix),
-                    kIPv4MappedPrefix);
-}
-
-IPAddressNumber ConvertIPv4MappedToIPv4(const IPAddressNumber& address) {
-  DCHECK(IsIPv4Mapped(address));
-  return IPAddressNumber(address.begin() + arraysize(kIPv4MappedPrefix),
-                         address.end());
 }
 
 bool ParseCIDRBlock(const std::string& cidr_literal,
@@ -2120,7 +2241,92 @@ bool IPNumberMatchesPrefix(const IPAddressNumber& ip_number,
                                  96 + prefix_length_in_bits);
   }
 
-  return IPNumberPrefixCheck(ip_number, &ip_prefix[0], prefix_length_in_bits);
+  // Otherwise we are comparing two IPv4 addresses, or two IPv6 addresses.
+  // Compare all the bytes that fall entirely within the prefix.
+  int num_entire_bytes_in_prefix = prefix_length_in_bits / 8;
+  for (int i = 0; i < num_entire_bytes_in_prefix; ++i) {
+    if (ip_number[i] != ip_prefix[i])
+      return false;
+  }
+
+  // In case the prefix was not a multiple of 8, there will be 1 byte
+  // which is only partially masked.
+  int remaining_bits = prefix_length_in_bits % 8;
+  if (remaining_bits != 0) {
+    unsigned char mask = 0xFF << (8 - remaining_bits);
+    int i = num_entire_bytes_in_prefix;
+    if ((ip_number[i] & mask) != (ip_prefix[i] & mask))
+      return false;
+  }
+
+  return true;
+}
+
+struct addrinfo* CreateCopyOfAddrinfo(const struct addrinfo* info,
+                                      bool recursive) {
+  DCHECK(info);
+  struct addrinfo* copy = new addrinfo;
+
+  // Copy all the fields (some of these are pointers, we will fix that next).
+  memcpy(copy, info, sizeof(addrinfo));
+
+  // ai_canonname is a NULL-terminated string.
+  if (info->ai_canonname) {
+    copy->ai_canonname = do_strdup(info->ai_canonname);
+  }
+
+  // ai_addr is a buffer of length ai_addrlen.
+  if (info->ai_addr) {
+    copy->ai_addr = reinterpret_cast<sockaddr *>(new char[info->ai_addrlen]);
+    memcpy(copy->ai_addr, info->ai_addr, info->ai_addrlen);
+  }
+
+  // Recursive copy.
+  if (recursive && info->ai_next)
+    copy->ai_next = CreateCopyOfAddrinfo(info->ai_next, recursive);
+  else
+    copy->ai_next = NULL;
+
+  return copy;
+}
+
+void FreeCopyOfAddrinfo(struct addrinfo* info) {
+  DCHECK(info);
+  if (info->ai_canonname)
+    free(info->ai_canonname);  // Allocated by strdup.
+
+  if (info->ai_addr)
+    delete [] reinterpret_cast<char*>(info->ai_addr);
+
+  struct addrinfo* next = info->ai_next;
+
+  delete info;
+
+  // Recursive free.
+  if (next)
+    FreeCopyOfAddrinfo(next);
+}
+
+// Returns the port field of the sockaddr in |info|.
+uint16* GetPortFieldFromAddrinfo(struct addrinfo* info) {
+  const struct addrinfo* const_info = info;
+  const uint16* port_field = GetPortFieldFromAddrinfo(const_info);
+  return const_cast<uint16*>(port_field);
+}
+
+const uint16* GetPortFieldFromAddrinfo(const struct addrinfo* info) {
+  DCHECK(info);
+  const struct sockaddr* address = info->ai_addr;
+  DCHECK(address);
+  DCHECK_EQ(info->ai_family, address->sa_family);
+  return GetPortFieldFromSockaddr(address, info->ai_addrlen);
+}
+
+uint16 GetPortFromAddrinfo(const struct addrinfo* info) {
+  const uint16* port_field = GetPortFieldFromAddrinfo(info);
+  if (!port_field)
+    return -1;
+  return ntohs(*port_field);
 }
 
 const uint16* GetPortFieldFromSockaddr(const struct sockaddr* address,
@@ -2145,7 +2351,17 @@ int GetPortFromSockaddr(const struct sockaddr* address, socklen_t address_len) {
   const uint16* port_field = GetPortFieldFromSockaddr(address, address_len);
   if (!port_field)
     return -1;
-  return base::NetToHost16(*port_field);
+  return ntohs(*port_field);
+}
+
+// Assign |port| to each address in the linked list starting from |head|.
+void SetPortForAllAddrinfos(struct addrinfo* head, uint16 port) {
+  DCHECK(head);
+  for (struct addrinfo* ai = head; ai; ai = ai->ai_next) {
+    uint16* port_field = GetPortFieldFromAddrinfo(ai);
+    if (port_field)
+      *port_field = htons(port);
+  }
 }
 
 bool IsLocalhost(const std::string& host) {
@@ -2182,42 +2398,15 @@ bool IsLocalhost(const std::string& host) {
   return false;
 }
 
-NetworkInterface::NetworkInterface() : network_prefix(0) {
+NetworkInterface::NetworkInterface() {
 }
 
 NetworkInterface::NetworkInterface(const std::string& name,
-                                   uint32 interface_index,
-                                   const IPAddressNumber& address,
-                                   size_t network_prefix)
-    : name(name),
-      interface_index(interface_index),
-      address(address),
-      network_prefix(network_prefix) {
+                                   const IPAddressNumber& address)
+    : name(name), address(address) {
 }
 
 NetworkInterface::~NetworkInterface() {
-}
-
-unsigned CommonPrefixLength(const IPAddressNumber& a1,
-                            const IPAddressNumber& a2) {
-  DCHECK_EQ(a1.size(), a2.size());
-  for (size_t i = 0; i < a1.size(); ++i) {
-    unsigned diff = a1[i] ^ a2[i];
-    if (!diff)
-      continue;
-    for (unsigned j = 0; j < CHAR_BIT; ++j) {
-      if (diff & (1 << (CHAR_BIT - 1)))
-        return i * CHAR_BIT + j;
-      diff <<= 1;
-    }
-    NOTREACHED();
-  }
-  return a1.size() * CHAR_BIT;
-}
-
-unsigned MaskPrefixLength(const IPAddressNumber& mask) {
-  IPAddressNumber all_ones(mask.size(), 0xFF);
-  return CommonPrefixLength(mask, all_ones);
 }
 
 }  // namespace net

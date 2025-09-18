@@ -4,12 +4,9 @@
 
 #ifndef UI_BASE_UI_BASE_TYPES_H_
 #define UI_BASE_UI_BASE_TYPES_H_
-
-#include "ui/base/ui_export.h"
+#pragma once
 
 namespace ui {
-
-class Event;
 
 // Window "show" state.  These values are written to disk so should not be
 // changed.
@@ -21,8 +18,7 @@ enum WindowShowState {
   SHOW_STATE_MAXIMIZED  = 3,
   SHOW_STATE_INACTIVE   = 4,  // Views only, not persisted.
   SHOW_STATE_FULLSCREEN = 5,
-  SHOW_STATE_DETACHED   = 6,  // Views only; detached panel.
-  SHOW_STATE_END        = 7   // The end of show state enum.
+  SHOW_STATE_END        = 6   // The end of show state enum.
 };
 
 // Dialog button identifiers used to specify which buttons to show the user.
@@ -37,20 +33,8 @@ enum DialogButton {
 enum ModalType {
   MODAL_TYPE_NONE   = 0,  // Window is not modal.
   MODAL_TYPE_WINDOW = 1,  // Window is modal to its transient parent.
-  MODAL_TYPE_CHILD  = 2,  // Window is modal to a child of its transient parent.
-  MODAL_TYPE_SYSTEM = 3   // Window is modal to all other windows.
+  MODAL_TYPE_SYSTEM = 2   // Window is modal to all other windows.
 };
-
-// TODO(varunjain): Remove MENU_SOURCE_NONE (crbug.com/250964)
-enum MenuSourceType {
-  MENU_SOURCE_NONE            = 0,
-  MENU_SOURCE_MOUSE           = 1,
-  MENU_SOURCE_KEYBOARD        = 2,
-  MENU_SOURCE_TOUCH           = 3,
-  MENU_SOURCE_TOUCH_EDIT_MENU = 4,
-};
-
-UI_EXPORT MenuSourceType GetMenuSourceTypeForEvent(const ui::Event& event);
 
 }  // namespace ui
 

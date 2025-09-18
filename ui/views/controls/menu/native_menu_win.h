@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_NATIVE_MENU_WIN_H_
 #define UI_VIEWS_CONTROLS_MENU_NATIVE_MENU_WIN_H_
+#pragma once
 
 #include <vector>
 
@@ -12,13 +13,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/strings/string16.h"
+#include "ui/base/models/simple_menu_model.h"
 #include "ui/views/controls/menu/menu_wrapper.h"
 #include "ui/views/views_export.h"
-
-namespace ui {
-class MenuModel;
-}
 
 namespace views {
 
@@ -35,9 +32,9 @@ class VIEWS_EXPORT NativeMenuWin : public MenuWrapper {
   // Overridden from MenuWrapper:
   virtual void RunMenuAt(const gfx::Point& point, int alignment) OVERRIDE;
   virtual void CancelMenu() OVERRIDE;
-  virtual void Rebuild(MenuInsertionDelegateWin* delegate) OVERRIDE;
+  virtual void Rebuild() OVERRIDE;
   virtual void UpdateStates() OVERRIDE;
-  virtual HMENU GetNativeMenu() const OVERRIDE;
+  virtual gfx::NativeMenu GetNativeMenu() const OVERRIDE;
   virtual MenuAction GetMenuAction() const OVERRIDE;
   virtual void AddMenuListener(MenuListener* listener) OVERRIDE;
   virtual void RemoveMenuListener(MenuListener* listener) OVERRIDE;
@@ -74,7 +71,7 @@ class VIEWS_EXPORT NativeMenuWin : public MenuWrapper {
   // Sets the label of the item at the specified index.
   void SetMenuItemLabel(int menu_index,
                         int model_index,
-                        const base::string16& label);
+                        const string16& label);
 
   // Updates the local data structure with the correctly formatted version of
   // |label| at the specified model_index, and adds string data to |mii| if
@@ -82,7 +79,7 @@ class VIEWS_EXPORT NativeMenuWin : public MenuWrapper {
   // of the peculiarities of the Windows menu API.
   void UpdateMenuItemInfoForString(MENUITEMINFO* mii,
                                    int model_index,
-                                   const base::string16& label);
+                                   const string16& label);
 
   // Returns the alignment flags to be passed to TrackPopupMenuEx, based on the
   // supplied alignment and the UI text direction.
@@ -162,6 +159,24 @@ class VIEWS_EXPORT NativeMenuWin : public MenuWrapper {
   static NativeMenuWin* open_native_menu_win_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeMenuWin);
+};
+
+// A SimpleMenuModel subclass that allows the system menu for a window to be
+// wrapped.
+class VIEWS_EXPORT SystemMenuModel : public ui::SimpleMenuModel {
+ public:
+  explicit SystemMenuModel(Delegate* delegate);
+  virtual ~SystemMenuModel();
+
+  // Overridden from ui::MenuModel:
+  virtual int GetFirstItemIndex(gfx::NativeMenu native_menu) const;
+
+ protected:
+  // Overridden from SimpleMenuModel:
+  virtual int FlipIndex(int index) const { return GetItemCount() - index - 1; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SystemMenuModel);
 };
 
 }  // namespace views

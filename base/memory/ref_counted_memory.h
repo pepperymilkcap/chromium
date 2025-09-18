@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_MEMORY_REF_COUNTED_MEMORY_H_
 #define BASE_MEMORY_REF_COUNTED_MEMORY_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -12,7 +13,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 
-namespace base {
+// TODO(erg): The contents of this file should be in a namespace. This would
+// require touching >100 files in chrome/ though.
 
 // A generic interface to memory. This object is reference counted because one
 // of its two subclasses own the data they carry, and we need to have
@@ -26,9 +28,6 @@ class BASE_EXPORT RefCountedMemory
 
   // Size of the memory pointed to.
   virtual size_t size() const = 0;
-
-  // Returns true if |other| is byte for byte equal.
-  bool Equals(const scoped_refptr<RefCountedMemory>& other) const;
 
  protected:
   friend class base::RefCountedThreadSafe<RefCountedMemory>;
@@ -50,8 +49,6 @@ class BASE_EXPORT RefCountedStaticMemory : public RefCountedMemory {
   virtual size_t size() const OVERRIDE;
 
  private:
-  virtual ~RefCountedStaticMemory();
-
   const unsigned char* data_;
   size_t length_;
 
@@ -65,7 +62,7 @@ class BASE_EXPORT RefCountedBytes : public RefCountedMemory {
   RefCountedBytes();
 
   // Constructs a RefCountedBytes object by _copying_ from |initializer|.
-  explicit RefCountedBytes(const std::vector<unsigned char>& initializer);
+  RefCountedBytes(const std::vector<unsigned char>& initializer);
 
   // Constructs a RefCountedBytes object by performing a swap. (To non
   // destructively build a RefCountedBytes, use the constructor that takes a
@@ -80,12 +77,15 @@ class BASE_EXPORT RefCountedBytes : public RefCountedMemory {
   std::vector<unsigned char>& data() { return data_; }
 
  private:
+  friend class base::RefCountedThreadSafe<RefCountedBytes>;
   virtual ~RefCountedBytes();
 
   std::vector<unsigned char> data_;
 
   DISALLOW_COPY_AND_ASSIGN(RefCountedBytes);
 };
+
+namespace base {
 
 // An implementation of RefCountedMemory, where the bytes are stored in an STL
 // string. Use this if your data naturally arrives in that format.
@@ -106,31 +106,12 @@ class BASE_EXPORT RefCountedString : public RefCountedMemory {
   std::string& data() { return data_; }
 
  private:
+  friend class base::RefCountedThreadSafe<RefCountedString>;
   virtual ~RefCountedString();
 
   std::string data_;
 
   DISALLOW_COPY_AND_ASSIGN(RefCountedString);
-};
-
-// An implementation of RefCountedMemory that holds a chunk of memory
-// previously allocated with malloc or calloc, and that therefore must be freed
-// using free().
-class BASE_EXPORT RefCountedMallocedMemory : public base::RefCountedMemory {
- public:
-  RefCountedMallocedMemory(void* data, size_t length);
-
-  // Overridden from RefCountedMemory:
-  virtual const unsigned char* front() const OVERRIDE;
-  virtual size_t size() const OVERRIDE;
-
- private:
-  virtual ~RefCountedMallocedMemory();
-
-  unsigned char* data_;
-  size_t length_;
-
-  DISALLOW_COPY_AND_ASSIGN(RefCountedMallocedMemory);
 };
 
 }  // namespace base

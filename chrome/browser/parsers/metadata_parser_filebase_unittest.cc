@@ -5,11 +5,11 @@
 #include <map>
 #include <string>
 
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"  // TODO(brettw) remove when WideToASCII moves.
+#include "base/scoped_temp_dir.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"  // TODO(brettw) remove when WideToASCII moves.
 #include "chrome/browser/parsers/metadata_parser_filebase.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -40,13 +40,13 @@ class FileMetaDataParserTest : public testing::Test {
 
   std::string test_file_size() {
     int64 size;
-    EXPECT_TRUE(base::GetFileSize(test_file_, &size));
+    EXPECT_TRUE(file_util::GetFileSize(test_file_, &size));
 
     return base::Int64ToString(size);
   }
 
-  base::ScopedTempDir temp_dir_;
-  base::FilePath test_file_;
+  ScopedTempDir temp_dir_;
+  FilePath test_file_;
 };
 
 TEST_F(FileMetaDataParserTest, Parse) {

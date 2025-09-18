@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,39 +6,30 @@
 
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_piece.h"
+#include "base/message_loop.h"
+#include "base/string_piece.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "chromeos/network/device_state.h"
-#include "chromeos/network/network_device_handler.h"
-#include "chromeos/network/network_event_log.h"
-#include "chromeos/network/network_state_handler.h"
-#include "chromeos/network/network_state_handler_observer.h"
-#include "chromeos/network/shill_property_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
-#include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/base/webui/jstemplate_builder.h"
-#include "ui/base/webui/web_ui_util.h"
 
 using content::BrowserThread;
 using content::WebContents;
@@ -64,36 +55,31 @@ const char kTriesLeft[] = "tries";
 
 // Error constants, passed to the page.
 const char kErrorPin[] = "incorrectPin";
+const char kErrorPuk[] = "incorrectPuk";
 const char kErrorOk[] = "ok";
 
-chromeos::NetworkDeviceHandler* GetNetworkDeviceHandler() {
-  return chromeos::NetworkHandler::Get()->network_device_handler();
-}
-
-chromeos::NetworkStateHandler* GetNetworkStateHandler() {
-  return chromeos::NetworkHandler::Get()->network_state_handler();
+const chromeos::NetworkDevice* GetCellularDevice() {
+  chromeos::NetworkLibrary* lib = chromeos::CrosLibrary::Get()->
+      GetNetworkLibrary();
+  CHECK(lib);
+  return lib->FindCellularDevice();
 }
 
 }  // namespace
 
 namespace chromeos {
 
-class SimUnlockUIHTMLSource : public content::URLDataSource {
+class SimUnlockUIHTMLSource : public ChromeURLDataManager::DataSource {
  public:
   SimUnlockUIHTMLSource();
 
-  // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual void StartDataRequest(
-      const std::string& path,
-      int render_process_id,
-      int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
-  virtual std::string GetMimeType(const std::string&) const OVERRIDE {
+  // Called when the network layer has requested a resource underneath
+  // the path we registered.
+  virtual void StartDataRequest(const std::string& path,
+                                bool is_incognito,
+                                int request_id);
+  virtual std::string GetMimeType(const std::string&) const {
     return "text/html";
-  }
-  virtual bool ShouldAddContentSecurityPolicy() const OVERRIDE {
-    return false;
   }
 
  private:
@@ -106,7 +92,8 @@ class SimUnlockUIHTMLSource : public content::URLDataSource {
 // The handler for Javascript messages related to the "sim-unlock" view.
 class SimUnlockHandler : public WebUIMessageHandler,
                          public base::SupportsWeakPtr<SimUnlockHandler>,
-                         public NetworkStateHandlerObserver {
+                         public NetworkLibrary::NetworkDeviceObserver,
+                         public NetworkLibrary::PinOperationObserver {
  public:
   SimUnlockHandler();
   virtual ~SimUnlockHandler();
@@ -114,8 +101,13 @@ class SimUnlockHandler : public WebUIMessageHandler,
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  // NetworkStateHandlerObserver implementation.
-  virtual void DeviceListChanged() OVERRIDE;
+  // NetworkLibrary::NetworkDeviceObserver implementation.
+  virtual void OnNetworkDeviceSimLockChanged(
+      NetworkLibrary* cros, const NetworkDevice* device) OVERRIDE;
+
+  // NetworkLibrary::PinOperationObserver implementation.
+  virtual void OnPinOperationCompleted(NetworkLibrary* cros,
+                                       PinOperationError error) OVERRIDE;
 
  private:
   // Should keep this state enum in sync with similar one in JS code.
@@ -136,23 +128,15 @@ class SimUnlockHandler : public WebUIMessageHandler,
   } SimUnlockState;
 
   // Type of the SIM unlock code.
-  enum SimUnlockCode {
+  typedef enum SimUnlockCode {
     CODE_PIN,
-    CODE_PUK
-  };
-
-  enum PinOperationError {
-    PIN_ERROR_NONE = 0,
-    PIN_ERROR_UNKNOWN = 1,
-    PIN_ERROR_INCORRECT_CODE = 2,
-    PIN_ERROR_BLOCKED = 3
-  };
+    CODE_PUK,
+  } SimUnlockCode;
 
   class TaskProxy : public base::RefCountedThreadSafe<TaskProxy> {
    public:
     explicit TaskProxy(const base::WeakPtr<SimUnlockHandler>& handler)
-        : handler_(handler),
-          code_type_() {
+        : handler_(handler) {
     }
 
     TaskProxy(const base::WeakPtr<SimUnlockHandler>& handler,
@@ -184,10 +168,6 @@ class SimUnlockHandler : public WebUIMessageHandler,
     }
 
    private:
-    friend class base::RefCountedThreadSafe<TaskProxy>;
-
-    ~TaskProxy() {}
-
     base::WeakPtr<SimUnlockHandler> handler_;
 
     // Pending code input (PIN/PUK).
@@ -199,38 +179,22 @@ class SimUnlockHandler : public WebUIMessageHandler,
     DISALLOW_COPY_AND_ASSIGN(TaskProxy);
   };
 
-  // Returns the cellular device that this dialog currently corresponds to.
-  const DeviceState* GetCellularDevice();
-
   // Processing for the cases when dialog was cancelled.
   void CancelDialog();
 
-  // Pass PIN/PUK code to shill and check status.
+  // Pass PIN/PUK code to flimflam and check status.
   void EnterCode(const std::string& code, SimUnlockCode code_type);
-
-  // Methods to invoke shill PIN/PUK D-Bus operations.
-  void ChangeRequirePin(bool require_pin, const std::string& pin);
-  void EnterPin(const std::string& pin);
-  void ChangePin(const std::string& old_pin, const std::string& new_pin);
-  void UnblockPin(const std::string& puk, const std::string& new_pin);
-  void PinOperationSuccessCallback(const std::string& operation_name);
-  void PinOperationErrorCallback(const std::string& operation_name,
-                                 const std::string& error_name,
-                                 scoped_ptr<base::DictionaryValue> error_data);
-
-  // Called when an asynchronous PIN operation has completed.
-  void OnPinOperationCompleted(PinOperationError error);
 
   // Single handler for PIN/PUK code operations.
   void HandleEnterCode(SimUnlockCode code_type, const std::string& code);
 
   // Handlers for JS WebUI messages.
-  void HandleCancel(const base::ListValue* args);
-  void HandleChangePinCode(const base::ListValue* args);
-  void HandleEnterPinCode(const base::ListValue* args);
-  void HandleEnterPukCode(const base::ListValue* args);
-  void HandleProceedToPukInput(const base::ListValue* args);
-  void HandleSimStatusInitialize(const base::ListValue* args);
+  void HandleCancel(const ListValue* args);
+  void HandleChangePinCode(const ListValue* args);
+  void HandleEnterPinCode(const ListValue* args);
+  void HandleEnterPukCode(const ListValue* args);
+  void HandleProceedToPukInput(const ListValue* args);
+  void HandleSimStatusInitialize(const ListValue* args);
 
   // Initialize current SIM card status, passes that to page.
   void InitializeSimStatus();
@@ -247,10 +211,11 @@ class SimUnlockHandler : public WebUIMessageHandler,
   void ProceedToPukInput();
 
   // Processes current SIM card state and update internal state/page.
-  void ProcessSimCardState(const DeviceState* cellular);
+  void ProcessSimCardState(const chromeos::NetworkDevice* cellular);
 
   // Updates page with the current state/SIM card info/error.
-  void UpdatePage(const DeviceState* cellular, const std::string& error_msg);
+  void UpdatePage(const chromeos::NetworkDevice* cellular,
+                  const std::string& error_msg);
 
   // Dialog internal state.
   SimUnlockState state_;
@@ -264,35 +229,25 @@ class SimUnlockHandler : public WebUIMessageHandler,
   // New PIN value for the case when we unblock SIM card or change PIN.
   std::string new_pin_;
 
-  // The initial lock type value, used to observe changes to lock status;
-  std::string sim_lock_type_;
-
   // True if there's a pending PIN operation.
   // That means that SIM lock state change will be received 2 times:
   // OnNetworkDeviceSimLockChanged and OnPinOperationCompleted.
   // First one should be ignored.
   bool pending_pin_operation_;
 
-  base::WeakPtrFactory<SimUnlockHandler> weak_ptr_factory_;
-
   DISALLOW_COPY_AND_ASSIGN(SimUnlockHandler);
 };
 
 // SimUnlockUIHTMLSource -------------------------------------------------------
 
-SimUnlockUIHTMLSource::SimUnlockUIHTMLSource() {
+SimUnlockUIHTMLSource::SimUnlockUIHTMLSource()
+    : DataSource(chrome::kChromeUISimUnlockHost, MessageLoop::current()) {
 }
 
-std::string SimUnlockUIHTMLSource::GetSource() const {
-  return chrome::kChromeUISimUnlockHost;
-}
-
-void SimUnlockUIHTMLSource::StartDataRequest(
-    const std::string& path,
-    int render_process_id,
-    int render_frame_id,
-    const content::URLDataSource::GotDataCallback& callback) {
-  base::DictionaryValue strings;
+void SimUnlockUIHTMLSource::StartDataRequest(const std::string& path,
+                                             bool is_incognito,
+                                             int request_id) {
+  DictionaryValue strings;
   strings.SetString("title",
       l10n_util::GetStringUTF16(IDS_SIM_UNLOCK_ENTER_PIN_TITLE));
   strings.SetString("ok", l10n_util::GetStringUTF16(IDS_OK));
@@ -345,15 +300,16 @@ void SimUnlockUIHTMLSource::StartDataRequest(
   strings.SetString("oldPin", l10n_util::GetStringUTF16(
       IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_CHANGE_PIN_OLD_PIN));
 
-  webui::SetFontAndTextDirection(&strings);
+  SetFontAndTextDirection(&strings);
 
   static const base::StringPiece html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_SIM_UNLOCK_HTML));
 
-  std::string full_html = webui::GetI18nTemplateHtml(html, &strings);
+  std::string full_html = jstemplate_builder::GetI18nTemplateHtml(html,
+                                                                  &strings);
 
-  callback.Run(base::RefCountedString::TakeString(&full_html));
+  SendResponse(request_id, base::RefCountedString::TakeString(&full_html));
 }
 
 // SimUnlockHandler ------------------------------------------------------------
@@ -361,16 +317,23 @@ void SimUnlockUIHTMLSource::StartDataRequest(
 SimUnlockHandler::SimUnlockHandler()
     : state_(SIM_UNLOCK_LOADING),
       dialog_mode_(SimDialogDelegate::SIM_DIALOG_UNLOCK),
-      pending_pin_operation_(false),
-      weak_ptr_factory_(this) {
-  if (GetNetworkStateHandler()
-          ->GetTechnologyState(NetworkTypePattern::Cellular()) !=
-      NetworkStateHandler::TECHNOLOGY_UNAVAILABLE)
-    GetNetworkStateHandler()->AddObserver(this, FROM_HERE);
+      pending_pin_operation_(false) {
+  const chromeos::NetworkDevice* cellular = GetCellularDevice();
+  // One could just call us directly via chrome://sim-unlock.
+  if (cellular) {
+    cellular_device_path_ = cellular->device_path();
+    CrosLibrary::Get()->GetNetworkLibrary()->AddNetworkDeviceObserver(
+        cellular_device_path_, this);
+    CrosLibrary::Get()->GetNetworkLibrary()->AddPinOperationObserver(this);
+  }
 }
 
 SimUnlockHandler::~SimUnlockHandler() {
-  GetNetworkStateHandler()->RemoveObserver(this, FROM_HERE);
+  if (!cellular_device_path_.empty()) {
+    CrosLibrary::Get()->GetNetworkLibrary()->RemoveNetworkDeviceObserver(
+        cellular_device_path_, this);
+    CrosLibrary::Get()->GetNetworkLibrary()->RemovePinOperationObserver(this);
+  }
 }
 
 void SimUnlockHandler::RegisterMessages() {
@@ -394,38 +357,25 @@ void SimUnlockHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void SimUnlockHandler::DeviceListChanged() {
-  const DeviceState* cellular_device = GetCellularDevice();
-  if (!cellular_device) {
-    LOG(WARNING) << "Cellular device with path '" << cellular_device_path_
-                 << "' disappeared.";
-    ProcessSimCardState(NULL);
-    return;
-  }
-
-  // Process the SIM card state only if the lock state changed.
-  if (cellular_device->sim_lock_type() == sim_lock_type_)
-    return;
-
-  sim_lock_type_ = cellular_device->sim_lock_type();
-  uint32 retries_left = cellular_device->sim_retries_left();
-  VLOG(1) << "OnNetworkDeviceSimLockChanged, lock: " << sim_lock_type_
+void SimUnlockHandler::OnNetworkDeviceSimLockChanged(
+    NetworkLibrary* cros, const NetworkDevice* device) {
+  chromeos::SimLockState lock_state = device->sim_lock_state();
+  int retries_left = device->sim_retries_left();
+  VLOG(1) << "OnNetworkDeviceSimLockChanged, lock: " << lock_state
           << ", retries: " << retries_left;
   // There's a pending PIN operation.
   // Wait for it to finish and refresh state then.
   if (!pending_pin_operation_)
-    ProcessSimCardState(cellular_device);
+    ProcessSimCardState(GetCellularDevice());
 }
 
-void SimUnlockHandler::OnPinOperationCompleted(PinOperationError error) {
+void SimUnlockHandler::OnPinOperationCompleted(NetworkLibrary* cros,
+                                               PinOperationError error) {
   pending_pin_operation_ = false;
+  DCHECK(cros);
+  const NetworkDevice* cellular = cros->FindCellularDevice();
+  DCHECK(cellular);
   VLOG(1) << "OnPinOperationCompleted, error: " << error;
-  const DeviceState* cellular = GetCellularDevice();
-  if (!cellular) {
-    VLOG(1) << "Cellular device disappeared. Dismissing dialog.";
-    ProcessSimCardState(NULL);
-    return;
-  }
   if (state_ == SIM_NOT_LOCKED_ASK_PIN && error == PIN_ERROR_NONE) {
     CHECK(dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_ON ||
           dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_OFF);
@@ -449,10 +399,6 @@ void SimUnlockHandler::OnPinOperationCompleted(PinOperationError error) {
     NotifyOnEnterPinEnded(false);
 }
 
-const DeviceState* SimUnlockHandler::GetCellularDevice() {
-  return GetNetworkStateHandler()->GetDeviceState(cellular_device_path_);
-}
-
 void SimUnlockHandler::CancelDialog() {
   if (dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_ON ||
       dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_OFF) {
@@ -470,140 +416,40 @@ void SimUnlockHandler::CancelDialog() {
 void SimUnlockHandler::EnterCode(const std::string& code,
                                  SimUnlockCode code_type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  NetworkLibrary* lib = chromeos::CrosLibrary::Get()->GetNetworkLibrary();
+  CHECK(lib);
 
+  const NetworkDevice* cellular = GetCellularDevice();
+  chromeos::SimLockState lock_state = cellular->sim_lock_state();
   pending_pin_operation_ = true;
 
   switch (code_type) {
     case CODE_PIN:
       if (dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_ON ||
           dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_OFF) {
-        if (!sim_lock_type_.empty()) {
+        if (lock_state != chromeos::SIM_UNLOCKED) {
           // If SIM is locked/absent, change RequirePin UI is not accessible.
           NOTREACHED() <<
               "Changing RequirePin pref on locked / uninitialized SIM.";
         }
-        ChangeRequirePin(
+        lib->ChangeRequirePin(
             dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_ON,
             code);
       } else if (dialog_mode_ == SimDialogDelegate::SIM_DIALOG_CHANGE_PIN) {
-        if (!sim_lock_type_.empty()) {
+        if (lock_state != chromeos::SIM_UNLOCKED) {
           // If SIM is locked/absent, changing PIN UI is not accessible.
           NOTREACHED() << "Changing PIN on locked / uninitialized SIM.";
         }
-        ChangePin(code, new_pin_);
+        lib->ChangePin(code, new_pin_);
       } else {
-        EnterPin(code);
+        lib->EnterPin(code);
       }
       break;
     case CODE_PUK:
       DCHECK(!new_pin_.empty());
-      UnblockPin(code, new_pin_);
+      lib->UnblockPin(code, new_pin_);
       break;
   }
-}
-
-void SimUnlockHandler::ChangeRequirePin(bool require_pin,
-                                        const std::string& pin) {
-  const DeviceState* cellular = GetCellularDevice();
-  if (!cellular) {
-    NOTREACHED() << "Calling RequirePin method w/o cellular device.";
-    return;
-  }
-  std::string operation_name = "ChangeRequirePin";
-  NET_LOG_USER(operation_name, cellular->path());
-  GetNetworkDeviceHandler()->RequirePin(
-      cellular->path(),
-      require_pin,
-      pin,
-      base::Bind(&SimUnlockHandler::PinOperationSuccessCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 operation_name),
-      base::Bind(&SimUnlockHandler::PinOperationErrorCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 operation_name));
-}
-
-void SimUnlockHandler::EnterPin(const std::string& pin) {
-  const DeviceState* cellular = GetCellularDevice();
-  if (!cellular) {
-    NOTREACHED() << "Calling RequirePin method w/o cellular device.";
-    return;
-  }
-  std::string operation_name = "EnterPin";
-  NET_LOG_USER(operation_name, cellular->path());
-  GetNetworkDeviceHandler()->EnterPin(
-      cellular->path(),
-      pin,
-      base::Bind(&SimUnlockHandler::PinOperationSuccessCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 operation_name),
-      base::Bind(&SimUnlockHandler::PinOperationErrorCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 operation_name));
-}
-
-void SimUnlockHandler::ChangePin(const std::string& old_pin,
-                                 const std::string& new_pin) {
-  const DeviceState* cellular = GetCellularDevice();
-  if (!cellular) {
-    NOTREACHED() << "Calling RequirePin method w/o cellular device.";
-    return;
-  }
-  std::string operation_name = "ChangePin";
-  NET_LOG_USER(operation_name, cellular->path());
-  GetNetworkDeviceHandler()->ChangePin(
-      cellular->path(),
-      old_pin,
-      new_pin,
-      base::Bind(&SimUnlockHandler::PinOperationSuccessCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 operation_name),
-      base::Bind(&SimUnlockHandler::PinOperationErrorCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 operation_name));
-}
-
-void SimUnlockHandler::UnblockPin(const std::string& puk,
-                                  const std::string& new_pin) {
-  const DeviceState* cellular = GetCellularDevice();
-  if (!cellular) {
-    NOTREACHED() << "Calling RequirePin method w/o cellular device.";
-    return;
-  }
-  std::string operation_name = "UnblockPin";
-  NET_LOG_USER(operation_name, cellular->path());
-  GetNetworkDeviceHandler()->UnblockPin(
-      cellular->path(),
-      puk,
-      new_pin,
-      base::Bind(&SimUnlockHandler::PinOperationSuccessCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 operation_name),
-      base::Bind(&SimUnlockHandler::PinOperationErrorCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 operation_name));
-}
-
-void SimUnlockHandler::PinOperationSuccessCallback(
-    const std::string& operation_name) {
-  NET_LOG_DEBUG("Pin operation successful.", operation_name);
-  OnPinOperationCompleted(PIN_ERROR_NONE);
-}
-
-void SimUnlockHandler::PinOperationErrorCallback(
-    const std::string& operation_name,
-    const std::string& error_name,
-    scoped_ptr<base::DictionaryValue> error_data) {
-  NET_LOG_ERROR("Pin operation failed: " + error_name, operation_name);
-  PinOperationError pin_error;
-  if (error_name == NetworkDeviceHandler::kErrorIncorrectPin ||
-      error_name == NetworkDeviceHandler::kErrorPinRequired)
-    pin_error = PIN_ERROR_INCORRECT_CODE;
-  else if (error_name == NetworkDeviceHandler::kErrorPinBlocked)
-    pin_error = PIN_ERROR_BLOCKED;
-  else
-    pin_error = PIN_ERROR_UNKNOWN;
-  OnPinOperationCompleted(pin_error);
 }
 
 void SimUnlockHandler::NotifyOnEnterPinEnded(bool cancelled) {
@@ -620,7 +466,7 @@ void SimUnlockHandler::NotifyOnRequirePinChangeEnded(bool new_value) {
       content::Details<bool>(&new_value));
 }
 
-void SimUnlockHandler::HandleCancel(const base::ListValue* args) {
+void SimUnlockHandler::HandleCancel(const ListValue* args) {
   const size_t kEnterCodeParamCount = 0;
   if (args->GetSize() != kEnterCodeParamCount) {
     NOTREACHED();
@@ -631,7 +477,7 @@ void SimUnlockHandler::HandleCancel(const base::ListValue* args) {
       base::Bind(&TaskProxy::HandleCancel, task.get()));
 }
 
-void SimUnlockHandler::HandleChangePinCode(const base::ListValue* args) {
+void SimUnlockHandler::HandleChangePinCode(const ListValue* args) {
   const size_t kChangePinParamCount = 2;
   std::string pin;
   std::string new_pin;
@@ -652,7 +498,7 @@ void SimUnlockHandler::HandleEnterCode(SimUnlockCode code_type,
       base::Bind(&TaskProxy::HandleEnterCode, task.get()));
 }
 
-void SimUnlockHandler::HandleEnterPinCode(const base::ListValue* args) {
+void SimUnlockHandler::HandleEnterPinCode(const ListValue* args) {
   const size_t kEnterPinParamCount = 1;
   std::string pin;
   if (args->GetSize() != kEnterPinParamCount || !args->GetString(0, &pin)) {
@@ -662,7 +508,7 @@ void SimUnlockHandler::HandleEnterPinCode(const base::ListValue* args) {
   HandleEnterCode(CODE_PIN, pin);
 }
 
-void SimUnlockHandler::HandleEnterPukCode(const base::ListValue* args) {
+void SimUnlockHandler::HandleEnterPukCode(const ListValue* args) {
   const size_t kEnterPukParamCount = 2;
   std::string puk;
   std::string new_pin;
@@ -676,7 +522,7 @@ void SimUnlockHandler::HandleEnterPukCode(const base::ListValue* args) {
   HandleEnterCode(CODE_PUK, puk);
 }
 
-void SimUnlockHandler::HandleProceedToPukInput(const base::ListValue* args) {
+void SimUnlockHandler::HandleProceedToPukInput(const ListValue* args) {
   const size_t kProceedToPukInputParamCount = 0;
   if (args->GetSize() != kProceedToPukInputParamCount) {
     NOTREACHED();
@@ -687,7 +533,7 @@ void SimUnlockHandler::HandleProceedToPukInput(const base::ListValue* args) {
       base::Bind(&TaskProxy::HandleProceedToPukInput, task.get()));
 }
 
-void SimUnlockHandler::HandleSimStatusInitialize(const base::ListValue* args) {
+void SimUnlockHandler::HandleSimStatusInitialize(const ListValue* args) {
   const size_t kSimStatusInitializeParamCount = 1;
   double mode;
   if (args->GetSize() != kSimStatusInitializeParamCount ||
@@ -704,17 +550,7 @@ void SimUnlockHandler::HandleSimStatusInitialize(const base::ListValue* args) {
 
 void SimUnlockHandler::InitializeSimStatus() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // TODO(armansito): For now, we're initializing the device path to the first
-  // available cellular device. We should try to obtain a specific device here,
-  // as there can be multiple cellular devices present.
-  const DeviceState* cellular_device =
-      GetNetworkStateHandler()
-          ->GetDeviceStateByType(NetworkTypePattern::Cellular());
-  if (cellular_device) {
-    cellular_device_path_ = cellular_device->path();
-    sim_lock_type_ = cellular_device->sim_lock_type();
-  }
-  ProcessSimCardState(cellular_device);
+  ProcessSimCardState(GetCellularDevice());
 }
 
 void SimUnlockHandler::ProceedToPukInput() {
@@ -723,22 +559,23 @@ void SimUnlockHandler::ProceedToPukInput() {
 }
 
 void SimUnlockHandler::ProcessSimCardState(
-    const DeviceState* cellular) {
+    const chromeos::NetworkDevice* cellular) {
   std::string error_msg;
   if (cellular) {
-    uint32 retries_left = cellular->sim_retries_left();
-    VLOG(1) << "Current state: " << state_ << " lock_type: " << sim_lock_type_
+    chromeos::SimLockState lock_state = cellular->sim_lock_state();
+    int retries_left = cellular->sim_retries_left();
+    VLOG(1) << "Current state: " << state_ << " lock_state: " << lock_state
             << " retries: " << retries_left;
     switch (state_) {
       case SIM_UNLOCK_LOADING:
-        if (sim_lock_type_ == shill::kSIMLockPin) {
+        if (lock_state == chromeos::SIM_LOCKED_PIN) {
           state_ = SIM_LOCKED_PIN;
-        } else if (sim_lock_type_ == shill::kSIMLockPuk) {
+        } else if (lock_state == chromeos::SIM_LOCKED_PUK) {
           if (retries_left > 0)
             state_ = SIM_LOCKED_PUK;
           else
             state_ = SIM_DISABLED;
-        } else if (sim_lock_type_.empty()) {
+        } else if (lock_state == chromeos::SIM_UNLOCKED) {
           if (dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_ON ||
               dialog_mode_ == SimDialogDelegate::SIM_DIALOG_SET_LOCK_OFF) {
             state_ = SIM_NOT_LOCKED_ASK_PIN;
@@ -762,9 +599,9 @@ void SimUnlockHandler::ProcessSimCardState(
         // We always start in these states when SIM is unlocked.
         // So if we get here while still being UNLOCKED,
         // that means entered PIN was incorrect.
-        if (sim_lock_type_.empty()) {
+        if (lock_state == chromeos::SIM_UNLOCKED) {
           error_msg = kErrorPin;
-        } else if (sim_lock_type_ == shill::kSIMLockPuk) {
+        } else if (lock_state == chromeos::SIM_LOCKED_PUK) {
           state_ = SIM_LOCKED_NO_PIN_TRIES_LEFT;
         } else {
           NOTREACHED()
@@ -773,13 +610,14 @@ void SimUnlockHandler::ProcessSimCardState(
         }
         break;
       case SIM_LOCKED_PIN:
-        if (sim_lock_type_ == shill::kSIMLockPuk) {
-          state_ = SIM_LOCKED_NO_PIN_TRIES_LEFT;
-        } else if (sim_lock_type_ == shill::kSIMLockPin) {
-          // Still locked with PIN.
-          error_msg = kErrorPin;
-        } else {
+        if (lock_state == chromeos::SIM_UNLOCKED ||
+            lock_state == chromeos::SIM_UNKNOWN) {
           state_ = SIM_ABSENT_NOT_LOCKED;
+        } else if (lock_state == chromeos::SIM_LOCKED_PUK) {
+          state_ = SIM_LOCKED_NO_PIN_TRIES_LEFT;
+        } else {
+          // Still blocked with PIN.
+          error_msg = kErrorPin;
         }
         break;
       case SIM_LOCKED_NO_PIN_TRIES_LEFT:
@@ -787,8 +625,8 @@ void SimUnlockHandler::ProcessSimCardState(
         state_ = SIM_LOCKED_PUK;
         break;
       case SIM_LOCKED_PUK:
-        if (sim_lock_type_ != shill::kSIMLockPin &&
-            sim_lock_type_ != shill::kSIMLockPuk) {
+        if (lock_state == chromeos::SIM_UNLOCKED ||
+            lock_state == chromeos::SIM_UNKNOWN) {
           state_ = SIM_ABSENT_NOT_LOCKED;
         } else if (retries_left == 0) {
           state_ = SIM_LOCKED_NO_PUK_TRIES_LEFT;
@@ -810,9 +648,9 @@ void SimUnlockHandler::ProcessSimCardState(
   UpdatePage(cellular, error_msg);
 }
 
-void SimUnlockHandler::UpdatePage(const DeviceState* cellular,
+void SimUnlockHandler::UpdatePage(const chromeos::NetworkDevice* cellular,
                                   const std::string& error_msg) {
-  base::DictionaryValue sim_dict;
+  DictionaryValue sim_dict;
   if (cellular)
     sim_dict.SetInteger(kTriesLeft, cellular->sim_retries_left());
   sim_dict.SetInteger(kState, state_);
@@ -832,7 +670,7 @@ SimUnlockUI::SimUnlockUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the chrome://sim-unlock/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  content::URLDataSource::Add(profile, html_source);
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
 
 }  // namespace chromeos

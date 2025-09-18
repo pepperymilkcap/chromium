@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_PROXY_PROXY_SCRIPT_FETCHER_IMPL_H_
 #define NET_PROXY_PROXY_SCRIPT_FETCHER_IMPL_H_
+#pragma once
 
 #include <string>
 
@@ -12,8 +13,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
-#include "base/time/time.h"
+#include "base/string16.h"
+#include "base/time.h"
 #include "net/proxy/proxy_script_fetcher.h"
 #include "net/url_request/url_request.h"
 
@@ -45,7 +46,7 @@ class NET_EXPORT ProxyScriptFetcherImpl : public ProxyScriptFetcher,
   void OnResponseCompleted(URLRequest* request);
 
   // ProxyScriptFetcher methods:
-  virtual int Fetch(const GURL& url, base::string16* text,
+  virtual int Fetch(const GURL& url, string16* text,
                     const net::CompletionCallback& callback) OVERRIDE;
   virtual void Cancel() OVERRIDE;
   virtual URLRequestContext* GetRequestContext() const OVERRIDE;
@@ -84,7 +85,7 @@ class NET_EXPORT ProxyScriptFetcherImpl : public ProxyScriptFetcher,
   base::WeakPtrFactory<ProxyScriptFetcherImpl> weak_factory_;
 
   // The context used for making network requests.
-  URLRequestContext* const url_request_context_;
+  URLRequestContext* url_request_context_;
 
   // Buffer that URLRequest writes into.
   scoped_refptr<IOBuffer> buf_;
@@ -111,7 +112,7 @@ class NET_EXPORT ProxyScriptFetcherImpl : public ProxyScriptFetcher,
 
   // This buffer is owned by the owner of |callback|, and will be filled with
   // UTF16 response on completion.
-  base::string16* result_text_;
+  string16* result_text_;
 
   // The maximum number of bytes to allow in responses.
   size_t max_response_bytes_;

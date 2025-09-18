@@ -1,28 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane.h"
 #include "ui/views/test/views_test_base.h"
-
-using base::ASCIIToUTF16;
+#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace views {
-
-namespace {
 
 // A view for testing that takes a fixed preferred size upon construction.
 class FixedSizeView : public View {
  public:
-  explicit FixedSizeView(const gfx::Size& size)
+  FixedSizeView(const gfx::Size& size)
     : size_(size) {}
 
-  // Overridden from View:
-  virtual gfx::Size GetPreferredSize() OVERRIDE {
+  virtual gfx::Size GetPreferredSize() {
     return size_;
   }
 
@@ -32,64 +28,108 @@ class FixedSizeView : public View {
   DISALLOW_COPY_AND_ASSIGN(FixedSizeView);
 };
 
-typedef ViewsTestBase TabbedPaneTest;
+class TabbedPaneTest : public ViewsTestBase,
+                       public WidgetDelegate {
+ public:
+  TabbedPaneTest() {}
 
-// Tests TabbedPane::GetPreferredSize() and TabbedPane::Layout().
+  TabbedPane* tabbed_pane_;
+
+ private:
+  virtual void SetUp() OVERRIDE {
+    ViewsTestBase::SetUp();
+    tabbed_pane_ = new TabbedPane();
+    window_ = Widget::CreateWindowWithBounds(this, gfx::Rect(0, 0, 100, 100));
+    window_->Show();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    window_->Close();
+    ViewsTestBase::TearDown();
+  }
+
+  virtual views::View* GetContentsView() OVERRIDE {
+    return tabbed_pane_;
+  }
+  virtual views::Widget* GetWidget() OVERRIDE {
+    return tabbed_pane_->GetWidget();
+  }
+  virtual const views::Widget* GetWidget() const OVERRIDE {
+    return tabbed_pane_->GetWidget();
+  }
+
+  Widget* window_;
+
+  DISALLOW_COPY_AND_ASSIGN(TabbedPaneTest);
+};
+
+// Tests that TabbedPane::GetPreferredSize() and TabbedPane::Layout().
 TEST_F(TabbedPaneTest, SizeAndLayout) {
-  scoped_ptr<TabbedPane> tabbed_pane(new TabbedPane());
   View* child1 = new FixedSizeView(gfx::Size(20, 10));
-  tabbed_pane->AddTab(ASCIIToUTF16("tab1"), child1);
+  tabbed_pane_->AddTab(ASCIIToUTF16("tab1"), child1);
   View* child2 = new FixedSizeView(gfx::Size(5, 5));
-  tabbed_pane->AddTab(ASCIIToUTF16("tab2"), child2);
-  tabbed_pane->SelectTabAt(0);
+  tabbed_pane_->AddTab(ASCIIToUTF16("tab2"), child2);
+  tabbed_pane_->SelectTabAt(0);
 
-  // The |tabbed_pane| implementation of Views has no border by default.
-  // Therefore it should be as wide as the widest tab. The native Windows
-  // tabbed pane has a border that used up extra space. Therefore the preferred
-  // width is larger than the largest child.
-  gfx::Size pref(tabbed_pane->GetPreferredSize());
-  EXPECT_GE(pref.width(), 20);
+  // Check that the preferred size is larger than the largest child.
+  gfx::Size pref(tabbed_pane_->GetPreferredSize());
+  EXPECT_GT(pref.width(), 20);
   EXPECT_GT(pref.height(), 10);
 
   // The bounds of our children should be smaller than the tabbed pane's bounds.
-  tabbed_pane->SetBounds(0, 0, 100, 200);
+  tabbed_pane_->SetBounds(0, 0, 100, 200);
   RunPendingMessages();
   gfx::Rect bounds(child1->bounds());
   EXPECT_GT(bounds.width(), 0);
-  // The |tabbed_pane| has no border. Therefore the children should be as wide
-  // as the |tabbed_pane|.
-  EXPECT_LE(bounds.width(), 100);
+  EXPECT_LT(bounds.width(), 100);
   EXPECT_GT(bounds.height(), 0);
   EXPECT_LT(bounds.height(), 200);
 
   // If we switch to the other tab, it should get assigned the same bounds.
-  tabbed_pane->SelectTabAt(1);
+  tabbed_pane_->SelectTabAt(1);
   EXPECT_EQ(bounds, child2->bounds());
 }
 
-TEST_F(TabbedPaneTest, AddAndSelect) {
-  scoped_ptr<TabbedPane> tabbed_pane(new TabbedPane());
-  // Add several tabs; only the first should be a selected automatically.
-  for (int i = 0; i < 3; ++i) {
-    View* tab = new View();
-    tabbed_pane->AddTab(ASCIIToUTF16("tab"), tab);
-    EXPECT_EQ(i + 1, tabbed_pane->GetTabCount());
-    EXPECT_EQ(0, tabbed_pane->selected_tab_index());
-  }
+TEST_F(TabbedPaneTest, AddRemove) {
+  View* tab0 = new View;
+  tabbed_pane_->AddTab(ASCIIToUTF16("tab0"), tab0);
+  EXPECT_EQ(tab0, tabbed_pane_->GetSelectedTab());
+  EXPECT_EQ(0, tabbed_pane_->GetSelectedTabIndex());
 
-  // Select each tab.
-  for (int i = 0; i < tabbed_pane->GetTabCount(); ++i) {
-    tabbed_pane->SelectTabAt(i);
-    EXPECT_EQ(i, tabbed_pane->selected_tab_index());
-  }
+  // Add more 3 tabs.
+  tabbed_pane_->AddTab(ASCIIToUTF16("tab1"), new View);
+  tabbed_pane_->AddTab(ASCIIToUTF16("tab2"), new View);
+  tabbed_pane_->AddTab(ASCIIToUTF16("tab3"), new View);
+  EXPECT_EQ(4, tabbed_pane_->GetTabCount());
 
-  // Add a tab at index 0, it should not be selected automatically.
-  View* tab0 = new View();
-  tabbed_pane->AddTabAtIndex(0, ASCIIToUTF16("tab0"), tab0);
-  EXPECT_NE(tab0, tabbed_pane->GetSelectedTab());
-  EXPECT_NE(0, tabbed_pane->selected_tab_index());
+  // Note: AddTab() doesn't select a tab if the tabbed pane isn't empty.
+
+  // Select the last one.
+  tabbed_pane_->SelectTabAt(tabbed_pane_->GetTabCount() - 1);
+  EXPECT_EQ(3, tabbed_pane_->GetSelectedTabIndex());
+
+  // Remove the last one.
+  delete tabbed_pane_->RemoveTabAtIndex(3);
+  EXPECT_EQ(3, tabbed_pane_->GetTabCount());
+
+  // After removing the last tab, check if the tabbed pane selected the previous
+  // tab.
+  EXPECT_EQ(2, tabbed_pane_->GetSelectedTabIndex());
+
+  tabbed_pane_->AddTabAtIndex(0, ASCIIToUTF16("tab4"), new View, true);
+
+  // Assert that even adding a new tab, the tabbed pane doesn't change the
+  // selection, i.e., it doesn't select the new one.
+  // The last tab should remains selected, instead of the tab added at index 0.
+  EXPECT_EQ(3, tabbed_pane_->GetSelectedTabIndex());
+
+  // Now change the selected tab.
+  tabbed_pane_->SelectTabAt(1);
+  EXPECT_EQ(1, tabbed_pane_->GetSelectedTabIndex());
+
+  // Remove the first one.
+  delete tabbed_pane_->RemoveTabAtIndex(0);
+  EXPECT_EQ(0, tabbed_pane_->GetSelectedTabIndex());
 }
 
-}  // namespace
-
-}  // namespace views
+} // namespace views

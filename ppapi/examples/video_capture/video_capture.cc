@@ -1,18 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <stdlib.h>
+#include <assert.h>
 #include <string.h>
 
 #include <map>
 #include <vector>
 
-#include "ppapi/c/dev/ppb_video_capture_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppb_opengles2.h"
 #include "ppapi/cpp/dev/buffer_dev.h"
-#include "ppapi/cpp/dev/device_ref_dev.h"
 #include "ppapi/cpp/dev/video_capture_dev.h"
 #include "ppapi/cpp/dev/video_capture_client_dev.h"
 #include "ppapi/cpp/completion_callback.h"
@@ -21,24 +19,15 @@
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/rect.h"
-#include "ppapi/cpp/var.h"
 #include "ppapi/lib/gl/include/GLES2/gl2.h"
 #include "ppapi/utility/completion_callback_factory.h"
 
-// When compiling natively on Windows, PostMessage can be #define-d to
-// something else.
-#ifdef PostMessage
-#undef PostMessage
-#endif
-
 // Assert |context_| isn't holding any GL Errors.  Done as a macro instead of a
 // function to preserve line number information in the failure message.
-#define AssertNoGLError() \
-  PP_DCHECK(!gles2_if_->GetError(context_->pp_resource()));
+#define assertNoGLError() \
+  assert(!gles2_if_->GetError(context_->pp_resource()));
 
 namespace {
-
-const char* const kDelimiter = "#__#";
 
 // This object is the global object representing this plugin library as long
 // as it is loaded.
@@ -60,7 +49,6 @@ class VCDemoInstance : public pp::Instance,
   // pp::Instance implementation (see PPP_Instance).
   virtual void DidChangeView(const pp::Rect& position,
                              const pp::Rect& clip_ignored);
-  virtual void HandleMessage(const pp::Var& message_data);
 
   // pp::Graphics3DClient implementation.
   virtual void Graphics3DContextLost() {
@@ -119,22 +107,12 @@ class VCDemoInstance : public pp::Instance,
 
   // GL-related functions.
   void InitGL();
+  void InitializeCapture();
   GLuint CreateTexture(int32_t width, int32_t height, int unit);
   void CreateGLObjects();
   void CreateShader(GLuint program, GLenum type, const char* source, int size);
   void PaintFinished(int32_t result);
   void CreateYUVTextures();
-
-  void Open(const pp::DeviceRef_Dev& device);
-  void Stop();
-  void Start();
-  void EnumerateDevicesFinished(int32_t result,
-                                std::vector<pp::DeviceRef_Dev>& devices);
-  void OpenFinished(int32_t result);
-
-  static void MonitorDeviceChangeCallback(void* user_data,
-                                          uint32_t device_count,
-                                          const PP_Resource devices[]);
 
   pp::Size position_size_;
   bool is_painting_;
@@ -152,9 +130,6 @@ class VCDemoInstance : public pp::Instance,
 
   // Owned data.
   pp::Graphics3D* context_;
-
-  std::vector<pp::DeviceRef_Dev> enumerate_devices_;
-  std::vector<pp::DeviceRef_Dev> monitor_devices_;
 };
 
 VCDemoInstance::VCDemoInstance(PP_Instance instance, pp::Module* module)
@@ -166,20 +141,16 @@ VCDemoInstance::VCDemoInstance(PP_Instance instance, pp::Module* module)
       texture_y_(0),
       texture_u_(0),
       texture_v_(0),
-      video_capture_(this),
+      video_capture_(*this),
       callback_factory_(this),
       context_(NULL) {
   gles2_if_ = static_cast<const struct PPB_OpenGLES2*>(
       module->GetBrowserInterface(PPB_OPENGLES2_INTERFACE));
-  PP_DCHECK(gles2_if_);
-
-  capture_info_.width = 320;
-  capture_info_.height = 240;
-  capture_info_.frames_per_second = 30;
+  assert(gles2_if_);
+  InitializeCapture();
 }
 
 VCDemoInstance::~VCDemoInstance() {
-  video_capture_.MonitorDeviceChange(NULL, NULL);
   delete context_;
 }
 
@@ -198,47 +169,16 @@ void VCDemoInstance::DidChangeView(
   Render();
 }
 
-void VCDemoInstance::HandleMessage(const pp::Var& message_data) {
-  if (message_data.is_string()) {
-    std::string event = message_data.AsString();
-    if (event == "PageInitialized") {
-      int32_t result = video_capture_.MonitorDeviceChange(
-          &VCDemoInstance::MonitorDeviceChangeCallback, this);
-      if (result != PP_OK)
-        PostMessage(pp::Var("MonitorDeviceChangeFailed"));
+void VCDemoInstance::InitializeCapture() {
+  capture_info_.width = 320;
+  capture_info_.height = 240;
+  capture_info_.frames_per_second = 30;
 
-      pp::CompletionCallbackWithOutput<std::vector<pp::DeviceRef_Dev> >
-          callback = callback_factory_.NewCallbackWithOutput(
-              &VCDemoInstance::EnumerateDevicesFinished);
-      result = video_capture_.EnumerateDevices(callback);
-      if (result != PP_OK_COMPLETIONPENDING)
-        PostMessage(pp::Var("EnumerationFailed"));
-    } else if (event == "UseDefault") {
-      Open(pp::DeviceRef_Dev());
-    } else if (event == "Stop") {
-      Stop();
-    } else if (event == "Start") {
-      Start();
-    } else if (event.find("Monitor:") == 0) {
-      std::string index_str = event.substr(strlen("Monitor:"));
-      int index = atoi(index_str.c_str());
-      if (index >= 0 && index < static_cast<int>(monitor_devices_.size()))
-        Open(monitor_devices_[index]);
-      else
-        PP_NOTREACHED();
-    } else if (event.find("Enumerate:") == 0) {
-      std::string index_str = event.substr(strlen("Enumerate:"));
-      int index = atoi(index_str.c_str());
-      if (index >= 0 && index < static_cast<int>(enumerate_devices_.size()))
-        Open(enumerate_devices_[index]);
-      else
-        PP_NOTREACHED();
-    }
-  }
+  video_capture_.StartCapture(capture_info_, 4);
 }
 
 void VCDemoInstance::InitGL() {
-  PP_DCHECK(position_size_.width() && position_size_.height());
+  assert(position_size_.width() && position_size_.height());
   is_painting_ = false;
 
   delete context_;
@@ -256,7 +196,7 @@ void VCDemoInstance::InitGL() {
     PP_GRAPHICS3DATTRIB_NONE,
   };
   context_ = new pp::Graphics3D(this, attributes);
-  PP_DCHECK(!context_->is_null());
+  assert(!context_->is_null());
 
   // Set viewport window size and clear color bit.
   gles2_if_->ClearColor(context_->pp_resource(), 1, 0, 0, 1);
@@ -265,13 +205,13 @@ void VCDemoInstance::InitGL() {
                       position_size_.width(), position_size_.height());
 
   BindGraphics(*context_);
-  AssertNoGLError();
+  assertNoGLError();
 
   CreateGLObjects();
 }
 
 void VCDemoInstance::Render() {
-  PP_DCHECK(!is_painting_);
+  assert(!is_painting_);
   is_painting_ = true;
   needs_paint_ = false;
   if (texture_y_) {
@@ -293,7 +233,7 @@ void VCDemoInstance::PaintFinished(int32_t result) {
 GLuint VCDemoInstance::CreateTexture(int32_t width, int32_t height, int unit) {
   GLuint texture_id;
   gles2_if_->GenTextures(context_->pp_resource(), 1, &texture_id);
-  AssertNoGLError();
+  assertNoGLError();
   // Assign parameters.
   gles2_if_->ActiveTexture(context_->pp_resource(), GL_TEXTURE0 + unit);
   gles2_if_->BindTexture(context_->pp_resource(), GL_TEXTURE_2D, texture_id);
@@ -314,7 +254,7 @@ GLuint VCDemoInstance::CreateTexture(int32_t width, int32_t height, int unit) {
   gles2_if_->TexImage2D(
       context_->pp_resource(), GL_TEXTURE_2D, 0, GL_LUMINANCE, width, height, 0,
       GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
-  AssertNoGLError();
+  assertNoGLError();
   return texture_id;
 }
 
@@ -373,7 +313,7 @@ void VCDemoInstance::CreateGLObjects() {
       context,
       gles2_if_->GetUniformLocation(context, program, "color_matrix"),
       1, GL_FALSE, kColorMatrix);
-  AssertNoGLError();
+  assertNoGLError();
 
   // Assign vertex positions and texture coordinates to buffers for use in
   // shader program.
@@ -387,12 +327,12 @@ void VCDemoInstance::CreateGLObjects() {
   gles2_if_->BindBuffer(context, GL_ARRAY_BUFFER, buffer);
   gles2_if_->BufferData(context, GL_ARRAY_BUFFER,
                         sizeof(kVertices), kVertices, GL_STATIC_DRAW);
-  AssertNoGLError();
+  assertNoGLError();
   GLint pos_location = gles2_if_->GetAttribLocation(
       context, program, "a_position");
   GLint tc_location = gles2_if_->GetAttribLocation(
       context, program, "a_texCoord");
-  AssertNoGLError();
+  assertNoGLError();
   gles2_if_->EnableVertexAttribArray(context, pos_location);
   gles2_if_->VertexAttribPointer(context, pos_location, 2,
                                  GL_FLOAT, GL_FALSE, 0, 0);
@@ -400,7 +340,7 @@ void VCDemoInstance::CreateGLObjects() {
   gles2_if_->VertexAttribPointer(
       context, tc_location, 2, GL_FLOAT, GL_FALSE, 0,
       static_cast<float*>(0) + 8);  // Skip position coordinates.
-  AssertNoGLError();
+  assertNoGLError();
 }
 
 void VCDemoInstance::CreateShader(
@@ -422,72 +362,6 @@ void VCDemoInstance::CreateYUVTextures() {
   height /= 2;
   texture_u_ = CreateTexture(width, height, 1);
   texture_v_ = CreateTexture(width, height, 2);
-}
-
-void VCDemoInstance::Open(const pp::DeviceRef_Dev& device) {
-  pp::CompletionCallback callback = callback_factory_.NewCallback(
-      &VCDemoInstance::OpenFinished);
-  int32_t result = video_capture_.Open(device, capture_info_, 4, callback);
-  if (result != PP_OK_COMPLETIONPENDING)
-    PostMessage(pp::Var("OpenFailed"));
-}
-
-void VCDemoInstance::Stop() {
-  if (video_capture_.StopCapture() != PP_OK)
-    PostMessage(pp::Var("StopFailed"));
-}
-
-void VCDemoInstance::Start() {
-  if (video_capture_.StartCapture() != PP_OK)
-    PostMessage(pp::Var("StartFailed"));
-}
-
-void VCDemoInstance::EnumerateDevicesFinished(
-    int32_t result,
-  std::vector<pp::DeviceRef_Dev>& devices) {
-  if (result == PP_OK) {
-    enumerate_devices_.swap(devices);
-    std::string device_names = "Enumerate:";
-    for (size_t index = 0; index < enumerate_devices_.size(); ++index) {
-      pp::Var name = enumerate_devices_[index].GetName();
-      PP_DCHECK(name.is_string());
-
-      if (index != 0)
-        device_names += kDelimiter;
-      device_names += name.AsString();
-    }
-    PostMessage(pp::Var(device_names));
-  } else {
-    PostMessage(pp::Var("EnumerationFailed"));
-  }
-}
-
-void VCDemoInstance::OpenFinished(int32_t result) {
-  if (result == PP_OK)
-    Start();
-  else
-    PostMessage(pp::Var("OpenFailed"));
-}
-
-// static
-void VCDemoInstance::MonitorDeviceChangeCallback(void* user_data,
-                                                 uint32_t device_count,
-                                                 const PP_Resource devices[]) {
-  VCDemoInstance* thiz = static_cast<VCDemoInstance*>(user_data);
-
-  std::string device_names = "Monitor:";
-  thiz->monitor_devices_.clear();
-  thiz->monitor_devices_.reserve(device_count);
-  for (size_t index = 0; index < device_count; ++index) {
-    thiz->monitor_devices_.push_back(pp::DeviceRef_Dev(devices[index]));
-    pp::Var name = thiz->monitor_devices_.back().GetName();
-    PP_DCHECK(name.is_string());
-
-    if (index != 0)
-      device_names += kDelimiter;
-    device_names += name.AsString();
-  }
-  thiz->PostMessage(pp::Var(device_names));
 }
 
 pp::Instance* VCDemoModule::CreateInstance(PP_Instance instance) {

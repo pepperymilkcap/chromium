@@ -6,7 +6,7 @@
 
 #include <sstream>
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_variant.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
 
@@ -32,7 +32,7 @@ void MockIEEventSink::OnDocumentComplete(IDispatch* dispatch, VARIANT* url) {
                        renderer_window,
                        OBJID_CLIENT, 0L);
     } else {
-      VLOG(1) << "Browser does not have renderer window";
+      DVLOG(1) << "Browser does not have renderer window";
     }
     OnLoad(IN_IE, V_BSTR(url));
   }
@@ -60,7 +60,7 @@ ExpectationSet MockIEEventSink::ExpectNavigationCardinality(
   // TODO(kkania): Consider avoiding this problem by creating a mock without
   // the OnFileDownload call or by removing the dependency of some tests on
   // InSequence.
-  LOG_IF(WARNING, complete_cardinality.ConservativeUpperBound() > 1000)
+  DLOG_IF(WARNING, complete_cardinality.ConservativeUpperBound() > 1000)
       << "Cardinality upper bound may be too great to be split up into single "
          "expect statements. If you do not require this navigation to be in "
          "sequence, do not call this method.";
@@ -178,33 +178,29 @@ void MockIEEventSink::ExpectDocumentReadystate(int ready_state) {
 }
 
 // MockIEEventSinkTest methods
-MockIEEventSinkTest::MockIEEventSinkTest()
-    : server_mock_(1337,
-                   base::ASCIIToWide(chrome_frame_test::GetLocalIPv4Address()),
-                   GetTestDataFolder()) {
-  loop_.set_snapshot_on_timeout(true);
+MockIEEventSinkTest::MockIEEventSinkTest() : server_mock_(1337, L"127.0.0.1",
+                                                          GetTestDataFolder()) {
   EXPECT_CALL(server_mock_, Get(_, StrCaseEq(L"/favicon.ico"), _))
       .WillRepeatedly(SendFast("HTTP/1.1 404 Not Found", ""));
 }
 
 MockIEEventSinkTest::MockIEEventSinkTest(int port, const std::wstring& address,
-                                         const base::FilePath& root_dir)
+                                         const FilePath& root_dir)
     : server_mock_(port, address, root_dir) {
-  loop_.set_snapshot_on_timeout(true);
   EXPECT_CALL(server_mock_, Get(_, StrCaseEq(L"/favicon.ico"), _))
       .WillRepeatedly(SendFast("HTTP/1.1 404 Not Found", ""));
 }
 
 void MockIEEventSinkTest::LaunchIEAndNavigate(const std::wstring& url) {
-  LaunchIENavigateAndLoop(url, kChromeFrameLongNavigationTimeout);
+  LaunchIENavigateAndLoop(url, kChromeFrameLongNavigationTimeoutInSeconds);
 }
 
 void MockIEEventSinkTest::LaunchIENavigateAndLoop(const std::wstring& url,
-                                                  base::TimeDelta timeout) {
+                                                  int timeout) {
   if (GetInstalledIEVersion() >= IE_8) {
     chrome_frame_test::ClearIESessionHistory();
   }
-  hung_call_detector_ = HungCOMCallDetector::Setup(ceil(timeout.InSecondsF()));
+  hung_call_detector_ = HungCOMCallDetector::Setup(timeout);
   EXPECT_TRUE(hung_call_detector_ != NULL);
 
   IEEventSink::SetAbnormalShutdown(false);
@@ -219,13 +215,11 @@ void MockIEEventSinkTest::LaunchIENavigateAndLoop(const std::wstring& url,
     loop_.RunFor(timeout);
   }
 
-  if (hung_call_detector_) {
-    IEEventSink::SetAbnormalShutdown(hung_call_detector_->is_hung());
-    hung_call_detector_->TearDown();
-  }
+  IEEventSink::SetAbnormalShutdown(hung_call_detector_->is_hung());
+  hung_call_detector_->TearDown();
 }
 
-base::FilePath MockIEEventSinkTest::GetTestFilePath(
+FilePath MockIEEventSinkTest::GetTestFilePath(
     const std::wstring& relative_path) {
   return server_mock_.root_dir().Append(relative_path);
 }

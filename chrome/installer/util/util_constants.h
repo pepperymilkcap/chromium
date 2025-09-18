@@ -7,6 +7,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_UTIL_CONSTANTS_H_
 #define CHROME_INSTALLER_UTIL_UTIL_CONSTANTS_H_
+#pragma once
 
 #include "base/basictypes.h"
 
@@ -70,31 +71,17 @@ enum InstallStatus {
   CONFLICTING_CHANNEL_EXISTS,  // 39. A multi-install product on a different
                                // update channel exists.
   READY_MODE_REQUIRES_CHROME,  // 40. Chrome Frame in ready-mode requires Chrome
-  APP_HOST_REQUIRES_MULTI_INSTALL,  // 41. --multi-install was missing from the
+  REQUIRES_MULTI_INSTALL,      // 41. --multi-install was missing from the
                                // command line.
   APPLY_DIFF_PATCH_FAILED,     // 42. Failed to apply a diff patch.
   INCONSISTENT_UPDATE_POLICY,  // 43. Inconsistent update policy GP settings.
-  APP_HOST_REQUIRES_USER_LEVEL,  // 44. --system-level is forbidden.
-  APP_HOST_REQUIRES_BINARIES,  // 45. No Chrome binaries at either level.
-  INSTALL_OF_GOOGLE_UPDATE_FAILED,  // 46. Failed to install Google Update.
-  INVALID_STATE_FOR_OPTION,    // 47. A non-install option was called with an
-                               // invalid installer state.
-  WAIT_FOR_EXISTING_FAILED,    // 48. OS error waiting for existing setup.exe.
-  PATCH_INVALID_ARGUMENTS,     // 49. The arguments of --patch were missing or
-                               // they were invalid for any reason.
-  DIFF_PATCH_SOURCE_MISSING,   // 50. No previous version archive found for
-                               // differential update.
-  UNUSED_BINARIES,             // 51. No multi-install products to update. The
-                               // binaries will be uninstalled if they are not
-                               // in use.
-  UNUSED_BINARIES_UNINSTALLED,  // 52. The binaries were uninstalled.
-  UNSUPPORTED_OPTION,          // 53. An unsupported legacy option was given.
-  // Friendly reminder: note the COMPILE_ASSERT below.
 };
 
 
-// Existing InstallStatus values must not change.  Always add to the end.
-COMPILE_ASSERT(installer::UNSUPPORTED_OPTION == 53,
+// If the following compile assert fires it means that the InstallStatus
+// enumeration changed which will break the contract between the old
+// chrome installed and the new setup.exe that is trying to upgrade.
+COMPILE_ASSERT(installer::INCONSISTENT_UPDATE_POLICY == 43,
                dont_change_enum);
 
 // The type of an update archive.
@@ -126,36 +113,33 @@ enum InstallerStage {
   REMOVING_OLD_VERSIONS,       // 14: Deleting old version directories.
   FINISHING,                   // 15: Finishing the install.
   CONFIGURE_AUTO_LAUNCH,       // 16: Configuring Chrome to auto-launch.
-  CREATING_VISUAL_MANIFEST,    // 17: Creating VisualElementsManifest.xml
-  DEFERRING_TO_HIGHER_VERSION,  // 18: Deferring to an installed higher version.
-  UNINSTALLING_BINARIES,       // 19: Uninstalling unused binaries.
-  UNINSTALLING_CHROME_FRAME,   // 20: Uninstalling multi-install Chrome Frame.
-  NUM_STAGES                   // 21: The number of stages.
+  NUM_STAGES                   // 17: The number of stages.
 };
 
 // When we start reporting the numerical values from the enum, the order
 // above MUST be preserved.
-COMPILE_ASSERT(UNINSTALLING_CHROME_FRAME == 20,
+COMPILE_ASSERT(CONFIGURE_AUTO_LAUNCH == 16,
                never_ever_ever_change_InstallerStage_values_bang);
 
 namespace switches {
-
 extern const char kAutoLaunchChrome[];
 extern const char kChrome[];
-extern const char kChromeAppHostDeprecated[];  // TODO(huangs): Remove by M27.
-extern const char kChromeAppLauncher[];
 extern const char kChromeFrame[];
+extern const char kChromeFrameQuickEnable[];
+extern const char kChromeFrameReadyMode[];
+extern const char kChromeFrameReadyModeOptIn[];
+extern const char kChromeFrameReadyModeTempOptOut[];
+extern const char kChromeFrameReadyModeEndTempOptOut[];
 extern const char kChromeSxS[];
-extern const char kConfigureUserSettings[];
+extern const char kCreateAllShortcuts[];
 extern const char kCriticalUpdateVersion[];
 extern const char kDeleteProfile[];
 extern const char kDisableLogging[];
+extern const char kDoNotCreateShortcuts[];
 extern const char kDoNotLaunchChrome[];
 extern const char kDoNotRegisterForUpdateLaunch[];
 extern const char kDoNotRemoveSharedItems[];
 extern const char kEnableLogging[];
-extern const char kEnsureGoogleUpdatePresent[];
-extern const char kForceConfigureUserSettings[];
 extern const char kForceUninstall[];
 extern const char kInstallArchive[];
 extern const char kInstallerData[];
@@ -164,61 +148,40 @@ extern const char kMakeChromeDefault[];
 extern const char kMsi[];
 extern const char kMultiInstall[];
 extern const char kNewSetupExe[];
-extern const char kOnOsUpgrade[];
-extern const char kQueryEULAAcceptance[];
 extern const char kRegisterChromeBrowser[];
 extern const char kRegisterChromeBrowserSuffix[];
-extern const char kRegisterDevChrome[];
 extern const char kRegisterURLProtocol[];
 extern const char kRenameChromeExe[];
 extern const char kRemoveChromeRegistration[];
 extern const char kRunAsAdmin[];
-extern const char kSelfDestruct[];
 extern const char kSystemLevel[];
 extern const char kUninstall[];
 extern const char kUpdateSetupExe[];
-extern const char kUncompressedArchive[];
 extern const char kVerboseLogging[];
 extern const char kShowEula[];
-extern const char kShowEulaForMetro[];
+extern const char kAltDesktopShortcut[];
 extern const char kInactiveUserToast[];
 extern const char kSystemLevelToast[];
 extern const char kExperimentGroup[];
 extern const char kToastResultsKey[];
-extern const char kPatch[];
-extern const char kInputFile[];
-extern const char kPatchFile[];
-extern const char kOutputFile[];
-
 }  // namespace switches
 
-extern const wchar_t kActiveSetupExe[];
-extern const wchar_t kChromeAppHostExe[];
 extern const wchar_t kChromeDll[];
-extern const wchar_t kChromeChildDll[];
 extern const wchar_t kChromeExe[];
 extern const wchar_t kChromeFrameDll[];
-extern const wchar_t kChromeFrameHelperDll[];
 extern const wchar_t kChromeFrameHelperExe[];
 extern const wchar_t kChromeFrameHelperWndClass[];
+extern const wchar_t kChromeFrameReadyModeField[];
 extern const wchar_t kChromeLauncherExe[];
 extern const wchar_t kChromeOldExe[];
 extern const wchar_t kChromeNewExe[];
-extern const wchar_t kCmdInstallApp[];
-extern const wchar_t kCmdInstallExtension[];
-extern const wchar_t kCmdOnOsUpgrade[];
-extern const wchar_t kCmdQueryEULAAcceptance[];
-extern const wchar_t kCmdQuickEnableApplicationHost[];
 extern const wchar_t kCmdQuickEnableCf[];
-extern const wchar_t kDelegateExecuteExe[];
-extern const wchar_t kEULASentinelFile[];
 extern const wchar_t kGoogleChromeInstallSubDir1[];
 extern const wchar_t kGoogleChromeInstallSubDir2[];
 extern const wchar_t kInstallBinaryDir[];
 extern const wchar_t kInstallerDir[];
 extern const wchar_t kInstallTempDir[];
 extern const wchar_t kInstallUserDataDir[];
-extern const wchar_t kLnkExt[];
 extern const wchar_t kNaClExe[];
 extern const wchar_t kSetupExe[];
 extern const wchar_t kSxSSuffix[];
@@ -235,8 +198,12 @@ extern const wchar_t kInstallerResult[];
 extern const wchar_t kInstallerResultUIString[];
 extern const wchar_t kInstallerSuccessLaunchCmdLine[];
 
+// Google Update named environment variable that implies kSystemLevel.
+extern const char kGoogleUpdateIsMachineEnvVar[];
+
 // Product options.
 extern const wchar_t kOptionMultiInstall[];
+extern const wchar_t kOptionReadyMode[];
 
 // Chrome channel display names.
 // NOTE: Canary is not strictly a 'channel', but rather a separate product
@@ -247,18 +214,6 @@ extern const wchar_t kChromeChannelCanary[];
 extern const wchar_t kChromeChannelDev[];
 extern const wchar_t kChromeChannelBeta[];
 extern const wchar_t kChromeChannelStable[];
-
-extern const size_t kMaxAppModelIdLength;
-
-// The range of error values for the installer, Courgette, and bsdiff is
-// overlapping. These offset values disambiguate between different sets
-// of errors by shifting the values up with the specified offset.
-const int kCourgetteErrorOffset = 300;
-const int kBsdiffErrorOffset = 600;
-
-// Arguments to --patch switch
-extern const char kCourgette[];
-extern const char kBsdiff[];
 
 }  // namespace installer
 

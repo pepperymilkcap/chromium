@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define GPU_COMMAND_BUFFER_CLIENT_PROGRAM_INFO_MANAGER_H_
 
 #include <GLES2/gl2.h>
-#include "gles2_impl_export.h"
 
 namespace gpu {
 namespace gles2 {
@@ -14,11 +13,11 @@ namespace gles2 {
 class GLES2Implementation;
 
 // Manages info about OpenGL ES Programs.
-class GLES2_IMPL_EXPORT ProgramInfoManager {
+class ProgramInfoManager {
  public:
   virtual ~ProgramInfoManager();
 
-  static ProgramInfoManager* Create(bool shared_resources_across_processes);
+  static ProgramInfoManager* Create(bool shared_resources);
 
   virtual void CreateInfo(GLuint program) = 0;
 

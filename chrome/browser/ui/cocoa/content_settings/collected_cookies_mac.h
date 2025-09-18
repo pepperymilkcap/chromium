@@ -1,44 +1,37 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/browsing_data/cookies_tree_model.h"
-#include "chrome/browser/ui/cocoa/constrained_window/constrained_window_mac.h"
+#include "chrome/browser/cookies_tree_model.h"
+#include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #import "chrome/browser/ui/cocoa/content_settings/cookie_tree_node.h"
-#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
 @class CollectedCookiesWindowController;
 @class CookieDetailsViewController;
 @class VerticalGradientView;
-
-namespace content {
-class WebContents;
-}
+class TabContentsWrapper;
 
 // The constrained window delegate reponsible for managing the collected
 // cookies dialog.
-class CollectedCookiesMac : public ConstrainedWindowMacDelegate,
+class CollectedCookiesMac : public ConstrainedWindowMacDelegateCustomSheet,
                             public content::NotificationObserver {
  public:
-  CollectedCookiesMac(content::WebContents* web_contents);
-  virtual ~CollectedCookiesMac();
+  CollectedCookiesMac(NSWindow* parent, TabContentsWrapper* wrapper);
 
-  void PerformClose();
+  void OnSheetDidEnd(NSWindow* sheet);
 
-  // ConstrainedWindowMacDelegate implementation.
-  virtual void OnConstrainedWindowClosed(
-      ConstrainedWindowMac* window) OVERRIDE;
-
-  CollectedCookiesWindowController* sheet_controller() const {
-    return sheet_controller_.get();
-  }
+  // ConstrainedWindowMacDelegateCustomSheet implementation.
+  virtual void DeleteDelegate() OVERRIDE;
 
  private:
+  virtual ~CollectedCookiesMac();
+
   // NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
@@ -46,16 +39,16 @@ class CollectedCookiesMac : public ConstrainedWindowMacDelegate,
 
   content::NotificationRegistrar registrar_;
 
-  scoped_ptr<ConstrainedWindowMac> window_;
+  ConstrainedWindow* window_;
 
-  base::scoped_nsobject<CollectedCookiesWindowController> sheet_controller_;
+  CollectedCookiesWindowController* sheet_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(CollectedCookiesMac);
 };
 
 // Controller for the collected cookies dialog. This class stores an internal
 // copy of the CookiesTreeModel but with Cocoa-converted values (NSStrings and
-// NSImages instead of std::strings and ImageSkias). Doing this allows us to use
+// NSImages instead of std::strings and SkBitmaps). Doing this allows us to use
 // bindings for the interface. Changes are pushed to this internal model via a
 // very thin bridge (see cookies_window_controller.h).
 @interface CollectedCookiesWindowController : NSWindowController
@@ -68,11 +61,11 @@ class CollectedCookiesMac : public ConstrainedWindowMacDelegate,
   scoped_ptr<CookiesTreeModel> blockedTreeModel_;
 
   // Cached array of icons.
-  base::scoped_nsobject<NSMutableArray> icons_;
+  scoped_nsobject<NSMutableArray> icons_;
 
   // Our Cocoa copy of the model.
-  base::scoped_nsobject<CocoaCookieTreeNode> cocoaAllowedTreeModel_;
-  base::scoped_nsobject<CocoaCookieTreeNode> cocoaBlockedTreeModel_;
+  scoped_nsobject<CocoaCookieTreeNode> cocoaAllowedTreeModel_;
+  scoped_nsobject<CocoaCookieTreeNode> cocoaBlockedTreeModel_;
 
   BOOL allowedCookiesButtonsEnabled_;
   BOOL blockedCookiesButtonsEnabled_;
@@ -89,39 +82,26 @@ class CollectedCookiesMac : public ConstrainedWindowMacDelegate,
   IBOutlet NSTextField* blockedCookiesText_;
   IBOutlet NSView* cookieDetailsViewPlaceholder_;
 
-  base::scoped_nsobject<NSViewAnimation> animation_;
+  scoped_nsobject<NSViewAnimation> animation_;
 
-  base::scoped_nsobject<CookieDetailsViewController> detailsViewController_;
+  scoped_nsobject<CookieDetailsViewController> detailsViewController_;
 
-  content::WebContents* webContents_;  // weak
-
-  CollectedCookiesMac* collectedCookiesMac_;  // weak
+  TabContentsWrapper* wrapper_;  // weak
 
   BOOL infoBarVisible_;
 
   BOOL contentSettingsChanged_;
 }
-
-@property(readonly, nonatomic) IBOutlet NSTreeController* allowedTreeController;
-@property(readonly, nonatomic) IBOutlet NSTreeController* blockedTreeController;
-@property(readonly, nonatomic) IBOutlet NSOutlineView* allowedOutlineView;
-@property(readonly, nonatomic) IBOutlet NSOutlineView* blockedOutlineView;
-@property(readonly, nonatomic) IBOutlet VerticalGradientView* infoBar;
-@property(readonly, nonatomic) IBOutlet NSImageView* infoBarIcon;
-@property(readonly, nonatomic) IBOutlet NSTextField* infoBarText;
-@property(readonly, nonatomic) IBOutlet NSTabView* tabView;
-@property(readonly, nonatomic) IBOutlet NSScrollView* blockedScrollView;
-@property(readonly, nonatomic) IBOutlet NSTextField* blockedCookiesText;
-@property(readonly, nonatomic) IBOutlet NSView* cookieDetailsViewPlaceholder;
+@property(readonly, nonatomic) NSTreeController* allowedTreeController;
+@property(readonly, nonatomic) NSTreeController* blockedTreeController;
 
 @property(assign, nonatomic) BOOL allowedCookiesButtonsEnabled;
 @property(assign, nonatomic) BOOL blockedCookiesButtonsEnabled;
 
-// Designated initializer. The WebContents cannot be NULL.
-- (id)initWithWebContents:(content::WebContents*)webContents
-      collectedCookiesMac:(CollectedCookiesMac*)collectedCookiesMac;
+// Designated initializer. TabContents cannot be NULL.
+- (id)initWithTabContentsWrapper:(TabContentsWrapper*)wrapper;
 
-// Closes the sheet and ends the modal loop. This will also clean up the memory.
+// Closes the sheet and ends the modal loop. This will also cleanup the memory.
 - (IBAction)closeSheet:(id)sender;
 
 - (IBAction)allowOrigin:(id)sender;
@@ -138,5 +118,5 @@ class CollectedCookiesMac : public ConstrainedWindowMacDelegate,
 - (CookiesTreeModel*)allowedTreeModel;
 - (CookiesTreeModel*)blockedTreeModel;
 
-- (void)loadTreeModelFromWebContents;
+- (void)loadTreeModelFromTabContentsWrapper;
 @end

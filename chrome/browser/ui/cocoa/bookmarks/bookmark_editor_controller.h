@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_EDITOR_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_EDITOR_CONTROLLER_H_
+#pragma once
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_base_controller.h"
 
@@ -13,7 +14,7 @@
 @interface BookmarkEditorController : BookmarkEditorBaseController {
  @private
   const BookmarkNode* node_;  // weak; owned by the model
-  base::scoped_nsobject<NSString> initialUrl_;
+  scoped_nsobject<NSString> initialUrl_;
   NSString* displayURL_;  // Bound to a text field in the dialog.
   IBOutlet NSTextField* urlField_;
   IBOutlet NSTextField* nameTextField_;
@@ -25,8 +26,6 @@
                    profile:(Profile*)profile
                     parent:(const BookmarkNode*)parent
                       node:(const BookmarkNode*)node
-                       url:(const GURL&)url
-                     title:(const base::string16&)title
              configuration:(BookmarkEditor::Configuration)configuration;
 
 @end

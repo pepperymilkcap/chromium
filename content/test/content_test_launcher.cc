@@ -1,138 +1,69 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/public/test/test_launcher.h"
+#include "content/test/test_launcher.h"
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/sys_info.h"
+#include "base/scoped_temp_dir.h"
 #include "base/test/test_suite.h"
+#include "content/app/content_main.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/test/content_test_suite_base.h"
-#include "content/shell/app/shell_main_delegate.h"
-#include "content/shell/browser/shell_content_browser_client.h"
-#include "content/shell/common/shell_content_client.h"
-#include "content/shell/common/shell_switches.h"
-#include "testing/gtest/include/gtest/gtest.h"
-
-#if defined(OS_ANDROID)
-#include "base/message_loop/message_loop.h"
-#include "content/public/test/nested_message_pump_android.h"
-#endif
+#include "content/shell/shell_main_delegate.h"
 
 #if defined(OS_WIN)
 #include "content/public/app/startup_helper_win.h"
-#include "sandbox/win/src/sandbox_types.h"
+#include "sandbox/src/sandbox_types.h"
 #endif  // defined(OS_WIN)
 
-namespace content {
-
-class ContentShellTestSuiteInitializer
-    : public testing::EmptyTestEventListener {
+class ContentTestLauncherDelegate : public test_launcher::TestLauncherDelegate {
  public:
-  ContentShellTestSuiteInitializer() {
+  ContentTestLauncherDelegate() {
   }
 
-  virtual void OnTestStart(const testing::TestInfo& test_info) OVERRIDE {
-    content_client_.reset(new ShellContentClient);
-    browser_content_client_.reset(new ShellContentBrowserClient());
-    SetContentClient(content_client_.get());
-    SetBrowserClientForTesting(browser_content_client_.get());
+  virtual ~ContentTestLauncherDelegate() {
   }
 
-  virtual void OnTestEnd(const testing::TestInfo& test_info) OVERRIDE {
-#if !defined(OS_ANDROID)
-    // On Android, production code doesn't reset ContentClient during shutdown.
-    // We try to do the same thing as production. Refer to crbug.com/181069.
-    browser_content_client_.reset();
-    content_client_.reset();
-    SetContentClient(NULL);
-#endif
+  virtual void EarlyInitialize() OVERRIDE {
   }
 
- private:
-  scoped_ptr<ShellContentClient> content_client_;
-  scoped_ptr<ShellContentBrowserClient> browser_content_client_;
+  virtual bool Run(int argc, char** argv, int* return_code) OVERRIDE {
+#if defined(OS_WIN)
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (command_line->HasSwitch(switches::kProcessType)) {
+      sandbox::SandboxInterfaceInfo sandbox_info = {0};
+      content::InitializeSandboxInfo(&sandbox_info);
+      ShellMainDelegate delegate;
+      *return_code =
+          content::ContentMain(GetModuleHandle(NULL), &sandbox_info, &delegate);
+      return true;
+    }
+#endif  // defined(OS_WIN)
 
-  DISALLOW_COPY_AND_ASSIGN(ContentShellTestSuiteInitializer);
-};
-
-#if defined(OS_ANDROID)
-base::MessagePump* CreateMessagePumpForUI() {
-  return new NestedMessagePumpAndroid();
-};
-#endif
-
-class ContentBrowserTestSuite : public ContentTestSuiteBase {
- public:
-  ContentBrowserTestSuite(int argc, char** argv)
-      : ContentTestSuiteBase(argc, argv) {
+    return false;
   }
-  virtual ~ContentBrowserTestSuite() {
-  }
-
- protected:
-  virtual void Initialize() OVERRIDE {
-
-#if defined(OS_ANDROID)
-    // This needs to be done before base::TestSuite::Initialize() is called,
-    // as it also tries to set MessagePumpForUIFactory.
-    if (!base::MessageLoop::InitMessagePumpForUIFactory(
-            &CreateMessagePumpForUI))
-      VLOG(0) << "MessagePumpForUIFactory already set, unable to override.";
-#endif
-
-    ContentTestSuiteBase::Initialize();
-
-    testing::TestEventListeners& listeners =
-      testing::UnitTest::GetInstance()->listeners();
-    listeners.Append(new ContentShellTestSuiteInitializer);
-  }
-  virtual void Shutdown() OVERRIDE {
-    base::TestSuite::Shutdown();
-  }
-
-  virtual ContentClient* CreateClientForInitialization() OVERRIDE {
-    return new ShellContentClient();
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(ContentBrowserTestSuite);
-};
-
-class ContentTestLauncherDelegate : public TestLauncherDelegate {
- public:
-  ContentTestLauncherDelegate() {}
-  virtual ~ContentTestLauncherDelegate() {}
 
   virtual int RunTestSuite(int argc, char** argv) OVERRIDE {
-    return ContentBrowserTestSuite(argc, argv).Run();
+    return base::TestSuite(argc, argv).Run();
   }
 
   virtual bool AdjustChildProcessCommandLine(
-      CommandLine* command_line, const base::FilePath& temp_data_dir) OVERRIDE {
-    command_line->AppendSwitchPath(switches::kContentShellDataPath,
-                                   temp_data_dir);
-    command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
-    command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
+      CommandLine* command_line) OVERRIDE {
+    FilePath file_exe;
+    if (!PathService::Get(base::FILE_EXE, &file_exe))
+      return false;
+    command_line->AppendSwitchPath(switches::kBrowserSubprocessPath, file_exe);
     return true;
-  }
-
- protected:
-  virtual ContentMainDelegate* CreateContentMainDelegate() OVERRIDE {
-    return new ShellMainDelegate();
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ContentTestLauncherDelegate);
 };
 
-}  // namespace content
-
 int main(int argc, char** argv) {
-  int default_jobs = std::max(1, base::SysInfo::NumberOfProcessors() / 2);
-  content::ContentTestLauncherDelegate launcher_delegate;
-  return LaunchTests(&launcher_delegate, default_jobs, argc, argv);
+  ContentTestLauncherDelegate launcher_delegate;
+  return test_launcher::LaunchTests(&launcher_delegate, argc, argv);
 }

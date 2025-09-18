@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/status_icons/status_icon.h"
 
-#include "chrome/browser/status_icons/status_icon_observer.h"
+#include "ui/base/models/menu_model.h"
 
 StatusIcon::StatusIcon() {
 }
@@ -12,32 +12,23 @@ StatusIcon::StatusIcon() {
 StatusIcon::~StatusIcon() {
 }
 
-void StatusIcon::AddObserver(StatusIconObserver* observer) {
+void StatusIcon::AddObserver(Observer* observer) {
   observers_.AddObserver(observer);
 }
 
-void StatusIcon::RemoveObserver(StatusIconObserver* observer) {
+void StatusIcon::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool StatusIcon::HasObservers() const {
-  return observers_.might_have_observers();
+bool StatusIcon::HasObservers() {
+  return observers_.size() > 0;
 }
 
 void StatusIcon::DispatchClickEvent() {
-  FOR_EACH_OBSERVER(StatusIconObserver, observers_, OnStatusIconClicked());
+  FOR_EACH_OBSERVER(Observer, observers_, OnClicked());
 }
 
-#if defined(OS_WIN)
-void StatusIcon::DispatchBalloonClickEvent() {
-  FOR_EACH_OBSERVER(StatusIconObserver, observers_, OnBalloonClicked());
-}
-#endif
-
-void StatusIcon::SetContextMenu(scoped_ptr<StatusIconMenuModel> menu) {
-  // The UI may been showing a menu for the current model, don't destroy it
-  // until we've notified the UI of the change.
-  scoped_ptr<StatusIconMenuModel> old_menu = context_menu_contents_.Pass();
-  context_menu_contents_ = menu.Pass();
-  UpdatePlatformContextMenu(context_menu_contents_.get());
+void StatusIcon::SetContextMenu(ui::MenuModel* menu) {
+  context_menu_contents_.reset(menu);
+  UpdatePlatformContextMenu(menu);
 }

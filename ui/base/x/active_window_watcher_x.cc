@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,12 @@
 
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
+#include "ui/base/gtk/gtk_compat.h"
+#include "ui/base/gtk/gdk_x_compat.h"
 
-#include "base/memory/singleton.h"
 #include "ui/base/x/active_window_watcher_x_observer.h"
 #include "ui/base/x/root_window_property_watcher_x.h"
 #include "ui/base/x/x11_util.h"
-#include "ui/gfx/gdk_compat.h"
-#include "ui/gfx/gtk_compat.h"
 
 namespace ui {
 

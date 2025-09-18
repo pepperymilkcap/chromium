@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,45 +7,37 @@
 #include <fcntl.h>
 #include <fontconfig/fontconfig.h>
 #include <stdint.h>
-#include <sys/poll.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/uio.h>
-#include <time.h>
 #include <unistd.h>
+#include <sys/uio.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/poll.h>
+#include <time.h>
 
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/eintr_wrapper.h"
 #include "base/linux_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/shared_memory.h"
 #include "base/memory/singleton.h"
 #include "base/pickle.h"
-#include "base/posix/eintr_wrapper.h"
-#include "base/posix/unix_domain_socket_linux.h"
-#include "base/process/launch.h"
-#include "base/process/process_metrics.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "content/child/webkitplatformsupport_impl.h"
+#include "base/process_util.h"
+#include "base/shared_memory.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "content/common/font_config_ipc_linux.h"
-#include "content/common/sandbox_linux/sandbox_linux.h"
-#include "content/common/set_process_title.h"
-#include "content/public/common/content_switches.h"
-#include "skia/ext/skia_utils_base.h"
-#include "third_party/WebKit/public/platform/linux/WebFontInfo.h"
-#include "third_party/WebKit/public/web/WebKit.h"
+#include "content/common/sandbox_methods_linux.h"
+#include "content/common/unix_domain_socket_posix.h"
+#include "content/common/webkitplatformsupport_impl.h"
+#include "skia/ext/SkFontHost_fontconfig_direct.h"
 #include "third_party/npapi/bindings/npapi_extensions.h"
-#include "third_party/skia/include/ports/SkFontConfigInterface.h"
-#include "ui/gfx/font_render_params_linux.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebFontInfo.h"
 
-using blink::WebCString;
-using blink::WebFontInfo;
-using blink::WebUChar;
-using blink::WebUChar32;
-
-namespace content {
+using WebKit::WebCString;
+using WebKit::WebFontInfo;
+using WebKit::WebUChar;
 
 // http://code.google.com/p/chromium/wiki/LinuxSandboxIPC
 
@@ -64,25 +56,12 @@ class SandboxIPCProcess  {
   SandboxIPCProcess(int lifeline_fd, int browser_socket,
                     std::string sandbox_cmd)
       : lifeline_fd_(lifeline_fd),
-        browser_socket_(browser_socket) {
+        browser_socket_(browser_socket),
+        font_config_(new FontConfigDirect()) {
     if (!sandbox_cmd.empty()) {
       sandbox_cmd_.push_back(sandbox_cmd);
       sandbox_cmd_.push_back(base::kFindInodeSwitch);
     }
-
-    // FontConfig doesn't provide a standard property to control subpixel
-    // positioning, so we pass the current setting through to WebKit.
-    WebFontInfo::setSubpixelPositioning(
-        gfx::GetDefaultWebkitSubpixelPositioning());
-
-    CommandLine& command_line = *CommandLine::ForCurrentProcess();
-    command_line.AppendSwitchASCII(switches::kProcessType,
-                                   switches::kSandboxIPCProcess);
-
-    // Update the process title. The argv was already cached by the call to
-    // SetProcessTitleFromCommandLine in content_main_runner.cc, so we can pass
-    // NULL here (we don't have the original argv at this point).
-    SetProcessTitleFromCommandLine(NULL);
   }
 
   ~SandboxIPCProcess();
@@ -132,7 +111,7 @@ class SandboxIPCProcess  {
     // bytes long (this is the largest message type).
     // 128 bytes padding are necessary so recvmsg() does not return MSG_TRUNC
     // error for a maximum length message.
-    char buf[FontConfigIPC::kMaxFontFamilyLength + 128];
+    char buf[FontConfigInterface::kMaxFontFamilyLength + 128];
 
     const ssize_t len = UnixDomainSocket::RecvMsg(fd, buf, sizeof(buf), &fds);
     if (len == -1) {
@@ -145,7 +124,7 @@ class SandboxIPCProcess  {
       return;
 
     Pickle pickle(buf, len);
-    PickleIterator iter(pickle);
+    void* iter = NULL;
 
     int kind;
     if (!pickle.ReadInt(&iter, &kind))
@@ -155,8 +134,8 @@ class SandboxIPCProcess  {
       HandleFontMatchRequest(fd, pickle, iter, fds);
     } else if (kind == FontConfigIPC::METHOD_OPEN) {
       HandleFontOpenRequest(fd, pickle, iter, fds);
-    } else if (kind == LinuxSandbox::METHOD_GET_FONT_FAMILY_FOR_CHAR) {
-      HandleGetFontFamilyForChar(fd, pickle, iter, fds);
+    } else if (kind == LinuxSandbox::METHOD_GET_FONT_FAMILY_FOR_CHARS) {
+      HandleGetFontFamilyForChars(fd, pickle, iter, fds);
     } else if (kind == LinuxSandbox::METHOD_LOCALTIME) {
       HandleLocaltime(fd, pickle, iter, fds);
     } else if (kind == LinuxSandbox::METHOD_GET_CHILD_WITH_INODE) {
@@ -176,58 +155,64 @@ class SandboxIPCProcess  {
     }
   }
 
-  int FindOrAddPath(const SkString& path) {
-    int count = paths_.count();
-    for (int i = 0; i < count; ++i) {
-      if (path == *paths_[i])
-        return i;
-    }
-    *paths_.append() = new SkString(path);
-    return count;
-  }
-
-  void HandleFontMatchRequest(int fd, const Pickle& pickle, PickleIterator iter,
+  void HandleFontMatchRequest(int fd, const Pickle& pickle, void* iter,
                               std::vector<int>& fds) {
-    uint32_t requested_style;
+    bool filefaceid_valid;
+    uint32_t filefaceid;
+
+    if (!pickle.ReadBool(&iter, &filefaceid_valid))
+      return;
+    if (filefaceid_valid) {
+      if (!pickle.ReadUInt32(&iter, &filefaceid))
+        return;
+    }
+    bool is_bold, is_italic;
+    if (!pickle.ReadBool(&iter, &is_bold) ||
+        !pickle.ReadBool(&iter, &is_italic)) {
+      return;
+    }
+
+    uint32_t characters_bytes;
+    if (!pickle.ReadUInt32(&iter, &characters_bytes))
+      return;
+    const char* characters = NULL;
+    if (characters_bytes > 0) {
+      const uint32_t kMaxCharactersBytes = 1 << 10;
+      if (characters_bytes % 2 != 0 ||  // We expect UTF-16.
+          characters_bytes > kMaxCharactersBytes ||
+          !pickle.ReadBytes(&iter, &characters, characters_bytes))
+        return;
+    }
+
     std::string family;
-    if (!pickle.ReadString(&iter, &family) ||
-        !pickle.ReadUInt32(&iter, &requested_style))
+    if (!pickle.ReadString(&iter, &family))
       return;
 
-    SkFontConfigInterface::FontIdentity result_identity;
-    SkString result_family;
-    SkTypeface::Style result_style;
-    SkFontConfigInterface* fc =
-        SkFontConfigInterface::GetSingletonDirectInterface();
-    const bool r = fc->matchFamilyName(
-        family.c_str(), static_cast<SkTypeface::Style>(requested_style),
-        &result_identity, &result_family, &result_style);
+    std::string result_family;
+    unsigned result_filefaceid;
+    const bool r = font_config_->Match(
+        &result_family, &result_filefaceid, filefaceid_valid, filefaceid,
+        family, characters, characters_bytes, &is_bold, &is_italic);
 
     Pickle reply;
     if (!r) {
       reply.WriteBool(false);
     } else {
-      // Stash away the returned path, so we can give it an ID (index)
-      // which will later be given to us in a request to open the file.
-      int index = FindOrAddPath(result_identity.fString);
-      result_identity.fID = static_cast<uint32_t>(index);
-
       reply.WriteBool(true);
-      skia::WriteSkString(&reply, result_family);
-      skia::WriteSkFontIdentity(&reply, result_identity);
-      reply.WriteUInt32(result_style);
+      reply.WriteUInt32(result_filefaceid);
+      reply.WriteString(result_family);
+      reply.WriteBool(is_bold);
+      reply.WriteBool(is_italic);
     }
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleFontOpenRequest(int fd, const Pickle& pickle, PickleIterator iter,
+  void HandleFontOpenRequest(int fd, const Pickle& pickle, void* iter,
                              std::vector<int>& fds) {
-    uint32_t index;
-    if (!pickle.ReadUInt32(&iter, &index))
+    uint32_t filefaceid;
+    if (!pickle.ReadUInt32(&iter, &filefaceid))
       return;
-    if (index >= static_cast<uint32_t>(paths_.count()))
-      return;
-    const int result_fd = open(paths_[index]->c_str(), O_RDONLY);
+    const int result_fd = font_config_->Open(filefaceid);
 
     Pickle reply;
     if (result_fd == -1) {
@@ -236,47 +221,64 @@ class SandboxIPCProcess  {
       reply.WriteBool(true);
     }
 
-    // The receiver will have its own access to the file, so we will close it
-    // after this send.
     SendRendererReply(fds, reply, result_fd);
 
-    if (result_fd >= 0) {
-      int err = IGNORE_EINTR(close(result_fd));
-      DCHECK(!err);
-    }
+    if (result_fd >= 0)
+      close(result_fd);
   }
 
-  void HandleGetFontFamilyForChar(int fd, const Pickle& pickle,
-                                  PickleIterator iter,
-                                  std::vector<int>& fds) {
+  void HandleGetFontFamilyForChars(int fd, const Pickle& pickle, void* iter,
+                                   std::vector<int>& fds) {
     // The other side of this call is
     // chrome/renderer/renderer_sandbox_support_linux.cc
 
-    EnsureWebKitInitialized();
-    WebUChar32 c;
-    if (!pickle.ReadInt(&iter, &c))
+    int num_chars;
+    if (!pickle.ReadInt(&iter, &num_chars))
       return;
+
+    // We don't want a corrupt renderer asking too much of us, it might
+    // overflow later in the code.
+    static const int kMaxChars = 4096;
+    if (num_chars < 1 || num_chars > kMaxChars) {
+      LOG(WARNING) << "HandleGetFontFamilyForChars: too many chars: "
+                   << num_chars;
+      return;
+    }
+
+    EnsureWebKitInitialized();
+    scoped_array<WebUChar> chars(new WebUChar[num_chars]);
+
+    for (int i = 0; i < num_chars; ++i) {
+      uint32_t c;
+      if (!pickle.ReadUInt32(&iter, &c)) {
+        return;
+      }
+
+      chars[i] = c;
+    }
 
     std::string preferred_locale;
     if (!pickle.ReadString(&iter, &preferred_locale))
       return;
 
-    blink::WebFontFamily family;
-    WebFontInfo::familyForChar(c, preferred_locale.c_str(), &family);
+    WebKit::WebFontFamily family;
+    WebFontInfo::familyForChars(chars.get(),
+                                num_chars,
+                                preferred_locale.c_str(),
+                                &family);
 
     Pickle reply;
     if (family.name.data()) {
       reply.WriteString(family.name.data());
     } else {
-      reply.WriteString(std::string());
+      reply.WriteString("");
     }
     reply.WriteBool(family.isBold);
     reply.WriteBool(family.isItalic);
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleGetStyleForStrike(int fd, const Pickle& pickle,
-                               PickleIterator iter,
+  void HandleGetStyleForStrike(int fd, const Pickle& pickle, void* iter,
                                std::vector<int>& fds) {
     std::string family;
     int sizeAndStyle;
@@ -287,7 +289,7 @@ class SandboxIPCProcess  {
     }
 
     EnsureWebKitInitialized();
-    blink::WebFontRenderStyle style;
+    WebKit::WebFontRenderStyle style;
     WebFontInfo::renderStyleForStrike(family.c_str(), sizeAndStyle, &style);
 
     Pickle reply;
@@ -296,13 +298,12 @@ class SandboxIPCProcess  {
     reply.WriteInt(style.useHinting);
     reply.WriteInt(style.hintStyle);
     reply.WriteInt(style.useAntiAlias);
-    reply.WriteInt(style.useSubpixelRendering);
-    reply.WriteInt(style.useSubpixelPositioning);
+    reply.WriteInt(style.useSubpixel);
 
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleLocaltime(int fd, const Pickle& pickle, PickleIterator iter,
+  void HandleLocaltime(int fd, const Pickle& pickle, void* iter,
                        std::vector<int>& fds) {
     // The other side of this call is in zygote_main_linux.cc
 
@@ -332,8 +333,7 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleGetChildWithInode(int fd, const Pickle& pickle,
-                               PickleIterator iter,
+  void HandleGetChildWithInode(int fd, const Pickle& pickle, void* iter,
                                std::vector<int>& fds) {
     // The other side of this call is in zygote_main_linux.cc
     if (sandbox_cmd_.empty()) {
@@ -365,14 +365,11 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleMakeSharedMemorySegment(int fd, const Pickle& pickle,
-                                     PickleIterator iter,
+  void HandleMakeSharedMemorySegment(int fd, const Pickle& pickle, void* iter,
                                      std::vector<int>& fds) {
     base::SharedMemoryCreateOptions options;
-    uint32_t size;
-    if (!pickle.ReadUInt32(&iter, &size))
+    if (!pickle.ReadUInt32(&iter, &options.size))
       return;
-    options.size = size;
     if (!pickle.ReadBool(&iter, &options.executable))
       return;
     int shm_fd = -1;
@@ -383,8 +380,7 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, shm_fd);
   }
 
-  void HandleMatchWithFallback(int fd, const Pickle& pickle,
-                               PickleIterator iter,
+  void HandleMatchWithFallback(int fd, const Pickle& pickle, void* iter,
                                std::vector<int>& fds) {
     // Unlike the other calls, for which we are an indirection in front of
     // WebKit or Skia, this call is always made via this sandbox helper
@@ -516,7 +512,7 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, font_fd);
 
     if (font_fd >= 0) {
-      if (IGNORE_EINTR(close(font_fd)) < 0)
+      if (HANDLE_EINTR(close(font_fd)) < 0)
         PLOG(ERROR) << "close";
     }
   }
@@ -647,22 +643,21 @@ class SandboxIPCProcess  {
 
   const int lifeline_fd_;
   const int browser_socket_;
+  scoped_ptr<FontConfigDirect> font_config_;
   std::vector<std::string> sandbox_cmd_;
-  scoped_ptr<WebKitPlatformSupportImpl> webkit_platform_support_;
-  SkTDArray<SkString*> paths_;
+  scoped_ptr<content::WebKitPlatformSupportImpl> webkit_platform_support_;
 };
 
 SandboxIPCProcess::~SandboxIPCProcess() {
-  paths_.deleteAll();
-  if (webkit_platform_support_)
-    blink::shutdownWithoutV8();
+  if (webkit_platform_support_.get())
+    WebKit::shutdown();
 }
 
 void SandboxIPCProcess::EnsureWebKitInitialized() {
-  if (webkit_platform_support_)
+  if (webkit_platform_support_.get())
     return;
-  webkit_platform_support_.reset(new WebKitPlatformSupportImpl);
-  blink::initializeWithoutV8(webkit_platform_support_.get());
+  webkit_platform_support_.reset(new content::WebKitPlatformSupportImpl);
+  WebKit::initializeWithoutV8(webkit_platform_support_.get());
 }
 
 // -----------------------------------------------------------------------------
@@ -708,18 +703,11 @@ void RenderSandboxHostLinux::Init(const std::string& sandbox_path) {
   const int child_lifeline_fd = pipefds[0];
   childs_lifeline_fd_ = pipefds[1];
 
-  // We need to be monothreaded before we fork().
-#if !defined(TOOLKIT_GTK)
-  // Exclude gtk port as TestSuite in base/tests/test_suite.cc is calling
-  // gtk_init.
-  // TODO(oshima): Remove ifdef when above issues are resolved.
-  DCHECK_EQ(1, base::GetNumberOfThreads(base::GetCurrentProcessHandle()));
-#endif
   pid_ = fork();
   if (pid_ == 0) {
-    if (IGNORE_EINTR(close(fds[0])) < 0)
+    if (HANDLE_EINTR(close(fds[0])) < 0)
       DPLOG(ERROR) << "close";
-    if (IGNORE_EINTR(close(pipefds[1])) < 0)
+    if (HANDLE_EINTR(close(pipefds[1])) < 0)
       DPLOG(ERROR) << "close";
 
     SandboxIPCProcess handler(child_lifeline_fd, browser_socket, sandbox_path);
@@ -730,11 +718,9 @@ void RenderSandboxHostLinux::Init(const std::string& sandbox_path) {
 
 RenderSandboxHostLinux::~RenderSandboxHostLinux() {
   if (initialized_) {
-    if (IGNORE_EINTR(close(renderer_socket_)) < 0)
+    if (HANDLE_EINTR(close(renderer_socket_)) < 0)
       PLOG(ERROR) << "close";
-    if (IGNORE_EINTR(close(childs_lifeline_fd_)) < 0)
+    if (HANDLE_EINTR(close(childs_lifeline_fd_)) < 0)
       PLOG(ERROR) << "close";
   }
 }
-
-}  // namespace content

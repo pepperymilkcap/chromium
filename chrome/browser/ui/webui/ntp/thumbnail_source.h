@@ -1,67 +1,53 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_THUMBNAIL_SOURCE_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_THUMBNAIL_SOURCE_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "content/public/browser/url_data_source.h"
+#include "base/memory/ref_counted_memory.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 
 class Profile;
 
-namespace base {
-class RefCountedMemory;
-}
-
-namespace thumbnails {
-class ThumbnailService;
+namespace history {
+class TopSites;
 }
 
 // ThumbnailSource is the gateway between network-level chrome: requests for
 // thumbnails and the history/top-sites backend that serves these.
-class ThumbnailSource : public content::URLDataSource {
+class ThumbnailSource : public ChromeURLDataManager::DataSource {
  public:
-  ThumbnailSource(Profile* profile, bool capture_thumbnails);
+  explicit ThumbnailSource(Profile* profile);
 
-  // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual void StartDataRequest(
-      const std::string& path,
-      int render_process_id,
-      int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
+  // Called when the network layer has requested a resource underneath
+  // the path we registered.
+  virtual void StartDataRequest(const std::string& path,
+                                bool is_incognito,
+                                int request_id) OVERRIDE;
+
   virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
-  virtual base::MessageLoop* MessageLoopForRequestPath(
+
+  virtual MessageLoop* MessageLoopForRequestPath(
       const std::string& path) const OVERRIDE;
-  virtual bool ShouldServiceRequest(
-      const net::URLRequest* request) const OVERRIDE;
 
  private:
   virtual ~ThumbnailSource();
 
+  // Send the default thumbnail when we are missing a real one.
+  void SendDefaultThumbnail(int request_id);
+
   // Raw PNG representation of the thumbnail to show when the thumbnail
   // database doesn't have a thumbnail for a webpage.
-  scoped_refptr<base::RefCountedMemory> default_thumbnail_;
+  scoped_refptr<RefCountedMemory> default_thumbnail_;
 
-  // ThumbnailService.
-  scoped_refptr<thumbnails::ThumbnailService> thumbnail_service_;
-
-  // Only used when servicing requests on the UI thread.
-  Profile* const profile_;
-
-  // Indicate that, when a URL for which we don't have a thumbnail is requested
-  // from this source, then Chrome should capture a thumbnail next time it
-  // navigates to this URL. This is useful when the thumbnail URLs are generated
-  // by an external service rather than TopSites, so Chrome can learn about the
-  // URLs for which it should get thumbnails. Sources that capture thumbnails
-  // are also be more lenient when matching thumbnail URLs by checking for
-  // existing thumbnails in the database that contain a URL matching the prefix
-  // of the requested URL.
-  const bool capture_thumbnails_;
+  // TopSites.
+  scoped_refptr<history::TopSites> top_sites_;
 
   DISALLOW_COPY_AND_ASSIGN(ThumbnailSource);
 };

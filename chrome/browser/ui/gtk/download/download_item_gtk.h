@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_DOWNLOAD_DOWNLOAD_ITEM_GTK_H_
 #define CHROME_BROWSER_UI_GTK_DOWNLOAD_DOWNLOAD_ITEM_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -11,20 +12,18 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
-#include "base/timer/timer.h"
-#include "chrome/browser/download/download_item_model.h"
+#include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/icon_manager.h"
-#include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/base/animation/animation_delegate.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
-#include "ui/gfx/animation/animation_delegate.h"
-#include "ui/gfx/animation/slide_animation.h"
 
+class BaseDownloadItemModel;
 class DownloadShelfContextMenuGtk;
 class DownloadShelfGtk;
 class GtkThemeService;
@@ -32,27 +31,29 @@ class NineBox;
 
 namespace gfx {
 class Image;
+}
+
+namespace ui {
 class SlideAnimation;
 }
 
 class DownloadItemGtk : public content::DownloadItem::Observer,
-                        public gfx::AnimationDelegate,
+                        public ui::AnimationDelegate,
                         public content::NotificationObserver {
  public:
   // DownloadItemGtk takes ownership of |download_item_model|.
   DownloadItemGtk(DownloadShelfGtk* parent_shelf,
-                  content::DownloadItem* download_item);
+                  BaseDownloadItemModel* download_item_model);
 
   // Destroys all widgets belonging to this DownloadItemGtk.
   virtual ~DownloadItemGtk();
 
-  // content::DownloadItem::Observer implementation.
+  // DownloadItem::Observer implementation.
   virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
-  virtual void OnDownloadDestroyed(content::DownloadItem* download) OVERRIDE;
-  virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE;
+  virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE { }
 
-  // gfx::AnimationDelegate implementation.
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  // ui::AnimationDelegate implementation.
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -61,14 +62,19 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
 
   // Called when the icon manager has finished loading the icon. We take
   // ownership of |icon_bitmap|.
-  void OnLoadSmallIconComplete(gfx::Image* image);
-  void OnLoadLargeIconComplete(gfx::Image* image);
+  void OnLoadSmallIconComplete(IconManager::Handle handle,
+                               gfx::Image* image);
+  void OnLoadLargeIconComplete(IconManager::Handle handle,
+                               gfx::Image* image);
 
   // Returns the DownloadItem model object belonging to this item.
-  content::DownloadItem* download() { return download_model_.download(); }
+  content::DownloadItem* get_download();
 
  private:
   friend class DownloadShelfContextMenuGtk;
+
+  // Returns true IFF the download is dangerous and unconfirmed.
+  bool IsDangerous();
 
   // Functions for controlling the progress animation.
   // Repaint the download progress.
@@ -97,9 +103,6 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
 
   // Sets the icon for the danger warning dialog.
   void UpdateDangerIcon();
-
-  // Reenables the download button after it has been clicked.
-  void ReenableHbox();
 
   static void InitNineBoxes();
 
@@ -196,7 +199,7 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
   scoped_ptr<DownloadShelfContextMenuGtk> menu_;
 
   // The download item model we represent.
-  DownloadItemModel download_model_;
+  scoped_ptr<BaseDownloadItemModel> download_model_;
 
   // The dangerous download dialog. This will be null for safe downloads.
   GtkWidget* dangerous_prompt_;
@@ -209,13 +212,13 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
   int dangerous_hbox_full_width_;
 
   // The animation when this item is first added to the shelf.
-  scoped_ptr<gfx::SlideAnimation> new_item_animation_;
+  scoped_ptr<ui::SlideAnimation> new_item_animation_;
 
   // Progress animation.
   base::RepeatingTimer<DownloadItemGtk> progress_timer_;
 
   // Animation for download complete.
-  gfx::SlideAnimation complete_animation_;
+  ui::SlideAnimation complete_animation_;
 
   // The file icon for the download. May be null. The small version is used
   // for display in the shelf; the large version is for use as a drag icon.
@@ -224,7 +227,7 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
   gfx::Image* icon_large_;
 
   // The last download file path for which we requested an icon.
-  base::FilePath icon_filepath_;
+  FilePath icon_filepath_;
 
   content::NotificationRegistrar registrar_;
 
@@ -232,18 +235,11 @@ class DownloadItemGtk : public content::DownloadItem::Observer,
   base::Time creation_time_;
 
   // For canceling an in progress icon request.
-  CancelableTaskTracker cancelable_task_tracker_;
+  CancelableRequestConsumerT<int, 0> icon_consumer_;
 
   // Indicates when the download has completed, so we don't redo
   // on-completion actions.
   bool download_complete_;
-
-  // Whether we are currently disabled as part of opening the downloaded file.
-  bool disabled_while_opening_;
-
-  // Method factory used to delay reenabling of the item when opening the
-  // downloaded file.
-  base::WeakPtrFactory<DownloadItemGtk> weak_ptr_factory_;
 };
 
 #endif  // CHROME_BROWSER_UI_GTK_DOWNLOAD_DOWNLOAD_ITEM_GTK_H_

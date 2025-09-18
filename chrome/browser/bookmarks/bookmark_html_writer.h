@@ -1,27 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_HTML_WRITER_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_HTML_WRITER_H_
+#pragma once
 
 #include <list>
 #include <map>
 #include <string>
 
-#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/ref_counted_memory.h"
-#include "chrome/common/cancelable_task_tracker.h"
-#include "content/public/browser/notification_observer.h"
+#include "chrome/browser/history/history.h"
 #include "content/public/browser/notification_registrar.h"
+#include "net/base/file_stream.h"
 
 class BookmarkNode;
+class FilePath;
 class Profile;
-
-namespace chrome {
-struct FaviconBitmapResult;
-}
 
 // Observer for bookmark html output. Used only in tests.
 class BookmarksExportObserver {
@@ -39,11 +35,10 @@ class BookmarksExportObserver {
 class BookmarkFaviconFetcher: public content::NotificationObserver {
  public:
   // Map of URL and corresponding favicons.
-  typedef std::map<std::string, scoped_refptr<base::RefCountedMemory> >
-      URLFaviconMap;
+  typedef std::map<std::string, scoped_refptr<RefCountedMemory> > URLFaviconMap;
 
   BookmarkFaviconFetcher(Profile* profile,
-                         const base::FilePath& path,
+                         const FilePath& path,
                          BookmarksExportObserver* observer);
   virtual ~BookmarkFaviconFetcher();
 
@@ -69,7 +64,8 @@ class BookmarkFaviconFetcher: public content::NotificationObserver {
 
   // Favicon fetch callback. After all favicons are fetched executes
   // html output on the file thread.
-  void OnFaviconDataAvailable(const chrome::FaviconBitmapResult& bitmap_result);
+  void OnFaviconDataAvailable(FaviconService::Handle handle,
+                              history::FaviconData favicon);
 
   // The Profile object used for accessing FaviconService, bookmarks model.
   Profile* profile_;
@@ -78,14 +74,14 @@ class BookmarkFaviconFetcher: public content::NotificationObserver {
   // for each of them. After favicon is fetched top url is removed from list.
   std::list<std::string> bookmark_urls_;
 
-  // Tracks favicon tasks.
-  CancelableTaskTracker cancelable_task_tracker_;
+  // Consumer for requesting favicons.
+  CancelableRequestConsumer favicon_consumer_;
 
   // Map that stores favicon per URL.
   scoped_ptr<URLFaviconMap> favicons_map_;
 
   // Path where html output is stored.
-  base::FilePath path_;
+  FilePath path_;
 
   BookmarksExportObserver* observer_;
 
@@ -102,7 +98,7 @@ namespace bookmark_html_writer {
 // Before writing to the file favicons are fetched on the main thread.
 // TODO(sky): need a callback on failure.
 void WriteBookmarks(Profile* profile,
-                    const base::FilePath& path,
+                    const FilePath& path,
                     BookmarksExportObserver* observer);
 
 }  // namespace bookmark_html_writer

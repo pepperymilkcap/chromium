@@ -24,17 +24,17 @@ namespace {
 // PPB_Var methods -------------------------------------------------------------
 
 void AddRefVar(PP_Var var) {
-  ProxyAutoLock lock;
+  ppapi::ProxyAutoLock lock;
   PpapiGlobals::Get()->GetVarTracker()->AddRefVar(var);
 }
 
 void ReleaseVar(PP_Var var) {
-  ProxyAutoLock lock;
+  ppapi::ProxyAutoLock lock;
   PpapiGlobals::Get()->GetVarTracker()->ReleaseVar(var);
 }
 
 PP_Var VarFromUtf8(const char* data, uint32_t len) {
-  ProxyAutoLock lock;
+  ppapi::ProxyAutoLock lock;
   return StringVar::StringToPPVar(data, len);
 }
 
@@ -43,7 +43,7 @@ PP_Var VarFromUtf8_1_0(PP_Module /*module*/, const char* data, uint32_t len) {
 }
 
 const char* VarToUtf8(PP_Var var, uint32_t* len) {
-  ProxyAutoLock lock;
+  ppapi::ProxyAutoLock lock;
   StringVar* str = StringVar::FromPPVar(var);
   if (str) {
     *len = static_cast<uint32_t>(str->value().size());
@@ -71,13 +71,11 @@ const PPB_Var_1_0 var_interface1_0 = {
 // PPB_VarArrayBuffer methods --------------------------------------------------
 
 PP_Var CreateArrayBufferVar(uint32_t size_in_bytes) {
-  ProxyAutoLock lock;
   return PpapiGlobals::Get()->GetVarTracker()->MakeArrayBufferPPVar(
       size_in_bytes);
 }
 
 PP_Bool ByteLength(PP_Var array, uint32_t* byte_length) {
-  ProxyAutoLock lock;
   ArrayBufferVar* buffer = ArrayBufferVar::FromPPVar(array);
   if (!buffer)
     return PP_FALSE;
@@ -86,7 +84,6 @@ PP_Bool ByteLength(PP_Var array, uint32_t* byte_length) {
 }
 
 void* Map(PP_Var array) {
-  ProxyAutoLock lock;
   ArrayBufferVar* buffer = ArrayBufferVar::FromPPVar(array);
   if (!buffer)
     return NULL;
@@ -94,7 +91,6 @@ void* Map(PP_Var array) {
 }
 
 void Unmap(PP_Var array) {
-  ProxyAutoLock lock;
   ArrayBufferVar* buffer = ArrayBufferVar::FromPPVar(array);
   if (buffer)
     buffer->Unmap();

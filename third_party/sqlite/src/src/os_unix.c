@@ -4506,7 +4506,7 @@ int fillInUnixFile(
   OSTRACE(("OPEN    %-3d %s\n", h, zFilename));
   pNew->h = h;
   pNew->zPath = zFilename;
-  if( strcmp(pVfs->zName,"unix-excl")==0 ){
+  if( memcmp(pVfs->zName,"unix-excl",10)==0 ){
     pNew->ctrlFlags = UNIXFILE_EXCL;
   }else{
     pNew->ctrlFlags = 0;

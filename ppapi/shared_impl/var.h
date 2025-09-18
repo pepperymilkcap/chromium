@@ -9,20 +9,14 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/shared_memory.h"
-#include "base/platform_file.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
 
 namespace ppapi {
 
 class ArrayBufferVar;
-class ArrayVar;
-class DictionaryVar;
 class NPObjectVar;
 class ProxyObjectVar;
-class ResourceVar;
 class StringVar;
 class VarTracker;
 
@@ -31,6 +25,8 @@ class VarTracker;
 // Represents a non-POD var.
 class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
  public:
+  virtual ~Var();
+
   // Returns a string representing the given var for logging purposes.
   static std::string PPVarToLogString(PP_Var var);
 
@@ -38,9 +34,6 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
   virtual ArrayBufferVar* AsArrayBufferVar();
   virtual NPObjectVar* AsNPObjectVar();
   virtual ProxyObjectVar* AsProxyObjectVar();
-  virtual ArrayVar* AsArrayVar();
-  virtual DictionaryVar* AsDictionaryVar();
-  virtual ResourceVar* AsResourceVar();
 
   // Creates a PP_Var corresponding to this object. The return value will have
   // one reference addrefed on behalf of the caller.
@@ -58,11 +51,9 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
   int32 GetExistingVarID() const;
 
  protected:
-  friend class base::RefCounted<Var>;
   friend class VarTracker;
 
   Var();
-  virtual ~Var();
 
   // Returns the unique ID associated with this string or object, creating it
   // if necessary. The return value will be 0 if the string or object is
@@ -100,17 +91,11 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
 //   DoSomethingWithTheString(string->value());
 class PPAPI_SHARED_EXPORT StringVar : public Var {
  public:
-  explicit StringVar(const std::string& str);
+  StringVar(const std::string& str);
   StringVar(const char* str, uint32 len);
   virtual ~StringVar();
 
   const std::string& value() const { return value_; }
-  // Return a pointer to the internal string. This allows other objects to
-  // temporarily store a weak pointer to our internal string. Use with care; the
-  // pointer *will* become invalid if this StringVar is removed from the
-  // tracker. (All of this applies to value(), but this one's even easier to use
-  // dangerously).
-  const std::string* ptr() const { return &value_; }
 
   // Var override.
   virtual StringVar* AsStringVar() OVERRIDE;
@@ -125,18 +110,11 @@ class PPAPI_SHARED_EXPORT StringVar : public Var {
   static PP_Var StringToPPVar(const std::string& str);
   static PP_Var StringToPPVar(const char* str, uint32 len);
 
-  // Same as StringToPPVar but avoids a copy by destructively swapping the
-  // given string into the newly created StringVar. The string must already be
-  // valid UTF-8. After the call, *src will be empty.
-  static PP_Var SwapValidatedUTF8StringIntoPPVar(std::string* src);
-
   // Helper function that converts a PP_Var to a string. This will return NULL
   // if the PP_Var is not of string type or the string is invalid.
   static StringVar* FromPPVar(PP_Var var);
 
  private:
-  StringVar();  // Makes an empty string.
-
   std::string value_;
 
   DISALLOW_COPY_AND_ASSIGN(StringVar);
@@ -164,18 +142,6 @@ class PPAPI_SHARED_EXPORT ArrayBufferVar : public Var {
   virtual void* Map() = 0;
   virtual void Unmap() = 0;
   virtual uint32 ByteLength() = 0;
-
-  // Creates a new shared memory region, and copies the data in the
-  // ArrayBufferVar into it. On the plugin side, host_shm_handle_id will be set
-  // to some value that is not -1. On the host side, plugin_shm_handle will be
-  // set to a valid SharedMemoryHandle.
-  //
-  // Returns true if creating the shared memory (and copying) is successful,
-  // false otherwise.
-  virtual bool CopyToNewShmem(
-      PP_Instance instance,
-      int *host_shm_handle_id,
-      base::SharedMemoryHandle *plugin_shm_handle) = 0;
 
   // Var override.
   virtual ArrayBufferVar* AsArrayBufferVar() OVERRIDE;

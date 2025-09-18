@@ -4,6 +4,7 @@
 
 #ifndef BASE_CALLBACK_FORWARD_H_
 #define BASE_CALLBACK_FORWARD_H_
+#pragma once
 
 namespace base {
 

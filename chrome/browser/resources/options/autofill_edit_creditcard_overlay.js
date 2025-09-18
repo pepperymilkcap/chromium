@@ -1,9 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  /** @const */ var OptionsPage = options.OptionsPage;
+  const OptionsPage = options.OptionsPage;
+
+  // The GUID of the loaded credit card.
+  var guid_;
 
   /**
    * AutofillEditCreditCardOverlay class
@@ -12,7 +15,7 @@ cr.define('options', function() {
    */
   function AutofillEditCreditCardOverlay() {
     OptionsPage.call(this, 'autofillEditCreditCard',
-                     loadTimeData.getString('autofillEditCreditCardTitle'),
+                     templateData.autofillEditCreditCardTitle,
                      'autofill-edit-credit-card-overlay');
   }
 
@@ -30,26 +33,17 @@ cr.define('options', function() {
       var self = this;
       $('autofill-edit-credit-card-cancel-button').onclick = function(event) {
         self.dismissOverlay_();
-      };
+      }
       $('autofill-edit-credit-card-apply-button').onclick = function(event) {
         self.saveCreditCard_();
         self.dismissOverlay_();
-      };
+      }
 
       self.guid_ = '';
+      self.hasEditedNumber_ = false;
       self.clearInputFields_();
       self.connectInputEvents_();
       self.setDefaultSelectOptions_();
-    },
-
-    /**
-    * Specifically catch the situations in which the overlay is cancelled
-    * externally (e.g. by pressing <Esc>), so that the input fields and
-    * GUID can be properly cleared.
-    * @override
-    */
-    handleCancel: function() {
-      this.dismissOverlay_();
     },
 
     /**
@@ -59,6 +53,7 @@ cr.define('options', function() {
     dismissOverlay_: function() {
       this.clearInputFields_();
       this.guid_ = '';
+      this.hasEditedNumber_ = false;
       OptionsPage.closeOverlay();
     },
 
@@ -157,8 +152,8 @@ cr.define('options', function() {
      * @private
      */
     setInputFields_: function(creditCard) {
-      $('name-on-card').value = creditCard.nameOnCard;
-      $('credit-card-number').value = creditCard.creditCardNumber;
+      $('name-on-card').value = creditCard['nameOnCard'];
+      $('credit-card-number').value = creditCard['creditCardNumber'];
 
       // The options for the year select control may be out-dated at this point,
       // e.g. the user opened the options page before midnight on New Year's Eve
@@ -166,10 +161,10 @@ cr.define('options', function() {
       // reload the select options just to be safe.
       this.setDefaultSelectOptions_();
 
-      var idx = parseInt(creditCard.expirationMonth, 10);
+      var idx = parseInt(creditCard['expirationMonth'], 10);
       $('expiration-month').selectedIndex = idx - 1;
 
-      expYear = creditCard.expirationYear;
+      expYear = creditCard['expirationYear'];
       var date = new Date();
       var year = parseInt(date.getFullYear());
       for (var i = 0; i < 10; ++i) {
@@ -187,8 +182,12 @@ cr.define('options', function() {
     loadCreditCard_: function(creditCard) {
       this.setInputFields_(creditCard);
       this.inputFieldChanged_();
-      this.guid_ = creditCard.guid;
+      this.guid_ = creditCard['guid'];
     },
+  };
+
+  AutofillEditCreditCardOverlay.clearInputFields = function(title) {
+    AutofillEditCreditCardOverlay.getInstance().clearInputFields_();
   };
 
   AutofillEditCreditCardOverlay.loadCreditCard = function(creditCard) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,12 +50,8 @@ std::string ExtensionIconSet::Get(int size, MatchType match_type) const {
 }
 
 bool ExtensionIconSet::ContainsPath(const std::string& path) const {
-  return GetIconSizeFromPath(path) != 0;
-}
-
-int ExtensionIconSet::GetIconSizeFromPath(const std::string& path) const {
   if (path.empty())
-    return 0;
+    return false;
 
   DCHECK(path[0] != '/') <<
       "ExtensionIconSet stores icon paths without leading slash.";
@@ -63,8 +59,8 @@ int ExtensionIconSet::GetIconSizeFromPath(const std::string& path) const {
   for (IconMap::const_iterator iter = map_.begin(); iter != map_.end();
        ++iter) {
     if (iter->second == path)
-      return iter->first;
+      return true;
   }
 
-  return 0;
+  return false;
 }

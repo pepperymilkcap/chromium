@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlwapi.h>
-
-#include "policy/policy_constants.h"
 
 // Herein lies stuff selectively stolen from Chrome. We don't pull it in
 // directly because all of it results in many things we don't want being
@@ -25,7 +23,6 @@ const wchar_t* kAllowedSwitches[] = {
   L"chrome-version",
   L"disable-background-mode",
   L"disable-popup-blocking",
-  L"disable-print-preview",
   L"disable-renderer-accessibility",
   L"enable-experimental-extension-apis",
   L"force-renderer-accessibility",
@@ -132,64 +129,13 @@ bool IsValidCommandLine(const wchar_t* command_line) {
   // doesn't get passed through to Chrome.
   for (int i = 1; i < num_args; ++i) {
     std::wstring trimmed_arg = TrimWhiteSpace(args[i]);
-    if (!IsValidArgument(trimmed_arg)) {
+    if (!IsValidArgument(trimmed_arg.c_str())) {
       success = false;
       break;
     }
   }
 
   return success;
-}
-
-// Looks up optionally configured launch parameters for Chrome that may have
-// been set via group policy.
-void AppendAdditionalLaunchParameters(std::wstring* command_line) {
-  static const HKEY kRootKeys[] = {
-    HKEY_LOCAL_MACHINE,
-    HKEY_CURRENT_USER
-  };
-
-  std::wstring launch_params_value_name(
-      &policy::key::kAdditionalLaunchParameters[0],
-      &policy::key::kAdditionalLaunchParameters[
-          lstrlenA(policy::key::kAdditionalLaunchParameters)]);
-
-  // Used for basic checks since CreateProcess doesn't support command lines
-  // longer than 0x8000 characters. If we surpass that length, we do not add the
-  // additional parameters.  Because we need to add a space before the
-  // extra parameters, we use 0x7fff and not 0x8000.
-  const size_t kMaxChars = 0x7FFF - command_line->size();
-  HKEY key;
-  LONG result;
-  bool found = false;
-  for (int i = 0; !found && i < arraysize(kRootKeys); ++i) {
-    result = ::RegOpenKeyExW(kRootKeys[i], policy::kRegistryChromePolicyKey, 0,
-                             KEY_QUERY_VALUE, &key);
-    if (result == ERROR_SUCCESS) {
-      DWORD size = 0;
-      DWORD type = 0;
-      result = RegQueryValueExW(key, launch_params_value_name.c_str(),
-                                0, &type, NULL, &size);
-      if (result == ERROR_SUCCESS && type == REG_SZ && size > 0 &&
-          (size / sizeof(wchar_t)) < kMaxChars) {
-        // This size includes any terminating null character or characters
-        // unless the data was stored without them, so for safety we allocate
-        // one extra char and zero out the buffer.
-        wchar_t* value = new wchar_t[(size / sizeof(wchar_t)) + 1];
-        memset(value, 0, size + sizeof(wchar_t));
-        result = RegQueryValueExW(key, launch_params_value_name.c_str(), 0,
-                                  &type, reinterpret_cast<BYTE*>(&value[0]),
-                                  &size);
-        if (result == ERROR_SUCCESS) {
-          *command_line += L' ';
-          *command_line += value;
-          found = true;
-        }
-        delete [] value;
-      }
-      ::RegCloseKey(key);
-    }
-  }
 }
 
 bool SanitizeAndLaunchChrome(const wchar_t* command_line) {
@@ -208,9 +154,6 @@ bool SanitizeAndLaunchChrome(const wchar_t* command_line) {
         command_line += L' ';
         command_line += args;
       }
-
-      // Append parameters that might be set by group policy.
-      AppendAdditionalLaunchParameters(&command_line);
 
       STARTUPINFO startup_info = {0};
       startup_info.cb = sizeof(startup_info);

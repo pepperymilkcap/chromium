@@ -4,14 +4,13 @@
 
 #ifndef UI_VIEWS_IME_INPUT_METHOD_DELEGATE_H_
 #define UI_VIEWS_IME_INPUT_METHOD_DELEGATE_H_
+#pragma once
 
 #include "ui/views/views_export.h"
 
-namespace ui {
-class KeyEvent;
-}
-
 namespace views {
+
+class KeyEvent;
 
 namespace internal {
 
@@ -22,7 +21,8 @@ class VIEWS_EXPORT InputMethodDelegate {
   virtual ~InputMethodDelegate() {}
 
   // Dispatch a key event already processed by the input method.
-  virtual void DispatchKeyEventPostIME(const ui::KeyEvent& key) = 0;
+  virtual void DispatchKeyEventPostIME(const KeyEvent& key) = 0;
+
 };
 
 }  // namespace internal

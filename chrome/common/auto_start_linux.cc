@@ -1,25 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/auto_start_linux.h"
 
 #include "base/environment.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/nix/xdg_util.h"
-#include "base/strings/string_tokenizer.h"
+#include "base/string_tokenizer.h"
 
 namespace {
 
-const base::FilePath::CharType kAutostart[] = "autostart";
+const FilePath::CharType kAutostart[] = "autostart";
+const FilePath::CharType kConfig[] = ".config";
+const char kXdgConfigHome[] = "XDG_CONFIG_HOME";
 
-base::FilePath GetAutostartDirectory(base::Environment* environment) {
-  base::FilePath result = base::nix::GetXDGDirectory(
-      environment,
-      base::nix::kXdgConfigHomeEnvVar,
-      base::nix::kDotConfigDir);
+FilePath GetAutostartDirectory(base::Environment* environment) {
+  FilePath result =
+      base::nix::GetXDGDirectory(environment, kXdgConfigHome, kConfig);
   result = result.Append(kAutostart);
   return result;
 }
@@ -31,14 +31,13 @@ bool AutoStart::AddApplication(const std::string& autostart_filename,
                                const std::string& command_line,
                                bool is_terminal_app) {
   scoped_ptr<base::Environment> environment(base::Environment::Create());
-  base::FilePath autostart_directory = GetAutostartDirectory(environment.get());
-  if (!base::DirectoryExists(autostart_directory) &&
-      !base::CreateDirectory(autostart_directory)) {
+  FilePath autostart_directory = GetAutostartDirectory(environment.get());
+  if (!file_util::DirectoryExists(autostart_directory) &&
+      !file_util::CreateDirectory(autostart_directory)) {
     return false;
   }
 
-  base::FilePath autostart_file =
-      autostart_directory.Append(autostart_filename);
+  FilePath autostart_file = autostart_directory.Append(autostart_filename);
   std::string terminal = is_terminal_app ? "true" : "false";
   std::string autostart_file_contents =
       "[Desktop Entry]\n"
@@ -50,7 +49,7 @@ bool AutoStart::AddApplication(const std::string& autostart_filename,
   if (file_util::WriteFile(autostart_file, autostart_file_contents.c_str(),
                            content_length) !=
       static_cast<int>(content_length)) {
-    base::DeleteFile(autostart_file, false);
+    file_util::Delete(autostart_file, false);
     return false;
   }
   return true;
@@ -58,19 +57,17 @@ bool AutoStart::AddApplication(const std::string& autostart_filename,
 
 bool AutoStart::Remove(const std::string& autostart_filename) {
   scoped_ptr<base::Environment> environment(base::Environment::Create());
-  base::FilePath autostart_directory = GetAutostartDirectory(environment.get());
-  base::FilePath autostart_file =
-      autostart_directory.Append(autostart_filename);
-  return base::DeleteFile(autostart_file, false);
+  FilePath autostart_directory = GetAutostartDirectory(environment.get());
+  FilePath autostart_file = autostart_directory.Append(autostart_filename);
+  return file_util::Delete(autostart_file, false);
 }
 
 bool AutoStart::GetAutostartFileContents(
     const std::string& autostart_filename, std::string* contents) {
   scoped_ptr<base::Environment> environment(base::Environment::Create());
-  base::FilePath autostart_directory = GetAutostartDirectory(environment.get());
-  base::FilePath autostart_file =
-      autostart_directory.Append(autostart_filename);
-  return base::ReadFileToString(autostart_file, contents);
+  FilePath autostart_directory = GetAutostartDirectory(environment.get());
+  FilePath autostart_file = autostart_directory.Append(autostart_filename);
+  return file_util::ReadFileToString(autostart_file, contents);
 }
 
 bool AutoStart::GetAutostartFileValue(const std::string& autostart_filename,
@@ -79,7 +76,7 @@ bool AutoStart::GetAutostartFileValue(const std::string& autostart_filename,
   std::string contents;
   if (!GetAutostartFileContents(autostart_filename, &contents))
     return false;
-  base::StringTokenizer tokenizer(contents, "\n");
+  StringTokenizer tokenizer(contents, "\n");
   std::string token = value_name + "=";
   while (tokenizer.GetNext()) {
     if (tokenizer.token().substr(0, token.length()) == token) {

@@ -1,20 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_RENDERER_WEBSHAREDWORKER_PROXY_H_
 #define CONTENT_RENDERER_WEBSHAREDWORKER_PROXY_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "ipc/ipc_listener.h"
-#include "third_party/WebKit/public/web/WebSharedWorkerConnector.h"
-#include "url/gurl.h"
-
-namespace content {
+#include "base/memory/scoped_ptr.h"
+#include "googleurl/src/gurl.h"
+#include "ipc/ipc_channel.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorker.h"
 
 class ChildThread;
 
@@ -23,34 +22,36 @@ class ChildThread;
 // thread. Once the connect event has been sent, all future communication will
 // happen via the WebMessagePortChannel, and the WebSharedWorker instance will
 // be freed.
-class WebSharedWorkerProxy : public blink::WebSharedWorkerConnector,
-                             private IPC::Listener {
+class WebSharedWorkerProxy : public WebKit::WebSharedWorker,
+                             private IPC::Channel::Listener {
  public:
   // If the worker not loaded yet, route_id == MSG_ROUTING_NONE
   WebSharedWorkerProxy(ChildThread* child_thread,
                        unsigned long long document_id,
                        bool exists,
                        int route_id,
-                       int render_view_route_id,
-                       int render_frame_route_id);
+                       int render_view_route_id);
   virtual ~WebSharedWorkerProxy();
 
   // Implementations of WebSharedWorker APIs
   virtual bool isStarted();
-  virtual void connect(blink::WebMessagePortChannel* channel,
+  virtual void connect(WebKit::WebMessagePortChannel* channel,
                        ConnectListener* listener);
 
   virtual void startWorkerContext(
-      const blink::WebURL& script_url,
-      const blink::WebString& name,
-      const blink::WebString& user_agent,
-      const blink::WebString& source_code,
-      const blink::WebString& content_security_policy,
-      blink::WebContentSecurityPolicyType policy_type,
+      const WebKit::WebURL& script_url,
+      const WebKit::WebString& name,
+      const WebKit::WebString& user_agent,
+      const WebKit::WebString& source_code,
+      const WebKit::WebString& content_security_policy,
+      WebKit::WebContentSecurityPolicyType policy_type,
       long long script_resource_appcache_id);
 
+  virtual void terminateWorkerContext();
+  virtual void clientDestroyed();
+
  private:
-  // IPC::Listener implementation.
+  // IPC::Channel::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Returns true if the worker is running (can send messages to it).
@@ -71,11 +72,11 @@ class WebSharedWorkerProxy : public blink::WebSharedWorkerConnector,
 
   void CreateWorkerContext(const GURL& script_url,
                            bool is_shared,
-                           const base::string16& name,
-                           const base::string16& user_agent,
-                           const base::string16& source_code,
-                           const base::string16& content_security_policy,
-                           blink::WebContentSecurityPolicyType policy_type,
+                           const string16& name,
+                           const string16& user_agent,
+                           const string16& source_code,
+                           const string16& content_security_policy,
+                           WebKit::WebContentSecurityPolicyType policy_type,
                            int pending_route_id,
                            int64 script_resource_appcache_id);
   void OnWorkerCreated();
@@ -87,9 +88,8 @@ class WebSharedWorkerProxy : public blink::WebSharedWorkerConnector,
   // routing ids).
   int route_id_;
 
-  // The routing id for the RenderView and RenderFrame that created this worker.
+  // The routing id for the RenderView that created this worker.
   int render_view_route_id_;
-  int render_frame_route_id_;
 
   ChildThread* child_thread_;
 
@@ -108,7 +108,5 @@ class WebSharedWorkerProxy : public blink::WebSharedWorkerConnector,
 
   DISALLOW_COPY_AND_ASSIGN(WebSharedWorkerProxy);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_RENDERER_WEBSHAREDWORKER_PROXY_H_

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <AvailabilityMacros.h>
-#include <crt_externs.h>
 #include <dlfcn.h>
 #include <string.h>
 #include <sys/event.h>
@@ -18,21 +17,30 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/mac/mac_logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/path_service.h"
-#include "base/posix/eintr_wrapper.h"
-#include "base/process/launch.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/process_util.h"
+#include "base/stringprintf.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/browser/mac/install_from_dmg.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+
+// RTLD_MAIN_ONLY is supported as of Mac OS X 10.5, but <dlfcn.h> does not
+// define it in the 10.5 SDK. It is present in the 10.6 SDK and is documented
+// as working on 10.5 and later. The source code for the version of dyld that
+// shipped in 10.5, dyld-95.3/src/dyldAPIs.cpp, confirms that this feature is
+// supported. Provide a fallback definition here.
+#if MAC_OS_X_VERSION_MAX_ALLOWED == MAC_OS_X_VERSION_10_5  // 10.5 SDK
+#define RTLD_MAIN_ONLY ((void*)-5)  // Search main executable only.
+#endif
 
 namespace mac_relauncher {
 
@@ -81,7 +89,7 @@ bool RelaunchApp(const std::vector<std::string>& args) {
   // been applied. In fact, it's safer than using the updated version of the
   // helper process, because there's no guarantee that the updated version's
   // relauncher implementation will be compatible with the running version's.
-  base::FilePath child_path;
+  FilePath child_path;
   if (!PathService::Get(content::CHILD_PROCESS_EXE, &child_path)) {
     LOG(ERROR) << "No CHILD_PROCESS_EXE";
     return false;
@@ -143,7 +151,7 @@ bool RelaunchAppWithHelper(const std::string& helper,
                  kRelauncherSyncFD != STDERR_FILENO,
                  kRelauncherSyncFD_must_not_conflict_with_stdio_fds);
 
-  base::FileHandleMappingVector fd_map;
+  base::file_handle_mapping_vector fd_map;
   fd_map.push_back(std::make_pair(*pipe_write_fd, kRelauncherSyncFD));
 
   base::LaunchOptions options;
@@ -256,20 +264,22 @@ int RelauncherMain(const content::MainFunctionParams& main_parameters) {
   // after the separator should be given to the relaunched process; it's also
   // important to not treat the path to the relaunched process as a "loose"
   // argument. NXArgc and NXArgv are pointers to the original argc and argv as
-  // passed to main(), so use those. Access them through _NSGetArgc and
-  // _NSGetArgv because NXArgc and NXArgv are normally only available to a
-  // main executable via crt1.o and this code will run from a dylib, and
-  // because of http://crbug.com/139902.
-  const int* argcp = _NSGetArgc();
+  // passed to main(), so use those. The typical mechanism to do this is to
+  // provide "extern" declarations to access these, but they're only present
+  // in the crt1.o start file. This function will be linked into the framework
+  // dylib, having no direct access to anything in crt1.o. dlsym to the
+  // rescue.
+  const int* argcp = static_cast<const int*>(dlsym(RTLD_MAIN_ONLY, "NXArgc"));
   if (!argcp) {
-    NOTREACHED();
+    LOG(ERROR) << "dlsym NXArgc: " << dlerror();
     return 1;
   }
   int argc = *argcp;
 
-  const char* const* const* argvp = _NSGetArgv();
+  const char* const** argvp =
+      static_cast<const char* const**>(dlsym(RTLD_MAIN_ONLY, "NXArgv"));
   if (!argvp) {
-    NOTREACHED();
+    LOG(ERROR) << "dlsym NXArgv: " << dlerror();
     return 1;
   }
   const char* const* argv = *argvp;
@@ -285,7 +295,7 @@ int RelauncherMain(const content::MainFunctionParams& main_parameters) {
   // won't contain the argv[0] of the relauncher process, the
   // RelauncherTypeArg() at argv[1], kRelauncherArgSeparator, or the
   // executable path of the process to be launched.
-  base::ScopedCFTypeRef<CFMutableArrayRef> relaunch_args(
+  base::mac::ScopedCFTypeRef<CFMutableArrayRef> relaunch_args(
       CFArrayCreateMutable(NULL, argc - 4, &kCFTypeArrayCallBacks));
   if (!relaunch_args) {
     LOG(ERROR) << "CFArrayCreateMutable";
@@ -326,7 +336,7 @@ int RelauncherMain(const content::MainFunctionParams& main_parameters) {
         relaunch_executable.assign(arg);
         seen_relaunch_executable = true;
       } else {
-        base::ScopedCFTypeRef<CFStringRef> arg_cf(
+        base::mac::ScopedCFTypeRef<CFStringRef> arg_cf(
             base::SysUTF8ToCFStringRef(arg));
         if (!arg_cf) {
           LOG(ERROR) << "base::SysUTF8ToCFStringRef failed for " << arg;

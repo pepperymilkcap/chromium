@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,22 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/http/http_basic_stream.h"
+#include "net/http/http_net_log_params.h"
 #include "net/http/http_network_session.h"
+#include "net/http/http_proxy_utils.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_stream_parser.h"
-#include "net/http/proxy_connect_redirect_http_stream.h"
 #include "net/socket/client_socket_handle.h"
-#include "url/gurl.h"
 
 namespace net {
 
@@ -34,10 +35,11 @@ HttpProxyClientSocket::HttpProxyClientSocket(
     HttpAuthHandlerFactory* http_auth_handler_factory,
     bool tunnel,
     bool using_spdy,
-    NextProto protocol_negotiated,
+    SSLClientSocket::NextProto protocol_negotiated,
     bool is_https_proxy)
-    : io_callback_(base::Bind(&HttpProxyClientSocket::OnIOComplete,
-                              base::Unretained(this))),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(io_callback_(
+        base::Bind(&HttpProxyClientSocket::OnIOComplete,
+                   base::Unretained(this)))),
       next_state_(STATE_NONE),
       transport_(transport_socket),
       endpoint_(endpoint),
@@ -52,7 +54,6 @@ HttpProxyClientSocket::HttpProxyClientSocket(
       using_spdy_(using_spdy),
       protocol_negotiated_(protocol_negotiated),
       is_https_proxy_(is_https_proxy),
-      redirect_has_load_timing_info_(false),
       net_log_(transport_socket->socket()->NetLog()) {
   // Synthesize the bits of a request that we actually use.
   request_.url = request_url;
@@ -83,26 +84,13 @@ int HttpProxyClientSocket::RestartWithAuth(const CompletionCallback& callback) {
   return rv;
 }
 
-const scoped_refptr<HttpAuthController>&
-HttpProxyClientSocket::GetAuthController() const {
-  return auth_;
-}
-
-bool HttpProxyClientSocket::IsUsingSpdy() const {
-  return using_spdy_;
-}
-
-NextProto HttpProxyClientSocket::GetProtocolNegotiated() const {
-  return protocol_negotiated_;
-}
-
 const HttpResponseInfo* HttpProxyClientSocket::GetConnectResponseInfo() const {
-  return response_.headers.get() ? &response_ : NULL;
+  return response_.headers ? &response_ : NULL;
 }
 
 HttpStream* HttpProxyClientSocket::CreateConnectResponseStream() {
-  return new ProxyConnectRedirectHttpStream(
-      redirect_has_load_timing_info_ ? &redirect_load_timing_info_ : NULL);
+  return new HttpBasicStream(transport_.release(),
+                             http_stream_parser_.release(), false);
 }
 
 
@@ -185,28 +173,20 @@ bool HttpProxyClientSocket::UsingTCPFastOpen() const {
   return false;
 }
 
-bool HttpProxyClientSocket::WasNpnNegotiated() const {
+int64 HttpProxyClientSocket::NumBytesRead() const {
   if (transport_.get() && transport_->socket()) {
-    return transport_->socket()->WasNpnNegotiated();
+    return transport_->socket()->NumBytesRead();
   }
   NOTREACHED();
-  return false;
+  return -1;
 }
 
-NextProto HttpProxyClientSocket::GetNegotiatedProtocol() const {
+base::TimeDelta HttpProxyClientSocket::GetConnectTimeMicros() const {
   if (transport_.get() && transport_->socket()) {
-    return transport_->socket()->GetNegotiatedProtocol();
+    return transport_->socket()->GetConnectTimeMicros();
   }
   NOTREACHED();
-  return kProtoUnknown;
-}
-
-bool HttpProxyClientSocket::GetSSLInfo(SSLInfo* ssl_info) {
-  if (transport_.get() && transport_->socket()) {
-    return transport_->socket()->GetSSLInfo(ssl_info);
-  }
-  NOTREACHED();
-  return false;
+  return base::TimeDelta::FromMicroseconds(-1);
 }
 
 int HttpProxyClientSocket::Read(IOBuffer* buf, int buf_len,
@@ -221,7 +201,7 @@ int HttpProxyClientSocket::Read(IOBuffer* buf, int buf_len,
     // We reach this case when the user cancels a 407 proxy auth prompt.
     // See http://crbug.com/8473.
     DCHECK_EQ(407, response_.headers->response_code());
-    LogBlockedTunnelResponse();
+    LogBlockedTunnelResponse(response_.headers->response_code());
 
     return ERR_TUNNEL_CONNECTION_FAILED;
   }
@@ -245,7 +225,7 @@ bool HttpProxyClientSocket::SetSendBufferSize(int32 size) {
   return transport_->socket()->SetSendBufferSize(size);
 }
 
-int HttpProxyClientSocket::GetPeerAddress(IPEndPoint* address) const {
+int HttpProxyClientSocket::GetPeerAddress(AddressList* address) const {
   return transport_->socket()->GetPeerAddress(address);
 }
 
@@ -294,11 +274,21 @@ int HttpProxyClientSocket::DidDrainBodyForAuthRestart(bool keep_alive) {
   return OK;
 }
 
-void HttpProxyClientSocket::LogBlockedTunnelResponse() const {
-  ProxyClientSocket::LogBlockedTunnelResponse(
-      response_.headers->response_code(),
-      request_.url,
-      is_https_proxy_);
+int HttpProxyClientSocket::HandleAuthChallenge() {
+  DCHECK(response_.headers);
+
+  int rv = auth_->HandleAuthChallenge(response_.headers, false, true, net_log_);
+  response_.auth_challenge = auth_->auth_info();
+  if (rv == OK)
+    return ERR_PROXY_AUTH_REQUESTED;
+
+  return rv;
+}
+
+void HttpProxyClientSocket::LogBlockedTunnelResponse(int response_code) const {
+  LOG(WARNING) << "Blocked proxy response with status " << response_code
+               << " to CONNECT request for "
+               << GetHostAndPort(request_.url) << ".";
 }
 
 void HttpProxyClientSocket::DoCallback(int result) {
@@ -338,7 +328,7 @@ int HttpProxyClientSocket::DoLoop(int last_io_result) {
       case STATE_SEND_REQUEST:
         DCHECK_EQ(OK, rv);
         net_log_.BeginEvent(
-            NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_SEND_REQUEST);
+            NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_SEND_REQUEST, NULL);
         rv = DoSendRequest();
         break;
       case STATE_SEND_REQUEST_COMPLETE:
@@ -349,7 +339,7 @@ int HttpProxyClientSocket::DoLoop(int last_io_result) {
       case STATE_READ_HEADERS:
         DCHECK_EQ(OK, rv);
         net_log_.BeginEvent(
-            NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_READ_HEADERS);
+            NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_READ_HEADERS, NULL);
         rv = DoReadHeaders();
         break;
       case STATE_READ_HEADERS_COMPLETE:
@@ -407,19 +397,19 @@ int HttpProxyClientSocket::DoSendRequest() {
       auth_->AddAuthorizationHeader(&authorization_headers);
     BuildTunnelRequest(request_, authorization_headers, endpoint_,
                        &request_line_, &request_headers_);
-
-    net_log_.AddEvent(
-        NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
-        base::Bind(&HttpRequestHeaders::NetLogCallback,
-                   base::Unretained(&request_headers_),
-                   &request_line_));
+    if (net_log_.IsLoggingAllEvents()) {
+      net_log_.AddEvent(
+          NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
+          make_scoped_refptr(new NetLogHttpRequestParameter(
+              request_line_, request_headers_)));
+    }
   }
 
   parser_buf_ = new GrowableIOBuffer();
-  http_stream_parser_.reset(new HttpStreamParser(
-      transport_.get(), &request_, parser_buf_.get(), net_log_));
-  return http_stream_parser_->SendRequest(
-      request_line_, request_headers_, &response_, io_callback_);
+  http_stream_parser_.reset(
+      new HttpStreamParser(transport_.get(), &request_, parser_buf_, net_log_));
+  return http_stream_parser_->SendRequest(request_line_, request_headers_, NULL,
+                                          &response_, io_callback_);
 }
 
 int HttpProxyClientSocket::DoSendRequestComplete(int result) {
@@ -443,9 +433,11 @@ int HttpProxyClientSocket::DoReadHeadersComplete(int result) {
   if (response_.headers->GetParsedHttpVersion() < HttpVersion(1, 0))
     return ERR_TUNNEL_CONNECTION_FAILED;
 
-  net_log_.AddEvent(
-      NetLog::TYPE_HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
-      base::Bind(&HttpResponseHeaders::NetLogCallback, response_.headers));
+  if (net_log_.IsLoggingAllEvents()) {
+    net_log_.AddEvent(
+        NetLog::TYPE_HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
+        make_scoped_refptr(new NetLogHttpResponseParameter(response_.headers)));
+  }
 
   switch (response_.headers->response_code()) {
     case 200:  // OK
@@ -462,51 +454,33 @@ int HttpProxyClientSocket::DoReadHeadersComplete(int result) {
       // The only safe thing to do here is to fail the connection because our
       // client is expecting an SSL protected response.
       // See http://crbug.com/7338.
-
-    case 302:  // Found / Moved Temporarily
-      // Attempt to follow redirects from HTTPS proxies, but only if we can
-      // sanitize the response.  This still allows a rogue HTTPS proxy to
-      // redirect an HTTPS site load to a similar-looking site, but no longer
-      // allows it to impersonate the site the user requested.
-      if (is_https_proxy_ && SanitizeProxyRedirect(&response_, request_.url)) {
-        bool is_connection_reused = http_stream_parser_->IsConnectionReused();
-        redirect_has_load_timing_info_ =
-            transport_->GetLoadTimingInfo(
-                is_connection_reused, &redirect_load_timing_info_);
-        transport_.reset();
-        http_stream_parser_.reset();
-        return ERR_HTTPS_PROXY_TUNNEL_RESPONSE;
-      }
-
-      // We're not using an HTTPS proxy, or we couldn't sanitize the redirect.
-      LogBlockedTunnelResponse();
-      return ERR_TUNNEL_CONNECTION_FAILED;
-
     case 407:  // Proxy Authentication Required
       // We need this status code to allow proxy authentication.  Our
       // authentication code is smart enough to avoid being tricked by an
       // active network attacker.
       // The next state is intentionally not set as it should be STATE_NONE;
-      return HandleProxyAuthChallenge(auth_.get(), &response_, net_log_);
+      return HandleAuthChallenge();
 
     default:
-      // Ignore response to avoid letting the proxy impersonate the target
-      // server.  (See http://crbug.com/137891.)
+      if (is_https_proxy_)
+        return ERR_HTTPS_PROXY_TUNNEL_RESPONSE;
+      // For all other status codes, we conservatively fail the CONNECT
+      // request.
       // We lose something by doing this.  We have seen proxy 403, 404, and
       // 501 response bodies that contain a useful error message.  For
       // example, Squid uses a 404 response to report the DNS error: "The
       // domain name does not exist."
-      LogBlockedTunnelResponse();
+      LogBlockedTunnelResponse(response_.headers->response_code());
       return ERR_TUNNEL_CONNECTION_FAILED;
   }
 }
 
 int HttpProxyClientSocket::DoDrainBody() {
-  DCHECK(drain_buf_.get());
+  DCHECK(drain_buf_);
   DCHECK(transport_->is_initialized());
   next_state_ = STATE_DRAIN_BODY_COMPLETE;
-  return http_stream_parser_->ReadResponseBody(
-      drain_buf_.get(), kDrainBodyBufferSize, io_callback_);
+  return http_stream_parser_->ReadResponseBody(drain_buf_, kDrainBodyBufferSize,
+                                               io_callback_);
 }
 
 int HttpProxyClientSocket::DoDrainBodyComplete(int result) {

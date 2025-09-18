@@ -1,28 +1,23 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
-
 body {
   -webkit-user-select: none;
   background: #fff;
   margin: 0;
-  overflow: hidden;
   padding: 0;
+  overflow: hidden;
 }
 
 .keyboard-overlay-keyboard {
+  border-radius: 6px;
   background: -webkit-linear-gradient(#484848, #252525) no-repeat;
   background-color: #252525;
-  border-radius: 6px;
   font-family: 'Droid Sans', Arial;
 }
 
 .keyboard-overlay-instructions {
   -webkit-box-orient: vertical;
-  background: -webkit-linear-gradient(rgb(51, 76, 126), rgb(13, 23, 43));
-  border: 2px solid rgb(87, 108, 207);
+  background: -webkit-linear-gradient(#334c7e, #0d172b);
   border-radius: 5px;
+  border: 2px solid #576ccf;
   color: #fff;
   display: -webkit-box;
   position: absolute;
@@ -51,7 +46,7 @@ body {
   margin: 0 auto 13px;
   text-align: center;
   text-decoration: underline;
-  vertical-align: middle;
+  verticl-align: middle;
 }
 
 .keyboard-overlay-learn-more-text a {
@@ -60,10 +55,10 @@ body {
 
 .keyboard-overlay-key {
   -webkit-box-orient: vertical;
+  border-radius: 4px;
   background-color: rgba(24, 24, 24, 0.9);
   border: 2px solid #7f7f7f;
-  border-radius: 4px;
-  color: rgb(151, 151, 151);
+  color: #979796;
   display: -webkit-box;
   font-size: 75%;
   font-weight: bold;
@@ -78,31 +73,27 @@ body {
 }
 
 .keyboard-overlay-key.is-shortcut.modifier-shift {
-  border-color: rgb(97, 186, 100);
+  border-color: #61ba64;
 }
 
 .keyboard-overlay-key.is-shortcut.modifier-ctrl {
-  border-color: rgb(93, 128, 199);
+  border-color: #5d80c7;
 }
 
 .keyboard-overlay-key.is-shortcut.modifier-alt {
-  border-color: rgb(184, 84, 84);
-}
-
-.keyboard-overlay-key.is-shortcut.modifier-search {
-  border-color: rgb(204, 204, 80);
+  border-color: #b85454;
 }
 
 .keyboard-overlay-key.is-shortcut.modifier-shift.modifier-ctrl {
-  border-color: rgb(121, 172, 143);
+  border-color: #79ac8f;
 }
 
 .keyboard-overlay-key.is-shortcut.modifier-shift.modifier-alt {
-  border-color: rgb(191, 189, 121);
+  border-color: #bfbd79;
 }
 
 .keyboard-overlay-key.is-shortcut.modifier-ctrl.modifier-alt {
-  border-color: rgb(158, 84, 206);
+  border-color: #9e54ce;
 }
 
 .keyboard-overlay-key.is-shortcut.modifier-shift.modifier-ctrl.modifier-alt {
@@ -112,77 +103,66 @@ body {
 .keyboard-overlay-key.pressed {
   border-color: #fff;
   color: #fff;
+  font-size: 85%;
 }
 
 .keyboard-overlay-key.pressed.is-shift {
-  background: -webkit-linear-gradient(rgb(68, 161, 66), rgb(62, 95, 55));
+  background: -webkit-linear-gradient(#44a142, #3e5f37);
 }
 
 .keyboard-overlay-key.pressed.is-shift.modifier-ctrl {
-  background: -webkit-linear-gradient(rgb(66, 161, 67), rgb(46, 92, 83));
+  background: -webkit-linear-gradient(#42a143, #2e5c53);
 }
 
 .keyboard-overlay-key.pressed.is-shift.modifier-alt {
-  background: -webkit-linear-gradient(rgb(69, 163, 67), rgb(81, 81, 52));
+  background: -webkit-linear-gradient(#45a343, #515134);
 }
 
 .keyboard-overlay-key.pressed.is-shift.modifier-ctrl.modifier-alt {
-  background: -webkit-linear-gradient(rgb(82, 161, 42), rgb(79, 77, 46));
+  background: -webkit-linear-gradient(#52a12a, #4f4d2e);
 }
 
 .keyboard-overlay-key.pressed.is-ctrl {
-  background: -webkit-linear-gradient(rgb(31, 55, 162), rgb(25, 38, 90));
+  background: -webkit-linear-gradient(#1f37a2, #19265a);
 }
 
 .keyboard-overlay-key.pressed.is-ctrl.modifier-shift {
-  background: -webkit-linear-gradient(rgb(67, 159, 165), rgb(30, 55, 96));
+  background: -webkit-linear-gradient(#439fa5, #1e3760);
 }
 
 .keyboard-overlay-key.pressed.is-ctrl.modifier-alt {
-  background: -webkit-linear-gradient(rgb(115, 54, 144), rgb(34, 37, 94));
+  background: -webkit-linear-gradient(#733690, #22255e);
 }
 
 .keyboard-overlay-key.pressed.is-ctrl.modifier-shift.modifier-alt {
-  background: -webkit-linear-gradient(rgb(115, 54, 144), rgb(33, 37, 93));
+  background: -webkit-linear-gradient(#733690, #21255d);
 }
 
 .keyboard-overlay-key.pressed.is-alt {
-  background: -webkit-linear-gradient(rgb(132, 44, 42), rgb(84, 30, 28));
+  background: -webkit-linear-gradient(#842c2a, #541e1c);
 }
 
 .keyboard-overlay-key.pressed.is-alt.modifier-shift {
-  background: -webkit-linear-gradient(top left, rgb(116, 94, 49),
-                                                rgb(85, 36, 30));
+  background: -webkit-linear-gradient(top left, #745e31, #55241e);
 }
 
 .keyboard-overlay-key.pressed.is-alt.modifier-ctrl {
-  background: -webkit-linear-gradient(rgb(118, 54, 143), rgb(82, 33, 40));
+  background: -webkit-linear-gradient(#76368f, #522128);
 }
 
 .keyboard-overlay-key.pressed.is-alt.modifier-shift.modifier-ctrl {
-  background: -webkit-linear-gradient(top left, rgb(115, 95, 41),
-                                                rgb(80, 36, 27));
-}
-
-.keyboard-overlay-key.pressed.is-search {
-  background: -webkit-linear-gradient(rgb(242, 242, 126), rgb(186, 186, 52));
+  background: -webkit-linear-gradient(top left, #735f29, #50241b);
 }
 
 .keyboard-overlay-shortcut-text {
   -webkit-box-flex: 1;
   -webkit-box-ordinal-group: 1;
   color: #fff;
-  padding: 1px 3px 0;
   text-align: center;
-  text-shadow: #000 0 0 2px;
 }
 
 .keyboard-overlay-key-text {
   -webkit-box-ordinal-group: 2;
-  padding: 0 3px 2px;
+  padding-bottom: 1px;
   text-align: center;
-}
-
-.keyboard-overlay-key.is-shortcut .keyboard-overlay-key-text {
-  opacity: 0.25;
 }

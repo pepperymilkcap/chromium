@@ -5,91 +5,107 @@
 #ifndef CONTENT_RENDERER_RENDER_WIDGET_FULLSCREEN_PEPPER_H_
 #define CONTENT_RENDERER_RENDER_WIDGET_FULLSCREEN_PEPPER_H_
 
-#include "base/memory/scoped_ptr.h"
-#include "content/renderer/mouse_lock_dispatcher.h"
-#include "content/renderer/pepper/fullscreen_container.h"
+#include "base/memory/weak_ptr.h"
+#include "content/renderer/pepper_parent_context_provider.h"
 #include "content/renderer/render_widget_fullscreen.h"
-#include "third_party/WebKit/public/web/WebWidget.h"
+#include "content/renderer/gpu/renderer_gl_context.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
+#include "webkit/plugins/ppapi/fullscreen_container.h"
 
-namespace blink {
-class WebLayer;
-}
+namespace webkit {
+namespace ppapi {
 
-namespace content {
-class PepperPluginInstanceImpl;
+class PluginInstance;
+
+}  // namespace ppapi
+}  // namespace webkit
 
 // A RenderWidget that hosts a fullscreen pepper plugin. This provides a
 // FullscreenContainer that the plugin instance can callback into to e.g.
 // invalidate rects.
 class RenderWidgetFullscreenPepper : public RenderWidgetFullscreen,
-                                     public FullscreenContainer {
+                                     public webkit::ppapi::FullscreenContainer,
+                                     public PepperParentContextProvider {
  public:
   static RenderWidgetFullscreenPepper* Create(
       int32 opener_id,
-      PepperPluginInstanceImpl* plugin,
-      const GURL& active_url,
-      const blink::WebScreenInfo& screen_info);
+      webkit::ppapi::PluginInstance* plugin,
+      const GURL& active_url);
 
   // pepper::FullscreenContainer API.
   virtual void Invalidate() OVERRIDE;
-  virtual void InvalidateRect(const blink::WebRect& rect) OVERRIDE;
-  virtual void ScrollRect(int dx, int dy, const blink::WebRect& rect) OVERRIDE;
+  virtual void InvalidateRect(const WebKit::WebRect& rect) OVERRIDE;
+  virtual void ScrollRect(int dx, int dy, const WebKit::WebRect& rect) OVERRIDE;
   virtual void Destroy() OVERRIDE;
-  virtual void DidChangeCursor(const blink::WebCursorInfo& cursor) OVERRIDE;
-  virtual void SetLayer(blink::WebLayer* layer) OVERRIDE;
+  virtual void DidChangeCursor(const WebKit::WebCursorInfo& cursor) OVERRIDE;
+  virtual webkit::ppapi::PluginDelegate::PlatformContext3D*
+      CreateContext3D() OVERRIDE;
 
-  // IPC::Listener implementation. This overrides the implementation
-  // in RenderWidgetFullscreen.
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  RendererGLContext* context() const { return context_; }
+  void SwapBuffers();
 
   // Could be NULL when this widget is closing.
-  PepperPluginInstanceImpl* plugin() const { return plugin_; }
-
-  MouseLockDispatcher* mouse_lock_dispatcher() const {
-    return mouse_lock_dispatcher_.get();
-  }
-
-  bool is_compositing() const { return !!layer_; }
+  webkit::ppapi::PluginInstance* plugin() const { return plugin_; }
 
  protected:
-  RenderWidgetFullscreenPepper(PepperPluginInstanceImpl* plugin,
-                               const GURL& active_url,
-                               const blink::WebScreenInfo& screen_info);
+  RenderWidgetFullscreenPepper(webkit::ppapi::PluginInstance* plugin,
+                               const GURL& active_url);
   virtual ~RenderWidgetFullscreenPepper();
 
   // RenderWidget API.
-  virtual void DidInitiatePaint() OVERRIDE;
+  virtual void WillInitiatePaint() OVERRIDE;
   virtual void DidFlushPaint() OVERRIDE;
   virtual void Close() OVERRIDE;
-  virtual PepperPluginInstanceImpl* GetBitmapForOptimizedPluginPaint(
+  virtual webkit::ppapi::PluginInstance* GetBitmapForOptimizedPluginPaint(
       const gfx::Rect& paint_bounds,
       TransportDIB** dib,
       gfx::Rect* location,
-      gfx::Rect* clip,
-      float* scale_factor) OVERRIDE;
-  virtual void OnResize(const ViewMsg_Resize_Params& params) OVERRIDE;
+      gfx::Rect* clip) OVERRIDE;
+  virtual void OnResize(const gfx::Size& new_size,
+                        const gfx::Rect& resizer_rect,
+                        bool is_fullscreen) OVERRIDE;
 
   // RenderWidgetFullscreen API.
-  virtual blink::WebWidget* CreateWebWidget() OVERRIDE;
+  virtual WebKit::WebWidget* CreateWebWidget() OVERRIDE;
 
   // RenderWidget overrides.
-  virtual GURL GetURLForGraphicsContext3D() OVERRIDE;
-  virtual void SetDeviceScaleFactor(float device_scale_factor) OVERRIDE;
+  virtual bool SupportsAsynchronousSwapBuffers() OVERRIDE;
 
  private:
+  // Creates the GL context for compositing.
+  void CreateContext();
+
+  // Initialize the GL states and resources for compositing.
+  bool InitContext();
+
+  // Checks (and returns) whether accelerated compositing should be on or off,
+  // and notify the browser.
+  bool CheckCompositing();
+
+  // Called when the compositing context gets lost.
+  void OnLostContext(RendererGLContext::ContextLostReason);
+
+  // Binding of RendererGLContext swapbuffers callback to
+  // RenderWidget::OnSwapBuffersCompleted.
+  void OnSwapBuffersCompleteByRendererGLContext();
+
+  // Implementation of PepperParentContextProvider.
+  virtual RendererGLContext* GetParentContextForPlatformContext3D() OVERRIDE;
+
   // URL that is responsible for this widget, passed to ggl::CreateViewContext.
   GURL active_url_;
 
   // The plugin instance this widget wraps.
-  PepperPluginInstanceImpl* plugin_;
+  webkit::ppapi::PluginInstance* plugin_;
 
-  blink::WebLayer* layer_;
+  // GL context for compositing.
+  RendererGLContext* context_;
+  unsigned int buffer_;
+  unsigned int program_;
 
-  scoped_ptr<MouseLockDispatcher> mouse_lock_dispatcher_;
+  base::WeakPtrFactory<RenderWidgetFullscreenPepper> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetFullscreenPepper);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_RENDERER_RENDER_WIDGET_FULLSCREEN_PEPPER_H_

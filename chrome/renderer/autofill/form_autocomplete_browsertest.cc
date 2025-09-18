@@ -2,23 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/time/time.h"
+#include "base/time.h"
+#include "chrome/common/autofill_messages.h"
 #include "chrome/test/base/chrome_render_view_test.h"
-#include "components/autofill/content/common/autofill_messages.h"
-#include "components/autofill/core/common/form_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/platform/WebURLError.h"
-#include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFormElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFormElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "webkit/forms/form_data.h"
+#include "webkit/glue/web_io_operators.h"
 
-using blink::WebFrame;
-using blink::WebString;
-using blink::WebURLError;
+using webkit::forms::FormData;
+using WebKit::WebFrame;
+using WebKit::WebString;
+using WebKit::WebTextDirection;
+using WebKit::WebURLError;
 
 typedef ChromeRenderViewTest FormAutocompleteTest;
-
-namespace autofill {
 
 // Tests that submitting a form generates a FormSubmitted message
 // with the form fields.
@@ -40,7 +41,7 @@ TEST_F(FormAutocompleteTest, NormalFormSubmit) {
   AutofillHostMsg_FormSubmitted::Read(message, &forms);
   ASSERT_EQ(2U, forms.a.fields.size());
 
-  FormFieldData& form_field = forms.a.fields[0];
+  webkit::forms::FormField& form_field = forms.a.fields[0];
   EXPECT_EQ(WebString("fname"), form_field.name);
   EXPECT_EQ(WebString("Rick"), form_field.value);
 
@@ -89,7 +90,7 @@ TEST_F(FormAutocompleteTest, AutoCompleteOffInputSubmit) {
   AutofillHostMsg_FormSubmitted::Read(message, &forms);
   ASSERT_EQ(1U, forms.a.fields.size());
 
-  FormFieldData& form_field = forms.a.fields[0];
+  webkit::forms::FormField& form_field = forms.a.fields[0];
   EXPECT_EQ(WebString("fname"), form_field.name);
   EXPECT_EQ(WebString("Rick"), form_field.value);
 }
@@ -101,10 +102,10 @@ TEST_F(FormAutocompleteTest, DynamicAutoCompleteOffFormSubmit) {
   LoadHTML("<html><form id='myForm'><input name='fname' value='Rick'/>"
            "<input name='lname' value='Deckard'/></form></html>");
 
-  blink::WebElement element =
-      GetMainFrame()->document().getElementById(blink::WebString("myForm"));
+  WebKit::WebElement element =
+      GetMainFrame()->document().getElementById(WebKit::WebString("myForm"));
   ASSERT_FALSE(element.isNull());
-  blink::WebFormElement form = element.to<blink::WebFormElement>();
+  WebKit::WebFormElement form = element.to<WebKit::WebFormElement>();
   EXPECT_TRUE(form.autoComplete());
 
   // Dynamically mark the form as autocomplete off.
@@ -121,5 +122,3 @@ TEST_F(FormAutocompleteTest, DynamicAutoCompleteOffFormSubmit) {
   EXPECT_FALSE(render_thread_->sink().GetFirstMessageMatching(
       AutofillHostMsg_FormSubmitted::ID));
 }
-
-}  // namespace autofill

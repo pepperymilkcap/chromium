@@ -55,10 +55,7 @@ rsync -lrpt "${SRC}/" "${DEST}"
 set +e
 
 # Notify LaunchServices.
-CORESERVICES="/System/Library/Frameworks/CoreServices.framework"
-LAUNCHSERVICES="${CORESERVICES}/Frameworks/LaunchServices.framework"
-LSREGISTER="${LAUNCHSERVICES}/Support/lsregister"
-"${LSREGISTER}" -f "${DEST}"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister "${DEST}"
 
 # If this script is not running as root and the application is installed
 # somewhere under /Applications, try to make it writable by all admin users.

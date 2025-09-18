@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,14 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/spin_wait.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
-#include "base/synchronization/spin_wait.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/thread.h"
 #include "base/threading/thread_collision_warner.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -37,7 +35,7 @@ class ConditionVariableTest : public PlatformTest {
   const TimeDelta kSixtyMs;
   const TimeDelta kOneHundredMs;
 
-  ConditionVariableTest()
+  explicit ConditionVariableTest()
       : kZeroMs(TimeDelta::FromMilliseconds(0)),
         kTenMs(TimeDelta::FromMilliseconds(10)),
         kThirtyMs(TimeDelta::FromMilliseconds(30)),
@@ -64,10 +62,10 @@ class ConditionVariableTest : public PlatformTest {
 class WorkQueue : public PlatformThread::Delegate {
  public:
   explicit WorkQueue(int thread_count);
-  virtual ~WorkQueue();
+  ~WorkQueue();
 
   // PlatformThread::Delegate interface.
-  virtual void ThreadMain() OVERRIDE;
+  void ThreadMain();
 
   //----------------------------------------------------------------------------
   // Worker threads only call the following methods.
@@ -131,7 +129,7 @@ class WorkQueue : public PlatformThread::Delegate {
 
   const int thread_count_;
   int waiting_thread_count_;
-  scoped_ptr<PlatformThreadHandle[]> thread_handles_;
+  scoped_array<PlatformThreadHandle> thread_handles_;
   std::vector<int> assignment_history_;  // Number of assignment per worker.
   std::vector<int> completion_history_;  // Number of completions per worker.
   int thread_started_counter_;  // Used to issue unique id to workers.
@@ -190,67 +188,8 @@ TEST_F(ConditionVariableTest, TimeoutTest) {
   lock.Release();
 }
 
-#if defined(OS_POSIX)
-const int kDiscontinuitySeconds = 2;
-
-void BackInTime(Lock* lock) {
-  AutoLock auto_lock(*lock);
-
-  timeval tv;
-  gettimeofday(&tv, NULL);
-  tv.tv_sec -= kDiscontinuitySeconds;
-  settimeofday(&tv, NULL);
-}
-
-// Tests that TimedWait ignores changes to the system clock.
-// Test is disabled by default, because it needs to run as root to muck with the
-// system clock.
-// http://crbug.com/293736
-TEST_F(ConditionVariableTest, DISABLED_TimeoutAcrossSetTimeOfDay) {
-  timeval tv;
-  gettimeofday(&tv, NULL);
-  tv.tv_sec += kDiscontinuitySeconds;
-  if (settimeofday(&tv, NULL) < 0) {
-    PLOG(ERROR) << "Could not set time of day. Run as root?";
-    return;
-  }
-
-  Lock lock;
-  ConditionVariable cv(&lock);
-  lock.Acquire();
-
-  Thread thread("Helper");
-  thread.Start();
-  thread.message_loop()->PostTask(FROM_HERE, base::Bind(&BackInTime, &lock));
-
-  TimeTicks start = TimeTicks::Now();
-  const TimeDelta kWaitTime = TimeDelta::FromMilliseconds(300);
-  // Allow for clocking rate granularity.
-  const TimeDelta kFudgeTime = TimeDelta::FromMilliseconds(50);
-
-  cv.TimedWait(kWaitTime + kFudgeTime);
-  TimeDelta duration = TimeTicks::Now() - start;
-
-  thread.Stop();
-  // We can't use EXPECT_GE here as the TimeDelta class does not support the
-  // required stream conversion.
-  EXPECT_TRUE(duration >= kWaitTime);
-  EXPECT_TRUE(duration <= TimeDelta::FromSeconds(kDiscontinuitySeconds));
-
-  lock.Release();
-}
-#endif
-
-
-// Suddenly got flaky on Win, see http://crbug.com/10607 (starting at
-// comment #15).
-#if defined(OS_WIN)
-#define MAYBE_MultiThreadConsumerTest DISABLED_MultiThreadConsumerTest
-#else
-#define MAYBE_MultiThreadConsumerTest MultiThreadConsumerTest
-#endif
 // Test serial task servicing, as well as two parallel task servicing methods.
-TEST_F(ConditionVariableTest, MAYBE_MultiThreadConsumerTest) {
+TEST_F(ConditionVariableTest, MultiThreadConsumerTest) {
   const int kThreadCount = 10;
   WorkQueue queue(kThreadCount);  // Start the threads.
 
@@ -277,6 +216,49 @@ TEST_F(ConditionVariableTest, MAYBE_MultiThreadConsumerTest) {
     EXPECT_EQ(0, queue.GetMaxCompletionsByWorkerThread());
     EXPECT_EQ(0, queue.GetMinCompletionsByWorkerThread());
     EXPECT_EQ(0, queue.GetNumberOfCompletedTasks());
+
+    // Set up to make one worker do 30ms tasks sequentially.
+    queue.ResetHistory();
+    queue.SetTaskCount(kTaskCount);
+    queue.SetWorkTime(kThirtyMs);
+    queue.SetAllowHelp(false);
+
+    start_time = Time::Now();
+  }
+
+  queue.work_is_available()->Signal();  // Start up one thread.
+  // Wait till we at least start to handle tasks (and we're not all waiting).
+  queue.SpinUntilTaskCountLessThan(kTaskCount);
+
+  {
+    // Wait until all 10 work tasks have at least been assigned.
+    base::AutoLock auto_lock(*queue.lock());
+    while (queue.task_count())
+      queue.no_more_tasks()->Wait();
+    // The last of the tasks *might* still be running, but... all but one should
+    // be done by now, since tasks are being done serially.
+    EXPECT_LE(queue.GetWorkTime().InMilliseconds() * (kTaskCount - 1),
+              (Time::Now() - start_time).InMilliseconds());
+
+    EXPECT_EQ(1, queue.GetNumThreadsTakingAssignments());
+    EXPECT_EQ(1, queue.GetNumThreadsCompletingTasks());
+    EXPECT_LE(kTaskCount - 1, queue.GetMaxCompletionsByWorkerThread());
+    EXPECT_EQ(0, queue.GetMinCompletionsByWorkerThread());
+    EXPECT_LE(kTaskCount - 1, queue.GetNumberOfCompletedTasks());
+  }
+
+  // Wait to be sure all tasks are done.
+  queue.SpinUntilAllThreadsAreWaiting();
+
+  {
+    // Check that all work was done by one thread id.
+    base::AutoLock auto_lock(*queue.lock());
+    EXPECT_EQ(1, queue.GetNumThreadsTakingAssignments());
+    EXPECT_EQ(1, queue.GetNumThreadsCompletingTasks());
+    EXPECT_EQ(0, queue.task_count());
+    EXPECT_EQ(kTaskCount, queue.GetMaxCompletionsByWorkerThread());
+    EXPECT_EQ(0, queue.GetMinCompletionsByWorkerThread());
+    EXPECT_EQ(kTaskCount, queue.GetNumberOfCompletedTasks());
 
     // Set up to make each task include getting help from another worker, so
     // so that the work gets done in paralell.

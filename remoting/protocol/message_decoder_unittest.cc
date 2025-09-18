@@ -6,7 +6,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/message_decoder.h"
@@ -16,7 +16,7 @@
 namespace remoting {
 namespace protocol {
 
-static const unsigned int kTestKey = 142;
+static const int kTestKey = 142;
 
 static void AppendMessage(const EventMessage& msg,
                           std::string* buffer) {
@@ -35,7 +35,7 @@ static void PrepareData(uint8** buffer, int* size) {
   for (int i = 0; i < 10; ++i) {
     EventMessage msg;
     msg.set_sequence_number(i);
-    msg.mutable_key_event()->set_usb_keycode(kTestKey + i);
+    msg.mutable_key_event()->set_keycode(kTestKey + i);
     msg.mutable_key_event()->set_pressed((i % 2) != 0);
     AppendMessage(msg, &encoded_data);
   }
@@ -50,7 +50,7 @@ void SimulateReadSequence(const int read_sequence[], int sequence_size) {
   int size;
   uint8* test_data;
   PrepareData(&test_data, &size);
-  scoped_ptr<uint8[]> memory_deleter(test_data);
+  scoped_array<uint8> memory_deleter(test_data);
 
   // Then simulate using MessageDecoder to decode variable
   // size of encoded data.
@@ -87,7 +87,7 @@ void SimulateReadSequence(const int read_sequence[], int sequence_size) {
   // Then verify the decoded messages.
   EXPECT_EQ(10u, message_list.size());
 
-  unsigned int index = 0;
+  int index = 0;
   for (std::list<EventMessage*>::iterator it =
            message_list.begin();
        it != message_list.end(); ++it) {
@@ -99,7 +99,7 @@ void SimulateReadSequence(const int read_sequence[], int sequence_size) {
 
     // TODO(sergeyu): Don't use index here. Instead store the expected values
     // in an array.
-    EXPECT_EQ(kTestKey + index, message->key_event().usb_keycode());
+    EXPECT_EQ(kTestKey + index, message->key_event().keycode());
     EXPECT_EQ((index % 2) != 0, message->key_event().pressed());
     ++index;
   }

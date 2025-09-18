@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_OMNIBOX_OMNIBOX_POPUP_VIEW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_OMNIBOX_OMNIBOX_POPUP_VIEW_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -14,17 +15,16 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
+#include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
-#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/font.h"
+#include "webkit/glue/window_open_disposition.h"
 
-class AutocompleteResult;
+class AutocompleteEditModel;
+class AutocompletePopupModel;
 class GtkThemeService;
-class OmniboxEditModel;
-class OmniboxPopupModel;
 class OmniboxView;
 class SkBitmap;
 
@@ -32,19 +32,16 @@ namespace gfx {
 class Image;
 }
 
-class OmniboxPopupViewGtk : public OmniboxPopupView,
+class OmniboxPopupViewGtk : public AutocompletePopupView,
                             public content::NotificationObserver {
  public:
   OmniboxPopupViewGtk(const gfx::Font& font,
                       OmniboxView* omnibox_view,
-                      OmniboxEditModel* edit_model,
+                      AutocompleteEditModel* edit_model,
                       GtkWidget* location_bar);
   virtual ~OmniboxPopupViewGtk();
 
-  // Initializes the view.
-  virtual void Init();
-
-  // Overridden from OmniboxPopupView:
+  // Overridden from AutocompletePopupView:
   virtual bool IsOpen() const OVERRIDE;
   virtual void InvalidateLine(size_t line) OVERRIDE;
   virtual void UpdatePopupAppearance() OVERRIDE;
@@ -57,55 +54,32 @@ class OmniboxPopupViewGtk : public OmniboxPopupView,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
- protected:
-  // Convert a y-coordinate to the closest line / result.
-  size_t LineFromY(int y) const;
-
-  // Return a Rect for the space for a result line.  This excludes the border,
-  // but includes the padding.  This is the area that is colored for a
-  // selection.
-  gfx::Rect GetRectForLine(size_t line, int width) const;
-
-  // Returns the number of hidden matches at the top of the popup. This is
-  // non-zero when a verbatim match like search-what-you-typed is present but
-  // should not be shown.
-  size_t GetHiddenMatchCount() const;
-
-  // Returns the current autocomplete result.
-  virtual const AutocompleteResult& GetResult() const;
-
  private:
   // Be friendly for unit tests.
   friend class OmniboxPopupViewGtkTest;
 
   static void SetupLayoutForMatch(
       PangoLayout* layout,
-      const base::string16& text,
+      const string16& text,
       const AutocompleteMatch::ACMatchClassifications& classifications,
       const GdkColor* base_color,
       const GdkColor* dim_color,
       const GdkColor* url_color,
       const std::string& prefix_text);
 
-  virtual void Show(size_t num_results);
-  virtual void Hide();
+  void Show(size_t num_results);
+  void Hide();
 
   // Restack the popup window directly above the browser's toplevel window.
   void StackWindow();
 
+  // Convert a y-coordinate to the closest line / result.
+  size_t LineFromY(int y);
+
   // Accept a line of the results, for example, when the user clicks a line.
   void AcceptLine(size_t line, WindowOpenDisposition disposition);
 
-  // Returns the appropriate icon to display beside |match|.
-  gfx::Image IconForMatch(const AutocompleteMatch& match,
-                          bool selected,
-                          bool is_selected_keyword);
-
-  // Returns the |index|th element of match, unless we're selected and showing
-  // the associated keyword match.
-  void GetVisibleMatchForInput(size_t index,
-                               const AutocompleteMatch** match,
-                               bool* is_selected_keyword);
+  const gfx::Image* IconForMatch(const AutocompleteMatch& match, bool selected);
 
   CHROMEGTK_CALLBACK_1(OmniboxPopupViewGtk, gboolean, HandleMotion,
                        GdkEventMotion*);
@@ -119,7 +93,7 @@ class OmniboxPopupViewGtk : public OmniboxPopupView,
   CHROMEGTK_CALLBACK_1(OmniboxPopupViewGtk, gboolean, HandleExpose,
                        GdkEventExpose*);
 
-  scoped_ptr<OmniboxPopupModel> model_;
+  scoped_ptr<AutocompletePopupModel> model_;
   OmniboxView* omnibox_view_;
   GtkWidget* location_bar_;
 
@@ -135,6 +109,11 @@ class OmniboxPopupViewGtk : public OmniboxPopupView,
   // Font used for suggestions after being derived from the constructor's
   // |font|.
   gfx::Font font_;
+
+  // Used to cache GdkPixbufs and map them from the SkBitmaps they were created
+  // from.
+  typedef std::map<const SkBitmap*, gfx::Image*> ImageMap;
+  ImageMap images_;
 
   // A list of colors which we should use for drawing the popup. These change
   // between gtk and normal mode.

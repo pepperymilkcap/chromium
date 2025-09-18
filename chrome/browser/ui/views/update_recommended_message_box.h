@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_UPDATE_RECOMMENDED_MESSAGE_BOX_H_
 #define CHROME_BROWSER_UI_VIEWS_UPDATE_RECOMMENDED_MESSAGE_BOX_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "ui/gfx/native_widget_types.h"
@@ -17,25 +18,29 @@ class MessageBoxView;
 // the latest version to be put to use.
 class UpdateRecommendedMessageBox : public views::DialogDelegate {
  public:
-  static void Show(gfx::NativeWindow parent_window);
-
- private:
-  UpdateRecommendedMessageBox();
-  virtual ~UpdateRecommendedMessageBox();
+  // This box is modal to |parent_window|.
+  static void ShowMessageBox(gfx::NativeWindow parent_window);
 
   // Overridden from views::DialogDelegate:
   virtual bool Accept() OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
+
+ protected:
+  // Overridden from views::DialogDelegate:
+  virtual int GetDialogButtons() const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
+
+ private:
+  explicit UpdateRecommendedMessageBox(gfx::NativeWindow parent_window);
+  virtual ~UpdateRecommendedMessageBox();
 
   views::MessageBoxView* message_box_view_;
 

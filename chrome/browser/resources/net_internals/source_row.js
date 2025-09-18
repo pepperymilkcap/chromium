@@ -42,8 +42,6 @@ var SourceRow = (function() {
 
       var selectionCol = addNode(tr, 'td');
       var checkbox = addNode(selectionCol, 'input');
-      checkbox.title = this.getSourceId();
-      selectionCol.style.borderLeft = '0';
       checkbox.type = 'checkbox';
 
       var idCell = addNode(tr, 'td');
@@ -76,8 +74,7 @@ var SourceRow = (function() {
 
       // Add a CSS classname specific to this source type (so CSS can specify
       // different stylings for different types).
-      var sourceTypeClass = sourceTypeString.toLowerCase().replace(/_/g, '-');
-      this.row_.classList.add('source-' + sourceTypeClass);
+      changeClassName(this.row_, 'source_' + sourceTypeString, true);
 
       this.updateClass_();
     },
@@ -92,7 +89,7 @@ var SourceRow = (function() {
         this.updateDescription_();
 
       // Update filters.
-      var matchesFilter = this.parentView_.currentFilter_(this.sourceEntry_);
+      var matchesFilter = this.matchesFilter(this.parentView_.currentFilter_);
       this.setIsMatchedByFilter(matchesFilter);
     },
 
@@ -122,12 +119,9 @@ var SourceRow = (function() {
       var noStyleSet = true;
       for (var i = 0; i < propertyNames.length; ++i) {
         var setStyle = noStyleSet && this[propertyNames[i][0]];
-        if (setStyle) {
-          this.row_.classList.add(propertyNames[i][1]);
+        changeClassName(this.row_, propertyNames[i][1], setStyle);
+        if (setStyle)
           noStyleSet = false;
-        } else {
-          this.row_.classList.remove(propertyNames[i][1]);
-        }
       }
     },
 
@@ -164,6 +158,45 @@ var SourceRow = (function() {
       } else {
         this.row_.style.display = 'none';
       }
+    },
+
+    matchesFilter: function(filter) {
+      if (filter.isActive && this.isInactive_)
+        return false;
+      if (filter.isInactive && !this.isInactive_)
+        return false;
+      if (filter.isError && !this.isError_)
+        return false;
+      if (filter.isNotError && this.isError_)
+        return false;
+
+      // Check source type, if needed.
+      if (filter.type) {
+        var sourceType = this.sourceEntry_.getSourceTypeString().toLowerCase();
+        if (filter.type.indexOf(sourceType) == -1)
+          return false;
+      }
+
+      // Check source ID, if needed.
+      if (filter.id) {
+        if (filter.id.indexOf(this.getSourceId() + '') == -1)
+          return false;
+      }
+
+      if (filter.text == '')
+        return true;
+
+      // The description is not always contained in one of the log entries.
+      if (this.description_.toLowerCase().indexOf(filter.text) != -1)
+        return true;
+
+      // Allow specifying source types by name.
+      var sourceType = this.sourceEntry_.getSourceTypeString();
+      if (sourceType.toLowerCase().indexOf(filter.text) != -1)
+        return true;
+
+      var entryText = JSON.stringify(this.sourceEntry_.getLogEntries());
+      return entryText.toLowerCase().indexOf(filter.text) != -1;
     },
 
     isSelected: function() {
@@ -261,6 +294,12 @@ var SourceRow = (function() {
      */
     moveAfter: function(entry) {
       this.row_.parentNode.insertBefore(this.row_, entry.row_.nextSibling);
+    },
+
+    remove: function() {
+      this.setSelected(false);
+      this.setIsMatchedByFilter(false);
+      this.row_.parentNode.removeChild(this.row_);
     }
   };
 

@@ -8,23 +8,30 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_CONSTANTS_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_CONSTANTS_H_
-
-#include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
+#pragma once
 
 namespace bookmarks {
 
 // Correction used for computing other values based on the height.
 const int kVisualHeightOffset = 2;
 
+// Bar height, when opened in "always visible" mode. This is actually a little
+// smaller than it should be (by |kVisualHeightOffset| points) because of the
+// visual overlap with the main toolbar. When using this to compute values
+// other than the actual height of the toolbar, be sure to add
+// |kVisualHeightOffset|.
+const int kBookmarkBarHeight = 26;
+
+// Our height, when visible in "new tab page" mode.
+const int kNTPBookmarkBarHeight = 40;
+
 // The amount of space between the inner bookmark bar and the outer toolbar on
 // new tab pages.
 const int kNTPBookmarkBarPadding =
-    (chrome::kNTPBookmarkBarHeight -
-        (chrome::kBookmarkBarHeight + kVisualHeightOffset)) / 2;
+    (kNTPBookmarkBarHeight - (kBookmarkBarHeight + kVisualHeightOffset)) / 2;
 
 // The height of buttons in the bookmark bar.
-const int kBookmarkButtonHeight =
-    chrome::kBookmarkBarHeight + kVisualHeightOffset;
+const int kBookmarkButtonHeight = kBookmarkBarHeight + kVisualHeightOffset;
 
 // The height of buttons in a bookmark bar folder menu.
 const CGFloat kBookmarkFolderButtonHeight = 24.0;
@@ -32,10 +39,6 @@ const CGFloat kBookmarkFolderButtonHeight = 24.0;
 // The radius of the corner curves on the menu. Also used for sizing the shadow
 // window behind the menu window at times when the menu can be scrolled.
 const CGFloat kBookmarkBarMenuCornerRadius = 4.0;
-
-// Overlap (in pixels) between the toolbar and the bookmark bar (when showing in
-// normal mode).
-const CGFloat kBookmarkBarOverlap = 3.0;
 
 }  // namespace bookmarks
 

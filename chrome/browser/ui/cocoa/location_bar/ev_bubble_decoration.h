@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_LOCATION_BAR_EV_BUBBLE_DECORATION_H_
 #define CHROME_BROWSER_UI_COCOA_LOCATION_BAR_EV_BUBBLE_DECORATION_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -22,7 +23,7 @@ class LocationIconDecoration;
 
 class EVBubbleDecoration : public BubbleDecoration {
  public:
-  explicit EVBubbleDecoration(LocationIconDecoration* location_icon);
+  EVBubbleDecoration(LocationIconDecoration* location_icon, NSFont* font);
   virtual ~EVBubbleDecoration();
 
   // |GetWidthForSpace()| will set |full_label| as the label, if it
@@ -42,12 +43,12 @@ class EVBubbleDecoration : public BubbleDecoration {
   virtual bool OnMousePressed(NSRect frame) OVERRIDE;
   virtual bool AcceptsMousePress() OVERRIDE;
 
-  // Implement |BubbleDecoration|.
-  virtual ui::NinePartImageIds GetBubbleImageIds() OVERRIDE;
-
  private:
+  // Keeps a reference to the font for use when eliding.
+  scoped_nsobject<NSFont> font_;
+
   // The real label.  BubbleDecoration's label may be elided.
-  base::scoped_nsobject<NSString> full_label_;
+  scoped_nsobject<NSString> full_label_;
 
   LocationIconDecoration* location_icon_;  // weak, owned by location bar.
 

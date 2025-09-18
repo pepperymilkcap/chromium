@@ -2,37 +2,43 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/extensions/extension_prefs_unittest.h"
+#include "extension_prefs_unittest.h"
 
-#include "base/basictypes.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
-#include "base/prefs/mock_pref_change_callback.h"
-#include "base/prefs/pref_change_registrar.h"
-#include "base/prefs/scoped_user_pref_update.h"
+#include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
-#include "base/values.h"
-#include "chrome/browser/extensions/extension_pref_value_map.h"
+#include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/browser/extensions/extension_pref_value_map.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_paths.h"
-#include "components/user_prefs/pref_registry_syncable.h"
+#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_permission_set.h"
+#include "chrome/common/string_ordinal.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/test/mock_notification_observer.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/manifest_constants.h"
-#include "extensions/common/permissions/permission_set.h"
-#include "extensions/common/permissions/permissions_info.h"
-#include "sync/api/string_ordinal.h"
+#include "content/test/notification_observer_mock.h"
 
 using base::Time;
 using base::TimeDelta;
 using content::BrowserThread;
 
-namespace extensions {
+namespace {
+
+const char kPref1[] = "path1.subpath";
+const char kPref2[] = "path2";
+const char kPref3[] = "path3";
+const char kPref4[] = "path4";
+
+// Default values in case an extension pref value is not overridden.
+const char kDefaultPref1[] = "default pref 1";
+const char kDefaultPref2[] = "default pref 2";
+const char kDefaultPref3[] = "default pref 3";
+const char kDefaultPref4[] = "default pref 4";
+
+}  // namespace
 
 static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
   int schemes = URLPattern::SCHEME_ALL;
@@ -41,16 +47,15 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
 
 ExtensionPrefsTest::ExtensionPrefsTest()
     : ui_thread_(BrowserThread::UI, &message_loop_),
-      prefs_(message_loop_.message_loop_proxy().get()) {}
-
-ExtensionPrefsTest::~ExtensionPrefsTest() {
+      file_thread_(BrowserThread::FILE, &message_loop_) {
 }
 
-void ExtensionPrefsTest::RegisterPreferences(
-    user_prefs::PrefRegistrySyncable* registry) {}
+ExtensionPrefsTest::~ExtensionPrefsTest() {}
+
+void ExtensionPrefsTest::RegisterPreferences() {}
 
 void ExtensionPrefsTest::SetUp() {
-  RegisterPreferences(prefs_.pref_registry().get());
+  RegisterPreferences();
   Initialize();
 }
 
@@ -58,12 +63,9 @@ void ExtensionPrefsTest::TearDown() {
   Verify();
 
   // Reset ExtensionPrefs, and re-verify.
-  prefs_.ResetPrefRegistry();
-  RegisterPreferences(prefs_.pref_registry().get());
   prefs_.RecreateExtensionPrefs();
+  RegisterPreferences();
   Verify();
-  prefs_.pref_service()->CommitPendingWrite();
-  message_loop_.RunUntilIdle();
 }
 
 // Tests the LastPingDay/SetLastPingDay functions.
@@ -73,14 +75,14 @@ class ExtensionPrefsLastPingDay : public ExtensionPrefsTest {
       : extension_time_(Time::Now() - TimeDelta::FromHours(4)),
         blacklist_time_(Time::Now() - TimeDelta::FromHours(2)) {}
 
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     extension_id_ = prefs_.AddExtensionAndReturnId("last_ping_day");
     EXPECT_TRUE(prefs()->LastPingDay(extension_id_).is_null());
     prefs()->SetLastPingDay(extension_id_, extension_time_);
     prefs()->SetBlacklistLastPingDay(blacklist_time_);
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     Time result = prefs()->LastPingDay(extension_id_);
     EXPECT_FALSE(result.is_null());
     EXPECT_TRUE(result == extension_time_);
@@ -96,68 +98,42 @@ class ExtensionPrefsLastPingDay : public ExtensionPrefsTest {
 };
 TEST_F(ExtensionPrefsLastPingDay, LastPingDay) {}
 
+
 // Tests the GetToolbarOrder/SetToolbarOrder functions.
 class ExtensionPrefsToolbarOrder : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     list_.push_back(prefs_.AddExtensionAndReturnId("1"));
     list_.push_back(prefs_.AddExtensionAndReturnId("2"));
     list_.push_back(prefs_.AddExtensionAndReturnId("3"));
-    ExtensionIdList before_list = prefs()->GetToolbarOrder();
+    std::vector<std::string> before_list = prefs()->GetToolbarOrder();
     EXPECT_TRUE(before_list.empty());
     prefs()->SetToolbarOrder(list_);
   }
 
-  virtual void Verify() OVERRIDE {
-    ExtensionIdList result = prefs()->GetToolbarOrder();
-    ASSERT_EQ(list_, result);
+  virtual void Verify() {
+    std::vector<std::string> result = prefs()->GetToolbarOrder();
+    ASSERT_EQ(list_.size(), result.size());
+    for (size_t i = 0; i < list_.size(); i++) {
+      EXPECT_EQ(list_[i], result[i]);
+    }
   }
 
  private:
-  ExtensionIdList list_;
+  std::vector<std::string> list_;
 };
 TEST_F(ExtensionPrefsToolbarOrder, ToolbarOrder) {}
 
-// Tests the GetKnownDisabled/SetKnownDisabled functions.
-class ExtensionPrefsKnownDisabled : public ExtensionPrefsTest {
- public:
-  virtual void Initialize() OVERRIDE {
-    ExtensionIdSet before_set;
-    EXPECT_FALSE(prefs()->GetKnownDisabled(&before_set));
-    EXPECT_TRUE(before_set.empty());
-
-    // Initialize to an empty list and confirm that GetKnownDisabled() returns
-    // true and an empty list.
-    prefs()->SetKnownDisabled(before_set);
-    EXPECT_TRUE(prefs()->GetKnownDisabled(&before_set));
-    EXPECT_TRUE(before_set.empty());
-
-    set_.insert(prefs_.AddExtensionAndReturnId("1"));
-    set_.insert(prefs_.AddExtensionAndReturnId("2"));
-    set_.insert(prefs_.AddExtensionAndReturnId("3"));
-    prefs()->SetKnownDisabled(set_);
-  }
-
-  virtual void Verify() OVERRIDE {
-    ExtensionIdSet result;
-    EXPECT_TRUE(prefs()->GetKnownDisabled(&result));
-    ASSERT_EQ(set_, result);
-  }
-
- private:
-  ExtensionIdSet set_;
-};
-TEST_F(ExtensionPrefsKnownDisabled, KnownDisabled) {}
 
 // Tests the IsExtensionDisabled/SetExtensionState functions.
 class ExtensionPrefsExtensionState : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     extension = prefs_.AddExtension("test");
     prefs()->SetExtensionState(extension->id(), Extension::DISABLED);
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     EXPECT_TRUE(prefs()->IsExtensionDisabled(extension->id()));
   }
 
@@ -166,14 +142,15 @@ class ExtensionPrefsExtensionState : public ExtensionPrefsTest {
 };
 TEST_F(ExtensionPrefsExtensionState, ExtensionState) {}
 
+
 class ExtensionPrefsEscalatePermissions : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     extension = prefs_.AddExtension("test");
     prefs()->SetDidExtensionEscalatePermissions(extension.get(), true);
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     EXPECT_TRUE(prefs()->DidExtensionEscalatePermissions(extension->id()));
   }
 
@@ -185,27 +162,13 @@ TEST_F(ExtensionPrefsEscalatePermissions, EscalatePermissions) {}
 // Tests the AddGrantedPermissions / GetGrantedPermissions functions.
 class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
-    const APIPermissionInfo* permission_info =
-      PermissionsInfo::GetInstance()->GetByID(APIPermission::kSocket);
-
+  virtual void Initialize() {
     extension_id_ = prefs_.AddExtensionAndReturnId("test");
 
-    api_perm_set1_.insert(APIPermission::kTab);
-    api_perm_set1_.insert(APIPermission::kBookmark);
-    scoped_ptr<APIPermission> permission(
-        permission_info->CreateAPIPermission());
-    {
-      scoped_ptr<base::ListValue> value(new base::ListValue());
-      value->Append(new base::StringValue("tcp-connect:*.example.com:80"));
-      value->Append(new base::StringValue("udp-bind::8080"));
-      value->Append(new base::StringValue("udp-send-to::8888"));
-      if (!permission->FromValue(value.get()))
-        NOTREACHED();
-    }
-    api_perm_set1_.insert(permission.release());
+    api_perm_set1_.insert(ExtensionAPIPermission::kTab);
+    api_perm_set1_.insert(ExtensionAPIPermission::kBookmark);
 
-    api_perm_set2_.insert(APIPermission::kHistory);
+    api_perm_set2_.insert(ExtensionAPIPermission::kHistory);
 
     AddPattern(&ehost_perm_set1_, "http://*.google.com/*");
     AddPattern(&ehost_perm_set1_, "http://example.com/*");
@@ -220,7 +183,7 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     AddPattern(&shost_perm_set2_, "http://somesite.com/*");
     AddPattern(&shost_perm_set2_, "http://example.com/*");
 
-    APIPermissionSet expected_apis = api_perm_set1_;
+    ExtensionAPIPermissionSet expected_apis = api_perm_set1_;
 
     AddPattern(&ehost_permissions_, "http://*.google.com/*");
     AddPattern(&ehost_permissions_, "http://example.com/*");
@@ -231,19 +194,18 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     AddPattern(&shost_permissions_, "http://somesite.com/*");
     AddPattern(&shost_permissions_, "http://example.com/*");
 
-    APIPermissionSet empty_set;
-    ManifestPermissionSet empty_manifest_permissions;
+    ExtensionAPIPermissionSet empty_set;
     URLPatternSet empty_extent;
-    scoped_refptr<PermissionSet> permissions;
-    scoped_refptr<PermissionSet> granted_permissions;
+    scoped_refptr<ExtensionPermissionSet> permissions;
+    scoped_refptr<ExtensionPermissionSet> granted_permissions;
 
     // Make sure both granted api and host permissions start empty.
     granted_permissions =
         prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_TRUE(granted_permissions->IsEmpty());
 
-    permissions = new PermissionSet(
-        api_perm_set1_, empty_manifest_permissions, empty_extent, empty_extent);
+    permissions = new ExtensionPermissionSet(
+        api_perm_set1_, empty_extent, empty_extent);
 
     // Add part of the api permissions.
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
@@ -256,8 +218,8 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     granted_permissions = NULL;
 
     // Add part of the explicit host permissions.
-    permissions = new PermissionSet(
-        empty_set, empty_manifest_permissions, ehost_perm_set1_, empty_extent);
+    permissions = new ExtensionPermissionSet(
+        empty_set, ehost_perm_set1_, empty_extent);
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
     granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_FALSE(granted_permissions->IsEmpty());
@@ -269,8 +231,8 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
               granted_permissions->effective_hosts());
 
     // Add part of the scriptable host permissions.
-    permissions = new PermissionSet(
-        empty_set, empty_manifest_permissions, empty_extent, shost_perm_set1_);
+    permissions = new ExtensionPermissionSet(
+        empty_set, empty_extent, shost_perm_set1_);
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
     granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_FALSE(granted_permissions->IsEmpty());
@@ -285,12 +247,13 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
                                &effective_permissions_);
     EXPECT_EQ(effective_permissions_, granted_permissions->effective_hosts());
 
-    // Add the rest of the permissions.
-    permissions = new PermissionSet(
-        api_perm_set2_, empty_manifest_permissions,
-        ehost_perm_set2_, shost_perm_set2_);
+    // Add the rest of both the permissions.
+    permissions = new ExtensionPermissionSet(
+       api_perm_set2_, ehost_perm_set2_, shost_perm_set2_);
 
-    APIPermissionSet::Union(expected_apis, api_perm_set2_, &api_permissions_);
+    std::set_union(expected_apis.begin(), expected_apis.end(),
+                   api_perm_set2_.begin(), api_perm_set2_.end(),
+                   std::inserter(api_permissions_, api_permissions_.begin()));
 
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
     granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
@@ -307,8 +270,8 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     EXPECT_EQ(effective_permissions_, granted_permissions->effective_hosts());
   }
 
-  virtual void Verify() OVERRIDE {
-    scoped_refptr<PermissionSet> permissions(
+  virtual void Verify() {
+    scoped_refptr<ExtensionPermissionSet> permissions(
         prefs()->GetGrantedPermissions(extension_id_));
     EXPECT_TRUE(permissions.get());
     EXPECT_FALSE(permissions->HasEffectiveFullAccess());
@@ -321,14 +284,14 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
 
  private:
   std::string extension_id_;
-  APIPermissionSet api_perm_set1_;
-  APIPermissionSet api_perm_set2_;
+  ExtensionAPIPermissionSet api_perm_set1_;
+  ExtensionAPIPermissionSet api_perm_set2_;
   URLPatternSet ehost_perm_set1_;
   URLPatternSet ehost_perm_set2_;
   URLPatternSet shost_perm_set1_;
   URLPatternSet shost_perm_set2_;
 
-  APIPermissionSet api_permissions_;
+  ExtensionAPIPermissionSet api_permissions_;
   URLPatternSet ehost_permissions_;
   URLPatternSet shost_permissions_;
   URLPatternSet effective_permissions_;
@@ -338,15 +301,13 @@ TEST_F(ExtensionPrefsGrantedPermissions, GrantedPermissions) {}
 // Tests the SetActivePermissions / GetActivePermissions functions.
 class ExtensionPrefsActivePermissions : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     extension_id_ = prefs_.AddExtensionAndReturnId("test");
 
-    APIPermissionSet api_perms;
-    api_perms.insert(APIPermission::kTab);
-    api_perms.insert(APIPermission::kBookmark);
-    api_perms.insert(APIPermission::kHistory);
-
-    ManifestPermissionSet empty_manifest_permissions;
+    ExtensionAPIPermissionSet api_perms;
+    api_perms.insert(ExtensionAPIPermission::kTab);
+    api_perms.insert(ExtensionAPIPermission::kBookmark);
+    api_perms.insert(ExtensionAPIPermission::kHistory);
 
     URLPatternSet ehosts;
     AddPattern(&ehosts, "http://*.google.com/*");
@@ -357,11 +318,10 @@ class ExtensionPrefsActivePermissions : public ExtensionPrefsTest {
     AddPattern(&shosts, "https://*.google.com/*");
     AddPattern(&shosts, "http://reddit.com/r/test/*");
 
-    active_perms_ = new PermissionSet(
-        api_perms, empty_manifest_permissions, ehosts, shosts);
+    active_perms_ = new ExtensionPermissionSet(api_perms, ehosts, shosts);
 
     // Make sure the active permissions start empty.
-    scoped_refptr<PermissionSet> active(
+    scoped_refptr<ExtensionPermissionSet> active(
         prefs()->GetActivePermissions(extension_id_));
     EXPECT_TRUE(active->IsEmpty());
 
@@ -371,32 +331,32 @@ class ExtensionPrefsActivePermissions : public ExtensionPrefsTest {
     EXPECT_EQ(active_perms_->apis(), active->apis());
     EXPECT_EQ(active_perms_->explicit_hosts(), active->explicit_hosts());
     EXPECT_EQ(active_perms_->scriptable_hosts(), active->scriptable_hosts());
-    EXPECT_EQ(*active_perms_.get(), *active.get());
+    EXPECT_EQ(*active_perms_, *active);
   }
 
-  virtual void Verify() OVERRIDE {
-    scoped_refptr<PermissionSet> permissions(
+  virtual void Verify() {
+    scoped_refptr<ExtensionPermissionSet> permissions(
         prefs()->GetActivePermissions(extension_id_));
-    EXPECT_EQ(*active_perms_.get(), *permissions.get());
+    EXPECT_EQ(*active_perms_, *permissions);
   }
 
  private:
   std::string extension_id_;
-  scoped_refptr<PermissionSet> active_perms_;
+  scoped_refptr<ExtensionPermissionSet> active_perms_;
 };
 TEST_F(ExtensionPrefsActivePermissions, SetAndGetActivePermissions) {}
 
 // Tests the GetVersionString function.
 class ExtensionPrefsVersionString : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     extension = prefs_.AddExtension("test");
     EXPECT_EQ("0.1", prefs()->GetVersionString(extension->id()));
     prefs()->OnExtensionUninstalled(extension->id(),
-                                    Manifest::INTERNAL, false);
+                                    Extension::INTERNAL, false);
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     EXPECT_EQ("", prefs()->GetVersionString(extension->id()));
   }
 
@@ -405,9 +365,64 @@ class ExtensionPrefsVersionString : public ExtensionPrefsTest {
 };
 TEST_F(ExtensionPrefsVersionString, VersionString) {}
 
+// Tests various areas of blacklist functionality.
+class ExtensionPrefsBlacklist : public ExtensionPrefsTest {
+ public:
+  virtual void Initialize() {
+    not_installed_id_ = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    // Install 5 extensions.
+    for (int i = 0; i < 5; i++) {
+      std::string name = "test" + base::IntToString(i);
+      extensions_.push_back(prefs_.AddExtension(name));
+    }
+    EXPECT_EQ(NULL, prefs()->GetInstalledExtensionInfo(not_installed_id_));
+
+    ExtensionList::const_iterator iter;
+    for (iter = extensions_.begin(); iter != extensions_.end(); ++iter) {
+      EXPECT_FALSE(prefs()->IsExtensionBlacklisted((*iter)->id()));
+    }
+    // Blacklist one installed and one not-installed extension id.
+    std::set<std::string> blacklisted_ids;
+    blacklisted_ids.insert(extensions_[0]->id());
+    blacklisted_ids.insert(not_installed_id_);
+    prefs()->UpdateBlacklist(blacklisted_ids);
+  }
+
+  virtual void Verify() {
+    // Make sure the two id's we expect to be blacklisted are.
+    EXPECT_TRUE(prefs()->IsExtensionBlacklisted(extensions_[0]->id()));
+    EXPECT_TRUE(prefs()->IsExtensionBlacklisted(not_installed_id_));
+
+    // Make sure the other id's are not blacklisted.
+    ExtensionList::const_iterator iter;
+    for (iter = extensions_.begin() + 1; iter != extensions_.end(); ++iter) {
+      EXPECT_FALSE(prefs()->IsExtensionBlacklisted((*iter)->id()));
+    }
+
+    // Make sure GetInstalledExtensionsInfo returns only the non-blacklisted
+    // extensions data.
+    scoped_ptr<ExtensionPrefs::ExtensionsInfo> info(
+        prefs()->GetInstalledExtensionsInfo());
+    EXPECT_EQ(4u, info->size());
+    ExtensionPrefs::ExtensionsInfo::iterator info_iter;
+    for (info_iter = info->begin(); info_iter != info->end(); ++info_iter) {
+      ExtensionInfo* extension_info = info_iter->get();
+      EXPECT_NE(extensions_[0]->id(), extension_info->extension_id);
+    }
+  }
+
+ private:
+  ExtensionList extensions_;
+
+  // An id we'll make up that doesn't match any installed extension id.
+  std::string not_installed_id_;
+};
+TEST_F(ExtensionPrefsBlacklist, Blacklist) {}
+
 class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     not_installed_id_ = "pghjnghklobnfoidcldiidjjjhkeeaoi";
 
     // Install some extensions.
@@ -415,14 +430,14 @@ class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
       std::string name = "test" + base::IntToString(i);
       extensions_.push_back(prefs_.AddExtension(name));
     }
-    EXPECT_EQ(NULL,
-              prefs()->GetInstalledExtensionInfo(not_installed_id_).get());
+    EXPECT_EQ(NULL, prefs()->GetInstalledExtensionInfo(not_installed_id_));
 
     ExtensionList::const_iterator iter;
     for (iter = extensions_.begin(); iter != extensions_.end(); ++iter) {
       std::string id = (*iter)->id();
       EXPECT_FALSE(prefs()->IsExternalExtensionAcknowledged(id));
       EXPECT_FALSE(prefs()->IsBlacklistedExtensionAcknowledged(id));
+      EXPECT_FALSE(prefs()->IsOrphanedExtensionAcknowledged(id));
       if (external_id_.empty()) {
         external_id_ = id;
         continue;
@@ -431,16 +446,22 @@ class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
         blacklisted_id_ = id;
         continue;
       }
+      if (orphaned_id_.empty()) {
+        orphaned_id_ = id;
+        continue;
+      }
     }
     // For each type of acknowledgment, acknowledge one installed and one
     // not-installed extension id.
     prefs()->AcknowledgeExternalExtension(external_id_);
     prefs()->AcknowledgeBlacklistedExtension(blacklisted_id_);
+    prefs()->AcknowledgeOrphanedExtension(orphaned_id_);
     prefs()->AcknowledgeExternalExtension(not_installed_id_);
     prefs()->AcknowledgeBlacklistedExtension(not_installed_id_);
+    prefs()->AcknowledgeOrphanedExtension(not_installed_id_);
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     ExtensionList::const_iterator iter;
     for (iter = extensions_.begin(); iter != extensions_.end(); ++iter) {
       std::string id = (*iter)->id();
@@ -454,9 +475,15 @@ class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
       } else {
         EXPECT_FALSE(prefs()->IsBlacklistedExtensionAcknowledged(id));
       }
+      if (id == orphaned_id_) {
+        EXPECT_TRUE(prefs()->IsOrphanedExtensionAcknowledged(id));
+      } else {
+        EXPECT_FALSE(prefs()->IsOrphanedExtensionAcknowledged(id));
+      }
     }
     EXPECT_TRUE(prefs()->IsExternalExtensionAcknowledged(not_installed_id_));
     EXPECT_TRUE(prefs()->IsBlacklistedExtensionAcknowledged(not_installed_id_));
+    EXPECT_TRUE(prefs()->IsOrphanedExtensionAcknowledged(not_installed_id_));
   }
 
  private:
@@ -465,53 +492,72 @@ class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
   std::string not_installed_id_;
   std::string external_id_;
   std::string blacklisted_id_;
+  std::string orphaned_id_;
 };
 TEST_F(ExtensionPrefsAcknowledgment, Acknowledgment) {}
 
+// Tests force hiding browser actions.
+class ExtensionPrefsHidingBrowserActions : public ExtensionPrefsTest {
+ public:
+  virtual void Initialize() {
+    // Install 5 extensions.
+    for (int i = 0; i < 5; i++) {
+      std::string name = "test" + base::IntToString(i);
+      extensions_.push_back(prefs_.AddExtension(name));
+    }
+
+    ExtensionList::const_iterator iter;
+    for (iter = extensions_.begin(); iter != extensions_.end(); ++iter)
+      EXPECT_TRUE(prefs()->GetBrowserActionVisibility(*iter));
+
+    prefs()->SetBrowserActionVisibility(extensions_[0], false);
+    prefs()->SetBrowserActionVisibility(extensions_[1], true);
+  }
+
+  virtual void Verify() {
+    // Make sure the one we hid is hidden.
+    EXPECT_FALSE(prefs()->GetBrowserActionVisibility(extensions_[0]));
+
+    // Make sure the other id's are not hidden.
+    ExtensionList::const_iterator iter = extensions_.begin() + 1;
+    for (; iter != extensions_.end(); ++iter) {
+      SCOPED_TRACE(base::StringPrintf("Loop %d ",
+                       static_cast<int>(iter - extensions_.begin())));
+      EXPECT_TRUE(prefs()->GetBrowserActionVisibility(*iter));
+    }
+  }
+
+ private:
+  ExtensionList extensions_;
+};
+TEST_F(ExtensionPrefsHidingBrowserActions, ForceHide) {}
+
 // Tests the idle install information functions.
-class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
+class ExtensionPrefsIdleInstallInfo : public ExtensionPrefsTest {
  public:
   // Sets idle install information for one test extension.
   void SetIdleInfo(std::string id, int num) {
-    base::DictionaryValue manifest;
-    manifest.SetString(manifest_keys::kName, "test");
-    manifest.SetString(manifest_keys::kVersion, "1." + base::IntToString(num));
-    base::FilePath path =
-        prefs_.extensions_dir().AppendASCII(base::IntToString(num));
-    std::string errors;
-    scoped_refptr<Extension> extension = Extension::Create(
-        path, Manifest::INTERNAL, manifest, Extension::NO_FLAGS, id, &errors);
-    ASSERT_TRUE(extension.get()) << errors;
-    ASSERT_EQ(id, extension->id());
-    prefs()->SetDelayedInstallInfo(extension.get(),
-                                   Extension::ENABLED,
-                                   false,
-                                   ExtensionPrefs::DELAY_REASON_WAIT_FOR_IDLE,
-                                   syncer::StringOrdinal());
+    prefs()->SetIdleInstallInfo(id,
+                                basedir_.AppendASCII(base::IntToString(num)),
+                                "1." + base::IntToString(num),
+                                now_ + TimeDelta::FromSeconds(num));
   }
 
   // Verifies that we get back expected idle install information previously
   // set by SetIdleInfo.
   void VerifyIdleInfo(std::string id, int num) {
-    scoped_ptr<ExtensionInfo> info(prefs()->GetDelayedInstallInfo(id));
-    ASSERT_TRUE(info);
+    FilePath crx_path;
     std::string version;
-    ASSERT_TRUE(info->extension_manifest->GetString("version", &version));
+    base::Time fetch_time;
+    ASSERT_TRUE(prefs()->GetIdleInstallInfo(id, &crx_path, &version,
+                                            &fetch_time));
+    ASSERT_EQ(crx_path.value(),
+              basedir_.AppendASCII(base::IntToString(num)).value());
     ASSERT_EQ("1." + base::IntToString(num), version);
-    ASSERT_EQ(base::IntToString(num),
-              info->extension_path.BaseName().MaybeAsASCII());
+    ASSERT_TRUE(fetch_time == now_ + TimeDelta::FromSeconds(num));
   }
 
-  bool HasInfoForId(ExtensionPrefs::ExtensionsInfo* info,
-                    const std::string& id) {
-    for (size_t i = 0; i < info->size(); ++i) {
-      if (info->at(i)->extension_id == id)
-        return true;
-    }
-    return false;
-  }
-
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     PathService::Get(chrome::DIR_TEST_DATA, &basedir_);
     now_ = Time::Now();
     id1_ = prefs_.AddExtensionAndReturnId("1");
@@ -524,23 +570,22 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
     SetIdleInfo(id2_, 2);
     VerifyIdleInfo(id1_, 1);
     VerifyIdleInfo(id2_, 2);
-    scoped_ptr<ExtensionPrefs::ExtensionsInfo> info(
-        prefs()->GetAllDelayedInstallInfo());
-    EXPECT_EQ(2u, info->size());
-    EXPECT_TRUE(HasInfoForId(info.get(), id1_));
-    EXPECT_TRUE(HasInfoForId(info.get(), id2_));
-    prefs()->RemoveDelayedInstallInfo(id1_);
-    prefs()->RemoveDelayedInstallInfo(id2_);
-    info = prefs()->GetAllDelayedInstallInfo();
-    EXPECT_TRUE(info->empty());
+    std::set<std::string> ids = prefs()->GetIdleInstallInfoIds();
+    EXPECT_EQ(2u, ids.size());
+    EXPECT_TRUE(ContainsKey(ids, id1_));
+    EXPECT_TRUE(ContainsKey(ids, id2_));
+    prefs()->RemoveIdleInstallInfo(id1_);
+    prefs()->RemoveIdleInstallInfo(id2_);
+    ids = prefs()->GetIdleInstallInfoIds();
+    EXPECT_TRUE(ids.empty());
 
     // Try getting/removing info for an id that used to have info set.
-    EXPECT_FALSE(prefs()->GetDelayedInstallInfo(id1_));
-    EXPECT_FALSE(prefs()->RemoveDelayedInstallInfo(id1_));
+    EXPECT_FALSE(prefs()->GetIdleInstallInfo(id1_, NULL, NULL, NULL));
+    EXPECT_FALSE(prefs()->RemoveIdleInstallInfo(id1_));
 
     // Try getting/removing info for an id that has not yet had any info set.
-    EXPECT_FALSE(prefs()->GetDelayedInstallInfo(id3_));
-    EXPECT_FALSE(prefs()->RemoveDelayedInstallInfo(id3_));
+    EXPECT_FALSE(prefs()->GetIdleInstallInfo(id3_, NULL, NULL, NULL));
+    EXPECT_FALSE(prefs()->RemoveIdleInstallInfo(id3_));
 
     // Set info for 4 extensions, then remove for one of them.
     SetIdleInfo(id1_, 1);
@@ -551,106 +596,45 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
     VerifyIdleInfo(id2_, 2);
     VerifyIdleInfo(id3_, 3);
     VerifyIdleInfo(id4_, 4);
-    prefs()->RemoveDelayedInstallInfo(id3_);
+    prefs()->RemoveIdleInstallInfo(id3_);
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     // Make sure the info for the 3 extensions we expect is present.
-    scoped_ptr<ExtensionPrefs::ExtensionsInfo> info(
-        prefs()->GetAllDelayedInstallInfo());
-    EXPECT_EQ(3u, info->size());
-    EXPECT_TRUE(HasInfoForId(info.get(), id1_));
-    EXPECT_TRUE(HasInfoForId(info.get(), id2_));
-    EXPECT_TRUE(HasInfoForId(info.get(), id4_));
+    std::set<std::string> ids = prefs()->GetIdleInstallInfoIds();
+    EXPECT_EQ(3u, ids.size());
+    EXPECT_TRUE(ContainsKey(ids, id1_));
+    EXPECT_TRUE(ContainsKey(ids, id2_));
+    EXPECT_TRUE(ContainsKey(ids, id4_));
     VerifyIdleInfo(id1_, 1);
     VerifyIdleInfo(id2_, 2);
     VerifyIdleInfo(id4_, 4);
 
     // Make sure there isn't info the for the one extension id we removed.
-    EXPECT_FALSE(prefs()->GetDelayedInstallInfo(id3_));
+    EXPECT_FALSE(prefs()->GetIdleInstallInfo(id3_, NULL, NULL, NULL));
   }
 
  protected:
   Time now_;
-  base::FilePath basedir_;
+  FilePath basedir_;
   std::string id1_;
   std::string id2_;
   std::string id3_;
   std::string id4_;
 };
-TEST_F(ExtensionPrefsDelayedInstallInfo, DelayedInstallInfo) {}
-
-// Tests the FinishDelayedInstallInfo function.
-class ExtensionPrefsFinishDelayedInstallInfo : public ExtensionPrefsTest {
- public:
-  virtual void Initialize() OVERRIDE {
-    base::DictionaryValue dictionary;
-    dictionary.SetString(manifest_keys::kName, "test");
-    dictionary.SetString(manifest_keys::kVersion, "0.1");
-    dictionary.SetString(manifest_keys::kBackgroundPage, "background.html");
-    scoped_refptr<Extension> extension =
-        prefs_.AddExtensionWithManifest(dictionary, Manifest::INTERNAL);
-    id_ = extension->id();
-
-
-    // Set idle info
-    base::DictionaryValue manifest;
-    manifest.SetString(manifest_keys::kName, "test");
-    manifest.SetString(manifest_keys::kVersion, "0.2");
-    scoped_ptr<base::ListValue> scripts(new base::ListValue);
-    scripts->AppendString("test.js");
-    manifest.Set(manifest_keys::kBackgroundScripts, scripts.release());
-    base::FilePath path =
-        prefs_.extensions_dir().AppendASCII("test_0.2");
-    std::string errors;
-    scoped_refptr<Extension> new_extension = Extension::Create(
-        path, Manifest::INTERNAL, manifest, Extension::NO_FLAGS, id_, &errors);
-    ASSERT_TRUE(new_extension.get()) << errors;
-    ASSERT_EQ(id_, new_extension->id());
-    prefs()->SetDelayedInstallInfo(new_extension.get(),
-                                   Extension::ENABLED,
-                                   false,
-                                   ExtensionPrefs::DELAY_REASON_WAIT_FOR_IDLE,
-                                   syncer::StringOrdinal());
-
-    // Finish idle installation
-    ASSERT_TRUE(prefs()->FinishDelayedInstallInfo(id_));
-  }
-
-  virtual void Verify() OVERRIDE {
-    EXPECT_FALSE(prefs()->GetDelayedInstallInfo(id_));
-
-    const base::DictionaryValue* manifest;
-    ASSERT_TRUE(prefs()->ReadPrefAsDictionary(id_, "manifest", &manifest));
-    ASSERT_TRUE(manifest);
-    std::string value;
-    EXPECT_TRUE(manifest->GetString(manifest_keys::kName, &value));
-    EXPECT_EQ("test", value);
-    EXPECT_TRUE(manifest->GetString(manifest_keys::kVersion, &value));
-    EXPECT_EQ("0.2", value);
-    EXPECT_FALSE(manifest->GetString(manifest_keys::kBackgroundPage, &value));
-    const base::ListValue* scripts;
-    ASSERT_TRUE(manifest->GetList(manifest_keys::kBackgroundScripts, &scripts));
-    EXPECT_EQ(1u, scripts->GetSize());
-  }
-
- protected:
-  std::string id_;
-};
-TEST_F(ExtensionPrefsFinishDelayedInstallInfo, FinishDelayedInstallInfo) {}
+TEST_F(ExtensionPrefsIdleInstallInfo, IdleInstallInfo) {}
 
 class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
-    prefs()->OnExtensionInstalled(extension_.get(),
-                                  Extension::DISABLED,
-                                  false,
-                                  syncer::StringOrdinal());
+    prefs()->OnExtensionInstalled(
+        extension_.get(), Extension::DISABLED, false,
+        StringOrdinal());
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     EXPECT_TRUE(prefs()->IsExtensionDisabled(extension_->id()));
   }
 
@@ -662,16 +646,14 @@ TEST_F(ExtensionPrefsOnExtensionInstalled,
 
 class ExtensionPrefsAppDraggedByUser : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->WasAppDraggedByUser(extension_->id()));
-    prefs()->OnExtensionInstalled(extension_.get(),
-                                  Extension::ENABLED,
-                                  false,
-                                  syncer::StringOrdinal());
+    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
+                                  false, StringOrdinal());
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     // Set the flag and see if it persisted.
     prefs()->SetAppDraggedByUser(extension_->id());
     EXPECT_TRUE(prefs()->WasAppDraggedByUser(extension_->id()));
@@ -688,168 +670,431 @@ TEST_F(ExtensionPrefsAppDraggedByUser, ExtensionPrefsAppDraggedByUser) {}
 
 class ExtensionPrefsFlags : public ExtensionPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     {
       base::DictionaryValue dictionary;
-      dictionary.SetString(manifest_keys::kName, "from_webstore");
-      dictionary.SetString(manifest_keys::kVersion, "0.1");
+      dictionary.SetString(extension_manifest_keys::kName, "from_webstore");
+      dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
       webstore_extension_ = prefs_.AddExtensionWithManifestAndFlags(
-          dictionary, Manifest::INTERNAL, Extension::FROM_WEBSTORE);
+          dictionary, Extension::INTERNAL,
+          Extension::STRICT_ERROR_CHECKS | Extension::FROM_WEBSTORE);
     }
 
     {
       base::DictionaryValue dictionary;
-      dictionary.SetString(manifest_keys::kName, "from_bookmark");
-      dictionary.SetString(manifest_keys::kVersion, "0.1");
+      dictionary.SetString(extension_manifest_keys::kName, "from_bookmark");
+      dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
       bookmark_extension_ = prefs_.AddExtensionWithManifestAndFlags(
-          dictionary, Manifest::INTERNAL, Extension::FROM_BOOKMARK);
-    }
-
-    {
-      base::DictionaryValue dictionary;
-      dictionary.SetString(manifest_keys::kName, "was_installed_by_default");
-      dictionary.SetString(manifest_keys::kVersion, "0.1");
-      default_extension_ = prefs_.AddExtensionWithManifestAndFlags(
-          dictionary,
-          Manifest::INTERNAL,
-          Extension::WAS_INSTALLED_BY_DEFAULT);
+          dictionary, Extension::INTERNAL,
+          Extension::STRICT_ERROR_CHECKS | Extension::FROM_BOOKMARK);
     }
   }
 
-  virtual void Verify() OVERRIDE {
+  virtual void Verify() {
     EXPECT_TRUE(prefs()->IsFromWebStore(webstore_extension_->id()));
     EXPECT_FALSE(prefs()->IsFromBookmark(webstore_extension_->id()));
 
     EXPECT_TRUE(prefs()->IsFromBookmark(bookmark_extension_->id()));
     EXPECT_FALSE(prefs()->IsFromWebStore(bookmark_extension_->id()));
-
-    EXPECT_TRUE(prefs()->WasInstalledByDefault(default_extension_->id()));
   }
 
  private:
   scoped_refptr<Extension> webstore_extension_;
   scoped_refptr<Extension> bookmark_extension_;
-  scoped_refptr<Extension> default_extension_;
 };
 TEST_F(ExtensionPrefsFlags, ExtensionPrefsFlags) {}
 
-PrefsPrepopulatedTestBase::PrefsPrepopulatedTestBase()
-    : ExtensionPrefsTest() {
-  base::DictionaryValue simple_dict;
+namespace keys = extension_manifest_keys;
+
+ExtensionPrefsPrepopulatedTest::ExtensionPrefsPrepopulatedTest()
+    : ExtensionPrefsTest(),
+      ext1_(NULL),
+      ext2_(NULL),
+      ext3_(NULL),
+      ext4_(NULL),
+      installed() {
+  DictionaryValue simple_dict;
   std::string error;
 
-  simple_dict.SetString(manifest_keys::kVersion, "1.0.0.0");
-  simple_dict.SetString(manifest_keys::kName, "unused");
+  simple_dict.SetString(keys::kVersion, "1.0.0.0");
+  simple_dict.SetString(keys::kName, "unused");
 
-  extension1_ = Extension::Create(
-      prefs_.temp_dir().AppendASCII("ext1_"),
-      Manifest::EXTERNAL_PREF,
-      simple_dict,
-      Extension::NO_FLAGS,
-      &error);
-  extension2_ = Extension::Create(
-      prefs_.temp_dir().AppendASCII("ext2_"),
-      Manifest::EXTERNAL_PREF,
-      simple_dict,
-      Extension::NO_FLAGS,
-      &error);
-  extension3_ = Extension::Create(
-      prefs_.temp_dir().AppendASCII("ext3_"),
-      Manifest::EXTERNAL_PREF,
-      simple_dict,
-      Extension::NO_FLAGS,
-      &error);
-  extension4_ = Extension::Create(
-      prefs_.temp_dir().AppendASCII("ext4_"),
-      Manifest::EXTERNAL_PREF,
-      simple_dict,
-      Extension::NO_FLAGS,
-      &error);
+  ext1_scoped_ = Extension::Create(
+      prefs_.temp_dir().AppendASCII("ext1_"), Extension::EXTERNAL_PREF,
+      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+  ext2_scoped_ = Extension::Create(
+      prefs_.temp_dir().AppendASCII("ext2_"), Extension::EXTERNAL_PREF,
+      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+  ext3_scoped_ = Extension::Create(
+      prefs_.temp_dir().AppendASCII("ext3_"), Extension::EXTERNAL_PREF,
+      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+  ext4_scoped_ = Extension::Create(
+      prefs_.temp_dir().AppendASCII("ext4_"), Extension::EXTERNAL_PREF,
+      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
 
-  for (size_t i = 0; i < kNumInstalledExtensions; ++i)
-    installed_[i] = false;
+  ext1_ = ext1_scoped_.get();
+  ext2_ = ext2_scoped_.get();
+  ext3_ = ext3_scoped_.get();
+  ext4_ = ext4_scoped_.get();
+
+  for (size_t i = 0; i < arraysize(installed); ++i)
+    installed[i] = false;
 }
 
-PrefsPrepopulatedTestBase::~PrefsPrepopulatedTestBase() {
+ExtensionPrefsPrepopulatedTest::~ExtensionPrefsPrepopulatedTest() {}
+
+void ExtensionPrefsPrepopulatedTest::RegisterPreferences() {
+  prefs()->pref_service()->RegisterStringPref(kPref1,
+                                              kDefaultPref1,
+                                              PrefService::UNSYNCABLE_PREF);
+  prefs()->pref_service()->RegisterStringPref(kPref2,
+                                              kDefaultPref2,
+                                              PrefService::UNSYNCABLE_PREF);
+  prefs()->pref_service()->RegisterStringPref(kPref3,
+                                              kDefaultPref3,
+                                              PrefService::UNSYNCABLE_PREF);
+  prefs()->pref_service()->RegisterStringPref(kPref4,
+                                              kDefaultPref4,
+                                              PrefService::UNSYNCABLE_PREF);
 }
 
-// Tests that blacklist state can be queried.
-class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
+void ExtensionPrefsPrepopulatedTest::InstallExtControlledPref(
+    Extension *ext,
+    const std::string& key,
+    Value* val) {
+  EnsureExtensionInstalled(ext);
+  prefs()->SetExtensionControlledPref(
+      ext->id(), key, kExtensionPrefsScopeRegular, val);
+}
+
+void ExtensionPrefsPrepopulatedTest::InstallExtControlledPrefIncognito(
+    Extension *ext,
+    const std::string& key,
+    Value* val) {
+  EnsureExtensionInstalled(ext);
+  prefs()->SetExtensionControlledPref(
+      ext->id(), key, kExtensionPrefsScopeIncognitoPersistent, val);
+}
+
+void ExtensionPrefsPrepopulatedTest
+::InstallExtControlledPrefIncognitoSessionOnly(Extension *ext,
+                                               const std::string& key,
+                                               Value* val) {
+  EnsureExtensionInstalled(ext);
+  prefs()->SetExtensionControlledPref(
+      ext->id(), key, kExtensionPrefsScopeIncognitoSessionOnly, val);
+}
+
+void ExtensionPrefsPrepopulatedTest::InstallExtension(Extension *ext) {
+  EnsureExtensionInstalled(ext);
+}
+
+void ExtensionPrefsPrepopulatedTest::UninstallExtension(
+    const std::string& extension_id) {
+  EnsureExtensionUninstalled(extension_id);
+}
+
+void ExtensionPrefsPrepopulatedTest::EnsureExtensionInstalled(Extension *ext) {
+  // Install extension the first time a preference is set for it.
+  Extension* extensions[] = {ext1_, ext2_, ext3_, ext4_};
+  for (size_t i = 0; i < arraysize(extensions); ++i) {
+    if (ext == extensions[i] && !installed[i]) {
+      prefs()->OnExtensionInstalled(ext, Extension::ENABLED,
+                                    false, StringOrdinal());
+      installed[i] = true;
+      break;
+    }
+  }
+}
+
+void ExtensionPrefsPrepopulatedTest::EnsureExtensionUninstalled(
+    const std::string& extension_id) {
+  Extension* extensions[] = {ext1_, ext2_, ext3_, ext4_};
+  for (size_t i = 0; i < arraysize(extensions); ++i) {
+    if (extensions[i]->id() == extension_id) {
+      installed[i] = false;
+      break;
+    }
+  }
+  prefs()->OnExtensionUninstalled(extension_id, Extension::INTERNAL, false);
+}
+
+class ExtensionPrefsInstallOneExtension
+    : public ExtensionPrefsPrepopulatedTest {
+  virtual void Initialize() {
+    InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
+  }
+  virtual void Verify() {
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    EXPECT_EQ("val1", actual);
+  }
+};
+TEST_F(ExtensionPrefsInstallOneExtension, ExtensionPrefsInstallOneExtension) {}
+
+// Check that we do not forget persistent incognito values after a reload.
+class ExtensionPrefsInstallIncognitoPersistent
+    : public ExtensionPrefsPrepopulatedTest {
  public:
-  virtual ~ExtensionPrefsBlacklistedExtensions() {}
+  virtual void Initialize() {
+    InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
+    InstallExtControlledPrefIncognito(ext1_, kPref1,
+                                      Value::CreateStringValue("val2"));
+    scoped_ptr<PrefService> incog_prefs(prefs_.CreateIncognitoPrefService());
+    std::string actual = incog_prefs->GetString(kPref1);
+    EXPECT_EQ("val2", actual);
+  }
+  virtual void Verify() {
+    // Main pref service shall see only non-incognito settings.
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    EXPECT_EQ("val1", actual);
+    // Incognito pref service shall see incognito values.
+    scoped_ptr<PrefService> incog_prefs(prefs_.CreateIncognitoPrefService());
+    actual = incog_prefs->GetString(kPref1);
+    EXPECT_EQ("val2", actual);
+  }
+};
+TEST_F(ExtensionPrefsInstallIncognitoPersistent,
+       ExtensionPrefsInstallOneExtension) {}
 
-  virtual void Initialize() OVERRIDE {
-    extension_a_ = prefs_.AddExtension("a");
-    extension_b_ = prefs_.AddExtension("b");
-    extension_c_ = prefs_.AddExtension("c");
+// Check that we forget 'session only' incognito values after a reload.
+class ExtensionPrefsInstallIncognitoSessionOnly
+    : public ExtensionPrefsPrepopulatedTest {
+ public:
+  ExtensionPrefsInstallIncognitoSessionOnly() : iteration_(0) {}
+
+  virtual void Initialize() {
+    InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
+    InstallExtControlledPrefIncognitoSessionOnly(
+        ext1_, kPref1, Value::CreateStringValue("val2"));
+    scoped_ptr<PrefService> incog_prefs(prefs_.CreateIncognitoPrefService());
+    std::string actual = incog_prefs->GetString(kPref1);
+    EXPECT_EQ("val2", actual);
+  }
+  virtual void Verify() {
+    // Main pref service shall see only non-incognito settings.
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    EXPECT_EQ("val1", actual);
+    // Incognito pref service shall see session-only incognito values only
+    // during first run. Once the pref service was reloaded, all values shall be
+    // discarded.
+    scoped_ptr<PrefService> incog_prefs(prefs_.CreateIncognitoPrefService());
+    actual = incog_prefs->GetString(kPref1);
+    if (iteration_ == 0) {
+      EXPECT_EQ("val2", actual);
+    } else {
+      EXPECT_EQ("val1", actual);
+    }
+    ++iteration_;
+  }
+  int iteration_;
+};
+TEST_F(ExtensionPrefsInstallIncognitoSessionOnly,
+       ExtensionPrefsInstallOneExtension) {}
+
+class ExtensionPrefsUninstallExtension : public ExtensionPrefsPrepopulatedTest {
+  virtual void Initialize() {
+    InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
+    InstallExtControlledPref(ext1_, kPref2, Value::CreateStringValue("val2"));
+    ExtensionContentSettingsStore* store = prefs()->content_settings_store();
+    ContentSettingsPattern pattern =
+        ContentSettingsPattern::FromString("http://[*.]example.com");
+    store->SetExtensionContentSetting(ext1_->id(),
+                                      pattern, pattern,
+                                      CONTENT_SETTINGS_TYPE_IMAGES,
+                                      std::string(),
+                                      CONTENT_SETTING_BLOCK,
+                                      kExtensionPrefsScopeRegular);
+
+    UninstallExtension(ext1_->id());
+  }
+  virtual void Verify() {
+    EXPECT_EQ(NULL, prefs()->GetExtensionPref(ext1_->id()));
+
+    std::string actual;
+    actual = prefs()->pref_service()->GetString(kPref1);
+    EXPECT_EQ(kDefaultPref1, actual);
+    actual = prefs()->pref_service()->GetString(kPref2);
+    EXPECT_EQ(kDefaultPref2, actual);
+  }
+};
+TEST_F(ExtensionPrefsUninstallExtension,
+       ExtensionPrefsUninstallExtension) {}
+
+// Tests triggering of notifications to registered observers.
+class ExtensionPrefsNotifyWhenNeeded : public ExtensionPrefsPrepopulatedTest {
+  virtual void Initialize() {
+    using testing::_;
+    using testing::Mock;
+    using testing::StrEq;
+
+    content::NotificationObserverMock observer;
+    PrefChangeRegistrar registrar;
+    registrar.Init(prefs()->pref_service());
+    registrar.Add(kPref1, &observer);
+
+    content::NotificationObserverMock incognito_observer;
+    scoped_ptr<PrefService> incog_prefs(prefs_.CreateIncognitoPrefService());
+    PrefChangeRegistrar incognito_registrar;
+    incognito_registrar.Init(incog_prefs.get());
+    incognito_registrar.Add(kPref1, &incognito_observer);
+
+    // Write value and check notification.
+    EXPECT_CALL(observer, Observe(_, _, _));
+    EXPECT_CALL(incognito_observer, Observe(_, _, _));
+    InstallExtControlledPref(ext1_, kPref1,
+        Value::CreateStringValue("https://www.chromium.org"));
+    Mock::VerifyAndClearExpectations(&observer);
+    Mock::VerifyAndClearExpectations(&incognito_observer);
+
+    // Write same value.
+    EXPECT_CALL(observer, Observe(_, _, _)).Times(0);
+    EXPECT_CALL(incognito_observer, Observe(_, _, _)).Times(0);
+    InstallExtControlledPref(ext1_, kPref1,
+        Value::CreateStringValue("https://www.chromium.org"));
+    Mock::VerifyAndClearExpectations(&observer);
+    Mock::VerifyAndClearExpectations(&incognito_observer);
+
+    // Change value.
+    EXPECT_CALL(observer, Observe(_, _, _));
+    EXPECT_CALL(incognito_observer, Observe(_, _, _));
+    InstallExtControlledPref(ext1_, kPref1,
+        Value::CreateStringValue("chrome://newtab"));
+    Mock::VerifyAndClearExpectations(&observer);
+    Mock::VerifyAndClearExpectations(&incognito_observer);
+
+    // Change only incognito persistent value.
+    EXPECT_CALL(observer, Observe(_, _, _)).Times(0);
+    EXPECT_CALL(incognito_observer, Observe(_, _, _));
+    InstallExtControlledPrefIncognito(ext1_, kPref1,
+        Value::CreateStringValue("chrome://newtab2"));
+    Mock::VerifyAndClearExpectations(&observer);
+    Mock::VerifyAndClearExpectations(&incognito_observer);
+
+    // Change only incognito session-only value.
+    EXPECT_CALL(observer, Observe(_, _, _)).Times(0);
+    EXPECT_CALL(incognito_observer, Observe(_, _, _));
+    InstallExtControlledPrefIncognito(ext1_, kPref1,
+        Value::CreateStringValue("chrome://newtab3"));
+    Mock::VerifyAndClearExpectations(&observer);
+    Mock::VerifyAndClearExpectations(&incognito_observer);
+
+    // Uninstall.
+    EXPECT_CALL(observer, Observe(_, _, _));
+    EXPECT_CALL(incognito_observer, Observe(_, _, _));
+    UninstallExtension(ext1_->id());
+    Mock::VerifyAndClearExpectations(&observer);
+    Mock::VerifyAndClearExpectations(&incognito_observer);
+
+    registrar.Remove(kPref1, &observer);
+    incognito_registrar.Remove(kPref1, &incognito_observer);
+  }
+  virtual void Verify() {
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    EXPECT_EQ(kDefaultPref1, actual);
+  }
+};
+TEST_F(ExtensionPrefsNotifyWhenNeeded,
+    ExtensionPrefsNotifyWhenNeeded) {}
+
+// Tests disabling an extension.
+class ExtensionPrefsDisableExt : public ExtensionPrefsPrepopulatedTest {
+  virtual void Initialize() {
+    InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    EXPECT_EQ("val1", actual);
+    prefs()->SetExtensionState(ext1_->id(), Extension::DISABLED);
+  }
+  virtual void Verify() {
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    EXPECT_EQ(kDefaultPref1, actual);
+  }
+};
+TEST_F(ExtensionPrefsDisableExt,  ExtensionPrefsDisableExt) {}
+
+// Tests disabling and reenabling an extension.
+class ExtensionPrefsReenableExt : public ExtensionPrefsPrepopulatedTest {
+  virtual void Initialize() {
+    InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
+    prefs()->SetExtensionState(ext1_->id(), Extension::DISABLED);
+    prefs()->SetExtensionState(ext1_->id(), Extension::ENABLED);
+  }
+  virtual void Verify() {
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    EXPECT_EQ("val1", actual);
+  }
+};
+TEST_F(ExtensionPrefsDisableExt,  ExtensionPrefsReenableExt) {}
+
+// Mock class to test whether objects are deleted correctly.
+class MockStringValue : public StringValue {
+ public:
+  explicit MockStringValue(const std::string& in_value)
+      : StringValue(in_value) {
+  }
+  virtual ~MockStringValue() {
+    Die();
+  }
+  MOCK_METHOD0(Die, void());
+};
+
+class ExtensionPrefsSetExtensionControlledPref
+    : public ExtensionPrefsPrepopulatedTest {
+ public:
+  virtual void Initialize() {
+    MockStringValue* v1 = new MockStringValue("https://www.chromium.org");
+    MockStringValue* v2 = new MockStringValue("https://www.chromium.org");
+    MockStringValue* v1i = new MockStringValue("https://www.chromium.org");
+    MockStringValue* v2i = new MockStringValue("https://www.chromium.org");
+    // Ownership is taken, value shall not be deleted.
+    EXPECT_CALL(*v1, Die()).Times(0);
+    EXPECT_CALL(*v1i, Die()).Times(0);
+    InstallExtControlledPref(ext1_, kPref1, v1);
+    InstallExtControlledPrefIncognito(ext1_, kPref1, v1i);
+    testing::Mock::VerifyAndClearExpectations(v1);
+    testing::Mock::VerifyAndClearExpectations(v1i);
+    // Make sure there is no memory leak and both values are deleted.
+    EXPECT_CALL(*v1, Die()).Times(1);
+    EXPECT_CALL(*v1i, Die()).Times(1);
+    EXPECT_CALL(*v2, Die()).Times(1);
+    EXPECT_CALL(*v2i, Die()).Times(1);
+    InstallExtControlledPref(ext1_, kPref1, v2);
+    InstallExtControlledPrefIncognito(ext1_, kPref1, v2i);
+    prefs_.RecreateExtensionPrefs();
+    testing::Mock::VerifyAndClearExpectations(v1);
+    testing::Mock::VerifyAndClearExpectations(v1i);
+    testing::Mock::VerifyAndClearExpectations(v2);
+    testing::Mock::VerifyAndClearExpectations(v2i);
   }
 
-  virtual void Verify() OVERRIDE {
-    {
-      ExtensionIdSet ids;
-      EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
-    }
-    prefs()->SetExtensionBlacklisted(extension_a_->id(), true);
-    {
-      ExtensionIdSet ids;
-      ids.insert(extension_a_->id());
-      EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
-    }
-    prefs()->SetExtensionBlacklisted(extension_b_->id(), true);
-    prefs()->SetExtensionBlacklisted(extension_c_->id(), true);
-    {
-      ExtensionIdSet ids;
-      ids.insert(extension_a_->id());
-      ids.insert(extension_b_->id());
-      ids.insert(extension_c_->id());
-      EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
-    }
-    prefs()->SetExtensionBlacklisted(extension_a_->id(), false);
-    {
-      ExtensionIdSet ids;
-      ids.insert(extension_b_->id());
-      ids.insert(extension_c_->id());
-      EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
-    }
-    prefs()->SetExtensionBlacklisted(extension_b_->id(), false);
-    prefs()->SetExtensionBlacklisted(extension_c_->id(), false);
-    {
-      ExtensionIdSet ids;
-      EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
-    }
+  virtual void Verify() {
+  }
+};
+TEST_F(ExtensionPrefsSetExtensionControlledPref,
+    ExtensionPrefsSetExtensionControlledPref) {}
 
-    // The interesting part: make sure that we're cleaning up after ourselves
-    // when we're storing *just* the fact that the extension is blacklisted.
-    std::string arbitrary_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-
-    prefs()->SetExtensionBlacklisted(arbitrary_id, true);
-    prefs()->SetExtensionBlacklisted(extension_a_->id(), true);
-
-    // (And make sure that the acknowledged bit is also cleared).
-    prefs()->AcknowledgeBlacklistedExtension(arbitrary_id);
-
-    EXPECT_TRUE(prefs()->GetExtensionPref(arbitrary_id));
-    {
-      ExtensionIdSet ids;
-      ids.insert(arbitrary_id);
-      ids.insert(extension_a_->id());
-      EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
-    }
-    prefs()->SetExtensionBlacklisted(arbitrary_id, false);
-    prefs()->SetExtensionBlacklisted(extension_a_->id(), false);
-    EXPECT_FALSE(prefs()->GetExtensionPref(arbitrary_id));
-    {
-      ExtensionIdSet ids;
-      EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
+// Tests that the switches::kDisableExtensions command-line flag prevents
+// extension controlled preferences from being enacted.
+class ExtensionPrefsDisableExtensions : public ExtensionPrefsPrepopulatedTest {
+ public:
+  ExtensionPrefsDisableExtensions()
+      : iteration_(0) {}
+  virtual ~ExtensionPrefsDisableExtensions() {}
+  virtual void Initialize() {
+    InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
+    // This becomes only active in the second verification phase.
+    prefs_.set_extensions_disabled(true);
+  }
+  virtual void Verify() {
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    if (iteration_ == 0) {
+      EXPECT_EQ("val1", actual);
+      ++iteration_;
+    } else {
+      EXPECT_EQ(kDefaultPref1, actual);
     }
   }
 
  private:
-  scoped_refptr<const Extension> extension_a_;
-  scoped_refptr<const Extension> extension_b_;
-  scoped_refptr<const Extension> extension_c_;
+  int iteration_;
 };
-TEST_F(ExtensionPrefsBlacklistedExtensions,
-       ExtensionPrefsBlacklistedExtensions) {}
-
-}  // namespace extensions
+TEST_F(ExtensionPrefsDisableExtensions, ExtensionPrefsDisableExtensions) {}

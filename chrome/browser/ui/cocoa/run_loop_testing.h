@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_RUN_LOOP_TESTING_H_
 #define CHROME_BROWSER_UI_COCOA_RUN_LOOP_TESTING_H_
+#pragma once
 
 namespace chrome {
 namespace testing {

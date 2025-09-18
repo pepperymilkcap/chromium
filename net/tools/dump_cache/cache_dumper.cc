@@ -1,11 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/tools/dump_cache/cache_dumper.h"
 
-#include "base/file_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/entry_impl.h"
@@ -13,10 +12,6 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/tools/dump_cache/url_to_filename_encoder.h"
-
-CacheDumper::CacheDumper(disk_cache::Backend* cache)
-    : cache_(cache) {
-}
 
 int CacheDumper::CreateEntry(const std::string& key,
                              disk_cache::Entry** entry,
@@ -41,7 +36,7 @@ void CacheDumper::CloseEntry(disk_cache::Entry* entry, base::Time last_used,
 
 // A version of CreateDirectory which supports lengthy filenames.
 // Returns true on success, false on failure.
-bool SafeCreateDirectory(const base::FilePath& path) {
+bool SafeCreateDirectory(const std::wstring& path) {
 #ifdef WIN32_LARGE_FILENAME_SUPPORT
   // Due to large paths on windows, it can't simply do a
   // CreateDirectory("a/b/c").  Instead, create each subdirectory manually.
@@ -52,38 +47,34 @@ bool SafeCreateDirectory(const base::FilePath& path) {
   // If the path starts with the long file header, skip over that
   const std::wstring kLargeFilenamePrefix(L"\\\\?\\");
   std::wstring header(kLargeFilenamePrefix);
-  if (path.value().find(header) == 0)
+  if (path.find(header) == 0)
     pos = 4;
 
   // Create the subdirectories individually
-  while ((pos = path.value().find(backslash, pos)) != std::wstring::npos) {
-    base::FilePath::StringType subdir = path.value().substr(0, pos);
+  while ((pos = path.find(backslash, pos)) != std::wstring::npos) {
+    std::wstring subdir = path.substr(0, pos);
     CreateDirectoryW(subdir.c_str(), NULL);
     // we keep going even if directory creation failed.
     pos++;
   }
   // Now create the full path
-  return CreateDirectoryW(path.value().c_str(), NULL) == TRUE;
+  return CreateDirectoryW(path.c_str(), NULL) == TRUE;
 #else
-  return base::CreateDirectory(path);
+  return file_util::CreateDirectory(path);
 #endif
-}
-
-DiskDumper::DiskDumper(const base::FilePath& path)
-    : path_(path), entry_(NULL) {
-  base::CreateDirectory(path);
 }
 
 int DiskDumper::CreateEntry(const std::string& key,
                             disk_cache::Entry** entry,
                             const net::CompletionCallback& callback) {
+  FilePath path(path_);
   // The URL may not start with a valid protocol; search for it.
   int urlpos = key.find("http");
   std::string url = urlpos > 0 ? key.substr(urlpos) : key;
-  std::string base_path = path_.MaybeAsASCII();
+  std::string base_path = WideToASCII(path_);
   std::string new_path =
       net::UrlToFilenameEncoder::Encode(url, base_path, false);
-  entry_path_ = base::FilePath::FromUTF8Unsafe(new_path);
+  entry_path_ = FilePath(ASCIIToWide(new_path));
 
 #ifdef WIN32_LARGE_FILENAME_SUPPORT
   // In order for long filenames to work, we'll need to prepend
@@ -93,14 +84,15 @@ int DiskDumper::CreateEntry(const std::string& key,
   // to convert to a wstring to do this.
   std::wstring name = kLongFilenamePrefix;
   name.append(entry_path_.value());
-  entry_path_ = base::FilePath(name);
+  entry_path_ = FilePath(name);
 #endif
 
   entry_url_ = key;
 
-  SafeCreateDirectory(entry_path_.DirName());
+  FilePath directory = entry_path_.DirName();
+  SafeCreateDirectory(directory.value());
 
-  base::FilePath::StringType file = entry_path_.value();
+  std::wstring file = entry_path_.value();
 #ifdef WIN32_LARGE_FILENAME_SUPPORT
   entry_ = CreateFileW(file.c_str(), GENERIC_WRITE|GENERIC_READ, 0, 0,
                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
@@ -108,7 +100,7 @@ int DiskDumper::CreateEntry(const std::string& key,
     wprintf(L"CreateFileW (%s) failed: %d\n", file.c_str(), GetLastError());
   return (entry_ != INVALID_HANDLE_VALUE) ? net::OK : net::ERR_FAILED;
 #else
-  entry_ = base::OpenFile(entry_path_, "w+");
+  entry_ = file_util::OpenFile(entry_path_, "w+");
   return (entry_ != NULL) ? net::OK : net::ERR_FAILED;
 #endif
 }
@@ -195,13 +187,10 @@ int DiskDumper::WriteEntry(disk_cache::Entry* entry, int index, int offset,
 
     data = headers.c_str();
     len = headers.size();
-  } else if (index == 1) {
+  } else if (index == 1) {  // Stream 1 is the data.
     data = buf->data();
     len = buf_len;
-  } else {
-    return 0;
   }
-
 #ifdef WIN32_LARGE_FILENAME_SUPPORT
   DWORD bytes;
   if (!WriteFile(entry_, data, len, &bytes, 0))
@@ -218,6 +207,7 @@ void DiskDumper::CloseEntry(disk_cache::Entry* entry, base::Time last_used,
 #ifdef WIN32_LARGE_FILENAME_SUPPORT
   CloseHandle(entry_);
 #else
-  base::CloseFile(entry_);
+  file_util::CloseFile(entry_);
 #endif
 }
+

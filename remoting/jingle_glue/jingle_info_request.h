@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "remoting/jingle_glue/iq_sender.h"
+#include "third_party/libjingle/source/talk/base/sigslot.h"
 
 namespace buzz {
 class XmlElement;
@@ -33,14 +34,17 @@ class SignalStrategy;
 //
 // This class is not threadsafe and should be used on the same thread it is
 // created on.
-class JingleInfoRequest {
+//
+// TODO(ajwong): Add support for a timeout.
+class JingleInfoRequest : public sigslot::has_slots<> {
  public:
-  // Callback to receive the Jingle configuration settings. All fields are empty
-  // if the request has timed out.
-  typedef base::Callback<void(const std::string& relay_token,
-                              const std::vector<std::string>& relay_servers,
-                              const std::vector<talk_base::SocketAddress>&
-                                  stun_servers)> OnJingleInfoCallback;
+  // Callback to receive the Jingle configuration settings.  The arguments are
+  // passed by pointer so the receive may call swap on them.  The receiver does
+  // NOT own the arguments, which are guaranteed only to be alive for the
+  // duration of the callback.
+  typedef base::Callback<void (
+      const std::string&, const std::vector<std::string>&,
+      const std::vector<talk_base::SocketAddress>&)> OnJingleInfoCallback;
 
   explicit JingleInfoRequest(SignalStrategy* signal_strategy);
   virtual ~JingleInfoRequest();
@@ -50,7 +54,7 @@ class JingleInfoRequest {
  private:
   struct PendingDnsRequest;
 
-  void OnResponse(IqRequest* request, const buzz::XmlElement* stanza);
+  void OnResponse(const buzz::XmlElement* stanza);
 
   IqSender iq_sender_;
   scoped_ptr<IqRequest> request_;

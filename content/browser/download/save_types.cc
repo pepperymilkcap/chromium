@@ -4,9 +4,8 @@
 
 #include "content/browser/download/save_types.h"
 
-namespace content {
 
-SaveFileCreateInfo::SaveFileCreateInfo(const base::FilePath& path,
+SaveFileCreateInfo::SaveFileCreateInfo(const FilePath& path,
                                        const GURL& url,
                                        SaveFileSource save_source,
                                        int32 save_id)
@@ -30,5 +29,3 @@ SaveFileCreateInfo::SaveFileCreateInfo()
 }
 
 SaveFileCreateInfo::~SaveFileCreateInfo() {}
-
-}  // namespace content

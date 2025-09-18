@@ -5,11 +5,10 @@
 #include "content/public/common/process_type.h"
 
 #include "base/logging.h"
-#include "content/public/common/content_client.h"
 
 namespace content {
 
-std::string GetProcessTypeNameInEnglish(int type) {
+std::string GetProcessTypeNameInEnglish(ProcessType type) {
   switch (type) {
     case PROCESS_TYPE_BROWSER:
       return "Browser";
@@ -21,10 +20,16 @@ std::string GetProcessTypeNameInEnglish(int type) {
       return "Web Worker";
     case PROCESS_TYPE_UTILITY:
       return "Utility";
+    case PROCESS_TYPE_PROFILE_IMPORT:
+      return "Profile Import helper";
     case PROCESS_TYPE_ZYGOTE:
       return "Zygote";
     case PROCESS_TYPE_SANDBOX_HELPER:
       return "Sandbox helper";
+    case PROCESS_TYPE_NACL_LOADER:
+      return "Native Client module";
+    case PROCESS_TYPE_NACL_BROKER:
+      return "Native Client broker";
     case PROCESS_TYPE_GPU:
       return "GPU";
     case PROCESS_TYPE_PPAPI_PLUGIN:
@@ -32,11 +37,10 @@ std::string GetProcessTypeNameInEnglish(int type) {
     case PROCESS_TYPE_PPAPI_BROKER:
       return "Pepper Plugin Broker";
     case PROCESS_TYPE_UNKNOWN:
+    default:
       DCHECK(false) << "Unknown child process type!";
       return "Unknown";
   }
-
-  return content::GetContentClient()->GetProcessTypeNameInEnglish(type);
 }
 
 }  // namespace content

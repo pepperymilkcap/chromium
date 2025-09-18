@@ -4,6 +4,7 @@
 
 #ifndef BASE_EVENT_RECORDER_H_
 #define BASE_EVENT_RECORDER_H_
+#pragma once
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
@@ -15,9 +16,9 @@
 #include <windows.h>
 #endif
 
-namespace base {
-
 class FilePath;
+
+namespace base {
 
 // A class for recording and playing back keyboard and mouse input events.
 //
@@ -74,7 +75,7 @@ class BASE_EXPORT EventRecorder {
   // Create a new EventRecorder.  Events are saved to the file filename.
   // If the file already exists, it will be deleted before recording
   // starts.
-  EventRecorder()
+  explicit EventRecorder()
       : is_recording_(false),
         is_playing_(false),
 #if defined(OS_WIN)

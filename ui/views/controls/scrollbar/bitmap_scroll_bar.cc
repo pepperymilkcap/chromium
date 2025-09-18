@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,15 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string16.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/string16.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "grit/ui_strings.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/menu/menu.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/scrollbar/base_scroll_bar_thumb.h"
@@ -50,19 +50,20 @@ class AutorepeatButton : public ImageButton {
  public:
   explicit AutorepeatButton(ButtonListener* listener)
       : ImageButton(listener),
-        repeater_(base::Bind(&AutorepeatButton::NotifyClick,
-                             base::Unretained(this))) {
+        ALLOW_THIS_IN_INITIALIZER_LIST(repeater_(
+            base::Bind(&AutorepeatButton::NotifyClick,
+                       base::Unretained(this)))) {
   }
   virtual ~AutorepeatButton() {}
 
  protected:
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE {
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE {
     Button::NotifyClick(event);
     repeater_.Start();
     return true;
   }
 
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE {
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE {
     OnMouseCaptureLost();
   }
 
@@ -73,13 +74,15 @@ class AutorepeatButton : public ImageButton {
  private:
   void NotifyClick() {
 #if defined(OS_WIN)
-    gfx::Point cursor_point(GetMessagePos());
+    DWORD pos = GetMessagePos();
+    POINTS points = MAKEPOINTS(pos);
+    gfx::Point cursor_point(points.x, points.y);
 #elif defined(OS_LINUX)
-    gfx::Point cursor_point = gfx::Screen::GetCursorScreenPoint();
+    gfx::Point cursor_point = Screen::GetCursorScreenPoint();
 #endif
-    ui::MouseEvent event(ui::ET_MOUSE_RELEASED,
-                         cursor_point, cursor_point,
-                         ui::EF_LEFT_MOUSE_BUTTON);
+    views::MouseEvent event(ui::ET_MOUSE_RELEASED,
+                            cursor_point.x(), cursor_point.y(),
+                            ui::EF_LEFT_MOUSE_BUTTON);
     Button::NotifyClick(event);
   }
 
@@ -108,52 +111,52 @@ class BitmapScrollBarThumb : public BaseScrollBarThumb {
 
   // View overrides:
   virtual gfx::Size GetPreferredSize() OVERRIDE {
-    return gfx::Size(background_image()->width(),
-                     start_cap_image()->height() +
-                         end_cap_image()->height() +
-                         grippy_image()->height());
+    return gfx::Size(background_bitmap()->width(),
+                     start_cap_bitmap()->height() +
+                         end_cap_bitmap()->height() +
+                         grippy_bitmap()->height());
   }
 
  protected:
   // View overrides:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->DrawImageInt(*start_cap_image(), 0, 0);
-    int top_cap_height = start_cap_image()->height();
-    int bottom_cap_height = end_cap_image()->height();
+    canvas->DrawBitmapInt(*start_cap_bitmap(), 0, 0);
+    int top_cap_height = start_cap_bitmap()->height();
+    int bottom_cap_height = end_cap_bitmap()->height();
     int thumb_body_height = height() - top_cap_height - bottom_cap_height;
-    canvas->TileImageInt(*background_image(), 0, top_cap_height,
-                         background_image()->width(), thumb_body_height);
-    canvas->DrawImageInt(*end_cap_image(), 0,
-                         height() - bottom_cap_height);
+    canvas->TileImageInt(*background_bitmap(), 0, top_cap_height,
+                         background_bitmap()->width(), thumb_body_height);
+    canvas->DrawBitmapInt(*end_cap_bitmap(), 0,
+                          height() - bottom_cap_height);
 
     // Paint the grippy over the track.
-    int grippy_x = (width() - grippy_image()->width()) / 2;
-    int grippy_y = (thumb_body_height - grippy_image()->height()) / 2;
-    canvas->DrawImageInt(*grippy_image(), grippy_x, grippy_y);
+    int grippy_x = (width() - grippy_bitmap()->width()) / 2;
+    int grippy_y = (thumb_body_height - grippy_bitmap()->height()) / 2;
+    canvas->DrawBitmapInt(*grippy_bitmap(), grippy_x, grippy_y);
   }
 
  private:
-  // Returns the image rendered at the start of the thumb.
-  gfx::ImageSkia* start_cap_image() const {
+  // Returns the bitmap rendered at the start of the thumb.
+  SkBitmap* start_cap_bitmap() const {
     return scroll_bar_->images_[BitmapScrollBar::THUMB_START_CAP][GetState()];
   }
 
-  // Returns the image rendered at the end of the thumb.
-  gfx::ImageSkia* end_cap_image() const {
+  // Returns the bitmap rendered at the end of the thumb.
+  SkBitmap* end_cap_bitmap() const {
     return scroll_bar_->images_[BitmapScrollBar::THUMB_END_CAP][GetState()];
   }
 
-  // Returns the image that is tiled in the background of the thumb between
+  // Returns the bitmap that is tiled in the background of the thumb between
   // the start and the end caps.
-  gfx::ImageSkia* background_image() const {
+  SkBitmap* background_bitmap() const {
     return scroll_bar_->images_[BitmapScrollBar::THUMB_MIDDLE][GetState()];
   }
 
-  // Returns the image that is rendered in the middle of the thumb
-  // transparently over the background image.
-  gfx::ImageSkia* grippy_image() const {
+  // Returns the bitmap that is rendered in the middle of the thumb
+  // transparently over the background bitmap.
+  SkBitmap* grippy_bitmap() const {
     return scroll_bar_->images_[BitmapScrollBar::THUMB_GRIPPY]
-        [CustomButton::STATE_NORMAL];
+        [CustomButton::BS_NORMAL];
   }
 
   // The BitmapScrollBar that owns us.
@@ -169,8 +172,8 @@ class BitmapScrollBarThumb : public BaseScrollBarThumb {
 
 BitmapScrollBar::BitmapScrollBar(bool horizontal, bool show_scroll_buttons)
     : BaseScrollBar(horizontal, new BitmapScrollBarThumb(this)),
-      prev_button_(new AutorepeatButton(this)),
-      next_button_(new AutorepeatButton(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(prev_button_(new AutorepeatButton(this))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(next_button_(new AutorepeatButton(this))),
       show_scroll_buttons_(show_scroll_buttons) {
   if (!show_scroll_buttons_) {
     prev_button_->SetVisible(false);
@@ -187,22 +190,22 @@ BitmapScrollBar::BitmapScrollBar(bool horizontal, bool show_scroll_buttons)
 
 void BitmapScrollBar::SetImage(ScrollBarPart part,
                                CustomButton::ButtonState state,
-                               gfx::ImageSkia* image_skia) {
+                               SkBitmap* bitmap) {
   DCHECK(part < PART_COUNT);
-  DCHECK(state < CustomButton::STATE_COUNT);
+  DCHECK(state < CustomButton::BS_COUNT);
   switch (part) {
     case PREV_BUTTON:
-      prev_button_->SetImage(state, image_skia);
+      prev_button_->SetImage(state, bitmap);
       break;
     case NEXT_BUTTON:
-      next_button_->SetImage(state, image_skia);
+      next_button_->SetImage(state, bitmap);
       break;
     case THUMB_START_CAP:
     case THUMB_MIDDLE:
     case THUMB_END_CAP:
     case THUMB_GRIPPY:
     case THUMB_TRACK:
-      images_[part][state] = image_skia;
+      images_[part][state] = bitmap;
       break;
   }
 }
@@ -264,7 +267,7 @@ void BitmapScrollBar::Layout() {
 
   // Preserve the height/width of the thumb (depending on orientation) as set
   // by the last call to |Update|, but coerce the width/height to be the
-  // appropriate value for the images provided.
+  // appropriate value for the bitmaps provided.
   if (IsHorizontal()) {
     thumb->SetBounds(thumb->x(), thumb->y(), thumb->width(),
                       thumb_prefsize.height());
@@ -298,7 +301,7 @@ void BitmapScrollBar::OnPaint(gfx::Canvas* canvas) {
 ///////////////////////////////////////////////////////////////////////////////
 // BitmapScrollBar, ButtonListener implementation:
 
-void BitmapScrollBar::ButtonPressed(Button* sender, const ui::Event& event) {
+void BitmapScrollBar::ButtonPressed(Button* sender, const views::Event& event) {
   if (sender == prev_button_) {
     ScrollByAmount(SCROLL_PREV_LINE);
   } else if (sender == next_button_) {

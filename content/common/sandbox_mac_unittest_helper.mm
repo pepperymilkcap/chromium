@@ -10,15 +10,15 @@ extern "C" {
 
 #include <map>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/process/kill.h"
 #include "content/common/sandbox_mac.h"
 #include "content/test/test_content_client.h"
 #include "testing/multiprocess_func_list.h"
 
-namespace content {
+using sandbox::Sandbox;
+
 namespace {
 
 const char* kSandboxTypeKey = "CHROMIUM_SANDBOX_SANDBOX_TYPE";
@@ -26,6 +26,8 @@ const char* kSandboxTestNameKey = "CHROMIUM_SANDBOX_TEST_NAME";
 const char* kTestDataKey = "CHROMIUM_SANDBOX_USER_DATA";
 
 }  // namespace
+
+namespace sandboxtest {
 
 // Support infrastructure for REGISTER_SANDBOX_TEST_CASE macro.
 namespace internal {
@@ -53,11 +55,11 @@ bool MacSandboxTest::RunTestInAllSandboxTypes(const char* test_name,
                                               const char* test_data) {
   // Go through all the sandbox types, and run the test case in each of them
   // if one fails, abort.
-  for(int i = static_cast<int>(SANDBOX_TYPE_FIRST_TYPE);
-      i < SANDBOX_TYPE_AFTER_LAST_TYPE;
+  for(int i = static_cast<int>(content::SANDBOX_TYPE_FIRST_TYPE);
+      i < content::SANDBOX_TYPE_AFTER_LAST_TYPE;
       ++i) {
 
-    if (!RunTestInSandbox(static_cast<SandboxType>(i),
+    if (!RunTestInSandbox(static_cast<content::SandboxType>(i),
             test_name, test_data)) {
       LOG(ERROR) << "Sandboxed test (" << test_name << ")" <<
           "Failed in sandbox type " << i <<
@@ -68,7 +70,7 @@ bool MacSandboxTest::RunTestInAllSandboxTypes(const char* test_name,
  return true;
 }
 
-bool MacSandboxTest::RunTestInSandbox(SandboxType sandbox_type,
+bool MacSandboxTest::RunTestInSandbox(content::SandboxType sandbox_type,
                                       const char* test_name,
                                       const char* test_data) {
   std::stringstream s;
@@ -117,18 +119,23 @@ MacSandboxTestCase *SandboxTestForName(const char* name) {
   return it->second;
 }
 
+}  // namespace sandboxtest
+
+namespace {
+
 // Main function for driver process that enables the sandbox and runs test
 // code.
 MULTIPROCESS_TEST_MAIN(mac_sandbox_test_runner) {
   TestContentClient content_client;
-  SetContentClient(&content_client);
+  content::SetContentClient(&content_client);
   // Extract parameters.
   char* sandbox_type_str = getenv(kSandboxTypeKey);
   if (!sandbox_type_str) {
     LOG(ERROR) << "Sandbox type not specified";
     return -1;
   }
-  SandboxType sandbox_type = static_cast<SandboxType>(atoi(sandbox_type_str));
+  content::SandboxType sandbox_type =
+      static_cast<content::SandboxType>(atoi(sandbox_type_str));
   char* sandbox_test_name = getenv(kSandboxTestNameKey);
   if (!sandbox_test_name) {
     LOG(ERROR) << "Sandbox test name not specified";
@@ -138,9 +145,9 @@ MULTIPROCESS_TEST_MAIN(mac_sandbox_test_runner) {
   const char* test_data = getenv(kTestDataKey);
 
   // Find Test Function to run;
-  scoped_ptr<MacSandboxTestCase>
-      test_case(SandboxTestForName(sandbox_test_name));
-  if (!test_case) {
+  scoped_ptr<sandboxtest::MacSandboxTestCase>
+      test_case(sandboxtest::SandboxTestForName(sandbox_test_name));
+  if (!test_case.get()) {
     LOG(ERROR) << "Invalid sandbox test name (" << sandbox_test_name << ")";
     return -1;
   }
@@ -155,7 +162,7 @@ MULTIPROCESS_TEST_MAIN(mac_sandbox_test_runner) {
 
   Sandbox::SandboxWarmup(sandbox_type);
 
-  if (!Sandbox::EnableSandbox(sandbox_type, base::FilePath())) {
+  if (!Sandbox::EnableSandbox(sandbox_type, FilePath())) {
     LOG(ERROR) << "Failed to initialize sandbox " << sandbox_type;
     return -1;
   }
@@ -168,4 +175,4 @@ MULTIPROCESS_TEST_MAIN(mac_sandbox_test_runner) {
   return 0;
 }
 
-}  // namespace content
+}  // namespace

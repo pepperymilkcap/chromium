@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // API test for chrome.tabs.captureVisibleTab(), capturing JPEG images.
-// browser_tests.exe --gtest_filter=ExtensionApiTest.CaptureVisibleFile
+// browser_tests.exe --gtest_filter=ExtensionApiTest.CaptureVisibleNoFile
 
 var pass = chrome.test.callbackPass;
 var fail = chrome.test.callbackFail;

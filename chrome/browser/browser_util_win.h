@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_BROWSER_UTIL_WIN_H_
 #define CHROME_BROWSER_BROWSER_UTIL_WIN_H_
+#pragma once
 
 namespace browser_util {
 

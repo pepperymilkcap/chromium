@@ -1,33 +1,33 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_MASTER_H_
 #define CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_MASTER_H_
+#pragma once
 
 #include <map>
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/shared_memory.h"
-#include "base/strings/string_piece.h"
+#include "base/shared_memory.h"
+#include "base/string_piece.h"
+#include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/user_script.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "extensions/common/extension_set.h"
-#include "extensions/common/user_script.h"
 
 namespace content {
 class RenderProcessHost;
 }
 
 class Profile;
-
-namespace extensions {
 
 typedef std::map<std::string, ExtensionSet::ExtensionPathAndDefaultLocale>
     ExtensionsInfo;
@@ -90,7 +90,7 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
     FRIEND_TEST_ALL_PREFIXES(UserScriptMasterTest, LeaveBOMNotAtTheBeginning);
     friend class base::RefCountedThreadSafe<UserScriptMaster::ScriptReloader>;
 
-    ~ScriptReloader();
+    ~ScriptReloader() {}
 
     // Where functions are run:
     //    master          file
@@ -167,7 +167,5 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
 
   DISALLOW_COPY_AND_ASSIGN(UserScriptMaster);
 };
-
-}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_MASTER_H_

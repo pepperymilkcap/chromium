@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_TAB_CONTENTS_BACKGROUND_CONTENTS_H_
 #define CHROME_BROWSER_TAB_CONTENTS_BACKGROUND_CONTENTS_H_
+#pragma once
 
 #include <string>
 
@@ -12,16 +13,15 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "ui/base/window_open_disposition.h"
+#include "webkit/glue/window_open_disposition.h"
 
 class Profile;
 
 namespace content {
-class SessionStorageNamespace;
 class SiteInstance;
 };
 
-// This class consumes WebContents. It can host a renderer, but does not
+// This class consumes TabContents. It can host a renderer, but does not
 // have any visible display.
 class BackgroundContents : public content::WebContentsDelegate,
                            public content::WebContentsObserver,
@@ -31,24 +31,19 @@ class BackgroundContents : public content::WebContentsDelegate,
    public:
     // Called by AddNewContents(). Asks the delegate to attach the opened
     // WebContents to a suitable container (e.g. browser) or to show it if it's
-    // a popup window. If |was_blocked| is non-NULL, then |*was_blocked| will be
-    // set to true if the popup gets blocked, and left unchanged otherwise.
+    // a popup window.
     virtual void AddWebContents(content::WebContents* new_contents,
                                 WindowOpenDisposition disposition,
                                 const gfx::Rect& initial_pos,
-                                bool user_gesture,
-                                bool* was_blocked) = 0;
+                                bool user_gesture) = 0;
 
    protected:
     virtual ~Delegate() {}
   };
 
-  BackgroundContents(
-      content::SiteInstance* site_instance,
-      int routing_id,
-      Delegate* delegate,
-      const std::string& partition_id,
-      content::SessionStorageNamespace* session_storage_namespace);
+  BackgroundContents(content::SiteInstance* site_instance,
+                     int routing_id,
+                     Delegate* delegate);
   virtual ~BackgroundContents();
 
   content::WebContents* web_contents() const { return web_contents_.get(); }
@@ -63,11 +58,10 @@ class BackgroundContents : public content::WebContentsDelegate,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
+                              bool user_gesture) OVERRIDE;
 
   // content::WebContentsObserver implementation:
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
+  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
 
   // content::NotificationObserver
   virtual void Observe(int type,
@@ -95,10 +89,10 @@ struct BackgroundContentsOpenedDetails {
   BackgroundContents* contents;
 
   // The name of the parent frame for these contents.
-  const base::string16& frame_name;
+  const string16& frame_name;
 
   // The ID of the parent application (if any).
-  const base::string16& application_id;
+  const string16& application_id;
 };
 
 #endif  // CHROME_BROWSER_TAB_CONTENTS_BACKGROUND_CONTENTS_H_

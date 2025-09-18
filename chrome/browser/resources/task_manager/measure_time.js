@@ -8,10 +8,6 @@
  * To be included as a first script in main.html
  */
 
-/**
- * measureTime class
- * @constructor
- */
 var measureTime = {
   isEnabled: localStorage.measureTimeEnabled,
 

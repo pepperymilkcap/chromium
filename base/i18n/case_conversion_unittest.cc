@@ -3,10 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/i18n/case_conversion.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace base {
 namespace {
 
 // Test upper and lower case string conversion.
@@ -25,4 +24,3 @@ TEST(CaseConversionTest, UpperLower) {
 // TODO(jshin): More tests are needed, especially with non-ASCII characters.
 
 }  // namespace
-}  // namespace base

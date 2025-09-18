@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppb_var.h"
+#include "ppapi/c/ppb_core.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_globals.h"
@@ -20,10 +20,8 @@
 #include "ppapi/proxy/plugin_var_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
-#include "ppapi/proxy/proxy_object_var.h"
 #include "ppapi/proxy/serialized_var.h"
 #include "ppapi/shared_impl/ppb_var_shared.h"
-#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/var.h"
 
 namespace ppapi {
@@ -66,7 +64,6 @@ PluginDispatcher* CheckExceptionAndGetDispatcher(const PP_Var& object,
 bool HasProperty(PP_Var var,
                  PP_Var name,
                  PP_Var* exception) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(var, exception);
   if (!dispatcher)
     return false;
@@ -85,7 +82,6 @@ bool HasProperty(PP_Var var,
 bool HasMethod(PP_Var var,
                PP_Var name,
                PP_Var* exception) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(var, exception);
   if (!dispatcher)
     return false;
@@ -104,7 +100,6 @@ bool HasMethod(PP_Var var,
 PP_Var GetProperty(PP_Var var,
                    PP_Var name,
                    PP_Var* exception) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(var, exception);
   if (!dispatcher)
     return PP_MakeUndefined();
@@ -124,7 +119,6 @@ void EnumerateProperties(PP_Var var,
                          uint32_t* property_count,
                          PP_Var** properties,
                          PP_Var* exception) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(var, exception);
   if (!dispatcher) {
     *property_count = 0;
@@ -147,7 +141,6 @@ void SetProperty(PP_Var var,
                  PP_Var name,
                  PP_Var value,
                  PP_Var* exception) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(var, exception);
   if (!dispatcher)
     return;
@@ -165,7 +158,6 @@ void SetProperty(PP_Var var,
 void RemoveProperty(PP_Var var,
                     PP_Var name,
                     PP_Var* exception) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(var, exception);
   if (!dispatcher)
     return;
@@ -185,7 +177,6 @@ PP_Var Call(PP_Var object,
             uint32_t argc,
             PP_Var* argv,
             PP_Var* exception) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(object, exception);
   if (!dispatcher)
     return PP_MakeUndefined();
@@ -209,7 +200,6 @@ PP_Var Construct(PP_Var object,
                  uint32_t argc,
                  PP_Var* argv,
                  PP_Var* exception) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(object, exception);
   if (!dispatcher)
     return PP_MakeUndefined();
@@ -231,7 +221,6 @@ PP_Var Construct(PP_Var object,
 bool IsInstanceOf(PP_Var var,
                   const PPP_Class_Deprecated* ppp_class,
                   void** ppp_class_data) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = CheckExceptionAndGetDispatcher(var, NULL);
   if (!dispatcher)
     return false;
@@ -250,14 +239,9 @@ bool IsInstanceOf(PP_Var var,
 PP_Var CreateObject(PP_Instance instance,
                     const PPP_Class_Deprecated* ppp_class,
                     void* ppp_class_data) {
-  ProxyAutoLock lock;
   Dispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
   if (!dispatcher)
     return PP_MakeUndefined();
-
-  PluginVarTracker* tracker = PluginGlobals::Get()->plugin_var_tracker();
-  if (tracker->IsPluginImplementedObjectAlive(ppp_class_data))
-    return PP_MakeUndefined();  // Object already exists with this user data.
 
   ReceiveSerializedVarReturnValue result;
   int64 class_int = static_cast<int64>(reinterpret_cast<intptr_t>(ppp_class));
@@ -266,14 +250,11 @@ PP_Var CreateObject(PP_Instance instance,
   dispatcher->Send(new PpapiHostMsg_PPBVar_CreateObjectDeprecated(
       API_ID_PPB_VAR_DEPRECATED, instance, class_int, data_int,
       &result));
-  PP_Var ret_var = result.Return(dispatcher);
+  return result.Return(dispatcher);
+}
 
-  // Register this object as being implemented by the plugin.
-  if (ret_var.type == PP_VARTYPE_OBJECT) {
-    tracker->PluginImplementedObjectCreated(instance, ret_var,
-                                            ppp_class, ppp_class_data);
-  }
-  return ret_var;
+InterfaceProxy* CreateVarDeprecatedProxy(Dispatcher* dispatcher) {
+  return new PPB_Var_Deprecated_Proxy(dispatcher );
 }
 
 }  // namespace
@@ -281,8 +262,8 @@ PP_Var CreateObject(PP_Instance instance,
 PPB_Var_Deprecated_Proxy::PPB_Var_Deprecated_Proxy(
     Dispatcher* dispatcher)
     : InterfaceProxy(dispatcher),
-      ppb_var_impl_(NULL),
-      task_factory_(this) {
+      task_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      ppb_var_impl_(NULL) {
   if (!dispatcher->IsPlugin()) {
     ppb_var_impl_ = static_cast<const PPB_Var_Deprecated*>(
         dispatcher->local_get_interface()(PPB_VAR_DEPRECATED_INTERFACE));
@@ -293,7 +274,7 @@ PPB_Var_Deprecated_Proxy::~PPB_Var_Deprecated_Proxy() {
 }
 
 // static
-const PPB_Var_Deprecated* PPB_Var_Deprecated_Proxy::GetProxyInterface() {
+const InterfaceProxy::Info* PPB_Var_Deprecated_Proxy::GetInfo() {
   static const PPB_Var_Deprecated var_deprecated_interface = {
     ppapi::PPB_Var_Shared::GetVarInterface1_0()->AddRef,
     ppapi::PPB_Var_Shared::GetVarInterface1_0()->Release,
@@ -310,13 +291,18 @@ const PPB_Var_Deprecated* PPB_Var_Deprecated_Proxy::GetProxyInterface() {
     &IsInstanceOf,
     &CreateObject
   };
-  return &var_deprecated_interface;
+
+  static const Info info = {
+    &var_deprecated_interface,
+    PPB_VAR_DEPRECATED_INTERFACE,
+    API_ID_PPB_VAR_DEPRECATED,
+    false,
+    &CreateVarDeprecatedProxy,
+  };
+  return &info;
 }
 
 bool PPB_Var_Deprecated_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  if (!dispatcher()->permissions().HasPermission(PERMISSION_DEV))
-    return false;
-
   // Prevent the dispatcher from going away during a call to Call or other
   // function that could mutate the DOM. This must happen OUTSIDE of
   // the message handlers since the SerializedVars use the dispatcher upon
@@ -380,11 +366,10 @@ void PPB_Var_Deprecated_Proxy::OnMsgReleaseObject(int64 object_id) {
   // spurious warning).
   // TODO(piman): See if we can fix the IPC code to enforce strict ordering, and
   // then remove this.
-  base::MessageLoop::current()->PostNonNestableTask(
-      FROM_HERE,
-      RunWhileLocked(base::Bind(&PPB_Var_Deprecated_Proxy::DoReleaseObject,
-                                task_factory_.GetWeakPtr(),
-                                object_id)));
+  MessageLoop::current()->PostNonNestableTask(FROM_HERE,
+      base::Bind(&PPB_Var_Deprecated_Proxy::DoReleaseObject,
+                 task_factory_.GetWeakPtr(),
+                 object_id));
 }
 
 void PPB_Var_Deprecated_Proxy::OnMsgHasProperty(

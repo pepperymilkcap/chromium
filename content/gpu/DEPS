@@ -1,5 +1,7 @@
 include_rules = [
-  "+content/child",
+  "-chrome",
+  "+chrome/app",
+  "+gpu/command_buffer",
   "+libEGL",
   "+libGLESv2",
   "+sandbox",

@@ -10,8 +10,6 @@ body {
 </style>
 <script>
 var frameCount = 0;
-// 3 is not enough for threaded compositing, using 6 to avoid racing.
-var totalRafs = 6;
 
 function runTest() {
   window.webkitRequestAnimationFrame(draw);
@@ -20,7 +18,7 @@ function draw() {
   frameCount++;
   var table = document.getElementById("table");
   table.style.backgroundColor = (frameCount & 1) ? 'red' : 'black';
-  if (frameCount == totalRafs) {
+  if (frameCount == 3) {
     domAutomationController.setAutomationId(1);
     domAutomationController.send("FINISHED");
   } else {

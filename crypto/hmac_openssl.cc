@@ -26,7 +26,7 @@ HMAC::HMAC(HashAlgorithm hash_alg)
   DCHECK(hash_alg_ == SHA1 || hash_alg_ == SHA256);
 }
 
-bool HMAC::Init(const unsigned char* key, size_t key_length) {
+bool HMAC::Init(const unsigned char* key, int key_length) {
   // Init must not be called more than once on the same HMAC object.
   DCHECK(plat_->key.empty());
 
@@ -42,7 +42,8 @@ HMAC::~HMAC() {
 
 bool HMAC::Sign(const base::StringPiece& data,
                 unsigned char* digest,
-                size_t digest_length) const {
+                int digest_length) const {
+  DCHECK_GE(digest_length, 0);
   DCHECK(!plat_->key.empty());  // Init must be called before Sign.
 
   ScopedOpenSSLSafeSizeBuffer<EVP_MAX_MD_SIZE> result(digest, digest_length);

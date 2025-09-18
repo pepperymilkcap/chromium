@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/tabs/drag_data.h"
 
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/gtk/tabs/tab_gtk.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 
@@ -21,7 +22,7 @@ DraggedTabData::DraggedTabData()
 }
 
 DraggedTabData::DraggedTabData(TabGtk* tab,
-                               WebContents* contents,
+                               TabContentsWrapper* contents,
                                content::WebContentsDelegate* original_delegate,
                                int source_model_index,
                                bool pinned,
@@ -38,7 +39,7 @@ DraggedTabData::~DraggedTabData() {
 }
 
 void DraggedTabData::ResetDelegate() {
-  contents_->SetDelegate(original_delegate_);
+  contents_->web_contents()->SetDelegate(original_delegate_);
 }
 
 DragData::DragData(std::vector<DraggedTabData> drag_data, int source_tab_index)
@@ -63,12 +64,12 @@ std::vector<TabGtk*> DragData::GetDraggedTabs() const {
 }
 
 std::vector<WebContents*> DragData::GetDraggedTabsContents() const {
-  std::vector<WebContents*> web_contentses;
+  std::vector<WebContents*> tabs_contents;
   for (size_t i = 0; i < drag_data_.size(); ++i) {
-    if (drag_data_[i].contents_)
-      web_contentses.push_back(drag_data_[i].contents_);
+    if (drag_data_[i].contents_->web_contents())
+      tabs_contents.push_back(drag_data_[i].contents_->web_contents());
   }
-  return web_contentses;
+  return tabs_contents;
 }
 
 void DragData::GetNumberOfMiniNonMiniTabs(
@@ -94,8 +95,13 @@ int DragData::GetAddTypesForDraggedTabAt(size_t index) {
   return add_types;
 }
 
-WebContents* DragData::GetSourceWebContents() {
+TabContentsWrapper* DragData::GetSourceTabContentsWrapper() {
   return GetSourceTabData()->contents_;
+}
+
+WebContents* DragData::GetSourceWebContents() {
+  TabContentsWrapper* contents = GetSourceTabData()->contents_;
+  return contents ? contents->web_contents(): NULL;
 }
 
 DraggedTabData* DragData::GetSourceTabData() {

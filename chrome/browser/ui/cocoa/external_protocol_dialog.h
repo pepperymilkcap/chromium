@@ -4,20 +4,16 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/time/time.h"
-#include "url/gurl.h"
+#include "base/time.h"
+#include "googleurl/src/gurl.h"
 
 @interface ExternalProtocolDialogController : NSObject {
  @private
   NSAlert* alert_;
   GURL url_;
-  int render_process_host_id_;
-  int routing_id_;
   base::Time creation_time_;
 };
 
-- (id)initWithGURL:(const GURL*)url
-    renderProcessHostId:(int)renderProcessHostId
-    routingId:(int)routingId;
+- (id)initWithGURL:(const GURL*)url;
 
 @end

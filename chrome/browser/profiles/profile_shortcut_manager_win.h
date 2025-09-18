@@ -4,102 +4,43 @@
 
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_SHORTCUT_MANAGER_WIN_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_SHORTCUT_MANAGER_WIN_H_
+#pragma once
 
-#include "base/callback.h"
-#include "chrome/browser/profiles/profile_shortcut_manager.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include <vector>
 
-class BrowserDistribution;
+#include "base/string16.h"
+#include "chrome/browser/profiles/profile_info_cache_observer.h"
 
-// Internal free-standing functions that are exported here for testing.
-namespace profiles {
-namespace internal {
-
-// Returns the full path to the profile icon file.
-base::FilePath GetProfileIconPath(const base::FilePath& profile_path);
-
-// Returns the default shortcut filename for the given profile name,
-// given |distribution|. Returns a filename appropriate for a
-// single-user installation if |profile_name| is empty.
-base::string16 GetShortcutFilenameForProfile(const base::string16& profile_name,
-                                             BrowserDistribution* distribution);
-
-// Returns the command-line flags to launch Chrome with the given profile.
-base::string16 CreateProfileShortcutFlags(const base::FilePath& profile_path);
-
-}  // namespace internal
-}  // namespace profiles
-
-class ProfileShortcutManagerWin : public ProfileShortcutManager,
-                                  public ProfileInfoCacheObserver,
-                                  public content::NotificationObserver {
+// This class observes the ProfileInfoCache, and makes corresponding changes
+// to shortcuts on the user's desktop in Windows systems.
+class ProfileShortcutManagerWin : public ProfileInfoCacheObserver {
  public:
-  // Specifies whether only the existing shortcut should be updated, a new
-  // shortcut should be created if none exist, or only the icon for this profile
-  // should be created in the profile directory.
-  enum CreateOrUpdateMode {
-    UPDATE_EXISTING_ONLY,
-    CREATE_WHEN_NONE_FOUND,
-    CREATE_OR_UPDATE_ICON_ONLY,
-  };
-  // Specifies whether non-profile shortcuts should be updated.
-  enum NonProfileShortcutAction {
-    IGNORE_NON_PROFILE_SHORTCUTS,
-    UPDATE_NON_PROFILE_SHORTCUTS,
-  };
-
-  explicit ProfileShortcutManagerWin(ProfileManager* manager);
+  ProfileShortcutManagerWin();
   virtual ~ProfileShortcutManagerWin();
 
-  // ProfileShortcutManager implementation:
-  virtual void CreateOrUpdateProfileIcon(
-      const base::FilePath& profile_path) OVERRIDE;
-  virtual void CreateProfileShortcut(
-      const base::FilePath& profile_path) OVERRIDE;
-  virtual void RemoveProfileShortcuts(
-      const base::FilePath& profile_path) OVERRIDE;
-  virtual void HasProfileShortcuts(
-      const base::FilePath& profile_path,
-      const base::Callback<void(bool)>& callback) OVERRIDE;
-  virtual void GetShortcutProperties(const base::FilePath& profile_path,
-                                     CommandLine* command_line,
-                                     base::string16* name,
-                                     base::FilePath* icon_path) OVERRIDE;
+  // Create a profile shortcut for the profile with path |profile_path|, plus
+  // update the original profile shortcut if |profile_path| is the second
+  // profile created.
+  virtual void AddProfileShortcut(const FilePath& profile_path);
 
-  // ProfileInfoCacheObserver implementation:
-  virtual void OnProfileAdded(const base::FilePath& profile_path) OVERRIDE;
+  // ProfileInfoCacheObserver:
+  virtual void OnProfileAdded(const FilePath& profile_path) OVERRIDE;
+  virtual void OnProfileWillBeRemoved(
+      const FilePath& profile_path) OVERRIDE;
   virtual void OnProfileWasRemoved(
-      const base::FilePath& profile_path,
-      const base::string16& profile_name) OVERRIDE;
+      const FilePath& profile_path,
+      const string16& profile_name) OVERRIDE;
   virtual void OnProfileNameChanged(
-      const base::FilePath& profile_path,
-      const base::string16& old_profile_name) OVERRIDE;
-  virtual void OnProfileAvatarChanged(
-      const base::FilePath& profile_path) OVERRIDE;
+      const FilePath& profile_path,
+      const string16& old_profile_name) OVERRIDE;
+  virtual void OnProfileAvatarChanged(const FilePath& profile_path) OVERRIDE;
 
-  // content::NotificationObserver implementation:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // Takes a vector of profile names (for example: "Sparky") and generates a
+  // vector of shortcut link names (for example: "Chromium (Sparky).lnk").
+  static std::vector<string16> GenerateShortcutsFromProfiles(
+      const std::vector<string16>& profile_names);
 
  private:
-  // Gives the profile path of an alternate profile than |profile_path|.
-  // Must only be called when the number profiles is 2.
-  base::FilePath GetOtherProfilePath(const base::FilePath& profile_path);
-
-  // Creates or updates shortcuts for the profile at |profile_path| according
-  // to the specified |create_mode| and |action|. This will always involve
-  // creating or updating the icon file for this profile.
-  void CreateOrUpdateShortcutsForProfileAtPath(
-      const base::FilePath& profile_path,
-      CreateOrUpdateMode create_mode,
-      NonProfileShortcutAction action);
-
-  ProfileManager* profile_manager_;
-
-  content::NotificationRegistrar registrar_;
-
   DISALLOW_COPY_AND_ASSIGN(ProfileShortcutManagerWin);
 };
 

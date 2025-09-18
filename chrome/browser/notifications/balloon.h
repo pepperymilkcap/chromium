@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_BALLOON_H_
 #define CHROME_BROWSER_NOTIFICATIONS_BALLOON_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -22,7 +23,7 @@ class Profile;
 // Interface for a view that displays a balloon.
 class BalloonView {
  public:
-  virtual ~BalloonView() {}
+  virtual ~BalloonView() { }
 
   // Show the view on the screen.
   virtual void Show(Balloon* balloon) = 0;
@@ -39,12 +40,8 @@ class BalloonView {
   // The total size of the view.
   virtual gfx::Size GetSize() const = 0;
 
-  // The host for the view's contents. May be NULL if an implementation does
-  // not have a host associated with it (i.e. does not do html rendering).
+  // The host for the view's contents.
   virtual BalloonHost* GetHost() const = 0;
-
-  // Returns the horizontal margin the content is inset by.
-  static int GetHorizontalMargin();
 };
 
 // Represents a Notification on the screen.
@@ -59,13 +56,13 @@ class Balloon {
   Profile* profile() const { return profile_; }
 
   gfx::Point GetPosition() const {
-    return position_ + offset_;
+    return position_.Add(offset_);
   }
   void SetPosition(const gfx::Point& upper_left, bool reposition);
 
-  const gfx::Vector2d& offset() const { return offset_; }
-  void set_offset(const gfx::Vector2d& offset) { offset_ = offset; }
-  void add_offset(const gfx::Vector2d& offset) { offset_.Add(offset); }
+  const gfx::Point& offset() { return offset_;}
+  void set_offset(const gfx::Point& offset) { offset_ = offset; }
+  void add_offset(const gfx::Point& offset) { offset_ = offset_.Add(offset); }
 
   const gfx::Size& content_size() const { return content_size_; }
   void set_content_size(const gfx::Size& size) { content_size_ = size; }
@@ -77,16 +74,19 @@ class Balloon {
     min_scrollbar_size_ = size;
   }
 
-  // Request a new content size for this balloon. This will get passed
+  // Request a new content size for this balloon.  This will get passed
   // to the balloon collection for checking against available space and
   // min/max restrictions.
-  void ResizeDueToAutoResize(const gfx::Size& size);
+  void SetContentPreferredSize(const gfx::Size& size);
 
-  // Provides a view for this balloon. Ownership transfers to this object.
+  // Provides a view for this balloon.  Ownership transfers
+  // to this object.
   void set_view(BalloonView* balloon_view);
 
   // Returns the balloon view associated with the balloon.
-  BalloonView* balloon_view() const { return balloon_view_.get(); }
+  BalloonView* view() const {
+    return balloon_view_.get();
+  }
 
   // Returns the viewing size for the balloon (content + frame).
   gfx::Size GetViewSize() const { return balloon_view_->GetSize(); }
@@ -100,18 +100,12 @@ class Balloon {
   // Called when the balloon is clicked by the user.
   virtual void OnClick();
 
-  // Called when the user clicks a button in the balloon.
-  virtual void OnButtonClick(int button_index);
-
   // Called when the balloon is closed, either by user (through the UI)
   // or by a script.
   virtual void OnClose(bool by_user);
 
   // Called by script to cause the balloon to close.
   virtual void CloseByScript();
-
-  // Returns the ID of the extension that created this balloon's notification.
-  std::string GetExtensionId();
 
  private:
   // Non-owned pointer to the profile.
@@ -120,7 +114,7 @@ class Balloon {
   // The notification being shown in this balloon.
   scoped_ptr<Notification> notification_;
 
-  // The collection that this balloon belongs to. Non-owned pointer.
+  // The collection that this balloon belongs to.  Non-owned pointer.
   BalloonCollection* collection_;
 
   // The actual UI element for the balloon.
@@ -132,7 +126,7 @@ class Balloon {
 
   // Temporary offset for balloons that need to be positioned in a non-standard
   // position for keeping the close buttons under the mouse cursor.
-  gfx::Vector2d offset_;
+  gfx::Point offset_;
 
   // Smallest size for this balloon where scrollbars will be shown.
   gfx::Size min_scrollbar_size_;

@@ -4,6 +4,7 @@
 
 #ifndef NET_PROXY_PROXY_CONFIG_SERVICE_MAC_H_
 #define NET_PROXY_PROXY_CONFIG_SERVICE_MAC_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -14,22 +15,16 @@
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service.h"
 
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
+class MessageLoop;
 
 namespace net {
 
-// TODO(sergeyu): This class needs to be exported because remoting code
-// creates it directly. Fix that and remove NET_EXPORT here.
-// crbug.com/125104
-class NET_EXPORT ProxyConfigServiceMac : public ProxyConfigService {
+class ProxyConfigServiceMac : public ProxyConfigService {
  public:
   // Constructs a ProxyConfigService that watches the Mac OS system settings.
-  // This instance is expected to be operated and deleted on the same thread
+  // This instance is expected to be operated and deleted on |io_loop|
   // (however it may be constructed from a different thread).
-  explicit ProxyConfigServiceMac(
-      base::SingleThreadTaskRunner* io_thread_task_runner);
+  explicit ProxyConfigServiceMac(MessageLoop* io_loop);
   virtual ~ProxyConfigServiceMac();
 
  public:
@@ -50,9 +45,13 @@ class NET_EXPORT ProxyConfigServiceMac : public ProxyConfigService {
 
     // NetworkConfigWatcherMac::Delegate implementation:
     virtual void StartReachabilityNotifications() OVERRIDE {}
-    virtual void SetDynamicStoreNotificationKeys(
-        SCDynamicStoreRef store) OVERRIDE;
-    virtual void OnNetworkConfigChange(CFArrayRef changed_keys) OVERRIDE;
+    virtual void SetDynamicStoreNotificationKeys(SCDynamicStoreRef store)
+        OVERRIDE {
+      proxy_config_service_->SetDynamicStoreNotificationKeys(store);
+    }
+    virtual void OnNetworkConfigChange(CFArrayRef changed_keys) OVERRIDE {
+      proxy_config_service_->OnNetworkConfigChange(changed_keys);
+    }
 
    private:
     ProxyConfigServiceMac* const proxy_config_service_;
@@ -78,7 +77,7 @@ class NET_EXPORT ProxyConfigServiceMac : public ProxyConfigService {
   scoped_refptr<Helper> helper_;
 
   // The thread that we expect to be operated on.
-  const scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;
+  MessageLoop* io_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyConfigServiceMac);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/ppb_audio.h"
 #include "ppapi/cpp/audio_config.h"
+#include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/resource.h"
 
 /// @file
@@ -16,11 +17,9 @@
 
 namespace pp {
 
-class InstanceHandle;
-
 /// An audio resource. Refer to the
-/// <a href="/native-client/devguide/coding/audio">Audio</a>
-/// chapter in the Developer's Guide for information on using this interface.
+/// <a href="/chrome/nativeclient/docs/audio.html">Pepper
+/// Audio API Code Walkthrough</a> for information on using this interface.
 class Audio : public Resource {
  public:
 
@@ -39,30 +38,16 @@ class Audio : public Resource {
   /// the device configuration and is specified in the <code>AudioConfig</code>
   /// documentation.
   ///
-  /// @param[in] instance The instance with which this resource will be
-  /// associated.
+  /// @param[in] instance A pointer to an <code>Instance</code> identifying one
+  /// instance of a module.
   /// @param[in] config An <code>AudioConfig</code> containing the audio config
   /// resource.
   /// @param[in] callback A <code>PPB_Audio_Callback</code> callback function
   /// that the browser calls when it needs more samples to play.
   /// @param[in] user_data A pointer to user data used in the callback function.
-  Audio(const InstanceHandle& instance,
+  Audio(Instance* instance,
         const AudioConfig& config,
         PPB_Audio_Callback callback,
-        void* user_data);
-
-  /// A constructor that creates an Audio resource.
-  ///
-  /// @param[in] instance The instance with which this resource will be
-  /// associated.
-  /// @param[in] config An <code>AudioConfig</code> containing the audio config
-  /// resource.
-  /// @param[in] callback A <code>PPB_Audio_Callback_1_0</code> callback
-  /// function that the browser calls when it needs more samples to play.
-  /// @param[in] user_data A pointer to user data used in the callback function.
-  Audio(const InstanceHandle& instance,
-        const AudioConfig& config,
-        PPB_Audio_Callback_1_0 callback,
         void* user_data);
 
   /// Getter function for returning the internal <code>PPB_AudioConfig</code>
@@ -90,7 +75,6 @@ class Audio : public Resource {
 
  private:
   AudioConfig config_;
-  bool use_1_0_interface_;
 };
 
 }  // namespace pp

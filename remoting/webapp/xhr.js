@@ -164,9 +164,7 @@ remoting.xhr.doMethod = function(methodName, url, onDone,
   }
 
   xhr.open(methodName, url, true);
-  if (methodName == 'POST' &&
-      (typeof opt_headers !== 'object' ||
-       typeof opt_headers['Content-type'] !== 'string')) {
+  if (methodName == 'POST') {
     xhr.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
   }
   // Add in request headers.

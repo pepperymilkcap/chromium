@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,26 +17,33 @@
 
 namespace jingle_glue {
 
-bool IPEndPointToSocketAddress(const net::IPEndPoint& ip_endpoint,
-                               talk_base::SocketAddress* address) {
-  sockaddr_storage addr;
-  socklen_t len = sizeof(addr);
-  return ip_endpoint.ToSockAddr(reinterpret_cast<sockaddr*>(&addr), &len) &&
-      talk_base::SocketAddressFromSockAddrStorage(addr, address);
+bool IPEndPointToSocketAddress(const net::IPEndPoint& address_chrome,
+                               talk_base::SocketAddress* address_lj) {
+  if (address_chrome.GetFamily() != AF_INET) {
+    LOG(ERROR) << "Only IPv4 addresses are supported.";
+    return false;
+  }
+  uint32 ip_as_int = talk_base::NetworkToHost32(
+      *reinterpret_cast<const uint32*>(&address_chrome.address()[0]));
+  *address_lj =  talk_base::SocketAddress(ip_as_int, address_chrome.port());
+  return true;
 }
 
-bool SocketAddressToIPEndPoint(const talk_base::SocketAddress& address,
-                               net::IPEndPoint* ip_endpoint) {
-  sockaddr_storage addr;
-  int size = address.ToSockAddrStorage(&addr);
-  return (size > 0) &&
-      ip_endpoint->FromSockAddr(reinterpret_cast<sockaddr*>(&addr), size);
+bool SocketAddressToIPEndPoint(const talk_base::SocketAddress& address_lj,
+                               net::IPEndPoint* address_chrome) {
+  uint32 ip = talk_base::HostToNetwork32(address_lj.ip());
+  net::IPAddressNumber address;
+  address.resize(net::kIPv4AddressSize);
+  memcpy(&address[0], &ip, net::kIPv4AddressSize);
+  *address_chrome = net::IPEndPoint(address, address_lj.port());
+  return true;
 }
 
 std::string SerializeP2PCandidate(const cricket::Candidate& candidate) {
   // TODO(sergeyu): Use SDP to format candidates?
-  base::DictionaryValue value;
-  value.SetString("ip", candidate.address().ipaddr().ToString());
+  DictionaryValue value;
+  value.SetString("name", candidate.name());
+  value.SetString("ip", candidate.address().IPAsString());
   value.SetInteger("port", candidate.address().port());
   value.SetString("type", candidate.type());
   value.SetString("protocol", candidate.protocol());
@@ -46,21 +53,20 @@ std::string SerializeP2PCandidate(const cricket::Candidate& candidate) {
   value.SetInteger("generation", candidate.generation());
 
   std::string result;
-  base::JSONWriter::Write(&value, &result);
+  base::JSONWriter::Write(&value, false, &result);
   return result;
 }
 
 bool DeserializeP2PCandidate(const std::string& candidate_str,
                              cricket::Candidate* candidate) {
-  scoped_ptr<base::Value> value(
-      base::JSONReader::Read(candidate_str, base::JSON_ALLOW_TRAILING_COMMAS));
-  if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY)) {
+  scoped_ptr<Value> value(base::JSONReader::Read(candidate_str, true));
+  if (!value.get() || !value->IsType(Value::TYPE_DICTIONARY)) {
     return false;
   }
 
-  base::DictionaryValue* dic_value =
-      static_cast<base::DictionaryValue*>(value.get());
+  DictionaryValue* dic_value = static_cast<DictionaryValue*>(value.get());
 
+  std::string name;
   std::string ip;
   int port;
   std::string type;
@@ -70,7 +76,8 @@ bool DeserializeP2PCandidate(const std::string& candidate_str,
   double preference;
   int generation;
 
-  if (!dic_value->GetString("ip", &ip) ||
+  if (!dic_value->GetString("name", &name) ||
+      !dic_value->GetString("ip", &ip) ||
       !dic_value->GetInteger("port", &port) ||
       !dic_value->GetString("type", &type) ||
       !dic_value->GetString("protocol", &protocol) ||
@@ -81,6 +88,7 @@ bool DeserializeP2PCandidate(const std::string& candidate_str,
     return false;
   }
 
+  candidate->set_name(name);
   candidate->set_address(talk_base::SocketAddress(ip, port));
   candidate->set_type(type);
   candidate->set_protocol(protocol);

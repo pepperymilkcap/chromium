@@ -1,30 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/aura/client/drag_drop_client.h"
 
 #include "ui/aura/root_window.h"
-#include "ui/aura/window_property.h"
-
-DECLARE_WINDOW_PROPERTY_TYPE(aura::client::DragDropClient*)
 
 namespace aura {
 namespace client {
 
-DEFINE_LOCAL_WINDOW_PROPERTY_KEY(
-    DragDropClient*, kRootWindowDragDropClientKey, NULL);
+const char kRootWindowDragDropClientKey[] = "RootWindowDragDropClient";
 
-void SetDragDropClient(Window* root_window, DragDropClient* client) {
-  DCHECK_EQ(root_window->GetRootWindow(), root_window);
-  root_window->SetProperty(kRootWindowDragDropClientKey, client);
+void SetDragDropClient(DragDropClient* client) {
+  RootWindow::GetInstance()->SetProperty(kRootWindowDragDropClientKey, client);
 }
 
-DragDropClient* GetDragDropClient(Window* root_window) {
-  if (root_window)
-    DCHECK_EQ(root_window->GetRootWindow(), root_window);
-  return root_window ?
-      root_window->GetProperty(kRootWindowDragDropClientKey) : NULL;
+DragDropClient* GetDragDropClient() {
+  return reinterpret_cast<DragDropClient*>(
+      RootWindow::GetInstance()->GetProperty(kRootWindowDragDropClientKey));
 }
 
 }  // namespace client

@@ -10,7 +10,7 @@ const fail = chrome.test.callbackFail;
 const assertEq = chrome.test.assertEq;
 const assertTrue = chrome.test.assertTrue;
 const bookmarks = chrome.bookmarks;
-const bookmarkManager = chrome.bookmarkManagerPrivate;
+const bookmarkManager = chrome.experimental.bookmarkManager;
 var fooNode, fooNode2, barNode, gooNode, count, emptyFolder, emptyFolder2;
 var folder, nodeA, nodeB;
 var childFolder, grandChildFolder, childNodeA, childNodeB;
@@ -297,16 +297,6 @@ var tests = [
   function canEdit() {
     bookmarkManager.canEdit(pass(function(result) {
       assertTrue(result, 'Should be able to edit bookmarks');
-    }));
-  },
-
-  function getSetMetaInfo() {
-    bookmarkManager.getMetaInfo(nodeA.id, "meta", pass(function(result) {
-      assertTrue(!result);
-    }));
-    bookmarkManager.setMetaInfo(nodeA.id, "meta", "bla");
-    bookmarkManager.getMetaInfo(nodeA.id, "meta", pass(function(result) {
-      assertEq("bla", result);
     }));
   }
 ];

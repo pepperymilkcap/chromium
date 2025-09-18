@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,25 +12,19 @@
 // cheaply passed around by value, the actual image data is stored in a ref-
 // counted member. When all Images referencing this storage are deleted, the
 // actual representations are deleted, too.
-//
-// Images can be empty, in which case they have no backing representation.
-// Attempting to use an empty Image will result in a crash.
 
 #ifndef UI_GFX_IMAGE_IMAGE_H_
 #define UI_GFX_IMAGE_IMAGE_H_
+#pragma once
 
 #include <map>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted_memory.h"
-#include "ui/gfx/gfx_export.h"
+#include "base/memory/ref_counted.h"
+#include "ui/base/ui_export.h"
 #include "ui/gfx/native_widget_types.h"
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-typedef struct CGColorSpace* CGColorSpaceRef;
-#endif
 
 class SkBitmap;
 
@@ -40,11 +34,8 @@ class ImageMacTest;
 }
 
 namespace gfx {
-struct ImagePNGRep;
-class ImageSkia;
-class Size;
 
-#if defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_USES_GTK)
 class CairoCachedSurface;
 #endif
 
@@ -53,36 +44,28 @@ class ImageRep;
 class ImageStorage;
 }
 
-class GFX_EXPORT Image {
+class UI_EXPORT Image {
  public:
   enum RepresentationType {
     kImageRepGdk,
     kImageRepCocoa,
-    kImageRepCocoaTouch,
-    kImageRepCairo,
+    kImageRepCairoCache,
     kImageRepSkia,
-    kImageRepPNG,
   };
 
   typedef std::map<RepresentationType, internal::ImageRep*> RepresentationMap;
 
-  // Creates an empty image with no representations.
-  Image();
+  // Creates a new image with the default representation. The object will take
+  // ownership of the image.
+  explicit Image(const SkBitmap* bitmap);
 
-  // Creates a new image by copying the raw PNG-encoded input for use as the
-  // default representation.
-  explicit Image(const std::vector<ImagePNGRep>& image_reps);
+  // To create an Image that supports multiple resolutions pass a vector
+  // of bitmaps, one for each resolution.
+  explicit Image(const std::vector<const SkBitmap*>& bitmaps);
 
-  // Creates a new image by copying the ImageSkia for use as the default
-  // representation.
-  explicit Image(const ImageSkia& image);
-
-#if defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_USES_GTK)
   // Does not increase |pixbuf|'s reference count; expects to take ownership.
   explicit Image(GdkPixbuf* pixbuf);
-#elif defined(OS_IOS)
-  // Does not retain |image|; expects to take ownership.
-  explicit Image(UIImage* image);
 #elif defined(OS_MACOSX)
   // Does not retain |image|; expects to take ownership.
   // A single NSImage object can contain multiple bitmaps so there's no reason
@@ -100,49 +83,15 @@ class GFX_EXPORT Image {
   // representations.
   ~Image();
 
-  // Creates an image from the passed in 1x bitmap.
-  // WARNING: The resulting image will be pixelated when painted on a high
-  // density display.
-  static Image CreateFrom1xBitmap(const SkBitmap& bitmap);
-
-  // Creates an image from the PNG encoded input.
-  // For example (from an std::vector):
-  // std::vector<unsigned char> png = ...;
-  // gfx::Image image =
-  //     Image::CreateFrom1xPNGBytes(&png.front(), png.size());
-  static Image CreateFrom1xPNGBytes(const unsigned char* input,
-                                    size_t input_size);
-
   // Converts the Image to the desired representation and stores it internally.
   // The returned result is a weak pointer owned by and scoped to the life of
-  // the Image. Must only be called if IsEmpty() is false.
+  // the Image.
   const SkBitmap* ToSkBitmap() const;
-  const ImageSkia* ToImageSkia() const;
-#if defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_USES_GTK)
   GdkPixbuf* ToGdkPixbuf() const;
   CairoCachedSurface* const ToCairo() const;
-#elif defined(OS_IOS)
-  UIImage* ToUIImage() const;
 #elif defined(OS_MACOSX)
   NSImage* ToNSImage() const;
-#endif
-
-  // Returns the raw PNG-encoded data for the bitmap at 1x. If the data is
-  // unavailable, either because the image has no data for 1x or because it is
-  // empty, an empty RefCountedBytes object is returned. NULL is never
-  // returned.
-  scoped_refptr<base::RefCountedMemory> As1xPNGBytes() const;
-
-  // Same as ToSkBitmap(), but returns a null SkBitmap if this image is empty.
-  SkBitmap AsBitmap() const;
-
-  // Same as ToImageSkia(), but returns an empty ImageSkia if this
-  // image is empty.
-  ImageSkia AsImageSkia() const;
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  // Same as ToSkBitmap(), but returns nil if this image is empty.
-  NSImage* AsNSImage() const;
 #endif
 
   // Performs a conversion, like above, but returns a copy of the result rather
@@ -151,16 +100,33 @@ class GFX_EXPORT Image {
   // backing pixels are shared amongst all copies (a fact of each of the
   // converted representations, rather than a limitation imposed by Image) and
   // so the result should be considered immutable.
-  scoped_refptr<base::RefCountedMemory> Copy1xPNGBytes() const;
-  ImageSkia* CopyImageSkia() const;
-  SkBitmap* CopySkBitmap() const;
-#if defined(TOOLKIT_GTK)
+  const SkBitmap* CopySkBitmap() const;
+#if defined(TOOLKIT_USES_GTK)
   GdkPixbuf* CopyGdkPixbuf() const;
-#elif defined(OS_IOS)
-  UIImage* CopyUIImage() const;
 #elif defined(OS_MACOSX)
   NSImage* CopyNSImage() const;
 #endif
+
+  // DEPRECATED ----------------------------------------------------------------
+  // Conversion handlers. These wrap the ToType() variants.
+  operator const SkBitmap*() const;
+  operator const SkBitmap&() const;
+#if defined(TOOLKIT_USES_GTK)
+  operator GdkPixbuf*() const;
+#elif defined(OS_MACOSX)
+  operator NSImage*() const;
+#endif
+  // ---------------------------------------------------------------------------
+
+  // Gets the number of bitmaps in this image. This may cause a conversion
+  // to a bitmap representation. Note, this function and GetSkBitmapAtIndex()
+  // are primarily meant to be used by the theme provider.
+  size_t GetNumberOfSkBitmaps() const;
+
+  // Gets the bitmap at the given index. This may cause a conversion
+  // to a bitmap representation. Note, the internal ordering of bitmaps is not
+  // guaranteed.
+  const SkBitmap* GetSkBitmapAtIndex(size_t index) const;
 
   // Inspects the representations map to see if the given type exists.
   bool HasRepresentation(RepresentationType type) const;
@@ -168,32 +134,16 @@ class GFX_EXPORT Image {
   // Returns the number of representations.
   size_t RepresentationCount() const;
 
-  // Returns true if this Image has no representations.
-  bool IsEmpty() const;
-
-  // Width and height of image in DIP coordinate system.
-  int Width() const;
-  int Height() const;
-  gfx::Size Size() const;
-
   // Swaps this image's internal representations with |other|.
   void SwapRepresentations(gfx::Image* other);
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  // Set the default representation's color space. This is used for converting
-  // to NSImage. This is used to compensate for PNGCodec not writing or reading
-  // colorspace ancillary chunks. (sRGB, iCCP).
-  void SetSourceColorSpace(CGColorSpaceRef color_space);
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
-
  private:
-  // Returns the type of the default representation.
-  RepresentationType DefaultRepresentationType() const;
+  // Returns the ImageRep for the default representation.
+  internal::ImageRep* DefaultRepresentation() const;
 
-  // Returns the ImageRep of the appropriate type or NULL if there is no
-  // representation of that type (and must_exist is false).
-  internal::ImageRep* GetRepresentation(
-      RepresentationType rep_type, bool must_exist) const;
+  // Returns a ImageRep for the given representation type, converting and
+  // caching if necessary.
+  internal::ImageRep* GetRepresentation(RepresentationType rep) const;
 
   // Stores a representation into the map.
   void AddRepresentation(internal::ImageRep* rep) const;

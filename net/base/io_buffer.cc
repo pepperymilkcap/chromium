@@ -13,7 +13,7 @@ IOBuffer::IOBuffer()
 }
 
 IOBuffer::IOBuffer(int buffer_size) {
-  CHECK_GE(buffer_size, 0);
+  DCHECK(buffer_size > 0);
   data_ = new char[buffer_size];
 }
 
@@ -42,7 +42,6 @@ IOBufferWithSize::~IOBufferWithSize() {
 StringIOBuffer::StringIOBuffer(const std::string& s)
     : IOBuffer(static_cast<char*>(NULL)),
       string_data_(s) {
-  CHECK_LT(s.size(), static_cast<size_t>(INT_MAX));
   data_ = const_cast<char*>(string_data_.data());
 }
 

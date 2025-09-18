@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,18 @@
 #include <algorithm>
 
 #include "base/i18n/rtl.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/themes/theme_properties.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/rounded_window.h"
+#include "chrome/browser/ui/gtk/slide_animator_gtk.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
+#include "ui/base/animation/slide_animation.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
-#include "ui/gfx/animation/slide_animation.h"
-#include "ui/gfx/font_list.h"
-#include "ui/gfx/gtk_compat.h"
-#include "ui/gfx/text_elider.h"
+#include "ui/base/text/text_elider.h"
 
 namespace {
 
@@ -44,11 +43,10 @@ const int kMousePadding = 20;
 StatusBubbleGtk::StatusBubbleGtk(Profile* profile)
     : theme_service_(GtkThemeService::GetFrom(profile)),
       padding_(NULL),
-      start_width_(0),
-      desired_width_(0),
       flip_horizontally_(false),
       y_offset_(0),
       download_shelf_is_visible_(false),
+      last_mouse_location_(0, 0),
       last_mouse_left_content_(false),
       ignore_next_left_content_(false) {
   InitWidgets();
@@ -63,8 +61,8 @@ StatusBubbleGtk::~StatusBubbleGtk() {
   container_.Destroy();
 }
 
-void StatusBubbleGtk::SetStatus(const base::string16& status_text_wide) {
-  std::string status_text = base::UTF16ToUTF8(status_text_wide);
+void StatusBubbleGtk::SetStatus(const string16& status_text_wide) {
+  std::string status_text = UTF16ToUTF8(status_text_wide);
   if (status_text_ == status_text)
     return;
 
@@ -113,9 +111,9 @@ void StatusBubbleGtk::SetStatusTextToURL() {
   }
 
   // TODO(tc): We don't actually use gfx::Font as the font in the status
-  // bubble.  We should extend gfx::ElideUrl to take some sort of pango font.
-  url_text_ = base::UTF16ToUTF8(
-      gfx::ElideUrl(url_, gfx::FontList(), desired_width, languages_));
+  // bubble.  We should extend ui::ElideUrl to take some sort of pango font.
+  url_text_ = UTF16ToUTF8(
+      ui::ElideUrl(url_, gfx::Font(), desired_width, languages_));
   SetStatusTextTo(url_text_);
 }
 
@@ -124,9 +122,8 @@ void StatusBubbleGtk::Show() {
   hide_timer_.Stop();
 
   gtk_widget_show(container_.get());
-  GdkWindow* gdk_window = gtk_widget_get_window(container_.get());
-  if (gdk_window)
-    gdk_window_raise(gdk_window);
+  if (container_->window)
+    gdk_window_raise(container_->window);
 }
 
 void StatusBubbleGtk::Hide() {
@@ -201,8 +198,7 @@ void StatusBubbleGtk::MouseMoved(
     // Get our base position (that is, not including the current offset)
     // relative to the origin of the root window.
     gint toplevel_x = 0, toplevel_y = 0;
-    GdkWindow* gdk_window = gtk_widget_get_window(toplevel);
-    gdk_window_get_position(gdk_window, &toplevel_x, &toplevel_y);
+    gdk_window_get_position(toplevel->window, &toplevel_x, &toplevel_y);
     gfx::Rect parent_rect =
         gtk_util::GetWidgetRectRelativeToToplevel(parent);
     gfx::Rect bubble_rect(
@@ -299,11 +295,11 @@ void StatusBubbleGtk::UserChangedTheme() {
     // toolbar" that I can find. Maybe in later iterations of the theme system,
     // there will be a better color to pick.
     GdkColor bookmark_text =
-        theme_service_->GetGdkColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
+        theme_service_->GetGdkColor(ThemeService::COLOR_BOOKMARK_TEXT);
     gtk_widget_modify_fg(label_.get(), GTK_STATE_NORMAL, &bookmark_text);
 
     GdkColor toolbar_color =
-        theme_service_->GetGdkColor(ThemeProperties::COLOR_TOOLBAR);
+        theme_service_->GetGdkColor(ThemeService::COLOR_TOOLBAR);
     gtk_widget_modify_bg(container_.get(), GTK_STATE_NORMAL, &toolbar_color);
   }
 
@@ -340,8 +336,8 @@ void StatusBubbleGtk::ExpandURL() {
   GtkAllocation allocation;
   gtk_widget_get_allocation(label_.get(), &allocation);
   start_width_ = allocation.width;
-  expand_animation_.reset(new gfx::SlideAnimation(this));
-  expand_animation_->SetTweenType(gfx::Tween::LINEAR);
+  expand_animation_.reset(new ui::SlideAnimation(this));
+  expand_animation_->SetTweenType(ui::Tween::LINEAR);
   expand_animation_->Show();
 
   SetStatusTextToURL();
@@ -372,10 +368,10 @@ gboolean StatusBubbleGtk::HandleMotionNotify(GtkWidget* sender,
   return FALSE;
 }
 
-void StatusBubbleGtk::AnimationEnded(const gfx::Animation* animation) {
+void StatusBubbleGtk::AnimationEnded(const ui::Animation* animation) {
   UpdateLabelSizeRequest();
 }
 
-void StatusBubbleGtk::AnimationProgressed(const gfx::Animation* animation) {
+void StatusBubbleGtk::AnimationProgressed(const ui::Animation* animation) {
   UpdateLabelSizeRequest();
 }

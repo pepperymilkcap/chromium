@@ -3,92 +3,46 @@
 # found in the LICENSE file.
 {
   'conditions': [
-    ['OS=="win" and asan==1', {
-      'variables': {
-        'dest_dir': '<(PRODUCT_DIR)/syzygy',
-        'syzygy_exe_dir': '<(DEPTH)/third_party/syzygy/binaries/exe',
-      },
-      # Copy the SyzyASan runtime and logger to the syzygy directory.
-      'targets': [
-        {
-          'target_name': 'copy_syzyasan_binaries',
-          'type': 'none',
-          'outputs': [
-            '<(dest_dir)/agent_logger.exe',
-            '<(dest_dir)/syzyasan_rtl.dll',
-            '<(dest_dir)/syzyasan_rtl.dll.pdb',
-          ],
-          'copies': [
-            {
-              'destination': '<(dest_dir)',
-              'files': [
-                '<(syzygy_exe_dir)/agent_logger.exe',
-                '<(syzygy_exe_dir)/syzyasan_rtl.dll',
-                '<(syzygy_exe_dir)/syzyasan_rtl.dll.pdb',
-              ],
-            },
-          ],
-        },
-      ],
-    }],
     ['OS=="win" and fastbuild==0', {
-      'variables': {
-        'dll_name': 'chrome',
-      },
+      # Reorder the initial chrome DLL executable, placing the optimized
+      # output and corresponding PDB file into the "syzygy" subdirectory.
+      # If there's a matching chrome.dll-ordering.json file present in
+      # the output directory, chrome.dll will be ordered according to that,
+      # otherwise it will be randomized.
+      # This target won't build in fastbuild, since there are no PDBs.
       'targets': [
         {
           'target_name': 'chrome_dll_syzygy',
           'type': 'none',
           'sources' : [],
-          'includes': [
-            'chrome_syzygy.gypi',
+          'dependencies': [
+            '<(DEPTH)/chrome/chrome.gyp:chrome_dll',
+          ],
+          'variables': {
+            'dest_dir': '<(PRODUCT_DIR)\\syzygy',
+          },
+          'actions': [
+            {
+              'action_name': 'Reorder Chrome with Syzygy',
+              'msvs_cygwin_shell': 0,
+              'inputs': [
+                '<(PRODUCT_DIR)\\chrome.dll',
+                '<(PRODUCT_DIR)\\chrome_dll.pdb',
+              ],
+              'outputs': [
+                '<(dest_dir)\\chrome.dll',
+                '<(dest_dir)\\chrome_dll.pdb',
+              ],
+              'action': [
+                'python',
+                '<(DEPTH)/chrome/tools/build/win/syzygy_reorder.py',
+                '--input_executable', '<(PRODUCT_DIR)\\chrome.dll',
+                '--input_symbol', '<(PRODUCT_DIR)\\chrome_dll.pdb',
+                '--destination_dir', '<(dest_dir)',
+              ],
+            },
           ],
         },
-      ],
-    }],
-    # Note, not else.
-    ['OS=="win" and fastbuild==0 and chrome_multiple_dll==1 and '
-        '(asan!=1 or buildtype!="Official")', {
-      'variables': {
-        'dll_name': 'chrome_child',
-      },
-      'targets': [
-        {
-          'target_name': 'chrome_child_dll_syzygy',
-          'type': 'none',
-          'sources' : [],
-          'includes': [
-            'chrome_syzygy.gypi',
-          ],
-        },
-      ],
-    }, {
-      'conditions': [
-        ['OS=="win" and fastbuild==0 and chrome_multiple_dll==1 and '
-            'asan==1 and buildtype=="Official"', {
-          'targets': [
-          {
-            'target_name': 'chrome_child_dll_syzygy',
-            'type': 'none',
-            'inputs': [
-              '<(PRODUCT_DIR)/chrome_child.dll',
-              '<(PRODUCT_DIR)/chrome_child.dll.pdb',
-            ],
-            'outputs': [
-              '<(PRODUCT_DIR)/syzygy/chrome_child.dll',
-              '<(PRODUCT_DIR)/syzygy/chrome_child.dll.pdb',
-            ],
-            'copies': [
-              {
-                'destination': '<(PRODUCT_DIR)/syzygy',
-                'files': [
-                  '<(PRODUCT_DIR)/chrome_child.dll',
-                  '<(PRODUCT_DIR)/chrome_child.dll.pdb',
-                ],
-              },
-            ],
-          }],
-        }],
       ],
     }],
   ],

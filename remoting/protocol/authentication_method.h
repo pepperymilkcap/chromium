@@ -6,6 +6,7 @@
 // configuration. It knows how to parse and format authentication
 // method names.
 // Currently the following methods are supported:
+//   v1_token - deprecated V1 authentication mechanism,
 //   spake2_plain - SPAKE2 without hashing applied to the password.
 //   spake2_hmac - SPAKE2 with HMAC hashing of the password.
 
@@ -14,6 +15,8 @@
 
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
+
 namespace remoting {
 namespace protocol {
 
@@ -21,13 +24,6 @@ class Authenticator;
 
 class AuthenticationMethod {
  public:
-  enum MethodType {
-    INVALID,
-    SPAKE2,
-    SPAKE2_PAIR,
-    THIRD_PARTY
-  };
-
   enum HashFunction {
     NONE,
     HMAC_SHA256,
@@ -36,8 +32,6 @@ class AuthenticationMethod {
   // Constructors for various authentication methods.
   static AuthenticationMethod Invalid();
   static AuthenticationMethod Spake2(HashFunction hash_function);
-  static AuthenticationMethod Spake2Pair();
-  static AuthenticationMethod ThirdParty();
 
   // Parses a string that defines an authentication method. Returns an
   // invalid value if the string is invalid.
@@ -49,9 +43,8 @@ class AuthenticationMethod {
                                        const std::string& tag,
                                        const std::string& shared_secret);
 
-  bool is_valid() const { return type_ != INVALID; }
-
-  MethodType type() const { return type_; }
+  // Returns true
+  bool is_valid() const { return !invalid_; }
 
   // Following methods are valid only when is_valid() returns true.
 
@@ -68,23 +61,12 @@ class AuthenticationMethod {
     return !(*this == other);
   }
 
- protected:
+ private:
   AuthenticationMethod();
-  AuthenticationMethod(MethodType type, HashFunction hash_function);
+  AuthenticationMethod(HashFunction hash_function);
 
-  MethodType type_;
+  bool invalid_;
   HashFunction hash_function_;
-};
-
-// SharedSecretHash stores hash of a host secret paired with the type
-// of the hashing function.
-struct SharedSecretHash {
-  AuthenticationMethod::HashFunction hash_function;
-  std::string value;
-
-  // Parse string representation of a shared secret hash. The |as_string|
-  // must be in form "<hash_function>:<hash_value_base64>".
-  bool Parse(const std::string& as_string);
 };
 
 }  // namespace protocol

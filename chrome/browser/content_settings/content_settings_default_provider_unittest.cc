@@ -3,17 +3,17 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/testing_pref_service.h"
+#include "base/message_loop.h"
 #include "chrome/browser/content_settings/content_settings_default_provider.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/test/test_browser_thread.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/gurl.h"
 
 using ::testing::_;
 using content::BrowserThread;
@@ -24,12 +24,12 @@ class DefaultProviderTest : public testing::Test {
       : ui_thread_(BrowserThread::UI, &message_loop_),
         provider_(profile_.GetPrefs(), false) {
   }
-  virtual ~DefaultProviderTest() {
+  ~DefaultProviderTest() {
     provider_.ShutdownOnUIThread();
   }
 
  protected:
-  base::MessageLoop message_loop_;
+  MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   TestingProfile profile_;
   content_settings::DefaultProvider provider_;
@@ -49,7 +49,7 @@ TEST_F(DefaultProviderTest, DefaultValues) {
       ContentSettingsPattern::Wildcard(),
       CONTENT_SETTINGS_TYPE_COOKIES,
       std::string(),
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             GetContentSetting(&provider_,
                               GURL(),
@@ -70,7 +70,7 @@ TEST_F(DefaultProviderTest, DefaultValues) {
       ContentSettingsPattern::Wildcard(),
       CONTENT_SETTINGS_TYPE_GEOLOCATION,
       std::string(),
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             GetContentSetting(&provider_,
                               GURL(),
@@ -101,7 +101,7 @@ TEST_F(DefaultProviderTest, IgnoreNonDefaultSettings) {
                               std::string(),
                               false));
   scoped_ptr<base::Value> value(
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
   bool owned = provider_.SetWebsiteSetting(
       ContentSettingsPattern::FromURL(primary_url),
       ContentSettingsPattern::FromURL(secondary_url),
@@ -129,7 +129,7 @@ TEST_F(DefaultProviderTest, Observer) {
       ContentSettingsPattern::Wildcard(),
       CONTENT_SETTINGS_TYPE_IMAGES,
       std::string(),
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
 
   EXPECT_CALL(mock_observer,
               OnContentSettingChanged(
@@ -139,7 +139,7 @@ TEST_F(DefaultProviderTest, Observer) {
       ContentSettingsPattern::Wildcard(),
       CONTENT_SETTINGS_TYPE_GEOLOCATION,
       std::string(),
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
 }
 
 
@@ -147,7 +147,7 @@ TEST_F(DefaultProviderTest, ObserveDefaultPref) {
   PrefService* prefs = profile_.GetPrefs();
 
   // Make a copy of the default pref value so we can reset it later.
-  scoped_ptr<base::Value> default_value(prefs->FindPreference(
+  scoped_ptr<Value> default_value(prefs->FindPreference(
       prefs::kDefaultContentSettings)->GetValue()->DeepCopy());
 
   provider_.SetWebsiteSetting(
@@ -155,7 +155,7 @@ TEST_F(DefaultProviderTest, ObserveDefaultPref) {
       ContentSettingsPattern::Wildcard(),
       CONTENT_SETTINGS_TYPE_COOKIES,
       std::string(),
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             GetContentSetting(&provider_,
                               GURL(),
@@ -165,7 +165,7 @@ TEST_F(DefaultProviderTest, ObserveDefaultPref) {
                               false));
 
   // Make a copy of the pref's new value so we can reset it later.
-  scoped_ptr<base::Value> new_value(prefs->FindPreference(
+  scoped_ptr<Value> new_value(prefs->FindPreference(
       prefs::kDefaultContentSettings)->GetValue()->DeepCopy());
 
   // Clearing the backing pref should also clear the internal cache.
@@ -213,7 +213,7 @@ TEST_F(DefaultProviderTest, OffTheRecord) {
       ContentSettingsPattern::Wildcard(),
       CONTENT_SETTINGS_TYPE_COOKIES,
       std::string(),
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             GetContentSetting(&provider_,
                               GURL(),
@@ -232,7 +232,7 @@ TEST_F(DefaultProviderTest, OffTheRecord) {
 
   // Changing content settings on the incognito provider should be ignored.
   scoped_ptr<base::Value> value(
-      base::Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
+      Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
   bool owned = otr_provider.SetWebsiteSetting(
       ContentSettingsPattern::Wildcard(),
       ContentSettingsPattern::Wildcard(),
@@ -256,4 +256,57 @@ TEST_F(DefaultProviderTest, OffTheRecord) {
                               std::string(),
                               true));
   otr_provider.ShutdownOnUIThread();
+}
+
+TEST_F(DefaultProviderTest, MigrateDefaultGeolocationContentSettingAfterSync) {
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            GetContentSetting(&provider_,
+                              GURL(),
+                              GURL(),
+                              CONTENT_SETTINGS_TYPE_GEOLOCATION,
+                              std::string(),
+                              false));
+
+  content_settings::MockObserver mock_observer;
+  EXPECT_CALL(mock_observer,
+              OnContentSettingChanged(
+                  _, _, CONTENT_SETTINGS_TYPE_GEOLOCATION, ""));
+  provider_.AddObserver(&mock_observer);
+
+  // Set obsolete preference and test if it is migrated correctly. This can
+  // happen when an old version of chrome syncs the obsolete default geolocation
+  // preference.
+  PrefService* prefs = profile_.GetPrefs();
+  prefs->SetInteger(prefs::kGeolocationDefaultContentSetting,
+                    CONTENT_SETTING_ALLOW);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            GetContentSetting(&provider_,
+                              GURL(),
+                              GURL(),
+                              CONTENT_SETTINGS_TYPE_GEOLOCATION,
+                              std::string(),
+                              false));
+}
+
+TEST_F(DefaultProviderTest, MigrateDefaultGeolocationContentSettingAtStartup) {
+  TestingProfile profile;
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  // Set obsolete preference and test if it is migrated correctly.
+  prefs->SetInteger(prefs::kGeolocationDefaultContentSetting,
+                    CONTENT_SETTING_ALLOW);
+  // Create a new |DefaultProvider| to test whether the obsolete default
+  // geolocation setting is correctly migrated. The migrated settings should be
+  // available right after creation of the provider.
+  content_settings::DefaultProvider provider(prefs, false);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            GetContentSetting(&provider,
+                              GURL(),
+                              GURL(),
+                              CONTENT_SETTINGS_TYPE_GEOLOCATION,
+                              std::string(),
+                              false));
+  provider.ShutdownOnUIThread();
 }

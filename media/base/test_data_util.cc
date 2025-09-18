@@ -7,41 +7,53 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "media/base/decoder_buffer.h"
+#include "media/ffmpeg/ffmpeg_common.h"
 
 namespace media {
 
-base::FilePath GetTestDataFilePath(const std::string& name) {
-  base::FilePath file_path;
+std::string GetTestDataURL(const std::string& name) {
+  FilePath file_path;
   CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &file_path));
 
   file_path = file_path.Append(FILE_PATH_LITERAL("media"))
-      .Append(FILE_PATH_LITERAL("test")).Append(FILE_PATH_LITERAL("data"))
+      .Append(FILE_PATH_LITERAL("test"))
+      .Append(FILE_PATH_LITERAL("data"))
       .AppendASCII(name);
-  return file_path;
+  return file_path.MaybeAsASCII();
 }
 
-scoped_refptr<DecoderBuffer> ReadTestDataFile(const std::string& name) {
-  base::FilePath file_path;
+void ReadTestDataFile(const std::string& name, scoped_array<uint8>* buffer,
+                      int* size) {
+  FilePath file_path;
   CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &file_path));
 
   file_path = file_path.Append(FILE_PATH_LITERAL("media"))
-      .Append(FILE_PATH_LITERAL("test")).Append(FILE_PATH_LITERAL("data"))
+      .Append(FILE_PATH_LITERAL("test"))
+      .Append(FILE_PATH_LITERAL("data"))
       .AppendASCII(name);
 
   int64 tmp = 0;
-  CHECK(base::GetFileSize(file_path, &tmp))
+  CHECK(file_util::GetFileSize(file_path, &tmp))
       << "Failed to get file size for '" << name << "'";
 
+  // Why FF_INPUT_BUFFER_PADDING_SIZE? FFmpeg assumes all input buffers are
+  // padded. Since most of our test data is passed to FFmpeg, it makes sense
+  // to do the padding here instead of scattering it around test code.
   int file_size = static_cast<int>(tmp);
+  buffer->reset(new uint8[file_size + FF_INPUT_BUFFER_PADDING_SIZE]);
 
-  scoped_refptr<DecoderBuffer> buffer(new DecoderBuffer(file_size));
-  CHECK_EQ(file_size,
-           base::ReadFile(
-               file_path, reinterpret_cast<char*>(buffer->writable_data()),
-               file_size)) << "Failed to read '" << name << "'";
+  CHECK(file_size == file_util::ReadFile(file_path,
+                                         reinterpret_cast<char*>(buffer->get()),
+                                         file_size))
+    << "Failed to read '" << name << "'";
+  *size = file_size;
+}
 
-  return buffer;
+void ReadTestDataFile(const std::string& name, scoped_refptr<Buffer>* buffer) {
+  scoped_array<uint8> buf;
+  int buf_size;
+  ReadTestDataFile(name, &buf, &buf_size);
+  *buffer = new DataBuffer(buf.Pass(), buf_size);
 }
 
 }  // namespace media

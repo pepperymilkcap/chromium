@@ -11,33 +11,17 @@
 
 namespace ppapi {
 
-// For "old" style resources, PP_Resource values differ on the host and plugin
-// side. Implementations of those should be careful to use HostResource to
-// prevent confusion. "New" style resources use the same PP_Resource value on
-// the host and plugin sides, and should not use HostResource.
-//
-// Old style resources match these file specs:
-//   Proxy: ppapi/proxy/ppb_*_proxy.*
-//   Host: webkit/plugins/ppapi/*
-// New style resources match these file specs:
-//   Proxy: ppapi/proxy/*_resource.*
-//   Browser: (content|chrome)/browser/renderer_host/pepper/pepper_*_host.*
-//   Renderer: (content|chrome)/renderer/pepper/pepper_*_host.*
-//
-//
 // Represents a PP_Resource sent over the wire. This just wraps a PP_Resource.
 // The point is to prevent mistakes where the wrong resource value is sent.
 // Resource values are remapped in the plugin so that it can talk to multiple
 // hosts. If all values were PP_Resource, it would be easy to forget to do
-// this transformation.
-//
-// To get the corresponding plugin PP_Resource for a HostResource, use
-// PluginResourceTracker::PluginResourceForHostResource().
+// this tranformation.
 //
 // All HostResources respresent IDs valid in the host.
 class PPAPI_SHARED_EXPORT HostResource {
  public:
-  HostResource();
+  HostResource() : instance_(0), host_resource_(0) {
+  }
 
   bool is_null() const {
     return !host_resource_;
@@ -47,14 +31,21 @@ class PPAPI_SHARED_EXPORT HostResource {
   // resource in the host. Yet these resources still need an instance to be
   // associated with. This function creates a HostResource with the given
   // instances and a 0 host resource ID for these cases.
-  static HostResource MakeInstanceOnly(PP_Instance instance);
+  static HostResource MakeInstanceOnly(PP_Instance instance) {
+    HostResource resource;
+    resource.SetHostResource(instance, 0);
+    return resource;
+  }
 
   // Sets and retrieves the internal PP_Resource which is valid for the host
   // (a.k.a. renderer, as opposed to the plugin) process.
   //
   // DO NOT CALL THESE FUNCTIONS IN THE PLUGIN SIDE OF THE PROXY. The values
   // will be invalid. See the class comment above.
-  void SetHostResource(PP_Instance instance, PP_Resource resource);
+  void SetHostResource(PP_Instance instance, PP_Resource resource) {
+    instance_ = instance;
+    host_resource_ = resource;
+  }
   PP_Resource host_resource() const {
     return host_resource_;
   }

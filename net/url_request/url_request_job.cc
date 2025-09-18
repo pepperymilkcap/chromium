@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,9 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
-#include "base/power_monitor/power_monitor.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
+#include "base/message_loop.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
@@ -18,11 +17,11 @@
 #include "net/base/network_delegate.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 
 namespace net {
 
-URLRequestJob::URLRequestJob(URLRequest* request,
-                             NetworkDelegate* network_delegate)
+URLRequestJob::URLRequestJob(URLRequest* request)
     : request_(request),
       done_(false),
       prefilter_bytes_read_(0),
@@ -33,20 +32,16 @@ URLRequestJob::URLRequestJob(URLRequest* request,
       has_handled_response_(false),
       expected_content_size_(-1),
       deferred_redirect_status_code_(-1),
-      network_delegate_(network_delegate),
-      weak_factory_(this) {
-  base::PowerMonitor* power_monitor = base::PowerMonitor::Get();
-  if (power_monitor)
-    power_monitor->AddObserver(this);
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+  base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
+  if (system_monitor)
+    base::SystemMonitor::Get()->AddPowerObserver(this);
 }
 
-void URLRequestJob::SetUpload(UploadDataStream* upload) {
+void URLRequestJob::SetUpload(UploadData* upload) {
 }
 
 void URLRequestJob::SetExtraRequestHeaders(const HttpRequestHeaders& headers) {
-}
-
-void URLRequestJob::SetPriority(RequestPriority priority) {
 }
 
 void URLRequestJob::Kill() {
@@ -70,7 +65,7 @@ bool URLRequestJob::Read(IOBuffer* buf, int buf_size, int *bytes_read) {
   DCHECK_LT(buf_size, 1000000);  // Sanity check.
   DCHECK(buf);
   DCHECK(bytes_read);
-  DCHECK(filtered_read_buffer_.get() == NULL);
+  DCHECK(filtered_read_buffer_ == NULL);
   DCHECK_EQ(0, filtered_read_buffer_len_);
 
   *bytes_read = 0;
@@ -105,17 +100,12 @@ void URLRequestJob::StopCaching() {
   // Nothing to do here.
 }
 
-bool URLRequestJob::GetFullRequestHeaders(HttpRequestHeaders* headers) const {
-  // Most job types don't send request headers.
-  return false;
-}
-
 LoadState URLRequestJob::GetLoadState() const {
   return LOAD_STATE_IDLE;
 }
 
-UploadProgress URLRequestJob::GetUploadProgress() const {
-  return UploadProgress();
+uint64 URLRequestJob::GetUploadProgress() const {
+  return 0;
 }
 
 bool URLRequestJob::GetCharset(std::string* charset) {
@@ -123,10 +113,6 @@ bool URLRequestJob::GetCharset(std::string* charset) {
 }
 
 void URLRequestJob::GetResponseInfo(HttpResponseInfo* info) {
-}
-
-void URLRequestJob::GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const {
-  // Only certain request types return more than just request start times.
 }
 
 bool URLRequestJob::GetResponseCookies(std::vector<std::string>* cookies) {
@@ -232,9 +218,9 @@ void URLRequestJob::NotifyURLRequestDestroyed() {
 }
 
 URLRequestJob::~URLRequestJob() {
-  base::PowerMonitor* power_monitor = base::PowerMonitor::Get();
-  if (power_monitor)
-    power_monitor->RemoveObserver(this);
+  base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
+  if (system_monitor)
+    base::SystemMonitor::Get()->RemovePowerObserver(this);
 }
 
 void URLRequestJob::NotifyCertificateRequested(
@@ -268,13 +254,6 @@ bool URLRequestJob::CanSetCookie(const std::string& cookie_line,
   return request_->CanSetCookie(cookie_line, options);
 }
 
-bool URLRequestJob::CanEnablePrivacyMode() const {
-  if (!request_)
-    return false;  // The request was destroyed, so there is no more work to do.
-
-  return request_->CanEnablePrivacyMode();
-}
-
 void URLRequestJob::NotifyHeadersComplete() {
   if (!request_ || !request_->has_delegate())
     return;  // The request was destroyed, so there is no more work to do.
@@ -297,9 +276,6 @@ void URLRequestJob::NotifyHeadersComplete() {
   // survival until we can get out of this method.
   scoped_refptr<URLRequestJob> self_preservation(this);
 
-  if (request_)
-    request_->OnHeadersComplete();
-
   GURL new_location;
   int http_status_code;
   if (IsRedirectResponse(&new_location, &http_status_code)) {
@@ -315,10 +291,6 @@ void URLRequestJob::NotifyHeadersComplete() {
                           url.parsed_for_possibly_invalid_spec().ref);
       new_location = new_location.ReplaceComponents(replacements);
     }
-
-    // Redirect response bodies are not read. Notify the transaction
-    // so it does not treat being stopped as an error.
-    DoneReading();
 
     bool defer_redirect = false;
     request_->NotifyReceivedRedirect(new_location, &defer_redirect);
@@ -343,8 +315,8 @@ void URLRequestJob::NotifyHeadersComplete() {
     GetAuthChallengeInfo(&auth_info);
     // Need to check for a NULL auth_info because the server may have failed
     // to send a challenge with the 401 response.
-    if (auth_info.get()) {
-      request_->NotifyAuthRequired(auth_info.get());
+    if (auth_info) {
+      request_->NotifyAuthRequired(auth_info);
       // Wait for SetAuth or CancelAuth to be called.
       return;
     }
@@ -440,8 +412,10 @@ void URLRequestJob::NotifyDone(const URLRequestStatus &status) {
     // successful.
     if (request_->status().is_success()) {
       if (status.status() == URLRequestStatus::FAILED) {
-        request_->net_log().AddEventWithNetErrorCode(NetLog::TYPE_FAILED,
-                                                     status.error());
+        request_->net_log().AddEvent(
+            NetLog::TYPE_FAILED,
+            make_scoped_refptr(new NetLogIntegerParameter("net_error",
+                                                          status.error())));
       }
       request_->set_status(status);
     }
@@ -449,7 +423,7 @@ void URLRequestJob::NotifyDone(const URLRequestStatus &status) {
 
   // Complete this notification later.  This prevents us from re-entering the
   // delegate if we're done because of a synchronous call.
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&URLRequestJob::CompleteNotifyDone,
                  weak_factory_.GetWeakPtr()));
@@ -484,12 +458,12 @@ void URLRequestJob::NotifyRestartRequired() {
     request_->Restart();
 }
 
-void URLRequestJob::OnCallToDelegate() {
-  request_->OnCallToDelegate();
+void URLRequestJob::SetBlockedOnDelegate() {
+  request_->SetBlockedOnDelegate();
 }
 
-void URLRequestJob::OnCallToDelegateComplete() {
-  request_->OnCallToDelegateComplete();
+void URLRequestJob::SetUnblockedOnDelegate() {
+  request_->SetUnblockedOnDelegate();
 }
 
 bool URLRequestJob::ReadRawData(IOBuffer* buf, int buf_size,
@@ -510,12 +484,10 @@ void URLRequestJob::FilteredDataRead(int bytes_read) {
 
 bool URLRequestJob::ReadFilteredData(int* bytes_read) {
   DCHECK(filter_.get());  // don't add data if there is no filter
-  DCHECK(filtered_read_buffer_.get() !=
-         NULL);                             // we need to have a buffer to fill
+  DCHECK(filtered_read_buffer_ != NULL);  // we need to have a buffer to fill
   DCHECK_GT(filtered_read_buffer_len_, 0);  // sanity check
   DCHECK_LT(filtered_read_buffer_len_, 1000000);  // sanity check
-  DCHECK(raw_read_buffer_.get() ==
-         NULL);  // there should be no raw read buffer yet
+  DCHECK(raw_read_buffer_ == NULL);  // there should be no raw read buffer yet
 
   bool rv = false;
   *bytes_read = 0;
@@ -671,7 +643,7 @@ bool URLRequestJob::ReadRawDataForFilter(int* bytes_read) {
 bool URLRequestJob::ReadRawDataHelper(IOBuffer* buf, int buf_size,
                                       int* bytes_read) {
   DCHECK(!request_->status().is_io_pending());
-  DCHECK(raw_read_buffer_.get() == NULL);
+  DCHECK(raw_read_buffer_ == NULL);
 
   // Keep a pointer to the read buffer, so we have access to it in the
   // OnRawReadComplete() callback in the event that the read completes
@@ -704,7 +676,7 @@ void URLRequestJob::FollowRedirect(const GURL& location, int http_status_code) {
 }
 
 void URLRequestJob::OnRawReadComplete(int bytes_read) {
-  DCHECK(raw_read_buffer_.get());
+  DCHECK(raw_read_buffer_);
   if (bytes_read > 0) {
     RecordBytesRead(bytes_read);
   }
@@ -722,8 +694,9 @@ void URLRequestJob::RecordBytesRead(int bytes_read) {
            << " pre total = " << prefilter_bytes_read_
            << " post total = " << postfilter_bytes_read_;
   UpdatePacketReadTimes();  // Facilitate stats recording if it is active.
-  if (network_delegate_)
-    network_delegate_->NotifyRawBytesRead(*request_, bytes_read);
+  const URLRequestContext* context = request_->context();
+  if (context && context->network_delegate())
+    context->network_delegate()->NotifyRawBytesRead(*request_, bytes_read);
 }
 
 bool URLRequestJob::FilterHasData() {

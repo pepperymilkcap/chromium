@@ -78,13 +78,11 @@ bool CppGenerator::Generate(const FileDescriptor* file,
   //   }
   // FOO_EXPORT is a macro which should expand to __declspec(dllexport) or
   // __declspec(dllimport) depending on what is being compiled.
-  Options file_options;
+  string dllexport_decl;
 
   for (int i = 0; i < options.size(); i++) {
     if (options[i].first == "dllexport_decl") {
-      file_options.dllexport_decl = options[i].second;
-    } else if (options[i].first == "safe_boundary_check") {
-      file_options.safe_boundary_check = true;
+      dllexport_decl = options[i].second;
     } else {
       *error = "Unknown generator option: " + options[i].first;
       return false;
@@ -97,7 +95,7 @@ bool CppGenerator::Generate(const FileDescriptor* file,
   string basename = StripProto(file->name());
   basename.append(".pb");
 
-  FileGenerator file_generator(file, file_options);
+  FileGenerator file_generator(file, dllexport_decl);
 
   // Generate header.
   {

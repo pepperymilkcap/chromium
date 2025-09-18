@@ -11,36 +11,22 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/memory/scoped_handle.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_hglobal.h"
-#include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 
 namespace ui {
 
 namespace {
 
-bool HasData(IDataObject* data_object, const Clipboard::FormatType& format) {
-  FORMATETC format_etc = format.ToFormatEtc();
-  return SUCCEEDED(data_object->QueryGetData(&format_etc));
-}
-
-bool GetData(IDataObject* data_object,
-             const Clipboard::FormatType& format,
-             STGMEDIUM* medium) {
-  FORMATETC format_etc = format.ToFormatEtc();
-  return SUCCEEDED(data_object->GetData(&format_etc, medium));
-}
-
-bool GetUrlFromHDrop(IDataObject* data_object,
-                     base::string16* url,
-                     base::string16* title) {
+bool GetUrlFromHDrop(IDataObject* data_object, string16* url,
+                     string16* title) {
   DCHECK(data_object && url && title);
 
   STGMEDIUM medium;
-  if (!GetData(data_object, Clipboard::GetCFHDropFormatType(), &medium))
+  if (FAILED(data_object->GetData(ClipboardUtil::GetCFHDropFormat(), &medium)))
     return false;
 
   HDROP hdrop = static_cast<HDROP>(GlobalLock(medium.hGlobal));
@@ -69,24 +55,25 @@ bool GetUrlFromHDrop(IDataObject* data_object,
   return success;
 }
 
-void SplitUrlAndTitle(const base::string16& str,
-                      base::string16* url,
-                      base::string16* title) {
+void SplitUrlAndTitle(const string16& str,
+                      string16* url,
+                      string16* title) {
   DCHECK(url && title);
   size_t newline_pos = str.find('\n');
-  if (newline_pos != base::string16::npos) {
+  if (newline_pos != string16::npos) {
     url->assign(str, 0, newline_pos);
-    title->assign(str, newline_pos + 1, base::string16::npos);
+    title->assign(str, newline_pos + 1, string16::npos);
   } else {
     url->assign(str);
     title->assign(str);
   }
 }
 
-bool GetFileUrl(IDataObject* data_object, base::string16* url,
-                base::string16* title) {
+bool GetFileUrl(IDataObject* data_object, string16* url,
+                string16* title) {
   STGMEDIUM store;
-  if (GetData(data_object, Clipboard::GetFilenameWFormatType(), &store)) {
+  if (SUCCEEDED(data_object->GetData(ClipboardUtil::GetFilenameWFormat(),
+                                     &store))) {
     bool success = false;
     {
       // filename using unicode
@@ -108,7 +95,8 @@ bool GetFileUrl(IDataObject* data_object, base::string16* url,
       return true;
   }
 
-  if (GetData(data_object, Clipboard::GetFilenameFormatType(), &store)) {
+  if (SUCCEEDED(data_object->GetData(ClipboardUtil::GetFilenameFormat(),
+                                     &store))) {
     bool success = false;
     {
       // filename using ascii
@@ -119,7 +107,7 @@ bool GetFileUrl(IDataObject* data_object, base::string16* url,
         DWORD file_url_len = arraysize(file_url);
         if (SUCCEEDED(::UrlCreateFromPathA(data.get(), file_url, &file_url_len,
                                            0))) {
-          url->assign(base::UTF8ToWide(file_url));
+          url->assign(UTF8ToWide(file_url));
           title->assign(*url);
           success = true;
         }
@@ -134,39 +122,131 @@ bool GetFileUrl(IDataObject* data_object, base::string16* url,
 
 }  // namespace
 
+
+FORMATETC* ClipboardUtil::GetUrlFormat() {
+  static UINT cf = RegisterClipboardFormat(CFSTR_INETURLA);
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetUrlWFormat() {
+  static UINT cf = RegisterClipboardFormat(CFSTR_INETURLW);
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetMozUrlFormat() {
+  // The format is "URL\nTitle"
+  static UINT cf = RegisterClipboardFormat(L"text/x-moz-url");
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetPlainTextFormat() {
+  // We don't need to register this format since it's a built in format.
+  static FORMATETC format = {CF_TEXT, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetPlainTextWFormat() {
+  // We don't need to register this format since it's a built in format.
+  static FORMATETC format = {CF_UNICODETEXT, 0, DVASPECT_CONTENT, -1,
+                             TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetFilenameWFormat() {
+  static UINT cf = RegisterClipboardFormat(CFSTR_FILENAMEW);
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetFilenameFormat() {
+  static UINT cf = RegisterClipboardFormat(CFSTR_FILENAMEA);
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetHtmlFormat() {
+  static UINT cf = RegisterClipboardFormat(L"HTML Format");
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetTextHtmlFormat() {
+  static UINT cf = RegisterClipboardFormat(L"text/html");
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetCFHDropFormat() {
+  // We don't need to register this format since it's a built in format.
+  static FORMATETC format = {CF_HDROP, 0, DVASPECT_CONTENT, -1,
+                             TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetFileDescriptorFormat() {
+  static UINT cf = RegisterClipboardFormat(CFSTR_FILEDESCRIPTOR);
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetFileContentFormatZero() {
+  static UINT cf = RegisterClipboardFormat(CFSTR_FILECONTENTS);
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, 0, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetWebKitSmartPasteFormat() {
+  static UINT cf = RegisterClipboardFormat(L"WebKit Smart Paste Format");
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+FORMATETC* ClipboardUtil::GetWebCustomDataFormat() {
+  // TODO(dcheng): This name is temporary. See crbug.com/106449
+  static UINT cf =
+      RegisterClipboardFormat(L"Chromium Web Custom MIME Data Format");
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  return &format;
+}
+
+
 bool ClipboardUtil::HasUrl(IDataObject* data_object) {
   DCHECK(data_object);
-  return HasData(data_object, Clipboard::GetMozUrlFormatType()) ||
-         HasData(data_object, Clipboard::GetUrlWFormatType()) ||
-         HasData(data_object, Clipboard::GetUrlFormatType()) ||
-         HasData(data_object, Clipboard::GetFilenameWFormatType()) ||
-         HasData(data_object, Clipboard::GetFilenameFormatType());
+  return SUCCEEDED(data_object->QueryGetData(GetMozUrlFormat())) ||
+      SUCCEEDED(data_object->QueryGetData(GetUrlWFormat())) ||
+      SUCCEEDED(data_object->QueryGetData(GetUrlFormat())) ||
+      SUCCEEDED(data_object->QueryGetData(GetFilenameWFormat())) ||
+      SUCCEEDED(data_object->QueryGetData(GetFilenameFormat()));
 }
 
 bool ClipboardUtil::HasFilenames(IDataObject* data_object) {
   DCHECK(data_object);
-  return HasData(data_object, Clipboard::GetCFHDropFormatType());
+  return SUCCEEDED(data_object->QueryGetData(GetCFHDropFormat()));
 }
 
 bool ClipboardUtil::HasFileContents(IDataObject* data_object) {
   DCHECK(data_object);
-  return HasData(data_object, Clipboard::GetFileContentZeroFormatType());
+  return SUCCEEDED(data_object->QueryGetData(GetFileContentFormatZero()));
 }
 
 bool ClipboardUtil::HasHtml(IDataObject* data_object) {
   DCHECK(data_object);
-  return HasData(data_object, Clipboard::GetHtmlFormatType()) ||
-         HasData(data_object, Clipboard::GetTextHtmlFormatType());
+  return SUCCEEDED(data_object->QueryGetData(GetHtmlFormat())) ||
+      SUCCEEDED(data_object->QueryGetData(GetTextHtmlFormat()));
 }
 
 bool ClipboardUtil::HasPlainText(IDataObject* data_object) {
   DCHECK(data_object);
-  return HasData(data_object, Clipboard::GetPlainTextWFormatType()) ||
-         HasData(data_object, Clipboard::GetPlainTextFormatType());
+  return SUCCEEDED(data_object->QueryGetData(GetPlainTextWFormat())) ||
+      SUCCEEDED(data_object->QueryGetData(GetPlainTextFormat()));
 }
 
+
 bool ClipboardUtil::GetUrl(IDataObject* data_object,
-    base::string16* url, base::string16* title, bool convert_filenames) {
+    string16* url, string16* title, bool convert_filenames) {
   DCHECK(data_object && url && title);
   if (!HasUrl(data_object))
     return false;
@@ -176,8 +256,8 @@ bool ClipboardUtil::GetUrl(IDataObject* data_object,
   if (GetUrlFromHDrop(data_object, url, title))
     return true;
 
-  if (GetData(data_object, Clipboard::GetMozUrlFormatType(), &store) ||
-      GetData(data_object, Clipboard::GetUrlWFormatType(), &store)) {
+  if (SUCCEEDED(data_object->GetData(GetMozUrlFormat(), &store)) ||
+      SUCCEEDED(data_object->GetData(GetUrlWFormat(), &store))) {
     {
       // Mozilla URL format or unicode URL
       base::win::ScopedHGlobal<wchar_t> data(store.hGlobal);
@@ -187,11 +267,11 @@ bool ClipboardUtil::GetUrl(IDataObject* data_object,
     return true;
   }
 
-  if (GetData(data_object, Clipboard::GetUrlFormatType(), &store)) {
+  if (SUCCEEDED(data_object->GetData(GetUrlFormat(), &store))) {
     {
       // URL using ascii
       base::win::ScopedHGlobal<char> data(store.hGlobal);
-      SplitUrlAndTitle(base::UTF8ToWide(data.get()), url, title);
+      SplitUrlAndTitle(UTF8ToWide(data.get()), url, title);
     }
     ReleaseStgMedium(&store);
     return true;
@@ -205,13 +285,13 @@ bool ClipboardUtil::GetUrl(IDataObject* data_object,
 }
 
 bool ClipboardUtil::GetFilenames(IDataObject* data_object,
-                                 std::vector<base::string16>* filenames) {
+                                 std::vector<string16>* filenames) {
   DCHECK(data_object && filenames);
   if (!HasFilenames(data_object))
     return false;
 
   STGMEDIUM medium;
-  if (!GetData(data_object, Clipboard::GetCFHDropFormatType(), &medium))
+  if (FAILED(data_object->GetData(GetCFHDropFormat(), &medium)))
     return false;
 
   HDROP hdrop = static_cast<HDROP>(GlobalLock(medium.hGlobal));
@@ -235,13 +315,13 @@ bool ClipboardUtil::GetFilenames(IDataObject* data_object,
 }
 
 bool ClipboardUtil::GetPlainText(IDataObject* data_object,
-                                 base::string16* plain_text) {
+                                 string16* plain_text) {
   DCHECK(data_object && plain_text);
   if (!HasPlainText(data_object))
     return false;
 
   STGMEDIUM store;
-  if (GetData(data_object, Clipboard::GetPlainTextWFormatType(), &store)) {
+  if (SUCCEEDED(data_object->GetData(GetPlainTextWFormat(), &store))) {
     {
       // Unicode text
       base::win::ScopedHGlobal<wchar_t> data(store.hGlobal);
@@ -251,11 +331,11 @@ bool ClipboardUtil::GetPlainText(IDataObject* data_object,
     return true;
   }
 
-  if (GetData(data_object, Clipboard::GetPlainTextFormatType(), &store)) {
+  if (SUCCEEDED(data_object->GetData(GetPlainTextFormat(), &store))) {
     {
       // ascii text
       base::win::ScopedHGlobal<char> data(store.hGlobal);
-      plain_text->assign(base::UTF8ToWide(data.get()));
+      plain_text->assign(UTF8ToWide(data.get()));
     }
     ReleaseStgMedium(&store);
     return true;
@@ -263,33 +343,33 @@ bool ClipboardUtil::GetPlainText(IDataObject* data_object,
 
   // If a file is dropped on the window, it does not provide either of the
   // plain text formats, so here we try to forcibly get a url.
-  base::string16 title;
+  string16 title;
   return GetUrl(data_object, plain_text, &title, false);
 }
 
 bool ClipboardUtil::GetHtml(IDataObject* data_object,
-                            base::string16* html, std::string* base_url) {
+                            string16* html, std::string* base_url) {
   DCHECK(data_object && html && base_url);
 
   STGMEDIUM store;
-  if (HasData(data_object, Clipboard::GetHtmlFormatType()) &&
-      GetData(data_object, Clipboard::GetHtmlFormatType(), &store)) {
+  if (SUCCEEDED(data_object->QueryGetData(GetHtmlFormat())) &&
+      SUCCEEDED(data_object->GetData(GetHtmlFormat(), &store))) {
     {
       // MS CF html
       base::win::ScopedHGlobal<char> data(store.hGlobal);
 
       std::string html_utf8;
       CFHtmlToHtml(std::string(data.get(), data.Size()), &html_utf8, base_url);
-      html->assign(base::UTF8ToWide(html_utf8));
+      html->assign(UTF8ToWide(html_utf8));
     }
     ReleaseStgMedium(&store);
     return true;
   }
 
-  if (!HasData(data_object, Clipboard::GetTextHtmlFormatType()))
+  if (FAILED(data_object->QueryGetData(GetTextHtmlFormat())))
     return false;
 
-  if (!GetData(data_object, Clipboard::GetTextHtmlFormatType(), &store))
+  if (FAILED(data_object->GetData(GetTextHtmlFormat(), &store)))
     return false;
 
   {
@@ -302,17 +382,16 @@ bool ClipboardUtil::GetHtml(IDataObject* data_object,
 }
 
 bool ClipboardUtil::GetFileContents(IDataObject* data_object,
-    base::string16* filename, std::string* file_contents) {
+    string16* filename, std::string* file_contents) {
   DCHECK(data_object && filename && file_contents);
-  if (!HasData(data_object, Clipboard::GetFileContentZeroFormatType()) &&
-      !HasData(data_object, Clipboard::GetFileDescriptorFormatType()))
+  if (FAILED(data_object->QueryGetData(GetFileContentFormatZero())) &&
+      FAILED(data_object->QueryGetData(GetFileDescriptorFormat())))
     return false;
 
   STGMEDIUM content;
   // The call to GetData can be very slow depending on what is in
   // |data_object|.
-  if (GetData(
-          data_object, Clipboard::GetFileContentZeroFormatType(), &content)) {
+  if (SUCCEEDED(data_object->GetData(GetFileContentFormatZero(), &content))) {
     if (TYMED_HGLOBAL == content.tymed) {
       base::win::ScopedHGlobal<char> data(content.hGlobal);
       file_contents->assign(data.get(), data.Size());
@@ -321,9 +400,8 @@ bool ClipboardUtil::GetFileContents(IDataObject* data_object,
   }
 
   STGMEDIUM description;
-  if (GetData(data_object,
-              Clipboard::GetFileDescriptorFormatType(),
-              &description)) {
+  if (SUCCEEDED(data_object->GetData(GetFileDescriptorFormat(),
+                                     &description))) {
     {
       base::win::ScopedHGlobal<FILEGROUPDESCRIPTOR> fgd(description.hGlobal);
       // We expect there to be at least one file in here.
@@ -336,15 +414,14 @@ bool ClipboardUtil::GetFileContents(IDataObject* data_object,
 }
 
 bool ClipboardUtil::GetWebCustomData(
-    IDataObject* data_object,
-    std::map<base::string16, base::string16>* custom_data) {
+    IDataObject* data_object, std::map<string16, string16>* custom_data) {
   DCHECK(data_object && custom_data);
 
-  if (!HasData(data_object, Clipboard::GetWebCustomDataFormatType()))
+  if (FAILED(data_object->QueryGetData(GetWebCustomDataFormat())))
     return false;
 
   STGMEDIUM store;
-  if (GetData(data_object, Clipboard::GetWebCustomDataFormatType(), &store)) {
+  if (SUCCEEDED(data_object->GetData(GetWebCustomDataFormat(), &store))) {
     {
       base::win::ScopedHGlobal<char> data(store.hGlobal);
       ReadCustomDataIntoMap(data.get(), data.Size(), custom_data);
@@ -404,9 +481,9 @@ std::string ClipboardUtil::HtmlToCFHtml(const std::string& html,
   static const char* source_url_prefix = "SourceURL:";
 
   static const char* start_markup =
-      "<html>\r\n<body>\r\n<!--StartFragment-->";
+      "<html>\r\n<body>\r\n<!--StartFragment-->\r\n";
   static const char* end_markup =
-      "<!--EndFragment-->\r\n</body>\r\n</html>";
+      "\r\n<!--EndFragment-->\r\n</body>\r\n</html>";
 
   // Calculate offsets
   size_t start_html_offset = strlen(header) - strlen(NUMBER_FORMAT) * 4 +

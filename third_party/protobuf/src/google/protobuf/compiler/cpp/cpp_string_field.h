@@ -46,8 +46,7 @@ namespace cpp {
 
 class StringFieldGenerator : public FieldGenerator {
  public:
-  explicit StringFieldGenerator(const FieldDescriptor* descriptor,
-                                const Options& options);
+  explicit StringFieldGenerator(const FieldDescriptor* descriptor);
   ~StringFieldGenerator();
 
   // implements FieldGenerator ---------------------------------------
@@ -60,8 +59,6 @@ class StringFieldGenerator : public FieldGenerator {
   void GenerateSwappingCode(io::Printer* printer) const;
   void GenerateConstructorCode(io::Printer* printer) const;
   void GenerateDestructorCode(io::Printer* printer) const;
-  void GenerateDefaultInstanceAllocator(io::Printer* printer) const;
-  void GenerateShutdownCode(io::Printer* printer) const;
   void GenerateMergeFromCodedStream(io::Printer* printer) const;
   void GenerateSerializeWithCachedSizes(io::Printer* printer) const;
   void GenerateSerializeWithCachedSizesToArray(io::Printer* printer) const;
@@ -76,8 +73,7 @@ class StringFieldGenerator : public FieldGenerator {
 
 class RepeatedStringFieldGenerator : public FieldGenerator {
  public:
-  explicit RepeatedStringFieldGenerator(const FieldDescriptor* descriptor,
-                                        const Options& options);
+  explicit RepeatedStringFieldGenerator(const FieldDescriptor* descriptor);
   ~RepeatedStringFieldGenerator();
 
   // implements FieldGenerator ---------------------------------------

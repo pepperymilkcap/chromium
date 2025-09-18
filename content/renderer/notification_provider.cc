@@ -1,52 +1,41 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/notification_provider.h"
 
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/render_view_impl.h"
-#include "third_party/WebKit/public/platform/WebURL.h"
-#include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebNotificationPermissionCallback.h"
-#include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
-#include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPermissionCallback.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
-using blink::WebDocument;
-using blink::WebNotification;
-using blink::WebNotificationPresenter;
-using blink::WebNotificationPermissionCallback;
-using blink::WebSecurityOrigin;
-using blink::WebString;
-using blink::WebURL;
-using blink::WebUserGestureIndicator;
-
-namespace content {
-
+using WebKit::WebDocument;
+using WebKit::WebNotification;
+using WebKit::WebNotificationPresenter;
+using WebKit::WebNotificationPermissionCallback;
+using WebKit::WebSecurityOrigin;
+using WebKit::WebString;
+using WebKit::WebURL;
 
 NotificationProvider::NotificationProvider(RenderViewImpl* render_view)
-    : RenderViewObserver(render_view) {
+    : content::RenderViewObserver(render_view) {
 }
 
 NotificationProvider::~NotificationProvider() {
+  manager_.DetachAll();
 }
 
 bool NotificationProvider::show(const WebNotification& notification) {
-  WebDocument document = render_view()->GetWebView()->mainFrame()->document();
   int notification_id = manager_.RegisterNotification(notification);
-
-  ShowDesktopNotificationHostMsgParams params;
-  params.origin = GURL(document.securityOrigin().toString());
-  params.icon_url = notification.iconURL();
-  params.title = notification.title();
-  params.body = notification.body();
-  params.direction = notification.direction();
-  params.notification_id = notification_id;
-  params.replace_id = notification.replaceId();
-  return Send(new DesktopNotificationHostMsg_Show(routing_id(), params));
+  if (notification.isHTML())
+    return ShowHTML(notification, notification_id);
+  else
+    return ShowText(notification, notification_id);
 }
 
 void NotificationProvider::cancel(const WebNotification& notification) {
@@ -80,7 +69,7 @@ void NotificationProvider::requestPermission(
     const WebSecurityOrigin& origin,
     WebNotificationPermissionCallback* callback) {
   // We only request permission in response to a user gesture.
-  if (!WebUserGestureIndicator::isProcessingUserGesture())
+      if (!render_view()->GetWebView()->mainFrame()->isProcessingUserGesture())
     return;
 
   int id = manager_.RegisterPermissionRequest(callback);
@@ -105,6 +94,35 @@ bool NotificationProvider::OnMessageReceived(const IPC::Message& message) {
     OnNavigate();  // Don't want to swallow the message.
 
   return handled;
+}
+
+bool NotificationProvider::ShowHTML(const WebNotification& notification,
+                                    int id) {
+  DCHECK(notification.isHTML());
+  content::ShowDesktopNotificationHostMsgParams params;
+  WebDocument document = render_view()->GetWebView()->mainFrame()->document();
+  params.origin = GURL(document.securityOrigin().toString());
+  params.is_html = true;
+  params.contents_url = notification.url();
+  params.notification_id = id;
+  params.replace_id = notification.replaceId();
+  return Send(new DesktopNotificationHostMsg_Show(routing_id(), params));
+}
+
+bool NotificationProvider::ShowText(const WebNotification& notification,
+                                    int id) {
+  DCHECK(!notification.isHTML());
+  content::ShowDesktopNotificationHostMsgParams params;
+  params.is_html = false;
+  WebDocument document = render_view()->GetWebView()->mainFrame()->document();
+  params.origin = GURL(document.securityOrigin().toString());
+  params.icon_url = notification.iconURL();
+  params.title = notification.title();
+  params.body = notification.body();
+  params.direction = notification.direction();
+  params.notification_id = id;
+  params.replace_id = notification.replaceId();
+  return Send(new DesktopNotificationHostMsg_Show(routing_id(), params));
 }
 
 void NotificationProvider::OnDisplay(int id) {
@@ -155,5 +173,3 @@ void NotificationProvider::OnPermissionRequestComplete(int id) {
 void NotificationProvider::OnNavigate() {
   manager_.Clear();
 }
-
-}  // namespace content

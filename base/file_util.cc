@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,45 +11,60 @@
 
 #include <fstream>
 
-#include "base/files/file_enumerator.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
-
-namespace base {
+#include "base/string_piece.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
 namespace {
 
-// The maximum number of 'uniquified' files we will try to create.
-// This is used when the filename we're trying to download is already in use,
-// so we create a new unique filename by appending " (nnn)" before the
-// extension, where 1 <= nnn <= kMaxUniqueFiles.
-// Also used by code that cleans up said files.
-static const int kMaxUniqueFiles = 100;
+const FilePath::CharType kExtensionSeparator = FILE_PATH_LITERAL('.');
 
 }  // namespace
 
-int64 ComputeDirectorySize(const FilePath& root_path) {
-  int64 running_size = 0;
-  FileEnumerator file_iter(root_path, true, FileEnumerator::FILES);
-  while (!file_iter.Next().empty())
-    running_size += file_iter.GetInfo().GetSize();
-  return running_size;
+namespace file_util {
+
+bool EndsWithSeparator(const FilePath& path) {
+  FilePath::StringType value = path.value();
+  if (value.empty())
+    return false;
+
+  return FilePath::IsSeparator(value[value.size() - 1]);
 }
 
-bool Move(const FilePath& from_path, const FilePath& to_path) {
-  if (from_path.ReferencesParent() || to_path.ReferencesParent())
+bool EnsureEndsWithSeparator(FilePath* path) {
+  if (!DirectoryExists(*path))
     return false;
-  return internal::MoveUnsafe(from_path, to_path);
+
+  if (EndsWithSeparator(*path))
+    return true;
+
+  FilePath::StringType& path_str =
+      const_cast<FilePath::StringType&>(path->value());
+  path_str.append(&FilePath::kSeparators[0], 1);
+
+  return true;
 }
 
-bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
-  if (from_path.ReferencesParent() || to_path.ReferencesParent())
-    return false;
-  return internal::CopyFileUnsafe(from_path, to_path);
+void InsertBeforeExtension(FilePath* path, const FilePath::StringType& suffix) {
+  FilePath::StringType& value =
+      const_cast<FilePath::StringType&>(path->value());
+
+  const FilePath::StringType::size_type last_dot =
+      value.rfind(kExtensionSeparator);
+  const FilePath::StringType::size_type last_separator =
+      value.find_last_of(FilePath::StringType(FilePath::kSeparators));
+
+  if (last_dot == FilePath::StringType::npos ||
+      (last_separator != std::wstring::npos && last_dot < last_separator)) {
+    // The path looks something like "C:\pics.old\jojo" or "C:\pics\jojo".
+    // We should just append the suffix to the entire path.
+    value.append(suffix);
+    return;
+  }
+
+  value.insert(last_dot, suffix);
 }
 
 bool ContentsEqual(const FilePath& filename1, const FilePath& filename2) {
@@ -127,8 +142,6 @@ bool TextContentsEqual(const FilePath& filename1, const FilePath& filename2) {
 }
 
 bool ReadFileToString(const FilePath& path, std::string* contents) {
-  if (path.ReferencesParent())
-    return false;
   FILE* file = OpenFile(path, "rb");
   if (!file) {
     return false;
@@ -147,8 +160,9 @@ bool ReadFileToString(const FilePath& path, std::string* contents) {
 
 bool IsDirectoryEmpty(const FilePath& dir_path) {
   FileEnumerator files(dir_path, false,
-      FileEnumerator::FILES | FileEnumerator::DIRECTORIES);
-  if (files.Next().empty())
+      static_cast<FileEnumerator::FileType>(
+          FileEnumerator::FILES | FileEnumerator::DIRECTORIES));
+  if (files.Next().value().empty())
     return true;
   return false;
 }
@@ -161,37 +175,42 @@ FILE* CreateAndOpenTemporaryFile(FilePath* path) {
   return CreateAndOpenTemporaryFileInDir(directory, path);
 }
 
-bool CreateDirectory(const FilePath& full_path) {
-  return CreateDirectoryAndGetError(full_path, NULL);
-}
-
 bool GetFileSize(const FilePath& file_path, int64* file_size) {
-  PlatformFileInfo info;
+  base::PlatformFileInfo info;
   if (!GetFileInfo(file_path, &info))
     return false;
   *file_size = info.size;
   return true;
 }
 
+bool IsDot(const FilePath& path) {
+  return FILE_PATH_LITERAL(".") == path.BaseName().value();
+}
+
+bool IsDotDot(const FilePath& path) {
+  return FILE_PATH_LITERAL("..") == path.BaseName().value();
+}
+
 bool TouchFile(const FilePath& path,
-               const Time& last_accessed,
-               const Time& last_modified) {
-  int flags = PLATFORM_FILE_OPEN | PLATFORM_FILE_WRITE_ATTRIBUTES;
-
-#if defined(OS_WIN)
-  // On Windows, FILE_FLAG_BACKUP_SEMANTICS is needed to open a directory.
-  if (DirectoryExists(path))
-    flags |= PLATFORM_FILE_BACKUP_SEMANTICS;
-#endif  // OS_WIN
-
-  const PlatformFile file = CreatePlatformFile(path, flags, NULL, NULL);
-  if (file != kInvalidPlatformFileValue) {
-    bool result = TouchPlatformFile(file, last_accessed, last_modified);
-    ClosePlatformFile(file);
+               const base::Time& last_accessed,
+               const base::Time& last_modified) {
+  base::PlatformFile file =
+      base::CreatePlatformFile(path,
+                               base::PLATFORM_FILE_OPEN |
+                               base::PLATFORM_FILE_WRITE_ATTRIBUTES,
+                               NULL, NULL);
+  if (file != base::kInvalidPlatformFileValue) {
+    bool result = base::TouchPlatformFile(file, last_accessed, last_modified);
+    base::ClosePlatformFile(file);
     return result;
   }
 
   return false;
+}
+
+bool SetLastModifiedTime(const FilePath& path,
+                         const base::Time& last_modified) {
+  return TouchFile(path, last_modified, last_modified);
 }
 
 bool CloseFile(FILE* file) {
@@ -218,35 +237,166 @@ bool TruncateFile(FILE* file) {
   return true;
 }
 
-}  // namespace base
+bool ContainsPath(const FilePath &parent, const FilePath& child) {
+  FilePath abs_parent = FilePath(parent);
+  FilePath abs_child = FilePath(child);
 
-// -----------------------------------------------------------------------------
+  if (!file_util::AbsolutePath(&abs_parent) ||
+      !file_util::AbsolutePath(&abs_child))
+    return false;
 
-namespace file_util {
+#if defined(OS_WIN)
+  // file_util::AbsolutePath() does not flatten case on Windows, so we must do
+  // a case-insensitive compare.
+  if (!StartsWith(abs_child.value(), abs_parent.value(), false))
+#else
+  if (!StartsWithASCII(abs_child.value(), abs_parent.value(), true))
+#endif
+    return false;
 
-using base::FilePath;
-using base::kMaxUniqueFiles;
+  // file_util::AbsolutePath() normalizes '/' to '\' on Windows, so we only need
+  // to check kSeparators[0].
+  if (abs_child.value().length() <= abs_parent.value().length() ||
+      abs_child.value()[abs_parent.value().length()] !=
+          FilePath::kSeparators[0])
+    return false;
 
-int GetUniquePathNumber(
-    const FilePath& path,
-    const FilePath::StringType& suffix) {
-  bool have_suffix = !suffix.empty();
-  if (!PathExists(path) &&
-      (!have_suffix || !PathExists(FilePath(path.value() + suffix)))) {
-    return 0;
-  }
-
-  FilePath new_path;
-  for (int count = 1; count <= kMaxUniqueFiles; ++count) {
-    new_path =
-        path.InsertBeforeExtensionASCII(base::StringPrintf(" (%d)", count));
-    if (!PathExists(new_path) &&
-        (!have_suffix || !PathExists(FilePath(new_path.value() + suffix)))) {
-      return count;
-    }
-  }
-
-  return -1;
+  return true;
 }
 
-}  // namespace file_util
+int64 ComputeDirectorySize(const FilePath& root_path) {
+  int64 running_size = 0;
+  FileEnumerator file_iter(root_path, true, FileEnumerator::FILES);
+  for (FilePath current = file_iter.Next(); !current.empty();
+       current = file_iter.Next()) {
+    FileEnumerator::FindInfo info;
+    file_iter.GetFindInfo(&info);
+#if defined(OS_WIN)
+    LARGE_INTEGER li = { info.nFileSizeLow, info.nFileSizeHigh };
+    running_size += li.QuadPart;
+#else
+    running_size += info.stat.st_size;
+#endif
+  }
+  return running_size;
+}
+
+int64 ComputeFilesSize(const FilePath& directory,
+                       const FilePath::StringType& pattern) {
+  int64 running_size = 0;
+  FileEnumerator file_iter(directory, false, FileEnumerator::FILES, pattern);
+  for (FilePath current = file_iter.Next(); !current.empty();
+       current = file_iter.Next()) {
+    FileEnumerator::FindInfo info;
+    file_iter.GetFindInfo(&info);
+#if defined(OS_WIN)
+    LARGE_INTEGER li = { info.nFileSizeLow, info.nFileSizeHigh };
+    running_size += li.QuadPart;
+#else
+    running_size += info.stat.st_size;
+#endif
+  }
+  return running_size;
+}
+
+///////////////////////////////////////////////
+// MemoryMappedFile
+
+MemoryMappedFile::~MemoryMappedFile() {
+  CloseHandles();
+}
+
+bool MemoryMappedFile::Initialize(const FilePath& file_name) {
+  if (IsValid())
+    return false;
+
+  if (!MapFileToMemory(file_name)) {
+    CloseHandles();
+    return false;
+  }
+
+  return true;
+}
+
+bool MemoryMappedFile::Initialize(base::PlatformFile file) {
+  if (IsValid())
+    return false;
+
+  file_ = file;
+
+  if (!MapFileToMemoryInternal()) {
+    CloseHandles();
+    return false;
+  }
+
+  return true;
+}
+
+bool MemoryMappedFile::IsValid() const {
+  return data_ != NULL;
+}
+
+bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
+  file_ = base::CreatePlatformFile(
+      file_name, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ,
+      NULL, NULL);
+
+  if (file_ == base::kInvalidPlatformFileValue) {
+    DLOG(ERROR) << "Couldn't open " << file_name.value();
+    return false;
+  }
+
+  return MapFileToMemoryInternal();
+}
+
+// Deprecated functions ----------------------------------------------------
+
+#if defined(OS_WIN)
+void AppendToPath(std::wstring* path, const std::wstring& new_ending) {
+  if (!path) {
+    NOTREACHED();
+    return;  // Don't crash in this function in release builds.
+  }
+
+  if (!EndsWithSeparator(FilePath(*path)))
+    path->push_back(FilePath::kSeparators[0]);
+  path->append(new_ending);
+}
+
+bool CopyDirectory(const std::wstring& from_path, const std::wstring& to_path,
+                   bool recursive) {
+  return CopyDirectory(FilePath::FromWStringHack(from_path),
+                       FilePath::FromWStringHack(to_path),
+                       recursive);
+}
+bool Delete(const std::wstring& path, bool recursive) {
+  return Delete(FilePath::FromWStringHack(path), recursive);
+}
+std::wstring GetFileExtensionFromPath(const std::wstring& path) {
+  std::wstring file_name = FilePath(path).BaseName().value();
+  const std::wstring::size_type last_dot = file_name.rfind(kExtensionSeparator);
+  return std::wstring(last_dot == std::wstring::npos ? L""
+                                                     : file_name, last_dot + 1);
+}
+FILE* OpenFile(const std::wstring& filename, const char* mode) {
+  return OpenFile(FilePath::FromWStringHack(filename), mode);
+}
+int ReadFile(const std::wstring& filename, char* data, int size) {
+  return ReadFile(FilePath::FromWStringHack(filename), data, size);
+}
+int WriteFile(const std::wstring& filename, const char* data, int size) {
+  return WriteFile(FilePath::FromWStringHack(filename), data, size);
+}
+#endif  // OS_WIN
+
+///////////////////////////////////////////////
+// FileEnumerator
+//
+// Note: the main logic is in file_util_<platform>.cc
+
+bool FileEnumerator::ShouldSkip(const FilePath& path) {
+  FilePath::StringType basename = path.BaseName().value();
+  return IsDot(path) || (IsDotDot(path) && !(INCLUDE_DOT_DOT & file_type_));
+}
+
+}  // namespace

@@ -11,7 +11,7 @@ namespace prerender {
 
 namespace {
 
-bool ListEntryMatches(base::ListValue* list,
+bool ListEntryMatches(ListValue* list,
                       size_t index,
                       const char* expected_url,
                       FinalStatus expected_final_status,
@@ -19,7 +19,7 @@ bool ListEntryMatches(base::ListValue* list,
                       const std::string& expected_end_time) {
   if (index >= list->GetSize())
     return false;
-  base::DictionaryValue* dict = NULL;
+  DictionaryValue* dict = NULL;
   if (!list->GetDictionary(index, &dict))
     return false;
   if (dict->size() != 4u)
@@ -48,8 +48,8 @@ bool ListEntryMatches(base::ListValue* list,
 }
 
 TEST(PrerenderHistoryTest, GetAsValue)  {
-  scoped_ptr<base::Value> entry_value;
-  base::ListValue* entry_list = NULL;
+  scoped_ptr<Value> entry_value;
+  ListValue* entry_list = NULL;
 
   // Create a history with only 2 values.
   PrerenderHistory history(2);
@@ -67,7 +67,7 @@ TEST(PrerenderHistoryTest, GetAsValue)  {
   // Add a single entry and make sure that it matches up.
   const char* const kFirstUrl = "http://www.alpha.com/";
   const FinalStatus kFirstFinalStatus = FINAL_STATUS_USED;
-  const Origin kFirstOrigin = ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN;
+  const Origin kFirstOrigin = ORIGIN_LINK_REL_PRERENDER;
   PrerenderHistory::Entry entry_first(
       GURL(kFirstUrl), kFirstFinalStatus, kFirstOrigin, epoch_start);
   history.AddEntry(entry_first);
@@ -98,7 +98,7 @@ TEST(PrerenderHistoryTest, GetAsValue)  {
   // Add a third entry and make sure that the first one drops off.
   const char* const kThirdUrl = "http://www.gamma.com/";
   const FinalStatus kThirdFinalStatus = FINAL_STATUS_AUTH_NEEDED;
-  const Origin kThirdOrigin = ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN;
+  const Origin kThirdOrigin = ORIGIN_LINK_REL_PRERENDER;
   PrerenderHistory::Entry entry_third(
       GURL(kThirdUrl), kThirdFinalStatus, kThirdOrigin,
       epoch_start + base::TimeDelta::FromMilliseconds(2));

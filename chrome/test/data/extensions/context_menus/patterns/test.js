@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 var make_browsertest_proceed = function() {
-  if (!chrome.runtime.lastError) {
+  if (!chrome.extension.lastError) {
     chrome.test.sendMessage("created items");
   }
 };

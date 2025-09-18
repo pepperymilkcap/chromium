@@ -4,13 +4,14 @@
 
 #ifndef BASE_METRICS_STATS_COUNTERS_H_
 #define BASE_METRICS_STATS_COUNTERS_H_
+#pragma once
 
 #include <string>
 
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
 #include "base/metrics/stats_table.h"
-#include "base/time/time.h"
+#include "base/time.h"
 
 namespace base {
 

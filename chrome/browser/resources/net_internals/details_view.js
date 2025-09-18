@@ -59,7 +59,7 @@ var DetailsView = (function() {
 
         var sourceEntry = this.sourceEntries_[i];
         var div = addNode(node, 'div');
-        div.className = 'log-source-entry';
+        div.className = 'logSourceEntry';
 
         var p = addNode(div, 'p');
         addNodeWithText(p, 'h4',
@@ -71,8 +71,7 @@ var DetailsView = (function() {
 
         var logEntries = sourceEntry.getLogEntries();
         var startDate = timeutil.convertTimeTicksToDate(logEntries[0].time);
-        var startTimeDiv = addNodeWithText(p, 'div', 'Start Time: ');
-        timeutil.addNodeWithDate(startTimeDiv, startDate);
+        addNodeWithText(p, 'div', 'Start Time: ' + startDate.toLocaleString());
 
         sourceEntry.printAsText(div);
 

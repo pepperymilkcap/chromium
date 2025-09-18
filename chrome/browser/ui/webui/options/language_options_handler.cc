@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,11 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
@@ -28,8 +28,6 @@
 
 using content::UserMetricsAction;
 
-namespace options {
-
 LanguageOptionsHandler::LanguageOptionsHandler() {
 }
 
@@ -37,7 +35,7 @@ LanguageOptionsHandler::~LanguageOptionsHandler() {
 }
 
 void LanguageOptionsHandler::GetLocalizedValues(
-    base::DictionaryValue* localized_strings) {
+    DictionaryValue* localized_strings) {
   LanguageOptionsHandlerCommon::GetLocalizedValues(localized_strings);
 
   RegisterTitle(localized_strings, "languagePage",
@@ -56,7 +54,7 @@ void LanguageOptionsHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-base::ListValue* LanguageOptionsHandler::GetLanguageList() {
+ListValue* LanguageOptionsHandler::GetLanguageList() {
   // Collect the language codes from the supported accept-languages.
   const std::string app_locale = g_browser_process->GetApplicationLocale();
   std::vector<std::string> language_codes;
@@ -66,20 +64,22 @@ base::ListValue* LanguageOptionsHandler::GetLanguageList() {
   // In theory, we should be able to create a map that is sorted by
   // display names using ICU comparator, but doing it is hard, thus we'll
   // use an auxiliary vector to achieve the same result.
-  typedef std::pair<std::string, base::string16> LanguagePair;
-  typedef std::map<base::string16, LanguagePair> LanguageMap;
+  typedef std::pair<std::string, string16> LanguagePair;
+  typedef std::map<string16, LanguagePair> LanguageMap;
   LanguageMap language_map;
   // The auxiliary vector mentioned above.
-  std::vector<base::string16> display_names;
+  std::vector<string16> display_names;
 
   // Build the list of display names, and build the language map.
   for (size_t i = 0; i < language_codes.size(); ++i) {
-    base::string16 display_name =
+    string16 display_name =
         l10n_util::GetDisplayNameForLocale(language_codes[i], app_locale,
                                            false);
-    base::string16 native_display_name =
+    base::i18n::AdjustStringForLocaleDirection(&display_name);
+    string16 native_display_name =
         l10n_util::GetDisplayNameForLocale(language_codes[i], language_codes[i],
                                            false);
+    base::i18n::AdjustStringForLocaleDirection(&native_display_name);
     display_names.push_back(display_name);
     language_map[display_name] =
         std::make_pair(language_codes[i], native_display_name);
@@ -90,31 +90,20 @@ base::ListValue* LanguageOptionsHandler::GetLanguageList() {
   l10n_util::SortStrings16(app_locale, &display_names);
 
   // Build the language list from the language map.
-  base::ListValue* language_list = new base::ListValue();
+  ListValue* language_list = new ListValue();
   for (size_t i = 0; i < display_names.size(); ++i) {
-    base::string16& display_name = display_names[i];
-    base::string16 adjusted_display_name(display_name);
-    base::i18n::AdjustStringForLocaleDirection(&adjusted_display_name);
-
-    const LanguagePair& pair = language_map[display_name];
-    base::string16 adjusted_native_display_name(pair.second);
-    base::i18n::AdjustStringForLocaleDirection(&adjusted_native_display_name);
-
-    bool has_rtl_chars = base::i18n::StringContainsStrongRTLChars(display_name);
-    std::string directionality = has_rtl_chars ? "rtl" : "ltr";
-
-    base::DictionaryValue* dictionary = new base::DictionaryValue();
+    const LanguagePair& pair = language_map[display_names[i]];
+    DictionaryValue* dictionary = new DictionaryValue();
     dictionary->SetString("code",  pair.first);
-    dictionary->SetString("displayName", adjusted_display_name);
-    dictionary->SetString("textDirection", directionality);
-    dictionary->SetString("nativeDisplayName", adjusted_native_display_name);
+    dictionary->SetString("displayName", display_names[i]);
+    dictionary->SetString("nativeDisplayName", pair.second);
     language_list->Append(dictionary);
   }
 
   return language_list;
 }
 
-base::string16 LanguageOptionsHandler::GetProductName() {
+string16 LanguageOptionsHandler::GetProductName() {
   return l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
 }
 
@@ -124,9 +113,7 @@ void LanguageOptionsHandler::SetApplicationLocale(
   pref_service->SetString(prefs::kApplicationLocale, language_code);
 }
 
-void LanguageOptionsHandler::RestartCallback(const base::ListValue* args) {
+void LanguageOptionsHandler::RestartCallback(const ListValue* args) {
   content::RecordAction(UserMetricsAction("LanguageOptions_Restart"));
-  chrome::AttemptRestart();
+  BrowserList::AttemptRestart();
 }
-
-}  // namespace options

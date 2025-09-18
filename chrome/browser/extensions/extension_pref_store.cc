@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,13 +15,18 @@ ExtensionPrefStore::ExtensionPrefStore(
   extension_pref_value_map_->AddObserver(this);
 }
 
+ExtensionPrefStore::~ExtensionPrefStore() {
+  if (extension_pref_value_map_)
+    extension_pref_value_map_->RemoveObserver(this);
+}
+
 void ExtensionPrefStore::OnInitializationCompleted() {
   NotifyInitializationCompleted();
 }
 
 void ExtensionPrefStore::OnPrefValueChanged(const std::string& key) {
   CHECK(extension_pref_value_map_);
-  const base::Value *winner =
+  const Value *winner =
       extension_pref_value_map_->GetEffectivePrefValue(key,
                                                        incognito_pref_store_,
                                                        NULL);
@@ -35,9 +40,4 @@ void ExtensionPrefStore::OnExtensionPrefValueMapDestruction() {
   CHECK(extension_pref_value_map_);
   extension_pref_value_map_->RemoveObserver(this);
   extension_pref_value_map_ = NULL;
-}
-
-ExtensionPrefStore::~ExtensionPrefStore() {
-  if (extension_pref_value_map_)
-    extension_pref_value_map_->RemoveObserver(this);
 }

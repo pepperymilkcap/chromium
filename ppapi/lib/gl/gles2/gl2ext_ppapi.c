@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #define GL_TRUE 1
 #endif  // GL_TRUE
 
-#if defined(__GNUC__) && !defined(__APPLE__) && !defined(ANDROID)
+#if defined(__GNUC__) && !defined(__APPLE__)
 #define PP_TLS __thread
 #elif defined(_MSC_VER)
 #define PP_TLS __declspec(thread)
@@ -26,18 +26,6 @@
 // TODO(alokp): This will need to be thread-safe if we build gles2 as a
 // shared library.
 static const struct PPB_OpenGLES2* g_gles2_interface = NULL;
-static const struct PPB_OpenGLES2InstancedArrays*
-    g_gles2_instanced_arrays_interface = NULL;
-static const struct PPB_OpenGLES2FramebufferBlit*
-    g_gles2_framebuffer_blit_interface = NULL;
-static const struct PPB_OpenGLES2FramebufferMultisample*
-    g_gles2_framebuffer_multisample_interface = NULL;
-static const struct PPB_OpenGLES2ChromiumEnableFeature*
-    g_gles2_chromium_enable_feature_interface = NULL;
-static const struct PPB_OpenGLES2ChromiumMapSub*
-    g_gles2_chromium_map_sub_interface = NULL;
-static const struct PPB_OpenGLES2Query*
-    g_gles2_query_interface = NULL;
 
 // TODO(alokp): Make sure PP_TLS works on all supported platforms.
 static PP_TLS PP_Resource g_current_context = 0;
@@ -47,36 +35,10 @@ GLboolean GL_APIENTRY glInitializePPAPI(
   if (!g_gles2_interface) {
     g_gles2_interface = get_browser_interface(PPB_OPENGLES2_INTERFACE);
   }
-  if (!g_gles2_instanced_arrays_interface) {
-    g_gles2_instanced_arrays_interface =
-        get_browser_interface(PPB_OPENGLES2_INSTANCEDARRAYS_INTERFACE);
-  }
-  if (!g_gles2_framebuffer_blit_interface) {
-    g_gles2_framebuffer_blit_interface =
-        get_browser_interface(PPB_OPENGLES2_FRAMEBUFFERBLIT_INTERFACE);
-  }
-  if (!g_gles2_framebuffer_multisample_interface) {
-    g_gles2_framebuffer_multisample_interface =
-        get_browser_interface(
-            PPB_OPENGLES2_FRAMEBUFFERMULTISAMPLE_INTERFACE);
-  }
-  if (!g_gles2_chromium_enable_feature_interface) {
-    g_gles2_chromium_enable_feature_interface =
-        get_browser_interface(
-            PPB_OPENGLES2_CHROMIUMENABLEFEATURE_INTERFACE);
-  }
-  if (!g_gles2_chromium_map_sub_interface) {
-    g_gles2_chromium_map_sub_interface =
-        get_browser_interface(PPB_OPENGLES2_CHROMIUMMAPSUB_INTERFACE);
-  }
-  if (!g_gles2_query_interface) {
-    g_gles2_query_interface =
-        get_browser_interface(PPB_OPENGLES2_QUERY_INTERFACE);
-  }
   return g_gles2_interface ? GL_TRUE : GL_FALSE;
 }
 
-GLboolean GL_APIENTRY glTerminatePPAPI(void) {
+GLboolean GL_APIENTRY glTerminatePPAPI() {
   g_gles2_interface = NULL;
   return GL_TRUE;
 }
@@ -85,40 +47,11 @@ void GL_APIENTRY glSetCurrentContextPPAPI(PP_Resource context) {
   g_current_context = context;
 }
 
-PP_Resource GL_APIENTRY glGetCurrentContextPPAPI(void) {
+PP_Resource GL_APIENTRY glGetCurrentContextPPAPI() {
   return g_current_context;
 }
 
-const struct PPB_OpenGLES2* GL_APIENTRY glGetInterfacePPAPI(void) {
+const struct PPB_OpenGLES2* GL_APIENTRY glGetInterfacePPAPI() {
   return g_gles2_interface;
 }
 
-const struct PPB_OpenGLES2InstancedArrays* GL_APIENTRY
-    glGetInstancedArraysInterfacePPAPI(void) {
-  return g_gles2_instanced_arrays_interface;
-}
-
-const struct PPB_OpenGLES2FramebufferBlit* GL_APIENTRY
-    glGetFramebufferBlitInterfacePPAPI(void) {
-  return g_gles2_framebuffer_blit_interface;
-}
-
-const struct PPB_OpenGLES2FramebufferMultisample* GL_APIENTRY
-    glGetFramebufferMultisampleInterfacePPAPI(void) {
-  return g_gles2_framebuffer_multisample_interface;
-}
-
-const struct PPB_OpenGLES2ChromiumEnableFeature* GL_APIENTRY
-    glGetChromiumEnableFeatureInterfacePPAPI(void) {
-  return g_gles2_chromium_enable_feature_interface;
-}
-
-const struct PPB_OpenGLES2ChromiumMapSub* GL_APIENTRY
-    glGetChromiumMapSubInterfacePPAPI(void) {
-  return g_gles2_chromium_map_sub_interface;
-}
-
-const struct PPB_OpenGLES2Query* GL_APIENTRY
-    glGetQueryInterfacePPAPI(void) {
-  return g_gles2_query_interface;
-}

@@ -78,17 +78,14 @@ void TraceEventETWProvider::TraceEvent(const char* name,
   event.SetField(1, sizeof(id), &id);
   event.SetField(2, extra_len + 1, extra);
 
-  // These variables are declared here so that they are not out of scope when
-  // the event is logged.
-  DWORD depth;
-  void* backtrace[32];
-
   // See whether we're to capture a backtrace.
+  void* backtrace[32];
   if (enable_flags() & CAPTURE_STACK_TRACE) {
-    depth = CaptureStackBackTrace(0,
-                                  arraysize(backtrace),
-                                  backtrace,
-                                  NULL);
+    DWORD hash = 0;
+    DWORD depth = CaptureStackBackTrace(0,
+                                        arraysize(backtrace),
+                                        backtrace,
+                                        &hash);
     event.SetField(3, sizeof(depth), &depth);
     event.SetField(4, sizeof(backtrace[0]) * depth, backtrace);
   }

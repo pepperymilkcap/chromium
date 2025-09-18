@@ -15,7 +15,7 @@
 
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_string.h"
-#include "ppapi/native_client/src/trusted/plugin/manifest.h"
+#include "native_client/src/trusted/plugin/manifest.h"
 #include "third_party/jsoncpp/source/include/json/value.h"
 
 namespace pp {
@@ -25,16 +25,17 @@ class URLUtil_Dev;
 namespace plugin {
 
 class ErrorInfo;
-class PnaclOptions;
 
 class JsonManifest : public Manifest {
  public:
   JsonManifest(const pp::URLUtil_Dev* url_util,
            const nacl::string& manifest_base_url,
-           const nacl::string& sandbox_isa)
+           const nacl::string& sandbox_isa,
+           bool prefer_portable)
       : url_util_(url_util),
         manifest_base_url_(manifest_base_url),
         sandbox_isa_(sandbox_isa),
+        prefer_portable_(prefer_portable),
         dictionary_(Json::nullValue) { }
   virtual ~JsonManifest() { }
 
@@ -43,14 +44,16 @@ class JsonManifest : public Manifest {
   bool Init(const nacl::string& json, ErrorInfo* error_info);
 
   // Gets the full program URL for the current sandbox ISA from the
-  // manifest file.
+  // manifest file. Sets |is_portable| to |true| if the program is
+  // portable bitcode.
   virtual bool GetProgramURL(nacl::string* full_url,
-                             PnaclOptions* pnacl_options,
-                             ErrorInfo* error_info) const;
+                             ErrorInfo* error_info,
+                             bool* is_portable) const;
 
   // Resolves a URL relative to the manifest base URL
   virtual bool ResolveURL(const nacl::string& relative_url,
                           nacl::string* full_url,
+                          bool* permit_extension_url,
                           ErrorInfo* error_info) const;
 
   // Gets the file names from the "files" section of the manifest.  No
@@ -61,12 +64,15 @@ class JsonManifest : public Manifest {
 
   // Resolves a key from the "files" section to a fully resolved URL,
   // i.e., relative URL values are fully expanded relative to the
-  // manifest's URL (via ResolveURL).
-  // If there was an error, details are reported via error_info.
+  // manifest's URL (via ResolveURL).  If there was an error, details
+  // are reported via error_info, and is_portable, if non-NULL, tells
+  // the caller whether the resolution used the portable
+  // representation or an ISA-specific version of the file.
   virtual bool ResolveKey(const nacl::string& key,
                           nacl::string* full_url,
-                          PnaclOptions* pnacl_options,
-                          ErrorInfo* error_info) const;
+                          bool* permit_extension_url,
+                          ErrorInfo* error_info,
+                          bool* is_portable) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(JsonManifest);
@@ -79,6 +85,9 @@ class JsonManifest : public Manifest {
   const pp::URLUtil_Dev* url_util_;
   nacl::string manifest_base_url_;
   nacl::string sandbox_isa_;
+  // Determines whether portable programs are chosen in manifest files over
+  // native programs.
+  bool prefer_portable_;
 
   Json::Value dictionary_;
 };

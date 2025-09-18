@@ -135,8 +135,6 @@
       'dependencies' : [
         '../icu/icu.gyp:icuuc',
       ],
-      # TODO(jschuh): http://crbug.com/167187
-      'msvs_disabled_warnings': [ 4267 ],
     },
   ]
 }

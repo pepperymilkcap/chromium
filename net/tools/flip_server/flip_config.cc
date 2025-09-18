@@ -4,8 +4,6 @@
 
 #include "net/tools/flip_server/flip_config.h"
 
-#include <unistd.h>
-
 namespace net {
 
 FlipAcceptor::FlipAcceptor(enum FlipHandlerType flip_handler_type,
@@ -23,7 +21,7 @@ FlipAcceptor::FlipAcceptor(enum FlipHandlerType flip_handler_type,
                            int accepts_per_wake,
                            bool reuseport,
                            bool wait_for_iface,
-                           void* memory_cache)
+                           void *memory_cache)
     : flip_handler_type_(flip_handler_type),
       listen_ip_(listen_ip),
       listen_port_(listen_port),
@@ -58,20 +56,21 @@ FlipAcceptor::FlipAcceptor(enum FlipHandlerType flip_handler_type,
                                     wait_for_iface,
                                     disable_nagle_,
                                     &listen_fd_);
-    if (ret == 0) {
+    if ( ret == 0 ) {
       break;
-    } else if (ret == -3 && wait_for_iface) {
+    } else if ( ret == -3 && wait_for_iface ) {
       // Binding error EADDRNOTAVAIL was encounted. We need
       // to wait for the interfaces to raised. try again.
       usleep(200000);
     } else {
       LOG(ERROR) << "Unable to create listening socket for: ret = " << ret
-                 << ": " << listen_ip_.c_str() << ":" << listen_port_.c_str();
+                 << ": " << listen_ip_.c_str() << ":"
+                 << listen_port_.c_str();
       return;
     }
   }
 
-  FlipSetNonBlocking(listen_fd_);
+  SetNonBlocking(listen_fd_);
   VLOG(1) << "Listening on socket: ";
   if (flip_handler_type == FLIP_HANDLER_PROXY)
     VLOG(1) << "\tType         : Proxy";
@@ -81,22 +80,24 @@ FlipAcceptor::FlipAcceptor(enum FlipHandlerType flip_handler_type,
     VLOG(1) << "\tType         : HTTP Server";
   VLOG(1) << "\tIP           : " << listen_ip_;
   VLOG(1) << "\tPort         : " << listen_port_;
-  VLOG(1) << "\tHTTP Server  : " << http_server_ip_ << ":" << http_server_port_;
+  VLOG(1) << "\tHTTP Server  : " << http_server_ip_ << ":"
+          << http_server_port_;
   VLOG(1) << "\tHTTPS Server : " << https_server_ip_ << ":"
           << https_server_port_;
-  VLOG(1) << "\tSSL          : " << (ssl_cert_filename.size() ? "true"
-                                                              : "false");
+  VLOG(1) << "\tSSL          : "
+          << (ssl_cert_filename.size()?"true":"false");
   VLOG(1) << "\tCertificate  : " << ssl_cert_filename;
   VLOG(1) << "\tKey          : " << ssl_key_filename;
-  VLOG(1) << "\tSpdy Only    : " << (spdy_only ? "true" : "false");
+  VLOG(1) << "\tSpdy Only    : " << (spdy_only?"true":"flase");
 }
 
 FlipAcceptor::~FlipAcceptor() {}
 
 FlipConfig::FlipConfig()
     : server_think_time_in_s_(0),
-      log_destination_(logging::LOG_TO_SYSTEM_DEBUG_LOG),
-      wait_for_iface_(false) {}
+      log_destination_(logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG),
+      wait_for_iface_(false) {
+}
 
 FlipConfig::~FlipConfig() {}
 
@@ -115,7 +116,7 @@ void FlipConfig::AddAcceptor(enum FlipHandlerType flip_handler_type,
                              int accepts_per_wake,
                              bool reuseport,
                              bool wait_for_iface,
-                             void* memory_cache) {
+                             void *memory_cache) {
   // TODO(mbelshe): create a struct FlipConfigArgs{} for the arguments.
   acceptors_.push_back(new FlipAcceptor(flip_handler_type,
                                         listen_ip,
@@ -135,4 +136,4 @@ void FlipConfig::AddAcceptor(enum FlipHandlerType flip_handler_type,
                                         memory_cache));
 }
 
-}  // namespace net
+}  // namespace

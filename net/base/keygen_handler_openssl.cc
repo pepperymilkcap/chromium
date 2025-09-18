@@ -20,7 +20,7 @@ std::string KeygenHandler::GenKeyAndSignChallenge() {
   EVP_PKEY* pkey = key->key();
 
   if (stores_key_)
-    OpenSSLPrivateKeyStore::StoreKeyPair(url_, pkey);
+    OpenSSLPrivateKeyStore::GetInstance()->StorePrivateKey(url_, pkey);
 
   crypto::ScopedOpenSSL<NETSCAPE_SPKI, NETSCAPE_SPKI_free> spki(
        NETSCAPE_SPKI_new());

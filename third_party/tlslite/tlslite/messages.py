@@ -130,9 +130,6 @@ class ClientHello(HandshakeMsg):
         self.certificate_types = [CertificateType.x509]
         self.compression_methods = []   # a list of 8-bit values
         self.srp_username = None        # a string
-        self.channel_id = False
-        self.support_signed_cert_timestamps = False
-        self.status_request = False
 
     def create(self, version, random, session_id, cipher_suites,
                certificate_types=None, srp_username=None):
@@ -177,25 +174,6 @@ class ClientHello(HandshakeMsg):
                         self.srp_username = bytesToString(p.getVarBytes(1))
                     elif extType == 7:
                         self.certificate_types = p.getVarList(1, 1)
-                    elif extType == ExtensionType.channel_id:
-                        self.channel_id = True
-                    elif extType == ExtensionType.signed_cert_timestamps:
-                        if extLength:
-                            raise SyntaxError()
-                        self.support_signed_cert_timestamps = True
-                    elif extType == ExtensionType.status_request:
-                        # Extension contents are currently ignored.
-                        # According to RFC 6066, this is not strictly forbidden
-                        # (although it is suboptimal):
-                        # Servers that receive a client hello containing the
-                        # "status_request" extension MAY return a suitable
-                        # certificate status response to the client along with
-                        # their certificate.  If OCSP is requested, they
-                        # SHOULD use the information contained in the extension
-                        # when selecting an OCSP responder and SHOULD include
-                        # request_extensions in the OCSP request.
-                        p.getFixBytes(extLength)
-                        self.status_request = True
                     else:
                         p.getFixBytes(extLength)
                     soFar += 4 + extLength
@@ -242,9 +220,6 @@ class ServerHello(HandshakeMsg):
         self.cipher_suite = 0
         self.certificate_type = CertificateType.x509
         self.compression_method = 0
-        self.channel_id = False
-        self.signed_cert_timestamps = None
-        self.status_request = False
 
     def create(self, version, random, session_id, cipher_suite,
                certificate_type):
@@ -291,15 +266,6 @@ class ServerHello(HandshakeMsg):
                 CertificateType.x509:
             extLength += 5
 
-        if self.channel_id:
-            extLength += 4
-
-        if self.signed_cert_timestamps:
-            extLength += 4 + len(self.signed_cert_timestamps)
-
-        if self.status_request:
-            extLength += 4
-
         if extLength != 0:
             w.add(extLength, 2)
 
@@ -308,18 +274,6 @@ class ServerHello(HandshakeMsg):
             w.add(7, 2)
             w.add(1, 2)
             w.add(self.certificate_type, 1)
-
-        if self.channel_id:
-            w.add(ExtensionType.channel_id, 2)
-            w.add(0, 2)
-
-        if self.signed_cert_timestamps:
-            w.add(ExtensionType.signed_cert_timestamps, 2)
-            w.addVarSeq(stringToBytes(self.signed_cert_timestamps), 1, 2)
-
-        if self.status_request:
-            w.add(ExtensionType.status_request, 2)
-            w.add(0, 2)
 
         return HandshakeMsg.postWrite(self, w, trial)
 
@@ -387,37 +341,6 @@ class Certificate(HandshakeMsg):
             w.addVarSeq(bytes, 1, 2)
         else:
             raise AssertionError()
-        return HandshakeMsg.postWrite(self, w, trial)
-
-class CertificateStatus(HandshakeMsg):
-    def __init__(self):
-        self.contentType = ContentType.handshake
-
-    def create(self, ocsp_response):
-        self.ocsp_response = ocsp_response
-        return self
-
-    # Defined for the sake of completeness, even though we currently only
-    # support sending the status message (server-side), not requesting
-    # or receiving it (client-side).
-    def parse(self, p):
-        p.startLengthCheck(3)
-        status_type = p.get(1)
-        # Only one type is specified, so hardwire it.
-        if status_type != CertificateStatusType.ocsp:
-            raise SyntaxError()
-        ocsp_response = p.getVarBytes(3)
-        if not ocsp_response:
-            # Can't be empty
-            raise SyntaxError()
-        self.ocsp_response = ocsp_response
-        return self
-
-    def write(self, trial=False):
-        w = HandshakeMsg.preWrite(self, HandshakeType.certificate_status,
-                                  trial)
-        w.add(CertificateStatusType.ocsp, 1)
-        w.addVarSeq(stringToBytes(self.ocsp_response), 1, 3)
         return HandshakeMsg.postWrite(self, w, trial)
 
 class CertificateRequest(HandshakeMsg):
@@ -643,28 +566,6 @@ class Finished(HandshakeMsg):
         w = HandshakeMsg.preWrite(self, HandshakeType.finished, trial)
         w.addFixSeq(self.verify_data, 1)
         return HandshakeMsg.postWrite(self, w, trial)
-
-class EncryptedExtensions(HandshakeMsg):
-    def __init__(self):
-        self.channel_id_key = None
-        self.channel_id_proof = None
-
-    def parse(self, p):
-        p.startLengthCheck(3)
-        soFar = 0
-        while soFar != p.lengthCheck:
-            extType = p.get(2)
-            extLength = p.get(2)
-            if extType == ExtensionType.channel_id:
-                if extLength != 32*4:
-                    raise SyntaxError()
-                self.channel_id_key = p.getFixBytes(64)
-                self.channel_id_proof = p.getFixBytes(64)
-            else:
-                p.getFixBytes(extLength)
-            soFar += 4 + extLength
-        p.stopLengthCheck()
-        return self
 
 class ApplicationData(Msg):
     def __init__(self):

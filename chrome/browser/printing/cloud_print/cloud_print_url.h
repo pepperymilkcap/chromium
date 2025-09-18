@@ -4,21 +4,16 @@
 
 #ifndef CHROME_BROWSER_PRINTING_CLOUD_PRINT_CLOUD_PRINT_URL_H_
 #define CHROME_BROWSER_PRINTING_CLOUD_PRINT_CLOUD_PRINT_URL_H_
+#pragma once
 
 #include <string>
 
 class GURL;
 class Profile;
 
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
-
 // Centralize URL management for the cloud print service.
 class CloudPrintURL {
  public:
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
-
   explicit CloudPrintURL(Profile* profile) : profile_(profile) {}
 
   GURL GetCloudPrintServiceURL();
@@ -33,6 +28,8 @@ class CloudPrintURL {
   static GURL GetCloudPrintTestPageURL();
 
  private:
+  void RegisterPreferences();
+
   Profile* profile_;
 };
 

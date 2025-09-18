@@ -4,11 +4,17 @@
 
 // Constants as functions, not to be called until after runTests.
 function getURLHttpSimpleLoad() {
-  return getServerURL('extensions/api_test/webrequest/simpleLoad/a.html');
+  return getServerURL('files/extensions/api_test/webrequest/simpleLoad/a.html');
 }
 
 function getURLHttpSimpleLoadRedirect() {
   return getServerURL('server-redirect?'+getURLHttpSimpleLoad());
+}
+
+// A URL from b.com, which we don't have permission to access.
+function getURLNotVisible() {
+  return getServerURL('files/extensions/api_test/webrequest/simpleLoad/b.html',
+                      'b.com');
 }
 
 runTests([
@@ -80,7 +86,7 @@ runTests([
           details: {
             url: getURLHttpSimpleLoadRedirect(),
             responseHeadersExist: true,
-            statusLine: "HTTP/1.1 301 Moved Permanently"
+            statusLine: "HTTP/1.0 301 Moved Permanently"
           }
         },
         { label: "onBeforeRedirect",
@@ -92,7 +98,7 @@ runTests([
             responseHeadersExist: true,
             ip: "127.0.0.1",
             fromCache: false,
-            statusLine: "HTTP/1.1 301 Moved Permanently"
+            statusLine: "HTTP/1.0 301 Moved Permanently"
           }
         },
         { label: "onBeforeRequest-2",
@@ -121,7 +127,7 @@ runTests([
           details: {
             url: getURLHttpSimpleLoad(),
             responseHeadersExist: true,
-            statusLine: "HTTP/1.1 200 OK",
+            statusLine: "HTTP/1.0 200 OK",
           }
         },
         { label: "onResponseStarted",
@@ -132,7 +138,7 @@ runTests([
             responseHeadersExist: true,
             ip: "127.0.0.1",
             fromCache: false,
-            statusLine: "HTTP/1.1 200 OK",
+            statusLine: "HTTP/1.0 200 OK",
           }
         },
         { label: "onCompleted",
@@ -143,7 +149,7 @@ runTests([
             ip: "127.0.0.1",
             fromCache: false,
             responseHeadersExist: true,
-            statusLine: "HTTP/1.1 200 OK"
+            statusLine: "HTTP/1.0 200 OK"
           }
         }
       ],
@@ -181,5 +187,45 @@ runTests([
       [  // event order
         ["onBeforeRequest", "onErrorOccurred"] ]);
     navigateAndWait(getURL("does_not_exist.html"));
+  },
+
+  // Navigates to a page that we don't have access to, then a blank page.
+  // We should not see the first navigation.
+  function simpleLoadNonVisible() {
+    expect(
+      [  // events
+        { label: "a-onBeforeRequest",
+          event: "onBeforeRequest",
+          details: {
+            url: getURL("simpleLoad/a.html"),
+            frameUrl: getURL("simpleLoad/a.html")
+          }
+        },
+        { label: "a-onResponseStarted",
+          event: "onResponseStarted",
+          details: {
+            url: getURL("simpleLoad/a.html"),
+            statusCode: 200,
+            fromCache: false,
+            statusLine: "HTTP/1.1 200 OK",
+            // Request to chrome-extension:// url has no IP.
+          }
+        },
+        { label: "a-onCompleted",
+          event: "onCompleted",
+          details: {
+            url: getURL("simpleLoad/a.html"),
+            statusCode: 200,
+            fromCache: false,
+            statusLine: "HTTP/1.1 200 OK",
+            // Request to chrome-extension:// url has no IP.
+          }
+        },
+      ],
+      [  // event order
+      ["a-onBeforeRequest", "a-onResponseStarted", "a-onCompleted"] ]);
+    navigateAndWait(getURLNotVisible(), function() {
+      navigateAndWait(getURL("simpleLoad/a.html"));
+    });
   },
 ]);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,25 +6,25 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_status.h"
 
 namespace net {
 
-URLRequestSimpleJob::URLRequestSimpleJob(
-    URLRequest* request, NetworkDelegate* network_delegate)
-    : URLRequestJob(request, network_delegate),
+URLRequestSimpleJob::URLRequestSimpleJob(URLRequest* request)
+    : URLRequestJob(request),
       data_offset_(0),
-      weak_factory_(this) {}
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {}
 
 void URLRequestSimpleJob::Start() {
   // Start reading asynchronously so that all error reporting and data
   // callbacks happen as they would for network requests.
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(&URLRequestSimpleJob::StartAsync, weak_factory_.GetWeakPtr()));
+      base::Bind(&URLRequestSimpleJob::StartAsync,
+                 weak_factory_.GetWeakPtr()));
 }
 
 bool URLRequestSimpleJob::GetMimeType(std::string* mime_type) const {
@@ -55,19 +55,13 @@ void URLRequestSimpleJob::StartAsync() {
   if (!request_)
     return;
 
-  int result = GetData(&mime_type_, &charset_, &data_,
-                       base::Bind(&URLRequestSimpleJob::OnGetDataCompleted,
-                                  weak_factory_.GetWeakPtr()));
-  if (result != ERR_IO_PENDING)
-    OnGetDataCompleted(result);
-}
-
-void URLRequestSimpleJob::OnGetDataCompleted(int result) {
-  if (result == OK) {
+  if (GetData(&mime_type_, &charset_, &data_)) {
     // Notify that the headers are complete
     NotifyHeadersComplete();
   } else {
-    NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED, result));
+    // what should the error code be?
+    NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED,
+                                      ERR_INVALID_URL));
   }
 }
 

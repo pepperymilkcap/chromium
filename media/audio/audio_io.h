@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "media/audio/audio_buffers_state.h"
-#include "media/base/audio_bus.h"
 
 // Low-level audio output support. To make sound there are 3 objects involved:
 // - AudioSource : produces audio samples on a pull model. Implements
@@ -42,13 +41,10 @@
 // Because we support more audio streams than physically available channels
 // a given AudioOutputStream might or might not talk directly to hardware.
 // An audio stream allocates several buffers for audio data and calls
-// AudioSourceCallback::OnMoreData() periodically to fill these buffers,
+// AudioSourceCallback::OnModeData() periodically to fill these buffers,
 // as the data is written to the audio device. Size of each packet is determined
 // by |samples_per_packet| specified in AudioParameters  when the stream is
 // created.
-
-namespace media {
-
 class MEDIA_EXPORT AudioOutputStream {
  public:
   // Audio sources must implement AudioSourceCallback. This interface will be
@@ -57,30 +53,40 @@ class MEDIA_EXPORT AudioOutputStream {
   // itself such as creating Windows or initializing COM.
   class MEDIA_EXPORT AudioSourceCallback {
    public:
-    // Provide more data by fully filling |dest|.  The source will return
-    // the number of frames it filled.  |buffers_state| contains current state
-    // of the buffers, and can be used by the source to calculate delay.
-    virtual int OnMoreData(AudioBus* dest,
-                           AudioBuffersState buffers_state) = 0;
+    virtual ~AudioSourceCallback() {}
 
-    virtual int OnMoreIOData(AudioBus* source,
-                             AudioBus* dest,
-                             AudioBuffersState buffers_state) = 0;
+    // Provide more data by filling |dest| up to |max_size| bytes. The provided
+    // buffer size is determined by the |samples_per_packet| specified in
+    // AudioParameters when the stream is created. The source will return
+    // the number of bytes it filled. The expected structure of |dest| is
+    // platform and format specific.
+    // |buffers_state| contains current state of the buffers, and can be used
+    // by the source to calculate delay.
+    virtual uint32 OnMoreData(
+        AudioOutputStream* stream, uint8* dest, uint32 max_size,
+        AudioBuffersState buffers_state) = 0;
 
     // There was an error while playing a buffer. Audio source cannot be
     // destroyed yet. No direct action needed by the AudioStream, but it is
     // a good place to stop accumulating sound data since is is likely that
-    // playback will not continue.
-    virtual void OnError(AudioOutputStream* stream) = 0;
+    // playback will not continue. |code| is an error code that is platform
+    // specific.
+    virtual void OnError(AudioOutputStream* stream, int code) = 0;
 
-   protected:
-    virtual ~AudioSourceCallback() {}
+    // Waits till data becomes available. Used when buffering data starting
+    // new audio stream.
+    // Polling is not the best approach, but incorporating messaging loop
+    // with delayed tasks into guts of complex code is even worse, as it is
+    // very error-prone. We cannot easily add synchronization, interface is
+    // already cut in stone because of need of backward compatibility with
+    // plugins. In any case, data is usually immediately available,
+    // so there would be no delay.
+    virtual void WaitTillDataReady() {}
   };
 
   virtual ~AudioOutputStream() {}
 
-  // Open the stream. false is returned if the stream cannot be opened.  Open()
-  // must always be followed by a call to Close() even if Open() fails.
+  // Open the stream. false is returned if the stream cannot be opened.
   virtual bool Open() = 0;
 
   // Starts playing audio and generating AudioSourceCallback::OnMoreData().
@@ -110,21 +116,24 @@ class MEDIA_EXPORT AudioInputStream {
  public:
   class MEDIA_EXPORT AudioInputCallback {
    public:
+    virtual ~AudioInputCallback() {}
+
     // Called by the audio recorder when a full packet of audio data is
     // available. This is called from a special audio thread and the
     // implementation should return as soon as possible.
     virtual void OnData(AudioInputStream* stream, const uint8* src,
-                        uint32 size, uint32 hardware_delay_bytes,
-                        double volume) = 0;
+                        uint32 size, uint32 hardware_delay_bytes) = 0;
+
+    // The stream is done with this callback, the last call received by this
+    // audio sink.
+    virtual void OnClose(AudioInputStream* stream) = 0;
 
     // There was an error while recording audio. The audio sink cannot be
     // destroyed yet. No direct action needed by the AudioInputStream, but it
     // is a good place to stop accumulating sound data since is is likely that
-    // recording will not continue.
-    virtual void OnError(AudioInputStream* stream) = 0;
-
-   protected:
-    virtual ~AudioInputCallback() {}
+    // recording will not continue. |code| is an error code that is platform
+    // specific.
+    virtual void OnError(AudioInputStream* stream, int code) = 0;
   };
 
   virtual ~AudioInputStream() {}
@@ -145,24 +154,6 @@ class MEDIA_EXPORT AudioInputStream {
   // Close the stream. This also generates AudioInputCallback::OnClose(). This
   // should be the last call made on this object.
   virtual void Close() = 0;
-
-  // Returns the maximum microphone analog volume or 0.0 if device does not
-  // have volume control.
-  virtual double GetMaxVolume() = 0;
-
-  // Sets the microphone analog volume, with range [0, max_volume] inclusive.
-  virtual void SetVolume(double volume) = 0;
-
-  // Returns the microphone analog volume, with range [0, max_volume] inclusive.
-  virtual double GetVolume() = 0;
-
-  // Sets the Automatic Gain Control (AGC) state.
-  virtual void SetAutomaticGainControl(bool enabled) = 0;
-
-  // Returns the Automatic Gain Control (AGC) state.
-  virtual bool GetAutomaticGainControl() = 0;
 };
-
-}  // namespace media
 
 #endif  // MEDIA_AUDIO_AUDIO_IO_H_

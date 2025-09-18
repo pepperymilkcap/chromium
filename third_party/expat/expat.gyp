@@ -1,19 +1,8 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
-  'variables': {
-    'conditions': [
-      # On Linux, we implicitly already depend on expat via fontconfig;
-      # let's not pull it in twice.
-      ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android"', {
-        'use_system_expat%': 1,
-      }, {
-        'use_system_expat%': 0,
-      }],
-    ],
-  },
   'target_defaults': {
     'defines': [
       '_LIB',
@@ -22,9 +11,13 @@
     'include_dirs': [
       'files/lib',
     ],
+    'dependencies': [
+    ]
   },
   'conditions': [
-    ['use_system_expat == 1', {
+    ['os_posix == 1 and OS != "mac" and OS != "android"', {
+      # On Linux, we implicitly already depend on expat via fontconfig;
+      # let's not pull it in twice.
       'targets': [
         {
           'target_name': 'expat',
@@ -34,18 +27,9 @@
               '-lexpat',
             ],
           },
-          'conditions': [
-            ['OS=="android"', {
-              'direct_dependent_settings': {
-                'include_dirs': [
-                  '<(android_src)/external/expat/lib',
-                ],
-              },
-            }],
-          ],
         },
       ],
-    }, {  # else: use_system_expat != 1
+    }, {  # OS != linux
       'targets': [
         {
           'target_name': 'expat',
@@ -75,7 +59,7 @@
                 'COMPILED_FROM_DSP',
               ],
             }],
-            ['OS=="mac" or OS=="ios" or OS=="android" or os_bsd==1', {
+            ['OS=="mac" or OS=="android" or os_bsd==1', {
               'defines': [
                 'HAVE_EXPAT_CONFIG_H',
               ],

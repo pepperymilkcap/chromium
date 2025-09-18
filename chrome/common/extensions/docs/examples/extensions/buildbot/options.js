@@ -2,31 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-(function() {
-
-window.buildbot = window.buildbot || {};
-
-var prefs = new buildbot.PrefStore;
-
-// Initialize the checkbox checked state from the saved preference.
-function main() {
-  var checkbox = document.getElementById('notifications');
-  prefs.getUseNotifications(function(useNotifications) {
-    checkbox.checked = useNotifications;
-    checkbox.addEventListener(
-      'click',
-      function() {prefs.setUseNotifications(checkbox.checked);});
-  });
-
-  var textbox = document.getElementById('try-job-username');
-  prefs.getTryJobUsername(function(tryJobUsername) {
-    textbox.value = tryJobUsername;
-    textbox.addEventListener(
-        'change',
-        function() {prefs.setTryJobUsername(textbox.value);});
-  });
+function save() {
+  var prefs = JSON.parse(localStorage.prefs);
+  prefs.use_notifications = document.getElementById('notifications').checked;
+  localStorage.prefs = JSON.stringify(prefs);
 }
 
-main();
-
-})();
+// Make sure the checkbox checked state gets properly initialized from the
+// saved preference.
+document.addEventListener('DOMContentLoaded', function () {
+  var prefs = JSON.parse(localStorage.prefs);
+  document.getElementById('notifications').checked = prefs.use_notifications;
+  document.getElementById('notifications').addEventListener('click', save);
+});

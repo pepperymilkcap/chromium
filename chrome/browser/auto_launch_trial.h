@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_AUTO_LAUNCH_TRIAL_H_
 #define CHROME_BROWSER_AUTO_LAUNCH_TRIAL_H_
+#pragma once
 
 #include <string>
 
@@ -43,6 +44,15 @@ bool IsInExperimentGroup(const std::string& brand_code);
 
 // Whether the brand is part of the control group for auto-launch.
 bool IsInControlGroup(const std::string& brand_code);
+
+// Updates UMA to reflect user changing the auto-launch setting.
+void UpdateToggleAutoLaunchMetric(bool auto_launch);
+
+// Updates UMA to reflect user responses to the infobar.
+void UpdateInfobarResponseMetric(InfobarMetricResponse response);
+
+// Updates UMA to reflect that the infobar has been shown.
+void UpdateInfobarShownMetric();
 
 }  // namespace auto_launch_trial
 

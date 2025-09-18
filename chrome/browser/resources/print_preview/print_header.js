@@ -8,246 +8,174 @@ cr.define('print_preview', function() {
   /**
    * Creates a PrintHeader object. This object encapsulates all the elements
    * and logic related to the top part of the left pane in print_preview.html.
-   * @param {!print_preview.PrintTicketStore} printTicketStore Used to read
-   *     information about the document.
-   * @param {!print_preview.DestinationStore} destinationStore Used to get the
-   *     selected destination.
    * @constructor
-   * @extends {print_preview.Component}
    */
-  function PrintHeader(printTicketStore, destinationStore) {
-    print_preview.Component.call(this);
+  function PrintHeader() {
+    this.printButton_ = $('print-button');
+    this.cancelButton_ = $('cancel-button');
+    this.summary_ = $('print-summary');
+    this.printButton_.focus();
+    this.addEventListeners_();
+  }
 
-    /**
-     * Used to read information about the document.
-     * @type {!print_preview.PrintTicketStore}
-     * @private
-     */
-    this.printTicketStore_ = printTicketStore;
-
-    /**
-     * Used to get the selected destination.
-     * @type {!print_preview.DestinationStore}
-     * @private
-     */
-    this.destinationStore_ = destinationStore;
-
-    /**
-     * Whether the component is enabled.
-     * @type {boolean}
-     * @private
-     */
-    this.isEnabled_ = true;
-
-    /**
-     * Whether the print button is enabled.
-     * @type {boolean}
-     * @private
-     */
-    this.isPrintButtonEnabled_ = true;
-  };
-
-  /**
-   * Event types dispatched by the print header.
-   * @enum {string}
-   */
-  PrintHeader.EventType = {
-    PRINT_BUTTON_CLICK: 'print_preview.PrintHeader.PRINT_BUTTON_CLICK',
-    CANCEL_BUTTON_CLICK: 'print_preview.PrintHeader.CANCEL_BUTTON_CLICK'
-  };
+  cr.addSingletonGetter(PrintHeader);
 
   PrintHeader.prototype = {
-    __proto__: print_preview.Component.prototype,
-
-    set isEnabled(isEnabled) {
-      this.isEnabled_ = isEnabled;
-      this.updatePrintButtonEnabledState_();
-      this.isCancelButtonEnabled = isEnabled;
+    get printButton() {
+      return this.printButton_;
     },
 
-    set isPrintButtonEnabled(isEnabled) {
-      this.isPrintButtonEnabled_ = isEnabled;
-      this.updatePrintButtonEnabledState_();
+    get cancelButton() {
+      return this.cancelButton_;
     },
 
-    set isCancelButtonEnabled(isEnabled) {
-      this.getChildElement('button.cancel').disabled = !isEnabled;
-    },
-
-    /** @param {string} message Error message to display in the print header. */
-    setErrorMessage: function(message) {
-      var summaryEl = this.getChildElement('.summary');
-      summaryEl.innerHTML = '';
-      summaryEl.textContent = message;
-    },
-
-    /** @override */
-    enterDocument: function() {
-      print_preview.Component.prototype.enterDocument.call(this);
-
-      // User events
-      this.tracker.add(
-          this.getChildElement('button.cancel'),
-          'click',
-          this.onCancelButtonClick_.bind(this));
-      this.tracker.add(
-          this.getChildElement('button.print'),
-          'click',
-          this.onPrintButtonClick_.bind(this));
-
-      // Data events.
-      this.tracker.add(
-          this.printTicketStore_,
-          print_preview.PrintTicketStore.EventType.INITIALIZE,
-          this.onTicketChange_.bind(this));
-      this.tracker.add(
-          this.printTicketStore_,
-          print_preview.PrintTicketStore.EventType.DOCUMENT_CHANGE,
-          this.onTicketChange_.bind(this));
-      this.tracker.add(
-          this.printTicketStore_,
-          print_preview.PrintTicketStore.EventType.TICKET_CHANGE,
-          this.onTicketChange_.bind(this));
-      this.tracker.add(
-          this.destinationStore_,
-          print_preview.DestinationStore.EventType.DESTINATION_SELECT,
-          this.onDestinationSelect_.bind(this));
-      this.tracker.add(
-          this.printTicketStore_.copies,
-          print_preview.ticket_items.TicketItem.EventType.CHANGE,
-          this.onTicketChange_.bind(this));
-      this.tracker.add(
-          this.printTicketStore_.duplex,
-          print_preview.ticket_items.TicketItem.EventType.CHANGE,
-          this.onTicketChange_.bind(this));
-      this.tracker.add(
-          this.printTicketStore_.pageRange,
-          print_preview.ticket_items.TicketItem.EventType.CHANGE,
-          this.onTicketChange_.bind(this));
+    get summary() {
+      return this.summary_;
     },
 
     /**
-     * Updates Print Button state.
+     * Adding event listeners where necessary. Listeners take care of changing
+     * their behavior depending on the current state, no need to remove them.
      * @private
      */
-    updatePrintButtonEnabledState_: function() {
-      this.getChildElement('button.print').disabled =
-          !this.isEnabled_ ||
-          !this.isPrintButtonEnabled_ ||
-          !this.printTicketStore_.isTicketValid();
+    addEventListeners_: function() {
+      this.cancelButton_.onclick = function() {
+        this.disableCancelButton();
+        closePrintPreviewTab();
+      }.bind(this);
+      this.printButton_.onclick = this.onPrintRequested.bind(this);
+      document.addEventListener(customEvents.UPDATE_SUMMARY,
+                                this.updateSummary_.bind(this));
+      document.addEventListener(customEvents.UPDATE_PRINT_BUTTON,
+                                this.updatePrintButton_.bind(this));
+      document.addEventListener(customEvents.PDF_GENERATION_ERROR,
+                                this.onPDFGenerationError_.bind(this));
+      document.addEventListener(customEvents.PRINTER_CAPABILITIES_UPDATED,
+                                this.onPrinterCapabilitiesUpdated_.bind(this));
     },
 
     /**
-     * Updates the summary element based on the currently selected user options.
+     * Enables the cancel button and attaches its keydown event listener.
+     */
+    enableCancelButton: function() {
+      window.onkeydown = onKeyDown;
+      this.cancelButton_.disabled = false;
+    },
+
+    /**
+     * Executes when a |customEvents.PDF_GENERATION_ERROR| event occurs.
+     * @private
+     */
+    onPDFGenerationError_: function() {
+      this.printButton_.disabled = true;
+    },
+
+    /**
+     * Executes when a |customEvents.PRINTER_CAPABILITIES_UPDATED| event occurs.
+     * @private
+     */
+    onPrinterCapabilitiesUpdated_: function() {
+      getSelectedPrinterName() == PRINT_TO_PDF ?
+          this.printButton.textContent = localStrings.getString('saveButton') :
+          this.printButton.textContent = localStrings.getString('printButton');
+    },
+
+    /**
+     * Disables the cancel button and removes its keydown event listener.
+     */
+    disableCancelButton: function() {
+      window.onkeydown = null;
+      this.cancelButton_.disabled = true;
+    },
+
+    /**
+     * Listener executing whenever the print button is clicked or user presses
+     * the enter button while focus is in the pages field.
+     */
+    onPrintRequested: function() {
+      var printToPDF = getSelectedPrinterName() == PRINT_TO_PDF;
+      if (!printToPDF) {
+        this.printButton_.classList.add('loading');
+        this.cancelButton_.classList.add('loading');
+        this.summary_.innerHTML = localStrings.getString('printing');
+      }
+      this.disableCancelButton();
+      requestToPrintDocument();
+    },
+
+    /**
+     * Updates the state of |this.printButton_| depending on the user selection.
+     * The button is enabled only when the following conditions are true.
+     * 1) The selected page ranges are valid.
+     * 2) The number of copies is valid (if applicable).
+     * @private
+     */
+    updatePrintButton_: function() {
+      if (showingSystemDialog)
+        return;
+      this.printButton_.disabled = !areSettingsValid();
+    },
+
+    /**
+     * Updates |this.summary_| based on the currently selected user options.
      * @private
      */
     updateSummary_: function() {
-      if (!this.printTicketStore_.isTicketValid()) {
-        this.getChildElement('.summary').innerHTML = '';
+      var printToPDF = getSelectedPrinterName() == PRINT_TO_PDF;
+      var copies = printToPDF ? 1 : copiesSettings.numberOfCopies;
+
+      if ((!printToPDF && !copiesSettings.isValid()) ||
+          !pageSettings.isPageSelectionValid()) {
+        this.summary_.innerHTML = '';
         return;
       }
 
+      if (!marginSettings.areMarginSettingsValid()) {
+        this.summary_.innerHTML = '';
+        return;
+      }
+
+      var pageSet = pageSettings.selectedPagesSet;
+      var numOfSheets = pageSet.length;
+      if (numOfSheets == 0)
+        return;
+
       var summaryLabel =
           localStrings.getString('printPreviewSheetsLabelSingular');
+      var numOfPagesText = '';
       var pagesLabel = localStrings.getString('printPreviewPageLabelPlural');
 
-      var saveToPdf = this.destinationStore_.selectedDestination &&
-          this.destinationStore_.selectedDestination.id ==
-              print_preview.Destination.GooglePromotedId.SAVE_AS_PDF;
-      if (saveToPdf) {
+      if (printToPDF)
         summaryLabel = localStrings.getString('printPreviewPageLabelSingular');
-      }
 
-      var numPages = this.printTicketStore_.pageRange.getPageNumberSet().size;
-      var numSheets = numPages;
-      if (!saveToPdf && this.printTicketStore_.duplex.getValue()) {
-        numSheets = Math.ceil(numPages / 2);
-      }
+      if (!printToPDF && copiesSettings.twoSidedCheckbox.checked)
+        numOfSheets = Math.ceil(numOfSheets / 2);
+      numOfSheets *= copies;
 
-      var copies = this.printTicketStore_.copies.getValueAsNumber();
-      numSheets *= copies;
-      numPages *= copies;
-
-      if (numSheets > 1) {
-        summaryLabel = saveToPdf ? pagesLabel :
+      if (numOfSheets > 1) {
+        summaryLabel = printToPDF ? pagesLabel :
             localStrings.getString('printPreviewSheetsLabelPlural');
       }
 
-      var html;
-      if (numPages != numSheets) {
+      var html = '';
+      if (pageSet.length * copies != numOfSheets) {
+        numOfPagesText = pageSet.length * copies;
         html = localStrings.getStringF('printPreviewSummaryFormatLong',
-                                       '<b>' + numSheets + '</b>',
+                                       '<b>' + numOfSheets + '</b>',
                                        '<b>' + summaryLabel + '</b>',
-                                       numPages,
-                                       pagesLabel);
+                                       numOfPagesText, pagesLabel);
       } else {
         html = localStrings.getStringF('printPreviewSummaryFormatShort',
-                                       '<b>' + numSheets + '</b>',
+                                       '<b>' + numOfSheets + '</b>',
                                        '<b>' + summaryLabel + '</b>');
       }
 
       // Removing extra spaces from within the string.
       html = html.replace(/\s{2,}/g, ' ');
-      this.getChildElement('.summary').innerHTML = html;
-    },
-
-    /**
-     * Called when the print button is clicked. Dispatches a PRINT_DOCUMENT
-     * common event.
-     * @private
-     */
-    onPrintButtonClick_: function() {
-      if (this.destinationStore_.selectedDestination.id !=
-          print_preview.Destination.GooglePromotedId.SAVE_AS_PDF) {
-        this.getChildElement('button.print').classList.add('loading');
-        this.getChildElement('button.cancel').classList.add('loading');
-        this.getChildElement('.summary').innerHTML =
-            localStrings.getString('printing');
-      }
-      cr.dispatchSimpleEvent(this, PrintHeader.EventType.PRINT_BUTTON_CLICK);
-    },
-
-    /**
-     * Called when the cancel button is clicked. Dispatches a
-     * CLOSE_PRINT_PREVIEW event.
-     * @private
-     */
-    onCancelButtonClick_: function() {
-      cr.dispatchSimpleEvent(this, PrintHeader.EventType.CANCEL_BUTTON_CLICK);
-    },
-
-    /**
-     * Called when a new destination is selected. Updates the text on the print
-     * button.
-     * @private
-     */
-    onDestinationSelect_: function() {
-      var isSaveLabel = this.destinationStore_.selectedDestination.id ==
-          print_preview.Destination.GooglePromotedId.SAVE_AS_PDF ||
-          this.destinationStore_.selectedDestination.id ==
-              print_preview.Destination.GooglePromotedId.DOCS;
-      this.getChildElement('button.print').textContent = isSaveLabel ?
-          localStrings.getString('saveButton') :
-          localStrings.getString('printButton');
-      this.getChildElement('button.print').focus();
-    },
-
-    /**
-     * Called when the print ticket has changed. Disables the print button if
-     * any of the settings are invalid.
-     * @private
-     */
-    onTicketChange_: function() {
-      this.updatePrintButtonEnabledState_();
-      this.updateSummary_();
-      if (document.activeElement == null ||
-          document.activeElement == document.body) {
-        this.getChildElement('button.print').focus();
-      }
+      this.summary_.innerHTML = html;
     }
   };
 
-  // Export
   return {
     PrintHeader: PrintHeader
   };

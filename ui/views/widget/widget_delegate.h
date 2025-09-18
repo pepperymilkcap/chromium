@@ -4,16 +4,18 @@
 
 #ifndef UI_VIEWS_WIDGET_WIDGET_DELEGATE_H_
 #define UI_VIEWS_WIDGET_WIDGET_DELEGATE_H_
+#pragma once
 
 #include <string>
-#include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/views/view.h"
 
+class SkBitmap;
+
 namespace gfx {
-class ImageSkia;
 class Rect;
 }
 
@@ -25,6 +27,7 @@ class NonClientFrameView;
 class View;
 class Widget;
 
+// WidgetDelegate interface
 // Handles events on Widgets in context-specific ways.
 class VIEWS_EXPORT WidgetDelegate {
  public:
@@ -44,6 +47,9 @@ class VIEWS_EXPORT WidgetDelegate {
   // NULL no view is focused.
   virtual View* GetInitiallyFocusedView();
 
+  // Moved from WindowDelegate: ------------------------------------------------
+  // TODO(beng): sort
+
   virtual BubbleDelegateView* AsBubbleDelegate();
   virtual DialogDelegate* AsDialogDelegate();
 
@@ -62,28 +68,26 @@ class VIEWS_EXPORT WidgetDelegate {
 
   virtual ui::AccessibilityTypes::Role GetAccessibleWindowRole() const;
 
+  virtual ui::AccessibilityTypes::State GetAccessibleWindowState() const;
+
   // Returns the title to be read with screen readers.
-  virtual base::string16 GetAccessibleWindowTitle() const;
+  virtual string16 GetAccessibleWindowTitle() const;
 
   // Returns the text to be displayed in the window title.
-  virtual base::string16 GetWindowTitle() const;
+  virtual string16 GetWindowTitle() const;
 
   // Returns true if the window should show a title in the title bar.
   virtual bool ShouldShowWindowTitle() const;
 
-  // Returns true if the window should show a close button in the title bar.
-  virtual bool ShouldShowCloseButton() const;
-
-  // Returns true if the window should handle standard system commands, such as
-  // close, minimize, maximize.
-  virtual bool ShouldHandleSystemCommands() const;
+  // Returns true if the window's client view wants a client edge.
+  virtual bool ShouldShowClientEdge() const;
 
   // Returns the app icon for the window. On Windows, this is the ICON_BIG used
   // in Alt-Tab list and Win7's taskbar.
-  virtual gfx::ImageSkia GetWindowAppIcon();
+  virtual SkBitmap GetWindowAppIcon();
 
   // Returns the icon to be displayed in the window.
-  virtual gfx::ImageSkia GetWindowIcon();
+  virtual SkBitmap GetWindowIcon();
 
   // Returns true if a window icon should be shown.
   virtual bool ShouldShowWindowIcon() const;
@@ -104,8 +108,7 @@ class VIEWS_EXPORT WidgetDelegate {
 
   // Retrieves the window's bounds and "show" states.
   // This behavior can be overridden to provide additional functionality.
-  virtual bool GetSavedWindowPlacement(const Widget* widget,
-                                       gfx::Rect* bounds,
+  virtual bool GetSavedWindowPlacement(gfx::Rect* bounds,
                                        ui::WindowShowState* show_state) const;
 
   // Returns true if the window's size should be restored. If this is false,
@@ -140,40 +143,13 @@ class VIEWS_EXPORT WidgetDelegate {
 
   // Called by the Widget to create the NonClient Frame View for this widget.
   // Return NULL to use the default one.
-  virtual NonClientFrameView* CreateNonClientFrameView(Widget* widget);
-
-  // Called by the Widget to create the overlay View for this widget. Return
-  // NULL for no overlay. The overlay View will fill the Widget and sit on top
-  // of the ClientView and NonClientFrameView (both visually and wrt click
-  // targeting).
-  virtual View* CreateOverlayView();
+  virtual NonClientFrameView* CreateNonClientFrameView();
 
   // Returns true if the window can be notified with the work area change.
   // Otherwise, the work area change for the top window will be processed by
   // the default window manager. In some cases, like panel, we would like to
   // manage the positions by ourselves.
   virtual bool WillProcessWorkAreaChange() const;
-
-  // Returns true if window has a hit-test mask.
-  virtual bool WidgetHasHitTestMask() const;
-
-  // Provides the hit-test mask if HasHitTestMask above returns true.
-  virtual void GetWidgetHitTestMask(gfx::Path* mask) const;
-
-  // Returns true if focus should advance to the top level widget when
-  // tab/shift-tab is hit and on the last/first focusable view. Default returns
-  // false, which means tab/shift-tab never advance to the top level Widget.
-  virtual bool ShouldAdvanceFocusToTopLevelWidget() const;
-
-  // Returns true if event handling should descend into |child|.
-  // |location| is in terms of the Window.
-  virtual bool ShouldDescendIntoChildForEventHandling(
-      gfx::NativeView child,
-      const gfx::Point& location);
-
-  // Populates |panes| with accessible panes in this window that can
-  // be cycled through with keyboard focus.
-  virtual void GetAccessiblePanes(std::vector<View*>* panes) {}
 
  protected:
   virtual ~WidgetDelegate() {}
@@ -186,15 +162,13 @@ class VIEWS_EXPORT WidgetDelegate {
 
 // A WidgetDelegate implementation that is-a View. Used to override GetWidget()
 // to call View's GetWidget() for the common case where a WidgetDelegate
-// implementation is-a View. Note that WidgetDelegateView is not owned by
-// view's hierarchy and is expected to be deleted on DeleteDelegate call.
+// implementation is-a View.
 class VIEWS_EXPORT WidgetDelegateView : public WidgetDelegate, public View {
  public:
   WidgetDelegateView();
   virtual ~WidgetDelegateView();
 
   // Overridden from WidgetDelegate:
-  virtual void DeleteDelegate() OVERRIDE;
   virtual Widget* GetWidget() OVERRIDE;
   virtual const Widget* GetWidget() const OVERRIDE;
 

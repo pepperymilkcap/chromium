@@ -1,15 +1,13 @@
-// Copyright 2011 Google Inc. All Rights Reserved.
+// Copyright 2011 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 // Multi-threaded worker
 //
-// Author: Skal (pascal.massimino@gmail.com)
+// Author: skal@google.com (Pascal Massimino)
 
 #include <assert.h>
 #include <string.h>   // for memset()

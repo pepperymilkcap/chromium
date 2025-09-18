@@ -8,34 +8,20 @@
 #include "base/basictypes.h"
 #include "content/public/renderer/render_view_observer.h"
 
-namespace blink {
-class WebInputEvent;
-}
-
-namespace ui {
-struct LatencyInfo;
-}
-
-namespace content {
-
 // Class which observes user input events and postpones
 // idle notifications if the user is active.
-class IdleUserDetector : public RenderViewObserver {
+class IdleUserDetector : public content::RenderViewObserver {
  public:
-  IdleUserDetector(RenderView* render_view);
+  IdleUserDetector(content::RenderView* render_view);
   virtual ~IdleUserDetector();
 
  private:
   // RenderViewObserver implementation:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  void OnHandleInputEvent(const blink::WebInputEvent* event,
-                          const ui::LatencyInfo& latency_info,
-                          bool is_keyboard_shortcut);
+  void OnHandleInputEvent(const IPC::Message& message);
 
   DISALLOW_COPY_AND_ASSIGN(IdleUserDetector);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_RENDERER_IDLE_USER_DETECTOR_H_

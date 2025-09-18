@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -76,9 +76,9 @@ def CompressUsingLZMA(build_dir, compressed_file, input_file):
           # Older 7zip versions can support these settings, as these changes
           # rely on existing functionality in the lzma format.
           '-m0=BCJ2',
-          '-m1=LZMA:d27:fb128',
-          '-m2=LZMA:d22:fb128:mf=bt2',
-          '-m3=LZMA:d22:fb128:mf=bt2',
+          '-m1=LZMA:d26:fb64',
+          '-m2=LZMA:d20:fb64:mf=bt2',
+          '-m3=LZMA:d20:fb64:mf=bt2',
           '-mb0:1',
           '-mb0s1:2',
           '-mb0s2:3',
@@ -89,8 +89,7 @@ def CompressUsingLZMA(build_dir, compressed_file, input_file):
   RunSystemCommand(cmd)
 
 
-def CopyAllFilesToStagingDir(config, distribution, staging_dir, build_dir,
-                             enable_hidpi, enable_touch_ui):
+def CopyAllFilesToStagingDir(config, distribution, staging_dir, build_dir):
   """Copies the files required for installer archive.
   Copies all common files required for various distributions of Chromium and
   also files for the specific Chromium build specified by distribution.
@@ -101,29 +100,24 @@ def CopyAllFilesToStagingDir(config, distribution, staging_dir, build_dir,
       distribution = distribution[1:]
     CopySectionFilesToStagingDir(config, distribution.upper(),
                                  staging_dir, build_dir)
-  if enable_hidpi == '1':
-    CopySectionFilesToStagingDir(config, 'HIDPI', staging_dir, build_dir)
-  if enable_touch_ui == '1':
-    CopySectionFilesToStagingDir(config, 'TOUCH', staging_dir, build_dir)
 
 
-def CopySectionFilesToStagingDir(config, section, staging_dir, src_dir):
-  """Copies installer archive files specified in section from src_dir to
-  staging_dir. This method reads section from config and copies all the
-  files specified from src_dir to staging dir.
+def CopySectionFilesToStagingDir(config, section, staging_dir, build_dir):
+  """Copies installer archive files specified in section to staging dir.
+  This method copies reads section from config file and copies all the files
+  specified to staging dir.
   """
   for option in config.options(section):
     if option.endswith('dir'):
       continue
 
-    dst_dir = os.path.join(staging_dir, config.get(section, option))
-    src_paths = glob.glob(os.path.join(src_dir, option))
-    if src_paths and not os.path.exists(dst_dir):
-      os.makedirs(dst_dir)
-    for src_path in src_paths:
-      dst_path = os.path.join(dst_dir, os.path.basename(src_path))
-      if not os.path.exists(dst_path):
-        shutil.copy(src_path, dst_dir)
+    dst = os.path.join(staging_dir, config.get(section, option))
+    if not os.path.exists(dst):
+      os.makedirs(dst)
+    for file in glob.glob(os.path.join(build_dir, option)):
+      dst_file = os.path.join(dst, os.path.basename(file))
+      if not os.path.exists(dst_file):
+        shutil.copy(file, dst)
 
 def GenerateDiffPatch(options, orig_file, new_file, patch_file):
   if (options.diff_algorithm == "COURGETTE"):
@@ -139,13 +133,13 @@ def GetLZMAExec(build_dir):
                            "lzma_sdk", "Executable", "7za.exe")
   return lzma_exec
 
-def GetPrevVersion(build_dir, temp_dir, last_chrome_installer, output_name):
+def GetPrevVersion(build_dir, temp_dir, last_chrome_installer):
   if not last_chrome_installer:
     return ''
 
-  lzma_exec = GetLZMAExec(build_dir)
-  prev_archive_file = os.path.join(last_chrome_installer,
-                                   output_name + ARCHIVE_SUFFIX)
+  lzma_exec = GetLZMAExec(options.build_dir)
+  prev_archive_file = os.path.join(options.last_chrome_installer,
+                                   options.output_name + ARCHIVE_SUFFIX)
   cmd = [lzma_exec,
          'x',
          '-o"%s"' % temp_dir,
@@ -170,7 +164,7 @@ def MakeStagingDirectories(staging_dir):
   os.makedirs(temp_file_path)
   return (file_path, temp_file_path)
 
-def Readconfig(input_file, current_version):
+def Readconfig(build_dir, input_file, current_version):
   """Reads config information from input file after setting default value of
   global variabes.
   """
@@ -210,14 +204,6 @@ def CreateArchiveFile(options, staging_dir, current_version, prev_version):
     os.remove(archive_file)
     RunSystemCommand(cmd)
 
-  # Do not compress the archive in developer (component) builds.
-  if options.component_build == '1':
-    compressed_file = os.path.join(
-        options.output_dir, options.output_name + COMPRESSED_ARCHIVE_SUFFIX)
-    if os.path.exists(compressed_file):
-      os.remove(compressed_file)
-    return os.path.basename(archive_file)
-
   # If we are generating a patch, run bsdiff against previous build and
   # compress the resulting patch file. If this is not a patch just compress the
   # uncompressed archive file.
@@ -243,7 +229,7 @@ def CreateArchiveFile(options, staging_dir, current_version, prev_version):
   return compressed_archive_file
 
 
-def PrepareSetupExec(options, current_version, prev_version):
+def PrepareSetupExec(options, staging_dir, current_version, prev_version):
   """Prepares setup.exe for bundling in mini_installer based on options."""
   if options.setup_exe_format == "FULL":
     setup_file = SETUP_EXEC
@@ -320,207 +306,29 @@ def CreateResourceInputFile(
     f.write(resource_file)
 
 
-# Reads |manifest_name| from |build_dir| and writes |manifest_name| to
-# |output_dir| with the same content plus |inserted_string| added just before
-# |insert_before|.
-def CopyAndAugmentManifest(build_dir, output_dir, manifest_name,
-                           inserted_string, insert_before):
-  with open(os.path.join(build_dir, manifest_name), 'r') as f:
-    manifest_lines = f.readlines()
-
-  insert_line = -1
-  insert_pos = -1
-  for i in xrange(len(manifest_lines)):
-    insert_pos = manifest_lines[i].find(insert_before)
-    if insert_pos != -1:
-      insert_line = i
-      break
-  if insert_line == -1:
-    raise ValueError('Could not find {0} in the manifest:\n{1}'.format(
-        insert_before, ''.join(manifest_lines)))
-  old = manifest_lines[insert_line]
-  manifest_lines[insert_line] = (old[:insert_pos] + '\n' + inserted_string +
-                                 '\n' + old[insert_pos:])
-
-  with open(os.path.join(output_dir, manifest_name), 'w') as f :
-    f.write(''.join(manifest_lines))
-
-
-def CopyIfChanged(src, target_dir):
-  """Copy specified |src| file to |target_dir|, but only write to target if
-  the file has changed. This avoids a problem during packaging where parts of
-  the build have not completed and have the runtime DLL locked when we try to
-  copy over it. See http://crbug.com/305877 for details."""
-  assert os.path.isdir(target_dir)
-  dest = os.path.join(target_dir, os.path.basename(src))
-  if os.path.exists(dest):
-    # We assume the files are OK to buffer fully into memory since we know
-    # they're only 1-2M.
-    with open(src, 'rb') as fsrc:
-      src_data = fsrc.read()
-    with open(dest, 'rb') as fdest:
-      dest_data = fdest.read()
-    if src_data != dest_data:
-      # This may still raise if we get here, but this really should almost
-      # never happen (it would mean that the contents of e.g. msvcr100d.dll
-      # had been changed).
-      shutil.copyfile(src, dest)
-  else:
-    shutil.copyfile(src, dest)
-
-
-# Copy the relevant CRT DLLs to |build_dir|. We copy DLLs from all versions
-# of VS installed to make sure we have the correct CRT version, unused DLLs
-# should not conflict with the others anyways.
-def CopyVisualStudioRuntimeDLLs(build_dir, target_arch):
-  is_debug = os.path.basename(build_dir).startswith('Debug')
-  if not is_debug and not os.path.basename(build_dir).startswith('Release'):
-    print ("Warning: could not determine build configuration from "
-           "output directory, assuming Release build.")
-
-  crt_dlls = []
-  sys_dll_dir = None
-  if is_debug:
-    crt_dlls = glob.glob(
-        "C:/Program Files (x86)/Microsoft Visual Studio */VC/redist/"
-        "Debug_NonRedist/" + target_arch + "/Microsoft.*.DebugCRT/*.dll")
-  else:
-    crt_dlls = glob.glob(
-        "C:/Program Files (x86)/Microsoft Visual Studio */VC/redist/" +
-        target_arch + "/Microsoft.*.CRT/*.dll")
-
-  # Also handle the case where someone is building using only winsdk and
-  # doesn't have Visual Studio installed.
-  if not crt_dlls:
-    if target_arch == 'x64':
-      # check we are are on a 64bit system by existence of WOW64 dir
-      if os.access("C:/Windows/SysWOW64", os.F_OK):
-        sys_dll_dir = "C:/Windows/System32"
-      else:
-        # only support packaging of 64bit installer on 64bit system
-        # but this just as bad as not finding DLLs at all so we
-        # don't abort here to mirror behavior below
-        print ("Warning: could not find x64 CRT DLLs on x86 system.")
-    else:
-      # On a 64-bit system, 32-bit dlls are in SysWOW64 (don't ask).
-      if os.access("C:/Windows/SysWOW64", os.F_OK):
-        sys_dll_dir = "C:/Windows/SysWOW64"
-      else:
-        sys_dll_dir = "C:/Windows/System32"
-
-    if sys_dll_dir is not None:
-      if is_debug:
-        crt_dlls = glob.glob(os.path.join(sys_dll_dir, "msvc*0d.dll"))
-      else:
-        crt_dlls = glob.glob(os.path.join(sys_dll_dir, "msvc*0.dll"))
-
-  if not crt_dlls:
-    print ("Warning: could not find CRT DLLs to copy to build dir - target "
-           "may not run on a system that doesn't have those DLLs.")
-
-  for dll in crt_dlls:
-    CopyIfChanged(dll, build_dir)
-
-
-# Copies component build DLLs and generates required config files and manifests
-# in order for chrome.exe and setup.exe to be able to find those DLLs at
-# run-time.
-# This is meant for developer builds only and should never be used to package
-# an official build.
-def DoComponentBuildTasks(staging_dir, build_dir, target_arch, current_version):
-  # Get the required directories for the upcoming operations.
-  chrome_dir = os.path.join(staging_dir, CHROME_DIR)
-  version_dir = os.path.join(chrome_dir, current_version)
-  installer_dir = os.path.join(version_dir, 'Installer')
-  # |installer_dir| is technically only created post-install, but we need it
-  # now to add setup.exe's config and manifest to the archive.
-  if not os.path.exists(installer_dir):
-    os.mkdir(installer_dir)
-
-  # Copy the VS CRT DLLs to |build_dir|. This must be done before the general
-  # copy step below to ensure the CRT DLLs are added to the archive and marked
-  # as a dependency in the exe manifests generated below.
-  CopyVisualStudioRuntimeDLLs(build_dir, target_arch)
-
-  # Stage all the component DLLs found in |build_dir|. These are all the DLLs
-  # which have not already been added to the staged |version_dir| by virtue of
-  # chrome.release.
-  build_dlls = glob.glob(os.path.join(build_dir, '*.dll'))
-  staged_dll_basenames = [os.path.basename(staged_dll) for staged_dll in \
-                          glob.glob(os.path.join(version_dir, '*.dll'))]
-  component_dll_filenames = []
-  for component_dll in [dll for dll in build_dlls if \
-                        os.path.basename(dll) not in staged_dll_basenames]:
-    # remoting_*.dll's don't belong in the archive (it doesn't depend on them
-    # in gyp). Trying to copy them causes a build race when creating the
-    # installer archive in component mode. See: crbug.com/180996
-    if os.path.basename(component_dll).startswith('remoting_'):
-      continue
-    # Copy them to the version_dir (for the version assembly to be able to refer
-    # to them below and make sure chrome.exe can find them at runtime).
-    shutil.copy(component_dll, version_dir)
-    # Also copy them directly to the Installer directory for the installed
-    # setup.exe to be able to run (as it doesn't statically link in component
-    # DLLs).
-    # This makes the archive ~1.5X bigger (Release ~185MB => ~278MB;
-    # Debug ~520MB => ~875MB) this is however simpler than any other installer
-    # change and doesn't make archive generation itself slower so it only
-    # matters when copying the archive to other test machines. This approach
-    # can be revised if this is a problem.
-    shutil.copy(component_dll, installer_dir)
-    component_dll_filenames.append(os.path.basename(component_dll))
-
-  # Copy chrome.exe.manifest as-is. It is required, among other things, to
-  # declare a dependency on the version dir assembly.
-  shutil.copy(os.path.join(build_dir, 'chrome.exe.manifest'), chrome_dir)
-
-  # Also copy setup.exe.manifest as-is. It is required, among other things, to
-  # let setup.exe UAC when it wants to, by specifying that it handles elevation
-  # "asInvoker", rather than have Windows auto-elevate it when launched.
-  shutil.copy(os.path.join(build_dir, 'setup.exe.manifest'), installer_dir)
-
-  # Augment {version}.manifest to include all component DLLs as part of the
-  # assembly it constitutes, which will allow dependents of this assembly to
-  # find these DLLs.
-  version_assembly_dll_additions = []
-  for dll_filename in component_dll_filenames:
-    version_assembly_dll_additions.append("  <file name='%s'/>" % dll_filename)
-  CopyAndAugmentManifest(build_dir, version_dir,
-                         '%s.manifest' % current_version,
-                         '\n'.join(version_assembly_dll_additions),
-                         '</assembly>')
-
-
 def main(options):
   """Main method that reads input file, creates archive file and write
   resource input file.
   """
   current_version = BuildVersion(options.build_dir)
 
-  config = Readconfig(options.input_file, current_version)
+  config = Readconfig(options.build_dir, options.input_file, current_version)
 
   (staging_dir, temp_dir) = MakeStagingDirectories(options.staging_dir)
 
   prev_version = GetPrevVersion(options.build_dir, temp_dir,
-                                options.last_chrome_installer,
-                                options.output_name)
+                                options.last_chrome_installer)
 
   # Preferentially copy the files we can find from the output_dir, as
   # this is where we'll find the Syzygy-optimized executables when
   # building the optimized mini_installer.
   if options.build_dir != options.output_dir:
     CopyAllFilesToStagingDir(config, options.distribution,
-                             staging_dir, options.output_dir,
-                             options.enable_hidpi, options.enable_touch_ui)
+                             staging_dir, options.output_dir)
 
   # Now copy the remainder of the files from the build dir.
   CopyAllFilesToStagingDir(config, options.distribution,
-                           staging_dir, options.build_dir,
-                           options.enable_hidpi, options.enable_touch_ui)
-
-  if options.component_build == '1':
-    DoComponentBuildTasks(staging_dir, options.build_dir,
-                          options.target_arch, current_version)
+                           staging_dir, options.build_dir)
 
   version_numbers = current_version.split('.')
   current_build_number = version_numbers[2] + '.' + version_numbers[3]
@@ -534,7 +342,7 @@ def main(options):
   archive_file = CreateArchiveFile(options, staging_dir,
                                    current_build_number, prev_build_number)
 
-  setup_file = PrepareSetupExec(options,
+  setup_file = PrepareSetupExec(options, staging_dir,
                                 current_build_number, prev_build_number)
 
   CreateResourceInputFile(options.output_dir, options.setup_exe_format,
@@ -548,14 +356,14 @@ def _ParseOptions():
       help='Build directory. The paths in input_file are relative to this.')
   parser.add_option('--staging_dir',
       help='Staging directory where intermediate files and directories '
-           'will be created')
+           'will be created'),
   parser.add_option('-o', '--output_dir',
       help='The output directory where the archives will be written. '
             'Defaults to the build_dir.')
   parser.add_option('--resource_file_path',
       help='The path where the resource file will be output. '
            'Defaults to %s in the build directory.' %
-               MINI_INSTALLER_INPUT_FILE)
+               MINI_INSTALLER_INPUT_FILE),
   parser.add_option('-d', '--distribution',
       help='Name of Chromium Distribution. Optional.')
   parser.add_option('-s', '--skip_rebuild_archive',
@@ -572,38 +380,20 @@ def _ParseOptions():
            '{BSDIFF|COURGETTE}.')
   parser.add_option('-n', '--output_name', default='chrome',
       help='Name used to prefix names of generated archives.')
-  parser.add_option('--enable_hidpi', default='0',
-      help='Whether to include HiDPI resource files.')
-  parser.add_option('--enable_touch_ui', default='0',
-      help='Whether to include resource files from the "TOUCH" section of the '
-           'input file.')
-  parser.add_option('--component_build', default='0',
-      help='Whether this archive is packaging a component build. This will '
-           'also turn off compression of chrome.7z into chrome.packed.7z and '
-           'helpfully delete any old chrome.packed.7z in |output_dir|.')
-  parser.add_option('--target_arch', default='x86',
-      help='Specify the target architecture for installer - this is used '
-           'to determine which CRT runtime files to pull and package '
-           'with the installer archive {x86|x64}.')
 
-  options, _ = parser.parse_args()
+  options, args = parser.parse_args()
   if not options.build_dir:
     parser.error('You must provide a build dir.')
 
-  options.build_dir = os.path.normpath(options.build_dir)
-
   if not options.staging_dir:
     parser.error('You must provide a staging dir.')
-
-  if not options.input_file:
-    parser.error('You must provide an input file')
 
   if not options.output_dir:
     options.output_dir = options.build_dir
 
   if not options.resource_file_path:
-    options.resource_file_path = os.path.join(options.build_dir,
-                                              MINI_INSTALLER_INPUT_FILE)
+    options.options.resource_file_path = os.path.join(options.build_dir,
+                                                      MINI_INSTALLER_INPUT_FILE)
 
   return options
 

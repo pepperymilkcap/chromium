@@ -4,16 +4,16 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
+#include "base/process_util.h"
+#include "base/string_util.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/thread_restrictions.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -21,29 +21,27 @@
 #include "chrome/test/base/chrome_process_util.h"
 #include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
-#include "gpu/command_buffer/service/gpu_switches.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
-#include "url/gurl.h"
 
 namespace {
 
-static const base::FilePath::CharType kTempDirName[] =
+static const FilePath::CharType kTempDirName[] =
     FILE_PATH_LITERAL("memory_test_profile");
 
 class MemoryTest : public UIPerfTest {
  public:
   MemoryTest() : cleanup_temp_dir_on_exit_(false) {}
 
-  virtual ~MemoryTest() {
+  ~MemoryTest() {
     // Cleanup our temporary directory.
     if (cleanup_temp_dir_on_exit_)
-      base::DeleteFile(temp_dir_, true);
+      file_util::Delete(temp_dir_, true);
   }
 
   // Called from SetUp() to determine the user data dir to copy.
-  virtual base::FilePath GetUserDataDirSource() const = 0;
+  virtual FilePath GetUserDataDirSource() const = 0;
 
   // Called from RunTest() to determine the set of URLs to retrieve.
   // Returns the length of the list.
@@ -58,15 +56,6 @@ class MemoryTest : public UIPerfTest {
 
     launch_arguments_.AppendSwitch(switches::kEnableLogging);
 
-#if defined (OS_MACOSX)
-    // On Mac the OpenGL driver will leave around active pages for GPU
-    // memory, resulting in a massive reported memory regression. Limit
-    // the impact of this by minimizing the amount of GPU memory used.
-    // http://crbug.com/178531
-    launch_arguments_.AppendSwitchASCII(switches::kForceGpuMemAvailableMb,
-                                        "1");
-#endif
-
     // In order to record a dataset to cache for future playback,
     // set the |playback| to false and run the test. The source user data dir
     // will be populated with an appropriate cache set.  If any of source
@@ -77,10 +66,9 @@ class MemoryTest : public UIPerfTest {
       // Use the playback cache, but don't use playback events.
       launch_arguments_.AppendSwitch(switches::kPlaybackMode);
       launch_arguments_.AppendSwitch(switches::kNoEvents);
-      launch_arguments_.AppendSwitch(switches::kDisableGpuShaderDiskCache);
 
       // Get the specified user data dir (optional)
-      base::FilePath profile_dir =
+      FilePath profile_dir =
           CommandLine::ForCurrentProcess()->GetSwitchValuePath(
           switches::kUserDataDir);
 
@@ -228,17 +216,17 @@ class MemoryTest : public UIPerfTest {
   //   On success, modifies user_data_dir_ to be a new profile directory
   //   sets temp_dir_ to the containing temporary directory,
   //   and sets cleanup_temp_dir_on_exit_ to true.
-  bool SetupTempDirectory(const base::FilePath& src_dir) {
+  bool SetupTempDirectory(const FilePath& src_dir) {
     VLOG(1) << "Setting up temp directory in " << src_dir.value();
     // We create a copy of the test dir and use it so that each
     // run of this test starts with the same data.  Running this
     // test has the side effect that it will change the profile.
-    if (!base::CreateNewTempDirectory(kTempDirName, &temp_dir_)) {
+    if (!file_util::CreateNewTempDirectory(kTempDirName, &temp_dir_)) {
       LOG(ERROR) << "Could not create temp directory:" << kTempDirName;
       return false;
     }
 
-    if (!base::CopyDirectory(src_dir, temp_dir_, true)) {
+    if (!file_util::CopyDirectory(src_dir, temp_dir_, true)) {
       LOG(ERROR) << "Could not copy temp directory";
       return false;
     }
@@ -252,15 +240,14 @@ class MemoryTest : public UIPerfTest {
   }
 
   bool cleanup_temp_dir_on_exit_;
-  base::FilePath temp_dir_;
-  base::FilePath user_data_dir_;
-  base::ThreadRestrictions::ScopedAllowIO allow_io_;
+  FilePath temp_dir_;
+  FilePath user_data_dir_;
 };
 
 class GeneralMixMemoryTest : public MemoryTest {
  public:
-  virtual base::FilePath GetUserDataDirSource() const OVERRIDE {
-    base::FilePath profile_dir;
+  virtual FilePath GetUserDataDirSource() const {
+    FilePath profile_dir;
     PathService::Get(base::DIR_SOURCE_ROOT, &profile_dir);
     profile_dir = profile_dir.AppendASCII("data");
     profile_dir = profile_dir.AppendASCII("memory_test");
@@ -268,7 +255,7 @@ class GeneralMixMemoryTest : public MemoryTest {
     return profile_dir;
   }
 
-  virtual size_t GetUrlList(std::string** list) OVERRIDE {
+  virtual size_t GetUrlList(std::string** list) {
     *list = urls_;
     return urls_length_;
   }
@@ -410,7 +397,7 @@ size_t GeneralMixMemoryTest::urls_length_ =
 
 class GeneralMixReferenceMemoryTest : public GeneralMixMemoryTest {
  public:
-  virtual void SetUp() {
+  void SetUp() {
     UseReferenceBuild();
     GeneralMixMemoryTest::SetUp();
   }
@@ -424,8 +411,8 @@ class MembusterMemoryTest : public MemoryTest {
     delete[] test_urls_;
   }
 
-  virtual base::FilePath GetUserDataDirSource() const OVERRIDE {
-    base::FilePath profile_dir;
+  virtual FilePath GetUserDataDirSource() const {
+    FilePath profile_dir;
     PathService::Get(base::DIR_SOURCE_ROOT, &profile_dir);
     profile_dir = profile_dir.AppendASCII("data");
     profile_dir = profile_dir.AppendASCII("memory_test");
@@ -433,7 +420,7 @@ class MembusterMemoryTest : public MemoryTest {
     return profile_dir;
   }
 
-  virtual size_t GetUrlList(std::string** list) OVERRIDE {
+  virtual size_t GetUrlList(std::string** list) {
     size_t total_url_entries = urls_length_ * kIterations_ * 2 - 1;
     if (!test_urls_) {
       test_urls_ = new std::string[total_url_entries];
@@ -506,14 +493,6 @@ size_t MembusterMemoryTest::urls_length_ =
     arraysize(MembusterMemoryTest::source_urls_);
 
 #define QUOTE(x) #x
-#if defined(OS_MACOSX)
-// The reference builds crash on mac with the memory test and we don't care
-// enough to fix it because this test is being replaced with Telemetry.
-#define GENERAL_MIX_MEMORY_TESTS(name, tabs) \
-TEST_F(GeneralMixMemoryTest, name) { \
-  RunTest(QUOTE(_##tabs##t), tabs); \
-}
-#else
 #define GENERAL_MIX_MEMORY_TESTS(name, tabs) \
 TEST_F(GeneralMixMemoryTest, name) { \
   RunTest(QUOTE(_##tabs##t), tabs); \
@@ -521,7 +500,6 @@ TEST_F(GeneralMixMemoryTest, name) { \
 TEST_F(GeneralMixReferenceMemoryTest, name) { \
   RunTest(QUOTE(_##tabs##t_ref), tabs); \
 }
-#endif
 
 GENERAL_MIX_MEMORY_TESTS(SingleTabTest, 1);
 GENERAL_MIX_MEMORY_TESTS(FiveTabTest, 5);

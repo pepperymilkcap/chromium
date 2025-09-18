@@ -1,42 +1,34 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
-#include "base/debug/stack_trace.h"
 #include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
+#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/metrics/statistics_recorder.h"
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
-#include "base/pending_task.h"
-#include "base/strings/string_util.h"
+#include "base/process_util.h"
+#include "base/string_util.h"
+#include "base/system_monitor/system_monitor.h"
 #include "base/threading/platform_thread.h"
-#include "base/time/time.h"
-#include "base/timer/hi_res_timer_manager.h"
-#include "content/child/child_process.h"
-#include "content/common/content_constants_internal.h"
+#include "base/time.h"
+#include "content/common/content_counters.h"
+#include "content/common/hi_res_timer_manager.h"
+#include "content/common/pepper_plugin_registry.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/renderer/content_renderer_client.h"
-#include "content/renderer/browser_plugin/browser_plugin_manager_impl.h"
-#include "content/renderer/pepper/pepper_plugin_registry.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "ui/base/ui_base_switches.h"
-#include "webkit/child/webkit_child_helpers.h"
-
-#if defined(OS_ANDROID)
-#include "base/android/sys_utils.h"
-#include "third_party/skia/include/core/SkGraphics.h"
-#endif  // OS_ANDROID
+#include "webkit/plugins/ppapi/ppapi_interface_factory.h"
 
 #if defined(OS_MACOSX)
 #include <Carbon/Carbon.h>
@@ -45,33 +37,73 @@
 
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/mach_override/mach_override.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #endif  // OS_MACOSX
 
-#if defined(ENABLE_WEBRTC)
-#include "third_party/libjingle/overrides/init_webrtc.h"
-#endif
-
-namespace content {
+#if defined(OS_MACOSX)
 namespace {
+
+CFArrayRef ChromeTISCreateInputSourceList(
+   CFDictionaryRef properties,
+   Boolean includeAllInstalled) {
+  CFTypeRef values[] = { CFSTR("") };
+  return CFArrayCreate(
+      kCFAllocatorDefault, values, arraysize(values), &kCFTypeArrayCallBacks);
+}
+
+void InstallFrameworkHacks() {
+  // See http://crbug.com/31225
+  // TODO: Don't do this on newer OS X revisions that have a fix for
+  // http://openradar.appspot.com/radar?id=1156410
+  if (base::mac::IsOSSnowLeopardOrLater()) {
+    // Chinese Handwriting was introduced in 10.6. Since doing this override
+    // regresses page cycler memory usage on 10.5, don't do the unnecessary
+    // override there.
+    mach_error_t err = mach_override_ptr(
+        (void*)&TISCreateInputSourceList,
+        (void*)&ChromeTISCreateInputSourceList,
+        NULL);
+    CHECK_EQ(err_none, err);
+  }
+}
+
+}  // namespace
+#endif  // OS_MACOSX
+
 // This function provides some ways to test crash and assertion handling
 // behavior of the renderer.
 static void HandleRendererErrorTestParameters(const CommandLine& command_line) {
+  // This parameter causes an assertion.
+  if (command_line.HasSwitch(switches::kRendererAssertTest)) {
+    DCHECK(false);
+  }
+
+
+#if !defined(OFFICIAL_BUILD)
+  // This parameter causes an assertion too.
+  if (command_line.HasSwitch(switches::kRendererCheckFalseTest)) {
+    CHECK(false);
+  }
+#endif  // !defined(OFFICIAL_BUILD)
+
+
+  // This parameter causes a null pointer crash (crash reporter trigger).
+  if (command_line.HasSwitch(switches::kRendererCrashTest)) {
+    int* bad_pointer = NULL;
+    *bad_pointer = 0;
+  }
+
   if (command_line.HasSwitch(switches::kWaitForDebugger))
     base::debug::WaitForDebugger(60, true);
 
   if (command_line.HasSwitch(switches::kRendererStartupDialog))
     ChildProcess::WaitForDebugger("Renderer");
-
-  // This parameter causes an assertion.
-  if (command_line.HasSwitch(switches::kRendererAssertTest)) {
-    DCHECK(false);
-  }
 }
 
 // This is a simplified version of the browser Jankometer, which measures
 // the processing time of tasks on the render thread.
-class RendererMessageLoopObserver : public base::MessageLoop::TaskObserver {
+class RendererMessageLoopObserver : public MessageLoop::TaskObserver {
  public:
   RendererMessageLoopObserver()
       : process_times_(base::Histogram::FactoryGet(
@@ -79,50 +111,30 @@ class RendererMessageLoopObserver : public base::MessageLoop::TaskObserver {
             1, 3600000, 50, base::Histogram::kUmaTargetedHistogramFlag)) {}
   virtual ~RendererMessageLoopObserver() {}
 
-  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  virtual void WillProcessTask(base::TimeTicks time_posted) {
     begin_process_message_ = base::TimeTicks::Now();
   }
 
-  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  virtual void DidProcessTask(base::TimeTicks time_posted) {
     if (!begin_process_message_.is_null())
       process_times_->AddTime(base::TimeTicks::Now() - begin_process_message_);
   }
 
  private:
   base::TimeTicks begin_process_message_;
-  base::HistogramBase* const process_times_;
+  base::Histogram* const process_times_;
   DISALLOW_COPY_AND_ASSIGN(RendererMessageLoopObserver);
 };
 
-// For measuring memory usage after each task. Behind a command line flag.
-class MemoryObserver : public base::MessageLoop::TaskObserver {
- public:
-  MemoryObserver() {}
-  virtual ~MemoryObserver() {}
-
-  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
-  }
-
-  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
-    HISTOGRAM_MEMORY_KB("Memory.RendererUsed", webkit_glue::MemoryUsageKB());
-  }
- private:
-  DISALLOW_COPY_AND_ASSIGN(MemoryObserver);
-};
-
-}  // namespace
-
 // mainline routine for running as the Renderer process
-int RendererMain(const MainFunctionParams& parameters) {
+int RendererMain(const content::MainFunctionParams& parameters) {
   TRACE_EVENT_BEGIN_ETW("RendererMain", 0, "");
-  base::debug::TraceLog::GetInstance()->SetProcessName("Renderer");
-  base::debug::TraceLog::GetInstance()->SetProcessSortIndex(
-      kTraceEventRendererProcessSortIndex);
 
   const CommandLine& parsed_command_line = parameters.command_line;
 
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool;
+  InstallFrameworkHacks();
 #endif  // OS_MACOSX
 
 #if defined(OS_CHROMEOS)
@@ -137,13 +149,6 @@ int RendererMain(const MainFunctionParams& parameters) {
   }
 #endif
 
-#if defined(OS_ANDROID)
-  const int kMB = 1024 * 1024;
-  size_t font_cache_limit =
-      base::android::SysUtils::IsLowEndDevice() ? kMB : 8 * kMB;
-  SkGraphics::SetFontCacheLimit(font_cache_limit);
-#endif
-
   // This function allows pausing execution using the --renderer-startup-dialog
   // flag allowing us to attach a debugger.
   // Do not move this function down since that would mean we can't easily debug
@@ -152,28 +157,31 @@ int RendererMain(const MainFunctionParams& parameters) {
 
   RendererMainPlatformDelegate platform(parameters);
 
+  webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager =
+      webkit::ppapi::PpapiInterfaceFactoryManager::GetInstance();
+  content::GetContentClient()->renderer()->RegisterPPAPIInterfaceFactories(
+      factory_manager);
 
-  base::StatsCounterTimer stats_counter_timer("Content.RendererInit");
-  base::StatsScope<base::StatsCounterTimer> startup_timer(stats_counter_timer);
+  base::StatsScope<base::StatsCounterTimer>
+      startup_timer(content::Counters::renderer_main());
 
   RendererMessageLoopObserver task_observer;
 #if defined(OS_MACOSX)
   // As long as we use Cocoa in the renderer (for the forseeable future as of
-  // now; see http://crbug.com/306348 for info) we need to have a UI loop.
-  base::MessageLoopForUI main_message_loop;
+  // now; see http://crbug.com/13890 for info) we need to have a UI loop.
+  MessageLoop main_message_loop(MessageLoop::TYPE_UI);
 #else
-  // The main message loop of the renderer services doesn't have IO or UI tasks.
-  base::MessageLoop main_message_loop;
+  // The main message loop of the renderer services doesn't have IO or UI tasks,
+  // unless in-process-plugins is used.
+  MessageLoop main_message_loop(RenderProcessImpl::InProcessPlugins() ?
+              MessageLoop::TYPE_UI : MessageLoop::TYPE_DEFAULT);
 #endif
   main_message_loop.AddTaskObserver(&task_observer);
 
-  scoped_ptr<MemoryObserver> memory_observer;
-  if (parsed_command_line.HasSwitch(switches::kMemoryMetrics)) {
-    memory_observer.reset(new MemoryObserver());
-    main_message_loop.AddTaskObserver(memory_observer.get());
-  }
-
   base::PlatformThread::SetName("CrRendererMain");
+
+  base::SystemMonitor system_monitor;
+  HighResolutionTimerManager hi_res_timer_manager;
 
   platform.PlatformInitialize();
 
@@ -181,61 +189,46 @@ int RendererMain(const MainFunctionParams& parameters) {
   platform.InitSandboxTests(no_sandbox);
 
   // Initialize histogram statistics gathering system.
-  base::StatisticsRecorder::Initialize();
-
-  // Initialize statistical testing infrastructure.  We set the entropy provider
-  // to NULL to disallow the renderer process from creating its own one-time
-  // randomized trials; they should be created in the browser process.
-  base::FieldTrialList field_trial_list(NULL);
-  // Ensure any field trials in browser are reflected into renderer.
-  if (parsed_command_line.HasSwitch(switches::kForceFieldTrials)) {
-    // Field trials are created in an "activated" state to ensure they get
-    // reported in crash reports.
-    bool result = base::FieldTrialList::CreateTrialsFromString(
-        parsed_command_line.GetSwitchValueASCII(switches::kForceFieldTrials),
-        base::FieldTrialList::ACTIVATE_TRIALS);
-    DCHECK(result);
+  // Don't create StatisticsRecorder in the single process mode.
+  scoped_ptr<base::StatisticsRecorder> statistics;
+  if (!base::StatisticsRecorder::IsActive()) {
+    statistics.reset(new base::StatisticsRecorder());
   }
 
-#if defined(ENABLE_PLUGINS)
+  // Initialize statistical testing infrastructure.  We set client_id to the
+  // empty string to disallow the renderer process from creating its own
+  // one-time randomized trials; they should be created in the browser process.
+  base::FieldTrialList field_trial(EmptyString());
+  // Ensure any field trials in browser are reflected into renderer.
+  if (parsed_command_line.HasSwitch(switches::kForceFieldTestNameAndValue)) {
+    std::string persistent = parsed_command_line.GetSwitchValueASCII(
+        switches::kForceFieldTestNameAndValue);
+    bool ret = field_trial.CreateTrialsInChildProcess(persistent);
+    DCHECK(ret);
+  }
+
   // Load pepper plugins before engaging the sandbox.
   PepperPluginRegistry::GetInstance();
-#endif
-#if defined(ENABLE_WEBRTC)
-  // Initialize WebRTC before engaging the sandbox.
-  // NOTE: On linux, this call could already have been made from
-  // zygote_main_linux.cc.  However, calling multiple times from the same thread
-  // is OK.
-  InitializeWebRtcModule();
-#endif
 
   {
 #if defined(OS_WIN) || defined(OS_MACOSX)
     // TODO(markus): Check if it is OK to unconditionally move this
     // instruction down.
     RenderProcessImpl render_process;
-    new RenderThreadImpl();
+    render_process.set_main_thread(new RenderThreadImpl());
 #endif
     bool run_loop = true;
     if (!no_sandbox) {
       run_loop = platform.EnableSandbox();
     } else {
       LOG(ERROR) << "Running without renderer sandbox";
-#ifndef NDEBUG
-      // For convenience, we print the stack trace for crashes. We can't get
-      // symbols when the sandbox is enabled, so only try when the sandbox is
-      // disabled.
-      base::debug::EnableInProcessStackDumping();
-#endif
     }
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     RenderProcessImpl render_process;
-    new RenderThreadImpl();
+    render_process.set_main_thread(new RenderThreadImpl());
 #endif
 
-    base::HighResolutionTimerManager hi_res_timer_manager;
-
-    platform.RunSandboxTests(no_sandbox);
+    platform.RunSandboxTests();
 
     startup_timer.Stop();  // End of Startup Time Measurement.
 
@@ -245,7 +238,7 @@ int RendererMain(const MainFunctionParams& parameters) {
         pool->Recycle();
 #endif
       TRACE_EVENT_BEGIN_ETW("RendererMain.START_MSG_LOOP", 0, 0);
-      base::MessageLoop::current()->Run();
+      MessageLoop::current()->Run();
       TRACE_EVENT_END_ETW("RendererMain.START_MSG_LOOP", 0, 0);
     }
   }
@@ -253,5 +246,3 @@ int RendererMain(const MainFunctionParams& parameters) {
   TRACE_EVENT_END_ETW("RendererMain", 0, "");
   return 0;
 }
-
-}  // namespace content

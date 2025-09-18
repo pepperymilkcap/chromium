@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/installer/util/product_unittest.h"
 
 #include "base/logging.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
-#include "chrome/common/chrome_constants.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/installer/util/chrome_frame_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/installation_state.h"
@@ -48,7 +47,7 @@ class ProductTest : public TestWithTempDirAndDeleteTempOverrideKeys {
 
 // This test is flaky on Win, see http://crbug.com/100567
 #if defined(OS_WIN)
-#define MAYBE_ProductInstallBasic DISABLED_ProductInstallBasic
+#define MAYBE_ProductInstallBasic FLAKY_ProductInstallBasic
 #else
 #define MAYBE_ProductInstallBasic ProductInstallBasic
 #endif
@@ -71,21 +70,12 @@ TEST_F(ProductTest, MAYBE_ProductInstallBasic) {
   BrowserDistribution* distribution = product->distribution();
   EXPECT_EQ(BrowserDistribution::CHROME_BROWSER, distribution->GetType());
 
-  std::vector<base::FilePath> user_data_paths;
-  product->GetUserDataPaths(&user_data_paths);
-  EXPECT_GE(user_data_paths.size(), static_cast<size_t>(1));
-  const base::FilePath& user_data = user_data_paths[0];
-  EXPECT_FALSE(user_data_paths[0].empty());
+  FilePath user_data(product->GetUserDataPath());
+  EXPECT_FALSE(user_data.empty());
   EXPECT_NE(std::wstring::npos,
-            user_data_paths[0].value().find(installer::kInstallUserDataDir));
-  if (user_data_paths.size() > 1) {
-    EXPECT_FALSE(user_data_paths[1].empty());
-    EXPECT_NE(
-        std::wstring::npos,
-        user_data_paths[1].value().find(chrome::kMetroChromeUserDataSubDir));
-  }
+            user_data.value().find(installer::kInstallUserDataDir));
 
-  base::FilePath program_files;
+  FilePath program_files;
   PathService::Get(base::DIR_PROGRAM_FILES, &program_files);
   // The User Data path should never be under program files, even though
   // system_level is true.
@@ -108,10 +98,10 @@ TEST_F(ProductTest, MAYBE_ProductInstallBasic) {
     ASSERT_TRUE(version_key.Valid());
 
     const char kCurrentVersion[] = "1.2.3.4";
-    Version current_version(kCurrentVersion);
+    scoped_ptr<Version> current_version(
+        Version::GetVersionFromString(kCurrentVersion));
     version_key.WriteValue(google_update::kRegVersionField,
-                           base::UTF8ToWide(
-                               current_version.GetString()).c_str());
+                           UTF8ToWide(current_version->GetString()).c_str());
 
     // We started out with a non-msi product.
     machine_state.Initialize();
@@ -119,7 +109,7 @@ TEST_F(ProductTest, MAYBE_ProductInstallBasic) {
         machine_state.GetProductState(system_level, distribution->GetType());
     EXPECT_TRUE(chrome_state != NULL);
     if (chrome_state != NULL) {
-      EXPECT_TRUE(chrome_state->version().Equals(current_version));
+      EXPECT_TRUE(chrome_state->version().Equals(*current_version.get()));
       EXPECT_FALSE(chrome_state->is_msi());
     }
 

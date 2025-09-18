@@ -4,18 +4,20 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_GTK_UTIL_H_
 #define CHROME_BROWSER_UI_GTK_GTK_UTIL_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
-#include "ui/base/window_open_disposition.h"
+#include "base/string16.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
+#include "webkit/glue/window_open_disposition.h"
 
 typedef struct _cairo cairo_t;
+typedef struct _GdkColor GdkColor;
 typedef struct _GtkWidget GtkWidget;
 
 class BrowserWindow;
@@ -23,9 +25,20 @@ class GtkThemeService;
 class GURL;
 class Profile;
 
-namespace gfx {
-class Image;
+namespace content {
+struct RendererPreferences;
 }
+
+namespace event_utils {
+
+// Translates GdkEvent state into what kind of disposition they represent.
+// For example, a middle click would mean to open a background tab.
+WindowOpenDisposition DispositionFromGdkState(guint state);
+
+// Translates event flags into plaform independent event flags.
+int EventFlagsFromGdkState(guint state);
+
+}  // namespace event_utils
 
 namespace gtk_util {
 
@@ -97,6 +110,12 @@ void ForceFontSizePixels(GtkWidget* widget, double size_pixels);
 // even if ForceFontSizePixels() was never called.
 void UndoForceFontSize(GtkWidget* widget);
 
+// Gets the position of a gtk widget in screen coordinates.
+gfx::Point GetWidgetScreenPosition(GtkWidget* widget);
+
+// Returns the bounds of the specified widget in screen coordinates.
+gfx::Rect GetWidgetScreenBounds(GtkWidget* widget);
+
 // Retuns size of the |widget| without window manager decorations.
 gfx::Size GetWidgetSize(GtkWidget* widget);
 
@@ -110,6 +129,9 @@ void ConvertWidgetPointToScreen(GtkWidget* widget, gfx::Point* p);
 // (e.g. buttons). Returns the vbox that widget was packed in.
 GtkWidget* CenterWidgetInHBox(GtkWidget* hbox, GtkWidget* widget,
                               bool pack_at_end, int padding);
+
+// Enumerates the top-level gdk windows of the current display.
+void EnumerateTopLevelWindows(ui::EnumerateWindowsDelegate* delegate);
 
 // Set that clicking the button with the given mouse buttons will cause a click
 // event.
@@ -139,26 +161,14 @@ int MirroredXCoordinate(GtkWidget* widget, int x);
 // Returns true if the pointer is currently inside the widget.
 bool WidgetContainsCursor(GtkWidget* widget);
 
-// Sets the default window icon for all windows created in this app. This icon
-// will only be used if a window has not explicitly been assigned an icon
-// (e.g. by SetWindowIcon()).
-//
-// |window| is only used to determine if a themed icon exists. If so, we use
-// that icon, otherwise we use the icon packaged with Chrome.
+// Sets the icon of |window| to the product icon (potentially used in window
+// border or alt-tab list).
+void SetWindowIcon(GtkWindow* window);
+
+// Sets the default window icon for all windows created in this app. |window|
+// is used to determine if a themed icon exists. If so, we use that icon,
+// otherwise we use the icon packaged with Chrome.
 void SetDefaultWindowIcon(GtkWindow* window);
-
-// Sets the icon of |window| to the Chrome product icon, overlaid with
-// |profile|'s avatar icon (or the Incognito icon for Incognito windows). It
-// first looks for a themed icon, then falls back to the product icons
-// packaged with Chrome.
-void SetWindowIcon(GtkWindow* window, Profile* profile);
-
-// Sets the icon of |window| to |icon|, overlaid with |profile|'s avatar icon
-// (or the Incognito icon for Incognito windows). It first looks for a themed
-// icon, then falls back to the product icons packaged with Chrome.
-//
-// Note that |icon| will be modified by this function.
-void SetWindowIcon(GtkWindow* window, Profile* profile, GdkPixbuf* icon);
 
 // Adds an action button with the given text to the dialog. Only useful when you
 // want a stock icon but not the stock text to go with it. Returns the button.
@@ -176,13 +186,17 @@ void SetLabelColor(GtkWidget* label, const GdkColor* color);
 // Adds the given widget to an alignment identing it by |kGroupIndent|.
 GtkWidget* IndentWidget(GtkWidget* content);
 
+// Sets (or resets) the font settings in |prefs| (used when creating new
+// renderers) based on GtkSettings (which itself comes from XSETTINGS).
+void UpdateGtkFontSettings(content::RendererPreferences* prefs);
+
 // Reverses a point in RTL mode. Used in making vectors of GdkPoints for window
 // shapes.
 GdkPoint MakeBidiGdkPoint(gint x, gint y, gint width, bool ltr);
 
 // Creates a tooltip string to be passed to gtk_widget_set_tooltip_markup from
 // the title and URL.
-std::string BuildTooltipTitleFor(base::string16 title, const GURL& url);
+std::string BuildTooltipTitleFor(string16 title, const GURL& url);
 
 // Draws a GTK text entry with the style parameters of GtkEntry
 // |offscreen_entry| onto |widget_to_draw_on| in the rectangle |rec|. Drawing
@@ -193,7 +207,7 @@ void DrawTextEntryBackground(GtkWidget* offscreen_entry,
                              GdkRectangle* rec);
 
 // Set up the text to be displayed by |layout|.
-void SetLayoutText(PangoLayout* layout, const base::string16& text);
+void SetLayoutText(PangoLayout* layout, const string16& text);
 
 // Draws the background of the toolbar area subject to the expose rectangle
 // |event| and starting image tiling from |tabstrip_origin|.
@@ -202,13 +216,6 @@ void DrawThemedToolbarBackground(GtkWidget* widget,
                                  GdkEventExpose* event,
                                  const gfx::Point& tabstrip_origin,
                                  GtkThemeService* provider);
-
-// Draw an entire pixbuf without dithering.
-void DrawFullImage(cairo_t* cr,
-                   GtkWidget* widget,
-                   const gfx::Image& image,
-                   gint dest_x,
-                   gint dest_y);
 
 // Returns the two colors averaged together.
 GdkColor AverageColors(GdkColor color_one, GdkColor color_two);
@@ -230,6 +237,11 @@ gfx::Rect GetWidgetRectRelativeToToplevel(GtkWidget* widget);
 // except that it will always work, and it should be called after any custom
 // expose events are connected.
 void SuppressDefaultPainting(GtkWidget* container);
+
+// Get the window open disposition from the state in gtk_get_current_event().
+// This is designed to be called inside a "clicked" event handler. It is an
+// error to call it when gtk_get_current_event() won't return a GdkEventButton*.
+WindowOpenDisposition DispositionForCurrentButtonPressEvent();
 
 // Safely grabs all input (with X grabs and an application grab), returning true
 // for success.
@@ -275,15 +287,20 @@ void ShowDialogWithMinLocalizedWidth(GtkWidget* dialog,
                                      int width_id);
 
 // Wrapper to present a window. On Linux, it just calls gtk_window_present or
-// gtk_window_present_with_time for non-zero timestamp.
+// gtk_window_present_with_time for non-zero timestamp. For ChromeOS, it first
+// finds the host window of the dialog contents and then present it.
 void PresentWindow(GtkWidget* window, int timestamp);
+
+// Get real window for given dialog. On ChromeOS, this gives the native dialog
+// host window. On Linux, it merely returns the passed in dialog.
+GtkWindow* GetDialogWindow(GtkWidget* dialog);
 
 // Gets dialog window bounds.
 gfx::Rect GetDialogBounds(GtkWidget* dialog);
 
 // Returns the stock menu item label for the "preferences" item - returns an
 // empty string if no stock item found.
-base::string16 GetStockPreferencesMenuLabel();
+string16 GetStockPreferencesMenuLabel();
 
 // Checks whether a widget is actually visible, i.e. whether it and all its
 // ancestors up to its toplevel are visible.
@@ -306,6 +323,11 @@ void InitLabelSizeRequestAndEllipsizeMode(GtkWidget* label);
 // window manager bugs. You should always call it after creating a dialog with
 // gtk_message_dialog_new.
 void ApplyMessageDialogQuirks(GtkWidget* dialog);
+
+// Performs Cut/Copy/Paste operation on the |window|.
+void DoCut(BrowserWindow* window);
+void DoCopy(BrowserWindow* window);
+void DoPaste(BrowserWindow* window);
 
 }  // namespace gtk_util
 

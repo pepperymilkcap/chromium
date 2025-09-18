@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,50 +6,33 @@ var getURL = chrome.extension.getURL;
 var deepEq = chrome.test.checkDeepEq;
 var expectedEventData;
 var capturedEventData;
-var capturedUnexpectedData;
 var expectedEventOrder;
 var tabId;
 var tabIdMap;
 var frameIdMap;
 var testServerPort;
 var testServer = "www.a.com";
-var defaultScheme = "http";
 var eventsCaptured;
 
-// If true, don't bark on events that were not registered via expect().
-// These events are recorded in capturedUnexpectedData instead of
-// capturedEventData.
-var ignoreUnexpected = false;
-
-// This is a debugging aid to print all received events as well as the
-// information whether they were expected.
-var logAllRequests = false;
-
 function runTests(tests) {
-  var waitForAboutBlank = function(_, info, tab) {
-    if (info.status == "complete" && tab.url == "about:blank") {
-      tabId = tab.id;
-      tabIdMap = {};
-      tabIdMap[tabId] = 0;
-      chrome.tabs.onUpdated.removeListener(waitForAboutBlank);
-      chrome.test.getConfig(function(config) {
-        testServerPort = config.testServer.port;
-        chrome.test.runTests(tests);
-      });
-    }
-  };
-  chrome.tabs.onUpdated.addListener(waitForAboutBlank);
-  chrome.tabs.create({url: "about:blank"});
+  chrome.tabs.create({url: "about:blank"}, function(tab) {
+    tabId = tab.id;
+    tabIdMap = {};
+    tabIdMap[tabId] = 0;
+    chrome.test.getConfig(function(config) {
+      testServerPort = config.testServer.port;
+      chrome.test.runTests(tests);
+    });
+  });
 }
 
 // Returns an URL from the test server, fixing up the port. Must be called
 // from within a test case passed to runTests.
-function getServerURL(path, opt_host, opt_scheme) {
+function getServerURL(path, opt_host) {
   if (!testServerPort)
     throw new Error("Called getServerURL outside of runTests.");
   var host = opt_host || testServer;
-  var scheme = opt_scheme || defaultScheme;
-  return scheme + "://" + host + ":" + testServerPort + "/" + path;
+  return "http://" + host + ":" + testServerPort + "/" + path;
 }
 
 // Helper to advance to the next test only when the tab has finished loading.
@@ -79,17 +62,13 @@ function navigateAndWait(url, callback) {
 //     webRequest API.
 // extraInfoSpec: the union of all desired extraInfoSpecs for the events.
 function expect(data, order, filter, extraInfoSpec) {
-  expectedEventData = data || [];
+  expectedEventData = data;
   capturedEventData = [];
-  capturedUnexpectedData = [];
-  expectedEventOrder = order || [];
-  if (expectedEventData.length > 0) {
-    eventsCaptured = chrome.test.callbackAdded();
-  }
+  expectedEventOrder = order;
+  eventsCaptured = chrome.test.callbackAdded();
   tabAndFrameUrls = {};  // Maps "{tabId}-{frameId}" to the URL of the frame.
   frameIdMap = {"-1": -1};
   removeListeners();
-  resetDeclarativeRules();
   initListeners(filter || {urls: ["<all_urls>"]}, extraInfoSpec || []);
   // Fill in default values.
   for (var i = 0; i < expectedEventData.length; ++i) {
@@ -171,7 +150,6 @@ function captureEvent(name, details, callback) {
   // us specify special return values per event.
   var currentIndex = capturedEventData.length;
   var extraOptions;
-  var retval;
   if (expectedEventData.length > currentIndex) {
     retval =
         expectedEventData[currentIndex].retval_function ?
@@ -236,28 +214,15 @@ function captureEvent(name, details, callback) {
       }
     }
   });
-  if (!found && !ignoreUnexpected) {
+  if (!found) {
     console.log("Expected events: " +
         JSON.stringify(expectedEventData, null, 2));
     chrome.test.fail("Received unexpected event '" + name + "':" +
         JSON.stringify(details, null, 2));
   }
 
-  if (found) {
-    if (logAllRequests) {
-      console.log("Expected: " + name + ": " + JSON.stringify(details));
-    }
-    capturedEventData.push({label: label, event: name, details: details});
-
-    // checkExpecations decrements the counter of pending events. We may only
-    // call it if an expected event has occurred.
-    checkExpectations();
-  } else {
-    if (logAllRequests) {
-      console.log("NOT Expected: " + name + ": " + JSON.stringify(details));
-    }
-    capturedUnexpectedData.push({label: label, event: name, details: details});
-  }
+  capturedEventData.push({label: label, event: name, details: details});
+  checkExpectations();
 
   if (callback) {
     window.setTimeout(callback, 0, retval);
@@ -276,7 +241,7 @@ function initListeners(filter, extraInfoSpec) {
   chrome.webRequest.onBeforeRequest.addListener(
       function(details) {
     return captureEvent("onBeforeRequest", details);
-  }, filter, intersect(extraInfoSpec, ["blocking", "requestBody"]));
+  }, filter, intersect(extraInfoSpec, ["blocking"]));
   chrome.webRequest.onBeforeSendHeaders.addListener(
       function(details) {
     return captureEvent("onBeforeSendHeaders", details);
@@ -331,8 +296,4 @@ function removeListeners() {
   helper(chrome.webRequest.onBeforeRedirect);
   helper(chrome.webRequest.onCompleted);
   helper(chrome.webRequest.onErrorOccurred);
-}
-
-function resetDeclarativeRules() {
-  chrome.declarativeWebRequest.onRequest.removeRules();
 }

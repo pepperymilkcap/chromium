@@ -162,9 +162,6 @@
 /* Define if you have POSIX threads libraries and header files. */
 #define HAVE_PTHREAD 1
 
-/* Have PTHREAD_PRIO_INHERIT. */
-#define HAVE_PTHREAD_PRIO_INHERIT 1
-
 /* Define to 1 if optimizing for size. */
 /* #undef HAVE_SMALL */
 
@@ -258,7 +255,7 @@
 #define PACKAGE_NAME "XZ Utils"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "XZ Utils 5.0.4"
+#define PACKAGE_STRING "XZ Utils 5.0.3"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "xz"
@@ -267,7 +264,7 @@
 #define PACKAGE_URL "http://tukaani.org/xz/"
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "5.0.4"
+#define PACKAGE_VERSION "5.0.3"
 
 /* Define to necessary symbol if this constant uses a non-standard name on
    your system. */
@@ -350,7 +347,7 @@
 
 
 /* Version number of package */
-#define VERSION "5.0.4"
+#define VERSION "5.0.3"
 
 /* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
    significant byte first (like Motorola and SPARC, unlike Intel). */
@@ -362,11 +359,6 @@
 # ifndef WORDS_BIGENDIAN
 /* #  undef WORDS_BIGENDIAN */
 # endif
-#endif
-
-/* Enable large inode numbers on Mac OS X 10.5.  */
-#ifndef _DARWIN_USE_64_BIT_INODE
-# define _DARWIN_USE_64_BIT_INODE 1
 #endif
 
 /* Number of bits in a file offset, on hosts where this is settable. */

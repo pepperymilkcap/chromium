@@ -2,33 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/files/scoped_temp_dir.h"
+#include "base/scoped_temp_dir.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/download/save_package.h"
-#include "content/shell/browser/shell.h"
-#include "content/test/content_browser_test.h"
-#include "content/test/content_browser_test_utils.h"
 
-namespace content {
+namespace {
 
-const char kTestFile[] = "files/simple_page.html";
+const char kTestFile[] = "files/save_page/a.htm";
 
-class SavePackageBrowserTest : public ContentBrowserTest {
+class SavePackageBrowserTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() OVERRIDE {
     ASSERT_TRUE(save_dir_.CreateUniqueTempDir());
-    ContentBrowserTest::SetUp();
+    InProcessBrowserTest::SetUp();
   }
 
   // Returns full paths of destination file and directory.
   void GetDestinationPaths(const std::string& prefix,
-                           base::FilePath* full_file_name,
-                           base::FilePath* dir) {
+                           FilePath* full_file_name,
+                           FilePath* dir) {
     *full_file_name = save_dir_.path().AppendASCII(prefix + ".htm");
     *dir = save_dir_.path().AppendASCII(prefix + "_files");
   }
 
   // Temporary directory we will save pages to.
-  base::ScopedTempDir save_dir_;
+  ScopedTempDir save_dir_;
 };
 
 // Create a SavePackage and delete it without calling Init.
@@ -36,12 +36,12 @@ class SavePackageBrowserTest : public ContentBrowserTest {
 IN_PROC_BROWSER_TEST_F(SavePackageBrowserTest, ImplicitCancel) {
   ASSERT_TRUE(test_server()->Start());
   GURL url = test_server()->GetURL(kTestFile);
-  NavigateToURL(shell(), url);
-  base::FilePath full_file_name, dir;
+  ui_test_utils::NavigateToURL(browser(), url);
+  FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   scoped_refptr<SavePackage> save_package(new SavePackage(
-      shell()->web_contents(), SAVE_PAGE_TYPE_AS_ONLY_HTML, full_file_name,
-      dir));
+      browser()->GetSelectedWebContents(),
+      content::SAVE_PAGE_TYPE_AS_ONLY_HTML, full_file_name, dir));
   ASSERT_TRUE(test_server()->Stop());
 }
 
@@ -50,14 +50,14 @@ IN_PROC_BROWSER_TEST_F(SavePackageBrowserTest, ImplicitCancel) {
 IN_PROC_BROWSER_TEST_F(SavePackageBrowserTest, ExplicitCancel) {
   ASSERT_TRUE(test_server()->Start());
   GURL url = test_server()->GetURL(kTestFile);
-  NavigateToURL(shell(), url);
-  base::FilePath full_file_name, dir;
+  ui_test_utils::NavigateToURL(browser(), url);
+  FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   scoped_refptr<SavePackage> save_package(new SavePackage(
-      shell()->web_contents(), SAVE_PAGE_TYPE_AS_ONLY_HTML, full_file_name,
-      dir));
+      browser()->GetSelectedWebContents(),
+      content::SAVE_PAGE_TYPE_AS_ONLY_HTML, full_file_name, dir));
   save_package->Cancel(true);
   ASSERT_TRUE(test_server()->Stop());
 }
 
-}  // namespace content
+}  // namespace

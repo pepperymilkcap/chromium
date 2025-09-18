@@ -10,20 +10,28 @@
 #include <errno.h>
 #include <pthread.h>
 
-#if !defined(OS_MACOSX)
+#if defined(OS_MACOSX)
+#include <AvailabilityMacros.h>
+#else
 #include <gcrypt.h>
 #endif
 
-#include "base/debug/leak_annotations.h"
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
+#include "googleurl/src/gurl.h"
 #include "printing/backend/cups_helper.h"
 #include "printing/backend/print_backend_consts.h"
-#include "url/gurl.h"
+
+#if (defined(OS_MACOSX) && \
+     MAC_OS_X_VERSION_MAX_ALLOWED <= MAC_OS_X_VERSION_10_5) || \
+    (defined(OS_LINUX) && \
+     CUPS_VERSION_MAJOR == 1 && CUPS_VERSION_MINOR < 4)
+const int CUPS_PRINTER_SCANNER = 0x2000000;  // Scanner-only device
+#endif
 
 #if !defined(OS_MACOSX)
 GCRY_THREAD_OPTION_PTHREAD_IMPL;
@@ -36,10 +44,6 @@ namespace {
 // It happened when multiple threads tried printing simultaneously.
 // Google search for 'gnutls thread safety' provided a solution that
 // initialized gcrypt and gnutls.
-
-// TODO(phajdan.jr): Remove this after https://bugs.g10code.com/gnupg/issue1197
-// gets fixed on all Linux distros we support (i.e. when they ship libgcrypt
-// with the fix).
 
 // Initially, we linked with -lgnutls and simply called gnutls_global_init(),
 // but this did not work well since we build one binary on Ubuntu Hardy and
@@ -75,14 +79,8 @@ class GcryptInitializer {
                 << " in " << kGnuTlsFiles[i];
         continue;
       }
-      {
-        // GnuTLS has a genuine small memory leak that is easier to annotate
-        // than suppress. See http://crbug.com/176888#c7
-        // TODO(earthdok): remove this once the leak is fixed.
-        ANNOTATE_SCOPED_MEMORY_LEAK;
-        if ((*pgnutls_global_init)() != 0)
-          LOG(ERROR) << "gnutls_global_init() failed";
-      }
+      if ((*pgnutls_global_init)() != 0)
+        LOG(ERROR) << "gnutls_global_init() failed";
       return;
     }
     LOG(ERROR) << "Cannot find libgnutls";
@@ -100,28 +98,22 @@ namespace printing {
 static const char kCUPSPrinterInfoOpt[] = "printer-info";
 static const char kCUPSPrinterStateOpt[] = "printer-state";
 static const char kCUPSPrinterTypeOpt[] = "printer-type";
-static const char kCUPSPrinterMakeModelOpt[] = "printer-make-and-model";
 
 class PrintBackendCUPS : public PrintBackend {
  public:
-  PrintBackendCUPS(const GURL& print_server_url,
-                   http_encryption_t encryption, bool blocking);
+  PrintBackendCUPS(const GURL& print_server_url, bool blocking);
+  virtual ~PrintBackendCUPS() {}
 
   // PrintBackend implementation.
   virtual bool EnumeratePrinters(PrinterList* printer_list) OVERRIDE;
+
   virtual std::string GetDefaultPrinterName() OVERRIDE;
-  virtual bool GetPrinterSemanticCapsAndDefaults(
-      const std::string& printer_name,
-      PrinterSemanticCapsAndDefaults* printer_info) OVERRIDE;
+
   virtual bool GetPrinterCapsAndDefaults(
       const std::string& printer_name,
       PrinterCapsAndDefaults* printer_info) OVERRIDE;
-  virtual std::string GetPrinterDriverInfo(
-      const std::string& printer_name) OVERRIDE;
-  virtual bool IsValidPrinter(const std::string& printer_name) OVERRIDE;
 
- protected:
-  virtual ~PrintBackendCUPS() {}
+  virtual bool IsValidPrinter(const std::string& printer_name) OVERRIDE;
 
  private:
   // Following functions are wrappers around corresponding CUPS functions.
@@ -129,19 +121,14 @@ class PrintBackendCUPS : public PrintBackend {
   // version in another case. There is an issue specifing CUPS_HTTP_DEFAULT
   // in the <functions>2(), it does not work in CUPS prior to 1.4.
   int GetDests(cups_dest_t** dests);
-  base::FilePath GetPPD(const char* name);
+  FilePath GetPPD(const char* name);
 
   GURL print_server_url_;
-  http_encryption_t cups_encryption_;
   bool blocking_;
 };
 
-PrintBackendCUPS::PrintBackendCUPS(const GURL& print_server_url,
-                                   http_encryption_t encryption,
-                                   bool blocking)
-    : print_server_url_(print_server_url),
-      cups_encryption_(encryption),
-      blocking_(blocking) {
+PrintBackendCUPS::PrintBackendCUPS(const GURL& print_server_url, bool blocking)
+    : print_server_url_(print_server_url), blocking_(blocking) {
 }
 
 bool PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
@@ -151,13 +138,14 @@ bool PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
   cups_dest_t* destinations = NULL;
   int num_dests = GetDests(&destinations);
   if ((num_dests == 0) && (cupsLastError() > IPP_OK_EVENTS_COMPLETE)) {
-    VLOG(1) << "CUPS: Error getting printers from CUPS server"
-            << ", server: " << print_server_url_
-            << ", error: " << static_cast<int>(cupsLastError());
+    VLOG(1) << "CP_CUPS: Error getting printers from CUPS server. Server: "
+            << print_server_url_
+            << " Error: "
+            << static_cast<int>(cupsLastError());
     return false;
   }
 
-  for (int printer_index = 0; printer_index < num_dests; ++printer_index) {
+  for (int printer_index = 0; printer_index < num_dests; printer_index++) {
     const cups_dest_t& printer = destinations[printer_index];
 
     // CUPS can have 'printers' that are actually scanners. (not MFC)
@@ -184,14 +172,8 @@ bool PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
     if (state != NULL)
       base::StringToInt(state, &printer_info.printer_status);
 
-    const char* drv_info = cupsGetOption(kCUPSPrinterMakeModelOpt,
-                                         printer.num_options,
-                                         printer.options);
-    if (drv_info)
-      printer_info.options[kDriverInfoTagName] = *drv_info;
-
     // Store printer options.
-    for (int opt_index = 0; opt_index < printer.num_options; ++opt_index) {
+    for (int opt_index = 0; opt_index < printer.num_options; opt_index++) {
       printer_info.options[printer.options[opt_index].name] =
           printer.options[opt_index].value;
     }
@@ -201,9 +183,7 @@ bool PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
 
   cupsFreeDests(num_dests, destinations);
 
-  VLOG(1) << "CUPS: Enumerated printers"
-          << ", server: " << print_server_url_
-          << ", # of printers: " << printer_list->size();
+  VLOG(1) << "CUPS: Enumerated " << printer_list->size() << " printers.";
   return true;
 }
 
@@ -212,20 +192,7 @@ std::string PrintBackendCUPS::GetDefaultPrinterName() {
   cups_dest_t* dests;
   int num_dests = GetDests(&dests);
   cups_dest_t* dest = cupsGetDest(NULL, NULL, num_dests, dests);
-  std::string name = dest ? std::string(dest->name) : std::string();
-  cupsFreeDests(num_dests, dests);
-  return name;
-}
-
-bool PrintBackendCUPS::GetPrinterSemanticCapsAndDefaults(
-    const std::string& printer_name,
-    PrinterSemanticCapsAndDefaults* printer_info) {
-  PrinterCapsAndDefaults info;
-  if (!GetPrinterCapsAndDefaults(printer_name, &info) )
-    return false;
-
-  return ParsePpdCapabilities(
-      printer_name, info.printer_capabilities, printer_info);
+  return dest ? std::string(dest->name) : std::string();
 }
 
 bool PrintBackendCUPS::GetPrinterCapsAndDefaults(
@@ -233,21 +200,19 @@ bool PrintBackendCUPS::GetPrinterCapsAndDefaults(
     PrinterCapsAndDefaults* printer_info) {
   DCHECK(printer_info);
 
-  VLOG(1) << "CUPS: Getting caps and defaults"
-          << ", printer name: " << printer_name;
+  VLOG(1) << "CUPS: Getting Caps and Defaults for: " << printer_name;
 
-  base::FilePath ppd_path(GetPPD(printer_name.c_str()));
+  FilePath ppd_path(GetPPD(printer_name.c_str()));
   // In some cases CUPS failed to get ppd file.
   if (ppd_path.empty()) {
-    LOG(ERROR) << "CUPS: Failed to get PPD"
-               << ", printer name: " << printer_name;
+    LOG(ERROR) << "CUPS: Failed to get PPD for: " << printer_name;
     return false;
   }
 
   std::string content;
-  bool res = base::ReadFileToString(ppd_path, &content);
+  bool res = file_util::ReadFileToString(ppd_path, &content);
 
-  base::DeleteFile(ppd_path, false);
+  file_util::Delete(ppd_path, false);
 
   if (res) {
     printer_info->printer_capabilities.swap(content);
@@ -258,26 +223,6 @@ bool PrintBackendCUPS::GetPrinterCapsAndDefaults(
   }
 
   return res;
-}
-
-std::string PrintBackendCUPS::GetPrinterDriverInfo(
-    const std::string& printer_name) {
-  cups_dest_t* destinations = NULL;
-  int num_dests = GetDests(&destinations);
-  std::string result;
-  for (int printer_index = 0; printer_index < num_dests; ++printer_index) {
-    const cups_dest_t& printer = destinations[printer_index];
-    if (printer_name == printer.name) {
-      const char* info = cupsGetOption(kCUPSPrinterMakeModelOpt,
-                                       printer.num_options,
-                                       printer.options);
-      if (info)
-        result = *info;
-    }
-  }
-
-  cupsFreeDests(num_dests, destinations);
-  return result;
 }
 
 bool PrintBackendCUPS::IsValidPrinter(const std::string& printer_name) {
@@ -295,50 +240,45 @@ bool PrintBackendCUPS::IsValidPrinter(const std::string& printer_name) {
 }
 
 scoped_refptr<PrintBackend> PrintBackend::CreateInstance(
-    const base::DictionaryValue* print_backend_settings) {
+    const DictionaryValue* print_backend_settings) {
 #if !defined(OS_MACOSX)
   // Initialize gcrypt library.
   g_gcrypt_initializer.Get();
 #endif
 
   std::string print_server_url_str, cups_blocking;
-  int encryption = HTTP_ENCRYPT_NEVER;
   if (print_backend_settings) {
     print_backend_settings->GetString(kCUPSPrintServerURL,
                                       &print_server_url_str);
 
     print_backend_settings->GetString(kCUPSBlocking,
                                       &cups_blocking);
-
-    print_backend_settings->GetInteger(kCUPSEncryption, &encryption);
   }
   GURL print_server_url(print_server_url_str.c_str());
-  return new PrintBackendCUPS(print_server_url,
-                              static_cast<http_encryption_t>(encryption),
-                              cups_blocking == kValueTrue);
+  return new PrintBackendCUPS(print_server_url, cups_blocking == kValueTrue);
 }
 
 int PrintBackendCUPS::GetDests(cups_dest_t** dests) {
   if (print_server_url_.is_empty()) {  // Use default (local) print server.
     return cupsGetDests(dests);
   } else {
-    HttpConnectionCUPS http(print_server_url_, cups_encryption_);
+    HttpConnectionCUPS http(print_server_url_);
     http.SetBlocking(blocking_);
     return cupsGetDests2(http.http(), dests);
   }
 }
 
-base::FilePath PrintBackendCUPS::GetPPD(const char* name) {
+FilePath PrintBackendCUPS::GetPPD(const char* name) {
   // cupsGetPPD returns a filename stored in a static buffer in CUPS.
   // Protect this code with lock.
   CR_DEFINE_STATIC_LOCAL(base::Lock, ppd_lock, ());
   base::AutoLock ppd_autolock(ppd_lock);
-  base::FilePath ppd_path;
+  FilePath ppd_path;
   const char* ppd_file_path = NULL;
   if (print_server_url_.is_empty()) {  // Use default (local) print server.
     ppd_file_path = cupsGetPPD(name);
     if (ppd_file_path)
-      ppd_path = base::FilePath(ppd_file_path);
+      ppd_path = FilePath(ppd_file_path);
   } else {
     // cupsGetPPD2 gets stuck sometimes in an infinite time due to network
     // configuration/issues. To prevent that, use non-blocking http connection
@@ -346,7 +286,7 @@ base::FilePath PrintBackendCUPS::GetPPD(const char* name) {
     // Note: After looking at CUPS sources, it looks like non-blocking
     // connection will timeout after 10 seconds of no data period. And it will
     // return the same way as if data was completely and sucessfully downloaded.
-    HttpConnectionCUPS http(print_server_url_, cups_encryption_);
+    HttpConnectionCUPS http(print_server_url_);
     http.SetBlocking(blocking_);
     ppd_file_path = cupsGetPPD2(http.http(), name);
     // Check if the get full PPD, since non-blocking call may simply return
@@ -361,15 +301,14 @@ base::FilePath PrintBackendCUPS::GetPPD(const char* name) {
       // Comparing file size against that content length might be unreliable
       // since some http reponses are encoded and content_length > file size.
       // Let's just check for the obvious CUPS and http errors here.
-      ppd_path = base::FilePath(ppd_file_path);
+      ppd_path = FilePath(ppd_file_path);
       ipp_status_t error_code = cupsLastError();
       int http_error = httpError(http.http());
       if (error_code > IPP_OK_EVENTS_COMPLETE || http_error != 0) {
-        LOG(ERROR) << "Error downloading PPD file"
-                   << ", name: " << name
+        LOG(ERROR) << "Error downloading PPD file for: " << name
                    << ", CUPS error: " << static_cast<int>(error_code)
                    << ", HTTP error: " << http_error;
-        base::DeleteFile(ppd_path, false);
+        file_util::Delete(ppd_path, false);
         ppd_path.clear();
       }
     }

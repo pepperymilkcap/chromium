@@ -4,8 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_TABS_THROBBER_VIEW_H_
 #define CHROME_BROWSER_UI_COCOA_TABS_THROBBER_VIEW_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
+
+#include "base/memory/scoped_nsobject.h"
 
 @protocol ThrobberDataDelegate;
 

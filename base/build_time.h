@@ -4,9 +4,10 @@
 
 #ifndef BASE_BUILD_TIME_
 #define BASE_BUILD_TIME_
+#pragma once
 
 #include "base/base_export.h"
-#include "base/time/time.h"
+#include "base/time.h"
 
 namespace base {
 

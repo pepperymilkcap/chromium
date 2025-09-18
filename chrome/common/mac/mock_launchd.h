@@ -4,31 +4,30 @@
 
 #ifndef CHROME_COMMON_MAC_MOCK_LAUNCHD_H_
 #define CHROME_COMMON_MAC_MOCK_LAUNCHD_H_
+#pragma once
 
 #include <launch.h>
 
 #include <string>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/common/mac/launchd.h"
 #include "chrome/common/multi_process_lock.h"
 
-namespace base {
 class MessageLoop;
-}
 
 // TODO(dmaclach): Write this in terms of a real mock.
 // http://crbug.com/76923
 class MockLaunchd : public Launchd {
  public:
-  static bool MakeABundle(const base::FilePath& dst,
+  static bool MakeABundle(const FilePath& dst,
                           const std::string& name,
-                          base::FilePath* bundle_root,
-                          base::FilePath* executable);
+                          FilePath* bundle_root,
+                          FilePath* executable);
 
-  MockLaunchd(const base::FilePath& file, base::MessageLoop* loop,
+  MockLaunchd(const FilePath& file, MessageLoop* loop,
               bool create_socket, bool as_service);
   virtual ~MockLaunchd();
 
@@ -62,14 +61,15 @@ class MockLaunchd : public Launchd {
   bool delete_called() const { return delete_called_; }
 
  private:
-  base::FilePath file_;
+  FilePath file_;
   std::string pipe_name_;
-  base::MessageLoop* message_loop_;
+  MessageLoop* message_loop_;
   scoped_ptr<MultiProcessLock> running_lock_;
   bool create_socket_;
   bool as_service_;
   bool restart_called_;
   bool remove_called_;
+  bool job_called_;
   bool checkin_called_;
   bool write_called_;
   bool delete_called_;

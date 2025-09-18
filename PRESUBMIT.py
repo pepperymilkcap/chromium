@@ -10,51 +10,17 @@ for more details about the presubmit API built into gcl.
 
 
 import re
-import subprocess
-import sys
 
 
 _EXCLUDED_PATHS = (
     r"^breakpad[\\\/].*",
-    r"^native_client_sdk[\\\/]src[\\\/]build_tools[\\\/]make_rules.py",
-    r"^native_client_sdk[\\\/]src[\\\/]build_tools[\\\/]make_simple.py",
-    r"^native_client_sdk[\\\/]src[\\\/]tools[\\\/].*.mk",
+    r"^native_client_sdk[\\\/].*",
     r"^net[\\\/]tools[\\\/]spdyshark[\\\/].*",
     r"^skia[\\\/].*",
     r"^v8[\\\/].*",
     r".*MakeFile$",
-    r".+_autogen\.h$",
-    r".+[\\\/]pnacl_shim\.c$",
-    r"^gpu[\\\/]config[\\\/].*_list_json\.cc$",
 )
 
-# TestRunner library is temporarily excluded from pan-project checks until
-# it's transitioned to chromium coding style.
-_TESTRUNNER_PATHS = (
-    r"^content[\\\/]shell[\\\/]renderer[\\\/]test_runner[\\\/].*",
-    r"^content[\\\/]shell[\\\/]common[\\\/]test_runner[\\\/].*",
-)
-
-# Fragment of a regular expression that matches C++ and Objective-C++
-# implementation files.
-_IMPLEMENTATION_EXTENSIONS = r'\.(cc|cpp|cxx|mm)$'
-
-# Regular expression that matches code only used for test binaries
-# (best effort).
-_TEST_CODE_EXCLUDED_PATHS = (
-    r'.*[/\\](fake_|test_|mock_).+%s' % _IMPLEMENTATION_EXTENSIONS,
-    r'.+_test_(base|support|util)%s' % _IMPLEMENTATION_EXTENSIONS,
-    r'.+_(api|browser|perf|pixel|unit|ui)?test(_[a-z]+)?%s' %
-        _IMPLEMENTATION_EXTENSIONS,
-    r'.+profile_sync_service_harness%s' % _IMPLEMENTATION_EXTENSIONS,
-    r'.*[/\\](test|tool(s)?)[/\\].*',
-    # content_shell is used for running layout tests.
-    r'content[/\\]shell[/\\].*',
-    # At request of folks maintaining this folder.
-    r'chrome[/\\]browser[/\\]automation[/\\].*',
-    # Non-production example code.
-    r'mojo[/\\]examples[/\\].*',
-)
 
 _TEST_ONLY_WARNING = (
     'You might be calling functions intended only for testing from\n'
@@ -64,194 +30,25 @@ _TEST_ONLY_WARNING = (
     'Email joi@chromium.org if you have questions.')
 
 
-_INCLUDE_ORDER_WARNING = (
-    'Your #include order seems to be broken. Send mail to\n'
-    'marja@chromium.org if this is not the case.')
 
+def _CheckNoInterfacesInBase(input_api, output_api):
+  """Checks to make sure no files in libbase.a have |@interface|."""
+  pattern = input_api.re.compile(r'^\s*@interface', input_api.re.MULTILINE)
+  files = []
+  for f in input_api.AffectedSourceFiles(input_api.FilterSourceFile):
+    if (f.LocalPath().startswith('base/') and
+        not f.LocalPath().endswith('_unittest.mm')):
+      contents = input_api.ReadFile(f)
+      if pattern.search(contents):
+        files.append(f)
 
-_BANNED_OBJC_FUNCTIONS = (
-    (
-      'addTrackingRect:',
-      (
-       'The use of -[NSView addTrackingRect:owner:userData:assumeInside:] is'
-       'prohibited. Please use CrTrackingArea instead.',
-       'http://dev.chromium.org/developers/coding-style/cocoa-dos-and-donts',
-      ),
-      False,
-    ),
-    (
-      'NSTrackingArea',
-      (
-       'The use of NSTrackingAreas is prohibited. Please use CrTrackingArea',
-       'instead.',
-       'http://dev.chromium.org/developers/coding-style/cocoa-dos-and-donts',
-      ),
-      False,
-    ),
-    (
-      'convertPointFromBase:',
-      (
-       'The use of -[NSView convertPointFromBase:] is almost certainly wrong.',
-       'Please use |convertPoint:(point) fromView:nil| instead.',
-       'http://dev.chromium.org/developers/coding-style/cocoa-dos-and-donts',
-      ),
-      True,
-    ),
-    (
-      'convertPointToBase:',
-      (
-       'The use of -[NSView convertPointToBase:] is almost certainly wrong.',
-       'Please use |convertPoint:(point) toView:nil| instead.',
-       'http://dev.chromium.org/developers/coding-style/cocoa-dos-and-donts',
-      ),
-      True,
-    ),
-    (
-      'convertRectFromBase:',
-      (
-       'The use of -[NSView convertRectFromBase:] is almost certainly wrong.',
-       'Please use |convertRect:(point) fromView:nil| instead.',
-       'http://dev.chromium.org/developers/coding-style/cocoa-dos-and-donts',
-      ),
-      True,
-    ),
-    (
-      'convertRectToBase:',
-      (
-       'The use of -[NSView convertRectToBase:] is almost certainly wrong.',
-       'Please use |convertRect:(point) toView:nil| instead.',
-       'http://dev.chromium.org/developers/coding-style/cocoa-dos-and-donts',
-      ),
-      True,
-    ),
-    (
-      'convertSizeFromBase:',
-      (
-       'The use of -[NSView convertSizeFromBase:] is almost certainly wrong.',
-       'Please use |convertSize:(point) fromView:nil| instead.',
-       'http://dev.chromium.org/developers/coding-style/cocoa-dos-and-donts',
-      ),
-      True,
-    ),
-    (
-      'convertSizeToBase:',
-      (
-       'The use of -[NSView convertSizeToBase:] is almost certainly wrong.',
-       'Please use |convertSize:(point) toView:nil| instead.',
-       'http://dev.chromium.org/developers/coding-style/cocoa-dos-and-donts',
-      ),
-      True,
-    ),
-)
-
-
-_BANNED_CPP_FUNCTIONS = (
-    # Make sure that gtest's FRIEND_TEST() macro is not used; the
-    # FRIEND_TEST_ALL_PREFIXES() macro from base/gtest_prod_util.h should be
-    # used instead since that allows for FLAKY_ and DISABLED_ prefixes.
-    (
-      'FRIEND_TEST(',
-      (
-       'Chromium code should not use gtest\'s FRIEND_TEST() macro. Include',
-       'base/gtest_prod_util.h and use FRIEND_TEST_ALL_PREFIXES() instead.',
-      ),
-      False,
-      (),
-    ),
-    (
-      'ScopedAllowIO',
-      (
-       'New code should not use ScopedAllowIO. Post a task to the blocking',
-       'pool or the FILE thread instead.',
-      ),
-      True,
-      (
-        r"^components[\\\/]breakpad[\\\/]app[\\\/]breakpad_mac\.mm$",
-        r"^content[\\\/]shell[\\\/]browser[\\\/]shell_browser_main\.cc$",
-        r"^content[\\\/]shell[\\\/]browser[\\\/]shell_message_filter\.cc$",
-        r"^net[\\\/]disk_cache[\\\/]cache_util\.cc$",
-      ),
-    ),
-    (
-      'SkRefPtr',
-      (
-        'The use of SkRefPtr is prohibited. ',
-        'Please use skia::RefPtr instead.'
-      ),
-      True,
-      (),
-    ),
-    (
-      'SkAutoRef',
-      (
-        'The indirect use of SkRefPtr via SkAutoRef is prohibited. ',
-        'Please use skia::RefPtr instead.'
-      ),
-      True,
-      (),
-    ),
-    (
-      'SkAutoTUnref',
-      (
-        'The use of SkAutoTUnref is dangerous because it implicitly ',
-        'converts to a raw pointer. Please use skia::RefPtr instead.'
-      ),
-      True,
-      (),
-    ),
-    (
-      'SkAutoUnref',
-      (
-        'The indirect use of SkAutoTUnref through SkAutoUnref is dangerous ',
-        'because it implicitly converts to a raw pointer. ',
-        'Please use skia::RefPtr instead.'
-      ),
-      True,
-      (),
-    ),
-    (
-      r'/HANDLE_EINTR\(.*close',
-      (
-       'HANDLE_EINTR(close) is invalid. If close fails with EINTR, the file',
-       'descriptor will be closed, and it is incorrect to retry the close.',
-       'Either call close directly and ignore its return value, or wrap close',
-       'in IGNORE_EINTR to use its return value. See http://crbug.com/269623'
-      ),
-      True,
-      (),
-    ),
-    (
-      r'/IGNORE_EINTR\((?!.*close)',
-      (
-       'IGNORE_EINTR is only valid when wrapping close. To wrap other system',
-       'calls, use HANDLE_EINTR. See http://crbug.com/269623',
-      ),
-      True,
-      (
-        # Files that #define IGNORE_EINTR.
-        r'^base[\\\/]posix[\\\/]eintr_wrapper\.h$',
-        r'^ppapi[\\\/]tests[\\\/]test_broker\.cc$',
-      ),
-    ),
-)
-
-
-_VALID_OS_MACROS = (
-    # Please keep sorted.
-    'OS_ANDROID',
-    'OS_BSD',
-    'OS_CAT',       # For testing.
-    'OS_CHROMEOS',
-    'OS_FREEBSD',
-    'OS_IOS',
-    'OS_LINUX',
-    'OS_MACOSX',
-    'OS_NACL',
-    'OS_OPENBSD',
-    'OS_POSIX',
-    'OS_SOLARIS',
-    'OS_WIN',
-)
+  if len(files):
+    return [ output_api.PresubmitError(
+        'Objective-C interfaces or categories are forbidden in libbase. ' +
+        'See http://groups.google.com/a/chromium.org/group/chromium-dev/' +
+        'browse_thread/thread/efb28c10435987fd',
+        files) ]
+  return []
 
 
 def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
@@ -263,19 +60,29 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   # We only scan .cc files and the like, as the declaration of
   # for-testing functions in header files are hard to distinguish from
   # calls to such functions without a proper C++ parser.
-  file_inclusion_pattern = r'.+%s' % _IMPLEMENTATION_EXTENSIONS
+  source_extensions = r'\.(cc|cpp|cxx|mm)$'
+  file_inclusion_pattern = r'.+%s' % source_extensions
+  file_exclusion_patterns = (
+      r'.*[/\\](test_|mock_).+%s' % source_extensions,
+      r'.+_test_(support|base)%s' % source_extensions,
+      r'.+_(api|browser|perf|unit|ui)?test%s' % source_extensions,
+      r'.+profile_sync_service_harness%s' % source_extensions,
+      )
+  path_exclusion_patterns = (
+      r'.*[/\\](test|tool(s)?)[/\\].*',
+      # At request of folks maintaining this folder.
+      r'chrome[/\\]browser[/\\]automation[/\\].*',
+      )
 
   base_function_pattern = r'ForTest(ing)?|for_test(ing)?'
   inclusion_pattern = input_api.re.compile(r'(%s)\s*\(' % base_function_pattern)
-  comment_pattern = input_api.re.compile(r'//.*%s' % base_function_pattern)
   exclusion_pattern = input_api.re.compile(
     r'::[A-Za-z0-9_]+(%s)|(%s)[^;]+\{' % (
       base_function_pattern, base_function_pattern))
 
   def FilterFile(affected_file):
-    black_list = (_EXCLUDED_PATHS +
-                  _TEST_CODE_EXCLUDED_PATHS +
-                  input_api.DEFAULT_BLACK_LIST)
+    black_list = (file_exclusion_patterns + path_exclusion_patterns +
+                  _EXCLUDED_PATHS + input_api.DEFAULT_BLACK_LIST)
     return input_api.FilterSourceFile(
       affected_file,
       white_list=(file_inclusion_pattern, ),
@@ -284,15 +91,21 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   problems = []
   for f in input_api.AffectedSourceFiles(FilterFile):
     local_path = f.LocalPath()
-    for line_number, line in f.ChangedContents():
+    lines = input_api.ReadFile(f).splitlines()
+    line_number = 0
+    for line in lines:
       if (inclusion_pattern.search(line) and
-          not comment_pattern.search(line) and
           not exclusion_pattern.search(line)):
         problems.append(
           '%s:%d\n    %s' % (local_path, line_number, line.strip()))
+      line_number += 1
 
   if problems:
-    return [output_api.PresubmitPromptOrNotify(_TEST_ONLY_WARNING, problems)]
+    if not input_api.is_committing:
+      return [output_api.PresubmitPromptWarning(_TEST_ONLY_WARNING, problems)]
+    else:
+      # We don't warn on commit, to avoid stopping commits going through CQ.
+      return [output_api.PresubmitNotifyResult(_TEST_ONLY_WARNING, problems)]
   else:
     return []
 
@@ -311,28 +124,11 @@ def _CheckNoIOStreamInHeaders(input_api, output_api):
 
   if len(files):
     return [ output_api.PresubmitError(
-        'Do not #include <iostream> in header files, since it inserts static '
-        'initialization into every file including the header. Instead, '
+        'Do not #include <iostream> in header files, since it inserts static ' +
+        'initialization into every file including the header. Instead, ' +
         '#include <ostream>. See http://crbug.com/94794',
         files) ]
   return []
-
-
-def _CheckNoUNIT_TESTInSourceFiles(input_api, output_api):
-  """Checks to make sure no source files use UNIT_TEST"""
-  problems = []
-  for f in input_api.AffectedFiles():
-    if (not f.LocalPath().endswith(('.cc', '.mm'))):
-      continue
-
-    for line_num, line in f.ChangedContents():
-      if 'UNIT_TEST ' in line or line.endswith('UNIT_TEST'):
-        problems.append('    %s:%d' % (f.LocalPath(), line_num))
-
-  if not problems:
-    return []
-  return [output_api.PresubmitPromptWarning('UNIT_TEST is only for headers.\n' +
-      '\n'.join(problems))]
 
 
 def _CheckNoNewWStrings(input_api, output_api):
@@ -340,24 +136,17 @@ def _CheckNoNewWStrings(input_api, output_api):
   problems = []
   for f in input_api.AffectedFiles():
     if (not f.LocalPath().endswith(('.cc', '.h')) or
-        f.LocalPath().endswith(('test.cc', '_win.cc', '_win.h'))):
+        f.LocalPath().endswith('test.cc')):
       continue
 
-    allowWString = False
     for line_num, line in f.ChangedContents():
-      if 'presubmit: allow wstring' in line:
-        allowWString = True
-      elif not allowWString and 'wstring' in line:
+      if 'wstring' in line:
         problems.append('    %s:%d' % (f.LocalPath(), line_num))
-        allowWString = False
-      else:
-        allowWString = False
 
   if not problems:
     return []
   return [output_api.PresubmitPromptWarning('New code should not use wstrings.'
-      '  If you are calling a cross-platform API that accepts a wstring, '
-      'fix the API.\n' +
+      '  If you are calling an API that accepts a wstring, fix the API.\n' +
       '\n'.join(problems))]
 
 
@@ -374,672 +163,68 @@ def _CheckNoDEPSGIT(input_api, output_api):
   return []
 
 
-def _CheckNoBannedFunctions(input_api, output_api):
-  """Make sure that banned functions are not used."""
-  warnings = []
-  errors = []
-
-  file_filter = lambda f: f.LocalPath().endswith(('.mm', '.m', '.h'))
-  for f in input_api.AffectedFiles(file_filter=file_filter):
-    for line_num, line in f.ChangedContents():
-      for func_name, message, error in _BANNED_OBJC_FUNCTIONS:
-        if func_name in line:
-          problems = warnings;
-          if error:
-            problems = errors;
-          problems.append('    %s:%d:' % (f.LocalPath(), line_num))
-          for message_line in message:
-            problems.append('      %s' % message_line)
-
-  file_filter = lambda f: f.LocalPath().endswith(('.cc', '.mm', '.h'))
-  for f in input_api.AffectedFiles(file_filter=file_filter):
-    for line_num, line in f.ChangedContents():
-      for func_name, message, error, excluded_paths in _BANNED_CPP_FUNCTIONS:
-        def IsBlacklisted(affected_file, blacklist):
-          local_path = affected_file.LocalPath()
-          for item in blacklist:
-            if input_api.re.match(item, local_path):
-              return True
-          return False
-        if IsBlacklisted(f, excluded_paths):
-          continue
-        matched = False
-        if func_name[0:1] == '/':
-          regex = func_name[1:]
-          if input_api.re.search(regex, line):
-            matched = True
-        elif func_name in line:
-            matched = True
-        if matched:
-          problems = warnings;
-          if error:
-            problems = errors;
-          problems.append('    %s:%d:' % (f.LocalPath(), line_num))
-          for message_line in message:
-            problems.append('      %s' % message_line)
-
-  result = []
-  if (warnings):
-    result.append(output_api.PresubmitPromptWarning(
-        'Banned functions were used.\n' + '\n'.join(warnings)))
-  if (errors):
-    result.append(output_api.PresubmitError(
-        'Banned functions were used.\n' + '\n'.join(errors)))
-  return result
-
-
-def _CheckNoPragmaOnce(input_api, output_api):
-  """Make sure that banned functions are not used."""
-  files = []
-  pattern = input_api.re.compile(r'^#pragma\s+once',
-                                 input_api.re.MULTILINE)
-  for f in input_api.AffectedSourceFiles(input_api.FilterSourceFile):
-    if not f.LocalPath().endswith('.h'):
-      continue
-    contents = input_api.ReadFile(f)
-    if pattern.search(contents):
-      files.append(f)
-
-  if files:
-    return [output_api.PresubmitError(
-        'Do not use #pragma once in header files.\n'
-        'See http://www.chromium.org/developers/coding-style#TOC-File-headers',
-        files)]
-  return []
-
-
-def _CheckNoTrinaryTrueFalse(input_api, output_api):
-  """Checks to make sure we don't introduce use of foo ? true : false."""
+def _CheckNoFRIEND_TEST(input_api, output_api):
+  """Make sure that gtest's FRIEND_TEST() macro is not used, the
+  FRIEND_TEST_ALL_PREFIXES() macro from base/gtest_prod_util.h should be used
+  instead since that allows for FLAKY_, FAILS_ and DISABLED_ prefixes."""
   problems = []
-  pattern = input_api.re.compile(r'\?\s*(true|false)\s*:\s*(true|false)')
-  for f in input_api.AffectedFiles():
-    if not f.LocalPath().endswith(('.cc', '.h', '.inl', '.m', '.mm')):
-      continue
 
+  file_filter = lambda f: f.LocalPath().endswith(('.cc', '.h'))
+  for f in input_api.AffectedFiles(file_filter=file_filter):
     for line_num, line in f.ChangedContents():
-      if pattern.match(line):
+      if 'FRIEND_TEST(' in line:
         problems.append('    %s:%d' % (f.LocalPath(), line_num))
 
   if not problems:
     return []
-  return [output_api.PresubmitPromptWarning(
-      'Please consider avoiding the "? true : false" pattern if possible.\n' +
-      '\n'.join(problems))]
+  return [output_api.PresubmitPromptWarning('Chromium code should not use '
+      'gtest\'s FRIEND_TEST() macro. Include base/gtest_prod_util.h and use '
+      'FRIEND_TEST_ALL_PREFIXES() instead.\n' + '\n'.join(problems))]
 
 
-def _CheckUnwantedDependencies(input_api, output_api):
-  """Runs checkdeps on #include statements added in this
-  change. Breaking - rules is an error, breaking ! rules is a
-  warning.
-  """
-  # We need to wait until we have an input_api object and use this
-  # roundabout construct to import checkdeps because this file is
-  # eval-ed and thus doesn't have __file__.
-  original_sys_path = sys.path
-  try:
-    sys.path = sys.path + [input_api.os_path.join(
-        input_api.PresubmitLocalPath(), 'tools', 'checkdeps')]
-    import checkdeps
-    from cpp_checker import CppChecker
-    from rules import Rule
-  finally:
-    # Restore sys.path to what it was before.
-    sys.path = original_sys_path
+def _CheckNoNewOldCallback(input_api, output_api):
+  """Checks to make sure we don't introduce new uses of old callbacks."""
 
-  added_includes = []
-  for f in input_api.AffectedFiles():
-    if not CppChecker.IsCppFile(f.LocalPath()):
-      continue
-
-    changed_lines = [line for line_num, line in f.ChangedContents()]
-    added_includes.append([f.LocalPath(), changed_lines])
-
-  deps_checker = checkdeps.DepsChecker(input_api.PresubmitLocalPath())
-
-  error_descriptions = []
-  warning_descriptions = []
-  for path, rule_type, rule_description in deps_checker.CheckAddedCppIncludes(
-      added_includes):
-    description_with_path = '%s\n    %s' % (path, rule_description)
-    if rule_type == Rule.DISALLOW:
-      error_descriptions.append(description_with_path)
-    else:
-      warning_descriptions.append(description_with_path)
-
-  results = []
-  if error_descriptions:
-    results.append(output_api.PresubmitError(
-        'You added one or more #includes that violate checkdeps rules.',
-        error_descriptions))
-  if warning_descriptions:
-    results.append(output_api.PresubmitPromptOrNotify(
-        'You added one or more #includes of files that are temporarily\n'
-        'allowed but being removed. Can you avoid introducing the\n'
-        '#include? See relevant DEPS file(s) for details and contacts.',
-        warning_descriptions))
-  return results
-
-
-def _CheckFilePermissions(input_api, output_api):
-  """Check that all files have their permissions properly set."""
-  args = [sys.executable, 'tools/checkperms/checkperms.py', '--root',
-          input_api.change.RepositoryRoot()]
-  for f in input_api.AffectedFiles():
-    args += ['--file', f.LocalPath()]
-  errors = []
-  (errors, stderrdata) = subprocess.Popen(args).communicate()
-
-  results = []
-  if errors:
-    results.append(output_api.PresubmitError('checkperms.py failed.',
-                                             errors))
-  return results
-
-
-def _CheckNoAuraWindowPropertyHInHeaders(input_api, output_api):
-  """Makes sure we don't include ui/aura/window_property.h
-  in header files.
-  """
-  pattern = input_api.re.compile(r'^#include\s*"ui/aura/window_property.h"')
-  errors = []
-  for f in input_api.AffectedFiles():
-    if not f.LocalPath().endswith('.h'):
-      continue
-    for line_num, line in f.ChangedContents():
-      if pattern.match(line):
-        errors.append('    %s:%d' % (f.LocalPath(), line_num))
-
-  results = []
-  if errors:
-    results.append(output_api.PresubmitError(
-      'Header files should not include ui/aura/window_property.h', errors))
-  return results
-
-
-def _CheckIncludeOrderForScope(scope, input_api, file_path, changed_linenums):
-  """Checks that the lines in scope occur in the right order.
-
-  1. C system files in alphabetical order
-  2. C++ system files in alphabetical order
-  3. Project's .h files
-  """
-
-  c_system_include_pattern = input_api.re.compile(r'\s*#include <.*\.h>')
-  cpp_system_include_pattern = input_api.re.compile(r'\s*#include <.*>')
-  custom_include_pattern = input_api.re.compile(r'\s*#include ".*')
-
-  C_SYSTEM_INCLUDES, CPP_SYSTEM_INCLUDES, CUSTOM_INCLUDES = range(3)
-
-  state = C_SYSTEM_INCLUDES
-
-  previous_line = ''
-  previous_line_num = 0
-  problem_linenums = []
-  for line_num, line in scope:
-    if c_system_include_pattern.match(line):
-      if state != C_SYSTEM_INCLUDES:
-        problem_linenums.append((line_num, previous_line_num))
-      elif previous_line and previous_line > line:
-        problem_linenums.append((line_num, previous_line_num))
-    elif cpp_system_include_pattern.match(line):
-      if state == C_SYSTEM_INCLUDES:
-        state = CPP_SYSTEM_INCLUDES
-      elif state == CUSTOM_INCLUDES:
-        problem_linenums.append((line_num, previous_line_num))
-      elif previous_line and previous_line > line:
-        problem_linenums.append((line_num, previous_line_num))
-    elif custom_include_pattern.match(line):
-      if state != CUSTOM_INCLUDES:
-        state = CUSTOM_INCLUDES
-      elif previous_line and previous_line > line:
-        problem_linenums.append((line_num, previous_line_num))
-    else:
-      problem_linenums.append(line_num)
-    previous_line = line
-    previous_line_num = line_num
-
-  warnings = []
-  for (line_num, previous_line_num) in problem_linenums:
-    if line_num in changed_linenums or previous_line_num in changed_linenums:
-      warnings.append('    %s:%d' % (file_path, line_num))
-  return warnings
-
-
-def _CheckIncludeOrderInFile(input_api, f, changed_linenums):
-  """Checks the #include order for the given file f."""
-
-  system_include_pattern = input_api.re.compile(r'\s*#include \<.*')
-  # Exclude the following includes from the check:
-  # 1) #include <.../...>, e.g., <sys/...> includes often need to appear in a
-  # specific order.
-  # 2) <atlbase.h>, "build/build_config.h"
-  excluded_include_pattern = input_api.re.compile(
-      r'\s*#include (\<.*/.*|\<atlbase\.h\>|"build/build_config.h")')
-  custom_include_pattern = input_api.re.compile(r'\s*#include "(?P<FILE>.*)"')
-  # Match the final or penultimate token if it is xxxtest so we can ignore it
-  # when considering the special first include.
-  test_file_tag_pattern = input_api.re.compile(
-    r'_[a-z]+test(?=(_[a-zA-Z0-9]+)?\.)')
-  if_pattern = input_api.re.compile(
-      r'\s*#\s*(if|elif|else|endif|define|undef).*')
-  # Some files need specialized order of includes; exclude such files from this
-  # check.
-  uncheckable_includes_pattern = input_api.re.compile(
-      r'\s*#include '
-      '("ipc/.*macros\.h"|<windows\.h>|".*gl.*autogen.h")\s*')
-
-  contents = f.NewContents()
-  warnings = []
-  line_num = 0
-
-  # Handle the special first include. If the first include file is
-  # some/path/file.h, the corresponding including file can be some/path/file.cc,
-  # some/other/path/file.cc, some/path/file_platform.cc, some/path/file-suffix.h
-  # etc. It's also possible that no special first include exists.
-  # If the included file is some/path/file_platform.h the including file could
-  # also be some/path/file_xxxtest_platform.h.
-  including_file_base_name = test_file_tag_pattern.sub(
-    '', input_api.os_path.basename(f.LocalPath()))
-
-  for line in contents:
-    line_num += 1
-    if system_include_pattern.match(line):
-      # No special first include -> process the line again along with normal
-      # includes.
-      line_num -= 1
-      break
-    match = custom_include_pattern.match(line)
-    if match:
-      match_dict = match.groupdict()
-      header_basename = test_file_tag_pattern.sub(
-        '', input_api.os_path.basename(match_dict['FILE'])).replace('.h', '')
-
-      if header_basename not in including_file_base_name:
-        # No special first include -> process the line again along with normal
-        # includes.
-        line_num -= 1
-      break
-
-  # Split into scopes: Each region between #if and #endif is its own scope.
-  scopes = []
-  current_scope = []
-  for line in contents[line_num:]:
-    line_num += 1
-    if uncheckable_includes_pattern.match(line):
-      return []
-    if if_pattern.match(line):
-      scopes.append(current_scope)
-      current_scope = []
-    elif ((system_include_pattern.match(line) or
-           custom_include_pattern.match(line)) and
-          not excluded_include_pattern.match(line)):
-      current_scope.append((line_num, line))
-  scopes.append(current_scope)
-
-  for scope in scopes:
-    warnings.extend(_CheckIncludeOrderForScope(scope, input_api, f.LocalPath(),
-                                               changed_linenums))
-  return warnings
-
-
-def _CheckIncludeOrder(input_api, output_api):
-  """Checks that the #include order is correct.
-
-  1. The corresponding header for source files.
-  2. C system files in alphabetical order
-  3. C++ system files in alphabetical order
-  4. Project's .h files in alphabetical order
-
-  Each region separated by #if, #elif, #else, #endif, #define and #undef follows
-  these rules separately.
-  """
-
-  warnings = []
-  for f in input_api.AffectedFiles():
-    if f.LocalPath().endswith(('.cc', '.h')):
-      changed_linenums = set(line_num for line_num, _ in f.ChangedContents())
-      warnings.extend(_CheckIncludeOrderInFile(input_api, f, changed_linenums))
-
-  results = []
-  if warnings:
-    results.append(output_api.PresubmitPromptOrNotify(_INCLUDE_ORDER_WARNING,
-                                                      warnings))
-  return results
-
-
-def _CheckForVersionControlConflictsInFile(input_api, f):
-  pattern = input_api.re.compile('^(?:<<<<<<<|>>>>>>>) |^=======$')
-  errors = []
-  for line_num, line in f.ChangedContents():
-    if pattern.match(line):
-      errors.append('    %s:%d %s' % (f.LocalPath(), line_num, line))
-  return errors
-
-
-def _CheckForVersionControlConflicts(input_api, output_api):
-  """Usually this is not intentional and will cause a compile failure."""
-  errors = []
-  for f in input_api.AffectedFiles():
-    errors.extend(_CheckForVersionControlConflictsInFile(input_api, f))
-
-  results = []
-  if errors:
-    results.append(output_api.PresubmitError(
-      'Version control conflict markers found, please resolve.', errors))
-  return results
-
-
-def _CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api):
-  def FilterFile(affected_file):
-    """Filter function for use with input_api.AffectedSourceFiles,
-    below.  This filters out everything except non-test files from
-    top-level directories that generally speaking should not hard-code
-    service URLs (e.g. src/android_webview/, src/content/ and others).
+  def HasOldCallbackKeywords(line):
+    """Returns True if a line of text contains keywords that indicate the use
+    of the old callback system.
     """
-    return input_api.FilterSourceFile(
-      affected_file,
-      white_list=(r'^(android_webview|base|content|net)[\\\/].*', ),
-      black_list=(_EXCLUDED_PATHS +
-                  _TEST_CODE_EXCLUDED_PATHS +
-                  input_api.DEFAULT_BLACK_LIST))
+    return ('NewRunnableMethod' in line or
+            'NewCallback' in line or
+            input_api.re.search(r'\bCallback\d<', line) or
+            input_api.re.search(r'\bpublic Task\b', line) or
+            'public CancelableTask' in line)
 
-  base_pattern = '"[^"]*google\.com[^"]*"'
-  comment_pattern = input_api.re.compile('//.*%s' % base_pattern)
-  pattern = input_api.re.compile(base_pattern)
-  problems = []  # items are (filename, line_number, line)
-  for f in input_api.AffectedSourceFiles(FilterFile):
-    for line_num, line in f.ChangedContents():
-      if not comment_pattern.search(line) and pattern.search(line):
-        problems.append((f.LocalPath(), line_num, line))
-
-  if problems:
-    return [output_api.PresubmitPromptOrNotify(
-        'Most layers below src/chrome/ should not hardcode service URLs.\n'
-        'Are you sure this is correct? (Contact: joi@chromium.org)',
-        ['  %s:%d:  %s' % (
-            problem[0], problem[1], problem[2]) for problem in problems])]
-  else:
-    return []
-
-
-def _CheckNoAbbreviationInPngFileName(input_api, output_api):
-  """Makes sure there are no abbreviations in the name of PNG files.
-  """
-  pattern = input_api.re.compile(r'.*_[a-z]_.*\.png$|.*_[a-z]\.png$')
-  errors = []
-  for f in input_api.AffectedFiles(include_deletes=False):
-    if pattern.match(f.LocalPath()):
-      errors.append('    %s' % f.LocalPath())
-
-  results = []
-  if errors:
-    results.append(output_api.PresubmitError(
-        'The name of PNG files should not have abbreviations. \n'
-        'Use _hover.png, _center.png, instead of _h.png, _c.png.\n'
-        'Contact oshima@chromium.org if you have questions.', errors))
-  return results
-
-
-def _DepsFilesToCheck(re, changed_lines):
-  """Helper method for _CheckAddedDepsHaveTargetApprovals. Returns
-  a set of DEPS entries that we should look up."""
-  # We ignore deps entries on auto-generated directories.
-  AUTO_GENERATED_DIRS = ['grit', 'jni']
-
-  # This pattern grabs the path without basename in the first
-  # parentheses, and the basename (if present) in the second. It
-  # relies on the simple heuristic that if there is a basename it will
-  # be a header file ending in ".h".
-  pattern = re.compile(
-      r"""['"]\+([^'"]+?)(/[a-zA-Z0-9_]+\.h)?['"].*""")
-  results = set()
-  for changed_line in changed_lines:
-    m = pattern.match(changed_line)
-    if m:
-      path = m.group(1)
-      if path.split('/')[0] not in AUTO_GENERATED_DIRS:
-        results.add('%s/DEPS' % m.group(1))
-  return results
-
-
-def _CheckAddedDepsHaveTargetApprovals(input_api, output_api):
-  """When a dependency prefixed with + is added to a DEPS file, we
-  want to make sure that the change is reviewed by an OWNER of the
-  target file or directory, to avoid layering violations from being
-  introduced. This check verifies that this happens.
-  """
-  changed_lines = set()
-  for f in input_api.AffectedFiles():
-    filename = input_api.os_path.basename(f.LocalPath())
-    if filename == 'DEPS':
-      changed_lines |= set(line.strip()
-                           for line_num, line
-                           in f.ChangedContents())
-  if not changed_lines:
-    return []
-
-  virtual_depended_on_files = _DepsFilesToCheck(input_api.re, changed_lines)
-  if not virtual_depended_on_files:
-    return []
-
-  if input_api.is_committing:
-    if input_api.tbr:
-      return [output_api.PresubmitNotifyResult(
-          '--tbr was specified, skipping OWNERS check for DEPS additions')]
-    if not input_api.change.issue:
-      return [output_api.PresubmitError(
-          "DEPS approval by OWNERS check failed: this change has "
-          "no Rietveld issue number, so we can't check it for approvals.")]
-    output = output_api.PresubmitError
-  else:
-    output = output_api.PresubmitNotifyResult
-
-  owners_db = input_api.owners_db
-  owner_email, reviewers = input_api.canned_checks._RietveldOwnerAndReviewers(
-      input_api,
-      owners_db.email_regexp,
-      approval_needed=input_api.is_committing)
-
-  owner_email = owner_email or input_api.change.author_email
-
-  reviewers_plus_owner = set(reviewers)
-  if owner_email:
-    reviewers_plus_owner.add(owner_email)
-  missing_files = owners_db.files_not_covered_by(virtual_depended_on_files,
-                                                 reviewers_plus_owner)
-  unapproved_dependencies = ["'+%s'," % path[:-len('/DEPS')]
-                             for path in missing_files]
-
-  if unapproved_dependencies:
-    output_list = [
-      output('Missing LGTM from OWNERS of directories added to DEPS:\n    %s' %
-             '\n    '.join(sorted(unapproved_dependencies)))]
-    if not input_api.is_committing:
-      suggested_owners = owners_db.reviewers_for(missing_files, owner_email)
-      output_list.append(output(
-          'Suggested missing target path OWNERS:\n    %s' %
-          '\n    '.join(suggested_owners or [])))
-    return output_list
-
-  return []
-
-
-def _CheckSpamLogging(input_api, output_api):
-  file_inclusion_pattern = r'.+%s' % _IMPLEMENTATION_EXTENSIONS
-  black_list = (_EXCLUDED_PATHS +
-                _TEST_CODE_EXCLUDED_PATHS +
-                input_api.DEFAULT_BLACK_LIST +
-                (r"^base[\\\/]logging\.h$",
-                 r"^chrome[\\\/]app[\\\/]chrome_main_delegate\.cc$",
-                 r"^chrome[\\\/]browser[\\\/]chrome_browser_main\.cc$",
-                 r"^chrome[\\\/]browser[\\\/]ui[\\\/]startup[\\\/]"
-                     r"startup_browser_creator\.cc$",
-                 r"^chrome[\\\/]installer[\\\/]setup[\\\/].*",
-                 r"^chrome[\\\/]renderer[\\\/]extensions[\\\/]"
-                     r"logging_native_handler\.cc$",
-                 r"^remoting[\\\/]base[\\\/]logging\.h$",
-                 r"^remoting[\\\/]host[\\\/].*",
-                 r"^sandbox[\\\/]linux[\\\/].*",
-                 r"^ui[\\\/]aura[\\\/]bench[\\\/]bench_main\.cc$",))
-  source_file_filter = lambda x: input_api.FilterSourceFile(
-      x, white_list=(file_inclusion_pattern,), black_list=black_list)
-
-  log_info = []
-  printf = []
-
-  for f in input_api.AffectedSourceFiles(source_file_filter):
-    contents = input_api.ReadFile(f, 'rb')
-    if re.search(r"\bD?LOG\s*\(\s*INFO\s*\)", contents):
-      log_info.append(f.LocalPath())
-    elif re.search(r"\bD?LOG_IF\s*\(\s*INFO\s*,", contents):
-      log_info.append(f.LocalPath())
-
-    if re.search(r"\bprintf\(", contents):
-      printf.append(f.LocalPath())
-    elif re.search(r"\bfprintf\((stdout|stderr)", contents):
-      printf.append(f.LocalPath())
-
-  if log_info:
-    return [output_api.PresubmitError(
-      'These files spam the console log with LOG(INFO):',
-      items=log_info)]
-  if printf:
-    return [output_api.PresubmitError(
-      'These files spam the console log with printf/fprintf:',
-      items=printf)]
-  return []
-
-
-def _CheckForAnonymousVariables(input_api, output_api):
-  """These types are all expected to hold locks while in scope and
-     so should never be anonymous (which causes them to be immediately
-     destroyed)."""
-  they_who_must_be_named = [
-    'base::AutoLock',
-    'base::AutoReset',
-    'base::AutoUnlock',
-    'SkAutoAlphaRestore',
-    'SkAutoBitmapShaderInstall',
-    'SkAutoBlitterChoose',
-    'SkAutoBounderCommit',
-    'SkAutoCallProc',
-    'SkAutoCanvasRestore',
-    'SkAutoCommentBlock',
-    'SkAutoDescriptor',
-    'SkAutoDisableDirectionCheck',
-    'SkAutoDisableOvalCheck',
-    'SkAutoFree',
-    'SkAutoGlyphCache',
-    'SkAutoHDC',
-    'SkAutoLockColors',
-    'SkAutoLockPixels',
-    'SkAutoMalloc',
-    'SkAutoMaskFreeImage',
-    'SkAutoMutexAcquire',
-    'SkAutoPathBoundsUpdate',
-    'SkAutoPDFRelease',
-    'SkAutoRasterClipValidate',
-    'SkAutoRef',
-    'SkAutoTime',
-    'SkAutoTrace',
-    'SkAutoUnref',
-  ]
-  anonymous = r'(%s)\s*[({]' % '|'.join(they_who_must_be_named)
-  # bad: base::AutoLock(lock.get());
-  # not bad: base::AutoLock lock(lock.get());
-  bad_pattern = input_api.re.compile(anonymous)
-  # good: new base::AutoLock(lock.get())
-  good_pattern = input_api.re.compile(r'\bnew\s*' + anonymous)
-  errors = []
-
-  for f in input_api.AffectedFiles():
-    if not f.LocalPath().endswith(('.cc', '.h', '.inl', '.m', '.mm')):
+  problems = []
+  file_filter = lambda f: f.LocalPath().endswith(('.cc', '.h'))
+  for f in input_api.AffectedFiles(file_filter=file_filter):
+    if not any(HasOldCallbackKeywords(line) for line in f.NewContents()):
       continue
-    for linenum, line in f.ChangedContents():
-      if bad_pattern.search(line) and not good_pattern.search(line):
-        errors.append('%s:%d' % (f.LocalPath(), linenum))
+    for line_num, line in f.ChangedContents():
+      if HasOldCallbackKeywords(line):
+        problems.append('    %s:%d' % (f.LocalPath(), line_num))
 
-  if errors:
-    return [output_api.PresubmitError(
-      'These lines create anonymous variables that need to be named:',
-      items=errors)]
-  return []
-
-
-def _CheckCygwinShell(input_api, output_api):
-  source_file_filter = lambda x: input_api.FilterSourceFile(
-      x, white_list=(r'.+\.(gyp|gypi)$',))
-  cygwin_shell = []
-
-  for f in input_api.AffectedSourceFiles(source_file_filter):
-    for linenum, line in f.ChangedContents():
-      if 'msvs_cygwin_shell' in line:
-        cygwin_shell.append(f.LocalPath())
-        break
-
-  if cygwin_shell:
-    return [output_api.PresubmitError(
-      'These files should not use msvs_cygwin_shell (the default is 0):',
-      items=cygwin_shell)]
-  return []
-
-
-def _CheckJavaStyle(input_api, output_api):
-  """Runs checkstyle on changed java files and returns errors if any exist."""
-  original_sys_path = sys.path
-  try:
-    sys.path = sys.path + [input_api.os_path.join(
-        input_api.PresubmitLocalPath(), 'tools', 'android', 'checkstyle')]
-    import checkstyle
-  finally:
-    # Restore sys.path to what it was before.
-    sys.path = original_sys_path
-
-  return checkstyle.RunCheckstyle(
-      input_api, output_api, 'tools/android/checkstyle/chromium-style-5.0.xml')
+  if not problems:
+    return []
+  return [output_api.PresubmitPromptWarning('The old callback system is '
+      'deprecated. If possible, use base::Bind and base::Callback instead.\n' +
+      '\n'.join(problems))]
 
 
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
   results = []
   results.extend(input_api.canned_checks.PanProjectChecks(
-      input_api, output_api,
-      excluded_paths=_EXCLUDED_PATHS + _TESTRUNNER_PATHS))
+      input_api, output_api, excluded_paths=_EXCLUDED_PATHS))
+  results.extend(_CheckNoInterfacesInBase(input_api, output_api))
   results.extend(_CheckAuthorizedAuthor(input_api, output_api))
   results.extend(
-      _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api))
+    _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api))
   results.extend(_CheckNoIOStreamInHeaders(input_api, output_api))
-  results.extend(_CheckNoUNIT_TESTInSourceFiles(input_api, output_api))
   results.extend(_CheckNoNewWStrings(input_api, output_api))
   results.extend(_CheckNoDEPSGIT(input_api, output_api))
-  results.extend(_CheckNoBannedFunctions(input_api, output_api))
-  results.extend(_CheckNoPragmaOnce(input_api, output_api))
-  results.extend(_CheckNoTrinaryTrueFalse(input_api, output_api))
-  results.extend(_CheckUnwantedDependencies(input_api, output_api))
-  results.extend(_CheckFilePermissions(input_api, output_api))
-  results.extend(_CheckNoAuraWindowPropertyHInHeaders(input_api, output_api))
-  results.extend(_CheckIncludeOrder(input_api, output_api))
-  results.extend(_CheckForVersionControlConflicts(input_api, output_api))
-  results.extend(_CheckPatchFiles(input_api, output_api))
-  results.extend(_CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api))
-  results.extend(_CheckNoAbbreviationInPngFileName(input_api, output_api))
-  results.extend(_CheckForInvalidOSMacros(input_api, output_api))
-  results.extend(_CheckAddedDepsHaveTargetApprovals(input_api, output_api))
-  results.extend(
-      input_api.canned_checks.CheckChangeHasNoTabs(
-          input_api,
-          output_api,
-          source_file_filter=lambda x: x.LocalPath().endswith('.grd')))
-  results.extend(_CheckSpamLogging(input_api, output_api))
-  results.extend(_CheckForAnonymousVariables(input_api, output_api))
-  results.extend(_CheckCygwinShell(input_api, output_api))
-  results.extend(_CheckJavaStyle(input_api, output_api))
-
-  if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
-    results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
-        input_api, output_api,
-        input_api.PresubmitLocalPath(),
-        whitelist=[r'^PRESUBMIT_test\.py$']))
+  results.extend(_CheckNoFRIEND_TEST(input_api, output_api))
+  results.extend(_CheckNoNewOldCallback(input_api, output_api))
   return results
 
 
@@ -1104,8 +289,9 @@ def _CheckAuthorizedAuthor(input_api, output_api):
       input_api.re.match(r'[^#]+\s+\<(.+?)\>\s*$', line)
       for line in open(authors_path))
   valid_authors = [item.group(1).lower() for item in valid_authors if item]
+  if input_api.verbose:
+    print 'Valid authors are %s' % ', '.join(valid_authors)
   if not any(fnmatch.fnmatch(author.lower(), valid) for valid in valid_authors):
-    input_api.logging.info('Valid authors are %s', ', '.join(valid_authors))
     return [output_api.PresubmitPromptWarning(
         ('%s is not in AUTHORS file. If you are a new contributor, please visit'
         '\n'
@@ -1116,232 +302,10 @@ def _CheckAuthorizedAuthor(input_api, output_api):
   return []
 
 
-def _CheckPatchFiles(input_api, output_api):
-  problems = [f.LocalPath() for f in input_api.AffectedFiles()
-      if f.LocalPath().endswith(('.orig', '.rej'))]
-  if problems:
-    return [output_api.PresubmitError(
-        "Don't commit .rej and .orig files.", problems)]
-  else:
-    return []
-
-
-def _DidYouMeanOSMacro(bad_macro):
-  try:
-    return {'A': 'OS_ANDROID',
-            'B': 'OS_BSD',
-            'C': 'OS_CHROMEOS',
-            'F': 'OS_FREEBSD',
-            'L': 'OS_LINUX',
-            'M': 'OS_MACOSX',
-            'N': 'OS_NACL',
-            'O': 'OS_OPENBSD',
-            'P': 'OS_POSIX',
-            'S': 'OS_SOLARIS',
-            'W': 'OS_WIN'}[bad_macro[3].upper()]
-  except KeyError:
-    return ''
-
-
-def _CheckForInvalidOSMacrosInFile(input_api, f):
-  """Check for sensible looking, totally invalid OS macros."""
-  preprocessor_statement = input_api.re.compile(r'^\s*#')
-  os_macro = input_api.re.compile(r'defined\((OS_[^)]+)\)')
-  results = []
-  for lnum, line in f.ChangedContents():
-    if preprocessor_statement.search(line):
-      for match in os_macro.finditer(line):
-        if not match.group(1) in _VALID_OS_MACROS:
-          good = _DidYouMeanOSMacro(match.group(1))
-          did_you_mean = ' (did you mean %s?)' % good if good else ''
-          results.append('    %s:%d %s%s' % (f.LocalPath(),
-                                             lnum,
-                                             match.group(1),
-                                             did_you_mean))
-  return results
-
-
-def _CheckForInvalidOSMacros(input_api, output_api):
-  """Check all affected files for invalid OS macros."""
-  bad_macros = []
-  for f in input_api.AffectedFiles():
-    if not f.LocalPath().endswith(('.py', '.js', '.html', '.css')):
-      bad_macros.extend(_CheckForInvalidOSMacrosInFile(input_api, f))
-
-  if not bad_macros:
-    return []
-
-  return [output_api.PresubmitError(
-      'Possibly invalid OS macro[s] found. Please fix your code\n'
-      'or add your macro to src/PRESUBMIT.py.', bad_macros)]
-
-
 def CheckChangeOnUpload(input_api, output_api):
   results = []
   results.extend(_CommonChecks(input_api, output_api))
   return results
-
-
-def GetDefaultTryConfigs(bots=None):
-  """Returns a list of ('bot', set(['tests']), optionally filtered by [bots].
-
-  To add tests to this list, they MUST be in the the corresponding master's
-  gatekeeper config. For example, anything on master.chromium would be closed by
-  tools/build/masters/master.chromium/master_gatekeeper_cfg.py.
-
-  If 'bots' is specified, will only return configurations for bots in that list.
-  """
-
-  standard_tests = [
-      'base_unittests',
-      'browser_tests',
-      'cacheinvalidation_unittests',
-      'check_deps',
-      'check_deps2git',
-      'content_browsertests',
-      'content_unittests',
-      'crypto_unittests',
-      #'gfx_unittests',
-      'gpu_unittests',
-      'interactive_ui_tests',
-      'ipc_tests',
-      'jingle_unittests',
-      'media_unittests',
-      'net_unittests',
-      'ppapi_unittests',
-      'printing_unittests',
-      'sql_unittests',
-      'sync_unit_tests',
-      'unit_tests',
-      # Broken in release.
-      #'url_unittests',
-      #'webkit_unit_tests',
-  ]
-
-  linux_aura_tests = [
-      'app_list_unittests',
-      'aura_unittests',
-      'browser_tests',
-      'compositor_unittests',
-      'content_browsertests',
-      'content_unittests',
-      'events_unittests',
-      'interactive_ui_tests',
-      'unit_tests',
-  ]
-  builders_and_tests = {
-      # TODO(maruel): Figure out a way to run 'sizes' where people can
-      # effectively update the perf expectation correctly.  This requires a
-      # clobber=True build running 'sizes'. 'sizes' is not accurate with
-      # incremental build. Reference:
-      # http://chromium.org/developers/tree-sheriffs/perf-sheriffs.
-      # TODO(maruel): An option would be to run 'sizes' but not count a failure
-      # of this step as a try job failure.
-      'android_aosp': ['compile'],
-      'android_clang_dbg': ['slave_steps'],
-      'android_dbg': ['slave_steps'],
-      'cros_x86': ['defaulttests'],
-      'ios_dbg_simulator': [
-          'compile',
-          'base_unittests',
-          'content_unittests',
-          'crypto_unittests',
-          'url_unittests',
-          'net_unittests',
-          'sql_unittests',
-          'ui_unittests',
-      ],
-      'ios_rel_device': ['compile'],
-      'linux_asan': ['defaulttests'],
-      #TODO(stip): Change the name of this builder to reflect that it's release.
-      'linux_aura': linux_aura_tests,
-      'linux_chromeos_asan': ['defaulttests'],
-      'linux_chromeos_clang': ['compile'],
-      # Note: It is a Release builder even if its name convey otherwise.
-      'linux_chromeos': standard_tests + [
-          'app_list_unittests',
-          'aura_unittests',
-          'ash_unittests',
-          'chromeos_unittests',
-          'components_unittests',
-          'dbus_unittests',
-          'device_unittests',
-          'events_unittests',
-          'google_apis_unittests',
-          'sandbox_linux_unittests',
-      ],
-      'linux_clang': ['compile'],
-      'linux_rel': standard_tests + [
-          'cc_unittests',
-          'chromedriver_unittests',
-          'components_unittests',
-          'google_apis_unittests',
-          'nacl_integration',
-          'remoting_unittests',
-          'sandbox_linux_unittests',
-          'sync_integration_tests',
-      ],
-      'mac': ['compile'],
-      'mac_rel': standard_tests + [
-          'app_list_unittests',
-          'cc_unittests',
-          'chromedriver_unittests',
-          'components_unittests',
-          'google_apis_unittests',
-          'message_center_unittests',
-          'nacl_integration',
-          'remoting_unittests',
-          'sync_integration_tests',
-          'telemetry_unittests',
-      ],
-      'win': ['compile'],
-      'win_rel': standard_tests + [
-          'app_list_unittests',
-          'ash_unittests',
-          'aura_unittests',
-          'cc_unittests',
-          'chrome_elf_unittests',
-          'chromedriver_unittests',
-          'components_unittests',
-          'compositor_unittests',
-          'events_unittests',
-          'google_apis_unittests',
-          'installer_util_unittests',
-          'mini_installer_test',
-          'nacl_integration',
-          'remoting_unittests',
-          'sync_integration_tests',
-          'telemetry_unittests',
-          'views_unittests',
-      ],
-      'win_x64_rel': [
-          'base_unittests',
-      ],
-  }
-
-  swarm_enabled_builders = (
-      'linux_rel',
-      'mac_rel',
-      'win_rel',
-  )
-
-  swarm_enabled_tests = (
-      'base_unittests',
-      'browser_tests',
-      'interactive_ui_tests',
-      'net_unittests',
-      'unit_tests',
-  )
-
-  for bot in builders_and_tests:
-    if bot in swarm_enabled_builders:
-      builders_and_tests[bot] = [x + '_swarm' if x in swarm_enabled_tests else x
-                                 for x in builders_and_tests[bot]]
-
-  if bots:
-    return [(bot, set(builders_and_tests[bot])) for bot in bots]
-  else:
-    return [(bot, set(tests)) for bot, tests in builders_and_tests.iteritems()]
 
 
 def CheckChangeOnCommit(input_api, output_api):
@@ -1357,10 +321,11 @@ def CheckChangeOnCommit(input_api, output_api):
       json_url='http://chromium-status.appspot.com/current?format=json'))
   results.extend(input_api.canned_checks.CheckRietveldTryJobExecution(input_api,
       output_api, 'http://codereview.chromium.org',
-      ('win_rel', 'linux_rel', 'mac_rel, win:compile'),
-      'tryserver@chromium.org'))
+      ('win_rel', 'linux_rel', 'mac_rel'), 'tryserver@chromium.org'))
 
   results.extend(input_api.canned_checks.CheckChangeHasBugField(
+      input_api, output_api))
+  results.extend(input_api.canned_checks.CheckChangeHasTestField(
       input_api, output_api))
   results.extend(input_api.canned_checks.CheckChangeHasDescription(
       input_api, output_api))
@@ -1369,66 +334,12 @@ def CheckChangeOnCommit(input_api, output_api):
 
 
 def GetPreferredTrySlaves(project, change):
-  files = change.LocalPaths()
-
-  if not files or all(re.search(r'[\\/]OWNERS$', f) for f in files):
-    return []
-
-  if all(re.search('\.(m|mm)$|(^|[/_])mac[/_.]', f) for f in files):
-    return GetDefaultTryConfigs(['mac', 'mac_rel'])
-  if all(re.search('(^|[/_])win[/_.]', f) for f in files):
-    return GetDefaultTryConfigs(['win', 'win_rel'])
-  if all(re.search('(^|[/_])android[/_.]', f) for f in files):
-    return GetDefaultTryConfigs([
-        'android_aosp',
-        'android_clang_dbg',
-        'android_dbg',
-    ])
-  if all(re.search('^native_client_sdk', f) for f in files):
-    return GetDefaultTryConfigs([
-        'linux_nacl_sdk',
-        'mac_nacl_sdk',
-        'win_nacl_sdk',
-    ])
-  if all(re.search('[/_]ios[/_.]', f) for f in files):
-    return GetDefaultTryConfigs(['ios_rel_device', 'ios_dbg_simulator'])
-
-  trybots = GetDefaultTryConfigs([
-      'android_clang_dbg',
-      'android_dbg',
-      'ios_dbg_simulator',
-      'ios_rel_device',
-      'linux_aura',
-      'linux_asan',
-      'linux_chromeos',
-      'linux_clang',
-      'linux_rel',
-      'mac',
-      'mac_rel',
-      'win',
-      'win_rel',
-      'win_x64_rel',
-  ])
-
-  # Match things like path/aura/file.cc and path/file_aura.cc.
-  # Same for chromeos.
-  if any(re.search('[/_](aura|chromeos)', f) for f in files):
-    trybots.extend(GetDefaultTryConfigs([
-        'linux_chromeos_asan', 'linux_chromeos_clang']))
-
-  # If there are gyp changes to base, build, or chromeos, run a full cros build
-  # in addition to the shorter linux_chromeos build. Changes to high level gyp
-  # files have a much higher chance of breaking the cros build, which is
-  # differnt from the linux_chromeos build that most chrome developers test
-  # with.
-  if any(re.search('^(base|build|chromeos).*\.gypi?$', f) for f in files):
-    trybots.extend(GetDefaultTryConfigs(['cros_x86']))
-
-  # The AOSP bot doesn't build the chrome/ layer, so ignore any changes to it
-  # unless they're .gyp(i) files as changes to those files can break the gyp
-  # step on that bot.
-  if (not all(re.search('^chrome', f) for f in files) or
-      any(re.search('\.gypi?$', f) for f in files)):
-    trybots.extend(GetDefaultTryConfigs(['android_aosp']))
-
-  return trybots
+  only_objc_files = all(
+      f.LocalPath().endswith(('.mm', '.m')) for f in change.AffectedFiles())
+  if only_objc_files:
+    return ['mac_rel']
+  preferred = ['win_rel', 'linux_rel', 'mac_rel']
+  aura_re = '_aura[^/]*[.][^/]*'
+  if any(re.search(aura_re, f.LocalPath()) for f in change.AffectedFiles()):
+    preferred.append('linux_chromeos_aura:compile')
+  return preferred

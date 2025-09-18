@@ -5,14 +5,13 @@
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
-#include "chrome/browser/profiles/profile.h"
-#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
+#include "chrome/browser/profiles/profile_dependency_manager.h"
 
 // static
 CloudPrintProxyService* CloudPrintProxyServiceFactory::GetForProfile(
     Profile* profile) {
   return static_cast<CloudPrintProxyService*>(
-      GetInstance()->GetServiceForBrowserContext(profile, true));
+      GetInstance()->GetServiceForProfile(profile, true));
 }
 
 CloudPrintProxyServiceFactory* CloudPrintProxyServiceFactory::GetInstance() {
@@ -20,24 +19,21 @@ CloudPrintProxyServiceFactory* CloudPrintProxyServiceFactory::GetInstance() {
 }
 
 CloudPrintProxyServiceFactory::CloudPrintProxyServiceFactory()
-    : BrowserContextKeyedServiceFactory(
-        "CloudPrintProxyService",
-        BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("CloudPrintProxyService",
+                                 ProfileDependencyManager::GetInstance()) {
 }
 
 CloudPrintProxyServiceFactory::~CloudPrintProxyServiceFactory() {
 }
 
-BrowserContextKeyedService*
-CloudPrintProxyServiceFactory::BuildServiceInstanceFor(
-    content::BrowserContext* profile) const {
-  CloudPrintProxyService* service =
-      new CloudPrintProxyService(static_cast<Profile*>(profile));
+ProfileKeyedService* CloudPrintProxyServiceFactory::BuildServiceInstanceFor(
+    Profile* profile) const {
+  CloudPrintProxyService* service = new CloudPrintProxyService(profile);
   service->Initialize();
 
   return service;
 }
 
-bool CloudPrintProxyServiceFactory::ServiceIsNULLWhileTesting() const {
+bool CloudPrintProxyServiceFactory::ServiceIsNULLWhileTesting() {
   return true;
 }

@@ -4,6 +4,7 @@
 
 #ifndef BASE_SYNCHRONIZATION_CANCELLATION_FLAG_H_
 #define BASE_SYNCHRONIZATION_CANCELLATION_FLAG_H_
+#pragma once
 
 #include "base/base_export.h"
 #include "base/atomicops.h"

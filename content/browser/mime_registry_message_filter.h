@@ -5,30 +5,28 @@
 #ifndef CONTENT_BROWSER_MIME_REGISTRY_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_MIME_REGISTRY_MESSAGE_FILTER_H_
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "content/public/browser/browser_message_filter.h"
 
-namespace content {
-
-class MimeRegistryMessageFilter : public BrowserMessageFilter {
+class MimeRegistryMessageFilter : public content::BrowserMessageFilter {
  public:
   MimeRegistryMessageFilter();
 
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
-      BrowserThread::ID* thread) OVERRIDE;
+      content::BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
  private:
   virtual ~MimeRegistryMessageFilter();
 
-  void OnGetMimeTypeFromExtension(const base::FilePath::StringType& ext,
+  void OnGetMimeTypeFromExtension(const FilePath::StringType& ext,
                                   std::string* mime_type);
-  void OnGetMimeTypeFromFile(const base::FilePath& file_path,
+  void OnGetMimeTypeFromFile(const FilePath& file_path,
                              std::string* mime_type);
+  void OnGetPreferredExtensionForMimeType(const std::string& mime_type,
+                                          FilePath::StringType* extension);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_MIME_REGISTRY_MESSAGE_FILTER_H_

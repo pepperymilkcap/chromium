@@ -5,8 +5,8 @@
 #ifndef CONTENT_COMMON_GAMEPAD_HARDWARE_BUFFER_H_
 #define CONTENT_COMMON_GAMEPAD_HARDWARE_BUFFER_H_
 
-#include "content/common/one_writer_seqlock.h"
-#include "third_party/WebKit/public/platform/WebGamepads.h"
+#include "content/common/gamepad_seqlock.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGamepads.h"
 
 namespace content {
 
@@ -24,11 +24,10 @@ contention is detected by using the associated SeqLock.
 */
 
 struct GamepadHardwareBuffer {
-  // FIXME: Use the generic SharedMemorySeqLockBuffer<blink::WebGamepads>.
-  OneWriterSeqLock sequence;
-  blink::WebGamepads buffer;
+  GamepadSeqLock sequence;
+  WebKit::WebGamepads buffer;
 };
 
-}  // namespace content
+}
 
-#endif  // CONTENT_COMMON_GAMEPAD_HARDWARE_BUFFER_H_
+#endif // CONTENT_COMMON_GAMEPAD_HARDWARE_BUFFER_H_

@@ -4,13 +4,14 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_LANGUAGE_LIST_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_LANGUAGE_LIST_H_
+#pragma once
 
 #include <map>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 namespace chromeos {
 
@@ -25,7 +26,7 @@ class LanguageList {
   int languages_count() const { return static_cast<int>(locale_names_.size()); }
 
   // Returns the language for the given |index|.
-  base::string16 GetLanguageNameAt(int index) const;
+  string16 GetLanguageNameAt(int index) const;
 
   // Return the locale for the given |index|. E.g., may return pt-BR.
   std::string GetLocaleFromIndex(int index) const;
@@ -40,19 +41,19 @@ class LanguageList {
  private:
   struct LocaleData {
     LocaleData() {}
-    LocaleData(const base::string16& name, const std::string& code)
+    LocaleData(const string16& name, const std::string& code)
         : native_name(name), locale_code(code) {}
 
-    base::string16 native_name;
+    string16 native_name;
     std::string locale_code;  // E.g., en-us.
   };
 
-  typedef std::map<base::string16, LocaleData> LocaleDataMap;
+  typedef std::map<string16, LocaleData> LocaleDataMap;
 
   void InitNativeNames(const std::vector<std::string>& locale_codes);
 
   // The names of all the locales in the current application locale.
-  std::vector<base::string16> locale_names_;
+  std::vector<string16> locale_names_;
 
   // A map of some extra data (LocaleData) keyed off the name of the locale.
   LocaleDataMap native_names_;

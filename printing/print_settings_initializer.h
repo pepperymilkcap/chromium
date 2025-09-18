@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "printing/page_range.h"
 #include "printing/printing_export.h"
 
 namespace base {
@@ -22,9 +21,8 @@ class PrintSettings;
 // provided |job_settings|.
 class PRINTING_EXPORT PrintSettingsInitializer {
  public:
-  static bool InitSettings(
+  static void InitHeaderFooterStrings(
       const base::DictionaryValue& job_settings,
-      const PageRanges& ranges,
       PrintSettings* print_settings);
 
  private:

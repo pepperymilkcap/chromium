@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/sys_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_info.h"
@@ -21,6 +21,8 @@
 namespace net {
 
 namespace {
+
+const int kPollIntervalSec = 5;
 
 // Utility function to pull out a boolean value from a dictionary and return it,
 // returning a default value if the key is not present.
@@ -40,7 +42,7 @@ bool GetBoolFromDictionary(CFDictionaryRef dict,
 }
 
 void GetCurrentProxyConfig(ProxyConfig* config) {
-  base::ScopedCFTypeRef<CFDictionaryRef> config_dict(
+  base::mac::ScopedCFTypeRef<CFDictionaryRef> config_dict(
       SCDynamicStoreCopyProxies(NULL));
   DCHECK(config_dict);
 
@@ -78,7 +80,7 @@ void GetCurrentProxyConfig(ProxyConfig* config) {
     if (proxy_server.is_valid()) {
       config->proxy_rules().type =
           ProxyConfig::ProxyRules::TYPE_PROXY_PER_SCHEME;
-      config->proxy_rules().proxies_for_ftp.SetSingleProxyServer(proxy_server);
+      config->proxy_rules().proxy_for_ftp = proxy_server;
     }
   }
   if (GetBoolFromDictionary(config_dict.get(),
@@ -92,7 +94,7 @@ void GetCurrentProxyConfig(ProxyConfig* config) {
     if (proxy_server.is_valid()) {
       config->proxy_rules().type =
           ProxyConfig::ProxyRules::TYPE_PROXY_PER_SCHEME;
-      config->proxy_rules().proxies_for_http.SetSingleProxyServer(proxy_server);
+      config->proxy_rules().proxy_for_http = proxy_server;
     }
   }
   if (GetBoolFromDictionary(config_dict.get(),
@@ -106,8 +108,7 @@ void GetCurrentProxyConfig(ProxyConfig* config) {
     if (proxy_server.is_valid()) {
       config->proxy_rules().type =
           ProxyConfig::ProxyRules::TYPE_PROXY_PER_SCHEME;
-      config->proxy_rules().proxies_for_https.
-          SetSingleProxyServer(proxy_server);
+      config->proxy_rules().proxy_for_https = proxy_server;
     }
   }
   if (GetBoolFromDictionary(config_dict.get(),
@@ -121,7 +122,7 @@ void GetCurrentProxyConfig(ProxyConfig* config) {
     if (proxy_server.is_valid()) {
       config->proxy_rules().type =
           ProxyConfig::ProxyRules::TYPE_PROXY_PER_SCHEME;
-      config->proxy_rules().fallback_proxies.SetSingleProxyServer(proxy_server);
+      config->proxy_rules().fallback_proxy = proxy_server;
     }
   }
 
@@ -153,9 +154,6 @@ void GetCurrentProxyConfig(ProxyConfig* config) {
                             false)) {
     config->proxy_rules().bypass_rules.AddRuleToBypassLocal();
   }
-
-  // Source
-  config->set_source(PROXY_CONFIG_SOURCE_SYSTEM);
 }
 
 }  // namespace
@@ -181,34 +179,20 @@ class ProxyConfigServiceMac::Helper
   }
 
  private:
-  friend class base::RefCountedThreadSafe<Helper>;
-  ~Helper() {}
-
   ProxyConfigServiceMac* parent_;
 };
 
-void ProxyConfigServiceMac::Forwarder::SetDynamicStoreNotificationKeys(
-    SCDynamicStoreRef store) {
-  proxy_config_service_->SetDynamicStoreNotificationKeys(store);
-}
-
-void ProxyConfigServiceMac::Forwarder::OnNetworkConfigChange(
-    CFArrayRef changed_keys) {
-  proxy_config_service_->OnNetworkConfigChange(changed_keys);
-}
-
-ProxyConfigServiceMac::ProxyConfigServiceMac(
-    base::SingleThreadTaskRunner* io_thread_task_runner)
+ProxyConfigServiceMac::ProxyConfigServiceMac(MessageLoop* io_loop)
     : forwarder_(this),
       has_fetched_config_(false),
       helper_(new Helper(this)),
-      io_thread_task_runner_(io_thread_task_runner) {
-  DCHECK(io_thread_task_runner_.get());
+      io_loop_(io_loop) {
+  DCHECK(io_loop);
   config_watcher_.reset(new NetworkConfigWatcherMac(&forwarder_));
 }
 
 ProxyConfigServiceMac::~ProxyConfigServiceMac() {
-  DCHECK(io_thread_task_runner_->BelongsToCurrentThread());
+  DCHECK_EQ(io_loop_, MessageLoop::current());
   // Delete the config_watcher_ to ensure the notifier thread finishes before
   // this object is destroyed.
   config_watcher_.reset();
@@ -216,18 +200,18 @@ ProxyConfigServiceMac::~ProxyConfigServiceMac() {
 }
 
 void ProxyConfigServiceMac::AddObserver(Observer* observer) {
-  DCHECK(io_thread_task_runner_->BelongsToCurrentThread());
+  DCHECK_EQ(io_loop_, MessageLoop::current());
   observers_.AddObserver(observer);
 }
 
 void ProxyConfigServiceMac::RemoveObserver(Observer* observer) {
-  DCHECK(io_thread_task_runner_->BelongsToCurrentThread());
+  DCHECK_EQ(io_loop_, MessageLoop::current());
   observers_.RemoveObserver(observer);
 }
 
 net::ProxyConfigService::ConfigAvailability
     ProxyConfigServiceMac::GetLatestProxyConfig(ProxyConfig* config) {
-  DCHECK(io_thread_task_runner_->BelongsToCurrentThread());
+  DCHECK_EQ(io_loop_, MessageLoop::current());
 
   // Lazy-initialize by fetching the proxy setting from this thread.
   if (!has_fetched_config_) {
@@ -263,14 +247,14 @@ void ProxyConfigServiceMac::OnNetworkConfigChange(CFArrayRef changed_keys) {
   GetCurrentProxyConfig(&new_config);
 
   // Call OnProxyConfigChanged() on the IO thread to notify our observers.
-  io_thread_task_runner_->PostTask(
+  io_loop_->PostTask(
       FROM_HERE,
       base::Bind(&Helper::OnProxyConfigChanged, helper_.get(), new_config));
 }
 
 void ProxyConfigServiceMac::OnProxyConfigChanged(
     const ProxyConfig& new_config) {
-  DCHECK(io_thread_task_runner_->BelongsToCurrentThread());
+  DCHECK_EQ(io_loop_, MessageLoop::current());
 
   // Keep track of the last value we have seen.
   has_fetched_config_ = true;

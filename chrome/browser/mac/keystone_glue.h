@@ -1,18 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_MAC_KEYSTONE_GLUE_H_
 #define CHROME_BROWSER_MAC_KEYSTONE_GLUE_H_
+#pragma once
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 #if defined(__OBJC__)
 
 #import <Foundation/Foundation.h>
 
-#include "base/mac/scoped_authorizationref.h"
-#import "base/mac/scoped_nsobject.h"
+#import "base/memory/scoped_nsobject.h"
+#include "chrome/browser/mac/scoped_authorizationref.h"
 
 // Possible outcomes of various operations.  A version may accompany some of
 // these, but beware: a version is never required.  For statuses that can be
@@ -89,11 +90,11 @@ enum BrandFileType {
   NSTimer* timer_;  // strong
 
   // The most recent kAutoupdateStatusNotification notification posted.
-  base::scoped_nsobject<NSNotification> recentNotification_;
+  scoped_nsobject<NSNotification> recentNotification_;
 
   // The authorization object, when it needs to persist because it's being
   // carried across threads.
-  base::mac::ScopedAuthorizationRef authorization_;
+  ScopedAuthorizationRef authorization_;
 
   // YES if a synchronous promotion operation is in progress (promotion during
   // installation).
@@ -207,7 +208,7 @@ std::string BrandCode();
 bool KeystoneEnabled();
 
 // The version of the application currently installed on disk.
-base::string16 CurrentlyInstalledVersion();
+string16 CurrentlyInstalledVersion();
 
 }  // namespace keystone_glue
 

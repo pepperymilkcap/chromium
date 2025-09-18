@@ -7,13 +7,12 @@
 #include "base/logging.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/ui/gtk/download/download_item_gtk.h"
-#include "content/public/browser/page_navigator.h"
 #include "ui/gfx/point.h"
 
 DownloadShelfContextMenuGtk::DownloadShelfContextMenuGtk(
-    DownloadItemGtk* download_item,
-    content::PageNavigator* navigator)
-    : DownloadShelfContextMenu(download_item->download(), navigator),
+    BaseDownloadItemModel* model,
+    DownloadItemGtk* download_item)
+    : DownloadShelfContextMenu(model),
       download_item_gtk_(download_item) {
 }
 
@@ -21,11 +20,7 @@ DownloadShelfContextMenuGtk::~DownloadShelfContextMenuGtk() {}
 
 void DownloadShelfContextMenuGtk::Popup(GtkWidget* widget,
                                         GdkEventButton* event) {
-  ui::SimpleMenuModel* menu_model = GetMenuModel();
-  // Popup() should never be called after the DownloadItem is destroyed.
-  DCHECK(menu_model);
-
-  menu_.reset(new MenuGtk(this, menu_model));
+  menu_.reset(new MenuGtk(this, GetMenuModel()));
 
   if (widget)
     menu_->PopupForWidget(widget, event->button, event->time);

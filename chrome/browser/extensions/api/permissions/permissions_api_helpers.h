@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_PERMISSIONS_PERMISSIONS_API_HELPERS_H_
 #define CHROME_BROWSER_EXTENSIONS_API_PERMISSIONS_PERMISSIONS_API_HELPERS_H_
+#pragma once
 
 #include <string>
 #include "base/memory/scoped_ptr.h"
@@ -13,9 +14,9 @@ namespace base {
 class DictionaryValue;
 }
 
-namespace extensions {
+class ExtensionPermissionSet;
 
-class PermissionSet;
+namespace extensions {
 
 namespace api {
 namespace permissions {
@@ -27,14 +28,12 @@ namespace permissions_api_helpers {
 
 // Converts the permission |set| to a permissions object.
 scoped_ptr<api::permissions::Permissions> PackPermissionSet(
-    const PermissionSet* set);
+    const ExtensionPermissionSet* set);
 
 // Creates a permission set from |permissions|. Returns NULL if the permissions
 // cannot be converted to a permission set, in which case |error| will be set.
-scoped_refptr<PermissionSet> UnpackPermissionSet(
-    const api::permissions::Permissions& permissions,
-    bool allow_file_access,
-    std::string* error);
+scoped_refptr<ExtensionPermissionSet> UnpackPermissionSet(
+    const api::permissions::Permissions& permissions, std::string* error);
 
 }  // namespace permissions_api_helpers
 }  // namespace extensions

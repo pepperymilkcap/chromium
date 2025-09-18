@@ -4,6 +4,7 @@
 
 #ifndef PPAPI_SHARED_IMPL_PPAPI_SHARED_EXPORT_H_
 #define PPAPI_SHARED_IMPL_PPAPI_SHARED_EXPORT_H_
+#pragma once
 
 #if defined(COMPONENT_BUILD)
 #if defined(WIN32)
@@ -15,11 +16,7 @@
 #endif  // defined(PPAPI_SHARED_IMPLEMENTATION)
 
 #else  // defined(WIN32)
-#if defined(PPAPI_SHARED_IMPLEMENTATION)
 #define PPAPI_SHARED_EXPORT __attribute__((visibility("default")))
-#else
-#define PPAPI_SHARED_EXPORT
-#endif
 #endif
 
 #else  // defined(COMPONENT_BUILD)

@@ -4,14 +4,15 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_EDITOR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_EDITOR_GTK_H_
+#pragma once
 
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
+#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
-#include "chrome/browser/ui/bookmarks/bookmark_editor.h"
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
 
@@ -58,8 +59,7 @@ class BookmarkEditorGtk : public BookmarkEditor,
 
   // BookmarkModel observer methods. Any structural change results in
   // resetting the tree model.
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE {}
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {}
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,
                                  int old_index,
@@ -72,7 +72,6 @@ class BookmarkEditorGtk : public BookmarkEditor,
                                    const BookmarkNode* parent,
                                    int old_index,
                                    const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkAllNodesRemoved(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    const BookmarkNode* node) OVERRIDE {}
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
@@ -87,7 +86,7 @@ class BookmarkEditorGtk : public BookmarkEditor,
   GURL GetInputURL() const;
 
   // Returns the title the user has input.
-  base::string16 GetInputTitle() const;
+  string16 GetInputTitle() const;
 
   // Invokes ApplyEdits with the selected node.
   //

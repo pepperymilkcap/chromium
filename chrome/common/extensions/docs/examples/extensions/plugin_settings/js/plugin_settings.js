@@ -8,7 +8,8 @@
  */
 
 cr.define('pluginSettings', function() {
-  /** @const */ var EventTarget = cr.EventTarget;
+  const EventTarget = cr.EventTarget;
+  const Event = cr.Event;
 
   /**
    * Creates a new content settings model.
@@ -50,7 +51,7 @@ cr.define('pluginSettings', function() {
      * @private
      */
     didClearRules_: function(callback) {
-      if (chrome.runtime.lastError) {
+      if (chrome.extension.lastError) {
         console.error('Error clearing rules');
         callback();
         return;
@@ -94,10 +95,10 @@ cr.define('pluginSettings', function() {
      * @private
      */
     didSetContentSetting_: function(plugin, pattern, key, counter, callback) {
-      if (chrome.runtime.lastError) {
+      if (chrome.extension.lastError) {
         console.error(
             'Error restoring [' + key + ': ' + value + ']: ' +
-                chrome.runtime.lastError.message);
+                chrome.extension.lastError.message);
         window.localStorage.removeItem(key);
       }
       counter.value--;
@@ -123,8 +124,8 @@ cr.define('pluginSettings', function() {
         'resourceIdentifier': { 'id': plugin },
         'setting': setting,
       }, function() {
-        if (chrome.runtime.lastError) {
-          callback(chrome.runtime.lastError.message);
+        if (chrome.extension.lastError) {
+          callback(chrome.extension.lastError.message);
         } else {
           window.localStorage.setItem(JSON.stringify([plugin, pattern]),
                                       setting);

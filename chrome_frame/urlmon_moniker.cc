@@ -7,9 +7,9 @@
 #include <exdisp.h>
 #include <shlguid.h>
 
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "chrome_frame/bho.h"
 #include "chrome_frame/bind_context_info.h"
 #include "chrome_frame/chrome_active_document.h"
@@ -53,14 +53,14 @@ HRESULT NavigationManager::NavigateToCurrentUrlInCF(IBrowserService* browser) {
       std::wstring headers;
       if (!referrer_.empty()) {
         headers = base::StringPrintf(L"Referer: %ls\r\n\r\n",
-            base::ASCIIToWide(referrer_).c_str());
+            ASCIIToWide(referrer_).c_str());
       }
 
       // Pass in URL fragments if applicable.
       std::wstring fragment;
       GURL parsed_moniker_url(url_);
       if (parsed_moniker_url.has_ref()) {
-        fragment = base::UTF8ToWide(parsed_moniker_url.ref());
+        fragment = UTF8ToWide(parsed_moniker_url.ref());
       }
 
       VARIANT flags = { VT_I4 };
@@ -243,7 +243,6 @@ HRESULT MonikerPatch::BindToStorage(IMoniker_BindToStorage_Fn original,
   CComObject<BSCBStorageBind>* callback = NULL;
   if (ShouldWrapCallback(me, iid, bind_ctx)) {
     hr = CComObject<BSCBStorageBind>::CreateInstance(&callback);
-    DCHECK(SUCCEEDED(hr));
     auto_release_callback = callback;
     DCHECK_EQ(callback->m_dwRef, 1);
     hr = callback->Initialize(me, bind_ctx);

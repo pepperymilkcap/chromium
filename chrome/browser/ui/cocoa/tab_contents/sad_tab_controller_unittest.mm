@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/debug/debugger.h"
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/hyperlink_text_view.h"
 #import "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/sad_tab_view.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/browser/tab_contents/test_tab_contents.h"
 
 @interface SadTabView (ExposedForTesting)
 // Implementation is below.
@@ -52,7 +53,7 @@ class SadTabControllerTest : public ChromeRenderViewHostTestHarness {
   // Creates the controller and adds its view to contents, caller has ownership.
   SadTabController* CreateController() {
     SadTabController* controller =
-        [[SadTabController alloc] initWithWebContents:web_contents()];
+        [[SadTabController alloc] initWithWebContents:contents()];
     EXPECT_TRUE(controller);
     NSView* view = [controller view];
     EXPECT_TRUE(view);
@@ -75,7 +76,7 @@ class SadTabControllerTest : public ChromeRenderViewHostTestHarness {
 bool SadTabControllerTest::link_clicked_;
 
 TEST_F(SadTabControllerTest, WithTabContents) {
-  base::scoped_nsobject<SadTabController> controller(CreateController());
+  scoped_nsobject<SadTabController> controller(CreateController());
   EXPECT_TRUE(controller);
   HyperlinkTextView* help = GetHelpTextView(controller);
   EXPECT_TRUE(help);
@@ -83,14 +84,14 @@ TEST_F(SadTabControllerTest, WithTabContents) {
 
 TEST_F(SadTabControllerTest, WithoutTabContents) {
   DeleteContents();
-  base::scoped_nsobject<SadTabController> controller(CreateController());
+  scoped_nsobject<SadTabController> controller(CreateController());
   EXPECT_TRUE(controller);
   HyperlinkTextView* help = GetHelpTextView(controller);
   EXPECT_FALSE(help);
 }
 
 TEST_F(SadTabControllerTest, ClickOnLink) {
-  base::scoped_nsobject<SadTabController> controller(CreateController());
+  scoped_nsobject<SadTabController> controller(CreateController());
   HyperlinkTextView* help = GetHelpTextView(controller);
   EXPECT_TRUE(help);
   EXPECT_FALSE(link_clicked_);

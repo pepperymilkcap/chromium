@@ -10,7 +10,12 @@
 #  python_arch.sh /path/to/sysroot/usr/lib/libpython2.4.so.1.0
 #
 
-file_out=$(file --dereference "$1")
+python=$(readlink -f "$1")
+if [ ! -r "$python" ]; then
+  echo unknown
+  exit 0
+fi
+file_out=$(file "$python")
 if [ $? -ne 0 ]; then
   echo unknown
   exit 0
@@ -19,12 +24,6 @@ fi
 echo $file_out | grep -qs "ARM"
 if [ $? -eq 0 ]; then
   echo arm
-  exit 0
-fi
-
-echo $file_out | grep -qs "MIPS"
-if [ $? -eq 0 ]; then
-  echo mipsel
   exit 0
 fi
 

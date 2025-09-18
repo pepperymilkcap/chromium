@@ -1,19 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/socket/socks_client_socket.h"
 
-#include "base/memory/scoped_ptr.h"
 #include "net/base/address_list.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
+#include "net/base/mock_host_resolver.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/winsock_init.h"
-#include "net/dns/mock_host_resolver.h"
 #include "net/socket/client_socket_factory.h"
-#include "net/socket/socket_test_util.h"
 #include "net/socket/tcp_client_socket.h"
+#include "net/socket/socket_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -28,19 +27,16 @@ class SOCKSClientSocketTest : public PlatformTest {
  public:
   SOCKSClientSocketTest();
   // Create a SOCKSClientSocket on top of a MockSocket.
-  scoped_ptr<SOCKSClientSocket> BuildMockSocket(
-      MockRead reads[], size_t reads_count,
-      MockWrite writes[], size_t writes_count,
-      HostResolver* host_resolver,
-      const std::string& hostname, int port,
-      NetLog* net_log);
+  SOCKSClientSocket* BuildMockSocket(MockRead reads[], size_t reads_count,
+                                     MockWrite writes[], size_t writes_count,
+                                     HostResolver* host_resolver,
+                                     const std::string& hostname, int port,
+                                     NetLog* net_log);
   virtual void SetUp();
 
  protected:
   scoped_ptr<SOCKSClientSocket> user_sock_;
   AddressList address_list_;
-  // Filled in by BuildMockSocket() and owned by its return value
-  // (which |user_sock| is set to).
   StreamSocket* tcp_sock_;
   TestCompletionCallback callback_;
   scoped_ptr<MockHostResolver> host_resolver_;
@@ -56,7 +52,7 @@ void SOCKSClientSocketTest::SetUp() {
   PlatformTest::SetUp();
 }
 
-scoped_ptr<SOCKSClientSocket> SOCKSClientSocketTest::BuildMockSocket(
+SOCKSClientSocket* SOCKSClientSocketTest::BuildMockSocket(
     MockRead reads[],
     size_t reads_count,
     MockWrite writes[],
@@ -77,15 +73,9 @@ scoped_ptr<SOCKSClientSocket> SOCKSClientSocketTest::BuildMockSocket(
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(tcp_sock_->IsConnected());
 
-  scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
-  // |connection| takes ownership of |tcp_sock_|, but keep a
-  // non-owning pointer to it.
-  connection->SetSocket(scoped_ptr<StreamSocket>(tcp_sock_));
-  return scoped_ptr<SOCKSClientSocket>(new SOCKSClientSocket(
-      connection.Pass(),
+  return new SOCKSClientSocket(tcp_sock_,
       HostResolver::RequestInfo(HostPortPair(hostname, port)),
-      DEFAULT_PRIORITY,
-      host_resolver));
+      host_resolver);
 }
 
 // Implementation of HostResolver that never completes its resolve request.
@@ -96,7 +86,6 @@ class HangingHostResolverWithCancel : public HostResolver {
   HangingHostResolverWithCancel() : outstanding_request_(NULL) {}
 
   virtual int Resolve(const RequestInfo& info,
-                      RequestPriority priority,
                       AddressList* addresses,
                       const CompletionCallback& callback,
                       RequestHandle* out_req,
@@ -138,18 +127,18 @@ TEST_F(SOCKSClientSocketTest, CompleteHandshake) {
   const std::string payload_read = "moar random data";
 
   MockWrite data_writes[] = {
-      MockWrite(ASYNC, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)),
-      MockWrite(ASYNC, payload_write.data(), payload_write.size()) };
+      MockWrite(true, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)),
+      MockWrite(true, payload_write.data(), payload_write.size()) };
   MockRead data_reads[] = {
-      MockRead(ASYNC, kSOCKSOkReply, arraysize(kSOCKSOkReply)),
-      MockRead(ASYNC, payload_read.data(), payload_read.size()) };
-  CapturingNetLog log;
+      MockRead(true, kSOCKSOkReply, arraysize(kSOCKSOkReply)),
+      MockRead(true, payload_read.data(), payload_read.size()) };
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
 
-  user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
-                               data_writes, arraysize(data_writes),
-                               host_resolver_.get(),
-                               "localhost", 80,
-                               &log);
+  user_sock_.reset(BuildMockSocket(data_reads, arraysize(data_reads),
+                                   data_writes, arraysize(data_writes),
+                                   host_resolver_.get(),
+                                   "localhost", 80,
+                                   &log));
 
   // At this state the TCP connection is completed but not the SOCKS handshake.
   EXPECT_TRUE(tcp_sock_->IsConnected());
@@ -158,7 +147,7 @@ TEST_F(SOCKSClientSocketTest, CompleteHandshake) {
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
-  CapturingNetLog::CapturedEntryList entries;
+  net::CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(
       LogContainsBeginEvent(entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -173,15 +162,13 @@ TEST_F(SOCKSClientSocketTest, CompleteHandshake) {
 
   scoped_refptr<IOBuffer> buffer(new IOBuffer(payload_write.size()));
   memcpy(buffer->data(), payload_write.data(), payload_write.size());
-  rv = user_sock_->Write(
-      buffer.get(), payload_write.size(), callback_.callback());
+  rv = user_sock_->Write(buffer, payload_write.size(), callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback_.WaitForResult();
   EXPECT_EQ(static_cast<int>(payload_write.size()), rv);
 
   buffer = new IOBuffer(payload_read.size());
-  rv =
-      user_sock_->Read(buffer.get(), payload_read.size(), callback_.callback());
+  rv = user_sock_->Read(buffer, payload_read.size(), callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback_.WaitForResult();
   EXPECT_EQ(static_cast<int>(payload_read.size()), rv);
@@ -215,22 +202,21 @@ TEST_F(SOCKSClientSocketTest, HandshakeFailures) {
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
     MockWrite data_writes[] = {
-        MockWrite(SYNCHRONOUS, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)) };
+        MockWrite(false, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)) };
     MockRead data_reads[] = {
-        MockRead(SYNCHRONOUS, tests[i].fail_reply,
-                 arraysize(tests[i].fail_reply)) };
-    CapturingNetLog log;
+        MockRead(false, tests[i].fail_reply, arraysize(tests[i].fail_reply)) };
+    CapturingNetLog log(CapturingNetLog::kUnbounded);
 
-    user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
-                                 data_writes, arraysize(data_writes),
-                                 host_resolver_.get(),
-                                 "localhost", 80,
-                                 &log);
+    user_sock_.reset(BuildMockSocket(data_reads, arraysize(data_reads),
+                                     data_writes, arraysize(data_writes),
+                                     host_resolver_.get(),
+                                     "localhost", 80,
+                                     &log));
 
     int rv = user_sock_->Connect(callback_.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
-    CapturingNetLog::CapturedEntryList entries;
+    net::CapturingNetLog::EntryList entries;
     log.GetEntries(&entries);
     EXPECT_TRUE(LogContainsBeginEvent(
         entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -252,21 +238,21 @@ TEST_F(SOCKSClientSocketTest, PartialServerReads) {
   const char kSOCKSPartialReply2[] = { 0x5A, 0x00, 0x00, 0, 0, 0, 0 };
 
   MockWrite data_writes[] = {
-      MockWrite(ASYNC, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)) };
+      MockWrite(true, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)) };
   MockRead data_reads[] = {
-      MockRead(ASYNC, kSOCKSPartialReply1, arraysize(kSOCKSPartialReply1)),
-      MockRead(ASYNC, kSOCKSPartialReply2, arraysize(kSOCKSPartialReply2)) };
-  CapturingNetLog log;
+      MockRead(true, kSOCKSPartialReply1, arraysize(kSOCKSPartialReply1)),
+      MockRead(true, kSOCKSPartialReply2, arraysize(kSOCKSPartialReply2)) };
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
 
-  user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
-                               data_writes, arraysize(data_writes),
-                               host_resolver_.get(),
-                               "localhost", 80,
-                               &log);
+  user_sock_.reset(BuildMockSocket(data_reads, arraysize(data_reads),
+                                   data_writes, arraysize(data_writes),
+                                   host_resolver_.get(),
+                                   "localhost", 80,
+                                   &log));
 
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  CapturingNetLog::CapturedEntryList entries;
+  net::CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsBeginEvent(
       entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -286,25 +272,25 @@ TEST_F(SOCKSClientSocketTest, PartialClientWrites) {
   const char kSOCKSPartialRequest2[] = { 0x00, 0x50, 127, 0, 0, 1, 0 };
 
   MockWrite data_writes[] = {
-      MockWrite(ASYNC, arraysize(kSOCKSPartialRequest1)),
+      MockWrite(true, arraysize(kSOCKSPartialRequest1)),
       // simulate some empty writes
-      MockWrite(ASYNC, 0),
-      MockWrite(ASYNC, 0),
-      MockWrite(ASYNC, kSOCKSPartialRequest2,
+      MockWrite(true, 0),
+      MockWrite(true, 0),
+      MockWrite(true, kSOCKSPartialRequest2,
                 arraysize(kSOCKSPartialRequest2)) };
   MockRead data_reads[] = {
-      MockRead(ASYNC, kSOCKSOkReply, arraysize(kSOCKSOkReply)) };
-  CapturingNetLog log;
+      MockRead(true, kSOCKSOkReply, arraysize(kSOCKSOkReply)) };
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
 
-  user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
-                               data_writes, arraysize(data_writes),
-                               host_resolver_.get(),
-                               "localhost", 80,
-                               &log);
+  user_sock_.reset(BuildMockSocket(data_reads, arraysize(data_reads),
+                                   data_writes, arraysize(data_writes),
+                                   host_resolver_.get(),
+                                   "localhost", 80,
+                                   &log));
 
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  CapturingNetLog::CapturedEntryList entries;
+  net::CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsBeginEvent(
       entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -321,22 +307,22 @@ TEST_F(SOCKSClientSocketTest, PartialClientWrites) {
 // and closes the connection.
 TEST_F(SOCKSClientSocketTest, FailedSocketRead) {
   MockWrite data_writes[] = {
-      MockWrite(ASYNC, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)) };
+      MockWrite(true, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)) };
   MockRead data_reads[] = {
-      MockRead(ASYNC, kSOCKSOkReply, arraysize(kSOCKSOkReply) - 2),
+      MockRead(true, kSOCKSOkReply, arraysize(kSOCKSOkReply) - 2),
       // close connection unexpectedly
-      MockRead(SYNCHRONOUS, 0) };
-  CapturingNetLog log;
+      MockRead(false, 0) };
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
 
-  user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
-                               data_writes, arraysize(data_writes),
-                               host_resolver_.get(),
-                               "localhost", 80,
-                               &log);
+  user_sock_.reset(BuildMockSocket(data_reads, arraysize(data_reads),
+                                   data_writes, arraysize(data_writes),
+                                   host_resolver_.get(),
+                                   "localhost", 80,
+                                   &log));
 
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  CapturingNetLog::CapturedEntryList entries;
+  net::CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsBeginEvent(
       entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -356,17 +342,17 @@ TEST_F(SOCKSClientSocketTest, FailedDNS) {
 
   host_resolver_->rules()->AddSimulatedFailure(hostname);
 
-  CapturingNetLog log;
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
 
-  user_sock_ = BuildMockSocket(NULL, 0,
-                               NULL, 0,
-                               host_resolver_.get(),
-                               hostname, 80,
-                               &log);
+  user_sock_.reset(BuildMockSocket(NULL, 0,
+                                   NULL, 0,
+                                   host_resolver_.get(),
+                                   hostname, 80,
+                                   &log));
 
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  CapturingNetLog::CapturedEntryList entries;
+  net::CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsBeginEvent(
       entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -386,14 +372,14 @@ TEST_F(SOCKSClientSocketTest, DisconnectWhileHostResolveInProgress) {
     new HangingHostResolverWithCancel());
 
   // Doesn't matter what the socket data is, we will never use it -- garbage.
-  MockWrite data_writes[] = { MockWrite(SYNCHRONOUS, "", 0) };
-  MockRead data_reads[] = { MockRead(SYNCHRONOUS, "", 0) };
+  MockWrite data_writes[] = { MockWrite(false, "", 0) };
+  MockRead data_reads[] = { MockRead(false, "", 0) };
 
-  user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
-                               data_writes, arraysize(data_writes),
-                               hanging_resolver.get(),
-                               "foo", 80,
-                               NULL);
+  user_sock_.reset(BuildMockSocket(data_reads, arraysize(data_reads),
+                                   data_writes, arraysize(data_writes),
+                                   hanging_resolver.get(),
+                                   "foo", 80,
+                                   NULL));
 
   // Start connecting (will get stuck waiting for the host to resolve).
   int rv = user_sock_->Connect(callback_.callback());

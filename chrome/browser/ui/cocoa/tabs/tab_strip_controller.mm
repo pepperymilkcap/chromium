@@ -13,68 +13,65 @@
 #include "base/command_line.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
+#import "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #include "chrome/browser/ui/cocoa/drag_util.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 #import "chrome/browser/ui/cocoa/new_tab_button.h"
-#import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
+#import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
-#import "chrome/browser/ui/cocoa/tabs/media_indicator_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/tabs/throbber_view.h"
+#import "chrome/browser/ui/cocoa/tracking_area.h"
+#include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
-#include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
-#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
-#include "ui/base/cocoa/animation_utils.h"
-#import "ui/base/cocoa/tracking_area.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/models/list_selection_model.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/base/theme_provider.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 using content::OpenURLParams;
 using content::Referrer;
 using content::UserMetricsAction;
 using content::WebContents;
+
+NSString* const kTabStripNumberOfTabsChanged = @"kTabStripNumberOfTabsChanged";
 
 namespace {
 
@@ -83,14 +80,10 @@ namespace {
 const CGFloat kUseFullAvailableWidth = -1.0;
 
 // The amount by which tabs overlap.
-// Needs to be <= the x position of the favicon within a tab. Else, every time
-// the throbber is painted, the throbber's invalidation will also invalidate
-// parts of the tab to the left, and two tabs's backgrounds need to be painted
-// on each throbber frame instead of one.
 const CGFloat kTabOverlap = 19.0;
 
 // The amount by which mini tabs are separated from normal tabs.
-const CGFloat kLastMiniTabSpacing = 2.0;
+const CGFloat kLastMiniTabSpacing = 3.0;
 
 // The width and height for a tab's icon.
 const CGFloat kIconWidthAndHeight = 16.0;
@@ -100,6 +93,10 @@ const CGFloat kNewTabButtonOffset = 8.0;
 
 // Time (in seconds) in which tabs animate to their final position.
 const NSTimeInterval kAnimationDuration = 0.125;
+
+// The amount by wich the profile menu button is offset (from tab tabs or new
+// tab button).
+const CGFloat kProfileMenuButtonOffset = 6.0;
 
 // Helper class for doing NSAnimationContext calls that takes a bool to disable
 // all the work.  Useful for code that wants to conditionally animate.
@@ -142,108 +139,19 @@ private:
   DISALLOW_COPY_AND_ASSIGN(ScopedNSAnimationContextGroup);
 };
 
-// Creates an NSImage with size |size| and bitmap image representations for both
-// 1x and 2x scale factors. |drawingHandler| is called once for every scale
-// factor.  This is similar to -[NSImage imageWithSize:flipped:drawingHandler:],
-// but this function always evaluates drawingHandler eagerly, and it works on
-// 10.6 and 10.7.
-NSImage* CreateImageWithSize(NSSize size,
-                             void (^drawingHandler)(NSSize)) {
-  base::scoped_nsobject<NSImage> result([[NSImage alloc] initWithSize:size]);
-  [NSGraphicsContext saveGraphicsState];
-  for (ui::ScaleFactor scale_factor : ui::GetSupportedScaleFactors()) {
-    float scale = GetImageScale(scale_factor);
-    NSBitmapImageRep *bmpImageRep = [[[NSBitmapImageRep alloc]
-        initWithBitmapDataPlanes:NULL
-                      pixelsWide:size.width * scale
-                      pixelsHigh:size.height * scale
-                   bitsPerSample:8
-                 samplesPerPixel:4
-                        hasAlpha:YES
-                        isPlanar:NO
-                  colorSpaceName:NSDeviceRGBColorSpace
-                     bytesPerRow:0
-                    bitsPerPixel:0] autorelease];
-    [bmpImageRep setSize:size];
-    [NSGraphicsContext setCurrentContext:
-        [NSGraphicsContext graphicsContextWithBitmapImageRep:bmpImageRep]];
-    drawingHandler(size);
-    [result addRepresentation:bmpImageRep];
-  }
-  [NSGraphicsContext restoreGraphicsState];
-
-  return result.release();
-}
-
-// Takes a normal bitmap and a mask image and returns an image the size of the
-// mask that has pixels from |image| but alpha information from |mask|.
-NSImage* ApplyMask(NSImage* image, NSImage* mask) {
-  return [CreateImageWithSize([mask size], ^(NSSize size) {
-      // Skip a few pixels from the top of the tab background gradient, because
-      // the new tab button is not drawn at the very top of the browser window.
-      const int kYOffset = 10;
-      CGFloat width = size.width;
-      CGFloat height = size.height;
-
-      // In some themes, the tab background image is narrower than the
-      // new tab button, so tile the background image.
-      CGFloat x = 0;
-      // The floor() is to make sure images with odd widths don't draw to the
-      // same pixel twice on retina displays. (Using NSDrawThreePartImage()
-      // caused a startup perf regression, so that cannot be used.)
-      CGFloat tileWidth = floor(std::min(width, [image size].width));
-      while (x < width) {
-        [image drawAtPoint:NSMakePoint(x, 0)
-                  fromRect:NSMakeRect(0,
-                                      [image size].height - height - kYOffset,
-                                      tileWidth,
-                                      height)
-                 operation:NSCompositeCopy
-                  fraction:1.0];
-        x += tileWidth;
-      }
-
-      [mask drawAtPoint:NSZeroPoint
-               fromRect:NSMakeRect(0, 0, width, height)
-              operation:NSCompositeDestinationIn
-               fraction:1.0];
-  }) autorelease];
-}
-
-// Paints |overlay| on top of |ground|.
-NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
-  DCHECK_EQ([ground size].width, [overlay size].width);
-  DCHECK_EQ([ground size].height, [overlay size].height);
-
-  return [CreateImageWithSize([ground size], ^(NSSize size) {
-      CGFloat width = size.width;
-      CGFloat height = size.height;
-      [ground drawAtPoint:NSZeroPoint
-                 fromRect:NSMakeRect(0, 0, width, height)
-                operation:NSCompositeCopy
-                 fraction:1.0];
-      [overlay drawAtPoint:NSZeroPoint
-                  fromRect:NSMakeRect(0, 0, width, height)
-                 operation:NSCompositeSourceOver
-                  fraction:alpha];
-  }) autorelease];
-}
-
 }  // namespace
 
 @interface TabStripController (Private)
 - (void)addSubviewToPermanentList:(NSView*)aView;
 - (void)regenerateSubviewList;
 - (NSInteger)indexForContentsView:(NSView*)view;
-- (NSImageView*)iconImageViewForContents:(content::WebContents*)contents;
-- (void)updateIconsForContents:(content::WebContents*)contents
-                       atIndex:(NSInteger)modelIndex;
+- (void)updateFaviconForContents:(TabContentsWrapper*)contents
+                         atIndex:(NSInteger)modelIndex;
 - (void)layoutTabsWithAnimation:(BOOL)animate
              regenerateSubviews:(BOOL)doUpdate;
 - (void)animationDidStopForController:(TabController*)controller
                              finished:(BOOL)finished;
 - (NSInteger)indexFromModelIndex:(NSInteger)index;
-- (void)clickNewTabButton:(id)sender;
 - (NSInteger)numberOfOpenTabs;
 - (NSInteger)numberOfOpenMiniTabs;
 - (NSInteger)numberOfOpenNonMiniTabs;
@@ -253,8 +161,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
             givesIndex:(NSInteger*)index
            disposition:(WindowOpenDisposition*)disposition;
 - (void)setNewTabButtonHoverState:(BOOL)showHover;
-- (void)themeDidChangeNotification:(NSNotification*)notification;
-- (void)setNewTabImages;
 @end
 
 // A simple view class that prevents the Window Server from dragging the area
@@ -285,9 +191,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
 - (id)initWithFrame:(NSRect)frameRect
          controller:(TabStripController*)controller {
-  if ((self = [super initWithFrame:frameRect])) {
+  if ((self = [super initWithFrame:frameRect]))
     controller_ = controller;
-  }
   return self;
 }
 
@@ -398,13 +303,13 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 #pragma mark -
 
 // In general, there is a one-to-one correspondence between TabControllers,
-// TabViews, TabContentsControllers, and the WebContents in the
-// TabStripModel. In the steady-state, the indices line up so an index coming
-// from the model is directly mapped to the same index in the parallel arrays
-// holding our views and controllers. This is also true when new tabs are
-// created (even though there is a small period of animation) because the tab is
-// present in the model while the TabView is animating into place. As a result,
-// nothing special need be done to handle "new tab" animation.
+// TabViews, TabContentsControllers, and the TabContents in the TabStripModel.
+// In the steady-state, the indices line up so an index coming from the model
+// is directly mapped to the same index in the parallel arrays holding our
+// views and controllers. This is also true when new tabs are created (even
+// though there is a small period of animation) because the tab is present
+// in the model while the TabView is animating into place. As a result, nothing
+// special need be done to handle "new tab" animation.
 //
 // This all goes out the window with the "close tab" animation. The animation
 // kicks off in |-tabDetachedWithContents:atIndex:| with the notification that
@@ -445,10 +350,9 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   DCHECK(view && switchView && browser && delegate);
   if ((self = [super init])) {
     tabStripView_.reset([view retain]);
-    [tabStripView_ setController:self];
     switchView_ = switchView;
     browser_ = browser;
-    tabStripModel_ = browser_->tab_strip_model();
+    tabStripModel_ = browser_->tabstrip_model();
     hoverTabSelector_.reset(new HoverTabSelector(tabStripModel_));
     delegate_ = delegate;
     bridge_.reset(new TabStripModelObserverBridge(tabStripModel_, self));
@@ -462,25 +366,35 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     // (see |-addSubviewToPermanentList:|) will be wiped out.
     permanentSubviews_.reset([[NSMutableArray alloc] init]);
 
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     defaultFavicon_.reset(
-        rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).CopyNSImage());
+        [gfx::GetCachedImageWithName(@"nav.pdf") retain]);
 
     [self setLeftIndentForControls:[[self class] defaultLeftIndentForControls]];
     [self setRightIndentForControls:0];
 
+    // TODO(viettrungluu): WTF? "For some reason, if the view is present in the
+    // nib a priori, it draws correctly. If we create it in code and add it to
+    // the tab view, it draws with all sorts of crazy artifacts."
     newTabButton_ = [view getNewTabButton];
     [self addSubviewToPermanentList:newTabButton_];
-    [newTabButton_ setTarget:self];
-    [newTabButton_ setAction:@selector(clickNewTabButton:)];
+    [newTabButton_ setTarget:nil];
+    [newTabButton_ setAction:@selector(commandDispatch:)];
+    [newTabButton_ setTag:IDC_NEW_TAB];
 
-    [self setNewTabImages];
+    // Set the images from code because Cocoa fails to find them in our sub
+    // bundle during tests.
+    [[newTabButton_ cell] setImageID:IDR_NEWTAB_BUTTON
+                    forButtonState:image_button_cell::kDefaultState];
+    [[newTabButton_ cell] setImageID:IDR_NEWTAB_BUTTON_H
+                    forButtonState:image_button_cell::kHoverState];
+    [[newTabButton_ cell] setImageID:IDR_NEWTAB_BUTTON_P
+                    forButtonState:image_button_cell::kPressedState];
     newTabButtonShowingHoverImage_ = NO;
     newTabTrackingArea_.reset(
         [[CrTrackingArea alloc] initWithRect:[newTabButton_ bounds]
                                      options:(NSTrackingMouseEnteredAndExited |
                                               NSTrackingActiveAlways)
-                                       owner:self
+                                proxiedOwner:self
                                     userInfo:nil]);
     if (browserWindow)  // Nil for Browsers without a tab strip (e.g. popups).
       [newTabTrackingArea_ clearOwnerWhenWindowWillClose:browserWindow];
@@ -492,7 +406,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
                                                        controller:self]);
     [self addSubviewToPermanentList:dragBlockingView_];
 
-    newTabTargetFrame_ = NSZeroRect;
+    newTabTargetFrame_ = NSMakeRect(0, 0, 0, 0);
     availableResizeWidth_ = kUseFullAvailableWidth;
 
     closingControllers_.reset([[NSMutableSet alloc] init]);
@@ -508,19 +422,13 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
                name:NSViewFrameDidChangeNotification
              object:tabStripView_];
 
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(themeDidChangeNotification:)
-               name:kBrowserThemeDidChangeNotification
-             object:nil];
-
     trackingArea_.reset([[CrTrackingArea alloc]
         initWithRect:NSZeroRect  // Ignored by NSTrackingInVisibleRect
              options:NSTrackingMouseEnteredAndExited |
                      NSTrackingMouseMoved |
                      NSTrackingActiveAlways |
                      NSTrackingInVisibleRect
-               owner:self
+        proxiedOwner:self
             userInfo:nil]);
     if (browserWindow)  // Nil for Browsers without a tab strip (e.g. popups).
       [trackingArea_ clearOwnerWhenWindowWillClose:browserWindow];
@@ -546,22 +454,20 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     // means the tab model is already fully formed with tabs. Need to walk the
     // list and create the UI for each.
     const int existingTabCount = tabStripModel_->count();
-    const content::WebContents* selection =
-        tabStripModel_->GetActiveWebContents();
+    const TabContentsWrapper* selection =
+        tabStripModel_->GetActiveTabContents();
     for (int i = 0; i < existingTabCount; ++i) {
-      content::WebContents* currentContents =
-          tabStripModel_->GetWebContentsAt(i);
+      TabContentsWrapper* currentContents = tabStripModel_->GetTabContentsAt(i);
       [self insertTabWithContents:currentContents
                           atIndex:i
                      inForeground:NO];
       if (selection == currentContents) {
         // Must manually force a selection since the model won't send
         // selection messages in this scenario.
-        [self
-            activateTabWithContents:currentContents
-                   previousContents:NULL
-                            atIndex:i
-                             reason:TabStripModelObserver::CHANGE_REASON_NONE];
+        [self activateTabWithContents:currentContents
+                     previousContents:NULL
+                              atIndex:i
+                          userGesture:NO];
       }
     }
     // Don't lay out the tabs until after the controller has been fully
@@ -576,8 +482,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 }
 
 - (void)dealloc {
-  [tabStripView_ setController:nil];
-
   if (trackingArea_.get())
     [tabStripView_ removeTrackingArea:trackingArea_.get()];
 
@@ -589,12 +493,11 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     [[[view animationForKey:@"frameOrigin"] delegate] invalidate];
   }
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [tabStripView_ removeAllToolTips];
   [super dealloc];
 }
 
 + (CGFloat)defaultTabHeight {
-  return 26.0;
+  return 25.0;
 }
 
 + (CGFloat)defaultLeftIndentForControls {
@@ -610,10 +513,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   DCHECK(modelIndex >= 0 && modelIndex < tabStripModel_->count());
   NSInteger index = [self indexFromModelIndex:modelIndex];
   TabContentsController* controller = [tabContentsArray_ objectAtIndex:index];
-
-  // Make sure that any layers that move are not animated to their new
-  // positions.
-  ScopedCAActionDisabler disabler;
 
   // Resize the new view to fit the window. Calling |view| may lazily
   // instantiate the TabContentsController from the nib. Until we call
@@ -650,11 +549,30 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   // It also restores content autoresizing properties.
   [controller ensureContentsVisible];
 
-  NSWindow* parentWindow = [switchView_ window];
-  ConstrainedWindowSheetController* sheetController =
-      [ConstrainedWindowSheetController
-          controllerForParentWindow:parentWindow];
-  [sheetController parentViewDidBecomeActive:newView];
+  // Tell per-tab sheet manager about currently selected tab.
+  if (sheetController_.get()) {
+    [sheetController_ setActiveView:newView];
+  }
+
+  // Make sure the new tabs's sheets are visible (necessary when a background
+  // tab opened a sheet while it was in the background and now becomes active).
+  TabContentsWrapper* newTab = tabStripModel_->GetTabContentsAt(modelIndex);
+  DCHECK(newTab);
+  if (newTab) {
+    ConstrainedWindowTabHelper::ConstrainedWindowList::iterator it, end;
+    end = newTab->constrained_window_tab_helper()->constrained_window_end();
+    NSWindowController* controller = [[newView window] windowController];
+    DCHECK([controller isKindOfClass:[BrowserWindowController class]]);
+
+    for (it = newTab->constrained_window_tab_helper()->
+              constrained_window_begin();
+         it != end;
+         ++it) {
+      ConstrainedWindow* constrainedWindow = *it;
+      static_cast<ConstrainedWindowMac*>(constrainedWindow)->Realize(
+          static_cast<BrowserWindowController*>(controller));
+    }
+  }
 }
 
 // Create a new tab view and set its cell correctly so it draws the way we want
@@ -668,14 +586,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   [[controller view] setHidden:YES];
 
   return controller;
-}
-
-// (Private) Handles a click on the new tab button.
-- (void)clickNewTabButton:(id)sender {
-  content::RecordAction(UserMetricsAction("NewTab_Button"));
-  UMA_HISTOGRAM_ENUMERATION("Tab.NewTab", TabStripModel::NEW_TAB_BUTTON,
-                            TabStripModel::NEW_TAB_ENUM_COUNT);
-  tabStripModel_->delegate()->AddTabAt(GURL(), -1, true);
 }
 
 // (Private) Returns the number of open tabs in the tab strip. This is the
@@ -713,7 +623,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   NSInteger i = 0;
   for (TabController* controller in tabArray_.get()) {
     if ([closingControllers_ containsObject:controller]) {
-      DCHECK([[controller tabView] isClosing]);
+      DCHECK([(TabView*)[controller view] isClosing]);
       ++index;
     }
     if (i == index)  // No need to check anything after, it has no effect.
@@ -855,7 +765,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
       NSView* lastTab = [self viewAtIndex:numberOfOpenTabs - 1];
       availableResizeWidth_ = NSMaxX([lastTab frame]);
     }
-    tabStripModel_->CloseWebContentsAt(
+    tabStripModel_->CloseTabContentsAt(
         index,
         TabStripModel::CLOSE_USER_GESTURE |
         TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
@@ -1023,7 +933,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
     BOOL isPlaceholder = [[tab view] isEqual:placeholderTab_];
     NSRect tabFrame = [[tab view] frame];
-    tabFrame.size.height = [[self class] defaultTabHeight];
+    tabFrame.size.height = [[self class] defaultTabHeight] + 1;
     tabFrame.origin.y = 0;
     tabFrame.origin.x = offset;
 
@@ -1222,24 +1132,19 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
 // Handles setting the title of the tab based on the given |contents|. Uses
 // a canned string if |contents| is NULL.
-- (void)setTabTitle:(TabController*)tab withContents:(WebContents*)contents {
-  // TODO(miu): Rectify inconsistent tooltip behavior.  http://crbug.com/310947
-
-  base::string16 title;
+- (void)setTabTitle:(NSViewController*)tab withContents:(WebContents*)contents {
+  NSString* titleString = nil;
   if (contents)
-    title = contents->GetTitle();
-  if (title.empty())
-    title = l10n_util::GetStringUTF16(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED);
-  [tab setTitle:base::SysUTF16ToNSString(title)];
-
-  const base::string16& toolTip = chrome::AssembleTabTooltipText(
-      title, chrome::GetTabMediaStateForContents(contents));
-  [tab setToolTip:base::SysUTF16ToNSString(toolTip)];
+    titleString = base::SysUTF16ToNSString(contents->GetTitle());
+  if (![titleString length]) {
+    titleString = l10n_util::GetNSString(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED);
+  }
+  [tab setTitle:titleString];
 }
 
 // Called when a notification is received from the model to insert a new tab
 // at |modelIndex|.
-- (void)insertTabWithContents:(content::WebContents*)contents
+- (void)insertTabWithContents:(TabContentsWrapper*)contents
                       atIndex:(NSInteger)modelIndex
                  inForeground:(bool)inForeground {
   DCHECK(contents);
@@ -1254,12 +1159,9 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   // Make a new tab. Load the contents of this tab from the nib and associate
   // the new controller with |contents| so it can be looked up later.
-  const BOOL autoEmbedFullscreen =
-      implicit_cast<content::WebContentsDelegate*>(browser_)->
-          EmbedsFullscreenWidget();
-  base::scoped_nsobject<TabContentsController> contentsController(
-      [[TabContentsController alloc] initWithContents:contents
-                               andAutoEmbedFullscreen:autoEmbedFullscreen]);
+  scoped_nsobject<TabContentsController> contentsController(
+      [[TabContentsController alloc]
+          initWithContents:contents->web_contents()]);
   [tabContentsArray_ insertObject:contentsController atIndex:index];
 
   // Make a new tab and add it to the strip. Keep track of its controller.
@@ -1267,7 +1169,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   [newController setMini:tabStripModel_->IsMiniTab(modelIndex)];
   [newController setPinned:tabStripModel_->IsTabPinned(modelIndex)];
   [newController setApp:tabStripModel_->IsAppTab(modelIndex)];
-  [newController setUrl:contents->GetURL()];
+  [newController setUrl:contents->web_contents()->GetURL()];
   [tabArray_ insertObject:newController atIndex:index];
   NSView* newView = [newController view];
 
@@ -1277,7 +1179,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   [newView setFrame:NSOffsetRect([newView frame],
                                  0, -[[self class] defaultTabHeight])];
 
-  [self setTabTitle:newController withContents:contents];
+  [self setTabTitle:newController withContents:contents->web_contents()];
 
   // If a tab is being inserted, we can again use the entire tab strip width
   // for layout.
@@ -1295,40 +1197,41 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   // dragging a tab out into a new window, we have to put the tab's favicon
   // into the right state up front as we won't be told to do it from anywhere
   // else.
-  [self updateIconsForContents:contents atIndex:modelIndex];
-}
+  [self updateFaviconForContents:contents atIndex:modelIndex];
 
-// Called before |contents| is deactivated.
-- (void)tabDeactivatedWithContents:(content::WebContents*)contents {
-  contents->GetView()->StoreFocus();
+  // Send a broadcast that the number of tabs have changed.
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:kTabStripNumberOfTabsChanged
+                    object:self];
 }
 
 // Called when a notification is received from the model to select a particular
 // tab. Swaps in the toolbar and content area associated with |newContents|.
-- (void)activateTabWithContents:(content::WebContents*)newContents
-               previousContents:(content::WebContents*)oldContents
+- (void)activateTabWithContents:(TabContentsWrapper*)newContents
+               previousContents:(TabContentsWrapper*)oldContents
                         atIndex:(NSInteger)modelIndex
-                         reason:(int)reason {
+                    userGesture:(bool)wasUserGesture {
   // Take closing tabs into account.
   NSInteger activeIndex = [self indexFromModelIndex:modelIndex];
 
   if (oldContents) {
-    int oldModelIndex =
-        browser_->tab_strip_model()->GetIndexOfWebContents(oldContents);
+    int oldModelIndex = browser_->GetIndexOfController(
+        &(oldContents->web_contents()->GetController()));
     if (oldModelIndex != -1) {  // When closing a tab, the old tab may be gone.
       NSInteger oldIndex = [self indexFromModelIndex:oldModelIndex];
       TabContentsController* oldController =
           [tabContentsArray_ objectAtIndex:oldIndex];
       [oldController willBecomeUnselectedTab];
-      oldContents->WasHidden();
+      oldContents->web_contents()->GetView()->StoreFocus();
+      oldContents->web_contents()->WasHidden();
     }
   }
 
   // First get the vector of indices, which is allays sorted in ascending order.
-  ui::ListSelectionModel::SelectedIndices selection(
+  TabStripSelectionModel::SelectedIndices selection(
       tabStripModel_->selection_model().selected_indices());
   // Iterate through all of the tabs, selecting each as necessary.
-  ui::ListSelectionModel::SelectedIndices::iterator iter = selection.begin();
+  TabStripSelectionModel::SelectedIndices::iterator iter = selection.begin();
   int i = 0;
   for (TabController* current in tabArray_.get()) {
     BOOL selected = iter != selection.end() &&
@@ -1355,31 +1258,33 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   [self swapInTabAtIndex:modelIndex];
 
   if (newContents) {
-    newContents->WasShown();
-    newContents->GetView()->RestoreFocus();
+    newContents->web_contents()->DidBecomeSelected();
+    newContents->web_contents()->GetView()->RestoreFocus();
+
+    if (newContents->find_tab_helper()->find_ui_active())
+      browser_->GetFindBarController()->find_bar()->SetFocusAndSelection();
   }
 }
 
-- (void)tabReplacedWithContents:(content::WebContents*)newContents
-               previousContents:(content::WebContents*)oldContents
+- (void)tabReplacedWithContents:(TabContentsWrapper*)newContents
+               previousContents:(TabContentsWrapper*)oldContents
                         atIndex:(NSInteger)modelIndex {
   NSInteger index = [self indexFromModelIndex:modelIndex];
   TabContentsController* oldController =
       [tabContentsArray_ objectAtIndex:index];
-  DCHECK_EQ(oldContents, [oldController webContents]);
+  DCHECK_EQ(oldContents->web_contents(), [oldController webContents]);
 
   // Simply create a new TabContentsController for |newContents| and place it
-  // into the array, replacing |oldContents|.  An ActiveTabChanged notification
+  // into the array, replacing |oldContents|.  A ActiveTabChanged notification
   // will follow, at which point we will install the new view.
-  const BOOL autoEmbedFullscreen =
-      implicit_cast<content::WebContentsDelegate*>(browser_)->
-          EmbedsFullscreenWidget();
-  base::scoped_nsobject<TabContentsController> newController(
-      [[TabContentsController alloc] initWithContents:newContents
-                               andAutoEmbedFullscreen:autoEmbedFullscreen]);
+  scoped_nsobject<TabContentsController> newController(
+      [[TabContentsController alloc]
+          initWithContents:newContents->web_contents()]);
 
   // Bye bye, |oldController|.
   [tabContentsArray_ replaceObjectAtIndex:index withObject:newController];
+
+  [delegate_ onReplaceTabWithContents:newContents->web_contents()];
 
   // Fake a tab changed notification to force tab titles and favicons to update.
   [self tabChangedWithContents:newContents
@@ -1450,15 +1355,15 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   // Mark the tab as closing. This prevents it from generating any drags or
   // selections while it's animating closed.
-  [[closingTab tabView] setClosing:YES];
+  [(TabView*)[closingTab view] setClosing:YES];
 
   // Register delegate (owned by the animation system).
   NSView* tabView = [closingTab view];
   CAAnimation* animation = [[tabView animationForKey:@"frameOrigin"] copy];
   [animation autorelease];
-  base::scoped_nsobject<TabCloseAnimationDelegate> delegate(
-      [[TabCloseAnimationDelegate alloc] initWithTabStrip:self
-                                            tabController:closingTab]);
+  scoped_nsobject<TabCloseAnimationDelegate> delegate(
+    [[TabCloseAnimationDelegate alloc] initWithTabStrip:self
+                                          tabController:closingTab]);
   [animation setDelegate:delegate.get()];  // Retains delegate.
   NSMutableDictionary* animationDictionary =
       [NSMutableDictionary dictionaryWithDictionary:[tabView animations]];
@@ -1476,7 +1381,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 // Called when a notification is received from the model that the given tab
 // has gone away. Start an animation then force a layout to put everything
 // in motion.
-- (void)tabDetachedWithContents:(content::WebContents*)contents
+- (void)tabDetachedWithContents:(TabContentsWrapper*)contents
                         atIndex:(NSInteger)modelIndex {
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
@@ -1489,31 +1394,31 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     [self startClosingTabWithAnimation:tab];
     [self layoutTabs];
   } else {
-    // Don't remove the tab, as that makes the window look jarring without any
-    // tabs. Instead, simply mark it as closing to prevent the tab from
-    // generating any drags or selections.
-    [[tab tabView] setClosing:YES];
+    [self removeTab:tab];
   }
 
-  [delegate_ onTabDetachedWithContents:contents];
+  // Send a broadcast that the number of tabs have changed.
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:kTabStripNumberOfTabsChanged
+                    object:self];
+
+  [delegate_ onTabDetachedWithContents:contents->web_contents()];
 }
 
 // A helper routine for creating an NSImageView to hold the favicon or app icon
 // for |contents|.
-- (NSImageView*)iconImageViewForContents:(content::WebContents*)contents {
-  extensions::TabHelper* extensions_tab_helper =
-      extensions::TabHelper::FromWebContents(contents);
-  BOOL isApp = extensions_tab_helper->is_app();
+- (NSImageView*)iconImageViewForContents:(TabContentsWrapper*)contents {
+  BOOL isApp = contents->extension_tab_helper()->is_app();
   NSImage* image = nil;
   // Favicons come from the renderer, and the renderer draws everything in the
   // system color space.
   CGColorSpaceRef colorSpace = base::mac::GetSystemColorSpace();
   if (isApp) {
-    SkBitmap* icon = extensions_tab_helper->GetExtensionAppIcon();
+    SkBitmap* icon = contents->extension_tab_helper()->GetExtensionAppIcon();
     if (icon)
       image = gfx::SkBitmapToNSImageWithColorSpace(*icon, colorSpace);
   } else {
-    image = mac::FaviconForWebContents(contents);
+    image = mac::FaviconForTabContents(contents);
   }
 
   // Either we don't have a valid favicon or there was some issue converting it
@@ -1528,41 +1433,39 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
 // Updates the current loading state, replacing the icon view with a favicon,
 // a throbber, the default icon, or nothing at all.
-- (void)updateIconsForContents:(content::WebContents*)contents
-                       atIndex:(NSInteger)modelIndex {
+- (void)updateFaviconForContents:(TabContentsWrapper*)contents
+                         atIndex:(NSInteger)modelIndex {
   if (!contents)
     return;
 
   static NSImage* throbberWaitingImage =
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_THROBBER_WAITING).CopyNSImage();
+      [ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+          IDR_THROBBER_WAITING) retain];
   static NSImage* throbberLoadingImage =
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_THROBBER).CopyNSImage();
+      [ResourceBundle::GetSharedInstance().GetNativeImageNamed(IDR_THROBBER)
+        retain];
   static NSImage* sadFaviconImage =
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_SAD_FAVICON).CopyNSImage();
+      [ResourceBundle::GetSharedInstance().GetNativeImageNamed(IDR_SAD_FAVICON)
+        retain];
 
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
   TabController* tabController = [tabArray_ objectAtIndex:index];
 
-  FaviconTabHelper* favicon_tab_helper =
-      FaviconTabHelper::FromWebContents(contents);
   bool oldHasIcon = [tabController iconView] != nil;
-  bool newHasIcon = favicon_tab_helper->ShouldDisplayFavicon() ||
+  bool newHasIcon = contents->favicon_tab_helper()->ShouldDisplayFavicon() ||
       tabStripModel_->IsMiniTab(modelIndex);  // Always show icon if mini.
 
   TabLoadingState oldState = [tabController loadingState];
   TabLoadingState newState = kTabDone;
   NSImage* throbberImage = nil;
-  if (contents->IsCrashed()) {
+  if (contents->web_contents()->IsCrashed()) {
     newState = kTabCrashed;
     newHasIcon = true;
-  } else if (contents->IsWaitingForResponse()) {
+  } else if (contents->web_contents()->IsWaitingForResponse()) {
     newState = kTabWaiting;
     throbberImage = throbberWaitingImage;
-  } else if (contents->IsLoading()) {
+  } else if (contents->web_contents()->IsLoading()) {
     newState = kTabLoading;
     throbberImage = throbberLoadingImage;
   }
@@ -1580,16 +1483,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     if (newHasIcon) {
       if (newState == kTabDone) {
         iconView = [self iconImageViewForContents:contents];
-        const TabMediaState mediaState =
-            chrome::GetTabMediaStateForContents(contents);
-        // Create MediaIndicatorView upon first use.
-        if (mediaState != TAB_MEDIA_STATE_NONE &&
-            ![tabController mediaIndicatorView]) {
-          MediaIndicatorView* const mediaIndicatorView =
-              [[[MediaIndicatorView alloc] init] autorelease];
-          [tabController setMediaIndicatorView:mediaIndicatorView];
-        }
-        [[tabController mediaIndicatorView] updateIndicator:mediaState];
       } else if (newState == kTabCrashed) {
         NSImage* oldImage = [[self iconImageViewForContents:contents] image];
         NSRect frame =
@@ -1597,8 +1490,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
         iconView = [ThrobberView toastThrobberViewWithFrame:frame
                                                 beforeImage:oldImage
                                                  afterImage:sadFaviconImage];
-        [[tabController mediaIndicatorView]
-          updateIndicator:TAB_MEDIA_STATE_NONE];
       } else {
         NSRect frame =
             NSMakeRect(0, 0, kIconWidthAndHeight, kIconWidthAndHeight);
@@ -1608,28 +1499,20 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     }
 
     [tabController setIconView:iconView];
-    if (iconView) {
-      // See the comment above kTabOverlap for why these DCHECKs exist.
-      DCHECK_GE(NSMinX([iconView frame]), kTabOverlap);
-      // TODO(thakis): Ideally, this would be true too, but it's not true in
-      // some tests.
-      //DCHECK_LE(NSMaxX([iconView frame]),
-      //          NSWidth([[tabController view] frame]) - kTabOverlap);
-    }
   }
 }
 
 // Called when a notification is received from the model that the given tab
 // has been updated. |loading| will be YES when we only want to update the
 // throbber state, not anything else about the (partially) loading tab.
-- (void)tabChangedWithContents:(content::WebContents*)contents
+- (void)tabChangedWithContents:(TabContentsWrapper*)contents
                        atIndex:(NSInteger)modelIndex
                     changeType:(TabStripModelObserver::TabChangeType)change {
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
 
   if (modelIndex == tabStripModel_->active_index())
-    [delegate_ onTabChanged:change withContents:contents];
+    [delegate_ onTabChanged:change withContents:contents->web_contents()];
 
   if (change == TabStripModelObserver::TITLE_NOT_LOADING) {
     // TODO(sky): make this work.
@@ -1640,19 +1523,19 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   TabController* tabController = [tabArray_ objectAtIndex:index];
 
   if (change != TabStripModelObserver::LOADING_ONLY)
-    [self setTabTitle:tabController withContents:contents];
+    [self setTabTitle:tabController withContents:contents->web_contents()];
 
-  [self updateIconsForContents:contents atIndex:modelIndex];
+  [self updateFaviconForContents:contents atIndex:modelIndex];
 
   TabContentsController* updatedController =
       [tabContentsArray_ objectAtIndex:index];
-  [updatedController tabDidChange:contents];
+  [updatedController tabDidChange:contents->web_contents()];
 }
 
 // Called when a tab is moved (usually by drag&drop). Keep our parallel arrays
 // in sync with the tab strip model. It can also be pinned/unpinned
 // simultaneously, so we need to take care of that.
-- (void)tabMovedWithContents:(content::WebContents*)contents
+- (void)tabMovedWithContents:(TabContentsWrapper*)contents
                    fromIndex:(NSInteger)modelFrom
                      toIndex:(NSInteger)modelTo {
   // Take closing tabs into account.
@@ -1662,12 +1545,12 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   // Cancel any pending tab transition.
   hoverTabSelector_->CancelTabTransition();
 
-  base::scoped_nsobject<TabContentsController> movedTabContentsController(
+  scoped_nsobject<TabContentsController> movedTabContentsController(
       [[tabContentsArray_ objectAtIndex:from] retain]);
   [tabContentsArray_ removeObjectAtIndex:from];
   [tabContentsArray_ insertObject:movedTabContentsController.get()
                           atIndex:to];
-  base::scoped_nsobject<TabController> movedTabController(
+  scoped_nsobject<TabController> movedTabController(
       [[tabArray_ objectAtIndex:from] retain]);
   DCHECK([movedTabController isKindOfClass:[TabController class]]);
   [tabArray_ removeObjectAtIndex:from];
@@ -1681,7 +1564,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 }
 
 // Called when a tab is pinned or unpinned without moving.
-- (void)tabMiniStateChangedWithContents:(content::WebContents*)contents
+- (void)tabMiniStateChangedWithContents:(TabContentsWrapper*)contents
                                 atIndex:(NSInteger)modelIndex {
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
@@ -1696,8 +1579,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   [tabController setMini:tabStripModel_->IsMiniTab(modelIndex)];
   [tabController setPinned:tabStripModel_->IsTabPinned(modelIndex)];
   [tabController setApp:tabStripModel_->IsAppTab(modelIndex)];
-  [tabController setUrl:contents->GetURL()];
-  [self updateIconsForContents:contents atIndex:modelIndex];
+  [tabController setUrl:contents->web_contents()->GetURL()];
+  [self updateFaviconForContents:contents atIndex:modelIndex];
   // If the tab is being restored and it's pinned, the mini state is set after
   // the tab has already been rendered, so re-layout the tabstrip. In all other
   // cases, the state is set before the tab is rendered so this isn't needed.
@@ -1710,10 +1593,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   [targetFrames_ setObject:[NSValue valueWithRect:frame]
                     forKey:identifier];
   [view setFrame:frame];
-}
-
-- (TabStripModel*)tabStripModel {
-  return tabStripModel_;
 }
 
 - (NSView*)activeTabView {
@@ -1765,19 +1644,19 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   int toIndex = [self indexOfPlaceholder];
   // Cancel any pending tab transition.
   hoverTabSelector_->CancelTabTransition();
-  tabStripModel_->MoveWebContentsAt(from, toIndex, true);
+  tabStripModel_->MoveTabContentsAt(from, toIndex, true);
 }
 
-// Drop a given WebContents at the location of the current placeholder.
-// If there is no placeholder, it will go at the end. Used when dragging from
-// another window when we don't have access to the WebContents as part of our
-// strip. |frame| is in the coordinate system of the tab strip view and
-// represents where the user dropped the new tab so it can be animated into its
-// correct location when the tab is added to the model. If the tab was pinned in
-// its previous window, setting |pinned| to YES will propagate that state to the
+// Drop a given TabContents at the location of the current placeholder. If there
+// is no placeholder, it will go at the end. Used when dragging from another
+// window when we don't have access to the TabContents as part of our strip.
+// |frame| is in the coordinate system of the tab strip view and represents
+// where the user dropped the new tab so it can be animated into its correct
+// location when the tab is added to the model. If the tab was pinned in its
+// previous window, setting |pinned| to YES will propagate that state to the
 // new window. Mini-tabs are either app or pinned tabs; the app state is stored
 // by the |contents|, but the |pinned| state is the caller's responsibility.
-- (void)dropWebContents:(WebContents*)contents
+- (void)dropTabContents:(TabContentsWrapper*)contents
               withFrame:(NSRect)frame
             asPinnedTab:(BOOL)pinned {
   int modelIndex = [self indexOfPlaceholder];
@@ -1788,7 +1667,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   // Insert it into this tab strip. We want it in the foreground and to not
   // inherit the current tab's group.
-  tabStripModel_->InsertWebContentsAt(
+  tabStripModel_->InsertTabContentsAt(
       modelIndex, contents,
       TabStripModel::ADD_ACTIVE | (pinned ? TabStripModel::ADD_PINNED : 0));
 }
@@ -1960,7 +1839,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   if (activeTabView) {
     [subviews addObject:activeTabView];
   }
-  WithNoAnimation noAnimation;
   [tabStripView_ setSubviews:subviews];
   [self setTabTrackingAreasEnabled:mouseInside_];
 }
@@ -2031,23 +1909,22 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   switch (disposition) {
     case NEW_FOREGROUND_TAB: {
       content::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
-      chrome::NavigateParams params(browser_, *url,
-                                    content::PAGE_TRANSITION_TYPED);
+      browser::NavigateParams params(
+          browser_, *url, content::PAGE_TRANSITION_TYPED);
       params.disposition = disposition;
       params.tabstrip_index = index;
       params.tabstrip_add_types =
           TabStripModel::ADD_ACTIVE | TabStripModel::ADD_FORCE_INDEX;
-      chrome::Navigate(&params);
+      browser::Navigate(&params);
       break;
     }
-    case CURRENT_TAB: {
+    case CURRENT_TAB:
       content::RecordAction(UserMetricsAction("Tab_DropURLOnTab"));
       OpenURLParams params(
           *url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-      tabStripModel_->GetWebContentsAt(index)->OpenURL(params);
+      tabStripModel_->GetTabContentsAt(index)->web_contents()->OpenURL(params);
       tabStripModel_->ActivateTabAt(index, true);
       break;
-    }
     default:
       NOTIMPLEMENTED();
   }
@@ -2079,8 +1956,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   // If the input is plain text, classify the input and make the URL.
   AutocompleteMatch match;
-  AutocompleteClassifierFactory::GetForProfile(browser_->profile())->Classify(
-      base::SysNSStringToUTF16(text), false, false, &match, NULL);
+  browser_->profile()->GetAutocompleteClassifier()->Classify(
+      base::SysNSStringToUTF16(text), string16(), false, false, &match, NULL);
   GURL url(match.destination_url);
 
   [self openURL:&url inView:view at:point];
@@ -2158,6 +2035,19 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   return drag_util::IsUnsupportedDropData(browser_->profile(), info);
 }
 
+- (GTMWindowSheetController*)sheetController {
+  if (!sheetController_.get())
+    sheetController_.reset([[GTMWindowSheetController alloc]
+        initWithWindow:[switchView_ window] delegate:self]);
+  return sheetController_.get();
+}
+
+- (void)destroySheetController {
+  // Make sure there are no open sheets.
+  DCHECK_EQ(0U, [[sheetController_ viewsWithAttachedSheets] count]);
+  sheetController_.reset();
+}
+
 - (TabContentsController*)activeTabContentsController {
   int modelIndex = tabStripModel_->active_index();
   if (modelIndex < 0)
@@ -2169,58 +2059,68 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   return [tabContentsArray_ objectAtIndex:index];
 }
 
-- (void)themeDidChangeNotification:(NSNotification*)notification {
-  [self setNewTabImages];
+- (void)gtm_systemRequestsVisibilityForView:(NSView*)view {
+  // This implementation is required by GTMWindowSheetController.
+
+  // Raise window...
+  [[switchView_ window] makeKeyAndOrderFront:self];
+
+  // ...and raise a tab with a sheet.
+  NSInteger index = [self modelIndexForContentsView:view];
+  DCHECK(index >= 0);
+  if (index >= 0)
+    tabStripModel_->ActivateTabAt(index, false /* not a user gesture */);
 }
 
-- (void)setNewTabImages {
-  ThemeService *theme =
-      static_cast<ThemeService*>([[tabStripView_ window] themeProvider]);
-  if (!theme)
-    return;
+- (void)attachConstrainedWindow:(ConstrainedWindowMac*)window {
+  // TODO(thakis, avi): Figure out how to make this work when tabs are dragged
+  // out or if fullscreen mode is toggled.
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  NSImage* mask = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON_MASK).ToNSImage();
-  NSImage* normal = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON).ToNSImage();
-  NSImage* hover = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON_H).ToNSImage();
-  NSImage* pressed = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON_P).ToNSImage();
-
-  NSImage* foreground = ApplyMask(
-      theme->GetNSImageNamed(IDR_THEME_TAB_BACKGROUND), mask);
-
-  [[newTabButton_ cell] setImage:Overlay(foreground, normal, 1.0)
-                  forButtonState:image_button_cell::kDefaultState];
-  [[newTabButton_ cell] setImage:Overlay(foreground, hover, 1.0)
-                  forButtonState:image_button_cell::kHoverState];
-  [[newTabButton_ cell] setImage:Overlay(foreground, pressed, 1.0)
-                    forButtonState:image_button_cell::kPressedState];
-
-  // IDR_THEME_TAB_BACKGROUND_INACTIVE is only used with the default theme.
-  if (theme->UsingDefaultTheme()) {
-    const CGFloat alpha = tabs::kImageNoFocusAlpha;
-    NSImage* background = ApplyMask(
-        theme->GetNSImageNamed(IDR_THEME_TAB_BACKGROUND_INACTIVE), mask);
-    [[newTabButton_ cell] setImage:Overlay(background, normal, alpha)
-                    forButtonState:image_button_cell::kDefaultStateBackground];
-    [[newTabButton_ cell] setImage:Overlay(background, hover, alpha)
-                    forButtonState:image_button_cell::kHoverStateBackground];
-  } else {
-    [[newTabButton_ cell] setImage:nil
-                    forButtonState:image_button_cell::kDefaultStateBackground];
-    [[newTabButton_ cell] setImage:nil
-                    forButtonState:image_button_cell::kHoverStateBackground];
-  }
-}
-
-@end
-
-NSView* GetSheetParentViewForWebContents(WebContents* web_contents) {
   // View hierarchy of the contents view:
   // NSView  -- switchView, same for all tabs
   // +- NSView  -- TabContentsController's view
   //    +- TabContentsViewCocoa
-  //
-  // Changing it? Do not forget to modify
-  // -[TabStripController swapInTabAtIndex:] too.
-  return [web_contents->GetView()->GetNativeView() superview];
+  // Changing it? Do not forget to modify removeConstrainedWindow too.
+  // We use the TabContentsController's view in |swapInTabAtIndex|, so we have
+  // to pass it to the sheet controller here.
+  NSView* tabContentsView =
+      [window->owner()->web_contents()->GetNativeView() superview];
+  window->delegate()->RunSheet([self sheetController], tabContentsView);
+
+  // TODO(avi, thakis): GTMWindowSheetController has no api to move tabsheets
+  // between windows. Until then, we have to prevent having to move a tabsheet
+  // between windows, e.g. no tearing off of tabs.
+  NSInteger modelIndex = [self modelIndexForContentsView:tabContentsView];
+  NSInteger index = [self indexFromModelIndex:modelIndex];
+  BrowserWindowController* controller =
+      (BrowserWindowController*)[[switchView_ window] windowController];
+  DCHECK(controller != nil);
+  DCHECK(index >= 0);
+  if (index >= 0) {
+    [controller setTab:[self viewAtIndex:index] isDraggable:NO];
+  }
 }
+
+- (void)removeConstrainedWindow:(ConstrainedWindowMac*)window {
+  NSView* tabContentsView =
+      [window->owner()->web_contents()->GetNativeView() superview];
+
+  // TODO(avi, thakis): GTMWindowSheetController has no api to move tabsheets
+  // between windows. Until then, we have to prevent having to move a tabsheet
+  // between windows, e.g. no tearing off of tabs.
+  NSInteger modelIndex = [self modelIndexForContentsView:tabContentsView];
+  if (modelIndex < 0) {
+    // This can happen during shutdown where the tab contents view has already
+    // removed itself.
+    return;
+  }
+  NSInteger index = [self indexFromModelIndex:modelIndex];
+  BrowserWindowController* controller =
+      (BrowserWindowController*)[[switchView_ window] windowController];
+  DCHECK(index >= 0);
+  if (index >= 0) {
+    [controller setTab:[self viewAtIndex:index] isDraggable:YES];
+  }
+}
+
+@end

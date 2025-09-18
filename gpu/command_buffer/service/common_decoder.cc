@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,7 +63,6 @@ CommonDecoder::~CommonDecoder() {}
 void* CommonDecoder::GetAddressAndCheckSize(unsigned int shm_id,
                                             unsigned int offset,
                                             unsigned int size) {
-  CHECK(engine_);
   Buffer buffer = engine_->GetSharedMemoryBuffer(shm_id);
   if (!buffer.ptr)
     return NULL;
@@ -74,8 +73,15 @@ void* CommonDecoder::GetAddressAndCheckSize(unsigned int shm_id,
   return static_cast<int8*>(buffer.ptr) + offset;
 }
 
-Buffer CommonDecoder::GetSharedMemoryBuffer(unsigned int shm_id) {
-  return engine_->GetSharedMemoryBuffer(shm_id);
+bool CommonDecoder::PushAddress(uint32 offset) {
+  if (call_stack_.size() < kMaxStackDepth) {
+    CommandAddress return_address(engine_->GetGetOffset());
+    if (engine_->SetGetOffset(offset)) {
+      call_stack_.push(return_address);
+      return true;
+    }
+  }
+  return false;
 }
 
 const char* CommonDecoder::GetCommonCommandName(
@@ -160,6 +166,7 @@ error::Error CommonDecoder::DoCommonCommand(
       return error::kInvalidArguments;
     }
   }
+  return DoCommonCommand(command, arg_count, cmd_data);
   return error::kUnknownCommand;
 }
 
@@ -173,6 +180,56 @@ error::Error CommonDecoder::HandleSetToken(
     uint32 immediate_data_size,
     const cmd::SetToken& args) {
   engine_->set_token(args.token);
+  return error::kNoError;
+}
+
+error::Error CommonDecoder::HandleJump(
+    uint32 immediate_data_size,
+    const cmd::Jump& args) {
+  if (!engine_->SetGetOffset(args.offset)) {
+    return error::kInvalidArguments;
+  }
+  return error::kNoError;
+}
+
+error::Error CommonDecoder::HandleJumpRelative(
+    uint32 immediate_data_size,
+    const cmd::JumpRelative& args) {
+  if (!engine_->SetGetOffset(engine_->GetGetOffset() + args.offset)) {
+    return error::kInvalidArguments;
+  }
+  return error::kNoError;
+}
+
+error::Error CommonDecoder::HandleCall(
+    uint32 immediate_data_size,
+    const cmd::Call& args) {
+  if (!PushAddress(args.offset)) {
+    return error::kInvalidArguments;
+  }
+  return error::kNoError;
+}
+
+error::Error CommonDecoder::HandleCallRelative(
+    uint32 immediate_data_size,
+    const cmd::CallRelative& args) {
+  if (!PushAddress(engine_->GetGetOffset() + args.offset)) {
+    return error::kInvalidArguments;
+  }
+  return error::kNoError;
+}
+
+error::Error CommonDecoder::HandleReturn(
+    uint32 immediate_data_size,
+    const cmd::Return& args) {
+  if (call_stack_.empty()) {
+    return error::kInvalidArguments;
+  }
+  CommandAddress return_address = call_stack_.top();
+  call_stack_.pop();
+  if (!engine_->SetGetOffset(return_address.offset)) {
+    return error::kInvalidArguments;
+  }
   return error::kNoError;
 }
 
@@ -229,40 +286,24 @@ error::Error CommonDecoder::HandleSetBucketDataImmediate(
   return error::kNoError;
 }
 
-error::Error CommonDecoder::HandleGetBucketStart(
+error::Error CommonDecoder::HandleGetBucketSize(
     uint32 immediate_data_size,
-    const cmd::GetBucketStart& args) {
+    const cmd::GetBucketSize& args) {
   uint32 bucket_id = args.bucket_id;
-  uint32* result = GetSharedMemoryAs<uint32*>(
-      args.result_memory_id, args.result_memory_offset, sizeof(*result));
-  int32 data_memory_id = args.data_memory_id;
-  uint32 data_memory_offset = args.data_memory_offset;
-  uint32 data_memory_size = args.data_memory_size;
-  uint8* data = NULL;
-  if (data_memory_size != 0 || data_memory_id != 0 || data_memory_offset != 0) {
-    data = GetSharedMemoryAs<uint8*>(
-        args.data_memory_id, args.data_memory_offset, args.data_memory_size);
-    if (!data) {
-      return error::kInvalidArguments;
-    }
-  }
-  if (!result) {
+  uint32* data = GetSharedMemoryAs<uint32*>(
+      args.shared_memory_id, args.shared_memory_offset, sizeof(*data));
+  if (!data) {
     return error::kInvalidArguments;
   }
   // Check that the client initialized the result.
-  if (*result != 0) {
+  if (*data != 0) {
     return error::kInvalidArguments;
   }
   Bucket* bucket = GetBucket(bucket_id);
   if (!bucket) {
     return error::kInvalidArguments;
   }
-  uint32 bucket_size = bucket->size();
-  *result = bucket_size;
-  if (data) {
-    uint32 size = std::min(data_memory_size, bucket_size);
-    memcpy(data, bucket->GetData(0, size), size);
-  }
+  *data = bucket->size();
   return error::kNoError;
 }
 

@@ -7,22 +7,19 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/memory/singleton.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
-#include "content/browser/renderer_host/java/java_bridge_dispatcher_host_manager.h"
+#include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "content/browser/renderer_host/java/java_type.h"
-#include "content/browser/renderer_host/java/jni_helper.h"
-#include "content/public/browser/browser_thread.h"
-#include "third_party/WebKit/public/web/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 
 using base::StringPrintf;
 using base::android::AttachCurrentThread;
 using base::android::ConvertUTF8ToJavaString;
-using base::android::GetClass;
+using base::android::GetMethodIDFromClassName;
 using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
-using blink::WebBindings;
+using WebKit::WebBindings;
 
 // The conversion between JavaScript and Java types is based on the Live
 // Connect 2 spec. See
@@ -32,19 +29,15 @@ using blink::WebBindings;
 // existing behavior. These areas are marked LIVECONNECT_COMPLIANCE. We may
 // revisit this decision in the future.
 
-namespace content {
 namespace {
 
 const char kJavaLangClass[] = "java/lang/Class";
 const char kJavaLangObject[] = "java/lang/Object";
-const char kJavaLangReflectMethod[] = "java/lang/reflect/Method";
 const char kGetClass[] = "getClass";
 const char kGetMethods[] = "getMethods";
-const char kIsAnnotationPresent[] = "isAnnotationPresent";
 const char kReturningJavaLangClass[] = "()Ljava/lang/Class;";
 const char kReturningJavaLangReflectMethodArray[] =
     "()[Ljava/lang/reflect/Method;";
-const char kTakesJavaLangClassReturningBoolean[] = "(Ljava/lang/Class;)Z";
 
 // Our special NPObject type.  We extend an NPObject with a pointer to a
 // JavaBoundObject.  We also add static methods for each of the NPObject
@@ -120,182 +113,114 @@ bool JavaNPObject::GetProperty(NPObject* np_object,
   return false;
 }
 
-// Calls a Java method through JNI. If the Java method raises an uncaught
-// exception, it is cleared and this method returns false. Otherwise, this
-// method returns true and the Java method's return value is provided as an
-// NPVariant. Note that this method does not do any type coercion. The Java
-// return value is simply converted to the corresponding NPAPI type.
-bool CallJNIMethod(
-    jobject object,
-    const JavaType& return_type,
-    jmethodID id,
-    jvalue* parameters,
-    NPVariant* result,
-    const JavaRef<jclass>& safe_annotation_clazz,
-    const base::WeakPtr<JavaBridgeDispatcherHostManager>& manager) {
+// Calls a Java method through JNI and returns the result as an NPVariant. Note
+// that this method does not do any type coercion. The Java return value is
+// simply converted to the corresponding NPAPI type.
+NPVariant CallJNIMethod(jobject object, const JavaType& return_type,
+                        jmethodID id, jvalue* parameters) {
   JNIEnv* env = AttachCurrentThread();
+  NPVariant result;
   switch (return_type.type) {
     case JavaType::TypeBoolean:
       BOOLEAN_TO_NPVARIANT(env->CallBooleanMethodA(object, id, parameters),
-                           *result);
+                           result);
       break;
     case JavaType::TypeByte:
-      INT32_TO_NPVARIANT(env->CallByteMethodA(object, id, parameters), *result);
+      INT32_TO_NPVARIANT(env->CallByteMethodA(object, id, parameters), result);
       break;
     case JavaType::TypeChar:
-      INT32_TO_NPVARIANT(env->CallCharMethodA(object, id, parameters), *result);
+      INT32_TO_NPVARIANT(env->CallCharMethodA(object, id, parameters), result);
       break;
     case JavaType::TypeShort:
-      INT32_TO_NPVARIANT(env->CallShortMethodA(object, id, parameters),
-                         *result);
+      INT32_TO_NPVARIANT(env->CallShortMethodA(object, id, parameters), result);
       break;
     case JavaType::TypeInt:
-      INT32_TO_NPVARIANT(env->CallIntMethodA(object, id, parameters), *result);
+      INT32_TO_NPVARIANT(env->CallIntMethodA(object, id, parameters), result);
       break;
     case JavaType::TypeLong:
-      DOUBLE_TO_NPVARIANT(env->CallLongMethodA(object, id, parameters),
-                          *result);
+      DOUBLE_TO_NPVARIANT(env->CallLongMethodA(object, id, parameters), result);
       break;
     case JavaType::TypeFloat:
       DOUBLE_TO_NPVARIANT(env->CallFloatMethodA(object, id, parameters),
-                          *result);
+                          result);
       break;
     case JavaType::TypeDouble:
       DOUBLE_TO_NPVARIANT(env->CallDoubleMethodA(object, id, parameters),
-                          *result);
+                          result);
       break;
     case JavaType::TypeVoid:
       env->CallVoidMethodA(object, id, parameters);
-      VOID_TO_NPVARIANT(*result);
+      VOID_TO_NPVARIANT(result);
       break;
     case JavaType::TypeArray:
       // LIVECONNECT_COMPLIANCE: Existing behavior is to not call methods that
       // return arrays. Spec requires calling the method and converting the
       // result to a JavaScript array.
-      VOID_TO_NPVARIANT(*result);
+      VOID_TO_NPVARIANT(result);
       break;
     case JavaType::TypeString: {
-      jstring java_string = static_cast<jstring>(
-          env->CallObjectMethodA(object, id, parameters));
-      // If an exception was raised, we must clear it before calling most JNI
-      // methods. ScopedJavaLocalRef is liable to make such calls, so we test
-      // first.
-      if (base::android::ClearException(env)) {
-        return false;
-      }
-      ScopedJavaLocalRef<jstring> scoped_java_string(env, java_string);
-      if (!scoped_java_string.obj()) {
+      ScopedJavaLocalRef<jstring> java_string(env, static_cast<jstring>(
+          env->CallObjectMethodA(object, id, parameters)));
+      if (!java_string.obj()) {
         // LIVECONNECT_COMPLIANCE: Existing behavior is to return undefined.
         // Spec requires returning a null string.
-        VOID_TO_NPVARIANT(*result);
+        VOID_TO_NPVARIANT(result);
         break;
       }
       std::string str =
-          base::android::ConvertJavaStringToUTF8(scoped_java_string);
+          base::android::ConvertJavaStringToUTF8(env, java_string.obj());
+      // Take a copy and pass ownership to the variant. We must allocate using
+      // NPN_MemAlloc, to match NPN_ReleaseVariant, which uses NPN_MemFree.
       size_t length = str.length();
-      // This pointer is freed in _NPN_ReleaseVariantValue in
-      // third_party/WebKit/Source/WebCore/bindings/v8/npruntime.cpp.
-      char* buffer = static_cast<char*>(malloc(length));
+      char* buffer = static_cast<char*>(NPN_MemAlloc(length));
       str.copy(buffer, length, 0);
-      STRINGN_TO_NPVARIANT(buffer, length, *result);
+      STRINGN_TO_NPVARIANT(buffer, length, result);
       break;
     }
     case JavaType::TypeObject: {
-      // If an exception was raised, we must clear it before calling most JNI
-      // methods. ScopedJavaLocalRef is liable to make such calls, so we test
-      // first.
-      jobject java_object = env->CallObjectMethodA(object, id, parameters);
-      if (base::android::ClearException(env)) {
-        return false;
-      }
-      ScopedJavaLocalRef<jobject> scoped_java_object(env, java_object);
-      if (!scoped_java_object.obj()) {
-        NULL_TO_NPVARIANT(*result);
+      ScopedJavaLocalRef<jobject> java_object(
+          env,
+          env->CallObjectMethodA(object, id, parameters));
+      if (!java_object.obj()) {
+        NULL_TO_NPVARIANT(result);
         break;
       }
-      OBJECT_TO_NPVARIANT(JavaBoundObject::Create(scoped_java_object,
-                                                  safe_annotation_clazz,
-                                                  manager),
-                          *result);
+      OBJECT_TO_NPVARIANT(JavaBoundObject::Create(java_object), result);
       break;
     }
   }
-  return !base::android::ClearException(env);
-}
-
-double RoundDoubleTowardsZero(const double& x) {
-  if (std::isnan(x)) {
-    return 0.0;
-  }
-  return x > 0.0 ? floor(x) : ceil(x);
-}
-
-// Rounds to jlong using Java's type conversion rules.
-jlong RoundDoubleToLong(const double& x) {
-  double intermediate = RoundDoubleTowardsZero(x);
-  // The int64 limits can not be converted exactly to double values, so we
-  // compare to custom constants. kint64max is 2^63 - 1, but the spacing
-  // between double values in the the range 2^62 to 2^63 is 2^10. The cast is
-  // required to silence a spurious gcc warning for integer overflow.
-  const int64 limit = (GG_INT64_C(1) << 63) - static_cast<uint64>(1 << 10);
-  DCHECK(limit > 0);
-  const double kLargestDoubleLessThanInt64Max = limit;
-  const double kSmallestDoubleGreaterThanInt64Min = -limit;
-  if (intermediate > kLargestDoubleLessThanInt64Max) {
-    return kint64max;
-  }
-  if (intermediate < kSmallestDoubleGreaterThanInt64Min) {
-    return kint64min;
-  }
-  return static_cast<jlong>(intermediate);
-}
-
-// Rounds to jint using Java's type conversion rules.
-jint RoundDoubleToInt(const double& x) {
-  double intermediate = RoundDoubleTowardsZero(x);
-  // The int32 limits cast exactly to double values.
-  intermediate = std::min(intermediate, static_cast<double>(kint32max));
-  intermediate = std::max(intermediate, static_cast<double>(kint32min));
-  return static_cast<jint>(intermediate);
+  return result;
 }
 
 jvalue CoerceJavaScriptNumberToJavaValue(const NPVariant& variant,
                                          const JavaType& target_type,
                                          bool coerce_to_string) {
   // See http://jdk6.java.net/plugin2/liveconnect/#JS_NUMBER_VALUES.
-
-  // For conversion to numeric types, we need to replicate Java's type
-  // conversion rules. This requires that for integer values, we simply discard
-  // all but the lowest n buts, where n is the number of bits in the target
-  // type. For double values, the logic is more involved.
   jvalue result;
   DCHECK(variant.type == NPVariantType_Int32 ||
          variant.type == NPVariantType_Double);
   bool is_double = variant.type == NPVariantType_Double;
   switch (target_type.type) {
     case JavaType::TypeByte:
-      result.b = is_double ?
-          static_cast<jbyte>(RoundDoubleToInt(NPVARIANT_TO_DOUBLE(variant))) :
-          static_cast<jbyte>(NPVARIANT_TO_INT32(variant));
+      result.b = is_double ? static_cast<jbyte>(NPVARIANT_TO_DOUBLE(variant)) :
+                             static_cast<jbyte>(NPVARIANT_TO_INT32(variant));
       break;
     case JavaType::TypeChar:
       // LIVECONNECT_COMPLIANCE: Existing behavior is to convert double to 0.
-      // Spec requires converting doubles similarly to how we convert doubles to
-      // other numeric types.
+      // Spec requires converting doubles the same as int32.
       result.c = is_double ? 0 :
                              static_cast<jchar>(NPVARIANT_TO_INT32(variant));
       break;
     case JavaType::TypeShort:
-      result.s = is_double ?
-          static_cast<jshort>(RoundDoubleToInt(NPVARIANT_TO_DOUBLE(variant))) :
-          static_cast<jshort>(NPVARIANT_TO_INT32(variant));
+      result.s = is_double ? static_cast<jshort>(NPVARIANT_TO_DOUBLE(variant)) :
+                             static_cast<jshort>(NPVARIANT_TO_INT32(variant));
       break;
     case JavaType::TypeInt:
-      result.i = is_double ? RoundDoubleToInt(NPVARIANT_TO_DOUBLE(variant)) :
+      result.i = is_double ? static_cast<jint>(NPVARIANT_TO_DOUBLE(variant)) :
                              NPVARIANT_TO_INT32(variant);
       break;
     case JavaType::TypeLong:
-      result.j = is_double ? RoundDoubleToLong(NPVARIANT_TO_DOUBLE(variant)) :
+      result.j = is_double ? static_cast<jlong>(NPVARIANT_TO_DOUBLE(variant)) :
                              NPVARIANT_TO_INT32(variant);
       break;
     case JavaType::TypeFloat:
@@ -315,9 +240,8 @@ jvalue CoerceJavaScriptNumberToJavaValue(const NPVariant& variant,
       result.l = coerce_to_string ?
           ConvertUTF8ToJavaString(
               AttachCurrentThread(),
-              is_double ?
-                  base::StringPrintf("%.6lg", NPVARIANT_TO_DOUBLE(variant)) :
-                  base::Int64ToString(NPVARIANT_TO_INT32(variant))).Release() :
+              is_double ? StringPrintf("%.6lg", NPVARIANT_TO_DOUBLE(variant)) :
+                          base::Int64ToString(NPVARIANT_TO_INT32(variant))) :
           NULL;
       break;
     case JavaType::TypeBoolean:
@@ -357,7 +281,7 @@ jvalue CoerceJavaScriptBooleanToJavaValue(const NPVariant& variant,
     case JavaType::TypeString:
       result.l = coerce_to_string ?
           ConvertUTF8ToJavaString(AttachCurrentThread(),
-                                  boolean_value ? "true" : "false").Release() :
+                                  boolean_value ? "true" : "false") :
           NULL;
       break;
     case JavaType::TypeByte:
@@ -396,7 +320,7 @@ jvalue CoerceJavaScriptStringToJavaValue(const NPVariant& variant,
       result.l = ConvertUTF8ToJavaString(
           AttachCurrentThread(),
           base::StringPiece(NPVARIANT_TO_STRING(variant).UTF8Characters,
-                            NPVARIANT_TO_STRING(variant).UTF8Length)).Release();
+                            NPVARIANT_TO_STRING(variant).UTF8Length));
       break;
     case JavaType::TypeObject:
       // LIVECONNECT_COMPLIANCE: Existing behavior is to convert to NULL. Spec
@@ -459,7 +383,7 @@ jobject CreateJavaArray(const JavaType& type, jsize length) {
     case JavaType::TypeDouble:
       return env->NewDoubleArray(length);
     case JavaType::TypeString: {
-      ScopedJavaLocalRef<jclass> clazz(GetClass(env, "java/lang/String"));
+      ScopedJavaLocalRef<jclass> clazz(env, env->FindClass("java/lang/String"));
       return env->NewObjectArray(length, clazz.obj(), NULL);
     }
     case JavaType::TypeVoid:
@@ -472,10 +396,7 @@ jobject CreateJavaArray(const JavaType& type, jsize length) {
   return NULL;
 }
 
-// Sets the specified element of the supplied array to the value of the
-// supplied jvalue. Requires that the type of the array matches that of the
-// jvalue. Handles only primitive types and strings. Note that in the case of a
-// string, the array takes a new reference to the string object.
+// Note that this only handles primitive types and strings.
 void SetArrayElement(jobject array,
                      const JavaType& type,
                      jsize index,
@@ -528,22 +449,10 @@ void SetArrayElement(jobject array,
   base::android::CheckException(env);
 }
 
-void ReleaseJavaValueIfRequired(JNIEnv* env,
-                                jvalue* value,
-                                const JavaType& type) {
-  if (type.type == JavaType::TypeString ||
-      type.type == JavaType::TypeObject ||
-      type.type == JavaType::TypeArray) {
-    env->DeleteLocalRef(value->l);
-    value->l = NULL;
-  }
-}
-
 jvalue CoerceJavaScriptValueToJavaValue(const NPVariant& variant,
                                         const JavaType& target_type,
                                         bool coerce_to_string);
 
-// Returns a new local reference to a Java array.
 jobject CoerceJavaScriptObjectToArray(const NPVariant& variant,
                                       const JavaType& target_type) {
   DCHECK_EQ(JavaType::TypeArray, target_type.type);
@@ -588,11 +497,11 @@ jobject CoerceJavaScriptObjectToArray(const NPVariant& variant,
     return NULL;
   }
 
-  // Create the Java array.
+  // Create the Java array. Note that we don't explicitly release the local
+  // ref to the result or any of its elements.
   // TODO(steveblock): Handle failure to create the array.
   jobject result = CreateJavaArray(target_inner_type, length);
   NPVariant value_variant;
-  JNIEnv* env = AttachCurrentThread();
   for (jsize i = 0; i < length; ++i) {
     // It seems that getProperty() will set the variant to type void on failure,
     // but this doesn't seem to be documented, so do it explicitly here for
@@ -602,17 +511,10 @@ jobject CoerceJavaScriptObjectToArray(const NPVariant& variant,
     // value as JavaScript undefined.
     WebBindings::getProperty(0, object, WebBindings::getIntIdentifier(i),
                              &value_variant);
-    jvalue element = CoerceJavaScriptValueToJavaValue(value_variant,
-                                                      target_inner_type,
-                                                      false);
-    SetArrayElement(result, target_inner_type, i, element);
-    // CoerceJavaScriptValueToJavaValue() creates new local references to
-    // strings, objects and arrays. Of these, only strings can occur here.
-    // SetArrayElement() causes the array to take its own reference to the
-    // string, so we can now release the local reference.
-    DCHECK_NE(JavaType::TypeObject, target_inner_type.type);
-    DCHECK_NE(JavaType::TypeArray, target_inner_type.type);
-    ReleaseJavaValueIfRequired(env, &element, target_inner_type);
+    SetArrayElement(result, target_inner_type, i,
+                    CoerceJavaScriptValueToJavaValue(value_variant,
+                                                     target_inner_type,
+                                                     false));
     WebBindings::releaseVariantValue(&value_variant);
   }
 
@@ -639,7 +541,7 @@ jvalue CoerceJavaScriptObjectToJavaValue(const NPVariant& variant,
         // objects. Spec requires passing only Java objects which are
         // assignment-compatibile.
         result.l = AttachCurrentThread()->NewLocalRef(
-            JavaBoundObject::GetJavaObject(object).obj());
+            JavaBoundObject::GetJavaObject(object));
       } else {
         // LIVECONNECT_COMPLIANCE: Existing behavior is to pass null. Spec
         // requires converting if the target type is
@@ -652,8 +554,7 @@ jvalue CoerceJavaScriptObjectToJavaValue(const NPVariant& variant,
       // LIVECONNECT_COMPLIANCE: Existing behavior is to convert to
       // "undefined". Spec requires calling toString() on the Java object.
       result.l = coerce_to_string ?
-          ConvertUTF8ToJavaString(AttachCurrentThread(), "undefined").
-              Release() :
+          ConvertUTF8ToJavaString(AttachCurrentThread(), "undefined") :
           NULL;
       break;
     case JavaType::TypeByte:
@@ -706,8 +607,7 @@ jvalue CoerceJavaScriptNullOrUndefinedToJavaValue(const NPVariant& variant,
       // LIVECONNECT_COMPLIANCE: Existing behavior is to convert undefined to
       // "undefined". Spec requires converting undefined to NULL.
       result.l = (coerce_to_string && variant.type == NPVariantType_Void) ?
-          ConvertUTF8ToJavaString(AttachCurrentThread(), "undefined").
-              Release() :
+          ConvertUTF8ToJavaString(AttachCurrentThread(), "undefined") :
           NULL;
       break;
     case JavaType::TypeByte:
@@ -741,16 +641,15 @@ jvalue CoerceJavaScriptNullOrUndefinedToJavaValue(const NPVariant& variant,
 // strings when required, rather than simply converting to NULL. This is used
 // to maintain current behaviour, which differs slightly depending upon whether
 // or not the coercion in question is for an array element.
-//
-// Note that the jvalue returned by this method may contain a new local
-// reference to an object (string, object or array). This must be released by
-// the caller.
 jvalue CoerceJavaScriptValueToJavaValue(const NPVariant& variant,
                                         const JavaType& target_type,
                                         bool coerce_to_string) {
   // Note that in all these conversions, the relevant field of the jvalue must
   // always be explicitly set, as jvalue does not initialize its fields.
 
+  // Some of these methods create new Java Strings. Note that we don't
+  // explicitly release the local ref to these new objects, as there's no simple
+  // way to do so.
   switch (variant.type) {
     case NPVariantType_Int32:
     case NPVariantType_Double:
@@ -775,10 +674,8 @@ jvalue CoerceJavaScriptValueToJavaValue(const NPVariant& variant,
 
 }  // namespace
 
-NPObject* JavaBoundObject::Create(
-    const JavaRef<jobject>& object,
-    const JavaRef<jclass>& safe_annotation_clazz,
-    const base::WeakPtr<JavaBridgeDispatcherHostManager>& manager) {
+
+NPObject* JavaBoundObject::Create(const JavaRef<jobject>& object) {
   // The first argument (a plugin's instance handle) is passed through to the
   // allocate function directly, and we don't use it, so it's ok to be 0.
   // The object is created with a ref count of one.
@@ -786,42 +683,26 @@ NPObject* JavaBoundObject::Create(
       &JavaNPObject::kNPClass));
   // The NPObject takes ownership of the JavaBoundObject.
   reinterpret_cast<JavaNPObject*>(np_object)->bound_object =
-      new JavaBoundObject(object, safe_annotation_clazz, manager);
+      new JavaBoundObject(object);
   return np_object;
 }
 
-JavaBoundObject::JavaBoundObject(
-    const JavaRef<jobject>& object,
-    const JavaRef<jclass>& safe_annotation_clazz,
-    const base::WeakPtr<JavaBridgeDispatcherHostManager>& manager)
-    : java_object_(AttachCurrentThread(), object.obj()),
-      manager_(manager),
-      are_methods_set_up_(false),
-      safe_annotation_clazz_(safe_annotation_clazz) {
-  BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&JavaBridgeDispatcherHostManager::JavaBoundObjectCreated,
-                   manager_,
-                   base::android::ScopedJavaGlobalRef<jobject>(object)));
-  // Other than informing the JavaBridgeDispatcherHostManager that a java bound
-  // object has been created (above), we don't do anything else with our Java
-  // object when first created. We do it all lazily when a method is first
-  // invoked.
+JavaBoundObject::JavaBoundObject(const JavaRef<jobject>& object)
+    : java_object_(object.env()->NewGlobalRef(object.obj())) {
+  // We don't do anything with our Java object when first created. We do it all
+  // lazily when a method is first invoked.
 }
 
 JavaBoundObject::~JavaBoundObject() {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&JavaBridgeDispatcherHostManager::JavaBoundObjectDestroyed,
-                 manager_,
-                 base::android::ScopedJavaGlobalRef<jobject>(
-                     java_object_.get(AttachCurrentThread()))));
+  // Use the current thread's JNI env to release our global ref to the Java
+  // object.
+  AttachCurrentThread()->DeleteGlobalRef(java_object_);
 }
 
-ScopedJavaLocalRef<jobject> JavaBoundObject::GetJavaObject(NPObject* object) {
+jobject JavaBoundObject::GetJavaObject(NPObject* object) {
   DCHECK_EQ(&JavaNPObject::kNPClass, object->_class);
   JavaBoundObject* jbo = reinterpret_cast<JavaNPObject*>(object)->bound_object;
-  return jbo->java_object_.get(AttachCurrentThread());
+  return jbo->java_object_;
 }
 
 bool JavaBoundObject::HasMethod(const std::string& name) const {
@@ -861,78 +742,37 @@ bool JavaBoundObject::Invoke(const std::string& name, const NPVariant* args,
                                                      true);
   }
 
-  ScopedJavaLocalRef<jobject> obj = java_object_.get(AttachCurrentThread());
-
-  bool ok = false;
-  if (!obj.is_null()) {
-    // Call
-    ok = CallJNIMethod(obj.obj(), method->return_type(),
-                       method->id(), &parameters[0], result,
-                       safe_annotation_clazz_,
-                       manager_);
-  }
-
-  // Now that we're done with the jvalue, release any local references created
-  // by CoerceJavaScriptValueToJavaValue().
-  JNIEnv* env = AttachCurrentThread();
-  for (size_t i = 0; i < arg_count; ++i) {
-    ReleaseJavaValueIfRequired(env, &parameters[i], method->parameter_type(i));
-  }
-
-  return ok;
+  // Call
+  *result = CallJNIMethod(java_object_, method->return_type(), method->id(),
+                          &parameters[0]);
+  return true;
 }
 
 void JavaBoundObject::EnsureMethodsAreSetUp() const {
-  if (are_methods_set_up_)
-    return;
-  are_methods_set_up_ = true;
-
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_object_.get(env);
-
-  if (obj.is_null()) {
+  if (!methods_.empty()) {
     return;
   }
 
+  JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jclass> clazz(env, static_cast<jclass>(
-      env->CallObjectMethod(obj.obj(),  GetMethodIDFromClassName(
+      env->CallObjectMethod(java_object_,  GetMethodIDFromClassName(
           env,
           kJavaLangObject,
           kGetClass,
           kReturningJavaLangClass))));
-
   ScopedJavaLocalRef<jobjectArray> methods(env, static_cast<jobjectArray>(
       env->CallObjectMethod(clazz.obj(), GetMethodIDFromClassName(
           env,
           kJavaLangClass,
           kGetMethods,
           kReturningJavaLangReflectMethodArray))));
-
   size_t num_methods = env->GetArrayLength(methods.obj());
-  // Java objects always have public methods.
-  DCHECK(num_methods);
-
+  DCHECK(num_methods) << "Java objects always have public methods";
   for (size_t i = 0; i < num_methods; ++i) {
     ScopedJavaLocalRef<jobject> java_method(
         env,
         env->GetObjectArrayElement(methods.obj(), i));
-
-    if (!safe_annotation_clazz_.is_null()) {
-      jboolean safe = env->CallBooleanMethod(java_method.obj(),
-          GetMethodIDFromClassName(
-              env,
-              kJavaLangReflectMethod,
-              kIsAnnotationPresent,
-              kTakesJavaLangClassReturningBoolean),
-          safe_annotation_clazz_.obj());
-
-      if (!safe)
-        continue;
-    }
-
     JavaMethod* method = new JavaMethod(java_method);
     methods_.insert(std::make_pair(method->name(), method));
   }
 }
-
-}  // namespace content

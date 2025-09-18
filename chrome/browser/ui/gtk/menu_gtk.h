@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_MENU_GTK_H_
 #define CHROME_BROWSER_UI_GTK_MENU_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -11,13 +12,12 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/ui/gtk/g_object_weak_ref.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/gfx/point.h"
 
-namespace gfx {
-class Image;
-}
+class SkBitmap;
 
 namespace ui {
 class ButtonMenuItemModel;
@@ -45,10 +45,10 @@ class MenuGtk {
 
     // Return true if we should override the "gtk-menu-images" system setting
     // when showing image menu items for this menu.
-    virtual bool AlwaysShowIconForCmd(int command_id) const;
+    virtual bool AlwaysShowIconForCmd(int command_id) const { return false; }
 
     // Returns a tinted image used in button in a menu.
-    virtual GtkIconSet* GetIconSetForId(int idr);
+    virtual GtkIconSet* GetIconSetForId(int idr) { return NULL; }
 
     // Returns an icon for the menu item, if available.
     virtual GtkWidget* GetImageForCommandId(int command_id) const;
@@ -66,23 +66,15 @@ class MenuGtk {
   // is the new menu item.
   GtkWidget* AppendMenuItemWithLabel(int command_id, const std::string& label);
   GtkWidget* AppendMenuItemWithIcon(int command_id, const std::string& label,
-                                    const gfx::Image& icon);
+                                    const SkBitmap& icon);
   GtkWidget* AppendCheckMenuItemWithLabel(int command_id,
                                           const std::string& label);
   GtkWidget* AppendSeparator();
-  GtkWidget* InsertSeparator(int position);
   GtkWidget* AppendMenuItem(int command_id, GtkWidget* menu_item);
-  GtkWidget* InsertMenuItem(int command_id, GtkWidget* menu_item, int position);
   GtkWidget* AppendMenuItemToMenu(int index,
                                   ui::MenuModel* model,
                                   GtkWidget* menu_item,
                                   GtkWidget* menu,
-                                  bool connect_to_activate);
-  GtkWidget* InsertMenuItemToMenu(int index,
-                                  ui::MenuModel* model,
-                                  GtkWidget* menu_item,
-                                  GtkWidget* menu,
-                                  int position,
                                   bool connect_to_activate);
 
   // Displays the menu near a widget, as if the widget were a menu bar.
@@ -135,7 +127,7 @@ class MenuGtk {
  private:
   // Builds a GtkImageMenuItem.
   GtkWidget* BuildMenuItemWithImage(const std::string& label,
-                                    const gfx::Image& icon);
+                                    const SkBitmap& icon);
 
   GtkWidget* BuildMenuItemWithImage(const std::string& label,
                                     GtkWidget* image);
@@ -172,15 +164,13 @@ class MenuGtk {
   // Focus out event handler for the menu.
   CHROMEGTK_CALLBACK_1(MenuGtk, gboolean, OnMenuFocusOut, GdkEventFocus*);
 
-  // Handles building dynamic submenus on demand when they are shown.
-  CHROMEGTK_CALLBACK_0(MenuGtk, void, OnSubMenuShow);
+  // Lets dynamic submenu models know when they have been closed.
+  static void OnSubmenuHidden(GtkWidget* widget, gpointer userdata);
 
-  // Handles trearing down dynamic submenus when they have been closed.
-  CHROMEGTK_CALLBACK_0(MenuGtk, void, OnSubMenuHidden);
-
-  // Scheduled by OnSubMenuHidden() to avoid deleting submenus when hidden
-  // before pending activations within them are delivered.
-  static void OnSubMenuHiddenCallback(GtkWidget* submenu);
+  // Scheduled by OnSubmenuHidden() to avoid delivering MenuClosed notifications
+  // before ActivatedAt notifications. |menuitem| is the menu item containing
+  // the submenu that was hidden.
+  static void OnSubmenuHiddenCallback(const GObjectWeakRef& menuitem);
 
   // Sets the enable/disabled state and dynamic labels on our menu items.
   static void SetButtonItemInfo(GtkWidget* button, gpointer userdata);

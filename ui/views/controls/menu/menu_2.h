@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_2_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_2_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -20,6 +21,8 @@ class MenuModel;
 }
 
 namespace views {
+
+class NativeMenuGtk;
 
 // A menu. Populated from a model, and relies on a delegate to execute commands.
 //
@@ -62,7 +65,7 @@ class VIEWS_EXPORT Menu2 {
   void UpdateStates();
 
   // For submenus.
-  HMENU GetNativeMenu() const;
+  gfx::NativeMenu GetNativeMenu() const;
 
   // Get the result of the last call to RunMenuAt to determine whether an
   // item was selected, the user navigated to a next or previous menu, or
@@ -82,6 +85,7 @@ class VIEWS_EXPORT Menu2 {
   void SetMinimumWidth(int width);
 
  private:
+  friend class NativeMenuGtk;
 
   ui::MenuModel* model_;
 

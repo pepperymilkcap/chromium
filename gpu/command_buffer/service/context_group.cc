@@ -4,43 +4,24 @@
 
 #include "gpu/command_buffer/service/context_group.h"
 
-#include <algorithm>
 #include <string>
 
-#include "base/command_line.h"
-#include "base/strings/string_util.h"
-#include "base/sys_info.h"
+#include "base/string_util.h"
 #include "gpu/command_buffer/common/id_allocator.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/framebuffer_manager.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
-#include "gpu/command_buffer/service/gpu_switches.h"
-#include "gpu/command_buffer/service/image_manager.h"
-#include "gpu/command_buffer/service/mailbox_manager.h"
-#include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
 #include "gpu/command_buffer/service/texture_manager.h"
-#include "gpu/command_buffer/service/transfer_buffer_manager.h"
-#include "ui/gl/gl_implementation.h"
+#include "ui/gfx/gl/gl_implementation.h"
 
 namespace gpu {
 namespace gles2 {
 
-ContextGroup::ContextGroup(
-    MailboxManager* mailbox_manager,
-    ImageManager* image_manager,
-    MemoryTracker* memory_tracker,
-    StreamTextureManager* stream_texture_manager,
-    FeatureInfo* feature_info,
-    bool bind_generates_resource)
-    : mailbox_manager_(mailbox_manager ? mailbox_manager : new MailboxManager),
-      image_manager_(image_manager ? image_manager : new ImageManager),
-      memory_tracker_(memory_tracker),
-      stream_texture_manager_(stream_texture_manager),
-      enforce_gl_minimums_(CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnforceGLMinimums)),
+ContextGroup::ContextGroup(bool bind_generates_resource)
+    : num_contexts_(0),
       bind_generates_resource_(bind_generates_resource),
       max_vertex_attribs_(0u),
       max_texture_units_(0u),
@@ -49,25 +30,17 @@ ContextGroup::ContextGroup(
       max_fragment_uniform_vectors_(0u),
       max_varying_vectors_(0u),
       max_vertex_uniform_vectors_(0u),
-      max_color_attachments_(1u),
-      max_draw_buffers_(1u),
-      program_cache_(NULL),
-      feature_info_(feature_info ? feature_info : new FeatureInfo),
-      draw_buffer_(GL_BACK) {
-  {
-    TransferBufferManager* manager = new TransferBufferManager();
-    transfer_buffer_manager_.reset(manager);
-    manager->Initialize();
-  }
-
+      feature_info_(new FeatureInfo()) {
   id_namespaces_[id_namespaces::kBuffers].reset(new IdAllocator);
   id_namespaces_[id_namespaces::kFramebuffers].reset(new IdAllocator);
   id_namespaces_[id_namespaces::kProgramsAndShaders].reset(
       new NonReusedIdAllocator);
   id_namespaces_[id_namespaces::kRenderbuffers].reset(new IdAllocator);
   id_namespaces_[id_namespaces::kTextures].reset(new IdAllocator);
-  id_namespaces_[id_namespaces::kQueries].reset(new IdAllocator);
-  id_namespaces_[id_namespaces::kVertexArrays].reset(new IdAllocator);
+}
+
+ContextGroup::~ContextGroup() {
+  CHECK(num_contexts_ == 0);
 }
 
 static void GetIntegerv(GLenum pname, uint32* var) {
@@ -76,76 +49,45 @@ static void GetIntegerv(GLenum pname, uint32* var) {
   *var = value;
 }
 
-bool ContextGroup::Initialize(
-    GLES2Decoder* decoder,
-    const DisallowedFeatures& disallowed_features) {
-  // If we've already initialized the group just add the context.
-  if (HaveContexts()) {
-    decoders_.push_back(base::AsWeakPtr<GLES2Decoder>(decoder));
+bool ContextGroup::Initialize(const DisallowedFeatures& disallowed_features,
+                              const char* allowed_features) {
+  if (num_contexts_ > 0) {
+    ++num_contexts_;
     return true;
   }
 
-  if (!feature_info_->Initialize(disallowed_features)) {
+  if (!feature_info_->Initialize(disallowed_features, allowed_features)) {
     LOG(ERROR) << "ContextGroup::Initialize failed because FeatureInfo "
                << "initialization failed.";
     return false;
   }
 
-  const GLint kMinRenderbufferSize = 512;  // GL says 1 pixel!
   GLint max_renderbuffer_size = 0;
-  if (!QueryGLFeature(
-      GL_MAX_RENDERBUFFER_SIZE, kMinRenderbufferSize,
-      &max_renderbuffer_size)) {
-    LOG(ERROR) << "ContextGroup::Initialize failed because maximum "
-               << "renderbuffer size too small.";
-    return false;
-  }
+  glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &max_renderbuffer_size);
   GLint max_samples = 0;
-  if (feature_info_->feature_flags().chromium_framebuffer_multisample ||
-      feature_info_->feature_flags().multisampled_render_to_texture) {
-    if (feature_info_->feature_flags(
-            ).use_img_for_multisampled_render_to_texture) {
-      glGetIntegerv(GL_MAX_SAMPLES_IMG, &max_samples);
-    } else {
-      glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
-    }
+  if (feature_info_->feature_flags().chromium_framebuffer_multisample) {
+    glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
   }
 
-  if (feature_info_->feature_flags().ext_draw_buffers) {
-    GetIntegerv(GL_MAX_COLOR_ATTACHMENTS_EXT, &max_color_attachments_);
-    if (max_color_attachments_ < 1)
-      max_color_attachments_ = 1;
-    GetIntegerv(GL_MAX_DRAW_BUFFERS_ARB, &max_draw_buffers_);
-    if (max_draw_buffers_ < 1)
-      max_draw_buffers_ = 1;
-    draw_buffer_ = GL_BACK;
-  }
-
-  const bool depth24_supported = feature_info_->feature_flags().oes_depth24;
-
-  buffer_manager_.reset(
-      new BufferManager(memory_tracker_.get(), feature_info_.get()));
-  framebuffer_manager_.reset(
-      new FramebufferManager(max_draw_buffers_, max_color_attachments_));
+  buffer_manager_.reset(new BufferManager());
+  framebuffer_manager_.reset(new FramebufferManager());
   renderbuffer_manager_.reset(new RenderbufferManager(
-      memory_tracker_.get(), max_renderbuffer_size, max_samples,
-      depth24_supported));
+      max_renderbuffer_size, max_samples));
   shader_manager_.reset(new ShaderManager());
+  program_manager_.reset(new ProgramManager());
 
   // Lookup GL things we need to know.
-  const GLint kGLES2RequiredMinimumVertexAttribs = 8u;
-  if (!QueryGLFeatureU(
-      GL_MAX_VERTEX_ATTRIBS, kGLES2RequiredMinimumVertexAttribs,
-      &max_vertex_attribs_)) {
+  GetIntegerv(GL_MAX_VERTEX_ATTRIBS, &max_vertex_attribs_);
+  const GLuint kGLES2RequiredMinimumVertexAttribs = 8u;
+  if (max_vertex_attribs_ < kGLES2RequiredMinimumVertexAttribs) {
     LOG(ERROR) << "ContextGroup::Initialize failed because too few "
                << "vertex attributes supported.";
     return false;
   }
 
+  GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_texture_units_);
   const GLuint kGLES2RequiredMinimumTextureUnits = 8u;
-  if (!QueryGLFeatureU(
-      GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, kGLES2RequiredMinimumTextureUnits,
-      &max_texture_units_)) {
+  if (max_texture_units_ < kGLES2RequiredMinimumTextureUnits) {
     LOG(ERROR) << "ContextGroup::Initialize failed because too few "
                << "texture units supported.";
     return false;
@@ -153,47 +95,32 @@ bool ContextGroup::Initialize(
 
   GLint max_texture_size = 0;
   GLint max_cube_map_texture_size = 0;
-  const GLint kMinTextureSize = 2048;  // GL actually says 64!?!?
-  const GLint kMinCubeMapSize = 256;  // GL actually says 16!?!?
-  if (!QueryGLFeature(
-      GL_MAX_TEXTURE_SIZE, kMinTextureSize, &max_texture_size) ||
-      !QueryGLFeature(
-      GL_MAX_CUBE_MAP_TEXTURE_SIZE, kMinCubeMapSize,
-      &max_cube_map_texture_size)) {
-    LOG(ERROR) << "ContextGroup::Initialize failed because maximum texture size"
-               << "is too small.";
-    return false;
-  }
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+  glGetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, &max_cube_map_texture_size);
 
-  if (feature_info_->workarounds().max_texture_size) {
-    max_texture_size = std::min(
-        max_texture_size, feature_info_->workarounds().max_texture_size);
+  // Limit Intel on Mac to 512.
+  // TODO(gman): Update this code to check for a specific version of
+  // the drivers above which we no longer need this fix.
+#if defined(OS_MACOSX)
+  const char* vendor_str = reinterpret_cast<const char*>(
+      glGetString(GL_VENDOR));
+  if (vendor_str) {
+    std::string lc_str(::StringToLowerASCII(std::string(vendor_str)));
+    bool intel_on_mac = strstr(lc_str.c_str(), "intel");
+    if (intel_on_mac) {
+      max_cube_map_texture_size = std::min(
+        static_cast<GLint>(512), max_cube_map_texture_size);
+    }
   }
-  if (feature_info_->workarounds().max_cube_map_texture_size) {
-    max_cube_map_texture_size = std::min(
-        max_cube_map_texture_size,
-        feature_info_->workarounds().max_cube_map_texture_size);
-  }
+#endif
 
-  texture_manager_.reset(new TextureManager(memory_tracker_.get(),
-                                            feature_info_.get(),
+  texture_manager_.reset(new TextureManager(feature_info_.get(),
                                             max_texture_size,
                                             max_cube_map_texture_size));
-  texture_manager_->set_framebuffer_manager(framebuffer_manager_.get());
-  texture_manager_->set_stream_texture_manager(stream_texture_manager_);
 
-  const GLint kMinTextureImageUnits = 8;
-  const GLint kMinVertexTextureImageUnits = 0;
-  if (!QueryGLFeatureU(
-      GL_MAX_TEXTURE_IMAGE_UNITS, kMinTextureImageUnits,
-      &max_texture_image_units_) ||
-      !QueryGLFeatureU(
-      GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, kMinVertexTextureImageUnits,
-      &max_vertex_texture_image_units_)) {
-    LOG(ERROR) << "ContextGroup::Initialize failed because too few "
-               << "texture units.";
-    return false;
-  }
+  GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &max_texture_image_units_);
+  GetIntegerv(
+      GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &max_vertex_texture_image_units_);
 
   if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2) {
     GetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS,
@@ -210,81 +137,20 @@ bool ContextGroup::Initialize(
     max_vertex_uniform_vectors_ /= 4;
   }
 
-  const GLint kMinFragmentUniformVectors = 16;
-  const GLint kMinVaryingVectors = 8;
-  const GLint kMinVertexUniformVectors = 128;
-  if (!CheckGLFeatureU(
-      kMinFragmentUniformVectors, &max_fragment_uniform_vectors_) ||
-      !CheckGLFeatureU(kMinVaryingVectors, &max_varying_vectors_) ||
-      !CheckGLFeatureU(
-      kMinVertexUniformVectors, &max_vertex_uniform_vectors_)) {
-    LOG(ERROR) << "ContextGroup::Initialize failed because too few "
-               << "uniforms or varyings supported.";
-    return false;
-  }
-
-  // TODO(gman): Use workarounds similar to max_texture_size above to implement.
-  if (gfx::GetGLImplementation() == gfx::kGLImplementationOSMesaGL) {
-    // Some shaders in Skia needed more than the min.
-    max_fragment_uniform_vectors_ =
-       std::min(static_cast<uint32>(kMinFragmentUniformVectors * 2),
-                max_fragment_uniform_vectors_);
-    max_varying_vectors_ =
-       std::min(static_cast<uint32>(kMinVaryingVectors * 2),
-                max_varying_vectors_);
-    max_vertex_uniform_vectors_ =
-       std::min(static_cast<uint32>(kMinVertexUniformVectors * 2),
-                max_vertex_uniform_vectors_);
-  }
-
-  program_manager_.reset(new ProgramManager(
-      program_cache_, max_varying_vectors_));
-
   if (!texture_manager_->Initialize()) {
     LOG(ERROR) << "Context::Group::Initialize failed because texture manager "
                << "failed to initialize.";
     return false;
   }
 
-  decoders_.push_back(base::AsWeakPtr<GLES2Decoder>(decoder));
+  ++num_contexts_;
   return true;
 }
 
-namespace {
-
-bool IsNull(const base::WeakPtr<gles2::GLES2Decoder>& decoder) {
-  return !decoder.get();
-}
-
-template <typename T>
-class WeakPtrEquals {
- public:
-  explicit WeakPtrEquals(T* t) : t_(t) {}
-
-  bool operator()(const base::WeakPtr<T>& t) {
-    return t.get() == t_;
-  }
-
- private:
-  T* const t_;
-};
-
-}  // namespace anonymous
-
-bool ContextGroup::HaveContexts() {
-  decoders_.erase(std::remove_if(decoders_.begin(), decoders_.end(), IsNull),
-                  decoders_.end());
-  return !decoders_.empty();
-}
-
-void ContextGroup::Destroy(GLES2Decoder* decoder, bool have_context) {
-  decoders_.erase(std::remove_if(decoders_.begin(), decoders_.end(),
-                                 WeakPtrEquals<gles2::GLES2Decoder>(decoder)),
-                  decoders_.end());
-  // If we still have contexts do nothing.
-  if (HaveContexts()) {
+void ContextGroup::Destroy(bool have_context) {
+  DCHECK(num_contexts_ > 0);
+  if (--num_contexts_ > 0)
     return;
-  }
 
   if (buffer_manager_ != NULL) {
     buffer_manager_->Destroy(have_context);
@@ -293,8 +159,6 @@ void ContextGroup::Destroy(GLES2Decoder* decoder, bool have_context) {
 
   if (framebuffer_manager_ != NULL) {
     framebuffer_manager_->Destroy(have_context);
-    if (texture_manager_)
-      texture_manager_->set_framebuffer_manager(NULL);
     framebuffer_manager_.reset();
   }
 
@@ -317,9 +181,6 @@ void ContextGroup::Destroy(GLES2Decoder* decoder, bool have_context) {
     shader_manager_->Destroy(have_context);
     shader_manager_.reset();
   }
-
-  memory_tracker_ = NULL;
-  stream_texture_manager_ = NULL;
 }
 
 IdAllocatorInterface* ContextGroup::GetIdAllocator(unsigned namespace_id) {
@@ -329,63 +190,7 @@ IdAllocatorInterface* ContextGroup::GetIdAllocator(unsigned namespace_id) {
   return id_namespaces_[namespace_id].get();
 }
 
-uint32 ContextGroup::GetMemRepresented() const {
-  uint32 total = 0;
-  if (buffer_manager_.get())
-    total += buffer_manager_->mem_represented();
-  if (renderbuffer_manager_.get())
-    total += renderbuffer_manager_->mem_represented();
-  if (texture_manager_.get())
-    total += texture_manager_->mem_represented();
-  return total;
-}
-
-void ContextGroup::LoseContexts(GLenum reset_status) {
-  for (size_t ii = 0; ii < decoders_.size(); ++ii) {
-    if (decoders_[ii].get()) {
-      decoders_[ii]->LoseContext(reset_status);
-    }
-  }
-}
-
-ContextGroup::~ContextGroup() {
-  CHECK(!HaveContexts());
-}
-
-bool ContextGroup::CheckGLFeature(GLint min_required, GLint* v) {
-  GLint value = *v;
-  if (enforce_gl_minimums_) {
-    value = std::min(min_required, value);
-  }
-  *v = value;
-  return value >= min_required;
-}
-
-bool ContextGroup::CheckGLFeatureU(GLint min_required, uint32* v) {
-  GLint value = *v;
-  if (enforce_gl_minimums_) {
-    value = std::min(min_required, value);
-  }
-  *v = value;
-  return value >= min_required;
-}
-
-bool ContextGroup::QueryGLFeature(
-    GLenum pname, GLint min_required, GLint* v) {
-  GLint value = 0;
-  glGetIntegerv(pname, &value);
-  *v = value;
-  return CheckGLFeature(min_required, v);
-}
-
-bool ContextGroup::QueryGLFeatureU(
-    GLenum pname, GLint min_required, uint32* v) {
-  uint32 value = 0;
-  GetIntegerv(pname, &value);
-  bool result = CheckGLFeatureU(min_required, &value);
-  *v = value;
-  return result;
-}
-
 }  // namespace gles2
 }  // namespace gpu
+
+

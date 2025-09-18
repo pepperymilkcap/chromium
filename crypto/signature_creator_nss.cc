@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "crypto/nss_util.h"
-#include "crypto/rsa_private_key.h"
 
 namespace crypto {
 
@@ -43,31 +42,12 @@ SignatureCreator* SignatureCreator::Create(RSAPrivateKey* key) {
   return result.release();
 }
 
-// static
-bool SignatureCreator::Sign(RSAPrivateKey* key,
-                            const uint8* data,
-                            int data_len,
-                            std::vector<uint8>* signature) {
-  SECItem data_item;
-  data_item.type = siBuffer;
-  data_item.data = const_cast<unsigned char*>(data);
-  data_item.len = data_len;
-
-  SECItem signature_item;
-  SECStatus rv = SGN_Digest(key->key(), SEC_OID_SHA1, &signature_item,
-                            &data_item);
-  if (rv != SECSuccess) {
-    NOTREACHED();
-    return false;
-  }
-  signature->assign(signature_item.data,
-                    signature_item.data + signature_item.len);
-  SECITEM_FreeItem(&signature_item, PR_FALSE);
-  return true;
-}
-
 bool SignatureCreator::Update(const uint8* data_part, int data_part_len) {
-  SECStatus rv = SGN_Update(sign_context_, data_part, data_part_len);
+  // TODO(wtc): Remove this const_cast when we require NSS 3.12.5.
+  // See NSS bug https://bugzilla.mozilla.org/show_bug.cgi?id=518255
+  SECStatus rv = SGN_Update(sign_context_,
+                            const_cast<unsigned char*>(data_part),
+                            data_part_len);
   if (rv != SECSuccess) {
     NOTREACHED();
     return false;
@@ -80,6 +60,7 @@ bool SignatureCreator::Final(std::vector<uint8>* signature) {
   SECItem signature_item;
   SECStatus rv = SGN_End(sign_context_, &signature_item);
   if (rv != SECSuccess) {
+    NOTREACHED();
     return false;
   }
   signature->assign(signature_item.data,
@@ -88,9 +69,7 @@ bool SignatureCreator::Final(std::vector<uint8>* signature) {
   return true;
 }
 
-SignatureCreator::SignatureCreator()
-    : key_(NULL),
-      sign_context_(NULL) {
+SignatureCreator::SignatureCreator() : sign_context_(NULL) {
   EnsureNSSInit();
 }
 

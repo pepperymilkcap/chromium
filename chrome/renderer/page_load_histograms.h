@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,16 @@ namespace content {
 class DocumentState;
 }
 
+class RendererHistogramSnapshots;
+
 class PageLoadHistograms : public content::RenderViewObserver {
  public:
-  explicit PageLoadHistograms(content::RenderView* render_view);
+  PageLoadHistograms(content::RenderView* render_view,
+                     RendererHistogramSnapshots* histogram_snapshots);
 
  private:
   // RenderViewObserver implementation.
-  virtual void FrameWillClose(blink::WebFrame* frame) OVERRIDE;
+  virtual void FrameWillClose(WebKit::WebFrame* frame) OVERRIDE;
   virtual void ClosePage() OVERRIDE;
 
   // Dump all page load histograms appropriate for the given frame.
@@ -40,17 +43,19 @@ class PageLoadHistograms : public content::RenderViewObserver {
   // redirect had been done (the user never requested the page)
   // Also, it's possible to load a page without ever laying it out
   // so first_paint and first_paint_after_load can be 0.
-  void Dump(blink::WebFrame* frame);
+  void Dump(WebKit::WebFrame* frame);
 
   void ResetCrossFramePropertyAccess();
 
   void LogPageLoadTime(const content::DocumentState* load_times,
-                       const blink::WebDataSource* ds) const;
+                       const WebKit::WebDataSource* ds) const;
 
   // Site isolation metric counts.
   // These are per-page-load counts, reset to 0 after they are dumped.
   int cross_origin_access_count_;
   int same_origin_access_count_;
+
+  RendererHistogramSnapshots* histogram_snapshots_;
 
   DISALLOW_COPY_AND_ASSIGN(PageLoadHistograms);
 };

@@ -93,6 +93,8 @@ class TypeEnumerator
 
   STDMETHOD(Clone)(IEnumMediaTypes** clone) {
     TypeEnumerator* type_enum = new TypeEnumerator(pin_);
+    if (!type_enum)
+      return E_OUTOFMEMORY;
     type_enum->AddRef();
     type_enum->index_ = index_;
     *clone = type_enum;
@@ -246,18 +248,8 @@ STDMETHODIMP PinBase::GetAllocatorRequirements(
 STDMETHODIMP PinBase::ReceiveMultiple(IMediaSample** samples,
                                       long sample_count,
                                       long* processed) {
-  DCHECK(samples);
-
-  HRESULT hr = S_OK;
-  *processed = 0;
-  while (sample_count--) {
-    hr = Receive(samples[*processed]);
-    // S_FALSE means don't send any more.
-    if (hr != S_OK)
-      break;
-    ++(*processed);
-  }
-  return hr;
+  NOTREACHED();
+  return VFW_E_INVALIDMEDIATYPE;
 }
 
 STDMETHODIMP PinBase::ReceiveCanBlock() {

@@ -7,6 +7,7 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_ERROR_JOB_H_
 #define NET_URL_REQUEST_URL_REQUEST_ERROR_JOB_H_
+#pragma once
 
 #include "base/memory/weak_ptr.h"
 #include "net/base/net_export.h"
@@ -16,9 +17,7 @@ namespace net {
 
 class NET_EXPORT URLRequestErrorJob : public URLRequestJob {
  public:
-  URLRequestErrorJob(URLRequest* request,
-                     NetworkDelegate* network_delegate,
-                     int error);
+  URLRequestErrorJob(URLRequest* request, int error);
 
   virtual void Start() OVERRIDE;
 

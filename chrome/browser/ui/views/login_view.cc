@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/label.h"
@@ -25,8 +25,7 @@ using views::GridLayout;
 ///////////////////////////////////////////////////////////////////////////////
 // LoginView, public:
 
-LoginView::LoginView(const base::string16& explanation,
-                     LoginModel* model)
+LoginView::LoginView(const std::wstring& explanation, LoginModel* model)
     : username_field_(new views::Textfield),
       password_field_(new views::Textfield(views::Textfield::STYLE_OBSCURED)),
       username_label_(new views::Label(
@@ -36,7 +35,7 @@ LoginView::LoginView(const base::string16& explanation,
       message_label_(new views::Label(explanation)),
       login_model_(model) {
   message_label_->SetMultiLine(true);
-  message_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  message_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   message_label_->SetAllowCharacterBreak(true);
 
   // Initialize the Grid Layout Manager used for this dialog box.
@@ -80,19 +79,19 @@ LoginView::LoginView(const base::string16& explanation,
   layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   if (login_model_)
-    login_model_->AddObserver(this);
+    login_model_->SetObserver(this);
 }
 
 LoginView::~LoginView() {
   if (login_model_)
-    login_model_->RemoveObserver(this);
+    login_model_->SetObserver(NULL);
 }
 
-base::string16 LoginView::GetUsername() {
+std::wstring LoginView::GetUsername() {
   return username_field_->text();
 }
 
-base::string16 LoginView::GetPassword() {
+std::wstring LoginView::GetPassword() {
   return password_field_->text();
 }
 
@@ -103,16 +102,11 @@ views::View* LoginView::GetInitiallyFocusedView() {
 ///////////////////////////////////////////////////////////////////////////////
 // LoginView, views::View, views::LoginModelObserver overrides:
 
-void LoginView::OnAutofillDataAvailable(const base::string16& username,
-                                        const base::string16& password) {
+void LoginView::OnAutofillDataAvailable(const std::wstring& username,
+                                        const std::wstring& password) {
   if (username_field_->text().empty()) {
     username_field_->SetText(username);
     password_field_->SetText(password);
-    username_field_->SelectAll(true);
+    username_field_->SelectAll();
   }
-}
-
-void LoginView::OnLoginModelDestroying() {
-  login_model_->RemoveObserver(this);
-  login_model_ = NULL;
 }

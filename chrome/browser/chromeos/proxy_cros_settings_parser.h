@@ -4,16 +4,17 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_PROXY_CROS_SETTINGS_PARSER_H_
 #define CHROME_BROWSER_CHROMEOS_PROXY_CROS_SETTINGS_PARSER_H_
+#pragma once
 
 #include <string>
+
+class Profile;
 
 namespace base {
 class Value;
 }
 
 namespace chromeos {
-
-class UIProxyConfigService;
 
 extern const char kProxyPacUrl[];
 extern const char kProxySingleHttp[];
@@ -29,27 +30,26 @@ extern const char kProxyFtpPort[];
 extern const char kProxySocks[];
 extern const char kProxySocksPort[];
 extern const char kProxyIgnoreList[];
-extern const char kProxyUsePacUrl[];
 
 extern const char* const kProxySettings[];
 extern const size_t kProxySettingsCount;
 
-// This namespace defines helper functions for setting/getting Proxy settings.
+// This namespace defines two helper functions for parsing Proxy configuration
+// to and from the ProxyConfigServiceImpl and the UI that exposes them to the
+// user.
 namespace proxy_cros_settings_parser {
+  // Returns true if the supplied |path| is a proxy preference name.
+  bool IsProxyPref(const std::string& path);
 
-// Returns true if the supplied |path| is a proxy preference name.
-bool IsProxyPref(const std::string& path);
+  // Sets a value in the current proxy configuration on the specified profile.
+  void SetProxyPrefValue(Profile* profile,
+                         const std::string& path,
+                         const base::Value* in_value);
 
-// Sets a value in the current proxy configuration on the specified profile.
-void SetProxyPrefValue(const std::string& path,
-                       const base::Value* in_value,
-                       UIProxyConfigService* config_service);
-
-// Gets a value from the current proxy configuration on the specified profile.
-bool GetProxyPrefValue(const UIProxyConfigService& config_service,
-                       const std::string& path,
-                       base::Value** out_value);
-
+  // Gets a value from the current proxy configuration on the specified profile.
+  bool GetProxyPrefValue(Profile* profile,
+                         const std::string& path,
+                         base::Value** out_value);
 }  // namespace proxy_cros_settings_parser
 
 }  // namespace chromeos

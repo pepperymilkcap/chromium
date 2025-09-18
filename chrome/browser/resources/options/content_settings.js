@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-if (!loadTimeData.getBoolean('newContentSettings')) {
-
 cr.define('options', function() {
-  /** @const */ var OptionsPage = options.OptionsPage;
+
+  var OptionsPage = options.OptionsPage;
 
   //////////////////////////////////////////////////////////////////////////////
   // ContentSettings class:
@@ -16,8 +15,7 @@ cr.define('options', function() {
    */
   function ContentSettings() {
     this.activeNavTab = null;
-    OptionsPage.call(this, 'content',
-                     loadTimeData.getString('contentSettingsPageTabTitle'),
+    OptionsPage.call(this, 'content', templateData.contentSettingsPageTabTitle,
                      'content-settings-page');
   }
 
@@ -29,27 +27,21 @@ cr.define('options', function() {
     initializePage: function() {
       OptionsPage.prototype.initializePage.call(this);
 
+      chrome.send('getContentFilterSettings');
+
       var exceptionsButtons =
           this.pageDiv.querySelectorAll('.exceptions-list-button');
       for (var i = 0; i < exceptionsButtons.length; i++) {
         exceptionsButtons[i].onclick = function(event) {
           var page = ContentSettingsExceptionsArea.getInstance();
-
+          page.showList(
+              event.target.getAttribute('contentType'));
+          OptionsPage.navigateToPage('contentExceptions');
           // Add on the proper hash for the content type, and store that in the
           // history so back/forward and tab restore works.
-          var hash = event.currentTarget.getAttribute('contentType');
-          var url = page.name + '#' + hash;
-          window.history.pushState({pageName: page.name},
-                                    page.title,
-                                    '/' + url);
-
-          // Navigate after the history has been replaced in order to have the
-          // correct hash loaded.
-          OptionsPage.showPageByName('contentExceptions', false);
-
-          uber.invokeMethodOnParent('setPath', {path: url});
-          uber.invokeMethodOnParent('setTitle',
-              {title: loadTimeData.getString(hash + 'TabTitle')});
+          var hash = event.target.getAttribute('contentType');
+          window.history.replaceState({pageName: page.name}, page.title,
+                                      '/' + page.name + "#" + hash);
         };
       }
 
@@ -60,12 +52,12 @@ cr.define('options', function() {
         };
       }
 
-      $('manage-galleries-button').onclick = function(event) {
-        OptionsPage.navigateToPage('manageGalleries');
-      };
-
-      if (cr.isChromeOS)
-        UIAccountTweaks.applyGuestModeVisibility(document);
+      var manageIntentsButton = $('manage-intents-button');
+      if (manageIntentsButton) {
+        manageIntentsButton.onclick = function(event) {
+          OptionsPage.navigateToPage('intents');
+        };
+      }
 
       // Cookies filter page ---------------------------------------------------
       $('show-cookies-button').onclick = function(event) {
@@ -73,16 +65,8 @@ cr.define('options', function() {
         OptionsPage.navigateToPage('cookies');
       };
 
-      $('content-settings-overlay-confirm').onclick =
-          OptionsPage.closeOverlay.bind(OptionsPage);
-
-      $('media-pepper-flash-default').hidden = true;
-      $('media-pepper-flash-exceptions').hidden = true;
-
-      $('media-select-mic').addEventListener('change',
-          ContentSettings.setDefaultMicrophone_);
-      $('media-select-camera').addEventListener('change',
-          ContentSettings.setDefaultCamera_);
+      if (!templateData.enable_web_intents && $('intent-section'))
+        $('intent-section').hidden = true;
     },
   };
 
@@ -99,72 +83,17 @@ cr.define('options', function() {
    */
   ContentSettings.setContentFilterSettingsValue = function(dict) {
     for (var group in dict) {
-      var managedBy = dict[group].managedBy;
-      var controlledBy = managedBy == 'policy' || managedBy == 'extension' ?
-          managedBy : null;
       document.querySelector('input[type=radio][name=' + group + '][value=' +
-                             dict[group].value + ']').checked = true;
+                             dict[group]['value'] + ']').checked = true;
       var radios = document.querySelectorAll('input[type=radio][name=' +
                                              group + ']');
+      var managedBy = dict[group]['managedBy'];
       for (var i = 0, len = radios.length; i < len; i++) {
         radios[i].disabled = (managedBy != 'default');
-        radios[i].controlledBy = controlledBy;
+        radios[i].controlledBy = managedBy;
       }
-      var indicators = document.querySelectorAll(
-          'span.controlled-setting-indicator[content-setting=' + group + ']');
-      if (indicators.length == 0)
-        continue;
-      // Create a synthetic pref change event decorated as
-      // CoreOptionsHandler::CreateValueForPref() does.
-      var event = new Event(group);
-      event.value = {
-        value: dict[group].value,
-        controlledBy: controlledBy,
-      };
-      for (var i = 0; i < indicators.length; i++)
-        indicators[i].handlePrefChange(event);
     }
-  };
-
-  /**
-   * Updates the labels and indicators for the Media settings. Those require
-   * special handling because they are backed by multiple prefs and can change
-   * their scope based on the managed state of the backing prefs.
-   * @param {Object} mediaSettings A dictionary containing the following fields:
-   *     {String} askText The label for the ask radio button.
-   *     {String} blockText The label for the block radio button.
-   *     {Boolean} cameraDisabled Whether to disable the camera dropdown.
-   *     {Boolean} micDisabled Whether to disable the microphone dropdown.
-   *     {Boolean} showBubble Wether to show the managed icon and bubble for the
-   *         media label.
-   *     {String} bubbleText The text to use inside the bubble if it is shown.
-   */
-  ContentSettings.updateMediaUI = function(mediaSettings) {
-    $('media-stream-ask-label').innerHTML =
-        loadTimeData.getString(mediaSettings.askText);
-    $('media-stream-block-label').innerHTML =
-        loadTimeData.getString(mediaSettings.blockText);
-
-    if (mediaSettings.micDisabled)
-      $('media-select-mic').disabled = true;
-    if (mediaSettings.cameraDisabled)
-      $('media-select-camera').disabled = true;
-
-    OptionsPage.hideBubble();
-    // Create a synthetic pref change event decorated as
-    // CoreOptionsHandler::CreateValueForPref() does.
-    // TODO(arv): It was not clear what event type this should use?
-    var event = new Event('undefined');
-    event.value = {};
-
-    if (mediaSettings.showBubble) {
-      event.value = { controlledBy: 'policy' };
-      $('media-indicator').setAttribute(
-          'textpolicy', loadTimeData.getString(mediaSettings.bubbleText));
-      $('media-indicator').location = cr.ui.ArrowLocation.TOP_START;
-    }
-
-    $('media-indicator').handlePrefChange(event);
+    OptionsPage.updateManagedBannerVisibility();
   };
 
   /**
@@ -214,101 +143,9 @@ cr.define('options', function() {
     exceptionsList.patternValidityCheckComplete(pattern, valid);
   };
 
-  /**
-   * Shows/hides the link to the Pepper Flash camera and microphone default
-   * settings.
-   * Please note that whether the link is actually showed or not is also
-   * affected by the style class pepper-flash-settings.
-   */
-  ContentSettings.showMediaPepperFlashDefaultLink = function(show) {
-    $('media-pepper-flash-default').hidden = !show;
-  }
-
-  /**
-   * Shows/hides the link to the Pepper Flash camera and microphone
-   * site-specific settings.
-   * Please note that whether the link is actually showed or not is also
-   * affected by the style class pepper-flash-settings.
-   */
-  ContentSettings.showMediaPepperFlashExceptionsLink = function(show) {
-    $('media-pepper-flash-exceptions').hidden = !show;
-  }
-
-  /**
-   * Shows/hides the whole Web MIDI settings.
-   * @param {bool} show Wether to show the whole Web MIDI settings.
-   */
-  ContentSettings.showExperimentalWebMIDISettings = function(show) {
-    $('experimental-web-midi-settings').hidden = !show;
-  }
-
-  /**
-   * Updates the microphone/camera devices menu with the given entries.
-   * @param {string} type The device type.
-   * @param {Array} devices List of available devices.
-   * @param {string} defaultdevice The unique id of the current default device.
-   */
-  ContentSettings.updateDevicesMenu = function(type, devices, defaultdevice) {
-    var deviceSelect = '';
-    if (type == 'mic') {
-      deviceSelect = $('media-select-mic');
-    } else if (type == 'camera') {
-      deviceSelect = $('media-select-camera');
-    } else {
-      console.error('Unknown device type for <device select> UI element: ' +
-                    type);
-      return;
-    }
-
-    deviceSelect.textContent = '';
-
-    var deviceCount = devices.length;
-    var defaultIndex = -1;
-    for (var i = 0; i < deviceCount; i++) {
-      var device = devices[i];
-      var option = new Option(device.name, device.id);
-      if (option.value == defaultdevice)
-        defaultIndex = i;
-      deviceSelect.appendChild(option);
-    }
-    if (defaultIndex >= 0)
-      deviceSelect.selectedIndex = defaultIndex;
-  };
-
-  /**
-   * Enables/disables the protected content exceptions button.
-   * @param {bool} enable Whether to enable the button.
-   */
-  ContentSettings.enableProtectedContentExceptions = function(enable) {
-    var exceptionsButton = $('protected-content-exceptions');
-    if (exceptionsButton) {
-      exceptionsButton.disabled = !enable;
-    }
-  }
-
-  /**
-   * Set the default microphone device based on the popup selection.
-   * @private
-   */
-  ContentSettings.setDefaultMicrophone_ = function() {
-    var deviceSelect = $('media-select-mic');
-    chrome.send('setDefaultCaptureDevice', ['mic', deviceSelect.value]);
-  };
-
-  /**
-   * Set the default camera device based on the popup selection.
-   * @private
-   */
-  ContentSettings.setDefaultCamera_ = function() {
-    var deviceSelect = $('media-select-camera');
-    chrome.send('setDefaultCaptureDevice', ['camera', deviceSelect.value]);
-  };
-
   // Export
   return {
     ContentSettings: ContentSettings
   };
 
 });
-
-}

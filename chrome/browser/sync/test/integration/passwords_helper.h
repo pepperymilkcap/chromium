@@ -1,16 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_PASSWORDS_HELPER_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_PASSWORDS_HELPER_H_
+#pragma once
 
 #include <vector>
 
+#include "base/time.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "components/autofill/core/common/password_form.h"
+#include "webkit/forms/password_form.h"
 
 class PasswordStore;
 
@@ -19,35 +20,28 @@ namespace passwords_helper {
 // Adds the login held in |form| to the password store |store|. Even though
 // logins are normally added asynchronously, this method will block until the
 // login is added.
-void AddLogin(PasswordStore* store, const autofill::PasswordForm& form);
+void AddLogin(PasswordStore* store, const webkit::forms::PasswordForm& form);
 
 // Update the data held in password store |store| with a modified |form|.
 // This method blocks until the operation is complete.
-void UpdateLogin(PasswordStore* store, const autofill::PasswordForm& form);
+void UpdateLogin(PasswordStore* store, const webkit::forms::PasswordForm& form);
 
 // Searches |store| for all logins matching a fake signon realm used only by
 // LivePasswordsSyncTest and adds the results to |matches|. Note that the
 // caller is responsible for deleting the forms added to |matches|.
 void GetLogins(PasswordStore* store,
-               std::vector<autofill::PasswordForm>& matches);
+               std::vector<webkit::forms::PasswordForm>& matches);
 
 // Removes the login held in |form| from the password store |store|.  This
 // method blocks until the operation is complete.
-void RemoveLogin(PasswordStore* store, const autofill::PasswordForm& form);
+void RemoveLogin(PasswordStore* store, const webkit::forms::PasswordForm& form);
 
 // Removes all password forms from the password store |store|.
 void RemoveLogins(PasswordStore* store);
 
-// Sets the cryptographer's encryption passphrase for the profile at index
-// |index| to |passphrase|, and passphrase type |type|.
-void SetEncryptionPassphrase(int index,
-                             const std::string& passphrase,
-                             ProfileSyncService::PassphraseType type);
-
-// Sets the cryptographer's decryption passphrase for the profile at index
-// |index| to |passphrase|. Returns false if the operation failed, and true
-// otherwise.
-bool SetDecryptionPassphrase(int index, const std::string& passphrase);
+// Sets the cryptographer's passphrase for the profile at index |index| to
+// |passphrase|.
+void SetPassphrase(int index, const std::string& passphrase);
 
 // Gets the password store of the profile with index |index|.
 PasswordStore* GetPasswordStore(int index);
@@ -79,7 +73,7 @@ int GetVerifierPasswordCount();
 
 // Creates a test password form with a well known fake signon realm used only
 // by LivePasswordsSyncTest based on |index|.
-autofill::PasswordForm CreateTestPasswordForm(int index);
+webkit::forms::PasswordForm CreateTestPasswordForm(int index);
 
 }  // namespace passwords_helper
 

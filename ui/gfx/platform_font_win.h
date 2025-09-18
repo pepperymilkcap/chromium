@@ -4,26 +4,26 @@
 
 #ifndef UI_GFX_PLATFORM_FONT_WIN_H_
 #define UI_GFX_PLATFORM_FONT_WIN_H_
-
-#include <string>
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "ui/gfx/gfx_export.h"
+#include "ui/base/ui_export.h"
 #include "ui/gfx/platform_font.h"
 
 namespace gfx {
 
-class GFX_EXPORT PlatformFontWin : public PlatformFont {
+class UI_EXPORT PlatformFontWin : public PlatformFont {
  public:
   PlatformFontWin();
+  explicit PlatformFontWin(const Font& other);
   explicit PlatformFontWin(NativeFont native_font);
   PlatformFontWin(const std::string& font_name, int font_size);
 
   // Dialog units to pixels conversion.
   // See http://support.microsoft.com/kb/145994 for details.
   int horizontal_dlus_to_pixels(int dlus) const {
-    return dlus * font_ref_->GetDluBaseX() / 4;
+    return dlus * font_ref_->dlu_base_x() / 4;
   }
   int vertical_dlus_to_pixels(int dlus)  const {
     return dlus * font_ref_->height() / 8;
@@ -41,29 +41,14 @@ class GFX_EXPORT PlatformFontWin : public PlatformFont {
   typedef void (*AdjustFontCallback)(LOGFONT* lf);
   static AdjustFontCallback adjust_font_callback;
 
-  // Returns the font name for the system locale. Some fonts, particularly
-  // East Asian fonts, have different names per locale. If the localized font
-  // name could not be retrieved, returns GetFontName().
-  std::string GetLocalizedFontName() const;
-
-  // Returns a derived Font with the specified |style| and with height at most
-  // |height|. If the height and style of the receiver already match, it is
-  // returned. Otherwise, the returned Font will have the largest size such that
-  // its height is less than or equal to |height| (since there may not exist a
-  // size that matches the exact |height| specified).
-  Font DeriveFontWithHeight(int height, int style);
-
   // Overridden from PlatformFont:
   virtual Font DeriveFont(int size_delta, int style) const OVERRIDE;
   virtual int GetHeight() const OVERRIDE;
   virtual int GetBaseline() const OVERRIDE;
-  virtual int GetCapHeight() const OVERRIDE;
   virtual int GetAverageCharacterWidth() const OVERRIDE;
-  virtual int GetStringWidth(const base::string16& text) const OVERRIDE;
   virtual int GetExpectedTextWidth(int length) const OVERRIDE;
   virtual int GetStyle() const OVERRIDE;
   virtual std::string GetFontName() const OVERRIDE;
-  virtual std::string GetActualFontNameForTesting() const OVERRIDE;
   virtual int GetFontSize() const OVERRIDE;
   virtual NativeFont GetNativeFont() const OVERRIDE;
 
@@ -83,49 +68,34 @@ class GFX_EXPORT PlatformFontWin : public PlatformFont {
     // This constructor takes control of the HFONT, and will delete it when
     // the HFontRef is deleted.
     HFontRef(HFONT hfont,
-             int font_size,
              int height,
              int baseline,
-             int cap_height,
              int ave_char_width,
-             int style);
+             int style,
+             int dlu_base_x);
 
     // Accessors
     HFONT hfont() const { return hfont_; }
     int height() const { return height_; }
     int baseline() const { return baseline_; }
-    int cap_height() const { return cap_height_; }
     int ave_char_width() const { return ave_char_width_; }
     int style() const { return style_; }
+    int dlu_base_x() const { return dlu_base_x_; }
     const std::string& font_name() const { return font_name_; }
-    int font_size() const { return font_size_; }
-    int requested_font_size() const { return requested_font_size_; }
-
-    // Returns the average character width in dialog units.
-    int GetDluBaseX();
 
    private:
-    friend class base::RefCounted<HFontRef>;
+    friend class  base::RefCounted<HFontRef>;
 
     ~HFontRef();
 
     const HFONT hfont_;
-    const int font_size_;
     const int height_;
     const int baseline_;
-    const int cap_height_;
     const int ave_char_width_;
     const int style_;
-    // Average character width in dialog units. This is queried lazily from the
-    // system, with an initial value of -1 meaning it hasn't yet been queried.
-    int dlu_base_x_;
+    // Constants used in converting dialog units to pixels.
+    const int dlu_base_x_;
     std::string font_name_;
-
-    // If the requested font size is not possible for the font, |font_size_|
-    // will be different than |requested_font_size_|. This is stored separately
-    // so that code that increases the font size in a loop will not cause the
-    // loop to get stuck on the same size.
-    int requested_font_size_;
 
     DISALLOW_COPY_AND_ASSIGN(HFontRef);
   };
@@ -153,10 +123,9 @@ class GFX_EXPORT PlatformFontWin : public PlatformFont {
 
   // Indirect reference to the HFontRef, which references the underlying HFONT.
   scoped_refptr<HFontRef> font_ref_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformFontWin);
 };
 
 }  // namespace gfx
 
 #endif  // UI_GFX_PLATFORM_FONT_WIN_H_
+

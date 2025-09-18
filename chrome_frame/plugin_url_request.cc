@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,7 +32,6 @@ bool PluginUrlRequest::Initialize(PluginUrlRequestDelegate* delegate,
   extra_headers_ = extra_headers;
   resource_type_ = resource_type;
   load_flags_ = load_flags;
-  enable_frame_busting_ = enable_frame_busting;
 
   if (upload_data) {
     // We store a pointer to UrlmonUploadDataStream and not net::UploadData
@@ -44,19 +43,15 @@ bool PluginUrlRequest::Initialize(PluginUrlRequestDelegate* delegate,
     if (FAILED(hr)) {
       NOTREACHED();
     } else {
+      post_data_len_ = upload_data->GetContentLength();
       upload_stream->AddRef();
-      if (!upload_stream->Initialize(upload_data)) {
-        upload_stream->Release();
-        return true;
-      }
-
+      upload_stream->Initialize(upload_data);
       upload_data_.Attach(upload_stream);
       is_chunked_upload_ = upload_data->is_chunked();
-      STATSTG stat;
-      upload_stream->Stat(&stat, STATFLAG_NONAME);
-      post_data_len_ = stat.cbSize.QuadPart;
     }
   }
+
+  enable_frame_busting_ = enable_frame_busting;
 
   return true;
 }

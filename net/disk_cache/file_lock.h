@@ -4,11 +4,12 @@
 
 // See net/disk_cache/disk_cache.h for the public interface of the cache.
 
-#ifndef NET_DISK_CACHE_FILE_LOCK_H_
-#define NET_DISK_CACHE_FILE_LOCK_H_
+#ifndef NET_DISK_CACHE_FILE_LOCK_H__
+#define NET_DISK_CACHE_FILE_LOCK_H__
+#pragma once
 
 #include "net/base/net_export.h"
-#include "net/disk_cache/disk_format_base.h"
+#include "net/disk_cache/disk_format.h"
 
 namespace disk_cache {
 
@@ -42,4 +43,4 @@ class NET_EXPORT_PRIVATE FileLock {
 
 }  // namespace disk_cache
 
-#endif  // NET_DISK_CACHE_FILE_LOCK_H_
+#endif  // NET_DISK_CACHE_FILE_LOCK_H__

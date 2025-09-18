@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,18 @@ namespace net {
 
 #if defined(OS_ANDROID)
 bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
-    const base::FilePath::StringType& ext, std::string* result) const {
+    const FilePath::StringType& ext, std::string* result) const {
+  // TODO(jingzhao): Recover the original implementation once we support JNI.
+#if 0
   return android::GetMimeTypeFromExtension(ext, result);
+#else
+  NOTIMPLEMENTED();
+  return false;
+#endif
 }
 #else
 bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
-    const base::FilePath::StringType& ext, std::string* result) const {
+    const FilePath::StringType& ext, std::string* result) const {
   // TODO(thestig): This is a temporary hack until we can fix this
   // properly in test shell / webkit.
   // We have to play dumb and not return application/x-perl here
@@ -32,7 +38,7 @@ bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
   if (ext == "pl")
     return false;
 
-  base::FilePath dummy_path("foo." + ext);
+  FilePath dummy_path("foo." + ext);
   std::string out = base::nix::GetFileMimeType(dummy_path);
 
   // GetFileMimeType likes to return application/octet-stream
@@ -62,7 +68,6 @@ struct MimeToExt {
 const struct MimeToExt mime_type_ext_map[] = {
   {"application/pdf", "pdf"},
   {"application/x-tar", "tar"},
-  {"application/zip", "zip"},
   {"audio/mpeg", "mp3"},
   {"image/gif", "gif"},
   {"image/jpeg", "jpg"},
@@ -75,7 +80,7 @@ const struct MimeToExt mime_type_ext_map[] = {
 };
 
 bool PlatformMimeUtil::GetPreferredExtensionForMimeType(
-    const std::string& mime_type, base::FilePath::StringType* ext) const {
+    const std::string& mime_type, FilePath::StringType* ext) const {
 
   for (size_t x = 0;
        x < (sizeof(mime_type_ext_map) / sizeof(MimeToExt));
@@ -86,7 +91,7 @@ bool PlatformMimeUtil::GetPreferredExtensionForMimeType(
     }
   }
 
-  // TODO(dhg): Fix this the right way by implementing what's said below.
+  // TODO(dhg): Fix this the right way by implementing whats said below.
   // Unlike GetPlatformMimeTypeFromExtension, this method doesn't have a
   // default list that it uses, but for now we are also returning false since
   // this doesn't really matter as much under Linux.
@@ -97,14 +102,6 @@ bool PlatformMimeUtil::GetPreferredExtensionForMimeType(
   // then then try to chop off "*.".
 
   return false;
-}
-
-void PlatformMimeUtil::GetPlatformExtensionsForMimeType(
-    const std::string& mime_type,
-    base::hash_set<base::FilePath::StringType>* extensions) const {
-  base::FilePath::StringType ext;
-  if (GetPreferredExtensionForMimeType(mime_type, &ext))
-    extensions->insert(ext);
 }
 
 }  // namespace net

@@ -4,64 +4,42 @@
 
 #include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_db_task.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/history/history.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/glue/typed_url_change_processor.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 
-namespace browser_sync {
-
 using content::BrowserThread;
 
-namespace {
+namespace browser_sync {
 
-// The history service exposes a special non-standard task API which calls back
-// once a task has been dispatched, so we have to build a special wrapper around
-// the tasks we want to run.
-class RunTaskOnHistoryThread : public history::HistoryDBTask {
+class ControlTask : public HistoryDBTask {
  public:
-  explicit RunTaskOnHistoryThread(const base::Closure& task,
-                                  TypedUrlDataTypeController* dtc)
-      : task_(new base::Closure(task)),
-        dtc_(dtc) {
-  }
+  ControlTask(TypedUrlDataTypeController* controller, bool start)
+    : controller_(controller), start_(start) {}
 
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
-    // Set the backend, then release our reference before executing the task.
-    dtc_->SetBackend(backend);
-    dtc_ = NULL;
+                             history::HistoryDatabase* db) {
+    controller_->RunOnHistoryThread(start_, backend);
 
-    // Invoke the task, then free it immediately so we don't keep a reference
-    // around all the way until DoneRunOnMainThread() is invoked back on the
-    // main thread - we want to release references as soon as possible to avoid
-    // keeping them around too long during shutdown.
-    task_->Run();
-    task_.reset();
+    // Release the reference to the controller.  This ensures that
+    // the controller isn't held past its lifetime in unit tests.
+    controller_ = NULL;
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {}
+  virtual void DoneRunOnMainThread() {}
 
  protected:
-  virtual ~RunTaskOnHistoryThread() {}
-
-  scoped_ptr<base::Closure> task_;
-  scoped_refptr<TypedUrlDataTypeController> dtc_;
+  scoped_refptr<TypedUrlDataTypeController> controller_;
+  bool start_;
 };
-
-}  // namespace
 
 TypedUrlDataTypeController::TypedUrlDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
@@ -72,52 +50,36 @@ TypedUrlDataTypeController::TypedUrlDataTypeController(
                                     sync_service),
       backend_(NULL) {
   pref_registrar_.Init(profile->GetPrefs());
-  pref_registrar_.Add(
-      prefs::kSavingBrowserHistoryDisabled,
-      base::Bind(
-          &TypedUrlDataTypeController::OnSavingBrowserHistoryDisabledChanged,
-          base::Unretained(this)));
+  pref_registrar_.Add(prefs::kSavingBrowserHistoryDisabled, this);
 }
 
-syncer::ModelType TypedUrlDataTypeController::type() const {
-  return syncer::TYPED_URLS;
+TypedUrlDataTypeController::~TypedUrlDataTypeController() {
 }
 
-syncer::ModelSafeGroup TypedUrlDataTypeController::model_safe_group()
-    const {
-  return syncer::GROUP_HISTORY;
-}
-
-void TypedUrlDataTypeController::SetBackend(history::HistoryBackend* backend) {
+void TypedUrlDataTypeController::RunOnHistoryThread(bool start,
+    history::HistoryBackend* backend) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // The only variable we can access here is backend_, since it is always
+  // read from the DB thread. Touching anything else could lead to memory
+  // corruption.
   backend_ = backend;
-}
-
-void TypedUrlDataTypeController::OnSavingBrowserHistoryDisabledChanged() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (profile()->GetPrefs()->GetBoolean(
-          prefs::kSavingBrowserHistoryDisabled)) {
-    // We've turned off history persistence, so if we are running,
-    // generate an unrecoverable error. This can be fixed by restarting
-    // Chrome (on restart, typed urls will not be a registered type).
-    if (state() != NOT_RUNNING && state() != STOPPING) {
-      profile_sync_service()->DisableBrokenDatatype(
-          syncer::TYPED_URLS,
-          FROM_HERE,
-          "History saving is now disabled by policy.");
-    }
+  if (start) {
+    StartAssociation();
+  } else {
+    StopAssociation();
   }
+  backend_ = NULL;
 }
 
-bool TypedUrlDataTypeController::PostTaskOnBackendThread(
-    const tracked_objects::Location& from_here,
-    const base::Closure& task) {
+bool TypedUrlDataTypeController::StartAssociationAsync() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  HistoryService* history = HistoryServiceFactory::GetForProfile(
-      profile(), Profile::IMPLICIT_ACCESS);
+  DCHECK_EQ(state(), ASSOCIATING);
+  HistoryService* history = profile()->GetHistoryService(
+      Profile::IMPLICIT_ACCESS);
   if (history) {
-    history->ScheduleDBTask(new RunTaskOnHistoryThread(task, this),
-                            &cancelable_consumer_);
+    history_service_ = history;
+    history_service_->ScheduleDBTask(new ControlTask(this, true),
+                                     &cancelable_consumer_);
     return true;
   } else {
     // History must be disabled - don't start.
@@ -126,22 +88,86 @@ bool TypedUrlDataTypeController::PostTaskOnBackendThread(
   }
 }
 
-ProfileSyncComponentsFactory::SyncComponents
-TypedUrlDataTypeController::CreateSyncComponents() {
+void TypedUrlDataTypeController::CreateSyncComponents() {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(state(), ASSOCIATING);
   DCHECK(backend_);
-  return profile_sync_factory()->CreateTypedUrlSyncComponents(
-      profile_sync_service(),
-      backend_,
-      this);
+  ProfileSyncComponentsFactory::SyncComponents sync_components =
+      profile_sync_factory()->CreateTypedUrlSyncComponents(
+          profile_sync_service(),
+          backend_,
+          this);
+  set_model_associator(sync_components.model_associator);
+  set_change_processor(sync_components.change_processor);
 }
 
-void TypedUrlDataTypeController::DisconnectProcessor(
-    ChangeProcessor* processor) {
-  static_cast<TypedUrlChangeProcessor*>(processor)->Disconnect();
+void TypedUrlDataTypeController::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  switch (type) {
+    case chrome::NOTIFICATION_PREF_CHANGED:
+      DCHECK(*content::Details<std::string>(details).ptr() ==
+             prefs::kSavingBrowserHistoryDisabled);
+      if (profile()->GetPrefs()->GetBoolean(
+              prefs::kSavingBrowserHistoryDisabled)) {
+        // We've turned off history persistence, so if we are running,
+        // generate an unrecoverable error. This can be fixed by restarting
+        // Chrome (on restart, typed urls will not be a registered type).
+        if (state() != NOT_RUNNING && state() != STOPPING) {
+          profile_sync_service()->OnUnrecoverableError(
+              FROM_HERE, "History saving is now disabled by policy.");
+        }
+      }
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
 }
 
-TypedUrlDataTypeController::~TypedUrlDataTypeController() {}
+void TypedUrlDataTypeController::StopModels() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(state() == STOPPING || state() == NOT_RUNNING || state() == DISABLED);
+  DVLOG(1) << "TypedUrlDataTypeController::StopModels(): State = " << state();
+  notification_registrar_.RemoveAll();
+}
 
+bool TypedUrlDataTypeController::StopAssociationAsync() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(state(), STOPPING);
+  DCHECK(history_service_.get());
+  history_service_->ScheduleDBTask(new ControlTask(this, false),
+                                   &cancelable_consumer_);
+  return true;
+}
+
+syncable::ModelType TypedUrlDataTypeController::type() const {
+  return syncable::TYPED_URLS;
+}
+
+browser_sync::ModelSafeGroup TypedUrlDataTypeController::model_safe_group()
+    const {
+  return browser_sync::GROUP_HISTORY;
+}
+
+void TypedUrlDataTypeController::RecordUnrecoverableError(
+    const tracked_objects::Location& from_here,
+    const std::string& message) {
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+  UMA_HISTOGRAM_COUNTS("Sync.TypedUrlRunFailures", 1);
+}
+
+void TypedUrlDataTypeController::RecordAssociationTime(base::TimeDelta time) {
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+  UMA_HISTOGRAM_TIMES("Sync.TypedUrlAssociationTime", time);
+}
+
+void TypedUrlDataTypeController::RecordStartFailure(StartResult result) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  UMA_HISTOGRAM_ENUMERATION("Sync.TypedUrlStartFailures",
+                            result,
+                            MAX_START_RESULT);
+}
 }  // namespace browser_sync

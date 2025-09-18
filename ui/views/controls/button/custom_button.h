@@ -1,38 +1,41 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_BUTTON_CUSTOM_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_CUSTOM_BUTTON_H_
+#pragma once
 
-#include "base/memory/scoped_ptr.h"
-#include "ui/events/event_constants.h"
-#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "ui/views/controls/button/button.h"
 
-namespace gfx {
+namespace ui {
 class ThrobAnimation;
 }
 
 namespace views {
 
-class CustomButtonStateChangedDelegate;
-
 // A button with custom rendering. The common base class of ImageButton and
 // TextButton.
 // Note that this type of button is not focusable by default and will not be
-// part of the focus chain.  Call SetFocusable(true) to make it part of the
+// part of the focus chain.  Call set_focusable(true) to make it part of the
 // focus chain.
 class VIEWS_EXPORT CustomButton : public Button,
-                                  public gfx::AnimationDelegate {
+                                  public ui::AnimationDelegate {
  public:
   // The menu button's class name.
   static const char kViewClassName[];
 
-  static const CustomButton* AsCustomButton(const views::View* view);
-  static CustomButton* AsCustomButton(views::View* view);
-
   virtual ~CustomButton();
+
+  // Possible states
+  enum ButtonState {
+    BS_NORMAL = 0,
+    BS_HOT,
+    BS_PUSHED,
+    BS_DISABLED,
+    BS_COUNT
+  };
 
   // Get/sets the current display state of the button.
   ButtonState state() const { return state_; }
@@ -64,36 +67,33 @@ class VIEWS_EXPORT CustomButton : public Button,
     animate_on_state_change_ = value;
   }
 
-  void SetHotTracked(bool is_hot_tracked);
-  bool IsHotTracked() const;
+  // Returns true if the mouse pointer is over this control.  Note that this
+  // isn't the same as IsHotTracked() because the mouse may be over the control
+  // when it's disabled.
+  bool IsMouseHovered() const;
 
   // Overridden from View:
+  virtual void SetHotTracked(bool flag) OVERRIDE;
+  virtual bool IsHotTracked() const OVERRIDE;
   virtual void OnEnabledChanged() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
-  virtual bool OnKeyReleased(const ui::KeyEvent& event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual void OnMouseEntered(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseMoved(const MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyReleased(const KeyEvent& event) OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
   virtual void ShowContextMenu(const gfx::Point& p,
-                               ui::MenuSourceType source_type) OVERRIDE;
+                               bool is_mouse_gesture) OVERRIDE;
   virtual void OnDragDone() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual void VisibilityChanged(View* starting_from, bool is_visible) OVERRIDE;
 
-  // Overridden from gfx::AnimationDelegate:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-
-  // Takes ownership of the delegate.
-  void set_state_changed_delegate(CustomButtonStateChangedDelegate* delegate) {
-    state_changed_delegate_.reset(delegate);
-  }
+  // Overridden from ui::AnimationDelegate:
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
  protected:
   // Construct the Button with a Listener. See comment for Button's ctor.
@@ -107,23 +107,24 @@ class VIEWS_EXPORT CustomButton : public Button,
 
   // Returns true if the event is one that can trigger notifying the listener.
   // This implementation returns true if the left mouse button is down.
-  virtual bool IsTriggerableEvent(const ui::Event& event);
+  virtual bool IsTriggerableEvent(const MouseEvent& event);
 
   // Returns true if the button should become pressed when the user
   // holds the mouse down over the button. For this implementation,
   // we simply return IsTriggerableEvent(event).
-  virtual bool ShouldEnterPushedState(const ui::Event& event);
+  virtual bool ShouldEnterPushedState(const MouseEvent& event);
 
   // Overridden from View:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
   virtual void OnBlur() OVERRIDE;
 
   // The button state (defined in implementation)
   ButtonState state_;
 
   // Hover animation.
-  scoped_ptr<gfx::ThrobAnimation> hover_animation_;
+  scoped_ptr<ui::ThrobAnimation> hover_animation_;
 
  private:
   // Should we animate when the state changes? Defaults to true.
@@ -138,22 +139,7 @@ class VIEWS_EXPORT CustomButton : public Button,
   // See description above setter.
   bool request_focus_on_press_;
 
-  scoped_ptr<CustomButtonStateChangedDelegate> state_changed_delegate_;
-
   DISALLOW_COPY_AND_ASSIGN(CustomButton);
-};
-
-// Delegate for actions taken on state changes by CustomButton.
-class VIEWS_EXPORT CustomButtonStateChangedDelegate {
-public:
-  virtual ~CustomButtonStateChangedDelegate() {}
-  virtual void StateChanged(Button::ButtonState state) = 0;
-
-protected:
-  CustomButtonStateChangedDelegate() {}
-
-private:
-  DISALLOW_COPY_AND_ASSIGN(CustomButtonStateChangedDelegate);
 };
 
 }  // namespace views

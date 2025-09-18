@@ -1,22 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/scoped_nsobject.h"
-#include "base/prefs/pref_service.h"
+#import "base/memory/scoped_nsobject.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/command_updater.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_command_controller.h"
-#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/gradient_button_cell.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/view_resizer_pong.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -51,31 +46,25 @@ class ToolbarControllerTest : public CocoaProfileTest {
     kWrenchIndex, kLocationIndex, kBrowserActionContainerViewIndex
   };
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(browser());
 
-    CommandUpdater* updater =
-        browser()->command_controller()->command_updater();
+    CommandUpdater* updater = browser()->command_updater();
     // The default state for the commands is true, set a couple to false to
     // ensure they get picked up correct on initialization
     updater->UpdateCommandEnabled(IDC_BACK, false);
     updater->UpdateCommandEnabled(IDC_FORWARD, false);
     resizeDelegate_.reset([[ViewResizerPong alloc] init]);
     bar_.reset(
-        [[ToolbarController alloc]
-            initWithCommands:browser()->command_controller()->command_updater()
-                     profile:profile()
-                     browser:browser()
-              resizeDelegate:resizeDelegate_.get()]);
+        [[ToolbarController alloc] initWithModel:browser()->toolbar_model()
+                                        commands:browser()->command_updater()
+                                         profile:profile()
+                                         browser:browser()
+                                  resizeDelegate:resizeDelegate_.get()]);
     EXPECT_TRUE([bar_ view]);
     NSView* parent = [test_window() contentView];
     [parent addSubview:[bar_ view]];
-  }
-
-  virtual void TearDown() OVERRIDE {
-    bar_.reset();  // browser() must outlive the ToolbarController.
-    CocoaProfileTest::TearDown();
   }
 
   // Make sure the enabled state of the view is the same as the corresponding
@@ -91,15 +80,15 @@ class ToolbarControllerTest : public CocoaProfileTest {
               [[views objectAtIndex:kHomeIndex] isEnabled] ? true : false);
   }
 
-  base::scoped_nsobject<ViewResizerPong> resizeDelegate_;
-  base::scoped_nsobject<ToolbarController> bar_;
+  scoped_nsobject<ViewResizerPong> resizeDelegate_;
+  scoped_nsobject<ToolbarController> bar_;
 };
 
 TEST_VIEW(ToolbarControllerTest, [bar_ view])
 
 // Test the initial state that everything is sync'd up
 TEST_F(ToolbarControllerTest, InitialState) {
-  CommandUpdater* updater = browser()->command_controller()->command_updater();
+  CommandUpdater* updater = browser()->command_updater();
   CompareState(updater, [bar_ toolbarViews]);
 }
 
@@ -141,11 +130,11 @@ TEST_F(ToolbarControllerTest, NoLocationBar) {
 // Make some changes to the enabled state of a few of the buttons and ensure
 // that we're still in sync.
 TEST_F(ToolbarControllerTest, UpdateEnabledState) {
-  EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_BACK));
-  EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_FORWARD));
-  chrome::UpdateCommandEnabled(browser(), IDC_BACK, true);
-  chrome::UpdateCommandEnabled(browser(), IDC_FORWARD, true);
-  CommandUpdater* updater = browser()->command_controller()->command_updater();
+  CommandUpdater* updater = browser()->command_updater();
+  EXPECT_FALSE(updater->IsCommandEnabled(IDC_BACK));
+  EXPECT_FALSE(updater->IsCommandEnabled(IDC_FORWARD));
+  updater->UpdateCommandEnabled(IDC_BACK, true);
+  updater->UpdateCommandEnabled(IDC_FORWARD, true);
   CompareState(updater, [bar_ toolbarViews]);
 }
 
@@ -217,8 +206,8 @@ TEST_F(ToolbarControllerTest, BookmarkBubblePoint) {
 }
 
 TEST_F(ToolbarControllerTest, HoverButtonForEvent) {
-  base::scoped_nsobject<HitView> view(
-      [[HitView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)]);
+  scoped_nsobject<HitView> view([[HitView alloc]
+                                  initWithFrame:NSMakeRect(0,0,100,100)]);
   [bar_ setView:view];
   NSEvent* event = [NSEvent mouseEventWithType:NSMouseMoved
                                       location:NSMakePoint(10,10)
@@ -235,13 +224,12 @@ TEST_F(ToolbarControllerTest, HoverButtonForEvent) {
   EXPECT_FALSE([bar_ hoverButtonForEvent:event]);
 
   // Not yet...
-  base::scoped_nsobject<NSButton> button([[NSButton alloc] init]);
+  scoped_nsobject<NSButton> button([[NSButton alloc] init]);
   [view setHitTestReturn:button];
   EXPECT_FALSE([bar_ hoverButtonForEvent:event]);
 
   // Now!
-  base::scoped_nsobject<GradientButtonCell> cell(
-      [[GradientButtonCell alloc] init]);
+  scoped_nsobject<GradientButtonCell> cell([[GradientButtonCell alloc] init]);
   [button setCell:cell.get()];
   EXPECT_TRUE([bar_ hoverButtonForEvent:nil]);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,12 @@
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_all_tabs_controller.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_cell_single_line.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_controller.h"
-#import "chrome/browser/ui/cocoa/bookmarks/bookmark_name_folder_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_tree_browser_cell.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "grit/generated_resources.h"
@@ -63,49 +62,24 @@
 
 // static; implemented for each platform.  Update this function for new
 // classes derived from BookmarkEditorBaseController.
-void BookmarkEditor::Show(gfx::NativeWindow parent_window,
-                          Profile* profile,
-                          const EditDetails& details,
-                          Configuration configuration) {
-  if (details.type == EditDetails::EXISTING_NODE &&
-      details.existing_node->is_folder()) {
-    BookmarkNameFolderController* controller =
-        [[BookmarkNameFolderController alloc]
-            initWithParentWindow:parent_window
-                         profile:profile
-                            node:details.existing_node];
-    [controller runAsModalSheet];
-    return;
-  }
-
-  if (details.type == EditDetails::NEW_FOLDER && details.urls.empty()) {
-    BookmarkNameFolderController* controller =
-        [[BookmarkNameFolderController alloc]
-             initWithParentWindow:parent_window
-                          profile:profile
-                           parent:details.parent_node
-                         newIndex:details.index];
-     [controller runAsModalSheet];
-     return;
-  }
-
+void BookmarkEditor::ShowNative(gfx::NativeWindow parent_hwnd,
+                                Profile* profile,
+                                const BookmarkNode* parent,
+                                const EditDetails& details,
+                                Configuration configuration) {
   BookmarkEditorBaseController* controller = nil;
   if (details.type == EditDetails::NEW_FOLDER) {
     controller = [[BookmarkAllTabsController alloc]
-                  initWithParentWindow:parent_window
+                  initWithParentWindow:parent_hwnd
                                profile:profile
-                                parent:details.parent_node
-                                   url:details.url
-                                 title:details.title
+                                parent:parent
                          configuration:configuration];
   } else {
     controller = [[BookmarkEditorController alloc]
-                  initWithParentWindow:parent_window
+                  initWithParentWindow:parent_hwnd
                                profile:profile
-                                parent:details.parent_node
+                                parent:parent
                                   node:details.existing_node
-                                   url:details.url
-                                 title:details.title
                          configuration:configuration];
   }
   [controller runAsModalSheet];
@@ -119,8 +93,7 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
         importing_(false)
   { }
 
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE {
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {
     [controller_ modelChangedPreserveSelection:YES];
   }
 
@@ -149,10 +122,6 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
       [controller_ modelChangedPreserveSelection:NO];
   }
 
-  virtual void BookmarkAllNodesRemoved(BookmarkModel* model) OVERRIDE {
-    [controller_ modelChangedPreserveSelection:NO];
-  }
-
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    const BookmarkNode* node) OVERRIDE {
     if (!importing_ && node->is_folder())
@@ -171,14 +140,13 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
     // I care nothing for these 'favicons': I only show folders.
   }
 
-  virtual void ExtensiveBookmarkChangesBeginning(
-      BookmarkModel* model) OVERRIDE {
+  virtual void BookmarkImportBeginning(BookmarkModel* model) OVERRIDE {
     importing_ = true;
   }
 
   // Invoked after a batch import finishes.  This tells observers to update
   // themselves if they were waiting for the update to finish.
-  virtual void ExtensiveBookmarkChangesEnded(BookmarkModel* model) OVERRIDE {
+  virtual void BookmarkImportEnding(BookmarkModel* model) OVERRIDE {
     importing_ = false;
     [controller_ modelChangedPreserveSelection:YES];
   }
@@ -195,13 +163,12 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 
 @synthesize initialName = initialName_;
 @synthesize displayName = displayName_;
+@synthesize okEnabled = okEnabled_;
 
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                    nibName:(NSString*)nibName
                    profile:(Profile*)profile
                     parent:(const BookmarkNode*)parent
-                       url:(const GURL&)url
-                     title:(const base::string16&)title
              configuration:(BookmarkEditor::Configuration)configuration {
   NSString* nibpath = [base::mac::FrameworkBundle()
                         pathForResource:nibName
@@ -210,8 +177,6 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
     parentWindow_ = parentWindow;
     profile_ = profile;
     parentNode_ = parent;
-    url_ = url;
-    title_ = title;
     configuration_ = configuration;
     initialName_ = [@"" retain];
     observer_.reset(new BookmarkEditorBaseControllerBridge(self));
@@ -277,8 +242,6 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
         contextInfo:nil];
 }
 
-// This constant has to match the name of the method after it.
-NSString* const kOkEnabledName = @"okEnabled";
 - (BOOL)okEnabled {
   return YES;
 }
@@ -326,7 +289,7 @@ NSString* const kOkEnabledName = @"okEnabled";
 #pragma mark Folder Tree Management
 
 - (BookmarkModel*)bookmarkModel {
-  return BookmarkModelFactory::GetForProfile(profile_);
+  return profile_->GetBookmarkModel();
 }
 
 - (Profile*)profile {
@@ -335,14 +298,6 @@ NSString* const kOkEnabledName = @"okEnabled";
 
 - (const BookmarkNode*)parentNode {
   return parentNode_;
-}
-
-- (const GURL&)url {
-  return url_;
-}
-
-- (const base::string16&)title{
-  return title_;
 }
 
 - (BookmarkFolderInfo*)folderForIndexPath:(NSIndexPath*)indexPath {
@@ -455,9 +410,9 @@ NSString* const kOkEnabledName = @"okEnabled";
 - (void)selectNodeInBrowser:(const BookmarkNode*)node {
   DCHECK(configuration_ == BookmarkEditor::SHOW_TREE);
   NSIndexPath* selectionPath = [self selectionPathForNode:node];
-  [self willChangeValueForKey:kOkEnabledName];
+  [self willChangeValueForKey:@"okEnabled"];
   [self setTableSelectionPath:selectionPath];
-  [self didChangeValueForKey:kOkEnabledName];
+  [self didChangeValueForKey:@"okEnabled"];
 }
 
 - (NSIndexPath*)selectionPathForNode:(const BookmarkNode*)desiredNode {
@@ -465,7 +420,7 @@ NSString* const kOkEnabledName = @"okEnabled";
   // of ancestor nodes.  Then crawl down the folderTreeArray looking
   // for each ancestor in order while building up the selectionPath.
   std::stack<const BookmarkNode*> nodeStack;
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile_);
+  BookmarkModel* model = profile_->GetBookmarkModel();
   const BookmarkNode* rootNode = model->root_node();
   const BookmarkNode* node = desiredNode;
   while (node != rootNode) {
@@ -520,7 +475,7 @@ NSString* const kOkEnabledName = @"okEnabled";
 
 - (void)buildFolderTree {
   // Build up a tree of the current folder configuration.
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile_);
+  BookmarkModel* model = profile_->GetBookmarkModel();
   const BookmarkNode* rootNode = model->root_node();
   NSMutableArray* baseArray = [self addChildFoldersFromNode:rootNode];
   DCHECK(baseArray);
@@ -625,7 +580,7 @@ NSString* const kOkEnabledName = @"okEnabled";
 }
 
 - (void)createNewFolders {
-  base::AutoReset<BOOL> creatingNewFoldersSetter(&creatingNewFolders_, YES);
+  AutoReset<BOOL> creatingNewFoldersSetter(&creatingNewFolders_, YES);
   // Scan the tree looking for nodes marked 'newFolder' and create those nodes.
   NSArray* folderTreeArray = [self folderTreeArray];
   for (BookmarkFolderInfo *folderInfo in folderTreeArray) {

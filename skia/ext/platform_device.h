@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SKIA_EXT_PLATFORM_DEVICE_H_
 #define SKIA_EXT_PLATFORM_DEVICE_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -13,7 +14,7 @@
 #endif
 
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkBitmapDevice.h"
+#include "third_party/skia/include/core/SkDevice.h"
 #include "third_party/skia/include/core/SkPreConfig.h"
 
 class SkMatrix;
@@ -21,7 +22,8 @@ class SkMetaData;
 class SkPath;
 class SkRegion;
 
-#if defined(USE_CAIRO)
+#if defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_FREEBSD) \
+    || defined(OS_SUN)
 typedef struct _cairo cairo_t;
 typedef struct _cairo_rectangle cairo_rectangle_t;
 #elif defined(OS_MACOSX)
@@ -36,39 +38,43 @@ class PlatformDevice;
 #if defined(OS_WIN)
 typedef HDC PlatformSurface;
 typedef RECT PlatformRect;
-#elif defined(USE_CAIRO)
+#elif defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_FREEBSD) \
+    || defined(OS_SUN)
 typedef cairo_t* PlatformSurface;
 typedef cairo_rectangle_t PlatformRect;
 #elif defined(OS_MACOSX)
 typedef CGContextRef PlatformSurface;
 typedef CGRect PlatformRect;
-#else
+#elif defined(ANDROID)
+// TODO(tonyg): FIX TYPES!
 typedef void* PlatformSurface;
-typedef SkIRect* PlatformRect;
+typedef void* PlatformRect;
 #endif
 
 // The following routines provide accessor points for the functionality
-// exported by the various PlatformDevice ports.  
-// All calls to PlatformDevice::* should be routed through these 
+// exported by the various PlatformDevice ports.  The PlatformDevice, and
+// BitmapPlatformDevice classes inherit directly from SkDevice, which is no
+// longer a supported usage-pattern for skia.  In preparation of the removal of
+// these classes, all calls to PlatformDevice::* should be routed through these
 // helper functions.
 
 // Bind a PlatformDevice instance, |platform_device| to |device|.  Subsequent
 // calls to the functions exported below will forward the request to the
 // corresponding method on the bound PlatformDevice instance.    If no
-// PlatformDevice has been bound to the SkBaseDevice passed, then the 
-// routines are NOPS.
-SK_API void SetPlatformDevice(SkBaseDevice* device,
+// PlatformDevice has been bound to the SkDevice passed, then the routines are
+// NOPS.
+SK_API void SetPlatformDevice(SkDevice* device,
                               PlatformDevice* platform_device);
-SK_API PlatformDevice* GetPlatformDevice(SkBaseDevice* device);
+SK_API PlatformDevice* GetPlatformDevice(SkDevice* device);
 
 
 #if defined(OS_WIN)
 // Initializes the default settings and colors in a device context.
 SK_API void InitializeDC(HDC context);
 #elif defined(OS_MACOSX)
-// Returns the CGContext that backing the SkBaseDevice.  Forwards to the bound
+// Returns the CGContext that backing the SkDevice.  Forwards to the bound
 // PlatformDevice.  Returns NULL if no PlatformDevice is bound.
-SK_API CGContextRef GetBitmapContext(SkBaseDevice* device);
+SK_API CGContextRef GetBitmapContext(SkDevice* device);
 #endif
 
 // Following routines are used in print preview workflow to mark the draft mode
@@ -82,18 +88,14 @@ SK_API void SetIsPreviewMetafile(const SkCanvas& canvas, bool is_preview);
 SK_API bool IsPreviewMetafile(const SkCanvas& canvas);
 #endif
 
-// A SkBitmapDevice is basically a wrapper around SkBitmap that provides a 
-// surface for SkCanvas to draw into. PlatformDevice provides a surface 
-// Windows can also write to. It also provides functionality to play well 
-// with GDI drawing functions. This class is abstract and must be subclassed. 
-// It provides the basic interface to implement it either with or without 
-// a bitmap backend.
+// A SkDevice is basically a wrapper around SkBitmap that provides a surface for
+// SkCanvas to draw into. PlatformDevice provides a surface Windows can also
+// write to. It also provides functionality to play well with GDI drawing
+// functions. This class is abstract and must be subclassed. It provides the
+// basic interface to implement it either with or without a bitmap backend.
 //
-// PlatformDevice provides an interface which sub-classes of SkBaseDevice can 
-// also provide to allow for drawing by the native platform into the device.
-// TODO(robertphillips): Once the bitmap-specific entry points are removed
-// from SkBaseDevice it might make sense for PlatformDevice to be derived
-// from it.
+// PlatformDevice provides an interface which sub-classes of SkDevice can also
+// provide to allow for drawing by the native platform into the device.
 class SK_API PlatformDevice {
  public:
   virtual ~PlatformDevice() {}
@@ -121,8 +123,13 @@ class SK_API PlatformDevice {
   virtual void DrawToNativeContext(PlatformSurface surface, int x, int y,
                                    const PlatformRect* src_rect) = 0;
 
-  // Returns true if GDI operations can be used for drawing into the bitmap.
-  virtual bool SupportsPlatformPaint();
+  // Returns if GDI is allowed to render text to this device.
+  virtual bool IsNativeFontRenderingAllowed();
+
+  // True if AlphaBlend() was called during a
+  // BeginPlatformPaint()/EndPlatformPaint() pair.
+  // Used by the printing subclasses.  See |VectorPlatformDeviceEmf|.
+  virtual bool AlphaBlendUsed() const;
 
 #if defined(OS_WIN)
   // Loads a SkPath into the GDI context. The path can there after be used for

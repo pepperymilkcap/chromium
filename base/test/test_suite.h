@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_TEST_TEST_SUITE_H_
 #define BASE_TEST_TEST_SUITE_H_
+#pragma once
 
 // Defines a basic test suite framework for running gtest based tests.  You can
 // instantiate this class in your main function and call its Run method to run
@@ -20,9 +21,6 @@ class TestInfo;
 
 namespace base {
 
-// Instantiates TestSuite, runs it and returns exit code.
-int RunUnitTestsUsingBaseTestSuite(int argc, char **argv);
-
 class TestSuite {
  public:
   // Match function used by the GetTestCount method.
@@ -31,18 +29,35 @@ class TestSuite {
   TestSuite(int argc, char** argv);
   virtual ~TestSuite();
 
+  // Returns true if the test is marked as flaky.
+  static bool IsMarkedFlaky(const testing::TestInfo& test);
+
+  // Returns true if the test is marked as failing.
+  static bool IsMarkedFailing(const testing::TestInfo& test);
+
   // Returns true if the test is marked as "MAYBE_".
   // When using different prefixes depending on platform, we use MAYBE_ and
   // preprocessor directives to replace MAYBE_ with the target prefix.
   static bool IsMarkedMaybe(const testing::TestInfo& test);
 
+  // Returns true if the test failure should be ignored.
+  static bool ShouldIgnoreFailure(const testing::TestInfo& test);
+
+  // Returns true if the test failed and the failure shouldn't be ignored.
+  static bool NonIgnoredFailures(const testing::TestInfo& test);
+
+  // Returns the number of tests where the match function returns true.
+  int GetTestCount(TestMatch test_match);
+
   void CatchMaybeTests();
 
   void ResetCommandLine();
 
-  void AddTestLauncherResultPrinter();
-
   int Run();
+
+  // A command-line flag that makes a test failure always result in a non-zero
+  // process exit code.
+  static const char kStrictFailureHandling[];
 
  protected:
   // This constructor is only accessible to specialized test suite
@@ -71,8 +86,6 @@ class TestSuite {
  private:
   // Basic initialization for the test suite happens here.
   void PreInitialize(int argc, char** argv, bool create_at_exit_manager);
-
-  bool initialized_command_line_;
 
   DISALLOW_COPY_AND_ASSIGN(TestSuite);
 };

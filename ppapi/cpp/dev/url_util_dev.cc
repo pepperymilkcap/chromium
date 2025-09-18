@@ -4,192 +4,82 @@
 
 #include "ppapi/cpp/dev/url_util_dev.h"
 
-#include "ppapi/cpp/instance_handle.h"
-#include "ppapi/cpp/module_impl.h"
+#include "ppapi/cpp/instance.h"
+#include "ppapi/cpp/module.h"
 
 namespace pp {
 
-namespace {
-
-template <> const char* interface_name<PPB_URLUtil_Dev_0_6>() {
-  return PPB_URLUTIL_DEV_INTERFACE_0_6;
-}
-
-template <> const char* interface_name<PPB_URLUtil_Dev_0_7>() {
-  return PPB_URLUTIL_DEV_INTERFACE_0_7;
-}
-
-}  // namespace
-
 // static
 const URLUtil_Dev* URLUtil_Dev::Get() {
-  static URLUtil_Dev util;
   static bool tried_to_init = false;
-  static bool interface_available = false;
+  static URLUtil_Dev util;
 
   if (!tried_to_init) {
     tried_to_init = true;
-    if (has_interface<PPB_URLUtil_Dev_0_7>() ||
-        has_interface<PPB_URLUtil_Dev_0_6>())
-      interface_available = true;
+    util.interface_ = static_cast<const PPB_URLUtil_Dev*>(
+        Module::Get()->GetBrowserInterface(PPB_URLUTIL_DEV_INTERFACE));
   }
 
-  if (!interface_available)
+  if (!util.interface_)
     return NULL;
   return &util;
 }
 
 Var URLUtil_Dev::Canonicalize(const Var& url,
                               PP_URLComponents_Dev* components) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_7>()->Canonicalize(url.pp_var(),
-                                                                  components));
-  }
-  if (has_interface<PPB_URLUtil_Dev_0_6>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_6>()->Canonicalize(url.pp_var(),
-                                                                  components));
-  }
-  return Var();
+  return Var(Var::PassRef(),
+             interface_->Canonicalize(url.pp_var(), components));
 }
 
 Var URLUtil_Dev::ResolveRelativeToURL(const Var& base_url,
                                       const Var& relative_string,
                                       PP_URLComponents_Dev* components) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-      return Var(PASS_REF,
-                 get_interface<PPB_URLUtil_Dev_0_7>()->ResolveRelativeToURL(
-                     base_url.pp_var(),
-                     relative_string.pp_var(),
-                     components));
-  }
-  if (has_interface<PPB_URLUtil_Dev_0_6>()) {
-      return Var(PASS_REF,
-                 get_interface<PPB_URLUtil_Dev_0_6>()->ResolveRelativeToURL(
-                     base_url.pp_var(),
-                     relative_string.pp_var(),
-                     components));
-  }
-  return Var();
+  return Var(Var::PassRef(),
+             interface_->ResolveRelativeToURL(base_url.pp_var(),
+                                              relative_string.pp_var(),
+                                              components));
 }
 
 Var URLUtil_Dev::ResolveRelativeToDocument(
-    const InstanceHandle& instance,
+    const Instance& instance,
     const Var& relative_string,
     PP_URLComponents_Dev* components) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_7>()->ResolveRelativeToDocument(
-                   instance.pp_instance(),
-                   relative_string.pp_var(),
-                   components));
-  }
-  if (has_interface<PPB_URLUtil_Dev_0_6>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_6>()->ResolveRelativeToDocument(
-                   instance.pp_instance(),
-                   relative_string.pp_var(),
-                   components));
-  }
-  return Var();
+  return Var(Var::PassRef(),
+             interface_->ResolveRelativeToDocument(instance.pp_instance(),
+                                                   relative_string.pp_var(),
+                                                   components));
 }
 
 bool URLUtil_Dev::IsSameSecurityOrigin(const Var& url_a,
                                        const Var& url_b) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-    return PP_ToBool(
-        get_interface<PPB_URLUtil_Dev_0_7>()->IsSameSecurityOrigin(
-            url_a.pp_var(),
-            url_b.pp_var()));
-  }
-  if (has_interface<PPB_URLUtil_Dev_0_6>()) {
-    return PP_ToBool(
-        get_interface<PPB_URLUtil_Dev_0_6>()->IsSameSecurityOrigin(
-            url_a.pp_var(),
-            url_b.pp_var()));
-  }
-  return false;
+  return PP_ToBool(interface_->IsSameSecurityOrigin(url_a.pp_var(),
+                                                    url_b.pp_var()));
 }
 
-bool URLUtil_Dev::DocumentCanRequest(const InstanceHandle& instance,
+bool URLUtil_Dev::DocumentCanRequest(const Instance& instance,
                                      const Var& url) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-    return PP_ToBool(
-        get_interface<PPB_URLUtil_Dev_0_7>()->DocumentCanRequest(
-            instance.pp_instance(),
-            url.pp_var()));
-  }
-  if (has_interface<PPB_URLUtil_Dev_0_6>()) {
-    return PP_ToBool(
-        get_interface<PPB_URLUtil_Dev_0_6>()->DocumentCanRequest(
-            instance.pp_instance(),
-            url.pp_var()));
-  }
-  return false;
+  return PP_ToBool(interface_->DocumentCanRequest(instance.pp_instance(),
+                                                  url.pp_var()));
 }
 
-bool URLUtil_Dev::DocumentCanAccessDocument(
-    const InstanceHandle& active,
-    const InstanceHandle& target) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-    return PP_ToBool(
-        get_interface<PPB_URLUtil_Dev_0_7>()->DocumentCanAccessDocument(
-            active.pp_instance(),
-            target.pp_instance()));
-  }
-  if (has_interface<PPB_URLUtil_Dev_0_6>()) {
-    return PP_ToBool(
-        get_interface<PPB_URLUtil_Dev_0_6>()->DocumentCanAccessDocument(
-            active.pp_instance(),
-            target.pp_instance()));
-  }
-  return false;
+bool URLUtil_Dev::DocumentCanAccessDocument(const Instance& active,
+                                            const Instance& target) const {
+  return PP_ToBool(
+      interface_->DocumentCanAccessDocument(active.pp_instance(),
+                                            target.pp_instance()));
 }
 
-Var URLUtil_Dev::GetDocumentURL(const InstanceHandle& instance,
+Var URLUtil_Dev::GetDocumentURL(const Instance& instance,
                                 PP_URLComponents_Dev* components) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_7>()->GetDocumentURL(
-                   instance.pp_instance(),
-                   components));
-  }
-  if (has_interface<PPB_URLUtil_Dev_0_6>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_6>()->GetDocumentURL(
-                   instance.pp_instance(),
-                   components));
-  }
-  return Var();
+  return Var(Var::PassRef(),
+             interface_->GetDocumentURL(instance.pp_instance(), components));
 }
 
-Var URLUtil_Dev::GetPluginInstanceURL(const InstanceHandle& instance,
+Var URLUtil_Dev::GetPluginInstanceURL(const Instance& instance,
                                       PP_URLComponents_Dev* components) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_7>()->GetPluginInstanceURL(
-                   instance.pp_instance(),
-                   components));
-  }
-  if (has_interface<PPB_URLUtil_Dev_0_6>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_6>()->GetPluginInstanceURL(
-                   instance.pp_instance(),
-                   components));
-  }
-  return Var();
-}
-
-Var URLUtil_Dev::GetPluginReferrerURL(const InstanceHandle& instance,
-                                      PP_URLComponents_Dev* components) const {
-  if (has_interface<PPB_URLUtil_Dev_0_7>()) {
-    return Var(PASS_REF,
-               get_interface<PPB_URLUtil_Dev_0_7>()->GetPluginReferrerURL(
-                   instance.pp_instance(),
-                   components));
-  }
-  return Var();
+  return Var(Var::PassRef(),
+             interface_->GetPluginInstanceURL(instance.pp_instance(),
+                                              components));
 }
 
 }  // namespace pp

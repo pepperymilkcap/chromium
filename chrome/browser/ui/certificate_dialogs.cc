@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,19 +12,17 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/shell_dialogs/select_file_dialog.h"
 
 using content::BrowserThread;
 using content::WebContents;
 
 namespace {
 
-void WriterCallback(const base::FilePath& path, const std::string& data) {
+void WriterCallback(const FilePath& path, const std::string& data) {
   int bytes_written = file_util::WriteFile(path, data.data(), data.size());
   if (bytes_written != static_cast<ssize_t>(data.size())) {
     LOG(ERROR) << "Writing " << path.value() << " ("
@@ -32,8 +30,7 @@ void WriterCallback(const base::FilePath& path, const std::string& data) {
   }
 }
 
-void WriteFileOnFileThread(const base::FilePath& path,
-                           const std::string& data) {
+void WriteFileOnFileThread(const FilePath& path, const std::string& data) {
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE, base::Bind(&WriterCallback, path, data));
 }
@@ -49,7 +46,11 @@ std::string WrapAt64(const std::string &str) {
 
 std::string GetBase64String(net::X509Certificate::OSCertHandle cert) {
   std::string base64;
-  base::Base64Encode(x509_certificate_model::GetDerString(cert), &base64);
+  if (!base::Base64Encode(
+      x509_certificate_model::GetDerString(cert), &base64)) {
+    LOG(ERROR) << "base64 encoding error";
+    return "";
+  }
   return "-----BEGIN CERTIFICATE-----\r\n" +
       WrapAt64(base64) +
       "-----END CERTIFICATE-----\r\n";
@@ -58,18 +59,18 @@ std::string GetBase64String(net::X509Certificate::OSCertHandle cert) {
 ////////////////////////////////////////////////////////////////////////////////
 // General utility functions.
 
-class Exporter : public ui::SelectFileDialog::Listener {
+class Exporter : public SelectFileDialog::Listener {
  public:
   Exporter(WebContents* web_contents, gfx::NativeWindow parent,
            net::X509Certificate::OSCertHandle cert);
-  virtual ~Exporter();
+  ~Exporter();
 
   // SelectFileDialog::Listener implemenation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index, void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE;
+  virtual void FileSelected(const FilePath& path,
+                            int index, void* params);
+  virtual void FileSelectionCanceled(void* params);
  private:
-  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+  scoped_refptr<SelectFileDialog> select_file_dialog_;
 
   // The certificate hierarchy (leaf cert first).
   net::X509Certificate::OSCertHandles cert_chain_list_;
@@ -78,20 +79,20 @@ class Exporter : public ui::SelectFileDialog::Listener {
 Exporter::Exporter(WebContents* web_contents,
                    gfx::NativeWindow parent,
                    net::X509Certificate::OSCertHandle cert)
-    : select_file_dialog_(ui::SelectFileDialog::Create(
-        this, new ChromeSelectFilePolicy(web_contents))) {
+    : select_file_dialog_(SelectFileDialog::Create(this)) {
   x509_certificate_model::GetCertChainFromCert(cert, &cert_chain_list_);
 
   // TODO(mattm): should this default to some directory?
   // Maybe SavePackage::GetSaveDirPreference? (Except that it's private.)
-  base::FilePath suggested_path("certificate");
+  FilePath suggested_path("certificate");
   std::string cert_title = x509_certificate_model::GetTitle(cert);
   if (!cert_title.empty())
-    suggested_path = base::FilePath(cert_title);
+    suggested_path = FilePath(cert_title);
 
   ShowCertSelectFileDialog(select_file_dialog_.get(),
-                           ui::SelectFileDialog::SELECT_SAVEAS_FILE,
+                           SelectFileDialog::SELECT_SAVEAS_FILE,
                            suggested_path,
+                           web_contents,
                            parent,
                            NULL);
 }
@@ -105,8 +106,7 @@ Exporter::~Exporter() {
   x509_certificate_model::DestroyCertChain(&cert_chain_list_);
 }
 
-void Exporter::FileSelected(const base::FilePath& path, int index,
-                            void* params) {
+void Exporter::FileSelected(const FilePath& path, int index, void* params) {
   std::string data;
   switch (index) {
     case 2:
@@ -141,12 +141,13 @@ void Exporter::FileSelectionCanceled(void* params) {
 
 } // namespace
 
-void ShowCertSelectFileDialog(ui::SelectFileDialog* select_file_dialog,
-                              ui::SelectFileDialog::Type type,
-                              const base::FilePath& suggested_path,
+void ShowCertSelectFileDialog(SelectFileDialog* select_file_dialog,
+                              SelectFileDialog::Type type,
+                              const FilePath& suggested_path,
+                              WebContents* web_contents,
                               gfx::NativeWindow parent,
                               void* params) {
-  ui::SelectFileDialog::FileTypeInfo file_type_info;
+  SelectFileDialog::FileTypeInfo file_type_info;
   file_type_info.extensions.resize(5);
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("pem"));
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("crt"));
@@ -167,10 +168,9 @@ void ShowCertSelectFileDialog(ui::SelectFileDialog* select_file_dialog,
       l10n_util::GetStringUTF16(IDS_CERT_EXPORT_TYPE_PKCS7_CHAIN));
   file_type_info.include_all_files = true;
   select_file_dialog->SelectFile(
-      type, base::string16(),
-      suggested_path, &file_type_info,
-      1,  // 1-based index for |file_type_info.extensions| to specify default.
-      FILE_PATH_LITERAL("crt"),
+      type, string16(),
+      suggested_path, &file_type_info, 1,
+      FILE_PATH_LITERAL("crt"), web_contents,
       parent, params);
 }
 

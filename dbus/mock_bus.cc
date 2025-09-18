@@ -4,11 +4,9 @@
 
 #include "dbus/mock_bus.h"
 
-#include "base/location.h"
-
 namespace dbus {
 
-MockBus::MockBus(const Bus::Options& options) : Bus(options) {
+MockBus::MockBus(Bus::Options& options) : Bus(options) {
 }
 
 MockBus::~MockBus() {

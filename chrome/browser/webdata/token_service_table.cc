@@ -8,32 +8,10 @@
 #include <string>
 
 #include "base/logging.h"
-#include "components/webdata/common/web_database.h"
-#include "components/webdata/encryptor/encryptor.h"
+#include "chrome/browser/password_manager/encryptor.h"
 #include "sql/statement.h"
 
-namespace {
-
-WebDatabaseTable::TypeKey GetKey() {
-  // We just need a unique constant. Use the address of a static that
-  // COMDAT folding won't touch in an optimizing linker.
-  static int table_key = 0;
-  return reinterpret_cast<void*>(&table_key);
-}
-
-}  // namespace
-
-TokenServiceTable* TokenServiceTable::FromWebDatabase(WebDatabase* db) {
-  return static_cast<TokenServiceTable*>(db->GetTable(GetKey()));
-
-}
-
-WebDatabaseTable::TypeKey TokenServiceTable::GetTypeKey() const {
-  return GetKey();
-}
-
-bool TokenServiceTable::Init(sql::Connection* db, sql::MetaTable* meta_table) {
-  WebDatabaseTable::Init(db, meta_table);
+bool TokenServiceTable::Init() {
   if (!db_->DoesTableExist("token_service")) {
     if (!db_->Execute("CREATE TABLE token_service ("
                       "service VARCHAR PRIMARY KEY NOT NULL,"
@@ -49,22 +27,9 @@ bool TokenServiceTable::IsSyncable() {
   return true;
 }
 
-bool TokenServiceTable::MigrateToVersion(int version,
-                                         bool* update_compatible_version) {
-  return true;
-}
-
 bool TokenServiceTable::RemoveAllTokens() {
   sql::Statement s(db_->GetUniqueStatement(
       "DELETE FROM token_service"));
-
-  return s.Run();
-}
-
-bool TokenServiceTable::RemoveTokenForService(const std::string& service) {
-  sql::Statement s(db_->GetUniqueStatement(
-      "DELETE FROM token_service WHERE service = ?"));
-  s.BindString(0, service);
 
   return s.Run();
 }

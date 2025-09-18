@@ -6,21 +6,18 @@
 
 #include <vector>
 
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/stop_find_action.h"
-#include "third_party/WebKit/public/web/WebFindOptions.h"
-#include "ui/gfx/rect_f.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
 
-using blink::WebFindOptions;
+using WebKit::WebFindOptions;
 using content::WebContents;
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(FindTabHelper);
 
 // static
 int FindTabHelper::find_request_id_counter_ = -1;
@@ -37,7 +34,7 @@ FindTabHelper::FindTabHelper(WebContents* web_contents)
 FindTabHelper::~FindTabHelper() {
 }
 
-void FindTabHelper::StartFinding(base::string16 search_string,
+void FindTabHelper::StartFinding(string16 search_string,
                                  bool forward_direction,
                                  bool case_sensitive) {
   // If search_string is empty, it means FindNext was pressed with a keyboard
@@ -45,7 +42,7 @@ void FindTabHelper::StartFinding(base::string16 search_string,
   if (search_string.empty() && find_text_.empty()) {
     Profile* profile =
         Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-    base::string16 last_search_prepopulate_text =
+    string16 last_search_prepopulate_text =
         FindBarStateFactory::GetLastPrepopulateText(profile);
 
     // Try the last thing we searched for on this tab, then the last thing
@@ -95,11 +92,11 @@ void FindTabHelper::StartFinding(base::string16 search_string,
 
 void FindTabHelper::StopFinding(
     FindBarController::SelectionAction selection_action) {
-  if (selection_action == FindBarController::kClearSelectionOnPage) {
+  if (selection_action == FindBarController::kClearSelection) {
     // kClearSelection means the find string has been cleared by the user, but
     // the UI has not been dismissed. In that case we want to clear the
     // previously remembered search (http://crbug.com/42639).
-    previous_find_text_ = base::string16();
+    previous_find_text_ = string16();
   } else {
     find_ui_active_ = false;
     if (!find_text_.empty())
@@ -111,13 +108,13 @@ void FindTabHelper::StopFinding(
 
   content::StopFindAction action;
   switch (selection_action) {
-    case FindBarController::kClearSelectionOnPage:
+    case FindBarController::kClearSelection:
       action = content::STOP_FIND_ACTION_CLEAR_SELECTION;
       break;
-    case FindBarController::kKeepSelectionOnPage:
+    case FindBarController::kKeepSelection:
       action = content::STOP_FIND_ACTION_KEEP_SELECTION;
       break;
-    case FindBarController::kActivateSelectionOnPage:
+    case FindBarController::kActivateSelection:
       action = content::STOP_FIND_ACTION_ACTIVATE_SELECTION;
       break;
     default:
@@ -126,20 +123,6 @@ void FindTabHelper::StopFinding(
   }
   web_contents()->GetRenderViewHost()->StopFinding(action);
 }
-
-#if defined(OS_ANDROID)
-void FindTabHelper::ActivateNearestFindResult(float x, float y) {
-  if (!find_op_aborted_ && !find_text_.empty()) {
-    web_contents()->GetRenderViewHost()->ActivateNearestFindResult(
-        current_find_request_id_, x, y);
-  }
-}
-
-void FindTabHelper::RequestFindMatchRects(int current_version) {
-  if (!find_op_aborted_ && !find_text_.empty())
-    web_contents()->GetRenderViewHost()->RequestFindMatchRects(current_version);
-}
-#endif
 
 void FindTabHelper::HandleFindReply(int request_id,
                                     int number_of_matches,
@@ -157,9 +140,7 @@ void FindTabHelper::HandleFindReply(int request_id,
       active_match_ordinal = last_search_result_.active_match_ordinal();
 
     gfx::Rect selection = selection_rect;
-    if (final_update && active_match_ordinal == 0)
-      selection = gfx::Rect();
-    else if (selection_rect.IsEmpty())
+    if (selection.IsEmpty())
       selection = last_search_result_.selection_rect();
 
     // Notify the UI, automation and any other observers that a find result was

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@ TEST(GTestMac, ExpectNSEQ) {
   EXPECT_NSEQ(@"a", @"a");
 
   NSString* s1 = [NSString stringWithUTF8String:"a"];
-  NSString* s2 = @"a";
+  NSString* s2 = [NSString stringWithString:@"a"];
   EXPECT_NE(s1, s2);
   EXPECT_NSEQ(s1, s2);
 }
@@ -28,10 +28,10 @@ TEST(GTestMac, ExpectNSEQ) {
 TEST(GTestMac, AssertNSEQ) {
   base::mac::ScopedNSAutoreleasePool pool;
 
-  NSString* s1 = [NSString stringWithUTF8String:"a"];
-  NSString* s2 = @"a";
-  EXPECT_NE(s1, s2);
-  ASSERT_NSEQ(s1, s2);
+  NSNumber* n1 = [NSNumber numberWithInt:42];
+  NSNumber* n2 = [NSNumber numberWithInt:42];
+  EXPECT_NE(n1, n2);
+  ASSERT_NSEQ(n1, n2);
 }
 
 TEST(GTestMac, ExpectNSNE) {

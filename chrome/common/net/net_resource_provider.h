@@ -4,8 +4,9 @@
 
 #ifndef CHROME_COMMON_NET_NET_RESOURCE_PROVIDER_H_
 #define CHROME_COMMON_NET_NET_RESOURCE_PROVIDER_H_
+#pragma once
 
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 
 namespace chrome_common_net {
 

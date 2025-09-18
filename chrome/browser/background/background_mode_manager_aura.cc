@@ -4,7 +4,6 @@
 
 #include "chrome/browser/background/background_mode_manager.h"
 
-#include "extensions/common/extension.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -15,10 +14,10 @@ void BackgroundModeManager::EnableLaunchOnStartup(bool should_launch) {
 }
 
 void BackgroundModeManager::DisplayAppInstalledNotification(
-    const extensions::Extension* extension) {
+    const Extension* extension) {
   NOTIMPLEMENTED();
 }
 
-base::string16 BackgroundModeManager::GetPreferencesMenuLabel() {
+string16 BackgroundModeManager::GetPreferencesMenuLabel() {
   return l10n_util::GetStringUTF16(IDS_SETTINGS);
 }

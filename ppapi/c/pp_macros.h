@@ -1,19 +1,17 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From pp_macros.idl modified Wed Mar  6 13:04:56 2013. */
+/* From pp_macros.idl modified Thu Dec  8 23:25:05 2011. */
 
 #ifndef PPAPI_C_PP_MACROS_H_
 #define PPAPI_C_PP_MACROS_H_
 
 
-#define PPAPI_RELEASE 33
-
 /**
  * @file
- * Defines the common macros such as assert, inline, ...
+ * Defines the API ...
  */
 
 
@@ -101,7 +99,7 @@ PP_COMPILE_ASSERT_SIZE_IN_BYTES_IMPL(NAME, enum NAME, SIZE)
    Foo::Foo(MyInstance* instance)
        : PP_ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)) {}
  */
-#if defined(_MSC_VER)
+#if defined(COMPILER_MSVC)
 # define PP_ALLOW_THIS_IN_INITIALIZER_LIST(code) \
     __pragma(warning(push)) \
     __pragma(warning(disable:4355)) \

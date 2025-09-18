@@ -1,27 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_BUBBLE_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_BUBBLE_VIEW_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/gtest_prod_util.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/ui/bookmarks/bookmark_bubble_delegate.h"
-#include "chrome/browser/ui/bookmarks/recently_used_folders_combo_model.h"
+#include "base/string16.h"
+#include "chrome/browser/bookmarks/recently_used_folders_combo_model.h"
+#include "googleurl/src/gurl.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
-#include "url/gurl.h"
+#include "ui/views/controls/link_listener.h"
 
-class BookmarkBubbleViewObserver;
 class Profile;
 
 namespace views {
-class LabelButton;
+class TextButton;
 class Textfield;
 }
 
@@ -30,12 +28,11 @@ class Textfield;
 // bookmark it is created with. Don't create a BookmarkBubbleView directly,
 // instead use the static Show method.
 class BookmarkBubbleView : public views::BubbleDelegateView,
+                           public views::LinkListener,
                            public views::ButtonListener,
                            public views::ComboboxListener {
  public:
   static void ShowBubble(views::View* anchor_view,
-                         BookmarkBubbleViewObserver* observer,
-                         scoped_ptr<BookmarkBubbleDelegate> delegate,
                          Profile* profile,
                          const GURL& url,
                          bool newly_bookmarked);
@@ -46,8 +43,9 @@ class BookmarkBubbleView : public views::BubbleDelegateView,
 
   virtual ~BookmarkBubbleView();
 
-  // views::BubbleDelegateView method.
+  // views::BubbleDelegateView methods.
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
+  virtual gfx::Rect GetAnchorRect() OVERRIDE;
 
   // views::WidgetDelegate method.
   virtual void WindowClosing() OVERRIDE;
@@ -60,32 +58,30 @@ class BookmarkBubbleView : public views::BubbleDelegateView,
   virtual void Init() OVERRIDE;
 
  private:
-  friend class BookmarkBubbleViewTest;
-  FRIEND_TEST_ALL_PREFIXES(BookmarkBubbleViewTest, SyncPromoSignedIn);
-  FRIEND_TEST_ALL_PREFIXES(BookmarkBubbleViewTest, SyncPromoNotSignedIn);
-
   // Creates a BookmarkBubbleView.
   BookmarkBubbleView(views::View* anchor_view,
-                     BookmarkBubbleViewObserver* observer,
-                     scoped_ptr<BookmarkBubbleDelegate> delegate,
                      Profile* profile,
                      const GURL& url,
                      bool newly_bookmarked);
 
   // Returns the title to display.
-  base::string16 GetTitle();
+  string16 GetTitle();
 
-  // Overridden from views::View:
-  virtual gfx::Size GetMinimumSize() OVERRIDE;
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  // Overridden from views::LinkListener:
+  // Either unstars the item or shows the bookmark editor (depending upon which
+  // link was clicked).
+  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
   // Overridden from views::ButtonListener:
   // Closes the bubble or opens the edit dialog.
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   // Overridden from views::ComboboxListener:
-  virtual void OnSelectedIndexChanged(views::Combobox* combobox) OVERRIDE;
+  // Changes the parent of the bookmark.
+  virtual void ItemChanged(views::Combobox* combo_box,
+                           int prev_index,
+                           int new_index) OVERRIDE;
 
   // Handle the message when the user presses a button.
   void HandleButtonPressed(views::Button* sender);
@@ -99,31 +95,29 @@ class BookmarkBubbleView : public views::BubbleDelegateView,
   // The bookmark bubble, if we're showing one.
   static BookmarkBubbleView* bookmark_bubble_;
 
-  // Our observer, to notify when the bubble shows or hides.
-  BookmarkBubbleViewObserver* observer_;
-
-  // Delegate, to handle clicks on the sign in link.
-  scoped_ptr<BookmarkBubbleDelegate> delegate_;
-
   // The profile.
   Profile* profile_;
 
   // The bookmark URL.
   const GURL url_;
 
+  // Title of the bookmark. This is initially the title supplied to the
+  // constructor, which is typically the title of the page.
+  std::wstring title_;
+
   // If true, the page was just bookmarked.
   const bool newly_bookmarked_;
 
   RecentlyUsedFoldersComboModel parent_model_;
 
-  // Button for removing the bookmark.
-  views::LabelButton* remove_button_;
+  // Link for removing/unstarring the bookmark.
+  views::Link* remove_link_;
 
   // Button to bring up the editor.
-  views::LabelButton* edit_button_;
+  views::TextButton* edit_button_;
 
   // Button to close the window.
-  views::LabelButton* close_button_;
+  views::TextButton* close_button_;
 
   // Textfield showing the title of the bookmark.
   views::Textfield* title_tf_;
@@ -131,9 +125,6 @@ class BookmarkBubbleView : public views::BubbleDelegateView,
   // Combobox showing a handful of folders the user can choose from, including
   // the current parent.
   views::Combobox* parent_combobox_;
-
-  // Bookmark sync promo view, if displayed.
-  views::View* sync_promo_view_;
 
   // When the destructor is invoked should the bookmark be removed?
   bool remove_bookmark_;

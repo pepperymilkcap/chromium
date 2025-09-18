@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_ARCHIVED_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_ARCHIVED_DATABASE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/browser/history/url_database.h"
@@ -12,9 +13,7 @@
 #include "sql/init_status.h"
 #include "sql/meta_table.h"
 
-namespace base {
 class FilePath;
-}
 
 namespace history {
 
@@ -32,11 +31,7 @@ class ArchivedDatabase : public URLDatabase,
 
   // Initializes the database connection. This must return true before any other
   // functions on this class are called.
-  bool Init(const base::FilePath& file_name);
-
-  // Try to trim the cache memory used by the database.  If |aggressively| is
-  // true try to trim all unused cache, otherwise trim by half.
-  void TrimMemory(bool aggressively);
+  bool Init(const FilePath& file_name);
 
   // Transactions on the database. We support nested transactions and only
   // commit when the outermost one is committed (sqlite doesn't support true
@@ -44,12 +39,7 @@ class ArchivedDatabase : public URLDatabase,
   void BeginTransaction();
   void CommitTransaction();
 
-  // Returns the current version that we will generate archived databases with.
-  static int GetCurrentVersion();
-
  private:
-  bool InitTables();
-
   // Implemented for the specialized databases.
   virtual sql::Connection& GetDB() OVERRIDE;
 

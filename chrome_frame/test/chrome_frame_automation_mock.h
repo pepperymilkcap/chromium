@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,14 @@
 
 #include <string>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/path_service.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/test/test_process_killer_win.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome_frame/chrome_frame_automation.h"
 #include "chrome_frame/chrome_frame_plugin.h"
 #include "chrome_frame/navigation_constraints.h"
-#include "chrome_frame/test/test_scrubber.h"
+#include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/test/test_with_web_server.h"
 #include "chrome_frame/utils.h"
 
@@ -24,7 +23,7 @@ class AutomationMockDelegate
     : public CWindowImpl<T>,
       public ChromeFramePlugin<T> {
  public:
-  AutomationMockDelegate(base::MessageLoop* caller_message_loop,
+  AutomationMockDelegate(MessageLoop* caller_message_loop,
       int launch_timeout, bool perform_version_check,
       const std::wstring& profile_name,
       const std::wstring& language,
@@ -35,15 +34,14 @@ class AutomationMockDelegate
             chrome_frame_test::GetTestDataFolder()) {
 
     // Endeavour to only kill off Chrome Frame derived Chrome processes.
-    base::KillAllNamedProcessesWithArgument(
-        base::UTF8ToWide(chrome_frame_test::kChromeImageName),
-        base::UTF8ToWide(switches::kChromeFrame));
+    KillAllNamedProcessesWithArgument(
+        UTF8ToWide(chrome_frame_test::kChromeImageName),
+        UTF8ToWide(switches::kChromeFrame));
 
     mock_server_.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
 
-    base::FilePath profile_path;
-    GetChromeFrameProfilePath(profile_name, &profile_path);
-    chrome_frame_test::OverrideDataDirectoryForThisTest(profile_path.value());
+    FilePath profile_path(
+        chrome_frame_test::GetProfilePath(profile_name));
 
     automation_client_ = new ChromeFrameAutomationClient;
     GURL empty;
@@ -76,19 +74,18 @@ class AutomationMockDelegate
 
   // Navigate the external to a 'file://' url for unit test files
   bool NavigateRelativeFile(const std::wstring& file) {
-    base::FilePath cf_source_path;
+    FilePath cf_source_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &cf_source_path);
     std::wstring file_url(L"file://");
     file_url.append(cf_source_path.Append(
         FILE_PATH_LITERAL("chrome_frame")).Append(
             FILE_PATH_LITERAL("test")).Append(
                 FILE_PATH_LITERAL("data")).Append(file).value());
-    return Navigate(base::WideToUTF8(file_url));
+    return Navigate(WideToUTF8(file_url));
   }
 
   bool NavigateRelative(const std::wstring& relative_url) {
-    return Navigate(base::WideToUTF8(
-        mock_server_.Resolve(relative_url.c_str())));
+    return Navigate(WideToUTF8(mock_server_.Resolve(relative_url.c_str())));
   }
 
   virtual void OnAutomationServerReady() {
@@ -103,6 +100,14 @@ class AutomationMockDelegate
 
   virtual void OnAutomationServerLaunchFailed() {
     QuitMessageLoop();
+  }
+
+  virtual void OnLoad(const GURL& url) {
+    if (url_ == url) {
+      navigation_result_ = true;
+    } else {
+      QuitMessageLoop();
+    }
   }
 
   virtual void OnLoadFailed(int error_code, const std::string& url) {
@@ -130,12 +135,12 @@ class AutomationMockDelegate
   void QuitMessageLoop() {
     // Quit on the caller message loop has to be called on the caller
     // thread.
-    caller_message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+    caller_message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
 
  private:
   testing::StrictMock<MockWebServer> mock_server_;
-  base::MessageLoop* caller_message_loop_;
+  MessageLoop* caller_message_loop_;
   GURL url_;
   bool is_connected_;
   bool navigation_result_;
@@ -145,7 +150,7 @@ class AutomationMockLaunch
     : public AutomationMockDelegate<AutomationMockLaunch> {
  public:
   typedef AutomationMockDelegate<AutomationMockLaunch> Base;
-  AutomationMockLaunch(base::MessageLoop* caller_message_loop,
+  AutomationMockLaunch(MessageLoop* caller_message_loop,
                        int launch_timeout)
       : Base(caller_message_loop, launch_timeout, true, L"", L"", false,
              false) {
@@ -157,6 +162,77 @@ class AutomationMockLaunch
   bool launch_result() const {
     return is_connected();
   }
+};
+
+class AutomationMockNavigate
+    : public AutomationMockDelegate<AutomationMockNavigate> {
+ public:
+  typedef AutomationMockDelegate<AutomationMockNavigate> Base;
+  AutomationMockNavigate(MessageLoop* caller_message_loop,
+                         int launch_timeout)
+      : Base(caller_message_loop, launch_timeout, true, L"", L"", false,
+             false) {
+  }
+  virtual void OnLoad(const GURL& url) {
+    Base::OnLoad(url);
+    QuitMessageLoop();
+  }
+};
+
+class AutomationMockPostMessage
+    : public AutomationMockDelegate<AutomationMockPostMessage> {
+ public:
+  typedef AutomationMockDelegate<AutomationMockPostMessage> Base;
+  AutomationMockPostMessage(MessageLoop* caller_message_loop,
+                            int launch_timeout)
+      : Base(caller_message_loop, launch_timeout, true, L"", L"", false,
+             false),
+        postmessage_result_(false) {}
+  bool postmessage_result() const {
+    return postmessage_result_;
+  }
+  virtual void OnLoad(const GURL& url) {
+    Base::OnLoad(url);
+    if (navigation_result()) {
+      automation()->ForwardMessageFromExternalHost("Test", "null", "*");
+    }
+  }
+  virtual void OnMessageFromChromeFrame(const std::string& message,
+                                        const std::string& origin,
+                                        const std::string& target) {
+    postmessage_result_ = true;
+    QuitMessageLoop();
+  }
+ private:
+  bool postmessage_result_;
+};
+
+class AutomationMockHostNetworkRequestStart
+    : public AutomationMockDelegate<AutomationMockHostNetworkRequestStart> {
+ public:
+  typedef AutomationMockDelegate<AutomationMockHostNetworkRequestStart> Base;
+  AutomationMockHostNetworkRequestStart(MessageLoop* caller_message_loop,
+      int launch_timeout)
+      : Base(caller_message_loop, launch_timeout, true, L"", L"", false,
+             false),
+        request_start_result_(false) {
+    if (automation()) {
+      automation()->set_use_chrome_network(false);
+    }
+  }
+  bool request_start_result() const {
+    return request_start_result_;
+  }
+  virtual void OnRequestStart(int request_id,
+                              const AutomationURLRequest& request) {
+    request_start_result_ = true;
+    QuitMessageLoop();
+  }
+  virtual void OnLoad(const GURL& url) {
+    Base::OnLoad(url);
+  }
+ private:
+  bool request_start_result_;
 };
 
 #endif  // CHROME_FRAME_TEST_CHROME_FRAME_AUTOMATION_MOCK_H_

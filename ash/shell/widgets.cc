@@ -1,15 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/shell.h"
-#include "base/strings/utf_string_conversions.h"
-#include "ui/aura/root_window.h"
+#include "ash/wm/toplevel_frame_view.h"
+#include "base/utf_string_conversions.h"  // ASCIIToUTF16
 #include "ui/aura/window.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/button/checkbox.h"
-#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/radio_button.h"
+#include "ui/views/controls/button/text_button.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -36,12 +35,12 @@ class WidgetsWindow : public views::WidgetDelegateView {
 
   // Overridden from views::WidgetDelegate:
   virtual views::View* GetContentsView() OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual bool CanResize() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 
  private:
-  views::LabelButton* button_;
-  views::LabelButton* disabled_button_;
+  views::NativeTextButton* button_;
+  views::NativeTextButton* disabled_button_;
   views::Checkbox* checkbox_;
   views::Checkbox* checkbox_disabled_;
   views::Checkbox* checkbox_checked_;
@@ -53,28 +52,24 @@ class WidgetsWindow : public views::WidgetDelegateView {
 };
 
 WidgetsWindow::WidgetsWindow()
-    : button_(new views::LabelButton(NULL, base::ASCIIToUTF16("Button"))),
+    : button_(new views::NativeTextButton(NULL, ASCIIToUTF16("Button"))),
       disabled_button_(
-          new views::LabelButton(NULL, base::ASCIIToUTF16("Disabled button"))),
-      checkbox_(new views::Checkbox(base::ASCIIToUTF16("Checkbox"))),
+          new views::NativeTextButton(NULL, ASCIIToUTF16("Disabled button"))),
+      checkbox_(new views::Checkbox(ASCIIToUTF16("Checkbox"))),
       checkbox_disabled_(new views::Checkbox(
-          base::ASCIIToUTF16("Checkbox disabled"))),
-      checkbox_checked_(new views::Checkbox(
-          base::ASCIIToUTF16("Checkbox checked"))),
+          ASCIIToUTF16("Checkbox disabled"))),
+      checkbox_checked_(new views::Checkbox(ASCIIToUTF16("Checkbox checked"))),
       checkbox_checked_disabled_(new views::Checkbox(
-          base::ASCIIToUTF16("Checkbox checked disabled"))),
-      radio_button_(new views::RadioButton(
-          base::ASCIIToUTF16("Radio button"), 0)),
+          ASCIIToUTF16("Checkbox checked disabled"))),
+      radio_button_(new views::RadioButton(ASCIIToUTF16("Radio button"), 0)),
       radio_button_disabled_(new views::RadioButton(
-          base::ASCIIToUTF16("Radio button disabled"), 0)),
+          ASCIIToUTF16("Radio button disabled"), 0)),
       radio_button_selected_(new views::RadioButton(
-          base::ASCIIToUTF16("Radio button selected"), 0)),
+          ASCIIToUTF16("Radio button selected"), 0)),
       radio_button_selected_disabled_(new views::RadioButton(
-          base::ASCIIToUTF16("Radio button selected disabled"), 1)) {
-  button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+          ASCIIToUTF16("Radio button selected disabled"), 1)) {
   AddChildView(button_);
   disabled_button_->SetEnabled(false);
-  disabled_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
   AddChildView(disabled_button_);
   AddChildView(checkbox_);
   checkbox_disabled_->SetEnabled(false);
@@ -98,15 +93,17 @@ WidgetsWindow::~WidgetsWindow() {
 }
 
 void WidgetsWindow::OnPaint(gfx::Canvas* canvas) {
-  canvas->FillRect(GetLocalBounds(), SK_ColorWHITE);
+  canvas->FillRect(SK_ColorWHITE, GetLocalBounds());
 }
 
 void WidgetsWindow::Layout() {
   const int kVerticalPad = 5;
   int left = 5;
   int top = kVerticalPad;
-  for (int i = 0; i < child_count(); ++i) {
-    views::View* view = child_at(i);
+  for (Views::const_iterator it = children_begin();
+       it != children_end();
+       ++it) {
+    views::View* view = *it;
     gfx::Size preferred = view->GetPreferredSize();
     view->SetBounds(left, top, preferred.width(), preferred.height());
     top += preferred.height() + kVerticalPad;
@@ -121,12 +118,12 @@ views::View* WidgetsWindow::GetContentsView() {
   return this;
 }
 
-base::string16 WidgetsWindow::GetWindowTitle() const {
-  return base::ASCIIToUTF16("Examples: Widgets");
+string16 WidgetsWindow::GetWindowTitle() const {
+  return ASCIIToUTF16("Examples: Widgets");
 }
 
-bool WidgetsWindow::CanResize() const {
-  return true;
+views::NonClientFrameView* WidgetsWindow::CreateNonClientFrameView() {
+  return new ash::internal::ToplevelFrameView;
 }
 
 }  // namespace
@@ -137,8 +134,7 @@ namespace shell {
 void CreateWidgetsWindow() {
   gfx::Rect bounds(kWindowLeft, kWindowTop, kWindowWidth, kWindowHeight);
   views::Widget* widget =
-      views::Widget::CreateWindowWithContextAndBounds(
-          new WidgetsWindow, Shell::GetPrimaryRootWindow(), bounds);
+      views::Widget::CreateWindowWithBounds(new WidgetsWindow, bounds);
   widget->GetNativeView()->SetName("WidgetsWindow");
   widget->Show();
 }

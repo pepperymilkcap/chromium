@@ -17,8 +17,6 @@
 #define IPC_MESSAGE_IMPL
 #include "ipc/ipc_sync_message_unittest.h"
 
-namespace {
-
 static IPC::Message* g_reply;
 
 class TestMessageReceiver {
@@ -303,5 +301,3 @@ TEST(IPCSyncMessageTest, Main) {
   DCHECK_EQ(33, int1);
   DCHECK(!bool1);
 }
-
-}  // namespace

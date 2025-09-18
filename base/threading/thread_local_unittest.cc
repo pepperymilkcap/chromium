@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,8 @@ class ThreadLocalTesterBase : public base::DelegateSimpleThreadPool::Delegate {
   typedef base::ThreadLocalPointer<ThreadLocalTesterBase> TLPType;
 
   ThreadLocalTesterBase(TLPType* tlp, base::WaitableEvent* done)
-      : tlp_(tlp),
-        done_(done) {
-  }
-  virtual ~ThreadLocalTesterBase() {}
+      : tlp_(tlp), done_(done) { }
+  ~ThreadLocalTesterBase() { }
 
  protected:
   TLPType* tlp_;
@@ -30,14 +28,12 @@ class ThreadLocalTesterBase : public base::DelegateSimpleThreadPool::Delegate {
 class SetThreadLocal : public ThreadLocalTesterBase {
  public:
   SetThreadLocal(TLPType* tlp, base::WaitableEvent* done)
-      : ThreadLocalTesterBase(tlp, done),
-        val_(NULL) {
-  }
-  virtual ~SetThreadLocal() {}
+      : ThreadLocalTesterBase(tlp, done), val_(NULL) { }
+  ~SetThreadLocal() { }
 
   void set_value(ThreadLocalTesterBase* val) { val_ = val; }
 
-  virtual void Run() OVERRIDE {
+  virtual void Run() {
     DCHECK(!done_->IsSignaled());
     tlp_->Set(val_);
     done_->Signal();
@@ -50,14 +46,12 @@ class SetThreadLocal : public ThreadLocalTesterBase {
 class GetThreadLocal : public ThreadLocalTesterBase {
  public:
   GetThreadLocal(TLPType* tlp, base::WaitableEvent* done)
-      : ThreadLocalTesterBase(tlp, done),
-        ptr_(NULL) {
-  }
-  virtual ~GetThreadLocal() {}
+      : ThreadLocalTesterBase(tlp, done), ptr_(NULL) { }
+  ~GetThreadLocal() { }
 
   void set_ptr(ThreadLocalTesterBase** ptr) { ptr_ = ptr; }
 
-  virtual void Run() OVERRIDE {
+  virtual void Run() {
     DCHECK(!done_->IsSignaled());
     *ptr_ = tlp_->Get();
     done_->Signal();

@@ -1,52 +1,44 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_BROWSER_NAVIGATOR_H_
 #define CHROME_BROWSER_UI_BROWSER_NAVIGATOR_H_
+#pragma once
 
 #include <string>
 
-#include "base/memory/ref_counted.h"
-#include "base/memory/ref_counted_memory.h"
-#include "chrome/browser/ui/host_desktop.h"
-#include "content/public/browser/browser_context.h"
 #include "content/public/browser/global_request_id.h"
-#include "content/public/browser/page_navigator.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
-#include "ui/base/window_open_disposition.h"
+#include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
-#include "url/gurl.h"
+#include "webkit/glue/window_open_disposition.h"
 
 class Browser;
 class Profile;
+class TabContentsWrapper;
 
-namespace content {
-class WebContents;
-}
-
-namespace chrome {
+namespace browser {
 
 // Parameters that tell Navigate() what to do.
 //
 // Some basic examples:
 //
 // Simple Navigate to URL in current tab:
-// chrome::NavigateParams params(browser, GURL("http://www.google.com/"),
-//                               content::PAGE_TRANSITION_LINK);
-// chrome::Navigate(&params);
+// browser::NavigateParams params(browser, GURL("http://www.google.com/"),
+//                                PageTransition::LINK);
+// browser::Navigate(&params);
 //
 // Open bookmark in new background tab:
-// chrome::NavigateParams params(browser, url,
-//                               content::PAGE_TRANSITION_AUTO_BOOKMARK);
+// browser::NavigateParams params(browser, url, PageTransition::AUTO_BOOKMARK);
 // params.disposition = NEW_BACKGROUND_TAB;
-// chrome::Navigate(&params);
+// browser::Navigate(&params);
 //
-// Opens a popup WebContents:
-// chrome::NavigateParams params(browser, popup_contents);
+// Opens a popup TabContents:
+// browser::NavigateParams params(browser, popup_contents);
 // params.source_contents = source_contents;
-// chrome::Navigate(&params);
+// browser::Navigate(&params);
 //
 // See browser_navigator_browsertest.cc for more examples.
 //
@@ -54,60 +46,35 @@ struct NavigateParams {
   NavigateParams(Browser* browser,
                  const GURL& a_url,
                  content::PageTransition a_transition);
-  NavigateParams(Browser* browser,
-                 content::WebContents* a_target_contents);
-  NavigateParams(Profile* profile,
-                 const GURL& a_url,
-                 content::PageTransition a_transition);
+  NavigateParams(Browser* browser, TabContentsWrapper* a_target_contents);
   ~NavigateParams();
 
   // The URL/referrer to be loaded. Ignored if |target_contents| is non-NULL.
   GURL url;
   content::Referrer referrer;
 
-  // The browser-global ID of the frame to navigate, or -1 for the main frame.
-  int64 frame_tree_node_id;
-
-  // Any redirect URLs that occurred for this navigation before |url|.
-  // Usually empty.
-  std::vector<GURL> redirect_chain;
-
-  // Indicates whether this navigation will be sent using POST.
-  // The POST method is limited support for basic POST data by leveraging
-  // NavigationController::LOAD_TYPE_BROWSER_INITIATED_HTTP_POST.
-  // It is not for things like file uploads.
-  bool uses_post;
-
-  // The post data when the navigation uses POST.
-  scoped_refptr<base::RefCountedMemory> browser_initiated_post_data;
-
-  // Extra headers to add to the request for this page.  Headers are
-  // represented as "<name>: <value>" and separated by \r\n.  The entire string
-  // is terminated by \r\n.  May be empty if no extra headers are needed.
-  std::string extra_headers;
-
-  // [in]  A WebContents to be navigated or inserted into the target
-  //       Browser's tabstrip. If NULL, |url| or the homepage will be used
-  //       instead. When non-NULL, Navigate() assumes it has already been
-  //       navigated to its intended destination and will not load any URL in it
-  //       (i.e. |url| is ignored).
+  // [in]  A TabContents to be navigated or inserted into the target Browser's
+  //       tabstrip. If NULL, |url| or the homepage will be used instead. When
+  //       non-NULL, Navigate() assumes it has already been navigated to its
+  //       intended destination and will not load any URL in it (i.e. |url| is
+  //       ignored).
   //       Default is NULL.
-  // [out] The WebContents in which the navigation occurred or that was
+  // [out] The TabContents in which the navigation occurred or that was
   //       inserted. Guaranteed non-NULL except for note below:
   // Note: If this field is set to NULL by the caller and Navigate() creates
-  //       a new WebContents, this field will remain NULL and the
-  //       WebContents deleted if the WebContents it created is
-  //       not added to a TabStripModel before Navigate() returns.
-  content::WebContents* target_contents;
+  //       a new TabContents, this field will remain NULL and the TabContents
+  //       deleted if the TabContents it created is not added to a TabStripModel
+  //       before Navigate() returns.
+  TabContentsWrapper* target_contents;
 
-  // [in]  The WebContents that initiated the Navigate() request if such
-  //       context is necessary. Default is NULL, i.e. no context.
-  // [out] If NULL, this value will be set to the selected WebContents in
-  //       the originating browser prior to the operation performed by
-  //       Navigate(). However, if the originating page is from a different
-  //       profile (e.g. an OFF_THE_RECORD page originating from a non-OTR
-  //       window), then |source_contents| is reset to NULL.
-  content::WebContents* source_contents;
+  // [in]  The TabContents that initiated the Navigate() request if such context
+  //       is necessary. Default is NULL, i.e. no context.
+  // [out] If NULL, this value will be set to the selected TabContents in the
+  //       originating browser prior to the operation performed by Navigate().
+  //       However, if the originating page is from a different profile (e.g. an
+  //       OFF_THE_RECORD page originating from a non-OTR window), then
+  //       |source_contents| is reset to NULL.
+  TabContentsWrapper* source_contents;
 
   // The disposition requested by the navigation source. Default is
   // CURRENT_TAB. What follows is a set of coercions that happen to this value
@@ -125,13 +92,11 @@ struct NavigateParams {
   // |tabstrip_add_types|.
   WindowOpenDisposition disposition;
 
-  // The transition type of the navigation. Default is
-  // content::PAGE_TRANSITION_LINK when target_contents is specified in the
-  // constructor.
+  // The transition type of the navigation. Default is PageTransition::LINK
+  // when target_contents is specified in the constructor.
   content::PageTransition transition;
 
-  // Whether this navigation was initiated by the renderer process. Default is
-  // false.
+  // Whether this navigation was initiated by the renderer process.
   bool is_renderer_initiated;
 
   // The index the caller would like the tab to be positioned at in the
@@ -147,6 +112,9 @@ struct NavigateParams {
 
   // If non-empty, the new tab is an app tab.
   std::string extension_app_id;
+
+  // If non-empty, the new tab contents encoding is overriden by this value.
+  std::string override_encoding;
 
   // If non-empty, specifies the desired initial position and size of the
   // window if |disposition| == NEW_POPUP.
@@ -198,8 +166,8 @@ struct NavigateParams {
 
   // [in]  Specifies a Browser object where the navigation could occur or the
   //       tab could be added. Navigate() is not obliged to use this Browser if
-  //       it is not compatible with the operation being performed. This can be
-  //       NULL, in which case |initiating_profile| must be provided.
+  //       it is not compatible with the operation being performed. If NULL,
+  //       |profile| should be specified to find or create a matching Browser.
   // [out] Specifies the Browser object where the navigation occurred or the
   //       tab was added. Guaranteed non-NULL unless the disposition did not
   //       require a navigation, in which case this is set to NULL
@@ -210,42 +178,36 @@ struct NavigateParams {
   //       objects are deleted when the user closes a visible browser window).
   Browser* browser;
 
-  // The profile that is initiating the navigation. If there is a non-NULL
-  // browser passed in via |browser|, it's profile will be used instead.
-  Profile* initiating_profile;
+  // If |browser| == NULL, specifies a Profile to use when finding or
+  // creating a Browser.
+  Profile* profile;
 
   // Refers to a navigation that was parked in the browser in order to be
   // transferred to another RVH. Only used in case of a redirection of a request
   // to a different site that created a new RVH.
   content::GlobalRequestID transferred_global_request_id;
 
-  // Refers to which desktop this navigation should occur on. May be passed
-  // explicitly or inferred from an existing Browser instance.
-  chrome::HostDesktopType host_desktop_type;
-
-  // Indicates whether this navigation  should replace the current
-  // navigation entry.
-  bool should_replace_current_entry;
-
-  // Indicates whether |source_contents| should be set as opener when creating
-  // |target_contents|.
-  bool should_set_opener;
-
  private:
   NavigateParams();
 };
 
-// Copies fields from |params| struct to |nav_params| struct.
-void FillNavigateParamsFromOpenURLParams(chrome::NavigateParams* nav_params,
-                                         const content::OpenURLParams& params);
-
 // Navigates according to the configuration specified in |params|.
 void Navigate(NavigateParams* params);
 
-// Returns true if the url is allowed to open in incognito window.
-bool IsURLAllowedInIncognito(const GURL& url,
-                             content::BrowserContext* browser_context);
+// If the given navigational URL is a Singleton, return the tab index for it.
+// Otherwise, returns -1.
+int GetIndexOfSingletonTab(NavigateParams* params);
 
-}  // namespace chrome
+// Returns true if the url is allowed to open in incognito window.
+bool IsURLAllowedInIncognito(const GURL& url);
+
+#if defined(OS_CHROMEOS) || defined(USE_AURA)
+// Returns NEW_FOREGROUND_TAB if popup_bounds exceeds a specified percentage
+// of the window size, otherwise returns NEW_POPUP.
+WindowOpenDisposition DispositionForPopupBounds(
+    const gfx::Rect& popup_bounds, int window_width, int window_height);
+#endif
+
+}  // namespace browser
 
 #endif  // CHROME_BROWSER_UI_BROWSER_NAVIGATOR_H_

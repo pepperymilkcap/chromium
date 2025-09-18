@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,21 +11,17 @@
 #include <objbase.h>
 
 #include "base/at_exit.h"
-#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/i18n/icu_util.h"
 #include "base/logging.h"
 #include "base/logging_win.h"
 #include "base/path_service.h"
-#include "base/process/launch.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string16.h"
+#include "base/string_number_conversions.h"
+#include "base/string_piece.h"
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_constants.h"
@@ -40,22 +36,24 @@
 #include "chrome_frame/chrome_protocol.h"
 #include "chrome_frame/dll_redirector.h"
 #include "chrome_frame/exception_barrier.h"
-#include "chrome_frame/pin_module.h"
 #include "chrome_frame/resource.h"
 #include "chrome_frame/utils.h"
-#include "components/variations/entropy_provider.h"
+#include "googleurl/src/url_util.h"
 #include "grit/chrome_frame_resources.h"
-#include "url/url_util.h"
-
-#if _ATL_VER >= 0x0C00
-// This was removed between the VS2010 version and the VS2013 version, and
-// the unsuffixed version was repurposed to mean 'S'.
-#define UpdateRegistryFromResourceS UpdateRegistryFromResource
-#endif
 
 using base::win::RegKey;
 
 namespace {
+// This function has the side effect of initializing an unprotected
+// vector pointer inside GoogleUrl. If this is called during DLL loading,
+// it has the effect of avoiding an initialization race on that pointer.
+// TODO(siggi): fix GoogleUrl.
+void InitGoogleUrl() {
+  static const char kDummyUrl[] = "http://www.google.com";
+
+  url_util::IsStandard(kDummyUrl,
+                       url_parse::MakeRange(0, arraysize(kDummyUrl)));
+}
 
 const wchar_t kInternetSettings[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
@@ -81,7 +79,7 @@ const wchar_t kChromeFrameHelperWindowName[] =
     L"ChromeFrameHelperWindowName";
 
 // {0562BFC3-2550-45b4-BD8E-A310583D3A6F}
-const GUID kChromeFrameProvider =
+static const GUID kChromeFrameProvider =
     { 0x562bfc3, 0x2550, 0x45b4,
         { 0xbd, 0x8e, 0xa3, 0x10, 0x58, 0x3d, 0x3a, 0x6f } };
 
@@ -93,24 +91,11 @@ const wchar_t kChromeFramePrefix[] = L"chromeframe/";
 // See comments in DllGetClassObject.
 LPFNGETCLASSOBJECT g_dll_get_class_object_redir_ptr = NULL;
 
-// This function has the side effect of initializing an unprotected
-// vector pointer inside GoogleUrl. If this is called during DLL loading,
-// it has the effect of avoiding an initialization race on that pointer.
-// TODO(siggi): fix GoogleUrl.
-void InitGoogleUrl() {
-  static const char kDummyUrl[] = "http://www.google.com";
-
-  url_util::IsStandard(kDummyUrl,
-                       url_parse::MakeRange(0, arraysize(kDummyUrl)));
-}
-
 class ChromeTabModule : public CAtlDllModuleT<ChromeTabModule> {
  public:
   typedef CAtlDllModuleT<ChromeTabModule> ParentClass;
 
-  ChromeTabModule() : do_system_registration_(true),
-                      crash_reporting_(NULL),
-                      icu_initialized_(false) {}
+  ChromeTabModule() : do_system_registration_(true) {}
 
   DECLARE_LIBID(LIBID_ChromeTabLib)
   DECLARE_REGISTRY_APPID_RESOURCEID(IDR_CHROMETAB,
@@ -132,7 +117,7 @@ class ChromeTabModule : public CAtlDllModuleT<ChromeTabModule> {
     }
 
     if (SUCCEEDED(hr)) {
-      base::FilePath app_path =
+      FilePath app_path =
           chrome_launcher::GetChromeExecutablePath().DirName();
       hr = registrar->AddReplacement(L"CHROME_APPPATH",
                                      app_path.value().c_str());
@@ -157,7 +142,7 @@ class ChromeTabModule : public CAtlDllModuleT<ChromeTabModule> {
       // Add the directory of chrome_launcher.exe.  This will be the same
       // as the directory for the current DLL.
       std::wstring module_dir;
-      base::FilePath module_path;
+      FilePath module_path;
       if (PathService::Get(base::FILE_MODULE, &module_path)) {
         module_dir = module_path.DirName().value();
       } else {
@@ -200,58 +185,14 @@ class ChromeTabModule : public CAtlDllModuleT<ChromeTabModule> {
     return hr;
   }
 
-  // The module is "locked" when an object takes a reference on it. The first
-  // time it is locked, take a reference on crash reporting to bind its lifetime
-  // to the module and initialize ICU.
-  virtual LONG Lock() throw() {
-    LONG result = ParentClass::Lock();
-    if (result == 1) {
-      DCHECK_EQ(crash_reporting_,
-                static_cast<chrome_frame::ScopedCrashReporting*>(NULL));
-      crash_reporting_ = new chrome_frame::ScopedCrashReporting();
-
-      // Initialize ICU if this is the first time the module has been locked.
-      if (!icu_initialized_) {
-        icu_initialized_ = true;
-        // Best-effort since something is better than nothing here.
-        ignore_result(base::i18n::InitializeICU());
-      }
-    }
-    return result;
-  }
-
-  // The module is "unlocked" when an object that had a reference on it is
-  // destroyed. The last time it is unlocked, release the reference on crash
-  // reporting.
-  virtual LONG Unlock() throw() {
-    LONG result = ParentClass::Unlock();
-    if (!result) {
-      DCHECK_NE(crash_reporting_,
-                static_cast<chrome_frame::ScopedCrashReporting*>(NULL));
-      delete crash_reporting_;
-      crash_reporting_ = NULL;
-    }
-    return result;
-  }
-
   // See comments in AddCommonRGSReplacements
   bool do_system_registration_;
-
- private:
-  // A scoper created when the module is initially locked and destroyed when it
-  // is finally unlocked. This is not a scoped_ptr since that could cause
-  // reporting to shut down at exit, which would lead to problems with the
-  // loader lock.
-  chrome_frame::ScopedCrashReporting* crash_reporting_;
-
-  // Initially false, this is flipped to true to indicate that ICU has been
-  // initialized for the module.
-  bool icu_initialized_;
 };
 
 ChromeTabModule _AtlModule;
 
 base::AtExitManager* g_exit_manager = NULL;
+
 
 HRESULT RefreshElevationPolicy() {
   const wchar_t kIEFrameDll[] = L"ieframe.dll";
@@ -313,13 +254,13 @@ HRESULT RefreshElevationPolicy() {
 HRESULT SetupRunOnce() {
   HRESULT result = E_FAIL;
 
-  base::string16 channel_name;
+  string16 channel_name;
   if (base::win::GetVersion() < base::win::VERSION_VISTA &&
       GoogleUpdateSettings::GetChromeChannelAndModifiers(true, &channel_name)) {
     std::transform(channel_name.begin(), channel_name.end(),
                    channel_name.begin(), tolower);
     // Use this only for the dev channel.
-    if (channel_name.find(L"dev") != base::string16::npos) {
+    if (channel_name.find(L"dev") != string16::npos) {
       HKEY hive = HKEY_CURRENT_USER;
       if (IsSystemProcess()) {
         // For system installs, our updates will be running as SYSTEM which
@@ -360,17 +301,17 @@ HRESULT SetupUserLevelHelper() {
   base::win::RemoveCommandFromAutoRun(HKEY_CURRENT_USER, kRunKeyName);
 
   // Build the chrome_frame_helper command line.
-  base::FilePath module_path;
-  base::FilePath helper_path;
+  FilePath module_path;
+  FilePath helper_path;
   if (PathService::Get(base::FILE_MODULE, &module_path)) {
     module_path = module_path.DirName();
     helper_path = module_path.Append(kChromeFrameHelperExe);
-    if (!base::PathExists(helper_path)) {
+    if (!file_util::PathExists(helper_path)) {
       // If we can't find the helper in the current directory, try looking
       // one up (this is the layout in the build output folder).
       module_path = module_path.DirName();
       helper_path = module_path.Append(kChromeFrameHelperExe);
-      DCHECK(base::PathExists(helper_path)) <<
+      DCHECK(file_util::PathExists(helper_path)) <<
           "Could not find chrome_frame_helper.exe.";
     }
 
@@ -378,7 +319,7 @@ HRESULT SetupUserLevelHelper() {
     HWND old_window = FindWindow(kChromeFrameHelperWindowClassName,
                                  kChromeFrameHelperWindowName);
 
-    if (base::PathExists(helper_path)) {
+    if (file_util::PathExists(helper_path)) {
       std::wstring helper_path_cmd(L"\"");
       helper_path_cmd += helper_path.value();
       helper_path_cmd += L"\" ";
@@ -582,67 +523,35 @@ struct TokenWithPrivileges {
   CSid user_;
 };
 
-const wchar_t* const kMimeHandlerKeyValues[] = {
-  L"ChromeTab.ChromeActiveDocument",
-  L"ChromeTab.ChromeActiveDocument.1",
-};
-
-// Returns true if the values are present or absent in |root_key|'s Secure Mime
-// Handlers key based on |for_installed|. Returns false if the values are not as
-// expected or if an error occurred.
-bool MimeHandlerKeyIsConfigured(bool for_install, HKEY root_key) {
-  base::string16 key_name(kInternetSettings);
-  key_name.append(L"\\Secure Mime Handlers");
-  RegKey key(root_key, key_name.c_str(), KEY_QUERY_VALUE);
-  if (!key.Valid())
-    return false;
-
-  for (size_t i = 0; i < arraysize(kMimeHandlerKeyValues); ++i) {
-    DWORD value = 0;
-    LONG result = key.ReadValueDW(kMimeHandlerKeyValues[i], &value);
-    if (for_install) {
-      if (result != ERROR_SUCCESS || value != 1)
-        return false;
-    } else {
-      if (result != ERROR_FILE_NOT_FOUND)
-        return false;
-    }
-  }
-  return true;
-}
-
 HRESULT SetOrDeleteMimeHandlerKey(bool set, HKEY root_key) {
-  base::string16 key_name(kInternetSettings);
+  std::wstring key_name = kInternetSettings;
   key_name.append(L"\\Secure Mime Handlers");
-  RegKey key(root_key, key_name.c_str(), KEY_SET_VALUE);
+  RegKey key(root_key, key_name.c_str(), KEY_READ | KEY_WRITE);
   if (!key.Valid())
     return false;
 
-  HRESULT result = S_OK;
-  for (size_t i = 0; i < arraysize(kMimeHandlerKeyValues); ++i) {
-    LONG intermediate = set ?
-        key.WriteValue(kMimeHandlerKeyValues[i], 1) :
-        key.DeleteValue(kMimeHandlerKeyValues[i]);
-    if (intermediate != ERROR_SUCCESS && result == S_OK)
-      result = HRESULT_FROM_WIN32(intermediate);
+  LONG result1 = ERROR_SUCCESS;
+  LONG result2 = ERROR_SUCCESS;
+  if (set) {
+    result1 = key.WriteValue(L"ChromeTab.ChromeActiveDocument", 1);
+    result2 = key.WriteValue(L"ChromeTab.ChromeActiveDocument.1", 1);
+  } else {
+    result1 = key.DeleteValue(L"ChromeTab.ChromeActiveDocument");
+    result2 = key.DeleteValue(L"ChromeTab.ChromeActiveDocument.1");
   }
-  return result;
-}
 
-void OnPinModule() {
-  // Pin crash reporting by leaking a reference.
-  ignore_result(new chrome_frame::ScopedCrashReporting());
+  return result1 != ERROR_SUCCESS ? HRESULT_FROM_WIN32(result1) :
+                                    HRESULT_FROM_WIN32(result2);
 }
 
 // Chrome Frame registration functions.
 //-----------------------------------------------------------------------------
 HRESULT RegisterSecuredMimeHandler(bool enable, bool is_system) {
-  if (MimeHandlerKeyIsConfigured(enable, HKEY_LOCAL_MACHINE))
-    return S_OK;
-  if (!is_system)
+  if (!is_system) {
     return SetOrDeleteMimeHandlerKey(enable, HKEY_CURRENT_USER);
-  if (base::win::GetVersion() < base::win::VERSION_VISTA)
+  } else if (base::win::GetVersion() < base::win::VERSION_VISTA) {
     return SetOrDeleteMimeHandlerKey(enable, HKEY_LOCAL_MACHINE);
+  }
 
   std::wstring mime_key = kInternetSettings;
   mime_key.append(L"\\Secure Mime Handlers");
@@ -907,7 +816,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
                                LPVOID reserved) {
   UNREFERENCED_PARAMETER(instance);
   if (reason == DLL_PROCESS_ATTACH) {
-#if _ATL_VER < 0x0C00 && !defined(NDEBUG)
+#ifndef NDEBUG
     // Silence traces from the ATL registrar to reduce the log noise.
     ATL::CTrace::s_trace.ChangeCategory(atlTraceRegistrar, 0,
                                         ATLTRACESTATUS_DISABLED);
@@ -916,15 +825,13 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
 
     g_exit_manager = new base::AtExitManager();
     CommandLine::Init(0, NULL);
-    logging::LoggingSettings settings;
-    settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
-    logging::InitLogging(settings);
-
-    // Log the same items as Chrome.
-    logging::SetLogItems(true,  // enable_process_id
-                         true,  // enable_thread_id
-                         false, // enable_timestamp
-                         true); // enable_tickcount
+    InitializeCrashReporting();
+    logging::InitLogging(
+        NULL,
+        logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
+        logging::LOCK_LOG_FILE,
+        logging::DELETE_OLD_LOG_FILE,
+        logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
     DllRedirector* dll_redirector = DllRedirector::GetInstance();
     DCHECK(dll_redirector);
@@ -938,21 +845,17 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
           << "Found CF module with no DllGetClassObject export.";
     }
 
-    // Enable trace control and transport through event tracing for Windows.
+    // Enable ETW logging.
     logging::LogEventProvider::Initialize(kChromeFrameProvider);
-
-    // Set a callback so that crash reporting can be pinned when the module is
-    // pinned.
-    chrome_frame::SetPinModuleCallback(&OnPinModule);
   } else if (reason == DLL_PROCESS_DETACH) {
     DllRedirector* dll_redirector = DllRedirector::GetInstance();
     DCHECK(dll_redirector);
+
     dll_redirector->UnregisterAsFirstCFModule();
-
     g_patch_helper.UnpatchIfNeeded();
-
     delete g_exit_manager;
     g_exit_manager = NULL;
+    ShutdownCrashReporting();
   }
   return _AtlModule.DllMain(reason, reserved);
 }
@@ -964,13 +867,6 @@ STDAPI DllCanUnloadNow() {
 
 // Returns a class factory to create an object of the requested type
 STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
-  chrome_frame::ScopedCrashReporting crash_reporting;
-
-  // IE 11+ are unsupported.
-  if (GetIEVersion() > IE_10) {
-    return CLASS_E_CLASSNOTAVAILABLE;
-  }
-
   // If we found another module present when we were loaded, then delegate to
   // that:
   if (g_dll_get_class_object_redir_ptr) {
@@ -988,7 +884,6 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
 
 // DllRegisterServer - Adds entries to the system registry
 STDAPI DllRegisterServer() {
-  chrome_frame::ScopedCrashReporting crash_reporting;
   uint16 flags =  ACTIVEX | ACTIVEDOC | TYPELIB | GCF_PROTOCOL |
                   BHO_CLSID | BHO_REGISTRATION;
 
@@ -1002,14 +897,12 @@ STDAPI DllRegisterServer() {
 
 // DllUnregisterServer - Removes entries from the system registry
 STDAPI DllUnregisterServer() {
-  chrome_frame::ScopedCrashReporting crash_reporting;
   HRESULT hr = CustomRegistration(ALL, false, true);
   return hr;
 }
 
 // DllRegisterUserServer - Adds entries to the HKCU hive in the registry.
 STDAPI DllRegisterUserServer() {
-  chrome_frame::ScopedCrashReporting crash_reporting;
   UINT flags =  ACTIVEX | ACTIVEDOC | TYPELIB | GCF_PROTOCOL |
                 BHO_CLSID | BHO_REGISTRATION;
 
@@ -1023,7 +916,6 @@ STDAPI DllRegisterUserServer() {
 
 // DllUnregisterUserServer - Removes entries from the HKCU hive in the registry.
 STDAPI DllUnregisterUserServer() {
-  chrome_frame::ScopedCrashReporting crash_reporting;
   HRESULT hr = CustomRegistration(ALL, FALSE, false);
   return hr;
 }

@@ -4,10 +4,11 @@
 
 #include "chrome/browser/automation/automation_browser_tracker.h"
 
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 
-AutomationBrowserTracker::AutomationBrowserTracker(IPC::Sender* automation)
+AutomationBrowserTracker::AutomationBrowserTracker(
+    IPC::Message::Sender* automation)
     : AutomationResourceTracker<Browser*>(automation) {
 }
 

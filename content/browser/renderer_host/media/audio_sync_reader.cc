@@ -6,103 +6,95 @@
 
 #include <algorithm>
 
-#include "base/command_line.h"
-#include "base/memory/shared_memory.h"
-#include "base/metrics/histogram.h"
-#include "content/public/common/content_switches.h"
+#include "base/process_util.h"
+#include "base/shared_memory.h"
+#include "base/threading/platform_thread.h"
 #include "media/audio/audio_buffers_state.h"
-#include "media/audio/audio_parameters.h"
+#include "media/audio/audio_util.h"
 
-using media::AudioBus;
+const int kMinIntervalBetweenReadCallsInMs = 10;
 
-namespace content {
-
-AudioSyncReader::AudioSyncReader(base::SharedMemory* shared_memory,
-                                 const media::AudioParameters& params,
-                                 int input_channels)
-    : shared_memory_(shared_memory),
-      input_channels_(input_channels),
-      mute_audio_(CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kMuteAudio)),
-      packet_size_(shared_memory_->requested_size()),
-      renderer_callback_count_(0),
-      renderer_missed_callback_count_(0),
-#if defined(OS_MACOSX)
-      maximum_wait_time_(params.GetBufferDuration() / 2),
-#else
-      // TODO(dalecurtis): Investigate if we can reduce this on all platforms.
-      maximum_wait_time_(base::TimeDelta::FromMilliseconds(20)),
-#endif
-      buffer_index_(0) {
-  int input_memory_size = 0;
-  int output_memory_size = AudioBus::CalculateMemorySize(params);
-  if (input_channels_ > 0) {
-    // The input storage is after the output storage.
-    int frames = params.frames_per_buffer();
-    input_memory_size = AudioBus::CalculateMemorySize(input_channels_, frames);
-    char* input_data =
-        static_cast<char*>(shared_memory_->memory()) + output_memory_size;
-    input_bus_ = AudioBus::WrapMemory(input_channels_, frames, input_data);
-    input_bus_->Zero();
-  }
-  DCHECK_EQ(packet_size_, output_memory_size + input_memory_size);
-  output_bus_ = AudioBus::WrapMemory(params, shared_memory->memory());
-  output_bus_->Zero();
+AudioSyncReader::AudioSyncReader(base::SharedMemory* shared_memory)
+    : shared_memory_(shared_memory) {
 }
 
 AudioSyncReader::~AudioSyncReader() {
-  if (!renderer_callback_count_)
-    return;
+}
 
-  // Recording the percentage of deadline misses gives us a rough overview of
-  // how many users might be running into audio glitches.
-  int percentage_missed =
-      100.0 * renderer_missed_callback_count_ / renderer_callback_count_;
-  UMA_HISTOGRAM_PERCENTAGE(
-      "Media.AudioRendererMissedDeadline", percentage_missed);
+bool AudioSyncReader::DataReady() {
+  return !media::IsUnknownDataSize(
+      shared_memory_,
+      media::PacketSizeSizeInBytes(shared_memory_->created_size()));
 }
 
 // media::AudioOutputController::SyncReader implementations.
 void AudioSyncReader::UpdatePendingBytes(uint32 bytes) {
-  // Zero out the entire output buffer to avoid stuttering/repeating-buffers
-  // in the anomalous case if the renderer is unable to keep up with real-time.
-  output_bus_->Zero();
-  socket_->Send(&bytes, sizeof(bytes));
-  ++buffer_index_;
+  if (bytes != static_cast<uint32>(media::AudioOutputController::kPauseMark)) {
+    // Store unknown length of data into buffer, so we later
+    // can find out if data became available.
+    media::SetUnknownDataSize(
+        shared_memory_,
+        media::PacketSizeSizeInBytes(shared_memory_->created_size()));
+  }
+  base::AutoLock auto_lock(lock_);
+  if (socket_.get()) {
+    socket_->Send(&bytes, sizeof(bytes));
+  }
 }
 
-void AudioSyncReader::Read(const AudioBus* source, AudioBus* dest) {
-  ++renderer_callback_count_;
-  if (!WaitUntilDataIsReady()) {
-    ++renderer_missed_callback_count_;
-    dest->Zero();
-    return;
-  }
+uint32 AudioSyncReader::Read(void* data, uint32 size) {
+  uint32 max_size = media::PacketSizeSizeInBytes(
+      shared_memory_->created_size());
 
-  // Copy optional synchronized live audio input for consumption by renderer
-  // process.
-  if (input_bus_) {
-    if (source)
-      source->CopyTo(input_bus_.get());
-    else
-      input_bus_->Zero();
+#if defined(OS_WIN)
+  // HACK: yield if reader is called too often.
+  // Problem is lack of synchronization between host and renderer. We cannot be
+  // sure if renderer already filled the buffer, and due to all the plugins we
+  // cannot change the API, so we yield if previous call was too recent.
+  // Optimization: if renderer is "new" one that writes length of data we can
+  // stop yielding the moment length is written -- not ideal solution,
+  // but better than nothing.
+  while (!DataReady() &&
+         ((base::Time::Now() - previous_call_time_).InMilliseconds() <
+          kMinIntervalBetweenReadCallsInMs)) {
+    base::PlatformThread::YieldCurrentThread();
   }
+  previous_call_time_ = base::Time::Now();
+#endif
 
-  if (mute_audio_)
-    dest->Zero();
-  else
-    output_bus_->CopyTo(dest);
+  uint32 read_size = std::min(media::GetActualDataSizeInBytes(shared_memory_,
+                                                              max_size),
+                              size);
+
+  // Get the data from the buffer.
+  memcpy(data, shared_memory_->memory(), read_size);
+
+  // If amount read was less than requested, then zero out the remainder.
+  if (read_size < size)
+    memset(static_cast<char*>(data) + read_size, 0, size - read_size);
+
+  // Zero out the entire buffer.
+  memset(shared_memory_->memory(), 0, max_size);
+
+  // Store unknown length of data into buffer, in case renderer does not store
+  // the length itself. It also helps in decision if we need to yield.
+  media::SetUnknownDataSize(shared_memory_, max_size);
+
+  return read_size;
 }
 
 void AudioSyncReader::Close() {
-  socket_->Close();
+  base::AutoLock auto_lock(lock_);
+  if (socket_.get()) {
+    socket_->Close();
+    socket_.reset(NULL);
+  }
 }
 
 bool AudioSyncReader::Init() {
-  socket_.reset(new base::CancelableSyncSocket());
-  foreign_socket_.reset(new base::CancelableSyncSocket());
-  return base::CancelableSyncSocket::CreatePair(socket_.get(),
-                                                foreign_socket_.get());
+  socket_.reset(new base::SyncSocket());
+  foreign_socket_.reset(new base::SyncSocket());
+  return base::SyncSocket::CreatePair(socket_.get(), foreign_socket_.get());
 }
 
 #if defined(OS_WIN)
@@ -112,7 +104,9 @@ bool AudioSyncReader::PrepareForeignSocketHandle(
   ::DuplicateHandle(GetCurrentProcess(), foreign_socket_->handle(),
                     process_handle, foreign_handle,
                     0, FALSE, DUPLICATE_SAME_ACCESS);
-  return (*foreign_handle != 0);
+  if (*foreign_handle != 0)
+    return true;
+  return false;
 }
 #else
 bool AudioSyncReader::PrepareForeignSocketHandle(
@@ -120,59 +114,8 @@ bool AudioSyncReader::PrepareForeignSocketHandle(
     base::FileDescriptor* foreign_handle) {
   foreign_handle->fd = foreign_socket_->handle();
   foreign_handle->auto_close = false;
-  return (foreign_handle->fd != -1);
+  if (foreign_handle->fd != -1)
+    return true;
+  return false;
 }
 #endif
-
-bool AudioSyncReader::WaitUntilDataIsReady() {
-  base::TimeDelta timeout = maximum_wait_time_;
-  const base::TimeTicks start_time = base::TimeTicks::Now();
-  const base::TimeTicks finish_time = start_time + timeout;
-
-  // Check if data is ready and if not, wait a reasonable amount of time for it.
-  //
-  // Data readiness is achieved via parallel counters, one on the renderer side
-  // and one here.  Every time a buffer is requested via UpdatePendingBytes(),
-  // |buffer_index_| is incremented.  Subsequently every time the renderer has a
-  // buffer ready it increments its counter and sends the counter value over the
-  // SyncSocket.  Data is ready when |buffer_index_| matches the counter value
-  // received from the renderer.
-  //
-  // The counter values may temporarily become out of sync if the renderer is
-  // unable to deliver audio fast enough.  It's assumed that the renderer will
-  // catch up at some point, which means discarding counter values read from the
-  // SyncSocket which don't match our current buffer index.
-  size_t bytes_received = 0;
-  uint32 renderer_buffer_index = 0;
-  while (timeout.InMicroseconds() > 0) {
-    bytes_received = socket_->ReceiveWithTimeout(
-        &renderer_buffer_index, sizeof(renderer_buffer_index), timeout);
-    if (!bytes_received)
-      break;
-
-    DCHECK_EQ(bytes_received, sizeof(renderer_buffer_index));
-    if (renderer_buffer_index == buffer_index_)
-      break;
-
-    // Reduce the timeout value as receives succeed, but aren't the right index.
-    timeout = finish_time - base::TimeTicks::Now();
-  }
-
-  // Receive timed out or another error occurred.  Receive can timeout if the
-  // renderer is unable to deliver audio data within the allotted time.
-  if (!bytes_received || renderer_buffer_index != buffer_index_) {
-    DVLOG(2) << "AudioSyncReader::WaitUntilDataIsReady() timed out.";
-
-    base::TimeDelta time_since_start = base::TimeTicks::Now() - start_time;
-    UMA_HISTOGRAM_CUSTOM_TIMES("Media.AudioOutputControllerDataNotReady",
-                               time_since_start,
-                               base::TimeDelta::FromMilliseconds(1),
-                               base::TimeDelta::FromMilliseconds(1000),
-                               50);
-    return false;
-  }
-
-  return true;
-}
-
-}  // namespace content

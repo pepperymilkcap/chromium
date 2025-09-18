@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,9 +35,8 @@ var SocketsView = (function() {
     flushSocketsButton.onclick = this.flushSocketPools.bind(this);
   }
 
-  SocketsView.TAB_ID = 'tab-handle-sockets';
-  SocketsView.TAB_NAME = 'Sockets';
-  SocketsView.TAB_HASH = '#sockets';
+  // ID for special HTML element in category_tabs.html
+  SocketsView.TAB_HANDLE_ID = 'tab-handle-sockets';
 
   // IDs for special HTML elements in sockets_view.html
   SocketsView.MAIN_BOX_ID = 'sockets-view-tab-content';
@@ -65,7 +64,7 @@ var SocketsView = (function() {
 
       var socketPools = SocketPoolWrapper.createArrayFrom(socketPoolInfo);
       var tablePrinter = SocketPoolWrapper.createTablePrinter(socketPools);
-      tablePrinter.toHTML(this.socketPoolDiv_, 'styled-table');
+      tablePrinter.toHTML(this.socketPoolDiv_, 'styledTable');
 
       // Add table for each socket pool with information on each of its groups.
       for (var i = 0; i < socketPools.length; ++i) {
@@ -73,7 +72,7 @@ var SocketsView = (function() {
           var p = addNode(this.socketPoolGroupsDiv_, 'p');
           var br = addNode(p, 'br');
           var groupTablePrinter = socketPools[i].createGroupTablePrinter();
-          groupTablePrinter.toHTML(p, 'styled-table');
+          groupTablePrinter.toHTML(p, 'styledTable');
         }
       }
       return true;

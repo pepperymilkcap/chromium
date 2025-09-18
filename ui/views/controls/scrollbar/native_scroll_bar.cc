@@ -7,8 +7,7 @@
 #include <algorithm>
 #include <string>
 
-#include "base/message_loop/message_loop.h"
-#include "ui/events/event.h"
+#include "base/message_loop.h"
 #include "ui/views/controls/scrollbar/native_scroll_bar_wrapper.h"
 #include "ui/views/widget/widget.h"
 
@@ -19,7 +18,7 @@
 namespace views {
 
 // static
-const char NativeScrollBar::kViewClassName[] = "NativeScrollBar";
+const char NativeScrollBar::kViewClassName[] = "views/NativeScrollBar";
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeScrollBar, public:
@@ -32,15 +31,13 @@ NativeScrollBar::~NativeScrollBar() {
 }
 
 // static
-int NativeScrollBar::GetHorizontalScrollBarHeight(
-    const ui::NativeTheme* theme) {
-  return NativeScrollBarWrapper::GetHorizontalScrollBarHeight(theme);
+int NativeScrollBar::GetHorizontalScrollBarHeight() {
+  return NativeScrollBarWrapper::GetHorizontalScrollBarHeight();
 }
 
 // static
-int NativeScrollBar::GetVerticalScrollBarWidth(
-    const ui::NativeTheme* theme) {
-  return NativeScrollBarWrapper::GetVerticalScrollBarWidth(theme);
+int NativeScrollBar::GetVerticalScrollBarWidth() {
+  return NativeScrollBarWrapper::GetVerticalScrollBarWidth();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -58,33 +55,27 @@ void NativeScrollBar::Layout() {
   }
 }
 
-void NativeScrollBar::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
+void NativeScrollBar::ViewHierarchyChanged(bool is_add, View *parent,
+                                           View *child) {
   Widget* widget;
-  if (details.is_add && !native_wrapper_ && (widget = GetWidget())) {
+  if (is_add && !native_wrapper_ && (widget = GetWidget())) {
     native_wrapper_ = NativeScrollBarWrapper::CreateWrapper(this);
     AddChildView(native_wrapper_->GetView());
   }
 }
 
-const char* NativeScrollBar::GetClassName() const {
+std::string NativeScrollBar::GetClassName() const {
   return kViewClassName;
 }
 
 // Overridden from View for keyboard UI.
-bool NativeScrollBar::OnKeyPressed(const ui::KeyEvent& event) {
+bool NativeScrollBar::OnKeyPressed(const KeyEvent& event) {
   if (!native_wrapper_)
     return false;
   return native_wrapper_->GetView()->OnKeyPressed(event);
 }
 
-void NativeScrollBar::OnGestureEvent(ui::GestureEvent* event) {
-  if (!native_wrapper_)
-    return;
-  native_wrapper_->GetView()->OnGestureEvent(event);
-}
-
-bool NativeScrollBar::OnMouseWheel(const ui::MouseWheelEvent& event) {
+bool NativeScrollBar::OnMouseWheel(const MouseWheelEvent& event) {
   if (!native_wrapper_)
     return false;
   return native_wrapper_->GetView()->OnMouseWheel(event);
@@ -103,8 +94,7 @@ void NativeScrollBar::Update(int viewport_size,
 
 int NativeScrollBar::GetLayoutSize() const {
   return IsHorizontal() ?
-      GetHorizontalScrollBarHeight(GetNativeTheme()) :
-      GetVerticalScrollBarWidth(GetNativeTheme());
+      GetHorizontalScrollBarHeight() : GetVerticalScrollBarWidth();
 }
 
 int NativeScrollBar::GetPosition() const {

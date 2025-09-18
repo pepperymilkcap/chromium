@@ -1,15 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_APP_MODAL_DIALOGS_APP_MODAL_DIALOG_QUEUE_H_
 #define CHROME_BROWSER_UI_APP_MODAL_DIALOGS_APP_MODAL_DIALOG_QUEUE_H_
+#pragma once
 
 #include <deque>
 
-#include "base/basictypes.h"
-
-class AppModalDialog;
+#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 
 template <typename T> struct DefaultSingletonTraits;
 
@@ -18,8 +17,6 @@ template <typename T> struct DefaultSingletonTraits;
 // This class is a singleton.
 class AppModalDialogQueue {
  public:
-  typedef std::deque<AppModalDialog*>::iterator iterator;
-
   // Returns the singleton instance.
   static AppModalDialogQueue* GetInstance();
 
@@ -27,7 +24,10 @@ class AppModalDialogQueue {
   // queue, the dialog will be shown immediately. Once it is shown, the
   // most recently active browser window (or whichever is currently active)
   // will be app modal, meaning it will be activated if the user tries to
-  // activate any other browser windows.
+  // activate any other browser windows. So the dialog being shown should
+  // assure it is the child of BrowserList::GetLastActive() so that it is
+  // activated as well. See browser_list.h for more notes about our somewhat
+  // sloppy app modality.
   // Note: The AppModalDialog |dialog| must be window modal before it
   // can be added as app modal.
   void AddDialog(AppModalDialog* dialog);
@@ -47,14 +47,25 @@ class AppModalDialogQueue {
   void ActivateModalDialog();
 
   // Returns true if there is currently an active app modal dialog box.
-  bool HasActiveDialog() const;
+  bool HasActiveDialog() {
+    return active_dialog_ != NULL;
+  }
 
-  AppModalDialog* active_dialog() { return active_dialog_; }
+  // Accessor for |active_dialog_|.
+  AppModalDialog* active_dialog() {
+    return active_dialog_;
+  }
 
   // Iterators to walk the queue. The queue does not include the currently
   // active app modal dialog box.
-  iterator begin() { return app_modal_dialog_queue_.begin(); }
-  iterator end() { return app_modal_dialog_queue_.end(); }
+  typedef std::deque<AppModalDialog*>::iterator iterator;
+  iterator begin() {
+    return app_modal_dialog_queue_.begin();
+  }
+
+  iterator end() {
+    return app_modal_dialog_queue_.end();
+  }
 
  private:
   friend struct DefaultSingletonTraits<AppModalDialogQueue>;

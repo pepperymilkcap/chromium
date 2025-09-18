@@ -6,8 +6,6 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace cloud_print {
-
 TEST(CloudPrintTokenStoreTest, Basic) {
   EXPECT_EQ(NULL, CloudPrintTokenStore::current());
   CloudPrintTokenStore* store = new CloudPrintTokenStore;
@@ -18,4 +16,3 @@ TEST(CloudPrintTokenStoreTest, Basic) {
   EXPECT_EQ(NULL, CloudPrintTokenStore::current());
 }
 
-}  // namespace cloud_print

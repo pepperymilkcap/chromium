@@ -1,13 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/content_settings/cookie_details.h"
 #include "chrome/browser/ui/cocoa/content_settings/cookie_details_view_controller.h"
-#include "net/cookies/canonical_cookie.h"
-#include "net/cookies/parsed_cookie.h"
 
 namespace {
 
@@ -18,10 +16,12 @@ static CocoaCookieDetails* CreateTestCookieDetails(BOOL canEditExpiration) {
   GURL url("http://chromium.org");
   std::string cookieLine(
       "PHPSESSID=0123456789abcdef0123456789abcdef; path=/");
-  net::ParsedCookie pc(cookieLine);
-  net::CanonicalCookie cookie(url, pc);
+  net::CookieMonster::ParsedCookie pc(cookieLine);
+  net::CookieMonster::CanonicalCookie cookie(url, pc);
+  NSString* origin = base::SysUTF8ToNSString("http://chromium.org");
   CocoaCookieDetails* details = [CocoaCookieDetails alloc];
   [details initWithCookie:&cookie
+                   origin:origin
         canEditExpiration:canEditExpiration];
   return [details autorelease];
 }
@@ -35,8 +35,8 @@ static CookiePromptContentDetailsAdapter* CreateCookieTestContent(
 
 static CocoaCookieDetails* CreateTestDatabaseDetails() {
   std::string domain("chromium.org");
-  base::string16 name(base::SysNSStringToUTF16(@"wicked_name"));
-  base::string16 desc(base::SysNSStringToUTF16(@"wicked_desc"));
+  string16 name(base::SysNSStringToUTF16(@"wicked_name"));
+  string16 desc(base::SysNSStringToUTF16(@"wicked_desc"));
   CocoaCookieDetails* details = [CocoaCookieDetails alloc];
   [details initWithDatabase:domain
                databaseName:name
@@ -52,14 +52,14 @@ static CookiePromptContentDetailsAdapter* CreateDatabaseTestContent() {
 }
 
 TEST_F(CookieDetailsViewControllerTest, Create) {
-  base::scoped_nsobject<CookieDetailsViewController> detailsViewController(
+  scoped_nsobject<CookieDetailsViewController> detailsViewController(
       [[CookieDetailsViewController alloc] init]);
 }
 
 TEST_F(CookieDetailsViewControllerTest, ShrinkToFit) {
-  base::scoped_nsobject<CookieDetailsViewController> detailsViewController(
+  scoped_nsobject<CookieDetailsViewController> detailsViewController(
       [[CookieDetailsViewController alloc] init]);
-  base::scoped_nsobject<CookiePromptContentDetailsAdapter> adapter(
+  scoped_nsobject<CookiePromptContentDetailsAdapter> adapter(
       [CreateDatabaseTestContent() retain]);
   [detailsViewController.get() setContentObject:adapter.get()];
   NSRect beforeFrame = [[detailsViewController.get() view] frame];
@@ -70,10 +70,10 @@ TEST_F(CookieDetailsViewControllerTest, ShrinkToFit) {
 }
 
 TEST_F(CookieDetailsViewControllerTest, ExpirationEditability) {
-  base::scoped_nsobject<CookieDetailsViewController> detailsViewController(
+  scoped_nsobject<CookieDetailsViewController> detailsViewController(
       [[CookieDetailsViewController alloc] init]);
   [detailsViewController view];
-  base::scoped_nsobject<CookiePromptContentDetailsAdapter> adapter(
+  scoped_nsobject<CookiePromptContentDetailsAdapter> adapter(
       [CreateCookieTestContent(YES) retain]);
   [detailsViewController.get() setContentObject:adapter.get()];
 

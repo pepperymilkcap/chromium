@@ -4,25 +4,27 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_TABS_DRAGGED_VIEW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_TABS_DRAGGED_VIEW_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
-
 #include <vector>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
+#include "ui/base/animation/animation_delegate.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
-#include "ui/gfx/animation/animation_delegate.h"
-#include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
 class DragData;
+class TabContents;
 class TabRendererGtk;
 
-class DraggedViewGtk : public gfx::AnimationDelegate {
+class DraggedViewGtk : public ui::AnimationDelegate {
  public:
   DraggedViewGtk(DragData* drag_data,
                 const gfx::Point& mouse_tab_offset,
@@ -93,10 +95,10 @@ class DraggedViewGtk : public gfx::AnimationDelegate {
   gfx::Point GetDistanceFromTabStripOriginToMousePointer();
 
  private:
-  // Overridden from gfx::AnimationDelegate:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationCanceled(const gfx::Animation* animation) OVERRIDE;
+  // Overridden from ui::AnimationDelegate:
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE;
 
   // Arranges the contents of the dragged tab.
   void Layout();
@@ -171,11 +173,11 @@ class DraggedViewGtk : public gfx::AnimationDelegate {
   // tabstrip.
   gfx::Size attached_tab_size_;
 
-  // The dimensions of the WebContents being dragged.
+  // The dimensions of the TabContents being dragged.
   gfx::Size contents_size_;
 
   // The animation used to slide the attached tab to its final location.
-  gfx::SlideAnimation close_animation_;
+  ui::SlideAnimation close_animation_;
 
   // A callback notified when the animation is complete.
   base::Closure animation_callback_;

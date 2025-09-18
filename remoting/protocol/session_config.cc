@@ -11,18 +11,8 @@ namespace protocol {
 
 const int kDefaultStreamVersion = 2;
 
-// The control channel version that supports the "capabilities" message.
-const int kControlStreamVersion = 3;
-const int kControlStreamVersionNoCapabilities = kDefaultStreamVersion;
-
-ChannelConfig ChannelConfig::None() {
-  return ChannelConfig();
-}
-
-ChannelConfig::ChannelConfig()
-    : transport(TRANSPORT_NONE),
-      version(0),
-      codec(CODEC_UNDEFINED) {
+ChannelConfig::ChannelConfig() {
+  Reset();
 }
 
 ChannelConfig::ChannelConfig(TransportType transport, int version, Codec codec)
@@ -32,34 +22,27 @@ ChannelConfig::ChannelConfig(TransportType transport, int version, Codec codec)
 }
 
 bool ChannelConfig::operator==(const ChannelConfig& b) const {
-  // If the transport field is set to NONE then all other fields are irrelevant.
-  if (transport == ChannelConfig::TRANSPORT_NONE)
-    return transport == b.transport;
   return transport == b.transport && version == b.version && codec == b.codec;
 }
 
-SessionConfig::SessionConfig() {
-}
-
-bool SessionConfig::SupportsCapabilities() const {
-  return control_config_.version >= kControlStreamVersion;
+void ChannelConfig::Reset() {
+  transport = TRANSPORT_STREAM;
+  version = kDefaultStreamVersion;
+  codec = CODEC_UNDEFINED;
 }
 
 // static
-SessionConfig SessionConfig::ForTest() {
+SessionConfig SessionConfig::GetDefault() {
   SessionConfig result;
-  result.set_control_config(ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
-                                          kControlStreamVersionNoCapabilities,
+  result.set_control_config(ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
+                                          kDefaultStreamVersion,
                                           ChannelConfig::CODEC_UNDEFINED));
-  result.set_event_config(ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
+  result.set_event_config(ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                                         kDefaultStreamVersion,
                                         ChannelConfig::CODEC_UNDEFINED));
   result.set_video_config(ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                                         kDefaultStreamVersion,
                                         ChannelConfig::CODEC_VP8));
-  result.set_audio_config(ChannelConfig(ChannelConfig::TRANSPORT_NONE,
-                                        kDefaultStreamVersion,
-                                        ChannelConfig::CODEC_UNDEFINED));
   return result;
 }
 
@@ -69,8 +52,7 @@ CandidateSessionConfig::CandidateSessionConfig(
     const CandidateSessionConfig& config)
     : control_configs_(config.control_configs_),
       event_configs_(config.event_configs_),
-      video_configs_(config.video_configs_),
-      audio_configs_(config.audio_configs_) {
+      video_configs_(config.video_configs_) {
 }
 
 CandidateSessionConfig::~CandidateSessionConfig() { }
@@ -81,23 +63,19 @@ bool CandidateSessionConfig::Select(
   ChannelConfig control_config;
   ChannelConfig event_config;
   ChannelConfig video_config;
-  ChannelConfig audio_config;
 
   if (!SelectCommonChannelConfig(
           control_configs_, client_config->control_configs_, &control_config) ||
       !SelectCommonChannelConfig(
           event_configs_, client_config->event_configs_, &event_config) ||
       !SelectCommonChannelConfig(
-          video_configs_, client_config->video_configs_, &video_config) ||
-      !SelectCommonChannelConfig(
-          audio_configs_, client_config->audio_configs_, &audio_config)) {
+          video_configs_, client_config->video_configs_, &video_config)) {
     return false;
   }
 
   result->set_control_config(control_config);
   result->set_event_config(event_config);
   result->set_video_config(video_config);
-  result->set_audio_config(audio_config);
 
   return true;
 }
@@ -107,22 +85,19 @@ bool CandidateSessionConfig::IsSupported(
   return
       IsChannelConfigSupported(control_configs_, config.control_config()) &&
       IsChannelConfigSupported(event_configs_, config.event_config()) &&
-      IsChannelConfigSupported(video_configs_, config.video_config()) &&
-      IsChannelConfigSupported(audio_configs_, config.audio_config());
+      IsChannelConfigSupported(video_configs_, config.video_config());
 }
 
 bool CandidateSessionConfig::GetFinalConfig(SessionConfig* result) const {
   if (control_configs_.size() != 1 ||
       event_configs_.size() != 1 ||
-      video_configs_.size() != 1 ||
-      audio_configs_.size() != 1) {
+      video_configs_.size() != 1) {
     return false;
   }
 
   result->set_control_config(control_configs_.front());
   result->set_event_config(event_configs_.front());
   result->set_video_config(video_configs_.front());
-  result->set_audio_config(audio_configs_.front());
 
   return true;
 }
@@ -167,70 +142,25 @@ scoped_ptr<CandidateSessionConfig> CandidateSessionConfig::CreateFrom(
   result->mutable_control_configs()->push_back(config.control_config());
   result->mutable_event_configs()->push_back(config.event_config());
   result->mutable_video_configs()->push_back(config.video_config());
-  result->mutable_audio_configs()->push_back(config.audio_config());
   return result.Pass();
 }
 
 // static
 scoped_ptr<CandidateSessionConfig> CandidateSessionConfig::CreateDefault() {
   scoped_ptr<CandidateSessionConfig> result = CreateEmpty();
-
-  // Control channel.
   result->mutable_control_configs()->push_back(
-      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
-                    kControlStreamVersion,
-                    ChannelConfig::CODEC_UNDEFINED));
-  result->mutable_control_configs()->push_back(
-      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
-                    kControlStreamVersionNoCapabilities,
-                    ChannelConfig::CODEC_UNDEFINED));
-
-  // Event channel.
-  result->mutable_event_configs()->push_back(
-      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
-                    kDefaultStreamVersion,
-                    ChannelConfig::CODEC_UNDEFINED));
-
-  // Video channel.
-  result->mutable_video_configs()->push_back(
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                     kDefaultStreamVersion,
-                    ChannelConfig::CODEC_VP9));
+                    ChannelConfig::CODEC_UNDEFINED));
+  result->mutable_event_configs()->push_back(
+      ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
+                    kDefaultStreamVersion,
+                    ChannelConfig::CODEC_UNDEFINED));
   result->mutable_video_configs()->push_back(
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                     kDefaultStreamVersion,
                     ChannelConfig::CODEC_VP8));
-
-  // Audio channel.
-  result->mutable_audio_configs()->push_back(
-      ChannelConfig(ChannelConfig::TRANSPORT_MUX_STREAM,
-                    kDefaultStreamVersion,
-                    ChannelConfig::CODEC_OPUS));
-  result->mutable_audio_configs()->push_back(ChannelConfig::None());
-
   return result.Pass();
-}
-
-// static
-void CandidateSessionConfig::DisableAudioChannel(
-    CandidateSessionConfig* config) {
-  config->mutable_audio_configs()->clear();
-  config->mutable_audio_configs()->push_back(ChannelConfig());
-}
-
-// static
-void CandidateSessionConfig::DisableVideoCodec(
-    CandidateSessionConfig* config,
-    ChannelConfig::Codec codec) {
-  std ::vector<ChannelConfig>::iterator i;
-  for (i = config->mutable_video_configs()->begin();
-       i != config->mutable_video_configs()->end();) {
-    if (i->codec == codec) {
-      i = config->mutable_video_configs()->erase(i);
-    } else {
-      ++i;
-    }
-  }
 }
 
 }  // namespace protocol

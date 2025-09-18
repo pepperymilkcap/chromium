@@ -115,7 +115,7 @@ class TraceEventWinTest: public testing::Test {
     }
 
     // Create the log file.
-    ASSERT_TRUE(base::CreateTemporaryFile(&log_file_));
+    ASSERT_TRUE(file_util::CreateTemporaryFile(&log_file_));
 
     // Create a private log session on the file.
     EtwTraceProperties prop;
@@ -157,10 +157,7 @@ class TraceEventWinTest: public testing::Test {
       EXPECT_HRESULT_SUCCEEDED(controller_.Stop(&prop));
 
     if (!log_file_.value().empty())
-      base::DeleteFile(log_file_, false);
-
-    // We want our singleton torn down after each test.
-    TraceLog::DeleteForTesting();
+      file_util::Delete(log_file_, false);
   }
 
   void ExpectEvent(REFGUID guid,

@@ -28,8 +28,7 @@
 
 #ifndef BASE_TUPLE_H__
 #define BASE_TUPLE_H__
-
-#include "base/bind_helpers.h"
+#pragma once
 
 // Traits ----------------------------------------------------------------------
 //
@@ -540,86 +539,58 @@ inline void DispatchToMethod(ObjT* obj, Method method, const Tuple0& arg) {
 
 template <class ObjT, class Method, class A>
 inline void DispatchToMethod(ObjT* obj, Method method, const A& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg));
+  (obj->*method)(arg);
 }
 
 template <class ObjT, class Method, class A>
 inline void DispatchToMethod(ObjT* obj, Method method, const Tuple1<A>& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a));
+  (obj->*method)(arg.a);
 }
 
 template<class ObjT, class Method, class A, class B>
 inline void DispatchToMethod(ObjT* obj,
                              Method method,
                              const Tuple2<A, B>& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b));
+  (obj->*method)(arg.a, arg.b);
 }
 
 template<class ObjT, class Method, class A, class B, class C>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple3<A, B, C>& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c));
+  (obj->*method)(arg.a, arg.b, arg.c);
 }
 
 template<class ObjT, class Method, class A, class B, class C, class D>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple4<A, B, C, D>& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-                 base::internal::UnwrapTraits<D>::Unwrap(arg.d));
+  (obj->*method)(arg.a, arg.b, arg.c, arg.d);
 }
 
 template<class ObjT, class Method, class A, class B, class C, class D, class E>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple5<A, B, C, D, E>& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-                 base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-                 base::internal::UnwrapTraits<E>::Unwrap(arg.e));
+  (obj->*method)(arg.a, arg.b, arg.c, arg.d, arg.e);
 }
 
 template<class ObjT, class Method, class A, class B, class C, class D, class E,
          class F>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple6<A, B, C, D, E, F>& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-                 base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-                 base::internal::UnwrapTraits<E>::Unwrap(arg.e),
-                 base::internal::UnwrapTraits<F>::Unwrap(arg.f));
+  (obj->*method)(arg.a, arg.b, arg.c, arg.d, arg.e, arg.f);
 }
 
 template<class ObjT, class Method, class A, class B, class C, class D, class E,
          class F, class G>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple7<A, B, C, D, E, F, G>& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-                 base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-                 base::internal::UnwrapTraits<E>::Unwrap(arg.e),
-                 base::internal::UnwrapTraits<F>::Unwrap(arg.f),
-                 base::internal::UnwrapTraits<G>::Unwrap(arg.g));
+  (obj->*method)(arg.a, arg.b, arg.c, arg.d, arg.e, arg.f, arg.g);
 }
 
 template<class ObjT, class Method, class A, class B, class C, class D, class E,
          class F, class G, class H>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple8<A, B, C, D, E, F, G, H>& arg) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-                 base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-                 base::internal::UnwrapTraits<E>::Unwrap(arg.e),
-                 base::internal::UnwrapTraits<F>::Unwrap(arg.f),
-                 base::internal::UnwrapTraits<G>::Unwrap(arg.g),
-                 base::internal::UnwrapTraits<H>::Unwrap(arg.h));
+  (obj->*method)(arg.a, arg.b, arg.c, arg.d, arg.e, arg.f, arg.g, arg.h);
 }
 
 // Static Dispatchers with no out params.
@@ -636,77 +607,49 @@ inline void DispatchToFunction(Function function, const A& arg) {
 
 template <class Function, class A>
 inline void DispatchToFunction(Function function, const Tuple1<A>& arg) {
-  (*function)(base::internal::UnwrapTraits<A>::Unwrap(arg.a));
+  (*function)(arg.a);
 }
 
 template<class Function, class A, class B>
 inline void DispatchToFunction(Function function, const Tuple2<A, B>& arg) {
-  (*function)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-              base::internal::UnwrapTraits<B>::Unwrap(arg.b));
+  (*function)(arg.a, arg.b);
 }
 
 template<class Function, class A, class B, class C>
 inline void DispatchToFunction(Function function, const Tuple3<A, B, C>& arg) {
-  (*function)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-              base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-              base::internal::UnwrapTraits<C>::Unwrap(arg.c));
+  (*function)(arg.a, arg.b, arg.c);
 }
 
 template<class Function, class A, class B, class C, class D>
 inline void DispatchToFunction(Function function,
                                const Tuple4<A, B, C, D>& arg) {
-  (*function)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-              base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-              base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-              base::internal::UnwrapTraits<D>::Unwrap(arg.d));
+  (*function)(arg.a, arg.b, arg.c, arg.d);
 }
 
 template<class Function, class A, class B, class C, class D, class E>
 inline void DispatchToFunction(Function function,
                                const Tuple5<A, B, C, D, E>& arg) {
-  (*function)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-              base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-              base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-              base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-              base::internal::UnwrapTraits<E>::Unwrap(arg.e));
+  (*function)(arg.a, arg.b, arg.c, arg.d, arg.e);
 }
 
 template<class Function, class A, class B, class C, class D, class E, class F>
 inline void DispatchToFunction(Function function,
                                const Tuple6<A, B, C, D, E, F>& arg) {
-  (*function)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-              base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-              base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-              base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-              base::internal::UnwrapTraits<E>::Unwrap(arg.e),
-              base::internal::UnwrapTraits<F>::Unwrap(arg.f));
+  (*function)(arg.a, arg.b, arg.c, arg.d, arg.e, arg.f);
 }
 
 template<class Function, class A, class B, class C, class D, class E, class F,
          class G>
 inline void DispatchToFunction(Function function,
                                const Tuple7<A, B, C, D, E, F, G>& arg) {
-  (*function)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-              base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-              base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-              base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-              base::internal::UnwrapTraits<E>::Unwrap(arg.e),
-              base::internal::UnwrapTraits<F>::Unwrap(arg.f),
-              base::internal::UnwrapTraits<G>::Unwrap(arg.g));
+  (*function)(arg.a, arg.b, arg.c, arg.d, arg.e, arg.f, arg.g);
 }
 
 template<class Function, class A, class B, class C, class D, class E, class F,
          class G, class H>
 inline void DispatchToFunction(Function function,
                                const Tuple8<A, B, C, D, E, F, G, H>& arg) {
-  (*function)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-              base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-              base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-              base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-              base::internal::UnwrapTraits<E>::Unwrap(arg.e),
-              base::internal::UnwrapTraits<F>::Unwrap(arg.f),
-              base::internal::UnwrapTraits<G>::Unwrap(arg.g),
-              base::internal::UnwrapTraits<H>::Unwrap(arg.h));
+  (*function)(arg.a, arg.b, arg.c, arg.d, arg.e, arg.f, arg.g, arg.h);
 }
 
 // Dispatchers with 0 out param (as a Tuple0).
@@ -720,61 +663,46 @@ inline void DispatchToMethod(ObjT* obj,
 
 template <class ObjT, class Method, class A>
 inline void DispatchToMethod(ObjT* obj, Method method, const A& arg, Tuple0*) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg));
+  (obj->*method)(arg);
 }
 
 template <class ObjT, class Method, class A>
 inline void DispatchToMethod(ObjT* obj,
                              Method method,
                              const Tuple1<A>& arg, Tuple0*) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a));
+  (obj->*method)(arg.a);
 }
 
 template<class ObjT, class Method, class A, class B>
 inline void DispatchToMethod(ObjT* obj,
                              Method method,
                              const Tuple2<A, B>& arg, Tuple0*) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b));
+  (obj->*method)(arg.a, arg.b);
 }
 
 template<class ObjT, class Method, class A, class B, class C>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple3<A, B, C>& arg, Tuple0*) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c));
+  (obj->*method)(arg.a, arg.b, arg.c);
 }
 
 template<class ObjT, class Method, class A, class B, class C, class D>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple4<A, B, C, D>& arg, Tuple0*) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-                 base::internal::UnwrapTraits<D>::Unwrap(arg.d));
+  (obj->*method)(arg.a, arg.b, arg.c, arg.d);
 }
 
 template<class ObjT, class Method, class A, class B, class C, class D, class E>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple5<A, B, C, D, E>& arg, Tuple0*) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-                 base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-                 base::internal::UnwrapTraits<E>::Unwrap(arg.e));
+  (obj->*method)(arg.a, arg.b, arg.c, arg.d, arg.e);
 }
 
 template<class ObjT, class Method, class A, class B, class C, class D, class E,
          class F>
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple6<A, B, C, D, E, F>& arg, Tuple0*) {
-  (obj->*method)(base::internal::UnwrapTraits<A>::Unwrap(arg.a),
-                 base::internal::UnwrapTraits<B>::Unwrap(arg.b),
-                 base::internal::UnwrapTraits<C>::Unwrap(arg.c),
-                 base::internal::UnwrapTraits<D>::Unwrap(arg.d),
-                 base::internal::UnwrapTraits<E>::Unwrap(arg.e),
-                 base::internal::UnwrapTraits<F>::Unwrap(arg.f));
+  (obj->*method)(arg.a, arg.b, arg.c, arg.d, arg.e, arg.f);
 }
 
 // Dispatchers with 1 out param.
@@ -800,7 +728,7 @@ template<class ObjT, class Method, class InA,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple1<InA>& in,
                              Tuple1<OutA>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a), &out->a);
+  (obj->*method)(in.a, &out->a);
 }
 
 template<class ObjT, class Method, class InA, class InB,
@@ -808,9 +736,7 @@ template<class ObjT, class Method, class InA, class InB,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple2<InA, InB>& in,
                              Tuple1<OutA>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 &out->a);
+  (obj->*method)(in.a, in.b, &out->a);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC,
@@ -818,10 +744,7 @@ template<class ObjT, class Method, class InA, class InB, class InC,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple3<InA, InB, InC>& in,
                              Tuple1<OutA>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 &out->a);
+  (obj->*method)(in.a, in.b, in.c, &out->a);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC, class InD,
@@ -829,11 +752,7 @@ template<class ObjT, class Method, class InA, class InB, class InC, class InD,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple4<InA, InB, InC, InD>& in,
                              Tuple1<OutA>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 &out->a);
+  (obj->*method)(in.a, in.b, in.c, in.d, &out->a);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC, class InD,
@@ -841,12 +760,7 @@ template<class ObjT, class Method, class InA, class InB, class InC, class InD,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple5<InA, InB, InC, InD, InE>& in,
                              Tuple1<OutA>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 &out->a);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e, &out->a);
 }
 
 template<class ObjT, class Method,
@@ -855,13 +769,7 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple6<InA, InB, InC, InD, InE, InF>& in,
                              Tuple1<OutA>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 base::internal::UnwrapTraits<InF>::Unwrap(in.f),
-                 &out->a);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e, in.f, &out->a);
 }
 
 // Dispatchers with 2 out params.
@@ -887,8 +795,7 @@ template<class ObjT, class Method, class InA,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple1<InA>& in,
                              Tuple2<OutA, OutB>* out) {
-  (obj->*method)(
-      base::internal::UnwrapTraits<InA>::Unwrap(in.a), &out->a, &out->b);
+  (obj->*method)(in.a, &out->a, &out->b);
 }
 
 template<class ObjT, class Method, class InA, class InB,
@@ -896,10 +803,7 @@ template<class ObjT, class Method, class InA, class InB,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple2<InA, InB>& in,
                              Tuple2<OutA, OutB>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 &out->a,
-                 &out->b);
+  (obj->*method)(in.a, in.b, &out->a, &out->b);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC,
@@ -907,11 +811,7 @@ template<class ObjT, class Method, class InA, class InB, class InC,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple3<InA, InB, InC>& in,
                              Tuple2<OutA, OutB>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 &out->a,
-                 &out->b);
+  (obj->*method)(in.a, in.b, in.c, &out->a, &out->b);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC, class InD,
@@ -919,12 +819,7 @@ template<class ObjT, class Method, class InA, class InB, class InC, class InD,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple4<InA, InB, InC, InD>& in,
                              Tuple2<OutA, OutB>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 &out->a,
-                 &out->b);
+  (obj->*method)(in.a, in.b, in.c, in.d, &out->a, &out->b);
 }
 
 template<class ObjT, class Method,
@@ -933,13 +828,7 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple5<InA, InB, InC, InD, InE>& in,
                              Tuple2<OutA, OutB>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 &out->a,
-                 &out->b);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e, &out->a, &out->b);
 }
 
 template<class ObjT, class Method,
@@ -948,14 +837,7 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple6<InA, InB, InC, InD, InE, InF>& in,
                              Tuple2<OutA, OutB>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 base::internal::UnwrapTraits<InF>::Unwrap(in.f),
-                 &out->a,
-                 &out->b);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e, in.f, &out->a, &out->b);
 }
 
 // Dispatchers with 3 out params.
@@ -981,10 +863,7 @@ template<class ObjT, class Method, class InA,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple1<InA>& in,
                              Tuple3<OutA, OutB, OutC>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 &out->a,
-                 &out->b,
-                 &out->c);
+  (obj->*method)(in.a, &out->a, &out->b, &out->c);
 }
 
 template<class ObjT, class Method, class InA, class InB,
@@ -992,11 +871,7 @@ template<class ObjT, class Method, class InA, class InB,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple2<InA, InB>& in,
                              Tuple3<OutA, OutB, OutC>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 &out->a,
-                 &out->b,
-                 &out->c);
+  (obj->*method)(in.a, in.b, &out->a, &out->b, &out->c);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC,
@@ -1004,12 +879,7 @@ template<class ObjT, class Method, class InA, class InB, class InC,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple3<InA, InB, InC>& in,
                              Tuple3<OutA, OutB, OutC>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 &out->a,
-                 &out->b,
-                 &out->c);
+  (obj->*method)(in.a, in.b, in.c, &out->a, &out->b, &out->c);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC, class InD,
@@ -1017,13 +887,7 @@ template<class ObjT, class Method, class InA, class InB, class InC, class InD,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple4<InA, InB, InC, InD>& in,
                              Tuple3<OutA, OutB, OutC>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 &out->a,
-                 &out->b,
-                 &out->c);
+  (obj->*method)(in.a, in.b, in.c, in.d, &out->a, &out->b, &out->c);
 }
 
 template<class ObjT, class Method,
@@ -1032,14 +896,7 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple5<InA, InB, InC, InD, InE>& in,
                              Tuple3<OutA, OutB, OutC>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 &out->a,
-                 &out->b,
-                 &out->c);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e, &out->a, &out->b, &out->c);
 }
 
 template<class ObjT, class Method,
@@ -1048,15 +905,7 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple6<InA, InB, InC, InD, InE, InF>& in,
                              Tuple3<OutA, OutB, OutC>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 base::internal::UnwrapTraits<InF>::Unwrap(in.f),
-                 &out->a,
-                 &out->b,
-                 &out->c);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e, in.f, &out->a, &out->b, &out->c);
 }
 
 // Dispatchers with 4 out params.
@@ -1074,11 +923,7 @@ template<class ObjT, class Method, class InA,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const InA& in,
                              Tuple4<OutA, OutB, OutC, OutD>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d);
+  (obj->*method)(in, &out->a, &out->b, &out->c, &out->d);
 }
 
 template<class ObjT, class Method, class InA,
@@ -1086,11 +931,7 @@ template<class ObjT, class Method, class InA,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple1<InA>& in,
                              Tuple4<OutA, OutB, OutC, OutD>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d);
+  (obj->*method)(in.a, &out->a, &out->b, &out->c, &out->d);
 }
 
 template<class ObjT, class Method, class InA, class InB,
@@ -1098,12 +939,7 @@ template<class ObjT, class Method, class InA, class InB,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple2<InA, InB>& in,
                              Tuple4<OutA, OutB, OutC, OutD>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d);
+  (obj->*method)(in.a, in.b, &out->a, &out->b, &out->c, &out->d);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC,
@@ -1111,13 +947,7 @@ template<class ObjT, class Method, class InA, class InB, class InC,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple3<InA, InB, InC>& in,
                              Tuple4<OutA, OutB, OutC, OutD>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d);
+  (obj->*method)(in.a, in.b, in.c, &out->a, &out->b, &out->c, &out->d);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC, class InD,
@@ -1125,14 +955,7 @@ template<class ObjT, class Method, class InA, class InB, class InC, class InD,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple4<InA, InB, InC, InD>& in,
                              Tuple4<OutA, OutB, OutC, OutD>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d);
+  (obj->*method)(in.a, in.b, in.c, in.d, &out->a, &out->b, &out->c, &out->d);
 }
 
 template<class ObjT, class Method,
@@ -1141,15 +964,8 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple5<InA, InB, InC, InD, InE>& in,
                              Tuple4<OutA, OutB, OutC, OutD>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e,
+                 &out->a, &out->b, &out->c, &out->d);
 }
 
 template<class ObjT, class Method,
@@ -1158,16 +974,8 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple6<InA, InB, InC, InD, InE, InF>& in,
                              Tuple4<OutA, OutB, OutC, OutD>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 base::internal::UnwrapTraits<InF>::Unwrap(in.f),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e, in.f,
+                 &out->a, &out->b, &out->c, &out->d);
 }
 
 // Dispatchers with 5 out params.
@@ -1185,12 +993,7 @@ template<class ObjT, class Method, class InA,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const InA& in,
                              Tuple5<OutA, OutB, OutC, OutD, OutE>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d,
-                 &out->e);
+  (obj->*method)(in, &out->a, &out->b, &out->c, &out->d, &out->e);
 }
 
 template<class ObjT, class Method, class InA,
@@ -1198,12 +1001,7 @@ template<class ObjT, class Method, class InA,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple1<InA>& in,
                              Tuple5<OutA, OutB, OutC, OutD, OutE>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d,
-                 &out->e);
+  (obj->*method)(in.a, &out->a, &out->b, &out->c, &out->d, &out->e);
 }
 
 template<class ObjT, class Method, class InA, class InB,
@@ -1211,13 +1009,7 @@ template<class ObjT, class Method, class InA, class InB,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple2<InA, InB>& in,
                              Tuple5<OutA, OutB, OutC, OutD, OutE>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d,
-                 &out->e);
+  (obj->*method)(in.a, in.b, &out->a, &out->b, &out->c, &out->d, &out->e);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC,
@@ -1225,14 +1017,7 @@ template<class ObjT, class Method, class InA, class InB, class InC,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple3<InA, InB, InC>& in,
                              Tuple5<OutA, OutB, OutC, OutD, OutE>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d,
-                 &out->e);
+  (obj->*method)(in.a, in.b, in.c, &out->a, &out->b, &out->c, &out->d, &out->e);
 }
 
 template<class ObjT, class Method, class InA, class InB, class InC, class InD,
@@ -1240,14 +1025,7 @@ template<class ObjT, class Method, class InA, class InB, class InC, class InD,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple4<InA, InB, InC, InD>& in,
                              Tuple5<OutA, OutB, OutC, OutD, OutE>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d,
+  (obj->*method)(in.a, in.b, in.c, in.d, &out->a, &out->b, &out->c, &out->d,
                  &out->e);
 }
 
@@ -1257,16 +1035,8 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple5<InA, InB, InC, InD, InE>& in,
                              Tuple5<OutA, OutB, OutC, OutD, OutE>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d,
-                 &out->e);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e,
+                 &out->a, &out->b, &out->c, &out->d, &out->e);
 }
 
 template<class ObjT, class Method,
@@ -1275,17 +1045,8 @@ template<class ObjT, class Method,
 inline void DispatchToMethod(ObjT* obj, Method method,
                              const Tuple6<InA, InB, InC, InD, InE, InF>& in,
                              Tuple5<OutA, OutB, OutC, OutD, OutE>* out) {
-  (obj->*method)(base::internal::UnwrapTraits<InA>::Unwrap(in.a),
-                 base::internal::UnwrapTraits<InB>::Unwrap(in.b),
-                 base::internal::UnwrapTraits<InC>::Unwrap(in.c),
-                 base::internal::UnwrapTraits<InD>::Unwrap(in.d),
-                 base::internal::UnwrapTraits<InE>::Unwrap(in.e),
-                 base::internal::UnwrapTraits<InF>::Unwrap(in.f),
-                 &out->a,
-                 &out->b,
-                 &out->c,
-                 &out->d,
-                 &out->e);
+  (obj->*method)(in.a, in.b, in.c, in.d, in.e, in.f,
+                 &out->a, &out->b, &out->c, &out->d, &out->e);
 }
 
 #endif  // BASE_TUPLE_H__

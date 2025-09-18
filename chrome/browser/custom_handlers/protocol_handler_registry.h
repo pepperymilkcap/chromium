@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CUSTOM_HANDLERS_PROTOCOL_HANDLER_REGISTRY_H_
 #define CHROME_BROWSER_CUSTOM_HANDLERS_PROTOCOL_HANDLER_REGISTRY_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -11,33 +12,25 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/sequenced_task_runner_helpers.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
-#include "net/url_request/url_request_job_factory.h"
-
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
 
 // This is where handlers for protocols registered with
 // navigator.registerProtocolHandler() are registered. Each Profile owns an
 // instance of this class, which is initialized on browser start through
 // Profile::InitRegisteredProtocolHandlers(), and they should be the only
 // instances of this class.
-class ProtocolHandlerRegistry : public BrowserContextKeyedService {
 
+class ProtocolHandlerRegistry
+    : public base::RefCountedThreadSafe<
+          ProtocolHandlerRegistry, content::BrowserThread::DeleteOnIOThread> {
  public:
-  // Provides notification of when the OS level user agent settings
-  // are changed.
   class DefaultClientObserver
       : public ShellIntegration::DefaultWebClientObserver {
    public:
@@ -49,8 +42,6 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
     virtual void SetDefaultWebClientUIState(
         ShellIntegration::DefaultWebClientUIState state) OVERRIDE;
 
-    virtual bool IsInteractiveSetDefaultPermitted() OVERRIDE;
-
     // Give the observer a handle to the worker, so we can find out the protocol
     // when we're called and also tell the worker if we get deleted.
     void SetWorker(ShellIntegration::DefaultProtocolClientWorker* worker);
@@ -59,8 +50,7 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
     ShellIntegration::DefaultProtocolClientWorker* worker_;
 
    private:
-    virtual bool IsOwnedByWorker() OVERRIDE;
-
+    virtual bool IsOwnedByWorker() OVERRIDE { return true; }
     // This is a raw pointer, not reference counted, intentionally. In general
     // subclasses of DefaultWebClientObserver are not able to be refcounted
     // e.g. the browser options page
@@ -69,9 +59,9 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
     DISALLOW_COPY_AND_ASSIGN(DefaultClientObserver);
   };
 
-  // |Delegate| provides an interface for interacting asynchronously
-  // with the underlying OS for the purposes of registering Chrome
-  // as the default handler for specific protocols.
+  // TODO(koz): Refactor this to eliminate the unnecessary virtuals. All that
+  // should be needed is a way to ensure that the list of websafe protocols is
+  // updated.
   class Delegate {
    public:
     virtual ~Delegate();
@@ -88,57 +78,13 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
         ProtocolHandlerRegistry* registry);
   };
 
-  // Forward declaration of the internal implementation class.
-  class IOThreadDelegate;
-
-  // JobInterceptorFactory intercepts URLRequestJob creation for URLRequests the
-  // ProtocolHandlerRegistry is registered to handle.  When no handler is
-  // registered, the URLRequest is passed along to the chained
-  // URLRequestJobFactory (set with |JobInterceptorFactory::Chain|).
-  // JobInterceptorFactory's are created via
-  // |ProtocolHandlerRegistry::CreateJobInterceptorFactory|.
-  class JobInterceptorFactory : public net::URLRequestJobFactory {
-   public:
-    // |io_thread_delegate| is used to perform actual job creation work.
-    explicit JobInterceptorFactory(IOThreadDelegate* io_thread_delegate);
-    virtual ~JobInterceptorFactory();
-
-    // |job_factory| is set as the URLRequestJobFactory where requests are
-    // forwarded if JobInterceptorFactory decides to pass on them.
-    void Chain(scoped_ptr<net::URLRequestJobFactory> job_factory);
-
-    // URLRequestJobFactory implementation.
-    virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
-        const std::string& scheme,
-        net::URLRequest* request,
-        net::NetworkDelegate* network_delegate) const OVERRIDE;
-    virtual bool IsHandledProtocol(const std::string& scheme) const OVERRIDE;
-    virtual bool IsHandledURL(const GURL& url) const OVERRIDE;
-    virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE;
-
-   private:
-    // When JobInterceptorFactory decides to pass on particular requests,
-    // they're forwarded to the chained URLRequestJobFactory, |job_factory_|.
-    scoped_ptr<URLRequestJobFactory> job_factory_;
-    // |io_thread_delegate_| performs the actual job creation decisions by
-    // mirroring the ProtocolHandlerRegistry on the IO thread.
-    scoped_refptr<IOThreadDelegate> io_thread_delegate_;
-
-    DISALLOW_COPY_AND_ASSIGN(JobInterceptorFactory);
-  };
-
   typedef std::map<std::string, ProtocolHandler> ProtocolHandlerMap;
   typedef std::vector<ProtocolHandler> ProtocolHandlerList;
   typedef std::map<std::string, ProtocolHandlerList> ProtocolHandlerMultiMap;
   typedef std::vector<DefaultClientObserver*> DefaultClientObserverList;
 
-  // Creates a new instance. Assumes ownership of |delegate|.
   ProtocolHandlerRegistry(Profile* profile, Delegate* delegate);
-  virtual ~ProtocolHandlerRegistry();
-
-  // Returns a net::URLRequestJobFactory suitable for use on the IO thread, but
-  // is initialized on the UI thread.
-  scoped_ptr<JobInterceptorFactory> CreateJobInterceptorFactory();
+  ~ProtocolHandlerRegistry();
 
   // Called when a site tries to register as a protocol handler. If the request
   // can be handled silently by the registry - either to ignore the request
@@ -171,10 +117,8 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
   // Returns true if this handler is the default handler for its protocol.
   bool IsDefault(const ProtocolHandler& handler) const;
 
-  // Initializes default protocol settings and loads them from prefs.
-  // This method must be called to complete initialization of the
-  // registry after creation, and prior to use.
-  void InitProtocolSettings();
+  // Loads a user's registered protocol handlers.
+  void Load();
 
   // Returns the offset in the list of handlers for a protocol of the default
   // handler for that protocol.
@@ -212,6 +156,10 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
   // Returns true if the protocol has a default protocol handler.
   bool IsHandledProtocol(const std::string& scheme) const;
 
+  // Returns true if the protocol has a default protocol handler.
+  // Should be called only from the IO thread.
+  bool IsHandledProtocolIO(const std::string& scheme) const;
+
   // Removes the given protocol handler from the registry.
   void RemoveHandler(const ProtocolHandler& handler);
 
@@ -221,6 +169,10 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
   // Returns the default handler for this protocol, or an empty handler if none
   // exists.
   const ProtocolHandler& GetHandlerFor(const std::string& scheme) const;
+
+  // Creates a URL request job for the given request if there is a matching
+  // protocol handler, returns NULL otherwise.
+  net::URLRequestJob* MaybeCreateJob(net::URLRequest* request) const;
 
   // Puts this registry in the enabled state - registered protocol handlers
   // will handle requests.
@@ -232,31 +184,35 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
 
   // This is called by the UI thread when the system is shutting down. This
   // does finalization which must be done on the UI thread.
-  virtual void Shutdown() OVERRIDE;
+  void Finalize();
 
   // Registers the preferences that we store registered protocol handlers in.
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterPrefs(PrefService* prefService);
 
   bool enabled() const { return enabled_; }
 
-  // Add a predefined protocol handler. This has to be called before the first
-  // load command was issued, otherwise the command will be ignored.
-  void AddPredefinedHandler(const ProtocolHandler& handler);
-
  private:
-  friend class base::DeleteHelper<ProtocolHandlerRegistry>;
-  friend struct content::BrowserThread::DeleteOnThread<
-      content::BrowserThread::IO>;
-
-  // for access to InstallDefaultsForChromeOS
-  friend class ProtocolHandlerRegistryFactory;
-
-  friend class ProtocolHandlerRegistryTest;
-  friend class RegisterProtocolHandlerBrowserTest;
+  friend class base::RefCountedThreadSafe<ProtocolHandlerRegistry>;
 
   // Puts the given handler at the top of the list of handlers for its
   // protocol.
   void PromoteHandler(const ProtocolHandler& handler);
+
+  // Clears the default for the provided protocol.
+  // Should be called only from the IO thread.
+  void ClearDefaultIO(const std::string& scheme);
+
+  // Makes this ProtocolHandler the default handler for its protocol.
+  // Should be called only from the IO thread.
+  void SetDefaultIO(const ProtocolHandler& handler);
+
+  // Indicate that the registry has been enabled in the IO thread's copy of the
+  // data.
+  void EnableIO() { enabled_io_ = true; }
+
+  // Indicate that the registry has been disabled in the IO thread's copy of
+  // the data.
+  void DisableIO() { enabled_io_ = false; }
 
   // Saves a user's registered protocol handlers.
   void Save();
@@ -264,10 +220,6 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
   // Returns a pointer to the list of handlers registered for the given scheme,
   // or NULL if there are none.
   const ProtocolHandlerList* GetHandlerList(const std::string& scheme) const;
-
-  // Install default protocol handlers for chromeos which must be done
-  // prior to calling InitProtocolSettings.
-  void InstallDefaultsForChromeOS();
 
   // Makes this ProtocolHandler the default handler for its protocol.
   void SetDefault(const ProtocolHandler& handler);
@@ -277,11 +229,11 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
 
   // Returns a JSON list of protocol handlers. The caller is responsible for
   // deleting this Value.
-  base::Value* EncodeRegisteredHandlers();
+  Value* EncodeRegisteredHandlers();
 
   // Returns a JSON list of ignored protocol handlers. The caller is
   // responsible for deleting this Value.
-  base::Value* EncodeIgnoredHandlers();
+  Value* EncodeIgnoredHandlers();
 
   // Sends a notification of the given type to the NotificationService.
   void NotifyChanged();
@@ -291,11 +243,14 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
 
   // Get the DictionaryValues stored under the given pref name that are valid
   // ProtocolHandler values.
-  std::vector<const base::DictionaryValue*> GetHandlersFromPref(
+  std::vector<const DictionaryValue*> GetHandlersFromPref(
       const char* pref_name) const;
 
   // Ignores future requests to register the given protocol handler.
   void IgnoreProtocolHandler(const ProtocolHandler& handler);
+
+  // Register
+  void IgnoreHandlerFromValue(const DictionaryValue* value);
 
   // Map from protocols (strings) to protocol handlers.
   ProtocolHandlerMultiMap protocol_handlers_;
@@ -316,18 +271,18 @@ class ProtocolHandlerRegistry : public BrowserContextKeyedService {
   // requests.
   bool enabled_;
 
+  // Copy of enabled_ that is only accessed on the IO thread.
+  bool enabled_io_;
+
   // Whether or not we are loading.
   bool is_loading_;
 
-  // When the table gets loaded this flag will be set and any further calls to
-  // AddPredefinedHandler will be rejected.
-  bool is_loaded_;
-
-  // Copy of registry data for use on the IO thread. Changes to the registry
-  // are posted to the IO thread where updates are applied to this object.
-  scoped_refptr<IOThreadDelegate> io_thread_delegate_;
-
   DefaultClientObserverList default_client_observers_;
+
+  // Copy of default_handlers_ that is only accessed on the IO thread.
+  ProtocolHandlerMap default_handlers_io_;
+
+  friend class ProtocolHandlerRegistryTest;
 
   DISALLOW_COPY_AND_ASSIGN(ProtocolHandlerRegistry);
 };

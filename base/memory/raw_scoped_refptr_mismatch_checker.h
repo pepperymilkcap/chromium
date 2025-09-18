@@ -4,6 +4,7 @@
 
 #ifndef BASE_MEMORY_RAW_SCOPED_REFPTR_MISMATCH_CHECKER_H_
 #define BASE_MEMORY_RAW_SCOPED_REFPTR_MISMATCH_CHECKER_H_
+#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/template_util.h"

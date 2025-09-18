@@ -4,14 +4,15 @@
 
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_SYNC_APP_HELPER_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_SYNC_APP_HELPER_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/singleton.h"
-#include "sync/api/string_ordinal.h"
 
 class Profile;
+class StringOrdinal;
 class SyncTest;
 
 class SyncAppHelper {
@@ -28,26 +29,24 @@ class SyncAppHelper {
   bool AppStatesMatch(Profile* profile1, Profile* profile2);
 
   // Gets the page ordinal value for the applications with |name| in |profile|.
-  syncer::StringOrdinal GetPageOrdinalForApp(Profile* profile,
-                                             const std::string& name);
+  StringOrdinal GetPageOrdinalForApp(Profile* profile, const std::string& name);
 
   // Sets a new |page_ordinal| value for the application with |name| in
   // |profile|.
   void SetPageOrdinalForApp(Profile* profile,
                             const std::string& name,
-                            const syncer::StringOrdinal& page_ordinal);
+                            const StringOrdinal& page_ordinal);
 
   // Gets the app launch ordinal value for the application with |name| in
   // |profile|.
-  syncer::StringOrdinal GetAppLaunchOrdinalForApp(Profile* profile,
-                                                  const std::string& name);
+  StringOrdinal GetAppLaunchOrdinalForApp(Profile* profile,
+                                          const std::string& name);
 
   // Sets a new |app_launch_ordinal| value for the application with |name| in
   // |profile|.
-  void SetAppLaunchOrdinalForApp(
-      Profile* profile,
-      const std::string& name,
-      const syncer::StringOrdinal& app_launch_ordinal);
+  void SetAppLaunchOrdinalForApp(Profile* profile,
+                                 const std::string& name,
+                                 const StringOrdinal& app_launch_ordinal);
 
   // Fix any NTP icon collisions that are currently in |profile|.
   void FixNTPOrdinalCollisions(Profile* profile);

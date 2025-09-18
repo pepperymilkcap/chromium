@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_WRAPPER_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_WRAPPER_H_
+#pragma once
 
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/views_export.h"
@@ -12,13 +13,9 @@ namespace gfx {
 class Point;
 }
 
-namespace ui {
-class MenuModel;
-}
-
 namespace views {
 
-class MenuInsertionDelegateWin;
+class Menu2;
 class MenuListener;
 
 // An interface that wraps an object that implements a menu.
@@ -34,9 +31,6 @@ class VIEWS_EXPORT MenuWrapper {
 
   virtual ~MenuWrapper() {}
 
-  // Creates the appropriate instance of this wrapper for the current platform.
-  static MenuWrapper* CreateWrapper(ui::MenuModel* model);
-
   // Runs the menu at the specified point. This blocks until done.
   virtual void RunMenuAt(const gfx::Point& point, int alignment) = 0;
 
@@ -45,14 +39,14 @@ class VIEWS_EXPORT MenuWrapper {
 
   // Called when the model supplying data to this menu has changed, and the menu
   // must be rebuilt.
-  virtual void Rebuild(MenuInsertionDelegateWin* delegate) = 0;
+  virtual void Rebuild() = 0;
 
   // Called when the states of the items in the menu must be updated from the
   // model.
   virtual void UpdateStates() = 0;
 
   // Retrieve a native menu handle.
-  virtual HMENU GetNativeMenu() const = 0;
+  virtual gfx::NativeMenu GetNativeMenu() const = 0;
 
   // Get the result of the last call to RunMenuAt to determine whether an
   // item was selected, the user navigated to a next or previous menu, or
@@ -67,6 +61,9 @@ class VIEWS_EXPORT MenuWrapper {
 
   // Sets the minimum width of the menu.
   virtual void SetMinimumWidth(int width) = 0;
+
+  // Creates the appropriate instance of this wrapper for the current platform.
+  static MenuWrapper* CreateWrapper(Menu2* menu);
 };
 
 }  // namespace views

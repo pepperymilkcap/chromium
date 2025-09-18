@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/infobars/mock_confirm_infobar_delegate.h"
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 const char MockConfirmInfoBarDelegate::kMessage[] = "MockConfirmInfoBarMessage";
 
 MockConfirmInfoBarDelegate::MockConfirmInfoBarDelegate(Owner* owner)
-    : ConfirmInfoBarDelegate(),
+    : ConfirmInfoBarDelegate(NULL),
       owner_(owner),
       closes_on_action_(true),
       icon_accessed_(false),
@@ -25,19 +26,19 @@ MockConfirmInfoBarDelegate::~MockConfirmInfoBarDelegate() {
     owner_->OnInfoBarDelegateClosed();
 }
 
-int MockConfirmInfoBarDelegate::GetIconID() const {
+gfx::Image* MockConfirmInfoBarDelegate::GetIcon() const {
   icon_accessed_ = true;
-  return kNoIconID;
+  return NULL;
 }
 
-base::string16 MockConfirmInfoBarDelegate::GetMessageText() const {
+string16 MockConfirmInfoBarDelegate::GetMessageText() const {
   message_text_accessed_ = true;
-  return base::ASCIIToUTF16(kMessage);
+  return ASCIIToUTF16(kMessage);
 }
 
-base::string16 MockConfirmInfoBarDelegate::GetButtonLabel(
+string16 MockConfirmInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
-  return base::ASCIIToUTF16((button == BUTTON_OK) ? "OK" : "Cancel");
+  return ASCIIToUTF16((button == BUTTON_OK) ? "OK" : "Cancel");
 }
 
 bool MockConfirmInfoBarDelegate::Accept() {
@@ -50,9 +51,9 @@ bool MockConfirmInfoBarDelegate::Cancel() {
   return closes_on_action_;
 }
 
-base::string16 MockConfirmInfoBarDelegate::GetLinkText() const {
+string16 MockConfirmInfoBarDelegate::GetLinkText() const {
   link_text_accessed_ = true;
-  return base::string16();
+  return string16();
 }
 
 bool MockConfirmInfoBarDelegate::LinkClicked(

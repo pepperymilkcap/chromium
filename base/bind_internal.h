@@ -9,6 +9,7 @@
 
 #ifndef BASE_BIND_INTERNAL_H_
 #define BASE_BIND_INTERNAL_H_
+#pragma once
 
 #include "base/bind_helpers.h"
 #include "base/callback_internal.h"
@@ -24,9 +25,6 @@
 namespace base {
 namespace internal {
 
-// See base/callback.h for user documentation.
-//
-//
 // CONCEPTS:
 //  Runnable -- A type (really a type class) that has a single Run() method
 //              and a RunType typedef that corresponds to the type of Run().
@@ -814,7 +812,6 @@ MakeRunnable(const IgnoreResultHelper<T>& t) {
 template <typename T>
 const typename FunctorTraits<Callback<T> >::RunnableType&
 MakeRunnable(const Callback<T>& t) {
-  DCHECK(!t.is_null());
   return t;
 }
 
@@ -872,14 +869,15 @@ struct InvokeHelper<false, void, Runnable,
   }
 };
 
-template <typename Runnable, typename BoundWeakPtr>
+template <typename Runnable, typename A1>
 struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr)>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr) {
-    if (!weak_ptr.get()) {
+    void(A1)>  {
+  static void MakeItSo(Runnable runnable, A1 a1) {
+    if (!a1.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get());
+
+    runnable.Run(CallbackForward(a1));
   }
 };
 
@@ -899,14 +897,15 @@ struct InvokeHelper<false, void, Runnable,
   }
 };
 
-template <typename Runnable, typename BoundWeakPtr, typename A2>
+template <typename Runnable, typename A1, typename A2>
 struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr, A2)>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr, A2 a2) {
-    if (!weak_ptr.get()) {
+    void(A1, A2)>  {
+  static void MakeItSo(Runnable runnable, A1 a1, A2 a2) {
+    if (!a1.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get(), CallbackForward(a2));
+
+    runnable.Run(CallbackForward(a1), CallbackForward(a2));
   }
 };
 
@@ -928,14 +927,15 @@ struct InvokeHelper<false, void, Runnable,
   }
 };
 
-template <typename Runnable, typename BoundWeakPtr, typename A2, typename A3>
+template <typename Runnable, typename A1, typename A2, typename A3>
 struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr, A2, A3)>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr, A2 a2, A3 a3) {
-    if (!weak_ptr.get()) {
+    void(A1, A2, A3)>  {
+  static void MakeItSo(Runnable runnable, A1 a1, A2 a2, A3 a3) {
+    if (!a1.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get(), CallbackForward(a2), CallbackForward(a3));
+
+    runnable.Run(CallbackForward(a1), CallbackForward(a2), CallbackForward(a3));
   }
 };
 
@@ -958,16 +958,15 @@ struct InvokeHelper<false, void, Runnable,
   }
 };
 
-template <typename Runnable, typename BoundWeakPtr, typename A2, typename A3,
-    typename A4>
+template <typename Runnable, typename A1, typename A2, typename A3, typename A4>
 struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr, A2, A3, A4)>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr, A2 a2, A3 a3,
-      A4 a4) {
-    if (!weak_ptr.get()) {
+    void(A1, A2, A3, A4)>  {
+  static void MakeItSo(Runnable runnable, A1 a1, A2 a2, A3 a3, A4 a4) {
+    if (!a1.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get(), CallbackForward(a2), CallbackForward(a3),
+
+    runnable.Run(CallbackForward(a1), CallbackForward(a2), CallbackForward(a3),
         CallbackForward(a4));
   }
 };
@@ -993,16 +992,16 @@ struct InvokeHelper<false, void, Runnable,
   }
 };
 
-template <typename Runnable, typename BoundWeakPtr, typename A2, typename A3,
+template <typename Runnable, typename A1, typename A2, typename A3,
     typename A4, typename A5>
 struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr, A2, A3, A4, A5)>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr, A2 a2, A3 a3,
-      A4 a4, A5 a5) {
-    if (!weak_ptr.get()) {
+    void(A1, A2, A3, A4, A5)>  {
+  static void MakeItSo(Runnable runnable, A1 a1, A2 a2, A3 a3, A4 a4, A5 a5) {
+    if (!a1.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get(), CallbackForward(a2), CallbackForward(a3),
+
+    runnable.Run(CallbackForward(a1), CallbackForward(a2), CallbackForward(a3),
         CallbackForward(a4), CallbackForward(a5));
   }
 };
@@ -1030,16 +1029,17 @@ struct InvokeHelper<false, void, Runnable,
   }
 };
 
-template <typename Runnable, typename BoundWeakPtr, typename A2, typename A3,
+template <typename Runnable, typename A1, typename A2, typename A3,
     typename A4, typename A5, typename A6>
 struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr, A2, A3, A4, A5, A6)>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr, A2 a2, A3 a3,
-      A4 a4, A5 a5, A6 a6) {
-    if (!weak_ptr.get()) {
+    void(A1, A2, A3, A4, A5, A6)>  {
+  static void MakeItSo(Runnable runnable, A1 a1, A2 a2, A3 a3, A4 a4, A5 a5,
+      A6 a6) {
+    if (!a1.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get(), CallbackForward(a2), CallbackForward(a3),
+
+    runnable.Run(CallbackForward(a1), CallbackForward(a2), CallbackForward(a3),
         CallbackForward(a4), CallbackForward(a5), CallbackForward(a6));
   }
 };
@@ -1068,16 +1068,17 @@ struct InvokeHelper<false, void, Runnable,
   }
 };
 
-template <typename Runnable, typename BoundWeakPtr, typename A2, typename A3,
+template <typename Runnable, typename A1, typename A2, typename A3,
     typename A4, typename A5, typename A6, typename A7>
 struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr, A2, A3, A4, A5, A6, A7)>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr, A2 a2, A3 a3,
-      A4 a4, A5 a5, A6 a6, A7 a7) {
-    if (!weak_ptr.get()) {
+    void(A1, A2, A3, A4, A5, A6, A7)>  {
+  static void MakeItSo(Runnable runnable, A1 a1, A2 a2, A3 a3, A4 a4, A5 a5,
+      A6 a6, A7 a7) {
+    if (!a1.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get(), CallbackForward(a2), CallbackForward(a3),
+
+    runnable.Run(CallbackForward(a1), CallbackForward(a2), CallbackForward(a3),
         CallbackForward(a4), CallbackForward(a5), CallbackForward(a6),
         CallbackForward(a7));
   }

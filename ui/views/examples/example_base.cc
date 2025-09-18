@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <stdarg.h>
 
 #include "base/compiler_specific.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
+#include "ui/views/examples/examples_window.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -19,22 +20,25 @@ void LogStatus(const std::string& status);
 
 namespace {
 
-// TODO(oshima): Check if this special container is still necessary.
+// Some of GTK based view classes require NativeWidgetGtk in the view
+// parent chain. This class is used to defer the creation of such
+// views until a NativeWidgetGtk is added to the view hierarchy.
 class ContainerView : public View {
  public:
-  explicit ContainerView(ExampleBase* base)
+  explicit ContainerView(examples::ExampleBase* base)
       : example_view_created_(false),
         example_base_(base) {
   }
 
  private:
   // Overridden from View:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE {
-    View::ViewHierarchyChanged(details);
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE {
+    View::ViewHierarchyChanged(is_add, parent, child);
     // We're not using child == this because a Widget may not be
     // available when this is added to the hierarchy.
-    if (details.is_add && GetWidget() && !example_view_created_) {
+    if (is_add && GetWidget() && !example_view_created_) {
       example_view_created_ = true;
       example_base_->CreateExampleView(this);
     }
@@ -43,7 +47,7 @@ class ContainerView : public View {
   // True if the example view has already been created, or false otherwise.
   bool example_view_created_;
 
-  ExampleBase* example_base_;
+  examples::ExampleBase* example_base_;
 
   DISALLOW_COPY_AND_ASSIGN(ContainerView);
 };

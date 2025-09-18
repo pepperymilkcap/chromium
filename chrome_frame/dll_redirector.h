@@ -11,17 +11,14 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/shared_memory.h"
 #include "base/memory/singleton.h"
+#include "base/shared_memory.h"
 
 // Forward
 namespace ATL {
 class CSecurityAttributes;
 }
-
-namespace base {
 class Version;
-}
 
 // A singleton class that provides a facility to register the version of the
 // current module as the only version that should be loaded system-wide. If
@@ -72,14 +69,14 @@ class DllRedirector {
   virtual HMODULE GetFirstModule();
 
   // Returns the version of the current module or NULL if none can be found.
-  // The caller must free the returned version.
-  virtual base::Version* GetCurrentModuleVersion();
+  // The caller must free the Version.
+  virtual Version* GetCurrentModuleVersion();
 
   // Attempt to load the specified version dll. Finds it by walking up one
   // directory from our current module's location, then appending the newly
   // found version number. The Version class in base will have ensured that we
   // actually have a valid version and not e.g. ..\..\..\..\MyEvilFolder\.
-  virtual HMODULE LoadVersionedModule(base::Version* version);
+  virtual HMODULE LoadVersionedModule(Version* version);
 
   // Builds the necessary SECURITY_ATTRIBUTES to allow low integrity access
   // to an object. Returns true on success, false otherwise.
@@ -94,7 +91,7 @@ class DllRedirector {
   scoped_ptr<base::SharedMemory> shared_memory_;
 
   // The current version of the DLL to be loaded.
-  scoped_ptr<base::Version> dll_version_;
+  scoped_ptr<Version> dll_version_;
 
   // The handle to the first version of this module that was loaded. This
   // may refer to the current module, or another version of the same module

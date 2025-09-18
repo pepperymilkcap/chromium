@@ -91,7 +91,7 @@ static NSMutableDictionary *mockTable;
 {
 	Class realClass = [anObject class];
 	double timestamp = [NSDate timeIntervalSinceReferenceDate];
-	const char *className = [[NSString stringWithFormat:@"%@-%p-%f", realClass, anObject, timestamp] UTF8String];
+	const char *className = [[NSString stringWithFormat:@"%@-%p-%f", realClass, anObject, timestamp] cString]; 
 	Class subclass = objc_allocateClassPair(realClass, className, 0);
 	objc_registerClassPair(subclass);
 	object_setClass(anObject, subclass);

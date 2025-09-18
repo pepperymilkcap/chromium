@@ -4,8 +4,9 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_LOCATION_BAR_IMAGE_DECORATION_H_
 #define CHROME_BROWSER_UI_COCOA_LOCATION_BAR_IMAGE_DECORATION_H_
+#pragma once
 
-#import "base/mac/scoped_nsobject.h"
+#import "base/memory/scoped_nsobject.h"
 #include "chrome/browser/ui/cocoa/location_bar/location_bar_decoration.h"
 
 // |LocationBarDecoration| which sizes and draws itself according to
@@ -27,7 +28,7 @@ class ImageDecoration : public LocationBarDecoration {
   virtual void DrawInFrame(NSRect frame, NSView* control_view) OVERRIDE;
 
  private:
-  base::scoped_nsobject<NSImage> image_;
+  scoped_nsobject<NSImage> image_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageDecoration);
 };

@@ -6,18 +6,19 @@
 
 #include "base/bind.h"
 #include "base/metrics/histogram.h"
+#include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/api/sync_error.h"
+#include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
-#include "components/autofill/core/browser/personal_data_manager.h"
-#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
-#include "sync/api/sync_error.h"
-#include "sync/api/syncable_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 
-using autofill::AutofillWebDataService;
 using content::BrowserThread;
 
 namespace browser_sync {
@@ -26,55 +27,13 @@ AutofillProfileDataTypeController::AutofillProfileDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile,
     ProfileSyncService* sync_service)
-    : NonUIDataTypeController(profile_sync_factory,
-                              profile,
-                              sync_service),
-      personal_data_(NULL),
-      callback_registered_(false) {}
-
-syncer::ModelType AutofillProfileDataTypeController::type() const {
-  return syncer::AUTOFILL_PROFILE;
-}
-
-syncer::ModelSafeGroup
-    AutofillProfileDataTypeController::model_safe_group() const {
-  return syncer::GROUP_DB;
-}
-
-void AutofillProfileDataTypeController::WebDatabaseLoaded() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  OnModelLoaded();
-}
-
-void AutofillProfileDataTypeController::OnPersonalDataChanged() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK_EQ(state(), MODEL_STARTING);
-
-  personal_data_->RemoveObserver(this);
-  autofill::AutofillWebDataService* web_data_service =
-      WebDataServiceFactory::GetAutofillWebDataForProfile(
-          profile(), Profile::EXPLICIT_ACCESS).get();
-
-  if (!web_data_service)
-    return;
-
-  if (web_data_service->IsDatabaseLoaded()) {
-    OnModelLoaded();
-  } else  if (!callback_registered_) {
-     web_data_service->RegisterDBLoadedCallback(base::Bind(
-        &AutofillProfileDataTypeController::WebDatabaseLoaded, this));
-     callback_registered_ = true;
-  }
+    : NewNonFrontendDataTypeController(profile_sync_factory,
+                                       profile,
+                                       sync_service),
+      personal_data_(NULL) {
 }
 
 AutofillProfileDataTypeController::~AutofillProfileDataTypeController() {}
-
-bool AutofillProfileDataTypeController::PostTaskOnBackendThread(
-    const tracked_objects::Location& from_here,
-    const base::Closure& task) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return BrowserThread::PostTask(BrowserThread::DB, from_here, task);
-}
 
 bool AutofillProfileDataTypeController::StartModels() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -82,35 +41,109 @@ bool AutofillProfileDataTypeController::StartModels() {
   // Waiting for the personal data is subtle:  we do this as the PDM resets
   // its cache of unique IDs once it gets loaded. If we were to proceed with
   // association, the local ids in the mappings would wind up colliding.
-  personal_data_ =
-      autofill::PersonalDataManagerFactory::GetForProfile(profile());
+  personal_data_ = PersonalDataManagerFactory::GetForProfile(profile());
   if (!personal_data_->IsDataLoaded()) {
-    personal_data_->AddObserver(this);
+    personal_data_->SetObserver(this);
     return false;
   }
 
-  autofill::AutofillWebDataService* web_data_service =
-      WebDataServiceFactory::GetAutofillWebDataForProfile(
-          profile(), Profile::EXPLICIT_ACCESS).get();
-
-  if (!web_data_service)
-    return false;
-
-  if (web_data_service->IsDatabaseLoaded())
+  web_data_service_ = profile()->GetWebDataService(Profile::IMPLICIT_ACCESS);
+  if (web_data_service_.get() && web_data_service_->IsDatabaseLoaded()) {
     return true;
-
-  if (!callback_registered_) {
-     web_data_service->RegisterDBLoadedCallback(base::Bind(
-        &AutofillProfileDataTypeController::WebDatabaseLoaded, this));
-     callback_registered_ = true;
+  } else {
+    notification_registrar_.Add(this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
+                                content::NotificationService::AllSources());
+    return false;
   }
+}
 
-  return false;
+void AutofillProfileDataTypeController::OnPersonalDataChanged() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(state(), MODEL_STARTING);
+  personal_data_->RemoveObserver(this);
+  web_data_service_ = profile()->GetWebDataService(Profile::IMPLICIT_ACCESS);
+  if (web_data_service_.get() && web_data_service_->IsDatabaseLoaded()) {
+    DoStartAssociationAsync();
+  } else {
+    notification_registrar_.Add(this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
+                                content::NotificationService::AllSources());
+  }
+}
+
+void AutofillProfileDataTypeController::Observe(
+    int notification_type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  notification_registrar_.RemoveAll();
+  DoStartAssociationAsync();
+}
+
+void AutofillProfileDataTypeController::DoStartAssociationAsync() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(state(), MODEL_STARTING);
+  set_state(ASSOCIATING);
+  if (!StartAssociationAsync()) {
+    SyncError error(FROM_HERE,
+                    "Failed to post association task.",
+                    type());
+    StartDoneImpl(ASSOCIATION_FAILED, NOT_RUNNING, error);
+  }
+}
+
+bool AutofillProfileDataTypeController::StartAssociationAsync() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(state(), ASSOCIATING);
+  return BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      base::Bind(&AutofillProfileDataTypeController::StartAssociation,
+                 this));
+}
+
+base::WeakPtr<SyncableService>
+    AutofillProfileDataTypeController::GetWeakPtrToSyncableService() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  return profile_sync_factory()->GetAutofillProfileSyncableService(
+      web_data_service_.get());
 }
 
 void AutofillProfileDataTypeController::StopModels() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(state() == STOPPING || state() == NOT_RUNNING);
+  notification_registrar_.RemoveAll();
   personal_data_->RemoveObserver(this);
+}
+
+void AutofillProfileDataTypeController::StopLocalServiceAsync() {
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      base::Bind(&AutofillProfileDataTypeController::StopLocalService,
+                 this));
+}
+syncable::ModelType AutofillProfileDataTypeController::type() const {
+  return syncable::AUTOFILL_PROFILE;
+}
+
+browser_sync::ModelSafeGroup
+    AutofillProfileDataTypeController::model_safe_group() const {
+  return browser_sync::GROUP_DB;
+}
+
+void AutofillProfileDataTypeController::RecordUnrecoverableError(
+    const tracked_objects::Location& from_here,
+    const std::string& message) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  UMA_HISTOGRAM_COUNTS("Sync.AutofillProfileRunFailures", 1);
+}
+
+void AutofillProfileDataTypeController::RecordAssociationTime(
+    base::TimeDelta time) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  UMA_HISTOGRAM_TIMES("Sync.AutofillProfileAssociationTime", time);
+}
+
+void AutofillProfileDataTypeController::RecordStartFailure(StartResult result) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  UMA_HISTOGRAM_ENUMERATION("Sync.AutofillProfileStartFailures",
+                            result,
+                            MAX_START_RESULT);
 }
 
 }  // namepsace browser_sync

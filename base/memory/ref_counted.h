@@ -4,15 +4,12 @@
 
 #ifndef BASE_MEMORY_REF_COUNTED_H_
 #define BASE_MEMORY_REF_COUNTED_H_
+#pragma once
 
 #include <cassert>
 
 #include "base/atomic_ref_count.h"
 #include "base/base_export.h"
-#include "base/compiler_specific.h"
-#ifndef NDEBUG
-#include "base/logging.h"
-#endif
 #include "base/threading/thread_collision_warner.h"
 
 namespace base {
@@ -21,52 +18,18 @@ namespace subtle {
 
 class BASE_EXPORT RefCountedBase {
  public:
+  static bool ImplementsThreadSafeReferenceCounting() { return false; }
+
   bool HasOneRef() const { return ref_count_ == 1; }
 
  protected:
-  RefCountedBase()
-      : ref_count_(0)
-  #ifndef NDEBUG
-      , in_dtor_(false)
-  #endif
-      {
-  }
+  RefCountedBase();
+  ~RefCountedBase();
 
-  ~RefCountedBase() {
-  #ifndef NDEBUG
-    DCHECK(in_dtor_) << "RefCounted object deleted without calling Release()";
-  #endif
-  }
-
-
-  void AddRef() const {
-    // TODO(maruel): Add back once it doesn't assert 500 times/sec.
-    // Current thread books the critical section "AddRelease"
-    // without release it.
-    // DFAKE_SCOPED_LOCK_THREAD_LOCKED(add_release_);
-  #ifndef NDEBUG
-    DCHECK(!in_dtor_);
-  #endif
-    ++ref_count_;
-  }
+  void AddRef() const;
 
   // Returns true if the object should self-delete.
-  bool Release() const {
-    // TODO(maruel): Add back once it doesn't assert 500 times/sec.
-    // Current thread books the critical section "AddRelease"
-    // without release it.
-    // DFAKE_SCOPED_LOCK_THREAD_LOCKED(add_release_);
-  #ifndef NDEBUG
-    DCHECK(!in_dtor_);
-  #endif
-    if (--ref_count_ == 0) {
-  #ifndef NDEBUG
-      in_dtor_ = true;
-  #endif
-      return true;
-    }
-    return false;
-  }
+  bool Release() const;
 
  private:
   mutable int ref_count_;
@@ -81,6 +44,8 @@ class BASE_EXPORT RefCountedBase {
 
 class BASE_EXPORT RefCountedThreadSafeBase {
  public:
+  static bool ImplementsThreadSafeReferenceCounting() { return true; }
+
   bool HasOneRef() const;
 
  protected:
@@ -120,7 +85,8 @@ class BASE_EXPORT RefCountedThreadSafeBase {
 template <class T>
 class RefCounted : public subtle::RefCountedBase {
  public:
-  RefCounted() {}
+  RefCounted() { }
+  ~RefCounted() { }
 
   void AddRef() const {
     subtle::RefCountedBase::AddRef();
@@ -131,9 +97,6 @@ class RefCounted : public subtle::RefCountedBase {
       delete static_cast<const T*>(this);
     }
   }
-
- protected:
-  ~RefCounted() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RefCounted<T>);
@@ -170,7 +133,8 @@ struct DefaultRefCountedThreadSafeTraits {
 template <class T, typename Traits = DefaultRefCountedThreadSafeTraits<T> >
 class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
  public:
-  RefCountedThreadSafe() {}
+  RefCountedThreadSafe() { }
+  ~RefCountedThreadSafe() { }
 
   void AddRef() const {
     subtle::RefCountedThreadSafeBase::AddRef();
@@ -182,9 +146,6 @@ class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
     }
   }
 
- protected:
-  ~RefCountedThreadSafe() {}
-
  private:
   friend struct DefaultRefCountedThreadSafeTraits<T>;
   static void DeleteInternal(const T* x) { delete x; }
@@ -193,21 +154,16 @@ class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
 };
 
 //
-// A thread-safe wrapper for some piece of data so we can place other
-// things in scoped_refptrs<>.
+// A wrapper for some piece of data so we can place other things in
+// scoped_refptrs<>.
 //
 template<typename T>
-class RefCountedData
-    : public base::RefCountedThreadSafe< base::RefCountedData<T> > {
+class RefCountedData : public base::RefCounted< base::RefCountedData<T> > {
  public:
   RefCountedData() : data() {}
   RefCountedData(const T& in_value) : data(in_value) {}
 
   T data;
-
- private:
-  friend class base::RefCountedThreadSafe<base::RefCountedData<T> >;
-  ~RefCountedData() {}
 };
 
 }  // namespace base
@@ -263,8 +219,6 @@ class RefCountedData
 template <class T>
 class scoped_refptr {
  public:
-  typedef T element_type;
-
   scoped_refptr() : ptr_(NULL) {
   }
 
@@ -290,14 +244,21 @@ class scoped_refptr {
   }
 
   T* get() const { return ptr_; }
-
-  // Allow scoped_refptr<C> to be used in boolean expression
-  // and comparison operations.
   operator T*() const { return ptr_; }
-
   T* operator->() const {
     assert(ptr_ != NULL);
     return ptr_;
+  }
+
+  // Release a pointer.
+  // The return value is the current pointer held by this object.
+  // If this object holds a NULL pointer, the return value is NULL.
+  // After this operation, this object will hold a NULL pointer,
+  // and will not own the object any more.
+  T* release() {
+    T* retVal = ptr_;
+    ptr_ = NULL;
+    return retVal;
   }
 
   scoped_refptr<T>& operator=(T* p) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,27 +10,28 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/password_manager/password_store_change.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 
-using autofill::PasswordForm;
 using content::BrowserThread;
 using std::vector;
+using webkit::forms::PasswordForm;
 
 PasswordStoreX::PasswordStoreX(LoginDatabase* login_db,
                                Profile* profile,
+                               WebDataService* web_data_service,
                                NativeBackend* backend)
-    : PasswordStoreDefault(login_db, profile),
+    : PasswordStoreDefault(login_db, profile, web_data_service),
       backend_(backend), migration_checked_(!backend), allow_fallback_(false) {
 }
 
-PasswordStoreX::~PasswordStoreX() {}
+PasswordStoreX::~PasswordStoreX() {
+}
 
 void PasswordStoreX::AddLoginImpl(const PasswordForm& form) {
   CheckMigration();
@@ -91,7 +92,6 @@ void PasswordStoreX::RemoveLoginsCreatedBetweenImpl(
       changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE,
                                             **it));
     }
-    LogStatsForBulkDeletion(changes.size());
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_LOGINS_CHANGED,
         content::Source<PasswordStore>(this),
@@ -117,26 +117,22 @@ void PasswordStoreX::SortLoginsByOrigin(NativeBackend::PasswordFormList* list) {
   std::sort(list->begin(), list->end(), LoginLessThan());
 }
 
-void PasswordStoreX::GetLoginsImpl(
-    const autofill::PasswordForm& form,
-    AuthorizationPromptPolicy prompt_policy,
-    const ConsumerCallbackRunner& callback_runner) {
+void PasswordStoreX::GetLoginsImpl(GetLoginsRequest* request,
+                                   const PasswordForm& form) {
   CheckMigration();
-  std::vector<autofill::PasswordForm*> matched_forms;
-  if (use_native_backend() && backend_->GetLogins(form, &matched_forms)) {
-    SortLoginsByOrigin(&matched_forms);
-    callback_runner.Run(matched_forms);
+  if (use_native_backend() && backend_->GetLogins(form, &request->value)) {
+    SortLoginsByOrigin(&request->value);
+    ForwardLoginsResult(request);
     // The native backend may succeed and return no data even while locked, if
     // the query did not match anything stored. So we continue to allow fallback
     // until we perform a write operation, or until a read returns actual data.
-    if (matched_forms.size() > 0)
+    if (request->value.size() > 0)
       allow_fallback_ = false;
   } else if (allow_default_store()) {
-    DCHECK(matched_forms.empty());
-    PasswordStoreDefault::GetLoginsImpl(form, prompt_policy, callback_runner);
+    PasswordStoreDefault::GetLoginsImpl(request, form);
   } else {
     // The consumer will be left hanging unless we reply.
-    callback_runner.Run(matched_forms);
+    ForwardLoginsResult(request);
   }
 }
 
@@ -273,14 +269,11 @@ ssize_t PasswordStoreX::MigrateLogins() {
 
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
 // static
-void PasswordStoreX::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
+void PasswordStoreX::RegisterUserPrefs(PrefService* prefs) {
   // Normally we should be on the UI thread here, but in tests we might not.
-  registry->RegisterBooleanPref(
-      prefs::kPasswordsUseLocalProfileId,
-      // default: passwords don't use local ids
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kPasswordsUseLocalProfileId,
+                             false,  // default: passwords don't use local ids
+                             PrefService::UNSYNCABLE_PREF);
 }
 
 // static

@@ -5,18 +5,16 @@
 #include "content/renderer/active_notification_tracker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace content {
-
 TEST(ActiveNotificationTrackerTest, TestLookupAndClear) {
   ActiveNotificationTracker tracker;
 
-  blink::WebNotification notification1;
+  WebKit::WebNotification notification1;
   int id1 = tracker.RegisterNotification(notification1);
 
-  blink::WebNotification notification2;
+  WebKit::WebNotification notification2;
   int id2 = tracker.RegisterNotification(notification2);
 
-  blink::WebNotification result;
+  WebKit::WebNotification result;
   tracker.GetNotification(id1, &result);
   EXPECT_TRUE(result == notification1);
 
@@ -25,5 +23,3 @@ TEST(ActiveNotificationTrackerTest, TestLookupAndClear) {
 
   tracker.Clear();
 }
-
-}  // namespace content

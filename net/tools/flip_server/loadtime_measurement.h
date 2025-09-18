@@ -4,6 +4,7 @@
 
 #ifndef NET_TOOLS_FLIP_SERVER_LOADTIME_MEASUREMENT_H__
 #define NET_TOOLS_FLIP_SERVER_LOADTIME_MEASUREMENT_H__
+#pragma once
 
 #include <errno.h>
 #include <fcntl.h>
@@ -44,7 +45,7 @@ class LoadtimeMeasurement {
     }
     if (action.find("get_total_iteration") == 0) {
       char buffer[16];
-      snprintf(buffer, sizeof(buffer), "%d", num_urls_);
+      snprintf(buffer, 16, "%d", num_urls_);
       output.append(buffer, strlen(buffer));
       return;
     }
@@ -60,8 +61,7 @@ class LoadtimeMeasurement {
     }
     if (action.find("test_complete") == 0) {
       for (std::map<std::string, int>::const_iterator it = loadtimes_.begin();
-           it != loadtimes_.end();
-           ++it) {
+           it != loadtimes_.end(); ++it) {
         LOG(INFO) << it->first << " " << it->second;
       }
       loadtimes_.clear();
@@ -100,8 +100,7 @@ class LoadtimeMeasurement {
     close(fd);
   }
 
-  void split_string(const std::string& str,
-                    char sepa,
+  void split_string(std::string& str, char sepa,
                     std::vector<std::string>* sub_strs) {
     size_t b = 0;
     size_t e = str.find_first_of(sepa, b);
@@ -122,3 +121,4 @@ class LoadtimeMeasurement {
 };
 
 #endif  // NET_TOOLS_FLIP_SERVER_LOADTIME_MEASUREMENT_H__
+

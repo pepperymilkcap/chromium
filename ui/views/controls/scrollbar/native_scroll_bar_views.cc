@@ -5,8 +5,9 @@
 #include "ui/views/controls/scrollbar/native_scroll_bar_views.h"
 
 #include "base/logging.h"
-#include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/path.h"
 #include "ui/views/controls/button/custom_button.h"
 #include "ui/views/controls/focusable_border.h"
@@ -33,17 +34,17 @@ class ScrollBarButton : public BaseScrollBarButton {
   virtual ~ScrollBarButton();
 
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE {
-    return "ScrollBarButton";
+  virtual std::string GetClassName() const OVERRIDE {
+    return "views/ScrollBarButton";
   }
 
  protected:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
  private:
-  ui::NativeTheme::ExtraParams GetNativeThemeParams() const;
-  ui::NativeTheme::Part GetNativeThemePart() const;
-  ui::NativeTheme::State GetNativeThemeState() const;
+  gfx::NativeTheme::ExtraParams GetNativeThemeParams() const;
+  gfx::NativeTheme::Part GetNativeThemePart() const;
+  gfx::NativeTheme::State GetNativeThemeState() const;
 
   Type type_;
 };
@@ -55,17 +56,17 @@ class ScrollBarThumb : public BaseScrollBarThumb {
   virtual ~ScrollBarThumb();
 
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE {
-    return "ScrollBarThumb";
+  virtual std::string GetClassName() const OVERRIDE {
+    return "views/ScrollBarThumb";
   }
 
  protected:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
  private:
-  ui::NativeTheme::ExtraParams GetNativeThemeParams() const;
-  ui::NativeTheme::Part GetNativeThemePart() const;
-  ui::NativeTheme::State GetNativeThemeState() const;
+  gfx::NativeTheme::ExtraParams GetNativeThemeParams() const;
+  gfx::NativeTheme::Part GetNativeThemePart() const;
+  gfx::NativeTheme::State GetNativeThemeState() const;
 
   ScrollBar* scroll_bar_;
 };
@@ -73,35 +74,43 @@ class ScrollBarThumb : public BaseScrollBarThumb {
 /////////////////////////////////////////////////////////////////////////////
 // ScrollBarButton
 
-ScrollBarButton::ScrollBarButton(ButtonListener* listener, Type type)
+ScrollBarButton::ScrollBarButton(
+    ButtonListener* listener,
+    Type type)
     : BaseScrollBarButton(listener),
       type_(type) {
-  SetFocusable(false);
-  SetAccessibilityFocusable(false);
+  set_focusable(false);
+  set_accessibility_focusable(false);
 }
 
 ScrollBarButton::~ScrollBarButton() {
 }
 
 gfx::Size ScrollBarButton::GetPreferredSize() {
-  return GetNativeTheme()->GetPartSize(GetNativeThemePart(),
-                                       GetNativeThemeState(),
-                                       GetNativeThemeParams());
+  const gfx::NativeTheme* native_theme = gfx::NativeTheme::instance();
+  return native_theme->GetPartSize(GetNativeThemePart(),
+                                   GetNativeThemeState(),
+                                   GetNativeThemeParams());
 }
 
 void ScrollBarButton::OnPaint(gfx::Canvas* canvas) {
-  gfx::Rect bounds(GetPreferredSize());
-  GetNativeTheme()->Paint(canvas->sk_canvas(), GetNativeThemePart(),
-                          GetNativeThemeState(), bounds,
-                          GetNativeThemeParams());
+  const gfx::NativeTheme* native_theme = gfx::NativeTheme::instance();
+  gfx::Rect bounds;
+  bounds.set_size(GetPreferredSize());
+
+  native_theme->Paint(canvas->GetSkCanvas(),
+                      GetNativeThemePart(),
+                      GetNativeThemeState(),
+                      bounds,
+                      GetNativeThemeParams());
 }
 
-ui::NativeTheme::ExtraParams
+gfx::NativeTheme::ExtraParams
     ScrollBarButton::GetNativeThemeParams() const {
-  ui::NativeTheme::ExtraParams params;
+  gfx::NativeTheme::ExtraParams params;
 
   switch (state_) {
-    case CustomButton::STATE_HOVERED:
+    case CustomButton::BS_HOT:
       params.scrollbar_arrow.is_hovering = true;
       break;
     default:
@@ -112,39 +121,39 @@ ui::NativeTheme::ExtraParams
   return params;
 }
 
-ui::NativeTheme::Part
+gfx::NativeTheme::Part
     ScrollBarButton::GetNativeThemePart() const {
   switch (type_) {
     case UP:
-      return ui::NativeTheme::kScrollbarUpArrow;
+      return gfx::NativeTheme::kScrollbarUpArrow;
     case DOWN:
-      return ui::NativeTheme::kScrollbarDownArrow;
+      return gfx::NativeTheme::kScrollbarDownArrow;
     case LEFT:
-      return ui::NativeTheme::kScrollbarLeftArrow;
+      return gfx::NativeTheme::kScrollbarLeftArrow;
     case RIGHT:
-      return ui::NativeTheme::kScrollbarRightArrow;
+      return gfx::NativeTheme::kScrollbarRightArrow;
     default:
-      return ui::NativeTheme::kScrollbarUpArrow;
+      return gfx::NativeTheme::kScrollbarUpArrow;
   }
 }
 
-ui::NativeTheme::State
+gfx::NativeTheme::State
     ScrollBarButton::GetNativeThemeState() const {
-  ui::NativeTheme::State state;
+  gfx::NativeTheme::State state;
 
   switch (state_) {
-    case CustomButton::STATE_HOVERED:
-      state = ui::NativeTheme::kHovered;
+    case CustomButton::BS_HOT:
+      state = gfx::NativeTheme::kHovered;
       break;
-    case CustomButton::STATE_PRESSED:
-      state = ui::NativeTheme::kPressed;
+    case CustomButton::BS_PUSHED:
+      state = gfx::NativeTheme::kPressed;
       break;
-    case CustomButton::STATE_DISABLED:
-      state = ui::NativeTheme::kDisabled;
+    case CustomButton::BS_DISABLED:
+      state = gfx::NativeTheme::kDisabled;
       break;
-    case CustomButton::STATE_NORMAL:
+    case CustomButton::BS_NORMAL:
     default:
-      state = ui::NativeTheme::kNormal;
+      state = gfx::NativeTheme::kNormal;
       break;
   }
 
@@ -157,65 +166,68 @@ ui::NativeTheme::State
 ScrollBarThumb::ScrollBarThumb(BaseScrollBar* scroll_bar)
     : BaseScrollBarThumb(scroll_bar),
       scroll_bar_(scroll_bar) {
-  SetFocusable(false);
-  SetAccessibilityFocusable(false);
+  set_focusable(false);
+  set_accessibility_focusable(false);
 }
 
 ScrollBarThumb::~ScrollBarThumb() {
 }
 
 gfx::Size ScrollBarThumb::GetPreferredSize() {
-  return GetNativeTheme()->GetPartSize(GetNativeThemePart(),
-                                       GetNativeThemeState(),
-                                       GetNativeThemeParams());
+  const gfx::NativeTheme* native_theme = gfx::NativeTheme::instance();
+  return native_theme->GetPartSize(GetNativeThemePart(),
+                                   GetNativeThemeState(),
+                                   GetNativeThemeParams());
 }
 
 void ScrollBarThumb::OnPaint(gfx::Canvas* canvas) {
-  const gfx::Rect local_bounds(GetLocalBounds());
-  const ui::NativeTheme::State theme_state = GetNativeThemeState();
-  const ui::NativeTheme::ExtraParams extra_params(GetNativeThemeParams());
-  GetNativeTheme()->Paint(canvas->sk_canvas(),
-                          GetNativeThemePart(),
-                          theme_state,
-                          local_bounds,
-                          extra_params);
-  const ui::NativeTheme::Part gripper_part = scroll_bar_->IsHorizontal() ?
-      ui::NativeTheme::kScrollbarHorizontalGripper :
-      ui::NativeTheme::kScrollbarVerticalGripper;
-  GetNativeTheme()->Paint(canvas->sk_canvas(), gripper_part, theme_state,
-                          local_bounds, extra_params);
+  const gfx::NativeTheme* native_theme = gfx::NativeTheme::instance();
+
+  native_theme->Paint(canvas->GetSkCanvas(),
+                      GetNativeThemePart(),
+                      GetNativeThemeState(),
+                      GetLocalBounds(),
+                      GetNativeThemeParams());
 }
 
-ui::NativeTheme::ExtraParams ScrollBarThumb::GetNativeThemeParams() const {
-  // This gives the behavior we want.
-  ui::NativeTheme::ExtraParams params;
-  params.scrollbar_thumb.is_hovering =
-      (GetState() != CustomButton::STATE_HOVERED);
+gfx::NativeTheme::ExtraParams
+    ScrollBarThumb::GetNativeThemeParams() const {
+  gfx::NativeTheme::ExtraParams params;
+
+  switch (GetState()) {
+    case CustomButton::BS_HOT:
+      params.scrollbar_thumb.is_hovering = true;
+      break;
+    default:
+      params.scrollbar_thumb.is_hovering = false;
+      break;
+  }
+
   return params;
 }
 
-ui::NativeTheme::Part ScrollBarThumb::GetNativeThemePart() const {
+gfx::NativeTheme::Part ScrollBarThumb::GetNativeThemePart() const {
   if (scroll_bar_->IsHorizontal())
-    return ui::NativeTheme::kScrollbarHorizontalThumb;
-  return ui::NativeTheme::kScrollbarVerticalThumb;
+    return gfx::NativeTheme::kScrollbarHorizontalThumb;
+  return gfx::NativeTheme::kScrollbarVerticalThumb;
 }
 
-ui::NativeTheme::State ScrollBarThumb::GetNativeThemeState() const {
-  ui::NativeTheme::State state;
+gfx::NativeTheme::State ScrollBarThumb::GetNativeThemeState() const {
+  gfx::NativeTheme::State state;
 
   switch (GetState()) {
-    case CustomButton::STATE_HOVERED:
-      state = ui::NativeTheme::kHovered;
+    case CustomButton::BS_HOT:
+      state = gfx::NativeTheme::kHovered;
       break;
-    case CustomButton::STATE_PRESSED:
-      state = ui::NativeTheme::kPressed;
+    case CustomButton::BS_PUSHED:
+      state = gfx::NativeTheme::kPressed;
       break;
-    case CustomButton::STATE_DISABLED:
-      state = ui::NativeTheme::kDisabled;
+    case CustomButton::BS_DISABLED:
+      state = gfx::NativeTheme::kDisabled;
       break;
-    case CustomButton::STATE_NORMAL:
+    case CustomButton::BS_NORMAL:
     default:
-      state = ui::NativeTheme::kNormal;
+      state = gfx::NativeTheme::kNormal;
       break;
   }
 
@@ -227,7 +239,8 @@ ui::NativeTheme::State ScrollBarThumb::GetNativeThemeState() const {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeScrollBarViews, public:
 
-const char NativeScrollBarViews::kViewClassName[] = "NativeScrollBarViews";
+const char NativeScrollBarViews::kViewClassName[] =
+    "views/NativeScrollBarViews";
 
 NativeScrollBarViews::NativeScrollBarViews(NativeScrollBar* scroll_bar)
     : BaseScrollBar(scroll_bar->IsHorizontal(),
@@ -239,15 +252,15 @@ NativeScrollBarViews::NativeScrollBarViews(NativeScrollBar* scroll_bar)
     prev_button_ = new ScrollBarButton(this, ScrollBarButton::LEFT);
     next_button_ = new ScrollBarButton(this, ScrollBarButton::RIGHT);
 
-    part_ = ui::NativeTheme::kScrollbarHorizontalTrack;
+    part_ = gfx::NativeTheme::kScrollbarHorizontalTrack;
   } else {
     prev_button_ = new ScrollBarButton(this, ScrollBarButton::UP);
     next_button_ = new ScrollBarButton(this, ScrollBarButton::DOWN);
 
-    part_ = ui::NativeTheme::kScrollbarVerticalTrack;
+    part_ = gfx::NativeTheme::kScrollbarVerticalTrack;
   }
 
-  state_ = ui::NativeTheme::kNormal;
+  state_ = gfx::NativeTheme::kNormal;
 
   AddChildView(prev_button_);
   AddChildView(next_button_);
@@ -278,6 +291,7 @@ void NativeScrollBarViews::Layout() {
 }
 
 void NativeScrollBarViews::OnPaint(gfx::Canvas* canvas) {
+  const gfx::NativeTheme* native_theme = gfx::NativeTheme::instance();
   gfx::Rect bounds = GetTrackBounds();
 
   if (bounds.IsEmpty())
@@ -287,19 +301,22 @@ void NativeScrollBarViews::OnPaint(gfx::Canvas* canvas) {
   params_.scrollbar_track.track_y = bounds.y();
   params_.scrollbar_track.track_width = bounds.width();
   params_.scrollbar_track.track_height = bounds.height();
-  params_.scrollbar_track.classic_state = 0;
 
-  GetNativeTheme()->Paint(canvas->sk_canvas(), part_, state_, bounds, params_);
+
+  native_theme->Paint(canvas->GetSkCanvas(),
+                      part_,
+                      state_,
+                      bounds,
+                      params_);
 }
 
 gfx::Size NativeScrollBarViews::GetPreferredSize() {
-  const ui::NativeTheme* theme = native_scroll_bar_->GetNativeTheme();
   if (native_scroll_bar_->IsHorizontal())
-    return gfx::Size(0, GetHorizontalScrollBarHeight(theme));
-  return gfx::Size(GetVerticalScrollBarWidth(theme), 0);
+    return gfx::Size(0, GetHorizontalScrollBarHeight());
+  return gfx::Size(GetVerticalScrollBarWidth(), 0);
 }
 
-const char* NativeScrollBarViews::GetClassName() const {
+std::string NativeScrollBarViews::GetClassName() const {
   return kViewClassName;
 }
 
@@ -322,7 +339,7 @@ int NativeScrollBarViews::GetScrollIncrement(bool is_page, bool is_positive) {
 // BaseButton::ButtonListener overrides:
 
 void NativeScrollBarViews::ButtonPressed(Button* sender,
-                                         const ui::Event& event) {
+                                         const views::Event& event) {
   if (sender == prev_button_) {
     ScrollByAmount(SCROLL_PREV_LINE);
   } else if (sender == next_button_) {
@@ -368,6 +385,7 @@ gfx::Rect NativeScrollBarViews::GetTrackBounds() const {
   return bounds;
 }
 
+#if defined(USE_WAYLAND) || defined(USE_AURA)
 ////////////////////////////////////////////////////////////////////////////////
 // NativewScrollBarWrapper, public:
 
@@ -378,47 +396,46 @@ NativeScrollBarWrapper* NativeScrollBarWrapper::CreateWrapper(
 }
 
 // static
-int NativeScrollBarWrapper::GetHorizontalScrollBarHeight(
-    const ui::NativeTheme* theme) {
-  if (!theme)
-    theme = ui::NativeTheme::instance();
-  ui::NativeTheme::ExtraParams button_params;
+int NativeScrollBarWrapper::GetHorizontalScrollBarHeight() {
+  const gfx::NativeTheme* native_theme = gfx::NativeTheme::instance();
+
+  gfx::NativeTheme::ExtraParams button_params;
   button_params.scrollbar_arrow.is_hovering = false;
-  gfx::Size button_size = theme->GetPartSize(
-      ui::NativeTheme::kScrollbarLeftArrow,
-      ui::NativeTheme::kNormal,
+  gfx::Size button_size = native_theme->GetPartSize(
+      gfx::NativeTheme::kScrollbarLeftArrow,
+      gfx::NativeTheme::kNormal,
       button_params);
 
-  ui::NativeTheme::ExtraParams thumb_params;
+  gfx::NativeTheme::ExtraParams thumb_params;
   thumb_params.scrollbar_thumb.is_hovering = false;
-  gfx::Size track_size = theme->GetPartSize(
-      ui::NativeTheme::kScrollbarHorizontalThumb,
-      ui::NativeTheme::kNormal,
+  gfx::Size track_size = native_theme->GetPartSize(
+      gfx::NativeTheme::kScrollbarHorizontalThumb,
+      gfx::NativeTheme::kNormal,
       thumb_params);
 
   return std::max(track_size.height(), button_size.height());
 }
 
 // static
-int NativeScrollBarWrapper::GetVerticalScrollBarWidth(
-    const ui::NativeTheme* theme) {
-  if (!theme)
-    theme = ui::NativeTheme::instance();
-  ui::NativeTheme::ExtraParams button_params;
+int NativeScrollBarWrapper::GetVerticalScrollBarWidth() {
+  const gfx::NativeTheme* native_theme = gfx::NativeTheme::instance();
+
+  gfx::NativeTheme::ExtraParams button_params;
   button_params.scrollbar_arrow.is_hovering = false;
-  gfx::Size button_size = theme->GetPartSize(
-      ui::NativeTheme::kScrollbarUpArrow,
-      ui::NativeTheme::kNormal,
+  gfx::Size button_size = native_theme->GetPartSize(
+      gfx::NativeTheme::kScrollbarUpArrow,
+      gfx::NativeTheme::kNormal,
       button_params);
 
-  ui::NativeTheme::ExtraParams thumb_params;
+  gfx::NativeTheme::ExtraParams thumb_params;
   thumb_params.scrollbar_thumb.is_hovering = false;
-  gfx::Size track_size = theme->GetPartSize(
-      ui::NativeTheme::kScrollbarVerticalThumb,
-      ui::NativeTheme::kNormal,
+  gfx::Size track_size = native_theme->GetPartSize(
+      gfx::NativeTheme::kScrollbarVerticalThumb,
+      gfx::NativeTheme::kNormal,
       thumb_params);
 
   return std::max(track_size.width(), button_size.width());
 }
+#endif
 
 }  // namespace views

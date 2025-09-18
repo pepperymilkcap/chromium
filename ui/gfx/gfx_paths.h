@@ -4,8 +4,9 @@
 
 #ifndef UI_GFX_GFX_PATHS_H_
 #define UI_GFX_GFX_PATHS_H_
+#pragma once
 
-#include "ui/gfx/gfx_export.h"
+#include "ui/base/ui_export.h"
 
 // This file declares path keys for the app module.  These can be used with
 // the PathService to access various special directories and files.
@@ -22,7 +23,7 @@ enum {
 };
 
 // Call once to register the provider for the path keys defined above.
-GFX_EXPORT void RegisterPathProvider();
+UI_EXPORT void RegisterPathProvider();
 
 }  // namespace gfx
 

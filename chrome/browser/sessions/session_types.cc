@@ -1,15 +1,106 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sessions/session_types.h"
 
-#include "base/basictypes.h"
-#include "base/stl_util.h"
-#include "chrome/browser/sessions/session_command.h"
+#include "base/string_util.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 
-using sessions::SerializedNavigationEntry;
+using content::NavigationEntry;
+
+// TabNavigation --------------------------------------------------------------
+
+TabNavigation::TabNavigation()
+    : transition_(content::PAGE_TRANSITION_TYPED),
+      type_mask_(0),
+      index_(-1) {
+}
+
+TabNavigation::TabNavigation(int index,
+                             const GURL& virtual_url,
+                             const content::Referrer& referrer,
+                             const string16& title,
+                             const std::string& state,
+                             content::PageTransition transition)
+    : virtual_url_(virtual_url),
+      referrer_(referrer),
+      title_(title),
+      state_(state),
+      transition_(transition),
+      type_mask_(0),
+      index_(index) {
+}
+
+TabNavigation::TabNavigation(const TabNavigation& tab)
+    : virtual_url_(tab.virtual_url_),
+      referrer_(tab.referrer_),
+      title_(tab.title_),
+      state_(tab.state_),
+      transition_(tab.transition_),
+      type_mask_(tab.type_mask_),
+      index_(tab.index_) {
+}
+
+TabNavigation::~TabNavigation() {
+}
+
+TabNavigation& TabNavigation::operator=(const TabNavigation& tab) {
+  virtual_url_ = tab.virtual_url_;
+  referrer_ = tab.referrer_;
+  title_ = tab.title_;
+  state_ = tab.state_;
+  transition_ = tab.transition_;
+  type_mask_ = tab.type_mask_;
+  index_ = tab.index_;
+  return *this;
+}
+
+// static
+NavigationEntry* TabNavigation::ToNavigationEntry(
+    int page_id, Profile *profile) const {
+  NavigationEntry* entry = content::NavigationController::CreateNavigationEntry(
+      virtual_url_,
+      referrer_,
+      // Use a transition type of reload so that we don't incorrectly
+      // increase the typed count.
+      content::PAGE_TRANSITION_RELOAD,
+      false,
+      // The extra headers are not sync'ed across sessions.
+      std::string(),
+      profile);
+
+  entry->SetPageID(page_id);
+  entry->SetTitle(title_);
+  entry->SetContentState(state_);
+  entry->SetHasPostData(type_mask_ & TabNavigation::HAS_POST_DATA);
+
+  return entry;
+}
+
+void TabNavigation::SetFromNavigationEntry(const NavigationEntry& entry) {
+  virtual_url_ = entry.GetVirtualURL();
+  referrer_ = entry.GetReferrer();
+  title_ = entry.GetTitle();
+  state_ = entry.GetContentState();
+  transition_ = entry.GetTransitionType();
+  type_mask_ = entry.GetHasPostData() ? TabNavigation::HAS_POST_DATA : 0;
+}
+
+// static
+void TabNavigation::CreateNavigationEntriesFromTabNavigations(
+    Profile* profile,
+    const std::vector<TabNavigation>& navigations,
+    std::vector<NavigationEntry*>* entries) {
+  int page_id = 0;
+  for (std::vector<TabNavigation>::const_iterator i =
+           navigations.begin(); i != navigations.end(); ++i, ++page_id) {
+    entries->push_back(i->ToNavigationEntry(page_id, profile));
+  }
+}
 
 // SessionTab -----------------------------------------------------------------
 
@@ -20,39 +111,6 @@ SessionTab::SessionTab()
 }
 
 SessionTab::~SessionTab() {
-}
-
-void SessionTab::SetFromSyncData(const sync_pb::SessionTab& sync_data,
-                                 base::Time timestamp) {
-  window_id.set_id(sync_data.window_id());
-  tab_id.set_id(sync_data.tab_id());
-  tab_visual_index = sync_data.tab_visual_index();
-  current_navigation_index = sync_data.current_navigation_index();
-  pinned = sync_data.pinned();
-  extension_app_id = sync_data.extension_app_id();
-  user_agent_override.clear();
-  this->timestamp = timestamp;
-  navigations.clear();
-  for (int i = 0; i < sync_data.navigation_size(); ++i) {
-    navigations.push_back(
-        SerializedNavigationEntry::FromSyncData(i, sync_data.navigation(i)));
-  }
-  session_storage_persistent_id.clear();
-}
-
-sync_pb::SessionTab SessionTab::ToSyncData() const {
-  sync_pb::SessionTab sync_data;
-  sync_data.set_tab_id(tab_id.id());
-  sync_data.set_window_id(window_id.id());
-  sync_data.set_tab_visual_index(tab_visual_index);
-  sync_data.set_current_navigation_index(current_navigation_index);
-  sync_data.set_pinned(pinned);
-  sync_data.set_extension_app_id(extension_app_id);
-  for (std::vector<SerializedNavigationEntry>::const_iterator
-           it = navigations.begin(); it != navigations.end(); ++it) {
-    *sync_data.add_navigation() = it->ToSyncData();
-  }
-  return sync_data;
 }
 
 // SessionWindow ---------------------------------------------------------------
@@ -66,27 +124,4 @@ SessionWindow::SessionWindow()
 
 SessionWindow::~SessionWindow() {
   STLDeleteElements(&tabs);
-}
-
-sync_pb::SessionWindow SessionWindow::ToSyncData() const {
-  sync_pb::SessionWindow sync_data;
-  sync_data.set_window_id(window_id.id());
-  sync_data.set_selected_tab_index(selected_tab_index);
-  switch (type) {
-    case Browser::TYPE_TABBED:
-      sync_data.set_browser_type(
-          sync_pb::SessionWindow_BrowserType_TYPE_TABBED);
-      break;
-    case Browser::TYPE_POPUP:
-      sync_data.set_browser_type(
-        sync_pb::SessionWindow_BrowserType_TYPE_POPUP);
-      break;
-    default:
-      NOTREACHED() << "Unhandled browser type.";
-  }
-
-  for (size_t i = 0; i < tabs.size(); i++)
-    sync_data.add_tab(tabs[i]->tab_id.id());
-
-  return sync_data;
 }

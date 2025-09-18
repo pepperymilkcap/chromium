@@ -5,22 +5,14 @@
 #include "ui/gfx/icon_util.h"
 
 #include "base/file_util.h"
-#include "base/files/important_file_writer.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/win/resource_util.h"
-#include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_handle.h"
-#include "base/win/scoped_hdc.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/gfx/gdi_util.h"
-#include "ui/gfx/image/image.h"
-#include "ui/gfx/image/image_family.h"
 #include "ui/gfx/size.h"
 
 namespace {
-
 struct ScopedICONINFO : ICONINFO {
   ScopedICONINFO() {
     hbmColor = NULL;
@@ -34,116 +26,17 @@ struct ScopedICONINFO : ICONINFO {
       ::DeleteObject(hbmMask);
   }
 };
-
-// Creates a new ImageFamily, |resized_image_family|, based on the images in
-// |image_family|, but containing images of specific dimensions desirable for
-// Windows icons. For each desired image dimension, it chooses the most
-// appropriate image for that size, and resizes it to the desired size.
-// Returns true on success, false on failure. Failure can occur if
-// |image_family| is empty, all images in the family have size 0x0, or an image
-// has no allocated pixel data.
-// |resized_image_family| must be empty.
-bool BuildResizedImageFamily(const gfx::ImageFamily& image_family,
-                             gfx::ImageFamily* resized_image_family) {
-  DCHECK(resized_image_family);
-  DCHECK(resized_image_family->empty());
-
-  for (size_t i = 0; i < IconUtil::kNumIconDimensions; ++i) {
-    int dimension = IconUtil::kIconDimensions[i];
-    gfx::Size size(dimension, dimension);
-    const gfx::Image* best = image_family.GetBest(size);
-    if (!best || best->IsEmpty()) {
-      // Either |image_family| is empty, or all images have size 0x0.
-      return false;
-    }
-
-    // Optimize for the "Large icons" view in Windows Vista+. This view displays
-    // icons at full size if only if there is a 256x256 (kLargeIconSize) image
-    // in the .ico file. Otherwise, it shrinks icons to 48x48 (kMediumIconSize).
-    if (dimension > IconUtil::kMediumIconSize &&
-        best->Width() <= IconUtil::kMediumIconSize &&
-        best->Height() <= IconUtil::kMediumIconSize) {
-      // There is no source icon larger than 48x48, so do not create any
-      // images larger than 48x48. kIconDimensions is sorted in ascending
-      // order, so it is safe to break here.
-      break;
-    }
-
-    if (best->Size() == size) {
-      resized_image_family->Add(*best);
-    } else {
-      // There is no |dimension|x|dimension| source image.
-      // Resize this one to the desired size, and insert it.
-      SkBitmap best_bitmap = best->AsBitmap();
-      // Only kARGB_8888 images are supported.
-      // This will also filter out images with no pixels.
-      if (best_bitmap.config() != SkBitmap::kARGB_8888_Config)
-        return false;
-      SkBitmap resized_bitmap = skia::ImageOperations::Resize(
-          best_bitmap, skia::ImageOperations::RESIZE_LANCZOS3,
-          dimension, dimension);
-      resized_image_family->Add(gfx::Image::CreateFrom1xBitmap(resized_bitmap));
-    }
-  }
-  return true;
 }
 
-// Creates a set of bitmaps from an image family.
-// All images smaller than 256x256 are converted to SkBitmaps, and inserted into
-// |bitmaps| in order of aspect ratio (thinnest to widest), and then ascending
-// size order. If an image of exactly 256x256 is specified, it is converted into
-// PNG format and stored in |png_bytes|. Images with width or height larger than
-// 256 are ignored.
-// |bitmaps| must be an empty vector, and not NULL.
-// Returns true on success, false on failure. This fails if any image in
-// |image_family| is not a 32-bit ARGB image, or is otherwise invalid.
-bool ConvertImageFamilyToBitmaps(
-    const gfx::ImageFamily& image_family,
-    std::vector<SkBitmap>* bitmaps,
-    scoped_refptr<base::RefCountedMemory>* png_bytes) {
-  DCHECK(bitmaps != NULL);
-  DCHECK(bitmaps->empty());
-
-  for (gfx::ImageFamily::const_iterator it = image_family.begin();
-       it != image_family.end(); ++it) {
-    const gfx::Image& image = *it;
-
-    // All images should have one of the kIconDimensions sizes.
-    DCHECK_GT(image.Width(), 0);
-    DCHECK_LE(image.Width(), IconUtil::kLargeIconSize);
-    DCHECK_GT(image.Height(), 0);
-    DCHECK_LE(image.Height(), IconUtil::kLargeIconSize);
-
-    SkBitmap bitmap = image.AsBitmap();
-
-    // Only 32 bit ARGB bitmaps are supported. We also make sure the bitmap has
-    // been properly initialized.
-    SkAutoLockPixels bitmap_lock(bitmap);
-    if ((bitmap.config() != SkBitmap::kARGB_8888_Config) ||
-        (bitmap.getPixels() == NULL)) {
-      return false;
-    }
-
-    // Special case: Icons exactly 256x256 are stored in PNG format.
-    if (image.Width() == IconUtil::kLargeIconSize &&
-        image.Height() == IconUtil::kLargeIconSize) {
-      *png_bytes = image.As1xPNGBytes();
-    } else {
-      bitmaps->push_back(bitmap);
-    }
-  }
-
-  return true;
-}
-
-}  // namespace
-
+// Defining the dimensions for the icon images. We store only one value because
+// we always resize to a square image; that is, the value 48 means that we are
+// going to resize the given bitmap to a 48 by 48 pixels bitmap.
+//
 // The icon images appear in the icon file in same order in which their
-// corresponding dimensions appear in this array, so it is important to keep
-// this array sorted. Also note that the maximum icon image size we can handle
-// is 256 by 256. See:
-// http://msdn.microsoft.com/en-us/library/windows/desktop/aa511280.aspx#size
-const int IconUtil::kIconDimensions[] = {
+// corresponding dimensions appear in the |icon_dimensions_| array, so it is
+// important to keep this array sorted. Also note that the maximum icon image
+// size we can handle is 255 by 255.
+const int IconUtil::icon_dimensions_[] = {
   8,    // Recommended by the MSDN as a nice to have icon size.
   10,   // Used by the Shell (e.g. for shortcuts).
   14,   // Recommended by the MSDN as a nice to have icon size.
@@ -155,18 +48,14 @@ const int IconUtil::kIconDimensions[] = {
   48,   // Alt+Tab icon size.
   64,   // Recommended by the MSDN as a nice to have icon size.
   96,   // Recommended by the MSDN as a nice to have icon size.
-  128,  // Used by the Shell (e.g. for shortcuts).
-  256   // Used by Vista onwards for large icons.
+  128   // Used by the Shell (e.g. for shortcuts).
 };
-
-const size_t IconUtil::kNumIconDimensions = arraysize(kIconDimensions);
-const size_t IconUtil::kNumIconDimensionsUpToMediumSize = 9;
 
 HICON IconUtil::CreateHICONFromSkBitmap(const SkBitmap& bitmap) {
   // Only 32 bit ARGB bitmaps are supported. We also try to perform as many
   // validations as we can on the bitmap.
   SkAutoLockPixels bitmap_lock(bitmap);
-  if ((bitmap.config() != SkBitmap::kARGB_8888_Config) ||
+  if ((bitmap.getConfig() != SkBitmap::kARGB_8888_Config) ||
       (bitmap.width() <= 0) || (bitmap.height() <= 0) ||
       (bitmap.getPixels() == NULL))
     return NULL;
@@ -198,7 +87,7 @@ HICON IconUtil::CreateHICONFromSkBitmap(const SkBitmap& bitmap) {
       static_cast<const uint32*>(bitmap.getPixels()),
       bitmap.width() * bitmap.height());
 
-  scoped_ptr<uint8[]> mask_bits;
+  scoped_array<uint8> mask_bits;
   if (!bitmap_has_alpha_channel) {
     // Bytes per line with paddings to make it word alignment.
     size_t bytes_per_line = (bitmap.width() + 0xF) / 16 * 2;
@@ -239,63 +128,6 @@ SkBitmap* IconUtil::CreateSkBitmapFromHICON(HICON icon, const gfx::Size& s) {
   return new SkBitmap(CreateSkBitmapFromHICONHelper(icon, s));
 }
 
-scoped_ptr<SkBitmap> IconUtil::CreateSkBitmapFromIconResource(HMODULE module,
-                                                              int resource_id,
-                                                              int size) {
-  DCHECK_LE(size, kLargeIconSize);
-
-  // For everything except the Vista+ 256x256 icons, use |LoadImage()|.
-  if (size != kLargeIconSize) {
-    HICON icon_handle =
-        static_cast<HICON>(LoadImage(module, MAKEINTRESOURCE(resource_id),
-                                     IMAGE_ICON, size, size,
-                                     LR_DEFAULTCOLOR | LR_DEFAULTSIZE));
-    scoped_ptr<SkBitmap> bitmap(IconUtil::CreateSkBitmapFromHICON(icon_handle));
-    DestroyIcon(icon_handle);
-    return bitmap.Pass();
-  }
-
-  // For Vista+ 256x256 PNG icons, read the resource directly and find
-  // the corresponding icon entry to get its PNG bytes.
-  void* icon_dir_data = NULL;
-  size_t icon_dir_size = 0;
-  if (!base::win::GetResourceFromModule(module, resource_id, RT_GROUP_ICON,
-                                        &icon_dir_data, &icon_dir_size)) {
-    return scoped_ptr<SkBitmap>();
-  }
-  DCHECK(icon_dir_data);
-  DCHECK_GE(icon_dir_size, sizeof(GRPICONDIR));
-
-  const GRPICONDIR* icon_dir =
-      reinterpret_cast<const GRPICONDIR*>(icon_dir_data);
-  const GRPICONDIRENTRY* large_icon_entry = NULL;
-  for (size_t i = 0; i < icon_dir->idCount; ++i) {
-    const GRPICONDIRENTRY* entry = &icon_dir->idEntries[i];
-    // 256x256 icons are stored with width and height set to 0.
-    // See: http://en.wikipedia.org/wiki/ICO_(file_format)
-    if (entry->bWidth == 0 && entry->bHeight == 0) {
-      large_icon_entry = entry;
-      break;
-    }
-  }
-  if (!large_icon_entry)
-    return scoped_ptr<SkBitmap>();
-
-  void* png_data = NULL;
-  size_t png_size = 0;
-  if (!base::win::GetResourceFromModule(module, large_icon_entry->nID, RT_ICON,
-                                        &png_data, &png_size)) {
-    return scoped_ptr<SkBitmap>();
-  }
-  DCHECK(png_data);
-  DCHECK_EQ(png_size, large_icon_entry->dwBytesInRes);
-
-  const unsigned char* png_bytes =
-      reinterpret_cast<const unsigned char*>(png_data);
-  gfx::Image image = gfx::Image::CreateFrom1xPNGBytes(png_bytes, png_size);
-  return scoped_ptr<SkBitmap>(new SkBitmap(image.AsBitmap()));
-}
-
 SkBitmap* IconUtil::CreateSkBitmapFromHICON(HICON icon) {
   // We start with validating parameters.
   if (!icon)
@@ -312,56 +144,6 @@ SkBitmap* IconUtil::CreateSkBitmapFromHICON(HICON icon) {
 
   gfx::Size icon_size(bitmap_info.bmWidth, bitmap_info.bmHeight);
   return new SkBitmap(CreateSkBitmapFromHICONHelper(icon, icon_size));
-}
-
-HICON IconUtil::CreateCursorFromDIB(const gfx::Size& icon_size,
-                                    const gfx::Point& hotspot,
-                                    const void* dib_bits,
-                                    size_t dib_size) {
-  BITMAPINFO icon_bitmap_info = {0};
-  gfx::CreateBitmapHeader(
-      icon_size.width(),
-      icon_size.height(),
-      reinterpret_cast<BITMAPINFOHEADER*>(&icon_bitmap_info));
-
-  base::win::ScopedGetDC dc(NULL);
-  base::win::ScopedCreateDC working_dc(CreateCompatibleDC(dc));
-  base::win::ScopedGDIObject<HBITMAP> bitmap_handle(
-      CreateDIBSection(dc,
-                       &icon_bitmap_info,
-                       DIB_RGB_COLORS,
-                       0,
-                       0,
-                       0));
-  if (dib_size > 0) {
-    SetDIBits(0,
-              bitmap_handle,
-              0,
-              icon_size.height(),
-              dib_bits,
-              &icon_bitmap_info,
-              DIB_RGB_COLORS);
-  }
-
-  HBITMAP old_bitmap = reinterpret_cast<HBITMAP>(
-      SelectObject(working_dc, bitmap_handle));
-  SetBkMode(working_dc, TRANSPARENT);
-  SelectObject(working_dc, old_bitmap);
-
-  base::win::ScopedGDIObject<HBITMAP> mask(
-      CreateBitmap(icon_size.width(),
-                   icon_size.height(),
-                   1,
-                   1,
-                   NULL));
-  ICONINFO ii = {0};
-  ii.fIcon = FALSE;
-  ii.xHotspot = hotspot.x();
-  ii.yHotspot = hotspot.y();
-  ii.hbmMask = mask;
-  ii.hbmColor = bitmap_handle;
-
-  return CreateIconIndirect(&ii);
 }
 
 SkBitmap IconUtil::CreateSkBitmapFromHICONHelper(HICON icon,
@@ -413,7 +195,8 @@ SkBitmap IconUtil::CreateSkBitmapFromHICONHelper(HICON icon,
 
   // Capture boolean opacity. We may not use it if we find out the bitmap has
   // an alpha channel.
-  scoped_ptr<bool[]> opaque(new bool[num_pixels]);
+  bool* opaque = new bool[num_pixels];
+  DCHECK(opaque);
   for (size_t i = 0; i < num_pixels; ++i)
     opaque[i] = !bits[i];
 
@@ -439,6 +222,7 @@ SkBitmap IconUtil::CreateSkBitmapFromHICONHelper(HICON icon,
     }
   }
 
+  delete [] opaque;
   ::SelectObject(dib_dc, old_obj);
   ::DeleteObject(dib);
   ::DeleteDC(dib_dc);
@@ -446,50 +230,49 @@ SkBitmap IconUtil::CreateSkBitmapFromHICONHelper(HICON icon,
   return bitmap;
 }
 
-// static
-bool IconUtil::CreateIconFileFromImageFamily(
-    const gfx::ImageFamily& image_family,
-    const base::FilePath& icon_path) {
+bool IconUtil::CreateIconFileFromSkBitmap(const SkBitmap& bitmap,
+                                          const FilePath& icon_path) {
+  // Only 32 bit ARGB bitmaps are supported. We also make sure the bitmap has
+  // been properly initialized.
+  SkAutoLockPixels bitmap_lock(bitmap);
+  if ((bitmap.getConfig() != SkBitmap::kARGB_8888_Config) ||
+      (bitmap.height() <= 0) || (bitmap.width() <= 0) ||
+      (bitmap.getPixels() == NULL))
+    return false;
+
+  // We start by creating the file.
+  base::win::ScopedHandle icon_file(::CreateFile(icon_path.value().c_str(),
+       GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL));
+
+  if (!icon_file.IsValid())
+    return false;
+
   // Creating a set of bitmaps corresponding to the icon images we'll end up
-  // storing in the icon file. Each bitmap is created by resizing the most
-  // appropriate image from |image_family| to the desired size.
-  gfx::ImageFamily resized_image_family;
-  if (!BuildResizedImageFamily(image_family, &resized_image_family))
-    return false;
-
+  // storing in the icon file. Each bitmap is created by resizing the given
+  // bitmap to the desired size.
   std::vector<SkBitmap> bitmaps;
-  scoped_refptr<base::RefCountedMemory> png_bytes;
-  if (!ConvertImageFamilyToBitmaps(resized_image_family, &bitmaps, &png_bytes))
-    return false;
-
-  // Guaranteed true because BuildResizedImageFamily will provide at least one
-  // image < 256x256.
+  CreateResizedBitmapSet(bitmap, &bitmaps);
   DCHECK(!bitmaps.empty());
-  size_t bitmap_count = bitmaps.size();  // Not including PNG image.
-  // Including PNG image, if any.
-  size_t image_count = bitmap_count + (png_bytes.get() ? 1 : 0);
+  size_t bitmap_count = bitmaps.size();
 
   // Computing the total size of the buffer we need in order to store the
   // images in the desired icon format.
   size_t buffer_size = ComputeIconFileBufferSize(bitmaps);
-  // Account for the bytes needed for the PNG entry.
-  if (png_bytes.get())
-    buffer_size += sizeof(ICONDIRENTRY) + png_bytes->size();
+  unsigned char* buffer = new unsigned char[buffer_size];
+  DCHECK(buffer != NULL);
+  memset(buffer, 0, buffer_size);
 
   // Setting the information in the structures residing within the buffer.
   // First, we set the information which doesn't require iterating through the
   // bitmap set and then we set the bitmap specific structures. In the latter
   // step we also copy the actual bits.
-  std::vector<uint8> buffer(buffer_size);
-  ICONDIR* icon_dir = reinterpret_cast<ICONDIR*>(&buffer[0]);
+  ICONDIR* icon_dir = reinterpret_cast<ICONDIR*>(buffer);
   icon_dir->idType = kResourceTypeIcon;
-  icon_dir->idCount = static_cast<WORD>(image_count);
-  // - 1 because there is already one ICONDIRENTRY in ICONDIR.
-  size_t icon_dir_count = image_count - 1;
-
+  icon_dir->idCount = bitmap_count;
+  size_t icon_dir_count = bitmap_count - 1;  // Note DCHECK(!bitmaps.empty())!
   size_t offset = sizeof(ICONDIR) + (sizeof(ICONDIRENTRY) * icon_dir_count);
   for (size_t i = 0; i < bitmap_count; i++) {
-    ICONIMAGE* image = reinterpret_cast<ICONIMAGE*>(&buffer[offset]);
+    ICONIMAGE* image = reinterpret_cast<ICONIMAGE*>(buffer + offset);
     DCHECK_LT(offset, buffer_size);
     size_t icon_image_size = 0;
     SetSingleIconImageInformation(bitmaps[i], i, icon_dir, image, offset,
@@ -497,24 +280,23 @@ bool IconUtil::CreateIconFileFromImageFamily(
     DCHECK_GT(icon_image_size, 0U);
     offset += icon_image_size;
   }
-
-  // Add the PNG entry, if necessary.
-  if (png_bytes.get()) {
-    ICONDIRENTRY* entry = &icon_dir->idEntries[bitmap_count];
-    entry->bWidth = 0;
-    entry->bHeight = 0;
-    entry->wPlanes = 1;
-    entry->wBitCount = 32;
-    entry->dwBytesInRes = static_cast<DWORD>(png_bytes->size());
-    entry->dwImageOffset = static_cast<DWORD>(offset);
-    memcpy(&buffer[offset], png_bytes->front(), png_bytes->size());
-    offset += png_bytes->size();
-  }
-
   DCHECK_EQ(offset, buffer_size);
 
-  std::string data(buffer.begin(), buffer.end());
-  return base::ImportantFileWriter::WriteFileAtomically(icon_path, data);
+  // Finally, writing the data info the file.
+  DWORD bytes_written;
+  bool delete_file = false;
+  if (!WriteFile(icon_file.Get(), buffer, buffer_size, &bytes_written, NULL) ||
+      bytes_written != buffer_size)
+    delete_file = true;
+
+  ::CloseHandle(icon_file.Take());
+  delete [] buffer;
+  if (delete_file) {
+    bool success = file_util::Delete(icon_path, false);
+    DCHECK(success);
+  }
+
+  return !delete_file;
 }
 
 bool IconUtil::PixelsHaveAlpha(const uint32* pixels, size_t num_pixels) {
@@ -567,8 +349,6 @@ void IconUtil::SetSingleIconImageInformation(const SkBitmap& bitmap,
   DCHECK(icon_image != NULL);
   DCHECK_GT(image_offset, 0U);
   DCHECK(image_byte_count != NULL);
-  DCHECK_LT(bitmap.width(), kLargeIconSize);
-  DCHECK_LT(bitmap.height(), kLargeIconSize);
 
   // We start by computing certain image values we'll use later on.
   size_t xor_mask_size, bytes_in_resource;
@@ -627,6 +407,41 @@ void IconUtil::CopySkBitmapBitsIntoIconBuffer(const SkBitmap& bitmap,
   }
 }
 
+void IconUtil::CreateResizedBitmapSet(const SkBitmap& bitmap_to_resize,
+                                      std::vector<SkBitmap>* bitmaps) {
+  DCHECK(bitmaps != NULL);
+  DCHECK(bitmaps->empty());
+
+  bool inserted_original_bitmap = false;
+  for (size_t i = 0; i < arraysize(icon_dimensions_); i++) {
+    // If the dimensions of the bitmap we are resizing are the same as the
+    // current dimensions, then we should insert the bitmap and not a resized
+    // bitmap. If the bitmap's dimensions are smaller, we insert our bitmap
+    // first so that the bitmaps we return in the vector are sorted based on
+    // their dimensions.
+    if (!inserted_original_bitmap) {
+      if ((bitmap_to_resize.width() == icon_dimensions_[i]) &&
+          (bitmap_to_resize.height() == icon_dimensions_[i])) {
+        bitmaps->push_back(bitmap_to_resize);
+        inserted_original_bitmap = true;
+        continue;
+      }
+
+      if ((bitmap_to_resize.width() < icon_dimensions_[i]) &&
+          (bitmap_to_resize.height() < icon_dimensions_[i])) {
+        bitmaps->push_back(bitmap_to_resize);
+        inserted_original_bitmap = true;
+      }
+    }
+    bitmaps->push_back(skia::ImageOperations::Resize(
+        bitmap_to_resize, skia::ImageOperations::RESIZE_LANCZOS3,
+        icon_dimensions_[i], icon_dimensions_[i]));
+  }
+
+  if (!inserted_original_bitmap)
+    bitmaps->push_back(bitmap_to_resize);
+}
+
 size_t IconUtil::ComputeIconFileBufferSize(const std::vector<SkBitmap>& set) {
   DCHECK(!set.empty());
 
@@ -637,8 +452,7 @@ size_t IconUtil::ComputeIconFileBufferSize(const std::vector<SkBitmap>& set) {
   size_t total_buffer_size = sizeof(ICONDIR);
   size_t bitmap_count = set.size();
   total_buffer_size += sizeof(ICONDIRENTRY) * (bitmap_count - 1);
-  // May not have all icon sizes, but must have at least up to medium icon size.
-  DCHECK_GE(bitmap_count, kNumIconDimensionsUpToMediumSize);
+  DCHECK_GE(bitmap_count, arraysize(icon_dimensions_));
 
   // Add the bitmap specific structure sizes.
   for (size_t i = 0; i < bitmap_count; i++) {

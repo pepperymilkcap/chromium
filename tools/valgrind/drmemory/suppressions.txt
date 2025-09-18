@@ -1,7 +1,7 @@
 # This file contains suppressions for the Dr.Memory tool, see
 # http://dev.chromium.org/developers/how-tos/using-drmemory
 #
-# This file contains suppressions for the DrMemory reports happening
+# This file contains suppressions for the DrMemroy reports happening
 # in the 'light' mode (a.k.a. drmemory_light) as well as in the 'full' mode.
 # Please use suppressions_full.txt for all the reports that can happen only
 # in the full mode (drmemory_full),
@@ -24,18 +24,6 @@ LEAK
 name=Sophos LEAK
 ...
 sophos*.dll!*
-
-# Reports from Micorosft RDP ActiveX control (mstscax.dll)
-
-GDI USAGE ERROR
-name=crbug.com/177832: mstscax.dll causes "GDI USAGE ERROR" errors.
-...
-mstscax.dll!*
-
-UNADDRESSABLE ACCESS
-name=crbug.com/177832: mstscax.dll causes "UNADDRESSABLE ACCESS" errors.
-...
-mstscax.dll!*
 
 ############################
 # Suppress some false reports due to bugs in Dr.Memory like wrong analysis
@@ -117,13 +105,6 @@ INVALID HEAP ARGUMENT
 name=http://crbug.com/107567 intentional mismatch in _DebugHeapDelete, no frame
 *!std::numpunct<*>::_Tidy
 *!std::numpunct<*>::~numpunct<*>
-
-# TODO(rbultje): Investigate if code fix is required instead.
-WARNING
-name=http://crbug.com/223255 - prefetches in vp8
-instruction=prefetch*
-ffmpegsumo.dll!ff_prefetch_mmxext
-ffmpegsumo.dll!vp8_decode_mb_row_no_filter
 
 ############################
 # Intentional errors in Chromium tests (ToolsSanityTests)
@@ -217,6 +198,12 @@ name=AboutHandler::AboutCrash deliberate crash
 chrome.dll!AboutHandler::AboutCrash
 
 UNADDRESSABLE ACCESS
+name=RendererCrashTest.Crash deliberate crash
+# function is small, little risk for false negative in rest of it
+# TODO(bruening): switch to annotation once have support for that
+chrome.dll!HandleRendererErrorTestParameters
+
+UNADDRESSABLE ACCESS
 name=NPAPITesterBase.NoHangIfInitCrashes deliberate crash
 # function is small, little risk for false negative in rest of it
 # TODO(bruening): switch to annotation once have support for that
@@ -229,7 +216,7 @@ name=CrashingChildProcess deliberate crash
 
 UNADDRESSABLE ACCESS
 name=::Crasher::Run deliberate crash
-*!base::`anonymous namespace'::Crasher::Run
+*!`anonymous namespace'::Crasher::Run
 
 ############################
 # Benign issues in Chromium
@@ -239,16 +226,6 @@ name=http://crbug.com/72463 - prefetches in generated MemCopy
 instruction=prefetch*
 <not in a module>
 chrome.dll!v8::internal::CopyChars*
-
-WARNING
-name=prefetches in NVD3DUM.dll
-instruction=prefetch*
-NVD3DUM.dll!*
-
-WARNING
-name=prefetches in igdumd32.dll
-instruction=prefetch*
-igdumd32.dll!*
 
 UNADDRESSABLE ACCESS
 name=http://code.google.com/p/drmemory/issues/detail?id=582 bizarre cl-generated read-beyond-TOS
@@ -277,12 +254,6 @@ name=http://crbug.com/101717 (4)
 *!scoped_ptr<_OBJECT_NAME_INFORMATION>::~scoped_ptr<_OBJECT_NAME_INFORMATION>
 *!sandbox::GetPathFromHandle
 
-GDI USAGE ERROR
-name=http://code.google.com/p/drmemory/issues/detail?id=899 deleting bitmap which is probably safe
-system call NtGdiDeleteObjectApp
-*!skia::`anonymous namespace'::Bitmap::~Bitmap
-*!skia::`anonymous namespace'::Bitmap::`scalar deleting destructor'
-
 ############################
 # Real issues in Chromium
 
@@ -303,128 +274,14 @@ name=http://crbug.com/106522
 npapi_test_plugin.dll!NPAPIClient::PluginTest::id
 npapi_test_plugin.dll!NPAPIClient::ExecuteGetJavascriptUrlTest::TimerProc
 
-GDI USAGE ERROR
-name=http://crbug.com/109963 c
-system call NtGdiDeleteObjectApp
-GDI32.dll!DeleteDC
-content.dll!*
+UNADDRESSABLE ACCESS
+name=http://crbug.com/110642
+*!PrefsTabHelper::RegisterUserPrefs
+*!browser::RegisterUserPrefs
+*!TestingProfile::CreateTestingPrefService
+*!TestingProfile::GetPrefs
+*!ProfileKeyedServiceFactory::RegisterUserPrefsOnProfile
+*!ProfileDependencyManager::CreateProfileServices
 
-GDI USAGE ERROR
-name=http://crbug.com/109963 d
-system call NtGdiDeleteObjectApp
-GDI32.dll!DeleteDC
-*!base::internal::RunnableAdapter*
-
-# GDI usage errors in 3rd-party components
-GDI USAGE ERROR
-name=http://crbug.com/119552 a
-system call NtGdiDeleteObjectApp
-...
-*!OmniboxViewWin::*
-
-GDI USAGE ERROR
-name=http://crbug.com/119552 b
-system call Nt*
-...
-*!ATL::*
-
-GDI USAGE ERROR
-name=http://crbug.com/119552 c
-# optional gdi32.dll frame followed by user32.dll
-# TODO(bruening): once have
-# http://code.google.com/p/drmemory/issues/detail?id=846
-# I would do "gdi32.dll!...\nuser32.dll!*"
-*32.dll!*
-...
-shell32.dll!SHGetFileInfoW
-*!IconLoader::ReadIcon
-
-GDI USAGE ERROR
-name=http://crbug.com/119552 d
-system call NtGdiDeleteObjectApp
-gdi32.dll!DeleteObject
-riched20.dll!*
-riched20.dll!*
-riched20.dll!*
-
-GDI USAGE ERROR
-name=http://crbug.com/120157
-# "ReleaseDC called from different thread than GetDC"
-system call NtUserCallOneParam.RELEASEDC
-*!*FontCache::CacheElement::~CacheElement
-
-GDI USAGE ERROR
-name=http://crbug.com/158090
-# "DC created by one thread and used by another"
-...
-content.dll!content::*::FontCache::PreCacheFont
-content.dll!content::FontCacheDispatcher::OnPreCacheFont
-content.dll!DispatchToMethod<content::FontCacheDispatcher*
-
-GDI USAGE ERROR
-name=http://crbug.com/158090 c#4
-# ReleaseDC for DC called from different thread than the thread that called GetDC
-system call NtUserCallOneParam.RELEASEDC
-ui.dll!gfx::ReadColorProfile
-ui.dll!gfx::GetColorProfile
-content.dll!content::RenderMessageFilter::OnGetMonitorColorProfile
-content.dll!DispatchToMethod*
-
-INVALID HEAP ARGUMENT
-name=http://crbug.com/158350
-# allocated with operator new[], freed with operator delete
-*!*
-*!*
-*!*
-*!*
-*!*
-content.dll!*
-content.dll!*
-content.dll!*
-content.dll!*
-content.dll!*
-*!*
-*!*
-*!*
-*!*
-*!*
-KERNEL32.dll!*
-ntdll.dll!*
-ntdll.dll!*
-
-WARNING
-name=Security test (new oveflow)
-MSVCR100D.dll!operator new
-*!operator new
-*!operator new[]
-*!`anonymous namespace'::SecurityTest_NewOverflow_Test::TestBody
-*!testing::internal::HandleExceptionsInMethodIfSupported<testing::Test,void>
-
-WARNING
-name=Security test (calloc overflow)
-*!`anonymous namespace'::CallocReturnsNull
-*!`anonymous namespace'::SecurityTest_CallocOverflow_Test::TestBody
-*!testing::internal::HandleExceptionsInMethodIfSupported<testing::Test,void>
-
-GDI USAGE ERROR
-name=http://crbug.com/234484
-# "DC created by one thread and used by another"
-...
-*!chrome::`anonymous namespace'::SetOverlayIcon
-
-INVALID HEAP ARGUMENT
-name=http://crbug.com/262088
-drmemorylib.dll!av_dup_packet
-msvcrt.dll!wcsrchr
-ntdll.dll!RtlIsCurrentThreadAttachExempt
-ntdll.dll!LdrShutdownThread
-ntdll.dll!RtlExitUserThread
-
-GDI USAGE ERROR
-name=http://crbug.com/266484
-skia.dll!HDCOffscreen::draw
-skia.dll!SkScalerContext_GDI::generateImage
-skia.dll!SkScalerContext::getImage
-skia.dll!SkGlyphCache::findImage
-skia.dll!D1G_NoBounder_RectClip
-skia.dll!SkDraw::drawText
+# Empty line at EOF - workaround for
+# http://code.google.com/p/drmemory/issues/detail?id=41

@@ -15,7 +15,7 @@ GEN_INCLUDE(['net_internals_test.js']);
  */
 function checkDisplay(hostResolverInfo) {
   var family = hostResolverInfo.default_address_family;
-  expectEquals(addressFamilyToString(family),
+  expectEquals(getKeyWithValue(AddressFamily, family),
                $(DnsView.DEFAULT_FAMILY_SPAN_ID).innerText);
   expectEquals(family == AddressFamily.ADDRESS_FAMILY_IPV4,
                NetInternalsTest.isDisplayed($(DnsView.IPV6_DISABLED_SPAN_ID)));
@@ -34,7 +34,7 @@ function checkDisplay(hostResolverInfo) {
   expectEquals(entries.length, active + expired);
 
   var tableId = DnsView.CACHE_TBODY_ID;
-  NetInternalsTest.checkTbodyRows(tableId, entries.length);
+  NetInternalsTest.checkStyledTableRows(tableId, entries.length);
 
   // Rather than check the exact string in every position, just make sure every
   // entry is not empty, and does not have 'undefined' anywhere, which should
@@ -42,7 +42,7 @@ function checkDisplay(hostResolverInfo) {
   // entire corresponding function of DnsView.
   for (var row = 0; row < entries.length; ++row) {
     for (column = 0; column < 4; ++column) {
-      var text = NetInternalsTest.getTbodyText(tableId, row, column);
+      var text = NetInternalsTest.getStyledTableText(tableId, row, column);
       expectNotEquals(text, '');
       expectFalse(/undefined/i.test(text));
     }
@@ -135,7 +135,8 @@ AddCacheEntryTask.prototype = {
         // only if |expired_| is true.  Only checked for entries we add
         // ourselves to avoid any expiration time race.
         var expirationText =
-            NetInternalsTest.getTbodyText(DnsView.CACHE_TBODY_ID, index, 3);
+            NetInternalsTest.getStyledTableText(DnsView.CACHE_TBODY_ID,
+                                                index, 3);
         expectEquals(this.expired_, /expired/i.test(expirationText));
 
         this.onTaskDone();

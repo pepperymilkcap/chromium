@@ -4,10 +4,12 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_FILE_DIR_JOB_H_
 #define NET_URL_REQUEST_URL_REQUEST_FILE_DIR_JOB_H_
+#pragma once
 
 #include <string>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/directory_lister.h"
 #include "net/url_request/url_request_job.h"
@@ -18,9 +20,7 @@ class URLRequestFileDirJob
   : public URLRequestJob,
     public DirectoryLister::DirectoryListerDelegate {
  public:
-  URLRequestFileDirJob(URLRequest* request,
-                       NetworkDelegate* network_delegate,
-                       const base::FilePath& dir_path);
+  URLRequestFileDirJob(URLRequest* request, const FilePath& dir_path);
 
   bool list_complete() const { return list_complete_; }
 
@@ -31,7 +31,7 @@ class URLRequestFileDirJob
   virtual void Kill() OVERRIDE;
   virtual bool ReadRawData(IOBuffer* buf,
                            int buf_size,
-                           int* bytes_read) OVERRIDE;
+                           int *bytes_read) OVERRIDE;
   virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
   virtual bool GetCharset(std::string* charset) OVERRIDE;
 
@@ -54,7 +54,7 @@ class URLRequestFileDirJob
   bool FillReadBuffer(char *buf, int buf_size, int *bytes_read);
 
   DirectoryLister lister_;
-  base::FilePath dir_path_;
+  FilePath dir_path_;
   std::string data_;
   bool canceled_;
 

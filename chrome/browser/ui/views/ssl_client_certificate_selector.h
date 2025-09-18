@@ -1,18 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_SSL_CLIENT_CERTIFICATE_SELECTOR_H_
 #define CHROME_BROWSER_UI_VIEWS_SSL_CLIENT_CERTIFICATE_SELECTOR_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/ssl/ssl_client_auth_observer.h"
-#include "chrome/browser/ssl/ssl_client_certificate_selector.h"
+#include "base/string16.h"
+#include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/view.h"
@@ -22,18 +22,14 @@
 // certificate selector only through the cross-platform interface
 // chrome/browser/ssl_client_certificate_selector.h.
 
-namespace net {
-class SSLCertRequestInfo;
-class X509Certificate;
-}
-
 namespace views {
-class LabelButton;
 class TableView;
-class Widget;
+class TextButton;
 }
 
 class CertificateSelectorTableModel;
+class ConstrainedWindow;
+class TabContentsWrapper;
 
 class SSLClientCertificateSelector : public SSLClientAuthObserver,
                                      public views::DialogDelegateView,
@@ -41,10 +37,9 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
                                      public views::TableViewObserver {
  public:
   SSLClientCertificateSelector(
-      content::WebContents* web_contents,
-      const net::HttpNetworkSession* network_session,
+      TabContentsWrapper* wrapper,
       net::SSLCertRequestInfo* cert_request_info,
-      const chrome::SelectCertificateCallback& callback);
+      SSLClientAuthHandler* delegate);
   virtual ~SSLClientCertificateSelector();
 
   void Init();
@@ -56,20 +51,18 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
 
   // DialogDelegateView:
   virtual bool CanResize() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
-  virtual views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
-  virtual views::View* CreateExtraView() OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
+  virtual views::View* GetExtraView() OVERRIDE;
 
   // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   // views::TableViewObserver:
   virtual void OnSelectionChanged() OVERRIDE;
@@ -77,17 +70,20 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
 
  private:
   void CreateCertTable();
+  void CreateViewCertButton();
 
-  // Callback after unlocking certificate slot.
-  void Unlocked(net::X509Certificate* cert);
+  scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
+
+  scoped_refptr<SSLClientAuthHandler> delegate_;
 
   scoped_ptr<CertificateSelectorTableModel> model_;
 
-  content::WebContents* web_contents_;
+  TabContentsWrapper* wrapper_;
 
-  views::Widget* window_;
+  ConstrainedWindow* window_;
   views::TableView* table_;
-  views::LabelButton* view_cert_button_;
+  views::TextButton* view_cert_button_;
+  views::View* view_cert_button_container_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLClientCertificateSelector);
 };

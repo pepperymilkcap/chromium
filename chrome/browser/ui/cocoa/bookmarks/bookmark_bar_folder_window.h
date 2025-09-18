@@ -1,11 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_FOLDER_WINDOW_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_FOLDER_WINDOW_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
+
 
 // Window for a bookmark folder "menu".  This menu pops up when you
 // click on a bookmark button that represents a folder of bookmarks.
@@ -24,5 +28,6 @@
 // Scroll view that contains the main view (where the buttons go).
 @interface BookmarkBarFolderWindowScrollView : NSScrollView
 @end
+
 
 #endif  // CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_FOLDER_WINDOW_H_

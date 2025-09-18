@@ -6,7 +6,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "content/public/browser/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 
@@ -30,5 +30,5 @@ void BalloonViewHost::UpdateActualSize(const gfx::Size& new_size) {
 }
 
 gfx::NativeView BalloonViewHost::native_view() const {
-  return web_contents_->GetView()->GetContentNativeView();
+  return web_contents_->GetContentNativeView();
 }

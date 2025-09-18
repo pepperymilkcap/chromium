@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,137 +6,96 @@
 
 #import "base/logging.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
-#include "content/common/accessibility_messages.h"
-
-namespace content {
+#include "content/common/view_messages.h"
 
 // static
 BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
-    const AccessibilityNodeData& src,
+    gfx::NativeView parent_view,
+    const WebAccessibility& src,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory) {
-  return new BrowserAccessibilityManagerMac(NULL, src, delegate, factory);
+  return new BrowserAccessibilityManagerMac(
+      parent_view, src, delegate, factory);
 }
 
 BrowserAccessibilityManagerMac::BrowserAccessibilityManagerMac(
-    NSView* parent_view,
-    const AccessibilityNodeData& src,
+    gfx::NativeView parent_window,
+    const webkit_glue::WebAccessibility& src,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory)
-    : BrowserAccessibilityManager(src, delegate, factory),
-      parent_view_(parent_view) {
-}
-
-// static
-AccessibilityNodeData BrowserAccessibilityManagerMac::GetEmptyDocument() {
-  AccessibilityNodeData empty_document;
-  empty_document.id = 0;
-  empty_document.role = blink::WebAXRoleRootWebArea;
-  empty_document.state =
-      1 << blink::WebAXStateReadonly;
-  return empty_document;
+        : BrowserAccessibilityManager(parent_window, src, delegate, factory) {
 }
 
 void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
-    blink::WebAXEvent event_type,
+    int type,
     BrowserAccessibility* node) {
-  if (!node->IsNative())
-    return;
-
   // Refer to AXObjectCache.mm (webkit).
   NSString* event_id = @"";
-  switch (event_type) {
-    case blink::WebAXEventActiveDescendantChanged:
-      if (node->role() == blink::WebAXRoleTree)
+  switch (type) {
+    case ViewHostMsg_AccEvent::ACTIVE_DESCENDANT_CHANGED:
+      if (node->role() == WebAccessibility::ROLE_TREE)
         event_id = NSAccessibilitySelectedRowsChangedNotification;
       else
         event_id = NSAccessibilityFocusedUIElementChangedNotification;
-      break;
-    case blink::WebAXEventAlert:
+    case ViewHostMsg_AccEvent::ALERT:
       // Not used on Mac.
       return;
-    case blink::WebAXEventBlur:
-      // A no-op on Mac.
-      return;
-    case blink::WebAXEventCheckedStateChanged:
+    case ViewHostMsg_AccEvent::CHECK_STATE_CHANGED:
       // Not used on Mac.
       return;
-    case blink::WebAXEventChildrenChanged:
+    case ViewHostMsg_AccEvent::CHILDREN_CHANGED:
       // TODO(dtseng): no clear equivalent on Mac.
       return;
-    case blink::WebAXEventFocus:
+    case ViewHostMsg_AccEvent::FOCUS_CHANGED:
       event_id = NSAccessibilityFocusedUIElementChangedNotification;
       break;
-    case blink::WebAXEventLayoutComplete:
+    case ViewHostMsg_AccEvent::LAYOUT_COMPLETE:
       event_id = @"AXLayoutComplete";
       break;
-    case blink::WebAXEventLiveRegionChanged:
+    case ViewHostMsg_AccEvent::LIVE_REGION_CHANGED:
       event_id = @"AXLiveRegionChanged";
       break;
-    case blink::WebAXEventLoadComplete:
+    case ViewHostMsg_AccEvent::LOAD_COMPLETE:
       event_id = @"AXLoadComplete";
       break;
-    case blink::WebAXEventMenuListValueChanged:
+    case ViewHostMsg_AccEvent::MENU_LIST_VALUE_CHANGED:
       // Not used on Mac.
       return;
-    case blink::WebAXEventShow:
+    case ViewHostMsg_AccEvent::OBJECT_SHOW:
       // Not used on Mac.
       return;
-    case blink::WebAXEventHide:
+    case ViewHostMsg_AccEvent::OBJECT_HIDE:
       // Not used on Mac.
       return;
-    case blink::WebAXEventRowCountChanged:
+    case ViewHostMsg_AccEvent::ROW_COUNT_CHANGED:
       event_id = NSAccessibilityRowCountChangedNotification;
       break;
-    case blink::WebAXEventRowCollapsed:
+    case ViewHostMsg_AccEvent::ROW_COLLAPSED:
       event_id = @"AXRowCollapsed";
       break;
-    case blink::WebAXEventRowExpanded:
+    case ViewHostMsg_AccEvent::ROW_EXPANDED:
       event_id = @"AXRowExpanded";
       break;
-    case blink::WebAXEventScrolledToAnchor:
+    case ViewHostMsg_AccEvent::SCROLLED_TO_ANCHOR:
       // Not used on Mac.
       return;
-    case blink::WebAXEventSelectedChildrenChanged:
+    case ViewHostMsg_AccEvent::SELECTED_CHILDREN_CHANGED:
       event_id = NSAccessibilitySelectedChildrenChangedNotification;
       break;
-    case blink::WebAXEventSelectedTextChanged:
+    case ViewHostMsg_AccEvent::SELECTED_TEXT_CHANGED:
       event_id = NSAccessibilitySelectedTextChangedNotification;
       break;
-    case blink::WebAXEventTextInserted:
+    case ViewHostMsg_AccEvent::TEXT_INSERTED:
       // Not used on Mac.
       return;
-    case blink::WebAXEventTextRemoved:
+    case ViewHostMsg_AccEvent::TEXT_REMOVED:
       // Not used on Mac.
       return;
-    case blink::WebAXEventValueChanged:
+    case ViewHostMsg_AccEvent::VALUE_CHANGED:
       event_id = NSAccessibilityValueChangedNotification;
       break;
-    case blink::WebAXEventAriaAttributeChanged:
-      // Not used on Mac.
-      return;
-    case blink::WebAXEventAutocorrectionOccured:
-      // Not used on Mac.
-      return;
-    case blink::WebAXEventInvalidStatusChanged:
-      // Not used on Mac.
-      return;
-    case blink::WebAXEventLocationChanged:
-      // Not used on Mac.
-      return;
-    case blink::WebAXEventMenuListItemSelected:
-      // Not used on Mac.
-      return;
-    case blink::WebAXEventTextChanged:
-      // Not used on Mac.
-      return;
-    default:
-      LOG(WARNING) << "Unknown accessibility event: " << event_type;
-      return;
   }
-  BrowserAccessibilityCocoa* native_node = node->ToBrowserAccessibilityCocoa();
+  BrowserAccessibilityCocoa* native_node = node->toBrowserAccessibilityCocoa();
   DCHECK(native_node);
   NSAccessibilityPostNotification(native_node, event_id);
 }
-
-}  // namespace content

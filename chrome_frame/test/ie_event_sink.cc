@@ -11,13 +11,10 @@
 #include <utility>
 
 #include "base/lazy_instance.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/test/test_timeouts.h"
-#include "base/time/time.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_variant.h"
@@ -204,9 +201,12 @@ _ATL_FUNC_INFO IEEventSink::kFileDownloadInfo = {
 bool IEEventSink::abnormal_shutdown_ = false;
 
 IEEventSink::IEEventSink()
-    : onmessage_(this, &IEEventSink::OnMessage),
-      onloaderror_(this, &IEEventSink::OnLoadError),
-      onload_(this, &IEEventSink::OnLoad),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(
+          onmessage_(this, &IEEventSink::OnMessage)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          onloaderror_(this, &IEEventSink::OnLoadError)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          onload_(this, &IEEventSink::OnLoad)),
       listener_(NULL),
       ie_process_id_(0),
       did_receive_on_quit_(false) {
@@ -230,7 +230,8 @@ void IEEventSink::Attach(IDispatch* browser_disp) {
 }
 
 HRESULT IEEventSink::Attach(IWebBrowser2* browser) {
-  HRESULT result = E_INVALIDARG;
+  DCHECK(browser);
+  HRESULT result;
   if (browser) {
     web_browser2_ = browser;
     FindIEProcessId();
@@ -254,7 +255,7 @@ void IEEventSink::Uninitialize() {
         web_browser2_->get_LocationURL(browser_url.Receive());
         std::wstring browser_url_wstring;
         browser_url_wstring.assign(browser_url, browser_url.Length());
-        std::string browser_url_string = base::WideToUTF8(browser_url_wstring);
+        std::string browser_url_string = WideToUTF8(browser_url_wstring);
         LOG(ERROR) << "OnQuit was not received for browser with url "
                    << browser_url_string;
         web_browser2_->Quit();
@@ -265,7 +266,7 @@ void IEEventSink::Uninitialize() {
       web_browser2_.Release();
 
       if (!process.IsValid()) {
-        LOG_IF(WARNING, !process.IsValid())
+        DLOG_IF(WARNING, !process.IsValid())
             << base::StringPrintf("OpenProcess failed: %i", ::GetLastError());
         return;
       }
@@ -315,38 +316,9 @@ void IEEventSink::SetFocusToRenderer() {
   simulate_input::SetKeyboardFocusToWindow(GetRendererWindow());
 }
 
-void IEEventSink::SendKeys(const char* input_string) {
-  HWND window = GetRendererWindow();
-  simulate_input::SetKeyboardFocusToWindow(window);
-  const base::TimeDelta kMessageSleep = TestTimeouts::tiny_timeout();
-  const base::StringPiece codes(input_string);
-  for (size_t i = 0; i < codes.length(); ++i) {
-    char character = codes[i];
-    UINT virtual_key = 0;
-
-    if (character >= 'a' && character <= 'z') {
-      // VK_A - VK_Z are ASCII 'A' - 'Z'.
-      virtual_key = 'A' + (character - 'a');
-    } else if (character >= '0' && character <= '9') {
-      // VK_0 - VK_9 are ASCII '0' - '9'.
-      virtual_key = character;
-    } else {
-      FAIL() << "Character value out of range at position " << i
-             << " of string \"" << input_string << "\"";
-    }
-
-    UINT scan_code = MapVirtualKey(virtual_key, MAPVK_VK_TO_VSC);
-    EXPECT_NE(0U, scan_code) << "No translation for virtual key "
-                             << virtual_key << " for character at position "
-                             << i << " of string \"" << input_string << "\"";
-
-    ::PostMessage(window, WM_KEYDOWN,
-                  virtual_key, MAKELPARAM(1, scan_code));
-    base::PlatformThread::Sleep(kMessageSleep);
-    ::PostMessage(window, WM_KEYUP,
-                  virtual_key, MAKELPARAM(1, scan_code | KF_UP | KF_REPEAT));
-    base::PlatformThread::Sleep(kMessageSleep);
-  }
+void IEEventSink::SendKeys(const wchar_t* input_string) {
+  SetFocusToRenderer();
+  simulate_input::SendStringW(input_string);
 }
 
 void IEEventSink::SendMouseClick(int x, int y,
@@ -365,7 +337,7 @@ void IEEventSink::ExpectRendererWindowHasFocus() {
 
   ASSERT_TRUE(AttachThreadInput(GetCurrentThreadId(), renderer_thread, TRUE));
   HWND focus_window = GetFocus();
-  EXPECT_EQ(renderer_window, focus_window);
+  EXPECT_TRUE(focus_window == renderer_window);
   EXPECT_TRUE(AttachThreadInput(GetCurrentThreadId(), renderer_thread, FALSE));
 }
 
@@ -417,12 +389,7 @@ HWND IEEventSink::GetRendererWindow() {
            first_child = ::GetWindow(first_child, GW_CHILD)) {
         child_window = first_child;
         GetClassName(child_window, class_name, arraysize(class_name));
-#if defined(USE_AURA)
-        static const wchar_t kWndClassPrefix[] = L"Chrome_WidgetWin_";
-#else
-        static const wchar_t kWndClassPrefix[] = L"Chrome_RenderWidgetHostHWND";
-#endif
-        if (!_wcsnicmp(class_name, kWndClassPrefix, wcslen(kWndClassPrefix))) {
+        if (!_wcsicmp(class_name, L"Chrome_RenderWidgetHostHWND")) {
           renderer_window = child_window;
           break;
         }
@@ -595,7 +562,7 @@ STDMETHODIMP_(void) IEEventSink::OnDownloadBegin() {
 
 STDMETHODIMP_(void) IEEventSink::OnNewWindow2(IDispatch** dispatch,
                                               VARIANT_BOOL* s) {
-  VLOG(1) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 
   EXPECT_TRUE(dispatch);
   if (!dispatch)
@@ -622,7 +589,7 @@ STDMETHODIMP_(void) IEEventSink::OnNewWindow2(IDispatch** dispatch,
 
 STDMETHODIMP_(void) IEEventSink::OnNavigateError(IDispatch* dispatch,
     VARIANT* url, VARIANT* frame_name, VARIANT* status_code, VARIANT* cancel) {
-  VLOG(1) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   if (listener_)
     listener_->OnNavigateError(dispatch, url, frame_name, status_code, cancel);
 }
@@ -631,8 +598,8 @@ STDMETHODIMP IEEventSink::OnBeforeNavigate2(
     IDispatch* dispatch, VARIANT* url, VARIANT* flags,
     VARIANT* target_frame_name, VARIANT* post_data, VARIANT* headers,
     VARIANT_BOOL* cancel) {
-  VLOG(1) << __FUNCTION__ << " "
-          << base::StringPrintf("%ls - 0x%08X", url->bstrVal, this);
+  DVLOG(1) << __FUNCTION__
+           << base::StringPrintf("%ls - 0x%08X", url->bstrVal, this);
   // Reset any existing reference to chrome frame since this is a new
   // navigation.
   DisconnectFromChromeFrame();
@@ -644,7 +611,7 @@ STDMETHODIMP IEEventSink::OnBeforeNavigate2(
 
 STDMETHODIMP_(void) IEEventSink::OnNavigateComplete2(
     IDispatch* dispatch, VARIANT* url) {
-  VLOG(1) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   ConnectToChromeFrame();
   if (listener_)
     listener_->OnNavigateComplete2(dispatch, url);
@@ -652,7 +619,7 @@ STDMETHODIMP_(void) IEEventSink::OnNavigateComplete2(
 
 STDMETHODIMP_(void) IEEventSink::OnDocumentComplete(
     IDispatch* dispatch, VARIANT* url) {
-  VLOG(1) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   EXPECT_TRUE(url);
   if (!url)
     return;
@@ -662,8 +629,8 @@ STDMETHODIMP_(void) IEEventSink::OnDocumentComplete(
 
 STDMETHODIMP_(void) IEEventSink::OnFileDownload(
     VARIANT_BOOL active_doc, VARIANT_BOOL* cancel) {
-  VLOG(1) << __FUNCTION__ << " "
-          << base::StringPrintf(" 0x%08X ad=%i", this, active_doc);
+  DVLOG(1) << __FUNCTION__
+           << base::StringPrintf(" 0x%08X ad=%i", this, active_doc);
   if (listener_) {
     listener_->OnFileDownload(active_doc, cancel);
   } else {
@@ -674,7 +641,7 @@ STDMETHODIMP_(void) IEEventSink::OnFileDownload(
 STDMETHODIMP_(void) IEEventSink::OnNewWindow3(
     IDispatch** dispatch, VARIANT_BOOL* cancel, DWORD flags, BSTR url_context,
     BSTR url) {
-  VLOG(1) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   EXPECT_TRUE(dispatch);
   if (!dispatch)
     return;
@@ -699,7 +666,7 @@ STDMETHODIMP_(void) IEEventSink::OnNewWindow3(
 }
 
 STDMETHODIMP_(void) IEEventSink::OnQuit() {
-  VLOG(1) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 
   did_receive_on_quit_ = true;
 
@@ -720,32 +687,32 @@ STDMETHODIMP IEEventSink::Invoke(DISPID dispid, REFIID riid, LCID lcid,
 }
 
 HRESULT IEEventSink::OnLoad(const VARIANT* param) {
-  VLOG(1) << __FUNCTION__ << " " << param->bstrVal;
+  DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
   base::win::ScopedVariant stack_object(*param);
   if (chrome_frame_) {
     if (listener_)
       listener_->OnLoad(param->bstrVal);
   } else {
-    LOG(WARNING) << "Invalid chrome frame pointer";
+    DLOG(WARNING) << "Invalid chrome frame pointer";
   }
   return S_OK;
 }
 
 HRESULT IEEventSink::OnLoadError(const VARIANT* param) {
-  VLOG(1) << __FUNCTION__ << " " << param->bstrVal;
+  DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
   if (chrome_frame_) {
     if (listener_)
       listener_->OnLoadError(param->bstrVal);
   } else {
-    LOG(WARNING) << "Invalid chrome frame pointer";
+    DLOG(WARNING) << "Invalid chrome frame pointer";
   }
   return S_OK;
 }
 
 HRESULT IEEventSink::OnMessage(const VARIANT* param) {
-  VLOG(1) << __FUNCTION__ << " " << param;
+  DVLOG(1) << __FUNCTION__ << " " << param;
   if (!chrome_frame_.get()) {
-    LOG(WARNING) << "Invalid chrome frame pointer";
+    DLOG(WARNING) << "Invalid chrome frame pointer";
     return S_OK;
   }
 

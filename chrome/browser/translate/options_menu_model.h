@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_TRANSLATE_OPTIONS_MENU_MODEL_H_
 #define CHROME_BROWSER_TRANSLATE_OPTIONS_MENU_MODEL_H_
+#pragma once
 
 #include "ui/base/models/simple_menu_model.h"
 
@@ -23,7 +24,7 @@ class OptionsMenuModel : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
 
  private:
   TranslateInfoBarDelegate* translate_infobar_delegate_;

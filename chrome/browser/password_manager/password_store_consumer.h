@@ -4,12 +4,14 @@
 
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_CONSUMER_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_CONSUMER_H_
+#pragma once
 
-#include "chrome/browser/common/cancelable_request.h"
-#include "chrome/common/cancelable_task_tracker.h"
+#include "chrome/browser/cancelable_request.h"
 
-namespace autofill {
+namespace webkit {
+namespace forms {
 struct PasswordForm;
+}
 }
 
 // Reads from the PasswordStore are done asynchronously on a separate
@@ -25,7 +27,7 @@ class PasswordStoreConsumer {
   // anyway with an empty vector.
   virtual void OnPasswordStoreRequestDone(
       CancelableRequestProvider::Handle handle,
-      const std::vector<autofill::PasswordForm*>& result) = 0;
+      const std::vector<webkit::forms::PasswordForm*>& result) = 0;
 
   // The CancelableRequest framework needs both a callback (the
   // PasswordStoreConsumer::OnPasswordStoreRequestDone) as well as a
@@ -35,23 +37,11 @@ class PasswordStoreConsumer {
     return &cancelable_consumer_;
   }
 
-  // Called when the request is finished. If there are no results, it is called
-  // with an empty vector.
-  // Note: The implementation owns all PasswordForms in the vector.
-  virtual void OnGetPasswordStoreResults(
-      const std::vector<autofill::PasswordForm*>& results) = 0;
-
-  // Cancels the task.
-  CancelableTaskTracker* cancelable_task_tracker() {
-    return &cancelable_task_tracker_;
-  }
-
  protected:
   virtual ~PasswordStoreConsumer();
 
  private:
   CancelableRequestConsumer cancelable_consumer_;
-  CancelableTaskTracker cancelable_task_tracker_;
 };
 
 #endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_CONSUMER_H_

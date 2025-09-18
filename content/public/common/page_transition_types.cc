@@ -8,15 +8,6 @@
 
 namespace content {
 
-bool PageTransitionCoreTypeIs(PageTransition lhs,
-                              PageTransition rhs) {
-  // Expect the rhs to be a compile time constant without qualifiers.
-  DCHECK(PageTransitionGetQualifier(rhs) == 0 &&
-      PageTransitionIsValidType(rhs));
-  return implicit_cast<int>(PageTransitionStripQualifier(lhs)) ==
-      implicit_cast<int>(PageTransitionStripQualifier(rhs));
-}
-
 PageTransition PageTransitionStripQualifier(PageTransition type) {
   return static_cast<PageTransition>(type & ~PAGE_TRANSITION_QUALIFIER_MASK);
 }
@@ -51,28 +42,15 @@ int32 PageTransitionGetQualifier(PageTransition type) {
   return type & PAGE_TRANSITION_QUALIFIER_MASK;
 }
 
-bool PageTransitionIsWebTriggerable(PageTransition type) {
-  int32 t = PageTransitionStripQualifier(type);
-  switch (t) {
-    case PAGE_TRANSITION_LINK:
-    case PAGE_TRANSITION_AUTO_SUBFRAME:
-    case PAGE_TRANSITION_MANUAL_SUBFRAME:
-    case PAGE_TRANSITION_FORM_SUBMIT:
-      return true;
-  }
-  return false;
-}
-
 const char* PageTransitionGetCoreTransitionString(PageTransition type) {
-  int32 t = PageTransitionStripQualifier(type);
-  switch (t) {
+  switch (type & PAGE_TRANSITION_CORE_MASK) {
     case PAGE_TRANSITION_LINK: return "link";
     case PAGE_TRANSITION_TYPED: return "typed";
     case PAGE_TRANSITION_AUTO_BOOKMARK: return "auto_bookmark";
     case PAGE_TRANSITION_AUTO_SUBFRAME: return "auto_subframe";
     case PAGE_TRANSITION_MANUAL_SUBFRAME: return "manual_subframe";
     case PAGE_TRANSITION_GENERATED: return "generated";
-    case PAGE_TRANSITION_AUTO_TOPLEVEL: return "auto_toplevel";
+    case PAGE_TRANSITION_START_PAGE: return "start_page";
     case PAGE_TRANSITION_FORM_SUBMIT: return "form_submit";
     case PAGE_TRANSITION_RELOAD: return "reload";
     case PAGE_TRANSITION_KEYWORD: return "keyword";

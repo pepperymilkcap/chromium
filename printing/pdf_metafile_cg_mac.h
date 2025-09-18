@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,7 @@
 #include "base/threading/thread_checker.h"
 #include "printing/metafile.h"
 
-namespace base {
 class FilePath;
-}
 
 namespace gfx {
 class Rect;
@@ -37,7 +35,7 @@ class PRINTING_EXPORT PdfMetafileCg : public Metafile {
                             uint32 src_buffer_size) OVERRIDE;
 
   // Not implemented on mac.
-  virtual SkBaseDevice* StartPageForVectorCanvas(
+  virtual SkDevice* StartPageForVectorCanvas(
       const gfx::Size& page_size, const gfx::Rect& content_area,
       const float& scale_factor) OVERRIDE;
   virtual bool StartPage(const gfx::Size& page_size,
@@ -50,7 +48,7 @@ class PRINTING_EXPORT PdfMetafileCg : public Metafile {
   virtual bool GetData(void* dst_buffer, uint32 dst_buffer_size) const OVERRIDE;
 
   // For testing purposes only.
-  virtual bool SaveTo(const base::FilePath& file_path) const OVERRIDE;
+  virtual bool SaveTo(const FilePath& file_path) const OVERRIDE;
 
   virtual gfx::Rect GetPageBounds(unsigned int page_number) const OVERRIDE;
   virtual unsigned int GetPageCount() const OVERRIDE;
@@ -60,9 +58,12 @@ class PRINTING_EXPORT PdfMetafileCg : public Metafile {
   virtual CGContextRef context() const OVERRIDE;
 
   virtual bool RenderPage(unsigned int page_number,
-                          gfx::NativeDrawingContext context,
+                          CGContextRef context,
                           const CGRect rect,
-                          const MacRenderPageParams& params) const OVERRIDE;
+                          bool shrink_to_fit,
+                          bool stretch_to_fit,
+                          bool center_horizontally,
+                          bool center_vertically) const OVERRIDE;
 
  private:
   // Returns a CGPDFDocumentRef version of pdf_data_.
@@ -71,13 +72,13 @@ class PRINTING_EXPORT PdfMetafileCg : public Metafile {
   base::ThreadChecker thread_checker_;
 
   // Context for rendering to the pdf.
-  base::ScopedCFTypeRef<CGContextRef> context_;
+  base::mac::ScopedCFTypeRef<CGContextRef> context_;
 
   // PDF backing store.
-  base::ScopedCFTypeRef<CFMutableDataRef> pdf_data_;
+  base::mac::ScopedCFTypeRef<CFMutableDataRef> pdf_data_;
 
   // Lazily-created CGPDFDocument representation of pdf_data_.
-  mutable base::ScopedCFTypeRef<CGPDFDocumentRef> pdf_doc_;
+  mutable base::mac::ScopedCFTypeRef<CGPDFDocumentRef> pdf_doc_;
 
   // Whether or not a page is currently open.
   bool page_is_open_;

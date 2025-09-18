@@ -1,13 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file contains the binary format definition of the command buffer and
 // command buffer commands.
 
-#include "gpu/command_buffer/common/cmd_buffer_common.h"
-
-#include "gpu/command_buffer/common/command_buffer.h"
+#include "../common/cmd_buffer_common.h"
+#include "../common/command_buffer.h"
+#include "../common/logging.h"
 
 namespace gpu {
 #if !defined(_WIN32)
@@ -30,14 +30,6 @@ const char* GetCommandName(CommandId command_id) {
 }
 
 }  // namespace cmd
-
-// TODO(apatrick): this is a temporary optimization while skia is calling
-// RendererGLContext::MakeCurrent prior to every GL call. It saves returning 6
-// ints redundantly when only the error is needed for the CommandBufferProxy
-// implementation.
-error::Error CommandBuffer::GetLastError() {
-  return GetLastState().error;
-}
 
 }  // namespace gpu
 

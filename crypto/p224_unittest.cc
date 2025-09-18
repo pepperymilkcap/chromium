@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace crypto {
-
+using namespace crypto;
 using p224::Point;
 
 // kBasePointExternal is the P224 base point in external representation.
@@ -803,22 +802,7 @@ TEST(P224, Addition) {
 
   p224::Negate(b, &minus_b);
   p224::Add(a, b, &sum);
-  EXPECT_TRUE(memcmp(&sum, &a, sizeof(sum)) != 0);
+  EXPECT_TRUE(memcmp(&sum, &a, sizeof(sum) != 0));
   p224::Add(minus_b, sum, &a_again);
   EXPECT_TRUE(a_again.ToString() == a.ToString());
 }
-
-TEST(P224, Infinity) {
-  char zeros[56];
-  memset(zeros, 0, sizeof(zeros));
-
-  // Test that x^0 = ∞.
-  Point a;
-  p224::ScalarBaseMult(reinterpret_cast<const uint8*>(zeros), &a);
-  EXPECT_TRUE(memcmp(zeros, a.ToString().data(), sizeof(zeros)) == 0);
-
-  // We shouldn't allow ∞ to be imported.
-  EXPECT_FALSE(a.SetFromString(std::string(zeros, sizeof(zeros))));
-}
-
-}  // namespace crypto

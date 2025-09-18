@@ -4,23 +4,18 @@
 
 #include "chrome/browser/tab_contents/language_state.h"
 
-#include "chrome/browser/tab_contents/language_state_observer.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/web_contents.h"
 
 using content::NavigationController;
 
 LanguageState::LanguageState(NavigationController* nav_controller)
-    : is_page_translated_(false),
-      navigation_controller_(nav_controller),
-      page_needs_translation_(false),
+    : navigation_controller_(nav_controller),
+      page_translatable_(false),
       translation_pending_(false),
       translation_declined_(false),
-      in_page_navigation_(false),
-      translate_enabled_(false),
-      observer_(NULL) {
+      in_page_navigation_(false) {
 }
 
 LanguageState::~LanguageState() {
@@ -47,84 +42,39 @@ void LanguageState::DidNavigate(
     current_lang_.clear();
   }
 
-  SetIsPageTranslated(false);
-
   translation_pending_ = false;
   translation_declined_ = false;
-
-  SetTranslateEnabled(false);
 }
 
 void LanguageState::LanguageDetermined(const std::string& page_language,
-                                       bool page_needs_translation) {
+                                       bool page_translatable) {
   if (in_page_navigation_ && !original_lang_.empty()) {
     // In-page navigation, we don't expect our states to change.
     // Note that we'll set the languages if original_lang_ is empty.  This might
     // happen if the we did not get called on the top-page.
     return;
   }
-  page_needs_translation_ = page_needs_translation;
+  page_translatable_ = page_translatable;
   original_lang_ = page_language;
   current_lang_ = page_language;
-  SetIsPageTranslated(false);
-}
-
-bool LanguageState::InTranslateNavigation() const {
-  // The user is in the same translate session if
-  //   - no translation is pending
-  //   - this page is in the same language as the previous page
-  //   - the previous page had been translated
-  //   - the new page was navigated through a link.
-  return
-      !translation_pending_ &&
-      prev_original_lang_ == original_lang_ &&
-      prev_original_lang_ != prev_current_lang_ &&
-      navigation_controller_ &&
-      navigation_controller_->GetActiveEntry() &&
-      navigation_controller_->GetActiveEntry()->GetTransitionType() ==
-          content::PAGE_TRANSITION_LINK;
-}
-
-void LanguageState::SetCurrentLanguage(const std::string& language) {
-  current_lang_ = language;
-  SetIsPageTranslated(current_lang_ != original_lang_);
 }
 
 std::string LanguageState::AutoTranslateTo() const {
-  if (InTranslateNavigation() && !is_page_translated_)
+  // Only auto-translate if:
+  // - no translation is pending
+  // - this page is in the same language as the previous page
+  // - the previous page had been translated
+  // - this page is not already translated
+  // - the new page was navigated through a link.
+  if (!translation_pending_ &&
+      prev_original_lang_ == original_lang_ &&
+      prev_original_lang_ != prev_current_lang_ &&
+      original_lang_ == current_lang_ &&
+      navigation_controller_->GetActiveEntry() &&
+      navigation_controller_->GetActiveEntry()->GetTransitionType() ==
+          content::PAGE_TRANSITION_LINK) {
     return prev_current_lang_;
+  }
 
   return std::string();
-}
-
-void LanguageState::SetTranslateEnabled(bool value) {
-  if (translate_enabled_ == value)
-    return;
-
-  translate_enabled_ = value;
-  if (observer_) {
-    content::WebContents* web_contents =
-        navigation_controller_->GetWebContents();
-    observer_->OnTranslateEnabledChanged(web_contents);
-  }
-}
-
-bool LanguageState::HasLanguageChanged() const {
-  return original_lang_ != prev_original_lang_;
-}
-
-void LanguageState::SetIsPageTranslated(bool value) {
-  if (is_page_translated_ == value)
-    return;
-
-  is_page_translated_ = value;
-  if (observer_) {
-    content::WebContents* web_contents =
-        navigation_controller_->GetWebContents();
-    observer_->OnIsPageTranslatedChanged(web_contents);
-  }
-
-  // With the translation done, the translate feature must be enabled.
-  if (is_page_translated_)
-    SetTranslateEnabled(true);
 }

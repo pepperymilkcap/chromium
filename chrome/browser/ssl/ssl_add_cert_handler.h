@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SSL_SSL_ADD_CERT_HANDLER_H_
 #define CHROME_BROWSER_SSL_SSL_ADD_CERT_HANDLER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -22,7 +23,7 @@ class SSLAddCertHandler : public base::RefCountedThreadSafe<SSLAddCertHandler> {
   SSLAddCertHandler(net::URLRequest* request, net::X509Certificate* cert,
                     int render_process_host_id, int render_view_id);
 
-  net::X509Certificate* cert() { return cert_.get(); }
+  net::X509Certificate* cert()  { return cert_; }
 
   int network_request_id() const { return network_request_id_; }
 

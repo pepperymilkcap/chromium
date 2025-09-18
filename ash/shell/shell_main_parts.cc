@@ -13,8 +13,8 @@ namespace shell {
 
 void PreMainMessageLoopStart() {
   ui::RegisterPathProvider();
-  base::i18n::InitializeICU();
-  ResourceBundle::InitSharedInstanceWithLocale("en-US", NULL);
+  icu_util::Initialize();
+  ResourceBundle::InitSharedInstanceWithLocale("en-US");
 }
 
 }  // namespace ash

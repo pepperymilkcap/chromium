@@ -9,10 +9,9 @@
 
 #include "ipc/ipc_platform_file.h"
 
-namespace content {
 class RenderViewImpl;
 
-class MHTMLGenerator : public RenderViewObserver {
+class MHTMLGenerator : public content::RenderViewObserver {
  public:
   explicit MHTMLGenerator(RenderViewImpl* render_view);
   virtual ~MHTMLGenerator();
@@ -32,7 +31,5 @@ class MHTMLGenerator : public RenderViewObserver {
 
   DISALLOW_COPY_AND_ASSIGN(MHTMLGenerator);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_RENDERER_MHTML_GENERATOR_H_

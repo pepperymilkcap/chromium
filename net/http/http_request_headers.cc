@@ -1,14 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/http/http_request_headers.h"
 
 #include "base/logging.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/values.h"
+#include "base/stringprintf.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
 #include "net/http/http_util.h"
 
 namespace net {
@@ -85,16 +84,16 @@ void HttpRequestHeaders::SetHeader(const base::StringPiece& key,
                                    const base::StringPiece& value) {
   HeaderVector::iterator it = FindHeader(key);
   if (it != headers_.end())
-    it->value.assign(value.data(), value.size());
+    it->value = value.as_string();
   else
-    headers_.push_back(HeaderKeyValuePair(key, value));
+    headers_.push_back(HeaderKeyValuePair(key.as_string(), value.as_string()));
 }
 
 void HttpRequestHeaders::SetHeaderIfMissing(const base::StringPiece& key,
                                             const base::StringPiece& value) {
   HeaderVector::iterator it = FindHeader(key);
   if (it == headers_.end())
-    headers_.push_back(HeaderKeyValuePair(key, value));
+    headers_.push_back(HeaderKeyValuePair(key.as_string(), value.as_string()));
 }
 
 void HttpRequestHeaders::RemoveHeader(const base::StringPiece& key) {
@@ -181,54 +180,6 @@ std::string HttpRequestHeaders::ToString() const {
   }
   output.append("\r\n");
   return output;
-}
-
-base::Value* HttpRequestHeaders::NetLogCallback(
-    const std::string* request_line,
-    NetLog::LogLevel /* log_level */) const {
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  dict->SetString("line", *request_line);
-  base::ListValue* headers = new base::ListValue();
-  for (HeaderVector::const_iterator it = headers_.begin();
-       it != headers_.end(); ++it) {
-    headers->Append(
-        new base::StringValue(base::StringPrintf("%s: %s",
-                                                 it->key.c_str(),
-                                                 it->value.c_str())));
-  }
-  dict->Set("headers", headers);
-  return dict;
-}
-
-// static
-bool HttpRequestHeaders::FromNetLogParam(const base::Value* event_param,
-                                         HttpRequestHeaders* headers,
-                                         std::string* request_line) {
-  headers->Clear();
-  *request_line = "";
-
-  const base::DictionaryValue* dict = NULL;
-  const base::ListValue* header_list = NULL;
-
-  if (!event_param ||
-      !event_param->GetAsDictionary(&dict) ||
-      !dict->GetList("headers", &header_list) ||
-      !dict->GetString("line", request_line)) {
-    return false;
-  }
-
-  for (base::ListValue::const_iterator it = header_list->begin();
-       it != header_list->end();
-       ++it) {
-    std::string header_line;
-    if (!(*it)->GetAsString(&header_line)) {
-      headers->Clear();
-      *request_line = "";
-      return false;
-    }
-    headers->AddHeaderFromString(header_line);
-  }
-  return true;
 }
 
 HttpRequestHeaders::HeaderVector::iterator

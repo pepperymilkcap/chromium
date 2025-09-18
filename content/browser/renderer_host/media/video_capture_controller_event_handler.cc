@@ -4,8 +4,6 @@
 
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
 
-namespace content {
-
 VideoCaptureControllerID::VideoCaptureControllerID(int did)
     : device_id(did) {
 }
@@ -19,5 +17,3 @@ bool VideoCaptureControllerID::operator==(
     const VideoCaptureControllerID& vc) const {
   return this->device_id == vc.device_id;
 }
-
-}  // namespace content

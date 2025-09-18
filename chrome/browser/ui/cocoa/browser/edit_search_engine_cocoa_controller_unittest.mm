@@ -1,12 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "grit/generated_resources.h"
@@ -20,77 +20,49 @@
 #include "ui/gfx/image/image.h"
 
 @interface FakeEditSearchEngineController : EditSearchEngineCocoaController
-
-- (NSTextField*)nameField;
-- (NSTextField*)keywordField;
-- (NSTextField*)urlField;
-- (NSImageView*)nameImage;
-- (NSImageView*)keywordImage;
-- (NSImageView*)urlImage;
-- (NSButton*)doneButton;
-
-- (NSImage*)goodImage;
-- (NSImage*)badImage;
-
+@property(nonatomic, readonly) NSTextField* nameField;
+@property(nonatomic, readonly) NSTextField* keywordField;
+@property(nonatomic, readonly) NSTextField* urlField;
+@property(nonatomic, readonly) NSImageView* nameImage;
+@property(nonatomic, readonly) NSImageView* keywordImage;
+@property(nonatomic, readonly) NSImageView* urlImage;
+@property(nonatomic, readonly) NSButton* doneButton;
+@property(nonatomic, readonly) NSImage* goodImage;
+@property(nonatomic, readonly) NSImage* badImage;
 @end
 
 @implementation FakeEditSearchEngineController
-
-- (NSTextField*)nameField {
-  return nameField_;
-}
-
-- (NSTextField*)keywordField {
-  return keywordField_;
-}
-
-- (NSTextField*)urlField {
-  return urlField_;
-}
-
-- (NSImageView*)nameImage {
-  return nameImage_;
-}
-
-- (NSImageView*)keywordImage {
-  return keywordImage_;
-}
-
-- (NSImageView*)urlImage {
-  return urlImage_;
-}
-
-- (NSButton*)doneButton {
-  return doneButton_;
-}
-
+@synthesize nameField = nameField_;
+@synthesize keywordField = keywordField_;
+@synthesize urlField = urlField_;
+@synthesize nameImage = nameImage_;
+@synthesize keywordImage = keywordImage_;
+@synthesize urlImage = urlImage_;
+@synthesize doneButton = doneButton_;
 - (NSImage*)goodImage {
   ui::ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   return rb.GetNativeImageNamed(IDR_INPUT_GOOD).ToNSImage();
 }
-
 - (NSImage*)badImage {
   ui::ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   return rb.GetNativeImageNamed(IDR_INPUT_ALERT).ToNSImage();
 }
-
 @end
 
 namespace {
 
 class EditSearchEngineControllerTest : public CocoaProfileTest {
  public:
-  virtual void SetUp() {
-    CocoaProfileTest::SetUp();
-    ASSERT_TRUE(profile());
+   virtual void SetUp() {
+     CocoaProfileTest::SetUp();
+     ASSERT_TRUE(profile());
 
-    TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-        profile(), &TemplateURLServiceFactory::BuildInstanceFor);
-    controller_ =
-       [[FakeEditSearchEngineController alloc] initWithProfile:profile()
-                                                      delegate:nil
-                                                   templateURL:nil];
-  }
+     profile()->CreateTemplateURLService();
+     controller_ =
+        [[FakeEditSearchEngineController alloc] initWithProfile:profile()
+                                                       delegate:nil
+                                                    templateURL:nil];
+   }
 
   virtual void TearDown() {
     // Force the window to load so we hit |-awakeFromNib| to register as the
@@ -234,13 +206,12 @@ TEST_F(EditSearchEngineControllerTest, ValidateFields) {
 
 // Tests editing an existing TemplateURL.
 TEST_F(EditSearchEngineControllerTest, EditTemplateURL) {
-  TemplateURLData data;
-  data.short_name = base::ASCIIToUTF16("Foobar");
-  data.SetKeyword(base::ASCIIToUTF16("keyword"));
+  TemplateURL url;
+  url.set_short_name(ASCIIToUTF16("Foobar"));
+  url.set_keyword(ASCIIToUTF16("keyword"));
   std::string urlString = TemplateURLRef::DisplayURLToURLRef(
-      base::ASCIIToUTF16("http://foo-bar.com"));
-  data.SetURL(urlString);
-  TemplateURL url(profile(), data);
+      ASCIIToUTF16("http://foo-bar.com"));
+  url.SetURL(urlString, 0, 1);
   FakeEditSearchEngineController *controller =
       [[FakeEditSearchEngineController alloc] initWithProfile:profile()
                                                      delegate:nil

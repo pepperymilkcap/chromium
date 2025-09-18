@@ -4,15 +4,12 @@
 
 #ifndef IPC_IPC_DESCRIPTORS_H_
 #define IPC_IPC_DESCRIPTORS_H_
+#pragma once
 
 // This is a list of global descriptor keys to be used with the
-// base::GlobalDescriptors object (see base/posix/global_descriptors.h)
+// base::GlobalDescriptors object (see base/global_descriptors_posix.h)
 enum {
   kPrimaryIPCChannel = 0,
-  kStatsTableSharedMemFd,
-
-  // The first key that can be use to register descriptors.
-  kIPCDescriptorMax
 };
 
 #endif  // IPC_IPC_DESCRIPTORS_H_

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_COMMON_CHROME_VERSION_INFO_H_
 #define CHROME_COMMON_CHROME_VERSION_INFO_H_
+#pragma once
 
 #include <string>
 
@@ -35,9 +36,6 @@ class VersionInfo {
   // the empty string in this case, so it's not harmful if you don't
   // check is_valid().
   bool is_valid() const;
-
-  // E.g. "Chrome/a.b.c.d"
-  std::string ProductNameAndVersionForUserAgent() const;
 
   // E.g. "Chromium" or "Google Chrome".
   std::string Name() const;

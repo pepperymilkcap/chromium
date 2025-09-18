@@ -1,19 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// This file defines utility functions for fetching localized resources.
-
-#include "chrome/installer/util/l10n_string_util.h"
-
-#include <atlbase.h>
+// This file defines specific implementation of BrowserDistribution class for
+// Google Chrome.
 
 #include <algorithm>
 
+#include <atlbase.h>
+
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "chrome/installer/util/language_selector.h"
 
 namespace {
@@ -24,23 +23,11 @@ const installer::LanguageSelector& GetLanguageSelector() {
   return instance;
 }
 
-installer::TranslationDelegate* g_translation_delegate = NULL;
-
 }  // namespace
 
 namespace installer {
 
-TranslationDelegate::~TranslationDelegate() {
-}
-
-void SetTranslationDelegate(TranslationDelegate* delegate) {
-  g_translation_delegate = delegate;
-}
-
 std::wstring GetLocalizedString(int base_message_id) {
-  if (g_translation_delegate)
-    return g_translation_delegate->GetLocalizedString(base_message_id);
-
   std::wstring localized_string;
 
   int message_id = base_message_id + GetLanguageSelector().offset();
@@ -83,7 +70,7 @@ std::wstring GetLocalizedEulaResource() {
   // (see the definition of full_exe_path and resource).
   DCHECK(kuint32max > (url_path.size() * 3));
   DWORD count = static_cast<DWORD>(url_path.size() * 3);
-  scoped_ptr<wchar_t[]> url_canon(new wchar_t[count]);
+  scoped_array<wchar_t> url_canon(new wchar_t[count]);
   HRESULT hr = ::UrlCanonicalizeW(url_path.c_str(), url_canon.get(),
                                   &count, URL_ESCAPE_UNSAFE);
   if (SUCCEEDED(hr))

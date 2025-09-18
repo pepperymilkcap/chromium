@@ -7,7 +7,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/content_settings/content_settings_mock_provider.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace content_settings {
 
@@ -22,14 +22,14 @@ TEST(ContentSettingsProviderTest, Mock) {
       pattern,
       CONTENT_SETTINGS_TYPE_PLUGINS,
       "java_plugin",
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
 
 
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             GetContentSetting(&mock_provider, url, url,
                               CONTENT_SETTINGS_TYPE_PLUGINS, "java_plugin",
                               false));
-  scoped_ptr<base::Value> value_ptr(
+  scoped_ptr<Value> value_ptr(
             GetContentSettingValue(&mock_provider, url, url,
                                    CONTENT_SETTINGS_TYPE_PLUGINS,
                                    "java_plugin", false));
@@ -46,18 +46,11 @@ TEST(ContentSettingsProviderTest, Mock) {
                                    CONTENT_SETTINGS_TYPE_PLUGINS,
                                    "flash_plugin", false));
   EXPECT_EQ(CONTENT_SETTING_DEFAULT,
-            GetContentSetting(&mock_provider,
-                              url,
-                              url,
-                              CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                              std::string(),
-                              false));
+            GetContentSetting(&mock_provider, url, url,
+                              CONTENT_SETTINGS_TYPE_GEOLOCATION, "", false));
   EXPECT_EQ(NULL,
-            GetContentSettingValue(&mock_provider,
-                                   url,
-                                   url,
-                                   CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                                   std::string(),
+            GetContentSettingValue(&mock_provider, url, url,
+                                   CONTENT_SETTINGS_TYPE_GEOLOCATION, "",
                                    false));
 
   bool owned = mock_provider.SetWebsiteSetting(
@@ -65,7 +58,7 @@ TEST(ContentSettingsProviderTest, Mock) {
       pattern,
       CONTENT_SETTINGS_TYPE_PLUGINS,
       "java_plugin",
-      base::Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
+      Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
   EXPECT_TRUE(owned);
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             GetContentSetting(&mock_provider, url, url,
@@ -74,7 +67,7 @@ TEST(ContentSettingsProviderTest, Mock) {
 
   mock_provider.set_read_only(true);
   scoped_ptr<base::Value> value(
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
   owned = mock_provider.SetWebsiteSetting(
       pattern,
       pattern,
@@ -95,7 +88,7 @@ TEST(ContentSettingsProviderTest, Mock) {
       pattern,
       CONTENT_SETTINGS_TYPE_PLUGINS,
       "java_plugin",
-      base::Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
   EXPECT_TRUE(owned);
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             GetContentSetting(&mock_provider, url, url,

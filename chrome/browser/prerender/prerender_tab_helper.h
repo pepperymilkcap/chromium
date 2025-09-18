@@ -1,26 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PRERENDER_PRERENDER_TAB_HELPER_H_
 #define CHROME_BROWSER_PRERENDER_PRERENDER_TAB_HELPER_H_
 
+#include "base/time.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_user_data.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
-class PasswordManager;
-
-namespace autofill {
-struct PasswordForm;
-}
-
-namespace predictors {
-class LoggedInPredictorTable;
-}
+class TabContentsWrapper;
 
 namespace prerender {
 
@@ -28,93 +18,67 @@ class PrerenderManager;
 
 // PrerenderTabHelper is responsible for recording perceived pageload times
 // to compare PLT's with prerendering enabled and disabled.
-class PrerenderTabHelper
-    : public content::WebContentsObserver,
-      public content::WebContentsUserData<PrerenderTabHelper> {
+class PrerenderTabHelper : public content::WebContentsObserver {
  public:
-  enum Event {
-    EVENT_LOGGED_IN_TABLE_REQUESTED = 0,
-    EVENT_LOGGED_IN_TABLE_PRESENT = 1,
-    EVENT_MAINFRAME_CHANGE = 2,
-    EVENT_MAINFRAME_CHANGE_DOMAIN_LOGGED_IN = 3,
-    EVENT_MAINFRAME_COMMIT = 4,
-    EVENT_MAINFRAME_COMMIT_DOMAIN_LOGGED_IN = 5,
-    EVENT_LOGIN_ACTION_ADDED = 6,
-    EVENT_LOGIN_ACTION_ADDED_PW_EMPTY = 7,
-    EVENT_MAX_VALUE
-  };
-
-  static void CreateForWebContentsWithPasswordManager(
-      content::WebContents* web_contents,
-      PasswordManager* password_manager);
-
+  explicit PrerenderTabHelper(TabContentsWrapper* tab);
   virtual ~PrerenderTabHelper();
 
   // content::WebContentsObserver implementation.
   virtual void ProvisionalChangeToMainFrameUrl(
       const GURL& url,
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidStopLoading(
-      content::RenderViewHost* render_view_host) OVERRIDE;
+      const GURL& opener_url) OVERRIDE;
+  virtual void DidStopLoading() OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
-      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
-      bool is_iframe_srcdoc,
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidCommitProvisionalLoadForFrame(
-      int64 frame_id,
-      const base::string16& frame_unique_name,
-      bool is_main_frame,
-      const GURL& validated_url,
-      content::PageTransition transition_type,
-      content::RenderViewHost* render_view_host) OVERRIDE;
+      RenderViewHost* render_view_host) OVERRIDE;
 
-  // Called when a password form has been submitted.
-  void PasswordSubmitted(const autofill::PasswordForm& form);
-
-  // Called when this prerendered WebContents has just been swapped in.
+  // Called when this prerendered TabContents has just been swapped in.
   void PrerenderSwappedIn();
 
- private:
-  PrerenderTabHelper(content::WebContents* web_contents,
-                     PasswordManager* password_manager);
-  friend class content::WebContentsUserData<PrerenderTabHelper>;
+  void UpdateTargetURL(int32 page_id, const GURL& url);
 
-  void RecordEvent(Event event) const;
-  void RecordEventIfLoggedInURL(Event event, const GURL& url);
-  void RecordEventIfLoggedInURLResult(Event event, scoped_ptr<bool> is_present,
-                                      scoped_ptr<bool> lookup_succeeded);
-  // Helper class to compute pixel-based stats on the paint progress
-  // between when a prerendered page is swapped in and when the onload event
-  // fires.
-  class PixelStats;
-  scoped_ptr<PixelStats> pixel_stats_;
+ private:
+  // The data we store for a hover (time the hover occurred & URL).
+  class HoverData;
 
   // Retrieves the PrerenderManager, or NULL, if none was found.
   PrerenderManager* MaybeGetPrerenderManager() const;
 
-  // Returns whether the WebContents being observed is currently prerendering.
+  // Checks with the PrerenderManager if the specified URL has been preloaded,
+  // and if so, swap the RenderViewHost with the preload into this TabContents
+  // object. |opener_url| denotes the window.opener url that is set for this
+  // tab and is empty if there is no opener set.
+  bool MaybeUsePrerenderedPage(const GURL& url, const GURL& opener_url);
+
+  // Returns whether the TabContents being observed is currently prerendering.
   bool IsPrerendering();
 
-  // Returns whether the WebContents being observed was prerendered.
-  bool IsPrerendered();
+  // Records histogram information for the current hover, based on whether
+  // it was used or not.  Will not do anything if there is no current hover.
+  // Also resets the hover to no hover.
+  void MaybeLogCurrentHover(bool was_used);
+
+  bool IsTopSite(const GURL& url);
+
+  // TabContentsWrapper we're created for.
+  TabContentsWrapper* tab_;
 
   // System time at which the current load was started for the purpose of
   // the perceived page load time (PPLT).
   base::TimeTicks pplt_load_start_;
 
-  // System time at which the actual pageload started (pre-swapin), if
-  // a applicable (in cases when a prerender that was still loading was
-  // swapped in).
-  base::TimeTicks actual_load_start_;
+  // Information about the last hover for each hover threshold.
+  scoped_array<HoverData> last_hovers_;
+
+  // Information about the current hover independent of thresholds.
+  GURL current_hover_url_;
+  base::TimeTicks current_hover_time_;
 
   // Current URL being loaded.
   GURL url_;
-
-  base::WeakPtrFactory<PrerenderTabHelper> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderTabHelper);
 };

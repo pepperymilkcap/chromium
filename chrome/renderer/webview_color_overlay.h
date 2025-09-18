@@ -4,26 +4,27 @@
 
 #ifndef CHROME_RENDERER_WEBVIEW_COLOR_OVERLAY_H_
 #define CHROME_RENDERER_WEBVIEW_COLOR_OVERLAY_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "third_party/WebKit/public/platform/WebRect.h"
-#include "third_party/WebKit/public/web/WebPageOverlay.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPageOverlay.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 
 namespace content {
 class RenderView;
 }
 
 // This class draws the given color on a PageOverlay of a WebView.
-class WebViewColorOverlay : public blink::WebPageOverlay {
+class WebViewColorOverlay : public WebKit::WebPageOverlay {
  public:
   WebViewColorOverlay(content::RenderView* render_view, SkColor color);
   virtual ~WebViewColorOverlay();
 
  private:
-  // blink::WebPageOverlay implementation:
-  virtual void paintPageOverlay(blink::WebCanvas* canvas);
+  // WebKit::WebPageOverlay implementation:
+  virtual void paintPageOverlay(WebKit::WebCanvas* canvas);
 
   content::RenderView* render_view_;
   SkColor color_;

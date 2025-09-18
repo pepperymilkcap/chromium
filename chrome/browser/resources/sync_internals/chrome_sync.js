@@ -1,19 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 var chrome = chrome || {};
-
 // TODO(akalin): Add mocking code for e.g. chrome.send() so that we
 // can test this without rebuilding chrome.
-
-/**
- * Organize sync event listeners and asynchronous requests.
- * This object is one of a kind; its constructor is not public.
- * @type {Object}
- */
 chrome.sync = chrome.sync || {};
-(function() {
+(function () {
 
 // This Event class is a simplified version of the one from
 // event_bindings.js.
@@ -32,10 +25,6 @@ Event.prototype.removeListener = function(listener) {
   }
   this.listeners_.splice(i, 1);
 };
-
-Event.prototype.removeListeners = function() {
-  this.listeners_ = [];
-}
 
 Event.prototype.hasListener = function(listener) {
   return this.findListener_(listener) > -1;
@@ -88,7 +77,8 @@ chrome.sync.events = {
     'onChangesApplied',
     'onChangesComplete',
     'onSyncCycleCompleted',
-    'onConnectionStatusChange',
+    'onAuthError',
+    'onUpdatedToken',
     'onPassphraseRequired',
     'onPassphraseAccepted',
     'onInitializationComplete',
@@ -97,7 +87,7 @@ chrome.sync.events = {
     'onClearServerDataFailed',
     'onEncryptedTypesChanged',
     'onEncryptionComplete',
-    'onActionableError',
+    'onActionableError'
   ],
 
   'transaction': [
@@ -146,16 +136,13 @@ var syncFunctions = [
   'getNotificationState',
   'getNotificationInfo',
 
-  // Client server communication logging functions.
-  'getClientServerTraffic',
-
   // Node lookup functions.  See chrome/browser/sync/engine/syncapi.h
   // for docs.
   'getRootNodeDetails',
   'getNodeSummariesById',
   'getNodeDetailsById',
   'getChildNodeIds',
-  'getAllNodes',
+  'findNodesContainingString'
 ];
 
 for (var i = 0; i < syncFunctions.length; ++i) {

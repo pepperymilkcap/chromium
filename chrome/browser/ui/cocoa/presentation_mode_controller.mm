@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,9 @@
 
 #include <algorithm>
 
-#include "base/command_line.h"
 #import "base/mac/mac_util.h"
-#include "chrome/browser/fullscreen.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#include "chrome/common/chrome_switches.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 
 NSString* const kWillEnterFullscreenNotification =
     @"WillEnterFullscreenNotification";
@@ -54,7 +51,7 @@ const CGFloat kFloatingBarVerticalOffset = 22;
 // duration may be less than |fullDuration|.
 - (id)initWithFraction:(CGFloat)fromFraction
           fullDuration:(CGFloat)fullDuration
-        animationCurve:(NSAnimationCurve)animationCurve
+        animationCurve:(NSInteger)animationCurve
             controller:(PresentationModeController*)controller;
 
 @end
@@ -66,7 +63,7 @@ const CGFloat kFloatingBarVerticalOffset = 22;
 
 - (id)initWithFraction:(CGFloat)toFraction
           fullDuration:(CGFloat)fullDuration
-        animationCurve:(NSAnimationCurve)animationCurve
+        animationCurve:(NSInteger)animationCurve
             controller:(PresentationModeController*)controller {
   // Calculate the effective duration, based on the current shown fraction.
   DCHECK(controller);
@@ -201,7 +198,7 @@ const CGFloat kFloatingBarVerticalOffset = 22;
   // Disable these notifications on Lion as they cause crashes.
   // TODO(rohitrao): Figure out what happens if a fullscreen window changes
   // monitors on Lion.
-  if (base::mac::IsOSSnowLeopard()) {
+  if (base::mac::IsOSSnowLeopardOrEarlier()) {
     [nc addObserver:self
            selector:@selector(windowDidChangeScreen:)
                name:NSWindowDidChangeScreenNotification
@@ -286,9 +283,6 @@ const CGFloat kFloatingBarVerticalOffset = 22;
 
 - (void)ensureOverlayShownWithAnimation:(BOOL)animate delay:(BOOL)delay {
   if (!inPresentationMode_)
-    return;
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode))
     return;
 
   if (animate) {
@@ -422,7 +416,7 @@ const CGFloat kFloatingBarVerticalOffset = 22;
 }
 
 - (BOOL)shouldToggleMenuBar {
-  return !chrome::mac::SupportsSystemFullscreen() &&
+  return base::mac::IsOSSnowLeopardOrEarlier() &&
          [self isWindowOnPrimaryScreen] &&
          [[browserController_ window] isMainWindow];
 }

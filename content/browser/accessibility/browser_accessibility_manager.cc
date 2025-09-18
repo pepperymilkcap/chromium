@@ -6,167 +6,154 @@
 
 #include "base/logging.h"
 #include "content/browser/accessibility/browser_accessibility.h"
-#include "content/common/accessibility_messages.h"
+#include "content/common/view_messages.h"
 
-namespace content {
+using webkit_glue::WebAccessibility;
 
 BrowserAccessibility* BrowserAccessibilityFactory::Create() {
   return BrowserAccessibility::Create();
 }
 
-#if !defined(OS_MACOSX) && \
-    !defined(OS_WIN) && \
-    !defined(TOOLKIT_GTK) && \
-    !defined(OS_ANDROID) \
-// We have subclassess of BrowserAccessibilityManager on Mac, Linux/GTK,
-// and Win. For any other platform, instantiate the base class.
+// Start child IDs at -1 and decrement each time, because clients use
+// child IDs of 1, 2, 3, ... to access the children of an object by
+// index, so we use negative IDs to clearly distinguish between indices
+// and unique IDs.
+// static
+int32 BrowserAccessibilityManager::next_child_id_ = -1;
+
+#if (defined(OS_POSIX) && !defined(OS_MACOSX)) || defined(USE_AURA)
+// There's no OS-specific implementation of BrowserAccessibilityManager
+// on Unix, so just instantiate the base class.
 // static
 BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
-    const AccessibilityNodeData& src,
+    gfx::NativeView parent_view,
+    const WebAccessibility& src,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory) {
-  return new BrowserAccessibilityManager(src, delegate, factory);
+  return new BrowserAccessibilityManager(
+      parent_view, src, delegate, factory);
 }
 #endif
 
+// static
+BrowserAccessibilityManager* BrowserAccessibilityManager::CreateEmptyDocument(
+    gfx::NativeView parent_view,
+    WebAccessibility::State state,
+    BrowserAccessibilityDelegate* delegate,
+    BrowserAccessibilityFactory* factory) {
+  // Use empty document to process notifications
+  webkit_glue::WebAccessibility empty_document;
+  empty_document.id = 0;
+  empty_document.role = WebAccessibility::ROLE_ROOT_WEB_AREA;
+  empty_document.state = state;
+  return BrowserAccessibilityManager::Create(
+      parent_view, empty_document, delegate, factory);
+}
+
 BrowserAccessibilityManager::BrowserAccessibilityManager(
+    gfx::NativeView parent_view,
+    const WebAccessibility& src,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory)
-    : delegate_(delegate),
+    : parent_view_(parent_view),
+      delegate_(delegate),
       factory_(factory),
-      root_(NULL),
-      focus_(NULL),
-      osk_state_(OSK_ALLOWED) {
-}
-
-BrowserAccessibilityManager::BrowserAccessibilityManager(
-    const AccessibilityNodeData& src,
-    BrowserAccessibilityDelegate* delegate,
-    BrowserAccessibilityFactory* factory)
-    : delegate_(delegate),
-      factory_(factory),
-      root_(NULL),
-      focus_(NULL),
-      osk_state_(OSK_ALLOWED) {
-  Initialize(src);
-}
-
-BrowserAccessibilityManager::~BrowserAccessibilityManager() {
-  if (root_)
-    root_->Destroy();
-}
-
-void BrowserAccessibilityManager::Initialize(const AccessibilityNodeData src) {
-  std::vector<AccessibilityNodeData> nodes;
-  nodes.push_back(src);
-  if (!UpdateNodes(nodes))
-    return;
+      focus_(NULL) {
+  root_ = CreateAccessibilityTree(NULL, src, 0, false);
   if (!focus_)
     SetFocus(root_, false);
 }
 
 // static
-AccessibilityNodeData BrowserAccessibilityManager::GetEmptyDocument() {
-  AccessibilityNodeData empty_document;
-  empty_document.id = 0;
-  empty_document.role = blink::WebAXRoleRootWebArea;
-  return empty_document;
+int32 BrowserAccessibilityManager::GetNextChildID() {
+  // Get the next child ID, and wrap around when we get near the end
+  // of a 32-bit integer range. It's okay to wrap around; we just want
+  // to avoid it as long as possible because clients may cache the ID of
+  // an object for a while to determine if they've seen it before.
+  next_child_id_--;
+  if (next_child_id_ == -2000000000)
+    next_child_id_ = -1;
+
+  return next_child_id_;
+}
+
+BrowserAccessibilityManager::~BrowserAccessibilityManager() {
+  // Clients could still hold references to some nodes of the tree, so
+  // calling InternalReleaseReference will make sure that as many nodes
+  // as possible are released now, and remaining nodes are marked as
+  // inactive so that calls to any methods on them will fail gracefully.
+  focus_->InternalReleaseReference(false);
+  root_->InternalReleaseReference(true);
 }
 
 BrowserAccessibility* BrowserAccessibilityManager::GetRoot() {
   return root_;
 }
 
-BrowserAccessibility* BrowserAccessibilityManager::GetFromRendererID(
-    int32 renderer_id) {
+BrowserAccessibility* BrowserAccessibilityManager::GetFromChildID(
+    int32 child_id) {
   base::hash_map<int32, BrowserAccessibility*>::iterator iter =
-      renderer_id_map_.find(renderer_id);
-  if (iter != renderer_id_map_.end())
+      child_id_map_.find(child_id);
+  if (iter != child_id_map_.end()) {
     return iter->second;
-  return NULL;
+  } else {
+    return NULL;
+  }
 }
 
-void BrowserAccessibilityManager::GotFocus(bool touch_event_context) {
-  if (!touch_event_context)
-    osk_state_ = OSK_DISALLOWED_BECAUSE_TAB_JUST_APPEARED;
+BrowserAccessibility* BrowserAccessibilityManager::GetFromRendererID(
+    int32 renderer_id) {
+  base::hash_map<int32, int32>::iterator iter =
+      renderer_id_to_child_id_map_.find(renderer_id);
+  if (iter == renderer_id_to_child_id_map_.end())
+    return NULL;
 
+  int32 child_id = iter->second;
+  return GetFromChildID(child_id);
+}
+
+void BrowserAccessibilityManager::GotFocus() {
   if (!focus_)
     return;
 
-  NotifyAccessibilityEvent(blink::WebAXEventFocus, focus_);
+  NotifyAccessibilityEvent(ViewHostMsg_AccEvent::FOCUS_CHANGED, focus_);
 }
 
-void BrowserAccessibilityManager::WasHidden() {
-  osk_state_ = OSK_DISALLOWED_BECAUSE_TAB_HIDDEN;
+void BrowserAccessibilityManager::Remove(int32 child_id, int32 renderer_id) {
+  child_id_map_.erase(child_id);
+
+  // TODO(ctguil): Investigate if hit. We should never have a newer entry.
+  DCHECK(renderer_id_to_child_id_map_[renderer_id] == child_id);
+  // Make sure we don't overwrite a newer entry (see UpdateNode for a possible
+  // corner case).
+  if (renderer_id_to_child_id_map_[renderer_id] == child_id)
+    renderer_id_to_child_id_map_.erase(renderer_id);
 }
 
-void BrowserAccessibilityManager::GotMouseDown() {
-  osk_state_ = OSK_ALLOWED_WITHIN_FOCUSED_OBJECT;
-  NotifyAccessibilityEvent(blink::WebAXEventFocus, focus_);
-}
-
-bool BrowserAccessibilityManager::IsOSKAllowed(const gfx::Rect& bounds) {
-  if (!delegate_ || !delegate_->HasFocus())
-    return false;
-
-  gfx::Point touch_point = delegate_->GetLastTouchEventLocation();
-  return bounds.Contains(touch_point);
-}
-
-bool BrowserAccessibilityManager::UseRootScrollOffsetsWhenComputingBounds() {
-  return true;
-}
-
-void BrowserAccessibilityManager::RemoveNode(BrowserAccessibility* node) {
-  if (node == focus_)
-    SetFocus(root_, false);
-  int renderer_id = node->renderer_id();
-  renderer_id_map_.erase(renderer_id);
-}
-
-void BrowserAccessibilityManager::OnAccessibilityEvents(
-    const std::vector<AccessibilityHostMsg_EventParams>& params) {
-  bool should_send_initial_focus = false;
-
-  // Process all changes to the accessibility tree first.
+void BrowserAccessibilityManager::OnAccessibilityNotifications(
+    const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
   for (uint32 index = 0; index < params.size(); index++) {
-    const AccessibilityHostMsg_EventParams& param = params[index];
-    if (!UpdateNodes(param.nodes))
-      return;
+    const ViewHostMsg_AccessibilityNotification_Params& param = params[index];
 
-    // Set initial focus when a page is loaded.
-    blink::WebAXEvent event_type = param.event_type;
-    if (event_type == blink::WebAXEventLoadComplete) {
-      if (!focus_) {
-        SetFocus(root_, false);
-        should_send_initial_focus = true;
-      }
-    }
-  }
-
-  if (should_send_initial_focus &&
-      (!delegate_ || delegate_->HasFocus())) {
-    NotifyAccessibilityEvent(blink::WebAXEventFocus, focus_);
-  }
-
-  // Now iterate over the events again and fire the events.
-  for (uint32 index = 0; index < params.size(); index++) {
-    const AccessibilityHostMsg_EventParams& param = params[index];
+    // Update the tree.
+    UpdateNode(param.acc_tree, param.includes_children);
 
     // Find the node corresponding to the id that's the target of the
-    // event (which may not be the root of the update tree).
-    BrowserAccessibility* node = GetFromRendererID(param.id);
-    if (!node)
+    // notification (which may not be the root of the update tree).
+    base::hash_map<int32, int32>::iterator iter =
+        renderer_id_to_child_id_map_.find(param.id);
+    if (iter == renderer_id_to_child_id_map_.end()) {
       continue;
+    }
+    int32 child_id = iter->second;
+    BrowserAccessibility* node = GetFromChildID(child_id);
+    if (!node) {
+      NOTREACHED();
+      continue;
+    }
 
-    blink::WebAXEvent event_type = param.event_type;
-    if (event_type == blink::WebAXEventFocus ||
-        event_type == blink::WebAXEventBlur) {
+    if (param.notification_type == ViewHostMsg_AccEvent::FOCUS_CHANGED) {
       SetFocus(node, false);
-
-      if (osk_state_ != OSK_DISALLOWED_BECAUSE_TAB_HIDDEN &&
-          osk_state_ != OSK_DISALLOWED_BECAUSE_TAB_JUST_APPEARED)
-        osk_state_ = OSK_ALLOWED;
 
       // Don't send a native focus event if the window itself doesn't
       // have focus.
@@ -174,18 +161,21 @@ void BrowserAccessibilityManager::OnAccessibilityEvents(
         continue;
     }
 
-    // Send the event event to the operating system.
-    NotifyAccessibilityEvent(event_type, node);
+    // Send the notification event to the operating system.
+    NotifyAccessibilityEvent(param.notification_type, node);
+
+    // Set initial focus when a page is loaded.
+    if (param.notification_type == ViewHostMsg_AccEvent::LOAD_COMPLETE) {
+      if (!focus_)
+        SetFocus(root_, false);
+      if (!delegate_ || delegate_->HasFocus())
+        NotifyAccessibilityEvent(ViewHostMsg_AccEvent::FOCUS_CHANGED, focus_);
+    }
   }
 }
 
-void BrowserAccessibilityManager::OnLocationChanges(
-    const std::vector<AccessibilityHostMsg_LocationChangeParams>& params) {
-  for (size_t i = 0; i < params.size(); ++i) {
-    BrowserAccessibility* node = GetFromRendererID(params[i].id);
-    if (node)
-      node->SetLocation(params[i].new_location);
-  }
+gfx::NativeView BrowserAccessibilityManager::GetParentView() {
+  return parent_view_;
 }
 
 BrowserAccessibility* BrowserAccessibilityManager::GetFocus(
@@ -198,16 +188,16 @@ BrowserAccessibility* BrowserAccessibilityManager::GetFocus(
 
 void BrowserAccessibilityManager::SetFocus(
     BrowserAccessibility* node, bool notify) {
-  if (focus_ != node)
+  if (focus_ != node) {
+    if (focus_)
+      focus_->InternalReleaseReference(false);
     focus_ = node;
+    if (focus_)
+      focus_->InternalAddReference();
+  }
 
   if (notify && node && delegate_)
     delegate_->SetAccessibilityFocus(node->renderer_id());
-}
-
-void BrowserAccessibilityManager::SetRoot(BrowserAccessibility* node) {
-  root_ = node;
-  NotifyRootChanged();
 }
 
 void BrowserAccessibilityManager::DoDefaultAction(
@@ -244,190 +234,139 @@ gfx::Rect BrowserAccessibilityManager::GetViewBounds() {
   return gfx::Rect();
 }
 
-void BrowserAccessibilityManager::UpdateNodesForTesting(
-    const AccessibilityNodeData& node1,
-    const AccessibilityNodeData& node2 /* = AccessibilityNodeData() */,
-    const AccessibilityNodeData& node3 /* = AccessibilityNodeData() */,
-    const AccessibilityNodeData& node4 /* = AccessibilityNodeData() */,
-    const AccessibilityNodeData& node5 /* = AccessibilityNodeData() */,
-    const AccessibilityNodeData& node6 /* = AccessibilityNodeData() */,
-    const AccessibilityNodeData& node7 /* = AccessibilityNodeData() */) {
-  std::vector<AccessibilityNodeData> nodes;
-  nodes.push_back(node1);
-  if (node2.id != AccessibilityNodeData().id)
-    nodes.push_back(node2);
-  if (node3.id != AccessibilityNodeData().id)
-    nodes.push_back(node3);
-  if (node4.id != AccessibilityNodeData().id)
-    nodes.push_back(node4);
-  if (node5.id != AccessibilityNodeData().id)
-    nodes.push_back(node5);
-  if (node6.id != AccessibilityNodeData().id)
-    nodes.push_back(node6);
-  if (node7.id != AccessibilityNodeData().id)
-    nodes.push_back(node7);
-  UpdateNodes(nodes);
-}
+void BrowserAccessibilityManager::UpdateNode(
+    const WebAccessibility& src,
+    bool include_children) {
+  BrowserAccessibility* current = NULL;
 
-bool BrowserAccessibilityManager::UpdateNodes(
-    const std::vector<AccessibilityNodeData>& nodes) {
-  bool success = true;
-
-  // First, update all of the nodes in the tree.
-  for (size_t i = 0; i < nodes.size() && success; i++) {
-    if (!UpdateNode(nodes[i]))
-      success = false;
-  }
-
-  // In a second pass, call PostInitialize on each one - this must
-  // be called after all of each node's children are initialized too.
-  for (size_t i = 0; i < nodes.size() && success; i++) {
-    // Note: it's not a bug for nodes[i].id to not be found in the tree.
-    // Consider this example:
-    // Before:
-    // A
-    //   B
-    //     C
-    //   D
-    //     E
-    //       F
-    // After:
-    // A
-    //   B
-    //     C
-    //       F
-    //   D
-    // In this example, F is being reparented. The renderer scans the tree
-    // in order. If can't update "C" to add "F" as a child, when "F" is still
-    // a child of "E". So it first updates "E", to remove "F" as a child.
-    // Later, it ends up deleting "E". So when we get here, "E" was updated as
-    // part of this sequence but it no longer exists in the final tree, so
-    // there's nothing to postinitialize.
-    BrowserAccessibility* instance = GetFromRendererID(nodes[i].id);
-    if (instance)
-      instance->PostInitialize();
-  }
-
-  if (!success) {
-    // A bad accessibility tree could lead to memory corruption.
-    // Ask the delegate to crash the renderer, or if not available,
-    // crash the browser.
-    if (delegate_)
-      delegate_->FatalAccessibilityTreeError();
-    else
-      CHECK(false);
-  }
-
-  return success;
-}
-
-BrowserAccessibility* BrowserAccessibilityManager::CreateNode(
-    BrowserAccessibility* parent,
-    int32 renderer_id,
-    int32 index_in_parent) {
-  BrowserAccessibility* node = factory_->Create();
-  node->InitializeTreeStructure(
-      this, parent, renderer_id, index_in_parent);
-  AddNodeToMap(node);
-  return node;
-}
-
-void BrowserAccessibilityManager::AddNodeToMap(BrowserAccessibility* node) {
-  renderer_id_map_[node->renderer_id()] = node;
-}
-
-bool BrowserAccessibilityManager::UpdateNode(const AccessibilityNodeData& src) {
-  // This method updates one node in the tree based on serialized data
-  // received from the renderer.
-
-  // Create a set of child ids in |src| for fast lookup. If a duplicate id is
-  // found, exit now with a fatal error before changing anything else.
-  std::set<int32> new_child_ids;
-  for (size_t i = 0; i < src.child_ids.size(); ++i) {
-    if (new_child_ids.find(src.child_ids[i]) != new_child_ids.end())
-      return false;
-    new_child_ids.insert(src.child_ids[i]);
-  }
-
-  // Look up the node by id. If it's not found, then either the root
-  // of the tree is being swapped, or we're out of sync with the renderer
-  // and this is a serious error.
-  BrowserAccessibility* instance = GetFromRendererID(src.id);
-  if (!instance) {
-    if (src.role != blink::WebAXRoleRootWebArea)
-      return false;
-    instance = CreateNode(NULL, src.id, 0);
-  }
-
-  // Update all of the node-specific data, like its role, state, name, etc.
-  instance->InitializeData(src);
-
-  //
-  // Update the children in three steps:
-  //
-  // 1. Iterate over the old children and delete nodes that are no longer
-  //    in the tree.
-  // 2. Build up a vector of new children, reusing children that haven't
-  //    changed (but may have been reordered) and adding new empty
-  //    objects for new children.
-  // 3. Swap in the new children vector for the old one.
-
-  // Delete any previous children of this instance that are no longer
-  // children first. We make a deletion-only pass first to prevent a
-  // node that's being reparented from being the child of both its old
-  // parent and new parent, which could lead to a double-free.
-  // If a node is reparented, the renderer will always send us a fresh
-  // copy of the node.
-  const std::vector<BrowserAccessibility*>& old_children = instance->children();
-  for (size_t i = 0; i < old_children.size(); ++i) {
-    int old_id = old_children[i]->renderer_id();
-    if (new_child_ids.find(old_id) == new_child_ids.end())
-      old_children[i]->Destroy();
-  }
-
-  // Now build a vector of new children, reusing objects that were already
-  // children of this node before.
-  std::vector<BrowserAccessibility*> new_children;
-  bool success = true;
-  for (size_t i = 0; i < src.child_ids.size(); i++) {
-    int32 child_renderer_id = src.child_ids[i];
-    int32 index_in_parent = static_cast<int32>(i);
-    BrowserAccessibility* child = GetFromRendererID(child_renderer_id);
-    if (child) {
-      if (child->parent() != instance) {
-        // This is a serious error - nodes should never be reparented.
-        // If this case occurs, continue so this node isn't left in an
-        // inconsistent state, but return failure at the end.
-        success = false;
-        continue;
-      }
-      child->UpdateParent(instance, index_in_parent);
-    } else {
-      child = CreateNode(instance, child_renderer_id, index_in_parent);
+  // Look for the node to replace. Either we're replacing the whole tree
+  // (role is ROOT_WEB_AREA) or we look it up based on its renderer ID.
+  if (src.role == WebAccessibility::ROLE_ROOT_WEB_AREA) {
+    current = root_;
+  } else {
+    base::hash_map<int32, int32>::iterator iter =
+        renderer_id_to_child_id_map_.find(src.id);
+    if (iter != renderer_id_to_child_id_map_.end()) {
+      int32 child_id = iter->second;
+      current = GetFromChildID(child_id);
     }
-    new_children.push_back(child);
   }
 
-  // Finally, swap in the new children vector for the old.
-  instance->SwapChildren(new_children);
+  // If we can't find the node to replace, we're out of sync with the
+  // renderer (this would be a bug).
+  DCHECK(current);
+  if (!current)
+    return;
 
-  // Handle the case where this node is the new root of the tree.
-  if (src.role == blink::WebAXRoleRootWebArea &&
-      (!root_ || root_->renderer_id() != src.id)) {
-    if (root_)
-      root_->Destroy();
-    if (focus_ == root_)
-      SetFocus(instance, false);
-    SetRoot(instance);
+  // If this update is just for a single node (|include_children| is false),
+  // modify |current| directly and return - no tree changes are needed.
+  if (!include_children) {
+    DCHECK_EQ(0U, src.children.size());
+    current->PreInitialize(
+        this,
+        current->parent(),
+        current->child_id(),
+        current->index_in_parent(),
+        src);
+    current->PostInitialize();
+    return;
   }
 
-  // Keep track of what node is focused.
-  if (src.role != blink::WebAXRoleRootWebArea &&
-      src.role != blink::WebAXRoleWebArea &&
-      (src.state >> blink::WebAXStateFocused & 1)) {
-    SetFocus(instance, false);
+  BrowserAccessibility* current_parent = current->parent();
+  int current_index_in_parent = current->index_in_parent();
+
+  // Detach all of the nodes in the old tree and get a single flat vector
+  // of all node pointers.
+  std::vector<BrowserAccessibility*> old_tree_nodes;
+  current->DetachTree(&old_tree_nodes);
+
+  // Build a new tree, reusing old nodes if possible. Each node that's
+  // reused will have its reference count incremented by one.
+  current = CreateAccessibilityTree(
+      current_parent, src, current_index_in_parent, true);
+
+  // Decrement the reference count of all nodes in the old tree, which will
+  // delete any nodes no longer needed.
+  for (int i = 0; i < static_cast<int>(old_tree_nodes.size()); i++)
+    old_tree_nodes[i]->InternalReleaseReference(false);
+
+  // If the only reference to the focused node is focus_ itself, then the
+  // focused node is no longer in the tree, so set the focus to the root.
+  if (focus_ && focus_->ref_count() == 1) {
+    SetFocus(root_, true);
+    if (!delegate_ || delegate_->HasFocus())
+      NotifyAccessibilityEvent(ViewHostMsg_AccEvent::FOCUS_CHANGED, focus_);
   }
-  return success;
 }
 
-}  // namespace content
+BrowserAccessibility* BrowserAccessibilityManager::CreateAccessibilityTree(
+    BrowserAccessibility* parent,
+    const WebAccessibility& src,
+    int index_in_parent,
+    bool send_show_events) {
+  BrowserAccessibility* instance = NULL;
+  int32 child_id = 0;
+  bool children_can_send_show_events = send_show_events;
+  base::hash_map<int32, int32>::iterator iter =
+      renderer_id_to_child_id_map_.find(src.id);
+
+  // If a BrowserAccessibility instance for this ID already exists, add a
+  // new reference to it and retrieve its children vector.
+  if (iter != renderer_id_to_child_id_map_.end()) {
+    child_id = iter->second;
+    instance = GetFromChildID(child_id);
+  }
+
+  // If the node has changed roles, don't reuse a BrowserAccessibility
+  // object, that could confuse a screen reader.
+  // TODO(dtseng): Investigate when this gets hit; See crbug.com/93095.
+  DCHECK(!instance || instance->role() == src.role);
+
+  // If we're reusing a node, it should already be detached from a parent
+  // and any children. If not, that means we have a serious bug somewhere,
+  // like the same child is reachable from two places in the same tree.
+  if (instance && (instance->parent() != NULL || instance->child_count() > 0)) {
+    NOTREACHED();
+    instance = NULL;
+  }
+
+  if (instance) {
+    // If we're reusing a node, update its parent and increment its
+    // reference count.
+    instance->UpdateParent(parent, index_in_parent);
+    instance->InternalAddReference();
+    send_show_events = false;
+  } else {
+    // Otherwise, create a new instance.
+    instance = factory_->Create();
+    child_id = GetNextChildID();
+    children_can_send_show_events = false;
+  }
+
+  instance->PreInitialize(this, parent, child_id, index_in_parent, src);
+  child_id_map_[child_id] = instance;
+  renderer_id_to_child_id_map_[src.id] = child_id;
+
+  if ((src.state >> WebAccessibility::STATE_FOCUSED) & 1)
+    SetFocus(instance, false);
+
+  for (int i = 0; i < static_cast<int>(src.children.size()); ++i) {
+    BrowserAccessibility* child = CreateAccessibilityTree(
+        instance, src.children[i], i, children_can_send_show_events);
+    instance->AddChild(child);
+  }
+
+  if (src.role == WebAccessibility::ROLE_ROOT_WEB_AREA)
+    root_ = instance;
+
+  // Note: the purpose of send_show_events and children_can_send_show_events
+  // is so that we send a single OBJECT_SHOW event for the root of a subtree
+  // that just appeared for the first time, but not on any descendant of
+  // that subtree.
+  if (send_show_events)
+    NotifyAccessibilityEvent(ViewHostMsg_AccEvent::OBJECT_SHOW, instance);
+
+  instance->PostInitialize();
+
+  return instance;
+}

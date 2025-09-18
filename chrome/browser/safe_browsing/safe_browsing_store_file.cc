@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -132,10 +132,10 @@ void DeleteChunksFromSet(const base::hash_set<int32>& deleted,
 // Sanity-check the header against the file's size to make sure our
 // vectors aren't gigantic.  This doubles as a cheap way to detect
 // corruption without having to checksum the entire file.
-bool FileHeaderSanityCheck(const base::FilePath& filename,
+bool FileHeaderSanityCheck(const FilePath& filename,
                            const FileHeader& header) {
   int64 size = 0;
-  if (!base::GetFileSize(filename, &size))
+  if (!file_util::GetFileSize(filename, &size))
     return false;
 
   int64 expected_size = sizeof(FileHeader);
@@ -154,7 +154,7 @@ bool FileHeaderSanityCheck(const base::FilePath& filename,
 
 // This a helper function that reads header to |header|. Returns true if the
 // magic number is correct and santiy check passes.
-bool ReadAndVerifyHeader(const base::FilePath& filename,
+bool ReadAndVerifyHeader(const FilePath& filename,
                          FILE* fp,
                          FileHeader* header,
                          base::MD5Context* context) {
@@ -176,17 +176,17 @@ void SafeBrowsingStoreFile::RecordFormatEvent(FormatEventType event_type) {
 
 // static
 void SafeBrowsingStoreFile::CheckForOriginalAndDelete(
-    const base::FilePath& current_filename) {
-  const base::FilePath original_filename(
+    const FilePath& current_filename) {
+  const FilePath original_filename(
       current_filename.DirName().AppendASCII("Safe Browsing"));
-  if (base::PathExists(original_filename)) {
+  if (file_util::PathExists(original_filename)) {
     int64 size = 0;
-    if (base::GetFileSize(original_filename, &size)) {
+    if (file_util::GetFileSize(original_filename, &size)) {
       UMA_HISTOGRAM_COUNTS("SB2.OldDatabaseKilobytes",
                            static_cast<int>(size / 1024));
     }
 
-    if (base::DeleteFile(original_filename, false)) {
+    if (file_util::Delete(original_filename, false)) {
       RecordFormatEvent(FORMAT_EVENT_DELETED_ORIGINAL);
     } else {
       RecordFormatEvent(FORMAT_EVENT_DELETED_ORIGINAL_FAILED);
@@ -194,14 +194,18 @@ void SafeBrowsingStoreFile::CheckForOriginalAndDelete(
 
     // Just best-effort on the journal file, don't want to get lost in
     // the weeds.
-    const base::FilePath journal_filename(
+    const FilePath journal_filename(
         current_filename.DirName().AppendASCII("Safe Browsing-journal"));
-    base::DeleteFile(journal_filename, false);
+    file_util::Delete(journal_filename, false);
   }
 }
 
 SafeBrowsingStoreFile::SafeBrowsingStoreFile()
-    : chunks_written_(0), empty_(false), corruption_seen_(false) {}
+    : chunks_written_(0),
+      file_(NULL),
+      empty_(false),
+      corruption_seen_(false) {
+}
 
 SafeBrowsingStoreFile::~SafeBrowsingStoreFile() {
   Close();
@@ -215,65 +219,32 @@ bool SafeBrowsingStoreFile::Delete() {
     return false;
   }
 
-  return DeleteStore(filename_);
-}
-
-bool SafeBrowsingStoreFile::CheckValidity() {
-  // The file was either empty or never opened.  The empty case is
-  // presumed not to be invalid.  The never-opened case can happen if
-  // BeginUpdate() fails for any databases, and should already have
-  // caused the corruption callback to fire.
-  if (!file_.get())
-    return true;
-
-  if (!FileRewind(file_.get()))
-    return OnCorruptDatabase();
-
-  int64 size = 0;
-  if (!base::GetFileSize(filename_, &size))
-    return OnCorruptDatabase();
-
-  base::MD5Context context;
-  base::MD5Init(&context);
-
-  // Read everything except the final digest.
-  size_t bytes_left = static_cast<size_t>(size);
-  CHECK(size == static_cast<int64>(bytes_left));
-  if (bytes_left < sizeof(base::MD5Digest))
-    return OnCorruptDatabase();
-  bytes_left -= sizeof(base::MD5Digest);
-
-  // Fold the contents of the file into the checksum.
-  while (bytes_left > 0) {
-    char buf[4096];
-    const size_t c = std::min(sizeof(buf), bytes_left);
-    const size_t ret = fread(buf, 1, c, file_.get());
-
-    // The file's size changed while reading, give up.
-    if (ret != c)
-      return OnCorruptDatabase();
-    base::MD5Update(&context, base::StringPiece(buf, c));
-    bytes_left -= c;
+  if (!file_util::Delete(filename_, false) &&
+      file_util::PathExists(filename_)) {
+    NOTREACHED();
+    return false;
   }
 
-  // Calculate the digest to this point.
-  base::MD5Digest calculated_digest;
-  base::MD5Final(&calculated_digest, &context);
-
-  // Read the stored digest and verify it.
-  base::MD5Digest file_digest;
-  if (!ReadItem(&file_digest, file_.get(), NULL))
-    return OnCorruptDatabase();
-  if (0 != memcmp(&file_digest, &calculated_digest, sizeof(file_digest))) {
-    RecordFormatEvent(FORMAT_EVENT_VALIDITY_CHECKSUM_FAILURE);
-    return OnCorruptDatabase();
+  const FilePath new_filename = TemporaryFileForFilename(filename_);
+  if (!file_util::Delete(new_filename, false) &&
+      file_util::PathExists(new_filename)) {
+    NOTREACHED();
+    return false;
   }
+
+  // With SQLite support gone, one way to get to this code is if the
+  // existing file is a SQLite file.  Make sure the journal file is
+  // also removed.
+  const FilePath journal_filename(
+      filename_.value() + FILE_PATH_LITERAL("-journal"));
+  if (file_util::PathExists(journal_filename))
+    file_util::Delete(journal_filename, false);
 
   return true;
 }
 
 void SafeBrowsingStoreFile::Init(
-    const base::FilePath& filename,
+    const FilePath& filename,
     const base::Closure& corruption_callback
 ) {
   filename_ = filename;
@@ -292,7 +263,7 @@ bool SafeBrowsingStoreFile::WriteAddPrefix(int32 chunk_id, SBPrefix prefix) {
 bool SafeBrowsingStoreFile::GetAddPrefixes(SBAddPrefixes* add_prefixes) {
   add_prefixes->clear();
 
-  file_util::ScopedFILE file(base::OpenFile(filename_, "rb"));
+  file_util::ScopedFILE file(file_util::OpenFile(filename_, "rb"));
   if (file.get() == NULL) return false;
 
   FileHeader header;
@@ -314,7 +285,7 @@ bool SafeBrowsingStoreFile::GetAddFullHashes(
     std::vector<SBAddFullHash>* add_full_hashes) {
   add_full_hashes->clear();
 
-  file_util::ScopedFILE file(base::OpenFile(filename_, "rb"));
+  file_util::ScopedFILE file(file_util::OpenFile(filename_, "rb"));
   if (file.get() == NULL) return false;
 
   FileHeader header;
@@ -396,17 +367,17 @@ bool SafeBrowsingStoreFile::BeginUpdate() {
 
   corruption_seen_ = false;
 
-  const base::FilePath new_filename = TemporaryFileForFilename(filename_);
-  file_util::ScopedFILE new_file(base::OpenFile(new_filename, "wb+"));
+  const FilePath new_filename = TemporaryFileForFilename(filename_);
+  file_util::ScopedFILE new_file(file_util::OpenFile(new_filename, "wb+"));
   if (new_file.get() == NULL)
     return false;
 
-  file_util::ScopedFILE file(base::OpenFile(filename_, "rb"));
+  file_util::ScopedFILE file(file_util::OpenFile(filename_, "rb"));
   empty_ = (file.get() == NULL);
   if (empty_) {
     // If the file exists but cannot be opened, try to delete it (not
     // deleting directly, the bloom filter needs to be deleted, too).
-    if (base::PathExists(filename_))
+    if (file_util::PathExists(filename_))
       return OnCorruptDatabase();
 
     new_file_.swap(new_file);
@@ -476,6 +447,7 @@ bool SafeBrowsingStoreFile::FinishChunk() {
 
 bool SafeBrowsingStoreFile::DoUpdate(
     const std::vector<SBAddFullHash>& pending_adds,
+    const std::set<SBPrefix>& prefix_misses,
     SBAddPrefixes* add_prefixes_result,
     std::vector<SBAddFullHash>* add_full_hashes_result) {
   DCHECK(file_.get() || empty_);
@@ -484,7 +456,7 @@ bool SafeBrowsingStoreFile::DoUpdate(
   CHECK(add_full_hashes_result);
 
   SBAddPrefixes add_prefixes;
-  SBSubPrefixes sub_prefixes;
+  std::vector<SBSubPrefix> sub_prefixes;
   std::vector<SBAddFullHash> add_full_hashes;
   std::vector<SBSubFullHash> sub_full_hashes;
 
@@ -531,10 +503,8 @@ bool SafeBrowsingStoreFile::DoUpdate(
     if (!ReadItem(&file_digest, file_.get(), NULL))
       return OnCorruptDatabase();
 
-    if (0 != memcmp(&file_digest, &calculated_digest, sizeof(file_digest))) {
-      RecordFormatEvent(FORMAT_EVENT_UPDATE_CHECKSUM_FAILURE);
+    if (0 != memcmp(&file_digest, &calculated_digest, sizeof(file_digest)))
       return OnCorruptDatabase();
-    }
 
     // Close the file so we can later rename over it.
     file_.reset();
@@ -547,7 +517,7 @@ bool SafeBrowsingStoreFile::DoUpdate(
 
   // Get chunk file's size for validating counts.
   int64 size = 0;
-  if (!base::GetFileSize(TemporaryFileForFilename(filename_), &size))
+  if (!file_util::GetFileSize(TemporaryFileForFilename(filename_), &size))
     return OnCorruptDatabase();
 
   // Track update size to answer questions at http://crbug.com/72216 .
@@ -599,6 +569,10 @@ bool SafeBrowsingStoreFile::DoUpdate(
   add_full_hashes.insert(add_full_hashes.end(),
                          pending_adds.begin(), pending_adds.end());
 
+  // Check how often a prefix was checked which wasn't in the
+  // database.
+  SBCheckPrefixMisses(add_prefixes, prefix_misses);
+
   // Knock the subs from the adds and process deleted chunks.
   SBProcessSubs(&add_prefixes, &sub_prefixes,
                 &add_full_hashes, &sub_full_hashes,
@@ -644,17 +618,17 @@ bool SafeBrowsingStoreFile::DoUpdate(
     return false;
 
   // Trim any excess left over from the temporary chunk data.
-  if (!base::TruncateFile(new_file_.get()))
+  if (!file_util::TruncateFile(new_file_.get()))
     return false;
 
   // Close the file handle and swizzle the file into place.
   new_file_.reset();
-  if (!base::DeleteFile(filename_, false) &&
-      base::PathExists(filename_))
+  if (!file_util::Delete(filename_, false) &&
+      file_util::PathExists(filename_))
     return false;
 
-  const base::FilePath new_filename = TemporaryFileForFilename(filename_);
-  if (!base::Move(new_filename, filename_))
+  const FilePath new_filename = TemporaryFileForFilename(filename_);
+  if (!file_util::Move(new_filename, filename_))
     return false;
 
   // Record counts before swapping to caller.
@@ -670,12 +644,16 @@ bool SafeBrowsingStoreFile::DoUpdate(
 
 bool SafeBrowsingStoreFile::FinishUpdate(
     const std::vector<SBAddFullHash>& pending_adds,
+    const std::set<SBPrefix>& prefix_misses,
     SBAddPrefixes* add_prefixes_result,
     std::vector<SBAddFullHash>* add_full_hashes_result) {
   DCHECK(add_prefixes_result);
   DCHECK(add_full_hashes_result);
 
-  if (!DoUpdate(pending_adds, add_prefixes_result, add_full_hashes_result)) {
+  bool ret = DoUpdate(pending_adds, prefix_misses,
+                      add_prefixes_result, add_full_hashes_result);
+
+  if (!ret) {
     CancelUpdate();
     return false;
   }
@@ -722,30 +700,4 @@ void SafeBrowsingStoreFile::DeleteAddChunk(int32 chunk_id) {
 
 void SafeBrowsingStoreFile::DeleteSubChunk(int32 chunk_id) {
   sub_del_cache_.insert(chunk_id);
-}
-
-// static
-bool SafeBrowsingStoreFile::DeleteStore(const base::FilePath& basename) {
-  if (!base::DeleteFile(basename, false) &&
-      base::PathExists(basename)) {
-    NOTREACHED();
-    return false;
-  }
-
-  const base::FilePath new_filename = TemporaryFileForFilename(basename);
-  if (!base::DeleteFile(new_filename, false) &&
-      base::PathExists(new_filename)) {
-    NOTREACHED();
-    return false;
-  }
-
-  // With SQLite support gone, one way to get to this code is if the
-  // existing file is a SQLite file.  Make sure the journal file is
-  // also removed.
-  const base::FilePath journal_filename(
-      basename.value() + FILE_PATH_LITERAL("-journal"));
-  if (base::PathExists(journal_filename))
-    base::DeleteFile(journal_filename, false);
-
-  return true;
 }

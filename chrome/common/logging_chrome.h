@@ -1,21 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_COMMON_LOGGING_CHROME_H__
 #define CHROME_COMMON_LOGGING_CHROME_H__
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/logging.h"
-#include "base/time/time.h"
 
 class CommandLine;
-
-namespace base {
 class FilePath;
-}
 
 namespace logging {
 
@@ -37,7 +34,7 @@ void InitChromeLogging(const CommandLine& command_line,
 
 #if defined(OS_CHROMEOS)
 // Get the log file location.
-base::FilePath GetSessionLogFile(const CommandLine& command_line);
+FilePath GetSessionLogFile(const CommandLine& command_line);
 
 // Redirects chrome logging to the appropriate session log dir.
 void RedirectChromeLogging(const CommandLine& command_line);
@@ -47,7 +44,7 @@ void RedirectChromeLogging(const CommandLine& command_line);
 void CleanupChromeLogging();
 
 // Returns the fully-qualified name of the log file.
-base::FilePath GetLogFileName();
+FilePath GetLogFileName();
 
 // Returns true when error/assertion dialogs are to be shown,
 // false otherwise.
@@ -65,10 +62,9 @@ typedef std::vector<std::wstring> AssertionList;
 // the program writing the log has terminated.
 size_t GetFatalAssertions(AssertionList* assertions);
 
-// Inserts timestamp before file extension in the format
-// "_yymmdd-hhmmss".
-base::FilePath GenerateTimestampedName(const base::FilePath& base_path,
-                                       base::Time timestamp);
+// Handler to silently dump the current process without crashing.
+void DumpWithoutCrashing();
+
 }  // namespace logging
 
 #endif  // CHROME_COMMON_LOGGING_CHROME_H_

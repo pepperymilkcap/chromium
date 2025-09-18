@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_DRAGDROP_DRAG_DROP_TYPES_H_
 #define UI_BASE_DRAGDROP_DRAG_DROP_TYPES_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "ui/base/ui_export.h"
@@ -19,15 +20,10 @@ class UI_EXPORT DragDropTypes {
     DRAG_LINK = 1 << 2
   };
 
-  enum DragEventSource {
-    DRAG_EVENT_SOURCE_MOUSE,
-    DRAG_EVENT_SOURCE_TOUCH,
-  };
-
 #if defined(OS_WIN)
   static uint32 DragOperationToDropEffect(int drag_operation);
   static int DropEffectToDragOperation(uint32 effect);
-#elif defined(TOOLKIT_GTK)
+#elif !defined(OS_MACOSX)
   static int DragOperationToGdkDragAction(int drag_operation);
   static int GdkDragActionToDragOperation(int gdk_drag_action);
 #endif

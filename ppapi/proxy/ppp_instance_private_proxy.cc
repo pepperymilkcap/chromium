@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "ppapi/shared_impl/proxy_lock.h"
 
 namespace ppapi {
 namespace proxy {
@@ -21,9 +20,6 @@ namespace {
 
 PP_Var GetInstanceObject(PP_Instance instance) {
   Dispatcher* dispatcher = HostDispatcher::GetForInstance(instance);
-  if (!dispatcher->permissions().HasPermission(PERMISSION_PRIVATE))
-    return PP_MakeUndefined();
-
   ReceiveSerializedVarReturnValue result;
   dispatcher->Send(new PpapiMsg_PPPInstancePrivate_GetInstanceObject(
       API_ID_PPP_INSTANCE_PRIVATE, instance, &result));
@@ -33,6 +29,10 @@ PP_Var GetInstanceObject(PP_Instance instance) {
 static const PPP_Instance_Private instance_private_interface = {
   &GetInstanceObject
 };
+
+InterfaceProxy* CreateInstancePrivateProxy(Dispatcher* dispatcher) {
+  return new PPP_Instance_Private_Proxy(dispatcher);
+}
 
 }  // namespace
 
@@ -49,14 +49,18 @@ PPP_Instance_Private_Proxy::~PPP_Instance_Private_Proxy() {
 }
 
 // static
-const PPP_Instance_Private* PPP_Instance_Private_Proxy::GetProxyInterface() {
-  return &instance_private_interface;
+const InterfaceProxy::Info* PPP_Instance_Private_Proxy::GetInfo() {
+  static const Info info = {
+    &instance_private_interface,
+    PPP_INSTANCE_PRIVATE_INTERFACE,
+    API_ID_PPP_INSTANCE_PRIVATE,
+    false,
+    &CreateInstancePrivateProxy,
+  };
+  return &info;
 }
 
 bool PPP_Instance_Private_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  if (!dispatcher()->IsPlugin())
-    return false;
-
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_Instance_Private_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPInstancePrivate_GetInstanceObject,
@@ -70,8 +74,7 @@ void PPP_Instance_Private_Proxy::OnMsgGetInstanceObject(
     PP_Instance instance,
     SerializedVarReturnValue result) {
   result.Return(dispatcher(),
-                CallWhileUnlocked(ppp_instance_private_impl_->GetInstanceObject,
-                                  instance));
+                ppp_instance_private_impl_->GetInstanceObject(instance));
 }
 
 }  // namespace proxy

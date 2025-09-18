@@ -359,7 +359,7 @@ typedef uLong FAR uLongf;
    typedef Byte       *voidp;
 #endif
 
-#if !defined(_WIN32)
+#ifdef HAVE_UNISTD_H    /* may be set to #if 1 by ./configure */
 #  define Z_HAVE_UNISTD_H
 #endif
 

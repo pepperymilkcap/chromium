@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,47 +6,43 @@
 // to the actual files (they still may change if an error is detected on the
 // files).
 
-#include "net/tools/dump_cache/dump_files.h"
-
-#include <stdio.h>
-
 #include <set>
+#include <stdio.h>
 #include <string>
 
 #include "base/file_util.h"
-#include "base/files/file_enumerator.h"
-#include "base/format_macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "net/base/file_stream.h"
 #include "net/disk_cache/block_files.h"
 #include "net/disk_cache/disk_format.h"
 #include "net/disk_cache/mapped_file.h"
-#include "net/disk_cache/stats.h"
-#include "net/disk_cache/storage_block-inl.h"
 #include "net/disk_cache/storage_block.h"
+#include "net/disk_cache/storage_block-inl.h"
 
 namespace {
 
-const base::FilePath::CharType kIndexName[] = FILE_PATH_LITERAL("index");
+const wchar_t kIndexName[] = L"index";
+const wchar_t kDataPrefix[] = L"data_";
 
 // Reads the |header_size| bytes from the beginning of file |name|.
-bool ReadHeader(const base::FilePath& name, char* header, int header_size) {
-  net::FileStream file(NULL);
-  file.OpenSync(name, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ);
+bool ReadHeader(const std::wstring& name, char* header, int header_size) {
+  net::FileStream file;
+  file.Open(FilePath::FromWStringHack(name),
+      base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ);
   if (!file.IsOpen()) {
-    printf("Unable to open file %s\n", name.MaybeAsASCII().c_str());
+    printf("Unable to open file %ls\n", name.c_str());
     return false;
   }
 
-  int read = file.ReadSync(header, header_size);
+  int read = file.Read(header, header_size, net::CompletionCallback());
   if (read != header_size) {
-    printf("Unable to read file %s\n", name.MaybeAsASCII().c_str());
+    printf("Unable to read file %ls\n", name.c_str());
     return false;
   }
   return true;
 }
 
-int GetMajorVersionFromFile(const base::FilePath& name) {
+int GetMajorVersionFromFile(const std::wstring& name) {
   disk_cache::IndexHeader header;
   if (!ReadHeader(name, reinterpret_cast<char*>(&header), sizeof(header)))
     return 0;
@@ -54,47 +50,8 @@ int GetMajorVersionFromFile(const base::FilePath& name) {
   return header.version >> 16;
 }
 
-// Dumps the contents of the Stats record.
-void DumpStats(const base::FilePath& path, disk_cache::CacheAddr addr) {
-  // We need a message loop, although we really don't run any task.
-  base::MessageLoop loop(base::MessageLoop::TYPE_IO);
-
-  disk_cache::BlockFiles block_files(path);
-  if (!block_files.Init(false)) {
-    printf("Unable to init block files\n");
-    return;
-  }
-
-  disk_cache::Addr address(addr);
-  disk_cache::MappedFile* file = block_files.GetFile(address);
-  if (!file)
-    return;
-
-  size_t length = (2 + disk_cache::Stats::kDataSizesLength) * sizeof(int32) +
-                  disk_cache::Stats::MAX_COUNTER * sizeof(int64);
-
-  size_t offset = address.start_block() * address.BlockSize() +
-                  disk_cache::kBlockHeaderSize;
-
-  scoped_ptr<int32[]> buffer(new int32[length]);
-  if (!file->Read(buffer.get(), length, offset))
-    return;
-
-  printf("Stats:\nSignatrure: 0x%x\n", buffer[0]);
-  printf("Total size: %d\n", buffer[1]);
-  for (int i = 0; i < disk_cache::Stats::kDataSizesLength; i++)
-    printf("Size(%d): %d\n", i, buffer[i + 2]);
-
-  int64* counters = reinterpret_cast<int64*>(
-                        buffer.get() + 2 + disk_cache::Stats::kDataSizesLength);
-  for (int i = 0; i < disk_cache::Stats::MAX_COUNTER; i++)
-    printf("Count(%d): %" PRId64 "\n", i, *counters++);
-  printf("-------------------------\n\n");
-}
-
 // Dumps the contents of the Index-file header.
-void DumpIndexHeader(const base::FilePath& name,
-                     disk_cache::CacheAddr* stats_addr) {
+void DumpIndexHeader(const std::wstring& name) {
   disk_cache::IndexHeader header;
   if (!ReadHeader(name, reinterpret_cast<char*>(&header), sizeof(header)))
     return;
@@ -109,7 +66,6 @@ void DumpIndexHeader(const base::FilePath& name,
   printf("table length: %d\n", header.table_len);
   printf("last crash: %d\n", header.crash);
   printf("experiment: %d\n", header.experiment);
-  printf("stats: %x\n", header.stats);
   for (int i = 0; i < 5; i++) {
     printf("head %d: 0x%x\n", i, header.lru.heads[i]);
     printf("tail %d: 0x%x\n", i, header.lru.tails[i]);
@@ -119,17 +75,17 @@ void DumpIndexHeader(const base::FilePath& name,
   printf("operation: %d\n", header.lru.operation);
   printf("operation list: %d\n", header.lru.operation_list);
   printf("-------------------------\n\n");
-
-  *stats_addr = header.stats;
 }
 
 // Dumps the contents of a block-file header.
-void DumpBlockHeader(const base::FilePath& name) {
+void DumpBlockHeader(const std::wstring& name) {
   disk_cache::BlockFileHeader header;
   if (!ReadHeader(name, reinterpret_cast<char*>(&header), sizeof(header)))
     return;
 
-  printf("Block file: %s\n", name.BaseName().MaybeAsASCII().c_str());
+  std::wstring file_name = FilePath(name).BaseName().value();
+
+  printf("Block file: %ls\n", file_name.c_str());
   printf("magic: %x\n", header.magic);
   printf("version: %d.%d\n", header.version >> 16, header.version & 0xffff);
   printf("file id: %d\n", header.this_file);
@@ -152,9 +108,9 @@ void DumpBlockHeader(const base::FilePath& name) {
 // Simple class that interacts with the set of cache files.
 class CacheDumper {
  public:
-  explicit CacheDumper(const base::FilePath& path)
+  explicit CacheDumper(const std::wstring& path)
       : path_(path),
-        block_files_(path),
+        block_files_(FilePath::FromWStringHack(path)),
         index_(NULL),
         current_hash_(0),
         next_addr_(0) {
@@ -172,7 +128,7 @@ class CacheDumper {
                     disk_cache::RankingsNode* rankings);
 
  private:
-  base::FilePath path_;
+  std::wstring path_;
   disk_cache::BlockFiles block_files_;
   scoped_refptr<disk_cache::MappedFile> index_file_;
   disk_cache::Index* index_;
@@ -188,10 +144,11 @@ bool CacheDumper::Init() {
     return false;
   }
 
-  base::FilePath index_name(path_.Append(kIndexName));
+  std::wstring index_name(path_);
+  file_util::AppendToPath(&index_name, kIndexName);
   index_file_ = new disk_cache::MappedFile;
-  index_ = reinterpret_cast<disk_cache::Index*>(
-      index_file_->Init(index_name, 0));
+  index_ = reinterpret_cast<disk_cache::Index*>(index_file_->Init(
+      FilePath::FromWStringHack(index_name), 0));
   if (!index_) {
     printf("Unable to map index\n");
     return false;
@@ -237,7 +194,7 @@ bool CacheDumper::LoadEntry(disk_cache::CacheAddr addr,
   if (!file)
     return false;
 
-  disk_cache::StorageBlock<disk_cache::EntryStore> entry_block(file, address);
+  disk_cache::CacheEntryBlock entry_block(file, address);
   if (!entry_block.Load())
     return false;
 
@@ -262,7 +219,7 @@ bool CacheDumper::LoadRankings(disk_cache::CacheAddr addr,
   if (!file)
     return false;
 
-  disk_cache::StorageBlock<disk_cache::RankingsNode> rank_block(file, address);
+  disk_cache::CacheRankingsBlock rank_block(file, address);
   if (!rank_block.Load())
     return false;
 
@@ -308,26 +265,21 @@ void DumpRankings(const disk_cache::RankingsNode& rankings) {
 
 // -----------------------------------------------------------------------
 
-int GetMajorVersion(const base::FilePath& input_path) {
-  base::FilePath index_name(input_path.Append(kIndexName));
+int GetMajorVersion(const std::wstring& input_path) {
+  std::wstring index_name(input_path);
+  file_util::AppendToPath(&index_name, kIndexName);
 
   int version = GetMajorVersionFromFile(index_name);
   if (!version)
     return 0;
 
-  base::FilePath data_name(input_path.Append(FILE_PATH_LITERAL("data_0")));
+  std::wstring data_name(input_path);
+  file_util::AppendToPath(&data_name, L"data_0");
   if (version != GetMajorVersionFromFile(data_name))
     return 0;
 
-  data_name = input_path.Append(FILE_PATH_LITERAL("data_1"));
-  if (version != GetMajorVersionFromFile(data_name))
-    return 0;
-
-  data_name = input_path.Append(FILE_PATH_LITERAL("data_2"));
-  if (version != GetMajorVersionFromFile(data_name))
-    return 0;
-
-  data_name = input_path.Append(FILE_PATH_LITERAL("data_3"));
+  data_name = input_path;
+  file_util::AppendToPath(&data_name, L"data_1");
   if (version != GetMajorVersionFromFile(data_name))
     return 0;
 
@@ -335,27 +287,29 @@ int GetMajorVersion(const base::FilePath& input_path) {
 }
 
 // Dumps the headers of all files.
-int DumpHeaders(const base::FilePath& input_path) {
-  base::FilePath index_name(input_path.Append(kIndexName));
-  disk_cache::CacheAddr stats_addr = 0;
-  DumpIndexHeader(index_name, &stats_addr);
+int DumpHeaders(const std::wstring& input_path) {
+  std::wstring index_name(input_path);
+  file_util::AppendToPath(&index_name, kIndexName);
+  DumpIndexHeader(index_name);
 
-  base::FileEnumerator iter(input_path, false,
-                            base::FileEnumerator::FILES,
-                            FILE_PATH_LITERAL("data_*"));
-  for (base::FilePath file = iter.Next(); !file.empty(); file = iter.Next())
+  std::wstring pattern(kDataPrefix);
+  pattern.append(L"*");
+  file_util::FileEnumerator iter(FilePath(input_path), false,
+                                 file_util::FileEnumerator::FILES, pattern);
+  for (std::wstring file = iter.Next().value(); !file.empty();
+       file = iter.Next().value()) {
     DumpBlockHeader(file);
+  }
 
-  DumpStats(input_path, stats_addr);
   return 0;
 }
 
 // Dumps all entries from the cache.
-int DumpContents(const base::FilePath& input_path) {
+int DumpContents(const std::wstring& input_path) {
   DumpHeaders(input_path);
 
   // We need a message loop, although we really don't run any task.
-  base::MessageLoop loop(base::MessageLoop::TYPE_IO);
+  MessageLoop loop(MessageLoop::TYPE_IO);
   CacheDumper dumper(input_path);
   if (!dumper.Init())
     return -1;

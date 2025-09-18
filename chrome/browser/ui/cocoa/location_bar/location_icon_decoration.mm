@@ -1,25 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
 
-#include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_finder.h"
-#import "chrome/browser/ui/cocoa/bookmarks/bookmark_drag_drop_cocoa.h"
+#include "base/sys_string_conversions.h"
+#import "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
+#include "skia/ext/skia_utils_mac.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util_mac.h"
-#include "ui/gfx/image/image.h"
 
-using content::NavigationController;
 using content::NavigationEntry;
 using content::WebContents;
 
@@ -42,7 +38,10 @@ bool LocationIconDecoration::IsDraggable() {
 
   // Do not drag if the user has been editing the location bar, or the
   // location bar is at the NTP.
-  return (!owner_->GetOmniboxView()->IsEditingOrEmpty());
+  if (owner_->location_entry()->IsEditingOrEmpty())
+    return false;
+
+  return true;
 }
 
 NSPasteboard* LocationIconDecoration::GetDragPasteboard() {
@@ -65,13 +64,12 @@ NSPasteboard* LocationIconDecoration::GetDragPasteboard() {
 }
 
 NSImage* LocationIconDecoration::GetDragImage() {
-  content::WebContents* web_contents = owner_->GetWebContents();
-  NSImage* favicon =
-      FaviconTabHelper::FromWebContents(web_contents)->GetFavicon().AsNSImage();
-  NSImage* iconImage = favicon ? favicon : GetImage();
+  const SkBitmap& favicon = owner_->GetFavicon();
+  NSImage* iconImage = (!favicon.isNull()) ?
+      gfx::SkBitmapToNSImage(favicon) : GetImage();
 
-  NSImage* image =
-      chrome::DragImageForBookmark(iconImage, web_contents->GetTitle());
+  NSImage* image = bookmark_pasteboard_helper_mac::DragImageForBookmark(
+      iconImage, owner_->GetTitle());
   NSSize imageSize = [image size];
   drag_frame_ = NSMakeRect(0, 0, imageSize.width, imageSize.height);
   return image;
@@ -97,24 +95,22 @@ bool LocationIconDecoration::AcceptsMousePress() {
 bool LocationIconDecoration::OnMousePressed(NSRect frame) {
   // Do not show page info if the user has been editing the location
   // bar, or the location bar is at the NTP.
-  if (owner_->GetOmniboxView()->IsEditingOrEmpty())
+  if (owner_->location_entry()->IsEditingOrEmpty())
     return true;
 
   WebContents* tab = owner_->GetWebContents();
-  const NavigationController& controller = tab->GetController();
-  // Important to use GetVisibleEntry to match what's showing in the omnibox.
-  NavigationEntry* nav_entry = controller.GetVisibleEntry();
+  NavigationEntry* nav_entry = tab->GetController().GetActiveEntry();
   if (!nav_entry) {
     NOTREACHED();
     return true;
   }
-  Browser* browser = chrome::FindBrowserWithWebContents(tab);
-  chrome::ShowWebsiteSettings(browser, tab, nav_entry->GetURL(),
-                              nav_entry->GetSSL());
+  tab->ShowPageInfo(nav_entry->GetURL(), nav_entry->GetSSL(), true);
   return true;
 }
 
 NSString* LocationIconDecoration::GetToolTip() {
-  return owner_->GetOmniboxView()->IsEditingOrEmpty() ?
-      nil : l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_LOCATION_ICON);
+  if (owner_->location_entry()->IsEditingOrEmpty())
+    return nil;
+  else
+    return l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_LOCATION_ICON);
 }

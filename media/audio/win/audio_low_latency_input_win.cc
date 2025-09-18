@@ -6,19 +6,19 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "media/audio/audio_util.h"
 #include "media/audio/win/audio_manager_win.h"
 #include "media/audio/win/avrt_wrapper_win.h"
 
 using base::win::ScopedComPtr;
 using base::win::ScopedCOMInitializer;
 
-namespace media {
-
 WASAPIAudioInputStream::WASAPIAudioInputStream(
     AudioManagerWin* manager, const AudioParameters& params,
     const std::string& device_id)
-    : manager_(manager),
+    : com_init_(ScopedCOMInitializer::kMTA),
+      manager_(manager),
       capture_thread_(NULL),
       opened_(false),
       started_(false),
@@ -32,10 +32,10 @@ WASAPIAudioInputStream::WASAPIAudioInputStream(
   DCHECK(avrt_init) << "Failed to load the Avrt.dll";
 
   // Set up the desired capture format specified by the client.
-  format_.nSamplesPerSec = params.sample_rate();
+  format_.nSamplesPerSec = params.sample_rate;
   format_.wFormatTag = WAVE_FORMAT_PCM;
-  format_.wBitsPerSample = params.bits_per_sample();
-  format_.nChannels = params.channels();
+  format_.wBitsPerSample = params.bits_per_sample;
+  format_.nChannels = params.channels;
   format_.nBlockAlign = (format_.wBitsPerSample / 8) * format_.nChannels;
   format_.nAvgBytesPerSec = format_.nSamplesPerSec * format_.nBlockAlign;
   format_.cbSize = 0;
@@ -44,8 +44,8 @@ WASAPIAudioInputStream::WASAPIAudioInputStream(
   frame_size_ = format_.nBlockAlign;
   // Store size of audio packets which we expect to get from the audio
   // endpoint device in each capture event.
-  packet_size_frames_ = params.GetBytesPerBuffer() / format_.nBlockAlign;
-  packet_size_bytes_ = params.GetBytesPerBuffer();
+  packet_size_frames_ = params.GetPacketSize() / format_.nBlockAlign;
+  packet_size_bytes_ = params.GetPacketSize();
   DVLOG(1) << "Number of bytes per audio frame  : " << frame_size_;
   DVLOG(1) << "Number of audio frames per packet: " << packet_size_frames_;
 
@@ -60,7 +60,7 @@ WASAPIAudioInputStream::WASAPIAudioInputStream(
   stop_capture_event_.Set(CreateEvent(NULL, FALSE, FALSE, NULL));
   DCHECK(stop_capture_event_.IsValid());
 
-  ms_to_frame_count_ = static_cast<double>(params.sample_rate()) / 1000.0;
+  ms_to_frame_count_ = static_cast<double>(params.sample_rate) / 1000.0;
 
   LARGE_INTEGER performance_frequency;
   if (QueryPerformanceFrequency(&performance_frequency)) {
@@ -75,7 +75,6 @@ WASAPIAudioInputStream::WASAPIAudioInputStream(
 WASAPIAudioInputStream::~WASAPIAudioInputStream() {}
 
 bool WASAPIAudioInputStream::Open() {
-  DCHECK(CalledOnValidThread());
   // Verify that we are not already opened.
   if (opened_)
     return false;
@@ -84,37 +83,43 @@ bool WASAPIAudioInputStream::Open() {
   // device with the specified unique identifier or role which was
   // set at construction.
   HRESULT hr = SetCaptureDevice();
-  if (FAILED(hr))
+  if (FAILED(hr)) {
     return false;
+  }
 
   // Obtain an IAudioClient interface which enables us to create and initialize
   // an audio stream between an audio application and the audio engine.
   hr = ActivateCaptureDevice();
-  if (FAILED(hr))
+  if (FAILED(hr)) {
     return false;
+  }
 
   // Retrieve the stream format which the audio engine uses for its internal
-  // processing/mixing of shared-mode streams. This function call is for
-  // diagnostic purposes only and only in debug mode.
-#ifndef NDEBUG
+  // processing/mixing of shared-mode streams.
   hr = GetAudioEngineStreamFormat();
-#endif
+  if (FAILED(hr)) {
+    return false;
+  }
 
   // Verify that the selected audio endpoint supports the specified format
   // set during construction.
-  if (!DesiredFormatIsSupported())
+  if (!DesiredFormatIsSupported()) {
     return false;
+  }
 
   // Initialize the audio stream between the client and the device using
   // shared mode and a lowest possible glitch-free latency.
   hr = InitializeAudioEngine();
+  if (FAILED(hr)) {
+    return false;
+  }
 
-  opened_ = SUCCEEDED(hr);
-  return opened_;
+  opened_ = true;
+
+  return true;
 }
 
 void WASAPIAudioInputStream::Start(AudioInputCallback* callback) {
-  DCHECK(CalledOnValidThread());
   DCHECK(callback);
   DLOG_IF(ERROR, !opened_) << "Open() has not been called successfully";
   if (!opened_)
@@ -123,12 +128,7 @@ void WASAPIAudioInputStream::Start(AudioInputCallback* callback) {
   if (started_)
     return;
 
-  DCHECK(!sink_);
   sink_ = callback;
-
-  // Starts periodic AGC microphone measurements if the AGC has been enabled
-  // using SetAutomaticGainControl().
-  StartAgc();
 
   // Create and start the thread that will drive the capturing by waiting for
   // capture events.
@@ -140,20 +140,12 @@ void WASAPIAudioInputStream::Start(AudioInputCallback* callback) {
   HRESULT hr = audio_client_->Start();
   DLOG_IF(ERROR, FAILED(hr)) << "Failed to start input streaming.";
 
-  if (SUCCEEDED(hr) && audio_render_client_for_loopback_)
-    hr = audio_render_client_for_loopback_->Start();
-
   started_ = SUCCEEDED(hr);
 }
 
 void WASAPIAudioInputStream::Stop() {
-  DCHECK(CalledOnValidThread());
-  DVLOG(1) << "WASAPIAudioInputStream::Stop()";
   if (!started_)
     return;
-
-  // Stops periodic AGC microphone measurements.
-  StopAgc();
 
   // Shut down the capture thread.
   if (stop_capture_event_.IsValid()) {
@@ -174,85 +166,36 @@ void WASAPIAudioInputStream::Stop() {
   }
 
   started_ = false;
-  sink_ = NULL;
 }
 
 void WASAPIAudioInputStream::Close() {
-  DVLOG(1) << "WASAPIAudioInputStream::Close()";
   // It is valid to call Close() before calling open or Start().
   // It is also valid to call Close() after Start() has been called.
   Stop();
+  if (sink_) {
+    sink_->OnClose(this);
+    sink_ = NULL;
+  }
 
   // Inform the audio manager that we have been closed. This will cause our
   // destruction.
   manager_->ReleaseInputStream(this);
 }
 
-double WASAPIAudioInputStream::GetMaxVolume() {
-  // Verify that Open() has been called succesfully, to ensure that an audio
-  // session exists and that an ISimpleAudioVolume interface has been created.
-  DLOG_IF(ERROR, !opened_) << "Open() has not been called successfully";
-  if (!opened_)
-    return 0.0;
-
-  // The effective volume value is always in the range 0.0 to 1.0, hence
-  // we can return a fixed value (=1.0) here.
-  return 1.0;
-}
-
-void WASAPIAudioInputStream::SetVolume(double volume) {
-  DVLOG(1) << "SetVolume(volume=" << volume << ")";
-  DCHECK(CalledOnValidThread());
-  DCHECK_GE(volume, 0.0);
-  DCHECK_LE(volume, 1.0);
-
-  DLOG_IF(ERROR, !opened_) << "Open() has not been called successfully";
-  if (!opened_)
-    return;
-
-  // Set a new master volume level. Valid volume levels are in the range
-  // 0.0 to 1.0. Ignore volume-change events.
-  HRESULT hr = simple_audio_volume_->SetMasterVolume(static_cast<float>(volume),
-      NULL);
-  DLOG_IF(WARNING, FAILED(hr)) << "Failed to set new input master volume.";
-
-  // Update the AGC volume level based on the last setting above. Note that,
-  // the volume-level resolution is not infinite and it is therefore not
-  // possible to assume that the volume provided as input parameter can be
-  // used directly. Instead, a new query to the audio hardware is required.
-  // This method does nothing if AGC is disabled.
-  UpdateAgcVolume();
-}
-
-double WASAPIAudioInputStream::GetVolume() {
-  DLOG_IF(ERROR, !opened_) << "Open() has not been called successfully";
-  if (!opened_)
-    return 0.0;
-
-  // Retrieve the current volume level. The value is in the range 0.0 to 1.0.
-  float level = 0.0f;
-  HRESULT hr = simple_audio_volume_->GetMasterVolume(&level);
-  DLOG_IF(WARNING, FAILED(hr)) << "Failed to get input master volume.";
-
-  return static_cast<double>(level);
-}
-
 // static
-int WASAPIAudioInputStream::HardwareSampleRate(
-    const std::string& device_id) {
+double WASAPIAudioInputStream::HardwareSampleRate(ERole device_role) {
   base::win::ScopedCoMem<WAVEFORMATEX> audio_engine_mix_format;
-  HRESULT hr = GetMixFormat(device_id, &audio_engine_mix_format);
+  HRESULT hr = GetMixFormat(device_role, &audio_engine_mix_format);
   if (FAILED(hr))
-    return 0;
+    return 0.0;
 
-  return static_cast<int>(audio_engine_mix_format->nSamplesPerSec);
+  return static_cast<double>(audio_engine_mix_format->nSamplesPerSec);
 }
 
 // static
-uint32 WASAPIAudioInputStream::HardwareChannelCount(
-    const std::string& device_id) {
+uint32 WASAPIAudioInputStream::HardwareChannelCount(ERole device_role) {
   base::win::ScopedCoMem<WAVEFORMATEX> audio_engine_mix_format;
-  HRESULT hr = GetMixFormat(device_id, &audio_engine_mix_format);
+  HRESULT hr = GetMixFormat(device_role, &audio_engine_mix_format);
   if (FAILED(hr))
     return 0;
 
@@ -260,40 +203,43 @@ uint32 WASAPIAudioInputStream::HardwareChannelCount(
 }
 
 // static
-HRESULT WASAPIAudioInputStream::GetMixFormat(const std::string& device_id,
+HRESULT WASAPIAudioInputStream::GetMixFormat(ERole device_role,
                                              WAVEFORMATEX** device_format) {
   // It is assumed that this static method is called from a COM thread, i.e.,
   // CoInitializeEx() is not called here to avoid STA/MTA conflicts.
   ScopedComPtr<IMMDeviceEnumerator> enumerator;
-  HRESULT hr = enumerator.CreateInstance(__uuidof(MMDeviceEnumerator), NULL,
-                                         CLSCTX_INPROC_SERVER);
+  HRESULT hr =  CoCreateInstance(__uuidof(MMDeviceEnumerator),
+                                 NULL,
+                                 CLSCTX_INPROC_SERVER,
+                                 __uuidof(IMMDeviceEnumerator),
+                                 enumerator.ReceiveVoid());
   if (FAILED(hr))
     return hr;
 
   ScopedComPtr<IMMDevice> endpoint_device;
-  if (device_id == AudioManagerBase::kDefaultDeviceId) {
-    // Retrieve the default capture audio endpoint.
-    hr = enumerator->GetDefaultAudioEndpoint(eCapture, eConsole,
-                                             endpoint_device.Receive());
-  } else if (device_id == AudioManagerBase::kLoopbackInputDeviceId) {
-    // Capture the default playback stream.
-    hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
-                                             endpoint_device.Receive());
-  } else {
-    // Retrieve a capture endpoint device that is specified by an endpoint
-    // device-identification string.
-    hr = enumerator->GetDevice(base::UTF8ToUTF16(device_id).c_str(),
-                               endpoint_device.Receive());
-  }
-  if (FAILED(hr))
+  hr = enumerator->GetDefaultAudioEndpoint(eCapture,
+                                           device_role,
+                                           endpoint_device.Receive());
+  if (FAILED(hr)) {
+    // This will happen if there's no audio capture device found or available
+    // (e.g. some audio cards that have inputs will still report them as
+    // "not found" when no mic is plugged into the input jack).
+    LOG(WARNING) << "No audio end point: " << std::hex << hr;
     return hr;
+  }
 
   ScopedComPtr<IAudioClient> audio_client;
   hr = endpoint_device->Activate(__uuidof(IAudioClient),
                                  CLSCTX_INPROC_SERVER,
                                  NULL,
                                  audio_client.ReceiveVoid());
-  return SUCCEEDED(hr) ? audio_client->GetMixFormat(device_format) : hr;
+  DCHECK(SUCCEEDED(hr)) << "Failed to activate device: " << std::hex << hr;
+  if (SUCCEEDED(hr)) {
+    hr = audio_client->GetMixFormat(device_format);
+    DCHECK(SUCCEEDED(hr)) << "GetMixFormat: " << std::hex << hr;
+  }
+
+  return hr;
 }
 
 void WASAPIAudioInputStream::Run() {
@@ -325,12 +271,11 @@ void WASAPIAudioInputStream::Run() {
   size_t capture_buffer_size = std::max(
       2 * endpoint_buffer_size_frames_ * frame_size_,
       2 * packet_size_frames_ * frame_size_);
-  scoped_ptr<uint8[]> capture_buffer(new uint8[capture_buffer_size]);
+  scoped_array<uint8> capture_buffer(new uint8[capture_buffer_size]);
 
   LARGE_INTEGER now_count;
   bool recording = true;
   bool error = false;
-  double volume = GetVolume();
   HANDLE wait_array[2] = {stop_capture_event_, audio_samples_ready_event_};
 
   while (recording && !error) {
@@ -397,11 +342,6 @@ void WASAPIAudioInputStream::Run() {
                 first_audio_frame_timestamp) / 10000.0) * ms_to_frame_count_ +
                 buffer_frame_index - num_frames_to_read;
 
-          // Get a cached AGC volume level which is updated once every second
-          // on the audio manager thread. Note that, |volume| is also updated
-          // each time SetVolume() is called through IPC by the render-side AGC.
-          GetAgcVolume(&volume);
-
           // Deliver captured data to the registered consumer using a packet
           // size which was specified at construction.
           uint32 delay_frames = static_cast<uint32>(audio_delay_frames + 0.5);
@@ -409,13 +349,11 @@ void WASAPIAudioInputStream::Run() {
             uint8* audio_data =
                 reinterpret_cast<uint8*>(capture_buffer.get());
 
-            // Deliver data packet, delay estimation and volume level to
-            // the user.
+            // Deliver data packet and delay estimation to the user.
             sink_->OnData(this,
                           audio_data,
                           packet_size_bytes_,
-                          delay_frames * frame_size_,
-                          volume);
+                          delay_frames * frame_size_);
 
             // Store parts of the recorded data which can't be delivered
             // using the current packet size. The stored section will be used
@@ -452,49 +390,47 @@ void WASAPIAudioInputStream::Run() {
 void WASAPIAudioInputStream::HandleError(HRESULT err) {
   NOTREACHED() << "Error code: " << err;
   if (sink_)
-    sink_->OnError(this);
+    sink_->OnError(this, static_cast<int>(err));
 }
 
 HRESULT WASAPIAudioInputStream::SetCaptureDevice() {
   ScopedComPtr<IMMDeviceEnumerator> enumerator;
-  HRESULT hr = enumerator.CreateInstance(__uuidof(MMDeviceEnumerator),
-                                         NULL, CLSCTX_INPROC_SERVER);
-  if (FAILED(hr))
-    return hr;
+  HRESULT hr =  CoCreateInstance(__uuidof(MMDeviceEnumerator),
+                                 NULL,
+                                 CLSCTX_INPROC_SERVER,
+                                 __uuidof(IMMDeviceEnumerator),
+                                 enumerator.ReceiveVoid());
+  if (SUCCEEDED(hr)) {
+    // Retrieve the IMMDevice by using the specified role or the specified
+    // unique endpoint device-identification string.
+    // TODO(henrika): possibly add suport for the eCommunications as well.
+    if (device_id_ == AudioManagerBase::kDefaultDeviceId) {
+      // Retrieve the default capture audio endpoint for the specified role.
+      // Note that, in Windows Vista, the MMDevice API supports device roles
+      // but the system-supplied user interface programs do not.
+      hr = enumerator->GetDefaultAudioEndpoint(eCapture,
+                                               eConsole,
+                                               endpoint_device_.Receive());
+    } else {
+      // Retrieve a capture endpoint device that is specified by an endpoint
+      // device-identification string.
+      hr = enumerator->GetDevice(UTF8ToUTF16(device_id_).c_str(),
+                                 endpoint_device_.Receive());
+    }
 
-  // Retrieve the IMMDevice by using the specified role or the specified
-  // unique endpoint device-identification string.
-  // TODO(henrika): possibly add support for the eCommunications as well.
-  if (device_id_ == AudioManagerBase::kDefaultDeviceId) {
-    // Retrieve the default capture audio endpoint for the specified role.
-    // Note that, in Windows Vista, the MMDevice API supports device roles
-    // but the system-supplied user interface programs do not.
-    hr = enumerator->GetDefaultAudioEndpoint(eCapture, eConsole,
-                                             endpoint_device_.Receive());
-  } else if (device_id_ == AudioManagerBase::kLoopbackInputDeviceId) {
-    // Capture the default playback stream.
-    hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
-                                             endpoint_device_.Receive());
-  } else {
-    // Retrieve a capture endpoint device that is specified by an endpoint
-    // device-identification string.
-    hr = enumerator->GetDevice(base::UTF8ToUTF16(device_id_).c_str(),
-                               endpoint_device_.Receive());
-  }
+    if (FAILED(hr))
+      return hr;
 
-  if (FAILED(hr))
-    return hr;
-
-  // Verify that the audio endpoint device is active, i.e., the audio
-  // adapter that connects to the endpoint device is present and enabled.
-  DWORD state = DEVICE_STATE_DISABLED;
-  hr = endpoint_device_->GetState(&state);
-  if (FAILED(hr))
-    return hr;
-
-  if (!(state & DEVICE_STATE_ACTIVE)) {
-    DLOG(ERROR) << "Selected capture device is not active.";
-    hr = E_ACCESSDENIED;
+    // Verify that the audio endpoint device is active, i.e., the audio
+    // adapter that connects to the endpoint device is present and enabled.
+    DWORD state = DEVICE_STATE_DISABLED;
+    hr = endpoint_device_->GetState(&state);
+    if (SUCCEEDED(hr)) {
+      if (!(state & DEVICE_STATE_ACTIVE)) {
+        DLOG(ERROR) << "Selected capture device is not active.";
+        hr = E_ACCESSDENIED;
+      }
+    }
   }
 
   return hr;
@@ -511,55 +447,17 @@ HRESULT WASAPIAudioInputStream::ActivateCaptureDevice() {
 }
 
 HRESULT WASAPIAudioInputStream::GetAudioEngineStreamFormat() {
-  HRESULT hr = S_OK;
-#ifndef NDEBUG
-  // The GetMixFormat() method retrieves the stream format that the
-  // audio engine uses for its internal processing of shared-mode streams.
-  // The method always uses a WAVEFORMATEXTENSIBLE structure, instead
-  // of a stand-alone WAVEFORMATEX structure, to specify the format.
-  // An WAVEFORMATEXTENSIBLE structure can specify both the mapping of
-  // channels to speakers and the number of bits of precision in each sample.
-  base::win::ScopedCoMem<WAVEFORMATEXTENSIBLE> format_ex;
-  hr = audio_client_->GetMixFormat(
-      reinterpret_cast<WAVEFORMATEX**>(&format_ex));
-
-  // See http://msdn.microsoft.com/en-us/windows/hardware/gg463006#EFH
-  // for details on the WAVE file format.
-  WAVEFORMATEX format = format_ex->Format;
-  DVLOG(2) << "WAVEFORMATEX:";
-  DVLOG(2) << "  wFormatTags    : 0x" << std::hex << format.wFormatTag;
-  DVLOG(2) << "  nChannels      : " << format.nChannels;
-  DVLOG(2) << "  nSamplesPerSec : " << format.nSamplesPerSec;
-  DVLOG(2) << "  nAvgBytesPerSec: " << format.nAvgBytesPerSec;
-  DVLOG(2) << "  nBlockAlign    : " << format.nBlockAlign;
-  DVLOG(2) << "  wBitsPerSample : " << format.wBitsPerSample;
-  DVLOG(2) << "  cbSize         : " << format.cbSize;
-
-  DVLOG(2) << "WAVEFORMATEXTENSIBLE:";
-  DVLOG(2) << " wValidBitsPerSample: " <<
-      format_ex->Samples.wValidBitsPerSample;
-  DVLOG(2) << " dwChannelMask      : 0x" << std::hex <<
-      format_ex->dwChannelMask;
-  if (format_ex->SubFormat == KSDATAFORMAT_SUBTYPE_PCM)
-    DVLOG(2) << " SubFormat          : KSDATAFORMAT_SUBTYPE_PCM";
-  else if (format_ex->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)
-    DVLOG(2) << " SubFormat          : KSDATAFORMAT_SUBTYPE_IEEE_FLOAT";
-  else if (format_ex->SubFormat == KSDATAFORMAT_SUBTYPE_WAVEFORMATEX)
-    DVLOG(2) << " SubFormat          : KSDATAFORMAT_SUBTYPE_WAVEFORMATEX";
-#endif
-  return hr;
+  // Retrieve the stream format that the audio engine uses for its internal
+  // processing/mixing of shared-mode streams.
+  return audio_client_->GetMixFormat(&audio_engine_mix_format_);
 }
 
 bool WASAPIAudioInputStream::DesiredFormatIsSupported() {
-  // An application that uses WASAPI to manage shared-mode streams can rely
-  // on the audio engine to perform only limited format conversions. The audio
-  // engine can convert between a standard PCM sample size used by the
-  // application and the floating-point samples that the engine uses for its
-  // internal processing. However, the format for an application stream
-  // typically must have the same number of channels and the same sample
-  // rate as the stream format used by the device.
-  // Many audio devices support both PCM and non-PCM stream formats. However,
-  // the audio engine can mix only PCM streams.
+  // In shared mode, the audio engine always supports the mix format,
+  // which is stored in the |audio_engine_mix_format_| member. In addition,
+  // the audio engine *might* support similar formats that have the same
+  // sample rate and number of channels as the mix format but differ in
+  // the representation of audio sample values.
   base::win::ScopedCoMem<WAVEFORMATEX> closest_match;
   HRESULT hr = audio_client_->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED,
                                                 &format_,
@@ -570,25 +468,16 @@ bool WASAPIAudioInputStream::DesiredFormatIsSupported() {
 }
 
 HRESULT WASAPIAudioInputStream::InitializeAudioEngine() {
-  DWORD flags;
-  // Use event-driven mode only fo regular input devices. For loopback the
-  // EVENTCALLBACK flag is specified when intializing
-  // |audio_render_client_for_loopback_|.
-  if (device_id_ == AudioManagerBase::kLoopbackInputDeviceId) {
-    flags = AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_NOPERSIST;
-  } else {
-    flags =
-      AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST;
-  }
-
   // Initialize the audio stream between the client and the device.
-  // We connect indirectly through the audio engine by using shared mode.
+  // We connect indirectly through the audio engine by using shared mode
+  // and WASAPI is initialized in an event driven mode.
   // Note that, |hnsBufferDuration| is set of 0, which ensures that the
   // buffer is never smaller than the minimum buffer size needed to ensure
   // that glitches do not occur between the periodic processing passes.
   // This setting should lead to lowest possible latency.
   HRESULT hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                         flags,
+                                         AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
+                                         AUDCLNT_STREAMFLAGS_NOPERSIST,
                                          0,  // hnsBufferDuration
                                          0,
                                          &format_,
@@ -604,7 +493,6 @@ HRESULT WASAPIAudioInputStream::InitializeAudioEngine() {
   hr = audio_client_->GetBufferSize(&endpoint_buffer_size_frames_);
   if (FAILED(hr))
     return hr;
-
   DVLOG(1) << "endpoint buffer size: " << endpoint_buffer_size_frames_
            << " [frames]";
 
@@ -633,41 +521,9 @@ HRESULT WASAPIAudioInputStream::InitializeAudioEngine() {
   }
 #endif
 
-  // Set the event handle that the audio engine will signal each time a buffer
-  // becomes ready to be processed by the client.
-  //
-  // In loopback case the capture device doesn't receive any events, so we
-  // need to create a separate playback client to get notifications. According
-  // to MSDN:
-  //
-  //   A pull-mode capture client does not receive any events when a stream is
-  //   initialized with event-driven buffering and is loopback-enabled. To
-  //   work around this, initialize a render stream in event-driven mode. Each
-  //   time the client receives an event for the render stream, it must signal
-  //   the capture client to run the capture thread that reads the next set of
-  //   samples from the capture endpoint buffer.
-  //
-  // http://msdn.microsoft.com/en-us/library/windows/desktop/dd316551(v=vs.85).aspx
-  if (device_id_ == AudioManagerBase::kLoopbackInputDeviceId) {
-    hr = endpoint_device_->Activate(
-        __uuidof(IAudioClient), CLSCTX_INPROC_SERVER, NULL,
-        audio_render_client_for_loopback_.ReceiveVoid());
-    if (FAILED(hr))
-      return hr;
-
-    hr = audio_render_client_for_loopback_->Initialize(
-        AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
-        0, 0, &format_, NULL);
-    if (FAILED(hr))
-      return hr;
-
-    hr = audio_render_client_for_loopback_->SetEventHandle(
-        audio_samples_ready_event_.Get());
-  } else {
-    hr = audio_client_->SetEventHandle(audio_samples_ready_event_.Get());
-  }
-
+  // Set the event handle that the audio engine will signal each time
+  // a buffer becomes ready to be processed by the client.
+  hr = audio_client_->SetEventHandle(audio_samples_ready_event_.Get());
   if (FAILED(hr))
     return hr;
 
@@ -675,14 +531,5 @@ HRESULT WASAPIAudioInputStream::InitializeAudioEngine() {
   // enables us to read input data from the capture endpoint buffer.
   hr = audio_client_->GetService(__uuidof(IAudioCaptureClient),
                                  audio_capture_client_.ReceiveVoid());
-  if (FAILED(hr))
-    return hr;
-
-  // Obtain a reference to the ISimpleAudioVolume interface which enables
-  // us to control the master volume level of an audio session.
-  hr = audio_client_->GetService(__uuidof(ISimpleAudioVolume),
-                                 simple_audio_volume_.ReceiveVoid());
   return hr;
 }
-
-}  // namespace media

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,8 @@
 #include "chrome_frame/chrome_tab.h"
 #include "chrome_frame/com_type_info_holder.h"
 #include "grit/chrome_frame_resources.h"
+
+#define WM_HOST_MOVED_NOTIFICATION (WM_APP + 1)
 
 // ChromeFrameActivex: Implementation of the ActiveX control that is
 // responsible for hosting a chrome frame, i.e. an iframe like widget which
@@ -46,6 +48,7 @@ END_COM_MAP()
 
 BEGIN_MSG_MAP(ChromeFrameActivex)
   MESSAGE_HANDLER(WM_CREATE, OnCreate)
+  MESSAGE_HANDLER(WM_HOST_MOVED_NOTIFICATION, OnHostMoved)
   CHAIN_MSG_MAP(Base)
 END_MSG_MAP()
 
@@ -85,6 +88,10 @@ END_MSG_MAP()
 
  protected:
   // ChromeFrameDelegate overrides
+  virtual void OnLoad(const GURL& url);
+  virtual void OnMessageFromChromeFrame(const std::string& message,
+                                        const std::string& origin,
+                                        const std::string& target);
   virtual void OnLoadFailed(int error_code, const std::string& url);
   virtual void OnAutomationServerLaunchFailed(
       AutomationLaunchResult reason, const std::string& server_version);
@@ -97,6 +104,8 @@ END_MSG_MAP()
  private:
   LRESULT OnCreate(UINT message, WPARAM wparam, LPARAM lparam,
                    BOOL& handled);  // NO_LINT
+  LRESULT OnHostMoved(UINT message, WPARAM wparam, LPARAM lparam,
+                      BOOL& handled);  // NO_LINT
 
   HRESULT GetContainingDocument(IHTMLDocument2** doc);
   HRESULT GetDocumentWindow(IHTMLWindow2** window);
@@ -130,10 +139,6 @@ END_MSG_MAP()
 
   // A hook attached to the top-level window containing the ActiveX control.
   HHOOK chrome_wndproc_hook_;
-
-  // Set to true if the current instance is attaching to an existing Chrome
-  // tab. This occurs when a window.open request is performed by Chrome.
-  bool attaching_to_existing_cf_tab_;
 };
 
 #endif  // CHROME_FRAME_CHROME_FRAME_ACTIVEX_H_

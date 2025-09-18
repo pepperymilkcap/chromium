@@ -56,6 +56,10 @@ class UrlmonUrlRequest
   // to identify request objects in the log.
   std::string me() const;
 
+  static bool ImplementsThreadSafeReferenceCounting() {
+    return true;
+  }
+
  protected:
   UrlmonUrlRequest();
   ~UrlmonUrlRequest();

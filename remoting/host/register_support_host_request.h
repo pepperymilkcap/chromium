@@ -10,9 +10,11 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "remoting/base/rsa_key_pair.h"
 #include "remoting/jingle_glue/signal_strategy.h"
+#include "remoting/host/host_key_pair.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
+
+class MessageLoop;
 
 namespace buzz {
 class XmlElement;
@@ -39,6 +41,7 @@ class RegisterSupportHostRequest : public SignalStrategy::Listener {
   typedef base::Callback<void(bool, const std::string&,
                               const base::TimeDelta&)> RegisterCallback;
 
+  // Doesn't take ownership of |signal_strategy| or |key_pair|. Both
   // |signal_strategy| and |key_pair| must outlive this
   // object. |callback| is called when registration response is
   // received from the server. Callback is never called if the bot
@@ -47,8 +50,7 @@ class RegisterSupportHostRequest : public SignalStrategy::Listener {
   // TODO(sergeyu): This class should have timeout for the bot
   // response.
   RegisterSupportHostRequest(SignalStrategy* signal_strategy,
-                             scoped_refptr<RsaKeyPair> key_pair,
-                             const std::string& directory_bot_jid,
+                             HostKeyPair* key_pair,
                              const RegisterCallback& callback);
   virtual ~RegisterSupportHostRequest();
 
@@ -61,11 +63,11 @@ class RegisterSupportHostRequest : public SignalStrategy::Listener {
  private:
   void DoSend();
 
-  scoped_ptr<buzz::XmlElement> CreateRegistrationRequest(
-      const std::string& jid);
-  scoped_ptr<buzz::XmlElement> CreateSignature(const std::string& jid);
+  // Caller owns the result.
+  buzz::XmlElement* CreateRegistrationRequest(const std::string& jid);
+  buzz::XmlElement* CreateSignature(const std::string& jid);
 
-  void ProcessResponse(IqRequest* request, const buzz::XmlElement* response);
+  void ProcessResponse(const buzz::XmlElement* response);
   bool ParseResponse(const buzz::XmlElement* response,
                      std::string* support_id, base::TimeDelta* lifetime);
 
@@ -73,8 +75,7 @@ class RegisterSupportHostRequest : public SignalStrategy::Listener {
       bool success, const std::string& support_id, base::TimeDelta lifetime);
 
   SignalStrategy* signal_strategy_;
-  scoped_refptr<RsaKeyPair> key_pair_;
-  std::string directory_bot_jid_;
+  HostKeyPair* key_pair_;
   RegisterCallback callback_;
 
   scoped_ptr<IqSender> iq_sender_;

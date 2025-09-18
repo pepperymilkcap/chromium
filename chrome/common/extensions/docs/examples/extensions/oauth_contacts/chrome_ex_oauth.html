@@ -15,9 +15,13 @@
     </style>
     <script type="text/javascript" src="chrome_ex_oauthsimple.js"></script>
     <script type="text/javascript" src="chrome_ex_oauth.js"></script>
-    <script type="text/javascript" src="onload.js"></script>
+    <script type="text/javascript">
+      function onLoad() {
+        ChromeExOAuth.initCallbackPage();
+      };
+    </script>
   </head>
-  <body>
+  <body onload="onLoad();">
     Redirecting...
   </body>
 </html>

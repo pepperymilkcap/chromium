@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html i18n-values="dir:textdirection">
 <head>
-  <meta charset="utf-8">
   <link rel="stylesheet" href="dialog.css">
   <style>
     body {
@@ -53,8 +52,7 @@
     }
 
     function load() {
-      i18nTemplate.process(document, JSON.parse(
-          chrome.getVariableValue('dialogArguments')));
+      i18nTemplate.process(document, JSON.parse(chrome.dialogArguments));
       document.addEventListener('keydown', handleKeyDown);
       $('form').onsubmit = handleSubmit;
       $('cancel').onclick = cancel;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -35,26 +35,26 @@ from xml.dom import minidom
 from google import path_utils
 
 # Quick hack to fix the path.
-sys.path.append(os.path.abspath('../../tools/grit'))
-sys.path.append(os.path.abspath('../tools/grit'))
-from grit.extern import tclib
+sys.path.append(os.path.abspath('../../tools/grit/grit/extern'))
+sys.path.append(os.path.abspath('../tools/grit/grit/extern'))
+import FP
 
 # The IDs of strings we want to import from generated_resources.grd and include
 # in setup.exe's resources.
 kStringIds = [
   'IDS_PRODUCT_NAME',
   'IDS_SXS_SHORTCUT_NAME',
-  'IDS_PRODUCT_APP_LAUNCHER_NAME',
-  'IDS_PRODUCT_BINARIES_NAME',
   'IDS_PRODUCT_DESCRIPTION',
   'IDS_PRODUCT_FRAME_NAME',
   'IDS_UNINSTALL_CHROME',
   'IDS_ABOUT_VERSION_COMPANY_NAME',
   'IDS_INSTALL_HIGHER_VERSION',
-  'IDS_INSTALL_HIGHER_VERSION_APP_LAUNCHER',
+  'IDS_INSTALL_HIGHER_VERSION_CF',
+  'IDS_INSTALL_HIGHER_VERSION_CB_CF',
   'IDS_INSTALL_SYSTEM_LEVEL_EXISTS',
   'IDS_INSTALL_FAILED',
   'IDS_SAME_VERSION_REPAIR_FAILED',
+  'IDS_SAME_VERSION_REPAIR_FAILED_CF',
   'IDS_SETUP_PATCH_FAILED',
   'IDS_INSTALL_OS_NOT_SUPPORTED',
   'IDS_INSTALL_OS_ERROR',
@@ -71,14 +71,6 @@ kStringIds = [
   'IDS_INSTALL_INCONSISTENT_UPDATE_POLICY',
   'IDS_OEM_MAIN_SHORTCUT_NAME',
   'IDS_SHORTCUT_TOOLTIP',
-  'IDS_SHORTCUT_NEW_WINDOW',
-  'IDS_APP_LAUNCHER_PRODUCT_DESCRIPTION',
-  'IDS_APP_LAUNCHER_SHORTCUT_TOOLTIP',
-  'IDS_UNINSTALL_APP_LAUNCHER',
-  'IDS_APP_LIST_SHORTCUT_NAME',
-  'IDS_APP_LIST_SHORTCUT_NAME_CANARY',
-  'IDS_APP_SHORTCUTS_SUBDIR_NAME',
-  'IDS_APP_SHORTCUTS_SUBDIR_NAME_CANARY',
 ]
 
 # The ID of the first resource string.
@@ -126,9 +118,9 @@ def CollectTranslatedStrings(branding):
                           x.getAttribute('name') == string_id][0])
   message_texts = [node.firstChild.nodeValue.strip() for node in message_nodes]
 
-  # Generate the message ID of the string to correlate it with its translations
-  # in the xtb files.
-  translation_ids = [tclib.GenerateMessageId(text) for text in message_texts]
+  # The fingerprint of the string is the message ID in the translation files
+  # (xtb files).
+  translation_ids = [str(FP.FingerPrint(text)) for text in message_texts]
 
   # Manually put _EN_US in the list of translated strings because it doesn't
   # have a .xtb file.
@@ -192,8 +184,7 @@ def WriteHeaderFile(translated_strings, out_filename):
   """Writes a .h file with resource ids.  This file can be included by the
   executable to refer to identifiers."""
   lines = []
-  do_languages_lines = ['\n#define DO_LANGUAGES']
-  installer_string_mapping_lines = ['\n#define DO_INSTALLER_STRING_MAPPING']
+  do_languages_lines = ['#define DO_LANGUAGES']
 
   # Write the values for how the languages ids are offset.
   seen_languages = set()
@@ -222,14 +213,11 @@ def WriteHeaderFile(translated_strings, out_filename):
     lines.append('#define %s_BASE %s_%s' % (string_id,
                                             string_id,
                                             translated_strings[0].language))
-    installer_string_mapping_lines.append('  HANDLE_STRING(%s_BASE, %s)'
-                                          % (string_id, string_id))
 
-  outfile = open(out_filename, 'wb')
+  outfile = open(out_filename + '.h', 'wb')
   outfile.write('\n'.join(lines))
-  outfile.write('\n#ifndef RC_INVOKED')
+  outfile.write('\n#ifndef RC_INVOKED\n')
   outfile.write(' \\\n'.join(do_languages_lines))
-  outfile.write(' \\\n'.join(installer_string_mapping_lines))
   # .rc files must end in a new line
   outfile.write('\n#endif  // ndef RC_INVOKED\n')
   outfile.close()
@@ -246,7 +234,7 @@ def main(argv):
   translated_strings = CollectTranslatedStrings(branding)
   kFilebase = os.path.join(argv[1], 'installer_util_strings')
   WriteRCFile(translated_strings, kFilebase)
-  WriteHeaderFile(translated_strings, kFilebase + '.h')
+  WriteHeaderFile(translated_strings, kFilebase)
   return 0
 
 

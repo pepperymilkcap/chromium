@@ -1,14 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "native_client/src/shared/platform/nacl_check.h"
 
+#include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
 #include "ppapi/c/dev/ppb_memory_dev.h"
+#include "ppapi/c/dev/ppb_scrollbar_dev.h"
+#include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
-#include "ppapi/c/ppb_audio.h"
-#include "ppapi/c/ppb_audio_config.h"
+#include "ppapi/c/dev/ppb_widget_dev.h"
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppb_file_io.h"
 #include "ppapi/c/ppb_file_ref.h"
@@ -20,17 +22,15 @@
 #include "ppapi/c/ppb_input_event.h"
 #include "ppapi/c/ppb_instance.h"
 #include "ppapi/c/ppb_messaging.h"
-#include "ppapi/c/ppb_mouse_cursor.h"
 #include "ppapi/c/ppb_opengles2.h"
 #include "ppapi/c/ppb_url_loader.h"
 #include "ppapi/c/ppb_url_request_info.h"
 #include "ppapi/c/ppb_url_response_info.h"
 #include "ppapi/c/ppb_var.h"
 #include "ppapi/c/ppb_view.h"
-#include "ppapi/c/private/ppb_testing_private.h"
 
-#include "ppapi/native_client/tests/ppapi_test_lib/get_browser_interface.h"
-#include "ppapi/native_client/tests/ppapi_test_lib/internal_utils.h"
+#include "native_client/tests/ppapi_test_lib/get_browser_interface.h"
+#include "native_client/tests/ppapi_test_lib/internal_utils.h"
 
 // Use for dev interfaces that might not be present.
 const void* GetBrowserInterface(const char* interface_name) {
@@ -45,16 +45,6 @@ const void* GetBrowserInterfaceSafe(const char* interface_name) {
 }
 
 // Stable interfaces.
-
-const PPB_Audio* PPBAudio() {
-  return reinterpret_cast<const PPB_Audio*>(
-      GetBrowserInterfaceSafe(PPB_AUDIO_INTERFACE));
-}
-
-const PPB_AudioConfig* PPBAudioConfig() {
-  return reinterpret_cast<const PPB_AudioConfig*>(
-      GetBrowserInterfaceSafe(PPB_AUDIO_CONFIG_INTERFACE));
-}
 
 const PPB_Core* PPBCore() {
   return reinterpret_cast<const PPB_Core*>(
@@ -116,11 +106,6 @@ const PPB_Messaging* PPBMessaging() {
       GetBrowserInterfaceSafe(PPB_MESSAGING_INTERFACE));
 }
 
-const PPB_MouseCursor_1_0* PPBMouseCursor() {
-  return reinterpret_cast<const PPB_MouseCursor_1_0*>(
-      GetBrowserInterfaceSafe(PPB_MOUSECURSOR_INTERFACE_1_0));
-}
-
 const PPB_MouseInputEvent* PPBMouseInputEvent() {
   return reinterpret_cast<const PPB_MouseInputEvent*>(
       GetBrowserInterfaceSafe(PPB_MOUSE_INPUT_EVENT_INTERFACE));
@@ -159,6 +144,12 @@ const PPB_WheelInputEvent* PPBWheelInputEvent() {
 
 // Dev interfaces.
 
+const PPB_CursorControl_Dev* PPBCursorControlDev() {
+  return reinterpret_cast<const PPB_CursorControl_Dev*>(
+      // Change to GetBrowserInterfaceSafe when moving out of dev.
+      GetBrowserInterface(PPB_CURSOR_CONTROL_DEV_INTERFACE));
+}
+
 const PPB_Font_Dev* PPBFontDev() {
   return reinterpret_cast<const PPB_Font_Dev*>(
       // Change to GetBrowserInterfaceSafe when moving out of dev.
@@ -171,12 +162,25 @@ const PPB_Memory_Dev* PPBMemoryDev() {
       GetBrowserInterface(PPB_MEMORY_DEV_INTERFACE));
 }
 
-const PPB_Testing_Private* PPBTestingPrivate() {
-  return reinterpret_cast<const PPB_Testing_Private*>(
-      GetBrowserInterface(PPB_TESTING_PRIVATE_INTERFACE));
+const PPB_Scrollbar_Dev* PPBScrollbarDev() {
+  return  reinterpret_cast<const PPB_Scrollbar_Dev*>(
+      // Change to GetBrowserInterfaceSafe when moving out of dev.
+      GetBrowserInterface(PPB_SCROLLBAR_DEV_INTERFACE));
+}
+
+const PPB_Testing_Dev* PPBTestingDev() {
+  return  reinterpret_cast<const PPB_Testing_Dev*>(
+      // Change to GetBrowserInterfaceSafe when moving out of dev.
+      GetBrowserInterface(PPB_TESTING_DEV_INTERFACE));
 }
 
 const PPB_View* PPBView() {
   return reinterpret_cast<const PPB_View*>(
       GetBrowserInterface(PPB_VIEW_INTERFACE));
+}
+
+const PPB_Widget_Dev* PPBWidgetDev() {
+  return  reinterpret_cast<const PPB_Widget_Dev*>(
+      // Change to GetBrowserInterfaceSafe when moving out of dev.
+      GetBrowserInterface(PPB_WIDGET_DEV_INTERFACE));
 }

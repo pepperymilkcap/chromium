@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,60 +7,29 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/nix/xdg_util.h"
 #include "base/path_service.h"
-
-namespace chrome {
-
-using base::nix::GetXDGDirectory;
-using base::nix::GetXDGUserDirectory;
-using base::nix::kDotConfigDir;
-using base::nix::kXdgConfigHomeEnvVar;
+#include "base/nix/xdg_util.h"
 
 namespace {
 
+const char kDotConfigDir[] = ".config";
 const char kDownloadsDir[] = "Downloads";
-const char kMusicDir[] = "Music";
-const char kPicturesDir[] = "Pictures";
-const char kVideosDir[] = "Videos";
-
-// Generic function for GetUser{Music,Pictures,Video}Directory.
-bool GetUserMediaDirectory(const std::string& xdg_name,
-                           const std::string& fallback_name,
-                           base::FilePath* result) {
-#if defined(OS_CHROMEOS)
-  // No local media directories on CrOS.
-  return false;
-#else
-  *result = GetXDGUserDirectory(xdg_name.c_str(), fallback_name.c_str());
-
-  base::FilePath home = base::GetHomeDir();
-  if (*result != home) {
-    base::FilePath desktop;
-    if (!PathService::Get(base::DIR_USER_DESKTOP, &desktop))
-      return false;
-    if (*result != desktop) {
-      return true;
-    }
-  }
-
-  *result = home.Append(fallback_name);
-  return true;
-#endif
-}
+const char kXdgConfigHomeEnvVar[] = "XDG_CONFIG_HOME";
 
 }  // namespace
+
+namespace chrome {
 
 // See http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
 // for a spec on where config files go.  The net effect for most
 // systems is we use ~/.config/chromium/ for Chromium and
 // ~/.config/google-chrome/ for official builds.
 // (This also helps us sidestep issues with other apps grabbing ~/.chromium .)
-bool GetDefaultUserDataDirectory(base::FilePath* result) {
+bool GetDefaultUserDataDirectory(FilePath* result) {
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  base::FilePath config_dir(GetXDGDirectory(env.get(),
-                                      kXdgConfigHomeEnvVar,
-                                      kDotConfigDir));
+  FilePath config_dir(base::nix::GetXDGDirectory(env.get(),
+                                                 kXdgConfigHomeEnvVar,
+                                                 kDotConfigDir));
 #if defined(GOOGLE_CHROME_BUILD)
   *result = config_dir.Append("google-chrome");
 #else
@@ -69,8 +38,7 @@ bool GetDefaultUserDataDirectory(base::FilePath* result) {
   return true;
 }
 
-void GetUserCacheDirectory(const base::FilePath& profile_dir,
-                           base::FilePath* result) {
+void GetUserCacheDirectory(const FilePath& profile_dir, FilePath* result) {
   // See http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
   // for a spec on where cache files go.  Our rule is:
   // - if the user-data-dir in the standard place,
@@ -84,12 +52,12 @@ void GetUserCacheDirectory(const base::FilePath& profile_dir,
 
   scoped_ptr<base::Environment> env(base::Environment::Create());
 
-  base::FilePath cache_dir;
+  FilePath cache_dir;
   if (!PathService::Get(base::DIR_CACHE, &cache_dir))
     return;
-  base::FilePath config_dir(GetXDGDirectory(env.get(),
-                                      kXdgConfigHomeEnvVar,
-                                      kDotConfigDir));
+  FilePath config_dir(base::nix::GetXDGDirectory(env.get(),
+                                                 kXdgConfigHomeEnvVar,
+                                                 kDotConfigDir));
 
   if (!config_dir.AppendRelativePath(profile_dir, &cache_dir))
     return;
@@ -97,11 +65,11 @@ void GetUserCacheDirectory(const base::FilePath& profile_dir,
   *result = cache_dir;
 }
 
-bool GetChromeFrameUserDataDirectory(base::FilePath* result) {
+bool GetChromeFrameUserDataDirectory(FilePath* result) {
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  base::FilePath config_dir(GetXDGDirectory(env.get(),
-                                      kXdgConfigHomeEnvVar,
-                                      kDotConfigDir));
+  FilePath config_dir(base::nix::GetXDGDirectory(env.get(),
+                                                 kXdgConfigHomeEnvVar,
+                                                 kDotConfigDir));
 #if defined(GOOGLE_CHROME_BUILD)
   *result = config_dir.Append("google-chrome-frame");
 #else
@@ -110,44 +78,37 @@ bool GetChromeFrameUserDataDirectory(base::FilePath* result) {
   return true;
 }
 
-bool GetUserDocumentsDirectory(base::FilePath* result) {
-  *result = GetXDGUserDirectory("DOCUMENTS", "Documents");
+bool GetUserDocumentsDirectory(FilePath* result) {
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  *result = base::nix::GetXDGUserDirectory(env.get(), "DOCUMENTS", "Documents");
   return true;
 }
 
-bool GetUserDownloadsDirectorySafe(base::FilePath* result) {
-  base::FilePath home = base::GetHomeDir();
-  *result = home.Append(kDownloadsDir);
+// We respect the user's preferred download location, unless it is
+// ~ or their desktop directory, in which case we default to ~/Downloads.
+bool GetUserDownloadsDirectory(FilePath* result) {
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  *result = base::nix::GetXDGUserDirectory(env.get(), "DOWNLOAD",
+                                           kDownloadsDir);
+
+  FilePath home = file_util::GetHomeDir();
+  if (*result == home) {
+    *result = home.Append(kDownloadsDir);
+    return true;
+  }
+
+  FilePath desktop;
+  GetUserDesktop(&desktop);
+  if (*result == desktop) {
+    *result = home.Append(kDownloadsDir);
+  }
+
   return true;
 }
 
-bool GetUserDownloadsDirectory(base::FilePath* result) {
-  *result = base::nix::GetXDGUserDirectory("DOWNLOAD", kDownloadsDir);
-  return true;
-}
-
-// We respect the user's preferred pictures location, unless it is
-// ~ or their desktop directory, in which case we default to ~/Music.
-bool GetUserMusicDirectory(base::FilePath* result) {
-  return GetUserMediaDirectory("MUSIC", kMusicDir, result);
-}
-
-// We respect the user's preferred pictures location, unless it is
-// ~ or their desktop directory, in which case we default to ~/Pictures.
-bool GetUserPicturesDirectory(base::FilePath* result) {
-  return GetUserMediaDirectory("PICTURES", kPicturesDir, result);
-}
-
-// We respect the user's preferred pictures location, unless it is
-// ~ or their desktop directory, in which case we default to ~/Videos.
-bool GetUserVideosDirectory(base::FilePath* result) {
-  return GetUserMediaDirectory("VIDEOS", kVideosDir, result);
-}
-
-bool ProcessNeedsProfileDir(const std::string& process_type) {
-  // For now we have no reason to forbid this on Linux as we don't
-  // have the roaming profile troubles there. Moreover the Linux breakpad needs
-  // profile dir access in all process if enabled on Linux.
+bool GetUserDesktop(FilePath* result) {
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  *result = base::nix::GetXDGUserDirectory(env.get(), "DESKTOP", "Desktop");
   return true;
 }
 

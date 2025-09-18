@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/public/browser/font_list_async.h"
+#include "content/browser/font_list_async.h"
 
 #include "base/bind.h"
 #include "base/values.h"
@@ -15,33 +15,37 @@ namespace {
 
 // Just executes the given callback with the parameter.
 void ReturnFontListToOriginalThread(
-    const base::Callback<void(scoped_ptr<base::ListValue>)>& callback,
-    scoped_ptr<base::ListValue> result) {
-  callback.Run(result.Pass());
+    const base::Callback<void(scoped_refptr<FontListResult>)>& callback,
+    scoped_refptr<FontListResult> result) {
+  callback.Run(result);
 }
 
-void GetFontListInBlockingPool(
+void GetFontListOnFileThread(
     BrowserThread::ID calling_thread_id,
-    const base::Callback<void(scoped_ptr<base::ListValue>)>& callback) {
-  scoped_ptr<base::ListValue> result(GetFontList_SlowBlocking());
+    const base::Callback<void(scoped_refptr<FontListResult>)>& callback) {
+  scoped_refptr<FontListResult> result(new FontListResult);
+  result->list.reset(GetFontList_SlowBlocking());
   BrowserThread::PostTask(calling_thread_id, FROM_HERE,
-      base::Bind(&ReturnFontListToOriginalThread, callback,
-                 base::Passed(&result)));
+      base::Bind(&ReturnFontListToOriginalThread, callback, result));
 }
 
 }  // namespace
 
+FontListResult::FontListResult() {
+}
+
+FontListResult::~FontListResult() {
+}
+
 void GetFontListAsync(
-    const base::Callback<void(scoped_ptr<base::ListValue>)>& callback) {
+    const base::Callback<void(scoped_refptr<FontListResult>)>& callback) {
   BrowserThread::ID id;
   bool well_known_thread = BrowserThread::GetCurrentThreadIdentifier(&id);
   DCHECK(well_known_thread)
       << "Can only call GetFontList from a well-known thread.";
 
-  BrowserThread::PostBlockingPoolSequencedTask(
-      kFontListSequenceToken,
-      FROM_HERE,
-      base::Bind(&GetFontListInBlockingPool, id, callback));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+      base::Bind(&GetFontListOnFileThread, id, callback));
 }
 
 }  // namespace content

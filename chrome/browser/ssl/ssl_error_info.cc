@@ -1,27 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ssl/ssl_error_info.h"
 
-#include "base/i18n/time_formatting.h"
-#include "base/strings/utf_string_conversions.h"
-#include "content/public/browser/cert_store.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/common/time_format.h"
+#include "content/browser/cert_store.h"
+#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "net/base/escape.h"
+#include "net/base/cert_status_flags.h"
 #include "net/base/net_errors.h"
-#include "net/cert/cert_status_flags.h"
-#include "net/ssl/ssl_info.h"
+#include "net/base/ssl_info.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "url/gurl.h"
 
-using base::UTF8ToUTF16;
-
-SSLErrorInfo::SSLErrorInfo(const base::string16& title,
-                           const base::string16& details,
-                           const base::string16& short_description,
-                           const std::vector<base::string16>& extra_info)
+SSLErrorInfo::SSLErrorInfo(const string16& title,
+                           const string16& details,
+                           const string16& short_description,
+                           const std::vector<string16>& extra_info)
     : title_(title),
       details_(details),
       short_description_(short_description),
@@ -32,8 +29,8 @@ SSLErrorInfo::SSLErrorInfo(const base::string16& title,
 SSLErrorInfo SSLErrorInfo::CreateError(ErrorType error_type,
                                        net::X509Certificate* cert,
                                        const GURL& request_url) {
-  base::string16 title, details, short_description;
-  std::vector<base::string16> extra_info;
+  string16 title, details, short_description;
+  std::vector<string16> extra_info;
   switch (error_type) {
     case CERT_COMMON_NAME_INVALID: {
       title =
@@ -57,8 +54,7 @@ SSLErrorInfo SSLErrorInfo::CreateError(ErrorType error_type,
       details =
           l10n_util::GetStringFUTF16(IDS_CERT_ERROR_COMMON_NAME_INVALID_DETAILS,
                                      UTF8ToUTF16(request_url.host()),
-                                     net::EscapeForHTML(
-                                         UTF8ToUTF16(dns_names[i])),
+                                     UTF8ToUTF16(dns_names[i]),
                                      UTF8ToUTF16(request_url.host()));
       short_description = l10n_util::GetStringUTF16(
           IDS_CERT_ERROR_COMMON_NAME_INVALID_DESCRIPTION);
@@ -67,7 +63,7 @@ SSLErrorInfo SSLErrorInfo::CreateError(ErrorType error_type,
       extra_info.push_back(
           l10n_util::GetStringFUTF16(
               IDS_CERT_ERROR_COMMON_NAME_INVALID_EXTRA_INFO_2,
-              net::EscapeForHTML(UTF8ToUTF16(cert->subject().common_name)),
+              UTF8ToUTF16(cert->subject().common_name),
               UTF8ToUTF16(request_url.host())));
       break;
     }
@@ -76,11 +72,9 @@ SSLErrorInfo SSLErrorInfo::CreateError(ErrorType error_type,
           l10n_util::GetStringUTF16(IDS_CERT_ERROR_EXTRA_INFO_1));
       if (cert->HasExpired()) {
         title = l10n_util::GetStringUTF16(IDS_CERT_ERROR_EXPIRED_TITLE);
-        details = l10n_util::GetStringFUTF16(
-            IDS_CERT_ERROR_EXPIRED_DETAILS,
-            UTF8ToUTF16(request_url.host()),
-            UTF8ToUTF16(request_url.host()),
-            base::TimeFormatFriendlyDateAndTime(base::Time::Now()));
+        details = l10n_util::GetStringFUTF16(IDS_CERT_ERROR_EXPIRED_DETAILS,
+                                        UTF8ToUTF16(request_url.host()),
+                                        UTF8ToUTF16(request_url.host()));
         short_description =
             l10n_util::GetStringUTF16(IDS_CERT_ERROR_EXPIRED_DESCRIPTION);
         extra_info.push_back(l10n_util::GetStringUTF16(
@@ -93,8 +87,7 @@ SSLErrorInfo SSLErrorInfo::CreateError(ErrorType error_type,
         details = l10n_util::GetStringFUTF16(
             IDS_CERT_ERROR_NOT_YET_VALID_DETAILS,
             UTF8ToUTF16(request_url.host()),
-            UTF8ToUTF16(request_url.host()),
-            base::TimeFormatFriendlyDateAndTime(base::Time::Now()));
+            UTF8ToUTF16(request_url.host()));
         short_description =
             l10n_util::GetStringUTF16(IDS_CERT_ERROR_NOT_YET_VALID_DESCRIPTION);
         extra_info.push_back(
@@ -115,12 +108,8 @@ SSLErrorInfo SSLErrorInfo::CreateError(ErrorType error_type,
           IDS_CERT_ERROR_AUTHORITY_INVALID_EXTRA_INFO_2,
           UTF8ToUTF16(request_url.host()),
           UTF8ToUTF16(request_url.host())));
-#if !defined(OS_IOS)
-      // The third paragraph advises users to install a private trust anchor,
-      // but that is not possible in Chrome for iOS at this time.
       extra_info.push_back(l10n_util::GetStringUTF16(
           IDS_CERT_ERROR_AUTHORITY_INVALID_EXTRA_INFO_3));
-#endif
       break;
     case CERT_CONTAINS_ERRORS:
       title = l10n_util::GetStringUTF16(IDS_CERT_ERROR_CONTAINS_ERRORS_TITLE);
@@ -200,32 +189,14 @@ SSLErrorInfo SSLErrorInfo::CreateError(ErrorType error_type,
           l10n_util::GetStringUTF16(
               IDS_CERT_ERROR_WEAK_KEY_EXTRA_INFO_2));
       break;
-    case CERT_WEAK_KEY_DH:
-      title = l10n_util::GetStringUTF16(
-          IDS_ERRORPAGES_HEADING_WEAK_SERVER_EPHEMERAL_DH_KEY);
-      details = l10n_util::GetStringFUTF16(
-          IDS_CERT_ERROR_WEAK_KEY_DETAILS, UTF8ToUTF16(request_url.host()));
+    case CERT_NOT_IN_DNS:
+      title = l10n_util::GetStringUTF16(IDS_CERT_ERROR_NOT_IN_DNS_TITLE);
+      details = l10n_util::GetStringUTF16(IDS_CERT_ERROR_NOT_IN_DNS_DETAILS);
       short_description = l10n_util::GetStringUTF16(
-          IDS_CERT_ERROR_WEAK_KEY_DESCRIPTION);
+          IDS_CERT_ERROR_NOT_IN_DNS_DESCRIPTION);
       extra_info.push_back(
-          l10n_util::GetStringUTF16(
-              IDS_ERRORPAGES_SUMMARY_WEAK_SERVER_EPHEMERAL_DH_KEY));
-    case CERT_NAME_CONSTRAINT_VIOLATION:
-      title = l10n_util::GetStringUTF16(
-          IDS_CERT_ERROR_NAME_CONSTRAINT_VIOLATION_TITLE);
-      details = l10n_util::GetStringFUTF16(
-          IDS_CERT_ERROR_NAME_CONSTRAINT_VIOLATION_DETAILS,
-          UTF8ToUTF16(request_url.host()));
-      short_description = l10n_util::GetStringUTF16(
-          IDS_CERT_ERROR_NAME_CONSTRAINT_VIOLATION_DESCRIPTION);
+          l10n_util::GetStringUTF16(IDS_CERT_ERROR_NOT_IN_DNS_EXTRA_INFO));
       break;
-    case CERT_PINNED_KEY_MISSING:
-      title = l10n_util::GetStringUTF16(
-          IDS_ERRORPAGES_HEADING_PINNING_FAILURE);
-      details = l10n_util::GetStringUTF16(
-          IDS_ERRORPAGES_SUMMARY_PINNING_FAILURE);
-      short_description = l10n_util::GetStringUTF16(
-          IDS_ERRORPAGES_DETAILS_PINNING_FAILURE);
     case UNKNOWN:
       title = l10n_util::GetStringUTF16(IDS_CERT_ERROR_UNKNOWN_ERROR_TITLE);
       details = l10n_util::GetStringUTF16(IDS_CERT_ERROR_UNKNOWN_ERROR_DETAILS);
@@ -264,12 +235,8 @@ SSLErrorInfo::ErrorType SSLErrorInfo::NetErrorToErrorType(int net_error) {
       return CERT_WEAK_SIGNATURE_ALGORITHM;
     case net::ERR_CERT_WEAK_KEY:
       return CERT_WEAK_KEY;
-    case net::ERR_CERT_NAME_CONSTRAINT_VIOLATION:
-      return CERT_NAME_CONSTRAINT_VIOLATION;
-    case net::ERR_SSL_WEAK_SERVER_EPHEMERAL_DH_KEY:
-      return CERT_WEAK_KEY_DH;
-    case net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN:
-      return CERT_PINNED_KEY_MISSING;
+    case net::ERR_CERT_NOT_IN_DNS:
+      return CERT_NOT_IN_DNS;
     default:
       NOTREACHED();
       return UNKNOWN;
@@ -290,8 +257,7 @@ int SSLErrorInfo::GetErrorsForCertStatus(int cert_id,
     net::CERT_STATUS_REVOKED,
     net::CERT_STATUS_INVALID,
     net::CERT_STATUS_WEAK_SIGNATURE_ALGORITHM,
-    net::CERT_STATUS_WEAK_KEY,
-    net::CERT_STATUS_NAME_CONSTRAINT_VIOLATION,
+    net::CERT_STATUS_WEAK_KEY
   };
 
   const ErrorType kErrorTypes[] = {
@@ -303,8 +269,7 @@ int SSLErrorInfo::GetErrorsForCertStatus(int cert_id,
     CERT_REVOKED,
     CERT_INVALID,
     CERT_WEAK_SIGNATURE_ALGORITHM,
-    CERT_WEAK_KEY,
-    CERT_NAME_CONSTRAINT_VIOLATION,
+    CERT_WEAK_KEY
   };
   DCHECK(arraysize(kErrorFlags) == arraysize(kErrorTypes));
 
@@ -314,13 +279,11 @@ int SSLErrorInfo::GetErrorsForCertStatus(int cert_id,
     if (cert_status & kErrorFlags[i]) {
       count++;
       if (!cert.get()) {
-        bool r = content::CertStore::GetInstance()->RetrieveCert(
-            cert_id, &cert);
+        bool r = CertStore::GetInstance()->RetrieveCert(cert_id, &cert);
         DCHECK(r);
       }
       if (errors)
-        errors->push_back(
-            SSLErrorInfo::CreateError(kErrorTypes[i], cert.get(), url));
+        errors->push_back(SSLErrorInfo::CreateError(kErrorTypes[i], cert, url));
     }
   }
   return count;

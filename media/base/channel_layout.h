@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,100 +7,57 @@
 
 #include "media/base/media_export.h"
 
-namespace media {
-
-// Enumerates the various representations of the ordering of audio channels.
-// Logged to UMA, so never reuse a value, always add new/greater ones!
 enum ChannelLayout {
   CHANNEL_LAYOUT_NONE = 0,
-  CHANNEL_LAYOUT_UNSUPPORTED = 1,
+  CHANNEL_LAYOUT_UNSUPPORTED,
 
   // Front C
-  CHANNEL_LAYOUT_MONO = 2,
+  CHANNEL_LAYOUT_MONO,
 
   // Front L, Front R
-  CHANNEL_LAYOUT_STEREO = 3,
+  CHANNEL_LAYOUT_STEREO,
 
   // Front L, Front R, Back C
-  CHANNEL_LAYOUT_2_1 = 4,
+  CHANNEL_LAYOUT_2_1,
 
   // Front L, Front R, Front C
-  CHANNEL_LAYOUT_SURROUND = 5,
+  CHANNEL_LAYOUT_SURROUND,
 
   // Front L, Front R, Front C, Back C
-  CHANNEL_LAYOUT_4_0 = 6,
+  CHANNEL_LAYOUT_4POINT0,
 
   // Front L, Front R, Side L, Side R
-  CHANNEL_LAYOUT_2_2 = 7,
+  CHANNEL_LAYOUT_2_2,
 
   // Front L, Front R, Back L, Back R
-  CHANNEL_LAYOUT_QUAD = 8,
+  CHANNEL_LAYOUT_QUAD,
 
   // Front L, Front R, Front C, Side L, Side R
-  CHANNEL_LAYOUT_5_0 = 9,
+  CHANNEL_LAYOUT_5POINT0,
 
   // Front L, Front R, Front C, Side L, Side R, LFE
-  CHANNEL_LAYOUT_5_1 = 10,
+  CHANNEL_LAYOUT_5POINT1,
 
   // Front L, Front R, Front C, Back L, Back R
-  CHANNEL_LAYOUT_5_0_BACK = 11,
+  CHANNEL_LAYOUT_5POINT0_BACK,
 
   // Front L, Front R, Front C, Back L, Back R, LFE
-  CHANNEL_LAYOUT_5_1_BACK = 12,
+  CHANNEL_LAYOUT_5POINT1_BACK,
 
   // Front L, Front R, Front C, Side L, Side R, Back L, Back R
-  CHANNEL_LAYOUT_7_0 = 13,
+  CHANNEL_LAYOUT_7POINT0,
 
   // Front L, Front R, Front C, Side L, Side R, LFE, Back L, Back R
-  CHANNEL_LAYOUT_7_1 = 14,
-
-  // Front L, Front R, Front C, Side L, Side R, LFE, Front LofC, Front RofC
-  CHANNEL_LAYOUT_7_1_WIDE = 15,
-
-  // Stereo L, Stereo R
-  CHANNEL_LAYOUT_STEREO_DOWNMIX = 16,
-
-  // Stereo L, Stereo R, LFE
-  CHANNEL_LAYOUT_2POINT1 = 17,
-
-  // Stereo L, Stereo R, Front C, LFE
-  CHANNEL_LAYOUT_3_1 = 18,
-
-  // Stereo L, Stereo R, Front C, Rear C, LFE
-  CHANNEL_LAYOUT_4_1 = 19,
-
-  // Stereo L, Stereo R, Front C, Side L, Side R, Back C
-  CHANNEL_LAYOUT_6_0 = 20,
-
-  // Stereo L, Stereo R, Side L, Side R, Front LofC, Front RofC
-  CHANNEL_LAYOUT_6_0_FRONT = 21,
-
-  // Stereo L, Stereo R, Side L, Side R, Front C, Rear C.
-  CHANNEL_LAYOUT_HEXAGONAL = 22,
-
-  // Stereo L, Stereo R, Side L, Side R, Front C, Rear Center, LFE
-  CHANNEL_LAYOUT_6_1 = 23,
-
-  // Stereo L, Stereo R, Back L, Back R, Front C, Rear Center, LFE
-  CHANNEL_LAYOUT_6_1_BACK = 24,
-
-  // Stereo L, Stereo R, Side L, Side R, Front LofC, Front RofC, LFE
-  CHANNEL_LAYOUT_6_1_FRONT = 25,
-
-  // Front L, Front R, Front C, Side L, Side R, Front LofC, Front RofC
-  CHANNEL_LAYOUT_7_0_FRONT = 26,
+  CHANNEL_LAYOUT_7POINT1,
 
   // Front L, Front R, Front C, Back L, Back R, LFE, Front LofC, Front RofC
-  CHANNEL_LAYOUT_7_1_WIDE_BACK = 27,
+  CHANNEL_LAYOUT_7POINT1_WIDE,
 
-  // Front L, Front R, Front C, Side L, Side R, Rear C, Back L, Back R.
-  CHANNEL_LAYOUT_OCTAGONAL = 28,
-
-  // Channels are not explicitly mapped to speakers.
-  CHANNEL_LAYOUT_DISCRETE = 29,
+  // Stereo L, Stereo R
+  CHANNEL_LAYOUT_STEREO_DOWNMIX,
 
   // Total number of layouts.
-  CHANNEL_LAYOUT_MAX  // Must always be last!
+  CHANNEL_LAYOUT_MAX
 };
 
 enum Channels {
@@ -115,24 +72,20 @@ enum Channels {
   BACK_CENTER,
   SIDE_LEFT,
   SIDE_RIGHT,
+  STEREO_LEFT,
+  STEREO_RIGHT,
   CHANNELS_MAX
 };
 
-// Returns the expected channel position in an interleaved stream.  Values of -1
-// mean the channel at that index is not used for that layout.  Values range
-// from 0 to CHANNELS_MAX - 1.
-MEDIA_EXPORT int ChannelOrder(ChannelLayout layout, Channels channel);
+// The channel orderings for each layout as specified by FFmpeg.
+// Values represent the index of each channel in each layout. For example, the
+// left side surround sound channel in FFmpeg's 5.1 layout is in the 5th
+// position (because the order is L, R, C, LFE, LS, RS), so
+// kChannelOrderings[CHANNEL_LAYOUT_5POINT1][SIDE_LEFT] = 4;
+// Values of -1 mean the channel at that index is not used for that layout.
+extern const int kChannelOrderings[CHANNEL_LAYOUT_MAX][CHANNELS_MAX];
 
 // Returns the number of channels in a given ChannelLayout.
 MEDIA_EXPORT int ChannelLayoutToChannelCount(ChannelLayout layout);
-
-// Given the number of channels, return the best layout,
-// or return CHANNEL_LAYOUT_UNSUPPORTED if there is no good match.
-MEDIA_EXPORT ChannelLayout GuessChannelLayout(int channels);
-
-// Returns a string representation of the channel layout.
-MEDIA_EXPORT const char* ChannelLayoutToString(ChannelLayout layout);
-
-}  // namespace media
 
 #endif  // MEDIA_BASE_CHANNEL_LAYOUT_H_

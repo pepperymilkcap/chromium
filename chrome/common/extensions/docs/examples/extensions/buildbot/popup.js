@@ -2,300 +2,153 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-(function(){
+var botRoot = "http://build.chromium.org/p/chromium";
+var waterfallURL = botRoot + "/waterfall/bot_status.json?json=1";
+var botList;
+var checkinResults;
+var bots;
+var failures;
 
-var lkgrURL = 'http://chromium-status.appspot.com/lkgr';
-
-// Interval at which to reload the non-CL bot status.
-var botStatusRefreshIntervalInMs = 60 * 1000;
-// Interval at which to check for LKGR updates.
-var lkgrRefreshIntervalInMs = 60 * 1000;
-
-function getClassForTryJobResult(result) {
-  // Some win bots seem to report a null result while building.
-  if (result === null)
-    result = buildbot.RUNNING;
-
-  switch (parseInt(result)) {
-  case buildbot.RUNNING:
-    return "running";
-
-  case buildbot.SUCCESS:
-    return "success";
-
-  case buildbot.WARNINGS:
-    return "warnings";
-
-  case buildbot.FAILURE:
-    return "failure";
-
-  case buildbot.SKIPPED:
-    return "skipped";
-
-  case buildbot.EXCEPTION:
-    return "exception";
-
-  case buildbot.RETRY:
-    return "retry";
-
-  case buildbot.NOT_STARTED:
-  default:
-    return "never";
-  }
-}
-
-// Remove try jobs that have been supplanted by newer runs.
-function filterOldTryJobs(tryJobs) {
-  var latest = {};
-  tryJobs.forEach(function(tryJob) {
-    if (!latest[tryJob.builder] ||
-        latest[tryJob.builder].buildnumber < tryJob.buildnumber)
-      latest[tryJob.builder] = tryJob;
-  });
-
-  var result = [];
-  tryJobs.forEach(function(tryJob) {
-    if (tryJob.buildnumber == latest[tryJob.builder].buildnumber)
-      result.push(tryJob);
-  });
-
-  return result;
-}
-
-function createTryJobAnchorTitle(tryJob, fullTryJob) {
-  var title = tryJob.builder;
-
-  if (!fullTryJob)
-    return title;
-
-  var stepText = [];
-  if (fullTryJob.currentStep)
-    stepText.push("running " + fullTryJob.currentStep.name);
-
-  if (fullTryJob.results == buildbot.FAILURE && fullTryJob.text) {
-    stepText.push(fullTryJob.text.join(" "));
-  } else {
-    // Sometimes a step can fail without setting the try job text.  Look
-    // through all the steps to identify if this is the case.
-    var text = [];
-    fullTryJob.steps.forEach(function(step) {
-      if (step.results[0] == buildbot.FAILURE)
-        text.push(step.results[1][0]);
-    });
-
-    if (text.length > 0) {
-      text.unshift("failure");
-      stepText.push(text.join(" "));
-    }
-  }
-
-  if (stepText.length > 0)
-    title += ": " + stepText.join("; ");
-
-  return title;
-}
-
-function createPatchsetStatusElement(patchset) {
-  var table = document.createElement("div");
-  table.className = "issue-status";
-
-  var tryJobs = filterOldTryJobs(patchset.try_job_results);
-  tryJobs.forEach(function(tryJob) {
-    var key = tryJob.builder + "-" + tryJob.buildnumber;
-    var fullTryJob = patchset.full_try_job_results &&
-        patchset.full_try_job_results[key];
-
-    var tryJobAnchor = document.createElement("a");
-    tryJobAnchor.textContent = "  ";
-    tryJobAnchor.title = createTryJobAnchorTitle(tryJob, fullTryJob);
-    tryJobAnchor.className = "issue-status-build " +
-      getClassForTryJobResult(tryJob.result);
-    tryJobAnchor.target = "_blank";
-    tryJobAnchor.href = tryJob.url;
-    table.appendChild(tryJobAnchor);
-  });
-
-  return table;
-}
-
-function getLastFullPatchsetWithTryJobs(issue) {
-  var index = issue.patchsets.length - 1;
-  var fullPatchsets = issue.full_patchsets;
-  while (index >= 0 &&
-         (!fullPatchsets ||
-          !fullPatchsets[issue.patchsets[index]] ||
-          !fullPatchsets[issue.patchsets[index]].try_job_results ||
-          fullPatchsets[issue.patchsets[index]].try_job_results.length == 0)) {
-    index--;
-  }
-
-  return index >= 0 ? fullPatchsets[issue.patchsets[index]] : null;
-}
-
-function createTryStatusRow(issue) {
-  var table = document.getElementById("status-table");
-
-  // Order by decreasing issue number.
-  var position =
-      document.getElementsByClassName("trunk-status-row")[0].rowIndex;
-  while (position > 0 &&
-         parseInt(issue.issue) >
-             parseInt(table.rows[position - 1].getAttribute("data-issue"))) {
-    position--;
-  }
-
-  var row = table.insertRow(position);
-  row.setAttribute("data-issue", issue.issue);
-
-  return row;
-}
-
-function updateIssueDisplay(issue) {
-  var codereviewBaseURL = "https://codereview.chromium.org";
-
-  var lastFullPatchset = getLastFullPatchsetWithTryJobs(issue);
-
-  var row = document.querySelector("*[data-issue='" + issue.issue + "']");
-  if (!lastFullPatchset) {
-    if (row)
-      row.parentNode.removeChild(row);
+function updateBotList(text) {
+  var results = (new RegExp('(.*)<\/body>', 'g')).exec(text);
+  if (!results || results.index < 0) {
+    console.log("Error: couldn't find bot JSON");
+    console.log(text);
     return;
   }
+  var data;
+  try {
+    // The build bot returns invalid JSON. Namely it uses single
+    // quotes and includes commas in some invalid locations. We have to
+    // run some regexps across the text to fix it up.
+    var jsonString = results[1].replace(/'/g, '"').replace(/},]/g,'}]');
+    data = JSON.parse(jsonString);
+  } catch (e) {
+    console.dir(e);
+    console.log(text);
+    return;
+  }
+  if (!data) {
+    throw new Error("JSON parse fail: " + results[1]);
+  }
+  botList = data[0];
+  checkinResults = data[1];
 
-  if (!row)
-    row = createTryStatusRow(issue);
-
-  var label = row.childNodes[0] || row.insertCell(-1);
-  var status = row.childNodes[1] || row.insertCell(-1);
-
-  label.className = "status-label";
-  var clAnchor = label.childNodes[0] ||
-    label.appendChild(document.createElement("a"));
-  clAnchor.textContent = "CL " + issue.issue;
-  clAnchor.href = codereviewBaseURL + "/" + issue.issue;
-  clAnchor.title = issue.subject;
-  if (lastFullPatchset && lastFullPatchset.message)
-    clAnchor.title += " | " + lastFullPatchset.message;
-  clAnchor.target = "_blank";
-
-  var statusElement = createPatchsetStatusElement(lastFullPatchset);
-  if (status.childElementCount < 1)
-    status.appendChild(statusElement);
-  else
-    status.replaceChild(statusElement, status.firstChild);
-}
-
-function removeIssueDisplay(issueNumber) {
-  var row = document.querySelector("*[data-issue='" + issueNumber + "']");
-  row.parentNode.removeChild(row);
-}
-
-function addTryStatusRows() {
-  buildbot.getActiveIssues().forEach(updateIssueDisplay);
-}
-
-function updateLKGR(lkgr) {
-  var link = document.getElementById('link_lkgr');
-  link.textContent = 'LKGR (' + lkgr + ')';
-}
-
-function addBotStatusRow(bot, className) {
-  var table = document.getElementById("status-table");
-
-  var baseURL = "http://build.chromium.org/p/chromium" +
-    (bot.id != "" ? "." + bot.id : "");
-  var consoleURL = baseURL + "/console";
-  var statusURL = baseURL + "/horizontal_one_box_per_builder";
-
-  var row = table.insertRow(-1);
-  row.className = "trunk-status-row " + className;
-  var label = row.insertCell(-1);
-  label.className = "status-label";
-  var labelAnchor = document.createElement("a");
-  labelAnchor.href = consoleURL;
-  labelAnchor.target = "_blank";
-  labelAnchor.id = "link_" + bot.id;
-  labelAnchor.textContent = bot.label;
-  label.appendChild(labelAnchor);
-
-  var status = row.insertCell(-1);
-  status.className = "trunk-status-cell";
-  var statusIframe = document.createElement("iframe");
-  statusIframe.scrolling = "no";
-  statusIframe.src = statusURL;
-  status.appendChild(statusIframe);
-}
-
-function addBotStatusRows() {
-  var closerBots = [
-    {id: "", label: "Chromium"},
-    {id: "win", label: "Win"},
-    {id: "mac", label: "Mac"},
-    {id: "linux", label: "Linux"},
-    {id: "chromiumos", label: "ChromiumOS"},
-    {id: "chrome", label: "Official"},
-    {id: "memory", label: "Memory"}
-  ];
-
-  var otherBots = [
-    {id: "lkgr", label: "LKGR"},
-    {id: "perf", label: "Perf"},
-    {id: "memory.fyi", label: "Memory FYI"},
-    {id: "gpu", label: "GPU"},
-    {id: "gpu.fyi", label: "GPU FYI"}
-  ];
-
-  closerBots.forEach(function(bot) {
-    addBotStatusRow(bot, "closer-status-row");
+  failures = botList.filter(function(bot) {
+    return (bot.color != "success");
   });
-
-  otherBots.forEach(function(bot) {
-    addBotStatusRow(bot, "other-status-row");
-  });
+  displayFailures();
 }
 
-function fillStatusTable() {
-  addBotStatusRows();
-  addTryStatusRows();
+function displayFailures() {
+  bots.innerText = "";
+
+  if (failures.length == 0) {
+    var anchor = document.createElement("a");
+    anchor.addEventListener("click", showConsole);
+    anchor.className = "open";
+    anchor.innerText = "The tree is completely green.";
+    bots.appendChild(anchor);
+    bots.appendChild(document.createTextNode(" (no way!)"));
+  } else {
+    var anchor = document.createElement("a");
+    anchor.addEventListener("click", showFailures);
+    anchor.innerText = "failures:";
+    var div = document.createElement("div");
+    div.appendChild(anchor);
+    bots.appendChild(div);
+
+    failures.forEach(function(bot, i) {
+      var div = document.createElement("div");
+      div.className = "bot " + bot.color;
+      div.addEventListener("click", function() {
+        // Requires closure for each iteration to retain local value of |i|.
+        return function() { showBot(i); }
+      }());
+      div.innerText = bot.title;
+      bots.appendChild(div);
+    });
+  }
 }
 
-function main() {
-  buildbot.requestURL(lkgrURL, "text", updateLKGR);
-  fillStatusTable();
+function showURL(url) {
+  window.open(url);
+  window.event.stopPropagation();
+}
 
-  buildbot.getActiveIssues().setEventCallback(function(request) {
-    // NOTE(wittman): It doesn't appear that we can reliably detect closing of
-    // the popup and remove the event callback, so ensure the popup window is
-    // displayed before processing the event.
-    if (!chrome.extension.getViews({type: "popup"}))
-      return;
+function showBot(botIndex) {
+  var bot = failures[botIndex];
+  var url = botRoot + "/waterfall/waterfall?builder=" + bot.name;
+  showURL(url);
+}
 
-    switch (request.event) {
-    case "issueUpdated":
-    case "issueAdded":
-      updateIssueDisplay(buildbot.getActiveIssues().getIssue(request.issue));
-      break;
+function showConsole() {
+  var url = botRoot + "/waterfall/console";
+  showURL(url);
+}
 
-    case "issueRemoved":
-      removeIssueDisplay(request.issue);
-      break;
+function showTry() {
+  var url = botRoot + "/try-server/waterfall";
+  showURL(url);
+}
+
+function showFyi() {
+  var url = botRoot + "/waterfall.fyi/console";
+  showURL(url);
+}
+
+function showFailures() {
+  var url = botRoot +
+      "/waterfall/waterfall?show_events=true&failures_only=true";
+  showURL(url);
+}
+
+function requestURL(url, callback) {
+  console.log("requestURL: " + url);
+  var xhr = new XMLHttpRequest();
+  try {
+    xhr.onreadystatechange = function(state) {
+      if (xhr.readyState == 4) {
+        if (xhr.status == 200) {
+          var text = xhr.responseText;
+          //console.log(text);
+          callback(text);
+        } else {
+          bots.innerText = "Error.";
+        }
+      }
     }
-  });
 
-  setInterval(function() {
-    buildbot.requestURL(lkgrURL, "text", updateLKGR);
-  }, lkgrRefreshIntervalInMs);
+    xhr.onerror = function(error) {
+      console.log("xhr error: " + JSON.stringify(error));
+      console.dir(error);
+    }
 
-  setInterval(function() {
-    var botStatusElements =
-        document.getElementsByClassName("trunk-status-iframe");
-    for (var i = 0; i < botStatusElements.length; i++)
-      // Force a reload of the iframe in a way that doesn't cause cross-domain
-      // policy violations.
-      botStatusElements.item(i).src = botStatusElements.item(i).src;
-  }, botStatusRefreshIntervalInMs);
+    xhr.open("GET", url, true);
+    xhr.send({});
+  } catch(e) {
+    console.log("exception: " + e);
+  }
 }
 
-main();
+function toggle_size() {
+  if (document.body.className == "big") {
+    document.body.className = "small";
+  } else {
+    document.body.className = "big";
+  }
+}
 
-})();
+document.addEventListener('DOMContentLoaded', function () {
+  toggle_size();
+
+  bots = document.getElementById("bots");
+
+  // XHR from onload winds up blocking the load, so we put it in a setTimeout.
+  window.setTimeout(requestURL, 0, waterfallURL, updateBotList);
+
+  // Setup event handlers
+  document.querySelector('#console').addEventListener('click', showConsole);
+  document.querySelector('#try').addEventListener('click', showTry);
+  document.querySelector('#fyi').addEventListener('click', showFyi);
+});

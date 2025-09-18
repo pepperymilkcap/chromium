@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 
 #include <windows.h>
-#include <dbghelp.h>
 #include <objbase.h>
+#include <dbghelp.h>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/win/scoped_handle.h"
 #include "gtest/gtest.h"
@@ -57,7 +57,7 @@ class MinidumpTest: public testing::Test {
     ASSERT_TRUE(urlmon != NULL);
     ASSERT_TRUE(::FreeLibrary(urlmon));
 
-    ASSERT_TRUE(base::CreateTemporaryFile(&dump_file_));
+    ASSERT_TRUE(file_util::CreateTemporaryFile(&dump_file_));
     dump_file_handle_.Set(::CreateFile(dump_file_.value().c_str(),
                                        GENERIC_WRITE | GENERIC_READ,
                                        0,
@@ -75,7 +75,7 @@ class MinidumpTest: public testing::Test {
     }
 
     dump_file_handle_.Close();
-    EXPECT_TRUE(base::DeleteFile(dump_file_, false));
+    EXPECT_TRUE(file_util::Delete(dump_file_, false));
   }
 
   void EnsureDumpMapped() {
@@ -282,7 +282,7 @@ class MinidumpTest: public testing::Test {
   base::win::ScopedHandle dump_file_mapping_;
   void* dump_file_view_;
 
-  base::FilePath dump_file_;
+  FilePath dump_file_;
 };
 
 TEST_F(MinidumpTest, Version) {
@@ -299,7 +299,7 @@ TEST_F(MinidumpTest, Version) {
                                   dbg_help_file,
                                   arraysize(dbg_help_file)));
   scoped_ptr<FileVersionInfo> file_info(
-      FileVersionInfo::CreateFileVersionInfo(base::FilePath(dbg_help_file)));
+      FileVersionInfo::CreateFileVersionInfo(FilePath(dbg_help_file)));
   ASSERT_TRUE(file_info != NULL);
 
   VLOG(1) << "DbgHelp.dll version: " << file_info->file_version();
@@ -434,10 +434,11 @@ int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   CommandLine::Init(argc, argv);
 
-  logging::LoggingSettings settings;
-  settings.logging_dest = logging::LOG_TO_ALL;
-  settings.log_file = L"CON";
-  settings.lock_log = logging::DONT_LOCK_LOG_FILE;
-  logging::InitLogging(settings);
+  logging::InitLogging(
+      L"CON",
+      logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
+      logging::DONT_LOCK_LOG_FILE,
+      logging::APPEND_TO_OLD_LOG_FILE,
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
   return RUN_ALL_TESTS();
 }

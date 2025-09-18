@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_IMPORTER_FIREFOX_PROFILE_LOCK_H__
 #define CHROME_BROWSER_IMPORTER_FIREFOX_PROFILE_LOCK_H__
+#pragma once
 
 #include "build/build_config.h"
 
@@ -12,7 +13,7 @@
 #endif
 
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 
 // Firefox is designed to allow only one application to access its
@@ -67,7 +68,7 @@
 
 class FirefoxProfileLock {
  public:
-  explicit FirefoxProfileLock(const base::FilePath& path);
+  explicit FirefoxProfileLock(const FilePath& path);
   ~FirefoxProfileLock();
 
   // Locks and releases the profile.
@@ -81,13 +82,13 @@ class FirefoxProfileLock {
   FRIEND_TEST_ALL_PREFIXES(FirefoxProfileLockTest, ProfileLock);
   FRIEND_TEST_ALL_PREFIXES(FirefoxProfileLockTest, ProfileLockOrphaned);
 
-  static const base::FilePath::CharType* kLockFileName;
-  static const base::FilePath::CharType* kOldLockFileName;
+  static const FilePath::CharType* kLockFileName;
+  static const FilePath::CharType* kOldLockFileName;
 
   void Init();
 
   // Full path of the lock file in the profile folder.
-  base::FilePath lock_file_;
+  FilePath lock_file_;
 
   // The handle of the lock file.
 #if defined(OS_WIN)
@@ -98,7 +99,7 @@ class FirefoxProfileLock {
   // On Posix systems Firefox apparently first tries to put a fcntl lock
   // on a file and if that fails, it does a regular exculsive open on another
   // file. This variable contains the location of this other file.
-  base::FilePath old_lock_file_;
+  FilePath old_lock_file_;
 
   // Method that tries to put a fcntl lock on file specified by |lock_file_|.
   // Returns false if lock is already held by another process. true in all

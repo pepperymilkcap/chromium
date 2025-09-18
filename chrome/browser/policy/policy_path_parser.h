@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_POLICY_POLICY_PATH_PARSER_H_
 #define CHROME_BROWSER_POLICY_POLICY_PATH_PARSER_H_
+#pragma once
 
 #include <string>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 
 namespace policy {
 
@@ -46,19 +47,8 @@ namespace path_parser {
 // Any non recognized variable is not being translated at all. Variables are
 // translated only once in every string because for most of these there is no
 // sense in concatenating them more than once in a single path.
-base::FilePath::StringType ExpandPathVariables(
-    const base::FilePath::StringType& untranslated_string);
-
-// A helper function used to read the UserDataDir path policy without relying on
-// any policy infrastructure. This is required because this policy is needed
-// much earlier before the PrefService is initialized.
-// The function will fill |user_data_dir| if the policy "UserDataDir" is set and
-// leave it intact if the policy is missing. If the policy is set it should
-// override any manual changes to the profile path the user might have made so
-// this function should be used to verify no policy is specified whenever the
-// profile path is not read from the PathService which already takes this into
-// account.
-void CheckUserDataDirPolicy(base::FilePath* user_data_dir);
+FilePath::StringType ExpandPathVariables(
+    const FilePath::StringType& untranslated_string);
 
 }  // namespace path_parser
 

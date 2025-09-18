@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,35 +12,18 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "base/path_service.h"
-#include "base/process/launch.h"
-#include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
-#include "base/win/windows_version.h"
 
 namespace base {
 namespace debug {
 
 namespace {
 
-// Previous unhandled filter. Will be called if not NULL when we intercept an
-// exception. Only used in unit tests.
-LPTOP_LEVEL_EXCEPTION_FILTER g_previous_filter = NULL;
-
-// Prints the exception call stack.
-// This is the unit tests exception filter.
-long WINAPI StackDumpExceptionFilter(EXCEPTION_POINTERS* info) {
-  debug::StackTrace(info).Print();
-  if (g_previous_filter)
-    return g_previous_filter(info);
-  return EXCEPTION_CONTINUE_SEARCH;
-}
-
 // SymbolContext is a threadsafe singleton that wraps the DbgHelp Sym* family
 // of functions.  The Sym* family of functions may only be invoked by one
 // thread at a time.  SymbolContext code may access a symbol server over the
 // network while holding the lock for this singleton.  In the case of high
-// latency, this code will adversely affect performance.
+// latency, this code will adversly affect performance.
 //
 // There is also a known issue where this backtrace code can interact
 // badly with breakpad if breakpad is invoked in a separate thread while
@@ -74,7 +57,7 @@ class SymbolContext {
   // LOG(FATAL) here because this code is called might be triggered by a
   // LOG(FATAL) itself.
   void OutputTraceToStream(const void* const* trace,
-                           size_t count,
+                           int count,
                            std::ostream* os) {
     base::AutoLock lock(lock_);
 
@@ -112,7 +95,7 @@ class SymbolContext {
         (*os) << symbol->Name << " [0x" << trace[i] << "+"
               << sym_displacement << "]";
       } else {
-        // If there is no symbol information, add a spacer.
+        // If there is no symbol informtion, add a spacer.
         (*os) << "(No symbol) [0x" << trace[i] << "]";
       }
       if (has_line) {
@@ -132,7 +115,9 @@ class SymbolContext {
     SymSetOptions(SYMOPT_DEFERRED_LOADS |
                   SYMOPT_UNDNAME |
                   SYMOPT_LOAD_LINES);
-    if (!SymInitialize(GetCurrentProcess(), NULL, TRUE)) {
+    if (SymInitialize(GetCurrentProcess(), NULL, TRUE)) {
+      init_error_ = ERROR_SUCCESS;
+    } else {
       init_error_ = GetLastError();
       // TODO(awong): Handle error: SymInitialize can fail with
       // ERROR_INVALID_PARAMETER.
@@ -140,41 +125,6 @@ class SymbolContext {
       // process (prevents future tests from running or kills the browser
       // process).
       DLOG(ERROR) << "SymInitialize failed: " << init_error_;
-      return;
-    }
-
-    init_error_ = ERROR_SUCCESS;
-
-    // Work around a mysterious hang on Windows XP.
-    if (base::win::GetVersion() < base::win::VERSION_VISTA)
-      return;
-
-    // When transferring the binaries e.g. between bots, path put
-    // into the executable will get off. To still retrieve symbols correctly,
-    // add the directory of the executable to symbol search path.
-    // All following errors are non-fatal.
-    wchar_t symbols_path[1024];
-
-    // Note: The below function takes buffer size as number of characters,
-    // not number of bytes!
-    if (!SymGetSearchPathW(GetCurrentProcess(),
-                           symbols_path,
-                           arraysize(symbols_path))) {
-      DLOG(WARNING) << "SymGetSearchPath failed: ";
-      return;
-    }
-
-    FilePath module_path;
-    if (!PathService::Get(FILE_EXE, &module_path)) {
-      DLOG(WARNING) << "PathService::Get(FILE_EXE) failed.";
-      return;
-    }
-
-    std::wstring new_path(std::wstring(symbols_path) +
-                          L";" + module_path.DirName().value());
-    if (!SymSetSearchPathW(GetCurrentProcess(), new_path.c_str())) {
-      DLOG(WARNING) << "SymSetSearchPath failed.";
-      return;
     }
   }
 
@@ -184,14 +134,6 @@ class SymbolContext {
 };
 
 }  // namespace
-
-bool EnableInProcessStackDumping() {
-  // Add stack dumping support on exception on windows. Similar to OS_POSIX
-  // signal() handling in process_util_posix.cc.
-  g_previous_filter = SetUnhandledExceptionFilter(&StackDumpExceptionFilter);
-  RouteStdioToConsole();
-  return true;
-}
 
 // Disable optimizations for the StackTrace::StackTrace function. It is
 // important to disable at least frame pointer optimization ("y"), since
@@ -243,12 +185,9 @@ StackTrace::StackTrace(EXCEPTION_POINTERS* exception_pointers) {
          count_ < arraysize(trace_)) {
     trace_[count_++] = reinterpret_cast<void*>(stack_frame.AddrPC.Offset);
   }
-
-  for (size_t i = count_; i < arraysize(trace_); ++i)
-    trace_[i] = NULL;
 }
 
-void StackTrace::Print() const {
+void StackTrace::PrintBacktrace() const {
   OutputToStream(&std::cerr);
 }
 

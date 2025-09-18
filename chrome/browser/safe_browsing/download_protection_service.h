@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,6 +7,7 @@
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_DOWNLOAD_PROTECTION_SERVICE_H_
 #define CHROME_BROWSER_SAFE_BROWSING_DOWNLOAD_PROTECTION_SERVICE_H_
+#pragma once
 
 #include <set>
 #include <string>
@@ -14,17 +15,15 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/safe_browsing/database_manager.h"
-#include "chrome/browser/safe_browsing/ui_manager.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
+class SafeBrowsingService;
 
 namespace content {
 class DownloadItem;
-class PageNavigator;
 }
 
 namespace net {
@@ -33,19 +32,35 @@ class X509Certificate;
 }  // namespace net
 
 namespace safe_browsing {
-class DownloadFeedbackService;
 class SignatureUtil;
 
 // This class provides an asynchronous API to check whether a particular
 // client download is malicious or not.
 class DownloadProtectionService {
  public:
+  // TODO(noelutz): we're missing some fields here: server IPs,
+  // tab URL redirect chain, ...
+  struct DownloadInfo {
+    FilePath local_file;  // Where the download is currently stored.
+    FilePath target_file;  // Where the download will eventually be stored.
+    std::vector<GURL> download_url_chain;
+    GURL referrer_url;
+    std::string sha256_hash;
+    int64 total_bytes;
+    bool user_initiated;
+    std::string remote_address;
+    DownloadInfo();
+    ~DownloadInfo();
+    std::string DebugString() const;
+    // Creates a DownloadInfo from a DownloadItem object.
+    static DownloadInfo FromDownloadItem(const content::DownloadItem& item);
+  };
+
   enum DownloadCheckResult {
     SAFE,
     DANGEROUS,
-    UNCOMMON,
-    DANGEROUS_HOST,
-    POTENTIALLY_UNWANTED
+    // In the future we may introduce a third category which corresponds to
+    // suspicious downloads that are not known to be malicious.
   };
 
   // Callback type which is invoked once the download request is done.
@@ -65,7 +80,7 @@ class DownloadProtectionService {
   // method must be called on the UI thread, and the callback will also be
   // invoked on the UI thread.  This method must be called once the download
   // is finished and written to disk.
-  virtual void CheckClientDownload(content::DownloadItem* item,
+  virtual void CheckClientDownload(const DownloadInfo& info,
                                    const CheckDownloadCallback& callback);
 
   // Checks whether any of the URLs in the redirect chain of the
@@ -73,19 +88,13 @@ class DownloadProtectionService {
   // delivered asynchronously via the given callback.  This method must be
   // called on the UI thread, and the callback will also be invoked on the UI
   // thread.  Pre-condition: !info.download_url_chain.empty().
-  virtual void CheckDownloadUrl(const content::DownloadItem& item,
+  virtual void CheckDownloadUrl(const DownloadInfo& info,
                                 const CheckDownloadCallback& callback);
 
-  // Returns true iff the download specified by |info| should be scanned by
-  // CheckClientDownload() for malicious content.
-  virtual bool IsSupportedDownload(const content::DownloadItem& item,
-                                   const base::FilePath& target_path) const;
-
-  // Display more information to the user regarding the download specified by
-  // |info|. This method is invoked when the user requests more information
-  // about a download that was marked as malicious.
-  void ShowDetailsForDownload(const content::DownloadItem& item,
-                              content::PageNavigator* navigator);
+  // Returns true iff the given filename has an extension that is supported
+  // by this service.  In other words: this method returns true if it can
+  // protect users against files with that particular extension.
+  bool IsSupportedFileType(const FilePath& filename) const;
 
   // Enables or disables the service.  This is usually called by the
   // SafeBrowsingService, which tracks whether any profile uses these services
@@ -100,10 +109,6 @@ class DownloadProtectionService {
   // Returns the timeout that is used by CheckClientDownload().
   int64 download_request_timeout_ms() const {
     return download_request_timeout_ms_;
-  }
-
-  DownloadFeedbackService* feedback_service() {
-    return feedback_service_.get();
   }
 
  protected:
@@ -122,16 +127,10 @@ class DownloadProtectionService {
     REASON_DOWNLOAD_DANGEROUS,
     REASON_DOWNLOAD_SAFE,
     REASON_EMPTY_URL_CHAIN,
-    DEPRECATED_REASON_HTTPS_URL,
+    REASON_HTTPS_URL,
     REASON_PING_DISABLED,
     REASON_TRUSTED_EXECUTABLE,
     REASON_OS_NOT_SUPPORTED,
-    REASON_DOWNLOAD_UNCOMMON,
-    REASON_DOWNLOAD_NOT_SUPPORTED,
-    REASON_INVALID_RESPONSE_VERDICT,
-    REASON_ARCHIVE_WITHOUT_BINARIES,
-    REASON_DOWNLOAD_DANGEROUS_HOST,
-    REASON_DOWNLOAD_POTENTIALLY_UNWANTED,
     REASON_MAX  // Always add new values before this one.
   };
 
@@ -143,15 +142,9 @@ class DownloadProtectionService {
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            CheckClientDownloadSuccess);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
-                           CheckClientDownloadHTTPS);
-  FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
-                           CheckClientDownloadZip);
-  FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            CheckClientDownloadFetchFailed);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            TestDownloadRequestTimeout);
-  FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
-                           CheckClientCrxDownloadSuccess);
   static const char kDownloadRequestUrl[];
 
   // Cancels all requests in |download_requests_|, and empties it, releasing
@@ -170,12 +163,9 @@ class DownloadProtectionService {
       const net::X509Certificate& issuer,
       std::vector<std::string>* whitelist_strings);
 
-  // Returns the URL that will be used for download requests.
-  static GURL GetDownloadRequestUrl();
-
-  // These pointers may be NULL if SafeBrowsing is disabled.
-  scoped_refptr<SafeBrowsingUIManager> ui_manager_;
-  scoped_refptr<SafeBrowsingDatabaseManager> database_manager_;
+  // This pointer may be NULL if SafeBrowsing is disabled. The
+  // SafeBrowsingService owns us, so we don't need to hold a reference to it.
+  SafeBrowsingService* sb_service_;
 
   // The context we use to issue network requests.
   scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
@@ -192,8 +182,6 @@ class DownloadProtectionService {
   scoped_refptr<SignatureUtil> signature_util_;
 
   int64 download_request_timeout_ms_;
-
-  scoped_ptr<DownloadFeedbackService> feedback_service_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadProtectionService);
 };

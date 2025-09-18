@@ -1,18 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_STATUS_ICONS_STATUS_TRAY_H_
 #define CHROME_BROWSER_STATUS_ICONS_STATUS_TRAY_H_
+#pragma once
+
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/scoped_vector.h"
-#include "base/strings/string16.h"
-
-namespace gfx {
-class ImageSkia;
-}
 
 class StatusIcon;
 
@@ -20,14 +17,6 @@ class StatusIcon;
 // APIs to add/remove icons to the tray and attach context menus.
 class StatusTray {
  public:
-  enum StatusIconType {
-    NOTIFICATION_TRAY_ICON = 0,
-    MEDIA_STREAM_CAPTURE_ICON,
-    BACKGROUND_MODE_ICON,
-    OTHER_ICON,
-    NAMED_STATUS_ICON_COUNT
-  };
-
   // Static factory method that is implemented separately for each platform to
   // produce the appropriate platform-specific instance. Returns NULL if this
   // platform does not support status icons.
@@ -37,31 +26,29 @@ class StatusTray {
 
   // Creates a new StatusIcon. The StatusTray retains ownership of the
   // StatusIcon. Returns NULL if the StatusIcon could not be created.
-  StatusIcon* CreateStatusIcon(StatusIconType type,
-                               const gfx::ImageSkia& image,
-                               const base::string16& tool_tip);
+  StatusIcon* CreateStatusIcon();
 
-  // Removes |icon| from this status tray.
+  // Removes the current status icon associated with this identifier, if any.
   void RemoveStatusIcon(StatusIcon* icon);
 
  protected:
-  typedef ScopedVector<StatusIcon> StatusIcons;
-
   StatusTray();
-
   // Factory method for creating a status icon for this platform.
-  virtual StatusIcon* CreatePlatformStatusIcon(
-      StatusIconType type,
-      const gfx::ImageSkia& image,
-      const base::string16& tool_tip) = 0;
+  virtual StatusIcon* CreatePlatformStatusIcon() = 0;
 
+  // Removes all StatusIcons (used by derived classes to clean up in case they
+  // track external state used by the StatusIcons).
+  void RemoveAllIcons();
+
+  typedef std::vector<StatusIcon*> StatusIconList;
   // Returns the list of active status icons so subclasses can operate on them.
-  const StatusIcons& status_icons() const { return status_icons_; }
+  const StatusIconList& status_icons() { return status_icons_; }
 
  private:
-  // List containing all active StatusIcons. The icons are owned by this
-  // StatusTray.
-  StatusIcons status_icons_;
+  FRIEND_TEST_ALL_PREFIXES(StatusTrayTest, CreateRemove);
+
+  // List containing all active StatusIcons.
+  StatusIconList status_icons_;
 
   DISALLOW_COPY_AND_ASSIGN(StatusTray);
 };

@@ -4,11 +4,12 @@
 
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_ICON_EXTRACTOR_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_ICON_EXTRACTOR_H_
+#pragma once
 
 #include <string>
 
 #include "base/callback.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "chrome/browser/icon_loader.h"
 
 // Helper class for DownloadsGetFileIconFunction. Only used for a single icon
@@ -24,7 +25,7 @@ class DownloadFileIconExtractor {
 
   // Should return false if the request was invalid.  If the return value is
   // true, then |callback| should be called with the result.
-  virtual bool ExtractIconURLForPath(const base::FilePath& path,
+  virtual bool ExtractIconURLForPath(const FilePath& path,
                                      IconLoader::IconSize icon_size,
                                      IconURLCallback callback) = 0;
 };

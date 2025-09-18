@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,6 +9,9 @@
 
 #ifndef UI_BASE_GTK_GTK_HIG_CONSTANTS_H_
 #define UI_BASE_GTK_GTK_HIG_CONSTANTS_H_
+#pragma once
+
+#include "ui/base/ui_export.h"
 
 typedef struct _GdkColor GdkColor;
 
@@ -23,10 +26,9 @@ namespace ui {
 // Multiply uint8 color components by this.
 const int kSkiaToGDKMultiplier = 257;
 
-// Common color constants.
-const GdkColor kGdkWhite = GDK_COLOR_RGB(0xFF, 0xFF, 0xFF);
+// Named color constants.
+const GdkColor kGdkWhite = GDK_COLOR_RGB(0xff, 0xff, 0xff);
 const GdkColor kGdkBlack = GDK_COLOR_RGB(0x00, 0x00, 0x00);
-const GdkColor kGdkGray = GDK_COLOR_RGB(0x7F, 0x7F, 0x7F);
 
 // Constants relating to the layout of dialog windows:
 // (See http://library.gnome.org/devel/hig-book/stable/design-window.html.en)
@@ -50,5 +52,6 @@ const int kContentAreaSpacing = 18;
 const int kFormControlSpacing = 10;
 
 }  // namespace ui
+
 
 #endif  // UI_BASE_GTK_GTK_HIG_CONSTANTS_H_

@@ -33,7 +33,7 @@ function sendActivate(index, mode) {
 var MenuItem = cr.ui.define('div');
 
 MenuItem.prototype = {
-  __proto__: HTMLDivElement.prototype,
+  __proto__ : HTMLDivElement.prototype,
 
   /**
    * Decorates the menu item element.
@@ -190,51 +190,57 @@ Menu.prototype = {
    * Configuration object.
    * @type {Object}
    */
-  config_: null,
+  config_ : null,
 
   /**
    * Currently selected menu item.
    * @type {MenuItem}
    */
-  current_: null,
+  current_ : null,
 
   /**
    * Timers for opening/closing submenu.
    * @type {number}
    */
-  openSubmenuTimer_: 0,
-  closeSubmenuTimer_: 0,
+  openSubmenuTimer_ : 0,
+  closeSubmenuTimer_ : 0,
 
   /**
    * Auto scroll timer.
    * @type {number}
    */
-  scrollTimer_: 0,
+  scrollTimer_ : 0,
 
   /**
    * Pointer to a submenu currently shown, if any.
    * @type {MenuItem}
    */
-  submenuShown_: null,
+  submenuShown_ : null,
 
   /**
    * True if this menu is root.
    * @type {boolean}
    */
-  isRoot_: false,
+  isRoot_ : false,
+
+  /**
+   * Scrollable Viewport.
+   * @type {HTMLElement}
+   */
+  viewpotr_ : null,
 
   /**
    * Total hight of scroll buttons. Used to adjust the height of
    * viewport in order to show scroll bottons without scrollbar.
    * @type {number}
    */
-  buttonHeight_: 0,
+  buttonHeight_ : 0,
 
   /**
    * True to enable scroll button.
    * @type {boolean}
    */
-  scrollEnabled: false,
+  scrollEnabled : false,
 
   /**
    * Decorates the menu element.
@@ -263,8 +269,8 @@ Menu.prototype = {
     window.addEventListener('resize', this.onResize_.bind(this));
 
     // Setup scroll events.
-    var up = $('scroll-up');
-    var down = $('scroll-down');
+    var up = document.getElementById('scroll-up');
+    var down = document.getElementById('scroll-down');
     up.addEventListener('mouseout', this.stopScroll_.bind(this));
     down.addEventListener('mouseout', this.stopScroll_.bind(this));
     var menu = this;
@@ -314,7 +320,7 @@ Menu.prototype = {
   },
 
   /**
-   * @return {number} The index of the {@code item}.
+   * Returns the index of the {@code item}.
    */
   getMenuItemIndexOf: function(item) {
     return this.items_.indexOf(item);
@@ -325,7 +331,6 @@ Menu.prototype = {
    * of MenuItem, or any HTMLElement that implements {@code init},
    * {@code activate} methods as well as {@code selected} attribute.
    * @param {Object} attrs The menu item's properties passed from C++.
-   * @return {MenuItem} The created menu item.
    */
   createMenuItem: function(attrs) {
     return new MenuItem();
@@ -357,7 +362,7 @@ Menu.prototype = {
   showSelection: function() {
     if (this.current_) {
       this.current_.selected = true;
-    } else {
+    } else  {
       this.findNextEnabled_(1).selected = true;
     }
   },
@@ -462,7 +467,7 @@ Menu.prototype = {
       case 'U+0009':  // tab
          break;
       case 'U+001B':  // escape
-        chrome.send('close_all');
+        chrome.send('close_all', []);
         break;
       case 'Enter':
       case 'U+0020':  // space
@@ -508,8 +513,8 @@ Menu.prototype = {
   },
 
   onResize_: function() {
-    var up = $('scroll-up');
-    var down = $('scroll-down');
+    var up = document.getElementById('scroll-up');
+    var down = document.getElementById('scroll-down');
     // this needs to be < 2 as empty page has height of 1.
     if (window.innerHeight < 2) {
       // menu window is not visible yet. just hide buttons.
@@ -544,7 +549,7 @@ Menu.prototype = {
   closeSubmenu_: function(item) {
     this.submenuShown_ = null;
     this.cancelSubmenuTimer_();
-    chrome.send('close_submenu');
+    chrome.send('close_submenu', []);
   },
 
   /**
@@ -557,7 +562,7 @@ Menu.prototype = {
       if (this.current_) {
         this.current_.selected = false;
       }
-      chrome.send('move_to_parent');
+      chrome.send('move_to_parent', []);
     }
   },
 
@@ -566,21 +571,21 @@ Menu.prototype = {
    * menu is a submenu.
    * @private
    */
-  moveToSubmenu_: function() {
+  moveToSubmenu_: function () {
     var current = this.current_;
     if (current && current.attrs.type == 'submenu') {
       this.openSubmenu(current);
-      chrome.send('move_to_submenu');
+      chrome.send('move_to_submenu', []);
     }
   },
 
   /**
-   * Finds the next selectable item. If nothing is selected, the first
-   * selectable item will be chosen. Returns null if nothing is selectable.
+   * Find a next selectable item. If nothing is selected, the 1st
+   * selectable item will be chosen. Returns null if nothing is
+   * selectable.
    * @param {number} incr Specifies the direction to search, 1 to
-   *     downwards and -1 for upwards.
+   * downwards and -1 for upwards.
    * @private
-   * @return {MenuItem} The next selectable item.
    */
   findNextEnabled_: function(incr) {
     var len = this.items_.length;
@@ -631,7 +636,7 @@ Menu.prototype = {
    * Stops auto scroll.
    * @private
    */
-  stopScroll_: function() {
+  stopScroll_: function () {
     clearTimeout(this.scrollTimer_);
     this.scrollTimer_ = 0;
   },
@@ -640,31 +645,30 @@ Menu.prototype = {
    * Scrolls the viewport to make the selected item visible.
    * @private
    */
-  makeSelectedItemVisible_: function() {
+  makeSelectedItemVisible_: function(){
     this.current_.scrollIntoViewIfNeeded(false);
   },
 };
 
 /**
  * functions to be called from C++.
- * @param {Object} config The viewport configuration.
  */
 function init(config) {
-  $('viewport').init(config);
+  document.getElementById('viewport').init(config);
 }
 
 function selectItem() {
-  $('viewport').showSelection();
+  document.getElementById('viewport').showSelection();
 }
 
 function updateModel(model) {
-  $('viewport').updateModel(model);
+  document.getElementById('viewport').updateModel(model);
 }
 
 function modelUpdated() {
-  chrome.send('model_updated');
+  chrome.send('model_updated', []);
 }
 
 function enableScroll(enabled) {
-  $('viewport').scrollEnabled = enabled;
+  document.getElementById('viewport').scrollEnabled = enabled;
 }

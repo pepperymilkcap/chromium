@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/google/google_util.h"
+#include "chrome/browser/net/url_request_mock_link_doctor_job.h"
 #include "chrome/common/chrome_paths.h"
+#include "content/browser/net/url_request_failed_dns_job.h"
+#include "content/browser/net/url_request_mock_http_job.h"
+#include "content/browser/net/url_request_slow_download_job.h"
+#include "content/browser/net/url_request_slow_http_job.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/test/net/url_request_failed_job.h"
-#include "content/test/net/url_request_mock_http_job.h"
-#include "content/test/net/url_request_slow_download_job.h"
 #include "net/url_request/url_request_filter.h"
 
 using content::BrowserThread;
@@ -33,15 +34,14 @@ void SetUrlRequestMocksEnabled(bool enabled) {
 
     net::URLRequestFilter::GetInstance()->ClearHandlers();
 
-    content::URLRequestFailedJob::AddUrlHandler();
-    content::URLRequestSlowDownloadJob::AddUrlHandler();
+    URLRequestFailedDnsJob::AddUrlHandler();
+    URLRequestMockLinkDoctorJob::AddUrlHandler();
+    URLRequestSlowDownloadJob::AddUrlHandler();
 
-    base::FilePath root_http;
+    FilePath root_http;
     PathService::Get(chrome::DIR_TEST_DATA, &root_http);
-    content::URLRequestMockHTTPJob::AddUrlHandler(root_http);
-    content::URLRequestMockHTTPJob::AddHostnameToFileHandler(
-        google_util::LinkDoctorBaseURL().host(),
-        root_http.AppendASCII("mock-link-doctor.html"));
+    URLRequestMockHTTPJob::AddUrlHandler(root_http);
+    URLRequestSlowHTTPJob::AddUrlHandler(root_http);
   } else {
     // Revert to the default handlers.
     net::URLRequestFilter::GetInstance()->ClearHandlers();

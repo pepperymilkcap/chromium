@@ -4,73 +4,71 @@
 
 #ifndef CONTENT_TEST_TEST_WEB_CONTENTS_VIEW_H_
 #define CONTENT_TEST_TEST_WEB_CONTENTS_VIEW_H_
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "content/port/browser/render_view_host_delegate_view.h"
-#include "content/port/browser/web_contents_view_port.h"
+#include "content/public/browser/web_contents_view.h"
 
 namespace content {
 
-class TestWebContentsView : public WebContentsViewPort,
-                            public RenderViewHostDelegateView {
+class TestWebContentsView : public WebContentsView {
  public:
   TestWebContentsView();
   virtual ~TestWebContentsView();
 
-  // RenderViewHostDelegateView:
+  // RenderViewHostDelegate::View:
+  virtual void CreateNewWindow(
+      int route_id,
+      const ViewHostMsg_CreateWindow_Params& params) OVERRIDE;
+  virtual void CreateNewWidget(int route_id,
+                               WebKit::WebPopupType popup_type) OVERRIDE;
+  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
+  virtual void ShowCreatedWindow(int route_id,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture) OVERRIDE;
+  virtual void ShowCreatedWidget(int route_id,
+                                 const gfx::Rect& initial_pos) OVERRIDE;
+  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+  virtual void ShowContextMenu(const ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
                              int selected_item,
-                             const std::vector<MenuItem>& items,
-                             bool right_aligned,
-                             bool allow_multiple_selection) OVERRIDE;
-  virtual void StartDragging(const DropData& drop_data,
-                             blink::WebDragOperationsMask allowed_ops,
-                             const gfx::ImageSkia& image,
-                             const gfx::Vector2d& image_offset,
-                             const DragEventSourceInfo& event_info) OVERRIDE;
-  virtual void UpdateDragCursor(blink::WebDragOperation operation) OVERRIDE;
+                             const std::vector<WebMenuItem>& items,
+                             bool right_aligned) OVERRIDE;
+  virtual void StartDragging(const WebDropData& drop_data,
+                             WebKit::WebDragOperationsMask allowed_ops,
+                             const SkBitmap& image,
+                             const gfx::Point& image_offset) OVERRIDE;
+  virtual void UpdateDragCursor(WebKit::WebDragOperation operation) OVERRIDE;
   virtual void GotFocus() OVERRIDE;
   virtual void TakeFocus(bool reverse) OVERRIDE;
 
   // WebContentsView:
+  virtual void CreateView(const gfx::Size& initial_size) OVERRIDE;
+  virtual RenderWidgetHostView* CreateViewForWidget(
+      RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
   virtual void GetContainerBounds(gfx::Rect *out) const OVERRIDE;
+  virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void SetInitialFocus() OVERRIDE;
   virtual void StoreFocus() OVERRIDE;
   virtual void RestoreFocus() OVERRIDE;
-  virtual DropData* GetDropData() const OVERRIDE;
-  virtual gfx::Rect GetViewBounds() const OVERRIDE;
-#if defined(OS_MACOSX)
-  virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;
-  virtual bool GetAllowOverlappingViews() const OVERRIDE;
-  virtual void SetOverlayView(WebContentsView* overlay,
-                              const gfx::Point& offset) OVERRIDE;
-  virtual void RemoveOverlayView() OVERRIDE;
-#endif
-
-  // WebContentsViewPort:
-  virtual void CreateView(const gfx::Size& initial_size,
-                          gfx::NativeView context) OVERRIDE;
-  virtual RenderWidgetHostView* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual RenderWidgetHostView* CreateViewForPopupWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual void SetPageTitle(const base::string16& title) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
-  virtual void RenderViewSwappedIn(RenderViewHost* host) OVERRIDE;
-  virtual void SetOverscrollControllerEnabled(bool enabled) OVERRIDE;
-#if defined(OS_MACOSX)
+  virtual bool IsDoingDrag() const OVERRIDE;
+  virtual void CancelDragAndCloseTab() OVERRIDE;
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
-#endif
+  virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
+  virtual void InstallOverlayView(gfx::NativeView view) OVERRIDE;
+  virtual void RemoveOverlayView() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestWebContentsView);

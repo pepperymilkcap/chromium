@@ -19,7 +19,7 @@
     },
   ],
   'conditions': [
-    ['OS == "win" and target_arch=="ia32"', {
+    ['OS == "win"', {
       'targets': [
         {
           'target_name': 'dynamic_annotations_win64',

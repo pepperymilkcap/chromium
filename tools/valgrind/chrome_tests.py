@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 import glob
 import logging
-import multiprocessing
 import optparse
 import os
 import stat
@@ -29,7 +28,6 @@ class BuildDirAmbiguous(Exception): pass
 
 class ChromeTests:
   SLOW_TOOLS = ["memcheck", "tsan", "tsan_rv", "drmemory"]
-  LAYOUT_TESTS_DEFAULT_CHUNK_SIZE = 400
 
   def __init__(self, options, args, test):
     if ':' in test:
@@ -57,7 +55,7 @@ class ChromeTests:
     # an absolute Unix-style path
     self._source_dir = os.path.abspath(self._source_dir).replace('\\', '/')
     valgrind_test_script = os.path.join(script_dir, "valgrind_test.py")
-    self._command_preamble = ["--source-dir=%s" % (self._source_dir)]
+    self._command_preamble = ["--source_dir=%s" % (self._source_dir)]
 
     if not self._options.build_dir:
       dirs = [
@@ -69,7 +67,7 @@ class ChromeTests:
       if len(build_dir) > 1:
         raise BuildDirAmbiguous("Found more than one suitable build dir:\n"
                                 "%s\nPlease specify just one "
-                                "using --build-dir" % ", ".join(build_dir))
+                                "using --build_dir" % ", ".join(build_dir))
       elif build_dir:
         self._options.build_dir = build_dir[0]
       else:
@@ -77,12 +75,12 @@ class ChromeTests:
 
     if self._options.build_dir:
       build_dir = os.path.abspath(self._options.build_dir)
-      self._command_preamble += ["--build-dir=%s" % (self._options.build_dir)]
+      self._command_preamble += ["--build_dir=%s" % (self._options.build_dir)]
 
   def _EnsureBuildDirFound(self):
     if not self._options.build_dir:
       raise BuildDirNotFound("Oops, couldn't find a build dir, please "
-                             "specify it manually using --build-dir")
+                             "specify it manually using --build_dir")
 
   def _DefaultCommand(self, tool, exe=None, valgrind_test_args=None):
     '''Generates the default command array that most tests will use.'''
@@ -119,17 +117,8 @@ class ChromeTests:
       # Valgrind runs tests slowly, so slow tests hurt more; show elapased time
       # so we can find the slowpokes.
       cmd.append("--gtest_print_time")
-      # Built-in test launcher for gtest-based executables runs tests using
-      # multiple process by default. Force the single-process mode back.
-      cmd.append("--single-process-tests")
     if self._options.gtest_repeat:
       cmd.append("--gtest_repeat=%s" % self._options.gtest_repeat)
-    if self._options.gtest_shuffle:
-      cmd.append("--gtest_shuffle")
-    if self._options.brave_new_test_launcher:
-      cmd.append("--brave-new-test-launcher")
-    if self._options.test_launcher_bot_mode:
-      cmd.append("--test-launcher-bot-mode")
     return cmd
 
   def Run(self):
@@ -204,26 +193,6 @@ class ChromeTests:
     if gtest_filter:
       cmd.append("--gtest_filter=%s" % gtest_filter)
 
-  @staticmethod
-  def ShowTests():
-    test_to_names = {}
-    for name, test_function in ChromeTests._test_list.iteritems():
-      test_to_names.setdefault(test_function, []).append(name)
-
-    name_to_aliases = {}
-    for names in test_to_names.itervalues():
-      names.sort(key=lambda name: len(name))
-      name_to_aliases[names[0]] = names[1:]
-
-    print
-    print "Available tests:"
-    print "----------------"
-    for name, aliases in sorted(name_to_aliases.iteritems()):
-      if aliases:
-        print "   {} (aka {})".format(name, ', '.join(aliases))
-      else:
-        print "   {}".format(name)
-
   def SetupLdPath(self, requires_build_dir):
     if requires_build_dir:
       self._EnsureBuildDirFound()
@@ -241,7 +210,6 @@ class ChromeTests:
     tool = valgrind_test.CreateTool(self._options.valgrind_tool)
     cmd = self._DefaultCommand(tool, name, valgrind_test_args)
     self._AppendGtestFilter(tool, name, cmd)
-    cmd.extend(['--test-tiny-timeout=1000'])
     if cmd_args:
       cmd.extend(cmd_args)
 
@@ -254,35 +222,11 @@ class ChromeTests:
     self.SetupLdPath(False)
     return tool.Run(cmd, None)
 
-  def TestAppList(self):
-    return self.SimpleTest("app_list", "app_list_unittests")
-
-  def TestAsh(self):
-    return self.SimpleTest("ash", "ash_unittests")
-
-  def TestAura(self):
-    return self.SimpleTest("aura", "aura_unittests")
-
   def TestBase(self):
     return self.SimpleTest("base", "base_unittests")
 
-  def TestCast(self):
-    return self.SimpleTest("chrome", "cast_unittests")
-
-  def TestChromeOS(self):
-    return self.SimpleTest("chromeos", "chromeos_unittests")
-
-  def TestComponents(self):
-    return self.SimpleTest("components", "components_unittests")
-
-  def TestCompositor(self):
-    return self.SimpleTest("compositor", "compositor_unittests")
-
   def TestContent(self):
     return self.SimpleTest("content", "content_unittests")
-
-  def TestContentBrowser(self):
-    return self.SimpleTest("content", "content_browsertests")
 
   def TestCourgette(self):
     return self.SimpleTest("courgette", "courgette_unittests")
@@ -290,20 +234,14 @@ class ChromeTests:
   def TestCrypto(self):
     return self.SimpleTest("crypto", "crypto_unittests")
 
-  def TestDevice(self):
-    return self.SimpleTest("device", "device_unittests")
-
-  def TestEvents(self):
-    return self.SimpleTest("events", "events_unittests")
-
-  def TestFFmpeg(self):
-    return self.SimpleTest("chrome", "ffmpeg_unittests")
-
-  def TestFFmpegRegressions(self):
-    return self.SimpleTest("chrome", "ffmpeg_regression_tests")
+  def TestGfx(self):
+    return self.SimpleTest("chrome", "gfx_unittests")
 
   def TestGPU(self):
     return self.SimpleTest("gpu", "gpu_unittests")
+
+  def TestGURL(self):
+    return self.SimpleTest("chrome", "googleurl_unittests")
 
   def TestIpc(self):
     return self.SimpleTest("ipc", "ipc_tests",
@@ -315,14 +253,8 @@ class ChromeTests:
   def TestMedia(self):
     return self.SimpleTest("chrome", "media_unittests")
 
-  def TestMessageCenter(self):
-    return self.SimpleTest("message_center", "message_center_unittests")
-
   def TestNet(self):
     return self.SimpleTest("net", "net_unittests")
-
-  def TestNetPerf(self):
-    return self.SimpleTest("net", "net_perftests")
 
   def TestPPAPI(self):
     return self.SimpleTest("chrome", "ppapi_unittests")
@@ -342,23 +274,14 @@ class ChromeTests:
   def TestSync(self):
     return self.SimpleTest("chrome", "sync_unit_tests")
 
-  def TestLinuxSandbox(self):
-    return self.SimpleTest("sandbox", "sandbox_linux_unittests")
+  def TestTestShell(self):
+    return self.SimpleTest("webkit", "test_shell_tests")
 
   def TestUnit(self):
-    # http://crbug.com/51716
-    # Disabling all unit tests
-    # Problems reappeared after r119922
-    if common.IsMac() and (self._options.valgrind_tool == "memcheck"):
-      logging.warning("unit_tests are disabled for memcheck on MacOS.")
-      return 0;
     return self.SimpleTest("chrome", "unit_tests")
 
   def TestUIUnit(self):
     return self.SimpleTest("chrome", "ui_unittests")
-
-  def TestURL(self):
-    return self.SimpleTest("chrome", "url_unittests")
 
   def TestViews(self):
     return self.SimpleTest("views", "views_unittests")
@@ -367,16 +290,7 @@ class ChromeTests:
   UI_VALGRIND_ARGS = ["--timeout=14400", "--trace_children", "--indirect"]
   # UI test timeouts are in milliseconds.
   UI_TEST_ARGS = ["--ui-test-action-timeout=60000",
-                  "--ui-test-action-max-timeout=150000",
-                  "--no-sandbox"]
-
-  # TODO(thestig) fine-tune these values.
-  # Valgrind timeouts are in seconds.
-  BROWSER_VALGRIND_ARGS = ["--timeout=50000", "--trace_children", "--indirect"]
-  # Browser test timeouts are in milliseconds.
-  BROWSER_TEST_ARGS = ["--ui-test-action-timeout=400000",
-                       "--ui-test-action-max-timeout=800000",
-                       "--no-sandbox"]
+                  "--ui-test-action-max-timeout=150000"]
 
   def TestAutomatedUI(self):
     return self.SimpleTest("chrome", "automated_ui_tests",
@@ -385,8 +299,8 @@ class ChromeTests:
 
   def TestBrowser(self):
     return self.SimpleTest("chrome", "browser_tests",
-                           valgrind_test_args=self.BROWSER_VALGRIND_ARGS,
-                           cmd_args=self.BROWSER_TEST_ARGS)
+                           valgrind_test_args=self.UI_VALGRIND_ARGS,
+                           cmd_args=self.UI_TEST_ARGS)
 
   def TestInteractiveUI(self):
     return self.SimpleTest("chrome", "interactive_ui_tests",
@@ -411,6 +325,11 @@ class ChromeTests:
                            valgrind_test_args=self.UI_VALGRIND_ARGS,
                            cmd_args=(["--ui-test-action-max-timeout=450000"]))
 
+  def TestUI(self):
+    return self.SimpleTest("chrome", "ui_tests",
+                           valgrind_test_args=self.UI_VALGRIND_ARGS,
+                           cmd_args=self.UI_TEST_ARGS)
+
   def TestLayoutChunk(self, chunk_num, chunk_size):
     # Run tests [chunk_num*chunk_size .. (chunk_num+1)*chunk_size) from the
     # list of tests.  Wrap around to beginning of list at end.
@@ -431,6 +350,7 @@ class ChromeTests:
     # Now build script_cmd, the run_webkits_tests.py commandline
     # Store each chunk in its own directory so that we can find the data later
     chunk_dir = os.path.join("layout", "chunk_%05d" % chunk_num)
+    test_shell = os.path.join(self._options.build_dir, "test_shell")
     out_dir = os.path.join(path_utils.ScriptDir(), "latest")
     out_dir = os.path.join(out_dir, chunk_dir)
     if os.path.exists(out_dir):
@@ -441,29 +361,19 @@ class ChromeTests:
       os.makedirs(out_dir)
     script = os.path.join(self._source_dir, "webkit", "tools", "layout_tests",
                           "run_webkit_tests.py")
-    # http://crbug.com/260627: After the switch to content_shell from DRT, each
-    # test now brings up 3 processes.  Under Valgrind, they become memory bound
-    # and can eventually OOM if we don't reduce the total count.
-    # It'd be nice if content_shell automatically throttled the startup of new
-    # tests if we're low on memory.
-    jobs = max(1, int(multiprocessing.cpu_count() * 0.3))
     script_cmd = ["python", script, "-v",
                   "--run-singly",  # run a separate DumpRenderTree for each test
-                  "--fully-parallel",
-                  "--child-processes=%d" % jobs,
+                  "--experimental-fully-parallel",
                   "--time-out-ms=200000",
-                  "--no-retry-failures",  # retrying takes too much time
-                  # http://crbug.com/176908: Don't launch a browser when done.
-                  "--no-show-results",
+                  "--noshow-results",
                   "--nocheck-sys-deps"]
     # Pass build mode to run_webkit_tests.py.  We aren't passed it directly,
     # so parse it out of build_dir.  run_webkit_tests.py can only handle
     # the two values "Release" and "Debug".
     # TODO(Hercules): unify how all our scripts pass around build mode
-    # (--mode / --target / --build-dir / --debug)
-    if self._options.build_dir:
-      build_root, mode = os.path.split(self._options.build_dir)
-      script_cmd.extend(["--build-directory", build_root, "--target", mode])
+    # (--mode / --target / --build_dir / --debug)
+    if self._options.build_dir.endswith("Debug"):
+      script_cmd.append("--debug");
     if (chunk_size > 0):
       script_cmd.append("--run-chunk=%d:%d" % (chunk_num, chunk_size))
     if len(self._args):
@@ -476,16 +386,7 @@ class ChromeTests:
     # Now run script_cmd with the wrapper in cmd
     cmd.extend(["--"])
     cmd.extend(script_cmd)
-
-    # Layout tests often times fail quickly, but the buildbot remains green.
-    # Detect this situation when running with the default chunk size.
-    if chunk_size == self.LAYOUT_TESTS_DEFAULT_CHUNK_SIZE:
-      min_runtime_in_seconds=120
-    else:
-      min_runtime_in_seconds=0
-    ret = tool.Run(cmd, "layout", min_runtime_in_seconds=min_runtime_in_seconds)
-    return ret
-
+    return tool.Run(cmd, "layout")
 
   def TestLayout(self):
     # A "chunk file" is maintained in the local directory so that each test
@@ -515,9 +416,10 @@ class ChromeTests:
     except IOError, (errno, strerror):
       logging.error("error reading from file %s (%d, %s)" % (chunk_file,
                     errno, strerror))
-    # Save the new chunk size before running the tests. Otherwise if a
-    # particular chunk hangs the bot, the chunk number will never get
-    # incremented and the bot will be wedged.
+    ret = self.TestLayoutChunk(chunk_num, chunk_size)
+    # Wait until after the test runs to completion to write out the new chunk
+    # number.  This way, if the bot is killed, we'll start running again from
+    # the current chunk rather than skipping it.
     logging.info("Saving state to " + chunk_file)
     try:
       f = open(chunk_file, "w")
@@ -530,54 +432,41 @@ class ChromeTests:
     # Since we're running small chunks of the layout tests, it's important to
     # mark the ones that have errors in them.  These won't be visible in the
     # summary list for long, but will be useful for someone reviewing this bot.
-    return self.TestLayoutChunk(chunk_num, chunk_size)
+    return ret
 
   # The known list of tests.
   # Recognise the original abbreviations as well as full executable names.
   _test_list = {
     "cmdline" : RunCmdLine,
-    "app_list": TestAppList,     "app_list_unittests": TestAppList,
-    "ash": TestAsh,              "ash_unittests": TestAsh,
-    "aura": TestAura,            "aura_unittests": TestAura,
     "automated_ui" : TestAutomatedUI,
     "base": TestBase,            "base_unittests": TestBase,
     "browser": TestBrowser,      "browser_tests": TestBrowser,
-    "cast": TestCast,            "cast_unittests": TestCast,
-    "chromeos": TestChromeOS,    "chromeos_unittests": TestChromeOS,
-    "components": TestComponents,"components_unittests": TestComponents,
-    "compositor": TestCompositor,"compositor_unittests": TestCompositor,
-    "content": TestContent,      "content_unittests": TestContent,
-    "content_browsertests": TestContentBrowser,
-    "courgette": TestCourgette,  "courgette_unittests": TestCourgette,
     "crypto": TestCrypto,        "crypto_unittests": TestCrypto,
-    "device": TestDevice,        "device_unittests": TestDevice,
-    "events": TestEvents,        "events_unittests": TestEvents,
-    "ffmpeg": TestFFmpeg,        "ffmpeg_unittests": TestFFmpeg,
-    "ffmpeg_regression_tests": TestFFmpegRegressions,
-    "gpu": TestGPU,              "gpu_unittests": TestGPU,
+    "googleurl": TestGURL,       "googleurl_unittests": TestGURL,
+    "content": TestContent,      "content_unittests": TestContent,
+    "courgette": TestCourgette,  "courgette_unittests": TestCourgette,
     "ipc": TestIpc,              "ipc_tests": TestIpc,
     "interactive_ui": TestInteractiveUI,
-    "jingle": TestJingle,        "jingle_unittests": TestJingle,
     "layout": TestLayout,        "layout_tests": TestLayout,
     "webkit": TestLayout,
     "media": TestMedia,          "media_unittests": TestMedia,
-    "message_center": TestMessageCenter,
-    "message_center_unittests" : TestMessageCenter,
     "net": TestNet,              "net_unittests": TestNet,
-    "net_perf": TestNetPerf,     "net_perftests": TestNetPerf,
+    "jingle": TestJingle,        "jingle_unittests": TestJingle,
     "ppapi": TestPPAPI,          "ppapi_unittests": TestPPAPI,
     "printing": TestPrinting,    "printing_unittests": TestPrinting,
     "reliability": TestReliability, "reliability_tests": TestReliability,
     "remoting": TestRemoting,    "remoting_unittests": TestRemoting,
     "safe_browsing": TestSafeBrowsing, "safe_browsing_tests": TestSafeBrowsing,
-    "sandbox": TestLinuxSandbox, "sandbox_linux_unittests": TestLinuxSandbox,
-    "sql": TestSql,              "sql_unittests": TestSql,
     "sync": TestSync,            "sync_unit_tests": TestSync,
     "sync_integration_tests": TestSyncIntegration,
     "sync_integration": TestSyncIntegration,
-    "ui_unit": TestUIUnit,       "ui_unittests": TestUIUnit,
+    "test_shell": TestTestShell, "test_shell_tests": TestTestShell,
+    "ui": TestUI,                "ui_tests": TestUI,
     "unit": TestUnit,            "unit_tests": TestUnit,
-    "url": TestURL,              "url_unittests": TestURL,
+    "sql": TestSql,              "sql_unittests": TestSql,
+    "ui_unit": TestUIUnit,       "ui_unittests": TestUIUnit,
+    "gfx": TestGfx,              "gfx_unittests": TestGfx,
+    "gpu": TestGPU,              "gpu_unittests": TestGPU,
     "views": TestViews,          "views_unittests": TestViews,
   }
 
@@ -585,61 +474,38 @@ class ChromeTests:
 def _main():
   parser = optparse.OptionParser("usage: %prog -b <dir> -t <test> "
                                  "[-t <test> ...]")
-
-  parser.add_option("--help-tests", dest="help_tests", action="store_true",
-                    default=False, help="List all available tests")
-  parser.add_option("-b", "--build-dir",
+  parser.disable_interspersed_args()
+  parser.add_option("-b", "--build_dir",
                     help="the location of the compiler output")
-  parser.add_option("--target", help="Debug or Release")
   parser.add_option("-t", "--test", action="append", default=[],
                     help="which test to run, supports test:gtest_filter format "
                          "as well.")
-  parser.add_option("--baseline", action="store_true", default=False,
+  parser.add_option("", "--baseline", action="store_true", default=False,
                     help="generate baseline data instead of validating")
-  parser.add_option("--gtest_filter",
+  parser.add_option("", "--gtest_filter",
                     help="additional arguments to --gtest_filter")
-  parser.add_option("--gtest_repeat", help="argument for --gtest_repeat")
-  parser.add_option("--gtest_shuffle", action="store_true", default=False,
-                    help="Randomize tests' orders on every iteration.")
+  parser.add_option("", "--gtest_repeat",
+                    help="argument for --gtest_repeat")
   parser.add_option("-v", "--verbose", action="store_true", default=False,
                     help="verbose output - enable debug log messages")
-  parser.add_option("--tool", dest="valgrind_tool", default="memcheck",
+  parser.add_option("", "--tool", dest="valgrind_tool", default="memcheck",
                     help="specify a valgrind tool to run the tests under")
-  parser.add_option("--tool_flags", dest="valgrind_tool_flags", default="",
+  parser.add_option("", "--tool_flags", dest="valgrind_tool_flags", default="",
                     help="specify custom flags for the selected valgrind tool")
-  parser.add_option("--keep_logs", action="store_true", default=False,
+  parser.add_option("", "--keep_logs", action="store_true", default=False,
                     help="store memory tool logs in the <tool>.logs directory "
                          "instead of /tmp.\nThis can be useful for tool "
                          "developers/maintainers.\nPlease note that the <tool>"
                          ".logs directory will be clobbered on tool startup.")
-  parser.add_option("-n", "--num_tests", type="int",
-                    default=ChromeTests.LAYOUT_TESTS_DEFAULT_CHUNK_SIZE,
+  parser.add_option("-n", "--num_tests", default=1500, type="int",
                     help="for layout tests: # of subtests per run.  0 for all.")
-  # TODO(thestig) Remove this if we can.
-  parser.add_option("--gtest_color", dest="gtest_color", default="no",
-                    help="dummy compatibility flag for sharding_supervisor.")
-  parser.add_option("--brave-new-test-launcher", action="store_true",
-                    help="run the tests with --brave-new-test-launcher")
-  parser.add_option("--test-launcher-bot-mode", action="store_true",
-                    help="run the tests with --test-launcher-bot-mode")
 
   options, args = parser.parse_args()
-
-  # Bake target into build_dir.
-  if options.target and options.build_dir:
-    assert (options.target !=
-            os.path.basename(os.path.dirname(options.build_dir)))
-    options.build_dir = os.path.join(os.path.abspath(options.build_dir),
-                                     options.target)
 
   if options.verbose:
     logging_utils.config_root(logging.DEBUG)
   else:
     logging_utils.config_root()
-
-  if options.help_tests:
-    ChromeTests.ShowTests()
-    return 0
 
   if not options.test:
     parser.error("--test not specified")

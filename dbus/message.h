@@ -1,43 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef DBUS_MESSAGE_H_
 #define DBUS_MESSAGE_H_
+#pragma once
 
 #include <string>
 #include <vector>
 #include <dbus/dbus.h>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
-#include "dbus/dbus_export.h"
-#include "dbus/file_descriptor.h"
-#include "dbus/object_path.h"
-
-namespace google {
-namespace protobuf {
-
-class MessageLite;
-
-}  // namespace protobuf
-}  // namespace google
-
 
 namespace dbus {
 
 class MessageWriter;
 class MessageReader;
-
-// DBUS_TYPE_UNIX_FD was added in D-Bus version 1.4
-#if !defined(DBUS_TYPE_UNIX_FD)
-#define DBUS_TYPE_UNIX_FD      ((int) 'h')
-#endif
-
-// Returns true if Unix FD passing is supported in libdbus.
-// The check is done runtime rather than compile time as the libdbus
-// version used at runtime may be different from the one used at compile time.
-CHROME_DBUS_EXPORT bool IsDBusTypeUnixFdSupported();
 
 // Message is the base class of D-Bus message types. Client code must use
 // sub classes such as MethodCall and Response instead.
@@ -46,7 +24,7 @@ CHROME_DBUS_EXPORT bool IsDBusTypeUnixFdSupported();
 // as the class is inside 'dbus' namespace. We chose to name this way, as
 // libdbus defines lots of types starting with DBus, such as
 // DBusMessage. We should avoid confusion and conflict with these types.
-class CHROME_DBUS_EXPORT Message {
+class Message {
  public:
   // The message type used in D-Bus.  Redefined here so client code
   // doesn't need to use raw D-Bus macros. DBUS_MESSAGE_TYPE_INVALID
@@ -79,7 +57,6 @@ class CHROME_DBUS_EXPORT Message {
     STRUCT = DBUS_TYPE_STRUCT,
     DICT_ENTRY = DBUS_TYPE_DICT_ENTRY,
     VARIANT = DBUS_TYPE_VARIANT,
-    UNIX_FD = DBUS_TYPE_UNIX_FD,
   };
 
   // Returns the type of the message. Returns MESSAGE_INVALID if
@@ -93,12 +70,12 @@ class CHROME_DBUS_EXPORT Message {
   DBusMessage* raw_message() { return raw_message_; }
 
   // Sets the destination, the path, the interface, the member, etc.
-  bool SetDestination(const std::string& destination);
-  bool SetPath(const ObjectPath& path);
-  bool SetInterface(const std::string& interface);
-  bool SetMember(const std::string& member);
-  bool SetErrorName(const std::string& error_name);
-  bool SetSender(const std::string& sender);
+  void SetDestination(const std::string& destination);
+  void SetPath(const std::string& path);
+  void SetInterface(const std::string& interface);
+  void SetMember(const std::string& member);
+  void SetErrorName(const std::string& error_name);
+  void SetSender(const std::string& sender);
   void SetSerial(uint32 serial);
   void SetReplySerial(uint32 reply_serial);
   // SetSignature() does not exist as we cannot do it.
@@ -106,7 +83,7 @@ class CHROME_DBUS_EXPORT Message {
   // Gets the destination, the path, the interface, the member, etc.
   // If not set, an empty string is returned.
   std::string GetDestination();
-  ObjectPath GetPath();
+  std::string GetPath();
   std::string GetInterface();
   std::string GetMember();
   std::string GetErrorName();
@@ -117,8 +94,7 @@ class CHROME_DBUS_EXPORT Message {
   uint32 GetReplySerial();
 
   // Returns the string representation of this message. Useful for
-  // debugging. The output is truncated as needed (ex. strings are truncated
-  // if longer than a certain limit defined in the .cc file).
+  // debugging.
   std::string ToString();
 
  protected:
@@ -139,7 +115,7 @@ class CHROME_DBUS_EXPORT Message {
 };
 
 // MessageCall is a type of message used for calling a method via D-Bus.
-class CHROME_DBUS_EXPORT MethodCall : public Message {
+class MethodCall : public Message {
  public:
   // Creates a method call message for the specified interface name and
   // the method name.
@@ -168,7 +144,7 @@ class CHROME_DBUS_EXPORT MethodCall : public Message {
 };
 
 // Signal is a type of message used to send a signal.
-class CHROME_DBUS_EXPORT Signal : public Message {
+class Signal : public Message {
  public:
   // Creates a signal message for the specified interface name and the
   // method name.
@@ -198,45 +174,45 @@ class CHROME_DBUS_EXPORT Signal : public Message {
 
 // Response is a type of message used for receiving a response from a
 // method via D-Bus.
-class CHROME_DBUS_EXPORT Response : public Message {
+class Response : public Message {
  public:
   // Returns a newly created Response from the given raw message of the
-  // type DBUS_MESSAGE_TYPE_METHOD_RETURN. Takes the ownership of |raw_message|.
-  static scoped_ptr<Response> FromRawMessage(DBusMessage* raw_message);
+  // type DBUS_MESSAGE_TYPE_METHOD_RETURN. The caller must delete the
+  // returned object. Takes the ownership of |raw_message|.
+  static Response* FromRawMessage(DBusMessage* raw_message);
 
-  // Returns a newly created Response from the given method call.
-  // Used for implementing exported methods. Does NOT take the ownership of
-  // |method_call|.
-  static scoped_ptr<Response> FromMethodCall(MethodCall* method_call);
+  // Returns a newly created Response from the given method call. The
+  // caller must delete the returned object. Used for implementing
+  // exported methods.
+  static Response* FromMethodCall(MethodCall* method_call);
 
-  // Returns a newly created Response with an empty payload.
-  // Useful for testing.
-  static scoped_ptr<Response> CreateEmpty();
+  // Returns a newly created Response with an empty payload. The caller
+  // must delete the returned object. Useful for testing.
+  static Response* CreateEmpty();
 
- protected:
+ private:
   // Creates a Response message. The internal raw message is NULL.
   Response();
 
- private:
   DISALLOW_COPY_AND_ASSIGN(Response);
 };
 
 // ErrorResponse is a type of message used to return an error to the
 // caller of a method.
-class CHROME_DBUS_EXPORT ErrorResponse: public Response {
+class ErrorResponse: public Message {
  public:
   // Returns a newly created Response from the given raw message of the
-  // type DBUS_MESSAGE_TYPE_METHOD_RETURN. Takes the ownership of |raw_message|.
-  static scoped_ptr<ErrorResponse> FromRawMessage(DBusMessage* raw_message);
+  // type DBUS_MESSAGE_TYPE_METHOD_RETURN. The caller must delete the
+  // returned object. Takes the ownership of |raw_message|.
+  static ErrorResponse* FromRawMessage(DBusMessage* raw_message);
 
   // Returns a newly created ErrorResponse from the given method call, the
   // error name, and the error message.  The error name looks like
   // "org.freedesktop.DBus.Error.Failed". Used for returning an error to a
-  // failed method call. Does NOT take the ownership of |method_call|.
-  static scoped_ptr<ErrorResponse> FromMethodCall(
-      MethodCall* method_call,
-      const std::string& error_name,
-      const std::string& error_message);
+  // failed method call.
+  static ErrorResponse* FromMethodCall(MethodCall* method_call,
+                                       const std::string& error_name,
+                                       const std::string& error_message);
 
  private:
   // Creates an ErrorResponse message. The internal raw message is NULL.
@@ -262,11 +238,10 @@ class CHROME_DBUS_EXPORT ErrorResponse: public Response {
 //
 //   writer.AppendString(str);
 //
-class CHROME_DBUS_EXPORT MessageWriter {
+class MessageWriter {
  public:
-  // Data added with Append* will be written to |message|, which may be NULL
-  // to create a sub-writer for passing to OpenArray, etc.
-  explicit MessageWriter(Message* message);
+  // Data added with Append* will be written to |message|.
+  MessageWriter(Message* message);
   ~MessageWriter();
 
   // Appends a byte to the message.
@@ -280,8 +255,7 @@ class CHROME_DBUS_EXPORT MessageWriter {
   void AppendUint64(uint64 value);
   void AppendDouble(double value);
   void AppendString(const std::string& value);
-  void AppendObjectPath(const ObjectPath& value);
-  void AppendFileDescriptor(const FileDescriptor& value);
+  void AppendObjectPath(const std::string& value);
 
   // Opens an array. The array contents can be added to the array with
   // |sub_writer|. The client code must close the array with
@@ -318,15 +292,7 @@ class CHROME_DBUS_EXPORT MessageWriter {
   // Appends the array of object paths. Arrays of object paths are often
   // used when exchanging object paths, hence it's worth having a
   // specialized function.
-  void AppendArrayOfObjectPaths(const std::vector<ObjectPath>& object_paths);
-
-  // Appends the protocol buffer as an array of bytes. The buffer is serialized
-  // into an array of bytes before communication, since protocol buffers are not
-  // a native dbus type. On the receiving size the array of bytes needs to be
-  // read and deserialized into a protocol buffer of the correct type. There are
-  // methods in MessageReader to assist in this.  Return true on succes and fail
-  // when serialization is not successful.
-  bool AppendProtoAsArrayOfBytes(const google::protobuf::MessageLite& protobuf);
+  void AppendArrayOfObjectPaths(const std::vector<std::string>& object_paths);
 
   // Appends the byte wrapped in a variant data container. Variants are
   // widely used in D-Bus services so it's worth having a specialized
@@ -342,7 +308,7 @@ class CHROME_DBUS_EXPORT MessageWriter {
   void AppendVariantOfUint64(uint64 value);
   void AppendVariantOfDouble(double value);
   void AppendVariantOfString(const std::string& value);
-  void AppendVariantOfObjectPath(const ObjectPath& value);
+  void AppendVariantOfObjectPath(const std::string& value);
 
  private:
   // Helper function used to implement AppendByte etc.
@@ -363,11 +329,10 @@ class CHROME_DBUS_EXPORT MessageWriter {
 //
 // MessageReader manages an internal iterator to read data. All functions
 // starting with Pop advance the iterator on success.
-class CHROME_DBUS_EXPORT MessageReader {
+class MessageReader {
  public:
-  // The data will be read from the given |message|, which may be NULL to
-  // create a sub-reader for passing to PopArray, etc.
-  explicit MessageReader(Message* message);
+  // The data will be read from the given message.
+  MessageReader(Message* message);
   ~MessageReader();
 
   // Returns true if the reader has more data to read. The function is
@@ -390,8 +355,7 @@ class CHROME_DBUS_EXPORT MessageReader {
   bool PopUint64(uint64* value);
   bool PopDouble(double* value);
   bool PopString(std::string* value);
-  bool PopObjectPath(ObjectPath* value);
-  bool PopFileDescriptor(FileDescriptor* value);
+  bool PopObjectPath(std::string* value);
 
   // Sets up the given message reader to read an array at the current
   // iterator position.
@@ -426,15 +390,7 @@ class CHROME_DBUS_EXPORT MessageReader {
   // Arrays of object paths are often used to communicate with D-Bus
   // services like NetworkManager, hence it's worth having a specialized
   // function.
-  bool PopArrayOfObjectPaths(std::vector<ObjectPath>* object_paths);
-
-  // Gets the array of bytes at the current iterator position. It then parses
-  // this binary blob into the protocol buffer supplied.
-  // Returns true and advances the iterator on success. On failure returns false
-  // and emits an error message on the source of the failure. The two most
-  // common errors come from the iterator not currently being at a byte array or
-  // the wrong type of protocol buffer is passed in and the parse fails.
-  bool PopArrayOfBytesAsProto(google::protobuf::MessageLite* protobuf);
+  bool PopArrayOfObjectPaths(std::vector<std::string>* object_paths);
 
   // Gets the byte from the variant data container at the current iterator
   // position.
@@ -453,7 +409,7 @@ class CHROME_DBUS_EXPORT MessageReader {
   bool PopVariantOfUint64(uint64* value);
   bool PopVariantOfDouble(double* value);
   bool PopVariantOfString(std::string* value);
-  bool PopVariantOfObjectPath(ObjectPath* value);
+  bool PopVariantOfObjectPath(std::string* value);
 
   // Get the data type of the value at the current iterator
   // position. INVALID_DATA will be returned if the iterator points to the

@@ -4,16 +4,9 @@
 
 #ifndef CHROME_BROWSER_COMPONENT_UPDATER_COMPONENT_UPDATER_CONFIGURATOR_H_
 #define CHROME_BROWSER_COMPONENT_UPDATER_COMPONENT_UPDATER_CONFIGURATOR_H_
+#pragma once
 
 #include "chrome/browser/component_updater/component_updater_service.h"
-
-class CommandLine;
-
-namespace net {
-
-class URLRequestContextGetter;
-
-} // namespace
 
 ComponentUpdateService::Configurator* MakeChromeComponentUpdaterConfigurator(
     const CommandLine* cmdline, net::URLRequestContextGetter* context_getter);

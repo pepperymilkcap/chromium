@@ -1,32 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/time/time.h"
+#include "base/time.h"
 
+class BaseDownloadItemModel;
 @class ChromeUILocalizer;
 @class DownloadItemCell;
 @class DownloadItemButton;
 class DownloadItemMac;
-class DownloadItemModel;
 class DownloadShelfContextMenuMac;
 @class DownloadShelfController;
 @class GTMWidthBasedTweaker;
 
 namespace content {
 class DownloadItem;
-class PageNavigator;
-}
-
-namespace gfx {
-class FontList;
-}
-
-namespace ui {
-class MenuModel;
 }
 
 // A controller class that manages one download item.
@@ -36,15 +27,17 @@ class MenuModel;
   IBOutlet DownloadItemButton* progressView_;
   IBOutlet DownloadItemCell* cell_;
 
+  IBOutlet NSMenu* activeDownloadMenu_;
+  IBOutlet NSMenu* completeDownloadMenu_;
+
   // This is shown instead of progressView_ for dangerous downloads.
   IBOutlet NSView* dangerousDownloadView_;
   IBOutlet NSTextField* dangerousDownloadLabel_;
   IBOutlet NSButton* dangerousDownloadConfirmButton_;
 
-  // Needed to find out how much the tweakers changed sizes to update the other
-  // views.
-  IBOutlet GTMWidthBasedTweaker* dangerousButtonTweaker_;
-  IBOutlet GTMWidthBasedTweaker* maliciousButtonTweaker_;
+  // Needed to find out how much the tweaker changed sizes to update the
+  // other views.
+  IBOutlet GTMWidthBasedTweaker* buttonTweaker_;
 
   // Because the confirm text and button for dangerous downloads are determined
   // at runtime, an outlet to the localizer is needed to construct the layout
@@ -63,9 +56,6 @@ class MenuModel;
   // The time at which this view was created.
   base::Time creationTime_;
 
-  // Default font list to use for text metrics.
-  scoped_ptr<gfx::FontList> font_list_;
-
   // The state of this item.
   enum DownoadItemState {
     kNormal,
@@ -73,13 +63,12 @@ class MenuModel;
   } state_;
 };
 
-// Initialize controller for |downloadItem|.
-- (id)initWithDownload:(content::DownloadItem*)downloadItem
-                 shelf:(DownloadShelfController*)shelf
-             navigator:(content::PageNavigator*)navigator;
+// Takes ownership of |downloadModel|.
+- (id)initWithModel:(BaseDownloadItemModel*)downloadModel
+              shelf:(DownloadShelfController*)shelf;
 
 // Updates the UI and menu state from |downloadModel|.
-- (void)setStateFromDownload:(DownloadItemModel*)downloadModel;
+- (void)setStateFromDownload:(BaseDownloadItemModel*)downloadModel;
 
 // Remove ourself from the download UI.
 - (void)remove;
@@ -103,11 +92,6 @@ class MenuModel;
 // Returns the DownloadItem model object belonging to this item.
 - (content::DownloadItem*)download;
 
-// Returns the MenuModel for the download item context menu. The returned
-// MenuModel is owned by the DownloadItemController and will be valid until the
-// DownloadItemController is destroyed.
-- (ui::MenuModel*)contextMenuModel;
-
 // Updates the tooltip with the download's path.
 - (void)updateToolTip;
 
@@ -116,6 +100,12 @@ class MenuModel;
 - (BOOL)isDangerousMode;
 - (IBAction)saveDownload:(id)sender;
 - (IBAction)discardDownload:(id)sender;
-- (IBAction)dismissMaliciousDownload:(id)sender;
-- (IBAction)showContextMenu:(id)sender;
+
+// Context menu handlers.
+- (IBAction)handleOpen:(id)sender;
+- (IBAction)handleAlwaysOpen:(id)sender;
+- (IBAction)handleReveal:(id)sender;
+- (IBAction)handleCancel:(id)sender;
+- (IBAction)handleTogglePause:(id)sender;
+
 @end

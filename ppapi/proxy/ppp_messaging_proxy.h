@@ -5,7 +5,6 @@
 #ifndef PPAPI_PROXY_PPP_MESSAGING_PROXY_H_
 #define PPAPI_PROXY_PPP_MESSAGING_PROXY_H_
 
-#include "base/compiler_specific.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/ppp_messaging.h"
 #include "ppapi/proxy/interface_proxy.h"
@@ -20,7 +19,7 @@ class PPP_Messaging_Proxy : public InterfaceProxy {
   PPP_Messaging_Proxy(Dispatcher* dispatcher);
   virtual ~PPP_Messaging_Proxy();
 
-  static const PPP_Messaging* GetProxyInterface();
+  static const Info* GetInfo();
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;

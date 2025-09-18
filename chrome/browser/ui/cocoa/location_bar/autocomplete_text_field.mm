@@ -11,7 +11,6 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
-#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 @implementation AutocompleteTextField
 
@@ -79,8 +78,11 @@
 // a decoration area and get the expected selection behaviour,
 // likewise for multiple clicks in those areas.
 - (void)mouseDown:(NSEvent*)theEvent {
+  // Close the popup before processing the event.  This prevents the
+  // popup from being visible while a right-click context menu or
+  // page-action menu is visible.  Also, it matches other platforms.
   if (observer_)
-    observer_->OnMouseDown([theEvent buttonNumber]);
+    observer_->ClosePopup();
 
   // If the click was a Control-click, bring up the context menu.
   // |NSTextField| handles these cases inconsistently if the field is
@@ -128,8 +130,7 @@
     if (editor) {
       NSEvent* currentEvent = [NSApp currentEvent];
       if ([currentEvent type] == NSLeftMouseUp &&
-          ![editor selectedRange].length &&
-          (!observer_ || observer_->ShouldSelectAllOnMouseDown())) {
+          ![editor selectedRange].length) {
         [editor selectAll:nil];
       }
     }
@@ -166,35 +167,13 @@
   [editor mouseDown:theEvent];
 }
 
-- (void)rightMouseDown:(NSEvent*)event {
-  if (observer_)
-    observer_->OnMouseDown([event buttonNumber]);
-  [super rightMouseDown:event];
-}
-
-- (void)otherMouseDown:(NSEvent *)event {
-  if (observer_)
-    observer_->OnMouseDown([event buttonNumber]);
-  [super otherMouseDown:event];
-}
-
-// Received from tracking areas. Pass it down to the cell, and add the field.
-- (void)mouseEntered:(NSEvent*)theEvent {
-  [[self cell] mouseEntered:theEvent inView:self];
-}
-
-// Received from tracking areas. Pass it down to the cell, and add the field.
-- (void)mouseExited:(NSEvent*)theEvent {
-  [[self cell] mouseExited:theEvent inView:self];
-}
-
 // Overridden so that cursor and tooltip rects can be updated.
 - (void)setFrame:(NSRect)frameRect {
   [super setFrame:frameRect];
   if (observer_) {
     observer_->OnFrameChanged();
   }
-  [self updateMouseTracking];
+  [self updateCursorAndToolTipRects];
 }
 
 - (void)setAttributedStringValue:(NSAttributedString*)aString {
@@ -235,27 +214,12 @@
   [self addToolTipRect:aRect owner:tooltip userData:nil];
 }
 
-- (void)setGrayTextAutocompletion:(NSString*)suggestText
-                        textColor:(NSColor*)suggestColor {
-  [self setNeedsDisplay:YES];
-  suggestText_.reset([suggestText retain]);
-  suggestColor_.reset([suggestColor retain]);
-}
-
-- (NSString*)suggestText {
-  return suggestText_;
-}
-
-- (NSColor*)suggestColor {
-  return suggestColor_;
-}
-
 // TODO(shess): -resetFieldEditorFrameIfNeeded is the place where
 // changes to the cell layout should be flushed.  LocationBarViewMac
 // and ToolbarController are calling this routine directly, and I
 // think they are probably wrong.
 // http://crbug.com/40053
-- (void)updateMouseTracking {
+- (void)updateCursorAndToolTipRects {
   // This will force |resetCursorRects| to be called, as it is not to be called
   // directly.
   [[self window] invalidateCursorRectsForView:self];
@@ -268,9 +232,6 @@
   // Reload the decoration tooltips.
   [currentToolTips_ removeAllObjects];
   [[self cell] updateToolTipsInRect:[self bounds] ofView:self];
-
-  // Setup/update the tracking areas for the decorations.
-  [[self cell] setUpTrackingAreasInRect:[self bounds] ofView:self];
 }
 
 // NOTE(shess): http://crbug.com/19116 describes a weird bug which
@@ -387,16 +348,6 @@
   return doResign;
 }
 
-- (void)drawRect:(NSRect)rect {
-  [super drawRect:rect];
-  autocomplete_text_field::DrawGrayTextAutocompletion(
-      [self attributedStringValue],
-      suggestText_,
-      suggestColor_,
-      self,
-      [[self cell] drawingRectForBounds:[self bounds]]);
-}
-
 // (URLDropTarget protocol)
 - (id<URLDropTargetController>)urlDropController {
   BrowserWindowController* windowController =
@@ -435,46 +386,7 @@
 }
 
 - (ViewID)viewID {
-  return VIEW_ID_OMNIBOX;
+  return VIEW_ID_LOCATION_BAR;
 }
 
 @end
-
-namespace autocomplete_text_field {
-
-void DrawGrayTextAutocompletion(NSAttributedString* mainText,
-                                NSString* suggestText,
-                                NSColor* suggestColor,
-                                NSView* controlView,
-                                NSRect frame) {
-  if (![suggestText length])
-    return;
-
-  base::scoped_nsobject<NSTextFieldCell> cell(
-      [[NSTextFieldCell alloc] initTextCell:@""]);
-  [cell setBordered:NO];
-  [cell setDrawsBackground:NO];
-  [cell setEditable:NO];
-
-  base::scoped_nsobject<NSMutableAttributedString> combinedText(
-      [[NSMutableAttributedString alloc] initWithAttributedString:mainText]);
-  NSRange range = NSMakeRange([combinedText length], 0);
-  [combinedText replaceCharactersInRange:range withString:suggestText];
-  [combinedText addAttribute:NSForegroundColorAttributeName
-                       value:suggestColor
-                       range:NSMakeRange(range.location, [suggestText length])];
-  [cell setAttributedStringValue:combinedText];
-
-  CGFloat mainTextWidth = [mainText size].width;
-  CGFloat suggestWidth = NSWidth(frame) - mainTextWidth;
-  NSRect suggestRect = NSMakeRect(NSMinX(frame) + mainTextWidth,
-                                  NSMinY(frame),
-                                  suggestWidth,
-                                  NSHeight(frame));
-
-  gfx::ScopedNSGraphicsContextSaveGState saveGState;
-  NSRectClip(suggestRect);
-  [cell drawInteriorWithFrame:frame inView:controlView];
-}
-
-}  // namespace autocomplete_text_field

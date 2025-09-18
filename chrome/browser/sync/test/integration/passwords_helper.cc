@@ -4,22 +4,19 @@
 
 #include "chrome/browser/sync/test/integration/passwords_helper.h"
 
-#include "base/compiler_specific.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_form_data.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
-#include "chrome/browser/password_manager/password_store_factory.h"
-#include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/browser_thread.h"
 
-using autofill::PasswordForm;
+using webkit::forms::PasswordForm;
 using sync_datatype_helper::test;
 
 const std::string kFakeSignonRealm = "http://fake-signon-realm.google.com/";
@@ -43,23 +40,17 @@ class PasswordStoreConsumerHelper : public PasswordStoreConsumer {
 
   virtual void OnPasswordStoreRequestDone(
       CancelableRequestProvider::Handle handle,
-      const std::vector<PasswordForm*>& result) OVERRIDE {
-    // TODO(kaiwang): Remove this function.
-    NOTREACHED();
-  }
-
-  virtual void OnGetPasswordStoreResults(
-      const std::vector<PasswordForm*>& result) OVERRIDE {
+      const std::vector<PasswordForm*>& result) {
     result_->clear();
     for (std::vector<PasswordForm*>::const_iterator it = result.begin();
-         it != result.end();
-         ++it) {
+         it != result.end(); ++it) {
+      // Make a copy of the form since it gets deallocated after the caller of
+      // this method returns.
       result_->push_back(**it);
-      delete *it;
     }
 
     // Quit the message loop to wake up passwords_helper::GetLogins.
-    base::MessageLoopForUI::current()->Quit();
+    MessageLoopForUI::current()->Quit();
   }
 
  private:
@@ -93,8 +84,8 @@ void GetLogins(PasswordStore* store, std::vector<PasswordForm>& matches) {
   PasswordForm matcher_form;
   matcher_form.signon_realm = kFakeSignonRealm;
   PasswordStoreConsumerHelper consumer(&matches);
-  store->GetLogins(matcher_form, PasswordStore::DISALLOW_PROMPT, &consumer);
-  content::RunMessageLoop();
+  store->GetLogins(matcher_form, &consumer);
+  ui_test_utils::RunMessageLoop();
 }
 
 void RemoveLogin(PasswordStore* store, const PasswordForm& form) {
@@ -114,26 +105,19 @@ void RemoveLogins(PasswordStore* store) {
   }
 }
 
-void SetEncryptionPassphrase(int index,
-                             const std::string& passphrase,
-                             ProfileSyncService::PassphraseType type) {
-  ProfileSyncServiceFactory::GetForProfile(
-      test()->GetProfile(index))->SetEncryptionPassphrase(passphrase, type);
-}
-
-bool SetDecryptionPassphrase(int index, const std::string& passphrase) {
-  return ProfileSyncServiceFactory::GetForProfile(
-      test()->GetProfile(index))->SetDecryptionPassphrase(passphrase);
+void SetPassphrase(int index, const std::string& passphrase) {
+  test()->GetProfile(index)->GetProfileSyncService()->SetPassphrase(
+      passphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
 }
 
 PasswordStore* GetPasswordStore(int index) {
-  return PasswordStoreFactory::GetForProfile(test()->GetProfile(index),
-                                             Profile::IMPLICIT_ACCESS).get();
+  return test()->GetProfile(index)->GetPasswordStore(Profile::IMPLICIT_ACCESS);
 }
 
 PasswordStore* GetVerifierPasswordStore() {
-  return PasswordStoreFactory::GetForProfile(test()->verifier(),
-                                             Profile::IMPLICIT_ACCESS).get();
+  return test()->verifier()->GetPasswordStore(Profile::IMPLICIT_ACCESS);
 }
 
 bool ProfileContainsSamePasswordFormsAsVerifier(int index) {
@@ -216,10 +200,8 @@ PasswordForm CreateTestPasswordForm(int index) {
   PasswordForm form;
   form.signon_realm = kFakeSignonRealm;
   form.origin = GURL(base::StringPrintf(kIndexedFakeOrigin, index));
-  form.username_value =
-      base::ASCIIToUTF16(base::StringPrintf("username%d", index));
-  form.password_value =
-      base::ASCIIToUTF16(base::StringPrintf("password%d", index));
+  form.username_value = ASCIIToUTF16(base::StringPrintf("username%d", index));
+  form.password_value = ASCIIToUTF16(base::StringPrintf("password%d", index));
   form.date_created = base::Time::Now();
   return form;
 }

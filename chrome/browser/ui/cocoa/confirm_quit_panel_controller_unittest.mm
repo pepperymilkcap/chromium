@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
-
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
-#include "chrome/browser/ui/cocoa/confirm_quit.h"
+#include "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
 #include "testing/gtest_mac.h"
-#include "ui/base/accelerators/platform_accelerator_cocoa.h"
+#include "ui/base/accelerators/accelerator_cocoa.h"
 
 namespace {
 
@@ -43,37 +42,36 @@ TEST_F(ConfirmQuitPanelControllerTest, ShowAndDismiss) {
 TEST_F(ConfirmQuitPanelControllerTest, KeyCombinationForAccelerator) {
   Class controller = [ConfirmQuitPanelController class];
 
-  ui::PlatformAcceleratorCocoa item(@"q", NSCommandKeyMask);
+  ui::AcceleratorCocoa item = ui::AcceleratorCocoa(@"q", NSCommandKeyMask);
   EXPECT_NSEQ(TestString(@"{Cmd}Q"),
               [controller keyCombinationForAccelerator:item]);
 
-  ui::PlatformAcceleratorCocoa item2(@"c", NSCommandKeyMask | NSShiftKeyMask);
+  item = ui::AcceleratorCocoa(@"c", NSCommandKeyMask | NSShiftKeyMask);
   EXPECT_NSEQ(TestString(@"{Cmd}{Shift}C"),
-              [controller keyCombinationForAccelerator:item2]);
+              [controller keyCombinationForAccelerator:item]);
 
-  ui::PlatformAcceleratorCocoa item3(@"h",
+  item = ui::AcceleratorCocoa(@"h",
       NSCommandKeyMask | NSShiftKeyMask | NSAlternateKeyMask);
   EXPECT_NSEQ(TestString(@"{Cmd}{Opt}{Shift}H"),
-              [controller keyCombinationForAccelerator:item3]);
+              [controller keyCombinationForAccelerator:item]);
 
-  ui::PlatformAcceleratorCocoa item4(@"r",
+  item = ui::AcceleratorCocoa(@"r",
       NSCommandKeyMask | NSShiftKeyMask | NSAlternateKeyMask |
       NSControlKeyMask);
   EXPECT_NSEQ(TestString(@"{Cmd}{Ctrl}{Opt}{Shift}R"),
-              [controller keyCombinationForAccelerator:item4]);
+              [controller keyCombinationForAccelerator:item]);
 
-  ui::PlatformAcceleratorCocoa item5(@"o", NSControlKeyMask);
+  item = ui::AcceleratorCocoa(@"o", NSControlKeyMask);
   EXPECT_NSEQ(TestString(@"{Ctrl}O"),
-              [controller keyCombinationForAccelerator:item5]);
+              [controller keyCombinationForAccelerator:item]);
 
-  ui::PlatformAcceleratorCocoa item6(@"m", NSShiftKeyMask | NSControlKeyMask);
+  item = ui::AcceleratorCocoa(@"m", NSShiftKeyMask | NSControlKeyMask);
   EXPECT_NSEQ(TestString(@"{Ctrl}{Shift}M"),
-              [controller keyCombinationForAccelerator:item6]);
+              [controller keyCombinationForAccelerator:item]);
 
-  ui::PlatformAcceleratorCocoa item7(
-      @"e", NSCommandKeyMask | NSAlternateKeyMask);
+  item = ui::AcceleratorCocoa(@"e", NSCommandKeyMask | NSAlternateKeyMask);
   EXPECT_NSEQ(TestString(@"{Cmd}{Opt}E"),
-              [controller keyCombinationForAccelerator:item7]);
+              [controller keyCombinationForAccelerator:item]);
 }
 
 }  // namespace

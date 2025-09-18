@@ -14,7 +14,7 @@
 
 // Disable the whole test case when executing on a computer that has no printer
 // installed.
-// Note: Parent should be testing::Test or InProcessBrowserTest.
+// Note: Parent should be testing::Test or UITest.
 template<typename Parent>
 class PrintingTest : public Parent {
  public:

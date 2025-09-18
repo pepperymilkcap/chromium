@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/win/registry.h"
 #include "base/version.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/util/delete_reg_key_work_item.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/helper.h"
@@ -56,16 +55,15 @@ class MockWorkItemList : public WorkItemList {
                                               const std::wstring&,
                                               CopyOverWriteOption,
                                               const std::wstring&));
-  MOCK_METHOD1(AddCreateDirWorkItem, WorkItem* (const base::FilePath&));
+  MOCK_METHOD1(AddCreateDirWorkItem, WorkItem* (const FilePath&));
   MOCK_METHOD2(AddCreateRegKeyWorkItem, WorkItem* (HKEY, const std::wstring&));
   MOCK_METHOD2(AddDeleteRegKeyWorkItem, WorkItem* (HKEY, const std::wstring&));
   MOCK_METHOD3(AddDeleteRegValueWorkItem, WorkItem* (HKEY,
                                                      const std::wstring&,
                                                      const std::wstring&));
-  MOCK_METHOD2(AddDeleteTreeWorkItem, WorkItem* (
-      const base::FilePath&,
-      const std::vector<base::FilePath>&));
-  MOCK_METHOD1(AddDeleteTreeWorkItem, WorkItem* (const base::FilePath&));
+  MOCK_METHOD2(AddDeleteTreeWorkItem, WorkItem* (const FilePath&,
+                                                 const std::vector<FilePath>&));
+  MOCK_METHOD1(AddDeleteTreeWorkItem, WorkItem* (const FilePath&));
   MOCK_METHOD3(AddMoveTreeWorkItem, WorkItem* (const std::wstring&,
                                                const std::wstring&,
                                                const std::wstring&));
@@ -118,7 +116,7 @@ class MockProductState : public ProductState {
     oem_install_ = oem_install;
   }
   void clear_oem_install() { has_oem_install_ = false; }
-  void SetUninstallProgram(const base::FilePath& setup_exe) {
+  void SetUninstallProgram(const FilePath& setup_exe) {
     uninstall_command_ = CommandLine(setup_exe);
   }
   void AddUninstallSwitch(const std::string& option) {
@@ -167,23 +165,20 @@ class MockInstallerState : public InstallerState {
 class InstallWorkerTest : public testing::Test {
  public:
   virtual void SetUp() {
-    current_version_.reset(new Version("1.0.0.0"));
-    new_version_.reset(new Version("42.0.0.0"));
+    current_version_.reset(Version::GetVersionFromString("1.0.0.0"));
+    new_version_.reset(Version::GetVersionFromString("42.0.0.0"));
 
     // Don't bother ensuring that these paths exist. Since we're just
     // building the work item lists and not running them, they shouldn't
     // actually be touched.
-    archive_path_ =
-        base::FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123\\chrome.7z");
+    archive_path_ = FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123\\chrome.7z");
     // TODO(robertshield): Take this from the BrowserDistribution once that
     // no longer depends on MasterPreferences.
-    installation_path_ =
-        base::FilePath(L"C:\\Program Files\\Google\\Chrome\\");
-    src_path_ = base::FilePath(
-        L"C:\\UnlikelyPath\\Temp\\chrome_123\\source\\Chrome-bin");
-    setup_path_ = base::FilePath(
-        L"C:\\UnlikelyPath\\Temp\\CR_123.tmp\\setup.exe");
-    temp_dir_ = base::FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123");
+    installation_path_ = FilePath(L"C:\\Program Files\\Google\\Chrome\\");
+    src_path_ =
+        FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123\\source\\Chrome-bin");
+    setup_path_ = FilePath(L"C:\\UnlikelyPath\\Temp\\CR_123.tmp\\setup.exe");
+    temp_dir_ = FilePath(L"C:\\UnlikelyPath\\Temp\\chrome_123");
   }
 
   virtual void TearDown() {
@@ -195,22 +190,7 @@ class InstallWorkerTest : public testing::Test {
     if (installation_state->GetProductState(
             system_level, BrowserDistribution::CHROME_BINARIES) == NULL) {
       MockProductState product_state;
-      product_state.set_version(new Version(*current_version_));
-      product_state.set_brand(L"TEST");
-      product_state.set_multi_install(true);
-      BrowserDistribution* dist =
-          BrowserDistribution::GetSpecificDistribution(
-              BrowserDistribution::CHROME_BINARIES);
-      base::FilePath install_path =
-          installer::GetChromeInstallPath(system_level, dist);
-      product_state.SetUninstallProgram(
-          install_path.AppendASCII(current_version_->GetString())
-          .Append(installer::kInstallerDir)
-          .Append(installer::kSetupExe));
-      product_state.AddUninstallSwitch(installer::switches::kUninstall);
-      product_state.AddUninstallSwitch(installer::switches::kMultiInstall);
-      if (system_level)
-        product_state.AddUninstallSwitch(installer::switches::kSystemLevel);
+      product_state.set_version(current_version_->Clone());
       installation_state->SetProductState(system_level,
                                           BrowserDistribution::CHROME_BINARIES,
                                           product_state);
@@ -220,18 +200,19 @@ class InstallWorkerTest : public testing::Test {
   void AddChromeToInstallationState(
       bool system_level,
       bool multi_install,
+      bool with_chrome_frame_ready_mode,
       MockInstallationState* installation_state) {
     if (multi_install)
       MaybeAddBinariesToInstallationState(system_level, installation_state);
     MockProductState product_state;
-    product_state.set_version(new Version(*current_version_));
+    product_state.set_version(current_version_->Clone());
     product_state.set_multi_install(multi_install);
     product_state.set_brand(L"TEST");
     product_state.set_eula_accepted(1);
     BrowserDistribution* dist =
         BrowserDistribution::GetSpecificDistribution(
             BrowserDistribution::CHROME_BROWSER);
-    base::FilePath install_path =
+    FilePath install_path =
         installer::GetChromeInstallPath(system_level, dist);
     product_state.SetUninstallProgram(
       install_path.AppendASCII(current_version_->GetString())
@@ -243,6 +224,11 @@ class InstallWorkerTest : public testing::Test {
     if (multi_install) {
       product_state.AddUninstallSwitch(installer::switches::kMultiInstall);
       product_state.AddUninstallSwitch(installer::switches::kChrome);
+      if (with_chrome_frame_ready_mode) {
+        product_state.AddUninstallSwitch(installer::switches::kChromeFrame);
+        product_state.AddUninstallSwitch(
+            installer::switches::kChromeFrameReadyMode);
+      }
     }
 
     installation_state->SetProductState(system_level,
@@ -253,17 +239,18 @@ class InstallWorkerTest : public testing::Test {
   void AddChromeFrameToInstallationState(
       bool system_level,
       bool multi_install,
+      bool ready_mode,
       MockInstallationState* installation_state) {
     if (multi_install)
       MaybeAddBinariesToInstallationState(system_level, installation_state);
     MockProductState product_state;
-    product_state.set_version(new Version(*current_version_));
+    product_state.set_version(current_version_->Clone());
     product_state.set_multi_install(multi_install);
     BrowserDistribution* dist =
         BrowserDistribution::GetSpecificDistribution(
             multi_install ? BrowserDistribution::CHROME_BINARIES :
                 BrowserDistribution::CHROME_FRAME);
-    base::FilePath install_path =
+    FilePath install_path =
         installer::GetChromeInstallPath(system_level, dist);
     product_state.SetUninstallProgram(
       install_path.AppendASCII(current_version_->GetString())
@@ -273,8 +260,13 @@ class InstallWorkerTest : public testing::Test {
     product_state.AddUninstallSwitch(installer::switches::kChromeFrame);
     if (system_level)
       product_state.AddUninstallSwitch(installer::switches::kSystemLevel);
-    if (multi_install)
+    if (multi_install) {
       product_state.AddUninstallSwitch(installer::switches::kMultiInstall);
+      if (ready_mode) {
+        product_state.AddUninstallSwitch(
+            installer::switches::kChromeFrameReadyMode);
+      }
+    }
 
     installation_state->SetProductState(system_level,
                                         BrowserDistribution::CHROME_FRAME,
@@ -285,7 +277,7 @@ class InstallWorkerTest : public testing::Test {
                                                       bool multi_install) {
     scoped_ptr<MockInstallationState> installation_state(
         new MockInstallationState());
-    AddChromeToInstallationState(system_level, multi_install,
+    AddChromeToInstallationState(system_level, multi_install, false,
                                  installation_state.get());
     return installation_state.release();
   }
@@ -308,33 +300,6 @@ class InstallWorkerTest : public testing::Test {
                                           InstallerState::MULTI_PACKAGE :
                                           InstallerState::SINGLE_PACKAGE);
     return installer_state.release();
-  }
-
-  static void AddChromeBinariesToInstallerState(
-      const InstallationState& machine_state,
-      MockInstallerState* installer_state) {
-    if (!installer_state->is_multi_install()) {
-      NOTREACHED();
-      return;
-    }
-    if (installer_state->FindProduct(BrowserDistribution::CHROME_BINARIES))
-      return;
-
-    // Fresh install or upgrade?
-    const ProductState* chrome_binaries =
-        machine_state.GetProductState(installer_state->system_install(),
-                                      BrowserDistribution::CHROME_BINARIES);
-    if (chrome_binaries != NULL) {
-      installer_state->AddProductFromState(BrowserDistribution::CHROME_BINARIES,
-                                           *chrome_binaries);
-    } else {
-      BrowserDistribution* dist =
-          BrowserDistribution::GetSpecificDistribution(
-              BrowserDistribution::CHROME_BINARIES);
-      scoped_ptr<Product> product(new Product(dist));
-      product->SetOption(installer::kOptionMultiInstall, true);
-      installer_state->AddProduct(&product);
-    }
   }
 
   static void AddChromeToInstallerState(
@@ -361,6 +326,7 @@ class InstallWorkerTest : public testing::Test {
 
   static void AddChromeFrameToInstallerState(
       const InstallationState& machine_state,
+      bool ready_mode,
       MockInstallerState* installer_state) {
     // Fresh install or upgrade?
     const ProductState* cf =
@@ -374,8 +340,11 @@ class InstallWorkerTest : public testing::Test {
           BrowserDistribution::GetSpecificDistribution(
               BrowserDistribution::CHROME_FRAME);
       scoped_ptr<Product> product(new Product(dist));
-      if (installer_state->is_multi_install())
+      if (installer_state->is_multi_install()) {
         product->SetOption(installer::kOptionMultiInstall, true);
+        if (ready_mode)
+          product->SetOption(installer::kOptionReadyMode, true);
+      }
       installer_state->AddProduct(&product);
     }
   }
@@ -388,15 +357,6 @@ class InstallWorkerTest : public testing::Test {
     scoped_ptr<MockInstallerState> installer_state(
         BuildBasicInstallerState(system_install, multi_install, machine_state,
                                  operation));
-    if (multi_install) {
-      // We don't want to include Chrome Binaries for uninstall if the machine
-      // has other products. For simplicity, we check Chrome Frame only.
-      bool machine_has_other_products =
-          machine_state.GetProductState(system_install,
-              BrowserDistribution::CHROME_FRAME) != NULL;
-      if (operation != InstallerState::UNINSTALL || !machine_has_other_products)
-        AddChromeBinariesToInstallerState(machine_state, installer_state.get());
-    }
     AddChromeToInstallerState(machine_state, installer_state.get());
     return installer_state.release();
   }
@@ -404,27 +364,25 @@ class InstallWorkerTest : public testing::Test {
   static MockInstallerState* BuildChromeFrameInstallerState(
       bool system_install,
       bool multi_install,
+      bool ready_mode,
       const InstallationState& machine_state,
       InstallerState::Operation operation) {
-    // This method only works for installation/upgrade.
-    DCHECK(operation != InstallerState::UNINSTALL);
     scoped_ptr<MockInstallerState> installer_state(
         BuildBasicInstallerState(system_install, multi_install, machine_state,
                                  operation));
-    if (multi_install)
-      AddChromeBinariesToInstallerState(machine_state, installer_state.get());
-    AddChromeFrameToInstallerState(machine_state, installer_state.get());
+    AddChromeFrameToInstallerState(machine_state, ready_mode,
+                                   installer_state.get());
     return installer_state.release();
   }
 
  protected:
   scoped_ptr<Version> current_version_;
   scoped_ptr<Version> new_version_;
-  base::FilePath archive_path_;
-  base::FilePath installation_path_;
-  base::FilePath setup_path_;
-  base::FilePath src_path_;
-  base::FilePath temp_dir_;
+  FilePath archive_path_;
+  FilePath installation_path_;
+  FilePath setup_path_;
+  FilePath src_path_;
+  FilePath temp_dir_;
 };
 
 // Tests
@@ -434,14 +392,6 @@ TEST_F(InstallWorkerTest, TestInstallChromeSingleSystem) {
   const bool system_level = true;
   const bool multi_install = false;
   MockWorkItemList work_item_list;
-
-  const HKEY kRegRoot = system_level ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-  static const wchar_t kRegKeyPath[] = L"Software\\Chromium\\test";
-  scoped_ptr<CreateRegKeyWorkItem> create_reg_key_work_item(
-      WorkItem::CreateCreateRegKeyWorkItem(kRegRoot, kRegKeyPath));
-  scoped_ptr<SetRegValueWorkItem> set_reg_value_work_item(
-      WorkItem::CreateSetRegValueWorkItem(kRegRoot, kRegKeyPath, L"", L"",
-                                          false));
 
   scoped_ptr<InstallationState> installation_state(
       BuildChromeInstallationState(system_level, multi_install));
@@ -455,10 +405,6 @@ TEST_F(InstallWorkerTest, TestInstallChromeSingleSystem) {
   // TODO(robertshield): Set up some real expectations.
   EXPECT_CALL(work_item_list, AddCopyTreeWorkItem(_, _, _, _, _))
       .Times(AtLeast(1));
-  EXPECT_CALL(work_item_list, AddCreateRegKeyWorkItem(_, _))
-      .WillRepeatedly(Return(create_reg_key_work_item.get()));
-  EXPECT_CALL(work_item_list, AddSetRegStringValueWorkItem(_, _, _, _, _))
-      .WillRepeatedly(Return(set_reg_value_work_item.get()));
 
   AddInstallWorkItems(*installation_state.get(),
                       *installer_state.get(),
@@ -466,8 +412,8 @@ TEST_F(InstallWorkerTest, TestInstallChromeSingleSystem) {
                       archive_path_,
                       src_path_,
                       temp_dir_,
-                      current_version_.get(),
                       *new_version_.get(),
+                      &current_version_,
                       &work_item_list);
 }
 
@@ -499,16 +445,13 @@ class OldIELowRightsTests : public InstallWorkerTest,
     root_key_ = system_level_ ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
 
     installation_state_.reset(new MockInstallationState());
-    AddChromeFrameToInstallationState(system_level_, multi_install_,
+    AddChromeFrameToInstallationState(system_level_, multi_install_, false,
                                       installation_state_.get());
     installer_state_.reset(BuildBasicInstallerState(
         system_level_, multi_install_, *installation_state_,
         multi_install_ ? InstallerState::MULTI_UPDATE :
             InstallerState::SINGLE_INSTALL_OR_UPDATE));
-    if (multi_install_)
-      AddChromeBinariesToInstallerState(*installation_state_,
-                                        installer_state_.get());
-    AddChromeFrameToInstallerState(*installation_state_,
+    AddChromeFrameToInstallerState(*installation_state_, false,
                                    installer_state_.get());
   }
 
@@ -530,6 +473,19 @@ TEST_P(OldIELowRightsTests, AddDeleteOldIELowRightsPolicyWorkItems) {
                                          &work_item_list);
 }
 
+TEST_P(OldIELowRightsTests, AddCopyIELowRightsPolicyWorkItems) {
+  StrictMock<MockWorkItemList> work_item_list;
+
+  // The old elevation policy key should only be copied when there's no old
+  // value.
+  EXPECT_CALL(work_item_list,
+              AddCopyRegKeyWorkItem(root_key_, StrEq(elevation_key),
+                                    StrEq(old_elevation_key),
+                                    Eq(WorkItem::IF_NOT_PRESENT))).Times(1);
+
+  AddCopyIELowRightsPolicyWorkItems(*installer_state_.get(), &work_item_list);
+}
+
 INSTANTIATE_TEST_CASE_P(Variations, OldIELowRightsTests,
                         Combine(Bool(), Bool()));
 
@@ -542,7 +498,7 @@ TEST_F(InstallWorkerTest, GoogleUpdateWorkItemsTest) {
       BuildChromeInstallationState(system_level, false));
 
   MockProductState cf_state;
-  cf_state.set_version(new Version(*current_version_));
+  cf_state.set_version(current_version_->Clone());
   cf_state.set_multi_install(false);
 
   installation_state->SetProductState(system_level,
@@ -615,7 +571,7 @@ TEST_F(InstallWorkerTest, AddUsageStatsWorkItems) {
       BuildChromeInstallationState(system_level, multi_install));
 
   MockProductState chrome_state;
-  chrome_state.set_version(new Version(*current_version_));
+  chrome_state.set_version(current_version_->Clone());
   chrome_state.set_multi_install(false);
   chrome_state.set_usagestats(1);
 
@@ -713,94 +669,187 @@ const wchar_t QuickEnableAbsentTest::kRegKeyPath[] =
 TEST_F(QuickEnableAbsentTest, CleanInstallSingleChrome) {
   // Install single Chrome on a clean system.
   scoped_ptr<MockInstallerState> installer_state(
-      BuildBasicInstallerState(system_level_, true, *machine_state_,
-                                InstallerState::MULTI_UPDATE));
-  AddQuickEnableChromeFrameWorkItems(*installer_state, &work_item_list_);
+      BuildChromeInstallerState(system_level_, false, *machine_state_,
+                                InstallerState::SINGLE_INSTALL_OR_UPDATE));
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
 }
 
-TEST_F(InstallWorkerTest, WillProductBePresentAfterSetup) {
-  BrowserDistribution::Type prod_type_list[] = {
-    BrowserDistribution::CHROME_BROWSER,
-    BrowserDistribution::CHROME_FRAME,
-    // Excluding BrowserDistribution::CHROME_BINARIES, since it is installed
-    // along with other products.
-  };
-  enum {  // Index into prod_type_list[].
-    TYPE_BROWSER = 0,
-    TYPE_CF,
-    NUM_TYPE  // This must appear last.
-  };
-  DCHECK(arraysize(prod_type_list) == NUM_TYPE);
-  InstallerState::Operation op_list[] = {
-    InstallerState::UNINSTALL,
-    InstallerState::SINGLE_INSTALL_OR_UPDATE
-  };
+TEST_F(QuickEnableAbsentTest, CleanInstallSingleChromeFrame) {
+  // Install single Chrome Frame on a clean system.
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildChromeFrameInstallerState(system_level_, false, false,
+                                     *machine_state_,
+                                     InstallerState::SINGLE_INSTALL_OR_UPDATE));
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
 
-  const bool system_level = false;
-  const bool multi_install = true;
+TEST_F(QuickEnableAbsentTest, CleanInstallMultiChromeFrame) {
+  // Install multi Chrome Frame on a clean system.
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildChromeFrameInstallerState(system_level_, true, false,
+                                     *machine_state_,
+                                     InstallerState::MULTI_INSTALL));
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
 
-  // Loop over machine states: {No product, Chrome, CF, Chrome + CF}.
-  for (int i_mach = 0; i_mach < (1 << NUM_TYPE); ++i_mach) {
-    // i_mach is the machine state before operation, as bit mask.
-    scoped_ptr<MockInstallationState> machine_state(
-        new MockInstallationState());
-    if ((i_mach & (1 << TYPE_BROWSER)) != 0) {  // Add Chrome.
-      AddChromeToInstallationState(system_level, multi_install,
-                                   machine_state.get());
-    }
-    if ((i_mach & (1 << TYPE_CF)) != 0) {  // Add Chrome Frame.
-      AddChromeFrameToInstallationState(system_level, multi_install,
-                                        machine_state.get());
-    }
+TEST_F(QuickEnableAbsentTest, CleanInstallMultiChromeChromeFrame) {
+  // Install multi Chrome and Chrome Frame on a clean system.
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildBasicInstallerState(system_level_, true, *machine_state_,
+                               InstallerState::MULTI_INSTALL));
+  AddChromeToInstallerState(*machine_state_, installer_state.get());
+  AddChromeFrameToInstallerState(*machine_state_, false,
+                                 installer_state.get());
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
 
-    // Loop over operations: {uninstall, install/update}.
-    for (int i_op = 0; i_op < arraysize(op_list); ++i_op) {
+TEST_F(QuickEnableAbsentTest, UninstallMultiChromeLeaveMultiChromeFrame) {
+  // Uninstall multi Chrome on a machine with multi Chrome Frame.
+  AddChromeToInstallationState(system_level_, true, false,
+                               machine_state_.get());
+  AddChromeFrameToInstallationState(system_level_, true, false,
+                                    machine_state_.get());
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildBasicInstallerState(system_level_, true, *machine_state_,
+                               InstallerState::UNINSTALL));
+  AddChromeToInstallerState(*machine_state_, installer_state.get());
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
 
-      // Loop over product types to operate on: {TYPE_BROWSER, TYPE_CF}.
-      for (int i_type_op = 0; i_type_op < NUM_TYPE; ++i_type_op) {
-        scoped_ptr<InstallerState> installer_state;
-        if (i_type_op == TYPE_BROWSER) {
-          installer_state.reset(BuildChromeInstallerState(
-              system_level, multi_install, *machine_state, op_list[i_op]));
-        } else if (i_type_op == TYPE_CF) {
-          // Skip the CF uninstall case due to limitations in
-          // BuildChromeFrameInstallerState().
-          if (op_list[i_op] == InstallerState::UNINSTALL)
-            continue;
+TEST_F(QuickEnableAbsentTest, UninstallMultiChromeLeaveSingleChromeFrame) {
+  // Uninstall multi Chrome on a machine with single Chrome Frame.
+  AddChromeToInstallationState(system_level_, true, false,
+                               machine_state_.get());
+  AddChromeFrameToInstallationState(system_level_, false, false,
+                                    machine_state_.get());
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildBasicInstallerState(system_level_, true, *machine_state_,
+                               InstallerState::UNINSTALL));
+  AddChromeToInstallerState(*machine_state_, installer_state.get());
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
 
-          installer_state.reset(BuildChromeFrameInstallerState(
-              system_level, multi_install, *machine_state, op_list[i_op]));
-        } else {
-          NOTREACHED();
-        }
+TEST_F(QuickEnableAbsentTest, AcceptReadyMode) {
+  // Accept ready-mode.
+  AddChromeToInstallationState(system_level_, true, true,
+                               machine_state_.get());
+  AddChromeFrameToInstallationState(system_level_, true, true,
+                                    machine_state_.get());
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildBasicInstallerState(system_level_, true, *machine_state_,
+                               InstallerState::UNINSTALL));
+  AddChromeToInstallerState(*machine_state_, installer_state.get());
+  AddChromeFrameToInstallerState(*machine_state_, false, installer_state.get());
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
 
-        // Calculate the machine state after operation, as bit mask.
-        // If uninstall, remove product with bitwise AND; else add with OR.
-        int mach_after = (op_list[i_op] == InstallerState::UNINSTALL) ?
-            i_mach & ~(1 << i_type_op) : i_mach | (1 << i_type_op);
-
-        // Verify predicted presence of Chrome Binaries.
-        bool bin_res = installer::WillProductBePresentAfterSetup(
-            *installer_state,
-            *machine_state,
-            BrowserDistribution::CHROME_BINARIES);
-        // Binaries are expected to be present iff any product is installed.
-        bool bin_expect = mach_after != 0;
-        EXPECT_EQ(bin_expect, bin_res);
-
-        // Loop over product types to check: {TYPE_BROWSER, TYPE_CF}.
-        for (int i_type_check = 0; i_type_check < NUM_TYPE; ++i_type_check) {
-          // Verify predicted presence of product.
-          bool prod_res = installer::WillProductBePresentAfterSetup(
-              *installer_state,
-              *machine_state,
-              prod_type_list[i_type_check]);
-          bool prod_expect = (mach_after & (1 << i_type_check)) != 0;
-          EXPECT_EQ(prod_expect, prod_res);
-        }
-      }
-    }
+// Test scenarios under which the quick-enable-cf command should exist after the
+// run.
+class QuickEnablePresentTest : public InstallWorkerTest {
+ public:
+  virtual void SetUp() {
+    InstallWorkerTest::SetUp();
+    root_key_ = system_level_ ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+    create_reg_key_work_item_.reset(
+        WorkItem::CreateCreateRegKeyWorkItem(root_key_, kRegKeyPath));
+    set_reg_value_work_item_.reset(
+        WorkItem::CreateSetRegValueWorkItem(root_key_, kRegKeyPath, L"", L"",
+                                            false));
+    machine_state_.reset(new MockInstallationState());
+    EXPECT_CALL(work_item_list_,
+                AddCreateRegKeyWorkItem(Eq(root_key_), StrCaseEq(kRegKeyPath)))
+        .Times(1)
+        .WillOnce(Return(create_reg_key_work_item_.get()));
+    EXPECT_CALL(work_item_list_,
+                AddSetRegStringValueWorkItem(Eq(root_key_),
+                                             StrCaseEq(kRegKeyPath),
+                                             StrEq(L"CommandLine"), _,
+                                             Eq(true)))
+        .Times(1)
+        .WillOnce(Return(set_reg_value_work_item_.get()));
+    EXPECT_CALL(work_item_list_,
+                AddSetRegDwordValueWorkItem(Eq(root_key_),
+                                            StrCaseEq(kRegKeyPath), _,
+                                            Eq(static_cast<DWORD>(1)),
+                                            Eq(true)))
+        .Times(2)
+        .WillRepeatedly(Return(set_reg_value_work_item_.get()));
   }
+  virtual void TearDown() {
+    machine_state_.reset();
+    set_reg_value_work_item_.reset();
+    create_reg_key_work_item_.reset();
+    root_key_ = NULL;
+    InstallWorkerTest::TearDown();
+  }
+ protected:
+  static const bool system_level_ = false;
+  static const wchar_t kRegKeyPath[];
+  HKEY root_key_;
+  scoped_ptr<CreateRegKeyWorkItem> create_reg_key_work_item_;
+  scoped_ptr<SetRegValueWorkItem> set_reg_value_work_item_;
+  scoped_ptr<MockInstallationState> machine_state_;
+  StrictMock<MockWorkItemList> work_item_list_;
+};
+
+const wchar_t QuickEnablePresentTest::kRegKeyPath[] =
+    L"Software\\Google\\Update\\Clients\\"
+    L"{4DC8B4CA-1BDA-483e-B5FA-D3C12E15B62D}\\Commands\\quick-enable-cf";
+
+TEST_F(QuickEnablePresentTest, CleanInstallMultiChrome) {
+  // Install multi Chrome on a clean system.
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildChromeInstallerState(system_level_, true, *machine_state_,
+                                InstallerState::MULTI_INSTALL));
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
+
+TEST_F(QuickEnablePresentTest, CleanInstallMultiChromeReadyMode) {
+  // Install multi Chrome with Chrome Frame ready-mode on a clean system.
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildBasicInstallerState(system_level_, true, *machine_state_,
+                               InstallerState::MULTI_INSTALL));
+  AddChromeToInstallerState(*machine_state_, installer_state.get());
+  AddChromeFrameToInstallerState(*machine_state_, true,
+                                 installer_state.get());
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
+
+TEST_F(QuickEnablePresentTest, UninstallSingleChromeFrame) {
+  // Uninstall single Chrome Frame on a machine with multi Chrome.
+  AddChromeToInstallationState(system_level_, true, false,
+                               machine_state_.get());
+  AddChromeFrameToInstallationState(system_level_, false, false,
+                                    machine_state_.get());
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildBasicInstallerState(system_level_, false, *machine_state_,
+                               InstallerState::UNINSTALL));
+  AddChromeFrameToInstallerState(*machine_state_, false, installer_state.get());
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
+}
+
+TEST_F(QuickEnablePresentTest, UninstallMultiChromeFrame) {
+  // Uninstall multi Chrome Frame on a machine with multi Chrome.
+  AddChromeToInstallationState(system_level_, true, false,
+                               machine_state_.get());
+  AddChromeFrameToInstallationState(system_level_, true, false,
+                                    machine_state_.get());
+  scoped_ptr<MockInstallerState> installer_state(
+      BuildBasicInstallerState(system_level_, true, *machine_state_,
+                               InstallerState::UNINSTALL));
+  AddChromeFrameToInstallerState(*machine_state_, false, installer_state.get());
+  AddQuickEnableWorkItems(*installer_state, *machine_state_, &setup_path_,
+                          new_version_.get(), &work_item_list_);
 }
 
 #endif  // defined(GOOGLE_CHROME_BUILD)

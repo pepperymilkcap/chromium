@@ -4,11 +4,12 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_JOB_FACTORY_H_
 #define NET_URL_REQUEST_URL_REQUEST_JOB_FACTORY_H_
+#pragma once
 
+#include <map>
 #include <string>
-
+#include <vector>
 #include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/net_export.h"
 
@@ -16,44 +17,91 @@ class GURL;
 
 namespace net {
 
-class NetworkDelegate;
 class URLRequest;
 class URLRequestJob;
 
 class NET_EXPORT URLRequestJobFactory
     : NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
-  // TODO(shalev): Move this to URLRequestJobFactoryImpl.
   class NET_EXPORT ProtocolHandler {
    public:
     virtual ~ProtocolHandler();
 
-    virtual URLRequestJob* MaybeCreateJob(
-        URLRequest* request, NetworkDelegate* network_delegate) const = 0;
+    virtual URLRequestJob* MaybeCreateJob(URLRequest* request) const = 0;
+  };
 
-    // Indicates if it should be safe to redirect to |location|. Should handle
-    // protocols handled by MaybeCreateJob().  Only called when registered with
-    // URLRequestJobFactoryImpl::SetProtocolHandler() not called when used with
-    // ProtocolInterceptJobFactory.
-    // NOTE(pauljensen): Default implementation returns true.
-    virtual bool IsSafeRedirectTarget(const GURL& location) const;
+  class NET_EXPORT Interceptor {
+   public:
+    virtual ~Interceptor();
+
+    // Called for every request made.  Should return a new job to handle the
+    // request if it should be intercepted, or NULL to allow the request to
+    // be handled in the normal manner.
+    virtual URLRequestJob* MaybeIntercept(URLRequest* request) const = 0;
+
+    // Called after having received a redirect response, but prior to the
+    // the request delegate being informed of the redirect. Can return a new
+    // job to replace the existing job if it should be intercepted, or NULL
+    // to allow the normal handling to continue. If a new job is provided,
+    // the delegate never sees the original redirect response, instead the
+    // response produced by the intercept job will be returned.
+    virtual URLRequestJob* MaybeInterceptRedirect(
+        const GURL& location,
+        URLRequest* request) const = 0;
+
+    // Called after having received a final response, but prior to the
+    // the request delegate being informed of the response. This is also
+    // called when there is no server response at all to allow interception
+    // on DNS or network errors. Can return a new job to replace the existing
+    // job if it should be intercepted, or NULL to allow the normal handling to
+    // continue. If a new job is provided, the delegate never sees the original
+    // response, instead the response produced by the intercept job will be
+    // returned.
+    virtual URLRequestJob* MaybeInterceptResponse(
+        URLRequest* request) const = 0;
+
+    // Returns true if this interceptor handles requests for URLs with the
+    // given protocol. Returning false does not imply that this interceptor
+    // can't or won't handle requests with the given protocol.
+    virtual bool WillHandleProtocol(const std::string& protocol) const {
+        return false;
+    }
   };
 
   URLRequestJobFactory();
-  virtual ~URLRequestJobFactory();
+  ~URLRequestJobFactory();
 
-  virtual URLRequestJob* MaybeCreateJobWithProtocolHandler(
-      const std::string& scheme,
-      URLRequest* request,
-      NetworkDelegate* network_delegate) const = 0;
+  // Sets the ProtocolHandler for a scheme. Returns true on success, false on
+  // failure (a ProtocolHandler already exists for |scheme|). On success,
+  // URLRequestJobFactory takes ownership of |protocol_handler|.
+  bool SetProtocolHandler(const std::string& scheme,
+                          ProtocolHandler* protocol_handler);
 
-  virtual bool IsHandledProtocol(const std::string& scheme) const = 0;
+  // Takes ownership of |interceptor|. Adds it to the end of the Interceptor
+  // list.
+  void AddInterceptor(Interceptor* interceptor);
 
-  virtual bool IsHandledURL(const GURL& url) const = 0;
+  URLRequestJob* MaybeCreateJobWithInterceptor(URLRequest* request) const;
 
-  virtual bool IsSafeRedirectTarget(const GURL& location) const = 0;
+  URLRequestJob* MaybeCreateJobWithProtocolHandler(const std::string& scheme,
+                                                   URLRequest* request) const;
+
+  URLRequestJob* MaybeInterceptRedirect(const GURL& location,
+                                        URLRequest* request) const;
+
+  URLRequestJob* MaybeInterceptResponse(URLRequest* request) const;
+
+  bool IsHandledProtocol(const std::string& scheme) const;
+
+  bool IsHandledURL(const GURL& url) const;
 
  private:
+  typedef std::map<std::string, ProtocolHandler*> ProtocolHandlerMap;
+  typedef std::vector<Interceptor*> InterceptorList;
+
+  ProtocolHandlerMap protocol_handler_map_;
+  InterceptorList interceptors_;
+
   DISALLOW_COPY_AND_ASSIGN(URLRequestJobFactory);
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,9 @@
 
 #include <algorithm>
 #include <cstring>
-#include <iomanip>
 #include <sstream>
 #include <vector>
 
-#include "ppapi/cpp/core.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/var.h"
 #include "ppapi/cpp/view.h"
@@ -31,12 +29,9 @@ TestingInstance::TestingInstance(PP_Instance instance)
     : pp::InstancePrivate(instance),
 #endif
       current_case_(NULL),
+      progress_cookie_number_(0),
       executed_tests_(false),
-      number_tests_executed_(0),
-      nacl_mode_(false),
-      ssl_server_port_(-1),
-      websocket_port_(-1),
-      remove_plugin_(true) {
+      nacl_mode_(false) {
   callback_factory_.Initialize(this);
 }
 
@@ -52,15 +47,9 @@ bool TestingInstance::Init(uint32_t argc,
     if (std::strcmp(argn[i], "mode") == 0) {
       if (std::strcmp(argv[i], "nacl") == 0)
         nacl_mode_ = true;
-    } else if (std::strcmp(argn[i], "protocol") == 0) {
-      protocol_ = argv[i];
-    } else if (std::strcmp(argn[i], "websocket_host") == 0) {
-      websocket_host_ = argv[i];
-    } else if (std::strcmp(argn[i], "websocket_port") == 0) {
-      websocket_port_ = atoi(argv[i]);
-    } else if (std::strcmp(argn[i], "ssl_server_port") == 0) {
-      ssl_server_port_ = atoi(argv[i]);
     }
+    else if (std::strcmp(argn[i], "protocol") == 0)
+      protocol_ = argv[i];
   }
   // Create the proper test case from the argument.
   for (uint32_t i = 0; i < argc; i++) {
@@ -68,7 +57,7 @@ bool TestingInstance::Init(uint32_t argc,
       if (argv[i][0] == '\0')
         break;
       current_case_ = CaseForTestName(argv[i]);
-      test_filter_ = argv[i];
+      test_filter_ = FilterForTestName(argv[i]);
       if (!current_case_)
         errors_.append(std::string("Unknown test case ") + argv[i]);
       else if (!current_case_->Init())
@@ -113,28 +102,24 @@ bool TestingInstance::HandleInputEvent(const pp::InputEvent& event) {
 }
 
 void TestingInstance::EvalScript(const std::string& script) {
-  SendTestCommand("EvalScript", script);
+  std::string message("TESTING_MESSAGE:EvalScript:");
+  message.append(script);
+  PostMessage(pp::Var(message));
 }
 
 void TestingInstance::SetCookie(const std::string& name,
                                 const std::string& value) {
-  SendTestCommand("SetCookie", name + "=" + value);
+  std::string message("TESTING_MESSAGE:SetCookie:");
+  message.append(name);
+  message.append("=");
+  message.append(value);
+  PostMessage(pp::Var(message));
 }
 
 void TestingInstance::LogTest(const std::string& test_name,
-                              const std::string& error_message,
-                              PP_TimeTicks start_time) {
-  // Compute the time to run the test and save it in a string for logging:
-  PP_TimeTicks end_time(pp::Module::Get()->core()->GetTimeTicks());
-  std::ostringstream number_stream;
-  PP_TimeTicks elapsed_time(end_time - start_time);
-  number_stream << std::fixed << std::setprecision(3) << elapsed_time;
-  std::string time_string(number_stream.str());
-
+                              const std::string& error_message) {
   // Tell the browser we're still working.
   ReportProgress(kProgressSignal);
-
-  number_tests_executed_++;
 
   std::string html;
   html.append("<div class=\"test_line\"><span class=\"test_name\">");
@@ -151,19 +136,8 @@ void TestingInstance::LogTest(const std::string& test_name,
       errors_.append(", ");  // Separator for different error messages.
     errors_.append(test_name + " FAIL: " + error_message);
   }
-  html.append(" <span class=\"time\">(");
-  html.append(time_string);
-  html.append("s)</span>");
-
   html.append("</div>");
   LogHTML(html);
-
-  std::string test_time;
-  test_time.append(test_name);
-  test_time.append(" finished in ");
-  test_time.append(time_string);
-  test_time.append(" seconds.");
-  LogTestTime(test_time);
 }
 
 void TestingInstance::AppendError(const std::string& message) {
@@ -176,7 +150,7 @@ void TestingInstance::ExecuteTests(int32_t unused) {
   ReportProgress(kProgressSignal);
 
   // Clear the console.
-  SendTestCommand("ClearConsole");
+  PostMessage(pp::Var("TESTING_MESSAGE:ClearConsole"));
 
   if (!errors_.empty()) {
     // Catch initialization errors and output the current error string to
@@ -187,51 +161,15 @@ void TestingInstance::ExecuteTests(int32_t unused) {
     errors_.append("FAIL: Only listed tests");
   } else {
     current_case_->RunTests(test_filter_);
-
-    if (number_tests_executed_ == 0) {
-      errors_.append("No tests executed. The test filter might be too "
-                     "restrictive: '" + test_filter_ + "'.");
-      LogError(errors_);
-    }
-    if (current_case_->skipped_tests().size()) {
-      // TODO(dmichael): Convert all TestCases to run all tests in one fixture,
-      //                 and enable this check. Currently, a lot of our tests
-      //                 run 1 test per fixture, which is slow.
-      /*
-      errors_.append("Some tests were not listed and thus were not run. Make "
-                     "sure all tests are passed in the test_case URL (even if "
-                     "they are marked DISABLED_). Forgotten tests: ");
-      std::set<std::string>::const_iterator iter =
-          current_case_->skipped_tests().begin();
-      for (; iter != current_case_->skipped_tests().end(); ++iter) {
-        errors_.append(*iter);
-        errors_.append(" ");
-      }
-      LogError(errors_);
-      */
-    }
-    if (current_case_->remaining_tests().size()) {
-      errors_.append("Some listed tests were not found in the TestCase. Check "
-                     "the test names that were passed to make sure they match "
-                     "tests in the TestCase. Unknown tests: ");
-      std::map<std::string, bool>::const_iterator iter =
-          current_case_->remaining_tests().begin();
-      for (; iter != current_case_->remaining_tests().end(); ++iter) {
-        errors_.append(iter->first);
-        errors_.append(" ");
-      }
-      LogError(errors_);
-    }
+    // Automated PyAuto tests rely on finding the exact strings below.
+    LogHTML(errors_.empty() ?
+            "<span class=\"pass\">[SHUTDOWN]</span> All tests passed." :
+            "<span class=\"fail\">[SHUTDOWN]</span> Some tests failed.");
   }
 
-  if (remove_plugin_)
-    SendTestCommand("RemovePluginWhenFinished");
-  std::string result(errors_);
-  if (result.empty())
-    result = "PASS";
-  SendTestCommand("DidExecuteTests", result);
-  // Note, DidExecuteTests may unload the plugin. We can't really do anything
-  // after this point.
+  // Declare we're done by setting a cookie to either "PASS" or the errors.
+  ReportProgress(errors_.empty() ? "PASS" : errors_);
+  PostMessage(pp::Var("TESTING_MESSAGE:DidExecuteTests"));
 }
 
 TestCase* TestingInstance::CaseForTestName(const std::string& name) {
@@ -245,17 +183,12 @@ TestCase* TestingInstance::CaseForTestName(const std::string& name) {
   return NULL;
 }
 
-void TestingInstance::SendTestCommand(const std::string& command) {
-  std::string msg("TESTING_MESSAGE:");
-  msg += command;
-  PostMessage(pp::Var(msg));
+std::string TestingInstance::FilterForTestName(const std::string& name) {
+  size_t delim = name.find_first_of('_');
+  if (delim != std::string::npos)
+    return name.substr(delim+1);
+  return "";
 }
-
-void TestingInstance::SendTestCommand(const std::string& command,
-                                      const std::string& params) {
-  SendTestCommand(command + ":" + params);
-}
-
 
 void TestingInstance::LogAvailableTests() {
   // Print out a listing of all tests.
@@ -293,19 +226,17 @@ void TestingInstance::LogError(const std::string& text) {
 }
 
 void TestingInstance::LogHTML(const std::string& html) {
-  SendTestCommand("LogHTML", html);
+  std::string message("TESTING_MESSAGE:LogHTML:");
+  message.append(html);
+  PostMessage(pp::Var(message));
 }
 
 void TestingInstance::ReportProgress(const std::string& progress_value) {
-  SendTestCommand("ReportProgress", progress_value);
-}
-
-void TestingInstance::AddPostCondition(const std::string& script) {
-  SendTestCommand("AddPostCondition", script);
-}
-
-void TestingInstance::LogTestTime(const std::string& test_time) {
-  SendTestCommand("LogTestTime", test_time);
+  // Use streams since nacl doesn't compile base yet (for StringPrintf).
+  std::ostringstream cookie_name;
+  cookie_name << "PPAPI_PROGRESS_" << progress_cookie_number_;
+  SetCookie(cookie_name.str(), progress_value);
+  progress_cookie_number_++;
 }
 
 class Module : public pp::Module {

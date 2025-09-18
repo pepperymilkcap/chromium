@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CRYPTO_SCOPED_NSS_TYPES_H_
 #define CRYPTO_SCOPED_NSS_TYPES_H_
+#pragma once
 
 #include <keyhi.h>
 #include <nss.h>
@@ -37,9 +38,6 @@ typedef scoped_ptr_malloc<
                                PR_TRUE> > ScopedPK11Context;
 typedef scoped_ptr_malloc<
     PK11SlotInfo, NSSDestroyer<PK11SlotInfo, PK11_FreeSlot> > ScopedPK11Slot;
-typedef scoped_ptr_malloc<
-    PK11SlotList, NSSDestroyer<PK11SlotList,
-                               PK11_FreeSlotList> > ScopedPK11SlotList;
 typedef scoped_ptr_malloc<
     PK11SymKey, NSSDestroyer<PK11SymKey, PK11_FreeSymKey> > ScopedPK11SymKey;
 typedef scoped_ptr_malloc<

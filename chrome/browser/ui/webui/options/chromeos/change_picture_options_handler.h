@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,11 @@
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_CHANGE_PICTURE_OPTIONS_HANDLER_H_
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/image_decoder.h"
+#include "chrome/browser/chromeos/options/take_photo_dialog.h"
+#include "chrome/browser/ui/select_file_dialog.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "content/public/browser/notification_registrar.h"
-#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/shell_dialogs/select_file_dialog.h"
 
 namespace base {
 class DictionaryValue;
@@ -20,14 +19,10 @@ class ListValue;
 
 namespace chromeos {
 
-class User;
-
-namespace options {
-
 // ChromeOS user image options page UI handler.
-class ChangePictureOptionsHandler : public ::options::OptionsPageUIHandler,
-                                    public ui::SelectFileDialog::Listener,
-                                    public ImageDecoder::Delegate {
+class ChangePictureOptionsHandler : public OptionsPageUIHandler,
+                                    public SelectFileDialog::Listener,
+                                    public TakePhotoDialog::Delegate {
  public:
   ChangePictureOptionsHandler();
   virtual ~ChangePictureOptionsHandler();
@@ -48,14 +43,11 @@ class ChangePictureOptionsHandler : public ::options::OptionsPageUIHandler,
 
   // Sends the profile image to the page. If |should_select| is true then
   // the profile image element is selected.
-  void SendProfileImage(const gfx::ImageSkia& image, bool should_select);
+  void SendProfileImage(const SkBitmap& image, bool should_select);
 
   // Starts profile image update and shows the last downloaded profile image,
   // if any, on the page. Shouldn't be called before |SendProfileImage|.
   void UpdateProfileImage();
-
-  // Sends previous user image to the page.
-  void SendOldImage(const std::string& image_url);
 
   // Starts camera presence check.
   void CheckCameraPresence();
@@ -66,11 +58,8 @@ class ChangePictureOptionsHandler : public ::options::OptionsPageUIHandler,
   // Opens a file selection dialog to choose user image from file.
   void HandleChooseFile(const base::ListValue* args);
 
-  // Handles photo taken with WebRTC UI.
-  void HandlePhotoTaken(const base::ListValue* args);
-
-  // Handles camera presence check request.
-  void HandleCheckCameraPresence(const base::ListValue* args);
+  // Opens the camera capture dialog.
+  void HandleTakePhoto(const base::ListValue* args);
 
   // Gets the list of available user images and sends it to the page.
   void HandleGetAvailableImages(const base::ListValue* args);
@@ -86,8 +75,11 @@ class ChangePictureOptionsHandler : public ::options::OptionsPageUIHandler,
 
   // SelectFileDialog::Delegate implementation.
   virtual void FileSelected(
-      const base::FilePath& path,
+      const FilePath& path,
       int index, void* params) OVERRIDE;
+
+  // TakePhotoDialog::Delegate implementation.
+  virtual void OnPhotoAccepted(const SkBitmap& photo) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -97,52 +89,25 @@ class ChangePictureOptionsHandler : public ::options::OptionsPageUIHandler,
   // Called when the camera presence check has been completed.
   void OnCameraPresenceCheckDone();
 
-  // Sets user image to photo taken from camera.
-  void SetImageFromCamera(const gfx::ImageSkia& photo);
-
   // Returns handle to browser window or NULL if it can't be found.
   gfx::NativeWindow GetBrowserWindow() const;
 
-  // Overriden from ImageDecoder::Delegate:
-  virtual void OnImageDecoded(const ImageDecoder* decoder,
-                              const SkBitmap& decoded_image) OVERRIDE;
-  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE;
-
-  // Returns user related to current WebUI. If this user doesn't exist,
-  // returns active user.
-  User* GetUser() const;
-
-  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+  scoped_refptr<SelectFileDialog> select_file_dialog_;
 
   // Previous user image from camera/file and its data URL.
-  gfx::ImageSkia previous_image_;
-  std::string previous_image_url_;
+  SkBitmap previous_image_;
+  std::string previous_image_data_url_;
 
   // Index of the previous user image.
   int previous_image_index_;
-
-  // Last user photo, if taken.
-  gfx::ImageSkia user_photo_;
-
-  // Data URL for |user_photo_|.
-  std::string user_photo_data_url_;
 
   content::NotificationRegistrar registrar_;
 
   base::WeakPtrFactory<ChangePictureOptionsHandler> weak_factory_;
 
-  // Last ImageDecoder instance used to decode an image blob received by
-  // HandlePhotoTaken.
-  scoped_refptr<ImageDecoder> image_decoder_;
-
- private:
-  // Last known state of the camera.
-  bool was_camera_present_;
-
   DISALLOW_COPY_AND_ASSIGN(ChangePictureOptionsHandler);
 };
 
-}  // namespace options
-}  // namespace chromeos
+} // namespace chromeos
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_CHANGE_PICTURE_OPTIONS_HANDLER_H_

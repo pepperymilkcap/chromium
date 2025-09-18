@@ -6,17 +6,9 @@
 #define CHROME_BROWSER_PRERENDER_PRERENDER_UTIL_H_
 
 #include "base/basictypes.h"
-#include "url/gurl.h"
-#include "webkit/common/resource_type.h"
-
-namespace net {
-class HttpResponseHeaders;
-class URLRequest;
-}
+#include "googleurl/src/gurl.h"
 
 namespace prerender {
-
-extern const char kChromeNavigateExtraDataKey[];
 
 // ID indicating that no experiment is active.
 const uint8 kNoExperiment = 0;
@@ -38,32 +30,9 @@ bool IsGoogleDomain(const GURL& url);
 // Indicates whether the URL provided could be a Google search result page.
 bool IsGoogleSearchResultURL(const GURL& url);
 
-// The prerender contents of some experiments should never be swapped in
-// by pretending to never match on the URL.  This function will return true
-// iff this is the case for the experiment_id specified.
-bool IsNoSwapInExperiment(uint8 experiment_id);
-
-// The prerender contents of some experiments should behave identical to the
-// control group, regardless of the field trial.  This function will return true
-// iff this is the case for the experiment_id specified.
-bool IsControlGroupExperiment(uint8 experiment_id);
-
-// Called by URLRequestResponseStarted to gather data about Pagespeed headers
-// into the Prerender.PagespeedHeader histogram. Public so it can be accessed
-// by the unit test.
-void GatherPagespeedData(const ResourceType::Type resource_type,
-                         const GURL& request_url,
-                         const net::HttpResponseHeaders* response_headers);
-
-// Static method gathering stats about a URLRequest for which a response has
-// just started.
-void URLRequestResponseStarted(net::URLRequest* request);
-
-// Report a URL was canceled due to trying to handle an external URL.
-void ReportPrerenderExternalURL();
-
-// Report a URL was canceled due to unsupported prerender scheme.
-void ReportUnsupportedPrerenderScheme(const GURL& url);
+// Returns true iff the URL provided is Web URL, using the scheme http
+// or https.
+bool IsWebURL(const GURL& url);
 
 }  // namespace prerender
 

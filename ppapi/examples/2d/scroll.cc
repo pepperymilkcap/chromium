@@ -4,8 +4,6 @@
 
 #include <math.h>
 
-#include <algorithm>
-
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/instance.h"

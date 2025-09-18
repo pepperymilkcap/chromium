@@ -4,8 +4,9 @@
 
 #ifndef CHROME_INSTALLER_UTIL_FAKE_INSTALLATION_STATE_H_
 #define CHROME_INSTALLER_UTIL_FAKE_INSTALLATION_STATE_H_
+#pragma once
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/version.h"
 #include "chrome/installer/util/fake_product_state.h"
 #include "chrome/installer/util/helper.h"
@@ -22,7 +23,7 @@ class FakeInstallationState : public InstallationState {
     FakeProductState chrome_state;
     chrome_state.set_version(version);
     chrome_state.set_multi_install(multi_install);
-    base::FilePath setup_exe(
+    FilePath setup_exe(
         GetChromeInstallPath(system_install,
                              BrowserDistribution::GetSpecificDistribution(
                                  BrowserDistribution::CHROME_BROWSER)));

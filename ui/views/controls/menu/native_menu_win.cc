@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,30 +8,25 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/stl_util.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "base/win/wrapped_window_proc.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/accelerators/accelerator.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
-#include "ui/base/models/menu_model.h"
-#include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/canvas.h"
+#include "ui/base/win/hwnd_util.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/image/image.h"
-#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/native_theme.h"
 #include "ui/gfx/rect.h"
-#include "ui/gfx/win/hwnd_util.h"
-#include "ui/native_theme/native_theme.h"
-#include "ui/native_theme/native_theme_win.h"
 #include "ui/views/controls/menu/menu_2.h"
 #include "ui/views/controls/menu/menu_config.h"
-#include "ui/views/controls/menu/menu_insertion_delegate_win.h"
 #include "ui/views/controls/menu/menu_listener.h"
-#include "ui/views/layout/layout_constants.h"
 
-using ui::NativeTheme;
+using gfx::NativeTheme;
 
 namespace views {
 
@@ -44,6 +39,8 @@ static const int kItemTopMargin = 3;
 static const int kItemBottomMargin = 4;
 // Margins between the left of the item and the icon.
 static const int kItemLeftMargin = 4;
+// Margins between the right of the item and the label.
+static const int kItemRightMargin = 10;
 // The width for displaying the sub-menu arrow.
 static const int kArrowWidth = 10;
 
@@ -51,7 +48,7 @@ struct NativeMenuWin::ItemData {
   // The Windows API requires that whoever creates the menus must own the
   // strings used for labels, and keep them around for the lifetime of the
   // created menu. So be it.
-  base::string16 label;
+  string16 label;
 
   // Someone needs to own submenus, it may as well be us.
   scoped_ptr<Menu2> submenu;
@@ -76,12 +73,12 @@ static NativeMenuWin* GetNativeMenuWinFromHMENU(HMENU hmenu) {
 // structure we have constructed in NativeMenuWin.
 class NativeMenuWin::MenuHostWindow {
  public:
-  explicit MenuHostWindow(NativeMenuWin* parent) : parent_(parent) {
+  MenuHostWindow(NativeMenuWin* parent) : parent_(parent) {
     RegisterClass();
     hwnd_ = CreateWindowEx(l10n_util::GetExtendedStyles(), kWindowClassName,
                            L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
-    gfx::CheckWindowCreated(hwnd_);
-    gfx::SetWindowUserData(hwnd_, this);
+    ui::CheckWindowCreated(hwnd_);
+    ui::SetWindowUserData(hwnd_, this);
   }
 
   ~MenuHostWindow() {
@@ -98,21 +95,14 @@ class NativeMenuWin::MenuHostWindow {
     if (registered)
       return;
 
-    WNDCLASSEX window_class;
-    base::win::InitializeWindowClass(
-        kWindowClassName,
-        &base::win::WrappedWindowProc<MenuHostWindowProc>,
-        CS_DBLCLKS,
-        0,
-        0,
-        NULL,
-        reinterpret_cast<HBRUSH>(COLOR_WINDOW+1),
-        NULL,
-        NULL,
-        NULL,
-        &window_class);
-    ATOM clazz = RegisterClassEx(&window_class);
-    CHECK(clazz);
+    WNDCLASSEX wcex = {0};
+    wcex.cbSize = sizeof(WNDCLASSEX);
+    wcex.style = CS_DBLCLKS;
+    wcex.lpfnWndProc = base::win::WrappedWindowProc<&MenuHostWindowProc>;
+    wcex.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);
+    wcex.lpszClassName = kWindowClassName;
+    ATOM clazz = RegisterClassEx(&wcex);
+    DCHECK(clazz);
     registered = true;
   }
 
@@ -173,12 +163,12 @@ class NativeMenuWin::MenuHostWindow {
     if (data) {
       gfx::Font font;
       measure_item_struct->itemWidth = font.GetStringWidth(data->label) +
-          kIconWidth + kItemLeftMargin + views::kItemLabelSpacing -
+          kIconWidth + kItemLeftMargin + kItemRightMargin -
           GetSystemMetrics(SM_CXMENUCHECK);
       if (data->submenu.get())
         measure_item_struct->itemWidth += kArrowWidth;
       // If the label contains an accelerator, make room for tab.
-      if (data->label.find(L'\t') != base::string16::npos)
+      if (data->label.find(L'\t') != string16::npos)
         measure_item_struct->itemWidth += font.GetStringWidth(L" ");
       measure_item_struct->itemHeight =
           font.GetHeight() + kItemBottomMargin + kItemTopMargin;
@@ -218,7 +208,7 @@ class NativeMenuWin::MenuHostWindow {
       rect.top += kItemTopMargin;
       // Should we add kIconWidth only when icon.width() != 0 ?
       rect.left += kItemLeftMargin + kIconWidth;
-      rect.right -= views::kItemLabelSpacing;
+      rect.right -= kItemRightMargin;
       UINT format = DT_TOP | DT_SINGLELINE;
       // Check whether the mnemonics should be underlined.
       BOOL underline_mnemonics;
@@ -234,10 +224,10 @@ class NativeMenuWin::MenuHostWindow {
       // left and the accelerator on the right.
       // TODO(jungshik): This will break in RTL UI. Currently, he/ar use the
       //                 window system UI font and will not hit here.
-      base::string16 label = data->label;
-      base::string16 accel;
-      base::string16::size_type tab_pos = label.find(L'\t');
-      if (tab_pos != base::string16::npos) {
+      string16 label = data->label;
+      string16 accel;
+      string16::size_type tab_pos = label.find(L'\t');
+      if (tab_pos != string16::npos) {
         accel = label.substr(tab_pos);
         label = label.substr(0, tab_pos);
       }
@@ -254,25 +244,21 @@ class NativeMenuWin::MenuHostWindow {
 
       // Draw the icon after the label, otherwise it would be covered
       // by the label.
-      gfx::Image icon;
+      SkBitmap icon;
       if (data->native_menu_win->model_->GetIconAt(data->model_index, &icon)) {
         // We currently don't support items with both icons and checkboxes.
-        const gfx::ImageSkia* skia_icon = icon.ToImageSkia();
         DCHECK(type != ui::MenuModel::TYPE_CHECK);
-        gfx::Canvas canvas(
-            skia_icon->GetRepresentation(1.0f),
-            false);
+        gfx::CanvasSkia canvas(icon, false);
         skia::DrawToNativeContext(
             canvas.sk_canvas(), dc,
             draw_item_struct->rcItem.left + kItemLeftMargin,
             draw_item_struct->rcItem.top + (draw_item_struct->rcItem.bottom -
-                draw_item_struct->rcItem.top - skia_icon->height()) / 2, NULL);
+                draw_item_struct->rcItem.top - icon.height()) / 2, NULL);
       } else if (type == ui::MenuModel::TYPE_CHECK &&
                  data->native_menu_win->model_->IsItemCheckedAt(
                      data->model_index)) {
         // Manually render a checkbox.
-        ui::NativeThemeWin* native_theme = ui::NativeThemeWin::instance();
-        const MenuConfig& config = MenuConfig::instance(native_theme);
+        const MenuConfig& config = MenuConfig::instance();
         NativeTheme::State state;
         if (draw_item_struct->itemState & ODS_DISABLED) {
           state = NativeTheme::kDisabled;
@@ -285,18 +271,17 @@ class NativeMenuWin::MenuHostWindow {
         int icon_y = kItemTopMargin +
             (height - kItemTopMargin - kItemBottomMargin -
              config.check_height) / 2;
-        gfx::Canvas canvas(gfx::Size(config.check_width, config.check_height),
-                           1.0f,
-                           false);
+        gfx::CanvasSkia canvas(gfx::Size(config.check_width,
+                                         config.check_height), false);
         NativeTheme::ExtraParams extra;
         extra.menu_check.is_radio = false;
         gfx::Rect bounds(0, 0, config.check_width, config.check_height);
 
         // Draw the background and the check.
-        native_theme->Paint(
+        NativeTheme::instance()->Paint(
             canvas.sk_canvas(), NativeTheme::kMenuCheckBackground,
             state, bounds, extra);
-        native_theme->Paint(
+        NativeTheme::instance()->Paint(
             canvas.sk_canvas(), NativeTheme::kMenuCheck, state, bounds, extra);
 
         // Draw checkbox to menu.
@@ -349,7 +334,7 @@ class NativeMenuWin::MenuHostWindow {
                                              WPARAM w_param,
                                              LPARAM l_param) {
     MenuHostWindow* host =
-        reinterpret_cast<MenuHostWindow*>(gfx::GetWindowUserData(window));
+        reinterpret_cast<MenuHostWindow*>(ui::GetWindowUserData(window));
     // host is null during initial construction.
     LRESULT l_result = 0;
     if (!host || !host->ProcessWindowMessage(window, message, w_param, l_param,
@@ -398,7 +383,7 @@ NativeMenuWin::NativeMenuWin(ui::MenuModel* model, HWND system_menu_for)
       menu_action_(MENU_ACTION_NONE),
       menu_to_select_(NULL),
       position_to_select_(-1),
-      menu_to_select_factory_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(menu_to_select_factory_(this)),
       parent_(NULL),
       destroyed_flag_(NULL) {
 }
@@ -454,7 +439,7 @@ void NativeMenuWin::RunMenuAt(const gfx::Point& point, int alignment) {
     // state. Instead post a task, then notify. This mirrors what WM_MENUCOMMAND
     // does.
     menu_to_select_factory_.InvalidateWeakPtrs();
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&NativeMenuWin::DelayedSelect,
                    menu_to_select_factory_.GetWeakPtr()));
@@ -469,12 +454,12 @@ void NativeMenuWin::CancelMenu() {
   EndMenu();
 }
 
-void NativeMenuWin::Rebuild(MenuInsertionDelegateWin* delegate) {
+void NativeMenuWin::Rebuild() {
   ResetNativeMenu();
   items_.clear();
 
   owner_draw_ = model_->HasIcons() || owner_draw_;
-  first_item_index_ = delegate ? delegate->GetInsertionIndex(menu_) : 0;
+  first_item_index_ = model_->GetFirstItemIndex(GetNativeMenu());
   for (int menu_index = first_item_index_;
         menu_index < first_item_index_ + model_->GetItemCount(); ++menu_index) {
     int model_index = menu_index - first_item_index_;
@@ -504,7 +489,7 @@ void NativeMenuWin::UpdateStates() {
   }
 }
 
-HMENU NativeMenuWin::GetNativeMenu() const {
+gfx::NativeMenu NativeMenuWin::GetNativeMenu() const {
   return menu_;
 }
 
@@ -626,7 +611,7 @@ void NativeMenuWin::AddMenuItemAt(int menu_index, int model_index) {
     mii.fType = MFT_OWNERDRAW;
 
   ItemData* item_data = new ItemData;
-  item_data->label = base::string16();
+  item_data->label = string16();
   ui::MenuModel::ItemType type = model_->GetTypeAt(model_index);
   if (type == ui::MenuModel::TYPE_SUBMENU) {
     item_data->submenu.reset(new Menu2(model_->GetSubmenuModelAt(model_index)));
@@ -678,7 +663,7 @@ void NativeMenuWin::SetMenuItemState(int menu_index, bool enabled, bool checked,
 
 void NativeMenuWin::SetMenuItemLabel(int menu_index,
                                      int model_index,
-                                     const base::string16& label) {
+                                     const string16& label) {
   if (IsSeparatorItemAt(menu_index))
     return;
 
@@ -690,15 +675,15 @@ void NativeMenuWin::SetMenuItemLabel(int menu_index,
 
 void NativeMenuWin::UpdateMenuItemInfoForString(MENUITEMINFO* mii,
                                                 int model_index,
-                                                const base::string16& label) {
-  base::string16 formatted = label;
+                                                const string16& label) {
+  string16 formatted = label;
   ui::MenuModel::ItemType type = model_->GetTypeAt(model_index);
   // Strip out any tabs, otherwise they get interpreted as accelerators and can
   // lead to weird behavior.
   ReplaceSubstringsAfterOffset(&formatted, 0, L"\t", L" ");
   if (type != ui::MenuModel::TYPE_SUBMENU) {
     // Add accelerator details to the label if provided.
-    ui::Accelerator accelerator(ui::VKEY_UNKNOWN, ui::EF_NONE);
+    ui::Accelerator accelerator(ui::VKEY_UNKNOWN, false, false, false);
     if (model_->GetAcceleratorAt(model_index, &accelerator)) {
       formatted += L"\t";
       formatted += accelerator.GetShortcutText();
@@ -754,11 +739,26 @@ void NativeMenuWin::CreateHostWindow() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// SystemMenuModel:
+
+SystemMenuModel::SystemMenuModel(ui::SimpleMenuModel::Delegate* delegate)
+    : SimpleMenuModel(delegate) {
+}
+
+SystemMenuModel::~SystemMenuModel() {
+}
+
+int SystemMenuModel::GetFirstItemIndex(gfx::NativeMenu native_menu) const {
+  // We allow insertions before last item (Close).
+  return std::max(0, GetMenuItemCount(native_menu) - 1);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // MenuWrapper, public:
 
 // static
-MenuWrapper* MenuWrapper::CreateWrapper(ui::MenuModel* model) {
-  return new NativeMenuWin(model, NULL);
+MenuWrapper* MenuWrapper::CreateWrapper(Menu2* menu) {
+  return new NativeMenuWin(menu->model(), NULL);
 }
 
 }  // namespace views

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define NET_SOCKET_SSL_SERVER_SOCKET_H_
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/socket/ssl_socket.h"
@@ -32,16 +31,6 @@ class SSLServerSocket : public SSLSocket {
   virtual int Handshake(const CompletionCallback& callback) = 0;
 };
 
-// Configures the underlying SSL library for the use of SSL server sockets.
-//
-// Due to the requirements of the underlying libraries, this should be called
-// early in process initialization, before any SSL socket, client or server,
-// has been used.
-//
-// Note: If a process does not use SSL server sockets, this call may be
-// omitted.
-NET_EXPORT void EnableSSLServerSockets();
-
 // Creates an SSL server socket over an already-connected transport socket.
 // The caller must provide the server certificate and private key to use.
 //
@@ -53,8 +42,8 @@ NET_EXPORT void EnableSSLServerSockets();
 //
 // The caller starts the SSL server handshake by calling Handshake on the
 // returned socket.
-NET_EXPORT scoped_ptr<SSLServerSocket> CreateSSLServerSocket(
-    scoped_ptr<StreamSocket> socket,
+NET_EXPORT SSLServerSocket* CreateSSLServerSocket(
+    StreamSocket* socket,
     X509Certificate* certificate,
     crypto::RSAPrivateKey* key,
     const SSLConfig& ssl_config);

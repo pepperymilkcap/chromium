@@ -5,15 +5,16 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
+#include "chrome/test/automation/window_proxy.h"
+#include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
-#include "testing/perf/perf_test.h"
+#include "net/test/test_server.h"
 
 namespace {
 
@@ -24,9 +25,8 @@ namespace {
 class MachPortsTest : public UIPerfTest {
  public:
   MachPortsTest()
-      : server_(net::SpawnedTestServer::TYPE_HTTP,
-                net::SpawnedTestServer::kLocalhost,
-                base::FilePath(FILE_PATH_LITERAL("data/mach_ports/moz"))) {
+      : server_(net::TestServer::TYPE_HTTP,
+                FilePath(FILE_PATH_LITERAL("data/mach_ports/moz"))) {
   }
 
   virtual void SetUp() OVERRIDE {
@@ -61,7 +61,7 @@ class MachPortsTest : public UIPerfTest {
   }
 
  private:
-  net::SpawnedTestServer server_;
+  net::TestServer server_;
   std::vector<int> port_counts_;
 };
 
@@ -72,7 +72,10 @@ TEST_F(MachPortsTest, GetCounts) {
   RecordPortCount();
 
   // Create a browser and open a few tabs.
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  scoped_refptr<WindowProxy> window(automation()->GetActiveWindow());
+  ASSERT_TRUE(window.get());
+
+  scoped_refptr<BrowserProxy> browser(automation()->FindTabbedBrowserWindow());
   ASSERT_TRUE(browser.get());
 
   EXPECT_TRUE(AddTab(browser, "www.google.com"));

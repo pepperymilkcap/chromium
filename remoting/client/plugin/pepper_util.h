@@ -1,36 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef REMOTING_CLIENT_PLUGIN_PLUGIN_UTIL_H_
 #define REMOTING_CLIENT_PLUGIN_PLUGIN_UTIL_H_
 
-#include <stdint.h>
-
+#include "base/basictypes.h"
 #include "base/callback_forward.h"
 
-namespace pp {
-class InstanceHandle;
-class NetAddress;
-}
-
-namespace talk_base {
-class SocketAddress;
-}
+#include "ppapi/cpp/completion_callback.h"
 
 namespace remoting {
 
-// Helpers to convert between different socket address representations.
-bool SocketAddressToPpNetAddressWithPort(
-    const pp::InstanceHandle& instance,
-    const talk_base::SocketAddress& address,
-    pp::NetAddress* pp_net_address,
-    uint16_t port);
-bool SocketAddressToPpNetAddress(const pp::InstanceHandle& instance,
-                                 const talk_base::SocketAddress& address,
-                                 pp::NetAddress* pp_net_address);
-void PpNetAddressToSocketAddress(const pp::NetAddress& pp_net_address,
-                                 talk_base::SocketAddress* address);
+// Function for adapting a Chromium base::Closure to a PP_CompletionCallback
+// friendly function.  The base::Closure object should be a dynamically
+// allocated copy of the result from base::Bind(). It should be passed as
+// |user_data|.  This function will invoke base::Closure::Run() on
+// |user_data| when called, and then delete |user_data|.
+void CompletionCallbackClosureAdapter(void* user_data, int32_t not_used);
 
 }  // namespace remoting
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,18 +27,10 @@
 
 #ifndef BASE_ATOMICOPS_H_
 #define BASE_ATOMICOPS_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "build/build_config.h"
-
-#if defined(OS_WIN) && defined(ARCH_CPU_64_BITS)
-// windows.h #defines this (only on x64). This causes problems because the
-// public API also uses MemoryBarrier at the public name for this fence. So, on
-// X64, undef it, and call its documented
-// (http://msdn.microsoft.com/en-us/library/windows/desktop/ms684208.aspx)
-// implementation directly.
-#undef MemoryBarrier
-#endif
 
 namespace base {
 namespace subtle {
@@ -47,7 +39,7 @@ typedef int32 Atomic32;
 #ifdef ARCH_CPU_64_BITS
 // We need to be able to go between Atomic64 and AtomicWord implicitly.  This
 // means Atomic64 and AtomicWord should be the same type on 64-bit.
-#if defined(__ILP32__) || defined(OS_NACL)
+#if defined(OS_NACL)
 // NaCl's intptr_t is not actually 64-bits on 64-bit!
 // http://code.google.com/p/nativeclient/issues/detail?id=1162
 typedef int64_t Atomic64;
@@ -137,20 +129,14 @@ Atomic64 Release_Load(volatile const Atomic64* ptr);
 }  // namespace base
 
 // Include our platform specific implementation.
-#if defined(THREAD_SANITIZER)
-#include "base/atomicops_internals_tsan.h"
-#elif defined(OS_WIN) && defined(COMPILER_MSVC) && defined(ARCH_CPU_X86_FAMILY)
+#if defined(OS_WIN) && defined(COMPILER_MSVC) && defined(ARCH_CPU_X86_FAMILY)
 #include "base/atomicops_internals_x86_msvc.h"
-#elif defined(OS_MACOSX)
-#include "base/atomicops_internals_mac.h"
-#elif defined(OS_NACL)
-#include "base/atomicops_internals_gcc.h"
-#elif defined(COMPILER_GCC) && defined(ARCH_CPU_ARM_FAMILY)
-#include "base/atomicops_internals_arm_gcc.h"
+#elif defined(OS_MACOSX) && defined(ARCH_CPU_X86_FAMILY)
+#include "base/atomicops_internals_x86_macosx.h"
 #elif defined(COMPILER_GCC) && defined(ARCH_CPU_X86_FAMILY)
 #include "base/atomicops_internals_x86_gcc.h"
-#elif defined(COMPILER_GCC) && defined(ARCH_CPU_MIPS_FAMILY)
-#include "base/atomicops_internals_mips_gcc.h"
+#elif defined(COMPILER_GCC) && defined(ARCH_CPU_ARM_FAMILY)
+#include "base/atomicops_internals_arm_gcc.h"
 #else
 #error "Atomic operations are not supported on your platform"
 #endif

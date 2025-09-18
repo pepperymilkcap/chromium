@@ -7,23 +7,24 @@
 #include <gdk/gdkkeysyms.h>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas.h"
+#include "ui/base/text/text_elider.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/text_elider.h"
 
 namespace {
 
@@ -44,7 +45,7 @@ const GdkColor kBackgroundColor = GDK_COLOR_RGB(0xff, 0xff, 0xff);
 }  // namespace
 
 AvatarMenuItemGtk::AvatarMenuItemGtk(Delegate* delegate,
-                                     const AvatarMenu::Item& item,
+                                     const AvatarMenuModel::Item& item,
                                      size_t item_index,
                                      GtkThemeService* theme_service)
     : delegate_(delegate),
@@ -53,7 +54,8 @@ AvatarMenuItemGtk::AvatarMenuItemGtk(Delegate* delegate,
       theme_service_(theme_service),
       status_label_(NULL),
       link_alignment_(NULL),
-      edit_profile_link_(NULL) {
+      edit_profile_link_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   Init(theme_service_);
 
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
@@ -65,21 +67,42 @@ AvatarMenuItemGtk::~AvatarMenuItemGtk() {
   widget_.Destroy();
 }
 
+void AvatarMenuItemGtk::OpenProfile() {
+  delegate_->OpenProfile(item_index_);
+}
+
 gboolean AvatarMenuItemGtk::OnProfileClick(GtkWidget* widget,
                                            GdkEventButton* event) {
-  delegate_->OpenProfile(item_index_);
+  // delegate_->EditProfile() will close the avatar bubble which in turn
+  // try to destroy this AvatarMenuItemGtk.
+  // This is not OK to do this from the signal handler, so we'll
+  // defer it.
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&AvatarMenuItemGtk::OpenProfile,
+                 weak_factory_.GetWeakPtr()));
   return FALSE;
 }
 
 gboolean AvatarMenuItemGtk::OnProfileKeyPress(GtkWidget* widget,
                                               GdkEventKey* event) {
+  // delegate_->EditProfile() will close the avatar bubble which in turn
+  // try to destroy this AvatarMenuItemGtk.
+  // This is not OK to do this from the signal handler, so we'll
+  // defer it.
   if (event->keyval == GDK_Return ||
       event->keyval == GDK_ISO_Enter ||
       event->keyval == GDK_KP_Enter) {
     if (item_.active)
-      delegate_->EditProfile(item_index_);
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&AvatarMenuItemGtk::EditProfile,
+                     weak_factory_.GetWeakPtr()));
     else
-      delegate_->OpenProfile(item_index_);
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&AvatarMenuItemGtk::OpenProfile,
+                     weak_factory_.GetWeakPtr()));
   }
 
   return FALSE;
@@ -135,6 +158,10 @@ gboolean AvatarMenuItemGtk::OnProfileLeave(GtkWidget* widget,
   return FALSE;
 }
 
+void AvatarMenuItemGtk::EditProfile() {
+  delegate_->EditProfile(item_index_);
+}
+
 void AvatarMenuItemGtk::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
@@ -153,10 +180,23 @@ void AvatarMenuItemGtk::Observe(int type,
   // Assume that the widget isn't highlighted since theme changes will almost
   // never happen while we're up.
   gtk_widget_modify_bg(widget_.get(), GTK_STATE_NORMAL, unhighlighted_color_);
+
+  if (edit_profile_link_) {
+    gtk_chrome_link_button_set_use_gtk_theme(
+        GTK_CHROME_LINK_BUTTON(edit_profile_link_),
+        using_native);
+  }
 }
 
 void AvatarMenuItemGtk::OnEditProfileLinkClicked(GtkWidget* link) {
-  delegate_->EditProfile(item_index_);
+  // delegate_->EditProfile() will close the avatar bubble which in turn
+  // try to destroy this AvatarMenuItemGtk.
+  // This is not OK to do this from the signal handler, so we'll
+  // defer it.
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&AvatarMenuItemGtk::EditProfile,
+                 weak_factory_.GetWeakPtr()));
 }
 
 gboolean AvatarMenuItemGtk::OnEventBoxExpose(GtkWidget* widget,
@@ -201,21 +241,19 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
   // of the profile icon.
   if (item_.active) {
     const SkBitmap* avatar_image = item_.icon.ToSkBitmap();
-    gfx::ImageSkiaRep avatar_image_rep = gfx::ImageSkiaRep(*avatar_image, 1.0f);
-    gfx::Canvas canvas(avatar_image_rep, /* is_opaque */ true);
+    gfx::CanvasSkia canvas(*avatar_image, /* is_opaque */ true);
 
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    const gfx::ImageSkia* check_image = rb.GetImageNamed(
-        IDR_PROFILE_SELECTED).ToImageSkia();
-    gfx::Rect check_rect(0, 0, check_image->width(), check_image->height());
-    int y = avatar_image->height() - check_image->height();
-    int x = avatar_image->width() - check_image->width() + kCheckMarkXOffset;
-    canvas.DrawImageInt(*check_image, x, y);
+    SkBitmap check_image = rb.GetImageNamed(IDR_PROFILE_SELECTED);
+    gfx::Rect check_rect(0, 0, check_image.width(), check_image.height());
+    int y = avatar_image->height() - check_image.height();
+    int x = avatar_image->width() - check_image.width() + kCheckMarkXOffset;
+    canvas.DrawBitmapInt(check_image, x, y);
 
-    SkBitmap final_image = canvas.ExtractImageRep().sk_bitmap();
-    avatar_pixbuf = gfx::GdkPixbufFromSkBitmap(final_image);
+    SkBitmap final_image = canvas.ExtractBitmap();
+    avatar_pixbuf = gfx::GdkPixbufFromSkBitmap(&final_image);
   } else {
-    avatar_pixbuf = gfx::GdkPixbufFromSkBitmap(*item_.icon.ToSkBitmap());
+    avatar_pixbuf = gfx::GdkPixbufFromSkBitmap(item_.icon.ToSkBitmap());
   }
 
   GtkWidget* avatar_image = gtk_image_new_from_pixbuf(avatar_pixbuf);
@@ -226,29 +264,23 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
   // The user name label.
   GtkWidget* item_vbox = gtk_vbox_new(FALSE, 0);
   GtkWidget* name_label = NULL;
-  base::string16 elided_name = gfx::ElideText(item_.name,
-                                              gfx::FontList(),
-                                              kUserNameMaxWidth,
-                                              gfx::ELIDE_AT_END);
-
-  name_label = theme_service->BuildLabel(base::UTF16ToUTF8(elided_name),
-                                         ui::kGdkBlack);
+  string16 elided_name = ui::ElideText(item_.name,
+                                       gfx::Font(),
+                                       kUserNameMaxWidth,
+                                       ui::ELIDE_AT_END);
   if (item_.active) {
-    char* markup = g_markup_printf_escaped(
-        "<span weight='bold'>%s</span>",
-        base::UTF16ToUTF8(elided_name).c_str());
-    gtk_label_set_markup(GTK_LABEL(name_label), markup);
-    g_free(markup);
+    name_label = gtk_util::CreateBoldLabel(UTF16ToUTF8(elided_name));
+  } else {
+    name_label = theme_service->BuildLabel(UTF16ToUTF8(elided_name),
+                                           ui::kGdkBlack);
   }
-
   gtk_misc_set_alignment(GTK_MISC(name_label), 0, 0);
   gtk_box_pack_start(GTK_BOX(item_vbox), name_label, TRUE, TRUE, 0);
 
   // The sync status label.
-  status_label_ = theme_service_->BuildLabel(std::string(), ui::kGdkBlack);
+  status_label_ = gtk_label_new("");
   char* markup = g_markup_printf_escaped(
-      "<span size='small'>%s</span>",
-      base::UTF16ToUTF8(item_.sync_state).c_str());
+      "<span size='small'>%s</span>", UTF16ToUTF8(item_.sync_state).c_str());
   gtk_label_set_markup(GTK_LABEL(status_label_), markup);
   g_free(markup);
   gtk_misc_set_alignment(GTK_MISC(status_label_), 0, 0);
@@ -258,8 +290,8 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
 
   if (item_.active) {
     // The "edit your profile" link.
-    edit_profile_link_ = theme_service_->BuildChromeLinkButton(
-        l10n_util::GetStringUTF8(IDS_PROFILES_EDIT_PROFILE_LINK));
+    edit_profile_link_ = gtk_chrome_link_button_new(
+        l10n_util::GetStringUTF8(IDS_PROFILES_EDIT_PROFILE_LINK).c_str());
     // Fix for bug#107348. edit link steals focus from menu item which
     // hides edit link button in focus-out-event handler,
     // so, it misses the click event.

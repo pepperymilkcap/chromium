@@ -10,12 +10,12 @@
 #include <objbase.h>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
-#include "base/process/process.h"
-#include "base/strings/stringprintf.h"
+#include "base/process.h"
+#include "base/scoped_temp_dir.h"
+#include "base/stringprintf.h"
 #include "base/win/event_trace_controller.h"
 #include "base/win/event_trace_provider.h"
 #include "base/win/scoped_handle.h"
@@ -23,10 +23,13 @@
 
 #include <initguid.h>  // NOLINT - has to be last
 
-namespace base {
-namespace win {
-
 namespace {
+
+using base::win::EtwMofEvent;
+using base::win::EtwTraceController;
+using base::win::EtwTraceConsumerBase;
+using base::win::EtwTraceProperties;
+using base::win::EtwTraceProvider;
 
 typedef std::list<EVENT_TRACE> EventQueue;
 
@@ -67,21 +70,21 @@ class TestConsumer: public EtwTraceConsumerBase<TestConsumer> {
     ::SetEvent(sank_event_.Get());
   }
 
-  static ScopedHandle sank_event_;
+  static base::win::ScopedHandle sank_event_;
   static EventQueue events_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestConsumer);
 };
 
-ScopedHandle TestConsumer::sank_event_;
+base::win::ScopedHandle TestConsumer::sank_event_;
 EventQueue TestConsumer::events_;
 
 class EtwTraceConsumerBaseTest: public testing::Test {
  public:
   EtwTraceConsumerBaseTest()
-      : session_name_(StringPrintf(L"TestSession-%d",
-                                   Process::Current().pid())) {
+      : session_name_(base::StringPrintf(L"TestSession-%d",
+                                         base::Process::Current().pid())) {
   }
 
   virtual void SetUp() {
@@ -203,8 +206,9 @@ class EtwTraceConsumerRealtimeTest: public EtwTraceConsumerBaseTest {
   }
 
   TestConsumer consumer_;
-  ScopedHandle consumer_ready_;
-  ScopedHandle consumer_thread_;
+  GUID test_provider_;
+  base::win::ScopedHandle consumer_ready_;
+  base::win::ScopedHandle consumer_thread_;
 };
 
 }  // namespace
@@ -279,8 +283,6 @@ class EtwTraceConsumerDataTest: public EtwTraceConsumerBaseTest {
   }
 
   virtual void SetUp() {
-    EtwTraceConsumerBaseTest::SetUp();
-
     EtwTraceProperties prop;
     EtwTraceController::Stop(session_name_.c_str(), &prop);
 
@@ -291,7 +293,7 @@ class EtwTraceConsumerDataTest: public EtwTraceConsumerBaseTest {
   }
 
   virtual void TearDown() {
-    EXPECT_TRUE(base::DeleteFile(temp_file_, false));
+    EXPECT_TRUE(file_util::Delete(temp_file_, false));
 
     EtwTraceConsumerBaseTest::TearDown();
   }
@@ -335,7 +337,7 @@ class EtwTraceConsumerDataTest: public EtwTraceConsumerBaseTest {
   }
 
   HRESULT RoundTripEvent(PEVENT_TRACE_HEADER header, PEVENT_TRACE* trace) {
-    base::DeleteFile(temp_file_, false);
+    file_util::Delete(temp_file_, false);
 
     HRESULT hr = LogEventToTempSession(header);
     if (SUCCEEDED(hr))
@@ -378,6 +380,3 @@ TEST_F(EtwTraceConsumerDataTest, RoundTrip) {
   ASSERT_EQ(sizeof(kData), trace->MofLength);
   ASSERT_STREQ(kData, reinterpret_cast<const char*>(trace->MofData));
 }
-
-}  // namespace win
-}  // namespace base

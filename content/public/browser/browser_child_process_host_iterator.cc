@@ -11,25 +11,20 @@
 namespace content {
 
 BrowserChildProcessHostIterator::BrowserChildProcessHostIterator()
-    : all_(true), process_type_(PROCESS_TYPE_UNKNOWN) {
+    : all_(true), type_(content::PROCESS_TYPE_UNKNOWN) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO)) <<
-      "BrowserChildProcessHostIterator must be used on the IO thread.";
+        "BrowserChildProcessHostIterator must be used on the IO thread.";
   iterator_ = BrowserChildProcessHostImpl::GetIterator()->begin();
 }
 
-BrowserChildProcessHostIterator::BrowserChildProcessHostIterator(int type)
-    : all_(false), process_type_(type) {
+BrowserChildProcessHostIterator::BrowserChildProcessHostIterator(
+    content::ProcessType type)
+    : all_(false), type_(type) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO)) <<
-      "BrowserChildProcessHostIterator must be used on the IO thread.";
-  DCHECK_NE(PROCESS_TYPE_RENDERER, type) <<
-      "BrowserChildProcessHostIterator doesn't work for renderer processes; "
-      "try RenderProcessHost::AllHostsIterator() instead.";
+        "BrowserChildProcessHostIterator must be used on the IO thread.";
   iterator_ = BrowserChildProcessHostImpl::GetIterator()->begin();
-  if (!Done() && (*iterator_)->GetData().process_type != process_type_)
+  if (!Done() && (*iterator_)->GetData().type != type_)
     ++(*this);
-}
-
-BrowserChildProcessHostIterator::~BrowserChildProcessHostIterator() {
 }
 
 bool BrowserChildProcessHostIterator::operator++() {
@@ -39,7 +34,7 @@ bool BrowserChildProcessHostIterator::operator++() {
     if (Done())
       break;
 
-    if (!all_ && (*iterator_)->GetData().process_type != process_type_)
+    if (!all_ && (*iterator_)->GetData().type != type_)
       continue;
 
     return true;

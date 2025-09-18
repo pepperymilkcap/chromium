@@ -1,39 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/shared_impl/resource_tracker.h"
 
-#include "base/bind.h"
-#include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
 #include "ppapi/shared_impl/callback_tracker.h"
 #include "ppapi/shared_impl/id_assignment.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
-#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/resource.h"
 
 namespace ppapi {
 
-ResourceTracker::ResourceTracker(ThreadMode thread_mode)
-    : last_resource_value_(0),
-      weak_ptr_factory_(this) {
-  if (thread_mode == SINGLE_THREADED)
-    thread_checker_.reset(new base::ThreadChecker);
+ResourceTracker::ResourceTracker() : last_resource_value_(0) {
 }
 
 ResourceTracker::~ResourceTracker() {
 }
 
-void ResourceTracker::CheckThreadingPreconditions() const {
-  DCHECK(!thread_checker_ || thread_checker_->CalledOnValidThread());
-#ifndef NDEBUG
-  ProxyLock::AssertAcquired();
-#endif
-}
-
 Resource* ResourceTracker::GetResource(PP_Resource res) const {
-  CheckThreadingPreconditions();
   ResourceMap::const_iterator i = live_resources_.find(res);
   if (i == live_resources_.end())
     return NULL;
@@ -41,12 +25,8 @@ Resource* ResourceTracker::GetResource(PP_Resource res) const {
 }
 
 void ResourceTracker::AddRefResource(PP_Resource res) {
-  CheckThreadingPreconditions();
   DLOG_IF(ERROR, !CheckIdType(res, PP_ID_TYPE_RESOURCE))
       << res << " is not a PP_Resource.";
-
-  DCHECK(CanOperateOnResource(res));
-
   ResourceMap::iterator i = live_resources_.find(res);
   if (i == live_resources_.end())
     return;
@@ -66,12 +46,8 @@ void ResourceTracker::AddRefResource(PP_Resource res) {
 }
 
 void ResourceTracker::ReleaseResource(PP_Resource res) {
-  CheckThreadingPreconditions();
   DLOG_IF(ERROR, !CheckIdType(res, PP_ID_TYPE_RESOURCE))
       << res << " is not a PP_Resource.";
-
-  DCHECK(CanOperateOnResource(res));
-
   ResourceMap::iterator i = live_resources_.find(res);
   if (i == live_resources_.end())
     return;
@@ -91,16 +67,7 @@ void ResourceTracker::ReleaseResource(PP_Resource res) {
   }
 }
 
-void ResourceTracker::ReleaseResourceSoon(PP_Resource res) {
-  base::MessageLoop::current()->PostNonNestableTask(
-      FROM_HERE,
-      RunWhileLocked(base::Bind(&ResourceTracker::ReleaseResource,
-                                weak_ptr_factory_.GetWeakPtr(),
-                                res)));
-}
-
 void ResourceTracker::DidCreateInstance(PP_Instance instance) {
-  CheckThreadingPreconditions();
   // Due to the infrastructure of some tests, the instance is registered
   // twice in a few cases. It would be nice not to do that and assert here
   // instead.
@@ -110,10 +77,9 @@ void ResourceTracker::DidCreateInstance(PP_Instance instance) {
 }
 
 void ResourceTracker::DidDeleteInstance(PP_Instance instance) {
-  CheckThreadingPreconditions();
   InstanceMap::iterator found_instance = instance_map_.find(instance);
 
-  // Due to the infrastructure of some tests, the instance is unregistered
+  // Due to the infrastructure of some tests, the instance is uyregistered
   // twice in a few cases. It would be nice not to do that and assert here
   // instead.
   if (found_instance == instance_map_.end())
@@ -157,7 +123,7 @@ void ResourceTracker::DidDeleteInstance(PP_Instance instance) {
   while (cur != to_delete.end()) {
     ResourceMap::iterator found_resource = live_resources_.find(*cur);
     if (found_resource != live_resources_.end())
-      found_resource->second.first->NotifyInstanceWasDeleted();
+      found_resource->second.first->InstanceWasDeleted();
     cur++;
   }
 
@@ -165,55 +131,37 @@ void ResourceTracker::DidDeleteInstance(PP_Instance instance) {
 }
 
 int ResourceTracker::GetLiveObjectsForInstance(PP_Instance instance) const {
-  CheckThreadingPreconditions();
   InstanceMap::const_iterator found = instance_map_.find(instance);
   if (found == instance_map_.end())
     return 0;
   return static_cast<int>(found->second->resources.size());
 }
 
-void ResourceTracker::UseOddResourceValueInDebugMode() {
-#if !defined(NDEBUG)
-  DCHECK_EQ(0, last_resource_value_);
-
-  ++last_resource_value_;
-#endif
-}
-
 PP_Resource ResourceTracker::AddResource(Resource* object) {
-  CheckThreadingPreconditions();
   // If the plugin manages to create too many resources, don't do crazy stuff.
-  if (last_resource_value_ >= kMaxPPId)
+  if (last_resource_value_ == kMaxPPId)
     return 0;
 
-  // Allocate an ID. Note there's a rare error condition below that means we
-  // could end up not using |new_id|, but that's harmless.
-  PP_Resource new_id = MakeTypedId(GetNextResourceValue(), PP_ID_TYPE_RESOURCE);
-
-  // Some objects have a 0 instance, meaning they aren't associated with any
-  // instance, so they won't be in |instance_map_|. This is (as of this writing)
-  // only true of the PPB_MessageLoop resource for the main thread.
-  if (object->pp_instance()) {
-    InstanceMap::iterator found = instance_map_.find(object->pp_instance());
-    if (found == instance_map_.end()) {
-      // If you hit this, it's likely somebody forgot to call DidCreateInstance,
-      // the resource was created with an invalid PP_Instance, or the renderer
-      // side tried to create a resource for a plugin that crashed/exited. This
-      // could happen for OOP plugins where due to reentrancies in context of
-      // outgoing sync calls the renderer can send events after a plugin has
-      // exited.
-      DLOG(INFO) << "Failed to find plugin instance in instance map";
-      return 0;
-    }
-    found->second->resources.insert(new_id);
+  InstanceMap::iterator found = instance_map_.find(object->pp_instance());
+  if (found == instance_map_.end()) {
+    // If you hit this, it's likely somebody forgot to call DidCreateInstance,
+    // the resource was created with an invalid PP_Instance, or the renderer
+    // side tried to create a resource for a plugin that crashed/exited. This
+    // could happen for OOP plugins where due to reentrancies in context of
+    // outgoing sync calls the renderer can send events after a plugin has
+    // exited.
+    DLOG(INFO) << "Failed to find plugin instance in instance map";
+    return 0;
   }
+
+  PP_Resource new_id = MakeTypedId(++last_resource_value_, PP_ID_TYPE_RESOURCE);
+  found->second->resources.insert(new_id);
 
   live_resources_[new_id] = ResourceAndRefCount(object, 0);
   return new_id;
 }
 
 void ResourceTracker::RemoveResource(Resource* object) {
-  CheckThreadingPreconditions();
   PP_Resource pp_resource = object->pp_resource();
   InstanceMap::iterator found = instance_map_.find(object->pp_instance());
   if (found != instance_map_.end())
@@ -222,52 +170,9 @@ void ResourceTracker::RemoveResource(Resource* object) {
 }
 
 void ResourceTracker::LastPluginRefWasDeleted(Resource* object) {
-  // Bug http://crbug.com/134611 indicates that sometimes the resource tracker
-  // is null here. This should never be the case since if we have a resource in
-  // the tracker, it should always have a valid instance associated with it
-  // (except for the resource for the main thread's message loop, which has
-  // instance set to 0).
-  // As a result, we do some CHECKs here to see what types of problems the
-  // instance might have before dispatching.
-  //
-  // TODO(brettw) remove these checks when this bug is no longer relevant.
-  // Note, we do an imperfect check here; this might be a loop that's not the
-  // main one.
-  const bool is_message_loop = (object->AsPPB_MessageLoop_API() != NULL);
-  CHECK(object->pp_instance() || is_message_loop);
-  CallbackTracker* callback_tracker =
-      PpapiGlobals::Get()->GetCallbackTrackerForInstance(object->pp_instance());
-  CHECK(callback_tracker || is_message_loop);
-  if (callback_tracker)
-    callback_tracker->PostAbortForResource(object->pp_resource());
-  object->NotifyLastPluginRefWasDeleted();
-}
-
-int32 ResourceTracker::GetNextResourceValue() {
-#if defined(NDEBUG)
-  return ++last_resource_value_;
-#else
-  // In debug mode, the least significant bit indicates which side (renderer
-  // or plugin process) created the resource. Increment by 2 so it's always the
-  // same.
-  last_resource_value_ += 2;
-  return last_resource_value_;
-#endif
-}
-
-bool ResourceTracker::CanOperateOnResource(PP_Resource res) {
-#if defined(NDEBUG)
-  return true;
-#else
-  // The invalid PP_Resource value could appear at both sides.
-  if (res == 0)
-    return true;
-
-  // Skipping the type bits, the least significant bit of |res| should be the
-  // same as that of |last_resource_value_|.
-  return ((res >> kPPIdTypeBits) & 1) == (last_resource_value_ & 1);
-#endif
-
+  PpapiGlobals::Get()->GetCallbackTrackerForInstance(object->pp_instance())->
+      PostAbortForResource(object->pp_resource());
+  object->LastPluginRefWasDeleted();
 }
 
 }  // namespace ppapi

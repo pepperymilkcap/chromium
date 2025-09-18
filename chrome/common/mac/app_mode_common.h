@@ -1,80 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_COMMON_MAC_APP_MODE_COMMON_H_
 #define CHROME_COMMON_MAC_APP_MODE_COMMON_H_
+#pragma once
 
-#import <Foundation/Foundation.h>
-
-#include "base/files/file_path.h"
-#include "base/strings/string16.h"
+#include <CoreFoundation/CoreFoundation.h>
 
 // This file contains constants, interfaces, etc. which are common to the
 // browser application and the app mode loader (a.k.a. shim).
 
 namespace app_mode {
 
-// These are keys for an Apple Event ping that the app shim process sends to
-// Chrome to get confirmation that Chrome is alive. The main Chrome process
-// doesn't need to register any handlers for them -- the event is just sent for
-// the empty reply that's automatically returned by the system.
-const AEEventClass kAEChromeAppClass = 'cApp';
-const AEEventID kAEChromeAppPing = 'ping';
-
-// The IPC socket used to communicate between app shims and Chrome will be
-// created under the user data directory with this name.
-extern const char kAppShimSocketName[];
-
-// Special app mode id used for the App Launcher.
-extern const char kAppListModeId[];
-
-// The process ID of the Chrome process that launched the app shim.
-// The presence of this switch instructs the app shim to send LaunchApp with
-// launch_now = false. This associates the shim without launching the app.
-extern const char kLaunchedByChromeProcessId[];
-
-// The display name of the bundle as shown in Finder and the Dock. For localized
-// bundles, this overrides the bundle's file name.
-extern NSString* const kCFBundleDisplayNameKey;
-
-// The key specifying whether the display name should be localized. This makes
-// Finder look in localization folders in the app bundle for a display name.
-// (e.g. Content/Resources/en.lproj/)
-extern NSString* const kLSHasLocalizedDisplayNameKey;
-
 // The key under which the browser's bundle ID will be stored in the
 // app mode launcher bundle's Info.plist.
-extern NSString* const kBrowserBundleIDKey;
+extern const CFStringRef kBrowserBundleIDKey;
 
-// Key for the shortcut ID.
-extern NSString* const kCrAppModeShortcutIDKey;
-
-// Key for the app's name.
-extern NSString* const kCrAppModeShortcutNameKey;
-
-// Key for the app's URL.
-extern NSString* const kCrAppModeShortcutURLKey;
-
-// Key for the app user data directory.
-extern NSString* const kCrAppModeUserDataDirKey;
-
-// Key for the app's extension path.
-extern NSString* const kCrAppModeProfileDirKey;
-
-// Key for the app's profile display name.
-extern NSString* const kCrAppModeProfileNameKey;
-
-// When the Chrome browser is run, it stores its location in the defaults
-// system using this key.
-extern NSString* const kLastRunAppBundlePathPrefsKey;
-
-// Placeholders used in the app mode loader bundle' Info.plist:
-extern NSString* const kShortcutIdPlaceholder; // Extension shortcut ID.
-extern NSString* const kShortcutNamePlaceholder; // Extension name.
-extern NSString* const kShortcutURLPlaceholder;
-// Bundle ID of the Chrome browser bundle.
-extern NSString* const kShortcutBrowserBundleIDPlaceholder;
+// The key under which to record the path to the (user-visible) application
+// bundle; this key is recorded under the ID given by |kAppPrefsID|.
+extern const CFStringRef kLastRunAppBundlePathPrefsKey;
 
 // Current major/minor version numbers of |ChromeAppModeInfo| (defined below).
 const unsigned kCurrentChromeAppModeInfoMajorVersion = 1;
@@ -87,10 +32,6 @@ const unsigned kCurrentChromeAppModeInfoMinorVersion = 0;
 // version number. It may refuse to load if the major version of the structure
 // is different from the one it accepts.
 struct ChromeAppModeInfo {
- public:
-  ChromeAppModeInfo();
-  ~ChromeAppModeInfo();
-
   // Major and minor version number of this structure.
   unsigned major_version;  // Required: all versions
   unsigned minor_version;  // Required: all versions
@@ -100,31 +41,25 @@ struct ChromeAppModeInfo {
   char** argv;  // Required: v1.0
 
   // Versioned path to the browser which is being loaded.
-  base::FilePath chrome_versioned_path;  // Required: v1.0
-
-  // Path to Chrome app bundle.
-  base::FilePath chrome_outer_bundle_path;  // Required: v1.0
+  char* chrome_versioned_path;  // Required: v1.0
 
   // Information about the App Mode shortcut:
 
-  // Path to the App Mode Loader application bundle that launched the process.
-  base::FilePath app_mode_bundle_path;  // Optional: v1.0
+  // Path to the App Mode Loader application bundle originally run.
+  char* app_mode_bundle_path;  // Optional: v1.0
 
   // Short ID string, preferably derived from |app_mode_short_name|. Should be
   // safe for the file system.
-  std::string app_mode_id;  // Required: v1.0
+  char* app_mode_id;  // Required: v1.0
+
+  // Short (e.g., one-word) UTF8-encoded name for the shortcut.
+  char* app_mode_short_name;  // Optional: v1.0
 
   // Unrestricted (e.g., several-word) UTF8-encoded name for the shortcut.
-  base::string16 app_mode_name;  // Optional: v1.0
+  char* app_mode_name;  // Optional: v1.0
 
   // URL for the shortcut. Must be a valid URL.
-  std::string app_mode_url;  // Required: v1.0
-
-  // Path to the app's user data directory.
-  base::FilePath user_data_dir;
-
-  // Directory of the profile associated with the app.
-  base::FilePath profile_dir;
+  char* app_mode_url;  // Required: v1.0
 };
 
 }  // namespace app_mode

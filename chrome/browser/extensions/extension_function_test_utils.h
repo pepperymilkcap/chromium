@@ -1,27 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_FUNCTION_TEST_UTILS_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_FUNCTION_TEST_UTILS_H_
+#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "extensions/common/manifest.h"
 
 class AsyncExtensionFunction;
 class Browser;
+class Extension;
 class UIThreadExtensionFunction;
 
 namespace base {
 class Value;
 class DictionaryValue;
 class ListValue;
-}
-
-namespace extensions {
-class Extension;
 }
 
 namespace extension_function_test_utils {
@@ -47,35 +44,7 @@ base::ListValue* ToList(base::Value* val);
 
 // Creates an extension instance that can be attached to an ExtensionFunction
 // before running it.
-scoped_refptr<extensions::Extension> CreateEmptyExtension();
-
-// Creates an extension instance with a specified location that can be attached
-// to an ExtensionFunction before running.
-scoped_refptr<extensions::Extension> CreateEmptyExtensionWithLocation(
-    extensions::Manifest::Location location);
-
-// Creates an empty extension with a variable ID, for tests that require
-// multiple extensions side-by-side having distinct IDs. If not empty, then
-// id_input is passed directly to Extension::CreateId() and thus has the same
-// behavior as that method. If id_input is empty, then Extension::Create()
-// receives an empty explicit ID and generates an appropriate ID for a blank
-// extension.
-scoped_refptr<extensions::Extension> CreateEmptyExtension(
-    const std::string& id_input);
-
-scoped_refptr<extensions::Extension> CreateExtension(
-    extensions::Manifest::Location location,
-    base::DictionaryValue* test_extension_value,
-    const std::string& id_input);
-
-// Creates an extension instance with a specified extension value that can be
-// attached to an ExtensionFunction before running.
-scoped_refptr<extensions::Extension> CreateExtension(
-    base::DictionaryValue* test_extension_value);
-
-// Returns true if |val| contains privacy information, e.g. url,
-// title, and faviconUrl.
-bool HasPrivacySensitiveFields(base::DictionaryValue* val);
+scoped_refptr<Extension> CreateEmptyExtension();
 
 enum RunFunctionFlags {
   NONE = 0,
@@ -83,8 +52,7 @@ enum RunFunctionFlags {
 };
 
 // Run |function| with |args| and return the resulting error. Adds an error to
-// the current test if |function| returns a result. Takes ownership of
-// |function|.
+// the current test if |function| returns a result.
 std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
                                       const std::string& args,
                                       Browser* browser,
@@ -94,20 +62,18 @@ std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
                                       Browser* browser);
 
 // Run |function| with |args| and return the result. Adds an error to the
-// current test if |function| returns an error. Takes ownership of
-// |function|. The caller takes ownership of the result.
-base::Value* RunFunctionAndReturnSingleResult(
-    UIThreadExtensionFunction* function,
-    const std::string& args,
-    Browser* browser,
-    RunFunctionFlags flags);
-base::Value* RunFunctionAndReturnSingleResult(
-    UIThreadExtensionFunction* function,
-    const std::string& args,
-    Browser* browser);
+// current test if |function| returns an error. The caller takes ownership of
+// the result.
+base::Value* RunFunctionAndReturnResult(UIThreadExtensionFunction* function,
+                                        const std::string& args,
+                                        Browser* browser,
+                                        RunFunctionFlags flags);
+base::Value* RunFunctionAndReturnResult(UIThreadExtensionFunction* function,
+                                        const std::string& args,
+                                        Browser* browser);
 
 // Create and run |function| with |args|. Works with both synchronous and async
-// functions. Ownership of |function| remains with the caller.
+// functions.
 //
 // TODO(aa): It would be nice if |args| could be validated against the schema
 // that |function| expects. That way, we know that we are testing something

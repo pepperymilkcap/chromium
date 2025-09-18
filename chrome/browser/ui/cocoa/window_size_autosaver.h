@@ -4,14 +4,14 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_WINDOW_SIZE_AUTOSAVER_H_
 #define CHROME_BROWSER_UI_COCOA_WINDOW_SIZE_AUTOSAVER_H_
+#pragma once
 
 class PrefService;
 @class NSWindow;
 
 // WindowSizeAutosaver is a helper class that makes it easy to let windows
 // autoremember their position or position and size in a PrefService object.
-// To use this, add a |base::scoped_nsobject<WindowSizeAutosaver>| to your
-// window
+// To use this, add a |scoped_nsobject<WindowSizeAutosaver>| to your window
 // controller and initialize it in the window controller's init method, passing
 // a window and an autosave name. The autosaver will register for "window moved"
 // and "window resized" notifications and write the current window state to the

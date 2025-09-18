@@ -4,19 +4,16 @@
 
 #ifndef CHROME_BROWSER_SYNC_PROFILE_SYNC_COMPONENTS_FACTORY_MOCK_H__
 #define CHROME_BROWSER_SYNC_PROFILE_SYNC_COMPONENTS_FACTORY_MOCK_H__
+#pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/glue/data_type_error_handler.h"
-#include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace browser_sync {
 class AssociatorInterface;
 class ChangeProcessor;
-class DataTypeEncryptionHandler;
-class FailedDataTypesHandler;
 }
 
 class ProfileSyncComponentsFactoryMock : public ProfileSyncComponentsFactory {
@@ -28,51 +25,64 @@ class ProfileSyncComponentsFactoryMock : public ProfileSyncComponentsFactory {
   virtual ~ProfileSyncComponentsFactoryMock();
 
   MOCK_METHOD1(RegisterDataTypes, void(ProfileSyncService*));
-  MOCK_METHOD6(CreateDataTypeManager,
+  MOCK_METHOD2(CreateDataTypeManager,
                browser_sync::DataTypeManager*(
-                   const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&,
-                   const browser_sync::DataTypeController::TypeMap*,
-                   const browser_sync::DataTypeEncryptionHandler*,
                    browser_sync::SyncBackendHost*,
-                   browser_sync::DataTypeManagerObserver* observer,
-                   browser_sync::FailedDataTypesHandler*
-                       failed_datatypes_handler));
-  MOCK_METHOD3(CreateSyncBackendHost,
-      browser_sync::SyncBackendHost*(
-          const std::string& name,
-          Profile* profile,
-          const base::WeakPtr<browser_sync::SyncPrefs>& sync_prefs));
-  MOCK_METHOD4(CreateGenericChangeProcessor,
+                   const browser_sync::DataTypeController::TypeMap*));
+  MOCK_METHOD3(CreateGenericChangeProcessor,
       browser_sync::GenericChangeProcessor*(
           ProfileSyncService* profile_sync_service,
-          browser_sync::DataTypeErrorHandler* error_handler,
-          const base::WeakPtr<syncer::SyncableService>& local_service,
-          const base::WeakPtr<syncer::SyncMergeResult>& merge_result));
+          browser_sync::UnrecoverableErrorHandler* error_handler,
+          const base::WeakPtr<SyncableService>& local_service));
   MOCK_METHOD0(CreateSharedChangeProcessor,
       browser_sync::SharedChangeProcessor*());
-  MOCK_METHOD1(GetSyncableServiceForType,
-               base::WeakPtr<syncer::SyncableService>(syncer::ModelType));
+  MOCK_METHOD2(CreateAppSyncComponents,
+      SyncComponents(ProfileSyncService* profile_sync_service,
+                     browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_CONST_METHOD1(GetAutofillProfileSyncableService,
+                     base::WeakPtr<SyncableService>(
+                         WebDataService* web_data_service));
+  MOCK_CONST_METHOD1(GetAutocompleteSyncableService,
+                     base::WeakPtr<SyncableService>(
+                         WebDataService* web_data_service));
   MOCK_METHOD2(CreateBookmarkSyncComponents,
       SyncComponents(ProfileSyncService* profile_sync_service,
-                     browser_sync::DataTypeErrorHandler* error_handler));
+                     browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_METHOD2(CreateExtensionSyncComponents,
+      SyncComponents(ProfileSyncService* profile_sync_service,
+                     browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_METHOD4(CreateExtensionOrAppSettingSyncComponents,
+      SyncComponents(syncable::ModelType model_type,
+                     SyncableService* settings_service,
+                     ProfileSyncService* profile_sync_service,
+                     browser_sync::UnrecoverableErrorHandler* error_handler));
   MOCK_METHOD3(CreatePasswordSyncComponents,
                SyncComponents(
                    ProfileSyncService* profile_sync_service,
                    PasswordStore* password_store,
-                   browser_sync::DataTypeErrorHandler* error_handler));
+                   browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_METHOD2(CreatePreferenceSyncComponents,
+      SyncComponents(ProfileSyncService* profile_sync_service,
+                     browser_sync::UnrecoverableErrorHandler* error_handler));
   MOCK_METHOD2(CreateSessionSyncComponents,
       SyncComponents(ProfileSyncService* profile_sync_service,
-                     browser_sync::DataTypeErrorHandler* error_handler));
-#if defined(ENABLE_THEMES)
+      browser_sync::UnrecoverableErrorHandler* error_handler));
   MOCK_METHOD2(CreateThemeSyncComponents,
       SyncComponents(ProfileSyncService* profile_sync_service,
-                     browser_sync::DataTypeErrorHandler* error_handler));
-#endif
+                     browser_sync::UnrecoverableErrorHandler* error_handler));
   MOCK_METHOD3(CreateTypedUrlSyncComponents,
                SyncComponents(
                    ProfileSyncService* profile_sync_service,
                    history::HistoryBackend* history_backend,
-                   browser_sync::DataTypeErrorHandler* error_handler));
+                   browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_METHOD2(CreateSearchEngineSyncComponents,
+               SyncComponents(
+                   ProfileSyncService* profile_sync_service,
+                   browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_METHOD2(CreateAppNotificationSyncComponents,
+               SyncComponents(
+                   ProfileSyncService* profile_sync_service,
+                   browser_sync::UnrecoverableErrorHandler* error_handler));
 
  private:
   SyncComponents MakeSyncComponents();

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 #include <string>
 
 #include "base/base64.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
@@ -22,7 +22,6 @@
 // "The implementation must reserve static storage for a
 // gss_OID_desc object for each constant.  That constant
 // should be initialized to point to that gss_OID_desc."
-// These are encoded using ASN.1 BER encoding.
 namespace {
 
 static gss_OID_desc GSS_C_NT_USER_NAME_VAL = {
@@ -76,16 +75,30 @@ gss_OID GSS_C_NT_EXPORT_NAME = &GSS_C_NT_EXPORT_NAME_VAL;
 
 namespace net {
 
-// Exported mechanism for GSSAPI. We always use SPNEGO:
+// These are encoded using ASN.1 BER encoding.
 
-// iso.org.dod.internet.security.mechanism.snego (1.3.6.1.5.5.2)
-gss_OID_desc CHROME_GSS_SPNEGO_MECH_OID_DESC_VAL = {
-  6,
-  const_cast<char*>("\x2b\x06\x01\x05\x05\x02")
+// This one is used by Firefox's nsAuthGSSAPI class.
+gss_OID_desc CHROME_GSS_KRB5_MECH_OID_DESC_VAL = {
+  9,
+  const_cast<char*>("\x2a\x86\x48\x86\xf7\x12\x01\x02\x02")
 };
 
-gss_OID CHROME_GSS_SPNEGO_MECH_OID_DESC =
-    &CHROME_GSS_SPNEGO_MECH_OID_DESC_VAL;
+gss_OID_desc CHROME_GSS_C_NT_HOSTBASED_SERVICE_X_VAL = {
+  6,
+  const_cast<char*>("\x2b\x06\x01\x05\x06\x02")
+};
+
+gss_OID_desc CHROME_GSS_C_NT_HOSTBASED_SERVICE_VAL = {
+  10,
+  const_cast<char*>("\x2a\x86\x48\x86\xf7\x12\x01\x02\x01\x04")
+};
+
+gss_OID CHROME_GSS_C_NT_HOSTBASED_SERVICE_X =
+    &CHROME_GSS_C_NT_HOSTBASED_SERVICE_X_VAL;
+gss_OID CHROME_GSS_C_NT_HOSTBASED_SERVICE =
+    &CHROME_GSS_C_NT_HOSTBASED_SERVICE_VAL;
+gss_OID CHROME_GSS_KRB5_MECH_OID_DESC =
+    &CHROME_GSS_KRB5_MECH_OID_DESC_VAL;
 
 // Debugging helpers.
 namespace {
@@ -333,8 +346,6 @@ std::string DescribeContext(GSSAPILibrary* gssapi_lib,
   OM_uint32 ctx_flags = 0;
   int locally_initiated = 0;
   int open = 0;
-  if (context_handle == GSS_C_NO_CONTEXT)
-    return std::string("Context: GSS_C_NO_CONTEXT");
   major_status = gssapi_lib->inquire_context(&minor_status,
                                              context_handle,
                                              &src_name,
@@ -419,7 +430,7 @@ bool GSSAPISharedLibrary::InitImpl() {
 }
 
 base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
-  const char* const* library_names;
+  const char** library_names;
   size_t num_lib_names;
   const char* user_specified_library[1];
   if (!gssapi_library_name_.empty()) {
@@ -427,7 +438,7 @@ base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
     library_names = user_specified_library;
     num_lib_names = 1;
   } else {
-    static const char* const kDefaultLibraryNames[] = {
+    static const char* kDefaultLibraryNames[] = {
 #if defined(OS_MACOSX)
       "libgssapi_krb5.dylib"  // MIT Kerberos
 #elif defined(OS_OPENBSD)
@@ -445,7 +456,7 @@ base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
 
   for (size_t i = 0; i < num_lib_names; ++i) {
     const char* library_name = library_names[i];
-    base::FilePath file_path(library_name);
+    FilePath file_path(library_name);
 
     // TODO(asanka): Move library loading to a separate thread.
     //               http://crbug.com/66702
@@ -715,7 +726,7 @@ HttpAuth::AuthorizationResult HttpAuthGSSAPI::ParseChallenge(
 }
 
 int HttpAuthGSSAPI::GenerateAuthToken(const AuthCredentials* credentials,
-                                      const std::string& spn,
+                                      const std::wstring& spn,
                                       std::string* auth_token) {
   DCHECK(auth_token);
 
@@ -734,7 +745,11 @@ int HttpAuthGSSAPI::GenerateAuthToken(const AuthCredentials* credentials,
   std::string encode_input(static_cast<char*>(output_token.value),
                            output_token.length);
   std::string encode_output;
-  base::Base64Encode(encode_input, &encode_output);
+  bool base64_rv = base::Base64Encode(encode_input, &encode_output);
+  if (!base64_rv) {
+    LOG(ERROR) << "Base64 encoding of auth token failed.";
+    return ERR_ENCODING_CONVERSION_FAILED;
+  }
   *auth_token = scheme_ + " " + encode_output;
   return OK;
 }
@@ -833,12 +848,12 @@ int MapInitSecContextStatusToError(OM_uint32 major_status) {
 
 }
 
-int HttpAuthGSSAPI::GetNextSecurityToken(const std::string& spn,
+int HttpAuthGSSAPI::GetNextSecurityToken(const std::wstring& spn,
                                          gss_buffer_t in_token,
                                          gss_buffer_t out_token) {
   // Create a name for the principal
   // TODO(cbentzel): Just do this on the first pass?
-  std::string spn_principal = spn;
+  std::string spn_principal = WideToASCII(spn);
   gss_buffer_desc spn_buffer = GSS_C_EMPTY_BUFFER;
   spn_buffer.value = const_cast<char*>(spn_principal.c_str());
   spn_buffer.length = spn_principal.size() + 1;
@@ -847,7 +862,7 @@ int HttpAuthGSSAPI::GetNextSecurityToken(const std::string& spn,
   OM_uint32 major_status = library_->import_name(
       &minor_status,
       &spn_buffer,
-      GSS_C_NT_HOSTBASED_SERVICE,
+      CHROME_GSS_C_NT_HOSTBASED_SERVICE,
       &principal_name);
   int rv = MapImportNameStatusToError(major_status);
   if (rv != OK) {

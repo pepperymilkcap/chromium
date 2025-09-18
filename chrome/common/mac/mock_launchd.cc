@@ -9,14 +9,15 @@
 #include <sys/un.h>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/process_util.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/mac/launchd.h"
 #include "chrome/common/service_process_util.h"
@@ -27,17 +28,17 @@ static const size_t kMaxPipeNameLength =
     sizeof(throwaway_sockaddr_un->sun_path);
 
 // static
-bool MockLaunchd::MakeABundle(const base::FilePath& dst,
+bool MockLaunchd::MakeABundle(const FilePath& dst,
                               const std::string& name,
-                              base::FilePath* bundle_root,
-                              base::FilePath* executable) {
+                              FilePath* bundle_root,
+                              FilePath* executable) {
   *bundle_root = dst.Append(name + std::string(".app"));
-  base::FilePath contents = bundle_root->AppendASCII("Contents");
-  base::FilePath mac_os = contents.AppendASCII("MacOS");
+  FilePath contents = bundle_root->AppendASCII("Contents");
+  FilePath mac_os = contents.AppendASCII("MacOS");
   *executable = mac_os.Append(name);
-  base::FilePath info_plist = contents.Append("Info.plist");
+  FilePath info_plist = contents.Append("Info.plist");
 
-  if (!base::CreateDirectory(mac_os)) {
+  if (!file_util::CreateDirectory(mac_os)) {
     return false;
   }
   const char *data = "#! testbundle\n";
@@ -82,31 +83,30 @@ bool MockLaunchd::MakeABundle(const base::FilePath& dst,
   }
   const UInt8* bundle_root_path =
       reinterpret_cast<const UInt8*>(bundle_root->value().c_str());
-  base::ScopedCFTypeRef<CFURLRef> url(
+  base::mac::ScopedCFTypeRef<CFURLRef> url(
       CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault,
                                               bundle_root_path,
                                               bundle_root->value().length(),
                                               true));
-  base::ScopedCFTypeRef<CFBundleRef> bundle(
+  base::mac::ScopedCFTypeRef<CFBundleRef> bundle(
       CFBundleCreate(kCFAllocatorDefault, url));
   return bundle.get();
 }
 
-MockLaunchd::MockLaunchd(const base::FilePath& file,
-                         base::MessageLoop* loop,
-                         bool create_socket,
-                         bool as_service)
+MockLaunchd::MockLaunchd(const FilePath& file, MessageLoop* loop,
+                         bool create_socket, bool as_service)
     : file_(file),
       message_loop_(loop),
       create_socket_(create_socket),
       as_service_(as_service),
       restart_called_(false),
       remove_called_(false),
+      job_called_(false),
       checkin_called_(false),
       write_called_(false),
       delete_called_(false) {
   std::string pipe_suffix("_SOCKET");
-  base::FilePath socket_path = file_;
+  FilePath socket_path = file_;
   while (socket_path.value().length() + pipe_suffix.length() >
          kMaxPipeNameLength - 2) {
     socket_path = socket_path.DirName();
@@ -125,8 +125,9 @@ CFDictionaryRef MockLaunchd::CopyExports() {
 
   CFStringRef env_var =
       base::mac::NSToCFCast(GetServiceProcessLaunchDSocketEnvVar());
-  base::ScopedCFTypeRef<CFStringRef> socket_path(CFStringCreateWithCString(
-      kCFAllocatorDefault, pipe_name_.c_str(), kCFStringEncodingUTF8));
+  base::mac::ScopedCFTypeRef<CFStringRef> socket_path(
+      CFStringCreateWithCString(kCFAllocatorDefault, pipe_name_.c_str(),
+                                kCFStringEncodingUTF8));
   const void *keys[] = { env_var };
   const void *values[] = { socket_path };
   COMPILE_ASSERT(arraysize(keys) == arraysize(values), array_sizes_must_match);
@@ -149,10 +150,10 @@ CFDictionaryRef MockLaunchd::CopyJobDictionary(CFStringRef label) {
   CFStringRef program = CFSTR(LAUNCH_JOBKEY_PROGRAM);
   CFStringRef program_pid = CFSTR(LAUNCH_JOBKEY_PID);
   const void *keys[] = { program, program_pid };
-  base::ScopedCFTypeRef<CFStringRef> path(
+  base::mac::ScopedCFTypeRef<CFStringRef> path(
       base::SysUTF8ToCFStringRef(file_.value()));
   int process_id = base::GetCurrentProcId();
-  base::ScopedCFTypeRef<CFNumberRef> pid(
+  base::mac::ScopedCFTypeRef<CFNumberRef> pid(
       CFNumberCreate(NULL, kCFNumberIntType, &process_id));
   const void *values[] = { path, pid };
   COMPILE_ASSERT(arraysize(keys) == arraysize(values), array_sizes_must_match);
@@ -168,11 +169,14 @@ CFDictionaryRef MockLaunchd::CopyDictionaryByCheckingIn(CFErrorRef* error) {
   checkin_called_ = true;
   CFStringRef program = CFSTR(LAUNCH_JOBKEY_PROGRAM);
   CFStringRef program_args = CFSTR(LAUNCH_JOBKEY_PROGRAMARGUMENTS);
-  base::ScopedCFTypeRef<CFStringRef> path(
+  base::mac::ScopedCFTypeRef<CFStringRef> path(
       base::SysUTF8ToCFStringRef(file_.value()));
   const void *array_values[] = { path.get() };
-  base::ScopedCFTypeRef<CFArrayRef> args(CFArrayCreate(
-      kCFAllocatorDefault, array_values, 1, &kCFTypeArrayCallBacks));
+  base::mac::ScopedCFTypeRef<CFArrayRef> args(
+      CFArrayCreate(kCFAllocatorDefault,
+                    array_values,
+                    1,
+                    &kCFTypeArrayCallBacks));
 
   if (!create_socket_) {
     const void *keys[] = { program, program_args };
@@ -205,12 +209,12 @@ CFDictionaryRef MockLaunchd::CopyDictionaryByCheckingIn(CFErrorRef* error) {
   signature.protocol = 0;
   size_t unix_addr_len = offsetof(struct sockaddr_un,
                                   sun_path) + path_len + 1;
-  base::ScopedCFTypeRef<CFDataRef> address(
+  base::mac::ScopedCFTypeRef<CFDataRef> address(
       CFDataCreate(NULL, reinterpret_cast<UInt8*>(&unix_addr), unix_addr_len));
   signature.address = address;
 
   CFSocketRef socket =
-      CFSocketCreateWithSocketSignature(NULL, &signature, 0, NULL, NULL);
+      CFSocketCreateWithSocketSignature(NULL, &signature, NULL, NULL, NULL);
 
   local_pipe = CFSocketGetNative(socket);
   EXPECT_NE(-1, local_pipe);
@@ -222,17 +226,20 @@ CFDictionaryRef MockLaunchd::CopyDictionaryByCheckingIn(CFErrorRef* error) {
     return NULL;
   }
 
-  base::ScopedCFTypeRef<CFNumberRef> socket_fd(
+  base::mac::ScopedCFTypeRef<CFNumberRef> socket_fd(
       CFNumberCreate(NULL, kCFNumberIntType, &local_pipe));
   const void *socket_array_values[] = { socket_fd };
-  base::ScopedCFTypeRef<CFArrayRef> sockets(CFArrayCreate(
-      kCFAllocatorDefault, socket_array_values, 1, &kCFTypeArrayCallBacks));
+  base::mac::ScopedCFTypeRef<CFArrayRef> sockets(
+      CFArrayCreate(kCFAllocatorDefault,
+                    socket_array_values,
+                    1,
+                    &kCFTypeArrayCallBacks));
   CFStringRef socket_dict_key = CFSTR("ServiceProcessSocket");
   const void *socket_keys[] = { socket_dict_key };
   const void *socket_values[] = { sockets };
   COMPILE_ASSERT(arraysize(socket_keys) == arraysize(socket_values),
                  socket_array_sizes_must_match);
-  base::ScopedCFTypeRef<CFDictionaryRef> socket_dict(
+  base::mac::ScopedCFTypeRef<CFDictionaryRef> socket_dict(
       CFDictionaryCreate(kCFAllocatorDefault,
                          socket_keys,
                          socket_values,
@@ -252,7 +259,7 @@ CFDictionaryRef MockLaunchd::CopyDictionaryByCheckingIn(CFErrorRef* error) {
 
 bool MockLaunchd::RemoveJob(CFStringRef label, CFErrorRef* error) {
   remove_called_ = true;
-  message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   return true;
 }
 
@@ -261,7 +268,7 @@ bool MockLaunchd::RestartJob(Domain domain,
                              CFStringRef name,
                              CFStringRef session_type) {
   restart_called_ = true;
-  message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   return true;
 }
 
@@ -269,7 +276,8 @@ CFMutableDictionaryRef MockLaunchd::CreatePlistFromFile(
     Domain domain,
     Type type,
     CFStringRef name)  {
-  base::ScopedCFTypeRef<CFDictionaryRef> dict(CopyDictionaryByCheckingIn(NULL));
+  base::mac::ScopedCFTypeRef<CFDictionaryRef> dict(
+      CopyDictionaryByCheckingIn(NULL));
   return CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, dict);
 }
 

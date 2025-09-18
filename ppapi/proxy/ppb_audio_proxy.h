@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/basictypes.h"
-#include "base/memory/shared_memory.h"
+#include "base/shared_memory.h"
 #include "base/sync_socket.h"
 #include "ipc/ipc_platform_file.h"
 #include "ppapi/c/pp_instance.h"
@@ -16,17 +16,14 @@
 #include "ppapi/c/ppb_audio.h"
 #include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/proxy_completion_callback_factory.h"
+#include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
 #include "ppapi/utility/completion_callback_factory.h"
 
 namespace ppapi {
 
-class AudioCallbackCombined;
 class HostResource;
 
 namespace proxy {
-
-class SerializedHandle;
 
 class PPB_Audio_Proxy : public InterfaceProxy {
  public:
@@ -34,11 +31,11 @@ class PPB_Audio_Proxy : public InterfaceProxy {
   virtual ~PPB_Audio_Proxy();
 
   // Creates an Audio object in the plugin process.
-  static PP_Resource CreateProxyResource(
-      PP_Instance instance_id,
-      PP_Resource config_id,
-      const AudioCallbackCombined& audio_callback,
-      void* user_data);
+  static PP_Resource CreateProxyResource(PP_Instance instance_id,
+                                         PP_Resource config_id,
+                                         PPB_Audio_Callback audio_callback,
+                                         void* user_data);
+
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -54,11 +51,11 @@ class PPB_Audio_Proxy : public InterfaceProxy {
   void OnMsgStartOrStop(const ppapi::HostResource& audio_id, bool play);
 
   // Renderer->plugin message handlers.
-  void OnMsgNotifyAudioStreamCreated(
-      const ppapi::HostResource& audio_id,
-      int32_t result_code,
-      ppapi::proxy::SerializedHandle socket_handle,
-      ppapi::proxy::SerializedHandle handle);
+  void OnMsgNotifyAudioStreamCreated(const ppapi::HostResource& audio_id,
+                                     int32_t result_code,
+                                     IPC::PlatformFileForTransit socket_handle,
+                                     base::SharedMemoryHandle handle,
+                                     uint32_t length);
 
   void AudioChannelConnected(int32_t result,
                              const ppapi::HostResource& resource);
@@ -77,7 +74,8 @@ class PPB_Audio_Proxy : public InterfaceProxy {
       base::SharedMemoryHandle* foreign_shared_memory_handle,
       uint32_t* shared_memory_length);
 
-  ProxyCompletionCallbackFactory<PPB_Audio_Proxy> callback_factory_;
+  pp::CompletionCallbackFactory<PPB_Audio_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_Audio_Proxy);
 };

@@ -118,8 +118,8 @@ function search(query, callback) {
   else
     query = '"' + query + '"';
 
-  var url = "https://code.google.com/p/chromium/codesearch#search/&type=cs&q=" + query +
-      "&exact_package=chromium&type=cs";
+  var url = "http://code.google.com/p/chromium/source/search?q=" + query;
+
   var req = new XMLHttpRequest();
   req.open("GET", url, true);
   req.setRequestHeader("GData-Version", "2");
@@ -133,8 +133,8 @@ function search(query, callback) {
 }
 
 function getUrl(path, line) {
-  var url = "https://code.google.com/p/chromium/codesearch#" + path
-      "&sq=package:chromium";
+  var url = "http://code.google.com/codesearch#OAMlx_jo-ck/" + path
+      "&exact_package=chromium&type=cs";
   if (line)
     url += "&l=" + line;
   return url;
@@ -148,8 +148,8 @@ function getEntryUrl(entry) {
 }
 
 function navigate(url) {
-  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-    chrome.tabs.update(tabs[0].id, {url: url});
+  chrome.tabs.getSelected(null, function(tab) {
+    chrome.tabs.update(tab.id, {url: url});
   });
 }
 
@@ -164,8 +164,7 @@ chrome.omnibox.onInputEntered.addListener(function(text) {
   } else if (text == 'halp') {
     // TODO(aa)
   } else {
-    navigate("https://code.google.com/p/chromium/codesearch#search/&type=cs" +
-             "&q=" + text +
-             "&exact_package=chromium&type=cs");
+    navigate("http://codesearch.google.com/codesearch?" +
+             "vert=chromium&as_q=" + text);
   }
 });

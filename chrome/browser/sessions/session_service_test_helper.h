@@ -1,26 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SESSIONS_SESSION_SERVICE_TEST_HELPER_H_
 #define CHROME_BROWSER_SESSIONS_SESSION_SERVICE_TEST_HELPER_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/sessions/session_id.h"
 
 class SessionBackend;
 class SessionCommand;
+class SessionID;
 class SessionService;
 struct SessionTab;
 struct SessionWindow;
-
-namespace sessions {
-class SerializedNavigationEntry;
-}
+class TabNavigation;
 
 // A simple class that makes writing SessionService related tests easier.
 
@@ -29,6 +27,9 @@ class SessionServiceTestHelper {
   explicit SessionServiceTestHelper();
   explicit SessionServiceTestHelper(SessionService* service);
   ~SessionServiceTestHelper();
+
+  void RestoreSessionFromCommands(const std::vector<SessionCommand*>& commands,
+                                  std::vector<SessionWindow*>* valid_windows);
 
   void PrepareTabInWindow(const SessionID& window_id,
                           const SessionID& tab_id,
@@ -39,16 +40,8 @@ class SessionServiceTestHelper {
                             const SessionID& tab_id,
                             const std::string& extension_app_id);
 
-  void SetTabUserAgentOverride(const SessionID& window_id,
-                               const SessionID& tab_id,
-                               const std::string& user_agent_override);
-
-  void SetForceBrowserNotAliveWithNoWindows(
-      bool force_browser_not_alive_with_no_windows);
-
   // Reads the contents of the last session.
-  void ReadWindows(std::vector<SessionWindow*>* windows,
-                   SessionID::id_type* active_window_id);
+  void ReadWindows(std::vector<SessionWindow*>* windows);
 
   void AssertTabEquals(SessionID& window_id,
                        SessionID& tab_id,
@@ -62,15 +55,14 @@ class SessionServiceTestHelper {
                        size_t nav_count,
                        const SessionTab& session_tab);
 
-  void AssertNavigationEquals(
-      const sessions::SerializedNavigationEntry& expected,
-      const sessions::SerializedNavigationEntry& actual);
+  void AssertNavigationEquals(const TabNavigation& expected,
+                              const TabNavigation& actual);
 
   void AssertSingleWindowWithSingleTab(
       const std::vector<SessionWindow*>& windows,
       size_t nav_count);
 
-  void SetService(SessionService* service);
+  void set_service(SessionService* service) { service_.reset(service); }
   SessionService* ReleaseService() { return service_.release(); }
   SessionService* service() { return service_.get(); }
 

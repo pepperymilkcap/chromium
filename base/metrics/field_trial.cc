@@ -1,26 +1,54 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/metrics/field_trial.h"
 
-#include <algorithm>
-
 #include "base/build_time.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/sha1.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/sys_byteorder.h"
+#include "base/stringprintf.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
 namespace base {
 
-namespace {
+static const char kHistogramFieldTrialSeparator('_');
 
-// Created a time value based on |year|, |month| and |day_of_month| parameters.
-Time CreateTimeFromParams(int year, int month, int day_of_month) {
+// statics
+const int FieldTrial::kNotFinalized = -1;
+const int FieldTrial::kDefaultGroupNumber = 0;
+const uint32 FieldTrial::kReservedHashValue = 0;
+bool FieldTrial::enable_benchmarking_ = false;
+
+const char FieldTrialList::kPersistentStringSeparator('/');
+int FieldTrialList::kExpirationYearInFuture = 0;
+
+//------------------------------------------------------------------------------
+// FieldTrial methods and members.
+
+FieldTrial::FieldTrial(const std::string& name,
+                       const Probability total_probability,
+                       const std::string& default_group_name,
+                       const int year,
+                       const int month,
+                       const int day_of_month)
+  : name_(name),
+    name_hash_(HashName(name)),
+    divisor_(total_probability),
+    default_group_name_(default_group_name),
+    random_(static_cast<Probability>(divisor_ * RandDouble())),
+    accumulated_group_probability_(0),
+    next_group_number_(kDefaultGroupNumber + 1),
+    group_(kNotFinalized),
+    group_name_hash_(kReservedHashValue),
+    enable_field_trial_(true) {
+  DCHECK_GT(total_probability, 0);
+  DCHECK(!name_.empty());
+  DCHECK(!default_group_name_.empty());
+  FieldTrialList::Register(this);
+
   DCHECK_GT(year, 1970);
   DCHECK_GT(month, 0);
   DCHECK_LT(month, 13);
@@ -37,78 +65,38 @@ Time CreateTimeFromParams(int year, int month, int day_of_month) {
   exploded.second = 0;
   exploded.millisecond = 0;
 
-  return Time::FromLocalExploded(exploded);
+  Time expiration_time = Time::FromLocalExploded(exploded);
+  if (GetBuildTime() > expiration_time)
+    Disable();
 }
 
-// Returns the boundary value for comparing against the FieldTrial's added
-// groups for a given |divisor| (total probability) and |entropy_value|.
-FieldTrial::Probability GetGroupBoundaryValue(
-    FieldTrial::Probability divisor,
-    double entropy_value) {
-  // Add a tiny epsilon value to get consistent results when converting floating
-  // points to int. Without it, boundary values have inconsistent results, e.g.:
-  //
-  //   static_cast<FieldTrial::Probability>(100 * 0.56) == 56
-  //   static_cast<FieldTrial::Probability>(100 * 0.57) == 56
-  //   static_cast<FieldTrial::Probability>(100 * 0.58) == 57
-  //   static_cast<FieldTrial::Probability>(100 * 0.59) == 59
-  const double kEpsilon = 1e-8;
-  const FieldTrial::Probability result =
-      static_cast<FieldTrial::Probability>(divisor * entropy_value + kEpsilon);
-  // Ensure that adding the epsilon still results in a value < |divisor|.
-  return std::min(result, divisor - 1);
-}
+void FieldTrial::UseOneTimeRandomization() {
+  DCHECK_EQ(group_, kNotFinalized);
+  DCHECK_EQ(kDefaultGroupNumber + 1, next_group_number_);
+  if (!FieldTrialList::IsOneTimeRandomizationEnabled()) {
+    NOTREACHED();
+    Disable();
+    return;
+  }
 
-}  // namespace
-
-// statics
-const int FieldTrial::kNotFinalized = -1;
-const int FieldTrial::kDefaultGroupNumber = 0;
-bool FieldTrial::enable_benchmarking_ = false;
-
-const char FieldTrialList::kPersistentStringSeparator('/');
-int FieldTrialList::kNoExpirationYear = 0;
-
-//------------------------------------------------------------------------------
-// FieldTrial methods and members.
-
-FieldTrial::EntropyProvider::~EntropyProvider() {
+  random_ = static_cast<Probability>(
+      divisor_ * HashClientId(FieldTrialList::client_id(), name_));
 }
 
 void FieldTrial::Disable() {
-  DCHECK(!group_reported_);
   enable_field_trial_ = false;
 
   // In case we are disabled after initialization, we need to switch
   // the trial to the default group.
   if (group_ != kNotFinalized) {
-    // Only reset when not already the default group, because in case we were
-    // forced to the default group, the group number may not be
-    // kDefaultGroupNumber, so we should keep it as is.
-    if (group_name_ != default_group_name_)
-      SetGroupChoice(default_group_name_, kDefaultGroupNumber);
+    group_ = kDefaultGroupNumber;
+    group_name_ = default_group_name_;
+    group_name_hash_ = HashName(group_name_);
   }
 }
 
 int FieldTrial::AppendGroup(const std::string& name,
                             Probability group_probability) {
-  // When the group choice was previously forced, we only need to return the
-  // the id of the chosen group, and anything can be returned for the others.
-  if (forced_) {
-    DCHECK(!group_name_.empty());
-    if (name == group_name_) {
-      // Note that while |group_| may be equal to |kDefaultGroupNumber| on the
-      // forced trial, it will not have the same value as the default group
-      // number returned from the non-forced |FactoryGetFieldTrial()| call,
-      // which takes care to ensure that this does not happen.
-      return group_;
-    }
-    DCHECK_NE(next_group_number_, group_);
-    // We still return different numbers each time, in case some caller need
-    // them to be different.
-    return next_group_number_++;
-  }
-
   DCHECK_LE(group_probability, divisor_);
   DCHECK_GE(group_probability, 0);
 
@@ -120,34 +108,48 @@ int FieldTrial::AppendGroup(const std::string& name,
   DCHECK_LE(accumulated_group_probability_, divisor_);
   if (group_ == kNotFinalized && accumulated_group_probability_ > random_) {
     // This is the group that crossed the random line, so we do the assignment.
-    SetGroupChoice(name, next_group_number_);
+    group_ = next_group_number_;
+    if (name.empty())
+      StringAppendF(&group_name_, "%d", group_);
+    else
+      group_name_ = name;
+    group_name_hash_ = HashName(group_name_);
+    FieldTrialList::NotifyFieldTrialGroupSelection(name_, group_name_);
   }
   return next_group_number_++;
 }
 
 int FieldTrial::group() {
-  FinalizeGroupChoice();
-  if (trial_registered_)
-    FieldTrialList::NotifyFieldTrialGroupSelection(this);
+  if (group_ == kNotFinalized) {
+    accumulated_group_probability_ = divisor_;
+    group_ = kDefaultGroupNumber;
+    group_name_ = default_group_name_;
+    group_name_hash_ = HashName(group_name_);
+    FieldTrialList::NotifyFieldTrialGroupSelection(name_, group_name_);
+  }
   return group_;
 }
 
-const std::string& FieldTrial::group_name() {
-  // Call |group()| to ensure group gets assigned and observers are notified.
-  group();
+std::string FieldTrial::group_name() {
+  group();  // call group() to make sure group assignment was done.
   DCHECK(!group_name_.empty());
   return group_name_;
 }
 
-void FieldTrial::SetForced() {
-  // We might have been forced before (e.g., by CreateFieldTrial) and it's
-  // first come first served, e.g., command line switch has precedence.
-  if (forced_)
-    return;
+bool FieldTrial::GetNameGroupId(NameGroupId* name_group_id) {
+  if (group_name_hash_ == kReservedHashValue)
+    return false;
+  name_group_id->name = name_hash_;
+  name_group_id->group = group_name_hash_;
+  return true;
+}
 
-  // And we must finalize the group choice before we mark ourselves as forced.
-  FinalizeGroupChoice();
-  forced_ = true;
+// static
+std::string FieldTrial::MakeName(const std::string& name_prefix,
+                                 const std::string& trial_name) {
+  std::string big_string(name_prefix);
+  big_string.append(1, kHistogramFieldTrialSeparator);
+  return big_string.append(FieldTrialList::FindFullName(trial_name));
 }
 
 // static
@@ -156,70 +158,44 @@ void FieldTrial::EnableBenchmarking() {
   enable_benchmarking_ = true;
 }
 
-// static
-FieldTrial* FieldTrial::CreateSimulatedFieldTrial(
-    const std::string& trial_name,
-    Probability total_probability,
-    const std::string& default_group_name,
-    double entropy_value) {
-  return new FieldTrial(trial_name, total_probability, default_group_name,
-                        entropy_value);
-}
-
-FieldTrial::FieldTrial(const std::string& trial_name,
-                       const Probability total_probability,
-                       const std::string& default_group_name,
-                       double entropy_value)
-    : trial_name_(trial_name),
-      divisor_(total_probability),
-      default_group_name_(default_group_name),
-      random_(GetGroupBoundaryValue(total_probability, entropy_value)),
-      accumulated_group_probability_(0),
-      next_group_number_(kDefaultGroupNumber + 1),
-      group_(kNotFinalized),
-      enable_field_trial_(true),
-      forced_(false),
-      group_reported_(false),
-      trial_registered_(false) {
-  DCHECK_GT(total_probability, 0);
-  DCHECK(!trial_name_.empty());
-  DCHECK(!default_group_name_.empty());
-}
-
 FieldTrial::~FieldTrial() {}
 
-void FieldTrial::SetTrialRegistered() {
-  DCHECK_EQ(kNotFinalized, group_);
-  DCHECK(!trial_registered_);
-  trial_registered_ = true;
+// static
+double FieldTrial::HashClientId(const std::string& client_id,
+                                const std::string& trial_name) {
+  // SHA-1 is designed to produce a uniformly random spread in its output space,
+  // even for nearly-identical inputs, so it helps massage whatever client_id
+  // and trial_name we get into something with a uniform distribution, which
+  // is desirable so that we don't skew any part of the 0-100% spectrum.
+  std::string input(client_id + trial_name);
+  unsigned char sha1_hash[kSHA1Length];
+  SHA1HashBytes(reinterpret_cast<const unsigned char*>(input.c_str()),
+                input.size(),
+                sha1_hash);
+
+  COMPILE_ASSERT(sizeof(uint64) < sizeof(sha1_hash), need_more_data);
+  uint64* bits = reinterpret_cast<uint64*>(&sha1_hash[0]);
+
+  return BitsToOpenEndedUnitInterval(*bits);
 }
 
-void FieldTrial::SetGroupChoice(const std::string& group_name, int number) {
-  group_ = number;
-  if (group_name.empty())
-    StringAppendF(&group_name_, "%d", group_);
-  else
-    group_name_ = group_name;
-  DVLOG(1) << "Field trial: " << trial_name_ << " Group choice:" << group_name_;
-}
+// static
+uint32 FieldTrial::HashName(const std::string& name) {
+  // SHA-1 is designed to produce a uniformly random spread in its output space,
+  // even for nearly-identical inputs.
+  unsigned char sha1_hash[kSHA1Length];
+  SHA1HashBytes(reinterpret_cast<const unsigned char*>(name.c_str()),
+                name.size(),
+                sha1_hash);
 
-void FieldTrial::FinalizeGroupChoice() {
-  if (group_ != kNotFinalized)
-    return;
-  accumulated_group_probability_ = divisor_;
-  // Here it's OK to use |kDefaultGroupNumber| since we can't be forced and not
-  // finalized.
-  DCHECK(!forced_);
-  SetGroupChoice(default_group_name_, kDefaultGroupNumber);
-}
+  COMPILE_ASSERT(sizeof(uint32) < sizeof(sha1_hash), need_more_data);
+  uint32* bits = reinterpret_cast<uint32*>(&sha1_hash[0]);
 
-bool FieldTrial::GetActiveGroup(ActiveGroup* active_group) const {
-  if (!group_reported_ || !enable_field_trial_)
-    return false;
-  DCHECK_NE(group_, kNotFinalized);
-  active_group->trial_name = trial_name_;
-  active_group->group_name = group_name_;
-  return true;
+  // We only DCHECK, since this should not happen because the registration
+  // of the experiment on the server should have already warn the developer.
+  // If this ever happen, we'll ignore this experiment/group when reporting.
+  DCHECK(*bits != kReservedHashValue);
+  return *bits;
 }
 
 //------------------------------------------------------------------------------
@@ -231,28 +207,25 @@ FieldTrialList* FieldTrialList::global_ = NULL;
 // static
 bool FieldTrialList::used_without_global_ = false;
 
-FieldTrialList::Observer::~Observer() {
-}
-
-FieldTrialList::FieldTrialList(
-    const FieldTrial::EntropyProvider* entropy_provider)
-    : entropy_provider_(entropy_provider),
-      observer_list_(new ObserverListThreadSafe<FieldTrialList::Observer>(
-          ObserverListBase<FieldTrialList::Observer>::NOTIFY_EXISTING_ONLY)) {
+FieldTrialList::FieldTrialList(const std::string& client_id)
+    : application_start_time_(TimeTicks::Now()),
+      client_id_(client_id),
+      observer_list_(ObserverList<Observer>::NOTIFY_EXISTING_ONLY) {
   DCHECK(!global_);
   DCHECK(!used_without_global_);
   global_ = this;
 
-  Time two_years_from_build_time = GetBuildTime() + TimeDelta::FromDays(730);
   Time::Exploded exploded;
-  two_years_from_build_time.LocalExplode(&exploded);
-  kNoExpirationYear = exploded.year;
+  Time two_years_from_now =
+      Time::NowFromSystemTime() + TimeDelta::FromDays(730);
+  two_years_from_now.LocalExplode(&exploded);
+  kExpirationYearInFuture = exploded.year;
 }
 
 FieldTrialList::~FieldTrialList() {
   AutoLock auto_lock(lock_);
   while (!registered_.empty()) {
-    RegistrationMap::iterator it = registered_.begin();
+    RegistrationList::iterator it = registered_.begin();
     it->second->Release();
     registered_.erase(it->first);
   }
@@ -261,79 +234,15 @@ FieldTrialList::~FieldTrialList() {
 }
 
 // static
-FieldTrial* FieldTrialList::FactoryGetFieldTrial(
-    const std::string& trial_name,
-    FieldTrial::Probability total_probability,
-    const std::string& default_group_name,
-    const int year,
-    const int month,
-    const int day_of_month,
-    FieldTrial::RandomizationType randomization_type,
-    int* default_group_number) {
-  return FactoryGetFieldTrialWithRandomizationSeed(
-      trial_name, total_probability, default_group_name,
-      year, month, day_of_month, randomization_type, 0, default_group_number);
-}
-
-// static
-FieldTrial* FieldTrialList::FactoryGetFieldTrialWithRandomizationSeed(
-    const std::string& trial_name,
-    FieldTrial::Probability total_probability,
-    const std::string& default_group_name,
-    const int year,
-    const int month,
-    const int day_of_month,
-    FieldTrial::RandomizationType randomization_type,
-    uint32 randomization_seed,
-    int* default_group_number) {
-  if (default_group_number)
-    *default_group_number = FieldTrial::kDefaultGroupNumber;
-  // Check if the field trial has already been created in some other way.
-  FieldTrial* existing_trial = Find(trial_name);
-  if (existing_trial) {
-    CHECK(existing_trial->forced_);
-    // If the default group name differs between the existing forced trial
-    // and this trial, then use a different value for the default group number.
-    if (default_group_number &&
-        default_group_name != existing_trial->default_group_name()) {
-      // If the new default group number corresponds to the group that was
-      // chosen for the forced trial (which has been finalized when it was
-      // forced), then set the default group number to that.
-      if (default_group_name == existing_trial->group_name_internal()) {
-        *default_group_number = existing_trial->group_;
-      } else {
-        // Otherwise, use |kNonConflictingGroupNumber| (-2) for the default
-        // group number, so that it does not conflict with the |AppendGroup()|
-        // result for the chosen group.
-        const int kNonConflictingGroupNumber = -2;
-        COMPILE_ASSERT(
-            kNonConflictingGroupNumber != FieldTrial::kDefaultGroupNumber,
-            conflicting_default_group_number);
-        COMPILE_ASSERT(
-            kNonConflictingGroupNumber != FieldTrial::kNotFinalized,
-            conflicting_default_group_number);
-        *default_group_number = kNonConflictingGroupNumber;
-      }
-    }
-    return existing_trial;
+void FieldTrialList::Register(FieldTrial* trial) {
+  if (!global_) {
+    used_without_global_ = true;
+    return;
   }
-
-  double entropy_value;
-  if (randomization_type == FieldTrial::ONE_TIME_RANDOMIZED) {
-    entropy_value = GetEntropyProviderForOneTimeRandomization()->
-          GetEntropyForTrial(trial_name, randomization_seed);
-  } else {
-    DCHECK_EQ(FieldTrial::SESSION_RANDOMIZED, randomization_type);
-    DCHECK_EQ(0U, randomization_seed);
-    entropy_value = RandDouble();
-  }
-
-  FieldTrial* field_trial = new FieldTrial(trial_name, total_probability,
-                                           default_group_name, entropy_value);
-  if (GetBuildTime() > CreateTimeFromParams(year, month, day_of_month))
-    field_trial->Disable();
-  FieldTrialList::Register(field_trial);
-  return field_trial;
+  AutoLock auto_lock(global_->lock_);
+  DCHECK(!global_->PreLockedFind(trial->name()));
+  trial->AddRef();
+  global_->registered_[trial->name()] = trial;
 }
 
 // static
@@ -357,7 +266,7 @@ std::string FieldTrialList::FindFullName(const std::string& name) {
   FieldTrial* field_trial = Find(name);
   if (field_trial)
     return field_trial->group_name();
-  return std::string();
+  return "";
 }
 
 // static
@@ -367,67 +276,65 @@ bool FieldTrialList::TrialExists(const std::string& name) {
 
 // static
 void FieldTrialList::StatesToString(std::string* output) {
-  FieldTrial::ActiveGroups active_groups;
-  GetActiveFieldTrialGroups(&active_groups);
-  for (FieldTrial::ActiveGroups::const_iterator it = active_groups.begin();
-       it != active_groups.end(); ++it) {
-    DCHECK_EQ(std::string::npos,
-              it->trial_name.find(kPersistentStringSeparator));
-    DCHECK_EQ(std::string::npos,
-              it->group_name.find(kPersistentStringSeparator));
-    output->append(it->trial_name);
-    output->append(1, kPersistentStringSeparator);
-    output->append(it->group_name);
-    output->append(1, kPersistentStringSeparator);
-  }
-}
-
-// static
-void FieldTrialList::GetActiveFieldTrialGroups(
-    FieldTrial::ActiveGroups* active_groups) {
-  DCHECK(active_groups->empty());
+  DCHECK(output->empty());
   if (!global_)
     return;
   AutoLock auto_lock(global_->lock_);
 
-  for (RegistrationMap::iterator it = global_->registered_.begin();
+  for (RegistrationList::iterator it = global_->registered_.begin();
        it != global_->registered_.end(); ++it) {
-    FieldTrial::ActiveGroup active_group;
-    if (it->second->GetActiveGroup(&active_group))
-      active_groups->push_back(active_group);
+    const std::string name = it->first;
+    std::string group_name = it->second->group_name_internal();
+    if (group_name.empty())
+      continue;  // Should not include uninitialized trials.
+    DCHECK_EQ(name.find(kPersistentStringSeparator), std::string::npos);
+    DCHECK_EQ(group_name.find(kPersistentStringSeparator), std::string::npos);
+    output->append(name);
+    output->append(1, kPersistentStringSeparator);
+    output->append(group_name);
+    output->append(1, kPersistentStringSeparator);
   }
 }
 
 // static
-bool FieldTrialList::CreateTrialsFromString(const std::string& trials_string,
-                                            FieldTrialActivationMode mode) {
+void FieldTrialList::GetFieldTrialNameGroupIds(
+    std::vector<FieldTrial::NameGroupId>* name_group_ids) {
+  DCHECK(name_group_ids->empty());
+  if (!global_)
+    return;
+  AutoLock auto_lock(global_->lock_);
+
+  for (RegistrationList::iterator it = global_->registered_.begin();
+       it != global_->registered_.end(); ++it) {
+    FieldTrial::NameGroupId name_group_id;
+    if (it->second->GetNameGroupId(&name_group_id))
+      name_group_ids->push_back(name_group_id);
+  }
+}
+
+// static
+bool FieldTrialList::CreateTrialsInChildProcess(
+    const std::string& parent_trials) {
   DCHECK(global_);
-  if (trials_string.empty() || !global_)
+  if (parent_trials.empty() || !global_)
     return true;
 
   size_t next_item = 0;
-  while (next_item < trials_string.length()) {
-    size_t name_end = trials_string.find(kPersistentStringSeparator, next_item);
-    if (name_end == trials_string.npos || next_item == name_end)
+  while (next_item < parent_trials.length()) {
+    size_t name_end = parent_trials.find(kPersistentStringSeparator, next_item);
+    if (name_end == parent_trials.npos || next_item == name_end)
       return false;
-    size_t group_name_end = trials_string.find(kPersistentStringSeparator,
+    size_t group_name_end = parent_trials.find(kPersistentStringSeparator,
                                                name_end + 1);
-    if (group_name_end == trials_string.npos || name_end + 1 == group_name_end)
+    if (group_name_end == parent_trials.npos || name_end + 1 == group_name_end)
       return false;
-    std::string name(trials_string, next_item, name_end - next_item);
-    std::string group_name(trials_string, name_end + 1,
+    std::string name(parent_trials, next_item, name_end - next_item);
+    std::string group_name(parent_trials, name_end + 1,
                            group_name_end - name_end - 1);
     next_item = group_name_end + 1;
 
-    FieldTrial* trial = CreateFieldTrial(name, group_name);
-    if (!trial)
+    if (!CreateFieldTrial(name, group_name))
       return false;
-    if (mode == ACTIVATE_TRIALS) {
-      // Call |group()| to mark the trial as "used" and notify observers, if
-      // any. This is useful to ensure that field trials created in child
-      // processes are properly reported in crash reports.
-      trial->group();
-    }
   }
   return true;
 }
@@ -442,19 +349,17 @@ FieldTrial* FieldTrialList::CreateFieldTrial(
   if (name.empty() || group_name.empty() || !global_)
     return NULL;
 
-  FieldTrial* field_trial = FieldTrialList::Find(name);
+  FieldTrial *field_trial(FieldTrialList::Find(name));
   if (field_trial) {
-    // In single process mode, or when we force them from the command line,
-    // we may have already created the field trial.
+    // In single process mode, we may have already created the field trial.
     if (field_trial->group_name_internal() != group_name)
       return NULL;
     return field_trial;
   }
   const int kTotalProbability = 100;
-  field_trial = new FieldTrial(name, kTotalProbability, group_name, 0);
-  FieldTrialList::Register(field_trial);
-  // Force the trial, which will also finalize the group choice.
-  field_trial->SetForced();
+  field_trial = new FieldTrial(name, kTotalProbability, group_name,
+                               kExpirationYearInFuture, 1, 1);
+  field_trial->AppendGroup(group_name, kTotalProbability);
   return field_trial;
 }
 
@@ -462,35 +367,28 @@ FieldTrial* FieldTrialList::CreateFieldTrial(
 void FieldTrialList::AddObserver(Observer* observer) {
   if (!global_)
     return;
-  global_->observer_list_->AddObserver(observer);
+  DCHECK(global_);
+  global_->observer_list_.AddObserver(observer);
 }
 
 // static
 void FieldTrialList::RemoveObserver(Observer* observer) {
   if (!global_)
     return;
-  global_->observer_list_->RemoveObserver(observer);
+  DCHECK(global_);
+  global_->observer_list_.RemoveObserver(observer);
 }
 
 // static
-void FieldTrialList::NotifyFieldTrialGroupSelection(FieldTrial* field_trial) {
+void FieldTrialList::NotifyFieldTrialGroupSelection(
+    const std::string& name,
+    const std::string& group_name) {
   if (!global_)
     return;
-
-  {
-    AutoLock auto_lock(global_->lock_);
-    if (field_trial->group_reported_)
-      return;
-    field_trial->group_reported_ = true;
-  }
-
-  if (!field_trial->enable_field_trial_)
-    return;
-
-  global_->observer_list_->Notify(
-      &FieldTrialList::Observer::OnFieldTrialGroupFinalized,
-      field_trial->trial_name(),
-      field_trial->group_name_internal());
+  DCHECK(global_);
+  FOR_EACH_OBSERVER(Observer,
+                    global_->observer_list_,
+                    OnFieldTrialGroupFinalized(name, group_name));
 }
 
 // static
@@ -502,34 +400,29 @@ size_t FieldTrialList::GetFieldTrialCount() {
 }
 
 // static
-const FieldTrial::EntropyProvider*
-    FieldTrialList::GetEntropyProviderForOneTimeRandomization() {
+bool FieldTrialList::IsOneTimeRandomizationEnabled() {
   if (!global_) {
     used_without_global_ = true;
-    return NULL;
+    return false;
   }
 
-  return global_->entropy_provider_.get();
-}
-
-FieldTrial* FieldTrialList::PreLockedFind(const std::string& name) {
-  RegistrationMap::iterator it = registered_.find(name);
-  if (registered_.end() == it)
-    return NULL;
-  return it->second;
+  return !global_->client_id_.empty();
 }
 
 // static
-void FieldTrialList::Register(FieldTrial* trial) {
-  if (!global_) {
-    used_without_global_ = true;
-    return;
-  }
-  AutoLock auto_lock(global_->lock_);
-  DCHECK(!global_->PreLockedFind(trial->trial_name()));
-  trial->AddRef();
-  trial->SetTrialRegistered();
-  global_->registered_[trial->trial_name()] = trial;
+const std::string& FieldTrialList::client_id() {
+  DCHECK(global_);
+  if (!global_)
+    return EmptyString();
+
+  return global_->client_id_;
+}
+
+FieldTrial* FieldTrialList::PreLockedFind(const std::string& name) {
+  RegistrationList::iterator it = registered_.find(name);
+  if (registered_.end() == it)
+    return NULL;
+  return it->second;
 }
 
 }  // namespace base

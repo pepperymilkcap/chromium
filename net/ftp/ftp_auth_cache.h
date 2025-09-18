@@ -4,12 +4,13 @@
 
 #ifndef NET_FTP_FTP_AUTH_CACHE_H_
 #define NET_FTP_FTP_AUTH_CACHE_H_
+#pragma once
 
 #include <list>
 
+#include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
 #include "net/base/net_export.h"
-#include "url/gurl.h"
 
 namespace net {
 
@@ -30,7 +31,7 @@ class NET_EXPORT_PRIVATE FtpAuthCache {
     Entry(const GURL& origin, const AuthCredentials& credentials);
     ~Entry();
 
-    GURL origin;
+    const GURL origin;
     AuthCredentials credentials;
   };
 

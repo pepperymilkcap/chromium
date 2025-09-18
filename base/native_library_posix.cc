@@ -6,10 +6,10 @@
 
 #include <dlfcn.h>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/utf_string_conversions.h"
 
 namespace base {
 

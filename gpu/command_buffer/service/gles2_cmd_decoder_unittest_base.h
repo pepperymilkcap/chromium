@@ -1,10 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_BASE_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_BASE_H_
 
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
@@ -13,29 +14,103 @@
 #include "gpu/command_buffer/service/framebuffer_manager.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/program_manager.h"
-#include "gpu/command_buffer/service/query_manager.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
-#include "gpu/command_buffer/service/stream_texture_manager_mock.h"
-#include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
-#include "gpu/command_buffer/service/vertex_array_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gl/gl_context_stub.h"
-#include "ui/gl/gl_surface_stub.h"
-#include "ui/gl/gl_mock.h"
-
-class CommandLine;
+#include "ui/gfx/gl/gl_context_stub.h"
+#include "ui/gfx/gl/gl_surface_stub.h"
 
 namespace gpu {
 namespace gles2 {
-
-class MemoryTracker;
 
 class GLES2DecoderTestBase : public testing::Test {
  public:
   GLES2DecoderTestBase();
   virtual ~GLES2DecoderTestBase();
+
+ protected:
+  static const GLint kMaxTextureSize = 2048;
+  static const GLint kMaxCubeMapTextureSize = 256;
+  static const GLint kNumVertexAttribs = 16;
+  static const GLint kNumTextureUnits = 8;
+  static const GLint kMaxTextureImageUnits = 8;
+  static const GLint kMaxVertexTextureImageUnits = 2;
+  static const GLint kMaxFragmentUniformVectors = 16;
+  static const GLint kMaxVaryingVectors = 8;
+  static const GLint kMaxVertexUniformVectors = 128;
+
+  static const GLuint kServiceAttrib0BufferId = 801;
+  static const GLuint kServiceFixedAttribBufferId = 802;
+
+  static const GLuint kServiceBufferId = 301;
+  static const GLuint kServiceFramebufferId = 302;
+  static const GLuint kServiceRenderbufferId = 303;
+  static const GLuint kServiceTextureId = 304;
+  static const GLuint kServiceProgramId = 305;
+  static const GLuint kServiceShaderId = 306;
+  static const GLuint kServiceElementBufferId = 308;
+
+  static const int32 kSharedMemoryId = 401;
+  static const size_t kSharedBufferSize = 2048;
+  static const uint32 kSharedMemoryOffset = 132;
+  static const int32 kInvalidSharedMemoryId = 402;
+  static const uint32 kInvalidSharedMemoryOffset = kSharedBufferSize + 1;
+  static const uint32 kInitialResult = 0xBDBDBDBDu;
+  static const uint8 kInitialMemoryValue = 0xBDu;
+
+  static const uint32 kNewClientId = 501;
+  static const uint32 kNewServiceId = 502;
+  static const uint32 kInvalidClientId = 601;
+
+  static const int kBackBufferWidth = 128;
+  static const int kBackBufferHeight = 64;
+
+  static const GLuint kServiceVertexShaderId = 321;
+  static const GLuint kServiceFragmentShaderId = 322;
+
+  static const GLsizei kNumVertices = 100;
+  static const GLsizei kNumIndices = 10;
+  static const int kValidIndexRangeStart = 1;
+  static const int kValidIndexRangeCount = 7;
+  static const int kInvalidIndexRangeStart = 0;
+  static const int kInvalidIndexRangeCount = 7;
+  static const int kOutOfRangeIndexRangeEnd = 10;
+  static const GLuint kMaxValidIndex = 7;
+
+  static const GLint kMaxAttribLength = 10;
+  static const char* kAttrib1Name;
+  static const char* kAttrib2Name;
+  static const char* kAttrib3Name;
+  static const GLint kAttrib1Size = 1;
+  static const GLint kAttrib2Size = 1;
+  static const GLint kAttrib3Size = 1;
+  static const GLint kAttrib1Location = 0;
+  static const GLint kAttrib2Location = 1;
+  static const GLint kAttrib3Location = 2;
+  static const GLenum kAttrib1Type = GL_FLOAT_VEC4;
+  static const GLenum kAttrib2Type = GL_FLOAT_VEC2;
+  static const GLenum kAttrib3Type = GL_FLOAT_VEC3;
+  static const GLint kInvalidAttribLocation = 30;
+  static const GLint kBadAttribIndex = kNumVertexAttribs;
+
+  static const GLint kMaxUniformLength = 12;
+  static const char* kUniform1Name;
+  static const char* kUniform2Name;
+  static const char* kUniform3Name;
+  static const GLint kUniform1Size = 1;
+  static const GLint kUniform2Size = 3;
+  static const GLint kUniform3Size = 2;
+  static const GLint kUniform1Location = 3;
+  static const GLint kUniform2Location = 10;
+  static const GLint kUniform2ElementLocation = 12;
+  static const GLint kUniform3Location = 20;
+  static const GLenum kUniform1Type = GL_SAMPLER_2D;
+  static const GLenum kUniform2Type = GL_INT_VEC2;
+  static const GLenum kUniform3Type = GL_FLOAT_VEC3;
+  static const GLenum kUniformCubemapType = GL_SAMPLER_CUBE;
+  static const GLint kInvalidUniformLocation = 30;
+  static const GLint kBadUniformIndex = 1000;
 
   // Template to call glGenXXX functions.
   template <typename T>
@@ -101,58 +176,35 @@ class GLES2DecoderTestBase : public testing::Test {
     return group_->GetIdAllocator(namespace_id);
   }
 
-  Buffer* GetBuffer(GLuint service_id) {
-    return group_->buffer_manager()->GetBuffer(service_id);
+  BufferManager::BufferInfo* GetBufferInfo(GLuint service_id) {
+    return group_->buffer_manager()->GetBufferInfo(service_id);
   }
 
-  Framebuffer* GetFramebuffer(GLuint service_id) {
-    return group_->framebuffer_manager()->GetFramebuffer(service_id);
+  FramebufferManager::FramebufferInfo* GetFramebufferInfo(GLuint service_id) {
+    return group_->framebuffer_manager()->GetFramebufferInfo(service_id);
   }
 
-  Renderbuffer* GetRenderbuffer(
+  RenderbufferManager::RenderbufferInfo* GetRenderbufferInfo(
       GLuint service_id) {
-    return group_->renderbuffer_manager()->GetRenderbuffer(service_id);
+    return group_->renderbuffer_manager()->GetRenderbufferInfo(service_id);
   }
 
-  TextureRef* GetTexture(GLuint client_id) {
-    return group_->texture_manager()->GetTexture(client_id);
+  TextureManager::TextureInfo* GetTextureInfo(GLuint service_id) {
+    return group_->texture_manager()->GetTextureInfo(service_id);
   }
 
-  Shader* GetShader(GLuint client_id) {
-    return group_->shader_manager()->GetShader(client_id);
+  ShaderManager::ShaderInfo* GetShaderInfo(GLuint service_id) {
+    return group_->shader_manager()->GetShaderInfo(service_id);
   }
 
-  Program* GetProgram(GLuint client_id) {
-    return group_->program_manager()->GetProgram(client_id);
-  }
-
-  QueryManager::Query* GetQueryInfo(GLuint client_id) {
-    return decoder_->GetQueryManager()->GetQuery(client_id);
-  }
-
-  // This name doesn't match the underlying function, but doing it this way
-  // prevents the need to special-case the unit test generation
-  VertexAttribManager* GetVertexArrayInfo(GLuint client_id) {
-    return decoder_->GetVertexArrayManager()->GetVertexAttribManager(client_id);
-  }
-
-  ProgramManager* program_manager() {
-    return group_->program_manager();
-  }
-
-  ::testing::StrictMock<MockStreamTextureManager>*
-  stream_texture_manager() const {
-    return stream_texture_manager_.get();
+  ProgramManager::ProgramInfo* GetProgramInfo(GLuint service_id) {
+    return group_->program_manager()->GetProgramInfo(service_id);
   }
 
   void DoCreateProgram(GLuint client_id, GLuint service_id);
   void DoCreateShader(GLenum shader_type, GLuint client_id, GLuint service_id);
 
   void SetBucketAsCString(uint32 bucket_id, const char* str);
-
-  void set_memory_tracker(MemoryTracker* memory_tracker) {
-    memory_tracker_ = memory_tracker;
-  }
 
   void InitDecoder(
       const char* extensions,
@@ -164,31 +216,23 @@ class GLES2DecoderTestBase : public testing::Test {
       bool request_stencil,
       bool bind_generates_resource);
 
-  void InitDecoderWithCommandLine(
-      const char* extensions,
-      bool has_alpha,
-      bool has_depth,
-      bool has_stencil,
-      bool request_alpha,
-      bool request_depth,
-      bool request_stencil,
-      bool bind_generates_resource,
-      const CommandLine* command_line);
-
   const ContextGroup& group() const {
     return *group_.get();
   }
 
-  ::testing::StrictMock< ::gfx::MockGLInterface>* GetGLMock() const {
-    return gl_.get();
-  }
+  struct AttribInfo {
+    const char* name;
+    GLint size;
+    GLenum type;
+    GLint location;
+  };
 
-  GLES2Decoder* GetDecoder() const {
-    return decoder_.get();
-  }
-
-  typedef TestHelper::AttribInfo AttribInfo;
-  typedef TestHelper::UniformInfo UniformInfo;
+  struct UniformInfo {
+    const char* name;
+    GLint size;
+    GLenum type;
+    GLint location;
+  };
 
   void SetupShader(
       AttribInfo* attribs, size_t num_attribs,
@@ -197,21 +241,10 @@ class GLES2DecoderTestBase : public testing::Test {
       GLuint vertex_shader_client_id, GLuint vertex_shader_service_id,
       GLuint fragment_shader_client_id, GLuint fragment_shader_service_id);
 
-  void SetupExpectationsForClearingUniforms(
-      UniformInfo* uniforms, size_t num_uniforms) {
-    TestHelper::SetupExpectationsForClearingUniforms(
-        gl_.get(), uniforms, num_uniforms);
-  }
-
-  void SetupInitCapabilitiesExpectations();
-  void SetupInitStateExpectations();
-  void ExpectEnableDisable(GLenum cap, bool enable);
-
   // Setups up a shader for testing glUniform.
-  void SetupShaderForUniform(GLenum uniform_type);
+  void SetupShaderForUniform();
   void SetupDefaultProgram();
   void SetupCubemapProgram();
-  void SetupSamplerExternalProgram();
   void SetupTexture();
 
   // Note that the error is returned as GLint instead of GLenum.
@@ -226,7 +259,6 @@ class GLES2DecoderTestBase : public testing::Test {
   void DoBindFramebuffer(GLenum target, GLuint client_id, GLuint service_id);
   void DoBindRenderbuffer(GLenum target, GLuint client_id, GLuint service_id);
   void DoBindTexture(GLenum target, GLuint client_id, GLuint service_id);
-  void DoBindVertexArrayOES(GLuint client_id, GLuint service_id);
 
   bool DoIsBuffer(GLuint client_id);
   bool DoIsFramebuffer(GLuint client_id);
@@ -245,10 +277,6 @@ class GLES2DecoderTestBase : public testing::Test {
   void DoDeleteShader(GLuint client_id, GLuint service_id);
   void DoDeleteTexture(GLuint client_id, GLuint service_id);
 
-  void DoCompressedTexImage2D(
-      GLenum target, GLint level, GLenum format,
-      GLsizei width, GLsizei height, GLint border,
-      GLsizei size, uint32 bucket_id);
   void DoTexImage2D(
       GLenum target, GLint level, GLenum internal_format,
       GLsizei width, GLsizei height, GLint border,
@@ -270,7 +298,6 @@ class GLES2DecoderTestBase : public testing::Test {
       GLint level, GLenum error);
   void DoVertexAttribPointer(
       GLuint index, GLint size, GLenum type, GLsizei stride, GLuint offset);
-  void DoVertexAttribDivisorANGLE(GLuint index, GLuint divisor);
 
   void DoEnableVertexAttribArray(GLint index);
 
@@ -298,15 +325,6 @@ class GLES2DecoderTestBase : public testing::Test {
       GLenum type,
       GLsizei width,
       GLsizei height);
-
-  void SetupExpectationsForRestoreClearState(
-      GLclampf restore_red,
-      GLclampf restore_green,
-      GLclampf restore_blue,
-      GLclampf restore_alpha,
-      GLuint restore_stencil,
-      GLclampf restore_depth,
-      bool restore_scissor_test);
 
   void SetupExpectationsForFramebufferClearing(
       GLenum target,
@@ -341,10 +359,7 @@ class GLES2DecoderTestBase : public testing::Test {
       bool depth_enabled,
       GLuint front_stencil_mask,
       GLuint back_stencil_mask,
-      bool stencil_enabled,
-      bool cull_face_enabled,
-      bool scissor_test_enabled,
-      bool blend_enabled);
+      bool stencil_enabled);
 
   void SetupExpectationsForApplyingDefaultDirtyState();
 
@@ -353,11 +368,6 @@ class GLES2DecoderTestBase : public testing::Test {
 
   void AddExpectationsForSimulatedAttrib0(
       GLsizei num_vertices, GLuint buffer_id);
-
-  void AddExpectationsForGenVertexArraysOES();
-  void AddExpectationsForDeleteVertexArraysOES();
-  void AddExpectationsForBindVertexArrayOES();
-  void AddExpectationsForRestoreAttribState(GLuint attrib);
 
   GLvoid* BufferOffset(unsigned i) {
     return static_cast<int8 *>(NULL)+(i);
@@ -374,123 +384,11 @@ class GLES2DecoderTestBase : public testing::Test {
     return isObject;
   }
 
- protected:
-  static const int kBackBufferWidth = 128;
-  static const int kBackBufferHeight = 64;
-
-  static const GLint kMaxTextureSize = 2048;
-  static const GLint kMaxCubeMapTextureSize = 256;
-  static const GLint kNumVertexAttribs = 16;
-  static const GLint kNumTextureUnits = 8;
-  static const GLint kMaxTextureImageUnits = 8;
-  static const GLint kMaxVertexTextureImageUnits = 2;
-  static const GLint kMaxFragmentUniformVectors = 16;
-  static const GLint kMaxVaryingVectors = 8;
-  static const GLint kMaxVertexUniformVectors = 128;
-  static const GLint kMaxViewportWidth = 8192;
-  static const GLint kMaxViewportHeight = 8192;
-
-  static const GLint kViewportX = 0;
-  static const GLint kViewportY = 0;
-  static const GLint kViewportWidth = kBackBufferWidth;
-  static const GLint kViewportHeight = kBackBufferHeight;
-
-  static const GLuint kServiceAttrib0BufferId = 801;
-  static const GLuint kServiceFixedAttribBufferId = 802;
-
-  static const GLuint kServiceBufferId = 301;
-  static const GLuint kServiceFramebufferId = 302;
-  static const GLuint kServiceRenderbufferId = 303;
-  static const GLuint kServiceTextureId = 304;
-  static const GLuint kServiceProgramId = 305;
-  static const GLuint kServiceShaderId = 306;
-  static const GLuint kServiceElementBufferId = 308;
-  static const GLuint kServiceQueryId = 309;
-  static const GLuint kServiceVertexArrayId = 310;
-
-  static const int32 kSharedMemoryId = 401;
-  static const size_t kSharedBufferSize = 2048;
-  static const uint32 kSharedMemoryOffset = 132;
-  static const int32 kInvalidSharedMemoryId = 402;
-  static const uint32 kInvalidSharedMemoryOffset = kSharedBufferSize + 1;
-  static const uint32 kInitialResult = 0xBDBDBDBDu;
-  static const uint8 kInitialMemoryValue = 0xBDu;
-
-  static const uint32 kNewClientId = 501;
-  static const uint32 kNewServiceId = 502;
-  static const uint32 kInvalidClientId = 601;
-
-  static const GLuint kServiceVertexShaderId = 321;
-  static const GLuint kServiceFragmentShaderId = 322;
-
-  static const GLuint kServiceCopyTextureChromiumShaderId = 701;
-  static const GLuint kServiceCopyTextureChromiumProgramId = 721;
-
-  static const GLuint kServiceCopyTextureChromiumTextureBufferId = 751;
-  static const GLuint kServiceCopyTextureChromiumVertexBufferId = 752;
-  static const GLuint kServiceCopyTextureChromiumFBOId = 753;
-  static const GLuint kServiceCopyTextureChromiumPositionAttrib = 761;
-  static const GLuint kServiceCopyTextureChromiumTexAttrib = 762;
-  static const GLuint kServiceCopyTextureChromiumSamplerLocation = 763;
-
-  static const GLsizei kNumVertices = 100;
-  static const GLsizei kNumIndices = 10;
-  static const int kValidIndexRangeStart = 1;
-  static const int kValidIndexRangeCount = 7;
-  static const int kInvalidIndexRangeStart = 0;
-  static const int kInvalidIndexRangeCount = 7;
-  static const int kOutOfRangeIndexRangeEnd = 10;
-  static const GLuint kMaxValidIndex = 7;
-
-  static const GLint kMaxAttribLength = 10;
-  static const char* kAttrib1Name;
-  static const char* kAttrib2Name;
-  static const char* kAttrib3Name;
-  static const GLint kAttrib1Size = 1;
-  static const GLint kAttrib2Size = 1;
-  static const GLint kAttrib3Size = 1;
-  static const GLint kAttrib1Location = 0;
-  static const GLint kAttrib2Location = 1;
-  static const GLint kAttrib3Location = 2;
-  static const GLenum kAttrib1Type = GL_FLOAT_VEC4;
-  static const GLenum kAttrib2Type = GL_FLOAT_VEC2;
-  static const GLenum kAttrib3Type = GL_FLOAT_VEC3;
-  static const GLint kInvalidAttribLocation = 30;
-  static const GLint kBadAttribIndex = kNumVertexAttribs;
-
-  static const GLint kMaxUniformLength = 12;
-  static const char* kUniform1Name;
-  static const char* kUniform2Name;
-  static const char* kUniform3Name;
-  static const GLint kUniform1Size = 1;
-  static const GLint kUniform2Size = 3;
-  static const GLint kUniform3Size = 2;
-  static const GLint kUniform1RealLocation = 3;
-  static const GLint kUniform2RealLocation = 10;
-  static const GLint kUniform2ElementRealLocation = 12;
-  static const GLint kUniform3RealLocation = 20;
-  static const GLint kUniform1FakeLocation = 0;               // These are
-  static const GLint kUniform2FakeLocation = 1;               // hardcoded
-  static const GLint kUniform2ElementFakeLocation = 0x10001;  // to match
-  static const GLint kUniform3FakeLocation = 2;               // ProgramManager.
-  static const GLint kUniform1DesiredLocation = -1;
-  static const GLint kUniform2DesiredLocation = -1;
-  static const GLint kUniform3DesiredLocation = -1;
-  static const GLenum kUniform1Type = GL_SAMPLER_2D;
-  static const GLenum kUniform2Type = GL_INT_VEC2;
-  static const GLenum kUniform3Type = GL_FLOAT_VEC3;
-  static const GLenum kUniformSamplerExternalType = GL_SAMPLER_EXTERNAL_OES;
-  static const GLenum kUniformCubemapType = GL_SAMPLER_CUBE;
-  static const GLint kInvalidUniformLocation = 30;
-  static const GLint kBadUniformIndex = 1000;
-
   // Use StrictMock to make 100% sure we know how GL will be called.
   scoped_ptr< ::testing::StrictMock< ::gfx::MockGLInterface> > gl_;
   scoped_refptr<gfx::GLSurfaceStub> surface_;
   scoped_refptr<gfx::GLContextStub> context_;
-  scoped_ptr<GLES2Decoder> mock_decoder_;
   scoped_ptr<GLES2Decoder> decoder_;
-  MemoryTracker* memory_tracker_;
 
   GLuint client_buffer_id_;
   GLuint client_framebuffer_id_;
@@ -501,8 +399,6 @@ class GLES2DecoderTestBase : public testing::Test {
   GLuint client_element_buffer_id_;
   GLuint client_vertex_shader_id_;
   GLuint client_fragment_shader_id_;
-  GLuint client_query_id_;
-  GLuint client_vertexarray_id_;
 
   uint32 shared_memory_id_;
   uint32 shared_memory_offset_;
@@ -514,38 +410,53 @@ class GLES2DecoderTestBase : public testing::Test {
  private:
   class MockCommandBufferEngine : public CommandBufferEngine {
    public:
-    MockCommandBufferEngine();
+    MockCommandBufferEngine() {
+      data_.reset(new int8[kSharedBufferSize]);
+      ClearSharedMemory();
+      valid_buffer_.ptr = data_.get();
+      valid_buffer_.size = kSharedBufferSize;
+    }
 
-    virtual ~MockCommandBufferEngine();
+    virtual ~MockCommandBufferEngine() {
+    }
 
-    virtual gpu::Buffer GetSharedMemoryBuffer(int32 shm_id) OVERRIDE;
+    virtual Buffer GetSharedMemoryBuffer(int32 shm_id) OVERRIDE {
+      return shm_id == kSharedMemoryId ? valid_buffer_ : invalid_buffer_;
+    }
 
     void ClearSharedMemory() {
       memset(data_.get(), kInitialMemoryValue, kSharedBufferSize);
     }
 
-    virtual void set_token(int32 token) OVERRIDE;
+    virtual void set_token(int32 token) OVERRIDE {
+      DCHECK(false);
+    }
 
-    virtual bool SetGetBuffer(int32 /* transfer_buffer_id */) OVERRIDE;
+    virtual bool SetGetBuffer(int32 /* transfer_buffer_id */) OVERRIDE {
+      DCHECK(false);
+      return false;
+    }
 
     // Overridden from CommandBufferEngine.
-    virtual bool SetGetOffset(int32 offset) OVERRIDE;
+    virtual bool SetGetOffset(int32 offset) OVERRIDE {
+      DCHECK(false);
+      return false;
+    }
 
     // Overridden from CommandBufferEngine.
-    virtual int32 GetGetOffset() OVERRIDE;
+    virtual int32 GetGetOffset() OVERRIDE {
+      DCHECK(false);
+      return 0;
+    }
 
    private:
-    scoped_ptr<int8[]> data_;
-    gpu::Buffer valid_buffer_;
-    gpu::Buffer invalid_buffer_;
+    scoped_array<int8> data_;
+    Buffer valid_buffer_;
+    Buffer invalid_buffer_;
   };
 
-  void AddExpectationsForVertexAttribManager();
-
   scoped_ptr< ::testing::StrictMock<MockCommandBufferEngine> > engine_;
-  scoped_ptr< ::testing::StrictMock<MockStreamTextureManager> >
-      stream_texture_manager_;
-  scoped_refptr<ContextGroup> group_;
+  ContextGroup::Ref group_;
 };
 
 class GLES2DecoderWithShaderTestBase : public GLES2DecoderTestBase {

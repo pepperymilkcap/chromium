@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_WINDOW_NATIVE_FRAME_VIEW_H_
 #define UI_VIEWS_WINDOW_NATIVE_FRAME_VIEW_H_
+#pragma once
 
 #include "ui/views/window/non_client_view.h"
 
@@ -25,12 +26,14 @@ class VIEWS_EXPORT NativeFrameView : public NonClientFrameView {
                              gfx::Path* window_mask) OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
-  virtual void UpdateWindowTitle() OVERRIDE;
 
   // View overrides:
+
+  // Returns the client size. On Windows, this is the expected behavior for
+  // native frames (see |NativeWidgetWin::WidgetSizeIsClientSize()|), while
+  // other platforms currently always return client bounds from
+  // |GetWindowBoundsForClientBounds()|.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual gfx::Size GetMinimumSize() OVERRIDE;
-  virtual gfx::Size GetMaximumSize() OVERRIDE;
 
  private:
   // Our containing frame.

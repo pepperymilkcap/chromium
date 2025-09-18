@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/ppb.h"
 #include "ppapi/c/ppb_opengles2.h"
-#include "ppapi/c/dev/ppb_opengles2ext_dev.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,29 +25,17 @@ GL_APICALL GLboolean GL_APIENTRY glInitializePPAPI(
 
 // Terminates OpenGL ES 2.0 library.
 // GL_FALSE is returned on failure, GL_TRUE otherwise.
-GL_APICALL GLboolean GL_APIENTRY glTerminatePPAPI(void);
+GL_APICALL GLboolean GL_APIENTRY glTerminatePPAPI();
 
 // Sets context to be used for rendering in the current thread.
 GL_APICALL void GL_APIENTRY glSetCurrentContextPPAPI(PP_Resource context);
 
 // Gets context being used for rendering in the current thread.
 // Returns NULL if a context has not been set yet.
-GL_APICALL PP_Resource GL_APIENTRY glGetCurrentContextPPAPI(void);
+GL_APICALL PP_Resource GL_APIENTRY glGetCurrentContextPPAPI();
 
 // Returns OpenGL ES 2.0 interface.
-GL_APICALL const struct PPB_OpenGLES2* GL_APIENTRY glGetInterfacePPAPI(void);
-GL_APICALL const struct PPB_OpenGLES2InstancedArrays* GL_APIENTRY
-    glGetInstancedArraysInterfacePPAPI(void);
-GL_APICALL const struct PPB_OpenGLES2FramebufferBlit* GL_APIENTRY
-    glGetFramebufferBlitInterfacePPAPI(void);
-GL_APICALL const struct PPB_OpenGLES2FramebufferMultisample* GL_APIENTRY
-    glGetFramebufferMultisampleInterfacePPAPI(void);
-GL_APICALL const struct PPB_OpenGLES2ChromiumEnableFeature* GL_APIENTRY
-    glGetChromiumEnableFeatureInterfacePPAPI(void);
-GL_APICALL const struct PPB_OpenGLES2ChromiumMapSub* GL_APIENTRY
-    glGetChromiumMapSubInterfacePPAPI(void);
-GL_APICALL const struct PPB_OpenGLES2Query* GL_APIENTRY
-    glGetQueryInterfacePPAPI(void);
+GL_APICALL const struct PPB_OpenGLES2* GL_APIENTRY glGetInterfacePPAPI();
 
 #ifdef __cplusplus
 }

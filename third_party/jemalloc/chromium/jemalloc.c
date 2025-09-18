@@ -4824,7 +4824,7 @@ arena_new(arena_t *arena)
 		bin->runcur = NULL;
 		arena_run_tree_new(&bin->runs);
 
-		bin->reg_size = ((size_t)1 << (TINY_MIN_2POW + i));
+		bin->reg_size = (1U << (TINY_MIN_2POW + i));
 
 		prev_run_size = arena_bin_run_size_calc(bin, prev_run_size);
 
@@ -5875,7 +5875,7 @@ MALLOC_OUT:
 	/* Set variables according to the value of opt_small_max_2pow. */
 	if (opt_small_max_2pow < opt_quantum_2pow)
 		opt_small_max_2pow = opt_quantum_2pow;
-	small_max = ((size_t)1 << opt_small_max_2pow);
+	small_max = (1U << opt_small_max_2pow);
 
 	/* Set bin-related variables. */
 	bin_maxclass = (pagesize >> 1);
@@ -5886,7 +5886,7 @@ MALLOC_OUT:
 	nsbins = pagesize_2pow - opt_small_max_2pow - 1;
 
 	/* Set variables according to the value of opt_quantum_2pow. */
-	quantum = ((size_t)1 << opt_quantum_2pow);
+	quantum = (1U << opt_quantum_2pow);
 	quantum_mask = quantum - 1;
 	if (ntbins > 0)
 		small_min = (quantum >> 1) + 1;
@@ -5895,7 +5895,7 @@ MALLOC_OUT:
 	assert(small_min <= quantum);
 
 	/* Set variables according to the value of opt_chunk_2pow. */
-	chunksize = ((size_t)1 << opt_chunk_2pow);
+	chunksize = (1LU << opt_chunk_2pow);
 	chunksize_mask = chunksize - 1;
 	chunk_npages = (chunksize >> pagesize_2pow);
 	{
@@ -6148,7 +6148,6 @@ malloc_shutdown()
 #define	free(a)		je_free(a)
 #define _msize(p) je_msize(p)
 #define _recalloc(p, n, s) je_recalloc(p, n, s)
-#define memalign(a, s) je_memalign(a, s)
 #endif
 
 ZONE_INLINE

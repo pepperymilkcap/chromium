@@ -28,13 +28,12 @@ class MetricsService : public MetricsServiceBase {
   static MetricsService* GetInstance();
   // Start/stop the metrics recording and uploading machine.  These should be
   // used on startup and when the user clicks the checkbox in the prefs.
+  // StartRecordingOnly starts the metrics recording but not reporting, for use
+  // in tests only.
   static void Start();
   static void Stop();
   // Set up client ID, session ID, etc.
   void InitializeMetricsState();
-
-  // Retrieves a client ID to use to identify self to metrics server.
-  static const std::string& GetClientID();
 
  private:
   MetricsService();
@@ -46,6 +45,9 @@ class MetricsService : public MetricsServiceBase {
     ACTIVE,                 // Accumalating log data
     STOPPED,                // Service has stopped
   };
+
+  // Maintain a map of histogram names to the sample stats we've sent.
+  typedef std::map<std::string, base::Histogram::SampleSet> LoggedSampleMap;
 
   // Sets and gets whether metrics recording is active.
   // SetRecording(false) also forces a persistent save of logging state (if
@@ -67,6 +69,9 @@ class MetricsService : public MetricsServiceBase {
   // idle_since_last_transmission to false and starts the timer (provided
   // starting the timer is permitted).
   void HandleIdleSinceLastTransmission(bool in_idle);
+
+  // Generates a new client ID to use to identify self to metrics server.
+  static std::string GenerateClientID();
 
   // ChromeFrame UMA data is uploaded when this timer proc gets invoked.
   static void CALLBACK TransmissionTimerProc(HWND window, unsigned int message,
@@ -123,7 +128,7 @@ class MetricsService : public MetricsServiceBase {
   std::wstring server_url_;
 
   // The identifier that's sent to the server with the log reports.
-  static std::string client_id_;
+  std::string client_id_;
 
   // A number that identifies the how many times the app has been launched.
   int session_id_;

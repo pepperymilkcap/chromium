@@ -34,3 +34,4 @@
 // Values around 1600 are used by installer/setup/build/
 
 #define IDD_IPC_SETTINGS                3000
+

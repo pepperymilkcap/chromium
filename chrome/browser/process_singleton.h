@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_PROCESS_SINGLETON_H_
 #define CHROME_BROWSER_PROCESS_SINGLETON_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -11,28 +12,22 @@
 #include <windows.h>
 #endif  // defined(OS_WIN)
 
-#include <set>
-#include <vector>
-
 #include "base/basictypes.h"
-#include "base/callback.h"
-#include "base/command_line.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/process/process.h"
 #include "base/threading/non_thread_safe.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
-#include "base/files/scoped_temp_dir.h"
-#endif
+#if defined(OS_POSIX)
+#include "base/file_path.h"
+#endif  // defined(OS_POSIX)
 
-#if defined(OS_WIN)
-#include "base/win/message_window.h"
-#endif  // defined(OS_WIN)
+#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#include "base/scoped_temp_dir.h"
+#endif  // defined(OS_LINUX) || defined(OS_OPENBSD)
 
 class CommandLine;
+class FilePath;
 
 // ProcessSingleton ----------------------------------------------------------
 //
@@ -52,54 +47,27 @@ class ProcessSingleton : public base::NonThreadSafe {
     PROCESS_NOTIFIED,
     PROFILE_IN_USE,
     LOCK_ERROR,
-    NUM_NOTIFY_RESULTS,
   };
 
-  // Implement this callback to handle notifications from other processes. The
-  // callback will receive the command line and directory with which the other
-  // Chrome process was launched. Return true if the command line will be
-  // handled within the current browser instance or false if the remote process
-  // should handle it (i.e., because the current process is shutting down).
-  typedef base::Callback<bool(
-      const CommandLine& command_line,
-      const base::FilePath& current_directory)> NotificationCallback;
-
-  ProcessSingleton(const base::FilePath& user_data_dir,
-                   const NotificationCallback& notification_callback);
+  explicit ProcessSingleton(const FilePath& user_data_dir);
   ~ProcessSingleton();
 
-  // Notify another process, if available. Otherwise sets ourselves as the
-  // singleton instance. Returns PROCESS_NONE if we became the singleton
-  // instance. Callers are guaranteed to either have notified an existing
-  // process or have grabbed the singleton (unless the profile is locked by an
-  // unreachable process).
-  // TODO(brettw): Make the implementation of this method non-platform-specific
-  // by making Linux re-use the Windows implementation.
-  NotifyResult NotifyOtherProcessOrCreate();
-
-  // Sets ourself up as the singleton instance.  Returns true on success.  If
-  // false is returned, we are not the singleton instance and the caller must
-  // exit.
-  // NOTE: Most callers should generally prefer NotifyOtherProcessOrCreate() to
-  // this method, only callers for whom failure is prefered to notifying another
-  // process should call this directly.
-  bool Create();
-
-  // Clear any lock state during shutdown.
-  void Cleanup();
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
-  static void DisablePromptForTesting();
-#endif
-
- protected:
   // Notify another process, if available.
-  // Returns true if another process was found and notified, false if we should
-  // continue with the current process.
-  // On Windows, Create() has to be called before this.
+  // Returns true if another process was found and notified, false if we
+  // should continue with this process.
+  // Windows code roughly based on Mozilla.
+  //
+  // TODO(brettw): this will not handle all cases. If two process start up too
+  // close to each other, the Create() might not yet have happened for the
+  // first one, so this function won't find it.
   NotifyResult NotifyOtherProcess();
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+  // Notify another process, if available.  Otherwise sets ourselves as the
+  // singleton instance.  Returns PROCESS_NONE if we became the singleton
+  // instance.
+  NotifyResult NotifyOtherProcessOrCreate();
+
+#if defined(OS_LINUX) || defined(OS_OPENBSD)
   // Exposed for testing.  We use a timeout on Linux, and in tests we want
   // this timeout to be short.
   NotifyResult NotifyOtherProcessWithTimeout(const CommandLine& command_line,
@@ -108,9 +76,50 @@ class ProcessSingleton : public base::NonThreadSafe {
   NotifyResult NotifyOtherProcessWithTimeoutOrCreate(
       const CommandLine& command_line,
       int timeout_seconds);
-  void OverrideCurrentPidForTesting(base::ProcessId pid);
-  void OverrideKillCallbackForTesting(
-      const base::Callback<void(int)>& callback);
+#endif  // defined(OS_LINUX) || defined(OS_OPENBSD)
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // Used in specific cases to let us know that there is an existing instance
+  // of Chrome running with this profile. In general, you should not use this
+  // function. Instead consider using NotifyOtherProcessOrCreate().
+  // For non profile-specific method, use
+  // browser_util::IsBrowserAlreadyRunning().
+  bool FoundOtherProcessWindow() const {
+      return (NULL != remote_window_);
+  }
+#endif  // defined(OS_WIN)
+
+  // Sets ourself up as the singleton instance.  Returns true on success.  If
+  // false is returned, we are not the singleton instance and the caller must
+  // exit.
+  bool Create();
+
+  // Clear any lock state during shutdown.
+  void Cleanup();
+
+  // Blocks the dispatch of CopyData messages. foreground_window refers
+  // to the window that should be set to the foreground if a CopyData message
+  // is received while the ProcessSingleton is locked.
+  void Lock(gfx::NativeWindow foreground_window) {
+    DCHECK(CalledOnValidThread());
+    locked_ = true;
+    foreground_window_ = foreground_window;
+  }
+
+  // Allows the dispatch of CopyData messages.
+  void Unlock() {
+    DCHECK(CalledOnValidThread());
+    locked_ = false;
+    foreground_window_ = NULL;
+  }
+
+  bool locked() {
+    DCHECK(CalledOnValidThread());
+    return locked_;
+  }
+
+#if defined(OS_WIN)
+  LRESULT WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 #endif
 
  private:
@@ -120,50 +129,30 @@ class ProcessSingleton : public base::NonThreadSafe {
   static const int kTimeoutInSeconds = 20;
 #endif
 
-  NotificationCallback notification_callback_;  // Handler for notifications.
+  bool locked_;
+  gfx::NativeWindow foreground_window_;
 
 #if defined(OS_WIN)
-  bool EscapeVirtualization(const base::FilePath& user_data_dir);
+  // This ugly behemoth handles startup commands sent from another process.
+  LRESULT OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds);
+
+  bool EscapeVirtualization(const FilePath& user_data_dir);
 
   HWND remote_window_;  // The HWND_MESSAGE of another browser.
-  base::win::MessageWindow window_;  // The message-only window.
+  HWND window_;  // The HWND_MESSAGE window.
   bool is_virtualized_;  // Stuck inside Microsoft Softricity VM environment.
-  HANDLE lock_file_;
-  base::FilePath user_data_dir_;
-#elif defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
-  // Return true if the given pid is one of our child processes.
-  // Assumes that the current pid is the root of all pids of the current
-  // instance.
-  bool IsSameChromeInstance(pid_t pid);
-
-  // Extract the process's pid from a symbol link path and if it is on
-  // the same host, kill the process, unlink the lock file and return true.
-  // If the process is part of the same chrome instance, unlink the lock file
-  // and return true without killing it.
-  // If the process is on a different host, return false.
-  bool KillProcessByLockPath();
-
-  // Default function to kill a process, overridable by tests.
-  void KillProcess(int pid);
-
-  // Allow overriding for tests.
-  base::ProcessId current_pid_;
-
-  // Function to call when the other process is hung and needs to be killed.
-  // Allows overriding for tests.
-  base::Callback<void(int)> kill_callback_;
-
+#elif defined(OS_LINUX) || defined(OS_OPENBSD)
   // Path in file system to the socket.
-  base::FilePath socket_path_;
+  FilePath socket_path_;
 
   // Path in file system to the lock.
-  base::FilePath lock_path_;
+  FilePath lock_path_;
 
   // Path in file system to the cookie file.
-  base::FilePath cookie_path_;
+  FilePath cookie_path_;
 
   // Temporary directory to hold the socket.
-  base::ScopedTempDir socket_dir_;
+  ScopedTempDir socket_dir_;
 
   // Helper class for linux specific messages.  LinuxWatcher is ref counted
   // because it posts messages between threads.
@@ -171,7 +160,7 @@ class ProcessSingleton : public base::NonThreadSafe {
   scoped_refptr<LinuxWatcher> watcher_;
 #elif defined(OS_MACOSX)
   // Path in file system to the lock.
-  base::FilePath lock_path_;
+  FilePath lock_path_;
 
   // File descriptor associated with the lockfile, valid between
   // |Create()| and |Cleanup()|.  Two instances cannot have a lock on

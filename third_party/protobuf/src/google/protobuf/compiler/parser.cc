@@ -174,20 +174,6 @@ bool Parser::ConsumeInteger(int* output, const char* error) {
   }
 }
 
-bool Parser::ConsumeSignedInteger(int* output, const char* error) {
-  bool is_negative = false;
-  uint64 max_value = kint32max;
-  if (TryConsume("-")) {
-    is_negative = true;
-    max_value += 1;
-  }
-  uint64 value = 0;
-  DO(ConsumeInteger64(max_value, &value, error));
-  if (is_negative) value *= -1;
-  *output = value;
-  return true;
-}
-
 bool Parser::ConsumeInteger64(uint64 max_value, uint64* output,
                               const char* error) {
   if (LookingAtType(io::Tokenizer::TYPE_INTEGER)) {
@@ -247,35 +233,6 @@ bool Parser::ConsumeString(string* output, const char* error) {
     return true;
   } else {
     AddError(error);
-    return false;
-  }
-}
-
-bool Parser::TryConsumeEndOfDeclaration(const char* text,
-                                        const LocationRecorder* location) {
-  if (LookingAt(text)) {
-    string leading, trailing;
-    input_->NextWithComments(&trailing, NULL, &leading);
-
-    // Save the leading comments for next time, and recall the leading comments
-    // from last time.
-    leading.swap(upcoming_doc_comments_);
-
-    if (location != NULL) {
-      location->AttachComments(&leading, &trailing);
-    }
-    return true;
-  } else {
-    return false;
-  }
-}
-
-bool Parser::ConsumeEndOfDeclaration(const char* text,
-                                     const LocationRecorder* location) {
-  if (TryConsumeEndOfDeclaration(text, location)) {
-    return true;
-  } else {
-    AddError("Expected \"" + string(text) + "\".");
     return false;
   }
 }
@@ -358,19 +315,6 @@ void Parser::LocationRecorder::RecordLegacyLocation(const Message* descriptor,
   }
 }
 
-void Parser::LocationRecorder::AttachComments(
-    string* leading, string* trailing) const {
-  GOOGLE_CHECK(!location_->has_leading_comments());
-  GOOGLE_CHECK(!location_->has_trailing_comments());
-
-  if (!leading->empty()) {
-    location_->mutable_leading_comments()->swap(*leading);
-  }
-  if (!trailing->empty()) {
-    location_->mutable_trailing_comments()->swap(*trailing);
-  }
-}
-
 // -------------------------------------------------------------------
 
 void Parser::SkipStatement() {
@@ -378,7 +322,7 @@ void Parser::SkipStatement() {
     if (AtEnd()) {
       return;
     } else if (LookingAtType(io::Tokenizer::TYPE_SYMBOL)) {
-      if (TryConsumeEndOfDeclaration(";", NULL)) {
+      if (TryConsume(";")) {
         return;
       } else if (TryConsume("{")) {
         SkipRestOfBlock();
@@ -396,7 +340,7 @@ void Parser::SkipRestOfBlock() {
     if (AtEnd()) {
       return;
     } else if (LookingAtType(io::Tokenizer::TYPE_SYMBOL)) {
-      if (TryConsumeEndOfDeclaration("}", NULL)) {
+      if (TryConsume("}")) {
         return;
       } else if (TryConsume("{")) {
         SkipRestOfBlock();
@@ -422,7 +366,7 @@ bool Parser::Parse(io::Tokenizer* input, FileDescriptorProto* file) {
 
   if (LookingAtType(io::Tokenizer::TYPE_START)) {
     // Advance to first token.
-    input_->NextWithComments(NULL, NULL, &upcoming_doc_comments_);
+    input_->Next();
   }
 
   {
@@ -449,7 +393,7 @@ bool Parser::Parse(io::Tokenizer* input, FileDescriptorProto* file) {
 
         if (LookingAt("}")) {
           AddError("Unmatched \"}\".");
-          input_->NextWithComments(NULL, NULL, &upcoming_doc_comments_);
+          input_->Next();
         }
       }
     }
@@ -467,7 +411,7 @@ bool Parser::ParseSyntaxIdentifier() {
   io::Tokenizer::Token syntax_token = input_->current();
   string syntax;
   DO(ConsumeString(&syntax, "Expected syntax identifier."));
-  DO(ConsumeEndOfDeclaration(";", NULL));
+  DO(Consume(";"));
 
   syntax_identifier_ = syntax;
 
@@ -483,7 +427,7 @@ bool Parser::ParseSyntaxIdentifier() {
 
 bool Parser::ParseTopLevelStatement(FileDescriptorProto* file,
                                     const LocationRecorder& root_location) {
-  if (TryConsumeEndOfDeclaration(";", NULL)) {
+  if (TryConsume(";")) {
     // empty statement; ignore
     return true;
   } else if (LookingAt("message")) {
@@ -507,16 +451,14 @@ bool Parser::ParseTopLevelStatement(FileDescriptorProto* file,
                        FileDescriptorProto::kMessageTypeFieldNumber,
                        location);
   } else if (LookingAt("import")) {
-    return ParseImport(file->mutable_dependency(),
-                       file->mutable_public_dependency(),
-                       file->mutable_weak_dependency(),
-                       root_location);
+    int index = file->dependency_size();
+    return ParseImport(file->add_dependency(), root_location, index);
   } else if (LookingAt("package")) {
     return ParsePackage(file, root_location);
   } else if (LookingAt("option")) {
     LocationRecorder location(root_location,
         FileDescriptorProto::kOptionsFieldNumber);
-    return ParseOption(file->mutable_options(), location, OPTION_STATEMENT);
+    return ParseOption(file->mutable_options(), location);
   } else {
     AddError("Expected top-level statement (e.g. \"message\").");
     return false;
@@ -540,45 +482,11 @@ bool Parser::ParseMessageDefinition(DescriptorProto* message,
   return true;
 }
 
-namespace {
-
-const int kMaxExtensionRangeSentinel = -1;
-
-bool IsMessageSetWireFormatMessage(const DescriptorProto& message) {
-  const MessageOptions& options = message.options();
-  for (int i = 0; i < options.uninterpreted_option_size(); ++i) {
-    const UninterpretedOption& uninterpreted = options.uninterpreted_option(i);
-    if (uninterpreted.name_size() == 1 &&
-        uninterpreted.name(0).name_part() == "message_set_wire_format" &&
-        uninterpreted.identifier_value() == "true") {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Modifies any extension ranges that specified 'max' as the end of the
-// extension range, and sets them to the type-specific maximum. The actual max
-// tag number can only be determined after all options have been parsed.
-void AdjustExtensionRangesWithMaxEndNumber(DescriptorProto* message) {
-  const bool is_message_set = IsMessageSetWireFormatMessage(*message);
-  const int max_extension_number = is_message_set ?
-      kint32max :
-      FieldDescriptor::kMaxNumber + 1;
-  for (int i = 0; i < message->extension_range_size(); ++i) {
-    if (message->extension_range(i).end() == kMaxExtensionRangeSentinel) {
-      message->mutable_extension_range(i)->set_end(max_extension_number);
-    }
-  }
-}
-
-}  // namespace
-
 bool Parser::ParseMessageBlock(DescriptorProto* message,
                                const LocationRecorder& message_location) {
-  DO(ConsumeEndOfDeclaration("{", &message_location));
+  DO(Consume("{"));
 
-  while (!TryConsumeEndOfDeclaration("}", NULL)) {
+  while (!TryConsume("}")) {
     if (AtEnd()) {
       AddError("Reached end of input in message definition (missing '}').");
       return false;
@@ -591,15 +499,12 @@ bool Parser::ParseMessageBlock(DescriptorProto* message,
     }
   }
 
-  if (message->extension_range_size() > 0) {
-    AdjustExtensionRangesWithMaxEndNumber(message);
-  }
   return true;
 }
 
 bool Parser::ParseMessageStatement(DescriptorProto* message,
                                    const LocationRecorder& message_location) {
-  if (TryConsumeEndOfDeclaration(";", NULL)) {
+  if (TryConsume(";")) {
     // empty statement; ignore
     return true;
   } else if (LookingAt("message")) {
@@ -627,7 +532,7 @@ bool Parser::ParseMessageStatement(DescriptorProto* message,
   } else if (LookingAt("option")) {
     LocationRecorder location(message_location,
                               DescriptorProto::kOptionsFieldNumber);
-    return ParseOption(message->mutable_options(), location, OPTION_STATEMENT);
+    return ParseOption(message->mutable_options(), location);
   } else {
     LocationRecorder location(message_location,
                               DescriptorProto::kFieldFieldNumber,
@@ -742,7 +647,7 @@ bool Parser::ParseMessageField(FieldDescriptorProto* field,
       return false;
     }
   } else {
-    DO(ConsumeEndOfDeclaration(";", &field_location));
+    DO(Consume(";"));
   }
 
   return true;
@@ -764,7 +669,7 @@ bool Parser::ParseFieldOptions(FieldDescriptorProto* field,
       // the default value is not actually an option.
       DO(ParseDefaultAssignment(field, field_location));
     } else {
-      DO(ParseOption(field->mutable_options(), location, OPTION_ASSIGNMENT));
+      DO(ParseOptionAssignment(field->mutable_options(), location));
     }
   } while (TryConsume(","));
 
@@ -930,8 +835,6 @@ bool Parser::ParseOptionNamePart(UninterpretedOption* uninterpreted_option,
 
 bool Parser::ParseUninterpretedBlock(string* value) {
   // Note that enclosing braces are not added to *value.
-  // We do NOT use ConsumeEndOfStatement for this brace because it's delimiting
-  // an expression, not a block of statements.
   DO(Consume("{"));
   int brace_depth = 1;
   while (!AtEnd()) {
@@ -955,9 +858,8 @@ bool Parser::ParseUninterpretedBlock(string* value) {
 
 // We don't interpret the option here. Instead we store it in an
 // UninterpretedOption, to be interpreted later.
-bool Parser::ParseOption(Message* options,
-                         const LocationRecorder& options_location,
-                         OptionStyle style) {
+bool Parser::ParseOptionAssignment(Message* options,
+                                   const LocationRecorder& options_location) {
   // Create an entry in the uninterpreted_option field.
   const FieldDescriptor* uninterpreted_option_field = options->GetDescriptor()->
       FindFieldByName("uninterpreted_option");
@@ -969,10 +871,6 @@ bool Parser::ParseOption(Message* options,
   LocationRecorder location(
       options_location, uninterpreted_option_field->number(),
       reflection->FieldSize(*options, uninterpreted_option_field));
-
-  if (style == OPTION_STATEMENT) {
-    DO(Consume("option"));
-  }
 
   UninterpretedOption* uninterpreted_option = down_cast<UninterpretedOption*>(
       options->GetReflection()->AddMessage(options,
@@ -1001,91 +899,82 @@ bool Parser::ParseOption(Message* options,
 
   DO(Consume("="));
 
-  {
-    LocationRecorder value_location(location);
-    value_location.RecordLegacyLocation(
-        uninterpreted_option, DescriptorPool::ErrorCollector::OPTION_VALUE);
+  LocationRecorder value_location(location);
+  value_location.RecordLegacyLocation(
+      uninterpreted_option, DescriptorPool::ErrorCollector::OPTION_VALUE);
 
-    // All values are a single token, except for negative numbers, which consist
-    // of a single '-' symbol, followed by a positive number.
-    bool is_negative = TryConsume("-");
+  // All values are a single token, except for negative numbers, which consist
+  // of a single '-' symbol, followed by a positive number.
+  bool is_negative = TryConsume("-");
 
-    switch (input_->current().type) {
-      case io::Tokenizer::TYPE_START:
-        GOOGLE_LOG(FATAL) << "Trying to read value before any tokens have been read.";
+  switch (input_->current().type) {
+    case io::Tokenizer::TYPE_START:
+      GOOGLE_LOG(FATAL) << "Trying to read value before any tokens have been read.";
+      return false;
+
+    case io::Tokenizer::TYPE_END:
+      AddError("Unexpected end of stream while parsing option value.");
+      return false;
+
+    case io::Tokenizer::TYPE_IDENTIFIER: {
+      value_location.AddPath(UninterpretedOption::kIdentifierValueFieldNumber);
+      if (is_negative) {
+        AddError("Invalid '-' symbol before identifier.");
         return false;
-
-      case io::Tokenizer::TYPE_END:
-        AddError("Unexpected end of stream while parsing option value.");
-        return false;
-
-      case io::Tokenizer::TYPE_IDENTIFIER: {
-        value_location.AddPath(
-            UninterpretedOption::kIdentifierValueFieldNumber);
-        if (is_negative) {
-          AddError("Invalid '-' symbol before identifier.");
-          return false;
-        }
-        string value;
-        DO(ConsumeIdentifier(&value, "Expected identifier."));
-        uninterpreted_option->set_identifier_value(value);
-        break;
       }
-
-      case io::Tokenizer::TYPE_INTEGER: {
-        uint64 value;
-        uint64 max_value =
-            is_negative ? static_cast<uint64>(kint64max) + 1 : kuint64max;
-        DO(ConsumeInteger64(max_value, &value, "Expected integer."));
-        if (is_negative) {
-          value_location.AddPath(
-              UninterpretedOption::kNegativeIntValueFieldNumber);
-          uninterpreted_option->set_negative_int_value(
-              -static_cast<int64>(value));
-        } else {
-          value_location.AddPath(
-              UninterpretedOption::kPositiveIntValueFieldNumber);
-          uninterpreted_option->set_positive_int_value(value);
-        }
-        break;
-      }
-
-      case io::Tokenizer::TYPE_FLOAT: {
-        value_location.AddPath(UninterpretedOption::kDoubleValueFieldNumber);
-        double value;
-        DO(ConsumeNumber(&value, "Expected number."));
-        uninterpreted_option->set_double_value(is_negative ? -value : value);
-        break;
-      }
-
-      case io::Tokenizer::TYPE_STRING: {
-        value_location.AddPath(UninterpretedOption::kStringValueFieldNumber);
-        if (is_negative) {
-          AddError("Invalid '-' symbol before string.");
-          return false;
-        }
-        string value;
-        DO(ConsumeString(&value, "Expected string."));
-        uninterpreted_option->set_string_value(value);
-        break;
-      }
-
-      case io::Tokenizer::TYPE_SYMBOL:
-        if (LookingAt("{")) {
-          value_location.AddPath(
-              UninterpretedOption::kAggregateValueFieldNumber);
-          DO(ParseUninterpretedBlock(
-              uninterpreted_option->mutable_aggregate_value()));
-        } else {
-          AddError("Expected option value.");
-          return false;
-        }
-        break;
+      string value;
+      DO(ConsumeIdentifier(&value, "Expected identifier."));
+      uninterpreted_option->set_identifier_value(value);
+      break;
     }
-  }
 
-  if (style == OPTION_STATEMENT) {
-    DO(ConsumeEndOfDeclaration(";", &location));
+    case io::Tokenizer::TYPE_INTEGER: {
+      uint64 value;
+      uint64 max_value =
+          is_negative ? static_cast<uint64>(kint64max) + 1 : kuint64max;
+      DO(ConsumeInteger64(max_value, &value, "Expected integer."));
+      if (is_negative) {
+        value_location.AddPath(
+            UninterpretedOption::kNegativeIntValueFieldNumber);
+        uninterpreted_option->set_negative_int_value(-static_cast<int64>(value));
+      } else {
+        value_location.AddPath(
+            UninterpretedOption::kPositiveIntValueFieldNumber);
+        uninterpreted_option->set_positive_int_value(value);
+      }
+      break;
+    }
+
+    case io::Tokenizer::TYPE_FLOAT: {
+      value_location.AddPath(UninterpretedOption::kDoubleValueFieldNumber);
+      double value;
+      DO(ConsumeNumber(&value, "Expected number."));
+      uninterpreted_option->set_double_value(is_negative ? -value : value);
+      break;
+    }
+
+    case io::Tokenizer::TYPE_STRING: {
+      value_location.AddPath(UninterpretedOption::kStringValueFieldNumber);
+      if (is_negative) {
+        AddError("Invalid '-' symbol before string.");
+        return false;
+      }
+      string value;
+      DO(ConsumeString(&value, "Expected string."));
+      uninterpreted_option->set_string_value(value);
+      break;
+    }
+
+    case io::Tokenizer::TYPE_SYMBOL:
+      if (LookingAt("{")) {
+        value_location.AddPath(UninterpretedOption::kAggregateValueFieldNumber);
+        DO(ParseUninterpretedBlock(
+            uninterpreted_option->mutable_aggregate_value()));
+      } else {
+        AddError("Expected option value.");
+        return false;
+      }
+      break;
   }
 
   return true;
@@ -1119,10 +1008,7 @@ bool Parser::ParseExtensions(DescriptorProto* message,
       LocationRecorder end_location(
           location, DescriptorProto::ExtensionRange::kEndFieldNumber);
       if (TryConsume("max")) {
-        // Set to the sentinel value - 1 since we increment the value below.
-        // The actual value of the end of the range should be set with
-        // AdjustExtensionRangesWithMaxEndNumber.
-        end = kMaxExtensionRangeSentinel - 1;
+        end = FieldDescriptor::kMaxNumber;
       } else {
         DO(ConsumeInteger(&end, "Expected integer."));
       }
@@ -1142,7 +1028,7 @@ bool Parser::ParseExtensions(DescriptorProto* message,
     range->set_end(end);
   } while (TryConsume(","));
 
-  DO(ConsumeEndOfDeclaration(";", &extensions_location));
+  DO(Consume(";"));
   return true;
 }
 
@@ -1160,7 +1046,7 @@ bool Parser::ParseExtend(RepeatedPtrField<FieldDescriptorProto>* extensions,
   io::Tokenizer::Token extendee_end = input_->previous();
 
   // Parse the block.
-  DO(ConsumeEndOfDeclaration("{", &extend_location));
+  DO(Consume("{"));
 
   bool is_first = true;
 
@@ -1197,7 +1083,7 @@ bool Parser::ParseExtend(RepeatedPtrField<FieldDescriptorProto>* extensions,
       // other statements.
       SkipStatement();
     }
-  } while (!TryConsumeEndOfDeclaration("}", NULL));
+  } while(!TryConsume("}"));
 
   return true;
 }
@@ -1223,9 +1109,9 @@ bool Parser::ParseEnumDefinition(EnumDescriptorProto* enum_type,
 
 bool Parser::ParseEnumBlock(EnumDescriptorProto* enum_type,
                             const LocationRecorder& enum_location) {
-  DO(ConsumeEndOfDeclaration("{", &enum_location));
+  DO(Consume("{"));
 
-  while (!TryConsumeEndOfDeclaration("}", NULL)) {
+  while (!TryConsume("}")) {
     if (AtEnd()) {
       AddError("Reached end of input in enum definition (missing '}').");
       return false;
@@ -1243,14 +1129,13 @@ bool Parser::ParseEnumBlock(EnumDescriptorProto* enum_type,
 
 bool Parser::ParseEnumStatement(EnumDescriptorProto* enum_type,
                                 const LocationRecorder& enum_location) {
-  if (TryConsumeEndOfDeclaration(";", NULL)) {
+  if (TryConsume(";")) {
     // empty statement; ignore
     return true;
   } else if (LookingAt("option")) {
     LocationRecorder location(enum_location,
                               EnumDescriptorProto::kOptionsFieldNumber);
-    return ParseOption(enum_type->mutable_options(), location,
-                       OPTION_STATEMENT);
+    return ParseOption(enum_type->mutable_options(), location);
   } else {
     LocationRecorder location(enum_location,
         EnumDescriptorProto::kValueFieldNumber, enum_type->value_size());
@@ -1279,14 +1164,16 @@ bool Parser::ParseEnumConstant(EnumValueDescriptorProto* enum_value,
     location.RecordLegacyLocation(
         enum_value, DescriptorPool::ErrorCollector::NUMBER);
 
+    bool is_negative = TryConsume("-");
     int number;
-    DO(ConsumeSignedInteger(&number, "Expected integer."));
+    DO(ConsumeInteger(&number, "Expected integer."));
+    if (is_negative) number *= -1;
     enum_value->set_number(number);
   }
 
   DO(ParseEnumConstantOptions(enum_value, enum_value_location));
 
-  DO(ConsumeEndOfDeclaration(";", &enum_value_location));
+  DO(Consume(";"));
 
   return true;
 }
@@ -1302,7 +1189,7 @@ bool Parser::ParseEnumConstantOptions(
   DO(Consume("["));
 
   do {
-    DO(ParseOption(value->mutable_options(), location, OPTION_ASSIGNMENT));
+    DO(ParseOptionAssignment(value->mutable_options(), location));
   } while (TryConsume(","));
 
   DO(Consume("]"));
@@ -1330,9 +1217,9 @@ bool Parser::ParseServiceDefinition(ServiceDescriptorProto* service,
 
 bool Parser::ParseServiceBlock(ServiceDescriptorProto* service,
                                const LocationRecorder& service_location) {
-  DO(ConsumeEndOfDeclaration("{", &service_location));
+  DO(Consume("{"));
 
-  while (!TryConsumeEndOfDeclaration("}", NULL)) {
+  while (!TryConsume("}")) {
     if (AtEnd()) {
       AddError("Reached end of input in service definition (missing '}').");
       return false;
@@ -1350,13 +1237,13 @@ bool Parser::ParseServiceBlock(ServiceDescriptorProto* service,
 
 bool Parser::ParseServiceStatement(ServiceDescriptorProto* service,
                                    const LocationRecorder& service_location) {
-  if (TryConsumeEndOfDeclaration(";", NULL)) {
+  if (TryConsume(";")) {
     // empty statement; ignore
     return true;
   } else if (LookingAt("option")) {
     LocationRecorder location(
         service_location, ServiceDescriptorProto::kOptionsFieldNumber);
-    return ParseOption(service->mutable_options(), location, OPTION_STATEMENT);
+    return ParseOption(service->mutable_options(), location);
   } else {
     LocationRecorder location(service_location,
         ServiceDescriptorProto::kMethodFieldNumber, service->method_size());
@@ -1399,41 +1286,28 @@ bool Parser::ParseServiceMethod(MethodDescriptorProto* method,
   }
   DO(Consume(")"));
 
-  if (LookingAt("{")) {
+  if (TryConsume("{")) {
     // Options!
-    DO(ParseOptions(method_location,
-                    MethodDescriptorProto::kOptionsFieldNumber,
-                    method->mutable_options()));
-  } else {
-    DO(ConsumeEndOfDeclaration(";", &method_location));
-  }
+    while (!TryConsume("}")) {
+      if (AtEnd()) {
+        AddError("Reached end of input in method options (missing '}').");
+        return false;
+      }
 
-  return true;
-}
-
-
-bool Parser::ParseOptions(const LocationRecorder& parent_location,
-                          const int optionsFieldNumber,
-                          Message* mutable_options) {
-  // Options!
-  ConsumeEndOfDeclaration("{", &parent_location);
-  while (!TryConsumeEndOfDeclaration("}", NULL)) {
-    if (AtEnd()) {
-      AddError("Reached end of input in method options (missing '}').");
-      return false;
-    }
-
-    if (TryConsumeEndOfDeclaration(";", NULL)) {
-      // empty statement; ignore
-    } else {
-      LocationRecorder location(parent_location,
-                                optionsFieldNumber);
-      if (!ParseOption(mutable_options, location, OPTION_STATEMENT)) {
-        // This statement failed to parse.  Skip it, but keep looping to
-        // parse other statements.
-        SkipStatement();
+      if (TryConsume(";")) {
+        // empty statement; ignore
+      } else {
+        LocationRecorder location(method_location,
+                                  MethodDescriptorProto::kOptionsFieldNumber);
+        if (!ParseOption(method->mutable_options(), location)) {
+          // This statement failed to parse.  Skip it, but keep looping to
+          // parse other statements.
+          SkipStatement();
+        }
       }
     }
+  } else {
+    DO(Consume(";"));
   }
 
   return true;
@@ -1532,44 +1406,32 @@ bool Parser::ParsePackage(FileDescriptorProto* file,
       if (!TryConsume(".")) break;
       file->mutable_package()->append(".");
     }
-
-    location.EndAt(input_->previous());
-
-    DO(ConsumeEndOfDeclaration(";", &location));
   }
 
+  DO(Consume(";"));
   return true;
 }
 
-bool Parser::ParseImport(RepeatedPtrField<string>* dependency,
-                         RepeatedField<int32>* public_dependency,
-                         RepeatedField<int32>* weak_dependency,
-                         const LocationRecorder& root_location) {
+bool Parser::ParseImport(string* import_filename,
+                         const LocationRecorder& root_location,
+                         int index) {
   DO(Consume("import"));
-  if (LookingAt("public")) {
-    LocationRecorder location(
-        root_location, FileDescriptorProto::kPublicDependencyFieldNumber,
-        public_dependency->size());
-    DO(Consume("public"));
-    *public_dependency->Add() = dependency->size();
-  } else if (LookingAt("weak")) {
-    LocationRecorder location(
-        root_location, FileDescriptorProto::kWeakDependencyFieldNumber,
-        weak_dependency->size());
-    DO(Consume("weak"));
-    *weak_dependency->Add() = dependency->size();
-  }
   {
     LocationRecorder location(root_location,
                               FileDescriptorProto::kDependencyFieldNumber,
-                              dependency->size());
-    DO(ConsumeString(dependency->Add(),
+                              index);
+    DO(ConsumeString(import_filename,
       "Expected a string naming the file to import."));
-
-    location.EndAt(input_->previous());
-
-    DO(ConsumeEndOfDeclaration(";", &location));
   }
+  DO(Consume(";"));
+  return true;
+}
+
+bool Parser::ParseOption(Message* options,
+                         const LocationRecorder& options_location) {
+  DO(Consume("option"));
+  DO(ParseOptionAssignment(options, options_location));
+  DO(Consume(";"));
   return true;
 }
 

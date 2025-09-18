@@ -6,13 +6,11 @@
 
 #include <windows.h>
 
+#include "base/file_path.h"
 #include "base/file_version_info.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
-
-using base::FilePath;
 
 FileVersionInfoWin::FileVersionInfoWin(void* data, int language, int code_page)
     : language_(language), code_page_(code_page) {
@@ -81,63 +79,63 @@ FileVersionInfo* FileVersionInfo::CreateFileVersionInfo(
   }
 }
 
-base::string16 FileVersionInfoWin::company_name() {
+string16 FileVersionInfoWin::company_name() {
   return GetStringValue(L"CompanyName");
 }
 
-base::string16 FileVersionInfoWin::company_short_name() {
+string16 FileVersionInfoWin::company_short_name() {
   return GetStringValue(L"CompanyShortName");
 }
 
-base::string16 FileVersionInfoWin::internal_name() {
+string16 FileVersionInfoWin::internal_name() {
   return GetStringValue(L"InternalName");
 }
 
-base::string16 FileVersionInfoWin::product_name() {
+string16 FileVersionInfoWin::product_name() {
   return GetStringValue(L"ProductName");
 }
 
-base::string16 FileVersionInfoWin::product_short_name() {
+string16 FileVersionInfoWin::product_short_name() {
   return GetStringValue(L"ProductShortName");
 }
 
-base::string16 FileVersionInfoWin::comments() {
+string16 FileVersionInfoWin::comments() {
   return GetStringValue(L"Comments");
 }
 
-base::string16 FileVersionInfoWin::legal_copyright() {
+string16 FileVersionInfoWin::legal_copyright() {
   return GetStringValue(L"LegalCopyright");
 }
 
-base::string16 FileVersionInfoWin::product_version() {
+string16 FileVersionInfoWin::product_version() {
   return GetStringValue(L"ProductVersion");
 }
 
-base::string16 FileVersionInfoWin::file_description() {
+string16 FileVersionInfoWin::file_description() {
   return GetStringValue(L"FileDescription");
 }
 
-base::string16 FileVersionInfoWin::legal_trademarks() {
+string16 FileVersionInfoWin::legal_trademarks() {
   return GetStringValue(L"LegalTrademarks");
 }
 
-base::string16 FileVersionInfoWin::private_build() {
+string16 FileVersionInfoWin::private_build() {
   return GetStringValue(L"PrivateBuild");
 }
 
-base::string16 FileVersionInfoWin::file_version() {
+string16 FileVersionInfoWin::file_version() {
   return GetStringValue(L"FileVersion");
 }
 
-base::string16 FileVersionInfoWin::original_filename() {
+string16 FileVersionInfoWin::original_filename() {
   return GetStringValue(L"OriginalFilename");
 }
 
-base::string16 FileVersionInfoWin::special_build() {
+string16 FileVersionInfoWin::special_build() {
   return GetStringValue(L"SpecialBuild");
 }
 
-base::string16 FileVersionInfoWin::last_change() {
+string16 FileVersionInfoWin::last_change() {
   return GetStringValue(L"LastChange");
 }
 

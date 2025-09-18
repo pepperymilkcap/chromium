@@ -4,9 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_CLICKHOLD_BUTTON_CELL_H_
 #define CHROME_BROWSER_UI_COCOA_CLICKHOLD_BUTTON_CELL_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 
 // A button cell that implements "click hold" behavior after a specified delay

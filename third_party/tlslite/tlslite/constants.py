@@ -22,8 +22,6 @@ class HandshakeType:
     certificate_verify = 15
     client_key_exchange = 16
     finished = 20
-    certificate_status = 22
-    encrypted_extensions = 203
 
 class ContentType:
     change_cipher_spec = 20
@@ -31,14 +29,6 @@ class ContentType:
     handshake = 22
     application_data = 23
     all = (20,21,22,23)
-
-class CertificateStatusType:
-    ocsp = 1
-
-class ExtensionType:
-    status_request = 5  # OCSP stapling
-    signed_cert_timestamps = 18  # signed_certificate_timestamp in RFC 6962
-    channel_id = 30031
 
 class AlertLevel:
     warning = 1
@@ -96,7 +86,6 @@ class AlertDescription:
     protocol_version = 70
     insufficient_security = 71
     internal_error = 80
-    inappropriate_fallback = 86
     user_canceled = 90
     no_renegotiation = 100
     unknown_srp_username = 120

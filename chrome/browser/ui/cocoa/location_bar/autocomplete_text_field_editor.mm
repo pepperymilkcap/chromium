@@ -4,16 +4,16 @@
 
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#import "content/browser/find_pasteboard.h"
 #include "grit/generated_resources.h"
-#import "ui/base/cocoa/find_pasteboard.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 namespace {
@@ -45,25 +45,11 @@ BOOL ThePasteboardIsTooDamnBig() {
 
 @implementation AutocompleteTextFieldEditor
 
-- (BOOL)shouldDrawInsertionPoint {
-  return [super shouldDrawInsertionPoint] &&
-         ![[[self delegate] cell] hideFocusState];
-}
-
 - (id)initWithFrame:(NSRect)frameRect {
   if ((self = [super initWithFrame:frameRect])) {
     dropHandler_.reset([[URLDropTargetHandler alloc] initWithView:self]);
 
     forbiddenCharacters_.reset([[NSCharacterSet controlCharacterSet] retain]);
-
-    // These checks seem inappropriate to the omnibox, and also
-    // unlikely to work reliably due to our autocomplete interfering.
-    //
-    // Also see <http://crbug.com/173405>.
-    NSTextCheckingTypes checkingTypes = [self enabledTextCheckingTypes];
-    checkingTypes &= ~NSTextCheckingTypeReplacement;
-    checkingTypes &= ~NSTextCheckingTypeCorrection;
-    [self setEnabledTextCheckingTypes:checkingTypes];
   }
   return self;
 }
@@ -108,12 +94,6 @@ BOOL ThePasteboardIsTooDamnBig() {
 - (void)cut:(id)sender {
   [self copy:sender];
   [self delete:nil];
-}
-
-- (void)showURL:(id)sender {
-  AutocompleteTextFieldObserver* observer = [self observer];
-  DCHECK(observer);
-  observer->ShowURL();
 }
 
 // This class assumes that the delegate is an AutocompleteTextField.
@@ -228,7 +208,6 @@ BOOL ThePasteboardIsTooDamnBig() {
   [menu addItemWithTitle:l10n_util::GetNSStringWithFixup(IDS_COPY)
                   action:@selector(copy:)
            keyEquivalent:@""];
-
   [menu addItemWithTitle:l10n_util::GetNSStringWithFixup(IDS_PASTE)
                   action:@selector(paste:)
            keyEquivalent:@""];
@@ -239,34 +218,28 @@ BOOL ThePasteboardIsTooDamnBig() {
     // Paste and go/search.
     AutocompleteTextFieldObserver* observer = [self observer];
     DCHECK(observer);
-    if (!ThePasteboardIsTooDamnBig()) {
-      NSString* pasteAndGoLabel =
-          l10n_util::GetNSStringWithFixup(observer->GetPasteActionStringId());
-      DCHECK([pasteAndGoLabel length]);
-      [menu addItemWithTitle:pasteAndGoLabel
-                      action:@selector(pasteAndGo:)
-               keyEquivalent:@""];
+    if (observer && observer->CanPasteAndGo()) {
+      const int string_id = observer->GetPasteActionStringId();
+      NSString* label = l10n_util::GetNSStringWithFixup(string_id);
+
+      // TODO(rohitrao): If the clipboard is empty, should we show a
+      // greyed-out "Paste and Go" or nothing at all?
+      if ([label length]) {
+        [menu addItemWithTitle:label
+                        action:@selector(pasteAndGo:)
+                 keyEquivalent:@""];
+      }
     }
 
-    [menu addItem:[NSMenuItem separatorItem]];
-
-    // Display a "Show URL" option if search term replacement is active.
-    if (observer->ShouldEnableShowURL()) {
-      NSString* showURLLabel =
-          l10n_util::GetNSStringWithFixup(IDS_SHOW_URL_MAC);
-      DCHECK([showURLLabel length]);
-      [menu addItemWithTitle:showURLLabel
-                      action:@selector(showURL:)
-               keyEquivalent:@""];
+    NSString* label = l10n_util::GetNSStringWithFixup(IDS_EDIT_SEARCH_ENGINES);
+    DCHECK([label length]);
+    if ([label length]) {
+      [menu addItem:[NSMenuItem separatorItem]];
+      NSMenuItem* item = [menu addItemWithTitle:label
+                                         action:@selector(commandDispatch:)
+                                  keyEquivalent:@""];
+      [item setTag:IDC_EDIT_SEARCH_ENGINES];
     }
-
-    NSString* searchEngineLabel =
-        l10n_util::GetNSStringWithFixup(IDS_EDIT_SEARCH_ENGINES);
-    DCHECK([searchEngineLabel length]);
-    NSMenuItem* item = [menu addItemWithTitle:searchEngineLabel
-                                       action:@selector(commandDispatch:)
-                                keyEquivalent:@""];
-    [item setTag:IDC_EDIT_SEARCH_ENGINES];
   }
 
   return menu;
@@ -302,27 +275,6 @@ BOOL ThePasteboardIsTooDamnBig() {
       observer->OnKillFocus();
   }
   return doResign;
-}
-
-- (void)mouseDown:(NSEvent*)event {
-  AutocompleteTextFieldObserver* observer = [self observer];
-  if (observer)
-    observer->OnMouseDown([event buttonNumber]);
-  [super mouseDown:event];
-}
-
-- (void)rightMouseDown:(NSEvent *)event {
-  AutocompleteTextFieldObserver* observer = [self observer];
-  if (observer)
-    observer->OnMouseDown([event buttonNumber]);
-  [super rightMouseDown:event];
-}
-
-- (void)otherMouseDown:(NSEvent *)event {
-  AutocompleteTextFieldObserver* observer = [self observer];
-  if (observer)
-    observer->OnMouseDown([event buttonNumber]);
-  [super otherMouseDown:event];
 }
 
 // (URLDropTarget protocol)
@@ -391,6 +343,15 @@ BOOL ThePasteboardIsTooDamnBig() {
 }
 
 - (void)setMarkedText:(id)aString selectedRange:(NSRange)selRange {
+  if (![self hasMarkedText]) {
+    // Before input methods set composition text in the omnibox, we need to
+    // examine whether the autocompletion controller accepts the keyword to
+    // avoid committing the current composition text wrongly.
+    AutocompleteTextFieldObserver* observer = [self observer];
+    if (observer)
+      observer->OnStartingIME();
+  }
+
   [super setMarkedText:aString selectedRange:selRange];
 
   // Because the OmniboxViewMac class treats marked text as content,
@@ -507,21 +468,18 @@ BOOL ThePasteboardIsTooDamnBig() {
   textChangedByKeyEvents_ = NO;
 }
 
+- (void)mouseDown:(NSEvent*)theEvent {
+  // Close the popup before processing the event.
+  AutocompleteTextFieldObserver* observer = [self observer];
+  if (observer)
+    observer->ClosePopup();
+
+  [super mouseDown:theEvent];
+}
+
 - (BOOL)validateMenuItem:(NSMenuItem*)item {
   if ([item action] == @selector(copyToFindPboard:))
     return [self selectedRange].length > 0;
-  if ([item action] == @selector(pasteAndGo:)) {
-    // TODO(rohitrao): If the clipboard is empty, should we show a
-    // greyed-out "Paste and Go" or nothing at all?
-    AutocompleteTextFieldObserver* observer = [self observer];
-    DCHECK(observer);
-    return observer->CanPasteAndGo();
-  }
-  if ([item action] == @selector(showURL:)) {
-    AutocompleteTextFieldObserver* observer = [self observer];
-    DCHECK(observer);
-    return observer->ShouldEnableShowURL();
-  }
   return [super validateMenuItem:item];
 }
 
@@ -536,16 +494,6 @@ BOOL ThePasteboardIsTooDamnBig() {
     return;
 
   [[FindPasteboard sharedInstance] setFindText:[selection string]];
-}
-
-- (void)drawRect:(NSRect)rect {
-  [super drawRect:rect];
-  autocomplete_text_field::DrawGrayTextAutocompletion(
-      [self textStorage],
-      [[self delegate] suggestText],
-      [[self delegate] suggestColor],
-      self,
-      [self bounds]);
 }
 
 @end

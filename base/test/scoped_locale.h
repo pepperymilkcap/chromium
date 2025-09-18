@@ -4,6 +4,7 @@
 
 #ifndef BASE_TEST_SCOPED_LOCALE_H_
 #define BASE_TEST_SCOPED_LOCALE_H_
+#pragma once
 
 #include <string>
 

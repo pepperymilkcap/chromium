@@ -8,16 +8,13 @@
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION=193323
+CLANG_REVISION=148911
 
 THIS_DIR="$(dirname "${0}")"
 LLVM_DIR="${THIS_DIR}/../../../third_party/llvm"
 LLVM_BUILD_DIR="${LLVM_DIR}/../llvm-build"
-LLVM_BOOTSTRAP_DIR="${LLVM_DIR}/../llvm-bootstrap"
 CLANG_DIR="${LLVM_DIR}/tools/clang"
-CLANG_TOOLS_EXTRA_DIR="${CLANG_DIR}/tools/extra"
 COMPILER_RT_DIR="${LLVM_DIR}/projects/compiler-rt"
-ANDROID_NDK_DIR="${LLVM_DIR}/../android_tools/ndk"
 STAMP_FILE="${LLVM_BUILD_DIR}/cr_build_revision"
 
 # ${A:-a} returns $A if it's set, a else.
@@ -32,19 +29,8 @@ OS="$(uname -s)"
 force_local_build=
 mac_only=
 run_tests=
-bootstrap=
-with_android=yes
-chrome_tools="plugins"
-
-if [[ "${OS}" = "Darwin" ]]; then
-  with_android=
-fi
-
 while [[ $# > 0 ]]; do
   case $1 in
-    --bootstrap)
-      bootstrap=yes
-      ;;
     --force-local-build)
       force_local_build=yes
       ;;
@@ -54,28 +40,11 @@ while [[ $# > 0 ]]; do
     --run-tests)
       run_tests=yes
       ;;
-    --without-android)
-      with_android=
-      ;;
-    --with-chrome-tools)
-      shift
-      if [[ $# == 0 ]]; then
-        echo "--with-chrome-tools requires an argument."
-        exit 1
-      fi
-      chrome_tools=$1
-      ;;
     --help)
       echo "usage: $0 [--force-local-build] [--mac-only] [--run-tests] "
-      echo "--bootstrap: First build clang with CC, then with itself."
       echo "--force-local-build: Don't try to download prebuilt binaries."
       echo "--mac-only: Do initial download only on Mac systems."
       echo "--run-tests: Run tests after building. Only for local builds."
-      echo "--without-android: Don't build ASan Android runtime library."
-      echo "--with-chrome-tools: Select which chrome tools to build." \
-           "Defaults to plugins."
-      echo "    Example: --with-chrome-tools 'plugins empty-string'"
-      echo
       exit 1
       ;;
   esac
@@ -87,7 +56,6 @@ done
 # --mac-only is passed in and the system isn't a mac. People who don't like this
 # can just delete their third_party/llvm-build directory.
 if [[ -n "$mac_only" ]] && [[ "${OS}" != "Darwin" ]] &&
-    [[ ! ( "$GYP_DEFINES" =~ .*(clang|tsan|asan)=1.* ) ]] &&
     ! [[ -d "${LLVM_BUILD_DIR}" ]]; then
   exit 0
 fi
@@ -109,17 +77,17 @@ if [[ "${OS}" = "Darwin" ]] && xcodebuild -version | grep -q 'Xcode 3.2' ; then
   fi
 
   SUB_VERSION=$(xcodebuild -version | sed -Ene 's/Xcode 3\.2\.([0-9]+)/\1/p')
-  if [[ "${SUB_VERSION}" < 6 ]]; then
+  if [[ "${SUB_VERSION}" < 3 ]]; then
     echo
     echo "          YOUR LD IS BUGGY!"
-    echo "Please upgrade Xcode to at least 3.2.6."
+    echo "Please upgrade Xcode to at least 3.2.3."
     echo
   fi
 fi
 
 
 # Check if there's anything to be done, exit early if not.
-if [[ -f "${STAMP_FILE}" ]]; then
+if [ -f "${STAMP_FILE}" ]; then
   PREVIOUSLY_BUILT_REVISON=$(cat "${STAMP_FILE}")
   if [[ -z "$force_local_build" ]] && \
        [[ "${PREVIOUSLY_BUILT_REVISON}" = "${CLANG_REVISION}" ]]; then
@@ -130,33 +98,39 @@ fi
 # To always force a new build if someone interrupts their build half way.
 rm -f "${STAMP_FILE}"
 
-
-# Clobber build files. PCH files only work with the compiler that created them.
-# We delete .o files to make sure all files are built with the new compiler.
-echo "Clobbering build files"
-MAKE_DIR="${THIS_DIR}/../../../out"
-XCODEBUILD_DIR="${THIS_DIR}/../../../xcodebuild"
-for DIR in "${XCODEBUILD_DIR}" "${MAKE_DIR}/Debug" "${MAKE_DIR}/Release"; do
-  if [[ -d "${DIR}" ]]; then
-    find "${DIR}" -name '*.o' -exec rm {} +
-    find "${DIR}" -name '*.o.d' -exec rm {} +
-    find "${DIR}" -name '*.gch' -exec rm {} +
-    find "${DIR}" -name '*.dylib' -exec rm -rf {} +
-    find "${DIR}" -name 'SharedPrecompiledHeaders' -exec rm -rf {} +
-  fi
-done
-
-# Clobber NaCl toolchain stamp files, see http://crbug.com/159793
-if [[ -d "${MAKE_DIR}" ]]; then
-  find "${MAKE_DIR}" -name 'stamp.untar' -exec rm {} +
-fi
+# Clobber pch files, since they only work with the compiler version that
+# created them.
 if [[ "${OS}" = "Darwin" ]]; then
-  if [[ -d "${XCODEBUILD_DIR}" ]]; then
-    find "${XCODEBUILD_DIR}" -name 'stamp.untar' -exec rm {} +
+  XCODEBUILD_DIR="${THIS_DIR}/../../../xcodebuild"
+  if [ -f "${THIS_DIR}/../../../WebKit.gyp" ]; then
+    # We're inside a WebKit checkout.
+    # TODO(thakis): try to unify the directory layout of the xcode- and
+    # make-based builds. http://crbug.com/110455
+    MAKE_DIR="${THIS_DIR}/../../../../../../out"
+  else
+    # We're inside a Chromium checkout.
+    MAKE_DIR="${THIS_DIR}/../../../out"
   fi
+  for CONFIG in Debug Release; do
+    if [[ -d "${MAKE_DIR}/${CONFIG}/obj.target" ]]; then
+      echo "Clobbering ${CONFIG} PCH files for make build"
+      find "${MAKE_DIR}/${CONFIG}/obj.target" -name '*.gch' -exec rm {} +
+    fi
+
+    # ninja puts its output below ${MAKE_DIR} as well.
+    if [[ -d "${MAKE_DIR}/${CONFIG}/obj" ]]; then
+      echo "Clobbering ${CONFIG} PCH files for ninja build"
+      find "${MAKE_DIR}/${CONFIG}/obj" -name '*.gch' -exec rm {} +
+    fi
+
+    if [[ -d "${XCODEBUILD_DIR}/${CONFIG}/SharedPrecompiledHeaders" ]]; then
+      echo "Clobbering ${CONFIG} PCH files for Xcode build"
+      rm -rf "${XCODEBUILD_DIR}/${CONFIG}/SharedPrecompiledHeaders"
+    fi
+  done
 fi
 
-if [[ -z "$force_local_build" ]]; then
+if [ -z "$force_local_build" ]; then
   # Check if there's a prebuilt binary and if so just fetch that. That's faster,
   # and goma relies on having matching binary hashes on client and server too.
   CDS_URL=https://commondatastorage.googleapis.com/chromium-browser-clang
@@ -191,15 +165,6 @@ if [[ -z "$force_local_build" ]]; then
   fi
 fi
 
-if [[ -n "${with_android}" ]] && ! [[ -d "${ANDROID_NDK_DIR}" ]]; then
-  echo "Android NDK not found at ${ANDROID_NDK_DIR}"
-  echo "The Android NDK is needed to build a Clang whose -fsanitize=address"
-  echo "works on Android. See "
-  echo "http://code.google.com/p/chromium/wiki/AndroidBuildInstructions for how"
-  echo "to install the NDK, or pass --without-android."
-  exit 1
-fi
-
 echo Getting LLVM r"${CLANG_REVISION}" in "${LLVM_DIR}"
 if ! svn co --force "${LLVM_REPO_URL}/llvm/trunk@${CLANG_REVISION}" \
                     "${LLVM_DIR}"; then
@@ -218,47 +183,12 @@ svn co --force "${LLVM_REPO_URL}/compiler-rt/trunk@${CLANG_REVISION}" \
 # Echo all commands.
 set -x
 
-NUM_JOBS=3
-if [[ "${OS}" = "Linux" ]]; then
-  NUM_JOBS="$(grep -c "^processor" /proc/cpuinfo)"
-elif [ "${OS}" = "Darwin" ]; then
-  NUM_JOBS="$(sysctl -n hw.ncpu)"
-fi
-
-# Build bootstrap clang if requested.
-if [[ -n "${bootstrap}" ]]; then
-  echo "Building bootstrap compiler"
-  mkdir -p "${LLVM_BOOTSTRAP_DIR}"
-  cd "${LLVM_BOOTSTRAP_DIR}"
-  if [[ ! -f ./config.status ]]; then
-    # The bootstrap compiler only needs to be able to build the real compiler,
-    # so it needs no cross-compiler output support. In general, the host
-    # compiler should be as similar to the final compiler as possible, so do
-    # keep --disable-threads & co.
-    ../llvm/configure \
-        --enable-optimized \
-        --enable-targets=host-only \
-        --disable-threads \
-        --disable-pthreads \
-        --without-llvmgcc \
-        --without-llvmgxx
-  fi
-  MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}"
-  if [[ -n "${run_tests}" ]]; then
-    make check-all
-  fi
-  cd -
-  export CC="${PWD}/${LLVM_BOOTSTRAP_DIR}/Release+Asserts/bin/clang"
-  export CXX="${PWD}/${LLVM_BOOTSTRAP_DIR}/Release+Asserts/bin/clang++"
-  echo "Building final compiler"
-fi
-
 # Build clang (in a separate directory).
 # The clang bots have this path hardcoded in built/scripts/slave/compile.py,
 # so if you change it you also need to change these links.
 mkdir -p "${LLVM_BUILD_DIR}"
 cd "${LLVM_BUILD_DIR}"
-if [[ ! -f ./config.status ]]; then
+if [ ! -f ./config.status ]; then
   ../llvm/configure \
       --enable-optimized \
       --disable-threads \
@@ -267,51 +197,30 @@ if [[ ! -f ./config.status ]]; then
       --without-llvmgxx
 fi
 
-MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}"
-STRIP_FLAGS=
-if [ "${OS}" = "Darwin" ]; then
-  # See http://crbug.com/256342
-  STRIP_FLAGS=-x
+NUM_JOBS=3
+if [ "${OS}" = "Linux" ]; then
+  NUM_JOBS="$(grep -c "^processor" /proc/cpuinfo)"
+elif [ "${OS}" = "Darwin" ]; then
+  NUM_JOBS="$(sysctl -n hw.ncpu)"
 fi
-strip ${STRIP_FLAGS} Release+Asserts/bin/clang
+MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}"
 cd -
 
-if [[ -n "${with_android}" ]]; then
-  # Make a standalone Android toolchain.
-  ${ANDROID_NDK_DIR}/build/tools/make-standalone-toolchain.sh \
-      --platform=android-14 \
-      --install-dir="${LLVM_BUILD_DIR}/android-toolchain" \
-      --system=linux-x86_64 \
-      --stl=stlport
-
-  # Build ASan runtime for Android.
-  # Note: LLVM_ANDROID_TOOLCHAIN_DIR is not relative to PWD, but to where we
-  # build the runtime, i.e. third_party/llvm/projects/compiler-rt.
-  cd "${LLVM_BUILD_DIR}"
-  make -C tools/clang/runtime/ \
-    LLVM_ANDROID_TOOLCHAIN_DIR="../../../llvm-build/android-toolchain"
-  cd -
-fi
-
-# Build Chrome-specific clang tools. Paths in this list should be relative to
-# tools/clang.
-# For each tool directory, copy it into the clang tree and use clang's build
-# system to compile it.
-for CHROME_TOOL_DIR in ${chrome_tools}; do
-  TOOL_SRC_DIR="${THIS_DIR}/../${CHROME_TOOL_DIR}"
-  TOOL_DST_DIR="${LLVM_DIR}/tools/clang/tools/chrome-${CHROME_TOOL_DIR}"
-  TOOL_BUILD_DIR="${LLVM_BUILD_DIR}/tools/clang/tools/chrome-${CHROME_TOOL_DIR}"
-  rm -rf "${TOOL_DST_DIR}"
-  cp -R "${TOOL_SRC_DIR}" "${TOOL_DST_DIR}"
-  rm -rf "${TOOL_BUILD_DIR}"
-  mkdir -p "${TOOL_BUILD_DIR}"
-  cp "${TOOL_SRC_DIR}/Makefile" "${TOOL_BUILD_DIR}"
-  MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}" -C "${TOOL_BUILD_DIR}"
-done
+# Build plugin.
+# Copy it into the clang tree and use clang's build system to compile the
+# plugin.
+PLUGIN_SRC_DIR="${THIS_DIR}/../plugins"
+PLUGIN_DST_DIR="${LLVM_DIR}/tools/clang/tools/chrome-plugin"
+PLUGIN_BUILD_DIR="${LLVM_BUILD_DIR}/tools/clang/tools/chrome-plugin"
+rm -rf "${PLUGIN_DST_DIR}"
+cp -R "${PLUGIN_SRC_DIR}" "${PLUGIN_DST_DIR}"
+rm -rf "${PLUGIN_BUILD_DIR}"
+mkdir -p "${PLUGIN_BUILD_DIR}"
+cp "${PLUGIN_SRC_DIR}/Makefile" "${PLUGIN_BUILD_DIR}"
+MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}" -C "${PLUGIN_BUILD_DIR}"
 
 if [[ -n "$run_tests" ]]; then
   # Run a few tests.
-  PLUGIN_SRC_DIR="${THIS_DIR}/../plugins"
   "${PLUGIN_SRC_DIR}/tests/test.sh" "${LLVM_BUILD_DIR}/Release+Asserts"
   cd "${LLVM_BUILD_DIR}"
   make check-all

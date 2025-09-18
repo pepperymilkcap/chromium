@@ -8,9 +8,10 @@
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/c/private/ppp_instance_private.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/shared_impl/host_resource.h"
+
+struct PPP_Instance_Private;
 
 namespace ppapi {
 namespace proxy {
@@ -22,7 +23,7 @@ class PPP_Instance_Private_Proxy : public InterfaceProxy {
   PPP_Instance_Private_Proxy(Dispatcher* dispatcher);
   virtual ~PPP_Instance_Private_Proxy();
 
-  static const PPP_Instance_Private* GetProxyInterface();
+  static const Info* GetInfo();
 
  private:
   // InterfaceProxy implementation.

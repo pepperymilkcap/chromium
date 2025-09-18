@@ -13,8 +13,6 @@
 
 #include <string>
 
-#include "native_client/src/include/nacl_macros.h"
-
 namespace plugin {
 
 // These error codes are reported via UMA so, if you edit them:
@@ -63,42 +61,6 @@ enum PluginErrorCode {
   ERROR_SEL_LDR_COMMUNICATION_WRAPPER = 35,
   ERROR_SEL_LDR_COMMUNICATION_REV_SERVICE = 36,
   ERROR_START_PROXY_CRASH = 37,
-  ERROR_MANIFEST_PROGRAM_MISSING_ARCH = 38,
-  ERROR_PNACL_CACHE_OPEN_INPROGRESS = 39,
-  ERROR_PNACL_CACHE_OPEN_NOACCESS = 40,
-  ERROR_PNACL_CACHE_OPEN_NOQUOTA = 41,
-  ERROR_PNACL_CACHE_OPEN_NOSPACE = 42,
-  ERROR_PNACL_CACHE_OPEN_OTHER = 43,
-  ERROR_PNACL_CACHE_DIRECTORY_CREATE = 44,
-  ERROR_PNACL_CACHE_FILEOPEN_NOACCESS = 45,
-  ERROR_PNACL_CACHE_FILEOPEN_NOQUOTA = 46,
-  ERROR_PNACL_CACHE_FILEOPEN_NOSPACE = 47,
-  ERROR_PNACL_CACHE_FILEOPEN_NOTAFILE = 48,
-  ERROR_PNACL_CACHE_FILEOPEN_OTHER = 49,
-  ERROR_PNACL_CACHE_FETCH_NOACCESS = 50,
-  ERROR_PNACL_CACHE_FETCH_NOTFOUND = 51,
-  ERROR_PNACL_CACHE_FETCH_OTHER = 52,
-  ERROR_PNACL_CACHE_FINALIZE_COPY_NOQUOTA = 53,
-  ERROR_PNACL_CACHE_FINALIZE_COPY_NOSPACE = 54,
-  ERROR_PNACL_CACHE_FINALIZE_COPY_OTHER = 55,
-  ERROR_PNACL_CACHE_FINALIZE_RENAME_NOACCESS = 56,
-  ERROR_PNACL_CACHE_FINALIZE_RENAME_OTHER = 57,
-  ERROR_PNACL_RESOURCE_FETCH = 58,
-  ERROR_PNACL_PEXE_FETCH_ABORTED = 59,
-  ERROR_PNACL_PEXE_FETCH_NOACCESS = 60,
-  ERROR_PNACL_PEXE_FETCH_OTHER = 61,
-  ERROR_PNACL_THREAD_CREATE = 62,
-  ERROR_PNACL_LLC_SETUP = 63,
-  ERROR_PNACL_LD_SETUP = 64,
-  ERROR_PNACL_LLC_INTERNAL = 65,
-  ERROR_PNACL_LD_INTERNAL = 66,
-  ERROR_PNACL_CREATE_TEMP = 67,
-  // This entry is no longer used, but should not be removed, because UMA
-  // numbers need to be kept consistent.
-  ERROR_PNACL_NOT_ENABLED = 68,
-  ERROR_MANIFEST_NOACCESS_URL = 69,
-  ERROR_NEXE_NOACCESS_URL = 70,
-  ERROR_PNACL_CRASH_THROTTLED = 71,
   // If you add a code, read the enum comment above on how to update histograms.
   ERROR_MAX
 };
@@ -110,26 +72,12 @@ class ErrorInfo {
   }
 
   void Reset() {
-    SetReport(ERROR_UNKNOWN, std::string());
+    SetReport(ERROR_UNKNOWN, "");
   }
 
   void SetReport(PluginErrorCode error_code, const std::string& message) {
     error_code_ = error_code;
     message_ = message;
-    console_message_ = message;
-  }
-
-  // console_message is a part of the error that is logged to
-  // the JavaScript console but is not reported to JavaScript via
-  // the lastError property.  This is used to report internal errors which
-  // may easily change in new versions of the browser and we don't want apps
-  // to come to depend on the details of these errors.
-  void SetReportWithConsoleOnlyError(PluginErrorCode error_code,
-                                     const std::string& message,
-                                     const std::string& console_message) {
-    error_code_ = error_code;
-    message_ = message;
-    console_message_ = message + "; " + console_message;
   }
 
   PluginErrorCode error_code() const {
@@ -138,21 +86,15 @@ class ErrorInfo {
 
   void PrependMessage(const std::string& prefix) {
     message_ = prefix + message_;
-    console_message_ = prefix + console_message_;
   }
 
   const std::string& message() const {
     return message_;
   }
 
-  const std::string& console_message() const {
-    return console_message_;
-  }
-
  private:
   PluginErrorCode error_code_;
   std::string message_;
-  std::string console_message_;
   NACL_DISALLOW_COPY_AND_ASSIGN(ErrorInfo);
 };
 

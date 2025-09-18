@@ -4,11 +4,12 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_EXTERNAL_PROTOCOL_DIALOG_H_
 #define CHROME_BROWSER_CHROMEOS_EXTERNAL_PROTOCOL_DIALOG_H_
+#pragma once
 
 #include <string>
 
-#include "base/strings/string16.h"
-#include "base/time/time.h"
+#include "base/string16.h"
+#include "base/time.h"
 #include "ui/views/window/dialog_delegate.h"
 
 class GURL;
@@ -33,9 +34,8 @@ class ExternalProtocolDialog : public views::DialogDelegate {
 
   // views::DialogDelegate Methods:
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;

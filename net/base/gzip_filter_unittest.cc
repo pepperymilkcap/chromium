@@ -5,6 +5,12 @@
 #include <fstream>
 #include <ostream>
 
+#if defined(USE_SYSTEM_ZLIB)
+#include <zlib.h>
+#else
+#include "third_party/zlib/zlib.h"
+#endif
+
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -13,12 +19,16 @@
 #include "net/base/io_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-#include "third_party/zlib/zlib.h"
 
 namespace {
 
 const int kDefaultBufferSize = 4096;
 const int kSmallBufferSize = 128;
+
+const char kApplicationOctetStream[] = "application/octet-stream";
+const char kApplicationXGzip[] = "application/x-gzip";
+const char kApplicationGzip[] = "application/gzip";
+const char kApplicationXGunzip[] = "application/x-gunzip";
 
 // The GZIP header (see RFC 1952):
 //   +---+---+---+---+---+---+---+---+---+---+
@@ -56,7 +66,7 @@ class GZipUnitTest : public PlatformTest {
     gzip_encode_buffer_ = NULL;
 
     // Get the path of source data file.
-    base::FilePath file_path;
+    FilePath file_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &file_path);
     file_path = file_path.AppendASCII("net");
     file_path = file_path.AppendASCII("data");
@@ -64,7 +74,7 @@ class GZipUnitTest : public PlatformTest {
     file_path = file_path.AppendASCII("google.txt");
 
     // Read data from the file into buffer.
-    ASSERT_TRUE(base::ReadFileToString(file_path, &source_buffer_));
+    ASSERT_TRUE(file_util::ReadFileToString(file_path, &source_buffer_));
 
     // Encode the data with deflate
     deflate_encode_buffer_ = new char[kDefaultBufferSize];

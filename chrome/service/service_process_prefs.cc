@@ -4,16 +4,12 @@
 
 #include "chrome/service/service_process_prefs.h"
 
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/prefs/pref_filter.h"
 #include "base/values.h"
 
 ServiceProcessPrefs::ServiceProcessPrefs(
-    const base::FilePath& pref_filename,
-    base::SequencedTaskRunner* task_runner)
-    : prefs_(new JsonPrefStore(pref_filename,
-                               task_runner,
-                               scoped_ptr<PrefFilter>())) {
+    const FilePath& pref_filename,
+    base::MessageLoopProxy* file_message_loop_proxy)
+    : prefs_(new JsonPrefStore(pref_filename, file_message_loop_proxy)) {
 }
 
 ServiceProcessPrefs::~ServiceProcessPrefs() {}
@@ -26,75 +22,39 @@ void ServiceProcessPrefs::WritePrefs() {
   prefs_->CommitPendingWrite();
 }
 
-std::string ServiceProcessPrefs::GetString(
-    const std::string& key,
-    const std::string& default_value) const {
-  const base::Value* value;
-  std::string result;
-  if (!prefs_->GetValue(key, &value) || !value->GetAsString(&result))
-    return default_value;
-
-  return result;
+void ServiceProcessPrefs::GetString(const std::string& key,
+                                    std::string* result) {
+  const Value* value;
+  if (prefs_->GetValue(key, &value) == PersistentPrefStore::READ_OK)
+    value->GetAsString(result);
 }
 
 void ServiceProcessPrefs::SetString(const std::string& key,
                                     const std::string& value) {
-  prefs_->SetValue(key, new base::StringValue(value));
+  prefs_->SetValue(key, Value::CreateStringValue(value));
 }
 
-bool ServiceProcessPrefs::GetBoolean(const std::string& key,
-                                     bool default_value) const {
-  const base::Value* value;
-  bool result = false;
-  if (!prefs_->GetValue(key, &value) || !value->GetAsBoolean(&result))
-    return default_value;
-
-  return result;
+void ServiceProcessPrefs::GetBoolean(const std::string& key, bool* result) {
+  const Value* value;
+  if (prefs_->GetValue(key, &value) == PersistentPrefStore::READ_OK)
+    value->GetAsBoolean(result);
 }
 
 void ServiceProcessPrefs::SetBoolean(const std::string& key, bool value) {
-  prefs_->SetValue(key, new base::FundamentalValue(value));
+  prefs_->SetValue(key, Value::CreateBooleanValue(value));
 }
 
-int ServiceProcessPrefs::GetInt(const std::string& key,
-                                int default_value) const {
-  const base::Value* value;
-  int result = default_value;
-  if (!prefs_->GetValue(key, &value) || !value->GetAsInteger(&result))
-    return default_value;
-
-  return result;
-}
-
-void ServiceProcessPrefs::SetInt(const std::string& key, int value) {
-  prefs_->SetValue(key, new base::FundamentalValue(value));
-}
-
-const base::DictionaryValue* ServiceProcessPrefs::GetDictionary(
-    const std::string& key) const {
-  const base::Value* value;
-  if (!prefs_->GetValue(key, &value) ||
-      !value->IsType(base::Value::TYPE_DICTIONARY)) {
-    return NULL;
+void ServiceProcessPrefs::GetDictionary(const std::string& key,
+                                        const DictionaryValue** result) {
+  const Value* value;
+  if (prefs_->GetValue(key, &value) != PersistentPrefStore::READ_OK ||
+      !value->IsType(Value::TYPE_DICTIONARY)) {
+    return;
   }
 
-  return static_cast<const base::DictionaryValue*>(value);
-}
-
-const base::ListValue* ServiceProcessPrefs::GetList(
-    const std::string& key) const {
-  const base::Value* value;
-  if (!prefs_->GetValue(key, &value) || !value->IsType(base::Value::TYPE_LIST))
-    return NULL;
-
-  return static_cast<const base::ListValue*>(value);
-}
-
-void ServiceProcessPrefs::SetValue(const std::string& key, base::Value* value) {
-  prefs_->SetValue(key, value);
+  *result = static_cast<const DictionaryValue*>(value);
 }
 
 void ServiceProcessPrefs::RemovePref(const std::string& key) {
   prefs_->RemoveValue(key);
 }
-

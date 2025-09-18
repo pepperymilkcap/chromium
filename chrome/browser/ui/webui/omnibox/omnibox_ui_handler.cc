@@ -6,27 +6,18 @@
 
 #include <string>
 
-#include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/strings/string16.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/string16.h"
+#include "base/stringprintf.h"
+#include "base/time.h"
 #include "base/values.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
-#include "chrome/browser/autocomplete/autocomplete_controller.h"
-#include "chrome/browser/autocomplete/autocomplete_input.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/autocomplete/autocomplete_provider.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/url_database.h"
-#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "content/public/browser/web_ui.h"
 
-OmniboxUIHandler::OmniboxUIHandler(Profile* profile): profile_(profile) {
-  ResetController();
+OmniboxUIHandler::OmniboxUIHandler(Profile* profile ) {
+  controller_.reset(new AutocompleteController(profile, this));
 }
 
 OmniboxUIHandler::~OmniboxUIHandler() {}
@@ -42,170 +33,94 @@ void OmniboxUIHandler::RegisterMessages() {
 // object result_to_output and call the javascript function
 // handleNewAutocompleteResult.  Here's an example populated
 // result_to_output object:
-// {
-//   'done': false,
+// { 'done': false,
 //   'time_since_omnibox_started_ms': 15,
-//   'host': 'mai',
-//   'is_typed_host': false,
-//   'combined_results' : {
-//     'num_items': 4,
-//     'item_0': {
-//       'destination_url': 'http://mail.google.com',
-//       'provider_name': 'HistoryURL',
-//       'relevance': 1410,
-//       ...
-//     }
-//     'item_1: {
-//       ...
-//     }
+//   'num_items': 4,
+//   'item_0': {
+//     'destination_url': 'http://mail.google.com',
+//     'provider_name': 'HistoryURL',
+//     'relevance': 1410,
+//     'is_default_match': true,
+//     ...
+//    }
+//   'item_1: {
 //     ...
 //   }
-//   'results_by_provider': {
-//     'HistoryURL' : {
-//       'num_items': 3,
-//         ...
-//       }
-//     'Search' : {
-//       'num_items': 1,
-//       ...
-//     }
-//     ...
-//   }
+//   ...
 // }
 // For reference, the javascript code that unpacks this object and
 // displays it is in chrome/browser/resources/omnibox.js
+//
+// TODO(mpearson): Instead of iterating over the sorted-and-
+// duplicate-eliminated results, perhaps it would be useful to also
+// poll all the AutocompleteController's providers.  This will require
+// changing the AutocompleteController's interface.
 void OmniboxUIHandler::OnResultChanged(bool default_match_changed) {
+  const AutocompleteResult& result = controller_->result();
   base::DictionaryValue result_to_output;
-  // Fill in general information.
+  // Fill in result-level information.
   result_to_output.SetBoolean("done", controller_->done());
   result_to_output.SetInteger("time_since_omnibox_started_ms",
       (base::Time::Now() - time_omnibox_started_).InMilliseconds());
-  const base::string16& host = controller_->input().text().substr(
-      controller_->input().parts().host.begin,
-      controller_->input().parts().host.len);
-  result_to_output.SetString("host", host);
-  bool is_typed_host;
-  if (LookupIsTypedHost(host, &is_typed_host)) {
-    // If we successfully looked up whether the host part of the omnibox
-    // input (this interprets the input as a host plus optional path) as
-    // a typed host, then record this information in the output.
-    result_to_output.SetBoolean("is_typed_host", is_typed_host);
-  }
-  // Fill in the merged/combined results the controller has provided.
-  AddResultToDictionary("combined_results", controller_->result().begin(),
-                        controller_->result().end(), &result_to_output);
-  // Fill results from each individual provider as well.
-  for (ACProviders::const_iterator it(controller_->providers()->begin());
-       it != controller_->providers()->end(); ++it) {
-    AddResultToDictionary(
-        std::string("results_by_provider.") + (*it)->GetName(),
-        (*it)->matches().begin(), (*it)->matches().end(), &result_to_output);
-  }
-  // Add done; send the results.
-  web_ui()->CallJavascriptFunction("omniboxDebug.handleNewAutocompleteResult",
-                                   result_to_output);
-}
-
-// For details on the format of the DictionaryValue that this function
-// populates, see the comments by OnResultChanged().
-void OmniboxUIHandler::AddResultToDictionary(const std::string& prefix,
-                                             ACMatches::const_iterator it,
-                                             ACMatches::const_iterator end,
-                                             base::DictionaryValue* output) {
+  result_to_output.SetInteger("num_items", result.size());
+  // Fill in per-match information.
   int i = 0;
-  for (; it != end; ++it, ++i) {
-    std::string item_prefix(prefix + base::StringPrintf(".item_%d", i));
+  for (ACMatches::const_iterator it = result.begin(); it != result.end();
+       ++it, ++i) {
+    std::string prefix(StringPrintf("item_%d", i));
     if (it->provider != NULL) {
-      output->SetString(item_prefix + ".provider_name",
-                        it->provider->GetName());
-      output->SetBoolean(item_prefix + ".provider_done", it->provider->done());
+      result_to_output.SetString(prefix + ".provider_name",
+                                 it->provider->name());
+      result_to_output.SetBoolean(prefix + ".provider_done",
+                                  it->provider->done());
     }
-    output->SetInteger(item_prefix + ".relevance", it->relevance);
-    output->SetBoolean(item_prefix + ".deletable", it->deletable);
-    output->SetString(item_prefix + ".fill_into_edit", it->fill_into_edit);
-    output->SetString(item_prefix + ".inline_autocompletion",
-                       it->inline_autocompletion);
-    output->SetString(item_prefix + ".destination_url",
-                      it->destination_url.spec());
-    output->SetString(item_prefix + ".contents", it->contents);
+    result_to_output.SetInteger(prefix + ".relevance", it->relevance);
+    result_to_output.SetBoolean(prefix + ".deletable", it->deletable);
+    result_to_output.SetString(prefix + ".fill_into_edit", it->fill_into_edit);
+    result_to_output.SetInteger(prefix + ".inline_autocomplete_offset",
+                                it->inline_autocomplete_offset);
+    result_to_output.SetString(prefix + ".destination_url",
+                               it->destination_url.spec());
+    result_to_output.SetString(prefix + ".contents", it->contents);
     // At this time, we're not bothering to send along the long vector that
     // represent contents classification.  i.e., for each character, what
     // type of text it is.
-    output->SetString(item_prefix + ".description", it->description);
+    result_to_output.SetString(prefix + ".description", it->description);
     // At this time, we're not bothering to send along the long vector that
     // represents description classification.  i.e., for each character, what
     // type of text it is.
-    output->SetInteger(item_prefix + ".transition", it->transition);
-    output->SetBoolean(item_prefix + ".is_history_what_you_typed_match",
-                       it->is_history_what_you_typed_match);
-    output->SetBoolean(item_prefix + ".allowed_to_be_default_match",
-                       it->allowed_to_be_default_match);
-    output->SetString(item_prefix + ".type",
-                      AutocompleteMatchType::ToString(it->type));
-    if (it->associated_keyword.get() != NULL) {
-      output->SetString(item_prefix + ".associated_keyword",
-                        it->associated_keyword->keyword);
+    result_to_output.SetInteger(prefix + ".transition", it->transition);
+    result_to_output.SetBoolean(prefix + ".is_history_what_you_typed_match",
+                                it->is_history_what_you_typed_match);
+    result_to_output.SetString(prefix + ".type",
+                               AutocompleteMatch::TypeToString(it->type));
+    if ((it->template_url != NULL) && (it->template_url->url() != NULL)) {
+      result_to_output.SetString(prefix + ".template_url",
+                                 it->template_url->url()->url());
     }
-    output->SetString(item_prefix + ".keyword", it->keyword);
-    output->SetBoolean(item_prefix + ".starred", it->starred);
-    output->SetBoolean(item_prefix + ".from_previous", it->from_previous);
-    for (AutocompleteMatch::AdditionalInfo::const_iterator j =
-         it->additional_info.begin(); j != it->additional_info.end(); ++j) {
-      output->SetString(item_prefix + ".additional_info." + j->first,
-                        j->second);
-    }
+    result_to_output.SetBoolean(prefix + ".starred", it->starred);
+    result_to_output.SetBoolean(prefix + ".from_previous", it->from_previous);
+    result_to_output.SetBoolean(prefix + ".is_default_match",
+                                it == result.default_match());
   }
-  output->SetInteger(prefix + ".num_items", i);
+  web_ui()->CallJavascriptFunction("omniboxDebug.handleNewAutocompleteResult",
+                                  result_to_output);
 }
 
-bool OmniboxUIHandler::LookupIsTypedHost(const base::string16& host,
-                                         bool* is_typed_host) const {
-  HistoryService* const history_service =
-      HistoryServiceFactory::GetForProfile(profile_,
-                                           Profile::EXPLICIT_ACCESS);
-  if (!history_service)
-    return false;
-  history::URLDatabase* url_db = history_service->InMemoryDatabase();
-  if (!url_db)
-    return false;
-  *is_typed_host = url_db->IsTypedHost(base::UTF16ToUTF8(host));
-  return true;
-}
-
-void OmniboxUIHandler::StartOmniboxQuery(const base::ListValue* input) {
-  DCHECK_EQ(4u, input->GetSize());
-  base::string16 input_string;
-  bool return_val = input->GetString(0, &input_string);
-  DCHECK(return_val);
-  int cursor_position;
-  return_val = input->GetInteger(1, &cursor_position);
-  DCHECK(return_val);
-  bool prevent_inline_autocomplete;
-  return_val = input->GetBoolean(2, &prevent_inline_autocomplete);
-  DCHECK(return_val);
-  bool prefer_keyword;
-  return_val = input->GetBoolean(3, &prefer_keyword);
-  DCHECK(return_val);
-  // Reset the controller.  If we don't do this, then the
-  // AutocompleteController might inappropriately set its |minimal_changes|
-  // variable (or something else) and some providers will short-circuit
-  // important logic and return stale results.  In short, we want the
-  // actual results to not depend on the state of the previous request.
-  ResetController();
+void OmniboxUIHandler::StartOmniboxQuery(
+    const base::ListValue* one_element_input_string) {
+  string16 input_string = ExtractStringValue(one_element_input_string);
+  string16 empty_string;
+  // Tell the autocomplete controller to start working on the
+  // input.  It's okay if the previous request hasn't yet finished;
+  // the autocomplete controller is smart enough to stop the previous
+  // query before it starts the new one.  By the way, in this call to
+  // Start(), we use the default/typical values for all parameters.
   time_omnibox_started_ = base::Time::Now();
-  controller_->Start(AutocompleteInput(
-      input_string,
-      cursor_position,
-      base::string16(),  // user's desired tld (top-level domain)
-      GURL(),
-      AutocompleteInput::INVALID_SPEC,
-      prevent_inline_autocomplete,
-      prefer_keyword,
-      true,  // allow exact keyword matches
-      AutocompleteInput::ALL_MATCHES));  // want all matches
-}
-
-void OmniboxUIHandler::ResetController() {
-  controller_.reset(new AutocompleteController(profile_, this,
-          AutocompleteClassifier::kDefaultOmniboxProviders));
+  controller_->Start(input_string,
+                     empty_string,  // user's desired tld (top-level domain)
+                     false,  // don't prevent inline autocompletion
+                     false,  // no preferred keyword provider
+                     true,  // allow exact keyword matches
+                     AutocompleteInput::ALL_MATCHES);  // want all matches
 }

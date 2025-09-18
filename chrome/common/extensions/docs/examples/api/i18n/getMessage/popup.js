@@ -21,5 +21,4 @@ function getAcceptLanguages() {
 document.addEventListener('DOMContentLoaded', function() {
   document.querySelector('#accept_lang').addEventListener(
       'click', getAcceptLanguages);
-  init();
 });

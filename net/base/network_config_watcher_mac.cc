@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 
@@ -17,7 +17,6 @@ namespace net {
 
 namespace {
 
-#if !defined(OS_IOS)
 // Called back by OS.  Calls OnNetworkConfigChange().
 void DynamicStoreCallback(SCDynamicStoreRef /* store */,
                           CFArrayRef changed_keys,
@@ -26,7 +25,6 @@ void DynamicStoreCallback(SCDynamicStoreRef /* store */,
       static_cast<NetworkConfigWatcherMac::Delegate*>(config_delegate);
   net_config_delegate->OnNetworkConfigChange(changed_keys);
 }
-#endif  // !defined(OS_IOS)
 
 class NetworkConfigWatcherMacThread : public base::Thread {
  public:
@@ -43,7 +41,7 @@ class NetworkConfigWatcherMacThread : public base::Thread {
   // on, so we invoke this function later on in startup to keep it fast.
   void InitNotifications();
 
-  base::ScopedCFTypeRef<CFRunLoopSourceRef> run_loop_source_;
+  base::mac::ScopedCFTypeRef<CFRunLoopSourceRef> run_loop_source_;
   NetworkConfigWatcherMac::Delegate* const delegate_;
   base::WeakPtrFactory<NetworkConfigWatcherMacThread> weak_factory_;
 
@@ -54,7 +52,7 @@ NetworkConfigWatcherMacThread::NetworkConfigWatcherMacThread(
     NetworkConfigWatcherMac::Delegate* delegate)
     : base::Thread("NetworkConfigWatcher"),
       delegate_(delegate),
-      weak_factory_(this) {}
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {}
 
 NetworkConfigWatcherMacThread::~NetworkConfigWatcherMacThread() {
   // Allow IO because Stop() calls PlatformThread::Join(), which is a blocking
@@ -73,12 +71,12 @@ void NetworkConfigWatcherMacThread::Init() {
 
   // TODO(willchan): Look to see if there's a better signal for when it's ok to
   // initialize this, rather than just delaying it by a fixed time.
-  const base::TimeDelta kInitializationDelay = base::TimeDelta::FromSeconds(1);
+  const int kInitializationDelayMS = 1000;
   message_loop()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&NetworkConfigWatcherMacThread::InitNotifications,
                  weak_factory_.GetWeakPtr()),
-      kInitializationDelay);
+      kInitializationDelayMS);
 }
 
 void NetworkConfigWatcherMacThread::CleanUp() {
@@ -91,8 +89,6 @@ void NetworkConfigWatcherMacThread::CleanUp() {
 }
 
 void NetworkConfigWatcherMacThread::InitNotifications() {
-#if !defined(OS_IOS)
-  // SCDynamicStore API does not exist on iOS.
   // Add a run loop source for a dynamic store to the current run loop.
   SCDynamicStoreContext context = {
     0,          // Version 0.
@@ -101,19 +97,16 @@ void NetworkConfigWatcherMacThread::InitNotifications() {
     NULL,       // This is not reference counted.  No release function.
     NULL,       // No description for this.
   };
-  base::ScopedCFTypeRef<SCDynamicStoreRef> store(SCDynamicStoreCreate(
+  base::mac::ScopedCFTypeRef<SCDynamicStoreRef> store(SCDynamicStoreCreate(
       NULL, CFSTR("org.chromium"), DynamicStoreCallback, &context));
   run_loop_source_.reset(SCDynamicStoreCreateRunLoopSource(
       NULL, store.get(), 0));
   CFRunLoopAddSource(CFRunLoopGetCurrent(), run_loop_source_.get(),
                      kCFRunLoopCommonModes);
-#endif  // !defined(OS_IOS)
 
   // Set up notifications for interface and IP address changes.
   delegate_->StartReachabilityNotifications();
-#if !defined(OS_IOS)
   delegate_->SetDynamicStoreNotificationKeys(store.get());
-#endif  // !defined(OS_IOS)
 }
 
 }  // namespace
@@ -123,7 +116,7 @@ NetworkConfigWatcherMac::NetworkConfigWatcherMac(Delegate* delegate)
   // We create this notifier thread because the notification implementation
   // needs a thread with a CFRunLoop, and there's no guarantee that
   // MessageLoop::current() meets that criterion.
-  base::Thread::Options thread_options(base::MessageLoop::TYPE_UI, 0);
+  base::Thread::Options thread_options(MessageLoop::TYPE_UI, 0);
   notifier_thread_->StartWithOptions(thread_options);
 }
 

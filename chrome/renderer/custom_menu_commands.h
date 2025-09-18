@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_CUSTOM_MENU_COMMANDS_H_
 #define CHROME_RENDERER_CUSTOM_MENU_COMMANDS_H_
+#pragma once
 
 namespace chrome {
 

@@ -22,10 +22,7 @@
 
 #if defined(OS_WIN)
 #define snprintf _snprintf
-typedef SSIZE_T ssize_t;
-#if !defined(__clang__) && _MSC_VER <= 1700
-# define va_copy(a, b) do { (a) = (b); } while (0)
-#endif
+#define va_copy(a, b) do { (a) = (b); } while (0)
 #endif
 
 namespace leveldb {
@@ -83,26 +80,6 @@ class AtomicPointer {
     ::base::subtle::NoBarrier_Store(&rep_, reinterpret_cast<Rep>(v));
   }
 };
-
-// Implementation of OnceType and InitOnce() pair, this is equivalent to
-// pthread_once_t and pthread_once().
-typedef ::base::subtle::Atomic32 OnceType;
-
-enum {
-  ONCE_STATE_UNINITIALIZED = 0,
-  ONCE_STATE_EXECUTING_CLOSURE = 1,
-  ONCE_STATE_DONE = 2
-};
-
-#define LEVELDB_ONCE_INIT   leveldb::port::ONCE_STATE_UNINITIALIZED
-
-// slow code path
-void InitOnceImpl(OnceType* once, void (*initializer)());
-
-static inline void InitOnce(OnceType* once, void (*initializer)()) {
-  if (::base::subtle::Acquire_Load(once) != ONCE_STATE_DONE)
-    InitOnceImpl(once, initializer);
-}
 
 bool Snappy_Compress(const char* input, size_t input_length,
                      std::string* output);

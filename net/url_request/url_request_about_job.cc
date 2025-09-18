@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,25 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 
 namespace net {
 
-URLRequestAboutJob::URLRequestAboutJob(URLRequest* request,
-                                       NetworkDelegate* network_delegate)
-    : URLRequestJob(request, network_delegate),
-      weak_factory_(this) {
+URLRequestAboutJob::URLRequestAboutJob(URLRequest* request)
+    : URLRequestJob(request),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+}
+
+// static
+URLRequestJob* URLRequestAboutJob::Factory(URLRequest* request,
+                                           const std::string& scheme) {
+  return new URLRequestAboutJob(request);
 }
 
 void URLRequestAboutJob::Start() {
   // Start reading asynchronously so that all error reporting and data
   // callbacks happen as they would for network requests.
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&URLRequestAboutJob::StartAsync, weak_factory_.GetWeakPtr()));
 }

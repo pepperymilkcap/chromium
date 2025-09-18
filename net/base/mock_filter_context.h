@@ -4,11 +4,12 @@
 
 #ifndef NET_BASE_MOCK_FILTER_CONTEXT_H_
 #define NET_BASE_MOCK_FILTER_CONTEXT_H_
+#pragma once
 
 #include <string>
 
+#include "googleurl/src/gurl.h"
 #include "net/base/filter.h"
-#include "url/gurl.h"
 
 namespace net {
 

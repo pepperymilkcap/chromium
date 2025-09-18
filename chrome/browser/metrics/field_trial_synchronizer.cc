@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,29 +8,21 @@
 #include "base/logging.h"
 #include "base/threading/thread.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 
 using content::BrowserThread;
 
-namespace {
-
-// This singleton instance should be constructed during the single threaded
-// portion of main(). It initializes globals to provide support for all future
-// calls. This object is created on the UI thread, and it is destroyed after
-// all the other threads have gone away.
-FieldTrialSynchronizer* g_field_trial_synchronizer = NULL;
-
-}  // namespace
-
 FieldTrialSynchronizer::FieldTrialSynchronizer() {
-  DCHECK(g_field_trial_synchronizer == NULL);
-  g_field_trial_synchronizer = this;
+  DCHECK(field_trial_synchronizer_ == NULL);
+  field_trial_synchronizer_ = this;
   base::FieldTrialList::AddObserver(this);
+}
 
-  chrome_variations::SetChildProcessLoggingVariationList();
+FieldTrialSynchronizer::~FieldTrialSynchronizer() {
+  base::FieldTrialList::RemoveObserver(this);
+  field_trial_synchronizer_ = NULL;
 }
 
 void FieldTrialSynchronizer::NotifyAllRenderers(
@@ -57,10 +49,8 @@ void FieldTrialSynchronizer::OnFieldTrialGroupFinalized(
                  this,
                  field_trial_name,
                  group_name));
-  chrome_variations::SetChildProcessLoggingVariationList();
 }
 
-FieldTrialSynchronizer::~FieldTrialSynchronizer() {
-  base::FieldTrialList::RemoveObserver(this);
-  g_field_trial_synchronizer = NULL;
-}
+// static
+FieldTrialSynchronizer*
+    FieldTrialSynchronizer::field_trial_synchronizer_ = NULL;

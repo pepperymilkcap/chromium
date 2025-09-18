@@ -8,12 +8,6 @@
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/var.h"
 
-// When compiling natively on Windows, PostMessage can be #define-d to
-// something else.
-#ifdef PostMessage
-#undef PostMessage
-#endif
-
 // This is a simple C++ Pepper plugin that demonstrates HandleMessage and
 // PostMessage.
 

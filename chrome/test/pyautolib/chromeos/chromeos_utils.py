@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -28,10 +28,15 @@ class ChromeosUtils(pyauto.PyUITest):
       python chromeos_utils.py \
         chromeos_utils.ChromeosUtils.LoginToDefaultAccount
     """
-    # Should auto-login. Nothing to do here.
-    # TODO(nirnimesh): Remove this when auto-login feature
-    # reaches chromeos such that this helper is not necessary.
-    pass
+    if self.GetLoginInfo()['is_logged_in']:
+      logging.info('Already logged in as %s.' % self.GetLoginInfo()['email'])
+      return
+    creds = constants.CREDENTIALS['$default']
+    username = creds[0]
+    passwd = creds[1]
+    self.Login(username, passwd)
+    assert self.GetLoginInfo()['is_logged_in']
+    logging.info('Logged in as %s.' % username)
 
 
 if __name__ == '__main__':

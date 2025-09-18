@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_SINGLE_SPLIT_VIEW_LISTENER_H_
 #define UI_VIEWS_CONTROLS_SINGLE_SPLIT_VIEW_LISTENER_H_
+#pragma once
 
 namespace views {
 

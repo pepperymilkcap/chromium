@@ -8,15 +8,12 @@
 
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "net/base/net_errors.h"
 #include "net/socket/client_socket_handle.h"
 
 namespace net {
 
 using base::Histogram;
-using base::HistogramBase;
 using base::LinearHistogram;
-using base::CustomHistogram;
 
 ClientSocketPoolHistograms::ClientSocketPoolHistograms(
     const std::string& pool_name)
@@ -25,30 +22,25 @@ ClientSocketPoolHistograms::ClientSocketPoolHistograms(
   // UMA_HISTOGRAM_ENUMERATION
   socket_type_ = LinearHistogram::FactoryGet("Net.SocketType_" + pool_name, 1,
       ClientSocketHandle::NUM_TYPES, ClientSocketHandle::NUM_TYPES + 1,
-      HistogramBase::kUmaTargetedHistogramFlag);
+      Histogram::kUmaTargetedHistogramFlag);
   // UMA_HISTOGRAM_CUSTOM_TIMES
   request_time_ = Histogram::FactoryTimeGet(
       "Net.SocketRequestTime_" + pool_name,
       base::TimeDelta::FromMilliseconds(1),
       base::TimeDelta::FromMinutes(10),
-      100, HistogramBase::kUmaTargetedHistogramFlag);
+      100, Histogram::kUmaTargetedHistogramFlag);
   // UMA_HISTOGRAM_CUSTOM_TIMES
   unused_idle_time_ = Histogram::FactoryTimeGet(
       "Net.SocketIdleTimeBeforeNextUse_UnusedSocket_" + pool_name,
       base::TimeDelta::FromMilliseconds(1),
       base::TimeDelta::FromMinutes(6),
-      100, HistogramBase::kUmaTargetedHistogramFlag);
+      100, Histogram::kUmaTargetedHistogramFlag);
   // UMA_HISTOGRAM_CUSTOM_TIMES
   reused_idle_time_ = Histogram::FactoryTimeGet(
       "Net.SocketIdleTimeBeforeNextUse_ReusedSocket_" + pool_name,
       base::TimeDelta::FromMilliseconds(1),
       base::TimeDelta::FromMinutes(6),
-      100, HistogramBase::kUmaTargetedHistogramFlag);
-  // UMA_HISTOGRAM_CUSTOM_ENUMERATION
-  error_code_ = CustomHistogram::FactoryGet(
-      "Net.SocketInitErrorCodes_" + pool_name,
-      GetAllErrorCodesForUma(),
-      HistogramBase::kUmaTargetedHistogramFlag);
+      100, Histogram::kUmaTargetedHistogramFlag);
 
   if (pool_name == "HTTPProxy")
     is_http_proxy_connection_ = true;
@@ -65,6 +57,25 @@ void ClientSocketPoolHistograms::AddSocketType(int type) const {
 
 void ClientSocketPoolHistograms::AddRequestTime(base::TimeDelta time) const {
   request_time_->AddTime(time);
+
+  static const bool proxy_connection_impact_trial_exists =
+      base::FieldTrialList::TrialExists("ProxyConnectionImpact");
+  if (proxy_connection_impact_trial_exists && is_http_proxy_connection_) {
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        base::FieldTrial::MakeName("Net.HttpProxySocketRequestTime",
+                             "ProxyConnectionImpact"),
+        time,
+        base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
+        100);
+  }
+  if (proxy_connection_impact_trial_exists && is_socks_connection_) {
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        base::FieldTrial::MakeName("Net.SocksSocketRequestTime",
+                             "ProxyConnectionImpact"),
+        time,
+        base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
+        100);
+  }
 }
 
 void ClientSocketPoolHistograms::AddUnusedIdleTime(base::TimeDelta time) const {
@@ -73,11 +84,6 @@ void ClientSocketPoolHistograms::AddUnusedIdleTime(base::TimeDelta time) const {
 
 void ClientSocketPoolHistograms::AddReusedIdleTime(base::TimeDelta time) const {
   reused_idle_time_->AddTime(time);
-}
-
-void ClientSocketPoolHistograms::AddErrorCode(int error_code) const {
-  // Error codes are positive (since histograms expect positive sample values).
-  error_code_->Add(-error_code);
 }
 
 }  // namespace net

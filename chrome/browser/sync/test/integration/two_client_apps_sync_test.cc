@@ -3,28 +3,21 @@
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/apps_helper.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_app_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "chrome/common/extensions/extension_constants.h"
-#include "extensions/browser/app_sorting.h"
-#include "sync/api/string_ordinal.h"
 
 using apps_helper::AllProfilesHaveSameAppsAsVerifier;
 using apps_helper::CopyNTPOrdinals;
 using apps_helper::DisableApp;
 using apps_helper::EnableApp;
 using apps_helper::FixNTPOrdinalCollisions;
-using apps_helper::GetAppLaunchOrdinalForApp;
 using apps_helper::HasSameAppsAsVerifier;
 using apps_helper::IncognitoDisableApp;
 using apps_helper::IncognitoEnableApp;
 using apps_helper::InstallApp;
 using apps_helper::InstallAppsPendingForSync;
-using apps_helper::InstallPlatformApp;
 using apps_helper::SetAppLaunchOrdinalForApp;
 using apps_helper::SetPageOrdinalForApp;
 using apps_helper::UninstallApp;
@@ -88,13 +81,6 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, StartWithDifferentApps) {
   for (int j = 0; j < kNumProfile1Apps; ++i, ++j) {
     InstallApp(GetProfile(1), i);
     InstallApp(verifier(), i);
-    CopyNTPOrdinals(GetProfile(1), verifier(), i);
-  }
-
-  const int kNumPlatformApps = 5;
-  for (int j = 0; j < kNumPlatformApps; ++i, ++j) {
-    InstallPlatformApp(GetProfile(1), i);
-    InstallPlatformApp(verifier(), i);
     CopyNTPOrdinals(GetProfile(1), verifier(), i);
   }
 
@@ -216,8 +202,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, UninstallThenInstall) {
 }
 
 // TCM ID - 3699295.
-// Flaky: http://crbug.com/226055
-IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, DISABLED_Merge) {
+IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, Merge) {
   ASSERT_TRUE(SetupSync());
   ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
 
@@ -303,14 +288,14 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, DisableApps) {
   ASSERT_TRUE(SetupSync());
   ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
 
-  ASSERT_TRUE(GetClient(1)->DisableSyncForDatatype(syncer::APPS));
+  ASSERT_TRUE(GetClient(1)->DisableSyncForDatatype(syncable::APPS));
   InstallApp(GetProfile(0), 0);
   InstallApp(verifier(), 0);
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(HasSameAppsAsVerifier(0));
   ASSERT_FALSE(HasSameAppsAsVerifier(1));
 
-  ASSERT_TRUE(GetClient(1)->EnableSyncForDatatype(syncer::APPS));
+  ASSERT_TRUE(GetClient(1)->EnableSyncForDatatype(syncable::APPS));
   ASSERT_TRUE(AwaitQuiescence());
 
   InstallAppsPendingForSync(GetProfile(0));
@@ -329,7 +314,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, DisableSync) {
   ASSERT_TRUE(GetClient(1)->DisableSyncForAllDatatypes());
   InstallApp(GetProfile(0), 0);
   InstallApp(verifier(), 0);
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion("Installed an app."));
   ASSERT_TRUE(HasSameAppsAsVerifier(0));
   ASSERT_FALSE(HasSameAppsAsVerifier(1));
 
@@ -348,15 +333,14 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, UpdatePageOrdinal) {
   ASSERT_TRUE(SetupSync());
   ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
 
-  syncer::StringOrdinal initial_page =
-      syncer::StringOrdinal::CreateInitialOrdinal();
+  StringOrdinal initial_page = StringOrdinal::CreateInitialOrdinal();
   InstallApp(GetProfile(0), 0);
   InstallApp(GetProfile(1), 0);
   InstallApp(verifier(), 0);
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
 
-  syncer::StringOrdinal second_page = initial_page.CreateAfter();
+  StringOrdinal second_page = initial_page.CreateAfter();
   SetPageOrdinalForApp(GetProfile(0), 0, second_page);
   SetPageOrdinalForApp(verifier(), 0, second_page);
   ASSERT_TRUE(AwaitQuiescence());
@@ -370,54 +354,16 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, UpdateAppLaunchOrdinal) {
   ASSERT_TRUE(SetupSync());
   ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
 
+  StringOrdinal initial_position = StringOrdinal::CreateInitialOrdinal();
   InstallApp(GetProfile(0), 0);
   InstallApp(GetProfile(1), 0);
   InstallApp(verifier(), 0);
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
 
-  syncer::StringOrdinal initial_position =
-      GetAppLaunchOrdinalForApp(GetProfile(0), 0);
-
-  syncer::StringOrdinal second_position = initial_position.CreateAfter();
+  StringOrdinal second_position = initial_position.CreateAfter();
   SetAppLaunchOrdinalForApp(GetProfile(0), 0, second_position);
   SetAppLaunchOrdinalForApp(verifier(), 0, second_position);
-  ASSERT_TRUE(AwaitQuiescence());
-  ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
-}
-
-// Adjust the CWS location within a page on the first client and sync. Adjust
-// which page the CWS appears on and sync. Both clients should have the same
-// page and app launch ordinal values for the CWS.
-IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, UpdateCWSOrdinals) {
-  ASSERT_TRUE(SetupSync());
-  ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
-
-  // Change the app launch ordinal.
-  syncer::StringOrdinal cws_app_launch_ordinal =
-      GetProfile(0)->GetExtensionService()->
-      extension_prefs()->app_sorting()->GetAppLaunchOrdinal(
-          extension_misc::kWebStoreAppId);
-  GetProfile(0)->GetExtensionService()->extension_prefs()->app_sorting()->
-      SetAppLaunchOrdinal(
-          extension_misc::kWebStoreAppId, cws_app_launch_ordinal.CreateAfter());
-  verifier()->GetExtensionService()->extension_prefs()->app_sorting()->
-      SetAppLaunchOrdinal(
-          extension_misc::kWebStoreAppId, cws_app_launch_ordinal.CreateAfter());
-  ASSERT_TRUE(AwaitQuiescence());
-  ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
-
-  // Change the page ordinal.
-  syncer::StringOrdinal cws_page_ordinal =
-      GetProfile(1)->GetExtensionService()->
-      extension_prefs()->app_sorting()->GetPageOrdinal(
-          extension_misc::kWebStoreAppId);
-  GetProfile(1)->GetExtensionService()->extension_prefs()->
-      app_sorting()->SetPageOrdinal(extension_misc::kWebStoreAppId,
-                                    cws_page_ordinal.CreateAfter());
-  verifier()->GetExtensionService()->extension_prefs()->
-      app_sorting()->SetPageOrdinal(extension_misc::kWebStoreAppId,
-                                    cws_page_ordinal.CreateAfter());
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppsAsVerifier());
 }

@@ -1,15 +1,21 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_TOOLBAR_TOOLBAR_MODEL_H_
 #define CHROME_BROWSER_UI_TOOLBAR_TOOLBAR_MODEL_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
-#include "url/gurl.h"
+#include "base/string16.h"
+
+class Browser;
+
+namespace content {
+class NavigationController;
+}
 
 namespace net {
 class X509Certificate;
@@ -24,95 +30,57 @@ class ToolbarModel {
   // don't need two sets of security UI levels.  SECURITY_STYLE_AUTHENTICATED
   // needs to be refined into three levels: warning, standard, and EV.
   enum SecurityLevel {
-#define DEFINE_TOOLBAR_MODEL_SECURITY_LEVEL(name,value)  name = value,
-#include "chrome/browser/ui/toolbar/toolbar_model_security_level_list.h"
-#undef DEFINE_TOOLBAR_MODEL_SECURITY_LEVEL
+    NONE = 0,          // HTTP/no URL/user is editing
+    EV_SECURE,         // HTTPS with valid EV cert
+    SECURE,            // HTTPS (non-EV)
+    SECURITY_WARNING,  // HTTPS, but unable to check certificate revocation
+                       // status or with insecure content on the page
+    SECURITY_ERROR,    // Attempted HTTPS and failed, page not authenticated
+    NUM_SECURITY_LEVELS,
   };
 
-  virtual ~ToolbarModel();
+  explicit ToolbarModel(Browser* browser);
+  ~ToolbarModel();
 
-  // Returns the text for the current page's URL. This will have been formatted
-  // for display to the user:
-  //   - Some characters may be unescaped.
-  //   - The scheme and/or trailing slash may be dropped.
-  //   - If the current page's URL is a search URL for the user's default search
-  //     engine, the query will be extracted and returned for display instead
-  //     of the URL.
-  virtual base::string16 GetText() const = 0;
+  // Returns the text that should be displayed in the location bar.
+  string16 GetText() const;
 
-  // Some search URLs bundle a special "corpus" param that we can extract and
-  // display next to users' search terms in cases where we'd show the search
-  // terms instead of the URL anyway.  For example, a Google image search might
-  // show the corpus "Images:" plus a search string.  This is only used on
-  // mobile.
-  virtual base::string16 GetCorpusNameForMobile() const = 0;
-
-  // Returns the URL of the current navigation entry.
-  virtual GURL GetURL() const = 0;
-
-  // Returns true if a call to GetText() would successfully replace the URL
-  // with search terms.  If |ignore_editing| is true, the result reflects the
-  // underlying state of the page without regard to any user edits that may be
-  // in progress in the omnibox.
-  virtual bool WouldPerformSearchTermReplacement(bool ignore_editing) const = 0;
-
-  // Returns true if a call to GetText() would return something other than the
-  // URL because of either search term replacement or URL omission in favor of
-  // the origin chip.
-  bool WouldReplaceURL() const;
-
-  // Returns the security level that the toolbar should display.  If
-  // |ignore_editing| is true, the result reflects the underlying state of the
-  // page without regard to any user edits that may be in progress in the
-  // omnibox.
-  virtual SecurityLevel GetSecurityLevel(bool ignore_editing) const = 0;
+  // Returns the security level that the toolbar should display.
+  SecurityLevel GetSecurityLevel() const;
 
   // Returns the resource_id of the icon to show to the left of the address,
-  // based on the current URL.  When search term replacement is active, this
-  // returns a search icon.  This doesn't cover specialized icons while the
+  // based on the current URL.  This doesn't cover specialized icons while the
   // user is editing; see OmniboxView::GetIcon().
-  virtual int GetIcon() const = 0;
-
-  // As |GetIcon()|, but returns the icon only taking into account the security
-  // |level| given, ignoring search term replacement state.
-  virtual int GetIconForSecurityLevel(SecurityLevel level) const = 0;
+  int GetIcon() const;
 
   // Returns the name of the EV cert holder.  Only call this when the security
   // level is EV_SECURE.
-  virtual base::string16 GetEVCertName() const = 0;
+  string16 GetEVCertName() const;
 
   // Returns whether the URL for the current navigation entry should be
   // in the location bar.
-  virtual bool ShouldDisplayURL() const = 0;
+  bool ShouldDisplayURL() const;
 
-  // Whether the text in the omnibox is currently being edited.
-  void set_input_in_progress(bool input_in_progress) {
-    input_in_progress_ = input_in_progress;
-  }
+  // Getter/setter of whether the text in location bar is currently being
+  // edited.
+  void set_input_in_progress(bool value) { input_in_progress_ = value; }
   bool input_in_progress() const { return input_in_progress_; }
 
-  // Whether URL replacement should be enabled.
-  void set_url_replacement_enabled(bool enabled) {
-    url_replacement_enabled_ = enabled;
-  }
-  bool url_replacement_enabled() const {
-    return url_replacement_enabled_;
-  }
-
- protected:
-  ToolbarModel();
+  // Returns "<organization_name> [<country>]".
+  static string16 GetEVCertName(const net::X509Certificate& cert);
 
  private:
-  // Returns true if a call to GetText() would return an empty string instead of
-  // the URL that would have otherwise been displayed because the host/origin is
-  // instead being displayed in the origin chip.  This returns false when we
-  // wouldn't have displayed a URL to begin with (e.g. for the NTP).
-  virtual bool WouldOmitURLDueToOriginChip() const = 0;
+  // Returns the navigation controller used to retrieve the navigation entry
+  // from which the states are retrieved.
+  // If this returns NULL, default values are used.
+  content::NavigationController* GetNavigationController() const;
 
+  Browser* browser_;
+
+  // Whether the text in the location bar is currently being edited.
   bool input_in_progress_;
-  bool url_replacement_enabled_;
 
-  DISALLOW_COPY_AND_ASSIGN(ToolbarModel);
+  DISALLOW_IMPLICIT_CONSTRUCTORS(ToolbarModel);
 };
 
 #endif  // CHROME_BROWSER_UI_TOOLBAR_TOOLBAR_MODEL_H_

@@ -4,17 +4,17 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_NTP_RESOURCE_CACHE_FACTORY_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_NTP_RESOURCE_CACHE_FACTORY_H_
+#pragma once
 
 #include "base/memory/singleton.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class NTPResourceCache;
-class Profile;
 
-// Singleton that owns the NTPResourceCaches used by the NTP and associates them
-// with Profiles. Listens for the Profile's destruction notification and cleans
-// up the associated ThemeService.
-class NTPResourceCacheFactory : public BrowserContextKeyedServiceFactory {
+// Singleton that owns all NTPResourceCaches and associates them with
+// Profiles. Listens for the Profile's destruction notification and cleans up
+// the associated ThemeService.
+class NTPResourceCacheFactory : public ProfileKeyedServiceFactory {
  public:
   static NTPResourceCache* GetForProfile(Profile* profile);
 
@@ -26,11 +26,10 @@ class NTPResourceCacheFactory : public BrowserContextKeyedServiceFactory {
   NTPResourceCacheFactory();
   virtual ~NTPResourceCacheFactory();
 
-  // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  // ProfileKeyedServiceFactory:
+  virtual ProfileKeyedService* BuildServiceInstanceFor(
+      Profile* profile) const OVERRIDE;
+  virtual bool ServiceRedirectedInIncognito() OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_NTP_NTP_RESOURCE_CACHE_FACTORY_H_

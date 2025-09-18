@@ -34,10 +34,6 @@ NOTES = {
   'std::__ioinit': '#includes <iostream>, use <ostream> instead',
 }
 
-# Determine whether this is a git checkout (as opposed to e.g. svn).
-IS_GIT_WORKSPACE = (subprocess.Popen(
-    ['git', 'rev-parse'], stderr=subprocess.PIPE).wait() == 0)
-
 class Demangler(object):
   """A wrapper around c++filt to provide a function to demangle symbols."""
   def __init__(self):
@@ -56,8 +52,6 @@ def QualifyFilenameAsProto(filename):
   """Attempt to qualify a bare |filename| with a src-relative path, assuming it
   is a protoc-generated file.  If a single match is found, it is returned.
   Otherwise the original filename is returned."""
-  if not IS_GIT_WORKSPACE:
-    return filename
   match = protobuf_filename_re.match(filename)
   if not match:
     return filename
@@ -83,8 +77,6 @@ def QualifyFilename(filename, symbol):
   """Given a bare filename and a symbol that occurs in it, attempt to qualify
   it with a src-relative path.  If more than one file matches, return the
   original filename."""
-  if not IS_GIT_WORKSPACE:
-    return filename
   match = symbol_code_name_re.match(symbol)
   if not match:
     return filename
@@ -100,47 +92,26 @@ def QualifyFilename(filename, symbol):
   return candidate
 
 # Regex matching nm output for the symbols we're interested in.
-# See test_ParseNmLine for examples.
-nm_re = re.compile(r'(\S+) (\S+) t (?:_ZN12)?_GLOBAL__(?:sub_)?I_(.*)')
-def ParseNmLine(line):
-  """Given a line of nm output, parse static initializers as a
-  (file, start, size) tuple."""
-  match = nm_re.match(line)
-  if match:
-    addr, size, filename = match.groups()
-    return (filename, int(addr, 16), int(size, 16))
-
-
-def test_ParseNmLine():
-  """Verify the nm_re regex matches some sample lines."""
-  parse = ParseNmLine(
-    '0000000001919920 0000000000000008 t '
-    '_ZN12_GLOBAL__I_safe_browsing_service.cc')
-  assert parse == ('safe_browsing_service.cc', 26319136, 8), parse
-
-  parse = ParseNmLine(
-    '00000000026b9eb0 0000000000000024 t '
-    '_GLOBAL__sub_I_extension_specifics.pb.cc')
-  assert parse == ('extension_specifics.pb.cc', 40607408, 36), parse
-
-# Just always run the test; it is fast enough.
-test_ParseNmLine()
-
-
+# Example line:
+#   0000000001919920 0000000000000008 b _ZN12_GLOBAL__N_119g_nine_box_prelightE
+nm_re = re.compile(r'(\S+) (\S+) t _GLOBAL__I_(.*)')
 def ParseNm(binary):
-  """Given a binary, yield static initializers as (file, start, size) tuples."""
+  """Given a binary, yield static initializers as (start, size, file) pairs."""
+
   nm = subprocess.Popen(['nm', '-S', binary], stdout=subprocess.PIPE)
   for line in nm.stdout:
-    parse = ParseNmLine(line)
-    if parse:
-      yield parse
+    match = nm_re.match(line)
+    if match:
+      addr, size, filename = match.groups()
+      yield int(addr, 16), int(size, 16), filename
+
 
 # Regex matching objdump output for the symbols we're interested in.
 # Example line:
 #     12354ab:  (disassembly, including <FunctionReference>)
 disassembly_re = re.compile(r'^\s+[0-9a-f]+:.*<(\S+)>')
 def ExtractSymbolReferences(binary, start, end):
-  """Given a span of addresses, returns symbol references from disassembly."""
+  """Given a span of addresses, yields symbol references from disassembly."""
   cmd = ['objdump', binary, '--disassemble',
          '--start-address=0x%x' % start, '--stop-address=0x%x' % end]
   objdump = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -161,15 +132,17 @@ def ExtractSymbolReferences(binary, start, end):
         # Probably a relative jump within this function.
         continue
       refs.add(ref)
+      continue
 
-  return sorted(refs)
+  for ref in sorted(refs):
+    yield ref
+
 
 def main():
-  parser = optparse.OptionParser(usage='%prog [option] filename')
-  parser.add_option('-d', '--diffable', dest='diffable',
+  parser = optparse.OptionParser(usage='%prog filename')
+  parser.add_option('-i', '--instances', dest='calculate_instances',
                     action='store_true', default=False,
-                    help='Prints the filename on each line, for more easily '
-                         'diff-able output. (Used by sizes.py)')
+                    help='Only print out the number of static initializers')
   opts, args = parser.parse_args()
   if len(args) != 1:
     parser.error('missing filename argument')
@@ -177,55 +150,36 @@ def main():
   binary = args[0]
 
   demangler = Demangler()
-  file_count = 0
-  initializer_count = 0
-
-  files = ParseNm(binary)
-  if opts.diffable:
-    files = sorted(files)
-  for filename, addr, size in files:
-    file_count += 1
-    ref_output = []
-
-    qualified_filename = QualifyFilenameAsProto(filename)
-
+  static_initializers_count = 0
+  for addr, size, filename in ParseNm(binary):
     if size == 2:
-      # gcc generates a two-byte 'repz retq' initializer when there is a
-      # ctor even when the ctor is empty.  This is fixed in gcc 4.6, but
-      # Android uses gcc 4.4.
-      ref_output.append('[empty ctor, but it still has cost on gcc <4.6]')
-    else:
-      for ref in ExtractSymbolReferences(binary, addr, addr+size):
-        initializer_count += 1
+      # gcc generates a two-byte 'repz retq' initializer when there is nothing
+      # to do.  jyasskin tells me this is fixed in gcc 4.6.
+      # Two bytes is too small to do anything, so just ignore it.
+      continue
 
-        ref = demangler.Demangle(ref)
-        if qualified_filename == filename:
-          qualified_filename = QualifyFilename(filename, ref)
+    if (opts.calculate_instances):
+      static_initializers_count += 1
+      continue
 
-        note = ''
-        if ref in NOTES:
-          note = NOTES[ref]
-        elif ref.endswith('_2eproto()'):
-          note = 'protocol compiler bug: crbug.com/105626'
+    ref_output = ''
+    qualified_filename = QualifyFilenameAsProto(filename)
+    for ref in ExtractSymbolReferences(binary, addr, addr+size):
+      ref = demangler.Demangle(ref)
+      if qualified_filename == filename:
+        qualified_filename = QualifyFilename(filename, ref)
+      if ref in NOTES:
+        ref_output = ref_output + '  %s [%s]\n' % (ref, NOTES[ref])
+      else:
+        ref_output = ref_output + '  ' + ref + '\n'
+    print '%s (initializer offset 0x%x size 0x%x)' % (qualified_filename,
+                                                      addr, size)
+    print ref_output
 
-        if note:
-          ref_output.append('%s [%s]' % (ref, note))
-        else:
-          ref_output.append(ref)
-
-    if opts.diffable:
-      print '\n'.join('# ' + qualified_filename + ' ' + r for r in ref_output)
-    else:
-      print '%s (initializer offset 0x%x size 0x%x)' % (qualified_filename,
-                                                        addr, size)
-      print ''.join('  %s\n' % r for r in ref_output)
-
-  if opts.diffable:
-    print '#',
-  print 'Found %d static initializers in %d files.' % (initializer_count,
-                                                       file_count)
-
+  if opts.calculate_instances:
+    print static_initializers_count
   return 0
+
 
 if '__main__' == __name__:
   sys.exit(main())

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,32 +6,40 @@
  * @fileoverview Oobe network screen implementation.
  */
 
-login.createScreen('NetworkScreen', 'connect', function() {
-  return {
-    EXTERNAL_API: [
-      'enableContinueButton',
-      'setTimezone',
-      'showError'
-    ],
+cr.define('oobe', function() {
+  /**
+   * Creates a new oobe screen div.
+   * @constructor
+   * @extends {HTMLDivElement}
+   */
+  var NetworkScreen = cr.ui.define('div');
+
+  /**
+   * Registers with Oobe.
+   */
+  NetworkScreen.register = function() {
+    var screen = $('connect');
+    NetworkScreen.decorate(screen);
+    Oobe.getInstance().registerScreen(screen);
+  };
+
+  NetworkScreen.prototype = {
+    __proto__: HTMLDivElement.prototype,
 
     /**
      * Dropdown element for networks selection.
      */
     dropdown_: null,
 
-    /** @override */
+    /** @inheritDoc */
     decorate: function() {
       Oobe.setupSelect($('language-select'),
-                       loadTimeData.getValue('languageList'),
+                       templateData.languageList,
                        'networkOnLanguageChanged');
 
       Oobe.setupSelect($('keyboard-select'),
-                       loadTimeData.getValue('inputMethodsList'),
+                       templateData.inputMethodsList,
                        'networkOnInputMethodChanged');
-
-      Oobe.setupSelect($('timezone-select'),
-                       loadTimeData.getValue('timezoneList'),
-                       'networkOnTimezoneChanged');
 
       this.dropdown_ = $('networks-list');
       cr.ui.DropDown.decorate(this.dropdown_);
@@ -43,7 +51,6 @@ login.createScreen('NetworkScreen', 'connect', function() {
 
     onBeforeHide: function() {
       cr.ui.DropDown.hide('networks-list');
-      this.enableContinueButton(false);
     },
 
     /**
@@ -51,7 +58,7 @@ login.createScreen('NetworkScreen', 'connect', function() {
      * @type {string}
      */
     get header() {
-      return loadTimeData.getString('networkScreenTitle');
+      return localStrings.getString('networkScreenTitle');
     },
 
     /**
@@ -62,57 +69,39 @@ login.createScreen('NetworkScreen', 'connect', function() {
       var buttons = [];
 
       var continueButton = this.ownerDocument.createElement('button');
-      continueButton.disabled = true;
       continueButton.id = 'continue-button';
-      continueButton.textContent = loadTimeData.getString('continueButton');
-      continueButton.classList.add('preserve-disabled-state');
+      continueButton.textContent = localStrings.getString('continueButton');
       continueButton.addEventListener('click', function(e) {
-        chrome.send('networkOnExit');
-        e.stopPropagation();
+        chrome.send('networkOnExit', []);
       });
       buttons.push(continueButton);
 
       return buttons;
-    },
-
-    /**
-     * Returns a control which should receive an initial focus.
-     */
-    get defaultControl() {
-      return $('language-select');
-    },
-
-    /**
-     * Enables/disables continue button.
-     * @param {boolean} enable Should the button be enabled?
-     */
-    enableContinueButton: function(enable) {
-      $('continue-button').disabled = !enable;
-    },
-
-    /**
-     * Sets the current timezone.
-     * @param {string} timezoneId The timezone ID to select.
-     */
-    setTimezone: function(timezoneId) {
-      $('timezone-select').value = timezoneId;
-    },
-
-    /**
-     * Shows the network error message.
-     * @param {string} message Message to be shown.
-     */
-    showError: function(message) {
-      var error = document.createElement('div');
-      var messageDiv = document.createElement('div');
-      messageDiv.className = 'error-message-bubble';
-      messageDiv.textContent = message;
-      error.appendChild(messageDiv);
-
-      $('bubble').showContentForElement($('networks-list'),
-                                        cr.ui.Bubble.Attachment.BOTTOM,
-                                        error);
     }
   };
-});
 
+  /**
+   * Shows the network error message.
+   * @param {string} message Message to be shown.
+   */
+  NetworkScreen.showError = function(message) {
+    var error = document.createElement('div');
+    var messageDiv = document.createElement('div');
+    messageDiv.className = 'error-message';
+    messageDiv.textContent = message;
+    error.appendChild(messageDiv);
+
+    $('bubble').showContentForElement($('networks-list'), error);
+  };
+
+  /**
+   * Hides the error notification bubble (if any).
+   */
+  NetworkScreen.clearErrors = function() {
+    $('bubble').hide();
+  };
+
+  return {
+    NetworkScreen: NetworkScreen
+  };
+});

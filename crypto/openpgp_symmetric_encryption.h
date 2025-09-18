@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CRYPTO_OPENPGP_SYMMETRIC_ENCRYPTION_H_
 #define CRYPTO_OPENPGP_SYMMETRIC_ENCRYPTION_H_
+#pragma once
 
 #include <string>
 
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 #include "crypto/crypto_export.h"
 
 namespace crypto {

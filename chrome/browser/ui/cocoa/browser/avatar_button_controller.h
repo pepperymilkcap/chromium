@@ -4,14 +4,13 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BROWSER_AVATAR_BUTTON_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BROWSER_AVATAR_BUTTON_CONTROLLER_H_
+#pragma once
 
 #import <AppKit/AppKit.h>
 
-#import "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 
-@class AvatarLabelButton;
-@class BaseBubbleController;
+@class AvatarMenuBubbleController;
 class Browser;
 
 namespace AvatarButtonControllerInternal {
@@ -30,20 +29,11 @@ class Observer;
   scoped_ptr<AvatarButtonControllerInternal::Observer> observer_;
 
   // The menu controller, if the menu is open.
-  __weak BaseBubbleController* menuController_;
-
-  // The avatar button.
-  base::scoped_nsobject<NSButton> button_;
-
-  // The managed user avatar label button. Only used for managed user profiles.
-  base::scoped_nsobject<AvatarLabelButton> labelButton_;
+  __weak AvatarMenuBubbleController* menuController_;
 }
 
-// The avatar button view.
-@property(readonly, nonatomic) NSButton* buttonView;
-
-// The managed user avatar label button view.
-@property(readonly, nonatomic) NSButton* labelButtonView;
+// The view cast to a button.
+@property (readonly, nonatomic) NSButton* buttonView;
 
 // Designated initializer.
 - (id)initWithBrowser:(Browser*)browser;
@@ -53,12 +43,12 @@ class Observer;
 - (void)setImage:(NSImage*)image;
 
 // Shows the avatar bubble.
-- (void)showAvatarBubble:(NSView*)anchor;
+- (void)showAvatarBubble;
 
 @end
 
 @interface AvatarButtonController (ExposedForTesting)
-- (BaseBubbleController*)menuController;
+- (AvatarMenuBubbleController*)menuController;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_BROWSER_AVATAR_BUTTON_CONTROLLER_H_

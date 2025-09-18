@@ -1,39 +1,28 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/geolocation/chrome_access_token_store.h"
 
 #include "base/bind.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_piece.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 using content::AccessTokenStore;
 using content::BrowserThread;
 
 namespace {
 
-bool IsUnsupportedNetworkProviderUrl(const GURL& url) {
-  const std::string& spec = url.spec();
-
-  // Unsupported after Chrome v14.
-  if (spec == "https://www.google.com/loc/json")
-    return true;
-
-  // Unsupported after Chrome v22.
-  if (spec == "https://maps.googleapis.com/maps/api/browserlocation/json")
-    return true;
-
-  return false;
-}
+// This was the default location service url for Chrome versions 14 and earlier
+// but is no longer supported.
+const char* kOldDefaultNetworkProviderUrl = "https://www.google.com/loc/json";
 
 // Loads access tokens and other necessary data on the UI thread, and
 // calls back to the originator on the originating threaad.
@@ -41,8 +30,7 @@ class TokenLoadingJob : public base::RefCountedThreadSafe<TokenLoadingJob> {
  public:
   TokenLoadingJob(
       const AccessTokenStore::LoadAccessTokensCallbackType& callback)
-      : callback_(callback),
-        system_request_context_(NULL) {
+      : callback_(callback) {
   }
 
   void Run() {
@@ -54,34 +42,30 @@ class TokenLoadingJob : public base::RefCountedThreadSafe<TokenLoadingJob> {
   }
 
  private:
-  friend class base::RefCountedThreadSafe<TokenLoadingJob>;
-
-  ~TokenLoadingJob() {}
-
   void PerformWorkOnUIThread() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     DictionaryPrefUpdate update(g_browser_process->local_state(),
                                 prefs::kGeolocationAccessToken);
-    base::DictionaryValue* token_dictionary = update.Get();
+    DictionaryValue* token_dictionary = update.Get();
 
-    std::vector<std::string> providers_to_remove;
+    bool has_old_network_provider_url = false;
     // The dictionary value could be NULL if the pref has never been set.
     if (token_dictionary != NULL) {
-      for (base::DictionaryValue::Iterator it(*token_dictionary); !it.IsAtEnd();
-           it.Advance()) {
-        GURL url(it.key());
+      for (DictionaryValue::key_iterator it = token_dictionary->begin_keys();
+           it != token_dictionary->end_keys(); ++it) {
+        GURL url(*it);
         if (!url.is_valid())
           continue;
-        if (IsUnsupportedNetworkProviderUrl(url)) {
-          providers_to_remove.push_back(it.key());
+        if (url.spec() == kOldDefaultNetworkProviderUrl) {
+          has_old_network_provider_url = true;
           continue;
         }
-        it.value().GetAsString(&access_token_set_[url]);
+        token_dictionary->GetStringWithoutPathExpansion(
+            *it, &access_token_set_[url]);
       }
-      for (size_t i = 0; i < providers_to_remove.size(); ++i) {
+      if (has_old_network_provider_url)
         token_dictionary->RemoveWithoutPathExpansion(
-            providers_to_remove[i], NULL);
-      }
+            kOldDefaultNetworkProviderUrl, NULL);
     }
 
     system_request_context_ = g_browser_process->system_request_context();
@@ -98,11 +82,15 @@ class TokenLoadingJob : public base::RefCountedThreadSafe<TokenLoadingJob> {
 
 }  // namespace
 
-void ChromeAccessTokenStore::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterDictionaryPref(prefs::kGeolocationAccessToken);
+void ChromeAccessTokenStore::RegisterPrefs(PrefService* prefs) {
+  prefs->RegisterDictionaryPref(prefs::kGeolocationAccessToken);
 }
 
-ChromeAccessTokenStore::ChromeAccessTokenStore() {}
+ChromeAccessTokenStore::ChromeAccessTokenStore() {
+}
+
+ChromeAccessTokenStore::~ChromeAccessTokenStore() {
+}
 
 void ChromeAccessTokenStore::LoadAccessTokens(
     const LoadAccessTokensCallbackType& callback) {
@@ -110,21 +98,17 @@ void ChromeAccessTokenStore::LoadAccessTokens(
   job->Run();
 }
 
-ChromeAccessTokenStore::~ChromeAccessTokenStore() {}
-
-static void SetAccessTokenOnUIThread(const GURL& server_url,
-                                     const base::string16& token) {
+void SetAccessTokenOnUIThread(const GURL& server_url, const string16& token) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DictionaryPrefUpdate update(g_browser_process->local_state(),
                               prefs::kGeolocationAccessToken);
-  base::DictionaryValue* access_token_dictionary = update.Get();
+  DictionaryValue* access_token_dictionary = update.Get();
   access_token_dictionary->SetWithoutPathExpansion(
-      server_url.spec(), base::Value::CreateStringValue(token));
+      server_url.spec(), Value::CreateStringValue(token));
 }
 
-void ChromeAccessTokenStore::SaveAccessToken(
-    const GURL& server_url,
-    const base::string16& access_token) {
+void ChromeAccessTokenStore::SaveAccessToken(const GURL& server_url,
+                                             const string16& access_token) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&SetAccessTokenOnUIThread, server_url, access_token));

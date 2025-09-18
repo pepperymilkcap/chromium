@@ -1,3 +1,4 @@
-# net/ OWNERS can also review testserver changes
-# General reviewer.
-phajdan.jr@chromium.org
+# For changes to testserver.py, chromiumsync.py, xmppserver.py and
+# run_testserver.cc.
+akalin@chromium.org
+nick@chromium.org

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,225 +15,72 @@ cr.define('cr.ui', function() {
    */
   var Bubble = cr.ui.define('div');
 
-  /**
-   * Bubble attachment side.
-   * @enum {string}
-   */
-  Bubble.Attachment = {
-    RIGHT: 'bubble-right',
-    LEFT: 'bubble-left',
-    TOP: 'bubble-top',
-    BOTTOM: 'bubble-bottom'
-  };
-
   Bubble.prototype = {
     __proto__: HTMLDivElement.prototype,
 
-    // Anchor element for this bubble.
+    // Anchor element
     anchor_: undefined,
 
-    // If defined, sets focus to this element once bubble is closed. Focus is
-    // set to this element only if there's no any other focused element.
-    elementToFocusOnHide_: undefined,
-
-    // Whether to hide bubble when key is pressed.
-    hideOnKeyPress_: true,
-
-    /** @override */
+    /** @inheritDoc */
     decorate: function() {
-      this.docKeyDownHandler_ = this.handleDocKeyDown_.bind(this);
-      this.selfClickHandler_ = this.handleSelfClick_.bind(this);
       this.ownerDocument.addEventListener('click',
                                           this.handleDocClick_.bind(this));
       this.ownerDocument.addEventListener('keydown',
-                                          this.docKeyDownHandler_);
-      window.addEventListener('blur', this.handleWindowBlur_.bind(this));
+                                          this.handleDocKeyDown_.bind(this));
       this.addEventListener('webkitTransitionEnd',
                             this.handleTransitionEnd_.bind(this));
-      // Guard timer for 200ms + epsilon.
-      ensureTransitionEndEvent(this, 250);
-    },
-
-    /**
-     * Element that should be focused on hide.
-     * @type {HTMLElement}
-     */
-    set elementToFocusOnHide(value) {
-      this.elementToFocusOnHide_ = value;
-    },
-
-    /**
-     * Whether to hide bubble when key is pressed.
-     * @type {boolean}
-     */
-    set hideOnKeyPress(value) {
-      this.hideOnKeyPress_ = value;
-    },
-
-    /**
-     * Whether to hide bubble when clicked inside bubble element.
-     * Default is true.
-     * @type {boolean}
-     */
-    set hideOnSelfClick(value) {
-      if (value)
-        this.removeEventListener('click', this.selfClickHandler_);
-      else
-        this.addEventListener('click', this.selfClickHandler_);
-    },
-
-    /**
-     * Handler for click event which prevents bubble auto hide.
-     * @private
-     */
-    handleSelfClick_: function(e) {
-      // Allow clicking on [x] button.
-      if (e.target && e.target.classList.contains('close-button'))
-        return;
-
-      e.stopPropagation();
-    },
-
-    /**
-     * Sets the attachment of the bubble.
-     * @param {!Attachment} attachment Bubble attachment.
-     */
-    setAttachment_: function(attachment) {
-      for (var k in Bubble.Attachment) {
-        var v = Bubble.Attachment[k];
-        this.classList.toggle(v, v == attachment);
-      }
     },
 
     /**
      * Shows the bubble for given anchor element.
-     * @param {!Object} pos Bubble position (left, top, right, bottom in px).
-     * @param {!Attachment} attachment Bubble attachment (on which side of the
-     *     specified position it should be displayed).
-     * @param {HTMLElement} opt_content Content to show in bubble.
-     *     If not specified, bubble element content is shown.
-     * @private
+     * @param {number} x X position of bubble's reference point.
+     * @param {number} y Y position of bubble's reference point.
+     * @param {HTMLElement} content Content to show in bubble.
+     * @public
      */
-    showContentAt_: function(pos, attachment, opt_content) {
-      this.style.top = this.style.left = this.style.right = this.style.bottom =
-          'auto';
-      for (var k in pos) {
-        if (typeof pos[k] == 'number')
-          this.style[k] = pos[k] + 'px';
-      }
-      if (opt_content !== undefined) {
-        this.innerHTML = '';
-        this.appendChild(opt_content);
-      }
-      this.setAttachment_(attachment);
+    showContentAt: function(x, y, content) {
+      const ARROW_OFFSET = 14;
+
+      var anchorX = x - ARROW_OFFSET;
+      var anchorY = y;
+
+      this.style.left = anchorX + 'px';
+      this.style.top = anchorY + 'px';
+
+      this.innerHTML = '';
+      this.appendChild(content);
       this.hidden = false;
       this.classList.remove('faded');
     },
 
     /**
-     * Shows the bubble for given anchor element. Bubble content is not cleared.
-     * @param {!HTMLElement} el Anchor element of the bubble.
-     * @param {!Attachment} attachment Bubble attachment (on which side of the
-     *     element it should be displayed).
-     * @param {number=} opt_offset Offset of the bubble.
-     * @param {number=} opt_padding Optional padding of the bubble.
-     */
-    showForElement: function(el, attachment, opt_offset, opt_padding) {
-      this.showContentForElement(
-          el, attachment, undefined, opt_offset, opt_padding);
-    },
-
-    /**
      * Shows the bubble for given anchor element.
      * @param {!HTMLElement} el Anchor element of the bubble.
-     * @param {!Attachment} attachment Bubble attachment (on which side of the
-     *     element it should be displayed).
-     * @param {HTMLElement} opt_content Content to show in bubble.
-     *     If not specified, bubble element content is shown.
-     * @param {number=} opt_offset Offset of the bubble attachment point from
-     *     left (for vertical attachment) or top (for horizontal attachment)
-     *     side of the element. If not specified, the bubble is positioned to
-     *     be aligned with the left/top side of the element but not farther than
-     *     half of its width/height.
-     * @param {number=} opt_padding Optional padding of the bubble.
+     * @param {HTMLElement} content Content to show in bubble.
+     * @public
      */
-    showContentForElement: function(el, attachment, opt_content,
-                                    opt_offset, opt_padding) {
-      /** @const */ var ARROW_OFFSET = 25;
-      /** @const */ var DEFAULT_PADDING = 18;
+    showContentForElement: function(el, content) {
+      const HORIZONTAL_PADDING = 10;
+      const VERTICAL_PADDING = 5;
 
-      if (opt_padding == undefined)
-        opt_padding = DEFAULT_PADDING;
-
-      var origin = cr.ui.login.DisplayManager.getPosition(el);
-      var offset = opt_offset == undefined ?
-          [Math.min(ARROW_OFFSET, el.offsetWidth / 2),
-           Math.min(ARROW_OFFSET, el.offsetHeight / 2)] :
-          [opt_offset, opt_offset];
-
-      var pos = {};
-      if (isRTL()) {
-        switch (attachment) {
-          case Bubble.Attachment.TOP:
-            pos.right = origin.right + offset[0] - ARROW_OFFSET;
-            pos.bottom = origin.bottom + el.offsetHeight + opt_padding;
-            break;
-          case Bubble.Attachment.RIGHT:
-            pos.top = origin.top + offset[1] - ARROW_OFFSET;
-            pos.right = origin.right + el.offsetWidth + opt_padding;
-            break;
-          case Bubble.Attachment.BOTTOM:
-            pos.right = origin.right + offset[0] - ARROW_OFFSET;
-            pos.top = origin.top + el.offsetHeight + opt_padding;
-            break;
-          case Bubble.Attachment.LEFT:
-            pos.top = origin.top + offset[1] - ARROW_OFFSET;
-            pos.left = origin.left + el.offsetWidth + opt_padding;
-            break;
-        }
-      } else {
-        switch (attachment) {
-          case Bubble.Attachment.TOP:
-            pos.left = origin.left + offset[0] - ARROW_OFFSET;
-            pos.bottom = origin.bottom + el.offsetHeight + opt_padding;
-            break;
-          case Bubble.Attachment.RIGHT:
-            pos.top = origin.top + offset[1] - ARROW_OFFSET;
-            pos.left = origin.left + el.offsetWidth + opt_padding;
-            break;
-          case Bubble.Attachment.BOTTOM:
-            pos.left = origin.left + offset[0] - ARROW_OFFSET;
-            pos.top = origin.top + el.offsetHeight + opt_padding;
-            break;
-          case Bubble.Attachment.LEFT:
-            pos.top = origin.top + offset[1] - ARROW_OFFSET;
-            pos.right = origin.right + el.offsetWidth + opt_padding;
-            break;
-        }
-      }
+      var elementOrigin = cr.ui.login.DisplayManager.getOffset(el);
+      var anchorX = elementOrigin.left + HORIZONTAL_PADDING;
+      var anchorY = elementOrigin.top + el.offsetHeight + VERTICAL_PADDING;
 
       this.anchor_ = el;
-      this.showContentAt_(pos, attachment, opt_content);
+      this.showContentAt(anchorX, anchorY, content);
     },
 
     /**
      * Shows the bubble for given anchor element.
      * @param {!HTMLElement} el Anchor element of the bubble.
      * @param {string} text Text content to show in bubble.
-     * @param {!Attachment} attachment Bubble attachment (on which side of the
-     *     element it should be displayed).
-     * @param {number=} opt_offset Offset of the bubble attachment point from
-     *     left (for vertical attachment) or top (for horizontal attachment)
-     *     side of the element. If not specified, the bubble is positioned to
-     *     be aligned with the left/top side of the element but not farther than
-     *     half of its weight/height.
-     * @param {number=} opt_padding Optional padding of the bubble.
+     * @public
      */
-    showTextForElement: function(el, text, attachment,
-                                 opt_offset, opt_padding) {
+    showTextForElement: function(el, text) {
       var span = this.ownerDocument.createElement('span');
       span.textContent = text;
-      this.showContentForElement(el, attachment, span, opt_offset, opt_padding);
+      this.showContentForElement(el, span);
     },
 
     /**
@@ -258,15 +105,8 @@ cr.define('cr.ui', function() {
      * @private
      */
     handleTransitionEnd_: function(e) {
-      if (this.classList.contains('faded')) {
+      if (this.classList.contains('faded'))
         this.hidden = true;
-        if (this.elementToFocusOnHide_ &&
-            document.activeElement == document.body) {
-          // Restore focus to default element only if there's no other
-          // element that is focused.
-          this.elementToFocusOnHide_.focus();
-        }
-      }
     },
 
     /**
@@ -287,23 +127,6 @@ cr.define('cr.ui', function() {
      * @private
      */
     handleDocKeyDown_: function(e) {
-      if (this.hideOnKeyPress_ && !this.hidden) {
-        this.hide();
-        return;
-      }
-
-      if (e.keyCode == 27 && !this.hidden) {
-        if (this.elementToFocusOnHide_)
-          this.elementToFocusOnHide_.focus();
-        this.hide();
-      }
-    },
-
-    /**
-     * Handler of window blur event.
-     * @private
-     */
-    handleWindowBlur_: function(e) {
       if (!this.hidden)
         this.hide();
     }

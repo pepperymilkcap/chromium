@@ -83,25 +83,18 @@ PrerenderTask.prototype = {
    * @param {object} prerenderInfo State of prerendering pages.
    */
   onPrerenderInfoChanged: function(prerenderInfo) {
-    if (this.isDone())
-      return;
-
     // Verify that prerendering is enabled.
     assertTrue(prerenderInfo.enabled, 'Prerendering not enabled.');
 
     // Check number of rows in both tables.
-    NetInternalsTest.checkTbodyRows(PrerenderView.HISTORY_TABLE_ID,
-                                    prerenderInfo.history.length);
-    NetInternalsTest.checkTbodyRows(PrerenderView.ACTIVE_TABLE_ID,
-                                    prerenderInfo.active.length);
+    NetInternalsTest.checkStyledTableRows(PrerenderView.HISTORY_DIV_ID,
+                                          prerenderInfo.history.length);
+    NetInternalsTest.checkStyledTableRows(PrerenderView.ACTIVE_DIV_ID,
+                                          prerenderInfo.active.length);
 
     if (this.state_ == STATE.START_PRERENDERING) {
       this.startPrerendering_(prerenderInfo);
     } else if (this.state_ == STATE.NEED_NAVIGATE) {
-      // Can't safely swap in a prerender until the main frame has committed.
-      // Waiting until the load has completed isn't necessary, but it's simpler.
-      if (!prerenderInfo.active[0].is_loaded)
-        return;
       this.navigate_(prerenderInfo);
     } else if (this.state_ == STATE.HISTORY_WAIT) {
       this.checkDone_(prerenderInfo);
@@ -118,21 +111,10 @@ PrerenderTask.prototype = {
   startPrerendering_: function(prerenderInfo) {
     expectEquals(0, prerenderInfo.active.length);
     expectEquals(0, prerenderInfo.history.length);
+    chrome.send('prerenderPage', [this.url_]);
     if (this.shouldSucceed_) {
-      chrome.send('prerenderPage', [this.url_]);
-
       this.state_ = STATE.NEED_NAVIGATE;
     } else {
-      // If the prerender is going to fail, we can add the prerender link to the
-      // current document, so we will create one less process.  Unfortunately,
-      // if the prerender is going to succeed, we have to create a new process
-      // with the prerender link, to avoid the prerender being cancelled due to
-      // a session storage namespace mismatch.
-      var link = document.createElement('link');
-      link.rel = 'prerender';
-      link.href = this.url_;
-      document.head.appendChild(link);
-
       this.state_ = STATE.HISTORY_WAIT;
     }
   },
@@ -177,7 +159,7 @@ PrerenderTask.prototype = {
     expectEquals(this.url_, prerenderInfo.history[0].url);
     expectEquals(this.finalStatus_, prerenderInfo.history[0].final_status);
 
-    this.onTaskDone();
+    testDone();
   }
 };
 

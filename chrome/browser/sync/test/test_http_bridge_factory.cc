@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,14 +31,12 @@ TestHttpBridgeFactory::TestHttpBridgeFactory() {}
 
 TestHttpBridgeFactory::~TestHttpBridgeFactory() {}
 
-void TestHttpBridgeFactory::Init(const std::string& user_agent) {}
-
-syncer::HttpPostProviderInterface* TestHttpBridgeFactory::Create() {
+sync_api::HttpPostProviderInterface* TestHttpBridgeFactory::Create() {
   return new TestHttpBridge();
 }
 
-void TestHttpBridgeFactory::Destroy(syncer::HttpPostProviderInterface* http) {
-  delete static_cast<TestHttpBridge*>(http);
+void TestHttpBridgeFactory::Destroy(sync_api::HttpPostProviderInterface* http) {
+  delete http;
 }
 
 }  // namespace browser_sync

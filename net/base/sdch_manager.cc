@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #include "base/base64.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "crypto/sha2.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domain.h"
 #include "net/url_request/url_request_http_job.h"
 
 namespace net {
@@ -109,9 +109,7 @@ bool SdchManager::Dictionary::CanSet(const std::string& domain,
     SdchErrorRecovery(DICTIONARY_MISSING_DOMAIN_SPECIFIER);
     return false;  // Domain is required.
   }
-  if (registry_controlled_domains::GetDomainAndRegistry(
-        domain,
-        registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES).empty()) {
+  if (RegistryControlledDomainService::GetDomainAndRegistry(domain).empty()) {
     SdchErrorRecovery(DICTIONARY_SPECIFIES_TOP_LEVEL_DOMAIN);
     return false;  // domain was a TLD.
   }

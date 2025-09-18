@@ -8,26 +8,23 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "grit/renderer_resources.h"
-#include "third_party/WebKit/public/platform/WebFileSystem.h"
-#include "third_party/WebKit/public/platform/WebFileSystemType.h"
-#include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 namespace extensions {
 
 FileBrowserHandlerCustomBindings::FileBrowserHandlerCustomBindings(
-    Dispatcher* dispatcher, ChromeV8Context* context)
-    : ChromeV8Extension(dispatcher, context) {
-  RouteFunction(
-      "GetExternalFileEntry",
-      base::Bind(&FileBrowserHandlerCustomBindings::GetExternalFileEntry,
-                 base::Unretained(this)));
-}
+    int dependency_count,
+    const char** dependencies)
+    : ChromeV8Extension("extensions/file_browser_handler_custom_bindings.js",
+                        IDR_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_JS,
+                        dependency_count,
+                        dependencies,
+                        NULL) {}
 
-void FileBrowserHandlerCustomBindings::GetExternalFileEntry(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
+static v8::Handle<v8::Value> GetExternalFileEntry(const v8::Arguments& args) {
   // TODO(zelidrag): Make this magic work on other platforms when file browser
   // matures enough on ChromeOS.
 #if defined(OS_CHROMEOS)
@@ -36,24 +33,34 @@ void FileBrowserHandlerCustomBindings::GetExternalFileEntry(
     v8::Local<v8::Object> file_def = args[0]->ToObject();
     std::string file_system_name(
         *v8::String::Utf8Value(file_def->Get(
-            v8::String::NewFromUtf8(args.GetIsolate(), "fileSystemName"))));
+            v8::String::New("fileSystemName"))));
     std::string file_system_path(
         *v8::String::Utf8Value(file_def->Get(
-            v8::String::NewFromUtf8(args.GetIsolate(), "fileSystemRoot"))));
+            v8::String::New("fileSystemRoot"))));
     std::string file_full_path(
         *v8::String::Utf8Value(file_def->Get(
-            v8::String::NewFromUtf8(args.GetIsolate(), "fileFullPath"))));
-    bool is_directory = file_def->Get(v8::String::NewFromUtf8(
-        args.GetIsolate(), "fileIsDirectory"))->ToBoolean()->Value();
-    blink::WebFrame* webframe =
-        blink::WebFrame::frameForContext(context()->v8_context());
-    args.GetReturnValue().Set(webframe->createFileEntry(
-        blink::WebFileSystemTypeExternal,
-        blink::WebString::fromUTF8(file_system_name.c_str()),
-        blink::WebString::fromUTF8(file_system_path.c_str()),
-        blink::WebString::fromUTF8(file_full_path.c_str()),
-        is_directory));
+            v8::String::New("fileFullPath"))));
+    bool is_directory =
+        file_def->Get(v8::String::New("fileIsDirectory"))->ToBoolean()->Value();
+    WebKit::WebFrame* webframe = WebKit::WebFrame::frameForCurrentContext();
+    return webframe->createFileEntry(
+        WebKit::WebFileSystem::TypeExternal,
+        WebKit::WebString::fromUTF8(file_system_name.c_str()),
+        WebKit::WebString::fromUTF8(file_system_path.c_str()),
+        WebKit::WebString::fromUTF8(file_full_path.c_str()),
+        is_directory);
+#else
+    return v8::Undefined();
 #endif
+}
+
+v8::Handle<v8::FunctionTemplate>
+FileBrowserHandlerCustomBindings::GetNativeFunction(
+    v8::Handle<v8::String> name) {
+  if (name->Equals(v8::String::New("GetExternalFileEntry")))
+    return v8::FunctionTemplate::New(GetExternalFileEntry);
+  else
+    return ChromeV8Extension::GetNativeFunction(name);
 }
 
 }  // namespace extensions

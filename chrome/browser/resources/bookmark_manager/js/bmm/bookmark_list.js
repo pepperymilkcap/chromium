@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 //            that handles the loading and the events from the bookmark backend.
 
 cr.define('bmm', function() {
-  var List = cr.ui.List;
-  var ListItem = cr.ui.ListItem;
-  var ArrayDataModel = cr.ui.ArrayDataModel;
-  var ContextMenuButton = cr.ui.ContextMenuButton;
+  const List = cr.ui.List;
+  const ListItem = cr.ui.ListItem;
+  const ArrayDataModel = cr.ui.ArrayDataModel;
+  const ContextMenuButton = cr.ui.ContextMenuButton;
 
   var list;
 
@@ -20,6 +20,7 @@ cr.define('bmm', function() {
    * @extends {ArrayDataModel}
    */
   function BookmarksArrayDataModel(items) {
+    this.bookmarksArrayDataModelArray_ = items;
     ArrayDataModel.call(this, items);
   }
 
@@ -32,8 +33,10 @@ cr.define('bmm', function() {
      * @return {number} The index of the found node or -1 if not found.
      */
     findIndexById: function(id) {
-      for (var i = 0; i < this.length; i++) {
-        if (this.item(i).id == id)
+      var arr = this.bookmarksArrayDataModelArray_;
+      var length = arr.length
+      for (var i = 0; i < length; i++) {
+        if (arr[i].id == id)
           return i;
       }
       return -1;
@@ -64,7 +67,7 @@ cr.define('bmm', function() {
   BookmarkList.prototype = {
     __proto__: List.prototype,
 
-    /** @override */
+    /** @inheritDoc */
     decorate: function() {
       List.prototype.decorate.call(this);
       this.addEventListener('mousedown', this.handleMouseDown_);
@@ -94,12 +97,15 @@ cr.define('bmm', function() {
       var callback = this.handleBookmarkCallback_.bind(this);
       this.loading_ = true;
 
-      if (!parentId)
+      if (!parentId) {
         callback([]);
-      else if (/^q=/.test(parentId))
+      } else if (/^q=/.test(parentId)) {
         chrome.bookmarks.search(parentId.slice(2), callback);
-      else
+      } else if (parentId == 'recent') {
+        chrome.bookmarks.getRecent(50, callback);
+      } else {
         chrome.bookmarks.getChildren(parentId, callback);
+      }
     },
 
     /**
@@ -125,11 +131,11 @@ cr.define('bmm', function() {
 
     /**
      * The bookmark node that the list is currently displaying. If we are
-     * currently displaying search this returns null.
+     * currently displaying recent or search this returns null.
      * @type {BookmarkTreeNode}
      */
     get bookmarkNode() {
-      if (this.isSearch())
+      if (this.isSearch() || this.isRecent())
         return null;
       var treeItem = bmm.treeLookup[this.parentId];
       return treeItem && treeItem.bookmarkNode;
@@ -143,15 +149,10 @@ cr.define('bmm', function() {
     },
 
     /**
-     * @return {boolean} Whether we are editing an ephemeral item.
+     * @return {boolean} Whether we are currently showing recent bookmakrs.
      */
-    hasEphemeral: function() {
-      var dataModel = this.dataModel;
-      for (var i = 0; i < dataModel.array_.length; i++) {
-        if (dataModel.array_[i].id == 'new')
-          return true;
-      }
-      return false;
+    isRecent: function() {
+      return this.parentId_ == 'recent';
     },
 
     /**
@@ -167,7 +168,6 @@ cr.define('bmm', function() {
       }
 
       if (el && el.parentNode == this &&
-          !el.editing &&
           !(el.lastChild instanceof ContextMenuButton)) {
         el.appendChild(new ContextMenuButton);
       }
@@ -181,7 +181,7 @@ cr.define('bmm', function() {
      * @param {!Event} originalEvent The original click event object.
      */
     dispatchUrlClickedEvent_: function(url, originalEvent) {
-      var event = new Event('urlClicked', {bubbles: true});
+      var event = new cr.Event('urlClicked', true, false);
       event.url = url;
       event.originalEvent = originalEvent;
       this.dispatchEvent(event);
@@ -247,14 +247,13 @@ cr.define('bmm', function() {
         // We create a new data model with updated items in the right order.
         var dataModel = this.dataModel;
         var items = {};
-        for (var i = this.dataModel.length - 1; i >= 0; i--) {
+        for (var i = this.dataModel.length -1 ; i >= 0; i--) {
           var bookmarkNode = dataModel.item(i);
           items[bookmarkNode.id] = bookmarkNode;
         }
         var newArray = [];
         for (var i = 0; i < reorderInfo.childIds.length; i++) {
           newArray[i] = items[reorderInfo.childIds[i]];
-          newArray[i].index = i;
         }
 
         this.dataModel = new BookmarksArrayDataModel(newArray);
@@ -262,8 +261,9 @@ cr.define('bmm', function() {
     },
 
     handleCreated: function(id, bookmarkNode) {
-      if (this.parentId == bookmarkNode.parentId)
+      if (this.parentId == bookmarkNode.parentId) {
         this.dataModel.splice(bookmarkNode.index, 0, bookmarkNode);
+      }
     },
 
     handleMoved: function(id, moveInfo) {
@@ -291,7 +291,7 @@ cr.define('bmm', function() {
               dataModel.splice(index, 1);
           }
 
-          if (moveInfo.parentId == this.parentId) {
+          if (moveInfo.parentId == list.parentId) {
             // Move to this folder
             var self = this;
             chrome.bookmarks.get(id, function(bookmarkNodes) {
@@ -374,7 +374,7 @@ cr.define('bmm', function() {
   BookmarkListItem.prototype = {
     __proto__: ListItem.prototype,
 
-    /** @override */
+    /** @inheritDoc */
     decorate: function() {
       ListItem.prototype.decorate.call(this);
 
@@ -392,8 +392,8 @@ cr.define('bmm', function() {
       if (bmm.isFolder(bookmarkNode)) {
         this.className = 'folder';
       } else {
-        labelEl.style.backgroundImage = getFaviconImageSet(bookmarkNode.url);
-        labelEl.style.backgroundSize = '16px';
+        labelEl.style.backgroundImage = url('chrome://favicon/' +
+                                            bookmarkNode.url);
         urlEl.textContent = bookmarkNode.url;
       }
 
@@ -458,7 +458,7 @@ cr.define('bmm', function() {
         // before deciding if we should exit edit mode.
         var doc = e.target.ownerDocument;
         window.setTimeout(function() {
-          var activeElement = doc.hasFocus() && doc.activeElement;
+          var activeElement = doc.activeElement;
           if (activeElement != urlInput && activeElement != labelInput) {
             listItem.editing = false;
           }
@@ -472,7 +472,7 @@ cr.define('bmm', function() {
 
         labelInput = doc.createElement('input');
         labelInput.placeholder =
-            loadTimeData.getString('name_input_placeholder');
+            localStrings.getString('name_input_placeholder');
         replaceAllChildren(labelEl, labelInput);
         labelInput.value = title;
 
@@ -481,7 +481,7 @@ cr.define('bmm', function() {
           urlInput.type = 'url';
           urlInput.required = true;
           urlInput.placeholder =
-              loadTimeData.getString('url_input_placeholder');
+              localStrings.getString('url_input_placeholder');
 
           // We also need a name for the input for the CSS to work.
           urlInput.name = '-url-input-' + cr.createUid();
@@ -500,7 +500,7 @@ cr.define('bmm', function() {
         });
         labelInput.addEventListener('keydown', handleKeydown);
         labelInput.addEventListener('blur', handleBlur);
-        cr.ui.limitInputWidth(labelInput, this, 100, 0.5);
+        cr.ui.limitInputWidth(labelInput, this, 100);
         labelInput.focus();
         labelInput.select();
 
@@ -510,7 +510,7 @@ cr.define('bmm', function() {
           });
           urlInput.addEventListener('keydown', handleKeydown);
           urlInput.addEventListener('blur', handleBlur);
-          cr.ui.limitInputWidth(urlInput, this, 200, 0.5);
+          cr.ui.limitInputWidth(urlInput, this, 100);
         }
 
       } else {
@@ -542,7 +542,7 @@ cr.define('bmm', function() {
                 var sm = this.parentNode.selectionModel;
                 sm.selectedIndex = sm.leadIndex = sm.anchorIndex = index;
 
-                alert(loadTimeData.getString('invalid_url'));
+                alert(localStrings.getString('invalid_url'));
               }
               urlInput.focus();
               urlInput.select();

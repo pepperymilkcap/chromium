@@ -1,12 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_XINPUT_HIERARCHY_CHANGED_EVENT_LISTENER_H_
 #define CHROME_BROWSER_CHROMEOS_XINPUT_HIERARCHY_CHANGED_EVENT_LISTENER_H_
+#pragma once
+
+#if defined(TOOLKIT_USES_GTK)
+#include <gdk/gdk.h>
+#endif
 
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/device_hierarchy_observer.h"
 
@@ -18,8 +23,7 @@ namespace chromeos {
 // which is sent to Chrome when X detects a system or USB keyboard (or mouse),
 // then tells X to change the current XKB keyboard layout. Start by just calling
 // instance() to get it going.
-class XInputHierarchyChangedEventListener
-    : public base::MessageLoopForUI::Observer {
+class XInputHierarchyChangedEventListener : public MessageLoopForUI::Observer {
  public:
   static XInputHierarchyChangedEventListener* GetInstance();
 
@@ -39,10 +43,23 @@ class XInputHierarchyChangedEventListener
   void Init();
   void StopImpl();
 
+#if defined(TOOLKIT_USES_GTK)
+  // When GTK events are processed, WillProcessXEvent() is not called
+  // automatically. It is necessary to call the function manually by adding the
+  // Gdk event filter.
+  static GdkFilterReturn GdkEventFilter(GdkXEvent* gxevent,
+                                        GdkEvent* gevent,
+                                        gpointer data);
+
+  // MessageLoopForUI::Observer overrides.
+  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE {}
+  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE {}
+#else
   // MessageLoopForUI::Observer overrides.
   virtual base::EventStatus WillProcessEvent(
       const base::NativeEvent& event) OVERRIDE;
   virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
+#endif
 
   // Returns true if the event was processed, false otherwise.
   virtual bool ProcessedXEvent(XEvent* xevent);

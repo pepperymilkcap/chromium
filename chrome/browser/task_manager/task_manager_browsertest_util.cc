@@ -1,43 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop/message_loop.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/task_manager/resource_provider.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/web_contents.h"
 
 namespace {
-
-int GetWebResourceCount(const TaskManagerModel* model) {
-  int count = 0;
-  for (int i = 0; i < model->ResourceCount(); i++) {
-    task_manager::Resource::Type type = model->GetResourceType(i);
-    // Skip system infrastructure resources.
-    if (type == task_manager::Resource::BROWSER ||
-        type == task_manager::Resource::NACL ||
-        type == task_manager::Resource::GPU ||
-        type == task_manager::Resource::UTILITY ||
-        type == task_manager::Resource::ZYGOTE ||
-        type == task_manager::Resource::SANDBOX_HELPER) {
-      continue;
-    }
-
-    count++;
-  }
-  return count;
-}
 
 class ResourceChangeObserver : public TaskManagerModelObserver {
  public:
@@ -65,8 +41,8 @@ class ResourceChangeObserver : public TaskManagerModelObserver {
 
  private:
   void OnResourceChange() {
-    if (GetWebResourceCount(model_) == target_resource_count_)
-      base::MessageLoopForUI::current()->Quit();
+    if (model_->ResourceCount() == target_resource_count_)
+      MessageLoopForUI::current()->Quit();
   }
 
   const TaskManagerModel* model_;
@@ -76,7 +52,7 @@ class ResourceChangeObserver : public TaskManagerModelObserver {
 }  // namespace
 
 // static
-void TaskManagerBrowserTestUtil::WaitForWebResourceChange(int target_count) {
+void TaskManagerBrowserTestUtil::WaitForResourceChange(int target_count) {
   TaskManagerModel* model = TaskManager::GetInstance()->model();
 
   ResourceChangeObserver observer(model, target_count);
@@ -85,11 +61,26 @@ void TaskManagerBrowserTestUtil::WaitForWebResourceChange(int target_count) {
   // Checks that the condition has not been satisfied yet.
   // This check has to be placed after the installation of the observer,
   // because resources may change before that.
-  if (GetWebResourceCount(model) == target_count) {
+  if (model->ResourceCount() == target_count) {
     model->RemoveObserver(&observer);
     return;
   }
 
-  content::RunMessageLoop();
+  ui_test_utils::RunMessageLoop();
   model->RemoveObserver(&observer);
 }
+
+// static
+void TaskManagerBrowserTestUtil::ShowTaskManagerAndWaitForReady(
+    Browser* browser) {
+#if defined(WEBUI_TASK_MANAGER)
+  ui_test_utils::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_TASK_MANAGER_WINDOW_READY,
+      content::Source<TaskManagerModel>(TaskManager::GetInstance()->model()));
+  browser->window()->ShowTaskManager();
+  observer.Wait();
+#else
+  browser->window()->ShowTaskManager();
+#endif  // defined(WEBUI_TASK_MANAGER)
+}
+

@@ -4,8 +4,9 @@
 
 #ifndef UI_VIEWS_ACCESSIBLE_PANE_VIEW_H_
 #define UI_VIEWS_ACCESSIBLE_PANE_VIEW_H_
+#pragma once
 
-#include "base/containers/hash_tables.h"
+#include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -45,7 +46,6 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
       OVERRIDE;
   virtual void SetVisible(bool flag) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual void RequestFocus() OVERRIDE;
 
   // Overridden from FocusChangeListener:
   virtual void OnWillChangeFocus(View* focused_before,
@@ -58,48 +58,20 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
   virtual FocusTraversable* GetFocusTraversableParent() OVERRIDE;
   virtual View* GetFocusTraversableParentView() OVERRIDE;
 
-  // For testing only.
-  const ui::Accelerator& home_key() const { return home_key_; }
-  const ui::Accelerator& end_key() const { return end_key_; }
-  const ui::Accelerator& escape_key() const { return escape_key_; }
-  const ui::Accelerator& left_key() const { return left_key_; }
-  const ui::Accelerator& right_key() const { return right_key_; }
-
  protected:
   // A subclass can override this to provide a default focusable child
   // other than the first focusable child.
   virtual View* GetDefaultFocusableChild();
 
-  // Returns the parent of |v|. Subclasses can override this if
-  // they need custom focus search behavior.
-  virtual View* GetParentForFocusSearch(View* v);
-
-  // Returns true if |v| is contained within the hierarchy rooted at |root|
-  // for the purpose of focus searching. Subclasses can override this if
-  // they need custom focus search behavior.
-  virtual bool ContainsForFocusSearch(View* root, const View* v);
-
   // Remove pane focus.
   virtual void RemovePaneFocus();
+
+  void RestoreLastFocusedView();
 
   View* GetFirstFocusableChild();
   View* GetLastFocusableChild();
 
-  FocusManager* focus_manager() const { return focus_manager_; }
-
-  // When finishing navigation by pressing ESC, it is allowed to surrender the
-  // focus to another window if if |allow| is set and no previous view can be
-  // found.
-  void set_allow_deactivate_on_esc(bool allow) {
-    allow_deactivate_on_esc_ = allow;
-  }
-
- private:
   bool pane_has_focus_;
-
-  // If true, the panel should be de-activated upon escape when no active view
-  // is known where to return to.
-  bool allow_deactivate_on_esc_;
 
   base::WeakPtrFactory<AccessiblePaneView> method_factory_;
 
@@ -118,11 +90,6 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
   ui::Accelerator escape_key_;
   ui::Accelerator left_key_;
   ui::Accelerator right_key_;
-
-  // View storage id for the last focused view that's not within this pane.
-  int last_focused_view_storage_id_;
-
-  friend class AccessiblePaneViewFocusSearch;
 
   DISALLOW_COPY_AND_ASSIGN(AccessiblePaneView);
 };

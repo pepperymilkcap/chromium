@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <shellapi.h>
 
 #include "base/logging.h"
-#include "base/win/win_util.h"
 #include "ui/gfx/rect.h"
 
 namespace views {
@@ -18,7 +17,7 @@ gfx::Rect GetMonitorBoundsForRect(const gfx::Rect& rect) {
   if (monitor) {
     MONITORINFO mi = {0};
     mi.cbSize = sizeof(mi);
-    base::win::GetMonitorInfoWrapper(monitor, &mi);
+    GetMonitorInfo(monitor, &mi);
     return gfx::Rect(mi.rcWork);
   }
   NOTREACHED();
@@ -26,8 +25,7 @@ gfx::Rect GetMonitorBoundsForRect(const gfx::Rect& rect) {
 }
 
 HWND GetTopmostAutoHideTaskbarForEdge(UINT edge, HMONITOR monitor) {
-  // NOTE: this may be invoked on a background thread.
-  APPBARDATA taskbar_data =  { sizeof(APPBARDATA), NULL, 0, edge };
+  APPBARDATA taskbar_data =  { sizeof APPBARDATA, NULL, 0, edge };
   HWND taskbar = reinterpret_cast<HWND>(SHAppBarMessage(ABM_GETAUTOHIDEBAR,
                                                         &taskbar_data));
   return (::IsWindow(taskbar) && (monitor != NULL) &&

@@ -3,7 +3,7 @@
   "description": "Access the Extensions window directly from the toolbar",
   "version": "1",
   "manifest_version": 2,
-  "permissions": ["tabs"],
+  "permissions": ["tabs", "experimental"],
   "background": {
     "scripts": ["background.js"],
     "persistent": false

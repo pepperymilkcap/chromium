@@ -6,8 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/message_loop_proxy.h"
 
 namespace base {
 
@@ -27,7 +26,7 @@ class PostTaskAndReplyRelay {
   PostTaskAndReplyRelay(const tracked_objects::Location& from_here,
                         const Closure& task, const Closure& reply)
       : from_here_(from_here),
-        origin_loop_(ThreadTaskRunnerHandle::Get()) {
+        origin_loop_(MessageLoopProxy::current()) {
     task_ = task;
     reply_ = reply;
   }
@@ -62,7 +61,7 @@ class PostTaskAndReplyRelay {
   }
 
   tracked_objects::Location from_here_;
-  scoped_refptr<SingleThreadTaskRunner> origin_loop_;
+  scoped_refptr<MessageLoopProxy> origin_loop_;
   Closure reply_;
   Closure task_;
 };

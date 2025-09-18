@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_SOCKET_SOCKS5_CLIENT_SOCKET_H_
 #define NET_SOCKET_SOCKS5_CLIENT_SOCKET_H_
+#pragma once
 
 #include <string>
 
@@ -11,13 +12,13 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
+#include "net/base/host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
-#include "net/dns/host_resolver.h"
 #include "net/socket/stream_socket.h"
-#include "url/gurl.h"
 
 namespace net {
 
@@ -28,13 +29,20 @@ class BoundNetLog;
 // Currently no SOCKSv5 authentication is supported.
 class NET_EXPORT_PRIVATE SOCKS5ClientSocket : public StreamSocket {
  public:
+  // Takes ownership of the |transport_socket|, which should already be
+  // connected by the time Connect() is called.
+  //
   // |req_info| contains the hostname and port to which the socket above will
   // communicate to via the SOCKS layer.
   //
   // Although SOCKS 5 supports 3 different modes of addressing, we will
   // always pass it a hostname. This means the DNS resolving is done
   // proxy side.
-  SOCKS5ClientSocket(scoped_ptr<ClientSocketHandle> transport_socket,
+  SOCKS5ClientSocket(ClientSocketHandle* transport_socket,
+                     const HostResolver::RequestInfo& req_info);
+
+  // Deprecated constructor (http://crbug.com/37810) that takes a StreamSocket.
+  SOCKS5ClientSocket(StreamSocket* transport_socket,
                      const HostResolver::RequestInfo& req_info);
 
   // On destruction Disconnect() is called.
@@ -52,9 +60,8 @@ class NET_EXPORT_PRIVATE SOCKS5ClientSocket : public StreamSocket {
   virtual void SetOmniboxSpeculation() OVERRIDE;
   virtual bool WasEverUsed() const OVERRIDE;
   virtual bool UsingTCPFastOpen() const OVERRIDE;
-  virtual bool WasNpnNegotiated() const OVERRIDE;
-  virtual NextProto GetNegotiatedProtocol() const OVERRIDE;
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
+  virtual int64 NumBytesRead() const OVERRIDE;
+  virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
 
   // Socket implementation.
   virtual int Read(IOBuffer* buf,
@@ -67,7 +74,7 @@ class NET_EXPORT_PRIVATE SOCKS5ClientSocket : public StreamSocket {
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
 
-  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE;
+  virtual int GetPeerAddress(AddressList* address) const OVERRIDE;
   virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
 
  private:

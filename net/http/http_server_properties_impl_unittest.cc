@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/containers/hash_tables.h"
+#include "base/hash_tables.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
@@ -65,7 +65,7 @@ TEST_F(SpdyServerPropertiesTest, Initialize) {
 }
 
 TEST_F(SpdyServerPropertiesTest, SupportsSpdyTest) {
-  HostPortPair spdy_server_empty(std::string(), 443);
+  HostPortPair spdy_server_empty("", 443);
   EXPECT_FALSE(impl_.SupportsSpdy(spdy_server_empty));
 
   // Add www.google.com:443 as supporting SPDY.
@@ -89,7 +89,7 @@ TEST_F(SpdyServerPropertiesTest, SupportsSpdyTest) {
 }
 
 TEST_F(SpdyServerPropertiesTest, SetSupportsSpdy) {
-  HostPortPair spdy_server_empty(std::string(), 443);
+  HostPortPair spdy_server_empty("", 443);
   impl_.SetSupportsSpdy(spdy_server_empty, true);
   EXPECT_FALSE(impl_.SupportsSpdy(spdy_server_empty));
 
@@ -134,7 +134,7 @@ TEST_F(SpdyServerPropertiesTest, GetSpdyServerList) {
   EXPECT_EQ(0U, spdy_server_list.GetSize());
 
   // Check empty server is not added.
-  HostPortPair spdy_server_empty(std::string(), 443);
+  HostPortPair spdy_server_empty("", 443);
   impl_.SetSupportsSpdy(spdy_server_empty, true);
   impl_.GetSpdyServerList(&spdy_server_list);
   EXPECT_EQ(0U, spdy_server_list.GetSize());
@@ -188,13 +188,15 @@ typedef HttpServerPropertiesImplTest AlternateProtocolServerPropertiesTest;
 
 TEST_F(AlternateProtocolServerPropertiesTest, Basic) {
   HostPortPair test_host_port_pair("foo", 80);
-  EXPECT_FALSE(impl_.HasAlternateProtocol(test_host_port_pair));
-  impl_.SetAlternateProtocol(test_host_port_pair, 443, NPN_SPDY_3);
+  EXPECT_FALSE(
+      impl_.HasAlternateProtocol(test_host_port_pair));
+  impl_.SetAlternateProtocol(
+      test_host_port_pair, 443, NPN_SPDY_1);
   ASSERT_TRUE(impl_.HasAlternateProtocol(test_host_port_pair));
   const PortAlternateProtocolPair alternate =
       impl_.GetAlternateProtocol(test_host_port_pair);
   EXPECT_EQ(443, alternate.port);
-  EXPECT_EQ(NPN_SPDY_3, alternate.protocol);
+  EXPECT_EQ(NPN_SPDY_1, alternate.protocol);
 
   impl_.Clear();
   EXPECT_FALSE(impl_.HasAlternateProtocol(test_host_port_pair));
@@ -204,12 +206,13 @@ TEST_F(AlternateProtocolServerPropertiesTest, Initialize) {
   HostPortPair test_host_port_pair1("foo1", 80);
   impl_.SetBrokenAlternateProtocol(test_host_port_pair1);
   HostPortPair test_host_port_pair2("foo2", 80);
-  impl_.SetAlternateProtocol(test_host_port_pair2, 443, NPN_SPDY_3);
+  impl_.SetAlternateProtocol(
+      test_host_port_pair2, 443, NPN_SPDY_1);
 
   AlternateProtocolMap alternate_protocol_map;
   PortAlternateProtocolPair port_alternate_protocol_pair;
   port_alternate_protocol_pair.port = 123;
-  port_alternate_protocol_pair.protocol = NPN_SPDY_3;
+  port_alternate_protocol_pair.protocol = NPN_SPDY_21;
   alternate_protocol_map[test_host_port_pair2] = port_alternate_protocol_pair;
   impl_.InitializeAlternateProtocolServers(&alternate_protocol_map);
 
@@ -221,7 +224,7 @@ TEST_F(AlternateProtocolServerPropertiesTest, Initialize) {
   port_alternate_protocol_pair =
       impl_.GetAlternateProtocol(test_host_port_pair2);
   EXPECT_EQ(123, port_alternate_protocol_pair.port);
-  EXPECT_EQ(NPN_SPDY_3, port_alternate_protocol_pair.protocol);
+  EXPECT_EQ(NPN_SPDY_21, port_alternate_protocol_pair.protocol);
 }
 
 TEST_F(AlternateProtocolServerPropertiesTest, SetBroken) {
@@ -235,7 +238,7 @@ TEST_F(AlternateProtocolServerPropertiesTest, SetBroken) {
   impl_.SetAlternateProtocol(
       test_host_port_pair,
       1234,
-      NPN_SPDY_3);
+      NPN_SPDY_1);
   alternate = impl_.GetAlternateProtocol(test_host_port_pair);
   EXPECT_EQ(ALTERNATE_PROTOCOL_BROKEN, alternate.protocol)
       << "Second attempt should be ignored.";
@@ -246,23 +249,25 @@ TEST_F(AlternateProtocolServerPropertiesTest, Forced) {
 
   PortAlternateProtocolPair default_protocol;
   default_protocol.port = 1234;
-  default_protocol.protocol = NPN_SPDY_3;
+  default_protocol.protocol = NPN_SPDY_21;
   HttpServerPropertiesImpl::ForceAlternateProtocol(default_protocol);
 
   // Verify the forced protocol.
   HostPortPair test_host_port_pair("foo", 80);
-  EXPECT_TRUE(impl_.HasAlternateProtocol(test_host_port_pair));
+  EXPECT_TRUE(
+      impl_.HasAlternateProtocol(test_host_port_pair));
   PortAlternateProtocolPair alternate =
       impl_.GetAlternateProtocol(test_host_port_pair);
   EXPECT_EQ(default_protocol.port, alternate.port);
   EXPECT_EQ(default_protocol.protocol, alternate.protocol);
 
   // Verify the real protocol overrides the forced protocol.
-  impl_.SetAlternateProtocol(test_host_port_pair, 443, NPN_SPDY_3);
+  impl_.SetAlternateProtocol(
+      test_host_port_pair, 443, NPN_SPDY_1);
   ASSERT_TRUE(impl_.HasAlternateProtocol(test_host_port_pair));
   alternate = impl_.GetAlternateProtocol(test_host_port_pair);
   EXPECT_EQ(443, alternate.port);
-  EXPECT_EQ(NPN_SPDY_3, alternate.protocol);
+  EXPECT_EQ(NPN_SPDY_1, alternate.protocol);
 
   // Turn off the static, forced alternate protocol so that tests don't
   // have this state.
@@ -270,7 +275,8 @@ TEST_F(AlternateProtocolServerPropertiesTest, Forced) {
 
   // Verify the forced protocol is off.
   HostPortPair test_host_port_pair2("bar", 80);
-  EXPECT_FALSE(impl_.HasAlternateProtocol(test_host_port_pair2));
+  EXPECT_FALSE(
+      impl_.HasAlternateProtocol(test_host_port_pair2));
 }
 
 typedef HttpServerPropertiesImplTest SpdySettingsServerPropertiesTest;
@@ -284,127 +290,107 @@ TEST_F(SpdySettingsServerPropertiesTest, Initialize) {
   EXPECT_TRUE(impl_.GetSpdySettings(spdy_server_google).empty());
 
   // Check by initializing with www.google.com:443 spdy server settings.
-  SettingsMap settings_map;
-  const SpdySettingsIds id = SETTINGS_UPLOAD_BANDWIDTH;
-  const SpdySettingsFlags flags = SETTINGS_FLAG_PERSISTED;
-  const uint32 value = 31337;
-  SettingsFlagsAndValue flags_and_value(flags, value);
-  settings_map[id] = flags_and_value;
-  spdy_settings_map[spdy_server_google] = settings_map;
+  spdy::SpdySettings spdy_settings;
+  spdy::SettingsFlagsAndId spdy_setting(0);
+  spdy_setting.set_flags(spdy::SETTINGS_FLAG_PERSISTED);
+  spdy_setting.set_id(1234);
+  spdy_settings.push_back(std::make_pair(spdy_setting, 31337));
+  spdy_settings_map[spdy_server_google] = spdy_settings;
   impl_.InitializeSpdySettingsServers(&spdy_settings_map);
-
-  const SettingsMap& settings_map2 = impl_.GetSpdySettings(spdy_server_google);
-  ASSERT_EQ(1U, settings_map2.size());
-  SettingsMap::const_iterator it = settings_map2.find(id);
-  EXPECT_TRUE(it != settings_map2.end());
-  SettingsFlagsAndValue flags_and_value2 = it->second;
-  EXPECT_EQ(flags, flags_and_value2.first);
-  EXPECT_EQ(value, flags_and_value2.second);
+  spdy::SpdySettings spdy_settings2 = impl_.GetSpdySettings(spdy_server_google);
+  ASSERT_EQ(1U, spdy_settings2.size());
+  spdy::SpdySetting spdy_setting2 = spdy_settings2.front();
+  spdy::SettingsFlagsAndId id2_ret(spdy_setting2.first);
+  EXPECT_EQ(1234U, id2_ret.id());
+  EXPECT_EQ(spdy::SETTINGS_FLAG_PERSISTED, id2_ret.flags());
+  EXPECT_EQ(31337U, spdy_settings2.front().second);
 }
 
-TEST_F(SpdySettingsServerPropertiesTest, SetSpdySetting) {
-  HostPortPair spdy_server_empty(std::string(), 443);
-  const SettingsMap& settings_map0 = impl_.GetSpdySettings(spdy_server_empty);
-  EXPECT_EQ(0U, settings_map0.size());  // Returns kEmptySettingsMap.
+TEST_F(SpdySettingsServerPropertiesTest, SpdySettingsTest) {
+  HostPortPair spdy_server_empty("", 443);
+  spdy::SpdySettings spdy_settings0 = impl_.GetSpdySettings(spdy_server_empty);
+  EXPECT_EQ(0U, spdy_settings0.size());    // Returns kEmptySpdySettings
 
   // Add www.google.com:443 as persisting.
   HostPortPair spdy_server_google("www.google.com", 443);
-  const SpdySettingsIds id1 = SETTINGS_UPLOAD_BANDWIDTH;
-  const SpdySettingsFlags flags1 = SETTINGS_FLAG_PLEASE_PERSIST;
-  const uint32 value1 = 31337;
-  EXPECT_TRUE(impl_.SetSpdySetting(spdy_server_google, id1, flags1, value1));
-  // Check the values.
-  const SettingsMap& settings_map1_ret =
+  spdy::SpdySettings spdy_settings1;
+  spdy::SettingsFlagsAndId id1(0);
+  id1.set_flags(spdy::SETTINGS_FLAG_PLEASE_PERSIST);
+  id1.set_id(1234);
+  spdy_settings1.push_back(std::make_pair(id1, 31337));
+  EXPECT_TRUE(impl_.SetSpdySettings(spdy_server_google, spdy_settings1));
+  spdy::SpdySettings spdy_settings1_ret =
       impl_.GetSpdySettings(spdy_server_google);
-  ASSERT_EQ(1U, settings_map1_ret.size());
-  SettingsMap::const_iterator it1_ret = settings_map1_ret.find(id1);
-  EXPECT_TRUE(it1_ret != settings_map1_ret.end());
-  SettingsFlagsAndValue flags_and_value1_ret = it1_ret->second;
-  EXPECT_EQ(SETTINGS_FLAG_PERSISTED, flags_and_value1_ret.first);
-  EXPECT_EQ(value1, flags_and_value1_ret.second);
+  ASSERT_EQ(1U, spdy_settings1_ret.size());
+  spdy::SpdySetting spdy_setting1_ret = spdy_settings1_ret.front();
+  spdy::SettingsFlagsAndId id1_ret(spdy_setting1_ret.first);
+  EXPECT_EQ(1234U, id1_ret.id());
+  EXPECT_EQ(spdy::SETTINGS_FLAG_PERSISTED, id1_ret.flags());
+  EXPECT_EQ(31337U, spdy_setting1_ret.second);
 
   // Add mail.google.com:443 as not persisting.
   HostPortPair spdy_server_mail("mail.google.com", 443);
-  const SpdySettingsIds id2 = SETTINGS_DOWNLOAD_BANDWIDTH;
-  const SpdySettingsFlags flags2 = SETTINGS_FLAG_NONE;
-  const uint32 value2 = 62667;
-  EXPECT_FALSE(impl_.SetSpdySetting(spdy_server_mail, id2, flags2, value2));
-  const SettingsMap& settings_map2_ret =
+  spdy::SpdySettings spdy_settings2;
+  spdy::SettingsFlagsAndId id2(0);
+  id2.set_id(5678);
+  spdy_settings2.push_back(std::make_pair(id2, 62667));
+  EXPECT_FALSE(impl_.SetSpdySettings(spdy_server_mail, spdy_settings2));
+  spdy::SpdySettings spdy_settings2_ret =
       impl_.GetSpdySettings(spdy_server_mail);
-  EXPECT_EQ(0U, settings_map2_ret.size());  // Returns kEmptySettingsMap.
+  EXPECT_EQ(0U, spdy_settings2_ret.size());  // Returns kEmptySpdySettings
 
   // Add docs.google.com:443 as persisting
   HostPortPair spdy_server_docs("docs.google.com", 443);
-  const SpdySettingsIds id3 = SETTINGS_ROUND_TRIP_TIME;
-  const SpdySettingsFlags flags3 = SETTINGS_FLAG_PLEASE_PERSIST;
-  const uint32 value3 = 93997;
-  SettingsFlagsAndValue flags_and_value3(flags3, value3);
-  EXPECT_TRUE(impl_.SetSpdySetting(spdy_server_docs, id3, flags3, value3));
-  // Check the values.
-  const SettingsMap& settings_map3_ret =
+  spdy::SpdySettings spdy_settings3;
+  spdy::SettingsFlagsAndId id3(0);
+  id3.set_flags(spdy::SETTINGS_FLAG_PLEASE_PERSIST);
+  id3.set_id(9012);
+  spdy_settings3.push_back(std::make_pair(id3, 93997));
+  EXPECT_TRUE(impl_.SetSpdySettings(spdy_server_docs, spdy_settings3));
+  spdy::SpdySettings spdy_settings3_ret =
       impl_.GetSpdySettings(spdy_server_docs);
-  ASSERT_EQ(1U, settings_map3_ret.size());
-  SettingsMap::const_iterator it3_ret = settings_map3_ret.find(id3);
-  EXPECT_TRUE(it3_ret != settings_map3_ret.end());
-  SettingsFlagsAndValue flags_and_value3_ret = it3_ret->second;
-  EXPECT_EQ(SETTINGS_FLAG_PERSISTED, flags_and_value3_ret.first);
-  EXPECT_EQ(value3, flags_and_value3_ret.second);
-
-  // Check data for www.google.com:443 (id1).
-  const SettingsMap& settings_map4_ret =
-      impl_.GetSpdySettings(spdy_server_google);
-  ASSERT_EQ(1U, settings_map4_ret.size());
-  SettingsMap::const_iterator it4_ret = settings_map4_ret.find(id1);
-  EXPECT_TRUE(it4_ret != settings_map4_ret.end());
-  SettingsFlagsAndValue flags_and_value4_ret = it4_ret->second;
-  EXPECT_EQ(SETTINGS_FLAG_PERSISTED, flags_and_value4_ret.first);
-  EXPECT_EQ(value1, flags_and_value1_ret.second);
-
-  // Clear www.google.com:443 as persisting.
-  impl_.ClearSpdySettings(spdy_server_google);
-  // Check the values.
-  const SettingsMap& settings_map5_ret =
-      impl_.GetSpdySettings(spdy_server_google);
-  ASSERT_EQ(0U, settings_map5_ret.size());
-
-  // Clear all settings.
-  ASSERT_GT(impl_.spdy_settings_map().size(), 0U);
-  impl_.ClearAllSpdySettings();
-  ASSERT_EQ(0U, impl_.spdy_settings_map().size());
+  ASSERT_EQ(1U, spdy_settings3_ret.size());
+  spdy::SpdySetting spdy_setting3_ret = spdy_settings3_ret.front();
+  spdy::SettingsFlagsAndId id3_ret(spdy_setting3_ret.first);
+  EXPECT_EQ(9012U, id3_ret.id());
+  EXPECT_EQ(spdy::SETTINGS_FLAG_PERSISTED, id3_ret.flags());
+  EXPECT_EQ(93997U, spdy_setting3_ret.second);
 }
 
 TEST_F(SpdySettingsServerPropertiesTest, Clear) {
   // Add www.google.com:443 as persisting.
   HostPortPair spdy_server_google("www.google.com", 443);
-  const SpdySettingsIds id1 = SETTINGS_UPLOAD_BANDWIDTH;
-  const SpdySettingsFlags flags1 = SETTINGS_FLAG_PLEASE_PERSIST;
-  const uint32 value1 = 31337;
-  EXPECT_TRUE(impl_.SetSpdySetting(spdy_server_google, id1, flags1, value1));
-  // Check the values.
-  const SettingsMap& settings_map1_ret =
+  spdy::SpdySettings spdy_settings1;
+  spdy::SettingsFlagsAndId id1(0);
+  id1.set_flags(spdy::SETTINGS_FLAG_PLEASE_PERSIST);
+  id1.set_id(1234);
+  spdy_settings1.push_back(std::make_pair(id1, 31337));
+  EXPECT_TRUE(impl_.SetSpdySettings(spdy_server_google, spdy_settings1));
+  spdy::SpdySettings spdy_settings1_ret =
       impl_.GetSpdySettings(spdy_server_google);
-  ASSERT_EQ(1U, settings_map1_ret.size());
-  SettingsMap::const_iterator it1_ret = settings_map1_ret.find(id1);
-  EXPECT_TRUE(it1_ret != settings_map1_ret.end());
-  SettingsFlagsAndValue flags_and_value1_ret = it1_ret->second;
-  EXPECT_EQ(SETTINGS_FLAG_PERSISTED, flags_and_value1_ret.first);
-  EXPECT_EQ(value1, flags_and_value1_ret.second);
+  ASSERT_EQ(1U, spdy_settings1_ret.size());
+  spdy::SpdySetting spdy_setting1_ret = spdy_settings1_ret.front();
+  spdy::SettingsFlagsAndId id1_ret(spdy_setting1_ret.first);
+  EXPECT_EQ(1234U, id1_ret.id());
+  EXPECT_EQ(spdy::SETTINGS_FLAG_PERSISTED, id1_ret.flags());
+  EXPECT_EQ(31337U, spdy_setting1_ret.second);
 
   // Add docs.google.com:443 as persisting
   HostPortPair spdy_server_docs("docs.google.com", 443);
-  const SpdySettingsIds id3 = SETTINGS_ROUND_TRIP_TIME;
-  const SpdySettingsFlags flags3 = SETTINGS_FLAG_PLEASE_PERSIST;
-  const uint32 value3 = 93997;
-  EXPECT_TRUE(impl_.SetSpdySetting(spdy_server_docs, id3, flags3, value3));
-  // Check the values.
-  const SettingsMap& settings_map3_ret =
+  spdy::SpdySettings spdy_settings3;
+  spdy::SettingsFlagsAndId id3(0);
+  id3.set_flags(spdy::SETTINGS_FLAG_PLEASE_PERSIST);
+  id3.set_id(9012);
+  spdy_settings3.push_back(std::make_pair(id3, 93997));
+  EXPECT_TRUE(impl_.SetSpdySettings(spdy_server_docs, spdy_settings3));
+  spdy::SpdySettings spdy_settings3_ret =
       impl_.GetSpdySettings(spdy_server_docs);
-  ASSERT_EQ(1U, settings_map3_ret.size());
-  SettingsMap::const_iterator it3_ret = settings_map3_ret.find(id3);
-  EXPECT_TRUE(it3_ret != settings_map3_ret.end());
-  SettingsFlagsAndValue flags_and_value3_ret = it3_ret->second;
-  EXPECT_EQ(SETTINGS_FLAG_PERSISTED, flags_and_value3_ret.first);
-  EXPECT_EQ(value3, flags_and_value3_ret.second);
+  ASSERT_EQ(1U, spdy_settings3_ret.size());
+  spdy::SpdySetting spdy_setting3_ret = spdy_settings3_ret.front();
+  spdy::SettingsFlagsAndId id3_ret(spdy_setting3_ret.first);
+  EXPECT_EQ(9012U, id3_ret.id());
+  EXPECT_EQ(spdy::SETTINGS_FLAG_PERSISTED, id3_ret.flags());
+  EXPECT_EQ(93997U, spdy_setting3_ret.second);
 
   impl_.Clear();
   EXPECT_EQ(0U, impl_.GetSpdySettings(spdy_server_google).size());

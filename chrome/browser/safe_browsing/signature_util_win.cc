@@ -8,7 +8,7 @@
 #include <softpub.h>
 #include <wintrust.h>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 
@@ -21,17 +21,17 @@ SignatureUtil::SignatureUtil() {}
 SignatureUtil::~SignatureUtil() {}
 
 void SignatureUtil::CheckSignature(
-    const base::FilePath& file_path,
+    const FilePath& file_path,
     ClientDownloadRequest_SignatureInfo* signature_info) {
   VLOG(2) << "Checking signature for " << file_path.value();
 
-  WINTRUST_FILE_INFO file_info = {0};
+  WINTRUST_FILE_INFO file_info;
   file_info.cbStruct = sizeof(file_info);
   file_info.pcwszFilePath = file_path.value().c_str();
   file_info.hFile = NULL;
   file_info.pgKnownSubject = NULL;
 
-  WINTRUST_DATA wintrust_data = {0};
+  WINTRUST_DATA wintrust_data;
   wintrust_data.cbStruct = sizeof(wintrust_data);
   wintrust_data.pPolicyCallbackData = NULL;
   wintrust_data.pSIPClientData = NULL;

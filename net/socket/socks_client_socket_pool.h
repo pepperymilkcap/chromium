@@ -4,6 +4,7 @@
 
 #ifndef NET_SOCKET_SOCKS_CLIENT_SOCKET_POOL_H_
 #define NET_SOCKET_SOCKS_CLIENT_SOCKET_POOL_H_
+#pragma once
 
 #include <string>
 
@@ -11,12 +12,12 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/host_port_pair.h"
-#include "net/dns/host_resolver.h"
-#include "net/socket/client_socket_pool.h"
+#include "net/base/host_resolver.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_histograms.h"
+#include "net/socket/client_socket_pool.h"
 
 namespace net {
 
@@ -28,7 +29,8 @@ class NET_EXPORT_PRIVATE SOCKSSocketParams
     : public base::RefCounted<SOCKSSocketParams> {
  public:
   SOCKSSocketParams(const scoped_refptr<TransportSocketParams>& proxy_server,
-                    bool socks_v5, const HostPortPair& host_port_pair);
+                    bool socks_v5, const HostPortPair& host_port_pair,
+                    RequestPriority priority);
 
   const scoped_refptr<TransportSocketParams>& transport_params() const {
     return transport_params_;
@@ -56,7 +58,6 @@ class NET_EXPORT_PRIVATE SOCKSSocketParams
 class SOCKSConnectJob : public ConnectJob {
  public:
   SOCKSConnectJob(const std::string& group_name,
-                  RequestPriority priority,
                   const scoped_refptr<SOCKSSocketParams>& params,
                   const base::TimeDelta& timeout_duration,
                   TransportClientSocketPool* transport_pool,
@@ -104,11 +105,8 @@ class SOCKSConnectJob : public ConnectJob {
   DISALLOW_COPY_AND_ASSIGN(SOCKSConnectJob);
 };
 
-class NET_EXPORT_PRIVATE SOCKSClientSocketPool
-    : public ClientSocketPool, public HigherLayeredPool {
+class NET_EXPORT_PRIVATE SOCKSClientSocketPool : public ClientSocketPool {
  public:
-  typedef SOCKSSocketParams SocketParams;
-
   SOCKSClientSocketPool(
       int max_sockets,
       int max_sockets_per_group,
@@ -136,10 +134,10 @@ class NET_EXPORT_PRIVATE SOCKSClientSocketPool
                              ClientSocketHandle* handle) OVERRIDE;
 
   virtual void ReleaseSocket(const std::string& group_name,
-                             scoped_ptr<StreamSocket> socket,
+                             StreamSocket* socket,
                              int id) OVERRIDE;
 
-  virtual void FlushWithError(int error) OVERRIDE;
+  virtual void Flush() OVERRIDE;
 
   virtual void CloseIdleSockets() OVERRIDE;
 
@@ -161,16 +159,6 @@ class NET_EXPORT_PRIVATE SOCKSClientSocketPool
 
   virtual ClientSocketPoolHistograms* histograms() const OVERRIDE;
 
-  // LowerLayeredPool implementation.
-  virtual bool IsStalled() const OVERRIDE;
-
-  virtual void AddHigherLayeredPool(HigherLayeredPool* higher_pool) OVERRIDE;
-
-  virtual void RemoveHigherLayeredPool(HigherLayeredPool* higher_pool) OVERRIDE;
-
-  // HigherLayeredPool implementation.
-  virtual bool CloseOneIdleConnection() OVERRIDE;
-
  private:
   typedef ClientSocketPoolBase<SOCKSSocketParams> PoolBase;
 
@@ -186,7 +174,7 @@ class NET_EXPORT_PRIVATE SOCKSClientSocketPool
     virtual ~SOCKSConnectJobFactory() {}
 
     // ClientSocketPoolBase::ConnectJobFactory methods.
-    virtual scoped_ptr<ConnectJob> NewConnectJob(
+    virtual ConnectJob* NewConnectJob(
         const std::string& group_name,
         const PoolBase::Request& request,
         ConnectJob::Delegate* delegate) const OVERRIDE;
@@ -206,6 +194,8 @@ class NET_EXPORT_PRIVATE SOCKSClientSocketPool
 
   DISALLOW_COPY_AND_ASSIGN(SOCKSClientSocketPool);
 };
+
+REGISTER_SOCKET_PARAMS_FOR_POOL(SOCKSClientSocketPool, SOCKSSocketParams);
 
 }  // namespace net
 

@@ -8,7 +8,7 @@
 
 #include "base/auto_reset.h"
 #include "ui/base/view_prop.h"
-#include "ui/gfx/win/hwnd_util.h"
+#include "ui/base/win/hwnd_util.h"
 
 namespace ui {
 
@@ -22,7 +22,8 @@ static bool WindowSupportsRerouteMouseWheel(HWND window) {
     if (!IsWindow(window))
       break;
 
-    if (ViewProp::GetValue(window, kHWNDSupportMouseWheelRerouting) != NULL) {
+    if (reinterpret_cast<bool>(
+            ViewProp::GetValue(window, kHWNDSupportMouseWheelRerouting))) {
       return true;
     }
     window = GetParent(window);
@@ -31,7 +32,7 @@ static bool WindowSupportsRerouteMouseWheel(HWND window) {
 }
 
 static bool IsCompatibleWithMouseWheelRedirection(HWND window) {
-  std::wstring class_name = gfx::GetClassName(window);
+  std::wstring class_name = GetClassName(window);
   // Mousewheel redirection to comboboxes is a surprising and
   // undesireable user behavior.
   return !(class_name == L"ComboBox" ||
@@ -39,7 +40,7 @@ static bool IsCompatibleWithMouseWheelRedirection(HWND window) {
 }
 
 static bool CanRedirectMouseWheelFrom(HWND window) {
-  std::wstring class_name = gfx::GetClassName(window);
+  std::wstring class_name = GetClassName(window);
 
   // Older Thinkpad mouse wheel drivers create a window under mouse wheel
   // pointer. Detect if we are dealing with this window. In this case we
@@ -103,7 +104,7 @@ bool RerouteMouseWheel(HWND window, WPARAM w_param, LPARAM l_param) {
 
     // window_under_wheel is a Chrome window.  If allowed, redirect.
     if (IsCompatibleWithMouseWheelRedirection(window_under_wheel)) {
-      base::AutoReset<bool> auto_reset_recursion_break(&recursion_break, true);
+      AutoReset<bool> auto_reset_recursion_break(&recursion_break, true);
       SendMessage(window_under_wheel, WM_MOUSEWHEEL, w_param, l_param);
       return true;
     }

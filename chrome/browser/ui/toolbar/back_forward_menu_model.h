@@ -1,34 +1,27 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_TOOLBAR_BACK_FORWARD_MENU_MODEL_H_
 #define CHROME_BROWSER_UI_TOOLBAR_BACK_FORWARD_MENU_MODEL_H_
+#pragma once
 
 #include <set>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/common/cancelable_task_tracker.h"
 #include "ui/base/models/menu_model.h"
-#include "ui/base/window_open_disposition.h"
+#include "webkit/glue/window_open_disposition.h"
 
 class Browser;
-
-namespace chrome {
-struct FaviconImageResult;
-}
+class SkBitmap;
 
 namespace content {
 class NavigationEntry;
 class WebContents;
-}
-
-namespace gfx {
-class Image;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -58,15 +51,14 @@ class BackForwardMenuModel : public ui::MenuModel {
   // out the total number of items to show.
   virtual int GetItemCount() const OVERRIDE;
   virtual ItemType GetTypeAt(int index) const OVERRIDE;
-  virtual ui::MenuSeparatorType GetSeparatorTypeAt(int index) const OVERRIDE;
   virtual int GetCommandIdAt(int index) const OVERRIDE;
-  virtual base::string16 GetLabelAt(int index) const OVERRIDE;
+  virtual string16 GetLabelAt(int index) const OVERRIDE;
   virtual bool IsItemDynamicAt(int index) const OVERRIDE;
   virtual bool GetAcceleratorAt(int index,
                                 ui::Accelerator* accelerator) const OVERRIDE;
   virtual bool IsItemCheckedAt(int index) const OVERRIDE;
   virtual int GetGroupIdAt(int index) const OVERRIDE;
-  virtual bool GetIconAt(int index, gfx::Image* icon) OVERRIDE;
+  virtual bool GetIconAt(int index, SkBitmap* icon) OVERRIDE;
   virtual ui::ButtonMenuItemModel* GetButtonMenuItemAt(
       int index) const OVERRIDE;
   virtual bool IsEnabledAt(int index) const OVERRIDE;
@@ -82,7 +74,6 @@ class BackForwardMenuModel : public ui::MenuModel {
   // Set the delegate for triggering OnIconChanged.
   virtual void SetMenuModelDelegate(
       ui::MenuModelDelegate* menu_model_delegate) OVERRIDE;
-  virtual ui::MenuModelDelegate* GetMenuModelDelegate() const OVERRIDE;
 
  protected:
    ui::MenuModelDelegate* menu_model_delegate() { return menu_model_delegate_; }
@@ -100,9 +91,8 @@ class BackForwardMenuModel : public ui::MenuModel {
   void FetchFavicon(content::NavigationEntry* entry);
 
   // Callback from the favicon service.
-  void OnFavIconDataAvailable(
-      int navigation_entry_unique_id,
-      const chrome::FaviconImageResult& image_result);
+  void OnFavIconDataAvailable(FaviconService::Handle handle,
+                              history::FaviconData favicon);
 
   // Allows the unit test to use its own dummy tab contents.
   void set_test_web_contents(content::WebContents* test_web_contents) {
@@ -173,7 +163,7 @@ class BackForwardMenuModel : public ui::MenuModel {
   bool ItemHasIcon(int index) const;
 
   // Allow the unit test to use the "Show Full History" label.
-  base::string16 GetShowFullHistoryLabel() const;
+  string16 GetShowFullHistoryLabel() const;
 
   // Looks up a NavigationEntry by menu id.
   content::NavigationEntry* GetNavigationEntry(int index) const;
@@ -203,8 +193,8 @@ class BackForwardMenuModel : public ui::MenuModel {
   // NavigationEntry->GetUniqueID().
   std::set<int> requested_favicons_;
 
-  // Used for loading favicons.
-  CancelableTaskTracker cancelable_task_tracker_;
+  // Used for loading favicons from history.
+  CancelableRequestConsumerTSimple<int> load_consumer_;
 
   // Used for receiving notifications when an icon is changed.
   ui::MenuModelDelegate* menu_model_delegate_;

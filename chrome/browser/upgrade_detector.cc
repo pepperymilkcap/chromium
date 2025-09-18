@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,9 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/ui/browser_otr_state.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -32,54 +31,36 @@ bool UseTestingIntervals() {
 }
 
 // static
-void UpgradeDetector::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(prefs::kRestartLastSessionOnShutdown, false);
-  registry->RegisterBooleanPref(prefs::kWasRestarted, false);
+void UpgradeDetector::RegisterPrefs(PrefService* prefs) {
+  prefs->RegisterBooleanPref(prefs::kRestartLastSessionOnShutdown, false);
+  prefs->RegisterBooleanPref(prefs::kWasRestarted, false);
 }
 
 int UpgradeDetector::GetIconResourceID(UpgradeNotificationIconType type) {
-  if (type == UPGRADE_ICON_TYPE_BADGE) {
-    // Badges do not exist on Views and Mac OS X.
-#if !defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
-    switch (upgrade_notification_stage_) {
-      case UPGRADE_ANNOYANCE_NONE:
-        return 0;
-      case UPGRADE_ANNOYANCE_LOW:
-        return IDR_UPDATE_BADGE;
-      case UPGRADE_ANNOYANCE_ELEVATED:
-        return IDR_UPDATE_BADGE2;
-      case UPGRADE_ANNOYANCE_HIGH:
-        return IDR_UPDATE_BADGE3;
-      case UPGRADE_ANNOYANCE_SEVERE:
-        return IDR_UPDATE_BADGE3;
-      case UPGRADE_ANNOYANCE_CRITICAL:
-        return IDR_UPDATE_BADGE3;
-    }
-#endif
-    NOTREACHED();
-    return 0;
-  }
-
+  bool badge = type == UPGRADE_ICON_TYPE_BADGE;
   switch (upgrade_notification_stage_) {
-    case UPGRADE_ANNOYANCE_NONE:
-      return 0;
-    case UPGRADE_ANNOYANCE_LOW:
-      return IDR_UPDATE_MENU_SEVERITY_LOW;
-    case UPGRADE_ANNOYANCE_ELEVATED:
-      return IDR_UPDATE_MENU_SEVERITY_MEDIUM;
-    case UPGRADE_ANNOYANCE_HIGH:
-      return IDR_UPDATE_MENU_SEVERITY_HIGH;
-    case UPGRADE_ANNOYANCE_SEVERE:
-      return IDR_UPDATE_MENU_SEVERITY_HIGH;
     case UPGRADE_ANNOYANCE_CRITICAL:
-      return IDR_UPDATE_MENU_SEVERITY_HIGH;
+      // The critical annoyance state, somewhat ironically, re-purposes the
+      // icon for the second highest severity state, since that state has the
+      // icon most closely resembling the one requested of this feature and the
+      // critical annoyance is never part of the sliding scale of severity
+      // anyway (always shown on its own).
+      return badge ? IDR_UPDATE_BADGE3 : IDR_UPDATE_MENU3;
+    case UPGRADE_ANNOYANCE_SEVERE:
+      return badge ? IDR_UPDATE_BADGE4 : IDR_UPDATE_MENU4;
+    case UPGRADE_ANNOYANCE_HIGH:
+      return badge ? IDR_UPDATE_BADGE3 : IDR_UPDATE_MENU3;
+    case UPGRADE_ANNOYANCE_ELEVATED:
+      return badge ? IDR_UPDATE_BADGE2 : IDR_UPDATE_MENU2;
+    case UPGRADE_ANNOYANCE_LOW:
+      return badge ? IDR_UPDATE_BADGE : IDR_UPDATE_MENU;
+    default:
+      return 0;
   }
-  NOTREACHED();
-  return 0;
 }
 
 UpgradeDetector::UpgradeDetector()
-    : upgrade_available_(UPGRADE_AVAILABLE_NONE),
+    : is_critical_upgrade_(false),
       critical_update_acknowledged_(false),
       upgrade_notification_stage_(UPGRADE_ANNOYANCE_NONE),
       notify_upgrade_(false) {
@@ -101,25 +82,13 @@ void UpgradeDetector::NotifyUpgradeRecommended() {
       content::Source<UpgradeDetector>(this),
       content::NotificationService::NoDetails());
 
-  switch (upgrade_available_) {
-    case UPGRADE_NEEDED_OUTDATED_INSTALL: {
-      content::NotificationService::current()->Notify(
-          chrome::NOTIFICATION_OUTDATED_INSTALL,
-          content::Source<UpgradeDetector>(this),
-          content::NotificationService::NoDetails());
-      break;
-    }
-    case UPGRADE_AVAILABLE_CRITICAL: {
-      int idle_timer = UseTestingIntervals() ?
-          kIdleRepeatingTimerWait :
-          kIdleRepeatingTimerWait * 60;  // To minutes.
-      idle_check_timer_.Start(FROM_HERE,
-          base::TimeDelta::FromSeconds(idle_timer),
-          this, &UpgradeDetector::CheckIdle);
-      break;
-    }
-    default:
-      break;
+  if (is_critical_upgrade_) {
+    int idle_timer = UseTestingIntervals() ?
+        kIdleRepeatingTimerWait :
+        kIdleRepeatingTimerWait * 60;  // To minutes.
+    idle_check_timer_.Start(FROM_HERE,
+        base::TimeDelta::FromSeconds(idle_timer),
+        this, &UpgradeDetector::CheckIdle);
   }
 }
 
@@ -134,16 +103,11 @@ void UpgradeDetector::CheckIdle() {
 }
 
 void UpgradeDetector::IdleCallback(IdleState state) {
-  // Don't proceed while an incognito window is open. The timer will still
-  // keep firing, so this function will get a chance to re-evaluate this.
-  if (chrome::IsOffTheRecordSessionActive())
-    return;
-
   switch (state) {
     case IDLE_STATE_LOCKED:
       // Computer is locked, auto-restart.
       idle_check_timer_.Stop();
-      chrome::AttemptRestart();
+      BrowserList::AttemptRestart();
       break;
     case IDLE_STATE_IDLE:
       // Computer has been idle for long enough, show warning.

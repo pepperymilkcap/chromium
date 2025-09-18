@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,31 +20,28 @@
 #include <queue>
 
 #include "base/compiler_specific.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "crypto/nss_util.h"
 #include "crypto/rsa_private_key.h"
 #include "net/base/address_list.h"
+#include "net/base/cert_status_flags.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
-#include "net/base/test_data_directory.h"
-#include "net/cert/cert_status_flags.h"
-#include "net/cert/mock_cert_verifier.h"
-#include "net/cert/x509_certificate.h"
-#include "net/http/transport_security_state.h"
+#include "net/base/ssl_config_service.h"
+#include "net/base/ssl_info.h"
+#include "net/base/x509_certificate.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/stream_socket.h"
-#include "net/ssl/ssl_config_service.h"
-#include "net/ssl/ssl_info.h"
-#include "net/test/cert_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -56,14 +53,11 @@ class FakeDataChannel {
  public:
   FakeDataChannel()
       : read_buf_len_(0),
-        closed_(false),
-        write_called_after_close_(false),
-        weak_factory_(this) {
+        ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   }
 
-  int Read(IOBuffer* buf, int buf_len, const CompletionCallback& callback) {
-    if (closed_)
-      return 0;
+  virtual int Read(IOBuffer* buf, int buf_len,
+                   const CompletionCallback& callback) {
     if (data_.empty()) {
       read_callback_ = callback;
       read_buf_ = buf;
@@ -73,30 +67,13 @@ class FakeDataChannel {
     return PropogateData(buf, buf_len);
   }
 
-  int Write(IOBuffer* buf, int buf_len, const CompletionCallback& callback) {
-    if (closed_) {
-      if (write_called_after_close_)
-        return net::ERR_CONNECTION_RESET;
-      write_called_after_close_ = true;
-      write_callback_ = callback;
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE, base::Bind(&FakeDataChannel::DoWriteCallback,
-                                weak_factory_.GetWeakPtr()));
-      return net::ERR_IO_PENDING;
-    }
+  virtual int Write(IOBuffer* buf, int buf_len,
+                    const CompletionCallback& callback) {
     data_.push(new net::DrainableIOBuffer(buf, buf_len));
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(&FakeDataChannel::DoReadCallback,
                               weak_factory_.GetWeakPtr()));
     return buf_len;
-  }
-
-  // Closes the FakeDataChannel. After Close() is called, Read() returns 0,
-  // indicating EOF, and Write() fails with ERR_CONNECTION_RESET. Note that
-  // after the FakeDataChannel is closed, the first Write() call completes
-  // asynchronously, which is necessary to reproduce bug 127822.
-  void Close() {
-    closed_ = true;
   }
 
  private:
@@ -110,15 +87,6 @@ class FakeDataChannel {
     read_buf_ = NULL;
     read_buf_len_ = 0;
     callback.Run(copied);
-  }
-
-  void DoWriteCallback() {
-    if (write_callback_.is_null())
-      return;
-
-    CompletionCallback callback = write_callback_;
-    write_callback_.Reset();
-    callback.Run(net::ERR_CONNECTION_RESET);
   }
 
   int PropogateData(scoped_refptr<net::IOBuffer> read_buf, int read_buf_len) {
@@ -136,17 +104,7 @@ class FakeDataChannel {
   scoped_refptr<net::IOBuffer> read_buf_;
   int read_buf_len_;
 
-  CompletionCallback write_callback_;
-
   std::queue<scoped_refptr<net::DrainableIOBuffer> > data_;
-
-  // True if Close() has been called.
-  bool closed_;
-
-  // Controls the completion of Write() after the FakeDataChannel is closed.
-  // After the FakeDataChannel is closed, the first Write() call completes
-  // asynchronously.
-  bool write_called_after_close_;
 
   base::WeakPtrFactory<FakeDataChannel> weak_factory_;
 
@@ -190,10 +148,7 @@ class FakeSocket : public StreamSocket {
     return net::OK;
   }
 
-  virtual void Disconnect() OVERRIDE {
-    incoming_->Close();
-    outgoing_->Close();
-  }
+  virtual void Disconnect() OVERRIDE {}
 
   virtual bool IsConnected() const OVERRIDE {
     return true;
@@ -203,9 +158,9 @@ class FakeSocket : public StreamSocket {
     return true;
   }
 
-  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE {
-      net::IPAddressNumber ip_address(net::kIPv4AddressSize);
-    *address = net::IPEndPoint(ip_address, 0 /*port*/);
+  virtual int GetPeerAddress(AddressList* address) const OVERRIDE {
+    net::IPAddressNumber ip_address(4);
+    *address = net::AddressList::CreateFromIPAddress(ip_address, 0 /*port*/);
     return net::OK;
   }
 
@@ -230,17 +185,12 @@ class FakeSocket : public StreamSocket {
     return false;
   }
 
-
-  virtual bool WasNpnNegotiated() const OVERRIDE {
-    return false;
+  virtual int64 NumBytesRead() const OVERRIDE {
+    return -1;
   }
 
-  virtual NextProto GetNegotiatedProtocol() const OVERRIDE {
-    return kProtoUnknown;
-  }
-
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE {
-    return false;
+  virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE {
+    return base::TimeDelta::FromMicroseconds(-1);
   }
 
  private:
@@ -268,12 +218,11 @@ TEST(FakeSocketTest, DataTransfer) {
   scoped_refptr<net::IOBuffer> read_buf = new net::IOBuffer(kReadBufSize);
 
   // Write then read.
-  int written =
-      server.Write(write_buf.get(), kTestDataSize, CompletionCallback());
+  int written = server.Write(write_buf, kTestDataSize, CompletionCallback());
   EXPECT_GT(written, 0);
   EXPECT_LE(written, kTestDataSize);
 
-  int read = client.Read(read_buf.get(), kReadBufSize, CompletionCallback());
+  int read = client.Read(read_buf, kReadBufSize, CompletionCallback());
   EXPECT_GT(read, 0);
   EXPECT_LE(read, written);
   EXPECT_EQ(0, memcmp(kTestData, read_buf->data(), read));
@@ -281,9 +230,9 @@ TEST(FakeSocketTest, DataTransfer) {
   // Read then write.
   TestCompletionCallback callback;
   EXPECT_EQ(net::ERR_IO_PENDING,
-            server.Read(read_buf.get(), kReadBufSize, callback.callback()));
+            server.Read(read_buf, kReadBufSize, callback.callback()));
 
-  written = client.Write(write_buf.get(), kTestDataSize, CompletionCallback());
+  written = client.Write(write_buf, kTestDataSize, CompletionCallback());
   EXPECT_GT(written, 0);
   EXPECT_LE(written, kTestDataSize);
 
@@ -296,32 +245,31 @@ TEST(FakeSocketTest, DataTransfer) {
 class SSLServerSocketTest : public PlatformTest {
  public:
   SSLServerSocketTest()
-      : socket_factory_(net::ClientSocketFactory::GetDefaultFactory()),
-        cert_verifier_(new MockCertVerifier()),
-        transport_security_state_(new TransportSecurityState) {
-    cert_verifier_->set_default_result(net::CERT_STATUS_AUTHORITY_INVALID);
+      : socket_factory_(net::ClientSocketFactory::GetDefaultFactory()) {
   }
 
  protected:
   void Initialize() {
-    scoped_ptr<ClientSocketHandle> client_connection(new ClientSocketHandle);
-    client_connection->SetSocket(
-        scoped_ptr<StreamSocket>(new FakeSocket(&channel_1_, &channel_2_)));
-    scoped_ptr<StreamSocket> server_socket(
-        new FakeSocket(&channel_2_, &channel_1_));
+    FakeSocket* fake_client_socket = new FakeSocket(&channel_1_, &channel_2_);
+    FakeSocket* fake_server_socket = new FakeSocket(&channel_2_, &channel_1_);
 
-    base::FilePath certs_dir(GetTestCertsDirectory());
+    FilePath certs_dir;
+    PathService::Get(base::DIR_SOURCE_ROOT, &certs_dir);
+    certs_dir = certs_dir.AppendASCII("net");
+    certs_dir = certs_dir.AppendASCII("data");
+    certs_dir = certs_dir.AppendASCII("ssl");
+    certs_dir = certs_dir.AppendASCII("certificates");
 
-    base::FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
+    FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
     std::string cert_der;
-    ASSERT_TRUE(base::ReadFileToString(cert_path, &cert_der));
+    ASSERT_TRUE(file_util::ReadFileToString(cert_path, &cert_der));
 
     scoped_refptr<net::X509Certificate> cert =
         X509Certificate::CreateFromBytes(cert_der.data(), cert_der.size());
 
-    base::FilePath key_path = certs_dir.AppendASCII("unittest.key.bin");
+    FilePath key_path = certs_dir.AppendASCII("unittest.key.bin");
     std::string key_string;
-    ASSERT_TRUE(base::ReadFileToString(key_path, &key_string));
+    ASSERT_TRUE(file_util::ReadFileToString(key_path, &key_string));
     std::vector<uint8> key_vector(
         reinterpret_cast<const uint8*>(key_string.data()),
         reinterpret_cast<const uint8*>(key_string.data() +
@@ -333,7 +281,9 @@ class SSLServerSocketTest : public PlatformTest {
     net::SSLConfig ssl_config;
     ssl_config.cached_info_enabled = false;
     ssl_config.false_start_enabled = false;
-    ssl_config.channel_id_enabled = false;
+    ssl_config.origin_bound_certs_enabled = false;
+    ssl_config.ssl3_enabled = true;
+    ssl_config.tls1_enabled = true;
 
     // Certificate provided by the host doesn't need authority.
     net::SSLConfig::CertAndStatus cert_and_status;
@@ -343,14 +293,13 @@ class SSLServerSocketTest : public PlatformTest {
 
     net::HostPortPair host_and_pair("unittest", 0);
     net::SSLClientSocketContext context;
-    context.cert_verifier = cert_verifier_.get();
-    context.transport_security_state = transport_security_state_.get();
-    client_socket_ =
+    context.cert_verifier = &cert_verifier_;
+    client_socket_.reset(
         socket_factory_->CreateSSLClientSocket(
-            client_connection.Pass(), host_and_pair, ssl_config, context);
-    server_socket_ = net::CreateSSLServerSocket(
-        server_socket.Pass(),
-        cert.get(), private_key.get(), net::SSLConfig());
+            fake_client_socket, host_and_pair, ssl_config, NULL, context));
+    server_socket_.reset(net::CreateSSLServerSocket(fake_server_socket,
+                                                    cert, private_key.get(),
+                                                    net::SSLConfig()));
   }
 
   FakeDataChannel channel_1_;
@@ -358,8 +307,7 @@ class SSLServerSocketTest : public PlatformTest {
   scoped_ptr<net::SSLClientSocket> client_socket_;
   scoped_ptr<net::SSLServerSocket> server_socket_;
   net::ClientSocketFactory* socket_factory_;
-  scoped_ptr<net::MockCertVerifier> cert_verifier_;
-  scoped_ptr<net::TransportSecurityState> transport_security_state_;
+  net::CertVerifier cert_verifier_;
 };
 
 // SSLServerSocket is only implemented using NSS.
@@ -428,11 +376,11 @@ TEST_F(SSLServerSocketTest, DataTransfer) {
   // Write then read.
   TestCompletionCallback write_callback;
   TestCompletionCallback read_callback;
-  server_ret = server_socket_->Write(
-      write_buf.get(), write_buf->size(), write_callback.callback());
+  server_ret = server_socket_->Write(write_buf, write_buf->size(),
+                                     write_callback.callback());
   EXPECT_TRUE(server_ret > 0 || server_ret == net::ERR_IO_PENDING);
-  client_ret = client_socket_->Read(
-      read_buf.get(), read_buf->BytesRemaining(), read_callback.callback());
+  client_ret = client_socket_->Read(read_buf, read_buf->BytesRemaining(),
+                                    read_callback.callback());
   EXPECT_TRUE(client_ret > 0 || client_ret == net::ERR_IO_PENDING);
 
   server_ret = write_callback.GetResult(server_ret);
@@ -442,8 +390,8 @@ TEST_F(SSLServerSocketTest, DataTransfer) {
 
   read_buf->DidConsume(client_ret);
   while (read_buf->BytesConsumed() < write_buf->size()) {
-    client_ret = client_socket_->Read(
-        read_buf.get(), read_buf->BytesRemaining(), read_callback.callback());
+    client_ret = client_socket_->Read(read_buf, read_buf->BytesRemaining(),
+                                      read_callback.callback());
     EXPECT_TRUE(client_ret > 0 || client_ret == net::ERR_IO_PENDING);
     client_ret = read_callback.GetResult(client_ret);
     ASSERT_GT(client_ret, 0);
@@ -455,11 +403,11 @@ TEST_F(SSLServerSocketTest, DataTransfer) {
 
   // Read then write.
   write_buf = new net::StringIOBuffer("hello123");
-  server_ret = server_socket_->Read(
-      read_buf.get(), read_buf->BytesRemaining(), read_callback.callback());
+  server_ret = server_socket_->Read(read_buf, read_buf->BytesRemaining(),
+                                    read_callback.callback());
   EXPECT_TRUE(server_ret > 0 || server_ret == net::ERR_IO_PENDING);
-  client_ret = client_socket_->Write(
-      write_buf.get(), write_buf->size(), write_callback.callback());
+  client_ret = client_socket_->Write(write_buf, write_buf->size(),
+                                     write_callback.callback());
   EXPECT_TRUE(client_ret > 0 || client_ret == net::ERR_IO_PENDING);
 
   server_ret = read_callback.GetResult(server_ret);
@@ -469,8 +417,8 @@ TEST_F(SSLServerSocketTest, DataTransfer) {
 
   read_buf->DidConsume(server_ret);
   while (read_buf->BytesConsumed() < write_buf->size()) {
-    server_ret = server_socket_->Read(
-        read_buf.get(), read_buf->BytesRemaining(), read_callback.callback());
+    server_ret = server_socket_->Read(read_buf, read_buf->BytesRemaining(),
+                                      read_callback.callback());
     EXPECT_TRUE(server_ret > 0 || server_ret == net::ERR_IO_PENDING);
     server_ret = read_callback.GetResult(server_ret);
     ASSERT_GT(server_ret, 0);
@@ -479,60 +427,6 @@ TEST_F(SSLServerSocketTest, DataTransfer) {
   EXPECT_EQ(write_buf->size(), read_buf->BytesConsumed());
   read_buf->SetOffset(0);
   EXPECT_EQ(0, memcmp(write_buf->data(), read_buf->data(), write_buf->size()));
-}
-
-// A regression test for bug 127822 (http://crbug.com/127822).
-// If the server closes the connection after the handshake is finished,
-// the client's Write() call should not cause an infinite loop.
-// NOTE: this is a test for SSLClientSocket rather than SSLServerSocket.
-TEST_F(SSLServerSocketTest, ClientWriteAfterServerClose) {
-  Initialize();
-
-  TestCompletionCallback connect_callback;
-  TestCompletionCallback handshake_callback;
-
-  // Establish connection.
-  int client_ret = client_socket_->Connect(connect_callback.callback());
-  ASSERT_TRUE(client_ret == net::OK || client_ret == net::ERR_IO_PENDING);
-
-  int server_ret = server_socket_->Handshake(handshake_callback.callback());
-  ASSERT_TRUE(server_ret == net::OK || server_ret == net::ERR_IO_PENDING);
-
-  client_ret = connect_callback.GetResult(client_ret);
-  ASSERT_EQ(net::OK, client_ret);
-  server_ret = handshake_callback.GetResult(server_ret);
-  ASSERT_EQ(net::OK, server_ret);
-
-  scoped_refptr<net::StringIOBuffer> write_buf =
-      new net::StringIOBuffer("testing123");
-
-  // The server closes the connection. The server needs to write some
-  // data first so that the client's Read() calls from the transport
-  // socket won't return ERR_IO_PENDING.  This ensures that the client
-  // will call Read() on the transport socket again.
-  TestCompletionCallback write_callback;
-
-  server_ret = server_socket_->Write(
-      write_buf.get(), write_buf->size(), write_callback.callback());
-  EXPECT_TRUE(server_ret > 0 || server_ret == net::ERR_IO_PENDING);
-
-  server_ret = write_callback.GetResult(server_ret);
-  EXPECT_GT(server_ret, 0);
-
-  server_socket_->Disconnect();
-
-  // The client writes some data. This should not cause an infinite loop.
-  client_ret = client_socket_->Write(
-      write_buf.get(), write_buf->size(), write_callback.callback());
-  EXPECT_TRUE(client_ret > 0 || client_ret == net::ERR_IO_PENDING);
-
-  client_ret = write_callback.GetResult(client_ret);
-  EXPECT_GT(client_ret, 0);
-
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, base::MessageLoop::QuitClosure(),
-      base::TimeDelta::FromMilliseconds(10));
-  base::MessageLoop::current()->Run();
 }
 
 // This test executes ExportKeyingMaterial() on the client and server sockets,
@@ -561,25 +455,22 @@ TEST_F(SSLServerSocketTest, ExportKeyingMaterial) {
   const char* kKeyingLabel = "EXPERIMENTAL-server-socket-test";
   const char* kKeyingContext = "";
   unsigned char server_out[kKeyingMaterialSize];
-  int rv = server_socket_->ExportKeyingMaterial(kKeyingLabel,
-                                                false, kKeyingContext,
+  int rv = server_socket_->ExportKeyingMaterial(kKeyingLabel, kKeyingContext,
                                                 server_out, sizeof(server_out));
-  ASSERT_EQ(net::OK, rv);
+  ASSERT_EQ(rv, net::OK);
 
   unsigned char client_out[kKeyingMaterialSize];
-  rv = client_socket_->ExportKeyingMaterial(kKeyingLabel,
-                                            false, kKeyingContext,
+  rv = client_socket_->ExportKeyingMaterial(kKeyingLabel, kKeyingContext,
                                             client_out, sizeof(client_out));
-  ASSERT_EQ(net::OK, rv);
-  EXPECT_EQ(0, memcmp(server_out, client_out, sizeof(server_out)));
+  ASSERT_EQ(rv, net::OK);
+  EXPECT_TRUE(memcmp(server_out, client_out, sizeof(server_out)) == 0);
 
   const char* kKeyingLabelBad = "EXPERIMENTAL-server-socket-test-bad";
   unsigned char client_bad[kKeyingMaterialSize];
-  rv = client_socket_->ExportKeyingMaterial(kKeyingLabelBad,
-                                            false, kKeyingContext,
+  rv = client_socket_->ExportKeyingMaterial(kKeyingLabelBad, kKeyingContext,
                                             client_bad, sizeof(client_bad));
   ASSERT_EQ(rv, net::OK);
-  EXPECT_NE(0, memcmp(server_out, client_bad, sizeof(server_out)));
+  EXPECT_TRUE(memcmp(server_out, client_bad, sizeof(server_out)) != 0);
 }
 #endif
 

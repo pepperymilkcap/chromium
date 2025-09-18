@@ -6,13 +6,15 @@
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "base/test/perf_time_logger.h"
+#include "base/perftimer.h"
+#include "base/string_util.h"
+#include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
-#include "net/dns/mock_host_resolver.h"
 #include "net/proxy/proxy_info.h"
+#include "net/proxy/proxy_resolver_js_bindings.h"
 #include "net/proxy/proxy_resolver_v8.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/proxy/sync_host_resolver.h"
+#include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_WIN)
@@ -20,6 +22,17 @@
 #elif defined(OS_MACOSX)
 #include "net/proxy/proxy_resolver_mac.h"
 #endif
+
+class MockSyncHostResolver : public net::SyncHostResolver {
+ public:
+  virtual int Resolve(const net::HostResolver::RequestInfo& info,
+                      net::AddressList* addresses,
+                      const net::BoundNetLog& net_log) OVERRIDE {
+    return net::ERR_NAME_NOT_RESOLVED;
+  }
+
+  virtual void Shutdown() OVERRIDE {}
+};
 
 // This class holds the URL to use for resolving, and the expected result.
 // We track the expected result in order to make sure the performance
@@ -85,11 +98,8 @@ class PacPerfSuiteRunner {
                      const std::string& resolver_name)
       : resolver_(resolver),
         resolver_name_(resolver_name),
-        test_server_(
-            net::SpawnedTestServer::TYPE_HTTP,
-            net::SpawnedTestServer::kLocalhost,
-            base::FilePath(
-                FILE_PATH_LITERAL("net/data/proxy_resolver_perftest"))) {
+        test_server_(net::TestServer::TYPE_HTTP,
+            FilePath(FILE_PATH_LITERAL("net/data/proxy_resolver_perftest"))) {
   }
 
   void RunAllTests() {
@@ -130,7 +140,7 @@ class PacPerfSuiteRunner {
 
     // Start the perf timer.
     std::string perf_test_name = resolver_name_ + "_" + script_name;
-    base::PerfTimeLogger timer(perf_test_name.c_str());
+    PerfTimeLogger timer(perf_test_name.c_str());
 
     for (int i = 0; i < kNumIterations; ++i) {
       // Round-robin between URLs to resolve.
@@ -154,7 +164,7 @@ class PacPerfSuiteRunner {
 
   // Read the PAC script from disk and initialize the proxy resolver with it.
   void LoadPacScriptIntoResolver(const std::string& script_name) {
-    base::FilePath path;
+    FilePath path;
     PathService::Get(base::DIR_SOURCE_ROOT, &path);
     path = path.AppendASCII("net");
     path = path.AppendASCII("data");
@@ -163,7 +173,7 @@ class PacPerfSuiteRunner {
 
     // Try to read the file from disk.
     std::string file_contents;
-    bool ok = base::ReadFileToString(path, &file_contents);
+    bool ok = file_util::ReadFileToString(path, &file_contents);
 
     // If we can't load the file from disk, something is misconfigured.
     LOG_IF(ERROR, !ok) << "Failed to read file: " << path.value();
@@ -178,7 +188,7 @@ class PacPerfSuiteRunner {
 
   net::ProxyResolver* resolver_;
   std::string resolver_name_;
-  net::SpawnedTestServer test_server_;
+  net::TestServer test_server_;
 };
 
 #if defined(OS_WIN)
@@ -195,35 +205,13 @@ TEST(ProxyResolverPerfTest, ProxyResolverMac) {
 }
 #endif
 
-class MockJSBindings : public net::ProxyResolverV8::JSBindings {
- public:
-  MockJSBindings() {}
-
-  virtual void Alert(const base::string16& message) OVERRIDE {
-    CHECK(false);
-  }
-
-  virtual bool ResolveDns(const std::string& host,
-                          ResolveDnsOperation op,
-                          std::string* output,
-                          bool* terminate) OVERRIDE {
-    CHECK(false);
-    return false;
-  }
-
-  virtual void OnError(int line_number,
-                       const base::string16& message) OVERRIDE {
-    CHECK(false);
-  }
-};
-
 TEST(ProxyResolverPerfTest, ProxyResolverV8) {
-  // This has to be done on the main thread.
-  net::ProxyResolverV8::RememberDefaultIsolate();
+  net::ProxyResolverJSBindings* js_bindings =
+      net::ProxyResolverJSBindings::CreateDefault(
+          new MockSyncHostResolver, NULL, NULL);
 
-  MockJSBindings js_bindings;
-  net::ProxyResolverV8 resolver;
-  resolver.set_js_bindings(&js_bindings);
+  net::ProxyResolverV8 resolver(js_bindings);
   PacPerfSuiteRunner runner(&resolver, "ProxyResolverV8");
   runner.RunAllTests();
 }
+

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,13 @@
 #include <winspool.h>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_piece.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_hglobal.h"
 #include "printing/backend/print_backend_consts.h"
-#include "printing/backend/printing_info_win.h"
 #include "printing/backend/win_helper.h"
-
 
 namespace {
 
@@ -40,35 +38,28 @@ namespace printing {
 class PrintBackendWin : public PrintBackend {
  public:
   PrintBackendWin() {}
-
-  // PrintBackend implementation.
-  virtual bool EnumeratePrinters(PrinterList* printer_list) OVERRIDE;
-  virtual std::string GetDefaultPrinterName() OVERRIDE;
-  virtual bool GetPrinterSemanticCapsAndDefaults(
-      const std::string& printer_name,
-      PrinterSemanticCapsAndDefaults* printer_info) OVERRIDE;
-  virtual bool GetPrinterCapsAndDefaults(
-      const std::string& printer_name,
-      PrinterCapsAndDefaults* printer_info) OVERRIDE;
-  virtual std::string GetPrinterDriverInfo(
-      const std::string& printer_name) OVERRIDE;
-  virtual bool IsValidPrinter(const std::string& printer_name) OVERRIDE;
-
- protected:
   virtual ~PrintBackendWin() {}
+
+  virtual bool EnumeratePrinters(PrinterList* printer_list);
+
+  virtual std::string GetDefaultPrinterName();
+
+  virtual bool GetPrinterCapsAndDefaults(const std::string& printer_name,
+                                         PrinterCapsAndDefaults* printer_info);
+
+  virtual bool IsValidPrinter(const std::string& printer_name);
 };
 
 bool PrintBackendWin::EnumeratePrinters(PrinterList* printer_list) {
   DCHECK(printer_list);
   DWORD bytes_needed = 0;
   DWORD count_returned = 0;
-  const DWORD kLevel = 4;
-  BOOL ret = EnumPrinters(PRINTER_ENUM_LOCAL|PRINTER_ENUM_CONNECTIONS, NULL,
-                          kLevel, NULL, 0, &bytes_needed, &count_returned);
+  BOOL ret = EnumPrinters(PRINTER_ENUM_LOCAL|PRINTER_ENUM_CONNECTIONS, NULL, 2,
+                          NULL, 0, &bytes_needed, &count_returned);
   if (!bytes_needed)
     return false;
-  scoped_ptr<BYTE[]> printer_info_buffer(new BYTE[bytes_needed]);
-  ret = EnumPrinters(PRINTER_ENUM_LOCAL|PRINTER_ENUM_CONNECTIONS, NULL, kLevel,
+  scoped_array<BYTE> printer_info_buffer(new BYTE[bytes_needed]);
+  ret = EnumPrinters(PRINTER_ENUM_LOCAL|PRINTER_ENUM_CONNECTIONS, NULL, 2,
                      printer_info_buffer.get(), bytes_needed, &bytes_needed,
                      &count_returned);
   DCHECK(ret);
@@ -76,16 +67,22 @@ bool PrintBackendWin::EnumeratePrinters(PrinterList* printer_list) {
     return false;
 
   std::string default_printer = GetDefaultPrinterName();
-  PRINTER_INFO_4* printer_info =
-      reinterpret_cast<PRINTER_INFO_4*>(printer_info_buffer.get());
+  PRINTER_INFO_2* printer_info =
+      reinterpret_cast<PRINTER_INFO_2*>(printer_info_buffer.get());
   for (DWORD index = 0; index < count_returned; index++) {
-    ScopedPrinterHandle printer;
     PrinterBasicInfo info;
-    if (printer.OpenPrinter(printer_info[index].pPrinterName) &&
-        InitBasicPrinterInfo(printer, &info)) {
-      info.is_default = (info.printer_name == default_printer);
-      printer_list->push_back(info);
-    }
+    info.printer_name = WideToUTF8(printer_info[index].pPrinterName);
+    info.is_default = (info.printer_name == default_printer);
+    if (printer_info[index].pComment)
+      info.printer_description = WideToUTF8(printer_info[index].pComment);
+    info.printer_status = printer_info[index].Status;
+    if (printer_info[index].pLocation)
+      info.options[kLocationTagName] =
+          WideToUTF8(printer_info[index].pLocation);
+    if (printer_info[index].pDriverName)
+      info.options[kDriverNameTagName] =
+          WideToUTF8(printer_info[index].pDriverName);
+    printer_list->push_back(info);
   }
   return true;
 }
@@ -95,69 +92,7 @@ std::string PrintBackendWin::GetDefaultPrinterName() {
   TCHAR default_printer_name[MAX_PATH];
   if (!::GetDefaultPrinter(default_printer_name, &size))
     return std::string();
-  return base::WideToUTF8(default_printer_name);
-}
-
-bool PrintBackendWin::GetPrinterSemanticCapsAndDefaults(
-    const std::string& printer_name,
-    PrinterSemanticCapsAndDefaults* printer_info) {
-  ScopedPrinterHandle printer_handle;
-  if (!printer_handle.OpenPrinter(base::UTF8ToWide(printer_name).c_str())) {
-    LOG(WARNING) << "Failed to open printer, error = " << GetLastError();
-    return false;
-  }
-
-  PrinterInfo5 info_5;
-  if (!info_5.Init(printer_handle)) {
-    return false;
-  }
-  DCHECK_EQ(info_5.get()->pPrinterName, base::UTF8ToUTF16(printer_name));
-
-  PrinterSemanticCapsAndDefaults caps;
-
-  // Get printer capabilities. For more info see here:
-  // http://msdn.microsoft.com/en-us/library/windows/desktop/dd183552(v=vs.85).aspx
-  caps.color_changeable = (::DeviceCapabilities(info_5.get()->pPrinterName,
-                                                info_5.get()->pPortName,
-                                                DC_COLORDEVICE,
-                                                NULL,
-                                                NULL) == 1);
-
-  caps.duplex_capable = (::DeviceCapabilities(info_5.get()->pPrinterName,
-                                              info_5.get()->pPortName,
-                                              DC_DUPLEX,
-                                              NULL,
-                                              NULL) == 1);
-
-  UserDefaultDevMode user_settings;
-
-  if (user_settings.Init(printer_handle)) {
-    if ((user_settings.get()->dmFields & DM_COLOR) == DM_COLOR)
-      caps.color_default = (user_settings.get()->dmColor == DMCOLOR_COLOR);
-
-    if ((user_settings.get()->dmFields & DM_DUPLEX) == DM_DUPLEX) {
-      switch (user_settings.get()->dmDuplex) {
-      case DMDUP_SIMPLEX:
-        caps.duplex_default = SIMPLEX;
-        break;
-      case DMDUP_VERTICAL:
-        caps.duplex_default = LONG_EDGE;
-        break;
-      case DMDUP_HORIZONTAL:
-        caps.duplex_default = SHORT_EDGE;
-        break;
-      default:
-        NOTREACHED();
-      }
-    }
-  } else {
-    LOG(WARNING) << "Fallback to color/simplex mode.";
-    caps.color_default = caps.color_changeable;
-    caps.duplex_default = SIMPLEX;
-  }
-
-  *printer_info = caps;
-  return true;
+  return WideToUTF8(default_printer_name);
 }
 
 bool PrintBackendWin::GetPrinterCapsAndDefaults(
@@ -173,8 +108,9 @@ bool PrintBackendWin::GetPrinterCapsAndDefaults(
   }
   DCHECK(printer_info);
   HPTPROVIDER provider = NULL;
-  std::wstring printer_name_wide = base::UTF8ToWide(printer_name);
+  std::wstring printer_name_wide = UTF8ToWide(printer_name);
   HRESULT hr = XPSModule::OpenProvider(printer_name_wide, 1, &provider);
+  DCHECK(SUCCEEDED(hr));
   if (provider) {
     base::win::ScopedComPtr<IStream> print_capabilities_stream;
     hr = CreateStreamOnHGlobal(NULL, TRUE,
@@ -195,14 +131,18 @@ bool PrintBackendWin::GetPrinterCapsAndDefaults(
       DCHECK(SUCCEEDED(hr));
       printer_info->caps_mime_type = "text/xml";
     }
-    ScopedPrinterHandle printer_handle;
-    if (printer_handle.OpenPrinter(printer_name_wide.c_str())) {
+    // TODO(sanjeevr): Add ScopedPrinterHandle
+    HANDLE printer_handle = NULL;
+    OpenPrinter(const_cast<LPTSTR>(printer_name_wide.c_str()), &printer_handle,
+                NULL);
+    DCHECK(printer_handle);
+    if (printer_handle) {
       LONG devmode_size = DocumentProperties(
           NULL, printer_handle, const_cast<LPTSTR>(printer_name_wide.c_str()),
           NULL, NULL, 0);
       if (devmode_size <= 0)
         return false;
-      scoped_ptr<BYTE[]> devmode_out_buffer(new BYTE[devmode_size]);
+      scoped_array<BYTE> devmode_out_buffer(new BYTE[devmode_size]);
       DEVMODE* devmode_out =
           reinterpret_cast<DEVMODE*>(devmode_out_buffer.get());
       DocumentProperties(
@@ -226,25 +166,24 @@ bool PrintBackendWin::GetPrinterCapsAndDefaults(
           printer_info->defaults_mime_type = "text/xml";
         }
       }
+      ClosePrinter(printer_handle);
     }
     XPSModule::CloseProvider(provider);
   }
   return true;
 }
 
-// Gets the information about driver for a specific printer.
-std::string PrintBackendWin::GetPrinterDriverInfo(
-    const std::string& printer_name) {
-  ScopedPrinterHandle printer;
-  if (!printer.OpenPrinter(base::UTF8ToWide(printer_name).c_str())) {
-    return std::string();
-  }
-  return GetDriverInfo(printer);
-}
-
 bool PrintBackendWin::IsValidPrinter(const std::string& printer_name) {
-  ScopedPrinterHandle printer_handle;
-  return printer_handle.OpenPrinter(base::UTF8ToWide(printer_name).c_str());
+  std::wstring printer_name_wide = UTF8ToWide(printer_name);
+  HANDLE printer_handle = NULL;
+  OpenPrinter(const_cast<LPTSTR>(printer_name_wide.c_str()), &printer_handle,
+              NULL);
+  bool ret = false;
+  if (printer_handle) {
+    ret = true;
+    ClosePrinter(printer_handle);
+  }
+  return ret;
 }
 
 scoped_refptr<PrintBackend> PrintBackend::CreateInstance(

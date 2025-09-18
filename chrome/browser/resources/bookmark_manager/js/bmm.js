@@ -3,15 +3,12 @@
 // found in the LICENSE file.
 
 cr.define('bmm', function() {
-  var Promise = cr.Promise;
+  const Promise = cr.Promise;
 
   /**
    * Whether a node contains another node.
-   * TODO(yosin): Once JavaScript style guide is updated and linter follows
-   * that, we'll remove useless documentations for |parent| and |descendant|.
-   * TODO(yosin): bmm.contains() should be method of BookmarkTreeNode.
-   * @param {!BookmarkTreeNode} parent .
-   * @param {!BookmarkTreeNode} descendant .
+   * @param {!BookmarkTreeNode} parent
+   * @param {!BookmarkTreeNode} descendant
    * @return {boolean} Whether the parent contains the descendant.
    */
   function contains(parent, descendant) {
@@ -44,18 +41,15 @@ cr.define('bmm', function() {
     var p = new Promise;
     if (!(id in loadingPromises)) {
       loadingPromises[id] = new Promise;
-      loadingPromises[id].addListener(function(n) {
-        p.value = n;
-      });
-      chrome.bookmarkManagerPrivate.getSubtree(id, false, function(nodes) {
+      chrome.experimental.bookmarkManager.getSubtree(id, false,
+                                                     function(nodes) {
         loadingPromises[id].value = nodes && nodes[0];
         delete loadingPromises[id];
       });
-    } else {
-      loadingPromises[id].addListener(function(n) {
-        p.value = n;
-      });
     }
+    loadingPromises[id].addListener(function(n) {
+      p.value = n;
+    });
     return p;
   }
 
@@ -112,8 +106,8 @@ cr.define('bmm', function() {
 
   /**
    * Called when the title of a bookmark changes.
-   * @param {string} id The id of changed bookmark node.
-   * @param {!Object} changeInfo The information about how the node changed.
+   * @param {string} id
+   * @param {!Object} changeInfo
    */
   function handleBookmarkChanged(id, changeInfo) {
     if (bmm.tree)
@@ -181,17 +175,6 @@ cr.define('bmm', function() {
   }
 
   /**
-   * Callback for when all bookmark nodes have been deleted.
-   */
-  function handleRemoveAll() {
-    // Reload the list and the tree.
-    if (bmm.list)
-      bmm.list.reload();
-    if (bmm.tree)
-      bmm.tree.reload();
-  }
-
-  /**
    * Callback for when importing bookmark is started.
    */
   function handleImportBegan() {
@@ -214,13 +197,18 @@ cr.define('bmm', function() {
       if (!bmm.list)
         return;
 
-      // TODO(estade): this should navigate to the newly imported folder, which
-      // may be the bookmark bar if there were no previous bookmarks.
-      bmm.list.reload();
+      if (bmm.list.selectImportedFolder) {
+        var otherBookmarks = bmm.tree.items[1].items;
+        var importedFolder = otherBookmarks[otherBookmarks.length - 1];
+        navigateTo(importedFolder.bookmarkId)
+        bmm.list.selectImportedFolder = false
+      } else {
+        bmm.list.reload();
+      }
     }
 
     if (bmm.tree) {
-      bmm.tree.addEventListener('load', f);
+      bmm.treeaddEventListener('load', f);
       bmm.tree.reload();
     }
   }

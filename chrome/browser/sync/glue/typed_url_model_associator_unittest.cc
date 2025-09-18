@@ -1,27 +1,26 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_piece.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "content/public/test/test_browser_thread.h"
-#include "sync/protocol/typed_url_specifics.pb.h"
+#include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
+#include "content/test/test_browser_thread.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/gurl.h"
 
 using browser_sync::TypedUrlModelAssociator;
 using content::BrowserThread;
 
-namespace {
-class SyncTypedUrlModelAssociatorTest : public testing::Test {
+class TypedUrlModelAssociatorTest : public testing::Test {
  public:
   static history::URLRow MakeTypedUrlRow(const char* url,
                                          const char* title,
@@ -31,7 +30,7 @@ class SyncTypedUrlModelAssociatorTest : public testing::Test {
                                          history::VisitVector* visits) {
     GURL gurl(url);
     history::URLRow history_url(gurl);
-    history_url.set_title(base::UTF8ToUTF16(title));
+    history_url.set_title(UTF8ToUTF16(title));
     history_url.set_typed_count(typed_count);
     history_url.set_last_visit(
         base::Time::FromInternalValue(last_visit));
@@ -65,29 +64,7 @@ class SyncTypedUrlModelAssociatorTest : public testing::Test {
   }
 };
 
-static void CreateModelAssociatorAsync(base::WaitableEvent* startup,
-                                       base::WaitableEvent* aborted,
-                                       base::WaitableEvent* done,
-                                       TypedUrlModelAssociator** associator,
-                                       ProfileSyncServiceMock* mock) {
-  // Grab the done lock - when we exit, this will be released and allow the
-  // test to finish.
-  *associator = new TypedUrlModelAssociator(mock, NULL, NULL);
-
-  // Signal frontend to call AbortAssociation and proceed after it's called.
-  startup->Signal();
-  aborted->Wait();
-  syncer::SyncError error = (*associator)->AssociateModels(NULL, NULL);
-  EXPECT_TRUE(error.IsSet());
-  EXPECT_EQ("datatype error was encountered: Association was aborted.",
-            error.message());
-  delete *associator;
-  done->Signal();
-}
-
-} // namespace
-
-TEST_F(SyncTypedUrlModelAssociatorTest, MergeUrls) {
+TEST_F(TypedUrlModelAssociatorTest, MergeUrls) {
   history::VisitVector visits1;
   history::URLRow row1(MakeTypedUrlRow("http://pie.com/", "pie",
                                        2, 3, false, &visits1));
@@ -176,7 +153,7 @@ TEST_F(SyncTypedUrlModelAssociatorTest, MergeUrls) {
   EXPECT_EQ(0U, new_visits5.size());
 }
 
-TEST_F(SyncTypedUrlModelAssociatorTest, MergeUrlsAfterExpiration) {
+TEST_F(TypedUrlModelAssociatorTest, MergeUrlsAfterExpiration) {
   // Tests to ensure that we don't resurrect expired URLs (URLs that have been
   // deleted from the history DB but still exist in the sync DB).
 
@@ -216,7 +193,7 @@ TEST_F(SyncTypedUrlModelAssociatorTest, MergeUrlsAfterExpiration) {
   EXPECT_EQ(4U, history_visits[2].visit_time.ToInternalValue());
 }
 
-TEST_F(SyncTypedUrlModelAssociatorTest, DiffVisitsSame) {
+TEST_F(TypedUrlModelAssociatorTest, DiffVisitsSame) {
   history::VisitVector old_visits;
   sync_pb::TypedUrlSpecifics new_url;
 
@@ -239,7 +216,7 @@ TEST_F(SyncTypedUrlModelAssociatorTest, DiffVisitsSame) {
   EXPECT_TRUE(removed_visits.empty());
 }
 
-TEST_F(SyncTypedUrlModelAssociatorTest, DiffVisitsRemove) {
+TEST_F(TypedUrlModelAssociatorTest, DiffVisitsRemove) {
   history::VisitVector old_visits;
   sync_pb::TypedUrlSpecifics new_url;
 
@@ -276,7 +253,7 @@ TEST_F(SyncTypedUrlModelAssociatorTest, DiffVisitsRemove) {
   }
 }
 
-TEST_F(SyncTypedUrlModelAssociatorTest, DiffVisitsAdd) {
+TEST_F(TypedUrlModelAssociatorTest, DiffVisitsAdd) {
   history::VisitVector old_visits;
   sync_pb::TypedUrlSpecifics new_url;
 
@@ -317,7 +294,7 @@ static history::VisitRow CreateVisit(content::PageTransition type,
                            type, 0);
 }
 
-TEST_F(SyncTypedUrlModelAssociatorTest, WriteTypedUrlSpecifics) {
+TEST_F(TypedUrlModelAssociatorTest, WriteTypedUrlSpecifics) {
   history::VisitVector visits;
   visits.push_back(CreateVisit(content::PAGE_TRANSITION_TYPED, 1));
   visits.push_back(CreateVisit(content::PAGE_TRANSITION_RELOAD, 2));
@@ -338,7 +315,7 @@ TEST_F(SyncTypedUrlModelAssociatorTest, WriteTypedUrlSpecifics) {
       static_cast<content::PageTransition>(typed_url.visit_transitions(1)));
 }
 
-TEST_F(SyncTypedUrlModelAssociatorTest, TooManyVisits) {
+TEST_F(TypedUrlModelAssociatorTest, TooManyVisits) {
   history::VisitVector visits;
   int64 timestamp = 1000;
   visits.push_back(CreateVisit(content::PAGE_TRANSITION_TYPED, timestamp++));
@@ -362,7 +339,7 @@ TEST_F(SyncTypedUrlModelAssociatorTest, TooManyVisits) {
       static_cast<content::PageTransition>(typed_url.visit_transitions(1)));
 }
 
-TEST_F(SyncTypedUrlModelAssociatorTest, TooManyTypedVisits) {
+TEST_F(TypedUrlModelAssociatorTest, TooManyTypedVisits) {
   history::VisitVector visits;
   int64 timestamp = 1000;
   for (int i = 0 ; i < 102; ++i) {
@@ -387,7 +364,7 @@ TEST_F(SyncTypedUrlModelAssociatorTest, TooManyTypedVisits) {
   }
 }
 
-TEST_F(SyncTypedUrlModelAssociatorTest, NoTypedVisits) {
+TEST_F(TypedUrlModelAssociatorTest, NoTypedVisits) {
   history::VisitVector visits;
   history::URLRow url(MakeTypedUrlRow("http://pie.com/", "pie",
                                       1, 1000, false, &visits));
@@ -403,31 +380,64 @@ TEST_F(SyncTypedUrlModelAssociatorTest, NoTypedVisits) {
       static_cast<content::PageTransition>(typed_url.visit_transitions(0)));
 }
 
+class TestTypedUrlModelAssociator : public TypedUrlModelAssociator {
+ public:
+  TestTypedUrlModelAssociator(base::WaitableEvent* startup,
+                              base::WaitableEvent* aborted)
+      : TypedUrlModelAssociator(&mock_, NULL),
+        startup_(startup),
+        aborted_(aborted) {}
+  virtual bool IsAbortPending() {
+    // Let the main thread know that we've been started up, and block until
+    // they've called Abort().
+    startup_->Signal();
+    EXPECT_TRUE(aborted_->TimedWait(base::TimeDelta::FromMilliseconds(
+      TestTimeouts::action_timeout_ms())));
+    return TypedUrlModelAssociator::IsAbortPending();
+  }
+ private:
+  ProfileSyncServiceMock mock_;
+  base::WaitableEvent* startup_;
+  base::WaitableEvent* aborted_;
+};
+
+static void CreateModelAssociator(base::WaitableEvent* startup,
+                                  base::WaitableEvent* aborted,
+                                  base::WaitableEvent* done,
+                                  TypedUrlModelAssociator** associator) {
+  // Grab the done lock - when we exit, this will be released and allow the
+  // test to finish.
+  *associator = new TestTypedUrlModelAssociator(startup, aborted);
+  // AssociateModels should be aborted and should return false.
+  EXPECT_FALSE((*associator)->AssociateModels(NULL));
+  delete *associator;
+  done->Signal();
+}
+
 // This test verifies that we can abort model association from the UI thread.
 // We start up the model associator on the DB thread, block until we abort the
 // association on the UI thread, then ensure that AssociateModels() returns
 // false.
-TEST_F(SyncTypedUrlModelAssociatorTest, TestAbort) {
+TEST_F(TypedUrlModelAssociatorTest, TestAbort) {
   content::TestBrowserThread db_thread(BrowserThread::DB);
   base::WaitableEvent startup(false, false);
   base::WaitableEvent aborted(false, false);
   base::WaitableEvent done(false, false);
-  TestingProfile profile;
-  ProfileSyncServiceMock mock(&profile);
-  TypedUrlModelAssociator* associator(NULL);
+  TypedUrlModelAssociator* associator;
   // Fire off to the DB thread to create the model associator and start
   // model association.
   db_thread.Start();
   base::Closure callback = base::Bind(
-      &CreateModelAssociatorAsync, &startup, &aborted, &done, &associator,
-                                   &mock);
+      &CreateModelAssociator, &startup, &aborted, &done, &associator);
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE, callback);
   // Wait for the model associator to get created and start assocation.
-  ASSERT_TRUE(startup.TimedWait(TestTimeouts::action_timeout()));
+  ASSERT_TRUE(startup.TimedWait(base::TimeDelta::FromMilliseconds(
+      TestTimeouts::action_timeout_ms())));
   // Abort the model assocation - this should be callable from any thread.
   associator->AbortAssociation();
   // Tell the remote thread to continue.
   aborted.Signal();
   // Block until CreateModelAssociator() exits.
-  ASSERT_TRUE(done.TimedWait(TestTimeouts::action_timeout()));
+  ASSERT_TRUE(done.TimedWait(base::TimeDelta::FromMilliseconds(
+      TestTimeouts::action_timeout_ms())));
 }

@@ -54,7 +54,7 @@ PREFIX : messageloop::posttask_helper___messageloop::posttask___disk_cache::infl
 PREFIX : anonymous namespace'::cachecreator::docallback___`anonymous namespace'::cachecreator::oniocomplete___disk_cache::inflightbackendio::onoperationcomplete___disk_cache::inflightio::invokecallback___disk_cache::backgroundio::oniosignalled___messageloop::runtask___messageloop::dowork___base::messagepumpforio::dorunloop___base::messagepumpwin::run___messageloop::runinternal___messageloop::run___base::thread::run___base::thread::threadmain___`anonymous namespace'::threadfunc
 
 # 49409
-PREFIX : std::basic_string<char,std::char_traits<char>,std::allocator<char> >::assign___fieldtriallist::statestostring___browserrenderprocesshost::appendrenderercommandline___browserrenderprocesshost::init___renderviewhost::createrenderview___tabcontents::createrenderviewforrendermanager___renderframehostmanager::initrenderview___renderframehostmanager::creatependingrenderview___renderframehostmanager::updaterendererstatefornavigate___renderframehostmanager::navigate___tabcontents::navigatetopendingentry___navigationcontroller::navigatetopendingentry___navigationcontroller::loadentry___navigationcontroller::loadurl___browser::openurlatindex___browser::openurlfromtab___browser::openurl___automationprovider::navigatetourlblockuntilnavigationscomplete___automationprovider::navigatetourl___ipc
+PREFIX : std::basic_string<char,std::char_traits<char>,std::allocator<char> >::assign___fieldtriallist::statestostring___browserrenderprocesshost::appendrenderercommandline___browserrenderprocesshost::init___renderviewhost::createrenderview___tabcontents::createrenderviewforrendermanager___renderviewhostmanager::initrenderview___renderviewhostmanager::creatependingrenderview___renderviewhostmanager::updaterendererstatefornavigate___renderviewhostmanager::navigate___tabcontents::navigatetopendingentry___navigationcontroller::navigatetopendingentry___navigationcontroller::loadentry___navigationcontroller::loadurl___browser::openurlatindex___browser::openurlfromtab___browser::openurl___automationprovider::navigatetourlblockuntilnavigationscomplete___automationprovider::navigatetourl___ipc
 
 # 39356
 PREFIX : renderwidgethost::onmsgupdaterect___ipc::messagewithtuple<tuple1<viewhostmsg_updaterect_params> >::dispatch<renderwidgethost,void (__thiscall renderwidgethost::*)(viewhostmsg_updaterect_params const &)>___renderwidgethost::onmessagereceived___renderviewhost::onmessagereceived___browserrenderprocesshost::onmessagereceived___renderwidgethelper::updatemsgproxy::run___messageloop::runtask___messageloop::dowork___base::messagepumpforui::dorunloop___base::messagepumpwin::runwithdispatcher___messageloop::runinternal___messageloopforui::run___`anonymous namespace'::runuimessageloop___browsermain___chromemain___maindllloader::launch___wwinmain_____tmaincrtstartup
@@ -156,6 +156,9 @@ PREFIX: webcore::renderobject::destroy___webcore::renderobjectchildlist::destroy
 # 77176
 PREFIX: webcore::implicitanimation::~implicitanimation___webcore::implicitanimation::`scalar deleting destructor'___wtf::hashtable<wtf::refptr<webcore::animationbase>,wtf::refptr<webcore::animationbase>,wtf::identityextractor<wtf::refptr<webcore::animationbase> >,wtf::ptrhash<wtf::refptr<webcore::animationbase> >,wtf::hashtraits<wtf::refptr<webcore::animationbase> >,wtf::hashtraits<wtf::refptr<webcore::animationbase> > >::deallocatetable
 
+# 21054
+REGEX : ^deletetask.*::run___messageloop::runtask___messageloop::dowork
+
 # 84178
 PREFIX: `anonymous namespace'::establishchannelcallback::send___`anonymous namespace'::establishchannelcallback::runwithparams___gpuprocesshost::sendoutstandingreplies
 
@@ -210,3 +213,6 @@ PREFIX: net::sdchmanager::isinsupporteddomain___net::urlrequesthttpjob::addextra
 
 # 96234
 PREFIX: std::_tree<std::_tmap_traits<syncable::id,int,std::less<syncable::id>,std::allocator<std::pair<syncable::id const ,int> >,0> >::_lbound___std::_tree<std::_tmap_traits<std::basic_string<char,std::char_traits<char>,std::allocator<char> >,fileapi::filesystemdirectorydatabase *,std::less<std::basic_string<char,std::char_traits<char>,std::allocator<char> > >,std::allocator<std::pair<std::basic_string<char,std::char_traits<char>,std::allocator<char> > const ,fileapi::filesystemdirectorydatabase *> >,0> >::find___net::sdchmanager::isinsupporteddomain___net::urlrequesthttpjob::addextraheaders
+
+# 96235
+PREFIX: browser::hidebookmarkbubbleview___browserview::onwidgetmove___views::nativewidgetwin::onmove

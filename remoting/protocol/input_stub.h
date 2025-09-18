@@ -1,9 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Interface for a device that receives input events.
-// This interface handles input event messages defined in event.proto.
+// This interface handles event messages defined in event.proto.
 
 #ifndef REMOTING_PROTOCOL_INPUT_STUB_H_
 #define REMOTING_PROTOCOL_INPUT_STUB_H_
@@ -21,8 +21,6 @@ class InputStub {
   InputStub() {}
   virtual ~InputStub() {}
 
-  // Implementations must never assume the presence of any |event| fields,
-  // nor assume that their contents are valid.
   virtual void InjectKeyEvent(const KeyEvent& event) = 0;
   virtual void InjectMouseEvent(const MouseEvent& event) = 0;
 

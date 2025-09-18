@@ -4,6 +4,7 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_ABOUT_JOB_H_
 #define NET_URL_REQUEST_URL_REQUEST_ABOUT_JOB_H_
+#pragma once
 
 #include <string>
 
@@ -15,7 +16,9 @@ namespace net {
 
 class NET_EXPORT URLRequestAboutJob : public URLRequestJob {
  public:
-  URLRequestAboutJob(URLRequest* request, NetworkDelegate* network_delegate);
+  explicit URLRequestAboutJob(URLRequest* request);
+
+  static URLRequest::ProtocolFactory Factory;
 
   // URLRequestJob:
   virtual void Start() OVERRIDE;

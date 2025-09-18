@@ -4,12 +4,13 @@
 
 #ifndef CHROME_BROWSER_PARSERS_METADATA_PARSER_FILEBASE_H_
 #define CHROME_BROWSER_PARSERS_METADATA_PARSER_FILEBASE_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/containers/hash_tables.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
+#include "base/hash_tables.h"
 #include "chrome/browser/parsers/metadata_parser.h"
 
 typedef base::hash_map<std::string, std::string> PropertyMap;
@@ -18,7 +19,7 @@ typedef base::hash_map<std::string, std::string> PropertyMap;
 // properties associated with files.
 class FileMetadataParser : public MetadataParser {
  public:
-  explicit FileMetadataParser(const base::FilePath& path);
+  explicit FileMetadataParser(const FilePath& path);
 
   virtual ~FileMetadataParser();
 
@@ -30,7 +31,7 @@ class FileMetadataParser : public MetadataParser {
 
  protected:
   PropertyMap properties_;
-  base::FilePath path_;
+  FilePath path_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FileMetadataParser);

@@ -6,35 +6,44 @@
 
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_logging.h"
-#include "base/strings/sys_string_conversions.h"
 #import "chrome/common/cloud_print/cloud_print_class_mac.h"
 #include "chrome/common/chrome_switches.h"
 
-@interface ServiceEventHandler : NSObject
-+ (void)submitPrint:(NSAppleEventDescriptor*)event;
+@interface ServiceApplication ()
+- (void)setCloudPrintHandler;
+- (void)submitPrint:(NSAppleEventDescriptor*)event;
 @end
 
-@implementation ServiceEventHandler
+@implementation ServiceApplication
+
+- (void)setCloudPrintHandler {
+  NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
+  [em setEventHandler:self
+          andSelector:@selector(submitPrint:)
+        forEventClass:cloud_print::kAECloudPrintClass
+           andEventID:cloud_print::kAECloudPrintClass];
+}
 
 // Event handler for Cloud Print Event. Forwards print job received to Chrome,
 // launching Chrome if necessary. Used to beat CUPS sandboxing.
-+ (void)submitPrint:(NSAppleEventDescriptor*)event {
+- (void)submitPrint:(NSAppleEventDescriptor*)event {
   std::string silent = std::string("--") + switches::kNoStartupWindow;
   // Set up flag so that it can be passed along with the Apple Event.
-  base::ScopedCFTypeRef<CFStringRef> silentLaunchFlag(
-      base::SysUTF8ToCFStringRef(silent));
+  CFStringRef silentLaunchFlag =
+      CFStringCreateWithCString(NULL, silent.c_str(), kCFStringEncodingUTF8);
   CFStringRef flags[] = { silentLaunchFlag };
   // Argv array that will be passed.
-  base::ScopedCFTypeRef<CFArrayRef> passArgv(
-      CFArrayCreate(NULL, (const void**)flags, 1, &kCFTypeArrayCallBacks));
+  CFArrayRef passArgv =
+      CFArrayCreate(NULL, (const void**) flags, 1, &kCFTypeArrayCallBacks);
   FSRef ref;
+  CFURLRef* kDontWantURL = NULL;
   // Get Chrome's bundle ID.
-  std::string bundleID = base::mac::BaseBundleID();
-  base::ScopedCFTypeRef<CFStringRef> bundleIDCF(
-      base::SysUTF8ToCFStringRef(bundleID));
+  std::string bundleID =  base::mac::BaseBundleID();
+  CFStringRef bundleIDCF =
+      CFStringCreateWithCString(NULL, bundleID.c_str(), kCFStringEncodingUTF8);
   // Use Launch Services to locate Chrome using its bundleID.
   OSStatus status = LSFindApplicationForInfo(kLSUnknownCreator, bundleIDCF,
-                                             NULL, &ref, NULL);
+                                             NULL, &ref, kDontWantURL);
 
   if (status != noErr) {
     OSSTATUS_LOG(ERROR, status) << "Failed to make path ref";
@@ -61,8 +70,8 @@
                                      NULL,
                                      passArgv,
                                      NULL };
-  AEDesc* initialEvent = const_cast<AEDesc*>([sendEvent aeDesc]);
-  params.initialEvent = static_cast<AppleEvent*>(initialEvent);
+  AEDesc* initialEvent = const_cast<AEDesc*> ([sendEvent aeDesc]);
+  params.initialEvent = static_cast<AppleEvent*> (initialEvent);
   // Send the Apple Event Using launch services, launching Chrome if necessary.
   status = LSOpenApplication(&params, NULL);
   if (status != noErr) {
@@ -70,16 +79,17 @@
   }
 }
 
+
 @end
 
-namespace chrome_service_mac {
 
-void RegisterServiceEventHandler() {
-  NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
-  [em setEventHandler:[ServiceEventHandler class]
-          andSelector:@selector(submitPrint:)
-        forEventClass:cloud_print::kAECloudPrintClass
-           andEventID:cloud_print::kAECloudPrintClass];
+namespace chrome_service_application_mac {
+
+void RegisterServiceApp() {
+  ServiceApplication* var =
+      base::mac::ObjCCastStrict<ServiceApplication>(
+          [ServiceApplication sharedApplication]);
+  [var setCloudPrintHandler];
 }
 
-}  // namespace chrome_service_mac
+}  // namespace chrome_service_application_mac

@@ -1,20 +1,17 @@
 include_rules = [
-  "+crypto",
-  "+google_apis",
-  "+media/base",
+  # Hack for NPAPI policy support. REMOVE ASAP.
+  # Bug: http://crbug.com/92576
+  "+content/common",
 
-  # Note: Only for net::EnableSSLServerSockets(), which must be called by
-  # unit tests at process start.
-  "-net",
-  "+net/socket",
+  "+crypto",
+  "+media/base",
 
   "-remoting",
   "+remoting/base",
   "+remoting/proto",
-  "+third_party/google_toolbox_for_mac/src",
-  "+third_party/libjingle",
-  "+third_party/libvpx",
-  "+third_party/libyuv",
-  "+third_party/webrtc/modules/desktop_capture",
-  "+ui/base/keycodes",
+  "+skia/config",
+  "+skia/ext",
+  "+third_party/GTM",
+  "+third_party/GTM/AppKit",
+  "+third_party/skia/include/core",
 ]

@@ -1,10 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/service/service_ipc_server.h"
 
-#include "base/metrics/histogram_delta_serialization.h"
 #include "chrome/common/service_messages.h"
 #include "chrome/service/cloud_print/cloud_print_proxy.h"
 #include "chrome/service/service_process.h"
@@ -26,12 +25,9 @@ bool ServiceIPCServer::Init() {
 
 void ServiceIPCServer::CreateChannel() {
   channel_.reset(NULL); // Tear down the existing channel, if any.
-  channel_.reset(new IPC::SyncChannel(
-      channel_handle_,
-      IPC::Channel::MODE_NAMED_SERVER,
-      this,
-      g_service_process->io_thread()->message_loop_proxy().get(),
-      true,
+  channel_.reset(new IPC::SyncChannel(channel_handle_,
+      IPC::Channel::MODE_NAMED_SERVER, this,
+      g_service_process->io_thread()->message_loop_proxy(), true,
       g_service_process->shutdown_event()));
   DCHECK(sync_message_filter_.get());
   channel_->AddFilter(sync_message_filter_.get());
@@ -43,6 +39,16 @@ ServiceIPCServer::~ServiceIPCServer() {
 #endif
 
   channel_->RemoveFilter(sync_message_filter_.get());
+
+  // The ChannelProxy object caches a pointer to the IPC thread, so need to
+  // reset it as it's not guaranteed to outlive this object.
+  // NOTE: this also has the side-effect of not closing the main IPC channel to
+  // the browser process.  This is needed because this is the signal that the
+  // browser uses to know that this process has died, so we need it to be alive
+  // until this process is shut down, and the OS closes the handle
+  // automatically.  We used to watch the object handle on Windows to do this,
+  // but it wasn't possible to do so on POSIX.
+  channel_->ClearIPCMessageLoop();
 }
 
 void ServiceIPCServer::OnChannelConnected(int32 peer_pid) {
@@ -93,27 +99,37 @@ bool ServiceIPCServer::OnMessageReceived(const IPC::Message& msg) {
   // again on subsequent connections.
   client_connected_ = true;
   IPC_BEGIN_MESSAGE_MAP(ServiceIPCServer, msg)
+    IPC_MESSAGE_HANDLER(ServiceMsg_EnableCloudPrintProxy,
+                        OnEnableCloudPrintProxy)
     IPC_MESSAGE_HANDLER(ServiceMsg_EnableCloudPrintProxyWithRobot,
                         OnEnableCloudPrintProxyWithRobot)
     IPC_MESSAGE_HANDLER(ServiceMsg_DisableCloudPrintProxy,
                         OnDisableCloudPrintProxy)
     IPC_MESSAGE_HANDLER(ServiceMsg_GetCloudPrintProxyInfo,
                         OnGetCloudPrintProxyInfo)
-    IPC_MESSAGE_HANDLER(ServiceMsg_GetHistograms, OnGetHistograms)
     IPC_MESSAGE_HANDLER(ServiceMsg_Shutdown, OnShutdown);
     IPC_MESSAGE_HANDLER(ServiceMsg_UpdateAvailable, OnUpdateAvailable);
+    IPC_MESSAGE_HANDLER(ServiceMsg_EnableVirtualDriver,
+                        OnEnableVirtualDriver);
+    IPC_MESSAGE_HANDLER(ServiceMsg_DisableVirtualDriver,
+                        OnDisableVirtualDriver);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
+void ServiceIPCServer::OnEnableCloudPrintProxy(const std::string& lsid) {
+  g_service_process->GetCloudPrintProxy()->EnableForUser(lsid);
+}
+
 void ServiceIPCServer::OnEnableCloudPrintProxyWithRobot(
     const std::string& robot_auth_code,
     const std::string& robot_email,
-    const std::string& user_email,
-    const base::DictionaryValue& user_settings) {
+    const std::string& user_email) {
   g_service_process->GetCloudPrintProxy()->EnableForUserWithRobot(
-      robot_auth_code, robot_email, user_email, user_settings);
+      robot_auth_code,
+      robot_email,
+      user_email);
 }
 
 void ServiceIPCServer::OnGetCloudPrintProxyInfo() {
@@ -122,21 +138,8 @@ void ServiceIPCServer::OnGetCloudPrintProxyInfo() {
   channel_->Send(new ServiceHostMsg_CloudPrintProxy_Info(info));
 }
 
-void ServiceIPCServer::OnGetHistograms() {
-  if (!histogram_delta_serializer_) {
-    histogram_delta_serializer_.reset(
-        new base::HistogramDeltaSerialization("ServiceProcess"));
-  }
-  std::vector<std::string> deltas;
-  histogram_delta_serializer_->PrepareAndSerializeDeltas(&deltas);
-  channel_->Send(new ServiceHostMsg_Histograms(deltas));
-}
-
 void ServiceIPCServer::OnDisableCloudPrintProxy() {
-  // User disabled CloudPrint proxy explicitly. Delete printers
-  // registered from this proxy and disable proxy.
-  g_service_process->GetCloudPrintProxy()->
-      UnregisterPrintersAndDisableForUser();
+  g_service_process->GetCloudPrintProxy()->DisableForUser();
 }
 
 void ServiceIPCServer::OnShutdown() {
@@ -145,5 +148,13 @@ void ServiceIPCServer::OnShutdown() {
 
 void ServiceIPCServer::OnUpdateAvailable() {
   g_service_process->SetUpdateAvailable();
+}
+
+void ServiceIPCServer::OnEnableVirtualDriver() {
+  g_service_process->EnableVirtualPrintDriver();
+}
+
+void ServiceIPCServer::OnDisableVirtualDriver() {
+  g_service_process->DisableVirtualPrintDriver();
 }
 

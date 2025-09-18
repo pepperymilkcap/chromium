@@ -13,7 +13,7 @@
 namespace pp {
 
 class CompletionCallback;
-class InstanceHandle;
+class Instance;
 class URLRequestInfo;
 class URLResponseInfo;
 
@@ -26,6 +26,10 @@ class URLLoader : public Resource {
   /// <code>URLLoader</code> object.
   URLLoader() {}
 
+  // TODO(brettw) remove this when NaCl is updated to use the new version
+  // that takes a pointer.
+  explicit URLLoader(const Instance& instance);
+
   /// A constructor used when a <code>PP_Resource</code> is provided as a
   /// return value whose reference count we need to increment.
   ///
@@ -36,9 +40,8 @@ class URLLoader : public Resource {
   /// A constructor used to allocate a new URLLoader in the browser. The
   /// resulting object will be <code>is_null</code> if the allocation failed.
   ///
-  /// @param[in] instance The instance with which this resource will be
-  /// associated.
-  explicit URLLoader(const InstanceHandle& instance);
+  /// @param[in] instance An <code>Instance</code>.
+  explicit URLLoader(Instance* instance);
 
   /// The copy constructor for <code>URLLoader</code>.
   ///
@@ -54,7 +57,7 @@ class URLLoader : public Resource {
   /// URLRequestInfo.
   /// @param[in] cc A <code>CompletionCallback</code> to run on asynchronous
   /// completion of Open(). This callback will run when response
-  /// headers for the url are received or error occurred. This callback
+  /// headers for the url are received or error occured. This callback
   /// will only run if Open() returns <code>PP_OK_COMPLETIONPENDING</code>.
   ///
   /// @return An int32_t containing an error code from
@@ -67,7 +70,7 @@ class URLLoader : public Resource {
   ///
   /// @param[in] cc A <code>CompletionCallback</code> to run on asynchronous
   /// completion of FollowRedirect(). This callback will run when response
-  /// headers for the redirect url are received or error occurred. This callback
+  /// headers for the redirect url are received or error occured. This callback
   /// will only run if FollowRedirect() returns
   /// <code>PP_OK_COMPLETIONPENDING</code>.
   ///

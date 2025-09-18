@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_PROVIDER_UTIL_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_PROVIDER_UTIL_H_
+#pragma once
 
 #include <deque>
 #include <vector>
@@ -22,12 +23,7 @@ struct HistoryMatch {
                bool match_in_scheme,
                bool innermost_match);
 
-  static bool EqualsGURL(const HistoryMatch& h, const GURL& url);
-
-  // Returns true if url in this HistoryMatch is just a host
-  // (e.g. "http://www.google.com/") and not some other subpage
-  // (e.g. "http://www.google.com/foo.html").
-  bool IsHostOnly() const;
+  bool operator==(const GURL& url) const;
 
   URLRow url_info;
 
@@ -50,13 +46,24 @@ struct HistoryMatch {
   // "x", no scheme in our prefix list (or "www.") begins with x, so all
   // matches are, vacuously, "innermost matches".
   bool innermost_match;
-
-  // When sorting, all promoted matches should appear before all non-promoted
-  // matches, regardless of other properties of the match.
-  bool promoted;
 };
 typedef std::deque<HistoryMatch> HistoryMatches;
 
-}  // namespace history
+struct Prefix {
+  Prefix(const string16& prefix, int num_components)
+      : prefix(prefix),
+        num_components(num_components) {}
+
+  string16 prefix;
+
+  // The number of "components" in the prefix.  The scheme is a component,
+  // and the initial "www." or "ftp." is a component.  So "http://foo.com"
+  // and "www.bar.com" each have one component, "ftp://ftp.ftp.com" has two,
+  // and "mysite.com" has none.  This is used to tell whether the user's
+  // input is an innermost match or not.  See comments in HistoryMatch.
+  int num_components;
+};
+typedef std::vector<Prefix> Prefixes;
+}
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_PROVIDER_UTIL_H_

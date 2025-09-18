@@ -16,15 +16,18 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/nix/xdg_util.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/third_party/xdg_mime/xdgmime.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/time/time.h"
+#include "base/time.h"
 
-namespace base {
-namespace nix {
+#if defined(TOOLKIT_USES_GTK)
+#include <gtk/gtk.h>  // NOLINT
+
+#include "base/message_loop.h"
+#endif
 
 namespace {
 
@@ -32,12 +35,13 @@ class IconTheme;
 
 // None of the XDG stuff is thread-safe, so serialize all access under
 // this lock.
-LazyInstance<Lock>::Leaky g_mime_util_xdg_lock = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::Lock>::Leaky
+    g_mime_util_xdg_lock = LAZY_INSTANCE_INITIALIZER;
 
 class MimeUtilConstants {
  public:
   typedef std::map<std::string, IconTheme*> IconThemeMap;
-  typedef std::map<FilePath, Time> IconDirMtimeMap;
+  typedef std::map<FilePath, base::Time> IconDirMtimeMap;
   typedef std::vector<std::string> IconFormats;
 
   // Specified by XDG icon theme specs.
@@ -61,10 +65,14 @@ class MimeUtilConstants {
   // The default theme.
   IconTheme* default_themes_[kDefaultThemeNum];
 
-  TimeTicks last_check_time_;
+  base::TimeTicks last_check_time_;
 
-  // The current icon theme, usually set through GTK theme integration.
-  std::string icon_theme_name_;
+#if defined(TOOLKIT_USES_GTK)
+  // This is set by DetectGtkTheme(). We cache it so that we can access the
+  // theme name from threads that aren't allowed to call
+  // gtk_settings_get_default().
+  std::string gtk_theme_name_;
+#endif
 
  private:
   MimeUtilConstants() {
@@ -152,13 +160,14 @@ class IconTheme {
 
   // store the subdirs of this theme and array index of |info_array_|.
   std::map<std::string, int> subdirs_;
-  scoped_ptr<SubDirInfo[]> info_array_;  // List of sub-directories.
+  scoped_array<SubDirInfo> info_array_;  // List of sub-directories.
   std::string inherits_;  // Name of the theme this one inherits from.
 };
 
 IconTheme::IconTheme(const std::string& name)
-    : index_theme_loaded_(false) {
-  ThreadRestrictions::AssertIOAllowed();
+  : index_theme_loaded_(false),
+    info_array_(NULL) {
+  base::ThreadRestrictions::AssertIOAllowed();
   // Iterate on all icon directories to find directories of the specified
   // theme and load the first encountered index.theme.
   MimeUtilConstants::IconDirMtimeMap::iterator iter;
@@ -167,10 +176,10 @@ IconTheme::IconTheme(const std::string& name)
       &MimeUtilConstants::GetInstance()->icon_dirs_;
   for (iter = icon_dirs->begin(); iter != icon_dirs->end(); ++iter) {
     theme_path = iter->first.Append(name);
-    if (!DirectoryExists(theme_path))
+    if (!file_util::DirectoryExists(theme_path))
       continue;
     FilePath theme_index = theme_path.Append("index.theme");
-    if (!index_theme_loaded_ && PathExists(theme_index)) {
+    if (!index_theme_loaded_ && file_util::PathExists(theme_index)) {
       if (!LoadIndexTheme(theme_index))
         return;
       index_theme_loaded_ = true;
@@ -247,7 +256,7 @@ FilePath IconTheme::GetIconPathUnderSubdir(const std::string& icon_name,
     for (size_t i = 0; i < icon_formats->size(); ++i) {
       icon_path = dir_iter->Append(subdir);
       icon_path = icon_path.Append(icon_name + (*icon_formats)[i]);
-      if (PathExists(icon_path))
+      if (file_util::PathExists(icon_path))
         return icon_path;
     }
   }
@@ -255,7 +264,7 @@ FilePath IconTheme::GetIconPathUnderSubdir(const std::string& icon_name,
 }
 
 bool IconTheme::LoadIndexTheme(const FilePath& file) {
-  FILE* fp = base::OpenFile(file, "r");
+  FILE* fp = file_util::OpenFile(file, "r");
   SubDirInfo* current_info = NULL;
   if (!fp)
     return false;
@@ -280,7 +289,7 @@ bool IconTheme::LoadIndexTheme(const FilePath& file) {
 
     std::string key, value;
     std::vector<std::string> r;
-    SplitStringDontTrim(entry, '=', &r);
+    base::SplitStringDontTrim(entry, '=', &r);
     if (r.size() < 2)
       continue;
 
@@ -316,7 +325,7 @@ bool IconTheme::LoadIndexTheme(const FilePath& file) {
     }
   }
 
-  base::CloseFile(fp);
+  file_util::CloseFile(fp);
   return info_array_.get() != NULL;
 }
 
@@ -343,9 +352,9 @@ size_t IconTheme::MatchesSize(SubDirInfo* info, size_t size) {
 
 std::string IconTheme::ReadLine(FILE* fp) {
   if (!fp)
-    return std::string();
+    return "";
 
-  std::string result;
+  std::string result = "";
   const size_t kBufferSize = 100;
   char buffer[kBufferSize];
   while ((fgets(buffer, kBufferSize - 1, fp)) != NULL) {
@@ -384,11 +393,12 @@ bool IconTheme::SetDirectories(const std::string& dirs) {
   return true;
 }
 
-bool CheckDirExistsAndGetMtime(const FilePath& dir, Time* last_modified) {
-  if (!DirectoryExists(dir))
+bool CheckDirExistsAndGetMtime(const FilePath& dir,
+                               base::Time* last_modified) {
+  if (!file_util::DirectoryExists(dir))
     return false;
-  PlatformFileInfo file_info;
-  if (!GetFileInfo(dir, &file_info))
+  base::PlatformFileInfo file_info;
+  if (!file_util::GetFileInfo(dir, &file_info))
     return false;
   *last_modified = file_info.last_modified;
   return true;
@@ -396,7 +406,7 @@ bool CheckDirExistsAndGetMtime(const FilePath& dir, Time* last_modified) {
 
 // Make sure |dir| exists and add it to the list of icon directories.
 void TryAddIconDir(const FilePath& dir) {
-  Time last_modified;
+  base::Time last_modified;
   if (!CheckDirExistsAndGetMtime(dir, &last_modified))
     return;
   MimeUtilConstants::GetInstance()->icon_dirs_[dir] = last_modified;
@@ -404,7 +414,7 @@ void TryAddIconDir(const FilePath& dir) {
 
 // For a xdg directory |dir|, add the appropriate icon sub-directories.
 void AddXDGDataDir(const FilePath& dir) {
-  if (!DirectoryExists(dir))
+  if (!file_util::DirectoryExists(dir))
     return;
   TryAddIconDir(dir.Append("icons"));
   TryAddIconDir(dir.Append("pixmaps"));
@@ -412,11 +422,11 @@ void AddXDGDataDir(const FilePath& dir) {
 
 // Add all the xdg icon directories.
 void InitIconDir() {
-  FilePath home = GetHomeDir();
+  FilePath home = file_util::GetHomeDir();
   if (!home.empty()) {
       FilePath legacy_data_dir(home);
       legacy_data_dir = legacy_data_dir.AppendASCII(".icons");
-      if (DirectoryExists(legacy_data_dir))
+      if (file_util::DirectoryExists(legacy_data_dir))
         TryAddIconDir(legacy_data_dir);
   }
   const char* env = getenv("XDG_DATA_HOME");
@@ -447,15 +457,15 @@ void InitIconDir() {
 void EnsureUpdated() {
   MimeUtilConstants* constants = MimeUtilConstants::GetInstance();
   if (constants->last_check_time_.is_null()) {
-    constants->last_check_time_ = TimeTicks::Now();
+    constants->last_check_time_ = base::TimeTicks::Now();
     InitIconDir();
     return;
   }
 
   // Per xdg theme spec, we should check the icon directories every so often
   // for newly added icons.
-  TimeDelta time_since_last_check =
-      TimeTicks::Now() - constants->last_check_time_;
+  base::TimeDelta time_since_last_check =
+      base::TimeTicks::Now() - constants->last_check_time_;
   if (time_since_last_check.InSeconds() > constants->kUpdateIntervalInSeconds) {
     constants->last_check_time_ += time_since_last_check;
 
@@ -463,7 +473,7 @@ void EnsureUpdated() {
     MimeUtilConstants::IconDirMtimeMap* icon_dirs = &constants->icon_dirs_;
     MimeUtilConstants::IconDirMtimeMap::iterator iter;
     for (iter = icon_dirs->begin(); iter != icon_dirs->end(); ++iter) {
-      Time last_modified;
+      base::Time last_modified;
       if (!CheckDirExistsAndGetMtime(iter->first, &last_modified) ||
           last_modified != iter->second) {
         rescan_icon_dirs = true;
@@ -488,7 +498,7 @@ FilePath LookupFallbackIcon(const std::string& icon_name) {
   for (iter = icon_dirs->begin(); iter != icon_dirs->end(); ++iter) {
     for (size_t i = 0; i < icon_formats->size(); ++i) {
       FilePath icon = iter->first.Append(icon_name + (*icon_formats)[i]);
-      if (PathExists(icon))
+      if (file_util::PathExists(icon))
         return icon;
     }
   }
@@ -500,7 +510,7 @@ void InitDefaultThemes() {
   IconTheme** default_themes =
       MimeUtilConstants::GetInstance()->default_themes_;
 
-  scoped_ptr<Environment> env(Environment::Create());
+  scoped_ptr<base::Environment> env(base::Environment::Create());
   base::nix::DesktopEnvironment desktop_env =
       base::nix::GetDesktopEnvironment(env.get());
   if (desktop_env == base::nix::DESKTOP_ENVIRONMENT_KDE3 ||
@@ -526,10 +536,12 @@ void InitDefaultThemes() {
     default_themes[1] = IconTheme::LoadTheme(kde_default_theme);
     default_themes[2] = IconTheme::LoadTheme(kde_fallback_theme);
   } else {
+#if defined(TOOLKIT_USES_GTK)
     // Assume it's Gnome and use GTK to figure out the theme.
     default_themes[1] = IconTheme::LoadTheme(
-        MimeUtilConstants::GetInstance()->icon_theme_name_);
+        MimeUtilConstants::GetInstance()->gtk_theme_name_);
     default_themes[2] = IconTheme::LoadTheme("gnome");
+#endif
   }
   // hicolor needs to be last per icon theme spec.
   default_themes[3] = IconTheme::LoadTheme("hicolor");
@@ -572,38 +584,49 @@ MimeUtilConstants::~MimeUtilConstants() {
 
 }  // namespace
 
+namespace base {
+namespace nix {
+
 std::string GetFileMimeType(const FilePath& filepath) {
-  if (filepath.empty())
-    return std::string();
-  ThreadRestrictions::AssertIOAllowed();
-  AutoLock scoped_lock(g_mime_util_xdg_lock.Get());
+  base::ThreadRestrictions::AssertIOAllowed();
+  base::AutoLock scoped_lock(g_mime_util_xdg_lock.Get());
   return xdg_mime_get_mime_type_from_file_name(filepath.value().c_str());
 }
 
 std::string GetDataMimeType(const std::string& data) {
-  ThreadRestrictions::AssertIOAllowed();
-  AutoLock scoped_lock(g_mime_util_xdg_lock.Get());
+  base::ThreadRestrictions::AssertIOAllowed();
+  base::AutoLock scoped_lock(g_mime_util_xdg_lock.Get());
   return xdg_mime_get_mime_type_for_data(data.data(), data.length(), NULL);
 }
 
-void SetIconThemeName(const std::string& name) {
+#if defined(TOOLKIT_USES_GTK)
+void DetectGtkTheme() {
   // If the theme name is already loaded, do nothing. Chrome doesn't respond
   // to changes in the system theme, so we never need to set this more than
   // once.
-  if (!MimeUtilConstants::GetInstance()->icon_theme_name_.empty())
+  if (!MimeUtilConstants::GetInstance()->gtk_theme_name_.empty())
     return;
 
-  MimeUtilConstants::GetInstance()->icon_theme_name_ = name;
+  // We should only be called on the UI thread.
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+
+  gchar* gtk_theme_name;
+  g_object_get(gtk_settings_get_default(),
+               "gtk-icon-theme-name",
+               &gtk_theme_name, NULL);
+  MimeUtilConstants::GetInstance()->gtk_theme_name_.assign(gtk_theme_name);
+  g_free(gtk_theme_name);
 }
+#endif
 
 FilePath GetMimeIcon(const std::string& mime_type, size_t size) {
-  ThreadRestrictions::AssertIOAllowed();
+  base::ThreadRestrictions::AssertIOAllowed();
   std::vector<std::string> icon_names;
   std::string icon_name;
   FilePath icon_file;
 
-  if (!mime_type.empty()) {
-    AutoLock scoped_lock(g_mime_util_xdg_lock.Get());
+  {
+    base::AutoLock scoped_lock(g_mime_util_xdg_lock.Get());
     const char *icon = xdg_mime_get_icon(mime_type.c_str());
     icon_name = std::string(icon ? icon : "");
   }
@@ -638,7 +661,7 @@ FilePath GetMimeIcon(const std::string& mime_type, size_t size) {
   for (size_t i = 0; i < icon_names.size(); i++) {
     if (icon_names[i][0] == '/') {
       icon_file = FilePath(icon_names[i]);
-      if (PathExists(icon_file))
+      if (file_util::PathExists(icon_file))
         return icon_file;
     } else {
       icon_file = LookupIconInDefaultTheme(icon_names[i], size);

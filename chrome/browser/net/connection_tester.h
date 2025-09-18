@@ -1,19 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_NET_CONNECTION_TESTER_H_
 #define CHROME_BROWSER_NET_CONNECTION_TESTER_H_
+#pragma once
 
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
-#include "url/gurl.h"
 
 namespace net {
-class NetLog;
 class URLRequestContext;
 }  // namespace net
 
@@ -103,6 +103,8 @@ class ConnectionTester {
   // delegate methods.
   class Delegate {
    public:
+    virtual ~Delegate() {}
+
     // Called once the test suite is about to start.
     virtual void OnStartConnectionTestSuite() = 0;
 
@@ -120,17 +122,13 @@ class ConnectionTester {
 
     // Called once ALL tests have completed.
     virtual void OnCompletedConnectionTestSuite() = 0;
-
-   protected:
-    virtual ~Delegate() {}
   };
 
   // Constructs a ConnectionTester that notifies test progress to |delegate|.
   // |delegate| is owned by the caller, and must remain valid for the lifetime
   // of ConnectionTester.
   ConnectionTester(Delegate* delegate,
-                   net::URLRequestContext* proxy_request_context,
-                   net::NetLog* net_log);
+                   net::URLRequestContext* proxy_request_context);
 
   // Note that destruction cancels any in-progress tests.
   ~ConnectionTester();
@@ -140,9 +138,9 @@ class ConnectionTester {
   void RunAllTests(const GURL& url);
 
   // Returns a text string explaining what |experiment| is testing.
-  static base::string16 ProxySettingsExperimentDescription(
+  static string16 ProxySettingsExperimentDescription(
       ProxySettingsExperiment experiment);
-  static base::string16 HostResolverExperimentDescription(
+  static string16 HostResolverExperimentDescription(
       HostResolverExperiment experiment);
 
  private:
@@ -176,9 +174,7 @@ class ConnectionTester {
   // of the list is the one currently in progress.
   ExperimentList remaining_experiments_;
 
-  net::URLRequestContext* const proxy_request_context_;
-
-  net::NetLog* net_log_;
+  const scoped_refptr<net::URLRequestContext> proxy_request_context_;
 
   DISALLOW_COPY_AND_ASSIGN(ConnectionTester);
 };

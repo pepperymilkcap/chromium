@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/hit_test.h"
-#include "ui/gfx/rect_conversions.h"
-#include "ui/views/rect_based_targeting_utils.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/client_view.h"
@@ -15,6 +13,8 @@
 namespace views {
 
 // static
+const int NonClientFrameView::kFrameShadowThickness = 1;
+const int NonClientFrameView::kClientEdgeThickness = 1;
 const char NonClientFrameView::kViewClassName[] =
     "ui/views/window/NonClientFrameView";
 
@@ -27,14 +27,12 @@ const char NonClientView::kViewClassName[] =
 // handling mouse messages.
 static const int kFrameViewIndex = 0;
 static const int kClientViewIndex = 1;
-// The overlay view is always on top (index == child_count() - 1).
 
 ////////////////////////////////////////////////////////////////////////////////
 // NonClientView, public:
 
 NonClientView::NonClientView()
-    : client_view_(NULL),
-      overlay_view_(NULL) {
+    : client_view_(NULL) {
 }
 
 NonClientView::~NonClientView() {
@@ -45,24 +43,12 @@ NonClientView::~NonClientView() {
 
 void NonClientView::SetFrameView(NonClientFrameView* frame_view) {
   // See comment in header about ownership.
-  frame_view->set_owned_by_client();
+  frame_view->set_parent_owned(false);
   if (frame_view_.get())
     RemoveChildView(frame_view_.get());
   frame_view_.reset(frame_view);
   if (parent())
     AddChildViewAt(frame_view_.get(), kFrameViewIndex);
-}
-
-void NonClientView::SetOverlayView(View* view) {
-  if (overlay_view_)
-    RemoveChildView(overlay_view_);
-
-  if (!view)
-    return;
-
-  overlay_view_ = view;
-  if (parent())
-    AddChildView(overlay_view_);
 }
 
 bool NonClientView::CanClose() {
@@ -79,6 +65,7 @@ void NonClientView::UpdateFrame() {
   widget->ThemeChanged();
   Layout();
   SchedulePaint();
+  widget->UpdateFrameAfterFrameChange();
 }
 
 void NonClientView::SetInactiveRenderingDisabled(bool disable) {
@@ -108,10 +95,6 @@ void NonClientView::UpdateWindowIcon() {
   frame_view_->UpdateWindowIcon();
 }
 
-void NonClientView::UpdateWindowTitle() {
-  frame_view_->UpdateWindowTitle();
-}
-
 void NonClientView::LayoutFrameView() {
   // First layout the NonClientFrameView, which determines the size of the
   // ClientView...
@@ -127,7 +110,7 @@ void NonClientView::LayoutFrameView() {
   frame_view_->Layout();
 }
 
-void NonClientView::SetAccessibleName(const base::string16& name) {
+void NonClientView::SetAccessibleName(const string16& name) {
   accessible_name_ = name;
 }
 
@@ -146,10 +129,6 @@ gfx::Size NonClientView::GetMinimumSize() {
   return frame_view_->GetMinimumSize();
 }
 
-gfx::Size NonClientView::GetMaximumSize() {
-  return frame_view_->GetMaximumSize();
-}
-
 void NonClientView::Layout() {
   LayoutFrameView();
 
@@ -159,86 +138,65 @@ void NonClientView::Layout() {
   // We need to manually call Layout on the ClientView as well for the same
   // reason as above.
   client_view_->Layout();
-
-  if (overlay_view_ && overlay_view_->visible())
-    overlay_view_->SetBoundsRect(GetLocalBounds());
 }
 
-void NonClientView::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
+void NonClientView::ViewHierarchyChanged(bool is_add, View* parent,
+                                         View* child) {
   // Add our two child views here as we are added to the Widget so that if we
   // are subsequently resized all the parent-child relationships are
   // established.
-  if (details.is_add && GetWidget() && details.child == this) {
+  if (is_add && GetWidget() && child == this) {
     AddChildViewAt(frame_view_.get(), kFrameViewIndex);
     AddChildViewAt(client_view_, kClientViewIndex);
-    if (overlay_view_)
-      AddChildView(overlay_view_);
   }
 }
 
 void NonClientView::GetAccessibleState(ui::AccessibleViewState* state) {
-  state->role = ui::AccessibilityTypes::ROLE_CLIENT;
+  state->role = ui::AccessibilityTypes::ROLE_WINDOW;
   state->name = accessible_name_;
 }
 
-const char* NonClientView::GetClassName() const {
+std::string NonClientView::GetClassName() const {
   return kViewClassName;
 }
 
-views::View* NonClientView::GetEventHandlerForRect(const gfx::Rect& rect) {
-  if (!views::UsePointBasedTargeting(rect))
-    return View::GetEventHandlerForRect(rect);
-
+views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
   // Because of the z-ordering of our child views (the client view is positioned
   // over the non-client frame view, if the client view ever overlaps the frame
-  // view visually (as it does for the browser window), then it will eat
+  // view visually (as it does for the browser window), then it will eat mouse
   // events for the window controls. We override this method here so that we can
   // detect this condition and re-route the events to the non-client frame view.
   // The assumption is that the frame view's implementation of HitTest will only
   // return true for area not occupied by the client view.
-  if (frame_view_->parent() == this) {
-    // During the reset of the frame_view_ it's possible to be in this code
-    // after it's been removed from the view hierarchy but before it's been
-    // removed from the NonClientView.
-    gfx::RectF rect_in_child_coords_f(rect);
-    View::ConvertRectToTarget(this, frame_view_.get(), &rect_in_child_coords_f);
-    gfx::Rect rect_in_child_coords = gfx::ToEnclosingRect(
-        rect_in_child_coords_f);
-    if (frame_view_->HitTestRect(rect_in_child_coords))
-      return frame_view_->GetEventHandlerForRect(rect_in_child_coords);
-  }
+  gfx::Point point_in_child_coords(point);
+  View::ConvertPointToView(this, frame_view_.get(), &point_in_child_coords);
+  if (frame_view_->HitTest(point_in_child_coords))
+    return frame_view_->GetEventHandlerForPoint(point_in_child_coords);
 
-  return View::GetEventHandlerForRect(rect);
-}
-
-views::View* NonClientView::GetTooltipHandlerForPoint(const gfx::Point& point) {
-  // The same logic as for |GetEventHandlerForRect()| applies here.
-  if (frame_view_->parent() == this) {
-    // During the reset of the frame_view_ it's possible to be in this code
-    // after it's been removed from the view hierarchy but before it's been
-    // removed from the NonClientView.
-    gfx::Point point_in_child_coords(point);
-    View::ConvertPointToTarget(this, frame_view_.get(), &point_in_child_coords);
-    views::View* handler =
-        frame_view_->GetTooltipHandlerForPoint(point_in_child_coords);
-    if (handler)
-      return handler;
-  }
-
-  return View::GetTooltipHandlerForPoint(point);
+  return View::GetEventHandlerForPoint(point);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // NonClientFrameView, public:
 
 void NonClientFrameView::SetInactiveRenderingDisabled(bool disable) {
-  if (paint_as_active_ == disable)
-    return;
-
+  // See comment in Widget::SetInactiveRenderingDisabled as to why we don't
+  // conditionally invoke ShouldPaintAsActiveChanged.
   paint_as_active_ = disable;
   ShouldPaintAsActiveChanged();
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// NonClientFrameView, View overrides:
+
+bool NonClientFrameView::HitTest(const gfx::Point& l) const {
+  // For the default case, we assume the non-client frame view never overlaps
+  // the client view.
+  return !GetWidget()->client_view()->bounds().Contains(l);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NonClientFrameView, protected:
 
 int NonClientFrameView::GetHTComponentForFrame(const gfx::Point& point,
                                                int top_resize_border_height,
@@ -289,31 +247,20 @@ int NonClientFrameView::GetHTComponentForFrame(const gfx::Point& point,
   return can_resize ? component : HTBORDER;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// NonClientFrameView, View overrides:
-
-bool NonClientFrameView::HitTestRect(const gfx::Rect& rect) const {
-  // For the default case, we assume the non-client frame view never overlaps
-  // the client view.
-  return !GetWidget()->client_view()->bounds().Intersects(rect);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// NonClientFrameView, protected:
-
 bool NonClientFrameView::ShouldPaintAsActive() const {
   return GetWidget()->IsActive() || paint_as_active_;
 }
 
 void NonClientFrameView::ShouldPaintAsActiveChanged() {
-  SchedulePaint();
+  if (!paint_as_active_)
+    SchedulePaint();
 }
 
 void NonClientFrameView::GetAccessibleState(ui::AccessibleViewState* state) {
-  state->role = ui::AccessibilityTypes::ROLE_CLIENT;
+  state->role = ui::AccessibilityTypes::ROLE_WINDOW;
 }
 
-const char* NonClientFrameView::GetClassName() const {
+std::string NonClientFrameView::GetClassName() const {
   return kViewClassName;
 }
 

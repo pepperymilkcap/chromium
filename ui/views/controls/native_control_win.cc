@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/view_prop.h"
-#include "ui/gfx/win/hwnd_util.h"
+#include "ui/base/win/hwnd_util.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/widget.h"
@@ -24,7 +24,7 @@ namespace views {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeControlWin, public:
 
-NativeControlWin::NativeControlWin() : original_wndproc_(NULL) {
+NativeControlWin::NativeControlWin() {
 }
 
 NativeControlWin::~NativeControlWin() {
@@ -65,14 +65,14 @@ void NativeControlWin::OnEnabledChanged() {
     EnableWindow(native_view(), enabled());
 }
 
-void NativeControlWin::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
+void NativeControlWin::ViewHierarchyChanged(bool is_add, View* parent,
+                                            View* child) {
   // Call the base class to hide the view if we're being removed.
-  NativeViewHost::ViewHierarchyChanged(details);
+  NativeViewHost::ViewHierarchyChanged(is_add, parent, child);
 
   // Create the HWND when we're added to a valid Widget. Many controls need a
   // parent HWND to function properly.
-  if (details.is_add && GetWidget() && !native_view())
+  if (is_add && GetWidget() && !native_view())
     CreateNativeControl();
 }
 
@@ -109,12 +109,14 @@ void NativeControlWin::OnFocus() {
   // a native win32 control, we don't always send a native (MSAA)
   // focus notification.
   bool send_native_event =
-      strcmp(parent_view->GetClassName(), Combobox::kViewClassName) &&
+      parent_view->GetClassName() != Combobox::kViewClassName &&
       parent_view->HasFocus();
 
   // Send the accessibility focus notification.
-  parent_view->NotifyAccessibilityEvent(
-      ui::AccessibilityTypes::EVENT_FOCUS, send_native_event);
+  if (parent_view->GetWidget()) {
+    parent_view->GetWidget()->NotifyAccessibilityEvent(
+        parent_view, ui::AccessibilityTypes::EVENT_FOCUS, send_native_event);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -124,12 +126,10 @@ void NativeControlWin::ShowContextMenu(const gfx::Point& location) {
   if (!context_menu_controller())
     return;
 
-  if (location.x() == -1 && location.y() == -1) {
-    View::ShowContextMenu(GetKeyboardContextMenuLocation(),
-                          ui::MENU_SOURCE_KEYBOARD);
-  } else {
-    View::ShowContextMenu(location, ui::MENU_SOURCE_MOUSE);
-  }
+  if (location.x() == -1 && location.y() == -1)
+    View::ShowContextMenu(GetKeyboardContextMenuLocation(), false);
+  else
+    View::ShowContextMenu(location, true);
 }
 
 void NativeControlWin::NativeControlCreated(HWND native_control) {
@@ -139,7 +139,7 @@ void NativeControlWin::NativeControlCreated(HWND native_control) {
   props_.push_back(ChildWindowMessageProcessor::Register(native_control, this));
 
   // Subclass so we get WM_KEYDOWN and WM_SETFOCUS messages.
-  original_wndproc_ = gfx::SetWindowProc(
+  original_wndproc_ = ui::SetWindowProc(
       native_control, &NativeControlWin::NativeControlWndProc);
 
   Attach(native_control);
@@ -215,8 +215,8 @@ LRESULT NativeControlWin::NativeControlWndProc(HWND window,
       NOTREACHED();
     }
   } else if (message == WM_DESTROY) {
-    native_control->props_.clear();
-    gfx::SetWindowProc(window, native_control->original_wndproc_);
+    native_control->props_.reset();
+    ui::SetWindowProc(window, native_control->original_wndproc_);
   }
 
   return CallWindowProc(native_control->original_wndproc_, window, message,

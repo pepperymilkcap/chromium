@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <pthread.h>
 #include <signal.h>
 #include <sys/resource.h>
 #include <unistd.h>
@@ -15,25 +14,16 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/eintr_wrapper.h"
 #include "base/logging.h"
-#include "base/posix/eintr_wrapper.h"
-#include "base/strings/string_number_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/sessions/session_restore.h"
+#include "base/string_number_conversions.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_service.h"
 
-#if defined(TOOLKIT_GTK)
-#include "chrome/browser/ui/gtk/chrome_browser_main_extra_parts_gtk.h"
-
-#if defined(ENABLE_PRINTING)
+#if defined(TOOLKIT_USES_GTK) && !defined(OS_CHROMEOS)
 #include "chrome/browser/printing/print_dialog_gtk.h"
-#endif  // defined(ENABLE_PRINTING)
-#endif  // defined(TOOLKIT_GTK)
+#endif
 
 using content::BrowserThread;
 
@@ -43,13 +33,6 @@ namespace {
 void SIGCHLDHandler(int signal) {
 }
 
-// The OSX fork() implementation can crash in the child process before
-// fork() returns.  In that case, the shutdown pipe will still be
-// shared with the parent process.  To prevent child crashes from
-// causing parent shutdowns, |g_pipe_pid| is the pid for the process
-// which registered |g_shutdown_pipe_write_fd|.
-// See <http://crbug.com/175341>.
-pid_t g_pipe_pid = -1;
 int g_shutdown_pipe_write_fd = -1;
 int g_shutdown_pipe_read_fd = -1;
 
@@ -61,7 +44,6 @@ void GracefulShutdownHandler(int signal) {
   action.sa_handler = SIG_DFL;
   RAW_CHECK(sigaction(signal, &action, NULL) == 0);
 
-  RAW_CHECK(g_pipe_pid == getpid());
   RAW_CHECK(g_shutdown_pipe_write_fd != -1);
   RAW_CHECK(g_shutdown_pipe_read_fd != -1);
   size_t bytes_written = 0;
@@ -93,80 +75,11 @@ void SIGTERMHandler(int signal) {
   GracefulShutdownHandler(signal);
 }
 
-// ExitHandler takes care of servicing an exit (from a signal) at the
-// appropriate time. Specifically if we get an exit and have not finished
-// session restore we delay the exit. To do otherwise means we're exiting part
-// way through startup which causes all sorts of problems.
-class ExitHandler : public content::NotificationObserver {
- public:
-  // Invokes exit when appropriate.
-  static void ExitWhenPossibleOnUIThread();
-
-  // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
- private:
-  ExitHandler();
-  virtual ~ExitHandler();
-
-  // Does the appropriate call to Exit.
-  static void Exit();
-
-  content::NotificationRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExitHandler);
-};
-
-// static
-void ExitHandler::ExitWhenPossibleOnUIThread() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  if (SessionRestore::IsRestoringSynchronously()) {
-    // ExitHandler takes care of deleting itself.
-    new ExitHandler();
-  } else {
-    Exit();
-  }
-}
-
-void ExitHandler::Observe(int type,
-                          const content::NotificationSource& source,
-                          const content::NotificationDetails& details) {
-  if (!SessionRestore::IsRestoringSynchronously()) {
-    // At this point the message loop may not be running (meaning we haven't
-    // gotten through browser startup, but are close). Post the task to at which
-    // point the message loop is running.
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(&ExitHandler::Exit));
-    delete this;
-  }
-}
-
-ExitHandler::ExitHandler() {
-  registrar_.Add(
-      this, chrome::NOTIFICATION_SESSION_RESTORE_DONE,
-      content::NotificationService::AllBrowserContextsAndSources());
-}
-
-ExitHandler::~ExitHandler() {
-}
-
-// static
-void ExitHandler::Exit() {
-#if defined(OS_CHROMEOS)
-  // On ChromeOS, exiting on signal should be always clean.
-  chrome::ExitCleanly();
-#else
-  chrome::AttemptExit();
-#endif
-}
-
 class ShutdownDetector : public base::PlatformThread::Delegate {
  public:
   explicit ShutdownDetector(int shutdown_fd);
 
-  virtual void ThreadMain() OVERRIDE;
+  virtual void ThreadMain();
 
  private:
   const int shutdown_fd_;
@@ -178,6 +91,7 @@ ShutdownDetector::ShutdownDetector(int shutdown_fd)
     : shutdown_fd_(shutdown_fd) {
   CHECK_NE(shutdown_fd_, -1);
 }
+
 
 // These functions are used to help us diagnose crash dumps that happen
 // during the shutdown process.
@@ -222,7 +136,12 @@ void ShutdownDetector::ThreadMain() {
     bytes_read += ret;
   } while (bytes_read < sizeof(signal));
   VLOG(1) << "Handling shutdown for signal " << signal << ".";
-  base::Closure task = base::Bind(&ExitHandler::ExitWhenPossibleOnUIThread);
+#if defined(OS_CHROMEOS)
+  // On ChromeOS, exiting on signal should be always clean.
+  base::Closure task = base::Bind(&BrowserList::ExitCleanly);
+#else
+  base::Closure task = base::Bind(&BrowserList::AttemptExit);
+#endif
 
   if (!BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, task)) {
     // Without a UI thread to post the exit task to, there aren't many
@@ -310,17 +229,9 @@ void ChromeBrowserMainPartsPosix::PostMainMessageLoopStart() {
   if (ret < 0) {
     PLOG(DFATAL) << "Failed to create pipe";
   } else {
-    g_pipe_pid = getpid();
     g_shutdown_pipe_read_fd = pipefd[0];
     g_shutdown_pipe_write_fd = pipefd[1];
-#if !defined(ADDRESS_SANITIZER) && !defined(KEEP_SHADOW_STACKS)
-    const size_t kShutdownDetectorThreadStackSize = PTHREAD_STACK_MIN;
-#else
-    // ASan instrumentation and -finstrument-functions (used for keeping the
-    // shadow stacks) bloat the stack frames, so we need to increase the stack
-    // size to avoid hitting the guard page.
-    const size_t kShutdownDetectorThreadStackSize = PTHREAD_STACK_MIN * 4;
-#endif
+    const size_t kShutdownDetectorThreadStackSize = 4096;
     // TODO(viettrungluu,willchan): crbug.com/29675 - This currently leaks, so
     // if you change this, you'll probably need to change the suppression.
     if (!base::PlatformThread::CreateNonJoinable(
@@ -351,26 +262,8 @@ void ChromeBrowserMainPartsPosix::PostMainMessageLoopStart() {
   action.sa_handler = SIGHUPHandler;
   CHECK(sigaction(SIGHUP, &action, NULL) == 0);
 
-#if defined(TOOLKIT_GTK) && defined(ENABLE_PRINTING)
+#if defined(TOOLKIT_USES_GTK) && !defined(OS_CHROMEOS)
   printing::PrintingContextGtk::SetCreatePrintDialogFunction(
       &PrintDialogGtk::CreatePrintDialog);
-#endif
-}
-
-void ChromeBrowserMainPartsPosix::ShowMissingLocaleMessageBox() {
-#if defined(OS_CHROMEOS)
-  NOTREACHED();  // Should not ever happen on ChromeOS.
-#elif defined(OS_MACOSX)
-  // Not called on Mac because we load the locale files differently.
-  NOTREACHED();
-#elif defined(TOOLKIT_GTK)
-  ChromeBrowserMainExtraPartsGtk::ShowMessageBox(
-      chrome_browser::kMissingLocaleDataMessage);
-#elif defined(USE_AURA)
-  // TODO(port): We may want a views based message dialog here eventually, but
-  // for now, crash.
-  NOTREACHED();
-#else
-#error "Need MessageBox implementation."
 #endif
 }

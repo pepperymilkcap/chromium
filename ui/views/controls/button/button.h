@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_BUTTON_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_BUTTON_H_
+#pragma once
 
 #include "ui/views/view.h"
 
@@ -16,7 +17,7 @@ class Event;
 // pressed.
 class VIEWS_EXPORT ButtonListener {
  public:
-  virtual void ButtonPressed(Button* sender, const ui::Event& event) = 0;
+  virtual void ButtonPressed(Button* sender, const views::Event& event) = 0;
 
  protected:
   virtual ~ButtonListener() {}
@@ -28,34 +29,19 @@ class VIEWS_EXPORT Button : public View {
  public:
   virtual ~Button();
 
-  // Button states for various button sub-types.
-  enum ButtonState {
-    STATE_NORMAL = 0,
-    STATE_HOVERED,
-    STATE_PRESSED,
-    STATE_DISABLED,
-    STATE_COUNT,
-  };
-
-  // Button styles with associated images and border painters.
-  // TODO(msw): Add Menu, ComboBox, etc.
-  enum ButtonStyle {
-    STYLE_BUTTON = 0,
-    STYLE_TEXTBUTTON,
-    STYLE_NATIVE_TEXTBUTTON,
-    STYLE_COUNT,
-  };
-
-  void SetTooltipText(const base::string16& tooltip_text);
+  void SetTooltipText(const string16& tooltip_text);
 
   int tag() const { return tag_; }
   void set_tag(int tag) { tag_ = tag; }
 
-  void SetAccessibleName(const base::string16& name);
+  int mouse_event_flags() const { return mouse_event_flags_; }
+
+  void SetAccessibleName(const string16& name);
+  void SetAccessibleKeyboardShortcut(const string16& shortcut);
 
   // Overridden from View:
   virtual bool GetTooltipText(const gfx::Point& p,
-                              base::string16* tooltip) const OVERRIDE;
+                              string16* tooltip) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
  protected:
@@ -65,21 +51,25 @@ class VIEWS_EXPORT Button : public View {
   explicit Button(ButtonListener* listener);
 
   // Cause the button to notify the listener that a click occurred.
-  virtual void NotifyClick(const ui::Event& event);
+  virtual void NotifyClick(const views::Event& event);
 
   // The button's listener. Notified when clicked.
   ButtonListener* listener_;
 
  private:
   // The text shown in a tooltip.
-  base::string16 tooltip_text_;
+  string16 tooltip_text_;
 
   // Accessibility data.
-  base::string16 accessible_name_;
+  string16 accessible_name_;
+  string16 accessible_shortcut_;
 
   // The id tag associated with this button. Used to disambiguate buttons in
   // the ButtonListener implementation.
   int tag_;
+
+  // Event flags present when the button was clicked.
+  int mouse_event_flags_;
 
   DISALLOW_COPY_AND_ASSIGN(Button);
 };

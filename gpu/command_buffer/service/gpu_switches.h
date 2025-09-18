@@ -6,31 +6,12 @@
 
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GPU_SWITCHES_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GPU_SWITCHES_H_
-
-#include "gpu/gpu_export.h"
+#pragma once
 
 namespace switches {
 
-GPU_EXPORT extern const char kCompileShaderAlwaysSucceeds[];
-GPU_EXPORT extern const char kDisableGLErrorLimit[];
-GPU_EXPORT extern const char kDisableGLSLTranslator[];
-GPU_EXPORT extern const char kDisableGpuDriverBugWorkarounds[];
-GPU_EXPORT extern const char kDisableShaderNameHashing[];
-GPU_EXPORT extern const char kEnableGPUCommandLogging[];
-GPU_EXPORT extern const char kEnableGPUDebugging[];
-GPU_EXPORT extern const char kEnableGPUServiceLoggingGPU[];
-GPU_EXPORT extern const char kDisableGpuProgramCache[];
-GPU_EXPORT extern const char kEnforceGLMinimums[];
-GPU_EXPORT extern const char kForceGLFinishWorkaround[];
-GPU_EXPORT extern const char kForceGpuMemAvailableMb[];
-GPU_EXPORT extern const char kForceSynchronousGLReadPixels[];
-GPU_EXPORT extern const char kGpuDriverBugWorkarounds[];
-GPU_EXPORT extern const char kGpuProgramCacheSizeKb[];
-GPU_EXPORT extern const char kDisableGpuShaderDiskCache[];
-GPU_EXPORT extern const char kEnableShareGroupAsyncTextureUpload[];
-
-GPU_EXPORT extern const char* kGpuSwitches[];
-GPU_EXPORT extern const int kNumGpuSwitches;
+extern const char kCompileShaderAlwaysSucceeds[];
+extern const char kEnableGPUDebugging[];
 
 }  // namespace switches
 

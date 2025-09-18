@@ -6,14 +6,12 @@
 
 #include "content/common/devtools_messages.h"
 #include "content/worker/worker_thread.h"
-#include "third_party/WebKit/public/platform/WebCString.h"
-#include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/web/WebSharedWorker.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorker.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
-using blink::WebSharedWorker;
-using blink::WebString;
-
-namespace content {
+using WebKit::WebSharedWorker;
+using WebKit::WebString;
 
 SharedWorkerDevToolsAgent::SharedWorkerDevToolsAgent(
     int route_id,
@@ -44,14 +42,14 @@ bool SharedWorkerDevToolsAgent::OnMessageReceived(const IPC::Message& message) {
 }
 
 void SharedWorkerDevToolsAgent::SendDevToolsMessage(
-    const blink::WebString& message) {
+    const WebKit::WebString& message) {
     Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(
         route_id_,
         message.utf8()));
 }
 
 void SharedWorkerDevToolsAgent::SaveDevToolsAgentState(
-    const blink::WebString& state) {
+    const WebKit::WebString& state) {
   Send(new DevToolsHostMsg_SaveAgentRuntimeState(route_id_,
                                                  state.utf8()));
 }
@@ -84,5 +82,3 @@ void SharedWorkerDevToolsAgent::OnResumeWorkerContext() {
 bool SharedWorkerDevToolsAgent::Send(IPC::Message* message) {
   return WorkerThread::current()->Send(message);
 }
-
-}  // namespace content

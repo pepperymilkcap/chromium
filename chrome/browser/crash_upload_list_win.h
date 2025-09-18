@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CRASH_UPLOAD_LIST_WIN_H_
 #define CHROME_BROWSER_CRASH_UPLOAD_LIST_WIN_H_
+#pragma once
 
 #include "chrome/browser/crash_upload_list.h"
 #include "base/compiler_specific.h"
@@ -12,11 +13,11 @@
 // from the Windows Event Log.
 class CrashUploadListWin : public CrashUploadList {
  public:
-  CrashUploadListWin(Delegate* delegate, const base::FilePath& upload_log_path);
+  explicit CrashUploadListWin(Delegate* delegate);
 
  protected:
   // Loads the list of crashes from the Windows Event Log.
-  virtual void LoadUploadList() OVERRIDE;
+  virtual void LoadCrashList() OVERRIDE;
 
  private:
   // Returns whether the event record is likely a Chrome crash log.

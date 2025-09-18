@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
 #include "base/rand_util.h"
+#include "chrome/browser/webdata/autofill_table.h"
+#include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
 #include "chrome_frame/test/mock_ie_event_sink_test.h"
-#include "components/autofill/core/browser/webdata/autofill_table.h"
-#include "components/webdata/common/web_database.h"
-#include "components/webdata/common/webdata_constants.h"
 
 using testing::_;
 
@@ -97,20 +97,17 @@ const size_t kBlankPngFileLength = 95;
 // Looks up |element_name| in the Chrome form data DB and ensures that the
 // results match |matcher|.
 ACTION_P2(ExpectFormValuesForElementNameMatch, element_name, matcher) {
-  base::FilePath root_path;
-  GetChromeFrameProfilePath(kIexploreProfileName, &root_path);
-  base::FilePath profile_path(
-      root_path.Append(L"Default").Append(kWebDataFilename));
+  FilePath profile_path(
+      chrome_frame_test::GetProfilePath(kIexploreProfileName)
+          .Append(L"Default").Append(chrome::kWebDataFilename));
 
-  autofill::AutofillTable autofill_table("en-US");
   WebDatabase web_database;
-  web_database.AddTable(&autofill_table);
   sql::InitStatus init_status = web_database.Init(profile_path);
   EXPECT_EQ(sql::INIT_OK, init_status);
 
   if (init_status == sql::INIT_OK) {
-    std::vector<base::string16> values;
-    autofill_table.GetFormValuesForElementName(
+    std::vector<string16> values;
+    web_database.GetAutofillTable()->GetFormValuesForElementName(
         element_name, L"", &values, 9999);
     EXPECT_THAT(values, matcher);
   }
@@ -210,7 +207,7 @@ TEST_F(DeleteBrowsingHistoryTest, DISABLED_CFDeleteBrowsingHistory) {
   EXPECT_CALL(load_helper, OnLoadComplete())
       .WillOnce(testing::DoAll(
           AccLeftClickInRenderer(&ie_mock_, AccObjectMatcher(L"username")),
-          PostKeyMessagesToRenderer(&ie_mock_, WideToASCII(kFormFieldValue)),
+          PostCharMessagesToRenderer(&ie_mock_, WideToASCII(kFormFieldValue)),
           AccLeftClickInRenderer(&ie_mock_, AccObjectMatcher(L"Submit"))));
 
   EXPECT_CALL(server_mock_, Post(_, testing::StrEq(L"/form"), _))
@@ -329,7 +326,7 @@ TEST_F(DeleteBrowsingHistoryTest, DISABLED_CFDeleteBrowsingHistory) {
       ie_mock_.event_sink()->LaunchIEAndNavigate(top_url, &ie_mock_));
 
   // 3 navigations + 2 invocations of delete browser history == 5
-  loop_.RunFor(kChromeFrameLongNavigationTimeout * 5);
+  loop_.RunFor(kChromeFrameLongNavigationTimeoutInSeconds * 5);
 }
 
 }  // namespace chrome_frame_test

@@ -179,12 +179,6 @@
  *	used for input more than STRTOD_DIGLIM digits long (default 40).
  */
 
-#if defined _MSC_VER && _MSC_VER == 1800
-// TODO(scottmg): VS2013 RC ICEs on a bunch of functions in this file.
-// This should be removed after RTM. See http://crbug.com/288948.
-#pragma optimize("", off)
-#endif
-
 #define IEEE_8087
 #define NO_HEX_FP
 
@@ -3575,7 +3569,7 @@ dtoa
 	int denorm;
 	ULong x;
 #endif
-	Bigint *b, *b1, *delta, *mlo = NULL, *mhi, *S;
+	Bigint *b, *b1, *delta, *mlo, *mhi, *S;
 	U d2, eps, u;
 	double ds;
 	char *s, *s0;
@@ -3897,7 +3891,7 @@ dtoa
 				goto no_digits;
 			goto one_digit;
 			}
-		for(i = 1; i <= k + 1; i++, dval(&u) *= 10.) {
+		for(i = 1;; i++, dval(&u) *= 10.) {
 			L = (Long)(dval(&u) / ds);
 			dval(&u) -= L*ds;
 #ifdef Check_FLT_ROUNDS

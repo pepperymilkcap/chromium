@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 // Any changes to the logging done in these functions should be matched
 // with the checks done in IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Metrics).
-// See metrics_apitest.cc.
+// See extension_metrics_apitest.cc.
 chrome.test.runTests([
   function recordUserAction() {
     // Log a metric once.
@@ -57,40 +57,6 @@ chrome.test.runTests([
     chrome.metricsPrivate.recordSmallCount('test.small.count', 42);
 
     chrome.test.succeed();
-  },
-
-  function getFieldTrial() {
-    var test1Callback = function(group) {
-      chrome.test.assertEq('', group);
-      chrome.metricsPrivate.getFieldTrial('apitestfieldtrial2', test2Callback);
-    };
-
-    var test2Callback = function(group) {
-      chrome.test.assertEq('group1', group);
-      chrome.test.succeed();
-    };
-
-    chrome.metricsPrivate.getFieldTrial('apitestfieldtrial1', test1Callback);
-  },
-
-  function getVariationParams1() {
-    chrome.metricsPrivate.getVariationParams(
-        'apitestfieldtrial1', function(params) {
-      chrome.test.assertEq('Variation parameters are unavailable.',
-                           chrome.runtime.lastError.message);
-      chrome.test.assertEq(undefined, params);
-      chrome.test.succeed();
-    });
-  },
-
-  function getVariationParams2() {
-    chrome.metricsPrivate.getVariationParams(
-        'apitestfieldtrial2', function(params) {
-      chrome.test.assertEq(undefined, chrome.runtime.lastError);
-      chrome.test.assertEq({a: 'aa', b: 'bb'}, params);
-      chrome.test.succeed();
-    });
-  },
-
+  }
 ]);
 

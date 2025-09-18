@@ -1,24 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/notifications/balloon.h"
 
 #include "base/logging.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/profiles/profile.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
-
-#if !defined(OS_WIN) && !defined(USE_AURA)
-// static
-int BalloonView::GetHorizontalMargin() {
-  // TODO: implement for linux (non-aura) and mac.
-  return 0;
-}
-#endif
 
 Balloon::Balloon(const Notification& notification, Profile* profile,
                  BalloonCollection* collection)
@@ -36,7 +26,7 @@ void Balloon::SetPosition(const gfx::Point& upper_left, bool reposition) {
     balloon_view_->RepositionToBalloon();
 }
 
-void Balloon::ResizeDueToAutoResize(const gfx::Size& size) {
+void Balloon::SetContentPreferredSize(const gfx::Size& size) {
   collection_->ResizeBalloon(this, size);
 }
 
@@ -70,21 +60,9 @@ void Balloon::OnClose(bool by_user) {
   collection_->OnBalloonClosed(this);
 }
 
-void Balloon::OnButtonClick(int button_index) {
-  notification_->ButtonClick(button_index);
-}
-
 void Balloon::CloseByScript() {
   // A user-initiated close begins with the view and then closes this object;
   // we simulate that with a script-initiated close but pass |by_user|=false.
   DCHECK(balloon_view_.get());
   balloon_view_->Close(false);
-}
-
-std::string Balloon::GetExtensionId() {
-  const ExtensionService* service = profile()->GetExtensionService();
-  const extensions::Extension* extension =
-      service->extensions()->GetExtensionOrAppByURL(
-          notification().origin_url());
-  return extension ? extension->id() : std::string();
 }

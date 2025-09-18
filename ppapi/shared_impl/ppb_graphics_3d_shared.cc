@@ -13,11 +13,11 @@
 namespace ppapi {
 
 PPB_Graphics3D_Shared::PPB_Graphics3D_Shared(PP_Instance instance)
-    : Resource(OBJECT_IS_IMPL, instance) {
+    : Resource(instance) {
 }
 
 PPB_Graphics3D_Shared::PPB_Graphics3D_Shared(const HostResource& host_resource)
-    : Resource(OBJECT_IS_PROXY, host_resource) {
+    : Resource(host_resource) {
 }
 
 PPB_Graphics3D_Shared::~PPB_Graphics3D_Shared() {
@@ -31,12 +31,12 @@ thunk::PPB_Graphics3D_API* PPB_Graphics3D_Shared::AsPPB_Graphics3D_API() {
   return this;
 }
 
-int32_t PPB_Graphics3D_Shared::GetAttribs(int32_t attrib_list[]) {
+int32_t PPB_Graphics3D_Shared::GetAttribs(int32_t* attrib_list) {
   // TODO(alokp): Implement me.
   return PP_ERROR_FAILED;
 }
 
-int32_t PPB_Graphics3D_Shared::SetAttribs(const int32_t attrib_list[]) {
+int32_t PPB_Graphics3D_Shared::SetAttribs(int32_t* attrib_list) {
   // TODO(alokp): Implement me.
   return PP_ERROR_FAILED;
 }
@@ -50,28 +50,25 @@ int32_t PPB_Graphics3D_Shared::ResizeBuffers(int32_t width, int32_t height) {
   if ((width < 0) || (height < 0))
     return PP_ERROR_BADARGUMENT;
 
-  gles2_impl()->ResizeCHROMIUM(width, height, 1.f);
+  gles2_impl()->ResizeCHROMIUM(width, height);
   // TODO(alokp): Check if resize succeeded and return appropriate error code.
   return PP_OK;
 }
 
-int32_t PPB_Graphics3D_Shared::SwapBuffers(
-    scoped_refptr<TrackedCallback> callback) {
+int32_t PPB_Graphics3D_Shared::SwapBuffers(PP_CompletionCallback callback) {
+  if (!callback.func) {
+    // Blocking SwapBuffers isn't supported (since we have to be on the main
+    // thread).
+    return PP_ERROR_BADARGUMENT;
+  }
+
   if (HasPendingSwap()) {
-    Log(PP_LOGLEVEL_ERROR, "PPB_Graphics3D.SwapBuffers: Plugin attempted swap "
-                           "with previous swap still pending.");
     // Already a pending SwapBuffers that hasn't returned yet.
     return PP_ERROR_INPROGRESS;
   }
 
-  swap_callback_ = callback;
+  swap_callback_ = new TrackedCallback(this, callback);
   return DoSwapBuffers();
-}
-
-int32_t PPB_Graphics3D_Shared::GetAttribMaxValue(int32_t attribute,
-                                                 int32_t* value) {
-  // TODO(alokp): Implement me.
-  return PP_ERROR_FAILED;
 }
 
 void* PPB_Graphics3D_Shared::MapTexSubImage2DCHROMIUM(GLenum target,
@@ -93,17 +90,15 @@ void PPB_Graphics3D_Shared::UnmapTexSubImage2DCHROMIUM(const void* mem) {
 
 void PPB_Graphics3D_Shared::SwapBuffersACK(int32_t pp_error) {
   DCHECK(HasPendingSwap());
-  swap_callback_->Run(pp_error);
+  TrackedCallback::ClearAndRun(&swap_callback_, pp_error);
 }
 
 bool PPB_Graphics3D_Shared::HasPendingSwap() const {
   return TrackedCallback::IsPending(swap_callback_);
 }
 
-bool PPB_Graphics3D_Shared::CreateGLES2Impl(
-    int32 command_buffer_size,
-    int32 transfer_buffer_size,
-    gpu::gles2::GLES2Implementation* share_gles2) {
+bool PPB_Graphics3D_Shared::CreateGLES2Impl(int32 command_buffer_size,
+                                            int32 transfer_buffer_size) {
   gpu::CommandBuffer* command_buffer = GetCommandBuffer();
   DCHECK(command_buffer);
 
@@ -118,27 +113,19 @@ bool PPB_Graphics3D_Shared::CreateGLES2Impl(
   const int32 kMaxTransferBufferSize = 16 * 1024 * 1024;
   transfer_buffer_.reset(new gpu::TransferBuffer(gles2_helper_.get()));
 
-  const bool bind_creates_resources = true;
-  const bool free_everything_when_invisible = false;
-
   // Create the object exposing the OpenGL API.
   gles2_impl_.reset(new gpu::gles2::GLES2Implementation(
       gles2_helper_.get(),
-      share_gles2 ? share_gles2->share_group() : NULL,
       transfer_buffer_.get(),
-      bind_creates_resources,
-      free_everything_when_invisible,
-      GetGpuControl()));
+      false,
+      true));
 
   if (!gles2_impl_->Initialize(
       transfer_buffer_size,
       kMinTransferBufferSize,
-      std::max(kMaxTransferBufferSize, transfer_buffer_size),
-      gpu::gles2::GLES2Implementation::kNoLimit)) {
+      std::max(kMaxTransferBufferSize, transfer_buffer_size))) {
     return false;
   }
-
-  gles2_impl_->PushGroupMarkerEXT(0, "PPAPIContext");
 
   return true;
 }

@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_NETWORK_TRANSACTION_H_
 #define NET_HTTP_HTTP_NETWORK_TRANSACTION_H_
+#pragma once
 
 #include <string>
 
@@ -11,35 +12,32 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/net_log.h"
 #include "net/base/request_priority.h"
+#include "net/base/ssl_config_service.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_stream_factory.h"
 #include "net/http/http_transaction.h"
 #include "net/proxy/proxy_service.h"
-#include "net/ssl/ssl_config_service.h"
-#include "net/websockets/websocket_handshake_stream_base.h"
 
 namespace net {
 
-class ClientSocketHandle;
 class HttpAuthController;
 class HttpNetworkSession;
-class HttpStreamBase;
+class HttpStream;
 class HttpStreamRequest;
 class IOBuffer;
-class SpdySession;
+class UploadDataStream;
 struct HttpRequestInfo;
 
 class NET_EXPORT_PRIVATE HttpNetworkTransaction
     : public HttpTransaction,
       public HttpStreamRequest::Delegate {
  public:
-  HttpNetworkTransaction(RequestPriority priority,
-                         HttpNetworkSession* session);
+  explicit HttpNetworkTransaction(HttpNetworkSession* session);
 
   virtual ~HttpNetworkTransaction();
 
@@ -60,27 +58,15 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
                    int buf_len,
                    const CompletionCallback& callback) OVERRIDE;
   virtual void StopCaching() OVERRIDE {}
-  virtual bool GetFullRequestHeaders(
-      HttpRequestHeaders* headers) const OVERRIDE;
-  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
   virtual void DoneReading() OVERRIDE {}
   virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
   virtual LoadState GetLoadState() const OVERRIDE;
-  virtual UploadProgress GetUploadProgress() const OVERRIDE;
-  virtual bool GetLoadTimingInfo(
-      LoadTimingInfo* load_timing_info) const OVERRIDE;
-  virtual void SetPriority(RequestPriority priority) OVERRIDE;
-  virtual void SetWebSocketHandshakeStreamCreateHelper(
-      WebSocketHandshakeStreamBase::CreateHelper* create_helper) OVERRIDE;
+  virtual uint64 GetUploadProgress() const OVERRIDE;
 
   // HttpStreamRequest::Delegate methods:
   virtual void OnStreamReady(const SSLConfig& used_ssl_config,
                              const ProxyInfo& used_proxy_info,
-                             HttpStreamBase* stream) OVERRIDE;
-  virtual void OnWebSocketHandshakeStreamReady(
-      const SSLConfig& used_ssl_config,
-      const ProxyInfo& used_proxy_info,
-      WebSocketHandshakeStreamBase* stream) OVERRIDE;
+                             HttpStream* stream) OVERRIDE;
   virtual void OnStreamFailed(int status,
                               const SSLConfig& used_ssl_config) OVERRIDE;
   virtual void OnCertificateError(int status,
@@ -96,25 +82,14 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   virtual void OnHttpsProxyTunnelResponse(const HttpResponseInfo& response_info,
                                           const SSLConfig& used_ssl_config,
                                           const ProxyInfo& used_proxy_info,
-                                          HttpStreamBase* stream) OVERRIDE;
+                                          HttpStream* stream) OVERRIDE;
 
  private:
-  friend class HttpNetworkTransactionSSLTest;
-
-  FRIEND_TEST_ALL_PREFIXES(HttpNetworkTransactionTest,
-                           ResetStateForRestart);
-  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest,
-                           WindowUpdateReceived);
-  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest,
-                           WindowUpdateSent);
-  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest,
-                           WindowUpdateOverflow);
-  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest,
-                           FlowControlStallResume);
-  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest,
-                           FlowControlStallResumeAfterSettings);
-  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest,
-                           FlowControlNegativeSendWindowSize);
+  FRIEND_TEST_ALL_PREFIXES(HttpNetworkTransactionTest, ResetStateForRestart);
+  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, WindowUpdateReceived);
+  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, WindowUpdateSent);
+  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, WindowUpdateOverflow);
+  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, FlowControlStallResume);
 
   enum State {
     STATE_CREATE_STREAM,
@@ -125,8 +100,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
     STATE_GENERATE_PROXY_AUTH_TOKEN_COMPLETE,
     STATE_GENERATE_SERVER_AUTH_TOKEN,
     STATE_GENERATE_SERVER_AUTH_TOKEN_COMPLETE,
-    STATE_INIT_REQUEST_BODY,
-    STATE_INIT_REQUEST_BODY_COMPLETE,
     STATE_BUILD_REQUEST,
     STATE_BUILD_REQUEST_COMPLETE,
     STATE_SEND_REQUEST,
@@ -160,8 +133,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   int DoGenerateProxyAuthTokenComplete(int result);
   int DoGenerateServerAuthToken();
   int DoGenerateServerAuthTokenComplete(int result);
-  int DoInitRequestBody();
-  int DoInitRequestBodyComplete(int result);
   int DoBuildRequest();
   int DoBuildRequestComplete(int result);
   int DoSendRequest();
@@ -187,9 +158,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
 
   // Called to handle a client certificate request.
   int HandleCertificateRequest(int error);
-
-  // Called to possibly handle a client authentication error.
-  void HandleClientAuthError(int error);
 
   // Called to possibly recover from an SSL handshake error.  Sets next_state_
   // and returns OK if recovering from the error.  Otherwise, the same error
@@ -249,13 +217,8 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // Get the {scheme, host, path, port} for the authentication target
   GURL AuthURL(HttpAuth::Target target) const;
 
-  // Returns true if this transaction is for a WebSocket handshake
-  bool ForWebSocketHandshake() const;
-
   // Debug helper.
   static std::string DescribeState(State state);
-
-  void SetStream(HttpStreamBase* stream);
 
   scoped_refptr<HttpAuthController>
       auth_controllers_[HttpAuth::AUTH_NUM_TARGETS];
@@ -267,19 +230,19 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
 
   CompletionCallback io_callback_;
   CompletionCallback callback_;
+  scoped_ptr<UploadDataStream> request_body_;
 
-  HttpNetworkSession* session_;
+  scoped_refptr<HttpNetworkSession> session_;
 
   BoundNetLog net_log_;
   const HttpRequestInfo* request_;
-  RequestPriority priority_;
   HttpResponseInfo response_;
 
   // |proxy_info_| is the ProxyInfo used by the HttpStreamRequest.
   ProxyInfo proxy_info_;
 
   scoped_ptr<HttpStreamRequest> stream_request_;
-  scoped_ptr<HttpStreamBase> stream_;
+  scoped_ptr<HttpStream> stream_;
 
   // True if we've validated the headers that the stream parser has returned.
   bool headers_valid_;
@@ -291,12 +254,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
 
   SSLConfig server_ssl_config_;
   SSLConfig proxy_ssl_config_;
-  // fallback_error_code contains the error code that caused the last TLS
-  // fallback. If the fallback connection results in
-  // ERR_SSL_INAPPROPRIATE_FALLBACK (i.e. the server indicated that the
-  // fallback should not have been needed) then we use this value to return the
-  // original error that triggered the fallback.
-  int fallback_error_code_;
 
   HttpRequestHeaders request_headers_;
 
@@ -309,16 +266,8 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   scoped_refptr<IOBuffer> read_buf_;
   int read_buf_len_;
 
-  // Total number of bytes received on streams for this transaction.
-  int64 total_received_bytes_;
-
   // The time the Start method was called.
   base::Time start_time_;
-
-  // When the transaction started / finished sending the request, including
-  // the body, if present.
-  base::TimeTicks send_start_time_;
-  base::TimeTicks send_end_time_;
 
   // The next state in the state machine.
   State next_state_;
@@ -326,11 +275,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // True when the tunnel is in the process of being established - we can't
   // read from the socket until the tunnel is done.
   bool establishing_tunnel_;
-
-  // The helper object to use to create WebSocketHandshakeStreamBase
-  // objects. Only relevant when establishing a WebSocket connection.
-  WebSocketHandshakeStreamBase::CreateHelper*
-      websocket_handshake_stream_base_create_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpNetworkTransaction);
 };

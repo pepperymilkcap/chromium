@@ -145,7 +145,6 @@ chrome.test.runTests([
       for (var x = 0; x < tabs.length; x++) {
         chrome.windows.get(tabs[x].windowId, pass(function(win) {
           assertTrue(win.type == "normal");
-          assertEq(false, win.alwaysOnTop);
         }));
       }
     }));
@@ -182,17 +181,6 @@ chrome.test.runTests([
       assertEq(4, tabs.length);
       for (var i = 0; i < tabs.length; i++)
         assertEq(0, tabs[0].index);
-    }));
-  },
-
-  function queryIncognito() {
-    chrome.windows.create(
-        {url: ['http://a.com', 'http://a.com'], incognito: true},
-        pass(function(win) {
-      assertEq(null, win);
-      chrome.tabs.query({url: 'http://a.com/'}, pass(function(tabs) {
-         assertEq(0, tabs.length);
-      }));
     }));
   }
 ]);

@@ -6,14 +6,14 @@
 // generates a new version of CF from the one already in the build folder and
 // then loads them both into the current process to verify the handoff.
 
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
-#include "base/memory/shared_memory.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
-#include "base/strings/string_util.h"
+#include "base/scoped_temp_dir.h"
+#include "base/shared_memory.h"
+#include "base/string_util.h"
 #include "base/version.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome/installer/test/alternate_version_generator.h"
@@ -38,35 +38,35 @@ class DllRedirectorLoadingTest : public testing::Test {
   // install to test upgrades.
   static void SetUpTestCase() {
     // First ensure that we can find the built Chrome Frame DLL.
-    base::FilePath build_chrome_frame_dll = GetChromeFrameBuildPath();
-    ASSERT_TRUE(base::PathExists(build_chrome_frame_dll));
+    FilePath build_chrome_frame_dll = GetChromeFrameBuildPath();
+    ASSERT_TRUE(file_util::PathExists(build_chrome_frame_dll));
 
     // Then grab its version.
     scoped_ptr<FileVersionInfo> original_version_info(
         FileVersionInfo::CreateFileVersionInfo(build_chrome_frame_dll));
     ASSERT_TRUE(original_version_info != NULL);
-    original_version_.reset(
-        new Version(WideToASCII(original_version_info->file_version())));
-    ASSERT_TRUE(original_version_->IsValid());
+    original_version_.reset(Version::GetVersionFromString(
+        WideToASCII(original_version_info->file_version())));
+    ASSERT_TRUE(original_version_ != NULL);
 
     // Make a place for us to run the test from.
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     // Make a versioned dir for the original chrome frame dll to run under.
-    base::FilePath original_version_dir(
+    FilePath original_version_dir(
         temp_dir_.path().AppendASCII(original_version_->GetString()));
-    ASSERT_TRUE(base::CreateDirectory(original_version_dir));
+    ASSERT_TRUE(file_util::CreateDirectory(original_version_dir));
 
     // Now move the original DLL that we will operate on into a named-version
     // folder.
     original_chrome_frame_dll_ =
         original_version_dir.Append(build_chrome_frame_dll.BaseName());
-    ASSERT_TRUE(base::CopyFile(build_chrome_frame_dll,
-                               original_chrome_frame_dll_));
-    ASSERT_TRUE(base::PathExists(original_chrome_frame_dll_));
+    ASSERT_TRUE(file_util::CopyFile(build_chrome_frame_dll,
+                                    original_chrome_frame_dll_));
+    ASSERT_TRUE(file_util::PathExists(original_chrome_frame_dll_));
 
     // Temporary location for the new Chrome Frame DLL.
-    base::FilePath temporary_new_chrome_frame_dll(
+    FilePath temporary_new_chrome_frame_dll(
         temp_dir_.path().Append(build_chrome_frame_dll.BaseName()));
 
     // Generate the version-bumped Chrome Frame DLL to a temporary path.
@@ -80,22 +80,22 @@ class DllRedirectorLoadingTest : public testing::Test {
     scoped_ptr<FileVersionInfo> new_version_info(
         FileVersionInfo::CreateFileVersionInfo(temporary_new_chrome_frame_dll));
     ASSERT_TRUE(new_version_info != NULL);
-    new_version_.reset(
-        new Version(WideToASCII(new_version_info->file_version())));
-    ASSERT_TRUE(new_version_->IsValid());
+    new_version_.reset(Version::GetVersionFromString(
+        WideToASCII(new_version_info->file_version())));
+    ASSERT_TRUE(new_version_ != NULL);
 
     // Make sure the new version is larger than the old.
     ASSERT_EQ(new_version_->CompareTo(*original_version_.get()), 1);
 
     // Now move the new Chrome Frame dll to its final resting place:
-    base::FilePath new_version_dir(
+    FilePath new_version_dir(
         temp_dir_.path().AppendASCII(new_version_->GetString()));
-    ASSERT_TRUE(base::CreateDirectory(new_version_dir));
+    ASSERT_TRUE(file_util::CreateDirectory(new_version_dir));
     new_chrome_frame_dll_ =
         new_version_dir.Append(build_chrome_frame_dll.BaseName());
-    ASSERT_TRUE(base::Move(temporary_new_chrome_frame_dll,
-                           new_chrome_frame_dll_));
-    ASSERT_TRUE(base::PathExists(new_chrome_frame_dll_));
+    ASSERT_TRUE(file_util::Move(temporary_new_chrome_frame_dll,
+                                new_chrome_frame_dll_));
+    ASSERT_TRUE(file_util::PathExists(new_chrome_frame_dll_));
   }
 
   static void TearDownTestCase() {
@@ -103,24 +103,24 @@ class DllRedirectorLoadingTest : public testing::Test {
       // The temp_dir cleanup has been observed to fail in some cases. It looks
       // like something is holding on to the Chrome Frame DLLs after they have
       // been explicitly unloaded. At least schedule them for cleanup on reboot.
-      ScheduleDirectoryForDeletion(temp_dir_.path());
+      ScheduleDirectoryForDeletion(temp_dir_.path().value().c_str());
     }
   }
 
  protected:
-  static base::FilePath original_chrome_frame_dll_;
-  static base::FilePath new_chrome_frame_dll_;
+  static FilePath original_chrome_frame_dll_;
+  static FilePath new_chrome_frame_dll_;
   static scoped_ptr<Version> original_version_;
   static scoped_ptr<Version> new_version_;
 
-  static base::ScopedTempDir temp_dir_;
+  static ScopedTempDir temp_dir_;
 };  // class DllRedirectorLoadingTest
 
-base::FilePath DllRedirectorLoadingTest::original_chrome_frame_dll_;
-base::FilePath DllRedirectorLoadingTest::new_chrome_frame_dll_;
+FilePath DllRedirectorLoadingTest::original_chrome_frame_dll_;
+FilePath DllRedirectorLoadingTest::new_chrome_frame_dll_;
 scoped_ptr<Version> DllRedirectorLoadingTest::original_version_;
 scoped_ptr<Version> DllRedirectorLoadingTest::new_version_;
-base::ScopedTempDir DllRedirectorLoadingTest::temp_dir_;
+ScopedTempDir DllRedirectorLoadingTest::temp_dir_;
 
 #if defined(COMPONENT_BUILD)
 // Disabling since npchrome_frame.dll's DllMain can't handle being loaded into
@@ -133,8 +133,8 @@ base::ScopedTempDir DllRedirectorLoadingTest::temp_dir_;
 
 TEST_F(DllRedirectorLoadingTest, MAYBE_TestDllRedirection) {
   struct TestData {
-    base::FilePath first_dll;
-    base::FilePath second_dll;
+    FilePath first_dll;
+    FilePath second_dll;
     Version* expected_beacon_version;
   } test_data[] = {
       {
@@ -208,10 +208,10 @@ TEST_F(DllRedirectorLoadingTest, MAYBE_TestDllRedirection) {
 
     char buffer[kSharedMemoryBytes] = {0};
     memcpy(buffer, beacon.memory(), kSharedMemoryBytes - 1);
-    Version beacon_version(buffer);
-    ASSERT_TRUE(beacon_version.IsValid());
+    scoped_ptr<Version> beacon_version(Version::GetVersionFromString(buffer));
+    ASSERT_TRUE(beacon_version != NULL);
 
     EXPECT_EQ(0,
-              beacon_version.CompareTo(*test_data[i].expected_beacon_version));
+              beacon_version->CompareTo(*test_data[i].expected_beacon_version));
   }
 }

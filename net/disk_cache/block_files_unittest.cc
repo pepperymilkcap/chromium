@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
-#include "base/files/file_enumerator.h"
 #include "net/disk_cache/block_files.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/disk_cache_test_base.h"
@@ -15,11 +14,10 @@ using base::Time;
 namespace {
 
 // Returns the number of files in this folder.
-int NumberOfFiles(const base::FilePath& path) {
-  base::FileEnumerator iter(path, false, base::FileEnumerator::FILES);
+int NumberOfFiles(const FilePath& path) {
+  file_util::FileEnumerator iter(path, false, file_util::FileEnumerator::FILES);
   int count = 0;
-  for (base::FilePath file = iter.Next(); !file.value().empty();
-       file = iter.Next()) {
+  for (FilePath file = iter.Next(); !file.value().empty(); file = iter.Next()) {
     count++;
   }
   return count;
@@ -31,7 +29,7 @@ namespace disk_cache {
 
 TEST_F(DiskCacheTest, BlockFiles_Grow) {
   ASSERT_TRUE(CleanupCacheDir());
-  ASSERT_TRUE(base::CreateDirectory(cache_path_));
+  ASSERT_TRUE(file_util::CreateDirectory(cache_path_));
 
   BlockFiles files(cache_path_);
   ASSERT_TRUE(files.Init(true));
@@ -57,7 +55,7 @@ TEST_F(DiskCacheTest, BlockFiles_Grow) {
 // We should be able to delete empty block files.
 TEST_F(DiskCacheTest, BlockFiles_Shrink) {
   ASSERT_TRUE(CleanupCacheDir());
-  ASSERT_TRUE(base::CreateDirectory(cache_path_));
+  ASSERT_TRUE(file_util::CreateDirectory(cache_path_));
 
   BlockFiles files(cache_path_);
   ASSERT_TRUE(files.Init(true));
@@ -80,7 +78,7 @@ TEST_F(DiskCacheTest, BlockFiles_Shrink) {
 // Handling of block files not properly closed.
 TEST_F(DiskCacheTest, BlockFiles_Recover) {
   ASSERT_TRUE(CleanupCacheDir());
-  ASSERT_TRUE(base::CreateDirectory(cache_path_));
+  ASSERT_TRUE(file_util::CreateDirectory(cache_path_));
 
   BlockFiles files(cache_path_);
   ASSERT_TRUE(files.Init(true));
@@ -157,12 +155,12 @@ TEST_F(DiskCacheTest, BlockFiles_Recover) {
 // Handling of truncated files.
 TEST_F(DiskCacheTest, BlockFiles_ZeroSizeFile) {
   ASSERT_TRUE(CleanupCacheDir());
-  ASSERT_TRUE(base::CreateDirectory(cache_path_));
+  ASSERT_TRUE(file_util::CreateDirectory(cache_path_));
 
   BlockFiles files(cache_path_);
   ASSERT_TRUE(files.Init(true));
 
-  base::FilePath filename = files.Name(0);
+  FilePath filename = files.Name(0);
   files.CloseFiles();
   // Truncate one of the files.
   {
@@ -178,14 +176,14 @@ TEST_F(DiskCacheTest, BlockFiles_ZeroSizeFile) {
 // Handling of truncated files (non empty).
 TEST_F(DiskCacheTest, BlockFiles_TruncatedFile) {
   ASSERT_TRUE(CleanupCacheDir());
-  ASSERT_TRUE(base::CreateDirectory(cache_path_));
+  ASSERT_TRUE(file_util::CreateDirectory(cache_path_));
 
   BlockFiles files(cache_path_);
   ASSERT_TRUE(files.Init(true));
   Addr address;
   EXPECT_TRUE(files.CreateBlock(RANKINGS, 2, &address));
 
-  base::FilePath filename = files.Name(0);
+  FilePath filename = files.Name(0);
   files.CloseFiles();
   // Truncate one of the files.
   {
@@ -201,7 +199,7 @@ TEST_F(DiskCacheTest, BlockFiles_TruncatedFile) {
 // Tests detection of out of sync counters.
 TEST_F(DiskCacheTest, BlockFiles_Counters) {
   ASSERT_TRUE(CleanupCacheDir());
-  ASSERT_TRUE(base::CreateDirectory(cache_path_));
+  ASSERT_TRUE(file_util::CreateDirectory(cache_path_));
 
   BlockFiles files(cache_path_);
   ASSERT_TRUE(files.Init(true));
@@ -256,7 +254,7 @@ TEST_F(DiskCacheTest, BlockFiles_Counters) {
 // An invalid file can be detected after init.
 TEST_F(DiskCacheTest, BlockFiles_InvalidFile) {
   ASSERT_TRUE(CleanupCacheDir());
-  ASSERT_TRUE(base::CreateDirectory(cache_path_));
+  ASSERT_TRUE(file_util::CreateDirectory(cache_path_));
 
   BlockFiles files(cache_path_);
   ASSERT_TRUE(files.Init(true));
@@ -266,7 +264,7 @@ TEST_F(DiskCacheTest, BlockFiles_InvalidFile) {
   EXPECT_TRUE(NULL == files.GetFile(addr));
 
   // Let's create an invalid file.
-  base::FilePath filename(files.Name(5));
+  FilePath filename(files.Name(5));
   char header[kBlockHeaderSize];
   memset(header, 'a', kBlockHeaderSize);
   EXPECT_EQ(kBlockHeaderSize,
@@ -302,7 +300,7 @@ TEST_F(DiskCacheTest, BlockFiles_Stats) {
 // Tests that we add and remove blocks correctly.
 TEST_F(DiskCacheTest, AllocationMap) {
   ASSERT_TRUE(CleanupCacheDir());
-  ASSERT_TRUE(base::CreateDirectory(cache_path_));
+  ASSERT_TRUE(file_util::CreateDirectory(cache_path_));
 
   BlockFiles files(cache_path_);
   ASSERT_TRUE(files.Init(true));

@@ -4,13 +4,12 @@
 
 #ifndef CHROME_INSTALLER_UTIL_GOOGLE_UPDATE_SETTINGS_H_
 #define CHROME_INSTALLER_UTIL_GOOGLE_UPDATE_SETTINGS_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
-#include "base/time/time.h"
-#include "base/version.h"
+#include "base/string16.h"
 #include "chrome/installer/util/util_constants.h"
 
 class BrowserDistribution;
@@ -30,26 +29,6 @@ class GoogleUpdateSettings {
     UPDATES_DISABLED    = 0,
     AUTOMATIC_UPDATES   = 1,
     MANUAL_UPDATES_ONLY = 2,
-    AUTO_UPDATES_ONLY   = 3,
-  };
-
-  // Defines product data that is tracked/used by Google Update.
-  struct ProductData {
-    // The currently installed version.
-    std::string version;
-    // The time that Google Update last updated this product.  (This means
-    // either running an updater successfully, or doing an update check that
-    // results in no update available.)
-    base::Time last_success;
-    // The result reported by the most recent run of an installer/updater.
-    int last_result;
-    // The error code, if any, reported by the most recent run of an
-    // installer or updater.  This is typically platform independent.
-    int last_error_code;
-    // The extra error code, if any, reported by the most recent run of
-    // an installer or updater.  This is typically an error code specific
-    // to the platform -- i.e. on Windows, it will be a Win32 HRESULT.
-    int last_extra_code;
   };
 
   // Returns true if this install is system-wide, false if it is per-user.
@@ -78,10 +57,10 @@ class GoogleUpdateSettings {
 
   // Returns the metrics id set in the registry (that can be used in crash
   // reports). If none found, returns empty string.
-  static bool GetMetricsId(std::string* metrics_id);
+  static bool GetMetricsId(std::wstring* metrics_id);
 
   // Sets the metrics id to be used in crash reports.
-  static bool SetMetricsId(const std::string& metrics_id);
+  static bool SetMetricsId(const std::wstring& metrics_id);
 
   // Sets the machine-wide EULA consented flag required on OEM installs.
   // Returns false if the setting could not be recorded.
@@ -149,12 +128,6 @@ class GoogleUpdateSettings {
   // active users. Returns false if writting to the registry failed.
   static bool UpdateDidRunState(bool did_run, bool system_level);
 
-  // Set did_run "dr" in the client state value for |dist|. This is used to
-  // measure active users. Returns false if writting to the registry failed.
-  static bool UpdateDidRunStateForDistribution(BrowserDistribution* dist,
-                                               bool did_run,
-                                               bool system_level);
-
   // Returns only the channel name: "" (stable), "dev", "beta", "canary", or
   // "unknown" if unknown. This value will not be modified by "-m" for a
   // multi-install. See kChromeChannel* in util_constants.h
@@ -166,7 +139,7 @@ class GoogleUpdateSettings {
   // it is a multi-install product, in which case it will return "m",
   // "unknown-m", "dev-m", or "beta-m").
   static bool GetChromeChannelAndModifiers(bool system_install,
-                                           base::string16* channel);
+                                           string16* channel);
 
   // This method changes the Google Update "ap" value to move the installation
   // on to or off of one of the recovery channels.
@@ -200,10 +173,6 @@ class GoogleUpdateSettings {
                                       int install_return_code,
                                       installer::ChannelInfo* value);
 
-  // This method updates the values that report how many profiles are in use
-  // and how many of those are signed-in.
-  static void UpdateProfileCounts(int profiles_active, int profiles_signedin);
-
   // For system-level installs, we need to be able to communicate the results
   // of the Toast Experiments back to Google Update. The problem is just that
   // the experiment is run in the context of the user, which doesn't have
@@ -226,56 +195,6 @@ class GoogleUpdateSettings {
   // true if an app-specific policy override is in force, or false otherwise.
   static UpdatePolicy GetAppUpdatePolicy(const std::wstring& app_guid,
                                          bool* is_overridden);
-
-  // Returns Google Update's uninstall command line, or an empty string if none
-  // is found.
-  static base::string16 GetUninstallCommandLine(bool system_install);
-
-  // Returns the version of Google Update that is installed.
-  static Version GetGoogleUpdateVersion(bool system_install);
-
-  // Returns the time at which Google Update last started an automatic update
-  // check, or the null time if this information isn't available.
-  static base::Time GetGoogleUpdateLastStartedAU(bool system_install);
-
-  // Returns the time at which Google Update last successfully contacted Google
-  // servers and got a valid check response, or the null time if this
-  // information isn't available.
-  static base::Time GetGoogleUpdateLastChecked(bool system_install);
-
-  // Returns detailed update data for a product being managed by Google Update.
-  // Returns true if the |version| and |last_updated| fields in |data|
-  // are modified.  The other items are considered optional.
-  static bool GetUpdateDetailForApp(bool system_install,
-                                    const wchar_t* app_guid,
-                                    ProductData* data);
-
-  // Returns product data for Google Update.  (Equivalent to calling
-  // GetUpdateDetailForAppGuid with the app guid for Google Update itself.)
-  static bool GetUpdateDetailForGoogleUpdate(bool system_install,
-                                             ProductData* data);
-
-  // Returns product data for the current product. (Equivalent to calling
-  // GetUpdateDetailForApp with the app guid stored in BrowserDistribution.)
-  static bool GetUpdateDetail(bool system_install, ProductData* data);
-
-  // Sets |experiment_labels| as the Google Update experiment_labels value in
-  // the ClientState key for this Chrome product, if appropriate. If
-  // |experiment_labels| is empty, this will delete the value instead. This will
-  // return true if the label was successfully set (or deleted), false otherwise
-  // (even if the label does not need to be set for this particular distribution
-  // type).
-  static bool SetExperimentLabels(bool system_install,
-                                  const base::string16& experiment_labels);
-
-  // Reads the Google Update experiment_labels value in the ClientState key for
-  // this Chrome product and writes it into |experiment_labels|. If the key or
-  // value does not exist, |experiment_labels| will be set to the empty string.
-  // If this distribution of Chrome does not set the experiment_labels value,
-  // this will do nothing to |experiment_labels|. This will return true if the
-  // label did not exist, or was successfully read.
-  static bool ReadExperimentLabels(bool system_install,
-                                   base::string16* experiment_labels);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(GoogleUpdateSettings);

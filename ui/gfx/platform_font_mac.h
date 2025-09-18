@@ -4,9 +4,9 @@
 
 #ifndef UI_GFX_PLATFORM_FONT_MAC_H_
 #define UI_GFX_PLATFORM_FONT_MAC_H_
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "base/mac/scoped_nsobject.h"
 #include "ui/gfx/platform_font.h"
 
 namespace gfx {
@@ -14,6 +14,7 @@ namespace gfx {
 class PlatformFontMac : public PlatformFont {
  public:
   PlatformFontMac();
+  explicit PlatformFontMac(const Font& other);
   explicit PlatformFontMac(NativeFont native_font);
   PlatformFontMac(const std::string& font_name,
                   int font_size);
@@ -22,42 +23,33 @@ class PlatformFontMac : public PlatformFont {
   virtual Font DeriveFont(int size_delta, int style) const OVERRIDE;
   virtual int GetHeight() const OVERRIDE;
   virtual int GetBaseline() const OVERRIDE;
-  virtual int GetCapHeight() const OVERRIDE;
   virtual int GetAverageCharacterWidth() const OVERRIDE;
-  virtual int GetStringWidth(const base::string16& text) const OVERRIDE;
   virtual int GetExpectedTextWidth(int length) const OVERRIDE;
   virtual int GetStyle() const OVERRIDE;
   virtual std::string GetFontName() const OVERRIDE;
-  virtual std::string GetActualFontNameForTesting() const OVERRIDE;
   virtual int GetFontSize() const OVERRIDE;
   virtual NativeFont GetNativeFont() const OVERRIDE;
 
  private:
-  PlatformFontMac(const std::string& font_name, int font_size, int font_style);
-  virtual ~PlatformFontMac();
+  PlatformFontMac(const std::string& font_name, int font_size, int style);
+  virtual ~PlatformFontMac() {}
 
-  // Calculates and caches the font metrics.
+  // Initialize the object with the specified parameters.
+  void InitWithNameSizeAndStyle(const std::string& font_name,
+                                int font_size,
+                                int style);
+
+  // Calculate and cache the font metrics.
   void CalculateMetrics();
 
-  // The NSFont instance for this object. If this object was constructed from an
-  // NSFont instance, this holds that NSFont instance. Otherwise this NSFont
-  // instance is constructed from the name, size, and style, and if there is no
-  // active font that matched those criteria, this object may be nil.
-  base::scoped_nsobject<NSFont> native_font_;
-
-  // The name/size/style trio that specify the font. Initialized in the
-  // constructors.
-  std::string font_name_;  // Corresponds to -[NSFont fontFamily].
+  std::string font_name_;
   int font_size_;
-  int font_style_;
+  int style_;
 
-  // Cached metrics, generated in CalculateMetrics().
+  // Cached metrics, generated at construction
   int height_;
   int ascent_;
-  int cap_height_;
   int average_width_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformFontMac);
 };
 
 }  // namespace gfx

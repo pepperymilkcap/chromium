@@ -1,3 +1,6 @@
+set noparent
+avi@chromium.org
+jam@chromium.org
 joi@chromium.org
 
 # Please include jam@ on all reviews that are adding new interfaces.

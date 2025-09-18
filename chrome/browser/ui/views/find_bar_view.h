@@ -4,16 +4,18 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FIND_BAR_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_FIND_BAR_VIEW_H_
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
+#include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/views/dropdown_bar_view.h"
+#include "ui/gfx/size.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 
 class FindBarHost;
-class FindNotificationDetails;
 
 namespace views {
 class ImageButton;
@@ -43,22 +45,20 @@ class FindBarView : public DropdownBarView,
   explicit FindBarView(FindBarHost* host);
   virtual ~FindBarView();
 
-  // Accessors for the text and selection displayed in the text box.
-  void SetFindTextAndSelectedRange(const base::string16& find_text,
-                                   const gfx::Range& selected_range);
-  base::string16 GetFindText() const;
-  gfx::Range GetSelectedRange() const;
+  // Gets/sets the text displayed in the text box.
+  string16 GetFindText() const;
+  void SetFindText(const string16& find_text);
 
   // Gets the selected text in the text box.
-  base::string16 GetFindSelectedText() const;
+  string16 GetFindSelectedText() const;
 
   // Gets the match count text displayed in the text box.
-  base::string16 GetMatchCountText() const;
+  string16 GetMatchCountText() const;
 
   // Updates the label inside the Find text box that shows the ordinal of the
   // active item and how many matches were found.
   void UpdateForResult(const FindNotificationDetails& result,
-                       const base::string16& find_text);
+                       const string16& find_text);
 
   // Clears the current Match Count value in the Find text box.
   void ClearMatchCount();
@@ -70,27 +70,25 @@ class FindBarView : public DropdownBarView,
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    views::View* parent,
+                                    views::View* child) OVERRIDE;
 
   // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   // views::TextfieldController:
+  virtual void ContentsChanged(views::Textfield* sender,
+                               const string16& new_contents) OVERRIDE;
   virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const ui::KeyEvent& key_event) OVERRIDE;
-  virtual void OnAfterUserAction(views::Textfield* sender) OVERRIDE;
-  virtual void OnAfterPaste() OVERRIDE;
+                              const views::KeyEvent& key_event) OVERRIDE;
 
  private:
-  // Starts finding |search_text|.  If the text is empty, stops finding.
-  void Find(const base::string16& search_text);
-
-  // Updates the appearance for the match count label.
+  // Update the appearance for the match count label.
   void UpdateMatchCountAppearance(bool no_match);
 
-  // views::View:
+  // Overridden from views::View.
   virtual void OnThemeChanged() OVERRIDE;
 
   // We use a hidden view to grab mouse clicks and bring focus to the find
@@ -106,23 +104,32 @@ class FindBarView : public DropdownBarView,
       : view_to_focus_on_mousedown_(view_to_focus_on_mousedown) {}
 
    private:
-    virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+    virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
 
     views::Textfield* view_to_focus_on_mousedown_;
 
     DISALLOW_COPY_AND_ASSIGN(FocusForwarderView);
   };
 
+  // A wrapper of views::TextField that allows us to select all text when we
+  // get focus. Represents the text field where the user enters a search term.
+  class SearchTextfieldView : public views::Textfield {
+   public:
+     SearchTextfieldView();
+     virtual ~SearchTextfieldView();
+
+     virtual void RequestFocus() OVERRIDE;
+
+   private:
+     DISALLOW_COPY_AND_ASSIGN(SearchTextfieldView);
+  };
+
   // Returns the OS-specific view for the find bar that acts as an intermediary
   // between us and the WebContentsView.
   FindBarHost* find_bar_host() const;
 
-  // Used to detect if the input text, not including the IME composition text,
-  // has changed or not.
-  base::string16 last_searched_text_;
-
   // The controls in the window.
-  views::Textfield* find_text_;
+  SearchTextfieldView* find_text_;
   views::Label* match_count_text_;
   FocusForwarderView* focus_forwarder_view_;
   views::ImageButton* find_previous_button_;
@@ -134,10 +141,10 @@ class FindBarView : public DropdownBarView,
 
   // The background image for the Find text box, which we draw behind the Find
   // box to provide the Chrome look to the edge of the text box.
-  const gfx::ImageSkia* text_box_background_;
+  const SkBitmap* text_box_background_;
 
   // The rounded edge on the left side of the Find text box.
-  const gfx::ImageSkia* text_box_background_left_;
+  const SkBitmap* text_box_background_left_;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarView);
 };

@@ -5,40 +5,34 @@
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
 
 #include "base/json/json_writer.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/accessibility/accessibility_extension_api_constants.h"
-#include "chrome/browser/extensions/api/tabs/tabs_constants.h"
-#include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/infobars/infobar.h"
-#include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/infobars/infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/api/experimental_accessibility.h"
-#include "content/public/browser/browser_accessibility_state.h"
-#include "extensions/browser/event_router.h"
-#include "extensions/browser/lazy_background_task_queue.h"
-#include "extensions/common/error_utils.h"
-#include "extensions/common/manifest_handlers/background_info.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension_error_utils.h"
+#include "content/public/browser/notification_service.h"
 
 namespace keys = extension_accessibility_api_constants;
-namespace experimental_accessibility =
-    extensions::api::experimental_accessibility;
 
 // Returns the AccessibilityControlInfo serialized into a JSON string,
 // consisting of an array of a single object of type AccessibilityObject,
 // as defined in the accessibility extension api's json schema.
-scoped_ptr<base::ListValue> ControlInfoToEventArguments(
-    const AccessibilityEventInfo* info) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+std::string ControlInfoToJsonString(const AccessibilityEventInfo* info) {
+  ListValue args;
+  DictionaryValue* dict = new DictionaryValue();
   info->SerializeToDict(dict);
-
-  scoped_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(dict);
-  return args.Pass();
+  args.Append(dict);
+  std::string json_args;
+  base::JSONWriter::Write(&args, false, &json_args);
+  return json_args;
 }
 
 ExtensionAccessibilityEventRouter*
@@ -48,10 +42,68 @@ ExtensionAccessibilityEventRouter*
 
 ExtensionAccessibilityEventRouter::ExtensionAccessibilityEventRouter()
     : enabled_(false) {
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_WINDOW_OPENED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_WINDOW_CLOSED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_ACTION,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_TEXT_CHANGED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_MENU_OPENED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED,
+                 content::NotificationService::AllSources());
 }
 
 ExtensionAccessibilityEventRouter::~ExtensionAccessibilityEventRouter() {
-  control_event_callback_.Reset();
+}
+
+void ExtensionAccessibilityEventRouter::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  switch (type) {
+    case chrome::NOTIFICATION_ACCESSIBILITY_WINDOW_OPENED:
+      OnWindowOpened(
+          content::Details<const AccessibilityWindowInfo>(details).ptr());
+      break;
+    case chrome::NOTIFICATION_ACCESSIBILITY_WINDOW_CLOSED:
+      OnWindowClosed(
+          content::Details<const AccessibilityWindowInfo>(details).ptr());
+      break;
+    case chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED:
+      OnControlFocused(
+          content::Details<const AccessibilityControlInfo>(details).ptr());
+      break;
+    case chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_ACTION:
+      OnControlAction(
+          content::Details<const AccessibilityControlInfo>(details).ptr());
+      break;
+    case chrome::NOTIFICATION_ACCESSIBILITY_TEXT_CHANGED:
+      OnTextChanged(
+          content::Details<const AccessibilityControlInfo>(details).ptr());
+      break;
+    case chrome::NOTIFICATION_ACCESSIBILITY_MENU_OPENED:
+      OnMenuOpened(
+          content::Details<const AccessibilityMenuInfo>(details).ptr());
+      break;
+    case chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED:
+      OnMenuClosed(
+          content::Details<const AccessibilityMenuInfo>(details).ptr());
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 void ExtensionAccessibilityEventRouter::SetAccessibilityEnabled(bool enabled) {
@@ -62,160 +114,61 @@ bool ExtensionAccessibilityEventRouter::IsAccessibilityEnabled() const {
   return enabled_;
 }
 
-void ExtensionAccessibilityEventRouter::SetControlEventCallbackForTesting(
-    ControlEventCallback control_event_callback) {
-  DCHECK(control_event_callback_.is_null());
-  control_event_callback_ = control_event_callback;
-}
-
-void ExtensionAccessibilityEventRouter::ClearControlEventCallback() {
-  control_event_callback_.Reset();
-}
-
-void ExtensionAccessibilityEventRouter::HandleWindowEvent(
-    ui::AccessibilityTypes::Event event,
-    const AccessibilityWindowInfo* info) {
-  if (!control_event_callback_.is_null())
-    control_event_callback_.Run(event, info);
-
-  if (event == ui::AccessibilityTypes::EVENT_ALERT)
-    OnWindowOpened(info);
-}
-
-void ExtensionAccessibilityEventRouter::HandleMenuEvent(
-    ui::AccessibilityTypes::Event event,
-    const AccessibilityMenuInfo* info) {
-  switch (event) {
-    case ui::AccessibilityTypes::EVENT_MENUSTART:
-    case ui::AccessibilityTypes::EVENT_MENUPOPUPSTART:
-      OnMenuOpened(info);
-      break;
-    case ui::AccessibilityTypes::EVENT_MENUEND:
-    case ui::AccessibilityTypes::EVENT_MENUPOPUPEND:
-      OnMenuClosed(info);
-      break;
-    case ui::AccessibilityTypes::EVENT_FOCUS:
-      OnControlFocused(info);
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
-void ExtensionAccessibilityEventRouter::HandleControlEvent(
-    ui::AccessibilityTypes::Event event,
-    const AccessibilityControlInfo* info) {
-  if (!control_event_callback_.is_null())
-    control_event_callback_.Run(event, info);
-
-  switch (event) {
-    case ui::AccessibilityTypes::EVENT_TEXT_CHANGED:
-    case ui::AccessibilityTypes::EVENT_SELECTION_CHANGED:
-      OnTextChanged(info);
-      break;
-    case ui::AccessibilityTypes::EVENT_VALUE_CHANGED:
-    case ui::AccessibilityTypes::EVENT_ALERT:
-      OnControlAction(info);
-      break;
-    case ui::AccessibilityTypes::EVENT_FOCUS:
-      OnControlFocused(info);
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
 void ExtensionAccessibilityEventRouter::OnWindowOpened(
     const AccessibilityWindowInfo* info) {
-  scoped_ptr<base::ListValue> args(ControlInfoToEventArguments(info));
-  DispatchEvent(info->profile(),
-                experimental_accessibility::OnWindowOpened::kEventName,
-                args.Pass());
+  std::string json_args = ControlInfoToJsonString(info);
+  DispatchEvent(info->profile(), keys::kOnWindowOpened, json_args);
+}
+
+void ExtensionAccessibilityEventRouter::OnWindowClosed(
+    const AccessibilityWindowInfo* info) {
+  std::string json_args = ControlInfoToJsonString(info);
+  DispatchEvent(info->profile(), keys::kOnWindowClosed, json_args);
 }
 
 void ExtensionAccessibilityEventRouter::OnControlFocused(
     const AccessibilityControlInfo* info) {
   last_focused_control_dict_.Clear();
   info->SerializeToDict(&last_focused_control_dict_);
-  scoped_ptr<base::ListValue> args(ControlInfoToEventArguments(info));
-  DispatchEvent(info->profile(),
-                experimental_accessibility::OnControlFocused::kEventName,
-                args.Pass());
+  std::string json_args = ControlInfoToJsonString(info);
+  DispatchEvent(info->profile(), keys::kOnControlFocused, json_args);
 }
 
 void ExtensionAccessibilityEventRouter::OnControlAction(
     const AccessibilityControlInfo* info) {
-  scoped_ptr<base::ListValue> args(ControlInfoToEventArguments(info));
-  DispatchEvent(info->profile(),
-                experimental_accessibility::OnControlAction::kEventName,
-                args.Pass());
+  std::string json_args = ControlInfoToJsonString(info);
+  DispatchEvent(info->profile(), keys::kOnControlAction, json_args);
 }
 
 void ExtensionAccessibilityEventRouter::OnTextChanged(
     const AccessibilityControlInfo* info) {
-  scoped_ptr<base::ListValue> args(ControlInfoToEventArguments(info));
-  DispatchEvent(info->profile(),
-                experimental_accessibility::OnTextChanged::kEventName,
-                args.Pass());
+  std::string json_args = ControlInfoToJsonString(info);
+  DispatchEvent(info->profile(), keys::kOnTextChanged, json_args);
 }
 
 void ExtensionAccessibilityEventRouter::OnMenuOpened(
     const AccessibilityMenuInfo* info) {
-  scoped_ptr<base::ListValue> args(ControlInfoToEventArguments(info));
-  DispatchEvent(info->profile(),
-                experimental_accessibility::OnMenuOpened::kEventName,
-                args.Pass());
+  std::string json_args = ControlInfoToJsonString(info);
+  DispatchEvent(info->profile(), keys::kOnMenuOpened, json_args);
 }
 
 void ExtensionAccessibilityEventRouter::OnMenuClosed(
     const AccessibilityMenuInfo* info) {
-  scoped_ptr<base::ListValue> args(ControlInfoToEventArguments(info));
-  DispatchEvent(info->profile(),
-                experimental_accessibility::OnMenuClosed::kEventName,
-                args.Pass());
-}
-
-void ExtensionAccessibilityEventRouter::OnChromeVoxLoadStateChanged(
-    Profile* profile,
-    bool loading,
-    bool make_announcements) {
-  scoped_ptr<base::ListValue> event_args(new base::ListValue());
-  event_args->Append(base::Value::CreateBooleanValue(loading));
-  event_args->Append(base::Value::CreateBooleanValue(make_announcements));
-  ExtensionAccessibilityEventRouter::DispatchEventToChromeVox(profile,
-      experimental_accessibility::OnChromeVoxLoadStateChanged::kEventName,
-      event_args.Pass());
-}
-
-// Static.
-void ExtensionAccessibilityEventRouter::DispatchEventToChromeVox(
-    Profile* profile,
-    const char* event_name,
-    scoped_ptr<base::ListValue> event_args) {
-  extensions::ExtensionSystem* system =
-      extensions::ExtensionSystem::Get(profile);
-  if (!system)
-    return;
-  scoped_ptr<extensions::Event> event(new extensions::Event(event_name,
-                                                            event_args.Pass()));
-  system->event_router()->DispatchEventToExtension(
-      extension_misc::kChromeVoxExtensionId, event.Pass());
+  std::string json_args = ControlInfoToJsonString(info);
+  DispatchEvent(info->profile(), keys::kOnMenuClosed, json_args);
 }
 
 void ExtensionAccessibilityEventRouter::DispatchEvent(
     Profile* profile,
     const char* event_name,
-    scoped_ptr<base::ListValue> event_args) {
-  if (enabled_ && profile &&
-      extensions::ExtensionSystem::Get(profile)->event_router()) {
-    scoped_ptr<extensions::Event> event(new extensions::Event(
-        event_name, event_args.Pass()));
-    extensions::ExtensionSystem::Get(profile)->event_router()->
-        BroadcastEvent(event.Pass());
+    const std::string& json_args) {
+  if (enabled_ && profile && profile->GetExtensionEventRouter()) {
+    profile->GetExtensionEventRouter()->DispatchEventToRenderers(
+        event_name, json_args, NULL, GURL());
   }
 }
 
-bool AccessibilitySetAccessibilityEnabledFunction::RunImpl() {
+bool SetAccessibilityEnabledFunction::RunImpl() {
   bool enabled;
   EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(0, &enabled));
   ExtensionAccessibilityEventRouter::GetInstance()
@@ -223,71 +176,53 @@ bool AccessibilitySetAccessibilityEnabledFunction::RunImpl() {
   return true;
 }
 
-bool AccessibilitySetNativeAccessibilityEnabledFunction::RunImpl() {
-  bool enabled;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(0, &enabled));
-  if (enabled) {
-    content::BrowserAccessibilityState::GetInstance()->
-        EnableAccessibility();
-  } else {
-    content::BrowserAccessibilityState::GetInstance()->
-        DisableAccessibility();
-  }
-  return true;
-}
-
-bool AccessibilityGetFocusedControlFunction::RunImpl() {
+bool GetFocusedControlFunction::RunImpl() {
   // Get the serialized dict from the last focused control and return it.
   // However, if the dict is empty, that means we haven't seen any focus
   // events yet, so return null instead.
   ExtensionAccessibilityEventRouter *accessibility_event_router =
       ExtensionAccessibilityEventRouter::GetInstance();
-  base::DictionaryValue *last_focused_control_dict =
+  DictionaryValue *last_focused_control_dict =
       accessibility_event_router->last_focused_control_dict();
   if (last_focused_control_dict->size()) {
-    SetResult(last_focused_control_dict->DeepCopyWithoutEmptyChildren());
+    result_.reset(last_focused_control_dict->DeepCopyWithoutEmptyChildren());
   } else {
-    SetResult(base::Value::CreateNullValue());
+    result_.reset(Value::CreateNullValue());
   }
   return true;
 }
 
-bool AccessibilityGetAlertsForTabFunction::RunImpl() {
+bool GetAlertsForTabFunction::RunImpl() {
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &tab_id));
 
   TabStripModel* tab_strip = NULL;
-  content::WebContents* contents = NULL;
+  TabContentsWrapper* contents = NULL;
   int tab_index = -1;
-  if (!extensions::ExtensionTabUtil::GetTabById(tab_id,
-                                                GetProfile(),
-                                                include_incognito(),
-                                                NULL,
-                                                &tab_strip,
-                                                &contents,
-                                                &tab_index)) {
-    error_ = extensions::ErrorUtils::FormatErrorMessage(
-        extensions::tabs_constants::kTabNotFoundError,
+  if (!ExtensionTabUtil::GetTabById(tab_id, profile(), include_incognito(),
+                                    NULL, &tab_strip, &contents, &tab_index)) {
+    error_ = ExtensionErrorUtils::FormatErrorMessage(
+        extension_tabs_module_constants::kTabNotFoundError,
         base::IntToString(tab_id));
     return false;
   }
 
-  base::ListValue* alerts_value = new base::ListValue;
+  ListValue* alerts_value = new ListValue;
 
-  InfoBarService* infobar_service = InfoBarService::FromWebContents(contents);
-  for (size_t i = 0; i < infobar_service->infobar_count(); ++i) {
+  InfoBarTabHelper* infobar_helper = contents->infobar_tab_helper();
+  for (size_t i = 0; i < infobar_helper->infobar_count(); ++i) {
     // TODO(hashimoto): Make other kind of alerts available.  crosbug.com/24281
+    InfoBarDelegate* infobar_delegate = infobar_helper->GetInfoBarDelegateAt(i);
     ConfirmInfoBarDelegate* confirm_infobar_delegate =
-        infobar_service->infobar_at(i)->delegate()->AsConfirmInfoBarDelegate();
+        infobar_delegate->AsConfirmInfoBarDelegate();
     if (confirm_infobar_delegate) {
-      base::DictionaryValue* alert_value = new base::DictionaryValue;
-      const base::string16 message_text =
-          confirm_infobar_delegate->GetMessageText();
+      DictionaryValue* alert_value = new DictionaryValue;
+      const string16 message_text = confirm_infobar_delegate->GetMessageText();
       alert_value->SetString(keys::kMessageKey, message_text);
       alerts_value->Append(alert_value);
     }
   }
 
-  SetResult(alerts_value);
+  result_.reset(alerts_value);
   return true;
 }

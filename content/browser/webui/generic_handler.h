@@ -4,6 +4,7 @@
 
 #ifndef CONTENT_BROWSER_WEBUI_GENERIC_HANDLER_H_
 #define CONTENT_BROWSER_WEBUI_GENERIC_HANDLER_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -12,10 +13,8 @@ namespace base {
 class ListValue;
 }
 
-namespace content {
-
 // A place to add handlers for messages shared across all WebUI pages.
-class GenericHandler : public WebUIMessageHandler {
+class GenericHandler : public content::WebUIMessageHandler {
  public:
   GenericHandler();
   virtual ~GenericHandler();
@@ -29,6 +28,4 @@ class GenericHandler : public WebUIMessageHandler {
   DISALLOW_COPY_AND_ASSIGN(GenericHandler);
 };
 
-}  // namespace content
-
-#endif  // namespace content
+#endif  // CONTENT_BROWSER_WEBUI_GENERIC_HANDLER_H_

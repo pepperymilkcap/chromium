@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class Profile;
 
@@ -18,7 +18,7 @@ class PrerenderManager;
 // Singleton that owns all PrerenderManagers and associates them with Profiles.
 // Listens for the Profile's destruction notification and cleans up the
 // associated PrerenderManager.
-class PrerenderManagerFactory : public BrowserContextKeyedServiceFactory {
+class PrerenderManagerFactory : public ProfileKeyedServiceFactory {
  public:
   // Returns the PrerenderManager for |profile|.
   static PrerenderManager* GetForProfile(Profile* profile);
@@ -31,13 +31,11 @@ class PrerenderManagerFactory : public BrowserContextKeyedServiceFactory {
   PrerenderManagerFactory();
   virtual ~PrerenderManagerFactory();
 
-  // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  // ProfileKeyedServiceFactory:
+  virtual ProfileKeyedService* BuildServiceInstanceFor(
+      Profile* profile) const OVERRIDE;
 };
 
-}  // namespace prerender
+}  // end namespace prerender
 
 #endif  // CHROME_BROWSER_PRERENDER_PRERENDER_MANAGER_FACTORY_H_

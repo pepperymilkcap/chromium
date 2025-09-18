@@ -5,90 +5,85 @@
 #include "chrome/app/chrome_main_delegate.h"
 
 #include "base/command_line.h"
-#include "base/environment.h"
-#include "base/files/file_path.h"
-#include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
-#include "base/metrics/statistics_recorder.h"
+#include "base/message_loop.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
-#include "base/process/memory.h"
-#include "base/process/process_handle.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/process_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/policy/policy_path_parser.h"
+#include "chrome/browser/diagnostics/diagnostics_main.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/profiling.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
-#include "components/nacl/common/nacl_switches.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
+#include "content/app/content_main.h"
+#include "content/common/content_counters.h"
+#include "content/public/app/content_main_delegate.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
+#include "content/public/common/content_switches.h"
+#include "media/base/media.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_WIN)
+#include <algorithm>
 #include <atlbase.h>
 #include <malloc.h>
-#include <algorithm>
-#include "base/strings/string_util.h"
-#include "chrome/common/child_process_logging.h"
-#include "sandbox/win/src/sandbox.h"
+#include "base/string_util.h"
+#include "base/win/registry.h"
+#include "chrome/browser/policy/policy_path_parser.h"
+#include "policy/policy_constants.h"
+#include "sandbox/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
-#include "ui/base/resource/resource_bundle_win.h"
 #endif
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #include "base/mac/os_crash_dumps.h"
+#include "chrome/app/breakpad_mac.h"
 #include "chrome/app/chrome_main_mac.h"
 #include "chrome/browser/mac/relauncher.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/mac/cfbundle_blocker.h"
 #include "chrome/common/mac/objc_zombie.h"
-#include "components/breakpad/app/breakpad_mac.h"
 #include "grit/chromium_strings.h"
+#include "third_party/WebKit/Source/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #endif
 
 #if defined(OS_POSIX)
 #include <locale.h>
 #include <signal.h>
-#include "chrome/app/chrome_breakpad_client.h"
-#include "components/breakpad/app/breakpad_client.h"
 #endif
 
-#if !defined(DISABLE_NACL) && defined(OS_LINUX)
-#include "components/nacl/common/nacl_paths.h"
-#include "components/nacl/zygote/nacl_fork_delegate_linux.h"
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#include "chrome/app/nacl_fork_delegate_linux.h"
 #endif
 
 #if defined(OS_CHROMEOS)
 #include "base/sys_info.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chromeos/chromeos_paths.h"
-#include "chromeos/chromeos_switches.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "chrome/common/descriptors_android.h"
-#else
-// Diagnostics is only available on non-android platforms.
-#include "chrome/browser/diagnostics/diagnostics_controller.h"
-#include "chrome/browser/diagnostics/diagnostics_writer.h"
+#if defined(TOOLKIT_USES_GTK)
+#include <gdk/gdk.h>
+#include <glib.h>
+#include <gtk/gtk.h>
 #endif
 
 #if defined(USE_X11)
@@ -97,28 +92,18 @@
 #include "ui/base/x/x11_util.h"
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include "components/breakpad/app/breakpad_linux.h"
+#if defined(USE_LINUX_BREAKPAD)
+#include "chrome/app/breakpad_linux.h"
 #endif
 
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 base::LazyInstance<chrome::ChromeContentBrowserClient>
     g_chrome_content_browser_client = LAZY_INSTANCE_INITIALIZER;
-#endif
-
-#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
-base::LazyInstance<ChromeContentRendererClient>
+base::LazyInstance<chrome::ChromeContentRendererClient>
     g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentUtilityClient>
     g_chrome_content_utility_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentPluginClient>
     g_chrome_content_plugin_client = LAZY_INSTANCE_INITIALIZER;
-#endif
-
-#if defined(OS_POSIX)
-base::LazyInstance<chrome::ChromeBreakpadClient>::Leaky
-    g_chrome_breakpad_client = LAZY_INSTANCE_INITIALIZER;
-#endif
 
 extern int NaClMain(const content::MainFunctionParams&);
 extern int ServiceProcessMain(const content::MainFunctionParams&);
@@ -145,6 +130,56 @@ bool HasDeprecatedArguments(const std::wstring& command_line) {
   StringToLowerASCII(&command_line_lower);
   std::wstring::size_type pos = command_line_lower.find(kChromeHtml);
   return (pos != std::wstring::npos);
+}
+
+// Checks if the registry key exists in the given hive and expands any
+// variables in the string.
+bool LoadUserDataDirPolicyFromRegistry(HKEY hive,
+                                       const std::wstring& key_name,
+                                       FilePath* user_data_dir) {
+  std::wstring value;
+
+  base::win::RegKey policy_key(hive,
+                               policy::kRegistryMandatorySubKey,
+                               KEY_READ);
+  if (policy_key.ReadValue(key_name.c_str(), &value) == ERROR_SUCCESS) {
+    *user_data_dir = FilePath(policy::path_parser::ExpandPathVariables(value));
+    return true;
+  }
+  return false;
+}
+
+void CheckUserDataDirPolicy(FilePath* user_data_dir) {
+  DCHECK(user_data_dir);
+  // We are running as Chrome Frame if we were invoked with user-data-dir,
+  // chrome-frame, and automation-channel switches.
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const bool is_chrome_frame =
+      !user_data_dir->empty() &&
+      command_line->HasSwitch(switches::kChromeFrame) &&
+      command_line->HasSwitch(switches::kAutomationClientChannelID);
+
+  // In the case of Chrome Frame, the last path component of the user-data-dir
+  // provided on the command line must be preserved since it is specific to
+  // CF's host.
+  FilePath cf_host_dir;
+  if (is_chrome_frame)
+    cf_host_dir = user_data_dir->BaseName();
+
+  // Policy from the HKLM hive has precedence over HKCU so if we have one here
+  // we don't have to try to load HKCU.
+  const char* key_name_ascii = (is_chrome_frame ? policy::key::kGCFUserDataDir :
+                                policy::key::kUserDataDir);
+  std::wstring key_name(ASCIIToWide(key_name_ascii));
+  if (LoadUserDataDirPolicyFromRegistry(HKEY_LOCAL_MACHINE, key_name,
+                                        user_data_dir) ||
+      LoadUserDataDirPolicyFromRegistry(HKEY_CURRENT_USER, key_name,
+                                        user_data_dir)) {
+    // A Group Policy value was loaded.  Append the Chrome Frame host directory
+    // if relevant.
+    if (is_chrome_frame)
+      *user_data_dir = user_data_dir->Append(cf_host_dir);
+  }
 }
 
 // If we try to access a path that is not currently available, we want the call
@@ -226,6 +261,26 @@ void EnableHeapProfiler(const CommandLine& command_line) {
 #endif
 }
 
+void InitializeChromeContentRendererClient() {
+  content::GetContentClient()->set_renderer(
+      &g_chrome_content_renderer_client.Get());
+}
+
+void InitializeChromeContentClient(const std::string& process_type) {
+  if (process_type.empty()) {
+    content::GetContentClient()->set_browser(
+        &g_chrome_content_browser_client.Get());
+  } else if (process_type == switches::kPluginProcess) {
+    content::GetContentClient()->set_plugin(
+        &g_chrome_content_plugin_client.Get());
+  } else if (process_type == switches::kRendererProcess) {
+    InitializeChromeContentRendererClient();
+  } else if (process_type == switches::kUtilityProcess) {
+    content::GetContentClient()->set_utility(
+        &g_chrome_content_utility_client.Get());
+  }
+}
+
 // Returns true if this subprocess type needs the ResourceBundle initialized
 // and resources loaded.
 bool SubprocessNeedsResourceBundle(const std::string& process_type) {
@@ -251,6 +306,32 @@ bool SubprocessNeedsResourceBundle(const std::string& process_type) {
       process_type == switches::kRendererProcess ||
       process_type == switches::kUtilityProcess;
 }
+
+#if defined(OS_MACOSX)
+// Update the name shown in Activity Monitor so users are less likely to ask
+// why Chrome has so many processes.
+void SetMacProcessName(const CommandLine& command_line) {
+  std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
+  // Don't worry about the browser process, its gets the stock name.
+  int name_id = 0;
+  if (command_line.HasSwitch(switches::kExtensionProcess)) {
+    name_id = IDS_WORKER_APP_NAME;
+  } else if (process_type == switches::kRendererProcess) {
+    name_id = IDS_RENDERER_APP_NAME;
+  } else if (process_type == switches::kPluginProcess ||
+             process_type == switches::kPpapiPluginProcess) {
+    name_id = IDS_PLUGIN_APP_NAME;
+  } else if (process_type == switches::kUtilityProcess) {
+    name_id = IDS_UTILITY_APP_NAME;
+  }
+  if (name_id) {
+    NSString* app_name = l10n_util::GetNSString(name_id);
+    base::mac::SetProcessName(base::mac::NSToCFCast(app_name));
+  }
+}
+
+#endif  // defined(OS_MACOSX)
 
 #if defined(OS_POSIX)
 // Check for --version and --product-version; return true if we encountered
@@ -281,14 +362,14 @@ bool HandleVersionSwitches(const CommandLine& command_line) {
 void HandleHelpSwitches(const CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kHelp) ||
       command_line.HasSwitch(switches::kHelpShort)) {
-    base::FilePath binary(command_line.argv()[0]);
+    FilePath binary(command_line.argv()[0]);
     execlp("man", "man", binary.BaseName().value().c_str(), NULL);
     PLOG(FATAL) << "execlp failed";
   }
 }
 #endif
 
-#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if !defined(OS_MACOSX)
 void SIGTERMProfilingShutdown(int signal) {
   Profiling::Stop();
   struct sigaction sigact;
@@ -305,7 +386,7 @@ void SetUpProfilingShutdownHandler() {
   sigemptyset(&sigact.sa_mask);
   CHECK(sigaction(SIGTERM, &sigact, NULL) == 0);
 }
-#endif  // !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#endif
 
 #endif  // OS_POSIX
 
@@ -317,15 +398,6 @@ struct MainFunction {
 }  // namespace
 
 ChromeMainDelegate::ChromeMainDelegate() {
-#if defined(OS_ANDROID)
-// On Android the main entry point time is the time when the Java code starts.
-// This happens before the shared library containing this code is even loaded.
-// The Java startup code has recorded that time, but the C++ code can't fetch it
-// from the Java side until it has initialized the JNI. See
-// ChromeMainDelegateAndroid.
-#else
-  startup_metric_utils::RecordMainEntryPointTime();
-#endif
 }
 
 ChromeMainDelegate::~ChromeMainDelegate() {
@@ -361,6 +433,13 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 #endif
 #endif  // OS_POSIX
 
+  // If we are in diagnostics mode this is the end of the line. After the
+  // diagnostics are run the process will invariably exit.
+  if (command_line.HasSwitch(switches::kDiagnostics)) {
+    *exit_code = DiagnosticsMain(command_line);
+    return true;
+  }
+
 #if defined(OS_WIN)
   // Must do this before any other usage of command line!
   if (HasDeprecatedArguments(command_line.GetCommandLineString())) {
@@ -369,105 +448,10 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
   }
 #endif
 
-  chrome::RegisterPathProvider();
-#if defined(OS_CHROMEOS)
-  chromeos::RegisterPathProvider();
-#endif
-#if !defined(DISABLE_NACL) && defined(OS_LINUX)
-  nacl::RegisterPathProvider();
-#endif
-
-// No support for ANDROID yet as DiagnosticsController needs wchar support.
-// TODO(gspencer): That's not true anymore, or at least there are no w-string
-// references anymore. Not sure if that means this can be enabled on Android or
-// not though.  As there is no easily accessible command line on Android, I'm
-// not sure this is a big deal.
-#if !defined(OS_ANDROID) && !defined(CHROME_MULTIPLE_DLL_CHILD)
-  // If we are in diagnostics mode this is the end of the line: after the
-  // diagnostics are run the process will invariably exit.
-  if (command_line.HasSwitch(switches::kDiagnostics)) {
-    diagnostics::DiagnosticsWriter::FormatType format =
-        diagnostics::DiagnosticsWriter::HUMAN;
-    if (command_line.HasSwitch(switches::kDiagnosticsFormat)) {
-      std::string format_str =
-          command_line.GetSwitchValueASCII(switches::kDiagnosticsFormat);
-      if (format_str == "machine") {
-        format = diagnostics::DiagnosticsWriter::MACHINE;
-      } else if (format_str == "log") {
-        format = diagnostics::DiagnosticsWriter::LOG;
-      } else {
-        DCHECK_EQ("human", format_str);
-      }
-    }
-
-    diagnostics::DiagnosticsWriter writer(format);
-    *exit_code = diagnostics::DiagnosticsController::GetInstance()->Run(
-        command_line, &writer);
-    diagnostics::DiagnosticsController::GetInstance()->ClearResults();
-    return true;
+  if (!command_line.HasSwitch(switches::kProcessType) &&
+      command_line.HasSwitch(switches::kEnableBenchmarking)) {
+    base::FieldTrial::EnableBenchmarking();
   }
-#endif
-
-#if defined(OS_CHROMEOS)
-  // If we are recovering from a crash on ChromeOS, then we will do some
-  // recovery using the diagnostics module, and then continue on. We fake up a
-  // command line to tell it that we want it to recover, and to preserve the
-  // original command line.
-  if (command_line.HasSwitch(chromeos::switches::kLoginUser) ||
-      command_line.HasSwitch(switches::kDiagnosticsRecovery)) {
-
-    // The statistics subsystem needs get initialized soon enough for the
-    // statistics to be collected.  It's safe to call this more than once.
-    base::StatisticsRecorder::Initialize();
-
-    CommandLine interim_command_line(command_line.GetProgram());
-    const char* kSwitchNames[] = {switches::kUserDataDir, };
-    interim_command_line.CopySwitchesFrom(
-        command_line, kSwitchNames, arraysize(kSwitchNames));
-    interim_command_line.AppendSwitch(switches::kDiagnostics);
-    interim_command_line.AppendSwitch(switches::kDiagnosticsRecovery);
-
-    diagnostics::DiagnosticsWriter::FormatType format =
-        diagnostics::DiagnosticsWriter::LOG;
-    if (command_line.HasSwitch(switches::kDiagnosticsFormat)) {
-      std::string format_str =
-          command_line.GetSwitchValueASCII(switches::kDiagnosticsFormat);
-      if (format_str == "machine") {
-        format = diagnostics::DiagnosticsWriter::MACHINE;
-      } else if (format_str == "human") {
-        format = diagnostics::DiagnosticsWriter::HUMAN;
-      } else {
-        DCHECK_EQ("log", format_str);
-      }
-    }
-
-    diagnostics::DiagnosticsWriter writer(format);
-    int diagnostics_exit_code =
-        diagnostics::DiagnosticsController::GetInstance()->Run(command_line,
-                                                               &writer);
-    if (diagnostics_exit_code) {
-      // Diagnostics has failed somehow, so we exit.
-      *exit_code = diagnostics_exit_code;
-      return true;
-    }
-
-    // Now we run the actual recovery tasks.
-    int recovery_exit_code =
-        diagnostics::DiagnosticsController::GetInstance()->RunRecovery(
-            command_line, &writer);
-
-    if (recovery_exit_code) {
-      // Recovery has failed somehow, so we exit.
-      *exit_code = recovery_exit_code;
-      return true;
-    }
-  } else {  // Not running diagnostics or recovery.
-    diagnostics::DiagnosticsController::GetInstance()->RecordRegularStartup();
-  }
-#endif
-
-  content::SetContentClient(&chrome_content_client_);
-
   return false;
 }
 
@@ -478,7 +462,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
   // CommandLine::Init() and chrome::RegisterPathProvider().  Ideally,
   // Breakpad initialization could occur sooner, preferably even before the
   // framework dylib is even loaded, to catch potential early crashes.
-  breakpad::InitCrashReporter(process_type);
+  InitCrashReporter();
 
 #if defined(NDEBUG)
   bool is_debug_build = false;
@@ -503,7 +487,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
   if (!command_line.HasSwitch(switches::kDisableBreakpad)) {
     bool disable_apple_crash_reporter = is_debug_build ||
         base::mac::IsBackgroundOnlyProcess();
-    if (!breakpad::IsCrashReporterEnabled() && disable_apple_crash_reporter) {
+    if (!IsCrashReporterEnabled() && disable_apple_crash_reporter) {
       base::mac::DisableOSCrashDumps();
     }
   }
@@ -524,7 +508,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
         << "Helper application requires --type.";
 
     // In addition, some helper flavors only work with certain process types.
-    base::FilePath executable;
+    FilePath executable;
     if (PathService::Get(base::FILE_EXE, &executable) &&
         executable.value().size() >= 3) {
       std::string last_three =
@@ -554,8 +538,8 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
         << "Main application forbids --type, saw " << process_type;
   }
 
-  if (breakpad::IsCrashReporterEnabled())
-    breakpad::InitCrashProcessInfo(process_type);
+  if (IsCrashReporterEnabled())
+    InitCrashProcessInfo();
 }
 #endif  // defined(OS_MACOSX)
 
@@ -564,9 +548,12 @@ void ChromeMainDelegate::PreSandboxStartup() {
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
-#if defined(OS_POSIX)
-  breakpad::SetBreakpadClient(g_chrome_breakpad_client.Pointer());
-#endif
+  // Initialize the content client which that code uses to talk to Chrome.
+  content::SetContentClient(&chrome_content_client_);
+  InitializeChromeContentClient(process_type);
+
+  // Initialize the Chrome path provider.
+  chrome::RegisterPathProvider();
 
 #if defined(OS_MACOSX)
   // On the Mac, the child executable lives at a predefined location within
@@ -578,80 +565,71 @@ void ChromeMainDelegate::PreSandboxStartup() {
   InitMacCrashReporter(command_line, process_type);
 #endif
 
-#if defined(OS_WIN)
-  child_process_logging::Init();
-#endif
-
   // Notice a user data directory override if any
-  base::FilePath user_data_dir =
+  FilePath user_data_dir =
       command_line.GetSwitchValuePath(switches::kUserDataDir);
-#if defined(OS_LINUX)
-  // On Linux, Chrome does not support running multiple copies under different
-  // DISPLAYs, so the profile directory can be specified in the environment to
-  // support the virtual desktop use-case.
-  if (user_data_dir.empty()) {
-    std::string user_data_dir_string;
-    scoped_ptr<base::Environment> environment(base::Environment::Create());
-    if (environment->GetVar("CHROME_USER_DATA_DIR", &user_data_dir_string) &&
-        IsStringUTF8(user_data_dir_string)) {
-      user_data_dir = base::FilePath::FromUTF8Unsafe(user_data_dir_string);
-    }
-  }
-#endif
 #if defined(OS_MACOSX) || defined(OS_WIN)
-  policy::path_parser::CheckUserDataDirPolicy(&user_data_dir);
+  CheckUserDataDirPolicy(&user_data_dir);
 #endif
-  if (!user_data_dir.empty()) {
-    CHECK(PathService::OverrideAndCreateIfNeeded(
-        chrome::DIR_USER_DATA,
-        user_data_dir,
-        chrome::ProcessNeedsProfileDir(process_type)));
-  }
+  if (!user_data_dir.empty())
+    CHECK(PathService::Override(chrome::DIR_USER_DATA, user_data_dir));
 
-  stats_counter_timer_.reset(new base::StatsCounterTimer("Chrome.Init"));
   startup_timer_.reset(new base::StatsScope<base::StatsCounterTimer>
-                       (*stats_counter_timer_));
+                       (content::Counters::chrome_main()));
 
   // Enable the heap profiler as early as possible!
   EnableHeapProfiler(command_line);
 
   // Enable Message Loop related state asap.
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
-    base::MessageLoop::EnableHistogrammer(true);
+    MessageLoop::EnableHistogrammer(true);
 
-#if !defined(OS_ANDROID)
-  // Android does InitLogging when library is loaded. Skip here.
+  // Single-process is an unsupported and not fully tested mode, so
+  // don't enable it for official Chrome builds.
+#if !defined(GOOGLE_CHROME_BUILD)
+  if (command_line.HasSwitch(switches::kSingleProcess)) {
+    content::RenderProcessHost::set_run_renderer_in_process(true);
+#if defined(OS_MACOSX)
+    // TODO(port-mac): This is from renderer_main_platform_delegate.cc.
+    // shess tried to refactor things appropriately, but it sprawled out
+    // of control because different platforms needed different styles of
+    // initialization.  Try again once we understand the process
+    // architecture needed and where it should live.
+    InitWebCoreSystemInterface();
+#endif
+
+    InitializeChromeContentRendererClient();
+  }
+#endif  // GOOGLE_CHROME_BUILD
+
   logging::OldFileDeletionState file_state =
       logging::APPEND_TO_OLD_LOG_FILE;
   if (process_type.empty()) {
     file_state = logging::DELETE_OLD_LOG_FILE;
   }
   logging::InitChromeLogging(command_line, file_state);
-#endif
+
+  // Register internal Chrome schemes so they'll be parsed correctly. This
+  // must happen before we process any URLs with the affected schemes, and
+  // must be done in all processes that work with these URLs (i.e. including
+  // renderers).
+  chrome::RegisterChromeSchemes();
 
 #if defined(OS_WIN)
   // TODO(darin): Kill this once http://crbug.com/52609 is fixed.
-  ui::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
+  ResourceBundle::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
 #endif
 
   if (SubprocessNeedsResourceBundle(process_type)) {
     // Initialize ResourceBundle which handles files loaded from external
     // sources.  The language should have been passed in to us from the
     // browser process as a command line flag.
-#if defined(DISABLE_NACL)
-    DCHECK(command_line.HasSwitch(switches::kLang) ||
-           process_type == switches::kZygoteProcess ||
-           process_type == switches::kGpuProcess ||
-           process_type == switches::kPpapiBrokerProcess ||
-           process_type == switches::kPpapiPluginProcess);
-#else
     DCHECK(command_line.HasSwitch(switches::kLang) ||
            process_type == switches::kZygoteProcess ||
            process_type == switches::kGpuProcess ||
            process_type == switches::kNaClLoaderProcess ||
            process_type == switches::kPpapiBrokerProcess ||
            process_type == switches::kPpapiPluginProcess);
-#endif
 
     // TODO(markusheintz): The command line flag --lang is actually processed
     // by the CommandLinePrefStore, and made available through the PrefService
@@ -660,67 +638,33 @@ void ChromeMainDelegate::PreSandboxStartup() {
     // this value could be passed in a different way.
     const std::string locale =
         command_line.GetSwitchValueASCII(switches::kLang);
-#if defined(OS_ANDROID)
-    // The renderer sandbox prevents us from accessing our .pak files directly.
-    // Therefore file descriptors to the .pak files that we need are passed in
-    // at process creation time.
-    int locale_pak_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
-        kAndroidLocalePakDescriptor);
-    CHECK(locale_pak_fd != -1);
-    ResourceBundle::InitSharedInstanceWithPakFile(base::File(locale_pak_fd),
-                                                  false);
-
-    int extra_pak_keys[] = {
-      kAndroidChrome100PercentPakDescriptor,
-      kAndroidUIResourcesPakDescriptor,
-    };
-    for (size_t i = 0; i < arraysize(extra_pak_keys); ++i) {
-      int pak_fd =
-          base::GlobalDescriptors::GetInstance()->MaybeGet(extra_pak_keys[i]);
-      CHECK(pak_fd != -1);
-      ResourceBundle::GetSharedInstance().AddDataPackFromFile(
-          base::File(pak_fd), ui::SCALE_FACTOR_100P);
-    }
-
-    base::i18n::SetICUDefaultLocale(locale);
-    const std::string loaded_locale = locale;
-#else
     const std::string loaded_locale =
-        ResourceBundle::InitSharedInstanceWithLocale(locale, NULL);
-
-    base::FilePath resources_pack_path;
-    PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-    ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-        resources_pack_path, ui::SCALE_FACTOR_NONE);
-#endif
+        ResourceBundle::InitSharedInstanceWithLocale(locale);
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " <<
         locale;
 
-#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
-    if (process_type == switches::kUtilityProcess ||
-        process_type == switches::kZygoteProcess) {
-      chrome::ChromeContentUtilityClient::PreSandboxStartup();
-    }
+#if defined(OS_MACOSX)
+    // Update the process name (need resources to get the strings, so
+    // only do this when ResourcesBundle has been initialized).
+    SetMacProcessName(command_line);
+#endif  // defined(OS_MACOSX)
+  }
+
+#if defined(USE_LINUX_BREAKPAD)
+  // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain
+  // sets this up for the browser process in a different manner. Zygotes
+  // need to call InitCrashReporter() in RunZygote().
+  if (!process_type.empty() && process_type != switches::kZygoteProcess)
+    InitCrashReporter();
 #endif
-  }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Zygote needs to call InitCrashReporter() in RunZygote().
-  if (process_type != switches::kZygoteProcess) {
-#if defined(OS_ANDROID)
-    if (process_type.empty())
-      breakpad::InitCrashReporter(process_type);
-    else
-      breakpad::InitNonBrowserCrashReporterForAndroid(process_type);
-#else  // !defined(OS_ANDROID)
-    breakpad::InitCrashReporter(process_type);
-#endif  // defined(OS_ANDROID)
-  }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
-
-  // After all the platform Breakpads have been initialized, store the command
-  // line for crash reporting.
-  crash_keys::SetSwitchesFromCommandLine(&command_line);
+#if defined(OS_CHROMEOS)
+  // Read and cache ChromeOS version from file,
+  // to be used from inside the sandbox.
+  int32 major_version, minor_version, bugfix_version;
+  base::SysInfo::OperatingSystemVersionNumbers(
+      &major_version, &minor_version, &bugfix_version);
+#endif
 }
 
 void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
@@ -739,27 +683,14 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
 int ChromeMainDelegate::RunProcess(
     const std::string& process_type,
     const content::MainFunctionParams& main_function_params) {
-  // ANDROID doesn't support "service", so no ServiceProcessMain, and arraysize
-  // doesn't support empty array. So we comment out the block for Android.
-#if !defined(OS_ANDROID)
   static const MainFunction kMainFunctions[] = {
-#if defined(ENABLE_FULL_PRINTING) && !defined(CHROME_MULTIPLE_DLL_CHILD)
     { switches::kServiceProcess,     ServiceProcessMain },
-#endif
-
 #if defined(OS_MACOSX)
     { switches::kRelauncherProcess,
       mac_relauncher::internal::RelauncherMain },
 #endif
-
-    // This entry is not needed on Linux, where the NaCl loader
-    // process is launched via nacl_helper instead.
-#if !defined(DISABLE_NACL) && !defined(CHROME_MULTIPLE_DLL_BROWSER) && \
-    !defined(OS_LINUX)
-    { switches::kNaClLoaderProcess,  NaClMain },
-#else
-    { "<invalid>", NULL },  // To avoid constant array of size 0
-                            // when DISABLE_NACL and CHROME_MULTIPLE_DLL_CHILD
+#if !defined(DISABLE_NACL)
+    { switches::kNaClLoaderProcess, NaClMain },
 #endif  // DISABLE_NACL
   };
 
@@ -767,20 +698,16 @@ int ChromeMainDelegate::RunProcess(
     if (process_type == kMainFunctions[i].name)
       return kMainFunctions[i].function(main_function_params);
   }
-#endif
 
-  return -1;
+  NOTREACHED() << "Unknown process type: " << process_type;
+  return 1;
 }
 
 void ChromeMainDelegate::ProcessExiting(const std::string& process_type) {
   if (SubprocessNeedsResourceBundle(process_type))
     ResourceBundle::CleanupSharedInstance();
-#if !defined(OS_ANDROID)
+
   logging::CleanupChromeLogging();
-#else
-  // Android doesn't use InitChromeLogging, so we close the log file manually.
-  logging::CloseLogFile();
-#endif  // !defined(OS_ANDROID)
 }
 
 #if defined(OS_MACOSX)
@@ -801,8 +728,14 @@ bool ChromeMainDelegate::DelaySandboxInitialization(
   return process_type == switches::kNaClLoaderProcess ||
       process_type == switches::kRelauncherProcess;
 }
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
+#elif defined(OS_POSIX)
 content::ZygoteForkDelegate* ChromeMainDelegate::ZygoteStarting() {
+  // Each Renderer we spawn will re-attempt initialization of the media
+  // libraries, at which point failure will be detected and handled, so
+  // we do not need to cope with initialization failures here.
+  FilePath media_path;
+  if (PathService::Get(chrome::DIR_MEDIA_LIBS, &media_path))
+    media::InitializeMediaLibrary(media_path);
 #if defined(DISABLE_NACL)
   return NULL;
 #else
@@ -811,56 +744,22 @@ content::ZygoteForkDelegate* ChromeMainDelegate::ZygoteStarting() {
 }
 
 void ChromeMainDelegate::ZygoteForked() {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
+
   Profiling::ProcessStarted();
   if (Profiling::BeingProfiled()) {
     base::debug::RestartProfilingAfterFork();
     SetUpProfilingShutdownHandler();
   }
 
+#if defined(USE_LINUX_BREAKPAD)
   // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain sets
   // this up for the browser process in a different manner.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  std::string process_type =
-      command_line->GetSwitchValueASCII(switches::kProcessType);
-  breakpad::InitCrashReporter(process_type);
+  InitCrashReporter();
+#endif
 
-  // Reset the command line for the newly spawned process.
-  crash_keys::SetSwitchesFromCommandLine(command_line);
+  InitializeChromeContentClient(process_type);
 }
-
 #endif  // OS_MACOSX
-
-content::ContentBrowserClient*
-ChromeMainDelegate::CreateContentBrowserClient() {
-#if defined(CHROME_MULTIPLE_DLL_CHILD)
-  return NULL;
-#else
-  return &g_chrome_content_browser_client.Get();
-#endif
-}
-
-content::ContentPluginClient* ChromeMainDelegate::CreateContentPluginClient() {
-#if defined(CHROME_MULTIPLE_DLL_BROWSER)
-  return NULL;
-#else
-  return &g_chrome_content_plugin_client.Get();
-#endif
-}
-
-content::ContentRendererClient*
-ChromeMainDelegate::CreateContentRendererClient() {
-#if defined(CHROME_MULTIPLE_DLL_BROWSER)
-  return NULL;
-#else
-  return &g_chrome_content_renderer_client.Get();
-#endif
-}
-
-content::ContentUtilityClient*
-ChromeMainDelegate::CreateContentUtilityClient() {
-#if defined(CHROME_MULTIPLE_DLL_BROWSER)
-  return NULL;
-#else
-  return &g_chrome_content_utility_client.Get();
-#endif
-}

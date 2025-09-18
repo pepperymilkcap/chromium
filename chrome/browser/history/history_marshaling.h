@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,13 @@
 
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_MARSHALING_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_MARSHALING_H_
+#pragma once
 
 #include "base/memory/scoped_vector.h"
-#include "chrome/browser/common/cancelable_request.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/history/history_service.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/page_usage_data.h"
-
-#if defined(OS_ANDROID)
-#include "chrome/browser/history/history_marshaling_android.h"
-#endif
 
 namespace history {
 
@@ -46,9 +43,29 @@ typedef CancelableRequest1<HistoryService::QueryMostVisitedURLsCallback,
                            history::MostVisitedURLList>
     QueryMostVisitedURLsRequest;
 
-typedef CancelableRequest1<HistoryService::QueryFilteredURLsCallback,
-                           history::FilteredURLList>
-    QueryFilteredURLsRequest;
+// Thumbnails -----------------------------------------------------------------
+
+typedef CancelableRequest<HistoryService::ThumbnailDataCallback>
+    GetPageThumbnailRequest;
+
+// Favicons -------------------------------------------------------------------
+
+typedef CancelableRequest<FaviconService::FaviconDataCallback>
+    GetFaviconRequest;
+
+// Downloads ------------------------------------------------------------------
+
+typedef CancelableRequest1<HistoryService::DownloadNextIdCallback,
+                           int/*next_id*/>
+    DownloadNextIdRequest;
+
+
+typedef CancelableRequest1<HistoryService::DownloadQueryCallback,
+                           std::vector<DownloadPersistentStoreInfo> >
+    DownloadQueryRequest;
+
+typedef CancelableRequest<HistoryService::DownloadCreateCallback>
+    DownloadCreateRequest;
 
 // Segment usage --------------------------------------------------------------
 

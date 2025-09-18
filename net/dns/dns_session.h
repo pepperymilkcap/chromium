@@ -4,31 +4,19 @@
 
 #ifndef NET_DNS_DNS_SESSION_H_
 #define NET_DNS_DNS_SESSION_H_
+#pragma once
 
-#include <vector>
-
-#include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
-#include "base/metrics/bucket_ranges.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/net_export.h"
 #include "net/base/rand_callback.h"
 #include "net/dns/dns_config_service.h"
-#include "net/dns/dns_socket_pool.h"
-
-namespace base {
-class BucketRanges;
-class SampleVector;
-}
 
 namespace net {
 
 class ClientSocketFactory;
-class DatagramClientSocket;
 class NetLog;
-class StreamSocket;
 
 // Session parameters and state shared between DNS transactions.
 // Ref-counted so that DnsClient::Request can keep working in absence of
@@ -38,106 +26,40 @@ class NET_EXPORT_PRIVATE DnsSession
  public:
   typedef base::Callback<int()> RandCallback;
 
-  class NET_EXPORT_PRIVATE SocketLease {
-   public:
-    SocketLease(scoped_refptr<DnsSession> session,
-                unsigned server_index,
-                scoped_ptr<DatagramClientSocket> socket);
-    ~SocketLease();
-
-    unsigned server_index() const { return server_index_; }
-
-    DatagramClientSocket* socket() { return socket_.get(); }
-
-   private:
-    scoped_refptr<DnsSession> session_;
-    unsigned server_index_;
-    scoped_ptr<DatagramClientSocket> socket_;
-
-    DISALLOW_COPY_AND_ASSIGN(SocketLease);
-  };
-
   DnsSession(const DnsConfig& config,
-             scoped_ptr<DnsSocketPool> socket_pool,
+             ClientSocketFactory* factory,
              const RandIntCallback& rand_int_callback,
              NetLog* net_log);
 
   const DnsConfig& config() const { return config_; }
   NetLog* net_log() const { return net_log_; }
 
+  ClientSocketFactory* socket_factory() { return socket_factory_.get(); }
+
   // Return the next random query ID.
   int NextQueryId() const;
 
   // Return the index of the first configured server to use on first attempt.
-  unsigned NextFirstServerIndex();
+  int NextFirstServerIndex();
 
-  // Start with |server_index| and find the index of the next known good server
-  // to use on this attempt. Returns |server_index| if this server has no
-  // recorded failures, or if there are no other servers that have not failed
-  // or have failed longer time ago.
-  unsigned NextGoodServerIndex(unsigned server_index);
-
-  // Record that server failed to respond (due to SRV_FAIL or timeout).
-  void RecordServerFailure(unsigned server_index);
-
-  // Record that server responded successfully.
-  void RecordServerSuccess(unsigned server_index);
-
-  // Record how long it took to receive a response from the server.
-  void RecordRTT(unsigned server_index, base::TimeDelta rtt);
-
-  // Record suspected loss of a packet for a specific server.
-  void RecordLostPacket(unsigned server_index, int attempt);
-
-  // Record server stats before it is destroyed.
-  void RecordServerStats();
-
-  // Return the timeout for the next query. |attempt| counts from 0 and is used
-  // for exponential backoff.
-  base::TimeDelta NextTimeout(unsigned server_index, int attempt);
-
-  // Allocate a socket, already connected to the server address.
-  // When the SocketLease is destroyed, the socket will be freed.
-  scoped_ptr<SocketLease> AllocateSocket(unsigned server_index,
-                                         const NetLog::Source& source);
-
-  // Creates a StreamSocket from the factory for a transaction over TCP. These
-  // sockets are not pooled.
-  scoped_ptr<StreamSocket> CreateTCPSocket(unsigned server_index,
-                                           const NetLog::Source& source);
+  // Return the timeout for the next query.
+  base::TimeDelta NextTimeout(int attempt);
 
  private:
   friend class base::RefCounted<DnsSession>;
   ~DnsSession();
 
-  // Release a socket.
-  void FreeSocket(unsigned server_index,
-                  scoped_ptr<DatagramClientSocket> socket);
-
-  // Return the timeout using the TCP timeout method.
-  base::TimeDelta NextTimeoutFromJacobson(unsigned server_index, int attempt);
-
-  // Compute the timeout using the histogram method.
-  base::TimeDelta NextTimeoutFromHistogram(unsigned server_index, int attempt);
-
   const DnsConfig config_;
-  scoped_ptr<DnsSocketPool> socket_pool_;
+  scoped_ptr<ClientSocketFactory> socket_factory_;
   RandCallback rand_callback_;
   NetLog* net_log_;
 
   // Current index into |config_.nameservers| to begin resolution with.
   int server_index_;
 
-  struct ServerStats;
-
-  // Track runtime statistics of each DNS server.
-  ScopedVector<ServerStats> server_stats_;
-
-  // Buckets shared for all |ServerStats::rtt_histogram|.
-  struct RttBuckets : public base::BucketRanges {
-    RttBuckets();
-  };
-  static base::LazyInstance<RttBuckets>::Leaky rtt_buckets_;
+  // TODO(szym): Add current RTT estimate.
+  // TODO(szym): Add TCP connection pool to support DNS over TCP.
+  // TODO(szym): Add UDP port pool to avoid NAT table overload.
 
   DISALLOW_COPY_AND_ASSIGN(DnsSession);
 };
@@ -145,3 +67,4 @@ class NET_EXPORT_PRIVATE DnsSession
 }  // namespace net
 
 #endif  // NET_DNS_DNS_SESSION_H_
+

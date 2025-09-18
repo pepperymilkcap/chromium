@@ -10,32 +10,11 @@ var height = 0;
 var deltaWidth = 20;
 var deltaHeight = 30;
 
-function checkRestoreAfterFullscreen(theWindow) {
-  chrome.test.assertEq('normal', theWindow.state);
-  chrome.test.assertEq(width, theWindow.width);
-  chrome.test.assertEq(height, theWindow.height);
-  chrome.windows.remove(theWindow.id, pass());
-}
-
-function checkFullscreen(theWindow) {
-  if (theWindow.type == 'panel') {
-    // Panels do not support fullscreen.
-    chrome.test.assertEq('normal', theWindow.state);
-  } else {
-    chrome.test.assertEq('fullscreen', theWindow.state);
-  }
-
-  chrome.windows.update(theWindow.id, {'state': 'normal'},
-      pass(checkRestoreAfterFullscreen));
-}
-
 function checkRestoreWithBounds(theWindow) {
   chrome.test.assertEq('normal', theWindow.state);
   chrome.test.assertEq(width, theWindow.width);
   chrome.test.assertEq(height, theWindow.height);
-
-  chrome.windows.update(theWindow.id, {'state': 'fullscreen'},
-    pass(checkFullscreen));
+  chrome.windows.remove(theWindow.id, pass());
 }
 
 function checkMaximized(theWindow) {
@@ -78,13 +57,9 @@ function minimizeWindow(theWindow) {
 }
 
 function testWindowState(windowType) {
-  // Specifying size prevents 'panel' windows from computing size
-  // asynchronously. It ensures panel sizes stay fixed through the test.
-  // Do not use the big size because the maximium panel sizes are based on a
-  // factor of the screen resolution and the try bot might be configured with
-  // 800x600 resolution.
-  chrome.windows.create({ 'url': 'hello.html', 'type': windowType, 'width': 200,
-                          'height': 200 },
+  // Specifying size prevents 'panel' windows from computing size asynchronously. It ensures
+  // panel sizes stay fixed through the test.
+  chrome.windows.create({'url': 'hello.html', 'type': windowType, 'width':200, 'height':300 },
     pass(minimizeWindow));
 }
 

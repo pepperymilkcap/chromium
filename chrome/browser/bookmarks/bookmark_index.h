@@ -4,21 +4,22 @@
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_INDEX_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_INDEX_H_
+#pragma once
 
 #include <map>
 #include <set>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 class BookmarkNode;
-struct BookmarkTitleMatch;
+class Profile;
 class QueryNode;
 class QueryParser;
 
-namespace content {
-class BrowserContext;
+namespace bookmark_utils {
+struct TitleMatch;
 }
 
 namespace history {
@@ -32,9 +33,10 @@ class URLDatabase;
 // BookmarkIndex maintains the index (index_) as a map of sets. The map (type
 // Index) maps from a lower case string to the set (type NodeSet) of
 // BookmarkNodes that contain that string in their title.
+
 class BookmarkIndex {
  public:
-  explicit BookmarkIndex(content::BrowserContext* browser_context);
+  explicit BookmarkIndex(Profile* profile);
   ~BookmarkIndex();
 
   // Invoked when a bookmark has been added to the model.
@@ -45,13 +47,13 @@ class BookmarkIndex {
 
   // Returns up to |max_count| of bookmarks containing the text |query|.
   void GetBookmarksWithTitlesMatching(
-      const base::string16& query,
+      const string16& query,
       size_t max_count,
-      std::vector<BookmarkTitleMatch>* results);
+      std::vector<bookmark_utils::TitleMatch>* results);
 
  private:
   typedef std::set<const BookmarkNode*> NodeSet;
-  typedef std::map<base::string16, NodeSet> Index;
+  typedef std::map<string16, NodeSet> Index;
 
   struct Match;
   typedef std::vector<Match> Matches;
@@ -61,8 +63,8 @@ class BookmarkIndex {
   typedef std::pair<const BookmarkNode*, int> NodeTypedCountPair;
   typedef std::vector<NodeTypedCountPair> NodeTypedCountPairs;
 
-  // Extracts |matches.nodes| into NodeTypedCountPairs, sorts the pairs in
-  // decreasing order of typed count, and then de-dupes the matches.
+  // Extracts |matches.nodes| into NodeTypedCountPairs and sorts the pairs in
+  // decreasing order of typed count.
   void SortMatches(const Matches& matches,
                    NodeTypedCountPairs* node_typed_counts) const;
 
@@ -85,12 +87,12 @@ class BookmarkIndex {
   void AddMatchToResults(const BookmarkNode* node,
                          QueryParser* parser,
                          const std::vector<QueryNode*>& query_nodes,
-                         std::vector<BookmarkTitleMatch>* results);
+                         std::vector<bookmark_utils::TitleMatch>* results);
 
   // Populates |matches| for the specified term. If |first_term| is true, this
   // is the first term in the query. Returns true if there is at least one node
   // matching the term.
-  bool GetBookmarksWithTitleMatchingTerm(const base::string16& term,
+  bool GetBookmarksWithTitleMatchingTerm(const string16& term,
                                          bool first_term,
                                          Matches* matches);
 
@@ -116,17 +118,17 @@ class BookmarkIndex {
                       Matches* result);
 
   // Returns the set of query words from |query|.
-  std::vector<base::string16> ExtractQueryWords(const base::string16& query);
+  std::vector<string16> ExtractQueryWords(const string16& query);
 
   // Adds |node| to |index_|.
-  void RegisterNode(const base::string16& term, const BookmarkNode* node);
+  void RegisterNode(const string16& term, const BookmarkNode* node);
 
   // Removes |node| from |index_|.
-  void UnregisterNode(const base::string16& term, const BookmarkNode* node);
+  void UnregisterNode(const string16& term, const BookmarkNode* node);
 
   Index index_;
 
-  content::BrowserContext* browser_context_;
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkIndex);
 };

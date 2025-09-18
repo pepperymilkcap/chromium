@@ -23,7 +23,7 @@ chrome.test.runTests([
     chrome.test.getConfig(function(config) {
       chrome.tabs.create({
         url: 'view-source:http://localhost:' + config.testServer.port +
-             '/extensions/test_file.html'});
+             '/files/extensions/test_file.html'});
     });
   }
 ]);

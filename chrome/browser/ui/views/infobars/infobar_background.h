@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_INFOBAR_BACKGROUND_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_INFOBAR_BACKGROUND_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/infobars/infobar_delegate.h"

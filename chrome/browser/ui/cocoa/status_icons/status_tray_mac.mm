@@ -13,12 +13,6 @@ StatusTray* StatusTray::Create() {
 StatusTrayMac::StatusTrayMac() {
 }
 
-StatusIcon* StatusTrayMac::CreatePlatformStatusIcon(
-    StatusIconType type,
-    const gfx::ImageSkia& image,
-    const base::string16& tool_tip) {
-  StatusIcon* icon = new StatusIconMac();
-  icon->SetImage(image);
-  icon->SetToolTip(tool_tip);
-  return icon;
+StatusIcon* StatusTrayMac::CreatePlatformStatusIcon() {
+  return new StatusIconMac();
 }

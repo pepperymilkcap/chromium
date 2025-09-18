@@ -8,7 +8,7 @@ var fail = chrome.test.callbackFail;
 function getTestFunctionFor(keys, fails) {
   return function generatedTest () {
     // Debug.
-    console.warn("keys: " + keys + "; fails: " + fails);
+    console.log("keys: " + keys + "; fails: " + fails);
 
     chrome.chromeosInfoPrivate.get(
         keys,
@@ -56,28 +56,5 @@ function generateTestsForKeys(keys) {
   return tests;
 }
 
-function timezoneSetTest() {
-  chrome.chromeosInfoPrivate.set('timezone', 'Pacific/Kiritimati');
-  chrome.chromeosInfoPrivate.get(
-      ["timezone"],
-      pass(
-        function(values) {
-          chrome.test.assertEq(values['timezone'],
-                               'Pacific/Kiritimati');
-        }
-      ));
-}
-
-// Run generated chrome.chromeosInfoPrivate.get() tests.
-var tests = generateTestsForKeys(["hwid",
-                                  "homeProvider",
-                                  "initialLocale",
-                                  "board",
-                                  "isOwner",
-                                  "timezone",
-                                  "supportedTimezones"])
-
-// Add chrome.chromeosInfoPrivate.set() test.
-tests.push(timezoneSetTest);
-
+var tests = generateTestsForKeys(["hwid", "homeProvider", "initialLocale"])
 chrome.test.runTests(tests);

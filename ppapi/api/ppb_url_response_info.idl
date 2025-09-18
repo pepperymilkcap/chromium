@@ -8,8 +8,6 @@
  * responses.
  */
 
-[generate_thunk]
-
 label Chrome {
   M14 = 1.0
 };

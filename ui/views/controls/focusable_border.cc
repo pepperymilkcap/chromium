@@ -5,9 +5,9 @@
 #include "ui/views/controls/focusable_border.h"
 
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/insets.h"
-#include "ui/gfx/skia_util.h"
-#include "ui/native_theme/native_theme.h"
+#include "ui/gfx/native_theme.h"
 
 namespace {
 
@@ -22,45 +22,30 @@ const int kRightInsetSize = 4;
 namespace views {
 
 FocusableBorder::FocusableBorder()
-    : insets_(kTopInsetSize, kLeftInsetSize,
-              kBottomInsetSize, kRightInsetSize),
-      override_color_(SK_ColorWHITE),
-      use_default_color_(true) {
+    : has_focus_(false),
+      insets_(kTopInsetSize, kLeftInsetSize,
+              kBottomInsetSize, kRightInsetSize) {
 }
 
-void FocusableBorder::SetColor(SkColor color) {
-  override_color_ = color;
-  use_default_color_ = false;
-}
-
-void FocusableBorder::UseDefaultColor() {
-  use_default_color_ = true;
-}
-
-void FocusableBorder::Paint(const View& view, gfx::Canvas* canvas) {
+void FocusableBorder::Paint(const View& view, gfx::Canvas* canvas) const {
+  SkRect rect;
+  rect.set(SkIntToScalar(0), SkIntToScalar(0),
+           SkIntToScalar(view.width()), SkIntToScalar(view.height()));
   SkPath path;
-  path.addRect(gfx::RectToSkRect(view.GetLocalBounds()), SkPath::kCW_Direction);
+  path.addRect(rect, SkPath::kCW_Direction);
   SkPaint paint;
   paint.setStyle(SkPaint::kStroke_Style);
-  SkColor color = override_color_;
-  if (use_default_color_) {
-    color = view.GetNativeTheme()->GetSystemColor(
-        view.HasFocus() ? ui::NativeTheme::kColorId_FocusedBorderColor :
-                          ui::NativeTheme::kColorId_UnfocusedBorderColor);
-  }
-
-  paint.setColor(color);
+  SkColor focus_color = gfx::NativeTheme::instance()->GetSystemColor(
+      has_focus_ ? gfx::NativeTheme::kColorId_FocusedBorderColor
+          : gfx::NativeTheme::kColorId_UnfocusedBorderColor);
+  paint.setColor(focus_color);
   paint.setStrokeWidth(SkIntToScalar(2));
 
-  canvas->DrawPath(path, paint);
+  canvas->GetSkCanvas()->drawPath(path, paint);
 }
 
-gfx::Insets FocusableBorder::GetInsets() const {
-  return insets_;
-}
-
-gfx::Size FocusableBorder::GetMinimumSize() const {
-  return gfx::Size();
+void FocusableBorder::GetInsets(gfx::Insets* insets) const {
+  *insets = insets_;
 }
 
 void FocusableBorder::SetInsets(int top, int left, int bottom, int right) {

@@ -2,23 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
+#import "content/browser/find_pasteboard.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-#import "ui/base/cocoa/find_pasteboard.h"
 
 // Expose private variables to make testing easier.
 @interface FindBarCocoaController(Testing)
+- (NSView*)findBarView;
+- (NSString*)findText;
 - (FindBarTextField*)findTextField;
 @end
 
 @implementation FindBarCocoaController(Testing)
+- (NSView*)findBarView {
+  return findBarView_;
+}
+
+- (NSString*)findText {
+  return [findText_ stringValue];
+}
+
 - (FindBarTextField*)findTextField {
   return findText_;
 }
@@ -38,7 +48,7 @@ class FindBarCocoaControllerTest : public CocoaTest {
  public:
   virtual void SetUp() {
     CocoaTest::SetUp();
-    controller_.reset([[FindBarCocoaController alloc] initWithBrowser:nil]);
+    controller_.reset([[FindBarCocoaController alloc] init]);
     [[test_window() contentView] addSubview:[controller_ view]];
   }
 
@@ -48,7 +58,7 @@ class FindBarCocoaControllerTest : public CocoaTest {
   }
 
  protected:
-  base::scoped_nsobject<FindBarCocoaController> controller_;
+  scoped_nsobject<FindBarCocoaController> controller_;
 };
 
 TEST_VIEW(FindBarCocoaControllerTest, [controller_ view])
@@ -82,7 +92,7 @@ TEST_F(FindBarCocoaControllerTest, SetFindText) {
 
   // Set the find text.
   NSString* const kFindText = @"Google";
-  [controller_ setFindText:kFindText selectedRange:NSMakeRange(NSNotFound, 0)];
+  [controller_ setFindText:kFindText];
   EXPECT_EQ(
       NSOrderedSame,
       [[findTextField stringValue] compare:kFindText]);
@@ -105,14 +115,14 @@ TEST_F(FindBarCocoaControllerTest, ResultLabelUpdatesCorrectly) {
 }
 
 TEST_F(FindBarCocoaControllerTest, FindTextIsGlobal) {
-  base::scoped_nsobject<FindBarCocoaController> otherController(
-      [[FindBarCocoaController alloc] initWithBrowser:nil]);
+  scoped_nsobject<FindBarCocoaController> otherController(
+      [[FindBarCocoaController alloc] init]);
   [[test_window() contentView] addSubview:[otherController view]];
 
   // Setting the text in one controller should update the other controller's
   // text as well.
   NSString* const kFindText = @"Respect to the man in the ice cream van";
-  [controller_ setFindText:kFindText selectedRange:NSMakeRange(NSNotFound, 0)];
+  [controller_ setFindText:kFindText];
   EXPECT_EQ(
       NSOrderedSame,
       [[controller_ findText] compare:kFindText]);
@@ -124,7 +134,7 @@ TEST_F(FindBarCocoaControllerTest, FindTextIsGlobal) {
 TEST_F(FindBarCocoaControllerTest, SettingFindTextUpdatesFindPboard) {
   NSString* const kFindText =
       @"It's not a bird, it's not a plane, it must be Dave who's on the train";
-  [controller_ setFindText:kFindText selectedRange:NSMakeRange(NSNotFound, 0)];
+  [controller_ setFindText:kFindText];
   EXPECT_EQ(
       NSOrderedSame,
       [[[FindPasteboard sharedInstance] findText] compare:kFindText]);

@@ -1,9 +1,8 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import logging
-import platform
 import os
 import signal
 import subprocess
@@ -19,51 +18,78 @@ class TimeoutError(Exception):
   pass
 
 
+def _print_line(line, flush=True):
+  # Printing to a text file (including stdout) on Windows always winds up
+  # using \r\n automatically.  On buildbot, this winds up being read by a master
+  # running on Linux, so we manually convert crlf to '\n'
+  print line.rstrip() + '\n',
+  if flush:
+    sys.stdout.flush()
+
+
 def RunSubprocessInBackground(proc):
   """Runs a subprocess in the background. Returns a handle to the process."""
   logging.info("running %s in the background" % " ".join(proc))
   return subprocess.Popen(proc)
 
 
-def RunSubprocess(proc, timeout=0):
+def RunSubprocess(proc, timeout=0, detach=False, background=False):
   """ Runs a subprocess, until it finishes or |timeout| is exceeded and the
   process is killed with taskkill.  A |timeout| <= 0  means no timeout.
 
   Args:
     proc: list of process components (exe + args)
     timeout: how long to wait before killing, <= 0 means wait forever
+    detach: Whether to pass the DETACHED_PROCESS argument to CreateProcess
+        on Windows.  This is used by Purify subprocesses on buildbot which
+        seem to get confused by the parent console that buildbot sets up.
   """
 
   logging.info("running %s, timeout %d sec" % (" ".join(proc), timeout))
-  sys.stdout.flush()
-  sys.stderr.flush()
-
-  # Manually read and print out stdout and stderr.
-  # By default, the subprocess is supposed to inherit these from its parent,
-  # however when run under buildbot, it seems unable to read data from a
-  # grandchild process, so we have to read the child and print the data as if
-  # it came from us for buildbot to read it.  We're not sure why this is
-  # necessary.
-  # TODO(erikkay): should we buffer stderr and stdout separately?
-  p = subprocess.Popen(proc, universal_newlines=True,
-                       bufsize=0,  # unbuffered
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+  if detach:
+    # see MSDN docs for "Process Creation Flags"
+    DETACHED_PROCESS = 0x8
+    p = subprocess.Popen(proc, creationflags=DETACHED_PROCESS)
+  else:
+    # For non-detached processes, manually read and print out stdout and stderr.
+    # By default, the subprocess is supposed to inherit these from its parent,
+    # however when run under buildbot, it seems unable to read data from a
+    # grandchild process, so we have to read the child and print the data as if
+    # it came from us for buildbot to read it.  We're not sure why this is
+    # necessary.
+    # TODO(erikkay): should we buffer stderr and stdout separately?
+    p = subprocess.Popen(proc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
   logging.info("started subprocess")
 
+  # How long to wait (in seconds) before printing progress log messages.
+  progress_delay = 300
+  progress_delay_time = time.time() + progress_delay
   did_timeout = False
   if timeout > 0:
     wait_until = time.time() + timeout
   while p.poll() is None and not did_timeout:
-    # Have to use readline rather than readlines() or "for line in p.stdout:",
-    # otherwise we get buffered even with bufsize=0.
-    line = p.stdout.readline()
-    while line and not did_timeout:
-      sys.stdout.write(line)
-      sys.stdout.flush()
+    if not detach:
       line = p.stdout.readline()
-      if timeout > 0:
-        did_timeout = time.time() > wait_until
+      while line and not did_timeout:
+        _print_line(line)
+        line = p.stdout.readline()
+        if timeout > 0:
+          did_timeout = time.time() > wait_until
+    else:
+      # When we detach, blocking on reading stdout doesn't work, so we sleep
+      # a short time and poll.
+      time.sleep(0.5)
+      if time.time() >= progress_delay_time:
+        # Force output on a periodic basis to avoid getting killed off by the
+        # buildbot.
+        # TODO(erikkay): I'd prefer a less obtrusive 'print ".",' with a flush
+        # but because of how we're doing subprocesses, this doesn't appear to
+        # work reliably.
+        logging.info("%s still running..." % os.path.basename(proc[0]))
+        progress_delay_time = time.time() + progress_delay
+    if timeout > 0:
+      did_timeout = time.time() > wait_until
 
   if did_timeout:
     logging.info("process timed out")
@@ -82,12 +108,12 @@ def RunSubprocess(proc, timeout=0):
     time.sleep(1.0)
     logging.error("TIMEOUT waiting for %s" % proc[0])
     raise TimeoutError(proc[0])
-  else:
-    for line in p.stdout:
-      sys.stdout.write(line)
+  elif not detach:
+    for line in p.stdout.readlines():
+      _print_line(line, False)
     if not IsMac():   # stdout flush fails on Mac
       logging.info("flushing stdout")
-      sys.stdout.flush()
+      p.stdout.flush()
 
   logging.info("collecting result code")
   result = p.poll()
@@ -108,42 +134,6 @@ def IsWindows():
   return sys.platform == 'cygwin' or sys.platform.startswith('win')
 
 
-def WindowsVersionName():
-  """Returns the name of the Windows version if it is known, or None.
-
-  Possible return values are: xp, vista, 7, 8, or None
-  """
-  if sys.platform == 'cygwin':
-    # Windows version number is hiding in system name.  Looks like:
-    # CYGWIN_NT-6.1-WOW64
-    try:
-      version_str = platform.uname()[0].split('-')[1]
-    except:
-      return None
-  elif sys.platform.startswith('win'):
-    # Normal Windows version string.  Mine: 6.1.7601
-    version_str = platform.version()
-  else:
-    return None
-
-  parts = version_str.split('.')
-  try:
-    major = int(parts[0])
-    minor = int(parts[1])
-  except:
-    return None  # Can't parse, unknown version.
-
-  if major == 5:
-    return 'xp'
-  elif major == 6 and minor == 0:
-    return 'vista'
-  elif major == 6 and minor == 1:
-    return '7'
-  elif major == 6 and minor == 2:
-    return '8'  # Future proof.  ;)
-  return None
-
-
 def PlatformNames():
   """Return an array of string to be used in paths for the platform
   (e.g. suppressions, gtest filters, ignore files etc.)
@@ -154,11 +144,7 @@ def PlatformNames():
   if IsMac():
     return ['mac']
   if IsWindows():
-    names = ['win32']
-    version_name = WindowsVersionName()
-    if version_name is not None:
-      names.append('win-%s' % version_name)
-    return names
+    return ['win32']
   raise NotImplementedError('Unknown platform "%s".' % sys.platform)
 
 

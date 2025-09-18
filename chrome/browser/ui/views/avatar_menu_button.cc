@@ -4,35 +4,91 @@
 
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 
-#include "base/command_line.h"
-#include "base/prefs/pref_service.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/profiles/avatar_menu.h"
-#include "chrome/browser/profiles/profile_info_util.h"
+#include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/avatar_menu_bubble_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/profile_chooser_view.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
-#include "content/public/browser/notification_service.h"
-#include "ui/gfx/canvas.h"
+#include "chrome/browser/ui/views/window.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/views/widget/widget.h"
+
+
+#if defined(OS_WIN)
+#include <shobjidl.h>
+#include "base/win/scoped_comptr.h"
+#include "base/win/windows_version.h"
+#include "skia/ext/image_operations.h"
+#include "ui/gfx/icon_util.h"
+#endif
 
 static inline int Round(double x) {
   return static_cast<int>(x + 0.5);
 }
 
-// static
-const char AvatarMenuButton::kViewClassName[] = "AvatarMenuButton";
+// The Windows 7 taskbar supports dynamic overlays and effects, we use this
+// to ovelay the avatar icon there. The overlay only applies if the taskbar
+// is in "default large icon mode". This function is a best effort deal so
+// we bail out silently at any error condition.
+// See http://msdn.microsoft.com/en-us/library/dd391696(VS.85).aspx for
+// more information.
+void DrawTaskBarDecoration(gfx::NativeWindow window, const gfx::Image* image) {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    return;
+  // Don't badge the task bar in the single profile case to match the behavior
+  // of the title bar.
+  if (!AvatarMenuModel::ShouldShowAvatarMenu())
+    return;
+  // SetOverlayIcon does nothing if the window is not visible so testing
+  // here avoids all the wasted effort of the image resizing.
+  if (!::IsWindowVisible(window))
+    return;
 
-AvatarMenuButton::AvatarMenuButton(Browser* browser, bool disabled)
-    : MenuButton(NULL, base::string16(), this, false),
+  base::win::ScopedComPtr<ITaskbarList3> taskbar;
+  HRESULT result = taskbar.CreateInstance(CLSID_TaskbarList, NULL,
+                                          CLSCTX_INPROC_SERVER);
+  if (FAILED(result) || FAILED(taskbar->HrInit()))
+    return;
+  HICON icon = NULL;
+  if (image) {
+    const SkBitmap* bitmap = image->ToSkBitmap();
+    const SkBitmap* source_bitmap = NULL;
+    SkBitmap squarer_bitmap;
+    if ((bitmap->width() == profiles::kAvatarIconWidth) &&
+        (bitmap->height() == profiles::kAvatarIconHeight)) {
+      // Shave a couple of columns so the bitmap is more square. So when
+      // resized to a square aspect ratio it looks pretty.
+      int x = 2;
+      bitmap->extractSubset(&squarer_bitmap, SkIRect::MakeXYWH(x, 0,
+          profiles::kAvatarIconWidth - x * 2, profiles::kAvatarIconHeight));
+      source_bitmap = &squarer_bitmap;
+    } else {
+      // The bitmaps size has changed. Resize what we have.
+      source_bitmap = bitmap;
+    }
+    // Since the target size is so small, we use our best resizer. Never pass
+    // windows a different size because it will badly hammer it to 16x16.
+    SkBitmap sk_icon = skia::ImageOperations::Resize(
+        *source_bitmap,
+        skia::ImageOperations::RESIZE_LANCZOS3,
+        16, 16);
+    icon = IconUtil::CreateHICONFromSkBitmap(sk_icon);
+    if (!icon)
+      return;
+  }
+  taskbar->SetOverlayIcon(window, icon, L"");
+  if (icon)
+    DestroyIcon(icon);
+#endif
+}
+
+AvatarMenuButton::AvatarMenuButton(Browser* browser, bool has_menu)
+    : MenuButton(NULL, string16(), this, false),
       browser_(browser),
-      disabled_(disabled),
-      is_rectangle_(false),
+      has_menu_(has_menu),
+      is_gaia_picture_(false),
       old_height_(0) {
   // In RTL mode, the avatar icon should be looking the opposite direction.
   EnableCanvasFlippingForRTLUI(true);
@@ -41,18 +97,14 @@ AvatarMenuButton::AvatarMenuButton(Browser* browser, bool disabled)
 AvatarMenuButton::~AvatarMenuButton() {
 }
 
-const char* AvatarMenuButton::GetClassName() const {
-  return kViewClassName;
-}
-
 void AvatarMenuButton::OnPaint(gfx::Canvas* canvas) {
   if (!icon_.get())
     return;
 
   if (old_height_ != height() || button_icon_.isNull()) {
     old_height_ = height();
-    button_icon_ = *profiles::GetAvatarIconForTitleBar(
-        *icon_, is_rectangle_, width(), height()).ToImageSkia();
+    button_icon_ = profiles::GetAvatarIconForTitleBar(
+        *icon_, is_gaia_picture_, width(), height());
   }
 
   // Scale the image to fit the width of the button.
@@ -72,48 +124,41 @@ void AvatarMenuButton::OnPaint(gfx::Canvas* canvas) {
   // incognito image has shadows at the top that make the apparent center below
   // the real center.
   int dst_y = Round((height() - dst_height) / 2.0);
-  canvas->DrawImageInt(button_icon_, 0, 0, button_icon_.width(),
+  canvas->DrawBitmapInt(button_icon_, 0, 0, button_icon_.width(),
       button_icon_.height(), dst_x, dst_y, dst_width, dst_height, false);
 }
 
-bool AvatarMenuButton::HitTestRect(const gfx::Rect& rect) const {
-  if (disabled_)
+bool AvatarMenuButton::HitTest(const gfx::Point& point) const {
+  if (!has_menu_)
     return false;
-  return views::MenuButton::HitTestRect(rect);
+  return views::MenuButton::HitTest(point);
 }
 
 void AvatarMenuButton::SetAvatarIcon(const gfx::Image& icon,
-                                     bool is_rectangle) {
+                                     bool is_gaia_picture) {
   icon_.reset(new gfx::Image(icon));
-  button_icon_ = gfx::ImageSkia();
-  is_rectangle_ = is_rectangle;
+  button_icon_ = SkBitmap();
+  is_gaia_picture_ = is_gaia_picture;
   SchedulePaint();
 }
 
-// views::MenuButtonListener implementation
-void AvatarMenuButton::OnMenuButtonClicked(views::View* source,
-                                           const gfx::Point& point) {
-  if (disabled_)
-    return;
-
+// views::ViewMenuDelegate implementation
+void AvatarMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
   ShowAvatarBubble();
 }
 
 void AvatarMenuButton::ShowAvatarBubble() {
+  if (!has_menu_)
+    return;
+
   gfx::Point origin;
   views::View::ConvertPointToScreen(this, &origin);
   gfx::Rect bounds(origin, size());
-  views::BubbleBorder::Arrow arrow = button_on_right_ ?
-      views::BubbleBorder::TOP_RIGHT : views::BubbleBorder::TOP_LEFT;
-  if (switches::IsNewProfileManagement()) {
-    ProfileChooserView::ShowBubble(
-        this, arrow, views::BubbleBorder::ALIGN_ARROW_TO_MID_ANCHOR, bounds,
-        browser_);
-  } else {
-    AvatarMenuBubbleView::ShowBubble(
-        this, arrow, views::BubbleBorder::ALIGN_ARROW_TO_MID_ANCHOR, bounds,
-        browser_);
-  }
+
+  AvatarMenuBubbleView* bubble = new AvatarMenuBubbleView(this,
+      views::BubbleBorder::TOP_LEFT, bounds, browser_);
+  browser::CreateViewsBubble(bubble);
+  bubble->Show();
 
   ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::ICON_AVATAR_BUBBLE);
 }

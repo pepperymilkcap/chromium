@@ -11,7 +11,6 @@
 #include "base/memory/singleton.h"
 #include "base/nix/xdg_util.h"
 #include "chrome/browser/ui/gtk/browser_titlebar.h"
-#include "ui/base/x/x11_util.h"
 
 namespace {
 
@@ -53,11 +52,8 @@ GConfTitlebarListener::~GConfTitlebarListener() {}
 
 GConfTitlebarListener::GConfTitlebarListener() : client_(NULL) {
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  base::nix::DesktopEnvironment de =
-      base::nix::GetDesktopEnvironment(env.get());
-  if (de == base::nix::DESKTOP_ENVIRONMENT_GNOME ||
-      de == base::nix::DESKTOP_ENVIRONMENT_UNITY ||
-      ui::GuessWindowManager() == ui::WM_METACITY) {
+  if (base::nix::GetDesktopEnvironment(env.get()) ==
+      base::nix::DESKTOP_ENVIRONMENT_GNOME) {
     client_ = gconf_client_get_default();
     // If we fail to get a context, that's OK, since we'll just fallback on
     // not receiving gconf keys.

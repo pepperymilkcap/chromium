@@ -10,34 +10,21 @@
 #include <string>
 #include <vector>
 
-#include "base/format_macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
-#include "chrome/browser/autocomplete/autocomplete_result.h"
-#include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/url_database.h"
-#include "chrome/browser/history/url_index_private_data.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_service.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
-#include "sql/transaction.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::ASCIIToUTF16;
 using base::Time;
 using base::TimeDelta;
 
@@ -58,19 +45,19 @@ struct TestURLInfo {
   {"http://news.google.com/", "Google News", 1, 1, 0},
   {"http://foo.com/", "Dir", 200, 100, 0},
   {"http://foo.com/dir/", "Dir", 2, 1, 10},
-  {"http://foo.com/dir/another/", "Dir", 10, 5, 0},
+  {"http://foo.com/dir/another/", "Dir", 5, 1, 0},
   {"http://foo.com/dir/another/again/", "Dir", 5, 1, 0},
-  {"http://foo.com/dir/another/again/myfile.html", "File", 3, 1, 0},
+  {"http://foo.com/dir/another/again/myfile.html", "File", 10, 2, 0},
   {"http://visitedest.com/y/a", "VA", 10, 1, 20},
   {"http://visitedest.com/y/b", "VB", 9, 1, 20},
   {"http://visitedest.com/x/c", "VC", 8, 1, 20},
   {"http://visitedest.com/x/d", "VD", 7, 1, 20},
   {"http://visitedest.com/y/e", "VE", 6, 1, 20},
-  {"http://typeredest.com/y/a", "TA", 5, 5, 0},
-  {"http://typeredest.com/y/b", "TB", 5, 4, 0},
-  {"http://typeredest.com/x/c", "TC", 5, 3, 0},
-  {"http://typeredest.com/x/d", "TD", 5, 2, 0},
-  {"http://typeredest.com/y/e", "TE", 5, 1, 0},
+  {"http://typeredest.com/y/a", "TA", 3, 5, 0},
+  {"http://typeredest.com/y/b", "TB", 3, 4, 0},
+  {"http://typeredest.com/x/c", "TC", 3, 3, 0},
+  {"http://typeredest.com/x/d", "TD", 3, 2, 0},
+  {"http://typeredest.com/y/e", "TE", 3, 1, 0},
   {"http://daysagoest.com/y/a", "DA", 1, 1, 0},
   {"http://daysagoest.com/y/b", "DB", 1, 1, 1},
   {"http://daysagoest.com/x/c", "DC", 1, 1, 2},
@@ -85,23 +72,17 @@ struct TestURLInfo {
   {"http://cda.com/Dogs%20Cats%20Gorillas%20Sea%20Slugs%20and%20Mice",
    "Dogs & Cats & Mice & Other Animals", 1, 1, 0},
   {"https://monkeytrap.org/", "", 3, 1, 0},
-  {"http://popularsitewithpathonly.com/moo",
-   "popularsitewithpathonly.com/moo", 50, 50, 0},
-  {"http://popularsitewithroot.com/", "popularsitewithroot.com", 50, 50, 0},
-  {"http://testsearch.com/?q=thequery", "Test Search Engine", 10, 10, 0},
-  {"http://testsearch.com/", "Test Search Engine", 9, 9, 0},
-  {"http://anotherengine.com/?q=thequery", "Another Search Engine", 8, 8, 0}
 };
 
 class HistoryQuickProviderTest : public testing::Test,
-                                 public AutocompleteProviderListener {
+                                 public ACProviderListener {
  public:
   HistoryQuickProviderTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_) {}
 
-  // AutocompleteProviderListener:
-  virtual void OnProviderUpdate(bool updated_matches) OVERRIDE {}
+  // ACProviderListener
+  virtual void OnProviderUpdate(bool updated_matches);
 
  protected:
   class SetShouldContain : public std::unary_function<const std::string&,
@@ -117,15 +98,11 @@ class HistoryQuickProviderTest : public testing::Test,
     std::set<std::string> matches_;
   };
 
-  static BrowserContextKeyedService* CreateTemplateURLService(
-      content::BrowserContext* profile) {
-    return new TemplateURLService(static_cast<Profile*>(profile));
+  void SetUp();
+
+  void TearDown() {
+    provider_ = NULL;
   }
-
-  virtual void SetUp();
-  virtual void TearDown();
-
-  virtual void GetTestData(size_t* data_count, TestURLInfo** test_data);
 
   // Fills test data into the history system.
   void FillData();
@@ -133,12 +110,13 @@ class HistoryQuickProviderTest : public testing::Test,
   // Runs an autocomplete query on |text| and checks to see that the returned
   // results' destination URLs match those provided. |expected_urls| does not
   // need to be in sorted order.
-  void RunTest(const base::string16 text,
+  void RunTest(const string16 text,
                std::vector<std::string> expected_urls,
+               std::string expected_top_result,
                bool can_inline_top_result,
-               base::string16 expected_fill_into_edit);
+               string16 expected_fill_into_edit);
 
-  base::MessageLoopForUI message_loop_;
+  MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 
@@ -147,81 +125,49 @@ class HistoryQuickProviderTest : public testing::Test,
 
   ACMatches ac_matches_;  // The resulting matches after running RunTest.
 
+ private:
   scoped_refptr<HistoryQuickProvider> provider_;
 };
 
 void HistoryQuickProviderTest::SetUp() {
   profile_.reset(new TestingProfile());
-  ASSERT_TRUE(profile_->CreateHistoryService(true, false));
+  profile_->CreateHistoryService(true, false);
   profile_->CreateBookmarkModel(true);
-  test::WaitForBookmarkModelToLoad(profile_.get());
-  profile_->BlockUntilHistoryIndexIsRefreshed();
-  history_service_ =
-      HistoryServiceFactory::GetForProfile(profile_.get(),
-                                           Profile::EXPLICIT_ACCESS);
+  profile_->BlockUntilBookmarkModelLoaded();
+  history_service_ = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
   EXPECT_TRUE(history_service_);
   provider_ = new HistoryQuickProvider(this, profile_.get());
-  TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-      profile_.get(), &HistoryQuickProviderTest::CreateTemplateURLService);
   FillData();
-  provider_->GetIndex()->RebuildFromHistory(
-      history_service_->history_backend_->db());
 }
 
-void HistoryQuickProviderTest::TearDown() {
-  provider_ = NULL;
-}
-
-void HistoryQuickProviderTest::GetTestData(size_t* data_count,
-                                           TestURLInfo** test_data) {
-  DCHECK(data_count);
-  DCHECK(test_data);
-  *data_count = arraysize(quick_test_db);
-  *test_data = &quick_test_db[0];
+void HistoryQuickProviderTest::OnProviderUpdate(bool updated_matches) {
+  MessageLoop::current()->Quit();
 }
 
 void HistoryQuickProviderTest::FillData() {
-  sql::Connection& db(history_service_->history_backend_->db()->GetDB());
-  ASSERT_TRUE(db.is_open());
+  history::URLDatabase* db = history_service_->InMemoryDatabase();
+  ASSERT_TRUE(db != NULL);
 
-  size_t data_count = 0;
-  TestURLInfo* test_data = NULL;
-  GetTestData(&data_count, &test_data);
-  size_t visit_id = 1;
-  for (size_t i = 0; i < data_count; ++i) {
-    const TestURLInfo& cur(test_data[i]);
+  history::InMemoryURLIndex* index =
+      new history::InMemoryURLIndex(FilePath());
+  PrefService* prefs = profile_->GetPrefs();
+  std::string languages(prefs->GetString(prefs::kAcceptLanguages));
+  index->Init(db, languages);
+  for (size_t i = 0; i < arraysize(quick_test_db); ++i) {
+    const TestURLInfo& cur = quick_test_db[i];
+    const GURL current_url(cur.url);
     Time visit_time = Time::Now() - TimeDelta::FromDays(cur.days_from_now);
-    sql::Transaction transaction(&db);
 
-    // Add URL.
-    transaction.Begin();
-    std::string sql_cmd_line = base::StringPrintf(
-        "INSERT INTO \"urls\" VALUES(%" PRIuS ", \'%s\', \'%s\', %d, %d, %"
-        PRId64 ", 0, 0)",
-        i + 1, cur.url.c_str(), cur.title.c_str(), cur.visit_count,
-        cur.typed_count, visit_time.ToInternalValue());
-    sql::Statement sql_stmt(db.GetUniqueStatement(sql_cmd_line.c_str()));
-    EXPECT_TRUE(sql_stmt.Run());
-    transaction.Commit();
-
-    // Add visits.
-    for (int j = 0; j < cur.visit_count; ++j) {
-      // Assume earlier visits are at one-day intervals.
-      visit_time -= TimeDelta::FromDays(1);
-      transaction.Begin();
-      // Mark the most recent |cur.typed_count| visits as typed.
-      std::string sql_cmd_line = base::StringPrintf(
-          "INSERT INTO \"visits\" VALUES(%" PRIuS ", %" PRIuS ", %" PRId64
-          ", 0, %d, 0, 1)",
-          visit_id++, i + 1, visit_time.ToInternalValue(),
-          (j < cur.typed_count) ? content::PAGE_TRANSITION_TYPED :
-                                  content::PAGE_TRANSITION_LINK);
-
-      sql::Statement sql_stmt(db.GetUniqueStatement(sql_cmd_line.c_str()));
-      EXPECT_TRUE(sql_stmt.Run());
-      transaction.Commit();
-    }
+    history::URLRow url_info(current_url);
+    url_info.set_title(UTF8ToUTF16(cur.title));
+    url_info.set_visit_count(cur.visit_count);
+    url_info.set_typed_count(cur.typed_count);
+    url_info.set_last_visit(visit_time);
+    url_info.set_hidden(false);
+    index->UpdateURL(i, url_info);
   }
+
+  provider_->set_index(index);
 }
 
 HistoryQuickProviderTest::SetShouldContain::SetShouldContain(
@@ -238,15 +184,17 @@ void HistoryQuickProviderTest::SetShouldContain::operator()(
 }
 
 
-void HistoryQuickProviderTest::RunTest(const base::string16 text,
+void HistoryQuickProviderTest::RunTest(const string16 text,
                                        std::vector<std::string> expected_urls,
+                                       std::string expected_top_result,
                                        bool can_inline_top_result,
-                                       base::string16 expected_fill_into_edit) {
+                                       string16 expected_fill_into_edit) {
   SCOPED_TRACE(text);  // Minimal hint to query being run.
-  base::MessageLoop::current()->RunUntilIdle();
-  AutocompleteInput input(text, base::string16::npos, base::string16(),
-                          GURL(), AutocompleteInput::INVALID_SPEC, false,
-                          false, true, AutocompleteInput::ALL_MATCHES);
+  std::sort(expected_urls.begin(), expected_urls.end());
+
+  MessageLoop::current()->RunAllPending();
+  AutocompleteInput input(text, string16(), false, false, true,
+                          AutocompleteInput::ALL_MATCHES);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());
 
@@ -268,68 +216,43 @@ void HistoryQuickProviderTest::RunTest(const base::string16 text,
       << " unexpected results, one of which was: '"
       << *(leftovers.begin()) << "'.";
 
-  if (expected_urls.empty())
-    return;
-
-  // Verify that we got the results in the order expected.
-  int best_score = ac_matches_.begin()->relevance + 1;
-  int i = 0;
-  std::vector<std::string>::const_iterator expected = expected_urls.begin();
-  for (ACMatches::const_iterator actual = ac_matches_.begin();
-       actual != ac_matches_.end() && expected != expected_urls.end();
-       ++actual, ++expected, ++i) {
-    EXPECT_EQ(*expected, actual->destination_url.spec())
-        << "For result #" << i << " we got '" << actual->destination_url.spec()
-        << "' but expected '" << *expected << "'.";
-    EXPECT_LT(actual->relevance, best_score)
-      << "At result #" << i << " (url=" << actual->destination_url.spec()
-      << "), we noticed scores are not monotonically decreasing.";
-    best_score = actual->relevance;
-  }
-
-  EXPECT_EQ(can_inline_top_result, ac_matches_[0].allowed_to_be_default_match);
-  if (can_inline_top_result) {
-    // When the top scorer is inline-able make sure we get the expected
-    // fill_into_edit and autocomplete offset.
-    EXPECT_EQ(expected_fill_into_edit, ac_matches_[0].fill_into_edit)
-        << "fill_into_edit was: '" << ac_matches_[0].fill_into_edit
-        << "' but we expected '" << expected_fill_into_edit << "'.";
-    size_t text_pos = expected_fill_into_edit.find(text);
-    ASSERT_NE(base::string16::npos, text_pos);
-    EXPECT_EQ(ac_matches_[0].fill_into_edit.substr(text_pos + text.size()),
-              ac_matches_[0].inline_autocompletion);
-  } else {
-    // When the top scorer is not inline-able autocomplete offset must be npos.
-    EXPECT_TRUE(ac_matches_[0].inline_autocompletion.empty());
-    // Also, the score must be too low to be inlineable.
-    // TODO(mpearson): when the controller reorders for inlining, there's no
-    // longer any connection between scores and what's inlineable / allowed
-    // to be the default match.  Remove this test.
-    EXPECT_LT(ac_matches_[0].relevance,
-              AutocompleteResult::kLowestDefaultScore);
-  }
+  // We always expect to get at least one result.
+  ASSERT_FALSE(ac_matches_.empty());
+  // See if we got the expected top scorer.
+  std::partial_sort(ac_matches_.begin(), ac_matches_.begin() + 1,
+                    ac_matches_.end(), AutocompleteMatch::MoreRelevant);
+  EXPECT_EQ(expected_top_result, ac_matches_[0].destination_url.spec())
+      << "Unexpected top result '" << ac_matches_[0].destination_url.spec()
+      << "'.";
+  // If the top scorer is inline-able then validate the autocomplete offset.
+  EXPECT_EQ(can_inline_top_result ? text.size() : string16::npos,
+            ac_matches_[0].inline_autocomplete_offset);
+  // And make sure we get the expected fill_into_edit.
+  EXPECT_EQ(expected_fill_into_edit, ac_matches_[0].fill_into_edit);
 }
 
 TEST_F(HistoryQuickProviderTest, SimpleSingleMatch) {
+  std::string expected_url("http://slashdot.org/favorite_page.html");
   std::vector<std::string> expected_urls;
-  expected_urls.push_back("http://slashdot.org/favorite_page.html");
-  RunTest(ASCIIToUTF16("slashdot"), expected_urls, true,
+  expected_urls.push_back(expected_url);
+  RunTest(ASCIIToUTF16("slashdot"), expected_urls, expected_url, true,
           ASCIIToUTF16("slashdot.org/favorite_page.html"));
 }
 
 TEST_F(HistoryQuickProviderTest, MultiTermTitleMatch) {
-  std::vector<std::string> expected_urls;
-  expected_urls.push_back(
+  std::string expected_url(
       "http://cda.com/Dogs%20Cats%20Gorillas%20Sea%20Slugs%20and%20Mice");
-  RunTest(ASCIIToUTF16("mice other animals"), expected_urls, false,
-          ASCIIToUTF16("cda.com/Dogs Cats Gorillas Sea Slugs and Mice"));
+  std::vector<std::string> expected_urls;
+  expected_urls.push_back(expected_url);
+  RunTest(ASCIIToUTF16("mice other animals"), expected_urls, expected_url,
+          false, ASCIIToUTF16("cda.com/Dogs Cats Gorillas Sea Slugs and Mice"));
 }
 
 TEST_F(HistoryQuickProviderTest, NonWordLastCharacterMatch) {
   std::string expected_url("http://slashdot.org/favorite_page.html");
   std::vector<std::string> expected_urls;
   expected_urls.push_back(expected_url);
-  RunTest(ASCIIToUTF16("slashdot.org/"), expected_urls, true,
+  RunTest(ASCIIToUTF16("slashdot.org/"), expected_urls, expected_url, true,
           ASCIIToUTF16("slashdot.org/favorite_page.html"));
 }
 
@@ -340,22 +263,28 @@ TEST_F(HistoryQuickProviderTest, MultiMatch) {
   // Scores high because of visit count.
   expected_urls.push_back("http://foo.com/dir/another/");
   // Scores high because of high visit count.
-  expected_urls.push_back("http://foo.com/dir/another/again/");
-  RunTest(ASCIIToUTF16("foo"), expected_urls, true, ASCIIToUTF16("foo.com"));
+  expected_urls.push_back("http://foo.com/dir/another/again/myfile.html");
+  RunTest(ASCIIToUTF16("foo"), expected_urls, "http://foo.com/", true,
+          ASCIIToUTF16("foo.com"));
 }
 
 TEST_F(HistoryQuickProviderTest, StartRelativeMatch) {
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://xyzabcdefghijklmnopqrstuvw.com/a");
-  RunTest(ASCIIToUTF16("xyza"), expected_urls, true,
+  expected_urls.push_back("http://abcxyzdefghijklmnopqrstuvw.com/a");
+  expected_urls.push_back("http://abcdefxyzghijklmnopqrstuvw.com/a");
+  RunTest(ASCIIToUTF16("xyz"), expected_urls,
+          "http://xyzabcdefghijklmnopqrstuvw.com/a", true,
           ASCIIToUTF16("xyzabcdefghijklmnopqrstuvw.com/a"));
 }
 
-TEST_F(HistoryQuickProviderTest, EncodingMatch) {
+TEST_F(HistoryQuickProviderTest, PrefixOnlyMatch) {
   std::vector<std::string> expected_urls;
-  expected_urls.push_back("http://spaces.com/path%20with%20spaces/foo.html");
-  RunTest(ASCIIToUTF16("path with spaces"), expected_urls, false,
-          ASCIIToUTF16("CANNOT AUTOCOMPLETE"));
+  expected_urls.push_back("http://foo.com/");
+  expected_urls.push_back("http://slashdot.org/favorite_page.html");
+  expected_urls.push_back("http://typeredest.com/y/a");
+  RunTest(ASCIIToUTF16("http://"), expected_urls, "http://foo.com/", true,
+          ASCIIToUTF16("http://foo.com"));
 }
 
 TEST_F(HistoryQuickProviderTest, VisitCountMatches) {
@@ -363,7 +292,8 @@ TEST_F(HistoryQuickProviderTest, VisitCountMatches) {
   expected_urls.push_back("http://visitedest.com/y/a");
   expected_urls.push_back("http://visitedest.com/y/b");
   expected_urls.push_back("http://visitedest.com/x/c");
-  RunTest(ASCIIToUTF16("visitedest"), expected_urls, true,
+  RunTest(ASCIIToUTF16("visitedest"), expected_urls,
+          "http://visitedest.com/y/a", true,
           ASCIIToUTF16("visitedest.com/y/a"));
 }
 
@@ -372,7 +302,8 @@ TEST_F(HistoryQuickProviderTest, TypedCountMatches) {
   expected_urls.push_back("http://typeredest.com/y/a");
   expected_urls.push_back("http://typeredest.com/y/b");
   expected_urls.push_back("http://typeredest.com/x/c");
-  RunTest(ASCIIToUTF16("typeredest"), expected_urls, true,
+  RunTest(ASCIIToUTF16("typeredest"), expected_urls,
+          "http://typeredest.com/y/a", true,
           ASCIIToUTF16("typeredest.com/y/a"));
 }
 
@@ -381,7 +312,8 @@ TEST_F(HistoryQuickProviderTest, DaysAgoMatches) {
   expected_urls.push_back("http://daysagoest.com/y/a");
   expected_urls.push_back("http://daysagoest.com/y/b");
   expected_urls.push_back("http://daysagoest.com/x/c");
-  RunTest(ASCIIToUTF16("daysagoest"), expected_urls, true,
+  RunTest(ASCIIToUTF16("daysagoest"), expected_urls,
+          "http://daysagoest.com/y/a", true,
           ASCIIToUTF16("daysagoest.com/y/a"));
 }
 
@@ -389,13 +321,8 @@ TEST_F(HistoryQuickProviderTest, EncodingLimitMatch) {
   std::vector<std::string> expected_urls;
   std::string url(
       "http://cda.com/Dogs%20Cats%20Gorillas%20Sea%20Slugs%20and%20Mice");
-  // First check that a mid-word match yield no results.
-  RunTest(ASCIIToUTF16("ice"), expected_urls, false,
-          ASCIIToUTF16("cda.com/Dogs Cats Gorillas Sea Slugs and Mice"));
-  // Then check that we get results when the match is at a word start
-  // that is present because of an encoded separate (%20 = space).
   expected_urls.push_back(url);
-  RunTest(ASCIIToUTF16("Mice"), expected_urls, false,
+  RunTest(ASCIIToUTF16("ice"), expected_urls, url, false,
           ASCIIToUTF16("cda.com/Dogs Cats Gorillas Sea Slugs and Mice"));
   // Verify that the matches' ACMatchClassifications offsets are in range.
   ACMatchClassifications content(ac_matches_[0].contents_class);
@@ -462,173 +389,69 @@ TEST_F(HistoryQuickProviderTest, Spans) {
             spans_b[2].style);
 }
 
-TEST_F(HistoryQuickProviderTest, DeleteMatch) {
-  std::vector<std::string> expected_urls;
-  expected_urls.push_back("http://slashdot.org/favorite_page.html");
-  // Fill up ac_matches_; we don't really care about the test yet.
-  RunTest(ASCIIToUTF16("slashdot"), expected_urls, true,
-          ASCIIToUTF16("slashdot.org/favorite_page.html"));
-  EXPECT_EQ(1U, ac_matches_.size());
-  provider_->DeleteMatch(ac_matches_[0]);
-  // Verify it's no longer an indexed visit.
-  expected_urls.clear();
-  RunTest(ASCIIToUTF16("slashdot"), expected_urls, true,
-          ASCIIToUTF16("NONE EXPECTED"));
-}
+TEST_F(HistoryQuickProviderTest, Relevance) {
+  history::ScoredHistoryMatch match;
+  int next_score = 1500;
 
-TEST_F(HistoryQuickProviderTest, PreventBeatingURLWhatYouTypedMatch) {
-  std::vector<std::string> expected_urls;
+  // Can inline, not clamped.
+  match.raw_score = 1425;
+  match.can_inline = true;
+  EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score), 1425);
+  EXPECT_EQ(next_score, 1424);
 
-  expected_urls.clear();
-  expected_urls.push_back("http://popularsitewithroot.com/");
-  // If the user enters a hostname (no path) that he/she has visited
-  // before, we should make sure that all HistoryQuickProvider results
-  // have scores less than what HistoryURLProvider will assign the
-  // URL-what-you-typed match.
-  RunTest(ASCIIToUTF16("popularsitewithroot.com"), expected_urls, true,
-          ASCIIToUTF16("popularsitewithroot.com"));
-  EXPECT_LT(ac_matches_[0].relevance,
-            HistoryURLProvider::kScoreForBestInlineableResult);
+  // Can't inline, not clamped.
+  next_score = 1500;
+  match.raw_score = 1425;
+  match.can_inline = false;
+  const int kMaxNonInliningScore = AutocompleteResult::kLowestDefaultScore - 1;
+  EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
-  // Check that if the user didn't quite enter the full hostname, this
-  // hostname would've normally scored above the URL-what-you-typed match.
-  RunTest(ASCIIToUTF16("popularsitewithroot.c"), expected_urls, true,
-          ASCIIToUTF16("popularsitewithroot.com"));
-  EXPECT_GE(ac_matches_[0].relevance,
-            HistoryURLProvider::kScoreForWhatYouTypedResult);
+  // Can inline, clamped.
+  next_score = kMaxNonInliningScore;
+  match.raw_score = 1425;
+  match.can_inline = true;
+  EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
-  expected_urls.clear();
-  expected_urls.push_back("http://popularsitewithpathonly.com/moo");
-  // If the user enters a hostname of a host that he/she has visited
-  // but never visited the root page of, we should make sure that all
-  // HistoryQuickProvider results have scores less than what the
-  // HistoryURLProvider will assign the URL-what-you-typed match.
-  RunTest(ASCIIToUTF16("popularsitewithpathonly.com"), expected_urls, true,
-          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
-  EXPECT_LT(ac_matches_[0].relevance,
-            HistoryURLProvider::kScoreForUnvisitedIntranetResult);
+  // Can't inline, clamped.
+  next_score = kMaxNonInliningScore;
+  match.raw_score = 1425;
+  match.can_inline = false;
+  EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
-  // Verify the same thing happens if the user adds a / to end of the
-  // hostname.
-  RunTest(ASCIIToUTF16("popularsitewithpathonly.com/"), expected_urls, true,
-          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
-  EXPECT_LT(ac_matches_[0].relevance,
-            HistoryURLProvider::kScoreForUnvisitedIntranetResult);
+  // Score just above the clamped limit.
+  next_score = kMaxNonInliningScore;
+  match.raw_score = AutocompleteResult::kLowestDefaultScore;
+  match.can_inline = false;
+  EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
-  // Check that if the user didn't quite enter the full hostname, this
-  // page would've normally scored above the URL-what-you-typed match.
-  RunTest(ASCIIToUTF16("popularsitewithpathonly.co"), expected_urls, true,
-          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
-  EXPECT_GE(ac_matches_[0].relevance,
-            HistoryURLProvider::kScoreForWhatYouTypedResult);
+  // Score right at the clamped limit.
+  next_score = kMaxNonInliningScore;
+  match.raw_score = kMaxNonInliningScore;
+  match.can_inline = true;
+  EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
-  // If the user enters a hostname + path that he/she has not visited
-  // before (but visited other things on the host), we can allow
-  // inline autocompletions.
-  RunTest(ASCIIToUTF16("popularsitewithpathonly.com/mo"), expected_urls, true,
-          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
-  EXPECT_GE(ac_matches_[0].relevance,
-            HistoryURLProvider::kScoreForWhatYouTypedResult);
+  // Score just below the clamped limit.
+  next_score = kMaxNonInliningScore;
+  match.raw_score = kMaxNonInliningScore - 1;
+  match.can_inline = true;
+  EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
+            kMaxNonInliningScore - 1);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 2);
 
-  // If the user enters a hostname + path that he/she has visited
-  // before, we should make sure that all HistoryQuickProvider results
-  // have scores less than what the HistoryURLProvider will assign
-  // the URL-what-you-typed match.
-  RunTest(ASCIIToUTF16("popularsitewithpathonly.com/moo"),
-          expected_urls, true,
-          ASCIIToUTF16("popularsitewithpathonly.com/moo"));
-  EXPECT_LT(ac_matches_[0].relevance,
-            HistoryURLProvider::kScoreForBestInlineableResult);
-}
-
-TEST_F(HistoryQuickProviderTest, CullSearchResults) {
-  // Set up a default search engine.
-  TemplateURLData data;
-  data.SetKeyword(ASCIIToUTF16("TestEngine"));
-  data.SetURL("http://testsearch.com/?q={searchTerms}");
-  TemplateURLService* template_url_service =
-      TemplateURLServiceFactory::GetForProfile(profile_.get());
-  TemplateURL* template_url = new TemplateURL(profile_.get(), data);
-  template_url_service->Add(template_url);
-  template_url_service->SetDefaultSearchProvider(template_url);
-  template_url_service->Load();
-
-  // A search results page should not be returned when typing a query.
-  std::vector<std::string> expected_urls;
-  expected_urls.push_back("http://anotherengine.com/?q=thequery");
-  RunTest(ASCIIToUTF16("thequery"), expected_urls, false, base::string16());
-
-  // A search results page should not be returned when typing the engine URL.
-  expected_urls.clear();
-  expected_urls.push_back("http://testsearch.com/");
-  RunTest(ASCIIToUTF16("testsearch"), expected_urls, true,
-          ASCIIToUTF16("testsearch.com"));
-}
-
-// HQPOrderingTest -------------------------------------------------------------
-
-TestURLInfo ordering_test_db[] = {
-  {"http://www.teamliquid.net/tlpd/korean/games/21648_bisu_vs_iris", "", 6, 3,
-      256},
-  {"http://www.amazon.com/", "amazon.com: online shopping for electronics, "
-      "apparel, computers, books, dvds & more", 20, 20, 10},
-  {"http://www.teamliquid.net/forum/viewmessage.php?topic_id=52045&"
-      "currentpage=83", "google images", 6, 6, 0},
-  {"http://www.tempurpedic.com/", "tempur-pedic", 7, 7, 0},
-  {"http://www.teamfortress.com/", "", 5, 5, 6},
-  {"http://www.rottentomatoes.com/", "", 3, 3, 7},
-  {"http://music.google.com/music/listen?u=0#start_pl", "", 3, 3, 9},
-  {"https://www.emigrantdirect.com/", "high interest savings account, high "
-      "yield savings - emigrantdirect", 5, 5, 3},
-  {"http://store.steampowered.com/", "", 6, 6, 1},
-  {"http://techmeme.com/", "techmeme", 111, 110, 4},
-  {"http://www.teamliquid.net/tlpd", "team liquid progaming database", 15, 15,
-      2},
-  {"http://store.steampowered.com/", "the steam summer camp sale", 6, 6, 1},
-  {"http://www.teamliquid.net/tlpd/korean/players", "tlpd - bw korean - player "
-      "index", 25, 7, 219},
-  {"http://slashdot.org/", "slashdot: news for nerds, stuff that matters", 3, 3,
-      6},
-  {"http://translate.google.com/", "google translate", 3, 3, 0},
-  {"http://arstechnica.com/", "ars technica", 3, 3, 3},
-  {"http://www.rottentomatoes.com/", "movies | movie trailers | reviews - "
-      "rotten tomatoes", 3, 3, 7},
-  {"http://www.teamliquid.net/", "team liquid - starcraft 2 and brood war pro "
-      "gaming news", 26, 25, 3},
-  {"http://metaleater.com/", "metaleater", 4, 3, 8},
-  {"http://half.com/", "half.com: textbooks , books , music , movies , games , "
-      "video games", 4, 4, 6},
-  {"http://teamliquid.net/", "team liquid - starcraft 2 and brood war pro "
-      "gaming news", 8, 5, 9},
-};
-
-class HQPOrderingTest : public HistoryQuickProviderTest {
- protected:
-  virtual void GetTestData(size_t* data_count,
-                           TestURLInfo** test_data) OVERRIDE;
-};
-
-void HQPOrderingTest::GetTestData(size_t* data_count, TestURLInfo** test_data) {
-  DCHECK(data_count);
-  DCHECK(test_data);
-  *data_count = arraysize(ordering_test_db);
-  *test_data = &ordering_test_db[0];
-}
-
-TEST_F(HQPOrderingTest, TEMatch) {
-  std::vector<std::string> expected_urls;
-  expected_urls.push_back("http://techmeme.com/");
-  expected_urls.push_back("http://www.teamliquid.net/");
-  expected_urls.push_back("http://www.teamliquid.net/tlpd");
-  RunTest(ASCIIToUTF16("te"), expected_urls, true,
-          ASCIIToUTF16("techmeme.com"));
-}
-
-TEST_F(HQPOrderingTest, TEAMatch) {
-  std::vector<std::string> expected_urls;
-  expected_urls.push_back("http://www.teamliquid.net/");
-  expected_urls.push_back("http://www.teamliquid.net/tlpd");
-  expected_urls.push_back("http://www.teamliquid.net/tlpd/korean/players");
-  RunTest(ASCIIToUTF16("tea"), expected_urls, true,
-          ASCIIToUTF16("www.teamliquid.net"));
+  // Low score, can inline, not clamped.
+  next_score = 1500;
+  match.raw_score = 500;
+  match.can_inline = true;
+  EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score), 500);
+  EXPECT_EQ(next_score, 499);
 }

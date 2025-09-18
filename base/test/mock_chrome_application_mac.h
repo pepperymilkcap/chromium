@@ -4,13 +4,14 @@
 
 #ifndef BASE_TEST_MOCK_CHROME_APPLICATION_MAC_H_
 #define BASE_TEST_MOCK_CHROME_APPLICATION_MAC_H_
+#pragma once
 
 #if defined(__OBJC__)
 
 #import <AppKit/AppKit.h>
 
 #include "base/mac/scoped_sending_event.h"
-#include "base/message_loop/message_pump_mac.h"
+#include "base/message_pump_mac.h"
 
 // A basic implementation of CrAppProtocol and
 // CrAppControlProtocol. This can be used in tests that need an

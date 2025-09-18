@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,19 @@
 
 #include "base/basictypes.h"
 #include "base/pickle.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/url_constants.h"
+#include "net/base/escape.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
+
+#if defined(OS_MACOSX)
+#include "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
+#else
+#include "chrome/browser/browser_process.h"
+#endif
 
 const char* BookmarkNodeData::kClipboardFormatString =
     "chromium/x-bookmark-entries";
@@ -25,11 +32,7 @@ BookmarkNodeData::Element::Element(const BookmarkNode* node)
     : is_url(node->is_url()),
       url(node->url()),
       title(node->GetTitle()),
-      date_added(node->date_added()),
-      date_folder_modified(node->date_folder_modified()),
       id_(node->id()) {
-  if (node->GetMetaInfoMap())
-    meta_info_map = *node->GetMetaInfoMap();
   for (int i = 0; i < node->child_count(); ++i)
     children.push_back(Element(node->GetChild(i)));
 }
@@ -42,14 +45,8 @@ void BookmarkNodeData::Element::WriteToPickle(Pickle* pickle) const {
   pickle->WriteString(url.spec());
   pickle->WriteString16(title);
   pickle->WriteInt64(id_);
-  pickle->WriteUInt64(meta_info_map.size());
-  for (BookmarkNode::MetaInfoMap::const_iterator it = meta_info_map.begin();
-      it != meta_info_map.end(); ++it) {
-    pickle->WriteString(it->first);
-    pickle->WriteString(it->second);
-  }
   if (!is_url) {
-    pickle->WriteUInt64(children.size());
+    pickle->WriteSize(children.size());
     for (std::vector<Element>::const_iterator i = children.begin();
          i != children.end(); ++i) {
       i->WriteToPickle(pickle);
@@ -58,7 +55,7 @@ void BookmarkNodeData::Element::WriteToPickle(Pickle* pickle) const {
 }
 
 bool BookmarkNodeData::Element::ReadFromPickle(Pickle* pickle,
-                                               PickleIterator* iterator) {
+                                               void** iterator) {
   std::string url_spec;
   if (!pickle->ReadBool(iterator, &is_url) ||
       !pickle->ReadString(iterator, &url_spec) ||
@@ -67,37 +64,35 @@ bool BookmarkNodeData::Element::ReadFromPickle(Pickle* pickle,
     return false;
   }
   url = GURL(url_spec);
-  date_added = base::Time();
-  date_folder_modified = base::Time();
-  meta_info_map.clear();
-  uint64 meta_field_count;
-  if (!pickle->ReadUInt64(iterator, &meta_field_count))
-    return false;
-  for (uint64 i = 0; i < meta_field_count; ++i) {
-    std::string key;
-    std::string value;
-    if (!pickle->ReadString(iterator, &key) ||
-        !pickle->ReadString(iterator, &value)) {
-      return false;
-    }
-    meta_info_map[key] = value;
-  }
   children.clear();
   if (!is_url) {
-    uint64 children_count;
-    if (!pickle->ReadUInt64(iterator, &children_count))
+    size_t children_count;
+    if (!pickle->ReadSize(iterator, &children_count))
       return false;
-    children.reserve(children_count);
-    for (uint64 i = 0; i < children_count; ++i) {
-      children.push_back(Element());
-      if (!children.back().ReadFromPickle(pickle, iterator))
+    children.resize(children_count);
+    for (std::vector<Element>::iterator i = children.begin();
+         i != children.end(); ++i) {
+      if (!i->ReadFromPickle(pickle, iterator))
         return false;
     }
   }
   return true;
 }
 
-// BookmarkNodeData -----------------------------------------------------------
+#if defined(TOOLKIT_VIEWS)
+// static
+ui::OSExchangeData::CustomFormat BookmarkNodeData::GetBookmarkCustomFormat() {
+  static ui::OSExchangeData::CustomFormat format;
+  static bool format_valid = false;
+
+  if (!format_valid) {
+    format_valid = true;
+    format = ui::OSExchangeData::RegisterCustomFormat(
+        BookmarkNodeData::kClipboardFormatString);
+  }
+  return format;
+}
+#endif
 
 BookmarkNodeData::BookmarkNodeData() {
 }
@@ -114,15 +109,6 @@ BookmarkNodeData::BookmarkNodeData(
 BookmarkNodeData::~BookmarkNodeData() {
 }
 
-#if !defined(OS_MACOSX)
-// static
-bool BookmarkNodeData::ClipboardContainsBookmarks() {
-  return ui::Clipboard::GetForCurrentThread()->IsFormatAvailable(
-      ui::Clipboard::GetFormatType(kClipboardFormatString),
-      ui::CLIPBOARD_TYPE_COPY_PASTE);
-}
-#endif
-
 bool BookmarkNodeData::ReadFromVector(
     const std::vector<const BookmarkNode*>& nodes) {
   Clear();
@@ -136,7 +122,7 @@ bool BookmarkNodeData::ReadFromVector(
   return true;
 }
 
-bool BookmarkNodeData::ReadFromTuple(const GURL& url, const base::string16& title) {
+bool BookmarkNodeData::ReadFromTuple(const GURL& url, const string16& title) {
   Clear();
 
   if (!url.is_valid())
@@ -153,41 +139,35 @@ bool BookmarkNodeData::ReadFromTuple(const GURL& url, const base::string16& titl
 }
 
 #if !defined(OS_MACOSX)
-void BookmarkNodeData::WriteToClipboard(ui::ClipboardType type) {
-  DCHECK_EQ(type, ui::CLIPBOARD_TYPE_COPY_PASTE);
-  ui::ScopedClipboardWriter scw(ui::Clipboard::GetForCurrentThread(),
-                                ui::CLIPBOARD_TYPE_COPY_PASTE);
+void BookmarkNodeData::WriteToClipboard(Profile* profile) const {
+  ui::ScopedClipboardWriter scw(g_browser_process->clipboard());
 
   // If there is only one element and it is a URL, write the URL to the
   // clipboard.
   if (elements.size() == 1 && elements[0].is_url) {
-    const base::string16& title = elements[0].title;
+    const string16& title = elements[0].title;
     const std::string url = elements[0].url.spec();
 
     scw.WriteBookmark(title, url);
-
-    // Don't call scw.WriteHyperlink() here, since some rich text editors will
-    // change fonts when such data is pasted in; besides, most such editors
-    // auto-linkify at some point anyway.
+    scw.WriteHyperlink(net::EscapeForHTML(title), url);
 
     // Also write the URL to the clipboard as text so that it can be pasted
     // into text fields. We use WriteText instead of WriteURL because we don't
     // want to clobber the X clipboard when the user copies out of the omnibox
     // on Linux (on Windows and Mac, there is no difference between these
     // functions).
-    scw.WriteText(base::UTF8ToUTF16(url));
+    scw.WriteText(UTF8ToUTF16(url));
   }
 
   Pickle pickle;
-  WriteToPickle(NULL, &pickle);
-  scw.WritePickledData(pickle,
-                       ui::Clipboard::GetFormatType(kClipboardFormatString));
+  WriteToPickle(profile, &pickle);
+  scw.WritePickledData(
+      pickle, ui::Clipboard::GetFormatType(kClipboardFormatString));
 }
 
-bool BookmarkNodeData::ReadFromClipboard(ui::ClipboardType type) {
-  DCHECK_EQ(type, ui::CLIPBOARD_TYPE_COPY_PASTE);
+bool BookmarkNodeData::ReadFromClipboard() {
   std::string data;
-  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  ui::Clipboard* clipboard = g_browser_process->clipboard();
   clipboard->ReadData(ui::Clipboard::GetFormatType(kClipboardFormatString),
                       &data);
 
@@ -197,7 +177,7 @@ bool BookmarkNodeData::ReadFromClipboard(ui::ClipboardType type) {
       return true;
   }
 
-  base::string16 title;
+  string16 title;
   std::string url;
   clipboard->ReadBookmark(&title, &url);
   if (!url.empty()) {
@@ -213,25 +193,113 @@ bool BookmarkNodeData::ReadFromClipboard(ui::ClipboardType type) {
 
   return false;
 }
+
+bool BookmarkNodeData::ClipboardContainsBookmarks() {
+  return g_browser_process->clipboard()->IsFormatAvailable(
+      ui::Clipboard::GetFormatType(kClipboardFormatString),
+      ui::Clipboard::BUFFER_STANDARD);
+}
+#else
+void BookmarkNodeData::WriteToClipboard(Profile* profile) const {
+  bookmark_pasteboard_helper_mac::WriteToPasteboard(
+      bookmark_pasteboard_helper_mac::kCopyPastePasteboard,
+      elements,
+      profile_path_.value());
+}
+
+bool BookmarkNodeData::ReadFromClipboard() {
+  FilePath file_path;
+  if (!bookmark_pasteboard_helper_mac::ReadFromPasteboard(
+      bookmark_pasteboard_helper_mac::kCopyPastePasteboard,
+      elements,
+      &file_path)) {
+    return false;
+  }
+
+  profile_path_ = file_path;
+  return true;
+}
+
+bool BookmarkNodeData::ReadFromDragClipboard() {
+  FilePath file_path;
+  if (!bookmark_pasteboard_helper_mac::ReadFromPasteboard(
+      bookmark_pasteboard_helper_mac::kDragPasteboard,
+      elements,
+      &file_path)) {
+    return false;
+  }
+
+  profile_path_ = file_path;
+  return true;
+}
+
+bool BookmarkNodeData::ClipboardContainsBookmarks() {
+  return bookmark_pasteboard_helper_mac::PasteboardContainsBookmarks(
+      bookmark_pasteboard_helper_mac::kCopyPastePasteboard);
+}
+#endif  // !defined(OS_MACOSX)
+
+#if defined(TOOLKIT_VIEWS)
+void BookmarkNodeData::Write(Profile* profile, ui::OSExchangeData* data) const {
+  DCHECK(data);
+
+  // If there is only one element and it is a URL, write the URL to the
+  // clipboard.
+  if (elements.size() == 1 && elements[0].is_url) {
+    if (elements[0].url.SchemeIs(chrome::kJavaScriptScheme)) {
+      data->SetString(UTF8ToUTF16(elements[0].url.spec()));
+    } else {
+      data->SetURL(elements[0].url, elements[0].title);
+    }
+  }
+
+  Pickle data_pickle;
+  WriteToPickle(profile, &data_pickle);
+
+  data->SetPickledData(GetBookmarkCustomFormat(), data_pickle);
+}
+
+bool BookmarkNodeData::Read(const ui::OSExchangeData& data) {
+  elements.clear();
+
+  profile_path_.clear();
+
+  if (data.HasCustomFormat(GetBookmarkCustomFormat())) {
+    Pickle drag_data_pickle;
+    if (data.GetPickledData(GetBookmarkCustomFormat(), &drag_data_pickle)) {
+      if (!ReadFromPickle(&drag_data_pickle))
+        return false;
+    }
+  } else {
+    // See if there is a URL on the clipboard.
+    Element element;
+    GURL url;
+    string16 title;
+    if (data.GetURLAndTitle(&url, &title))
+      ReadFromTuple(url, title);
+  }
+
+  return is_valid();
+}
 #endif
 
 void BookmarkNodeData::WriteToPickle(Profile* profile, Pickle* pickle) const {
-  base::FilePath path = profile ? profile->GetPath() : base::FilePath();
+  FilePath path = profile ? profile->GetPath() : FilePath();
   path.WriteToPickle(pickle);
-  pickle->WriteUInt64(elements.size());
+  pickle->WriteSize(elements.size());
 
   for (size_t i = 0; i < elements.size(); ++i)
     elements[i].WriteToPickle(pickle);
 }
 
 bool BookmarkNodeData::ReadFromPickle(Pickle* pickle) {
-  PickleIterator data_iterator(*pickle);
-  uint64 element_count;
-  if (profile_path_.ReadFromPickle(&data_iterator) &&
-      pickle->ReadUInt64(&data_iterator, &element_count)) {
+  void* data_iterator = NULL;
+  size_t element_count;
+  if (profile_path_.ReadFromPickle(pickle, &data_iterator) &&
+      pickle->ReadSize(&data_iterator, &element_count)) {
     std::vector<Element> tmp_elements;
     tmp_elements.resize(element_count);
-    for (uint64 i = 0; i < element_count; ++i) {
+    for (size_t i = 0; i < element_count; ++i) {
       if (!tmp_elements[i].ReadFromPickle(pickle, &data_iterator)) {
         return false;
       }
@@ -250,8 +318,8 @@ std::vector<const BookmarkNode*> BookmarkNodeData::GetNodes(
     return nodes;
 
   for (size_t i = 0; i < elements.size(); ++i) {
-    const BookmarkNode* node = BookmarkModelFactory::GetForProfile(
-        profile)->GetNodeByID(elements[i].id_);
+    const BookmarkNode* node =
+        profile->GetBookmarkModel()->GetNodeByID(elements[i].id_);
     if (!node) {
       nodes.clear();
       return nodes;

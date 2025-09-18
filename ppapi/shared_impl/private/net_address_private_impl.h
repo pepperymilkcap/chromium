@@ -5,16 +5,17 @@
 #ifndef PPAPI_SHARED_IMPL_PRIVATE_NET_ADDRESS_PRIVATE_IMPL_H_
 #define PPAPI_SHARED_IMPL_PRIVATE_NET_ADDRESS_PRIVATE_IMPL_H_
 
-#include <string>
-#include <vector>
-
 #include "base/basictypes.h"
 #include "ppapi/c/pp_stdint.h"
-#include "ppapi/c/ppb_net_address.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
 
 struct PP_NetAddress_Private;
 struct sockaddr;
+
+namespace net {
+class AddressList;
+class IPEndPoint;
+}
 
 namespace ppapi {
 
@@ -26,35 +27,18 @@ class PPAPI_SHARED_EXPORT NetAddressPrivateImpl {
                                    uint32_t sa_length,
                                    PP_NetAddress_Private* net_addr);
 
-  static bool IPEndPointToNetAddress(const std::vector<unsigned char>& address,
-                                     int port,
+  static bool IPEndPointToNetAddress(const net::IPEndPoint& ip,
                                      PP_NetAddress_Private* net_addr);
 
+  // Converts the first address to a PP_NetAddress_Private.
+  static bool AddressListToNetAddress(const net::AddressList& address_list,
+                                      PP_NetAddress_Private* net_addr);
+
   static bool NetAddressToIPEndPoint(const PP_NetAddress_Private& net_addr,
-                                     std::vector<unsigned char>* address,
-                                     int* port);
+                                     net::IPEndPoint* ip_end_point);
 
-  static std::string DescribeNetAddress(const PP_NetAddress_Private& addr,
-                                        bool include_port);
-
-  // Conversion methods to make PPB_NetAddress resource work with
-  // PP_NetAddress_Private.
-  // TODO(yzshen): Remove them once PPB_NetAddress resource doesn't use
-  // PP_NetAddress_Private as storage type.
-  static void CreateNetAddressPrivateFromIPv4Address(
-      const PP_NetAddress_IPv4& ipv4_addr,
-      PP_NetAddress_Private* addr);
-  static void CreateNetAddressPrivateFromIPv6Address(
-      const PP_NetAddress_IPv6& ipv6_addr,
-      PP_NetAddress_Private* addr);
-  static PP_NetAddress_Family GetFamilyFromNetAddressPrivate(
-      const PP_NetAddress_Private& addr);
-  static bool DescribeNetAddressPrivateAsIPv4Address(
-      const PP_NetAddress_Private& addr,
-      PP_NetAddress_IPv4* ipv4_addr);
-  static bool DescribeNetAddressPrivateAsIPv6Address(
-      const PP_NetAddress_Private& addr,
-      PP_NetAddress_IPv6* ipv6_addr);
+  static bool NetAddressToAddressList(const PP_NetAddress_Private& net_addr,
+                                      net::AddressList* address_list);
 
   static const PP_NetAddress_Private kInvalidNetAddress;
 

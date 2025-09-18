@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,20 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/printing/print_job_worker.h"
-#include "chrome/browser/printing/printing_ui_web_contents_observer.h"
 
 namespace printing {
 
 PrinterQuery::PrinterQuery()
-    : io_message_loop_(base::MessageLoop::current()),
-      worker_(new PrintJobWorker(this)),
+    : io_message_loop_(MessageLoop::current()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(worker_(new PrintJobWorker(this))),
       is_print_dialog_box_shown_(false),
       cookie_(PrintSettings::NewCookie()),
       last_status_(PrintingContext::FAILED) {
-  DCHECK_EQ(io_message_loop_->type(), base::MessageLoop::TYPE_IO);
+  DCHECK_EQ(io_message_loop_->type(), MessageLoop::TYPE_IO);
 }
 
 PrinterQuery::~PrinterQuery() {
@@ -57,7 +56,7 @@ PrintJobWorker* PrinterQuery::DetachWorker(PrintJobWorkerOwner* new_owner) {
   return worker_.release();
 }
 
-base::MessageLoop* PrinterQuery::message_loop() {
+MessageLoop* PrinterQuery::message_loop() {
   return io_message_loop_;
 }
 
@@ -69,32 +68,28 @@ int PrinterQuery::cookie() const {
   return cookie_;
 }
 
-void PrinterQuery::GetSettings(
-    GetSettingsAskParam ask_user_for_settings,
-    scoped_ptr<PrintingUIWebContentsObserver> web_contents_observer,
-    int expected_page_count,
-    bool has_selection,
-    MarginType margin_type,
-    const base::Closure& callback) {
-  DCHECK_EQ(io_message_loop_, base::MessageLoop::current());
+void PrinterQuery::GetSettings(GetSettingsAskParam ask_user_for_settings,
+                               gfx::NativeView parent_view,
+                               int expected_page_count,
+                               bool has_selection,
+                               MarginType margin_type,
+                               const base::Closure& callback) {
+  DCHECK_EQ(io_message_loop_, MessageLoop::current());
   DCHECK(!is_print_dialog_box_shown_);
 
   StartWorker(callback);
 
-  // Real work is done in PrintJobWorker::GetSettings().
+  // Real work is done in PrintJobWorker::Init().
   is_print_dialog_box_shown_ = ask_user_for_settings == ASK_USER;
   worker_->message_loop()->PostTask(
       FROM_HERE,
       base::Bind(&PrintJobWorker::GetSettings,
                  base::Unretained(worker_.get()),
-                 is_print_dialog_box_shown_,
-                 base::Passed(&web_contents_observer),
-                 expected_page_count,
-                 has_selection,
-                 margin_type));
+                 is_print_dialog_box_shown_, parent_view,
+                 expected_page_count, has_selection, margin_type));
 }
 
-void PrinterQuery::SetSettings(const base::DictionaryValue& new_settings,
+void PrinterQuery::SetSettings(const DictionaryValue& new_settings,
                                const base::Closure& callback) {
   StartWorker(callback);
 
@@ -103,11 +98,6 @@ void PrinterQuery::SetSettings(const base::DictionaryValue& new_settings,
       base::Bind(&PrintJobWorker::SetSettings,
                  base::Unretained(worker_.get()),
                  new_settings.DeepCopy()));
-}
-
-void PrinterQuery::SetWorkerDestination(
-    PrintDestinationInterface* destination) {
-  worker_->SetPrintDestination(destination);
 }
 
 void PrinterQuery::StartWorker(const base::Closure& callback) {

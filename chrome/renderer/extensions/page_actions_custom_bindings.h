@@ -4,22 +4,29 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_PAGE_ACTIONS_CUSTOM_BINDINGS_H_
 #define CHROME_RENDERER_EXTENSIONS_PAGE_ACTIONS_CUSTOM_BINDINGS_H_
+#pragma once
 
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 
+class ExtensionDispatcher;
+
 namespace extensions {
-class Dispatcher;
 
 // Implements custom bindings for the pageActions API.
 class PageActionsCustomBindings : public ChromeV8Extension {
  public:
-  PageActionsCustomBindings(Dispatcher* extension_dispatcher,
-                            ChromeV8Context* context);
+  PageActionsCustomBindings(
+      int dependency_count,
+      const char** dependencies,
+      ExtensionDispatcher* extension_dispatcher);
+
+  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
+      v8::Handle<v8::String> name) OVERRIDE;
 
  private:
-  void GetCurrentPageActions(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static v8::Handle<v8::Value> GetCurrentPageActions(const v8::Arguments& args);
 };
 
-}  // namespace extensions
+}  // extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_PAGE_ACTIONS_CUSTOM_BINDINGS_H_

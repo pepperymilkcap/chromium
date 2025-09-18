@@ -5,8 +5,8 @@
 #include "net/ftp/ftp_directory_listing_parser_unittest.h"
 
 #include "base/format_macros.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "net/ftp/ftp_directory_listing_parser_windows.h"
 
 namespace net {
@@ -38,12 +38,12 @@ TEST_F(FtpDirectoryListingParserWindowsTest, Good) {
     { "01-06-80  02:42AM                  458 Corner3.txt",
       FtpDirectoryListingEntry::FILE, "Corner3.txt", 458,
       1980, 1, 6, 2, 42 },
-#if !defined(OS_LINUX) && !defined(OS_ANDROID)
+#if !defined(OS_LINUX)
     // TODO(phajdan.jr): Re-enable when 2038-year problem is fixed on Linux.
     { "01-06-79  02:42AM                  458 Corner4",
       FtpDirectoryListingEntry::FILE, "Corner4", 458,
       2079, 1, 6, 2, 42 },
-#endif  // !defined (OS_LINUX) && !defined(OS_ANDROID)
+#endif  // !defined (OS_LINUX)
     { "01-06-1979  02:42AM                458 Readme.txt",
       FtpDirectoryListingEntry::FILE, "Readme.txt", 458,
       1979, 1, 6, 2, 42 },

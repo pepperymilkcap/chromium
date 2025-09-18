@@ -2,18 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/string16.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
+#include "base/string16.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-#include "content/public/test/render_view_test.h"
 #include "content/renderer/render_view_impl.h"
+#include "content/test/render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/common/webpreferences.h"
 
 #include <Cocoa/Cocoa.h>
 #include <Carbon/Carbon.h>  // for the kVK_* constants.
 
-namespace content {
+using content::RenderViewTest;
 
 NSEvent* CmdDeadKeyEvent(NSEventType type, unsigned short code) {
   UniChar uniChar = 0;
@@ -30,7 +29,7 @@ NSEvent* CmdDeadKeyEvent(NSEventType type, unsigned short code) {
   NSString* s = [NSString stringWithFormat:@"%C", uniChar];
 
   return [NSEvent keyEventWithType:type
-                          location:NSZeroPoint
+                          location:NSMakePoint(0, 0)
                      modifierFlags:NSCommandKeyMask
                          timestamp:0.0
                       windowNumber:0
@@ -50,32 +49,37 @@ TEST_F(RenderViewTest, MacTestCmdUp) {
   // a single long line).
   #define HTML(s) #s
   const char* kRawHtml = HTML(
-  <!DOCTYPE html>
-  <style>
-    /* Add a vertical scrollbar */
-    body { height: 10128px; }
-  </style>
-  <div id='keydown'></div>
-  <div id='scroll'></div>
-  <script>
-    var allowKeyEvents = true;
-    var scroll = document.getElementById('scroll');
-    var result = document.getElementById('keydown');
-    onkeydown = function(event) {
-      result.textContent =
-        event.keyCode + ',' +
-        event.shiftKey + ',' +
-        event.ctrlKey + ',' +
-        event.metaKey + ',' +
-        event.altKey;
-      return allowKeyEvents;
-    }
+  <html>
+  <head><title></title>
+  <script type='text/javascript' language='javascript'>
+  function OnKeyEvent(ev) {
+    var result = document.getElementById(ev.type);
+    result.innerText = (ev.which || ev.keyCode) + ',' +
+      ev.shiftKey + ',' +
+      ev.ctrlKey + ',' +
+      ev.metaKey + ',' +
+      ev.altKey;
+    return %s;  /* Replace with "return true;" when testing in an html file. */
+  }
+  function OnScroll(ev) {
+    var result = document.getElementById("scroll");
+    result.innerText = window.pageYOffset;
+    return true;
+  }
   </script>
-  <!--
-    TODO(esprehn): For some strange reason we need a non-empty document for
-    scrolling to work. This is not the case in a real browser only in the test.
-  -->
+  <style type="text/css">
+  p { border-bottom:5000px solid black; } /* enforce vertical scroll bar */
+  </style>
+  </head>
+  <body
+    onscroll='return OnScroll(event);'
+    onkeydown='return OnKeyEvent(event);'>
+  <div id='keydown' contenteditable='true'> </div>
+  <div id='scroll' contenteditable='true'> </div>
   <p>p1
+  <p>p2
+  </body>
+  </html>
   );
   #undef HTML
 
@@ -86,56 +90,59 @@ TEST_F(RenderViewTest, MacTestCmdUp) {
   view->OnUpdateWebPreferences(prefs);
 
   const int kMaxOutputCharacters = 1024;
-  base::string16 output;
+  string16 output;
+  char htmlBuffer[2048];
 
   NSEvent* arrowDownKeyDown = CmdDeadKeyEvent(NSKeyDown, kVK_DownArrow);
   NSEvent* arrowUpKeyDown = CmdDeadKeyEvent(NSKeyDown, kVK_UpArrow);
 
   // First test when javascript does not eat keypresses -- should scroll.
+  sprintf(htmlBuffer, kRawHtml, "true");
   view->set_send_content_state_immediately(true);
-  LoadHTML(kRawHtml);
+  LoadHTML(htmlBuffer);
   render_thread_->sink().ClearMessages();
 
-  const char* kArrowDownScrollDown = "40,false,false,true,false\n10144\np1";
+  const char* kArrowDownScrollDown =
+      "40,false,false,true,false\n10128\np1\n\np2";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToEndOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowDownKeyDown));
   ProcessPendingMessages();
-  ExecuteJavaScript("scroll.textContent = window.pageYOffset");
   output = GetMainFrame()->contentAsText(kMaxOutputCharacters);
   EXPECT_EQ(kArrowDownScrollDown, UTF16ToASCII(output));
 
-  const char* kArrowUpScrollUp = "38,false,false,true,false\n0\np1";
+  const char* kArrowUpScrollUp =
+      "38,false,false,true,false\n0\np1\n\np2";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToBeginningOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowUpKeyDown));
   ProcessPendingMessages();
-  ExecuteJavaScript("scroll.textContent = window.pageYOffset");
   output = GetMainFrame()->contentAsText(kMaxOutputCharacters);
   EXPECT_EQ(kArrowUpScrollUp, UTF16ToASCII(output));
 
-  // Now let javascript eat the key events -- no scrolling should happen.
-  // Set a scroll position slightly down the page to ensure that it does not
-  // move.
-  ExecuteJavaScript("allowKeyEvents = false; window.scrollTo(0, 100)");
 
-  const char* kArrowDownNoScroll = "40,false,false,true,false\n100\np1";
+  // Now let javascript eat the key events -- no scrolling should happen
+  sprintf(htmlBuffer, kRawHtml, "false");
+  view->set_send_content_state_immediately(true);
+  LoadHTML(htmlBuffer);
+  render_thread_->sink().ClearMessages();
+
+  const char* kArrowDownNoScroll =
+      "40,false,false,true,false\np1\n\np2";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToEndOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowDownKeyDown));
   ProcessPendingMessages();
-  ExecuteJavaScript("scroll.textContent = window.pageYOffset");
   output = GetMainFrame()->contentAsText(kMaxOutputCharacters);
   EXPECT_EQ(kArrowDownNoScroll, UTF16ToASCII(output));
 
-  const char* kArrowUpNoScroll = "38,false,false,true,false\n100\np1";
+  const char* kArrowUpNoScroll =
+      "38,false,false,true,false\np1\n\np2";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToBeginningOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowUpKeyDown));
   ProcessPendingMessages();
-  ExecuteJavaScript("scroll.textContent = window.pageYOffset");
   output = GetMainFrame()->contentAsText(kMaxOutputCharacters);
   EXPECT_EQ(kArrowUpNoScroll, UTF16ToASCII(output));
 }
 
-}  // namespace content

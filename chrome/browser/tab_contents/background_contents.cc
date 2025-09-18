@@ -5,54 +5,39 @@
 #include "chrome/browser/tab_contents/background_contents.h"
 
 #include "chrome/browser/background/background_contents_service.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_web_contents_observer.h"
+#include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/chrome_view_type.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
-#include "extensions/browser/view_type_utils.h"
 #include "ui/gfx/rect.h"
 
 using content::SiteInstance;
 using content::WebContents;
 
-BackgroundContents::BackgroundContents(
-    SiteInstance* site_instance,
-    int routing_id,
-    Delegate* delegate,
-    const std::string& partition_id,
-    content::SessionStorageNamespace* session_storage_namespace)
+BackgroundContents::BackgroundContents(SiteInstance* site_instance,
+                                       int routing_id,
+                                       Delegate* delegate)
     : delegate_(delegate) {
   profile_ = Profile::FromBrowserContext(
       site_instance->GetBrowserContext());
 
-  WebContents::CreateParams create_params(profile_, site_instance);
-  create_params.routing_id = routing_id;
-  if (session_storage_namespace) {
-    content::SessionStorageNamespaceMap session_storage_namespace_map;
-    session_storage_namespace_map.insert(
-        std::make_pair(partition_id, session_storage_namespace));
-    web_contents_.reset(WebContents::CreateWithSessionStorage(
-        create_params, session_storage_namespace_map));
-  } else {
-    web_contents_.reset(WebContents::Create(create_params));
-  }
-  extensions::SetViewType(
-      web_contents_.get(), extensions::VIEW_TYPE_BACKGROUND_CONTENTS);
+  // TODO(rafaelw): Implement correct session storage.
+  web_contents_.reset(WebContents::Create(
+      profile_, site_instance, routing_id, NULL, NULL));
+  web_contents_->SetViewType(chrome::VIEW_TYPE_BACKGROUND_CONTENTS);
   web_contents_->SetDelegate(this);
   content::WebContentsObserver::Observe(web_contents_.get());
-  extensions::ExtensionWebContentsObserver::CreateForWebContents(
-      web_contents_.get());
 
   // Close ourselves when the application is shutting down.
-  registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
+  registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
 
   // Register for our parent profile to shutdown, so we can shut ourselves down
@@ -71,12 +56,6 @@ BackgroundContents::BackgroundContents()
 BackgroundContents::~BackgroundContents() {
   if (!web_contents_.get())   // Will be null for unit tests.
     return;
-
-  // Unregister for any notifications before notifying observers that we are
-  // going away - this prevents any re-entrancy due to chained notifications
-  // (http://crbug.com/237781).
-  registrar_.RemoveAll();
-
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
       content::Source<Profile>(profile_),
@@ -113,18 +92,17 @@ void BackgroundContents::DidNavigateMainFramePostCommit(WebContents* tab) {
       content::Details<BackgroundContents>(this));
 }
 
-// Forward requests to add a new WebContents to our delegate.
+// Forward requests to add a new TabContents to our delegate.
 void BackgroundContents::AddNewContents(WebContents* source,
                                         WebContents* new_contents,
                                         WindowOpenDisposition disposition,
                                         const gfx::Rect& initial_pos,
-                                        bool user_gesture,
-                                        bool* was_blocked) {
+                                        bool user_gesture) {
   delegate_->AddWebContents(
-      new_contents, disposition, initial_pos, user_gesture, was_blocked);
+      new_contents, disposition, initial_pos, user_gesture);
 }
 
-void BackgroundContents::RenderProcessGone(base::TerminationStatus status) {
+void BackgroundContents::RenderViewGone(base::TerminationStatus status) {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_TERMINATED,
       content::Source<Profile>(profile_),
@@ -144,7 +122,7 @@ void BackgroundContents::Observe(int type,
   // background pages are closed when the last referencing frame is closed.
   switch (type) {
     case chrome::NOTIFICATION_PROFILE_DESTROYED:
-    case chrome::NOTIFICATION_APP_TERMINATING: {
+    case content::NOTIFICATION_APP_TERMINATING: {
       delete this;
       break;
     }

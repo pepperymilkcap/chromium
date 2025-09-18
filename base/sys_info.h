@@ -1,18 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_SYS_INFO_H_
 #define BASE_SYS_INFO_H_
-
-#include <map>
-#include <string>
+#pragma once
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
-#include "base/time/time.h"
-#include "build/build_config.h"
+
+#include <string>
+
+class FilePath;
 
 namespace base {
 
@@ -24,10 +23,6 @@ class BASE_EXPORT SysInfo {
   // Return the number of bytes of physical memory on the current machine.
   static int64 AmountOfPhysicalMemory();
 
-  // Return the number of bytes of current available physical memory on the
-  // machine.
-  static int64 AmountOfAvailablePhysicalMemory();
-
   // Return the number of megabytes of physical memory on the current machine.
   static int AmountOfPhysicalMemoryMB() {
     return static_cast<int>(AmountOfPhysicalMemory() / 1024 / 1024);
@@ -36,9 +31,6 @@ class BASE_EXPORT SysInfo {
   // Return the available disk space in bytes on the volume containing |path|,
   // or -1 on failure.
   static int64 AmountOfFreeDiskSpace(const FilePath& path);
-
-  // Returns system uptime in milliseconds.
-  static int64 Uptime();
 
   // Returns the name of the host operating system.
   static std::string OperatingSystemName();
@@ -58,66 +50,31 @@ class BASE_EXPORT SysInfo {
                                             int32* minor_version,
                                             int32* bugfix_version);
 
-  // Returns the architecture of the running operating system.
-  // Exact return value may differ across platforms.
-  // e.g. a 32-bit x86 kernel on a 64-bit capable CPU will return "x86",
-  //      whereas a x86-64 kernel on the same CPU will return "x86_64"
-  static std::string OperatingSystemArchitecture();
-
-  // Avoid using this. Use base/cpu.h to get information about the CPU instead.
-  // http://crbug.com/148884
-  // Returns the CPU model name of the system. If it can not be figured out,
-  // an empty string is returned.
-  static std::string CPUModelName();
+  // Returns the CPU architecture of the system. Exact return value may differ
+  // across platforms.
+  static std::string CPUArchitecture();
 
   // Return the smallest amount of memory (in bytes) which the VM system will
   // allocate.
   static size_t VMAllocationGranularity();
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Returns the maximum SysV shared memory segment size, or zero if there is no
-  // limit.
+  // Returns the maximum SysV shared memory segment size.
   static size_t MaxSharedMemorySize();
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif
 
 #if defined(OS_CHROMEOS)
-  typedef std::map<std::string, std::string> LsbReleaseMap;
+  // Returns the name of the version entry we wish to look up in the
+  // Linux Standard Base release information file.
+  static std::string GetLinuxStandardBaseVersionKey();
 
-  // Returns the contents of /etc/lsb-release as a map.
-  static const LsbReleaseMap& GetLsbReleaseMap();
-
-  // If |key| is present in the LsbReleaseMap, sets |value| and returns true.
-  static bool GetLsbReleaseValue(const std::string& key, std::string* value);
-
-  // Convenience function for GetLsbReleaseValue("CHROMEOS_RELEASE_BOARD",...).
-  // Returns "unknown" if CHROMEOS_RELEASE_BOARD is not set.
-  static std::string GetLsbReleaseBoard();
-
-  // Returns the creation time of /etc/lsb-release. (Used to get the date and
-  // time of the Chrome OS build).
-  static Time GetLsbReleaseTime();
-
-  // Returns true when actually running in a Chrome OS environment.
-  static bool IsRunningOnChromeOS();
-
-  // Test method to force re-parsing of lsb-release.
-  static void SetChromeOSVersionInfoForTest(const std::string& lsb_release,
-                                            const Time& lsb_release_time);
-#endif  // defined(OS_CHROMEOS)
-
-#if defined(OS_ANDROID)
-  // Returns the Android build's codename.
-  static std::string GetAndroidBuildCodename();
-
-  // Returns the Android build ID.
-  static std::string GetAndroidBuildID();
-
-  // Returns the device's name.
-  static std::string GetDeviceName();
-
-  static int DalvikHeapSizeMB();
-  static int DalvikHeapGrowthLimitMB();
-#endif  // defined(OS_ANDROID)
+  // Parses /etc/lsb-release to get version information for Google Chrome OS.
+  // Declared here so it can be exposed for unit testing.
+  static void ParseLsbRelease(const std::string& lsb_release,
+                              int32* major_version,
+                              int32* minor_version,
+                              int32* bugfix_version);
+#endif
 };
 
 }  // namespace base

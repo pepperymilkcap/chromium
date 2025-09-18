@@ -4,21 +4,16 @@
 
 #ifndef CHROME_BROWSER_UI_FIND_BAR_FIND_TAB_HELPER_H_
 #define CHROME_BROWSER_UI_FIND_BAR_FIND_TAB_HELPER_H_
+#pragma once
 
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_user_data.h"
-#include "ui/gfx/range/range.h"
-
-namespace gfx {
-class RectF;
-}
 
 // Per-tab find manager. Handles dealing with the life cycle of find sessions.
-class FindTabHelper : public content::WebContentsObserver,
-                      public content::WebContentsUserData<FindTabHelper> {
+class FindTabHelper : public content::WebContentsObserver {
  public:
+  explicit FindTabHelper(content::WebContents* web_contents);
   virtual ~FindTabHelper();
 
   // Starts the Find operation by calling StartFinding on the Tab. This function
@@ -27,7 +22,7 @@ class FindTabHelper : public content::WebContentsObserver,
   // function does not block while a search is in progress. The controller will
   // receive the results through the notification mechanism. See Observe(...)
   // for details.
-  void StartFinding(base::string16 search_string,
+  void StartFinding(string16 search_string,
                     bool forward_direction,
                     bool case_sensitive);
 
@@ -51,31 +46,17 @@ class FindTabHelper : public content::WebContentsObserver,
     current_find_request_id_ = current_find_request_id;
   }
 
-  // Accessor for find_text_. Used to determine if this WebContents has any
+  // Accessor for find_text_. Used to determine if this TabContents has any
   // active searches.
-  base::string16 find_text() const { return find_text_; }
+  string16 find_text() const { return find_text_; }
 
   // Accessor for the previous search we issued.
-  base::string16 previous_find_text() const { return previous_find_text_; }
-
-  gfx::Range selected_range() const { return selected_range_; }
-  void set_selected_range(const gfx::Range& selected_range) {
-    selected_range_ = selected_range;
-  }
+  string16 previous_find_text() const { return previous_find_text_; }
 
   // Accessor for find_result_.
   const FindNotificationDetails& find_result() const {
     return last_search_result_;
   }
-
-#if defined(OS_ANDROID)
-  // Selects and zooms to the find result nearest to the point (x,y)
-  // defined in find-in-page coordinates.
-  void ActivateNearestFindResult(float x, float y);
-
-  // Asks the renderer to send the rects of the current find matches.
-  void RequestFindMatchRects(int current_version);
-#endif
 
   void HandleFindReply(int request_id,
                        int number_of_matches,
@@ -84,9 +65,6 @@ class FindTabHelper : public content::WebContentsObserver,
                        bool final_update);
 
  private:
-  explicit FindTabHelper(content::WebContents* web_contents);
-  friend class content::WebContentsUserData<FindTabHelper>;
-
   // Each time a search request comes in we assign it an id before passing it
   // over the IPC so that when the results come in we can evaluate whether we
   // still care about the results of the search (in some cases we don't because
@@ -109,13 +87,10 @@ class FindTabHelper : public content::WebContentsObserver,
   // The current string we are/just finished searching for. This is used to
   // figure out if this is a Find or a FindNext operation (FindNext should not
   // increase the request id).
-  base::string16 find_text_;
+  string16 find_text_;
 
   // The string we searched for before |find_text_|.
-  base::string16 previous_find_text_;
-
-  // The selection within the text.
-  gfx::Range selected_range_;
+  string16 previous_find_text_;
 
   // Whether the last search was case sensitive or not.
   bool last_search_case_sensitive_;

@@ -1,16 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SQL_STATEMENT_H_
 #define SQL_STATEMENT_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "sql/connection.h"
 #include "sql/sql_export.h"
 
@@ -54,16 +55,18 @@ class SQL_EXPORT Statement {
   // be valid. Use is_valid() to check if it's OK.
   void Assign(scoped_refptr<Connection::StatementRef> ref);
 
-  // Resets the statement to an uninitialized state corrosponding to
-  // the default constructor, releasing the StatementRef.
-  void Clear();
-
   // Returns true if the statement can be executed. All functions can still
   // be used if the statement is invalid, but they will return failure or some
   // default value. This is because the statement can become invalid in the
   // middle of executing a command if there is a serious error and the database
   // has to be reset.
   bool is_valid() const { return ref_->is_valid(); }
+
+  // These operators allow conveniently checking if the statement is valid
+  // or not. See the pattern above for an example.
+  // TODO(shess,gbillock): Remove these once clients are converted.
+  operator bool() const { return is_valid(); }
+  bool operator!() const { return !is_valid(); }
 
   // Running -------------------------------------------------------------------
 
@@ -86,9 +89,9 @@ class SQL_EXPORT Statement {
   //   return s.Succeeded();
   bool Step();
 
-  // Resets the statement to its initial condition. This includes any current
-  // result row, and also the bound variables if the |clear_bound_vars| is true.
-  void Reset(bool clear_bound_vars);
+  // Resets the statement to its initial condition. This includes clearing all
+  // the bound variables and any current result row.
+  void Reset();
 
   // Returns true if the last executed thing in this statement succeeded. If
   // there was no last executed thing or the statement is invalid, this will
@@ -108,7 +111,7 @@ class SQL_EXPORT Statement {
   bool BindDouble(int col, double val);
   bool BindCString(int col, const char* val);
   bool BindString(int col, const std::string& val);
-  bool BindString16(int col, const base::string16& value);
+  bool BindString16(int col, const string16& value);
   bool BindBlob(int col, const void* value, int value_len);
 
   // Retrieving ----------------------------------------------------------------
@@ -123,7 +126,6 @@ class SQL_EXPORT Statement {
   // where that type is not the native type. For safety, call ColumnType only
   // on a column before getting the value out in any way.
   ColType ColumnType(int col) const;
-  ColType DeclaredColumnType(int col) const;
 
   // These all take a 0-based argument index.
   bool ColumnBool(int col) const;
@@ -131,7 +133,7 @@ class SQL_EXPORT Statement {
   int64 ColumnInt64(int col) const;
   double ColumnDouble(int col) const;
   std::string ColumnString(int col) const;
-  base::string16 ColumnString16(int col) const;
+  string16 ColumnString16(int col) const;
 
   // When reading a blob, you can get a raw pointer to the underlying data,
   // along with the length, or you can just ask us to copy the blob into a
@@ -139,7 +141,6 @@ class SQL_EXPORT Statement {
   int ColumnByteLength(int col) const;
   const void* ColumnBlob(int col) const;
   bool ColumnBlobAsString(int col, std::string* blob);
-  bool ColumnBlobAsString16(int col, base::string16* val) const;
   bool ColumnBlobAsVector(int col, std::vector<char>* val) const;
   bool ColumnBlobAsVector(int col, std::vector<unsigned char>* val) const;
 
@@ -177,11 +178,6 @@ class SQL_EXPORT Statement {
   // by the connection, which is why it's refcounted. This pointer is
   // guaranteed non-NULL.
   scoped_refptr<Connection::StatementRef> ref_;
-
-  // Set after Step() or Run() are called, reset by Reset().  Used to
-  // prevent accidental calls to API functions which would not work
-  // correctly after stepping has started.
-  bool stepped_;
 
   // See Succeeded() for what this holds.
   bool succeeded_;

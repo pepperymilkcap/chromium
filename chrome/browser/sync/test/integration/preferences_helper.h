@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_PREFERENCES_HELPER_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_PREFERENCES_HELPER_H_
+#pragma once
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/values.h"
 
 #include <string>
@@ -60,14 +61,14 @@ void AppendStringPref(int index,
 // |verifier| if DisableVerifier() hasn't been called.
 void ChangeFilePathPref(int index,
                         const char* pref_name,
-                        const base::FilePath& new_value);
+                        const FilePath& new_value);
 
 // Changes the value of the list preference with name |pref_name| in the
 // profile with index |index| to |new_value|. Also changes its value in
 // |verifier| if DisableVerifier() hasn't been called.
 void ChangeListPref(int index,
                     const char* pref_name,
-                    const base::ListValue& new_value);
+                    const ListValue& new_value);
 
 // Used to verify that the boolean preference with name |pref_name| has the
 // same value across all profiles. Also checks |verifier| if DisableVerifier()

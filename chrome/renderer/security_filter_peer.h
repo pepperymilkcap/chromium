@@ -4,8 +4,9 @@
 
 #ifndef CHROME_RENDERER_SECURITY_FILTER_PEER_H_
 #define CHROME_RENDERER_SECURITY_FILTER_PEER_H_
+#pragma once
 
-#include "webkit/child/resource_loader_bridge.h"
+#include "webkit/glue/resource_loader_bridge.h"
 
 // The SecurityFilterPeer is a proxy to a
 // webkit_glue::ResourceLoaderBridge::Peer instance.  It is used to pre-process
@@ -36,13 +37,12 @@ class SecurityFilterPeer : public webkit_glue::ResourceLoaderBridge::Peer {
       GURL* new_first_party_for_cookies) OVERRIDE;
   virtual void OnReceivedResponse(
       const webkit_glue::ResourceResponseInfo& info) OVERRIDE;
-  virtual void OnDownloadedData(int len, int encoded_data_length) OVERRIDE {}
+  virtual void OnDownloadedData(int len) OVERRIDE {}
   virtual void OnReceivedData(const char* data,
                               int data_length,
                               int encoded_data_length) OVERRIDE;
   virtual void OnCompletedRequest(
-      int error_code,
-      bool was_ignored_by_handler,
+      const net::URLRequestStatus& status,
       const std::string& security_info,
       const base::TimeTicks& completion_time) OVERRIDE;
 
@@ -73,8 +73,7 @@ class BufferedPeer : public SecurityFilterPeer {
                               int data_length,
                               int encoded_data_length) OVERRIDE;
   virtual void OnCompletedRequest(
-      int error_code,
-      bool was_ignored_by_handler,
+      const net::URLRequestStatus& status,
       const std::string& security_info,
       const base::TimeTicks& completion_time) OVERRIDE;
 
@@ -117,8 +116,7 @@ class ReplaceContentPeer : public SecurityFilterPeer {
                               int data_length,
                               int encoded_data_length) OVERRIDE;
   virtual void OnCompletedRequest(
-      int error_code,
-      bool was_ignored_by_handler,
+      const net::URLRequestStatus& status,
       const std::string& security_info,
       const base::TimeTicks& completion_time) OVERRIDE;
 

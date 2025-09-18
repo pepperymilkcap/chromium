@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_BALLOON_HOST_H_
 #define CHROME_BROWSER_NOTIFICATIONS_BALLOON_HOST_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 
@@ -35,11 +37,10 @@ class BalloonHost : public content::WebContentsDelegate,
   void Shutdown();
 
   // ExtensionFunctionDispatcher::Delegate overrides.
-  virtual extensions::WindowController* GetExtensionWindowController()
-      const OVERRIDE;
+  virtual Browser* GetBrowser() OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
-  const base::string16& GetSource() const;
+  const string16& GetSource() const;
 
   content::WebContents* web_contents() const { return web_contents_.get(); }
 
@@ -48,9 +49,6 @@ class BalloonHost : public content::WebContentsDelegate,
 
   // Returns whether the associated render view is ready. Used only for testing.
   bool IsRenderViewReady() const;
-
-  // content::WebContentsDelegate implementation:
-  virtual bool CanLoadDataURLsInWebUI() const OVERRIDE;
 
  protected:
   virtual ~BalloonHost();
@@ -61,20 +59,18 @@ class BalloonHost : public content::WebContentsDelegate,
   // content::WebContentsDelegate implementation:
   virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual void HandleMouseDown() OVERRIDE;
-  virtual void ResizeDueToAutoResize(content::WebContents* source,
-                                     const gfx::Size& pref_size) OVERRIDE;
+  virtual void UpdatePreferredSize(content::WebContents* source,
+                                   const gfx::Size& pref_size) OVERRIDE;
   virtual void AddNewContents(content::WebContents* source,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
+                              bool user_gesture) OVERRIDE;
 
   // content::WebContentsObserver implementation:
-  virtual void RenderViewCreated(
-      content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewReady() OVERRIDE;
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
+  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Message handlers

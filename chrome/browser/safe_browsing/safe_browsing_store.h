@@ -1,22 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_STORE_H_
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_STORE_H_
+#pragma once
 
 #include <set>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
-#include "base/containers/hash_tables.h"
-#include "base/time/time.h"
+#include "base/hash_tables.h"
+#include "base/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 
-namespace base {
 class FilePath;
-}
 
 // SafeBrowsingStore provides a storage abstraction for the
 // safe-browsing data used to build the bloom filter.  The items
@@ -66,8 +65,6 @@ struct SBSubPrefix {
   int32 GetAddChunkId() const { return add_chunk_id; }
   SBPrefix GetAddPrefix() const { return add_prefix; }
 };
-
-typedef std::deque<SBSubPrefix> SBSubPrefixes;
 
 struct SBAddFullHash {
   int32 chunk_id;
@@ -139,12 +136,21 @@ bool SBAddPrefixHashLess(const T& a, const U& b) {
 // in parallel.  At this time this code does the sorting internally,
 // but it might make sense to make sorting an API requirement so that
 // the storage can optimize for it.
+//
+// TODO(shess): The original code did not process |sub_full_hashes|
+// for matches in |add_full_hashes|, so this code doesn't, either.  I
+// think this is probably a bug.
 void SBProcessSubs(SBAddPrefixes* add_prefixes,
-                   SBSubPrefixes* sub_prefixes,
+                   std::vector<SBSubPrefix>* sub_prefixes,
                    std::vector<SBAddFullHash>* add_full_hashes,
                    std::vector<SBSubFullHash>* sub_full_hashes,
                    const base::hash_set<int32>& add_chunks_deleted,
                    const base::hash_set<int32>& sub_chunks_deleted);
+
+// Records a histogram of the number of items in |prefix_misses| which
+// are not in |add_prefixes|.
+void SBCheckPrefixMisses(const SBAddPrefixes& add_prefixes,
+                         const std::set<SBPrefix>& prefix_misses);
 
 // TODO(shess): This uses int32 rather than int because it's writing
 // specifically-sized items to files.  SBPrefix should likewise be
@@ -162,7 +168,7 @@ class SafeBrowsingStore {
   // is detected, which could happen as part of any call other than
   // Delete().  The appropriate action is to use Delete() to clear the
   // store.
-  virtual void Init(const base::FilePath& filename,
+  virtual void Init(const FilePath& filename,
                     const base::Closure& corruption_callback) = 0;
 
   // Deletes the files which back the store, returning true if
@@ -214,24 +220,18 @@ class SafeBrowsingStore {
   virtual void DeleteAddChunk(int32 chunk_id) = 0;
   virtual void DeleteSubChunk(int32 chunk_id) = 0;
 
-  // May be called during update to verify that the storage is valid.
-  // Return true if the store seems valid.  If corruption is detected,
-  // calls the corruption callback and return false.
-  // NOTE(shess): When storage was SQLite, there was no guarantee that
-  // a structurally sound database actually contained valid data,
-  // whereas SafeBrowsingStoreFile checksums the data.  For now, this
-  // distinction doesn't matter.
-  virtual bool CheckValidity() = 0;
-
   // Pass the collected chunks through SBPRocessSubs() and commit to
   // permanent storage.  The resulting add prefixes and hashes will be
   // stored in |add_prefixes_result| and |add_full_hashes_result|.
   // |pending_adds| is the set of full hashes which have been received
   // since the previous update, and is provided as a convenience
   // (could be written via WriteAddHash(), but that would flush the
-  // chunk to disk).
+  // chunk to disk).  |prefix_misses| is the set of prefixes where the
+  // |GetHash()| request returned no full hashes, used for diagnostic
+  // purposes.
   virtual bool FinishUpdate(
       const std::vector<SBAddFullHash>& pending_adds,
+      const std::set<SBPrefix>& prefix_misses,
       SBAddPrefixes* add_prefixes_result,
       std::vector<SBAddFullHash>* add_full_hashes_result) = 0;
 

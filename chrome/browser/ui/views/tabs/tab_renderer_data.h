@@ -1,19 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_RENDERER_DATA_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_RENDERER_DATA_H_
+#pragma once
 
-#include "base/process/kill.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/ui/tabs/tab_utils.h"
-#include "chrome/browser/ui/views/chrome_views_export.h"
-#include "ui/gfx/image/image_skia.h"
-#include "url/gurl.h"
+#include "base/process_util.h"
+#include "base/string16.h"
+#include "googleurl/src/gurl.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 // Wraps the state needed by the renderers.
-struct CHROME_VIEWS_EXPORT TabRendererData {
+struct TabRendererData {
   // Different types of network activity for a tab. The NetworkState of a tab
   // may be used to alter the UI (e.g. show different kinds of loading
   // animations).
@@ -35,12 +34,13 @@ struct CHROME_VIEWS_EXPORT TabRendererData {
             crashed_status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION);
   }
 
-  // Returns true if the TabRendererData is same as given |data|.
+  // Returns true if the TabRendererData is same as given |data|. Two favicons
+  // are considered equals if two SkBitmaps point to the same SkPixelRef object.
   bool Equals(const TabRendererData& data);
 
-  gfx::ImageSkia favicon;
+  SkBitmap favicon;
   NetworkState network_state;
-  base::string16 title;
+  string16 title;
   GURL url;
   bool loading;
   base::TerminationStatus crashed_status;
@@ -49,7 +49,6 @@ struct CHROME_VIEWS_EXPORT TabRendererData {
   bool mini;
   bool blocked;
   bool app;
-  TabMediaState media_state;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_RENDERER_DATA_H_

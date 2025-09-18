@@ -4,13 +4,14 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_COCOA_H_
 #define CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_COCOA_H_
+#pragma once
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/extensions/extension_keybinding_registry.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/search/search_model_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/ui_base_types.h"
 
 class Browser;
@@ -20,19 +21,12 @@ class Browser;
 @class NSMenu;
 @class NSWindow;
 
-namespace extensions {
-class ActiveTabPermissionGranter;
-class Extension;
-}
-
 // An implementation of BrowserWindow for Cocoa. Bridges between C++ and
 // the Cocoa NSWindow. Cross-platform code will interact with this object when
 // it needs to manipulate the window.
 
-class BrowserWindowCocoa :
-    public BrowserWindow,
-    public extensions::ExtensionKeybindingRegistry::Delegate,
-    public SearchModelObserver {
+class BrowserWindowCocoa : public BrowserWindow,
+                           public content::NotificationObserver {
  public:
   BrowserWindowCocoa(Browser* browser,
                      BrowserWindowController* controller);
@@ -41,32 +35,24 @@ class BrowserWindowCocoa :
   // Overridden from BrowserWindow
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
-  virtual void Hide() OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
   virtual bool IsActive() const OVERRIDE;
   virtual void FlashFrame(bool flash) OVERRIDE;
-  virtual bool IsAlwaysOnTop() const OVERRIDE;
-  virtual void SetAlwaysOnTop(bool always_on_top) OVERRIDE;
-  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
+  virtual gfx::NativeWindow GetNativeHandle() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
+  virtual void ToolbarSizeChanged(bool is_animating) OVERRIDE;
   virtual void UpdateTitleBar() OVERRIDE;
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE;
   virtual void UpdateDevTools() OVERRIDE;
+  virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
-  virtual void SetTranslateIconToggled(bool is_lit) OVERRIDE;
-  virtual void OnActiveTabChanged(content::WebContents* old_contents,
-                                  content::WebContents* new_contents,
-                                  int index,
-                                  int reason) OVERRIDE;
-  virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
-  virtual ui::WindowShowState GetRestoredState() const OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
@@ -79,87 +65,77 @@ class BrowserWindowCocoa :
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
       FullscreenExitBubbleType bubble_type) OVERRIDE;
-  virtual bool ShouldHideUIForFullscreen() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual bool IsFullscreenBubbleVisible() const OVERRIDE;
   virtual LocationBar* GetLocationBar() const OVERRIDE;
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
   virtual void UpdateReloadStopState(bool is_loading, bool force) OVERRIDE;
-  virtual void UpdateToolbar(content::WebContents* contents) OVERRIDE;
+  virtual void UpdateToolbar(TabContentsWrapper* contents,
+                             bool should_restore_state) OVERRIDE;
   virtual void FocusToolbar() OVERRIDE;
   virtual void FocusAppMenu() OVERRIDE;
   virtual void FocusBookmarksToolbar() OVERRIDE;
-  virtual void FocusInfobars() OVERRIDE;
+  virtual void FocusChromeOSStatus() OVERRIDE;
   virtual void RotatePaneFocus(bool forwards) OVERRIDE;
   virtual bool IsBookmarkBarVisible() const OVERRIDE;
   virtual bool IsBookmarkBarAnimating() const OVERRIDE;
   virtual bool IsTabStripEditable() const OVERRIDE;
   virtual bool IsToolbarVisible() const OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
-  virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
+  virtual bool IsPanel() const OVERRIDE;
+  virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
+  virtual void ToggleBookmarkBar() OVERRIDE;
+  virtual void ShowAboutChromeDialog() OVERRIDE;
   virtual void ShowUpdateChromeDialog() OVERRIDE;
+  virtual void ShowTaskManager() OVERRIDE;
+  virtual void ShowBackgroundPages() OVERRIDE;
   virtual void ShowBookmarkBubble(const GURL& url,
                                   bool already_bookmarked) OVERRIDE;
-  virtual void ShowTranslateBubble(
-      content::WebContents* contents,
-      TranslateBubbleModel::ViewState view_state,
-      TranslateErrors::Type error_type) OVERRIDE;
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  virtual void ShowOneClickSigninBubble(
-      OneClickSigninBubbleType type,
-      const base::string16& email,
-      const base::string16& error_message,
-      const StartSyncCallback& start_sync_callback) OVERRIDE;
-#endif
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
-  virtual void ConfirmBrowserCloseWithPendingDownloads(
-      int download_count,
-      Browser::DownloadClosePreventionType dialog_type,
-      bool app_modal,
-      const base::Callback<void(bool)>& callback) OVERRIDE;
+  virtual void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) OVERRIDE;
+  virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
-  virtual void ShowWebsiteSettings(Profile* profile,
-                                   content::WebContents* web_contents,
-                                   const GURL& url,
-                                   const content::SSLStatus& ssl) OVERRIDE;
+  virtual void ShowPageInfo(Profile* profile,
+                            const GURL& url,
+                            const content::SSLStatus& ssl,
+                            bool show_history) OVERRIDE;
   virtual void ShowAppMenu() OVERRIDE;
-  virtual bool PreHandleKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event,
-      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual void ShowCreateWebAppShortcutsDialog(
+      TabContentsWrapper* tab_contents) OVERRIDE;
+  virtual void ShowCreateChromeAppShortcutsDialog(
+      Profile* profile,
+      const Extension* app) OVERRIDE;
   virtual void Cut() OVERRIDE;
   virtual void Copy() OVERRIDE;
   virtual void Paste() OVERRIDE;
   virtual void OpenTabpose() OVERRIDE;
-  virtual void EnterFullscreenWithChrome() OVERRIDE;
-  virtual bool IsFullscreenWithChrome() OVERRIDE;
-  virtual bool IsFullscreenWithoutChrome() OVERRIDE;
+  virtual void EnterPresentationMode(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) OVERRIDE;
+  virtual void ExitPresentationMode() OVERRIDE;
+  virtual bool InPresentationMode() OVERRIDE;
+  virtual void ShowInstant(TabContentsWrapper* preview) OVERRIDE;
+  virtual void HideInstant() OVERRIDE;
+  virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
-  virtual web_modal::WebContentsModalDialogHost*
-      GetWebContentsModalDialogHost() OVERRIDE;
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
-  virtual void ShowPasswordGenerationBubble(
-      const gfx::Rect& rect,
-      const autofill::PasswordForm& form,
-      autofill::PasswordGenerator* password_generator) OVERRIDE;
-  virtual int GetRenderViewHeightInsetWithDetachedBookmarkBar() OVERRIDE;
 
-  // Overridden from ExtensionKeybindingRegistry::Delegate:
-  virtual extensions::ActiveTabPermissionGranter*
-      GetActiveTabPermissionGranter() OVERRIDE;
-
-  // Overridden from SearchModelObserver:
-  virtual void ModelChanged(const SearchModel::State& old_state,
-                            const SearchModel::State& new_state) OVERRIDE;
+  // Overridden from NotificationObserver
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Adds the given FindBar cocoa controller to this browser window.
   void AddFindBar(FindBarCocoaController* find_bar_cocoa_controller);
@@ -173,9 +149,12 @@ class BrowserWindowCocoa :
  private:
   NSWindow* window() const;  // Accessor for the (current) |NSWindow|.
 
+  content::NotificationRegistrar registrar_;
+  PrefChangeRegistrar pref_change_registrar_;
   Browser* browser_;  // weak, owned by controller
   BrowserWindowController* controller_;  // weak, owns us
-  base::scoped_nsobject<NSString> pending_window_title_;
+  base::WeakPtrFactory<Browser> confirm_close_factory_;
+  scoped_nsobject<NSString> pending_window_title_;
   ui::WindowShowState initial_show_state_;
   NSInteger attention_request_id_;  // identifier from requestUserAttention
 };

@@ -1,21 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/at_exit.h"
 #include "base/basictypes.h"
+#include "base/at_exit.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "chrome_frame/policy_settings.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
-#include "content/public/common/content_switches.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::ASCIIToWide;
 using base::win::RegKey;
 using chrome_frame_test::ScopedVirtualizeHklmAndHkcu;
 
@@ -24,27 +22,24 @@ namespace {
 // A best effort way to zap CF policy entries that may be in the registry.
 void DeleteChromeFramePolicyEntries(HKEY root) {
   RegKey key;
-  if (key.Open(root, policy::kRegistryChromePolicyKey,
+  if (key.Open(root, policy::kRegistryMandatorySubKey,
                KEY_ALL_ACCESS) == ERROR_SUCCESS) {
     key.DeleteValue(
         ASCIIToWide(policy::key::kChromeFrameRendererSettings).c_str());
     key.DeleteKey(ASCIIToWide(policy::key::kRenderInChromeFrameList).c_str());
     key.DeleteKey(ASCIIToWide(policy::key::kRenderInHostList).c_str());
     key.DeleteKey(ASCIIToWide(policy::key::kChromeFrameContentTypes).c_str());
-    key.DeleteValue(ASCIIToWide(policy::key::kApplicationLocaleValue).c_str());
-    key.DeleteValue(
-        ASCIIToWide(policy::key::kSuppressChromeFrameTurndownPrompt).c_str());
+    key.DeleteKey(ASCIIToWide(policy::key::kApplicationLocaleValue).c_str());
   }
 }
 
 bool InitializePolicyKey(HKEY policy_root, RegKey* policy_key) {
   EXPECT_EQ(ERROR_SUCCESS, policy_key->Create(policy_root,
-      policy::kRegistryChromePolicyKey, KEY_ALL_ACCESS));
+      policy::kRegistryMandatorySubKey, KEY_ALL_ACCESS));
   return policy_key->Valid();
 }
 
-void WritePolicyList(RegKey* policy_key,
-                     const wchar_t* list_name,
+void WritePolicyList(RegKey* policy_key, const wchar_t* list_name,
                      const wchar_t* values[], int count) {
   DCHECK(policy_key);
   // Remove any previous settings
@@ -81,8 +76,7 @@ bool SetRendererSettings(HKEY policy_root,
   return true;
 }
 
-bool SetCFContentTypes(HKEY policy_root,
-                       const wchar_t* content_types[],
+bool SetCFContentTypes(HKEY policy_root, const wchar_t* content_types[],
                        int count) {
   RegKey policy_key;
   if (!InitializePolicyKey(policy_root, &policy_key))
@@ -94,28 +88,16 @@ bool SetCFContentTypes(HKEY policy_root,
   return true;
 }
 
-bool SetCFPolicyString(HKEY policy_root,
-                       const char* policy_name,
-                       const wchar_t* value) {
+bool SetChromeApplicationLocale(HKEY policy_root, const wchar_t* locale) {
   RegKey policy_key;
   if (!InitializePolicyKey(policy_root, &policy_key))
     return false;
 
-  std::wstring policy_name_str(ASCIIToWide(policy_name));
+  std::wstring application_locale_value(
+      ASCIIToWide(policy::key::kApplicationLocaleValue));
   EXPECT_EQ(ERROR_SUCCESS,
-      policy_key.WriteValue(policy_name_str.c_str(), value));
+      policy_key.WriteValue(application_locale_value.c_str(), locale));
   return true;
-}
-
-void SetCFPolicyBool(HKEY policy_root,
-                     const char* policy_name,
-                     bool value) {
-  RegKey policy_key;
-  if (InitializePolicyKey(policy_root, &policy_key)) {
-    std::wstring policy_name_str(ASCIIToWide(policy_name));
-    EXPECT_EQ(ERROR_SUCCESS,
-              policy_key.WriteValue(policy_name_str.c_str(), value ? 1U : 0U));
-  }
 }
 
 }  // end namespace
@@ -224,52 +206,10 @@ TEST_F(PolicySettingsTest, ApplicationLocale) {
 
   HKEY root[] = { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER };
   for (int i = 0; i < arraysize(root); ++i) {
-    SetCFPolicyString(root[i], policy::key::kApplicationLocaleValue,
-                      kTestApplicationLocale);
+    SetChromeApplicationLocale(root[i], kTestApplicationLocale);
     ResetPolicySettings();
     EXPECT_EQ(std::wstring(kTestApplicationLocale),
               PolicySettings::GetInstance()->ApplicationLocale());
-
-    DeleteChromeFramePolicyEntries(root[i]);
-  }
-}
-
-TEST_F(PolicySettingsTest, AdditionalLaunchParameters) {
-  EXPECT_TRUE(PolicySettings::GetInstance()->
-      AdditionalLaunchParameters().GetProgram().empty());
-
-  std::string test_switches("--");
-  test_switches += switches::kDisableWebKitMediaSource;
-
-  HKEY root[] = { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER };
-  for (int i = 0; i < arraysize(root); ++i) {
-    SetCFPolicyString(root[i], policy::key::kAdditionalLaunchParameters,
-                      ASCIIToWide(test_switches).c_str());
-    ResetPolicySettings();
-    const CommandLine& additional_params =
-        PolicySettings::GetInstance()->AdditionalLaunchParameters();
-    EXPECT_TRUE(additional_params.HasSwitch(
-        switches::kDisableWebKitMediaSource));
-
-    base::FilePath program_path(FILE_PATH_LITERAL("my_chrome.exe"));
-    CommandLine new_cmd_line(program_path);
-    new_cmd_line.AppendArguments(additional_params, false);
-    EXPECT_NE(new_cmd_line.GetProgram(), additional_params.GetProgram());
-    EXPECT_TRUE(new_cmd_line.HasSwitch(switches::kDisableWebKitMediaSource));
-
-    DeleteChromeFramePolicyEntries(root[i]);
-  }
-}
-
-TEST_F(PolicySettingsTest, SuppressTurndownPrompt) {
-  EXPECT_FALSE(PolicySettings::GetInstance()->suppress_turndown_prompt());
-
-  HKEY root[] = { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER };
-  for (int i = 0; i < arraysize(root); ++i) {
-    SetCFPolicyBool(root[i], policy::key::kSuppressChromeFrameTurndownPrompt,
-                    true);
-    ResetPolicySettings();
-    EXPECT_TRUE(PolicySettings::GetInstance()->suppress_turndown_prompt());
 
     DeleteChromeFramePolicyEntries(root[i]);
   }

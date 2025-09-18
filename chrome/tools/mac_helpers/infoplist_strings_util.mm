@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,11 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "base/file_util.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/string_piece.h"
+#include "base/string_util.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/resource/data_pack.h"
 
@@ -63,10 +59,9 @@ ui::DataPack* LoadResourceDataPack(const char* dir_path,
   NSString* resource_path = [NSString stringWithFormat:@"%s/%s_%s.pak",
                              dir_path, branding_strings_name, locale_name];
   if (resource_path) {
-    base::FilePath resources_pak_path([resource_path fileSystemRepresentation]);
-    resources_pak_path = base::MakeAbsoluteFilePath(resources_pak_path);
-    resource_pack = new ui::DataPack(ui::SCALE_FACTOR_100P);
-    bool success = resource_pack->LoadFromPath(resources_pak_path);
+    FilePath resources_pak_path([resource_path fileSystemRepresentation]);
+    resource_pack = new ui::DataPack;
+    bool success = resource_pack->Load(resources_pak_path);
     if (!success) {
       delete resource_pack;
       resource_pack = NULL;
@@ -249,19 +244,10 @@ int main(int argc, char* const argv[]) {
     NSString* short_name =
           LoadStringFromDataPack(branded_data_pack.get(), cur_lang,
                                  short_name_id, short_name_id_str);
-    NSString* copyright_format =
+    NSString* copyright =
         LoadStringFromDataPack(branded_data_pack.get(), cur_lang,
                                IDS_ABOUT_VERSION_COPYRIGHT,
                                "IDS_ABOUT_VERSION_COPYRIGHT");
-
-    base::Time::Exploded exploded_time;
-    base::Time::Now().LocalExplode(&exploded_time);
-    std::vector<base::string16> replacements;
-    replacements.push_back(base::IntToString16(exploded_time.year));
-    NSString* copyright = base::SysUTF16ToNSString(
-        ReplaceStringPlaceholders(base::SysNSStringToUTF16(copyright_format),
-                                  replacements,
-                                  NULL));
 
     // For now, assume this is ok for all languages. If we need to, this could
     // be moved into generated_resources.grd and fetched.

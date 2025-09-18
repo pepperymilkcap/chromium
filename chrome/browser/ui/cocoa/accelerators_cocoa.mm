@@ -8,7 +8,6 @@
 
 #include "base/memory/singleton.h"
 #include "chrome/app/chrome_command_ids.h"
-#import "ui/base/accelerators/platform_accelerator_cocoa.h"
 
 namespace {
 
@@ -30,11 +29,9 @@ const struct AcceleratorMapping {
   { IDC_OPTIONS, @",", NSCommandKeyMask },
   { IDC_PASTE, @"v", NSCommandKeyMask },
   { IDC_PRINT, @"p", NSCommandKeyMask },
-  { IDC_RESTORE_TAB, @"t", NSCommandKeyMask | NSShiftKeyMask },
   { IDC_SAVE_PAGE, @"s", NSCommandKeyMask },
   { IDC_SHOW_BOOKMARK_BAR, @"b", NSCommandKeyMask | NSShiftKeyMask },
   { IDC_SHOW_BOOKMARK_MANAGER, @"b", NSCommandKeyMask | NSAlternateKeyMask },
-  { IDC_BOOKMARK_PAGE, @"d", NSCommandKeyMask },
   { IDC_SHOW_DOWNLOADS, @"j", NSCommandKeyMask | NSShiftKeyMask },
   { IDC_SHOW_HISTORY, @"y", NSCommandKeyMask },
   { IDC_VIEW_SOURCE, @"u", NSCommandKeyMask | NSAlternateKeyMask },
@@ -47,10 +44,7 @@ const struct AcceleratorMapping {
 AcceleratorsCocoa::AcceleratorsCocoa() {
   for (size_t i = 0; i < arraysize(kAcceleratorMap); ++i) {
     const AcceleratorMapping& entry = kAcceleratorMap[i];
-    ui::Accelerator accelerator(ui::VKEY_UNKNOWN, 0);
-    scoped_ptr<ui::PlatformAccelerator> platform_accelerator(
-        new ui::PlatformAcceleratorCocoa(entry.key, entry.modifiers));
-    accelerator.set_platform_accelerator(platform_accelerator.Pass());
+    ui::AcceleratorCocoa accelerator(entry.key, entry.modifiers);
     accelerators_.insert(std::make_pair(entry.command_id, accelerator));
   }
 }
@@ -62,9 +56,9 @@ AcceleratorsCocoa* AcceleratorsCocoa::GetInstance() {
   return Singleton<AcceleratorsCocoa>::get();
 }
 
-const ui::Accelerator* AcceleratorsCocoa::GetAcceleratorForCommand(
+const ui::AcceleratorCocoa* AcceleratorsCocoa::GetAcceleratorForCommand(
     int command_id) {
-  AcceleratorMap::iterator it = accelerators_.find(command_id);
+  AcceleratorCocoaMap::iterator it = accelerators_.find(command_id);
   if (it == accelerators_.end())
     return NULL;
   return &it->second;

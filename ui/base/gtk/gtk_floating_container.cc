@@ -8,7 +8,7 @@
 
 #include <algorithm>
 
-#include "ui/gfx/gtk_compat.h"
+#include "ui/base/gtk/gtk_compat.h"
 
 namespace {
 
@@ -177,6 +177,10 @@ static void gtk_floating_container_forall(GtkContainer* container,
   g_return_if_fail(container != NULL);
   g_return_if_fail(callback != NULL);
 
+  // Let GtkBin do its part of the forall.
+  ((GTK_CONTAINER_CLASS(gtk_floating_container_parent_class))->forall)
+      (container, include_internals, callback, callback_data);
+
   GtkFloatingContainer* floating = GTK_FLOATING_CONTAINER(container);
   GList* children = floating->floating_children;
   while (children) {
@@ -186,10 +190,6 @@ static void gtk_floating_container_forall(GtkContainer* container,
 
     (*callback)(child->widget, callback_data);
   }
-
-  // Let GtkBin do its part of the forall.
-  ((GTK_CONTAINER_CLASS(gtk_floating_container_parent_class))->forall)
-      (container, include_internals, callback, callback_data);
 }
 
 static void gtk_floating_container_size_request(GtkWidget* widget,

@@ -74,7 +74,7 @@
 #undef HAVE_EXECINFO_H
 
 /* Define to 1 if you have the <fcntl.h> header file. */
-#define HAVE_FCNTL_H 1
+#undef HAVE_FCNTL_H
 
 /* Define to 1 if you have the <features.h> header file. */
 #undef HAVE_FEATURES_H

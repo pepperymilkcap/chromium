@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_WINDOW_CLIENT_VIEW_H_
 #define UI_VIEWS_WINDOW_CLIENT_VIEW_H_
+#pragma once
 
 #include "ui/views/view.h"
 
@@ -58,17 +59,16 @@ class VIEWS_EXPORT ClientView : public View {
 
   // Overridden from View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual gfx::Size GetMaximumSize() OVERRIDE;
-  virtual gfx::Size GetMinimumSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
  protected:
   // Overridden from View:
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
 
   // Accessors for private data members.
   View* contents_view() const { return contents_view_; }
@@ -77,6 +77,9 @@ class VIEWS_EXPORT ClientView : public View {
   }
 
  private:
+  // The Widget that hosts this ClientView.
+  Widget* widget_;
+
   // The View that this ClientView contains.
   View* contents_view_;
 };

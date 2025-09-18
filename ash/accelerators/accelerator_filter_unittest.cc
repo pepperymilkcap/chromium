@@ -5,119 +5,120 @@
 #include "ash/accelerators/accelerator_filter.h"
 
 #include "ash/accelerators/accelerator_controller.h"
+#include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
-#include "ash/test/ash_test_base.h"
-#include "ash/test/test_screenshot_delegate.h"
-#include "ash/wm/window_state.h"
+#include "ash/test/aura_shell_test_base.h"
+#include "ash/wm/root_window_event_filter.h"
 #include "ash/wm/window_util.h"
-#include "base/memory/scoped_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_windows.h"
-#include "ui/aura/window.h"
-#include "ui/events/event.h"
 #include "ui/gfx/rect.h"
 
 namespace ash {
 namespace test {
 
-typedef AshTestBase AcceleratorFilterTest;
+namespace {
+
+class DummyScreenshotDelegate : public ScreenshotDelegate {
+ public:
+  DummyScreenshotDelegate() : handle_take_screenshot_count_(0) {
+  }
+  virtual ~DummyScreenshotDelegate() {}
+
+  // Overridden from ScreenshotDelegate:
+  virtual void HandleTakeScreenshot() OVERRIDE {
+    ++handle_take_screenshot_count_;
+  }
+
+  int handle_take_screenshot_count() const {
+    return handle_take_screenshot_count_;
+  }
+
+ private:
+  int handle_take_screenshot_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(DummyScreenshotDelegate);
+};
+
+AcceleratorController* GetController() {
+  return Shell::GetInstance()->accelerator_controller();
+}
+
+}  // namespace
+
+typedef AuraShellTestBase AcceleratorFilterTest;
 
 // Tests if AcceleratorFilter works without a focused window.
 TEST_F(AcceleratorFilterTest, TestFilterWithoutFocus) {
-  const TestScreenshotDelegate* delegate = GetScreenshotDelegate();
+  DummyScreenshotDelegate* delegate = new DummyScreenshotDelegate;
+  GetController()->SetScreenshotDelegate(
+      scoped_ptr<ScreenshotDelegate>(delegate).Pass());
   EXPECT_EQ(0, delegate->handle_take_screenshot_count());
 
-  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
+  aura::test::EventGenerator generator_;
   // AcceleratorController calls ScreenshotDelegate::HandleTakeScreenshot() when
   // VKEY_PRINT is pressed. See kAcceleratorData[] in accelerator_controller.cc.
-  generator.PressKey(ui::VKEY_PRINT, 0);
+  generator_.PressKey(ui::VKEY_PRINT, 0);
   EXPECT_EQ(1, delegate->handle_take_screenshot_count());
-  generator.ReleaseKey(ui::VKEY_PRINT, 0);
+  generator_.ReleaseKey(ui::VKEY_PRINT, 0);
   EXPECT_EQ(1, delegate->handle_take_screenshot_count());
 }
 
-// Tests if AcceleratorFilter works as expected with a focused window.
+// Tests if AcceleratorFilter works with a focused window.
 TEST_F(AcceleratorFilterTest, TestFilterWithFocus) {
-  aura::test::TestWindowDelegate test_delegate;
-  scoped_ptr<aura::Window> window(CreateTestWindowInShellWithDelegate(
-      &test_delegate,
+  aura::Window* default_container = Shell::GetInstance()->GetContainer(
+      internal::kShellWindowId_DefaultContainer);
+  aura::Window* window = aura::test::CreateTestWindowWithDelegate(
+      new aura::test::TestWindowDelegate,
       -1,
-      gfx::Rect()));
-  wm::ActivateWindow(window.get());
+      gfx::Rect(),
+      default_container);
+  ActivateWindow(window);
 
-  const TestScreenshotDelegate* delegate = GetScreenshotDelegate();
+  DummyScreenshotDelegate* delegate = new DummyScreenshotDelegate;
+  GetController()->SetScreenshotDelegate(
+      scoped_ptr<ScreenshotDelegate>(delegate).Pass());
   EXPECT_EQ(0, delegate->handle_take_screenshot_count());
 
-  // AcceleratorFilter should ignore the key events since the root window is
-  // not focused.
-  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
-  generator.PressKey(ui::VKEY_PRINT, 0);
-  EXPECT_EQ(0, delegate->handle_take_screenshot_count());
-  generator.ReleaseKey(ui::VKEY_PRINT, 0);
-  EXPECT_EQ(0, delegate->handle_take_screenshot_count());
-
-  // Reset window before |test_delegate| gets deleted.
-  window.reset();
+  aura::test::EventGenerator generator_;
+  generator_.PressKey(ui::VKEY_PRINT, 0);
+  EXPECT_EQ(1, delegate->handle_take_screenshot_count());
+  generator_.ReleaseKey(ui::VKEY_PRINT, 0);
+  EXPECT_EQ(1, delegate->handle_take_screenshot_count());
 }
 
 // Tests if AcceleratorFilter ignores the flag for Caps Lock.
 TEST_F(AcceleratorFilterTest, TestCapsLockMask) {
-  const TestScreenshotDelegate* delegate = GetScreenshotDelegate();
+  aura::Window* default_container = Shell::GetInstance()->GetContainer(
+      internal::kShellWindowId_DefaultContainer);
+  aura::Window* window = aura::test::CreateTestWindowWithDelegate(
+      new aura::test::TestWindowDelegate,
+      -1,
+      gfx::Rect(),
+      default_container);
+  ActivateWindow(window);
+
+  DummyScreenshotDelegate* delegate = new DummyScreenshotDelegate;
+  GetController()->SetScreenshotDelegate(
+      scoped_ptr<ScreenshotDelegate>(delegate).Pass());
   EXPECT_EQ(0, delegate->handle_take_screenshot_count());
 
-  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
-  generator.PressKey(ui::VKEY_PRINT, 0);
+  aura::test::EventGenerator generator_;
+  generator_.PressKey(ui::VKEY_PRINT, 0);
   EXPECT_EQ(1, delegate->handle_take_screenshot_count());
-  generator.ReleaseKey(ui::VKEY_PRINT, 0);
+  generator_.ReleaseKey(ui::VKEY_PRINT, 0);
   EXPECT_EQ(1, delegate->handle_take_screenshot_count());
 
   // Check if AcceleratorFilter ignores the mask for Caps Lock. Note that there
   // is no ui::EF_ mask for Num Lock.
-  generator.PressKey(ui::VKEY_PRINT, ui::EF_CAPS_LOCK_DOWN);
+  generator_.PressKey(ui::VKEY_PRINT, ui::EF_CAPS_LOCK_DOWN);
   EXPECT_EQ(2, delegate->handle_take_screenshot_count());
-  generator.ReleaseKey(ui::VKEY_PRINT, ui::EF_CAPS_LOCK_DOWN);
+  generator_.ReleaseKey(ui::VKEY_PRINT, ui::EF_CAPS_LOCK_DOWN);
   EXPECT_EQ(2, delegate->handle_take_screenshot_count());
 }
-
-#if defined(OS_CHROMEOS)
-// Tests if special hardware keys like brightness and volume are consumed as
-// expected by the shell.
-TEST_F(AcceleratorFilterTest, CanConsumeSystemKeys) {
-  internal::AcceleratorFilter filter;
-
-  // Normal keys are not consumed.
-  ui::KeyEvent press_a(ui::ET_KEY_PRESSED, ui::VKEY_A, ui::EF_NONE, false);
-  filter.OnKeyEvent(&press_a);
-  EXPECT_FALSE(press_a.stopped_propagation());
-
-  // System keys are directly consumed.
-  ui::KeyEvent press_mute(
-      ui::ET_KEY_PRESSED, ui::VKEY_VOLUME_MUTE, ui::EF_NONE, false);
-  filter.OnKeyEvent(&press_mute);
-  EXPECT_TRUE(press_mute.stopped_propagation());
-
-  // Setting a window property on the target allows system keys to pass through.
-  scoped_ptr<aura::Window> window(CreateTestWindowInShellWithId(1));
-  wm::GetWindowState(window.get())->set_can_consume_system_keys(true);
-  ui::KeyEvent press_volume_up(
-      ui::ET_KEY_PRESSED, ui::VKEY_VOLUME_UP, ui::EF_NONE, false);
-  ui::Event::DispatcherApi dispatch_helper(&press_volume_up);
-  dispatch_helper.set_target(window.get());
-  filter.OnKeyEvent(&press_volume_up);
-  EXPECT_FALSE(press_volume_up.stopped_propagation());
-
-  // System keys pass through to a child window if the parent (top level)
-  // window has the property set.
-  scoped_ptr<aura::Window> child(CreateTestWindowInShellWithId(2));
-  window->AddChild(child.get());
-  dispatch_helper.set_target(child.get());
-  filter.OnKeyEvent(&press_volume_up);
-  EXPECT_FALSE(press_volume_up.stopped_propagation());
-}
-#endif  // defined(OS_CHROMEOS)
 
 }  // namespace test
 }  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,11 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/path_service.h"
-#include "base/strings/stringprintf.h"
 #include "base/win/scoped_handle.h"
 #include "chrome_frame/test/test_server.h"
-#include "net/base/request_priority.h"
-#include "net/cookies/cookie_monster.h"
+#include "net/base/cookie_monster.h"
+#include "net/base/host_resolver_proc.h"
 #include "net/disk_cache/disk_cache.h"
-#include "net/dns/host_resolver_proc.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
@@ -33,12 +31,12 @@ class TestServerTest: public testing::Test {
   }
 
  public:
-  const base::FilePath& source_path() const {
+  const FilePath& source_path() const {
     return source_path_;
   }
 
  protected:
-  base::FilePath source_path_;
+  FilePath source_path_;
 };
 
 namespace {
@@ -64,30 +62,28 @@ class ScopedInternet {
 
 class TestURLRequest : public net::URLRequest {
  public:
-  TestURLRequest(const GURL& url,
-                 net::RequestPriority priority,
-                 Delegate* delegate,
-                 const net::TestURLRequestContext* context)
-      : net::URLRequest(url, priority, delegate, context) {}
+  TestURLRequest(const GURL& url, Delegate* delegate)
+      : net::URLRequest(url, delegate) {
+    set_context(new TestURLRequestContext());
+  }
 };
 
 class UrlTaskChain {
  public:
-  UrlTaskChain(const std::string& url, UrlTaskChain* next)
+  UrlTaskChain(const char* url, UrlTaskChain* next)
       : url_(url), next_(next) {
   }
 
   void Run() {
     EXPECT_EQ(0, delegate_.response_started_count());
 
-    base::MessageLoopForIO loop;
+    MessageLoopForIO loop;
 
-    net::TestURLRequestContext context;
-    TestURLRequest r(GURL(url_), net::DEFAULT_PRIORITY, &delegate_, &context);
+    TestURLRequest r(GURL(url_), &delegate_);
     r.Start();
     EXPECT_TRUE(r.is_pending());
 
-    base::MessageLoop::current()->Run();
+    MessageLoop::current()->Run();
 
     EXPECT_EQ(1, delegate_.response_started_count());
     EXPECT_FALSE(delegate_.received_data_before_response());
@@ -104,7 +100,7 @@ class UrlTaskChain {
 
  protected:
   std::string url_;
-  net::TestDelegate delegate_;
+  TestDelegate delegate_;
   UrlTaskChain* next_;
 };
 
@@ -119,16 +115,16 @@ DWORD WINAPI FetchUrl(void* param) {
 }
 
 struct QuitMessageHit {
-  explicit QuitMessageHit(base::MessageLoopForUI* loop)
-      : loop_(loop), hit_(false) {}
+  explicit QuitMessageHit(MessageLoopForUI* loop) : loop_(loop), hit_(false) {
+  }
 
-  base::MessageLoopForUI* loop_;
+  MessageLoopForUI* loop_;
   bool hit_;
 };
 
 void QuitMessageLoop(QuitMessageHit* msg) {
   msg->hit_ = true;
-  msg->loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  msg->loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 }  // end namespace
@@ -136,49 +132,33 @@ void QuitMessageLoop(QuitMessageHit* msg) {
 TEST_F(TestServerTest, TestServer) {
   // The web server needs a loop to exist on this thread during construction
   // the loop must be created before we construct the server.
-  base::MessageLoopForUI loop;
+  MessageLoopForUI loop;
 
   test_server::SimpleWebServer server(1337);
-  test_server::SimpleWebServer redirected_server(server.host(), 1338);
   test_server::SimpleResponse person("/person", "Guthrie Govan!");
   server.AddResponse(&person);
   test_server::FileResponse file("/file", source_path().Append(
       FILE_PATH_LITERAL("CFInstance.js")));
   server.AddResponse(&file);
-  test_server::RedirectResponse redir(
-      "/redir",
-      base::StringPrintf("http://%s:1338/dest",
-                         redirected_server.host().c_str()));
+  test_server::RedirectResponse redir("/goog", "http://www.google.com/");
   server.AddResponse(&redir);
-
-  test_server::SimpleResponse dest("/dest", "Destination");
-  redirected_server.AddResponse(&dest);
 
   // We should never hit this, but it's our way to break out of the test if
   // things start hanging.
   QuitMessageHit quit_msg(&loop);
   loop.PostDelayedTask(FROM_HERE, base::Bind(QuitMessageLoop, &quit_msg),
-                       base::TimeDelta::FromSeconds(10));
+                       10 * 1000);
 
-  UrlTaskChain quit_task(
-      base::StringPrintf("http://%s:1337/quit", server.host().c_str()), NULL);
-  UrlTaskChain fnf_task(
-      base::StringPrintf("http://%s:1337/404", server.host().c_str()),
-      &quit_task);
-  UrlTaskChain person_task(
-      base::StringPrintf("http://%s:1337/person", server.host().c_str()),
-      &fnf_task);
-  UrlTaskChain file_task(
-      base::StringPrintf("http://%s:1337/file", server.host().c_str()),
-      &person_task);
-  UrlTaskChain redir_task(
-      base::StringPrintf("http://%s:1337/redir", server.host().c_str()),
-      &file_task);
+  UrlTaskChain quit_task("http://localhost:1337/quit", NULL);
+  UrlTaskChain fnf_task("http://localhost:1337/404", &quit_task);
+  UrlTaskChain person_task("http://localhost:1337/person", &fnf_task);
+  UrlTaskChain file_task("http://localhost:1337/file", &person_task);
+  UrlTaskChain goog_task("http://localhost:1337/goog", &file_task);
 
   DWORD tid = 0;
   base::win::ScopedHandle worker(::CreateThread(
-      NULL, 0, FetchUrl, &redir_task, 0, &tid));
-  loop.base::MessageLoop::Run();
+      NULL, 0, FetchUrl, &goog_task, 0, &tid));
+  loop.MessageLoop::Run();
 
   EXPECT_FALSE(quit_msg.hit_);
   if (!quit_msg.hit_) {
@@ -190,7 +170,7 @@ TEST_F(TestServerTest, TestServer) {
 
     EXPECT_TRUE(person_task.response().find("Guthrie") != std::string::npos);
     EXPECT_TRUE(file_task.response().find("function") != std::string::npos);
-    EXPECT_TRUE(redir_task.response().find("Destination") != std::string::npos);
+    EXPECT_TRUE(goog_task.response().find("<title>") != std::string::npos);
   } else {
     ::TerminateThread(worker, ~0);
   }

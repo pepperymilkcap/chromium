@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <atlcom.h>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome_frame/stream_impl.h"
 #include "net/base/upload_data.h"
 #include "net/base/upload_data_stream.h"
@@ -27,7 +26,7 @@ class UrlmonUploadDataStream : public CComObjectRootEx<CComMultiThreadModel>,
     COM_INTERFACE_ENTRY(IStream)
   END_COM_MAP()
 
-  bool Initialize(net::UploadData* upload_data);
+  void Initialize(net::UploadData* upload_data);
 
   // Partial implementation of IStream.
   STDMETHOD(Read)(void* pv, ULONG cb, ULONG* read);

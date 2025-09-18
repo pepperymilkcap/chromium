@@ -4,8 +4,8 @@
 
 #include "net/base/filter.h"
 
-#include "base/files/file_path.h"
-#include "base/strings/string_util.h"
+#include "base/file_path.h"
+#include "base/string_util.h"
 #include "net/base/gzip_filter.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_util.h"
@@ -21,11 +21,17 @@ const char kSdch[]         = "sdch";
 // compress and x-compress are currently not supported.  If we decide to support
 // them, we'll need the same mime type compatibility hack we have for gzip.  For
 // more information, see Firefox's nsHttpChannel::ProcessNormal.
+const char kCompress[]     = "compress";
+const char kXCompress[]    = "x-compress";
+const char kIdentity[]     = "identity";
+const char kUncompressed[] = "uncompressed";
 
 // Mime types:
 const char kApplicationXGzip[]     = "application/x-gzip";
 const char kApplicationGzip[]      = "application/gzip";
 const char kApplicationXGunzip[]   = "application/x-gunzip";
+const char kApplicationXCompress[] = "application/x-compress";
+const char kApplicationCompress[]  = "application/compress";
 const char kTextHtml[]             = "text/html";
 
 // Buffer size allocated when de-compressing data.
@@ -172,9 +178,8 @@ void Filter::FixupEncodingTypes(
     GURL url;
     success = filter_context.GetURL(&url);
     DCHECK(success);
-    base::FilePath filename =
-        base::FilePath().AppendASCII(url.ExtractFileName());
-    base::FilePath::StringType extension = filename.Extension();
+    FilePath filename = FilePath().AppendASCII(url.ExtractFileName());
+    FilePath::StringType extension = filename.Extension();
 
     if (filter_context.IsDownload()) {
       // We don't want to decompress gzipped files when the user explicitly
@@ -316,7 +321,9 @@ Filter::Filter()
       stream_buffer_size_(0),
       next_stream_data_(NULL),
       stream_data_len_(0),
-      last_status_(FILTER_NEED_MORE_DATA) {}
+      next_filter_(NULL),
+      last_status_(FILTER_NEED_MORE_DATA) {
+}
 
 Filter::FilterStatus Filter::CopyOut(char* dest_buffer, int* dest_len) {
   int out_len;

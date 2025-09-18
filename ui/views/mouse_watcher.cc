@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,38 +8,32 @@
 #include "base/compiler_specific.h"
 #include "base/event_types.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "ui/events/event_constants.h"
-#include "ui/events/event_utils.h"
+#include "base/message_loop.h"
+#include "ui/base/events.h"
 #include "ui/gfx/screen.h"
-
-#if defined(USE_AURA)
-#include "ui/aura/env.h"
-#include "ui/aura/window.h"
-#include "ui/events/event.h"
-#include "ui/events/event_handler.h"
-#endif
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 namespace views {
 
-// Amount of time between when the mouse moves outside the Host's zone and when
+// Amount of time between when the mouse moves outside the view's zone and when
 // the listener is notified.
 const int kNotifyListenerTimeMs = 300;
 
-#if defined(OS_WIN) && !defined(USE_AURA)
-class MouseWatcher::Observer : public base::MessageLoopForUI::Observer {
+class MouseWatcher::Observer : public MessageLoopForUI::Observer {
  public:
   explicit Observer(MouseWatcher* mouse_watcher)
       : mouse_watcher_(mouse_watcher),
-        notify_listener_factory_(this) {
-    base::MessageLoopForUI::current()->AddObserver(this);
+        ALLOW_THIS_IN_INITIALIZER_LIST(notify_listener_factory_(this)) {
+    MessageLoopForUI::current()->AddObserver(this);
   }
 
-  virtual ~Observer() {
-    base::MessageLoopForUI::current()->RemoveObserver(this);
+  ~Observer() {
+    MessageLoopForUI::current()->RemoveObserver(this);
   }
 
   // MessageLoop::Observer implementation:
+#if defined(OS_WIN)
   virtual base::EventStatus WillProcessEvent(
       const base::NativeEvent& event) OVERRIDE {
     return base::EVENT_CONTINUE;
@@ -47,7 +41,7 @@ class MouseWatcher::Observer : public base::MessageLoopForUI::Observer {
 
   virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE {
     // We spy on three different Windows messages here to see if the mouse has
-    // moved out of the bounds of the current view. The messages are:
+    // moved out of the bounds of the view. The messages are:
     //
     // WM_MOUSEMOVE:
     //   For when the mouse moves from the view into the rest of the browser UI,
@@ -59,106 +53,113 @@ class MouseWatcher::Observer : public base::MessageLoopForUI::Observer {
     //
     switch (event.message) {
       case WM_MOUSEMOVE:
-        HandleGlobalMouseMoveEvent(MouseWatcherHost::MOUSE_MOVE);
+        HandleGlobalMouseMoveEvent(false);
         break;
       case WM_MOUSELEAVE:
       case WM_NCMOUSELEAVE:
-        HandleGlobalMouseMoveEvent(MouseWatcherHost::MOUSE_EXIT);
+        HandleGlobalMouseMoveEvent(true);
         break;
     }
   }
-
- private:
-  MouseWatcherHost* host() const { return mouse_watcher_->host_.get(); }
-
-  // Called from the message loop observer when a mouse movement has occurred.
-  void HandleGlobalMouseMoveEvent(MouseWatcherHost::MouseEventType event_type) {
-    bool contained = host()->Contains(
-        // TODO(scottmg): Native is wrong http://crbug.com/133312
-        gfx::Screen::GetNativeScreen()->GetCursorScreenPoint(),
-        event_type);
-    if (!contained) {
-      // Mouse moved outside the host's zone, start a timer to notify the
-      // listener.
-      if (!notify_listener_factory_.HasWeakPtrs()) {
-        base::MessageLoop::current()->PostDelayedTask(
-            FROM_HERE,
-            base::Bind(&Observer::NotifyListener,
-                       notify_listener_factory_.GetWeakPtr()),
-            event_type == MouseWatcherHost::MOUSE_MOVE
-                ? base::TimeDelta::FromMilliseconds(kNotifyListenerTimeMs)
-                : mouse_watcher_->notify_on_exit_time_);
-      }
-    } else {
-      // Mouse moved quickly out of the host and then into it again, so cancel
-      // the timer.
-      notify_listener_factory_.InvalidateWeakPtrs();
+#elif defined(USE_WAYLAND)
+  virtual MessageLoopForUI::Observer::EventStatus WillProcessEvent(
+      base::wayland::WaylandEvent* event) OVERRIDE {
+    switch (event->type) {
+      case base::wayland::WAYLAND_MOTION:
+        HandleGlobalMouseMoveEvent(false);
+        break;
+      case base::wayland::WAYLAND_POINTER_FOCUS:
+        if (!event->pointer_focus.state)
+          HandleGlobalMouseMoveEvent(true);
+        break;
+      default:
+        break;
     }
+    return EVENT_CONTINUE;
   }
-
-  void NotifyListener() {
-    mouse_watcher_->NotifyListener();
-    // WARNING: we've been deleted.
+#elif defined(USE_AURA)
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE {
+    return base::EVENT_CONTINUE;
   }
-
- private:
-  MouseWatcher* mouse_watcher_;
-
-  // A factory that is used to construct a delayed callback to the listener.
-  base::WeakPtrFactory<Observer> notify_listener_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(Observer);
-};
-#else
-class MouseWatcher::Observer : public ui::EventHandler {
- public:
-  explicit Observer(MouseWatcher* mouse_watcher)
-      : mouse_watcher_(mouse_watcher),
-        notify_listener_factory_(this) {
-    aura::Env::GetInstance()->AddPreTargetHandler(this);
-  }
-
-  virtual ~Observer() {
-    aura::Env::GetInstance()->RemovePreTargetHandler(this);
-  }
-
-  // ui::EventHandler implementation:
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
-    switch (event->type()) {
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE {
+    switch (ui::EventTypeFromNative(event)) {
       case ui::ET_MOUSE_MOVED:
       case ui::ET_MOUSE_DRAGGED:
-        HandleMouseEvent(MouseWatcherHost::MOUSE_MOVE);
+        // DRAGGED is a special case of MOVED. See events_win.cc/events_x.cc.
+        HandleGlobalMouseMoveEvent(false);
         break;
       case ui::ET_MOUSE_EXITED:
-        HandleMouseEvent(MouseWatcherHost::MOUSE_EXIT);
+        HandleGlobalMouseMoveEvent(true);
         break;
       default:
         break;
     }
   }
+#elif defined(TOOLKIT_USES_GTK)
+  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE {
+  }
+
+  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE {
+    switch (event->type) {
+      case GDK_MOTION_NOTIFY:
+        HandleGlobalMouseMoveEvent(false);
+        break;
+      case GDK_LEAVE_NOTIFY:
+        HandleGlobalMouseMoveEvent(true);
+        break;
+      default:
+        break;
+    }
+  }
+#endif
 
  private:
-  MouseWatcherHost* host() const { return mouse_watcher_->host_.get(); }
+  View* view() const { return mouse_watcher_->host_; }
 
-  // Called when a mouse event we're interested is seen.
-  void HandleMouseEvent(MouseWatcherHost::MouseEventType event_type) {
-    // It's safe to use last_mouse_location() here as this function is invoked
-    // during event dispatching.
-    if (!host()->Contains(aura::Env::GetInstance()->last_mouse_location(),
-                          event_type)) {
-      // Mouse moved outside the host's zone, start a timer to notify the
+  // Returns whether or not the cursor is currently in the view's "zone" which
+  // is defined as a slightly larger region than the view.
+  bool IsCursorInViewZone() {
+    gfx::Rect bounds = view()->GetLocalBounds();
+    gfx::Point view_topleft(bounds.origin());
+    View::ConvertPointToScreen(view(), &view_topleft);
+    bounds.set_origin(view_topleft);
+    bounds.SetRect(view_topleft.x() - mouse_watcher_->hot_zone_insets_.left(),
+                   view_topleft.y() - mouse_watcher_->hot_zone_insets_.top(),
+                   bounds.width() + mouse_watcher_->hot_zone_insets_.width(),
+                   bounds.height() + mouse_watcher_->hot_zone_insets_.height());
+
+    gfx::Point cursor_point = gfx::Screen::GetCursorScreenPoint();
+
+    return bounds.Contains(cursor_point.x(), cursor_point.y());
+  }
+
+  // Returns true if the mouse is over the view's window.
+  bool IsMouseOverWindow() {
+    Widget* widget = view()->GetWidget();
+    if (!widget)
+      return false;
+
+    return gfx::Screen::GetWindowAtCursorScreenPoint() ==
+        widget->GetNativeWindow();
+  }
+
+  // Called from the message loop observer when a mouse movement has occurred.
+  void HandleGlobalMouseMoveEvent(bool check_window) {
+    bool in_view = IsCursorInViewZone();
+    if (!in_view || (check_window && !IsMouseOverWindow())) {
+      // Mouse moved outside the view's zone, start a timer to notify the
       // listener.
       if (!notify_listener_factory_.HasWeakPtrs()) {
-        base::MessageLoop::current()->PostDelayedTask(
+        MessageLoop::current()->PostDelayedTask(
             FROM_HERE,
             base::Bind(&Observer::NotifyListener,
                        notify_listener_factory_.GetWeakPtr()),
-            event_type == MouseWatcherHost::MOUSE_MOVE
-                ? base::TimeDelta::FromMilliseconds(kNotifyListenerTimeMs)
-                : mouse_watcher_->notify_on_exit_time_);
+            !in_view ? kNotifyListenerTimeMs :
+                       mouse_watcher_->notify_on_exit_time_ms_);
       }
     } else {
-      // Mouse moved quickly out of the host and then into it again, so cancel
+      // Mouse moved quickly out of the view and then into it again, so cancel
       // the timer.
       notify_listener_factory_.InvalidateWeakPtrs();
     }
@@ -177,20 +178,17 @@ class MouseWatcher::Observer : public ui::EventHandler {
 
   DISALLOW_COPY_AND_ASSIGN(Observer);
 };
-#endif
 
 MouseWatcherListener::~MouseWatcherListener() {
 }
 
-MouseWatcherHost::~MouseWatcherHost() {
-}
-
-MouseWatcher::MouseWatcher(MouseWatcherHost* host,
-                           MouseWatcherListener* listener)
+MouseWatcher::MouseWatcher(View* host,
+                           MouseWatcherListener* listener,
+                           const gfx::Insets& hot_zone_insets)
     : host_(host),
       listener_(listener),
-      notify_on_exit_time_(base::TimeDelta::FromMilliseconds(
-          kNotifyListenerTimeMs)) {
+      hot_zone_insets_(hot_zone_insets),
+      notify_on_exit_time_ms_(kNotifyListenerTimeMs) {
 }
 
 MouseWatcher::~MouseWatcher() {
@@ -207,7 +205,7 @@ void MouseWatcher::Stop() {
 
 void MouseWatcher::NotifyListener() {
   observer_.reset(NULL);
-  listener_->MouseMovedOutOfHost();
+  listener_->MouseMovedOutOfView();
 }
 
 }  // namespace views

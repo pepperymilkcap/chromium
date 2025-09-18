@@ -1,13 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/applescript/bookmark_applescript_utils_unittest.h"
 
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
-#include "chrome/test/base/testing_profile.h"
 
 @implementation FakeAppDelegate
 
@@ -64,10 +61,13 @@ void BookmarkAppleScriptTest::SetUp() {
   [appDelegate_.get() setTest:this];
   DCHECK([NSApp delegate] == nil);
   [NSApp setDelegate:appDelegate_];
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-  const BookmarkNode* root = model->bookmark_bar_node();
+  const BookmarkNode* root = model().bookmark_bar_node();
   const std::string modelString("a f1:[ b d c ] d f2:[ e f g ] h ");
-  test::AddNodesFromModelString(model, root, modelString);
+  model_test_utils::AddNodesFromModelString(model(), root, modelString);
   bookmarkBar_.reset([[BookmarkFolderAppleScript alloc]
-      initWithBookmarkNode:model->bookmark_bar_node()]);
+      initWithBookmarkNode:model().bookmark_bar_node()]);
+}
+
+BookmarkModel& BookmarkAppleScriptTest::model() {
+  return *profile()->GetBookmarkModel();
 }

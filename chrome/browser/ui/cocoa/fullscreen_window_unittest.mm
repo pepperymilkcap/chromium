@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/fullscreen_window.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,7 +25,7 @@ class FullscreenWindowTest : public CocoaTest {
 };
 
 TEST_F(FullscreenWindowTest, Basics) {
-  base::scoped_nsobject<FullscreenWindow> window;
+  scoped_nsobject<FullscreenWindow> window;
   window.reset([[FullscreenWindow alloc] init]);
 
   EXPECT_EQ([NSScreen mainScreen], [window screen]);
@@ -37,10 +37,10 @@ TEST_F(FullscreenWindowTest, Basics) {
 }
 
 TEST_F(FullscreenWindowTest, CanPerformClose) {
-  base::scoped_nsobject<FullscreenWindow> window;
+  scoped_nsobject<FullscreenWindow> window;
   window.reset([[FullscreenWindow alloc] init]);
 
-  base::scoped_nsobject<PerformCloseUIItem> item;
+  scoped_nsobject<PerformCloseUIItem> item;
   item.reset([[PerformCloseUIItem alloc] init]);
 
   EXPECT_TRUE([window validateUserInterfaceItem:item.get()]);

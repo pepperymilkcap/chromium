@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,11 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "content/common/edit_command.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/content_paths.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-namespace content {
 
 class GtkKeyBindingsHandlerTest : public testing::Test {
  protected:
@@ -31,10 +29,10 @@ class GtkKeyBindingsHandlerTest : public testing::Test {
   GtkKeyBindingsHandlerTest()
       : window_(gtk_window_new(GTK_WINDOW_TOPLEVEL)),
         handler_(NULL) {
-    base::FilePath gtkrc;
-    PathService::Get(DIR_TEST_DATA, &gtkrc);
+    FilePath gtkrc;
+    PathService::Get(content::DIR_TEST_DATA, &gtkrc);
     gtkrc = gtkrc.AppendASCII("gtk_key_bindings_test_gtkrc");
-    EXPECT_TRUE(base::PathExists(gtkrc));
+    EXPECT_TRUE(file_util::PathExists(gtkrc));
 
     gtk_rc_parse(gtkrc.value().c_str());
 
@@ -44,7 +42,7 @@ class GtkKeyBindingsHandlerTest : public testing::Test {
     gtk_widget_show(fixed);
     gtk_widget_show(window_);
   }
-  virtual ~GtkKeyBindingsHandlerTest() {
+  ~GtkKeyBindingsHandlerTest() {
     gtk_widget_destroy(window_);
     delete handler_;
   }
@@ -105,9 +103,9 @@ TEST_F(GtkKeyBindingsHandlerTest, MoveCursor) {
     // "move-cursor" (visual-positions, 1, 1)
     { "MoveRightAndModifySelection", "" },
     // "move-cursor" (words, -1, 0)
-    { "MoveWordLeft", "" },
+    { "MoveWordBackward", "" },
     // "move-cursor" (words, 1, 0)
-    { "MoveWordRight", "" },
+    { "MoveWordForward", "" },
     // "move-cursor" (display-lines, -1, 0)
     { "MoveUp", "" },
     // "move-cursor" (display-lines, 1, 0)
@@ -222,5 +220,3 @@ TEST_F(GtkKeyBindingsHandlerTest, OtherActions) {
   TestKeyBinding(NewNativeWebKeyboardEvent(GDK_9, GDK_CONTROL_MASK),
                  kSetAnchor, arraysize(kSetAnchor));
 }
-
-}  // namespace content

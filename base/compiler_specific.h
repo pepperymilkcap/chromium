@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_COMPILER_SPECIFIC_H_
 #define BASE_COMPILER_SPECIFIC_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -40,6 +41,19 @@
 #define MSVC_DISABLE_OPTIMIZE() __pragma(optimize("", off))
 #define MSVC_ENABLE_OPTIMIZE() __pragma(optimize("", on))
 
+// Allows |this| to be passed as an argument in constructor initializer lists.
+// This uses push/pop instead of the seemingly simpler suppress feature to avoid
+// having the warning be disabled for more than just |code|.
+//
+// Example usage:
+// Foo::Foo() : x(NULL), ALLOW_THIS_IN_INITIALIZER_LIST(y(this)), z(3) {}
+//
+// Compiler warning C4355: 'this': used in base member initializer list:
+// http://msdn.microsoft.com/en-us/library/3c594ae3(VS.80).aspx
+#define ALLOW_THIS_IN_INITIALIZER_LIST(code) MSVC_PUSH_DISABLE_WARNING(4355) \
+                                             code \
+                                             MSVC_POP_WARNING()
+
 // Allows exporting a class that inherits from a non-exported base class.
 // This uses suppress instead of push/pop because the delimiter after the
 // declaration (either "," or "{") has to be placed before the pop macro.
@@ -49,9 +63,9 @@
 //
 // MSVC Compiler warning C4275:
 // non dll-interface class 'Bar' used as base for dll-interface class 'Foo'.
-// Note that this is intended to be used only when no access to the base class'
-// static data is done through derived classes or inline methods. For more info,
-// see http://msdn.microsoft.com/en-us/library/3tdb471s(VS.80).aspx
+// Note that this is intended to be used only when no access to the base class
+// can be gained through the derived class. For more info, see
+// http://msdn.microsoft.com/en-us/library/3tdb471s(VS.80).aspx
 #define NON_EXPORTED_BASE(code) MSVC_SUPPRESS_WARNING(4275) \
                                 code
 
@@ -63,32 +77,11 @@
 #define MSVC_POP_WARNING()
 #define MSVC_DISABLE_OPTIMIZE()
 #define MSVC_ENABLE_OPTIMIZE()
+#define ALLOW_THIS_IN_INITIALIZER_LIST(code) code
 #define NON_EXPORTED_BASE(code) code
 
 #endif  // COMPILER_MSVC
 
-
-// The C++ standard requires that static const members have an out-of-class
-// definition (in a single compilation unit), but MSVC chokes on this (when
-// language extensions, which are required, are enabled). (You're only likely to
-// notice the need for a definition if you take the address of the member or,
-// more commonly, pass it to a function that takes it as a reference argument --
-// probably an STL function.) This macro makes MSVC do the right thing. See
-// http://msdn.microsoft.com/en-us/library/34h23df8(v=vs.100).aspx for more
-// information. Use like:
-//
-// In .h file:
-//   struct Foo {
-//     static const int kBar = 5;
-//   };
-//
-// In .cc file:
-//   STATIC_CONST_MEMBER_DEFINITION const int Foo::kBar;
-#if defined(COMPILER_MSVC)
-#define STATIC_CONST_MEMBER_DEFINITION __declspec(selectany)
-#else
-#define STATIC_CONST_MEMBER_DEFINITION
-#endif
 
 // Annotate a variable indicating it's ok if the variable is not used.
 // (Typically used to silence a compiler warning when the assignment
@@ -97,40 +90,10 @@
 //   int x ALLOW_UNUSED = ...;
 #if defined(COMPILER_GCC)
 #define ALLOW_UNUSED __attribute__((unused))
+#define NOINLINE __attribute__((noinline))
 #else
 #define ALLOW_UNUSED
-#endif
-
-// Annotate a function indicating it should not be inlined.
-// Use like:
-//   NOINLINE void DoStuff() { ... }
-#if defined(COMPILER_GCC)
-#define NOINLINE __attribute__((noinline))
-#elif defined(COMPILER_MSVC)
-#define NOINLINE __declspec(noinline)
-#else
 #define NOINLINE
-#endif
-
-// Specify memory alignment for structs, classes, etc.
-// Use like:
-//   class ALIGNAS(16) MyClass { ... }
-//   ALIGNAS(16) int array[4];
-#if defined(COMPILER_MSVC)
-#define ALIGNAS(byte_alignment) __declspec(align(byte_alignment))
-#elif defined(COMPILER_GCC)
-#define ALIGNAS(byte_alignment) __attribute__((aligned(byte_alignment)))
-#endif
-
-// Return the byte alignment of the given type (available at compile time).  Use
-// sizeof(type) prior to checking __alignof to workaround Visual C++ bug:
-// http://goo.gl/isH0C
-// Use like:
-//   ALIGNOF(int32)  // this would be 4
-#if defined(COMPILER_MSVC)
-#define ALIGNOF(type) (sizeof(type) - sizeof(type) + __alignof(type))
-#elif defined(COMPILER_GCC)
-#define ALIGNOF(type) __alignof__(type)
 #endif
 
 // Annotate a virtual method indicating it must be overriding a virtual
@@ -141,30 +104,8 @@
 #define OVERRIDE override
 #elif defined(__clang__)
 #define OVERRIDE override
-#elif defined(COMPILER_GCC) && __cplusplus >= 201103 && \
-      (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) >= 40700
-// GCC 4.7 supports explicit virtual overrides when C++11 support is enabled.
-#define OVERRIDE override
 #else
 #define OVERRIDE
-#endif
-
-// Annotate a virtual method indicating that subclasses must not override it,
-// or annotate a class to indicate that it cannot be subclassed.
-// Use like:
-//   virtual void foo() FINAL;
-//   class B FINAL : public A {};
-#if defined(COMPILER_MSVC)
-// TODO(jered): Change this to "final" when chromium no longer uses MSVC 2010.
-#define FINAL sealed
-#elif defined(__clang__)
-#define FINAL final
-#elif defined(COMPILER_GCC) && __cplusplus >= 201103 && \
-      (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) >= 40700
-// GCC 4.7 supports explicit virtual overrides when C++11 support is enabled.
-#define FINAL final
-#else
-#define FINAL
 #endif
 
 // Annotate a function indicating the caller must examine the return value.
@@ -195,29 +136,5 @@
 #define WPRINTF_FORMAT(format_param, dots_param)
 // If available, it would look like:
 //   __attribute__((format(wprintf, format_param, dots_param)))
-
-
-// MemorySanitizer annotations.
-#ifdef MEMORY_SANITIZER
-extern "C" {
-void __msan_unpoison(const void *p, unsigned long s);
-}  // extern "C"
-
-// Mark a memory region fully initialized.
-// Use this to annotate code that deliberately reads uninitialized data, for
-// example a GC scavenging root set pointers from the stack.
-#define MSAN_UNPOISON(p, s)  __msan_unpoison(p, s)
-#else  // MEMORY_SANITIZER
-#define MSAN_UNPOISON(p, s)
-#endif  // MEMORY_SANITIZER
-
-// Macro useful for writing cross-platform function pointers.
-#if !defined(CDECL)
-#if defined(OS_WIN)
-#define CDECL __cdecl
-#else  // defined(OS_WIN)
-#define CDECL
-#endif  // defined(OS_WIN)
-#endif  // !defined(CDECL)
 
 #endif  // BASE_COMPILER_SPECIFIC_H_

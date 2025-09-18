@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "ash/wm/window_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
-#include "ui/events/event.h"
 
 namespace ash {
 namespace test {
@@ -36,23 +35,18 @@ TestActivationDelegate::TestActivationDelegate(bool activate)
 void TestActivationDelegate::SetWindow(aura::Window* window) {
   window_ = window;
   aura::client::SetActivationDelegate(window, this);
-  aura::client::SetActivationChangeObserver(window, this);
 }
 
-bool TestActivationDelegate::ShouldActivate() const {
+bool TestActivationDelegate::ShouldActivate(aura::Event* event) {
   should_activate_count_++;
   return activate_;
 }
-
-void TestActivationDelegate::OnWindowActivated(aura::Window* gained_active,
-                                               aura::Window* lost_active) {
-  DCHECK(window_ == gained_active || window_ == lost_active);
-  if (window_ == gained_active) {
-    activated_count_++;
-  } else if (window_ == lost_active) {
-    if (lost_active_count_++ == 0)
-      window_was_active_ = wm::IsActiveWindow(window_);
-  }
+void TestActivationDelegate::OnActivated() {
+  activated_count_++;
+}
+void TestActivationDelegate::OnLostActive() {
+  if (lost_active_count_++ == 0)
+    window_was_active_ = IsActiveWindow(window_);
 }
 
 }  // namespace test

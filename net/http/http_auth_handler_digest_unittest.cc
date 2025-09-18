@@ -5,8 +5,8 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_auth_handler_digest.h"
@@ -67,8 +67,7 @@ bool RespondToChallenge(HttpAuth::Target target,
   TestCompletionCallback callback;
   scoped_ptr<HttpRequestInfo> request(new HttpRequestInfo());
   request->url = GURL(request_url);
-  AuthCredentials credentials(base::ASCIIToUTF16("foo"),
-                              base::ASCIIToUTF16("bar"));
+  AuthCredentials credentials(ASCIIToUTF16("foo"), ASCIIToUTF16("bar"));
   int rv_generate = handler->GenerateAuthToken(
       &credentials, request.get(), callback.callback(), token);
   if (rv_generate != OK) {
@@ -531,8 +530,8 @@ TEST(HttpAuthHandlerDigestTest, AssembleCredentials) {
         digest->AssembleCredentials(tests[i].req_method,
                                     tests[i].req_path,
                                     AuthCredentials(
-                                        base::ASCIIToUTF16(tests[i].username),
-                                        base::ASCIIToUTF16(tests[i].password)),
+                                        ASCIIToUTF16(tests[i].username),
+                                        ASCIIToUTF16(tests[i].password)),
                                     tests[i].cnonce,
                                     tests[i].nonce_count);
 
@@ -625,34 +624,6 @@ TEST(HttpAuthHandlerDigest, RespondToProxyChallengeHttps) {
       HttpAuth::AUTH_PROXY,
       "http://proxy.intranet.corp.com:3128",
       "https://www.example.com/path/to/resource",
-      kSimpleChallenge,
-      &auth_token));
-  EXPECT_EQ("Digest username=\"foo\", realm=\"Oblivion\", "
-            "nonce=\"nonce-value\", uri=\"www.example.com:443\", "
-            "response=\"3270da8467afbe9ddf2334a48d46e9b9\"",
-            auth_token);
-}
-
-TEST(HttpAuthHandlerDigest, RespondToProxyChallengeWs) {
-  std::string auth_token;
-  EXPECT_TRUE(RespondToChallenge(
-      HttpAuth::AUTH_PROXY,
-      "http://proxy.intranet.corp.com:3128",
-      "ws://www.example.com/echo",
-      kSimpleChallenge,
-      &auth_token));
-  EXPECT_EQ("Digest username=\"foo\", realm=\"Oblivion\", "
-            "nonce=\"nonce-value\", uri=\"www.example.com:80\", "
-            "response=\"aa1df184f68d5b6ab9d9aa4f88e41b4c\"",
-            auth_token);
-}
-
-TEST(HttpAuthHandlerDigest, RespondToProxyChallengeWss) {
-  std::string auth_token;
-  EXPECT_TRUE(RespondToChallenge(
-      HttpAuth::AUTH_PROXY,
-      "http://proxy.intranet.corp.com:3128",
-      "wss://www.example.com/echo",
       kSimpleChallenge,
       &auth_token));
   EXPECT_EQ("Digest username=\"foo\", realm=\"Oblivion\", "

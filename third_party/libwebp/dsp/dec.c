@@ -1,10 +1,8 @@
-// Copyright 2010 Google Inc. All Rights Reserved.
+// Copyright 2010 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 // Speed-critical decoding functions.
@@ -51,7 +49,7 @@ static void DspInitTables(void) {
   }
 }
 
-static WEBP_INLINE uint8_t clip_8b(int v) {
+static inline uint8_t clip_8b(int v) {
   return (!(v & ~0xff)) ? v : (v < 0) ? 0 : 255;
 }
 
@@ -173,7 +171,7 @@ void (*VP8TransformWHT)(const int16_t* in, int16_t* out) = TransformWHT;
 
 #define DST(x, y) dst[(x) + (y) * BPS]
 
-static WEBP_INLINE void TrueMotion(uint8_t *dst, int size) {
+static inline void TrueMotion(uint8_t *dst, int size) {
   const uint8_t* top = dst - BPS;
   const uint8_t* const clip0 = clip1 + 255 - top[-1];
   int y;
@@ -208,7 +206,7 @@ static void HE16(uint8_t *dst) {     // horizontal
   }
 }
 
-static WEBP_INLINE void Put16(int v, uint8_t* dst) {
+static inline void Put16(int v, uint8_t* dst) {
   int j;
   for (j = 0; j < 16; ++j) {
     memset(dst + j * BPS, v, 16);
@@ -428,16 +426,11 @@ static void HE8uv(uint8_t *dst) {    // horizontal
 }
 
 // helper for chroma-DC predictions
-static WEBP_INLINE void Put8x8uv(uint8_t value, uint8_t* dst) {
+static inline void Put8x8uv(uint64_t v, uint8_t* dst) {
   int j;
-#ifndef WEBP_REFERENCE_IMPLEMENTATION
-  const uint64_t v = (uint64_t)value * 0x0101010101010101ULL;
   for (j = 0; j < 8; ++j) {
     *(uint64_t*)(dst + j * BPS) = v;
   }
-#else
-  for (j = 0; j < 8; ++j) memset(dst + j * BPS, value, 8);
-#endif
 }
 
 static void DC8uv(uint8_t *dst) {     // DC
@@ -446,7 +439,7 @@ static void DC8uv(uint8_t *dst) {     // DC
   for (i = 0; i < 8; ++i) {
     dc0 += dst[i - BPS] + dst[-1 + i * BPS];
   }
-  Put8x8uv(dc0 >> 4, dst);
+  Put8x8uv((uint64_t)((dc0 >> 4) * 0x0101010101010101ULL), dst);
 }
 
 static void DC8uvNoLeft(uint8_t *dst) {   // DC with no left samples
@@ -455,7 +448,7 @@ static void DC8uvNoLeft(uint8_t *dst) {   // DC with no left samples
   for (i = 0; i < 8; ++i) {
     dc0 += dst[i - BPS];
   }
-  Put8x8uv(dc0 >> 3, dst);
+  Put8x8uv((uint64_t)((dc0 >> 3) * 0x0101010101010101ULL), dst);
 }
 
 static void DC8uvNoTop(uint8_t *dst) {  // DC with no top samples
@@ -464,26 +457,26 @@ static void DC8uvNoTop(uint8_t *dst) {  // DC with no top samples
   for (i = 0; i < 8; ++i) {
     dc0 += dst[-1 + i * BPS];
   }
-  Put8x8uv(dc0 >> 3, dst);
+  Put8x8uv((uint64_t)((dc0 >> 3) * 0x0101010101010101ULL), dst);
 }
 
 static void DC8uvNoTopLeft(uint8_t *dst) {    // DC with nothing
-  Put8x8uv(0x80, dst);
+  Put8x8uv(0x8080808080808080ULL, dst);
 }
 
 //------------------------------------------------------------------------------
 // default C implementations
 
-const VP8PredFunc VP8PredLuma4[NUM_BMODES] = {
+VP8PredFunc VP8PredLuma4[/* NUM_BMODES */] = {
   DC4, TM4, VE4, HE4, RD4, VR4, LD4, VL4, HD4, HU4
 };
 
-const VP8PredFunc VP8PredLuma16[NUM_B_DC_MODES] = {
+VP8PredFunc VP8PredLuma16[/*NUM_B_DC_MODES */] = {
   DC16, TM16, VE16, HE16,
   DC16NoTop, DC16NoLeft, DC16NoTopLeft
 };
 
-const VP8PredFunc VP8PredChroma8[NUM_B_DC_MODES] = {
+VP8PredFunc VP8PredChroma8[/*NUM_B_DC_MODES */] = {
   DC8uv, TM8uv, VE8uv, HE8uv,
   DC8uvNoTop, DC8uvNoLeft, DC8uvNoTopLeft
 };
@@ -492,7 +485,7 @@ const VP8PredFunc VP8PredChroma8[NUM_B_DC_MODES] = {
 // Edge filtering functions
 
 // 4 pixels in, 2 pixels out
-static WEBP_INLINE void do_filter2(uint8_t* p, int step) {
+static inline void do_filter2(uint8_t* p, int step) {
   const int p1 = p[-2*step], p0 = p[-step], q0 = p[0], q1 = p[step];
   const int a = 3 * (q0 - p0) + sclip1[1020 + p1 - q1];
   const int a1 = sclip2[112 + ((a + 4) >> 3)];
@@ -502,7 +495,7 @@ static WEBP_INLINE void do_filter2(uint8_t* p, int step) {
 }
 
 // 4 pixels in, 4 pixels out
-static WEBP_INLINE void do_filter4(uint8_t* p, int step) {
+static inline void do_filter4(uint8_t* p, int step) {
   const int p1 = p[-2*step], p0 = p[-step], q0 = p[0], q1 = p[step];
   const int a = 3 * (q0 - p0);
   const int a1 = sclip2[112 + ((a + 4) >> 3)];
@@ -515,7 +508,7 @@ static WEBP_INLINE void do_filter4(uint8_t* p, int step) {
 }
 
 // 6 pixels in, 6 pixels out
-static WEBP_INLINE void do_filter6(uint8_t* p, int step) {
+static inline void do_filter6(uint8_t* p, int step) {
   const int p2 = p[-3*step], p1 = p[-2*step], p0 = p[-step];
   const int q0 = p[0], q1 = p[step], q2 = p[2*step];
   const int a = sclip1[1020 + 3 * (q0 - p0) + sclip1[1020 + p1 - q1]];
@@ -530,18 +523,17 @@ static WEBP_INLINE void do_filter6(uint8_t* p, int step) {
   p[ 2*step] = clip1[255 + q2 - a3];
 }
 
-static WEBP_INLINE int hev(const uint8_t* p, int step, int thresh) {
+static inline int hev(const uint8_t* p, int step, int thresh) {
   const int p1 = p[-2*step], p0 = p[-step], q0 = p[0], q1 = p[step];
   return (abs0[255 + p1 - p0] > thresh) || (abs0[255 + q1 - q0] > thresh);
 }
 
-static WEBP_INLINE int needs_filter(const uint8_t* p, int step, int thresh) {
+static inline int needs_filter(const uint8_t* p, int step, int thresh) {
   const int p1 = p[-2*step], p0 = p[-step], q0 = p[0], q1 = p[step];
   return (2 * abs0[255 + p0 - q0] + abs1[255 + p1 - q1]) <= thresh;
 }
 
-static WEBP_INLINE int needs_filter2(const uint8_t* p,
-                                     int step, int t, int it) {
+static inline int needs_filter2(const uint8_t* p, int step, int t, int it) {
   const int p3 = p[-4*step], p2 = p[-3*step], p1 = p[-2*step], p0 = p[-step];
   const int q0 = p[0], q1 = p[step], q2 = p[2*step], q3 = p[3*step];
   if ((2 * abs0[255 + p0 - q0] + abs1[255 + p1 - q1]) > t)
@@ -591,9 +583,8 @@ static void SimpleHFilter16i(uint8_t* p, int stride, int thresh) {
 //------------------------------------------------------------------------------
 // Complex In-loop filtering (Paragraph 15.3)
 
-static WEBP_INLINE void FilterLoop26(uint8_t* p,
-                                     int hstride, int vstride, int size,
-                                     int thresh, int ithresh, int hev_thresh) {
+static inline void FilterLoop26(uint8_t* p, int hstride, int vstride, int size,
+                                int thresh, int ithresh, int hev_thresh) {
   while (size-- > 0) {
     if (needs_filter2(p, hstride, thresh, ithresh)) {
       if (hev(p, hstride, hev_thresh)) {
@@ -606,9 +597,8 @@ static WEBP_INLINE void FilterLoop26(uint8_t* p,
   }
 }
 
-static WEBP_INLINE void FilterLoop24(uint8_t* p,
-                                     int hstride, int vstride, int size,
-                                     int thresh, int ithresh, int hev_thresh) {
+static inline void FilterLoop24(uint8_t* p, int hstride, int vstride, int size,
+                                int thresh, int ithresh, int hev_thresh) {
   while (size-- > 0) {
     if (needs_filter2(p, hstride, thresh, ithresh)) {
       if (hev(p, hstride, hev_thresh)) {
@@ -697,9 +687,7 @@ VP8SimpleFilterFunc VP8SimpleVFilter16i;
 VP8SimpleFilterFunc VP8SimpleHFilter16i;
 
 extern void VP8DspInitSSE2(void);
-#if defined(WEBP_USE_NEON)
 extern void VP8DspInitNEON(void);
-#endif
 
 void VP8DspInit(void) {
   DspInitTables();
@@ -724,11 +712,11 @@ void VP8DspInit(void) {
 
   // If defined, use CPUInfo() to overwrite some pointers with faster versions.
   if (VP8GetCPUInfo) {
-#if defined(WEBP_USE_SSE2)
+#if defined(__SSE2__) || defined(_MSC_VER)
     if (VP8GetCPUInfo(kSSE2)) {
       VP8DspInitSSE2();
     }
-#elif defined(WEBP_USE_NEON)
+#elif defined(__GNUC__) && defined(__ARM_NEON__)
     if (VP8GetCPUInfo(kNEON)) {
       VP8DspInitNEON();
     }

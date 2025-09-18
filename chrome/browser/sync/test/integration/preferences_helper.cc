@@ -4,13 +4,13 @@
 
 #include "chrome/browser/sync/test/integration/preferences_helper.h"
 
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/values.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
-#include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 
 using sync_datatype_helper::test;
 
@@ -67,7 +67,7 @@ void AppendStringPref(int index,
 
 void ChangeFilePathPref(int index,
                         const char* pref_name,
-                        const base::FilePath& new_value) {
+                        const FilePath& new_value) {
   GetPrefs(index)->SetFilePath(pref_name, new_value);
   if (test()->use_verifier())
     GetVerifierPrefs()->SetFilePath(pref_name, new_value);
@@ -75,11 +75,11 @@ void ChangeFilePathPref(int index,
 
 void ChangeListPref(int index,
                     const char* pref_name,
-                    const base::ListValue& new_value) {
+                    const ListValue& new_value) {
   {
     ListPrefUpdate update(GetPrefs(index), pref_name);
-    base::ListValue* list = update.Get();
-    for (base::ListValue::const_iterator it = new_value.begin();
+    ListValue* list = update.Get();
+    for (ListValue::const_iterator it = new_value.begin();
          it != new_value.end();
          ++it) {
       list->Append((*it)->DeepCopy());
@@ -88,8 +88,8 @@ void ChangeListPref(int index,
 
   if (test()->use_verifier()) {
     ListPrefUpdate update_verifier(GetVerifierPrefs(), pref_name);
-    base::ListValue* list_verifier = update_verifier.Get();
-    for (base::ListValue::const_iterator it = new_value.begin();
+    ListValue* list_verifier = update_verifier.Get();
+    for (ListValue::const_iterator it = new_value.begin();
          it != new_value.end();
          ++it) {
       list_verifier->Append((*it)->DeepCopy());
@@ -183,7 +183,7 @@ bool StringPrefMatches(const char* pref_name) {
 }
 
 bool FilePathPrefMatches(const char* pref_name) {
-  base::FilePath reference_value;
+  FilePath reference_value;
   if (test()->use_verifier()) {
     reference_value = GetVerifierPrefs()->GetFilePath(pref_name);
   } else {
@@ -191,8 +191,8 @@ bool FilePathPrefMatches(const char* pref_name) {
   }
   for (int i = 0; i < test()->num_clients(); ++i) {
     if (reference_value != GetPrefs(i)->GetFilePath(pref_name)) {
-      LOG(ERROR) << "base::FilePath preference " << pref_name
-                 << " mismatched in" << " profile " << i << ".";
+      LOG(ERROR) << "FilePath preference " << pref_name << " mismatched in"
+                 << " profile " << i << ".";
       return false;
     }
   }
@@ -200,7 +200,7 @@ bool FilePathPrefMatches(const char* pref_name) {
 }
 
 bool ListPrefMatches(const char* pref_name) {
-  const base::ListValue* reference_value;
+  const ListValue* reference_value;
   if (test()->use_verifier()) {
     reference_value = GetVerifierPrefs()->GetList(pref_name);
   } else {

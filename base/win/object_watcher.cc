@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,6 @@ ObjectWatcher::~ObjectWatcher() {
 }
 
 bool ObjectWatcher::StartWatching(HANDLE object, Delegate* delegate) {
-  CHECK(delegate);
   if (wait_object_) {
     NOTREACHED() << "Already watching an object";
     return false;
@@ -43,7 +42,7 @@ bool ObjectWatcher::StartWatching(HANDLE object, Delegate* delegate) {
 
   if (!RegisterWaitForSingleObject(&wait_object_, object, DoneWaiting,
                                    this, INFINITE, wait_flags)) {
-    DLOG_GETLASTERROR(FATAL) << "RegisterWaitForSingleObject failed";
+    NOTREACHED() << "RegisterWaitForSingleObject failed: " << GetLastError();
     object_ = NULL;
     wait_object_ = NULL;
     return false;
@@ -60,12 +59,12 @@ bool ObjectWatcher::StopWatching() {
     return false;
 
   // Make sure ObjectWatcher is used in a single-threaded fashion.
-  DCHECK_EQ(origin_loop_, MessageLoop::current());
+  DCHECK(origin_loop_ == MessageLoop::current());
 
   // Blocking call to cancel the wait. Any callbacks already in progress will
   // finish before we return from this call.
   if (!UnregisterWaitEx(wait_object_, INVALID_HANDLE_VALUE)) {
-    DLOG_GETLASTERROR(FATAL) << "UnregisterWaitEx failed";
+    NOTREACHED() << "UnregisterWaitEx failed: " << GetLastError();
     return false;
   }
 

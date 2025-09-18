@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_TABS_TAB_RENDERER_GTK_H_
 #define CHROME_BROWSER_UI_GTK_TABS_TAB_RENDERER_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <map>
@@ -11,14 +12,13 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/ui/tabs/tab_utils.h"
+#include "base/string16.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
-#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
@@ -28,8 +28,6 @@ namespace gfx {
 class CairoCachedSurface;
 class Image;
 class Size;
-class SlideAnimation;
-class ThrobAnimation;
 }  // namespace gfx
 
 class CustomDrawButton;
@@ -39,7 +37,12 @@ namespace content {
 class WebContents;
 }
 
-class TabRendererGtk : public gfx::AnimationDelegate,
+namespace ui {
+class SlideAnimation;
+class ThrobAnimation;
+}
+
+class TabRendererGtk : public ui::AnimationDelegate,
                        public content::NotificationObserver {
  public:
   // Possible animation states.
@@ -177,10 +180,6 @@ class TabRendererGtk : public gfx::AnimationDelegate,
   // Returns whether the Tab should display a favicon.
   bool ShouldShowIcon() const;
 
-  // Invoked from Layout() to adjust the position of the favicon or media
-  // indicator for mini tabs.
-  void MaybeAdjustLeftForMiniTab(gfx::Rect* bounds) const;
-
   // Returns the minimum possible size of a single unselected Tab.
   static gfx::Size GetMinimumUnselectedSize();
   // Returns the minimum possible size of a selected Tab. Selected tabs must
@@ -228,7 +227,7 @@ class TabRendererGtk : public gfx::AnimationDelegate,
   void Raise() const;
 
   // Returns the title of the Tab.
-  base::string16 GetTitle() const;
+  string16 GetTitle() const;
 
   // enter-notify-event handler that signals when the mouse enters the tab.
   CHROMEGTK_CALLBACK_1(TabRendererGtk, gboolean, OnEnterNotifyEvent,
@@ -251,7 +250,7 @@ class TabRendererGtk : public gfx::AnimationDelegate,
     SkBitmap favicon;
     gfx::CairoCachedSurface cairo_favicon;
     bool is_default_favicon;
-    base::string16 title;
+    string16 title;
     bool loading;
     bool crashed;
     bool incognito;
@@ -260,14 +259,12 @@ class TabRendererGtk : public gfx::AnimationDelegate,
     bool blocked;
     bool animating_mini_change;
     bool app;
-    TabMediaState media_state;
-    TabMediaState previous_media_state;
   };
 
-  // Overridden from gfx::AnimationDelegate:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationCanceled(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
+  // Overridden from ui::AnimationDelegate:
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
 
   // Starts/Stops the crash animation.
   void StartCrashAnimation();
@@ -275,10 +272,6 @@ class TabRendererGtk : public gfx::AnimationDelegate,
 
   // Return true if the crash animation is currently running.
   bool IsPerformingCrashAnimation() const;
-
-  // Starts the media indicator fade-in/out animation. There's no stop method
-  // because this is not a continuous animation.
-  void StartMediaIndicatorAnimation();
 
   // Set the temporary offset for the favicon. This is used during animation.
   void SetFaviconHidingOffset(int offset);
@@ -304,7 +297,6 @@ class TabRendererGtk : public gfx::AnimationDelegate,
   // Paint various portions of the Tab
   void PaintTitle(GtkWidget* widget, cairo_t* cr);
   void PaintIcon(GtkWidget* widget, cairo_t* cr);
-  void PaintMediaIndicator(GtkWidget* widget, cairo_t* cr);
   void PaintTabBackground(GtkWidget* widget, cairo_t* cr);
   void PaintInactiveTabBackground(GtkWidget* widget, cairo_t* cr);
   void PaintActiveTabBackground(GtkWidget* widget, cairo_t* cr);
@@ -314,7 +306,7 @@ class TabRendererGtk : public gfx::AnimationDelegate,
   // sides for the rounded tab shape.
   void DrawTabBackground(cairo_t* cr,
                          GtkWidget* widget,
-                         const gfx::Image& tab_bg,
+                         const gfx::Image* tab_bg,
                          int offset_x,
                          int offset_y);
 
@@ -328,9 +320,6 @@ class TabRendererGtk : public gfx::AnimationDelegate,
   // Returns the number of favicon-size elements that can fit in the tab's
   // current size.
   int IconCapacity() const;
-
-  // Returns whether the Tab should display the media indicator.
-  bool ShouldShowMediaIndicator() const;
 
   // Returns whether the Tab should display a close button.
   bool ShouldShowCloseBox() const;
@@ -363,7 +352,6 @@ class TabRendererGtk : public gfx::AnimationDelegate,
   // The bounds of various sections of the display.
   gfx::Rect favicon_bounds_;
   gfx::Rect title_bounds_;
-  gfx::Rect media_indicator_bounds_;
   gfx::Rect close_button_bounds_;
 
   TabData data_;
@@ -388,10 +376,6 @@ class TabRendererGtk : public gfx::AnimationDelegate,
   // changes and layout appropriately.
   bool showing_icon_;
 
-  // Whether we're showing the media indicator. It is cached so that we can
-  // detect when it changes and layout appropriately.
-  bool showing_media_indicator_;
-
   // Whether we are showing the close button. It is cached so that we can
   // detect when it changes and layout appropriately.
   bool showing_close_button_;
@@ -413,15 +397,10 @@ class TabRendererGtk : public gfx::AnimationDelegate,
   gfx::Rect requisition_;
 
   // Hover animation.
-  scoped_ptr<gfx::SlideAnimation> hover_animation_;
+  scoped_ptr<ui::SlideAnimation> hover_animation_;
 
   // Animation used when the title of an inactive mini-tab changes.
-  scoped_ptr<gfx::ThrobAnimation> mini_title_animation_;
-
-  // Media indicator fade-in/out animation (i.e., only on show/hide, not a
-  // continuous animation).
-  scoped_ptr<gfx::Animation> media_indicator_animation_;
-  TabMediaState animating_media_state_;
+  scoped_ptr<ui::ThrobAnimation> mini_title_animation_;
 
   // Contains the loading animation state.
   LoadingAnimation loading_animation_;

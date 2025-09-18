@@ -7,7 +7,8 @@
  * This file defines the <code>PPP_VideoDecoder_Dev</code> interface.
  */
 label Chrome {
-  M21 = 0.11
+  M14 = 0.9,
+  M18 = 0.10
 };
 
 /**
@@ -31,16 +32,12 @@ interface PPP_VideoDecoder_Dev {
    *  |decoder| the PPB_VideoDecoder_Dev resource.
    *  |req_num_of_bufs| tells how many buffers are needed by the decoder.
    *  |dimensions| tells the dimensions of the buffer to allocate.
-   *  |texture_target| the type of texture used. Sample targets in use are
-   *      TEXTURE_2D (most platforms) and TEXTURE_EXTERNAL_OES (on ARM).
    */
-  [version=0.11]
   void ProvidePictureBuffers(
       [in] PP_Instance instance,
       [in] PP_Resource decoder,
       [in] uint32_t req_num_of_bufs,
-      [in] PP_Size dimensions,
-      [in] uint32_t texture_target);
+      [in] PP_Size dimensions);
 
   /**
    * Callback function for decoder to deliver unneeded picture buffers back to
@@ -70,6 +67,20 @@ interface PPP_VideoDecoder_Dev {
       [in] PP_Instance instance,
       [in] PP_Resource decoder,
       [in] PP_Picture_Dev picture);
+
+  /**
+   * Callback function to tell the plugin that decoder has decoded end of stream
+   * marker and output all the pictures that should be displayed from the
+   * stream.
+   *
+   * Parameters:
+   *  |instance| the plugin instance to which the callback is responding.
+   *  |decoder| the PPB_VideoDecoder_Dev resource.
+   */
+  [deprecate=0.10]
+  void EndOfStream(
+      [in] PP_Instance instance,
+      [in] PP_Resource decoder);
 
   /**
    * Error handler callback for decoder to deliver information about detected

@@ -4,33 +4,35 @@
 
 #ifndef CHROME_BROWSER_SYNC_SYNC_GLOBAL_ERROR_H_
 #define CHROME_BROWSER_SYNC_SYNC_GLOBAL_ERROR_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
-#include "chrome/browser/ui/global_error/global_error.h"
+#include "chrome/browser/ui/global_error.h"
 
 class ProfileSyncService;
-class SigninManagerBase;
 
 // Shows sync errors on the wrench menu using a bubble view and a
 // menu item.
-class SyncGlobalError : public GlobalErrorWithStandardBubble,
+class SyncGlobalError : public GlobalError,
                         public ProfileSyncServiceObserver {
  public:
-  SyncGlobalError(ProfileSyncService* service, SigninManagerBase* signin);
+  explicit SyncGlobalError(ProfileSyncService* service);
   virtual ~SyncGlobalError();
+
+  virtual bool HasBadge() OVERRIDE;
 
   virtual bool HasMenuItem() OVERRIDE;
   virtual int MenuItemCommandID() OVERRIDE;
-  virtual base::string16 MenuItemLabel() OVERRIDE;
+  virtual string16 MenuItemLabel() OVERRIDE;
   virtual void ExecuteMenuItem(Browser* browser) OVERRIDE;
 
   virtual bool HasBubbleView() OVERRIDE;
-  virtual base::string16 GetBubbleViewTitle() OVERRIDE;
-  virtual std::vector<base::string16> GetBubbleViewMessages() OVERRIDE;
-  virtual base::string16 GetBubbleViewAcceptButtonLabel() OVERRIDE;
-  virtual base::string16 GetBubbleViewCancelButtonLabel() OVERRIDE;
+  virtual string16 GetBubbleViewTitle() OVERRIDE;
+  virtual string16 GetBubbleViewMessage() OVERRIDE;
+  virtual string16 GetBubbleViewAcceptButtonLabel() OVERRIDE;
+  virtual string16 GetBubbleViewCancelButtonLabel() OVERRIDE;
   virtual void OnBubbleViewDidClose(Browser* browser) OVERRIDE;
   virtual void BubbleViewAcceptButtonPressed(Browser* browser) OVERRIDE;
   virtual void BubbleViewCancelButtonPressed(Browser* browser) OVERRIDE;
@@ -38,12 +40,15 @@ class SyncGlobalError : public GlobalErrorWithStandardBubble,
   // ProfileSyncServiceObserver implementation.
   virtual void OnStateChanged() OVERRIDE;
 
+  // For non-ChromeOS we customize the "Sign in to sync" wrench menu item
+  // instead of adding a new wrench menu item at the bottom.
+  bool HasCustomizedSyncMenuItem();
+
  private:
-  base::string16 bubble_accept_label_;
-  base::string16 bubble_message_;
-  base::string16 menu_label_;
+  string16 bubble_accept_label_;
+  string16 bubble_message_;
+  string16 menu_label_;
   ProfileSyncService* service_;
-  SigninManagerBase* signin_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncGlobalError);
 };

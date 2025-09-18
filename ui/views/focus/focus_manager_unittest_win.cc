@@ -1,14 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/focus/focus_manager.h"
 
-#include "base/memory/scoped_ptr.h"
-#include "base/run_loop.h"
-#include "base/strings/utf_string_conversions.h"
-#include "ui/events/event.h"
-#include "ui/views/controls/button/label_button.h"
+#include "base/utf_string_conversions.h"
+#include "ui/views/controls/button/text_button.h"
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/focus/focus_manager_test.h"
 #include "ui/views/widget/widget.h"
@@ -41,11 +38,11 @@ class MessageTrackingView : public View {
   }
 
   // Overridden from View:
-  virtual bool OnKeyPressed(const ui::KeyEvent& e) OVERRIDE {
+  virtual bool OnKeyPressed(const KeyEvent& e) OVERRIDE {
     keys_pressed_.push_back(e.key_code());
     return true;
   }
-  virtual bool OnKeyReleased(const ui::KeyEvent& e) OVERRIDE {
+  virtual bool OnKeyReleased(const KeyEvent& e) OVERRIDE {
     keys_released_.push_back(e.key_code());
     return true;
   }
@@ -70,10 +67,10 @@ TEST_F(FocusManagerTest, FocusStoreRestore) {
   // Simulate an activate, otherwise the deactivate isn't going to do anything.
   SimulateActivateWindow();
 
-  LabelButton* button = new LabelButton(NULL, base::ASCIIToUTF16("Press me"));
-  button->SetStyle(Button::STYLE_NATIVE_TEXTBUTTON);
+  NativeTextButton* button = new NativeTextButton(NULL,
+                                                  ASCIIToUTF16("Press me"));
   View* view = new View();
-  view->SetFocusable(true);
+  view->set_focusable(true);
 
   GetContentsView()->AddChildView(button);
   button->SetBounds(10, 10, 200, 30);
@@ -85,9 +82,16 @@ TEST_F(FocusManagerTest, FocusStoreRestore) {
 
   view->RequestFocus();
   RunPendingMessages();
+  //  MessageLoopForUI::current()->RunWithDispatcher(new AcceleratorHandler());
 
-  // Required for VS2010: http://connect.microsoft.com/VisualStudio/feedback/details/520043/error-converting-from-null-to-a-pointer-type-in-std-pair
+  // Visual Studio 2010 has problems converting NULL to the null pointer for
+  // std::pair.  See http://connect.microsoft.com/VisualStudio/feedback/details/520043/error-converting-from-null-to-a-pointer-type-in-std-pair
+  // It will work if we pass nullptr.
+#if defined(_MSC_VER) && _MSC_VER >= 1600
+  views::View* null_view = nullptr;
+#else
   views::View* null_view = NULL;
+#endif
 
   // Deacivate the window, it should store its focus.
   SimulateDeactivateWindow();
@@ -203,13 +207,13 @@ TEST_F(FocusManagerTest, CreationForNativeRoot) {
 
 // Tests that the keyup messages are eaten for accelerators.
 // Windows-only, Windows is the only platform that handles accelerators in
-// AcceleratorHandler. NativeWidgetAura::OnKeyEvent handles them in other
-// configurations.
+// AcceleratorHandler. NativeWidgetAura/NativeWidgetGtk::OnKeyEvent handles
+// them in other configurations.
 TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   FocusManager* focus_manager = GetFocusManager();
   MessageTrackingView* mtv = new MessageTrackingView();
-  mtv->AddAccelerator(ui::Accelerator(ui::VKEY_0, ui::EF_NONE));
-  mtv->AddAccelerator(ui::Accelerator(ui::VKEY_1, ui::EF_NONE));
+  mtv->AddAccelerator(ui::Accelerator(ui::VKEY_0, false, false, false));
+  mtv->AddAccelerator(ui::Accelerator(ui::VKEY_1, false, false, false));
   GetContentsView()->AddChildView(mtv);
   focus_manager->SetFocusedView(mtv);
 
@@ -217,8 +221,8 @@ TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   PostKeyDown(ui::VKEY_9);
   PostKeyUp(ui::VKEY_9);
   AcceleratorHandler accelerator_handler;
-  scoped_ptr<base::RunLoop> run_loop(new base::RunLoop(&accelerator_handler));
-  run_loop->RunUntilIdle();
+  MessageLoopForUI::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
   // Make sure we get a key-up and key-down.
   ASSERT_EQ(1U, mtv->keys_pressed().size());
   EXPECT_EQ(ui::VKEY_9, mtv->keys_pressed()[0]);
@@ -236,8 +240,8 @@ TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   PostKeyUp(ui::VKEY_9);
   PostKeyUp(ui::VKEY_7);
   PostKeyUp(ui::VKEY_8);
-  run_loop.reset(new base::RunLoop(&accelerator_handler));
-  run_loop->RunUntilIdle();
+  MessageLoopForUI::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
   // Make sure we get a key-up and key-down.
   ASSERT_EQ(5U, mtv->keys_pressed().size());
   EXPECT_EQ(ui::VKEY_9, mtv->keys_pressed()[0]);
@@ -255,8 +259,8 @@ TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   // Now send an accelerator key sequence.
   PostKeyDown(ui::VKEY_0);
   PostKeyUp(ui::VKEY_0);
-  run_loop.reset(new base::RunLoop(&accelerator_handler));
-  run_loop->RunUntilIdle();
+  MessageLoopForUI::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
   EXPECT_TRUE(mtv->keys_pressed().empty());
   EXPECT_TRUE(mtv->keys_released().empty());
   EXPECT_TRUE(mtv->accelerator_pressed());
@@ -270,8 +274,8 @@ TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   PostKeyDown(ui::VKEY_0);
   PostKeyUp(ui::VKEY_1);
   PostKeyUp(ui::VKEY_0);
-  run_loop.reset(new base::RunLoop(&accelerator_handler));
-  run_loop->RunUntilIdle();
+  MessageLoopForUI::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
   EXPECT_TRUE(mtv->keys_pressed().empty());
   EXPECT_TRUE(mtv->keys_released().empty());
   EXPECT_TRUE(mtv->accelerator_pressed());

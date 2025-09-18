@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Implementation of DeleteChromeHistory
 #include "chrome_frame/delete_chrome_history.h"
 
-#include "chrome/browser/browsing_data/browsing_data_remover.h"
+#include "chrome/browser/browsing_data_remover.h"
 
 #include "base/win/windows_version.h"
 #include "chrome_frame/chrome_frame_activex.h"
@@ -31,6 +31,9 @@ HRESULT DeleteChromeHistory::FinalConstruct() {
 }
 
 void DeleteChromeHistory::OnAutomationServerReady() {
+  DVLOG(1) << __FUNCTION__;
+  automation_client_->RemoveBrowsingData(remove_mask_);
+  loop_.Quit();
 }
 
 void DeleteChromeHistory::OnAutomationServerLaunchFailed(
@@ -40,7 +43,7 @@ void DeleteChromeHistory::OnAutomationServerLaunchFailed(
 }
 
 void DeleteChromeHistory::GetProfilePath(const std::wstring& profile_name,
-                                         base::FilePath* profile_path) {
+                                         FilePath* profile_path) {
   ChromeFramePlugin::GetProfilePath(kIexploreProfileName, profile_path);
 }
 
@@ -88,8 +91,8 @@ STDMETHODIMP DeleteChromeHistory::DeleteBrowsingHistory(DWORD flags) {
     remove_mask_ |= BrowsingDataRemover::REMOVE_HISTORY;
 
   loop_.PostDelayedTask(FROM_HERE,
-      base::MessageLoop::QuitClosure(), base::TimeDelta::FromMinutes(10));
-  loop_.base::MessageLoop::Run();
+      MessageLoop::QuitClosure(), 1000 * 600);
+  loop_.MessageLoop::Run();
 
   return S_OK;
 }

@@ -1,99 +1,90 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_SCREEN_H_
 #define UI_GFX_SCREEN_H_
+#pragma once
 
-#include <vector>
-
-#include "base/basictypes.h"
-#include "ui/gfx/display.h"
-#include "ui/gfx/gfx_export.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
-#include "ui/gfx/screen_type_delegate.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 
 namespace gfx {
-class DisplayObserver;
-class Rect;
 
-// A utility class for getting various info about screen size, displays,
+// A utility class for getting various info about screen size, monitors,
 // cursor position, etc.
-//
-// Note that this class does not represent an individual display connected to a
-// computer -- see the Display class for that. A single Screen object exists on
-// most operating systems regardless of the number of connected displays. On
-// Windows 8, two Screens exist: one for Metro UI and another for the desktop.
-class GFX_EXPORT Screen {
+// TODO(erikkay) add more of those methods here
+class UI_EXPORT Screen {
  public:
-  // Retrieves the Screen that the specified NativeView belongs to. A value of
-  // NULL is treated as |SCREEN_TYPE_NATIVE|.
-  static Screen* GetScreenFor(NativeView view);
+  virtual ~Screen() {}
 
-  // Returns the SCREEN_TYPE_NATIVE Screen. This should be used with caution,
-  // as it is likely to be incorrect for code that runs on Windows.
-  static Screen* GetNativeScreen();
-
-  // Sets the global screen for a particular screen type. Only the _NATIVE
-  // ScreenType must be provided.
-  static void SetScreenInstance(ScreenType type, Screen* instance);
-
-  // Returns the global screen for a particular type. Types other than _NATIVE
-  // may be NULL.
-  static Screen* GetScreenByType(ScreenType type);
-
-  // Sets the global ScreenTypeDelegate. May be left unset if the platform
-  // uses only the _NATIVE ScreenType.
-  static void SetScreenTypeDelegate(ScreenTypeDelegate* delegate);
-
-  Screen();
-  virtual ~Screen();
-
-  // Returns true if DIP is enabled.
-  virtual bool IsDIPEnabled() = 0;
+#if defined(USE_AURA)
+  // Sets the instance to use. This takes owernship of |screen|, deleting the
+  // old instance. This is used on aura to avoid circular dependencies between
+  // ui and aura.
+  static void SetInstance(Screen* screen);
+#endif
 
   // Returns the current absolute position of the mouse pointer.
-  virtual gfx::Point GetCursorScreenPoint() = 0;
+  static gfx::Point GetCursorScreenPoint();
+
+  // Returns the work area of the monitor nearest the specified window.
+  static gfx::Rect GetMonitorWorkAreaNearestWindow(gfx::NativeView view);
+
+  // Returns the bounds of the monitor nearest the specified window.
+  static gfx::Rect GetMonitorAreaNearestWindow(gfx::NativeView view);
+
+  // Returns the work area of the monitor nearest the specified point.
+  static gfx::Rect GetMonitorWorkAreaNearestPoint(const gfx::Point& point);
+
+  // Returns the monitor area (not the work area, but the complete bounds) of
+  // the monitor nearest the specified point.
+  static gfx::Rect GetMonitorAreaNearestPoint(const gfx::Point& point);
+
+  // Returns the bounds of the work area of the primary monitor.
+  static gfx::Rect GetPrimaryMonitorWorkArea();
+
+  // Returns the bounds of the primary monitor.
+  static gfx::Rect GetPrimaryMonitorBounds();
+
+  // Returns the bounds of the work area of the monitor that most closely
+  // intersects the provided bounds.
+  static gfx::Rect GetMonitorWorkAreaMatching(
+      const gfx::Rect& match_rect);
 
   // Returns the window under the cursor.
-  virtual gfx::NativeWindow GetWindowUnderCursor() = 0;
+  static gfx::NativeWindow GetWindowAtCursorScreenPoint();
 
-  // Returns the window at the given screen coordinate |point|.
-  virtual gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) = 0;
+  // Returns the dimensions of the primary monitor in pixels.
+  static gfx::Size GetPrimaryMonitorSize();
 
-  // Returns the number of displays.
+  // Returns the number of monitors.
   // Mirrored displays are excluded; this method is intended to return the
   // number of distinct, usable displays.
-  virtual int GetNumDisplays() const = 0;
+  static int GetNumMonitors();
 
-  // Returns the list of displays that are currently available.
-  virtual std::vector<gfx::Display> GetAllDisplays() const = 0;
+ protected:
+  virtual gfx::Point GetCursorScreenPointImpl() = 0;
+  virtual gfx::Rect GetMonitorWorkAreaNearestWindowImpl(
+      gfx::NativeView view) = 0;
+  virtual gfx::Rect GetMonitorAreaNearestWindowImpl(
+      gfx::NativeView view) = 0;
+  virtual gfx::Rect GetMonitorWorkAreaNearestPointImpl(
+      const gfx::Point& point) = 0;
+  virtual gfx::Rect GetMonitorAreaNearestPointImpl(const gfx::Point& point) = 0;
+  virtual gfx::NativeWindow GetWindowAtCursorScreenPointImpl() = 0;
+  virtual gfx::Size GetPrimaryMonitorSizeImpl() = 0;
+  virtual int GetNumMonitorsImpl() = 0;
 
-  // Returns the display nearest the specified window.
-  virtual gfx::Display GetDisplayNearestWindow(NativeView view) const = 0;
-
-  // Returns the display nearest the specified point.
-  virtual gfx::Display GetDisplayNearestPoint(
-      const gfx::Point& point) const = 0;
-
-  // Returns the display that most closely intersects the provided bounds.
-  virtual gfx::Display GetDisplayMatching(
-      const gfx::Rect& match_rect) const = 0;
-
-  // Returns the primary display.
-  virtual gfx::Display GetPrimaryDisplay() const = 0;
-
-  // Adds/Removes display observers.
-  virtual void AddObserver(DisplayObserver* observer) = 0;
-  virtual void RemoveObserver(DisplayObserver* observer) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Screen);
+private:
+#if defined(USE_AURA)
+  // The singleton screen instance. Only used on aura.
+  static Screen* instance_;
+#endif
 };
-
-Screen* CreateNativeScreen();
 
 }  // namespace gfx
 
-#endif  // UI_GFX_SCREEN_H_
+#endif  // VIEWS_SCREEN_H_

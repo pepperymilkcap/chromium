@@ -10,13 +10,14 @@
 #include "base/base64.h"
 #include "base/lazy_instance.h"
 #include "base/rand_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "base/values.h"
+#include "content/public/browser/browser_thread.h"
 #include "crypto/hmac.h"
 
 namespace {
@@ -64,7 +65,7 @@ const char kItemSeparator = '\n';
 const char kVarValueSeparator = '=';
 
 const size_t kKeySizeInBytes = 128 / 8;
-const size_t kHMACSizeInBytes = 256 / 8;
+const int kHMACSizeInBytes = 256 / 8;
 
 // Length of base64 string required to encode given number of raw octets.
 #define BASE64_PER_RAW(X) (X > 0 ? ((X - 1) / 3 + 1) * 4 : 0)
@@ -139,11 +140,12 @@ void ConvertVarValueMapToBlob(const VarValueMap& map, std::string* out) {
     *out += it->first + kVarValueSeparator + it->second + kItemSeparator;
 }
 
-void CreatePassport(const std::string& domain,
-                    const VarValueMap& map,
-                    int64 tick,
-                    const crypto::HMAC* engine,
-                    std::string* out) {
+void CreatePassport(
+    const std::string& domain,
+    const VarValueMap& map,
+    int64 tick,
+    const crypto::HMAC* engine,
+    std::string* out) {
   DCHECK(engine);
   DCHECK(out);
   DCHECK(IsDomainSane(domain));
@@ -166,7 +168,10 @@ void CreatePassport(const std::string& domain,
     return;
   }
   std::string hmac_base64;
-  base::Base64Encode(hmac, &hmac_base64);
+  if (!base::Base64Encode(hmac, &hmac_base64)) {
+    NOTREACHED();
+    return;
+  }
   if (hmac_base64.size() != BASE64_PER_RAW(kHMACSizeInBytes)) {
     NOTREACHED();
     return;
@@ -186,7 +191,7 @@ void CreatePassport(const std::string& domain,
 
 }  // namespace
 
-namespace chrome {
+namespace browser {
 
 class InternalAuthVerificationService {
  public:
@@ -315,18 +320,18 @@ class InternalAuthVerificationService {
   DISALLOW_COPY_AND_ASSIGN(InternalAuthVerificationService);
 };
 
-}  // namespace chrome
+}  // namespace browser
 
 namespace {
 
-static base::LazyInstance<chrome::InternalAuthVerificationService>
+static base::LazyInstance<browser::InternalAuthVerificationService>
     g_verification_service = LAZY_INSTANCE_INITIALIZER;
 static base::LazyInstance<base::Lock>::Leaky
     g_verification_service_lock = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
-namespace chrome {
+namespace browser {
 
 class InternalAuthGenerationService : public base::ThreadChecker {
  public:
@@ -422,16 +427,16 @@ class InternalAuthGenerationService : public base::ThreadChecker {
   DISALLOW_COPY_AND_ASSIGN(InternalAuthGenerationService);
 };
 
-}  // namespace chrome
+}  // namespace browser
 
 namespace {
 
-static base::LazyInstance<chrome::InternalAuthGenerationService>
+static base::LazyInstance<browser::InternalAuthGenerationService>
     g_generation_service = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
-namespace chrome {
+namespace browser {
 
 // static
 bool InternalAuthVerification::VerifyPassport(
@@ -471,4 +476,4 @@ void InternalAuthGeneration::GenerateNewKey() {
   g_generation_service.Get().GenerateNewKey();
 }
 
-}  // namespace chrome
+}  // namespace browser

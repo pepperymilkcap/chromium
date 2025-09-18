@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,21 @@
 #include "content/common/appcache_messages.h"
 #include "content/public/browser/user_metrics.h"
 
-namespace content {
+using content::BrowserMessageFilter;
+using content::UserMetricsAction;
 
 AppCacheDispatcherHost::AppCacheDispatcherHost(
     ChromeAppCacheService* appcache_service,
     int process_id)
     : appcache_service_(appcache_service),
-      frontend_proxy_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(frontend_proxy_(this)),
       process_id_(process_id) {
 }
 
+AppCacheDispatcherHost::~AppCacheDispatcherHost() {}
+
 void AppCacheDispatcherHost::OnChannelConnected(int32 peer_pid) {
+  BrowserMessageFilter::OnChannelConnected(peer_pid);
   if (appcache_service_.get()) {
     backend_impl_.Initialize(
         appcache_service_.get(), &frontend_proxy_, process_id_);
@@ -60,10 +64,8 @@ bool AppCacheDispatcherHost::OnMessageReceived(const IPC::Message& message,
   return handled;
 }
 
-AppCacheDispatcherHost::~AppCacheDispatcherHost() {}
-
 void AppCacheDispatcherHost::BadMessageReceived() {
-  RecordAction(UserMetricsAction("BadMessageTerminate_ACDH"));
+  content::RecordAction(UserMetricsAction("BadMessageTerminate_ACDH"));
   BrowserMessageFilter::BadMessageReceived();
 }
 
@@ -96,8 +98,7 @@ void AppCacheDispatcherHost::OnSelectCache(
     int64 cache_document_was_loaded_from,
     const GURL& opt_manifest_url) {
   if (appcache_service_.get()) {
-    if (!backend_impl_.SelectCache(host_id,
-                                   document_url,
+    if (!backend_impl_.SelectCache(host_id, document_url,
                                    cache_document_was_loaded_from,
                                    opt_manifest_url)) {
       BadMessageReceived();
@@ -133,8 +134,8 @@ void AppCacheDispatcherHost::OnMarkAsForeignEntry(
     int host_id, const GURL& document_url,
     int64 cache_document_was_loaded_from) {
   if (appcache_service_.get()) {
-    if (!backend_impl_.MarkAsForeignEntry(
-            host_id, document_url, cache_document_was_loaded_from)) {
+    if (!backend_impl_.MarkAsForeignEntry(host_id, document_url,
+                                          cache_document_was_loaded_from)) {
       BadMessageReceived();
     }
   }
@@ -147,7 +148,7 @@ void AppCacheDispatcherHost::OnGetResourceList(
 }
 
 void AppCacheDispatcherHost::OnGetStatus(int host_id, IPC::Message* reply_msg) {
-  if (pending_reply_msg_) {
+  if (pending_reply_msg_.get()) {
     BadMessageReceived();
     delete reply_msg;
     return;
@@ -155,8 +156,8 @@ void AppCacheDispatcherHost::OnGetStatus(int host_id, IPC::Message* reply_msg) {
 
   pending_reply_msg_.reset(reply_msg);
   if (appcache_service_.get()) {
-    if (!backend_impl_.GetStatusWithCallback(
-            host_id, get_status_callback_, reply_msg)) {
+    if (!backend_impl_.GetStatusWithCallback(host_id, get_status_callback_,
+                                             reply_msg)) {
       BadMessageReceived();
     }
     return;
@@ -167,7 +168,7 @@ void AppCacheDispatcherHost::OnGetStatus(int host_id, IPC::Message* reply_msg) {
 
 void AppCacheDispatcherHost::OnStartUpdate(int host_id,
                                            IPC::Message* reply_msg) {
-  if (pending_reply_msg_) {
+  if (pending_reply_msg_.get()) {
     BadMessageReceived();
     delete reply_msg;
     return;
@@ -175,8 +176,8 @@ void AppCacheDispatcherHost::OnStartUpdate(int host_id,
 
   pending_reply_msg_.reset(reply_msg);
   if (appcache_service_.get()) {
-    if (!backend_impl_.StartUpdateWithCallback(
-            host_id, start_update_callback_, reply_msg)) {
+    if (!backend_impl_.StartUpdateWithCallback(host_id, start_update_callback_,
+                                               reply_msg)) {
       BadMessageReceived();
     }
     return;
@@ -186,7 +187,7 @@ void AppCacheDispatcherHost::OnStartUpdate(int host_id,
 }
 
 void AppCacheDispatcherHost::OnSwapCache(int host_id, IPC::Message* reply_msg) {
-  if (pending_reply_msg_) {
+  if (pending_reply_msg_.get()) {
     BadMessageReceived();
     delete reply_msg;
     return;
@@ -194,8 +195,8 @@ void AppCacheDispatcherHost::OnSwapCache(int host_id, IPC::Message* reply_msg) {
 
   pending_reply_msg_.reset(reply_msg);
   if (appcache_service_.get()) {
-    if (!backend_impl_.SwapCacheWithCallback(
-            host_id, swap_cache_callback_, reply_msg)) {
+    if (!backend_impl_.SwapCacheWithCallback(host_id, swap_cache_callback_,
+                                             reply_msg)) {
       BadMessageReceived();
     }
     return;
@@ -225,5 +226,3 @@ void AppCacheDispatcherHost::SwapCacheCallback(bool result, void* param) {
   AppCacheHostMsg_SwapCache::WriteReplyParams(reply_msg, result);
   Send(pending_reply_msg_.release());
 }
-
-}  // namespace content

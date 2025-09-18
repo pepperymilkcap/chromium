@@ -1,12 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/time.h"
 #include "base/synchronization/waitable_event.h"
-
-#include "base/compiler_specific.h"
 #include "base/threading/platform_thread.h"
-#include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -78,7 +76,7 @@ class WaitableEventSignaler : public PlatformThread::Delegate {
         ev_(ev) {
   }
 
-  virtual void ThreadMain() OVERRIDE {
+  void ThreadMain() {
     PlatformThread::Sleep(TimeDelta::FromSeconds(static_cast<int>(seconds_)));
     ev_->Signal();
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,16 +13,11 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/cancelable_callback.h"
 #include "base/compiler_specific.h"
-#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/process/process_handle.h"
-#include "base/run_loop.h"
+#include "base/message_loop.h"
+#include "base/process_util.h"
 #include "base/test/test_reg_util_win.h"
-#include "base/time/time.h"
-#include "base/time/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome_frame/chrome_tab.h"
@@ -38,17 +33,12 @@
 
 interface IWebBrowser2;
 
-namespace base {
-class FilePath;
-}
-
 namespace chrome_frame_test {
 
 int CloseVisibleWindowsOnAllThreads(HANDLE process);
 
 base::ProcessHandle LaunchIE(const std::wstring& url);
-base::ProcessHandle LaunchChrome(const std::wstring& url,
-                                 const base::FilePath& user_data_dir);
+base::ProcessHandle LaunchChrome(const std::wstring& url);
 
 // Attempts to close all open IE windows.
 // The return value is the number of windows closed.
@@ -57,15 +47,12 @@ base::ProcessHandle LaunchChrome(const std::wstring& url,
 // not perform this initialization itself.
 int CloseAllIEWindows();
 
-// Saves a screen snapshot to the desktop and logs its location.
-bool TakeSnapshotAndLog();
-
 extern const wchar_t kIEImageName[];
 extern const wchar_t kIEBrokerImageName[];
 extern const char kChromeImageName[];
 extern const wchar_t kChromeLauncher[];
-extern const base::TimeDelta kChromeFrameLongNavigationTimeout;
-extern const base::TimeDelta kChromeFrameVeryLongNavigationTimeout;
+extern const int kChromeFrameLongNavigationTimeoutInSeconds;
+extern const int kChromeFrameVeryLongNavigationTimeoutInSeconds;
 
 // Temporarily impersonate the current thread to low integrity for the lifetime
 // of the object. Destructor will automatically revert integrity level.
@@ -92,10 +79,11 @@ class HungCOMCallDetector
  public:
   HungCOMCallDetector()
       : is_hung_(false) {
+    LOG(INFO) << __FUNCTION__;
   }
 
   ~HungCOMCallDetector() {
-    TearDown();
+    LOG(INFO) << __FUNCTION__;
   }
 
   BEGIN_MSG_MAP(HungCOMCallDetector)
@@ -122,16 +110,10 @@ class HungCOMCallDetector
   }
 
   void TearDown() {
-    if (prev_filter_) {
-      base::win::ScopedComPtr<IMessageFilter> prev_filter;
-      CoRegisterMessageFilter(prev_filter_.get(), prev_filter.Receive());
-      DCHECK(prev_filter.IsSameObject(this));
-      prev_filter_.Release();
-    }
-    if (IsWindow()) {
-      DestroyWindow();
-      m_hWnd = NULL;
-    }
+    base::win::ScopedComPtr<IMessageFilter> prev_filter;
+    CoRegisterMessageFilter(prev_filter_.get(), prev_filter.Receive());
+    DestroyWindow();
+    m_hWnd = NULL;
   }
 
   STDMETHOD_(DWORD, HandleInComingCall)(DWORD call_type,
@@ -199,22 +181,13 @@ class HungCOMCallDetector
 // We need a UI message loop in the main thread.
 class TimedMsgLoop {
  public:
-  TimedMsgLoop() : snapshot_on_timeout_(false), quit_loop_invoked_(false) {
+  TimedMsgLoop() : quit_loop_invoked_(false) {
   }
 
-  void set_snapshot_on_timeout(bool value) {
-    snapshot_on_timeout_ = value;
-  }
-
-  void RunFor(base::TimeDelta duration) {
+  void RunFor(int seconds) {
+    QuitAfter(seconds);
     quit_loop_invoked_ = false;
-    if (snapshot_on_timeout_)
-      timeout_closure_.Reset(base::Bind(&TimedMsgLoop::SnapshotAndQuit));
-    else
-      timeout_closure_.Reset(base::MessageLoop::QuitClosure());
-    loop_.PostDelayedTask(FROM_HERE, timeout_closure_.callback(), duration);
-    loop_.base::MessageLoop::Run();
-    timeout_closure_.Cancel();
+    loop_.MessageLoop::Run();
   }
 
   void PostTask(const tracked_objects::Location& from_here,
@@ -223,38 +196,26 @@ class TimedMsgLoop {
   }
 
   void PostDelayedTask(const tracked_objects::Location& from_here,
-                       const base::Closure& task, base::TimeDelta delay) {
-    loop_.PostDelayedTask(from_here, task, delay);
+                       const base::Closure& task, int64 delay_ms) {
+    loop_.PostDelayedTask(from_here, task, delay_ms);
   }
 
   void Quit() {
-    // Quit after no delay.
-    QuitAfter(base::TimeDelta());
+    QuitAfter(0);
   }
 
-  void QuitAfter(base::TimeDelta delay) {
-    timeout_closure_.Cancel();
+  void QuitAfter(int seconds) {
     quit_loop_invoked_ = true;
-    loop_.PostDelayedTask(FROM_HERE, base::MessageLoop::QuitClosure(), delay);
+    loop_.PostDelayedTask(
+        FROM_HERE, MessageLoop::QuitClosure(), 1000 * seconds);
   }
 
   bool WasTimedOut() const {
     return !quit_loop_invoked_;
   }
 
-  void RunUntilIdle() {
-    loop_.RunUntilIdle();
-  }
-
  private:
-  static void SnapshotAndQuit() {
-    TakeSnapshotAndLog();
-    base::MessageLoop::current()->Quit();
-  }
-
-  base::MessageLoopForUI loop_;
-  base::CancelableClosure timeout_closure_;
-  bool snapshot_on_timeout_;
+  MessageLoopForUI loop_;
   bool quit_loop_invoked_;
 };
 
@@ -264,20 +225,22 @@ class TimedMsgLoop {
 #define QUIT_LOOP(loop) testing::InvokeWithoutArgs(\
   testing::CreateFunctor(&loop, &chrome_frame_test::TimedMsgLoop::Quit))
 
-#define QUIT_LOOP_SOON(loop, delay) testing::InvokeWithoutArgs(\
+#define QUIT_LOOP_SOON(loop, seconds) testing::InvokeWithoutArgs(\
   testing::CreateFunctor(&loop, &chrome_frame_test::TimedMsgLoop::QuitAfter, \
-                         delay))
+  seconds))
 
 // Launches IE as a COM server and returns the corresponding IWebBrowser2
 // interface pointer.
 // Returns S_OK on success.
 HRESULT LaunchIEAsComServer(IWebBrowser2** web_browser);
 
+FilePath GetProfilePath(const std::wstring& suffix);
+
 // Returns the path of the exe passed in.
 std::wstring GetExecutableAppPath(const std::wstring& file);
 
 // Returns the profile path to be used for IE. This varies as per version.
-base::FilePath GetProfilePathForIE();
+FilePath GetProfilePathForIE();
 
 // Returns the version of the exe passed in.
 std::wstring GetExeVersion(const std::wstring& exe_path);
@@ -286,10 +249,10 @@ std::wstring GetExeVersion(const std::wstring& exe_path);
 IEVersion GetInstalledIEVersion();
 
 // Returns the folder for CF test data.
-base::FilePath GetTestDataFolder();
+FilePath GetTestDataFolder();
 
 // Returns the folder for Selenium core.
-base::FilePath GetSeleniumTestFolder();
+FilePath GetSeleniumTestFolder();
 
 // Returns the path portion of the url.
 std::wstring GetPathFromUrl(const std::wstring& url);
@@ -302,10 +265,6 @@ bool AddCFMetaTag(std::string* html_data);
 
 // Get text data from the clipboard.
 std::wstring GetClipboardText();
-
-// Destroys the clipboard for the current thread. This function must be called
-// if GetClipboardText() or SetClipboardText() have been invoked.
-void DestroyClipboard();
 
 // Puts the given text data on the clipboard. All previous items on the
 // clipboard are removed.
@@ -338,6 +297,10 @@ class ScopedVirtualizeHklmAndHkcu {
   ScopedVirtualizeHklmAndHkcu();
   ~ScopedVirtualizeHklmAndHkcu();
 
+  // Removes all overrides and deletes all temporary test keys used by the
+  // overrides.
+  void RemoveAllOverrides();
+
  protected:
   registry_util::RegistryOverrideManager override_manager_;
 };
@@ -357,10 +320,6 @@ ScopedChromeFrameRegistrar::RegistrationType GetTestBedType();
 
 // Clears IE8 session restore history.
 void ClearIESessionHistory();
-
-// Returns a local IPv4 address for the current machine. The address
-// corresponding to a NIC is preferred over the loopback address.
-std::string GetLocalIPv4Address();
 
 }  // namespace chrome_frame_test
 

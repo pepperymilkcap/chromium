@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_MAC_SCOPED_SENDING_EVENT_H_
 #define BASE_MAC_SCOPED_SENDING_EVENT_H_
+#pragma once
 
-#include "base/base_export.h"
 #include "base/basictypes.h"
-#include "base/message_loop/message_pump_mac.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/message_pump_mac.h"
 
 // Nested event loops can pump IPC messages, including
 // script-initiated tab closes, which could release objects that the
@@ -28,7 +29,7 @@
 namespace base {
 namespace mac {
 
-class BASE_EXPORT ScopedSendingEvent {
+class ScopedSendingEvent {
  public:
   ScopedSendingEvent();
   ~ScopedSendingEvent();

@@ -5,7 +5,6 @@
 #ifndef PPAPI_PROXY_PPP_MOUSE_LOCK_PROXY_H_
 #define PPAPI_PROXY_PPP_MOUSE_LOCK_PROXY_H_
 
-#include "base/compiler_specific.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/ppp_mouse_lock.h"
 #include "ppapi/proxy/interface_proxy.h"
@@ -18,7 +17,7 @@ class PPP_MouseLock_Proxy : public InterfaceProxy {
   PPP_MouseLock_Proxy(Dispatcher* dispatcher);
   virtual ~PPP_MouseLock_Proxy();
 
-  static const PPP_MouseLock* GetProxyInterface();
+  static const Info* GetInfo();
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;

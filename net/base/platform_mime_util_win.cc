@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,29 +6,28 @@
 
 #include <string>
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 
 namespace net {
 
 bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
-    const base::FilePath::StringType& ext, std::string* result) const {
+    const FilePath::StringType& ext, std::string* result) const {
   // check windows registry for file extension's mime type (registry key
   // names are not case-sensitive).
   std::wstring value, key = L"." + ext;
   base::win::RegKey(HKEY_CLASSES_ROOT, key.c_str(), KEY_READ).ReadValue(
       L"Content Type", &value);
   if (!value.empty()) {
-    *result = base::WideToUTF8(value);
+    *result = WideToUTF8(value);
     return true;
   }
   return false;
 }
 
 bool PlatformMimeUtil::GetPreferredExtensionForMimeType(
-    const std::string& mime_type, base::FilePath::StringType* ext) const {
-  std::wstring key(
-      L"MIME\\Database\\Content Type\\" + base::UTF8ToWide(mime_type));
+    const std::string& mime_type, FilePath::StringType* ext) const {
+  std::wstring key(L"MIME\\Database\\Content Type\\" + UTF8ToWide(mime_type));
   if (base::win::RegKey(HKEY_CLASSES_ROOT, key.c_str(), KEY_READ).ReadValue(
           L"Extension", ext) != ERROR_SUCCESS) {
     return false;
@@ -38,18 +37,6 @@ bool PlatformMimeUtil::GetPreferredExtensionForMimeType(
     ext->erase(ext->begin());
 
   return true;
-}
-
-void PlatformMimeUtil::GetPlatformExtensionsForMimeType(
-    const std::string& mime_type,
-    base::hash_set<base::FilePath::StringType>* extensions) const {
-  // Multiple extensions could have the given mime type specified as their types
-  // in their 'HKCR\.<extension>\Content Type' keys. Iterating all the HKCR
-  // entries, though, is wildly impractical. Cheat by returning just the
-  // preferred extension.
-  base::FilePath::StringType ext;
-  if (GetPreferredExtensionForMimeType(mime_type, &ext))
-    extensions->insert(ext);
 }
 
 }  // namespace net

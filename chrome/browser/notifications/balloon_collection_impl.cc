@@ -7,19 +7,21 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_host.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/panels/docked_panel_collection.h"
+#include "chrome/browser/ui/panels/docked_panel_strip.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
+
+namespace {
 
 // Portion of the screen allotted for notifications. When notification balloons
 // extend over this, no new notifications are shown until some are closed.
@@ -28,34 +30,32 @@ const double kPercentBalloonFillFactor = 0.7;
 // Allow at least this number of balloons on the screen.
 const int kMinAllowedBalloonCount = 2;
 
-// The spacing between the balloon and the panel.
-const int kVerticalSpacingBetweenBalloonAndPanel = 5;
-
-#if USE_OFFSETS
 // Delay from the mouse leaving the balloon collection before
 // there is a relayout, in milliseconds.
 const int kRepositionDelayMs = 300;
-#endif  // USE_OFFSETS
 
+// The spacing between the balloon and the panel.
+const int kVerticalSpacingBetweenBalloonAndPanel = 5;
+
+}  // namespace
 
 BalloonCollectionImpl::BalloonCollectionImpl()
 #if USE_OFFSETS
-    : reposition_factory_(this),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(reposition_factory_(this)),
       added_as_message_loop_observer_(false)
 #endif
 {
-  registrar_.Add(this, chrome::NOTIFICATION_PANEL_COLLECTION_UPDATED,
+  registrar_.Add(this, chrome::NOTIFICATION_PANEL_ADDED,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
+  registrar_.Add(this, chrome::NOTIFICATION_PANEL_REMOVED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_PANEL_CHANGED_BOUNDS,
                  content::NotificationService::AllSources());
 
   SetPositionPreference(BalloonCollection::DEFAULT_POSITION);
 }
 
 BalloonCollectionImpl::~BalloonCollectionImpl() {
-#if USE_OFFSETS
-  RemoveMessageLoopObserver();
-#endif
 }
 
 void BalloonCollectionImpl::AddImpl(const Notification& notification,
@@ -91,21 +91,12 @@ void BalloonCollectionImpl::Add(const Notification& notification,
   AddImpl(notification, profile, false);
 }
 
-const Notification* BalloonCollectionImpl::FindById(
-    const std::string& id) const {
-  return base_.FindById(id);
-}
-
 bool BalloonCollectionImpl::RemoveById(const std::string& id) {
   return base_.CloseById(id);
 }
 
 bool BalloonCollectionImpl::RemoveBySourceOrigin(const GURL& origin) {
   return base_.CloseAllBySourceOrigin(origin);
-}
-
-bool BalloonCollectionImpl::RemoveByProfile(Profile* profile) {
-  return base_.CloseAllByProfile(profile);
 }
 
 void BalloonCollectionImpl::RemoveAll() {
@@ -145,7 +136,7 @@ void BalloonCollectionImpl::OnBalloonClosed(Balloon* source) {
 
   Balloons::const_iterator it = balloons.begin();
   if (layout_.RequiresOffsets()) {
-    gfx::Vector2d offset;
+    gfx::Point offset;
     bool apply_offset = false;
     while (it != balloons.end()) {
       if (*it == source) {
@@ -190,10 +181,12 @@ void BalloonCollectionImpl::Observe(
     const content::NotificationDetails& details) {
   gfx::Rect bounds;
   switch (type) {
-    case chrome::NOTIFICATION_PANEL_COLLECTION_UPDATED:
-    case chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE:
-      layout_.enable_computing_panel_offset();
-      if (layout_.ComputeOffsetToMoveAbovePanels())
+    case chrome::NOTIFICATION_PANEL_CHANGED_BOUNDS:
+      bounds = content::Source<Panel>(source).ptr()->GetBounds();
+      // Fall through.
+    case chrome::NOTIFICATION_PANEL_ADDED:
+    case chrome::NOTIFICATION_PANEL_REMOVED:
+      if (layout_.ComputeOffsetToMoveAbovePanels(bounds))
         PositionBalloons(true);
       break;
     default:
@@ -226,7 +219,7 @@ gfx::Rect BalloonCollectionImpl::GetBalloonsBoundingBox() const {
   for (iter = balloons.begin(); iter != balloons.end(); ++iter) {
     gfx::Rect balloon_box = gfx::Rect((*iter)->GetPosition(),
                                       (*iter)->GetViewSize());
-    bounds.Union(balloon_box);
+    bounds = bounds.Union(balloon_box);
   }
 
   return bounds;
@@ -235,14 +228,14 @@ gfx::Rect BalloonCollectionImpl::GetBalloonsBoundingBox() const {
 #if USE_OFFSETS
 void BalloonCollectionImpl::AddMessageLoopObserver() {
   if (!added_as_message_loop_observer_) {
-    base::MessageLoopForUI::current()->AddObserver(this);
+    MessageLoopForUI::current()->AddObserver(this);
     added_as_message_loop_observer_ = true;
   }
 }
 
 void BalloonCollectionImpl::RemoveMessageLoopObserver() {
   if (added_as_message_loop_observer_) {
-    base::MessageLoopForUI::current()->RemoveObserver(this);
+    MessageLoopForUI::current()->RemoveObserver(this);
     added_as_message_loop_observer_ = false;
   }
 }
@@ -257,7 +250,7 @@ void BalloonCollectionImpl::CancelOffsets() {
   for (Balloons::const_iterator it = balloons.begin();
        it != balloons.end();
        ++it)
-    (*it)->set_offset(gfx::Vector2d());
+    (*it)->set_offset(gfx::Point(0, 0));
 
   PositionBalloons(true);
 }
@@ -267,7 +260,7 @@ void BalloonCollectionImpl::HandleMouseMoveEvent() {
     // Mouse has left the region.  Schedule a reposition after
     // a short delay.
     if (!reposition_factory_.HasWeakPtrs()) {
-      base::MessageLoop::current()->PostDelayedTask(
+      MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&BalloonCollectionImpl::CancelOffsets,
                      reposition_factory_.GetWeakPtr()),
@@ -282,7 +275,6 @@ void BalloonCollectionImpl::HandleMouseMoveEvent() {
 
 BalloonCollectionImpl::Layout::Layout()
     : placement_(INVALID),
-      need_to_compute_panel_offset_(false),
       offset_to_move_above_panels_(0) {
   RefreshSystemMetrics();
 }
@@ -377,8 +369,7 @@ gfx::Point BalloonCollectionImpl::Layout::OffScreenLocation() const {
       break;
     case VERTICALLY_FROM_TOP_RIGHT:
     case VERTICALLY_FROM_BOTTOM_RIGHT:
-      location.Offset(-kBalloonMaxWidth - BalloonView::GetHorizontalMargin(),
-                      kBalloonMaxHeight);
+      location.Offset(-kBalloonMaxWidth, kBalloonMaxHeight);
       break;
     default:
       NOTREACHED();
@@ -413,22 +404,24 @@ gfx::Size BalloonCollectionImpl::Layout::ConstrainToSizeLimits(
                std::min(max_balloon_height(), size.height())));
 }
 
-bool BalloonCollectionImpl::Layout::ComputeOffsetToMoveAbovePanels() {
-  // If the offset is not enabled due to that we have not received a
-  // notification about panel, don't proceed because we don't want to call
-  // PanelManager::GetInstance() to create an instance when panel is not
-  // present.
-  if (!need_to_compute_panel_offset_)
-    return false;
-
-  const DockedPanelCollection::Panels& panels =
-      PanelManager::GetInstance()->docked_collection()->panels();
+bool BalloonCollectionImpl::Layout::ComputeOffsetToMoveAbovePanels(
+    const gfx::Rect& panel_bounds) {
+  const DockedPanelStrip::Panels& panels =
+      PanelManager::GetInstance()->docked_strip()->panels();
   int offset_to_move_above_panels = 0;
 
   // The offset is the maximum height of panels that could overlap with the
   // balloons.
   if (NeedToMoveAboveLeftSidePanels()) {
-    for (DockedPanelCollection::Panels::const_reverse_iterator iter =
+    // If the affecting panel does not lie in the balloon area, no need to
+    // update the offset.
+    if (!panel_bounds.IsEmpty() &&
+        (panel_bounds.right() <= work_area_.x() ||
+         panel_bounds.x() >= work_area_.x() + max_balloon_width())) {
+      return false;
+    }
+
+    for (DockedPanelStrip::Panels::const_reverse_iterator iter =
              panels.rbegin();
          iter != panels.rend(); ++iter) {
       // No need to check panels beyond the area occupied by the balloons.
@@ -440,7 +433,15 @@ bool BalloonCollectionImpl::Layout::ComputeOffsetToMoveAbovePanels() {
         offset_to_move_above_panels = current_height;
     }
   } else if (NeedToMoveAboveRightSidePanels()) {
-    for (DockedPanelCollection::Panels::const_iterator iter = panels.begin();
+    // If the affecting panel does not lie in the balloon area, no need to
+    // update the offset.
+    if (!panel_bounds.IsEmpty() &&
+        (panel_bounds.right() <= work_area_.right() - max_balloon_width() ||
+         panel_bounds.x() >= work_area_.right())) {
+      return false;
+    }
+
+    for (DockedPanelStrip::Panels::const_iterator iter = panels.begin();
          iter != panels.end(); ++iter) {
       // No need to check panels beyond the area occupied by the balloons.
       if ((*iter)->GetBounds().right() <=
@@ -473,11 +474,9 @@ bool BalloonCollectionImpl::Layout::RefreshSystemMetrics() {
 #if defined(OS_MACOSX)
   gfx::Rect new_work_area = GetMacWorkArea();
 #else
-  // TODO(scottmg): NativeScreen is wrong. http://crbug.com/133312
-  gfx::Rect new_work_area =
-      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().work_area();
+  gfx::Rect new_work_area = gfx::Screen::GetPrimaryMonitorWorkArea();
 #endif
-  if (work_area_ != new_work_area) {
+  if (!work_area_.Equals(new_work_area)) {
     work_area_.SetRect(new_work_area.x(), new_work_area.y(),
                        new_work_area.width(), new_work_area.height());
     changed = true;

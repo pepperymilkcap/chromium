@@ -13,12 +13,13 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/base/accessibility/accessibility_types.h"
+#include "ui/base/keycodes/keyboard_code_conversion_win.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/view_prop.h"
-#include "ui/events/keycodes/keyboard_code_conversion_win.h"
-#include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/win/hwnd_util.h"
+#include "ui/base/win/hwnd_util.h"
 #include "ui/views/background.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/widget.h"
@@ -88,7 +89,7 @@ class NativeControlContainer : public CWindowImpl<NativeControlContainer,
     control_ = parent_->CreateNativeControl(m_hWnd);
 
     // We subclass the control hwnd so we get the WM_KEYDOWN messages.
-    original_handler_ = gfx::SetWindowProc(
+    original_handler_ = ui::SetWindowProc(
         control_, &NativeControl::NativeControlWndProc);
     prop_.reset(new ViewProp(control_, kNativeControlKey , parent_));
 
@@ -177,7 +178,7 @@ NativeControl::NativeControl() : hwnd_view_(NULL),
                                  horizontal_alignment_(CENTER),
                                  fixed_height_(-1),
                                  vertical_alignment_(CENTER) {
-  SetFocusable(true);
+  set_focusable(true);
 }
 
 NativeControl::~NativeControl() {
@@ -208,9 +209,9 @@ void NativeControl::ValidateNativeControl() {
   }
 }
 
-void NativeControl::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
-  if (details.is_add && details.parent != this && !container_ && GetWidget()) {
+void NativeControl::ViewHierarchyChanged(bool is_add, View *parent,
+                                         View *child) {
+  if (is_add && parent != this && !container_ && GetWidget()) {
     ValidateNativeControl();
     Layout();
   }
@@ -269,19 +270,20 @@ void NativeControl::OnContextMenu(const POINT& location) {
   if (!context_menu_controller())
     return;
 
-  if (location.x == -1 && location.y == -1) {
-    ShowContextMenu(GetKeyboardContextMenuLocation(),
-                    ui::MENU_SOURCE_KEYBOARD);
-  } else {
-    ShowContextMenu(gfx::Point(location), ui::MENU_SOURCE_MOUSE);
-  }
+  if (location.x == -1 && location.y == -1)
+    ShowContextMenu(GetKeyboardContextMenuLocation(), false);
+  else
+    ShowContextMenu(gfx::Point(location), true);
 }
 
 void NativeControl::OnFocus() {
   if (container_) {
     DCHECK(container_->GetControl());
     ::SetFocus(container_->GetControl());
-    NotifyAccessibilityEvent(ui::AccessibilityTypes::EVENT_FOCUS, false);
+    if (GetWidget()) {
+      GetWidget()->NotifyAccessibilityEvent(
+          this, ui::AccessibilityTypes::EVENT_FOCUS, false);
+    }
   }
 }
 
@@ -378,7 +380,7 @@ LRESULT CALLBACK NativeControl::NativeControlWndProc(HWND window,
       NOTREACHED();
     }
   } else if (message == WM_DESTROY) {
-    gfx::SetWindowProc(window, reinterpret_cast<WNDPROC>(original_handler));
+    ui::SetWindowProc(window, reinterpret_cast<WNDPROC>(original_handler));
     native_control->container_->prop_.reset();
   }
 

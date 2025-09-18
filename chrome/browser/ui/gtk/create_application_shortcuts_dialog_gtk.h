@@ -1,18 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_CREATE_APPLICATION_SHORTCUTS_DIALOG_GTK_H_
 #define CHROME_BROWSER_UI_GTK_CREATE_APPLICATION_SHORTCUTS_DIALOG_GTK_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner_helpers.h"
+#include "base/message_loop_helpers.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/shell_integration.h"
 #include "content/public/browser/browser_thread.h"
+#include "googleurl/src/gurl.h"
 #include "ui/base/gtk/gtk_signal.h"
-#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -20,19 +22,9 @@ typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
 
-class Profile;
-
-namespace content {
-class WebContents;
-}
-
-namespace extensions {
 class Extension;
-}
-
-namespace gfx {
-class ImageFamily;
-}
+class TabContents;
+class TabContentsWrapper;
 
 class CreateApplicationShortcutsDialogGtk
     : public base::RefCountedThreadSafe<CreateApplicationShortcutsDialogGtk,
@@ -51,16 +43,15 @@ class CreateApplicationShortcutsDialogGtk
                        OnToggleCheckbox);
 
   virtual void CreateDialogBox(GtkWindow* parent);
-  virtual void CreateIconPixBuf(const gfx::ImageFamily& image);
+  virtual void CreateIconPixBuf(const SkBitmap& bitmap);
 
   // This method is called after a shortcut is created.
   // Subclasses can override it to take some action at that time.
   virtual void OnCreatedShortcut(void) {}
 
-  virtual void CreateDesktopShortcut(
-      const ShellIntegration::ShortcutInfo& shortcut_info,
-      const ShellIntegration::ShortcutLocations& creation_locations);
-  virtual void ShowErrorDialog();
+  void CreateDesktopShortcut(
+      const ShellIntegration::ShortcutInfo& shortcut_info);
+  void ShowErrorDialog();
 
   GtkWindow* parent_;
 
@@ -70,11 +61,8 @@ class CreateApplicationShortcutsDialogGtk
 
   // ShortcutInfo for the new shortcut.
   ShellIntegration::ShortcutInfo shortcut_info_;
-  // If false the shortcut will be created in the top-level menu.
-  bool create_in_chrome_apps_subdir_;
 
-  // Image associated with the site or app, scaled to the appropriate size to
-  // display in the dialog box.
+  // Image associated with the site.
   GdkPixbuf* favicon_pixbuf_;
 
   // Dialog box that allows the user to create an application shortcut.
@@ -92,47 +80,44 @@ class CreateApplicationShortcutsDialogGtk
 class CreateWebApplicationShortcutsDialogGtk
     : public CreateApplicationShortcutsDialogGtk {
  public:
-  // Displays the dialog box to create application shortcuts for |web_contents|.
-  static void Show(GtkWindow* parent, content::WebContents* web_contents);
+  // Displays the dialog box to create application shortcuts for |tab_contents|.
+  static void Show(GtkWindow* parent, TabContentsWrapper* tab_contents);
 
   CreateWebApplicationShortcutsDialogGtk(GtkWindow* parent,
-                                         content::WebContents* web_contents);
+                                         TabContentsWrapper* tab_contents);
+  virtual ~CreateWebApplicationShortcutsDialogGtk() {}
 
   virtual void OnCreatedShortcut(void) OVERRIDE;
 
- protected:
-  virtual ~CreateWebApplicationShortcutsDialogGtk() {}
-
  private:
-  // WebContents for which the shortcut will be created.
-  content::WebContents* web_contents_;
+
+  // TabContentsWrapper for which the shortcut will be created.
+  TabContentsWrapper* tab_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateWebApplicationShortcutsDialogGtk);
 };
 
 class CreateChromeApplicationShortcutsDialogGtk
-  : public CreateApplicationShortcutsDialogGtk {
+  : public CreateApplicationShortcutsDialogGtk,
+    public ImageLoadingTracker::Observer {
  public:
-  CreateChromeApplicationShortcutsDialogGtk(
-      GtkWindow* parent,
-      Profile* profile,
-      const extensions::Extension* app,
-      const base::Closure& close_callback);
+  // Displays the dialog box to create application shortcuts for |app|.
+  static void Show(GtkWindow* parent, const Extension* app);
 
- protected:
-  virtual ~CreateChromeApplicationShortcutsDialogGtk();
+  CreateChromeApplicationShortcutsDialogGtk(GtkWindow* parent,
+                                            const Extension* app);
+  virtual ~CreateChromeApplicationShortcutsDialogGtk() {}
 
-  virtual void CreateDesktopShortcut(
-      const ShellIntegration::ShortcutInfo& shortcut_info,
-      const ShellIntegration::ShortcutLocations& creation_locations) OVERRIDE;
+  // Implement ImageLoadingTracker::Observer.  |tracker_| is used to
+  // load the app's icon.  This method recieves the icon, and adds
+  // it to the "Create Shortcut" dailog box.
+  virtual void OnImageLoaded(SkBitmap* image,
+                             const ExtensionResource& resource,
+                             int index) OVERRIDE;
 
  private:
-  void OnShortcutInfoLoaded(
-      const ShellIntegration::ShortcutInfo& shortcut_info);
-
-  const extensions::Extension* app_;
-  base::FilePath profile_path_;
-  base::Closure close_callback_;
+  const Extension* app_;
+  ImageLoadingTracker tracker_;
   DISALLOW_COPY_AND_ASSIGN(CreateChromeApplicationShortcutsDialogGtk);
 };
 

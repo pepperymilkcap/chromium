@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,13 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/mac/scoped_nsobject.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
-#include "content/common/mac/font_descriptor.h"
-
-#include <map>
+#include "base/sys_string_conversions.h"
 
 extern "C" {
 
@@ -56,54 +51,46 @@ void _CTFontManagerUnregisterFontForData(NSUInteger, int) {
 
 }  // extern "C"
 
-namespace {
-
-uint32 GetFontIDForFont(const base::FilePath& font_path) {
-  // content/common can't depend on content/browser, so this cannot call
-  // BrowserThread::CurrentlyOn(). Check this is always called on the same
-  // thread.
-  static pthread_t thread_id = pthread_self();
-  DCHECK_EQ(pthread_self(), thread_id);
-
-  // Font loading used to call ATSFontGetContainer()
-  // and used that as font id.
-  // ATS is deprecated and CTFont doesn't seem to have a obvious fixed id for a
-  // font. Since this function is only called from a single thread, use a static
-  // map to store ids.
-  typedef std::map<base::FilePath, uint32> FontIdMap;
-  CR_DEFINE_STATIC_LOCAL(FontIdMap, font_ids, ());
-
-  auto it = font_ids.find(font_path);
-  if (it != font_ids.end())
-    return it->second;
-
-  uint32 font_id = font_ids.size() + 1;
-  font_ids[font_path] = font_id;
-  return font_id;
-}
-
-}  // namespace
-
 // static
-void FontLoader::LoadFont(const FontDescriptor& font,
-                          FontLoader::Result* result) {
-  base::ThreadRestrictions::AssertIOAllowed();
+bool FontLoader::LoadFontIntoBuffer(NSFont* font_to_encode,
+                                    base::SharedMemory* font_data,
+                                    uint32* font_data_size,
+                                    uint32* font_id) {
+  DCHECK(font_data);
+  DCHECK(font_data_size);
+  DCHECK(font_id);
+  *font_data_size = 0;
+  *font_id = 0;
 
-  DCHECK(result);
-  result->font_data_size = 0;
-  result->font_id = 0;
-
-  NSFont* font_to_encode = font.ToNSFont();
   // Used only for logging.
   std::string font_name([[font_to_encode fontName] UTF8String]);
 
   // Load appropriate NSFont.
   if (!font_to_encode) {
     DLOG(ERROR) << "Failed to load font " << font_name;
-    return;
+    return false;
   }
 
-  // NSFont -> File path.
+  // NSFont -> ATSFontRef.
+  ATSFontRef ats_font =
+      CTFontGetPlatformFont(reinterpret_cast<CTFontRef>(font_to_encode), NULL);
+  if (!ats_font) {
+    DLOG(ERROR) << "Conversion to ATSFontRef failed for " << font_name;
+    return false;
+  }
+
+  // Retrieve the ATSFontContainerRef corresponding to the font file we want to
+  // load. This is a unique identifier that allows the caller determine if the
+  // font file in question is already loaded.
+  COMPILE_ASSERT(sizeof(ATSFontContainerRef) == sizeof(font_id),
+      uint32_cant_hold_fontcontainer_ref);
+  ATSFontContainerRef fontContainer = kATSFontContainerRefUnspecified;
+  if (ATSFontGetContainer(ats_font, 0, &fontContainer) != noErr) {
+      DLOG(ERROR) << "Failed to get font container ref for " << font_name;
+      return false;
+  }
+
+  // ATSFontRef -> File path.
   // Warning: Calling this function on a font activated from memory will result
   // in failure with a -50 - paramErr.  This may occur if
   // CreateCGFontFromBuffer() is called in the same process as this function
@@ -111,45 +98,42 @@ void FontLoader::LoadFont(const FontDescriptor& font,
   // If said unit test were to load a system font and activate it from memory
   // it becomes impossible for the system to the find the original file ref
   // since the font now lives in memory as far as it's concerned.
-  CTFontRef ct_font_to_encode = (CTFontRef)font_to_encode;
-  base::scoped_nsobject<NSURL> font_url(
-      base::mac::CFToNSCast(base::mac::CFCastStrict<CFURLRef>(
-          CTFontCopyAttribute(ct_font_to_encode, kCTFontURLAttribute))));
-  if (![font_url isFileURL]) {
+  FSRef font_fsref;
+  if (ATSFontGetFileReference(ats_font, &font_fsref) != noErr) {
     DLOG(ERROR) << "Failed to find font file for " << font_name;
-    return;
+    return false;
   }
-
-  base::FilePath font_path = base::mac::NSStringToFilePath([font_url path]);
+  FilePath font_path = FilePath(base::mac::PathFromFSRef(font_fsref));
 
   // Load file into shared memory buffer.
   int64 font_file_size_64 = -1;
-  if (!base::GetFileSize(font_path, &font_file_size_64)) {
+  if (!file_util::GetFileSize(font_path, &font_file_size_64)) {
     DLOG(ERROR) << "Couldn't get font file size for " << font_path.value();
-    return;
+    return false;
   }
 
   if (font_file_size_64 <= 0 || font_file_size_64 >= kint32max) {
     DLOG(ERROR) << "Bad size for font file " << font_path.value();
-    return;
+    return false;
   }
 
   int32 font_file_size_32 = static_cast<int32>(font_file_size_64);
-  if (!result->font_data.CreateAndMapAnonymous(font_file_size_32)) {
+  if (!font_data->CreateAndMapAnonymous(font_file_size_32)) {
     DLOG(ERROR) << "Failed to create shmem area for " << font_name;
-    return;
+    return false;
   }
 
-  int32 amt_read = base::ReadFile(font_path,
-      reinterpret_cast<char*>(result->font_data.memory()),
-      font_file_size_32);
+  int32 amt_read = file_util::ReadFile(font_path,
+                       reinterpret_cast<char*>(font_data->memory()),
+                       font_file_size_32);
   if (amt_read != font_file_size_32) {
     DLOG(ERROR) << "Failed to read font data for " << font_path.value();
-    return;
+    return false;
   }
 
-  result->font_data_size = font_file_size_32;
-  result->font_id = GetFontIDForFont(font_path);
+  *font_data_size = font_file_size_32;
+  *font_id = fontContainer;
+  return true;
 }
 
 // static
@@ -168,7 +152,7 @@ bool FontLoader::CGFontRefFromBuffer(base::SharedMemoryHandle font_data,
 
   NSData* data = [NSData dataWithBytes:shm.memory()
                                 length:font_data_size];
-  base::ScopedCFTypeRef<CGDataProviderRef> provider(
+  base::mac::ScopedCFTypeRef<CGDataProviderRef> provider(
       CGDataProviderCreateWithCFData(base::mac::NSToCFCast(data)));
   if (!provider)
     return false;

@@ -4,9 +4,10 @@
 
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/ui/constrained_window.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -16,17 +17,19 @@ using content::WebContents;
 
 TabModalConfirmDialogDelegate::TabModalConfirmDialogDelegate(
     WebContents* web_contents)
-    : close_delegate_(NULL),
+    : window_(NULL),
       closing_(false) {
   NavigationController* controller = &web_contents->GetController();
   registrar_.Add(this, content::NOTIFICATION_LOAD_START,
                  content::Source<NavigationController>(controller));
+  registrar_.Add(this, content::NOTIFICATION_TAB_CLOSING,
+                 content::Source<NavigationController>(controller));
 }
 
 TabModalConfirmDialogDelegate::~TabModalConfirmDialogDelegate() {
-  // If we end up here, the window has been closed, so make sure we don't close
-  // it again.
-  close_delegate_ = NULL;
+  // If we end up here, the constrained window has been closed, so make sure we
+  // don't close it again.
+  window_ = NULL;
   // Make sure everything is cleaned up.
   Cancel();
 }
@@ -34,7 +37,8 @@ TabModalConfirmDialogDelegate::~TabModalConfirmDialogDelegate() {
 void TabModalConfirmDialogDelegate::Cancel() {
   if (closing_)
     return;
-  // Make sure we won't do anything when another action occurs.
+  // Make sure we won't do anything when |Cancel()| or |Accept()| is called
+  // again.
   closing_ = true;
   OnCanceled();
   CloseDialog();
@@ -43,53 +47,38 @@ void TabModalConfirmDialogDelegate::Cancel() {
 void TabModalConfirmDialogDelegate::Accept() {
   if (closing_)
     return;
-  // Make sure we won't do anything when another action occurs.
+  // Make sure we won't do anything when |Cancel()| or |Accept()| is called
+  // again.
   closing_ = true;
   OnAccepted();
   CloseDialog();
 }
+
 
 void TabModalConfirmDialogDelegate::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   // Close the dialog if we load a page (because the action might not apply to
-  // the same page anymore).
-  DCHECK_EQ(content::NOTIFICATION_LOAD_START, type);
-
-  Close();
-}
-
-void TabModalConfirmDialogDelegate::Close() {
-  if (closing_)
-    return;
-  // Make sure we won't do anything when another action occurs.
-  closing_ = true;
-  OnClosed();
-  CloseDialog();
-}
-
-void TabModalConfirmDialogDelegate::LinkClicked(
-    WindowOpenDisposition disposition) {
-  if (closing_)
-    return;
-  OnLinkClicked(disposition);
+  // the same page anymore) or if the tab is closed.
+  if (type == content::NOTIFICATION_LOAD_START ||
+      type == content::NOTIFICATION_TAB_CLOSING) {
+    Cancel();
+  } else {
+    NOTREACHED();
+  }
 }
 
 gfx::Image* TabModalConfirmDialogDelegate::GetIcon() {
   return NULL;
 }
 
-base::string16 TabModalConfirmDialogDelegate::GetAcceptButtonTitle() {
+string16 TabModalConfirmDialogDelegate::GetAcceptButtonTitle() {
   return l10n_util::GetStringUTF16(IDS_OK);
 }
 
-base::string16 TabModalConfirmDialogDelegate::GetCancelButtonTitle() {
+string16 TabModalConfirmDialogDelegate::GetCancelButtonTitle() {
   return l10n_util::GetStringUTF16(IDS_CANCEL);
-}
-
-base::string16 TabModalConfirmDialogDelegate::GetLinkText() const {
-  return base::string16();
 }
 
 const char* TabModalConfirmDialogDelegate::GetAcceptButtonIcon() {
@@ -106,14 +95,7 @@ void TabModalConfirmDialogDelegate::OnAccepted() {
 void TabModalConfirmDialogDelegate::OnCanceled() {
 }
 
-void TabModalConfirmDialogDelegate::OnLinkClicked(
-    WindowOpenDisposition disposition) {
-}
-
-void TabModalConfirmDialogDelegate::OnClosed() {
-}
-
 void TabModalConfirmDialogDelegate::CloseDialog() {
-  if (close_delegate_)
-    close_delegate_->CloseDialog();
+  if (window_)
+    window_->CloseConstrainedWindow();
 }

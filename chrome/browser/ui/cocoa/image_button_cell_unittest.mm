@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 
 namespace {
 
@@ -13,10 +14,9 @@ class ImageButtonCellTest : public CocoaTest {
  public:
   ImageButtonCellTest() {
     NSRect frame = NSMakeRect(0, 0, 50, 30);
-    base::scoped_nsobject<NSButton> view(
-        [[NSButton alloc] initWithFrame:frame]);
+    scoped_nsobject<NSButton>view([[NSButton alloc] initWithFrame:frame]);
     view_ = view.get();
-    base::scoped_nsobject<ImageButtonCell> cell(
+    scoped_nsobject<ImageButtonCell> cell(
         [[ImageButtonCell alloc] initTextCell:@""]);
     [view_ setCell:cell.get()];
     [[test_window() contentView] addSubview:view_];
@@ -76,17 +76,6 @@ TEST_F(ImageButtonCellTest, DisplayWithDisabled) {
   [[view_ cell] setImageID:0
             forButtonState:image_button_cell::kDisabledState];
   [view_ display];
-}
-
-TEST_F(ImageButtonCellTest, NewImageCausesDisplay) {
-  [[view_ cell] setImageID:IDR_STOP
-            forButtonState:image_button_cell::kDefaultState];
-  [view_ display];
-  EXPECT_FALSE([view_ needsDisplay]);
-
-  [[view_ cell] setImageID:IDR_RELOAD
-            forButtonState:image_button_cell::kDefaultState];
-  EXPECT_TRUE([view_ needsDisplay]);
 }
 
 } // namespace

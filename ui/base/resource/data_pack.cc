@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,10 @@
 #include <errno.h>
 
 #include "base/file_util.h"
-#include "base/files/memory_mapped_file.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 
 // For details of the file layout, see
 // http://dev.chromium.org/developers/design-documents/linuxresourcesandlocalizedstrings
@@ -54,7 +53,6 @@ enum LoadErrors {
   ENTRY_NOT_FOUND,
   HEADER_TRUNCATED,
   WRONG_ENCODING,
-  INIT_FAILED_FROM_FILE,
 
   LOAD_ERRORS_COUNT,
 };
@@ -63,17 +61,14 @@ enum LoadErrors {
 
 namespace ui {
 
-DataPack::DataPack(ui::ScaleFactor scale_factor)
-    : resource_count_(0),
-      text_encoding_type_(BINARY),
-      scale_factor_(scale_factor) {
+// In .cc for MemoryMappedFile dtor.
+DataPack::DataPack() : resource_count_(0), text_encoding_type_(BINARY) {
 }
-
 DataPack::~DataPack() {
 }
 
-bool DataPack::LoadFromPath(const base::FilePath& path) {
-  mmap_.reset(new base::MemoryMappedFile);
+bool DataPack::Load(const FilePath& path) {
+  mmap_.reset(new file_util::MemoryMappedFile);
   if (!mmap_->Initialize(path)) {
     DLOG(ERROR) << "Failed to mmap datapack";
     UMA_HISTOGRAM_ENUMERATION("DataPack.Load", INIT_FAILED,
@@ -81,22 +76,7 @@ bool DataPack::LoadFromPath(const base::FilePath& path) {
     mmap_.reset();
     return false;
   }
-  return LoadImpl();
-}
 
-bool DataPack::LoadFromFile(base::File file) {
-  mmap_.reset(new base::MemoryMappedFile);
-  if (!mmap_->Initialize(file.Pass())) {
-    DLOG(ERROR) << "Failed to mmap datapack";
-    UMA_HISTOGRAM_ENUMERATION("DataPack.Load", INIT_FAILED_FROM_FILE,
-                              LOAD_ERRORS_COUNT);
-    mmap_.reset();
-    return false;
-  }
-  return LoadImpl();
-}
-
-bool DataPack::LoadImpl() {
   // Sanity check the header of the file.
   if (kHeaderLength > mmap_->length()) {
     DLOG(ERROR) << "Data pack file corruption: incomplete file header.";
@@ -162,11 +142,6 @@ bool DataPack::LoadImpl() {
   return true;
 }
 
-bool DataPack::HasResource(uint16 resource_id) const {
-  return !!bsearch(&resource_id, mmap_->data() + kHeaderLength, resource_count_,
-                   sizeof(DataPackEntry), DataPackEntry::CompareById);
-}
-
 bool DataPack::GetStringPiece(uint16 resource_id,
                               base::StringPiece* data) const {
   // It won't be hard to make this endian-agnostic, but it's not worth
@@ -194,35 +169,26 @@ bool DataPack::GetStringPiece(uint16 resource_id,
   return true;
 }
 
-base::RefCountedStaticMemory* DataPack::GetStaticMemory(
-    uint16 resource_id) const {
+RefCountedStaticMemory* DataPack::GetStaticMemory(uint16 resource_id) const {
   base::StringPiece piece;
   if (!GetStringPiece(resource_id, &piece))
     return NULL;
 
-  return new base::RefCountedStaticMemory(
+  return new RefCountedStaticMemory(
       reinterpret_cast<const unsigned char*>(piece.data()), piece.length());
 }
 
-ResourceHandle::TextEncodingType DataPack::GetTextEncodingType() const {
-  return text_encoding_type_;
-}
-
-ui::ScaleFactor DataPack::GetScaleFactor() const {
-  return scale_factor_;
-}
-
 // static
-bool DataPack::WritePack(const base::FilePath& path,
+bool DataPack::WritePack(const FilePath& path,
                          const std::map<uint16, base::StringPiece>& resources,
                          TextEncodingType textEncodingType) {
-  FILE* file = base::OpenFile(path, "wb");
+  FILE* file = file_util::OpenFile(path, "wb");
   if (!file)
     return false;
 
   if (fwrite(&kFileFormatVersion, sizeof(kFileFormatVersion), 1, file) != 1) {
     LOG(ERROR) << "Failed to write file version";
-    base::CloseFile(file);
+    file_util::CloseFile(file);
     return false;
   }
 
@@ -231,7 +197,7 @@ bool DataPack::WritePack(const base::FilePath& path,
   uint32 entry_count = resources.size();
   if (fwrite(&entry_count, sizeof(entry_count), 1, file) != 1) {
     LOG(ERROR) << "Failed to write entry count";
-    base::CloseFile(file);
+    file_util::CloseFile(file);
     return false;
   }
 
@@ -239,14 +205,14 @@ bool DataPack::WritePack(const base::FilePath& path,
       textEncodingType != BINARY) {
     LOG(ERROR) << "Invalid text encoding type, got " << textEncodingType
                << ", expected between " << BINARY << " and " << UTF16;
-    base::CloseFile(file);
+    file_util::CloseFile(file);
     return false;
   }
 
   uint8 write_buffer = textEncodingType;
   if (fwrite(&write_buffer, sizeof(uint8), 1, file) != 1) {
     LOG(ERROR) << "Failed to write file text resources encoding";
-    base::CloseFile(file);
+    file_util::CloseFile(file);
     return false;
   }
 
@@ -260,13 +226,13 @@ bool DataPack::WritePack(const base::FilePath& path,
     uint16 resource_id = it->first;
     if (fwrite(&resource_id, sizeof(resource_id), 1, file) != 1) {
       LOG(ERROR) << "Failed to write id for " << resource_id;
-      base::CloseFile(file);
+      file_util::CloseFile(file);
       return false;
     }
 
     if (fwrite(&data_offset, sizeof(data_offset), 1, file) != 1) {
       LOG(ERROR) << "Failed to write offset for " << resource_id;
-      base::CloseFile(file);
+      file_util::CloseFile(file);
       return false;
     }
 
@@ -278,13 +244,13 @@ bool DataPack::WritePack(const base::FilePath& path,
   uint16 resource_id = 0;
   if (fwrite(&resource_id, sizeof(resource_id), 1, file) != 1) {
     LOG(ERROR) << "Failed to write extra resource id.";
-    base::CloseFile(file);
+    file_util::CloseFile(file);
     return false;
   }
 
   if (fwrite(&data_offset, sizeof(data_offset), 1, file) != 1) {
     LOG(ERROR) << "Failed to write extra offset.";
-    base::CloseFile(file);
+    file_util::CloseFile(file);
     return false;
   }
 
@@ -293,12 +259,12 @@ bool DataPack::WritePack(const base::FilePath& path,
        it != resources.end(); ++it) {
     if (fwrite(it->second.data(), it->second.length(), 1, file) != 1) {
       LOG(ERROR) << "Failed to write data for " << it->first;
-      base::CloseFile(file);
+      file_util::CloseFile(file);
       return false;
     }
   }
 
-  base::CloseFile(file);
+  file_util::CloseFile(file);
 
   return true;
 }

@@ -1,22 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_TABS_TAB_GTK_H_
 #define CHROME_BROWSER_UI_GTK_TABS_TAB_GTK_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/gtk/tabs/tab_renderer_gtk.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "ui/base/gtk/gtk_signal.h"
 
 class TabStripMenuController;
 class ThemeService;
 
-class TabGtk : public TabRendererGtk, public base::MessageLoopForUI::Observer {
+class TabGtk : public TabRendererGtk,
+               public MessageLoopForUI::Observer {
  public:
   // An interface implemented by an object that can help this Tab complete
   // various actions. The index parameter is the index of this Tab in the

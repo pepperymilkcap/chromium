@@ -4,12 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_FIND_BAR_FIND_BAR_BRIDGE_H_
 #define CHROME_BROWSER_UI_COCOA_FIND_BAR_FIND_BAR_BRIDGE_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 
-class Browser;
 class FindBarController;
 
 // This class is included by find_bar_host_browsertest.cc, so it has to be
@@ -38,7 +38,7 @@ class FindBarCocoaController;
 class FindBarBridge : public FindBar,
                       public FindBarTesting {
  public:
-  FindBarBridge(Browser* browser);
+  FindBarBridge();
   virtual ~FindBarBridge();
 
   FindBarCocoaController* find_bar_cocoa_controller() {
@@ -58,26 +58,21 @@ class FindBarBridge : public FindBar,
   virtual void SetFocusAndSelection() OVERRIDE;
   virtual void ClearResults(const FindNotificationDetails& results) OVERRIDE;
   virtual void StopAnimation() OVERRIDE;
-  virtual void SetFindTextAndSelectedRange(
-      const base::string16& find_text,
-      const gfx::Range& selected_range) OVERRIDE;
-  virtual base::string16 GetFindText() OVERRIDE;
-  virtual gfx::Range GetSelectedRange() OVERRIDE;
+  virtual void SetFindText(const string16& find_text) OVERRIDE;
   virtual void UpdateUIForFindResult(const FindNotificationDetails& result,
-                                     const base::string16& find_text) OVERRIDE;
+                                     const string16& find_text) OVERRIDE;
   virtual void AudibleAlert() OVERRIDE;
   virtual bool IsFindBarVisible() OVERRIDE;
   virtual void RestoreSavedFocus() OVERRIDE;
-  virtual bool HasGlobalFindPasteboard() OVERRIDE;
-  virtual void UpdateFindBarForChangedWebContents() OVERRIDE;
   virtual void MoveWindowIfNecessary(const gfx::Rect& selection_rect,
                                      bool no_redraw) OVERRIDE;
 
   // Methods from FindBarTesting.
   virtual bool GetFindBarWindowInfo(gfx::Point* position,
                                     bool* fully_visible) OVERRIDE;
-  virtual base::string16 GetFindSelectedText() OVERRIDE;
-  virtual base::string16 GetMatchCountText() OVERRIDE;
+  virtual string16 GetFindText() OVERRIDE;
+  virtual string16 GetFindSelectedText() OVERRIDE;
+  virtual string16 GetMatchCountText() OVERRIDE;
   virtual int GetWidth() OVERRIDE;
 
   // Used to disable find bar animations when testing.

@@ -1,88 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef PRINTING_BACKEND_WIN_HELPER_H_
 #define PRINTING_BACKEND_WIN_HELPER_H_
+#pragma once
 
 #include <objidl.h>
 #include <winspool.h>
 #include <prntvpt.h>
 #include <xpsprint.h>
 
-#include <string>
-
-#include "base/strings/string16.h"
-#include "base/win/scoped_handle.h"
+#include "base/string16.h"
 #include "printing/printing_export.h"
 
 // These are helper functions for dealing with Windows Printing.
 namespace printing {
-
-struct PRINTING_EXPORT PrinterBasicInfo;
-
-class PrinterHandleTraits {
- public:
-  typedef HANDLE Handle;
-
-  static bool CloseHandle(HANDLE handle) {
-    return ::ClosePrinter(handle) != FALSE;
-  }
-
-  static bool IsHandleValid(HANDLE handle) {
-    return handle != NULL;
-  }
-
-  static HANDLE NullHandle() {
-    return NULL;
-  }
-
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(PrinterHandleTraits);
-};
-
-class ScopedPrinterHandle
-    : public base::win::GenericScopedHandle<PrinterHandleTraits,
-                                            base::win::VerifierTraits> {
- public:
-  bool OpenPrinter(const wchar_t* printer) {
-    HANDLE temp_handle;
-    // ::OpenPrinter may return error but assign some value into handle.
-    if (::OpenPrinter(const_cast<LPTSTR>(printer), &temp_handle, NULL)) {
-      Set(temp_handle);
-    }
-    return IsValid();
-  }
-
- private:
-  typedef base::win::GenericScopedHandle<PrinterHandleTraits,
-                                         base::win::VerifierTraits> Base;
-};
-
-class PrinterChangeHandleTraits {
- public:
-  typedef HANDLE Handle;
-
-  static bool CloseHandle(HANDLE handle) {
-    ::FindClosePrinterChangeNotification(handle);
-    return true;
-  }
-
-  static bool IsHandleValid(HANDLE handle) {
-    return handle != NULL;
-  }
-
-  static HANDLE NullHandle() {
-    return NULL;
-  }
-
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(PrinterChangeHandleTraits);
-};
-
-typedef base::win::GenericScopedHandle<PrinterChangeHandleTraits,
-                                       base::win::DummyVerifierTraits>
-    ScopedPrinterChangeHandle;
 
 // Wrapper class to wrap the XPS APIs (PTxxx APIs). This is needed because these
 // APIs are not available by default on XP. We could delayload prntvpt.dll but
@@ -94,12 +27,12 @@ class PRINTING_EXPORT XPSModule {
   // All the other methods can ONLY be called after a successful call to Init.
   // Init can be called many times and by multiple threads.
   static bool Init();
-  static HRESULT OpenProvider(const base::string16& printer_name,
+  static HRESULT OpenProvider(const string16& printer_name,
                               DWORD version,
-                              HPTPROVIDER* provider);
+                              HPTPROVIDER *provider);
   static HRESULT GetPrintCapabilities(HPTPROVIDER provider,
-                                      IStream* print_ticket,
-                                      IStream* capabilities,
+                                      IStream *print_ticket,
+                                      IStream *capabilities,
                                       BSTR* error_message);
   static HRESULT ConvertDevModeToPrintTicket(HPTPROVIDER provider,
                                              ULONG devmode_size_in_bytes,
@@ -112,7 +45,7 @@ class PRINTING_EXPORT XPSModule {
       EDefaultDevmodeType base_devmode_type,
       EPrintTicketScope scope,
       ULONG* devmode_byte_count,
-      PDEVMODE* devmode,
+      PDEVMODE *devmode,
       BSTR* error_message);
   static HRESULT MergeAndValidatePrintTicket(HPTPROVIDER provider,
                                              IStream* base_ticket,
@@ -122,7 +55,6 @@ class PRINTING_EXPORT XPSModule {
                                              BSTR* error_message);
   static HRESULT ReleaseMemory(PVOID buffer);
   static HRESULT CloseProvider(HPTPROVIDER provider);
-
  private:
   XPSModule() { }
   static bool InitImpl();
@@ -154,7 +86,7 @@ class PRINTING_EXPORT XPSPrintModule {
       const LPCWSTR output_file_name,
       HANDLE progress_event,
       HANDLE completion_event,
-      UINT8* printable_pages_on,
+      UINT8 *printable_pages_on,
       UINT32 printable_pages_on_count,
       IXpsPrintJob **xps_print_job,
       IXpsPrintJobStream **document_stream,
@@ -163,11 +95,6 @@ class PRINTING_EXPORT XPSPrintModule {
   XPSPrintModule() { }
   static bool InitImpl();
 };
-
-PRINTING_EXPORT bool InitBasicPrinterInfo(HANDLE printer,
-                                          PrinterBasicInfo* printer_info);
-
-PRINTING_EXPORT std::string GetDriverInfo(HANDLE printer);
 
 }  // namespace printing
 

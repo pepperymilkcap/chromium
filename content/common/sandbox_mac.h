@@ -1,21 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_COMMON_SANDBOX_MAC_H_
 #define CONTENT_COMMON_SANDBOX_MAC_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/containers/hash_tables.h"
+#include "base/hash_tables.h"
 #include "base/gtest_prod_util.h"
-#include "content/common/content_export.h"
 #include "content/public/common/sandbox_type_mac.h"
 
-namespace base {
 class FilePath;
-}
 
 #if __OBJC__
 @class NSArray;
@@ -25,7 +23,7 @@ class NSArray;
 class NSString;
 #endif
 
-namespace content {
+namespace sandbox {
 
 // Class representing a substring of the sandbox profile tagged with its type.
 class SandboxSubstring {
@@ -54,7 +52,7 @@ class SandboxSubstring {
   SandboxSubstringType type_;
 };
 
-class CONTENT_EXPORT Sandbox {
+class Sandbox {
  public:
   // A map of variable name -> string to substitute in its place.
   typedef base::hash_map<std::string, SandboxSubstring>
@@ -75,10 +73,8 @@ class CONTENT_EXPORT Sandbox {
   //
   // Returns true on success, false if an error occurred enabling the sandbox.
   static bool EnableSandbox(int sandbox_type,
-                            const base::FilePath& allowed_dir);
+                            const FilePath& allowed_dir);
 
-  // Returns true if the sandbox has been enabled for the current process.
-  static bool SandboxIsCurrentlyActive();
 
   // Exposed for testing purposes, used by an accessory function of our tests
   // so we can't use FRIEND_TEST.
@@ -93,7 +89,7 @@ class CONTENT_EXPORT Sandbox {
   // The returned string contains embedded variables. The function fills in
   // |substitutions| to contain the values for these variables.
   static NSString* BuildAllowDirectoryAccessSandboxString(
-                       const base::FilePath& allowed_dir,
+                       const FilePath& allowed_dir,
                        SandboxVariableSubstitions* substitutions);
 
   // Assemble the final sandbox profile from a template by removing comments
@@ -128,10 +124,6 @@ class CONTENT_EXPORT Sandbox {
                   std::string *final_sandbox_profile_str);
 
  private:
-  // Returns an (allow file-read-metadata) rule for |allowed_path| and all its
-  // parent directories.
-  static NSString* AllowMetadataForPath(const base::FilePath& allowed_path);
-
   // Escape |src_utf8| for use in a plain string variable in a sandbox
   // configuraton file.  On return |dst| is set to the quoted output.
   // Returns: true on success, false otherwise.
@@ -155,15 +147,15 @@ class CONTENT_EXPORT Sandbox {
   // Convert provided path into a "canonical" path matching what the Sandbox
   // expects i.e. one without symlinks.
   // This path is not necessarily unique e.g. in the face of hardlinks.
-  static base::FilePath GetCanonicalSandboxPath(const base::FilePath& path);
+  static void GetCanonicalSandboxPath(FilePath* path);
 
   FRIEND_TEST_ALL_PREFIXES(MacDirAccessSandboxTest, StringEscape);
   FRIEND_TEST_ALL_PREFIXES(MacDirAccessSandboxTest, RegexEscape);
-  FRIEND_TEST_ALL_PREFIXES(MacDirAccessSandboxTest, SandboxAccess);
+  FRIEND_TEST_ALL_PREFIXES(MacDirAccessSandboxTest, DISABLED_SandboxAccess);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(Sandbox);
 };
 
-}  // namespace content
+}  // namespace sandbox
 
 #endif  // CONTENT_COMMON_SANDBOX_MAC_H_

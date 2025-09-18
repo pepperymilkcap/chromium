@@ -9,17 +9,7 @@ function AdjustHeight(frameWin) {
   frameWin.frameElement.style.height = height;
 }
 
-// Called when the tests are completed. |result| should be "PASS" if the test(s)
-// passed, or information about the failure if the test(s) did not pass.
-function DidExecuteTests(result) {
-  var plugin = document.getElementById("plugin");
-  if (plugin.parentNode.removePlugin) {
-    plugin.parentNode.removeChild(plugin);
-    plugin = undefined;
-  }
-  if (CheckPostConditions())
-    sendAutomationMessage(result);
-
+function DidExecuteTests() {
   if (window == top)
     return;
 
@@ -38,20 +28,10 @@ function AppendFrame(testcase, i) {
 
   var frame = document.createElement("IFRAME");
   var mode = ExtractSearchParameter("mode");
-  var websocket_host = ExtractSearchParameter("websocket_host");
-  var websocket_port = ExtractSearchParameter("websocket_port");
-  var ssl_server_port = ExtractSearchParameter("ssl_server_port");
-  var src = "?testcase=" + testcase;
   if (mode == "nacl")
-    src += "&mode=nacl";
-  if (websocket_host != "")
-    src += "&websocket_host=" + websocket_host;
-  if (websocket_port != "")
-    src += "&websocket_port=" + websocket_port;
-  if (ssl_server_port != "")
-    src += "&ssl_server_port=" + ssl_server_port;
-  frame.setAttribute("src", src);
-
+    frame.setAttribute("src", "?testcase=" + testcase + "&mode=nacl");
+  else
+    frame.setAttribute("src", "?testcase=" + testcase);
   frame.setAttribute("onload", "LoadNext(" + (i + 1) + ")");
   p.appendChild(frame);
 
@@ -94,16 +74,14 @@ function ExtractSearchParameter(name) {
 //
 // Otherwise, returns an array containing 2 items. The 0th element is the
 // message_type, one of:
-//  - AddPostCondition
-//  - ClearConsole
+//  - ClearContents
 //  - DidExecuteTests
-//  - EvalScript
 //  - LogHTML
-//  - RemovePluginWhenFinished
-//  - ReportProgress
+//  - SetCookie
+//  - EvalScript
 // The second item is the verbatim message_contents.
 function ParseTestingMessage(message_data) {
-  if (typeof(message_data) != "string")
+  if (typeof(message_data)!='string')
     return undefined;
   var testing_message_prefix = "TESTING_MESSAGE";
   var delim_str = ":";
@@ -126,28 +104,8 @@ function LogHTML(html) {
   window.document.getElementById("console").innerHTML += html;
 }
 
-function RemovePluginWhenFinished() {
-  window.document.getElementById("container").removePlugin = true;
-}
-
-function sendAutomationMessage(msg) {
-  if (window.domAutomationController) {
-    window.domAutomationController.setAutomationId(0);
-    window.domAutomationController.send(msg);
-  }
-}
-
-function LogTestTime(test_time) {
-  console.log(test_time);
-}
-
-// If something goes really wrong, the test running inside the plugin may not
-// terminate.  For example, if the plugin does not load, the test will never
-// send "PASS" to the browser.  In this case we should explicitly use the
-// automation controller to terminate the test.
-function InternalError(msg) {
-  LogHTML("<p>" + msg);
-  sendAutomationMessage(msg);
+function SetCookie(key_value_string) {
+  window.document.cookie = key_value_string + "; path=/";
 }
 
 function EvalScript(script) {
@@ -155,39 +113,6 @@ function EvalScript(script) {
     eval(script);
   } catch(ex) {
   }
-}
-
-var conditions = [];
-// Add a "PostCondition". These are bits of script that are run after the plugin
-// is destroyed. If they evaluate to false or throw an exception, it's
-// considered a failure.
-function AddPostCondition(script) {
-  conditions.push(script);
-}
-// Update the HTML to show the failure and update cookies so that ui_tests
-// doesn't count this as a pass.
-function ConditionFailed(error) {
-  error_string = "Post condition check failed: " + error;
-  InternalError(error_string);
-}
-// Iterate through the post conditions defined in |conditions| and check that
-// they all pass.
-function CheckPostConditions() {
-  var success = true;
-  for (var i = 0; i < conditions.length; ++i) {
-    var script = conditions[i];
-    try {
-      if (!eval(script)) {
-        ConditionFailed("\"" + script + "\"");
-        success = false;
-      }
-    } catch (ex) {
-      ConditionFailed("\"" + script + "\"" + " failed with exception: " +
-                      "\"" + ex.toString() + "\"");
-      success = false;
-    }
-  }
-  return success;
 }
 
 function IsTestingMessage(message_data) {
@@ -199,29 +124,17 @@ function handleTestingMessage(message_event) {
   if (type_contents_tuple) {
     var type = type_contents_tuple[0];
     var contents = type_contents_tuple[1];
-    if (type === "AddPostCondition")
-      AddPostCondition(contents);
-    else if (type === "ClearConsole")
+    if (type === "ClearConsole")
       ClearConsole();
     else if (type === "DidExecuteTests")
-      DidExecuteTests(contents);
-    else if (type === "EvalScript")
-      EvalScript(contents);
+      DidExecuteTests();
     else if (type === "LogHTML")
       LogHTML(contents);
-    else if (type === "RemovePluginWhenFinished")
-      RemovePluginWhenFinished();
-    else if (type === "ReportProgress")
-      sendAutomationMessage(contents);
-    else if (type === "LogTestTime")
-      LogTestTime(contents);
+    else if (type === "SetCookie")
+      SetCookie(contents);
+    else if (type === "EvalScript")
+      EvalScript(contents);
   }
-}
-
-function sendProgress() {
-  // We send "..." to signal that we're still working. See
-  // ppapi/tests/testing_instance.h for how this works.
-  sendAutomationMessage("...");
 }
 
 onload = function() {
@@ -229,19 +142,9 @@ onload = function() {
   var mode = ExtractSearchParameter("mode");
   document.title = 'Test ' + testcase;
   var obj;
-  if (mode == "nacl_newlib") {
+  if (mode == "nacl") {
     obj = document.createElement("EMBED");
-    obj.setAttribute("src", "ppapi_nacl_tests_newlib.nmf");
-    obj.setAttribute("type", "application/x-nacl");
-    obj.setAttribute("mode", mode);
-  } else if (mode == "nacl_glibc") {
-    obj = document.createElement("EMBED");
-    obj.setAttribute("src", "ppapi_nacl_tests_glibc.nmf");
-    obj.setAttribute("type", "application/x-nacl");
-    obj.setAttribute("mode", mode);
-  } else if (mode == "nacl_pnacl") {
-    obj = document.createElement("EMBED");
-    obj.setAttribute("src", "ppapi_nacl_tests_pnacl.nmf");
+    obj.setAttribute("src", "test_case.nmf");
     obj.setAttribute("type", "application/x-nacl");
     obj.setAttribute("mode", mode);
   } else {
@@ -264,40 +167,12 @@ onload = function() {
     obj.setAttribute("id", "plugin");
     obj.setAttribute("testcase", testcase);
     obj.setAttribute("protocol", window.location.protocol);
-    var websocket_host = ExtractSearchParameter("websocket_host");
-    if (websocket_host != "")
-      obj.setAttribute("websocket_host", websocket_host);
-    var websocket_port = ExtractSearchParameter("websocket_port");
-    if (websocket_port != "")
-      obj.setAttribute("websocket_port", websocket_port);
-    var ssl_server_port = ExtractSearchParameter("ssl_server_port");
-    if (ssl_server_port != "")
-      obj.setAttribute("ssl_server_port", ssl_server_port);
-
     var container = document.getElementById("container");
     container.addEventListener("message", handleTestingMessage, true);
-
-    // "error" and "crash" events will only fire for NaCl, but adding these
-    // listeners doesn't hurt in the non-NaCl cases.
-    obj.addEventListener("error", function() {
-      InternalError("Plugin did not load. '" + obj.lastError + "'");
-    }, true);
-    obj.addEventListener("crash", function() {
-      InternalError("Plugin crashed. '" + obj.lastError + "'");
-    }, true);
-
-    // NaCl sends progress events while loading. When we get one, notify the
-    // domAutomationController so that it knows we're still working.
-    obj.addEventListener("loadstart", sendProgress, true);
-    obj.addEventListener("progress", sendProgress, true);
-    obj.addEventListener("load", sendProgress, true);
-    obj.addEventListener("loadend", sendProgress, true);
-
     // Register a bad dispatchEvent to make sure it isn't used. See 'EVIL' note
     // below.
-    var original = obj.dispatchEvent;
     obj.dispatchEvent = function() {
-      InternalError("Bad dispatchEvent called!");
+      LogHTML("<p>Bad dispatchEvent called!");
     }
     container.appendChild(obj);
   }
@@ -307,23 +182,22 @@ onload = function() {
 // This part of the script does some nefarious things to make sure that it
 // doesn't affect the behavior of PostMessage (on which all the tests rely). In
 // particular, we replace document.createEvent, MessageEvent.initMessageEvent,
-// and the MessageEvent constructor. Previously, the NaCl integration
-// implementation made use of these and would fail (http://crbug.com/82604
-// and http://crbug.com/109775).
+// and the MessageEvent constructor. Previous versions of the PostMessage
+// implementation made use of these and would fail (http://crbug.com/82604).
 document.createEvent = function() {
-  InternalError("Bad document.createEvent called!");
+  LogHTML("<p>Bad document.createEvent called!");
 }
 function MessageEvent() {
-  InternalError("Bad MessageEvent constructor called!");
+  LogHTML("<p>Bad MessageEvent constructor called!");
 }
 MessageEvent.prototype.initMessageEvent = function() {
-  InternalError("Bad MessageEvent.initMessageEvent called!");
+  LogHTML("<p>Bad MessageEvent.initMessageEvent called!");
 }
 
 </script>
 </head><body>
 <div>
   <div id="container"></div>
-  <div id="console"><span class="load_msg">loading...</span></div>
+  <div id="console" /><span class="load_msg">loading...</span></div>
 </div>
 </body></html>

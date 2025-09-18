@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "chrome/browser/ui/gtk/reload_button_gtk.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -25,7 +25,7 @@ class ReloadButtonGtkTest : public testing::Test {
 
  protected:
   // We need a message loop for the timers to post events.
-  base::MessageLoop loop_;
+  MessageLoop loop_;
 
   ReloadButtonGtk reload_;
 };
@@ -94,7 +94,7 @@ TEST_F(ReloadButtonGtkTest, DoubleClickTimer) {
              true, false);
 
   // Now fire the timer.  This should complete the mode change.
-  loop_.RunUntilIdle();
+  loop_.RunAllPending();
   CheckState(true, ReloadButtonGtk::MODE_STOP, ReloadButtonGtk::MODE_STOP,
              false, false);
 }
@@ -139,7 +139,7 @@ TEST_F(ReloadButtonGtkTest, ResetOnTimer) {
   reload_.ChangeMode(ReloadButtonGtk::MODE_RELOAD, false);
 
   // Now fire the stop-to-reload timer.  This should reset the button.
-  loop_.RunUntilIdle();
+  loop_.RunAllPending();
   CheckState(true, ReloadButtonGtk::MODE_RELOAD, ReloadButtonGtk::MODE_RELOAD,
              false, false);
 }

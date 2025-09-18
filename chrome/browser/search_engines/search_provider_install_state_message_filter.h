@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,23 +20,22 @@ class SearchProviderInstallStateMessageFilter
   // Unlike the other methods, the constructor is called on the UI thread.
   SearchProviderInstallStateMessageFilter(int render_process_id,
                                           Profile* profile);
+  virtual ~SearchProviderInstallStateMessageFilter();
 
   // content::BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
  private:
-  virtual ~SearchProviderInstallStateMessageFilter();
-
   // Figures out the install state for the search provider.
    search_provider::InstallState GetSearchProviderInstallState(
       const GURL& page_location,
       const GURL& requested_host);
 
   // Starts handling the message requesting the search provider install state.
-  void OnGetSearchProviderInstallState(const GURL& page_location,
-                                       const GURL& requested_host,
-                                       IPC::Message* reply_msg);
+  void OnMsgGetSearchProviderInstallState(const GURL& page_location,
+                                          const GURL& requested_host,
+                                          IPC::Message* reply_msg);
 
   // Sends the reply message about the search provider install state.
   void ReplyWithProviderInstallState(const GURL& page_location,

@@ -4,10 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_OVERLAY_PANEL_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_OVERLAY_PANEL_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 
 @class HistoryOverlayView;
 
@@ -23,9 +24,9 @@ enum HistoryOverlayMode {
  @private
   HistoryOverlayMode mode_;
   // Strongly typed reference of self.view.
-  base::scoped_nsobject<HistoryOverlayView> contentView_;
+  scoped_nsobject<HistoryOverlayView> contentView_;
   // The view above which self.view is inserted as a subview.
-  base::scoped_nsobject<NSView> parent_;
+  scoped_nsobject<NSView> parent_;
 }
 
 // Designated initializer.
@@ -35,10 +36,7 @@ enum HistoryOverlayMode {
 - (void)showPanelForView:(NSView*)view;
 
 // Updates the appearance of the overlay based on track gesture progress.
-// gestureAmount must be between 0 and 1.
-// 0 indicates no progress. 1 indicates maximum progress.
-// Finished indicates whether the gesture has reached maximum progress.
-- (void)setProgress:(CGFloat)gestureAmount finished:(BOOL)finished;
+- (void)setProgress:(CGFloat)gestureAmount;
 
 // Fades the shield out and removes it from the view hierarchy.
 - (void)dismiss;

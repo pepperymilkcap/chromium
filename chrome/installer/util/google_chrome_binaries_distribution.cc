@@ -1,8 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// This file defines a class that contains various method related to branding.
+// This file declares a class that contains various method related to branding.
 
 #include "chrome/installer/util/google_chrome_binaries_distribution.h"
 
@@ -21,34 +21,28 @@ GoogleChromeBinariesDistribution::GoogleChromeBinariesDistribution()
     : ChromiumBinariesDistribution() {
 }
 
-base::string16 GoogleChromeBinariesDistribution::GetAppGuid() {
+std::wstring GoogleChromeBinariesDistribution::GetAppGuid() {
   return kChromeBinariesGuid;
 }
 
-base::string16 GoogleChromeBinariesDistribution::GetDisplayName() {
+std::wstring GoogleChromeBinariesDistribution::GetAppShortCutName() {
   return kChromeBinariesName;
 }
 
-base::string16 GoogleChromeBinariesDistribution::GetShortcutName(
-    ShortcutType shortcut_type) {
-  NOTREACHED();
-  return base::string16();
-}
-
-base::string16 GoogleChromeBinariesDistribution::GetStateKey() {
-  return base::string16(google_update::kRegPathClientState)
+std::wstring GoogleChromeBinariesDistribution::GetStateKey() {
+  return std::wstring(google_update::kRegPathClientState)
       .append(1, L'\\')
       .append(kChromeBinariesGuid);
 }
 
-base::string16 GoogleChromeBinariesDistribution::GetStateMediumKey() {
-  return base::string16(google_update::kRegPathClientStateMedium)
+std::wstring GoogleChromeBinariesDistribution::GetStateMediumKey() {
+  return std::wstring(google_update::kRegPathClientStateMedium)
       .append(1, L'\\')
       .append(kChromeBinariesGuid);
 }
 
-base::string16 GoogleChromeBinariesDistribution::GetVersionKey() {
-  return base::string16(google_update::kRegPathClients)
+std::wstring GoogleChromeBinariesDistribution::GetVersionKey() {
+  return std::wstring(google_update::kRegPathClients)
       .append(1, L'\\')
       .append(kChromeBinariesGuid);
 }

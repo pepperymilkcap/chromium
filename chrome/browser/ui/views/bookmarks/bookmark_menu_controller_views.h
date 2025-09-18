@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_MENU_CONTROLLER_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_MENU_CONTROLLER_VIEWS_H_
+#pragma once
 
 #include <set>
 
@@ -14,10 +15,9 @@
 #include "ui/views/controls/menu/menu_item_view.h"
 
 class BookmarkBarView;
-class BookmarkMenuControllerObserver;
 class BookmarkMenuDelegate;
 class BookmarkNode;
-class Browser;
+class Profile;
 
 namespace content {
 class PageNavigator;
@@ -25,13 +25,13 @@ class PageNavigator;
 
 namespace ui {
 class OSExchangeData;
-}
+}  // namespace ui
 
 namespace views {
 class MenuButton;
 class MenuRunner;
 class Widget;
-}
+}  // namespace views
 
 // BookmarkMenuController is responsible for showing a menu of bookmarks,
 // each item in the menu represents a bookmark.
@@ -40,19 +40,24 @@ class Widget;
 class BookmarkMenuController : public BaseBookmarkModelObserver,
                                public views::MenuDelegate {
  public:
+  // The observer is notified prior to the menu being deleted.
+  class Observer {
+   public:
+    virtual void BookmarkMenuDeleted(BookmarkMenuController* controller) = 0;
+
+   protected:
+    virtual ~Observer() {}
+  };
+
   // Creates a BookmarkMenuController showing the children of |node| starting
   // at |start_child_index|.
-  BookmarkMenuController(Browser* browser,
+  BookmarkMenuController(Profile* profile,
                          content::PageNavigator* page_navigator,
                          views::Widget* parent,
                          const BookmarkNode* node,
                          int start_child_index);
 
   void RunMenuAt(BookmarkBarView* bookmark_bar, bool for_drop);
-
-  void clear_bookmark_bar() {
-    bookmark_bar_ = NULL;
-  }
 
   // Hides the menu.
   void Cancel();
@@ -69,19 +74,13 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   // Sets the page navigator.
   void SetPageNavigator(content::PageNavigator* navigator);
 
-  void set_observer(BookmarkMenuControllerObserver* observer) {
-    observer_ = observer;
-  }
+  void set_observer(Observer* observer) { observer_ = observer; }
 
-  // views::MenuDelegate:
-  virtual base::string16 GetTooltipText(int id,
-                                        const gfx::Point& p) const OVERRIDE;
+  // MenuDelegate methods.
+  virtual string16 GetTooltipText(int id, const gfx::Point& p) const OVERRIDE;
   virtual bool IsTriggerableEvent(views::MenuItemView* view,
-                                  const ui::Event& e) OVERRIDE;
+                                  const views::MouseEvent& e) OVERRIDE;
   virtual void ExecuteCommand(int id, int mouse_event_flags) OVERRIDE;
-  virtual bool ShouldExecuteCommandWithoutClosingMenu(
-      int id,
-      const ui::Event& e) OVERRIDE;
   virtual bool GetDropFormats(
       views::MenuItemView* menu,
       int* formats,
@@ -90,15 +89,15 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   virtual bool CanDrop(views::MenuItemView* menu,
                        const ui::OSExchangeData& data) OVERRIDE;
   virtual int GetDropOperation(views::MenuItemView* item,
-                               const ui::DropTargetEvent& event,
+                               const views::DropTargetEvent& event,
                                DropPosition* position) OVERRIDE;
   virtual int OnPerformDrop(views::MenuItemView* menu,
                             DropPosition position,
-                            const ui::DropTargetEvent& event) OVERRIDE;
+                            const views::DropTargetEvent& event) OVERRIDE;
   virtual bool ShowContextMenu(views::MenuItemView* source,
                                int id,
                                const gfx::Point& p,
-                               ui::MenuSourceType source_type) OVERRIDE;
+                               bool is_mouse_gesture) OVERRIDE;
   virtual void DropMenuClosed(views::MenuItemView* menu) OVERRIDE;
   virtual bool CanDrag(views::MenuItemView* menu) OVERRIDE;
   virtual void WriteDragData(views::MenuItemView* sender,
@@ -112,7 +111,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
       views::MenuButton** button) OVERRIDE;
   virtual int GetMaxWidthForMenu(views::MenuItemView* view) OVERRIDE;
 
-  // BaseBookmarkModelObserver:
+  // BookmarkModelObserver methods.
   virtual void BookmarkModelChanged() OVERRIDE;
 
  private:
@@ -130,14 +129,13 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   BookmarkNodeData drop_data_;
 
   // The observer, may be null.
-  BookmarkMenuControllerObserver* observer_;
+  Observer* observer_;
 
   // Is the menu being shown for a drop?
   bool for_drop_;
 
-  // The bookmark bar. This is only non-null if we're showing a menu item for a
-  // folder on the bookmark bar and not for drop, or if the BookmarkBarView has
-  // been destroyed before the menu.
+  // The bookmark bar. This is only non-null if we're showing a menu item
+  // for a folder on the bookmark bar and not for drop.
   BookmarkBarView* bookmark_bar_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkMenuController);

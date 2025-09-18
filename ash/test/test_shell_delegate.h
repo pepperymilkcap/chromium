@@ -4,69 +4,34 @@
 
 #ifndef ASH_TEST_TEST_SHELL_DELEGATE_H_
 #define ASH_TEST_TEST_SHELL_DELEGATE_H_
-
-#include <string>
+#pragma once
 
 #include "ash/shell_delegate.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
-
-namespace keyboard {
-class KeyboardControllerProxy;
-}
 
 namespace ash {
 namespace test {
-
-class TestSessionStateDelegate;
 
 class TestShellDelegate : public ShellDelegate {
  public:
   TestShellDelegate();
   virtual ~TestShellDelegate();
 
-  void set_multi_profiles_enabled(bool multi_profiles_enabled) {
-    multi_profiles_enabled_ = multi_profiles_enabled;
-  }
-
   // Overridden from ShellDelegate:
-  virtual bool IsFirstRunAfterBoot() const OVERRIDE;
-  virtual bool IsIncognitoAllowed() const OVERRIDE;
-  virtual bool IsMultiProfilesEnabled() const OVERRIDE;
-  virtual bool IsRunningInForcedAppMode() const OVERRIDE;
-  virtual void PreInit() OVERRIDE;
-  virtual void Shutdown() OVERRIDE;
+  virtual views::Widget* CreateStatusArea() OVERRIDE;
+#if defined(OS_CHROMEOS)
+  virtual void LockScreen() OVERRIDE;
+#endif
   virtual void Exit() OVERRIDE;
-  virtual keyboard::KeyboardControllerProxy*
-      CreateKeyboardControllerProxy() OVERRIDE;
-  virtual content::BrowserContext* GetActiveBrowserContext() OVERRIDE;
-  virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
-  virtual ShelfDelegate* CreateShelfDelegate(ShelfModel* model) OVERRIDE;
-  virtual SystemTrayDelegate* CreateSystemTrayDelegate() OVERRIDE;
-  virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
-  virtual CapsLockDelegate* CreateCapsLockDelegate() OVERRIDE;
-  virtual SessionStateDelegate* CreateSessionStateDelegate() OVERRIDE;
-  virtual AccessibilityDelegate* CreateAccessibilityDelegate() OVERRIDE;
-  virtual NewWindowDelegate* CreateNewWindowDelegate() OVERRIDE;
-  virtual MediaDelegate* CreateMediaDelegate() OVERRIDE;
-  virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
-  virtual ui::MenuModel* CreateContextMenu(aura::Window* root) OVERRIDE;
-  virtual RootWindowHostFactory* CreateRootWindowHostFactory() OVERRIDE;
-  virtual base::string16 GetProductName() const OVERRIDE;
-
-  int num_exit_requests() const { return num_exit_requests_; }
-
-  TestSessionStateDelegate* test_session_state_delegate();
-
- private:
-  int num_exit_requests_;
-  bool multi_profiles_enabled_;
-
-  scoped_ptr<content::BrowserContext> active_browser_context_;
-
-  TestSessionStateDelegate* test_session_state_delegate_;  // Not owned.
-
-  DISALLOW_COPY_AND_ASSIGN(TestShellDelegate);
+  virtual void BuildAppListModel(AppListModel* model) OVERRIDE;
+  virtual AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
+  virtual std::vector<aura::Window*> GetCycleWindowList(
+      CycleSource source,
+      CycleOrder order) const OVERRIDE;
+  virtual void CreateNewWindow() OVERRIDE;
+  virtual void LauncherItemClicked(const LauncherItem& item) OVERRIDE;
+  virtual int GetBrowserShortcutResourceId() OVERRIDE;
+  virtual string16 GetLauncherItemTitle(const LauncherItem& item) OVERRIDE;
 };
 
 }  // namespace test

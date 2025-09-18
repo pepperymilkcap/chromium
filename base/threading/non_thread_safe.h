@@ -1,24 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_THREADING_NON_THREAD_SAFE_H_
 #define BASE_THREADING_NON_THREAD_SAFE_H_
+#pragma once
 
-// Classes deriving from NonThreadSafe may need to suppress MSVC warning 4275:
+// Classes deriving from NonThreadSafe may need to supress MSVC warning 4275:
 // non dll-interface class 'Bar' used as base for dll-interface class 'Foo'.
 // There is a specific macro to do it: NON_EXPORTED_BASE(), defined in
 // compiler_specific.h
 #include "base/compiler_specific.h"
 
-// See comment at top of thread_checker.h
-#if (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
-#define ENABLE_NON_THREAD_SAFE 1
-#else
-#define ENABLE_NON_THREAD_SAFE 0
-#endif
-
-#if ENABLE_NON_THREAD_SAFE
+#ifndef NDEBUG
 #include "base/threading/non_thread_safe_impl.h"
 #endif
 
@@ -35,7 +29,6 @@ class NonThreadSafeDoNothing {
   }
 
  protected:
-  ~NonThreadSafeDoNothing() {}
   void DetachFromThread() {}
 };
 
@@ -55,18 +48,15 @@ class NonThreadSafeDoNothing {
 //   }
 // }
 //
-// Note that base::ThreadChecker offers identical functionality to
-// NonThreadSafe, but does not require inheritance. In general, it is preferable
-// to have a base::ThreadChecker as a member, rather than inherit from
-// NonThreadSafe. For more details about when to choose one over the other, see
-// the documentation for base::ThreadChecker.
-#if ENABLE_NON_THREAD_SAFE
-typedef NonThreadSafeImpl NonThreadSafe;
+// In Release mode, CalledOnValidThread will always return true.
+//
+#ifndef NDEBUG
+class NonThreadSafe : public NonThreadSafeImpl {
+};
 #else
-typedef NonThreadSafeDoNothing NonThreadSafe;
-#endif  // ENABLE_NON_THREAD_SAFE
-
-#undef ENABLE_NON_THREAD_SAFE
+class NonThreadSafe : public NonThreadSafeDoNothing {
+};
+#endif  // NDEBUG
 
 }  // namespace base
 

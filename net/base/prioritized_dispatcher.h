@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_BASE_PRIORITIZED_DISPATCHER_H_
-#define NET_BASE_PRIORITIZED_DISPATCHER_H_
+#ifndef NET_BASE_PRIORITY_DISPATCH_H_
+#define NET_BASE_PRIORITY_DISPATCH_H_
+#pragma once
 
 #include <vector>
 
@@ -12,15 +13,15 @@
 
 namespace net {
 
-// A priority-based dispatcher of jobs. Dispatch order is by priority (highest
+// A priority-based dispatcher of jobs. Dispatch order is by priority (lowest
 // first) and then FIFO. The dispatcher enforces limits on the number of running
 // jobs. It never revokes a job once started. The job must call OnJobFinished
 // once it finishes in order to dispatch further jobs.
 //
-// This class is NOT thread-safe which is enforced by the underlying
-// non-thread-safe PriorityQueue. All operations are O(p) time for p priority
-// levels. It is safe to execute any method, including destructor, from within
-// Job::Start.
+// All operations are O(p) time for p priority levels. The class is fully
+// reentrant: it is safe to execute any method (incl. destructor) from within
+// Job callbacks. However, this class is NOT thread-safe, which is enforced
+// by the underlying non-thread-safe PriorityQueue.
 //
 class NET_EXPORT_PRIVATE PrioritizedDispatcher {
  public:
@@ -28,13 +29,10 @@ class NET_EXPORT_PRIVATE PrioritizedDispatcher {
   typedef PriorityQueue<Job*>::Priority Priority;
 
   // Describes the limits for the number of jobs started by the dispatcher.
-  // For example, |total_jobs| = 30 and |reserved_slots| = { 0, 5, 10, 5 } allow
-  // for at most 30 running jobs in total. Jobs at priority 0 can't use slots
-  // reserved for higher priorities, so they are limited to 10.
-  // If there are already 24 jobs running, then only 6 more jobs can start. No
-  // jobs at priority 1 or below can start. After one more job starts, no jobs
-  // at priority 2 or below can start, since the remaining 5 slots are reserved
-  // for priority 3 or above.
+  // For example, |total_jobs| = 30 and |reserved_slots| = { 5, 10, 5 }
+  // allow for at most 30 running jobs in total. If there are already 24 jobs
+  // running, then there can be 6 more jobs started of which at most 1 can be
+  // at priority 1 or 0, but the rest has to be at 0.
   struct NET_EXPORT_PRIVATE Limits {
     Limits(Priority num_priorities, size_t total_jobs);
     ~Limits();
@@ -52,10 +50,10 @@ class NET_EXPORT_PRIVATE PrioritizedDispatcher {
   // deleted after it is dispatched or canceled, or the dispatcher is destroyed.
   class Job {
    public:
-    // Note: PrioritizedDispatcher will never delete a Job.
+    // Note: PriorityDispatch will never delete a Job.
     virtual ~Job() {}
-    // Called when the dispatcher starts the job. Once the job finishes, it must
-    // call OnJobFinished.
+    // Called when the dispatcher starts the job. Must call OnJobFinished when
+    // done.
     virtual void Start() = 0;
   };
 
@@ -64,7 +62,7 @@ class NET_EXPORT_PRIVATE PrioritizedDispatcher {
   typedef PriorityQueue<Job*>::Pointer Handle;
 
   // Creates a dispatcher enforcing |limits| on number of running jobs.
-  explicit PrioritizedDispatcher(const Limits& limits);
+  PrioritizedDispatcher(const Limits& limits);
 
   ~PrioritizedDispatcher();
 
@@ -74,19 +72,14 @@ class NET_EXPORT_PRIVATE PrioritizedDispatcher {
 
   // Adds |job| with |priority| to the dispatcher. If limits permit, |job| is
   // started immediately. Returns handle to the job or null-handle if the job is
-  // started. The dispatcher does not own |job|, but |job| must live as long as
-  // it is queued in the dispatcher.
+  // started.
   Handle Add(Job* job, Priority priority);
-
-  // Just like Add, except that it adds Job at the font of queue of jobs with
-  // priorities of |priority|.
-  Handle AddAtHead(Job* job, Priority priority);
 
   // Removes the job with |handle| from the queue. Invalidates |handle|.
   // Note: a Handle is valid iff the job is in the queue, i.e. has not Started.
   void Cancel(const Handle& handle);
 
-  // Cancels and returns the oldest-lowest-priority Job invalidating any
+  // Removes and returns the oldest-lowest Job from the queue invalidating any
   // handles to it. Returns NULL if the queue is empty.
   Job* EvictOldestLowest();
 
@@ -98,28 +91,11 @@ class NET_EXPORT_PRIVATE PrioritizedDispatcher {
   // Notifies the dispatcher that a running job has finished. Could start a job.
   void OnJobFinished();
 
-  // Retrieves the Limits that |this| is currently using.  This may not exactly
-  // match the Limits this was created with.  In particular, the number of slots
-  // reserved for the lowest priority will always be 0, even if it was non-zero
-  // in the Limits passed to the constructor or to SetLimits.
-  Limits GetLimits() const;
-
-  // Updates |max_running_jobs_| to match |limits|.  Starts jobs if new limit
-  // allows.  Does not stop jobs if the new limits are lower than the old ones.
-  void SetLimits(const Limits& limits);
-
-  // Set the limits to zero for all priorities, allowing no new jobs to start.
-  void SetLimitsToZero();
-
  private:
   // Attempts to dispatch the job with |handle| at priority |priority| (might be
   // different than |handle.priority()|. Returns true if successful. If so
   // the |handle| becomes invalid.
   bool MaybeDispatchJob(const Handle& handle, Priority priority);
-
-  // Attempts to dispatch the next highest priority job in the queue. Returns
-  // true if successful, and all handles to that job become invalid.
-  bool MaybeDispatchNextJob();
 
   // Queue for jobs that need to wait for a spare slot.
   PriorityQueue<Job*> queue_;
@@ -135,4 +111,5 @@ class NET_EXPORT_PRIVATE PrioritizedDispatcher {
 
 }  // namespace net
 
-#endif  // NET_BASE_PRIORITIZED_DISPATCHER_H_
+#endif  // NET_BASE_PRIORITY_DISPATCH_H_
+

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_CHOOSE_MOBILE_NETWORK_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_CHOOSE_MOBILE_NETWORK_UI_H_
+#pragma once
 
 #include "content/public/browser/web_ui_controller.h"
 

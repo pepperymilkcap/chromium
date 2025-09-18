@@ -4,17 +4,14 @@
 
 #ifndef UI_VIEWS_WIDGET_NATIVE_WIDGET_AURA_H_
 #define UI_VIEWS_WIDGET_NATIVE_WIDGET_AURA_H_
+#pragma once
 
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/client/activation_delegate.h"
 #include "ui/aura/client/drag_drop_delegate.h"
-#include "ui/aura/client/focus_change_observer.h"
 #include "ui/aura/window_delegate.h"
-#include "ui/base/cursor/cursor.h"
-#include "ui/events/event_constants.h"
-#include "ui/views/ime/input_method_delegate.h"
+#include "ui/base/events.h"
 #include "ui/views/views_export.h"
 #include "ui/views/widget/native_widget_private.h"
 
@@ -29,32 +26,23 @@ namespace views {
 
 class DropHelper;
 class TooltipManagerAura;
-class WindowReorderer;
 
-class VIEWS_EXPORT NativeWidgetAura
-    : public internal::NativeWidgetPrivate,
-      public internal::InputMethodDelegate,
-      public aura::WindowDelegate,
-      public aura::client::ActivationDelegate,
-      public aura::client::ActivationChangeObserver,
-      public aura::client::FocusChangeObserver,
-      public aura::client::DragDropDelegate {
+class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
+                                      public aura::WindowDelegate,
+                                      public aura::client::ActivationDelegate,
+                                      public aura::client::DragDropDelegate {
  public:
   explicit NativeWidgetAura(internal::NativeWidgetDelegate* delegate);
+  virtual ~NativeWidgetAura();
 
   // TODO(beng): Find a better place for this, and the similar method on
   //             NativeWidgetWin.
   static gfx::Font GetWindowTitleFont();
 
-  // Called internally by NativeWidgetAura and DesktopNativeWidgetAura to
-  // associate |native_widget| with |window|.
-  static void RegisterNativeWidgetForWindow(
-      internal::NativeWidgetPrivate* native_widget,
-      aura::Window* window);
-
   // Overridden from internal::NativeWidgetPrivate:
   virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE;
   virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
+  virtual void UpdateFrameAfterFrameChange() OVERRIDE;
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
   virtual void FrameTypeChanged() OVERRIDE;
   virtual Widget* GetWidget() OVERRIDE;
@@ -64,33 +52,39 @@ class VIEWS_EXPORT NativeWidgetAura
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual ui::Layer* GetLayer() OVERRIDE;
-  virtual void ReorderNativeViews() OVERRIDE;
+  virtual void CalculateOffsetToAncestorWithLayer(
+      gfx::Point* offset,
+      ui::Layer** layer_parent) OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
   virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
   virtual TooltipManager* GetTooltipManager() const OVERRIDE;
-  virtual void SetCapture() OVERRIDE;
-  virtual void ReleaseCapture() OVERRIDE;
-  virtual bool HasCapture() const OVERRIDE;
+  virtual bool IsScreenReaderActive() const OVERRIDE;
+  virtual void SendNativeAccessibilityEvent(
+      View* view,
+      ui::AccessibilityTypes::Event event_type) OVERRIDE;
+  virtual void SetMouseCapture() OVERRIDE;
+  virtual void ReleaseMouseCapture() OVERRIDE;
+  virtual bool HasMouseCapture() const OVERRIDE;
   virtual InputMethod* CreateInputMethod() OVERRIDE;
-  virtual internal::InputMethodDelegate* GetInputMethodDelegate() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
   virtual void GetWindowPlacement(
       gfx::Rect* bounds,
       ui::WindowShowState* maximized) const OVERRIDE;
-  virtual bool SetWindowTitle(const base::string16& title) OVERRIDE;
-  virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
-                              const gfx::ImageSkia& app_icon) OVERRIDE;
+  virtual void SetWindowTitle(const string16& title) OVERRIDE;
+  virtual void SetWindowIcons(const SkBitmap& window_icon,
+                              const SkBitmap& app_icon) OVERRIDE;
+  virtual void SetAccessibleName(const string16& name) OVERRIDE;
+  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
+  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
-  virtual gfx::Rect GetWindowBoundsInScreen() const OVERRIDE;
-  virtual gfx::Rect GetClientAreaBoundsInScreen() const OVERRIDE;
+  virtual gfx::Rect GetWindowScreenBounds() const OVERRIDE;
+  virtual gfx::Rect GetClientAreaScreenBounds() const OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void StackAbove(gfx::NativeView native_view) OVERRIDE;
   virtual void StackAtTop() OVERRIDE;
-  virtual void StackBelow(gfx::NativeView native_view) OVERRIDE;
   virtual void SetShape(gfx::NativeRegion shape) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void CloseNow() OVERRIDE;
@@ -104,7 +98,6 @@ class VIEWS_EXPORT NativeWidgetAura
   virtual void Deactivate() OVERRIDE;
   virtual bool IsActive() const OVERRIDE;
   virtual void SetAlwaysOnTop(bool always_on_top) OVERRIDE;
-  virtual bool IsAlwaysOnTop() const OVERRIDE;
   virtual void Maximize() OVERRIDE;
   virtual void Minimize() OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
@@ -114,93 +107,61 @@ class VIEWS_EXPORT NativeWidgetAura
   virtual bool IsFullscreen() const OVERRIDE;
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
   virtual void SetUseDragFrame(bool use_drag_frame) OVERRIDE;
-  virtual void FlashFrame(bool flash_frame) OVERRIDE;
+  virtual bool IsAccessibleWidget() const OVERRIDE;
   virtual void RunShellDrag(View* view,
                             const ui::OSExchangeData& data,
-                            const gfx::Point& location,
-                            int operation,
-                            ui::DragDropTypes::DragEventSource source) OVERRIDE;
+                            int operation) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
-  virtual bool IsMouseEventsEnabled() const OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
+  virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
-  virtual Widget::MoveLoopResult RunMoveLoop(
-      const gfx::Vector2d& drag_offset,
-      Widget::MoveLoopSource source,
-      Widget::MoveLoopEscapeBehavior escape_behavior) OVERRIDE;
+  virtual void SetInactiveRenderingDisabled(bool value) OVERRIDE;
+  virtual Widget::MoveLoopResult RunMoveLoop() OVERRIDE;
   virtual void EndMoveLoop() OVERRIDE;
   virtual void SetVisibilityChangedAnimationsEnabled(bool value) OVERRIDE;
-  virtual ui::NativeTheme* GetNativeTheme() const OVERRIDE;
-  virtual void OnRootViewLayout() const OVERRIDE;
 
   // Overridden from views::InputMethodDelegate:
-  virtual void DispatchKeyEventPostIME(const ui::KeyEvent& key) OVERRIDE;
+  virtual void DispatchKeyEventPostIME(const KeyEvent& key) OVERRIDE;
 
   // Overridden from aura::WindowDelegate:
   virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual gfx::Size GetMaximumSize() const OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
                                const gfx::Rect& new_bounds) OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
+  virtual void OnBlur() OVERRIDE;
+  virtual bool OnKeyEvent(aura::KeyEvent* event) OVERRIDE;
   virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
-  virtual bool ShouldDescendIntoChildForEventHandling(
-      aura::Window* child,
-      const gfx::Point& location) OVERRIDE;
+  virtual bool OnMouseEvent(aura::MouseEvent* event) OVERRIDE;
+  virtual ui::TouchStatus OnTouchEvent(aura::TouchEvent* event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(aura::GestureEvent* event) OVERRIDE;
   virtual bool CanFocus() OVERRIDE;
   virtual void OnCaptureLost() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void OnWindowDestroying() OVERRIDE;
   virtual void OnWindowDestroyed() OVERRIDE;
-  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE;
-  virtual bool HasHitTestMask() const OVERRIDE;
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
-  virtual void DidRecreateLayer(ui::Layer* old_layer,
-                                ui::Layer* new_layer) OVERRIDE;
-
-  // Overridden from ui::EventHandler:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE;
 
   // Overridden from aura::client::ActivationDelegate:
-  virtual bool ShouldActivate() const OVERRIDE;
-
-  // Overridden from aura::client::ActivationChangeObserver:
-  virtual void OnWindowActivated(aura::Window* gained_active,
-                                 aura::Window* lost_active) OVERRIDE;
-
-  // Overridden from aura::client::FocusChangeObserver:
-  virtual void OnWindowFocused(aura::Window* gained_focus,
-                               aura::Window* lost_focus) OVERRIDE;
+  virtual bool ShouldActivate(aura::Event* event) OVERRIDE;
+  virtual void OnActivated() OVERRIDE;
+  virtual void OnLostActive() OVERRIDE;
 
   // Overridden from aura::client::DragDropDelegate:
-  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual void OnDragEntered(const aura::DropTargetEvent& event) OVERRIDE;
+  virtual int OnDragUpdated(const aura::DropTargetEvent& event) OVERRIDE;
   virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
-
-  // Overridden from NativeWidget:
-  virtual ui::EventHandler* GetEventHandler() OVERRIDE;
+  virtual int OnPerformDrop(const aura::DropTargetEvent& event) OVERRIDE;
 
  protected:
-  virtual ~NativeWidgetAura();
-
   internal::NativeWidgetDelegate* delegate() { return delegate_; }
 
  private:
   class ActiveWindowObserver;
 
-  void SetInitialFocus();
-
   internal::NativeWidgetDelegate* delegate_;
 
-  // WARNING: set to NULL when destroyed. As the Widget is not necessarily
-  // destroyed along with |window_| all usage of |window_| should first verify
-  // non-NULL.
   aura::Window* window_;
 
   // See class documentation for Widget in widget.h for a note about ownership.
@@ -213,22 +174,16 @@ class VIEWS_EXPORT NativeWidgetAura
   // Can we be made active?
   bool can_activate_;
 
-  // Are we in the destructor?
-  bool destroying_;
-
   gfx::NativeCursor cursor_;
 
   // The saved window state for exiting full screen state.
-  ui::WindowShowState saved_window_state_;
+  int saved_window_state_;
 
   scoped_ptr<TooltipManagerAura> tooltip_manager_;
 
-  // Reorders child windows of |window_| associated with a view based on the
-  // order of the associated views in the widget's view hierarchy.
-  scoped_ptr<WindowReorderer> window_reorderer_;
+  scoped_ptr<ActiveWindowObserver> active_window_observer_;
 
   scoped_ptr<DropHelper> drop_helper_;
-  int last_drop_operation_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetAura);
 };

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/crypto_module_password_dialog_nss.h"
+#include "chrome/browser/ui/crypto_module_password_dialog.h"
 
 #include <pk11pub.h>
 
@@ -10,7 +10,11 @@
 #include "base/logging.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/crypto_module.h"
-#include "net/cert/x509_certificate.h"
+#include "net/base/x509_certificate.h"
+
+#if defined(OS_CHROMEOS)
+#include "crypto/nss_util.h"
+#endif
 
 using content::BrowserThread;
 
@@ -28,36 +32,32 @@ bool ShouldShowDialog(const net::CryptoModule* module) {
 class SlotUnlocker {
  public:
   SlotUnlocker(const net::CryptoModuleList& modules,
-               chrome::CryptoModulePasswordReason reason,
-               const net::HostPortPair& server,
-               gfx::NativeWindow parent,
+               browser::CryptoModulePasswordReason reason,
+               const std::string& host,
                const base::Closure& callback);
 
   void Start();
 
  private:
-  void GotPassword(const std::string& password);
+  void GotPassword(const char* password);
   void Done();
 
   size_t current_;
   net::CryptoModuleList modules_;
-  chrome::CryptoModulePasswordReason reason_;
-  net::HostPortPair server_;
-  gfx::NativeWindow parent_;
+  browser::CryptoModulePasswordReason reason_;
+  std::string host_;
   base::Closure callback_;
   PRBool retry_;
 };
 
 SlotUnlocker::SlotUnlocker(const net::CryptoModuleList& modules,
-                           chrome::CryptoModulePasswordReason reason,
-                           const net::HostPortPair& server,
-                           gfx::NativeWindow parent,
+                           browser::CryptoModulePasswordReason reason,
+                           const std::string& host,
                            const base::Closure& callback)
     : current_(0),
       modules_(modules),
       reason_(reason),
-      server_(server),
-      parent_(parent),
+      host_(host),
       callback_(callback),
       retry_(PR_FALSE) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -68,12 +68,25 @@ void SlotUnlocker::Start() {
 
   for (; current_ < modules_.size(); ++current_) {
     if (ShouldShowDialog(modules_[current_].get())) {
+#if defined(OS_CHROMEOS)
+      if (crypto::IsTPMTokenReady()) {
+        std::string token_name;
+        std::string user_pin;
+        crypto::GetTPMTokenInfo(&token_name, &user_pin);
+        if (modules_[current_]->GetTokenName() == token_name) {
+          // The user PIN is a well known secret on this machine, and
+          // the user didn't set it, so we need to fetch the value and
+          // supply it for them here.
+          GotPassword(user_pin.c_str());
+          return;
+        }
+      }
+#endif
       ShowCryptoModulePasswordDialog(
           modules_[current_]->GetTokenName(),
           retry_,
           reason_,
-          server_.host(),
-          parent_,
+          host_,
           base::Bind(&SlotUnlocker::GotPassword, base::Unretained(this)));
       return;
     }
@@ -81,12 +94,12 @@ void SlotUnlocker::Start() {
   Done();
 }
 
-void SlotUnlocker::GotPassword(const std::string& password) {
+void SlotUnlocker::GotPassword(const char* password) {
   // TODO(mattm): PK11_DoPassword has something about PK11_Global.verifyPass.
   // Do we need it?
   // http://mxr.mozilla.org/mozilla/source/security/nss/lib/pk11wrap/pk11auth.c#577
 
-  if (password.empty()) {
+  if (!password) {
     // User cancelled entering password.  Oh well.
     ++current_;
     Start();
@@ -95,7 +108,7 @@ void SlotUnlocker::GotPassword(const std::string& password) {
 
   // TODO(mattm): handle protectedAuthPath
   SECStatus rv = PK11_CheckUserPassword(modules_[current_]->os_module_handle(),
-                                        password.c_str());
+                                        password);
   if (rv == SECWouldBlock) {
     // Incorrect password.  Try again.
     retry_ = PR_TRUE;
@@ -120,17 +133,16 @@ void SlotUnlocker::Done() {
 
 }  // namespace
 
-namespace chrome {
+namespace browser {
 
 void UnlockSlotsIfNecessary(const net::CryptoModuleList& modules,
-                            chrome::CryptoModulePasswordReason reason,
-                            const net::HostPortPair& server,
-                            gfx::NativeWindow parent,
+                            browser::CryptoModulePasswordReason reason,
+                            const std::string& host,
                             const base::Closure& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   for (size_t i = 0; i < modules.size(); ++i) {
     if (ShouldShowDialog(modules[i].get())) {
-      (new SlotUnlocker(modules, reason, server, parent, callback))->Start();
+      (new SlotUnlocker(modules, reason, host, callback))->Start();
       return;
     }
   }
@@ -138,14 +150,13 @@ void UnlockSlotsIfNecessary(const net::CryptoModuleList& modules,
 }
 
 void UnlockCertSlotIfNecessary(net::X509Certificate* cert,
-                               chrome::CryptoModulePasswordReason reason,
-                               const net::HostPortPair& server,
-                               gfx::NativeWindow parent,
+                               browser::CryptoModulePasswordReason reason,
+                               const std::string& host,
                                const base::Closure& callback) {
   net::CryptoModuleList modules;
   modules.push_back(net::CryptoModule::CreateFromHandle(
       cert->os_cert_handle()->slot));
-  UnlockSlotsIfNecessary(modules, reason, server, parent, callback);
+  UnlockSlotsIfNecessary(modules, reason, host, callback);
 }
 
-}  // namespace chrome
+}  // namespace browser

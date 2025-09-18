@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_IMPORTER_IMPORTER_LIST_OBSERVER_H_
 #define CHROME_BROWSER_IMPORTER_IMPORTER_LIST_OBSERVER_H_
+#pragma once
 
 namespace importer {
 

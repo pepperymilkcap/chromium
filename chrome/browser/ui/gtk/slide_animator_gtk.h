@@ -13,19 +13,20 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_SLIDE_ANIMATOR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_SLIDE_ANIMATOR_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
-#include "ui/gfx/animation/animation_delegate.h"
 
-namespace gfx {
+namespace ui {
 class SlideAnimation;
 }
 
-class SlideAnimatorGtk : public gfx::AnimationDelegate {
+class SlideAnimatorGtk : public ui::AnimationDelegate {
  public:
   class Delegate {
    public:
@@ -84,9 +85,9 @@ class SlideAnimatorGtk : public gfx::AnimationDelegate {
   // animation.
   bool IsAnimating();
 
-  // gfx::AnimationDelegate implementation.
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
+  // ui::AnimationDelegate implementation.
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
 
   // Used during testing; disable or enable animations (default is enabled).
   static void SetAnimationsForTesting(bool enable);
@@ -96,7 +97,7 @@ class SlideAnimatorGtk : public gfx::AnimationDelegate {
                                   GtkAllocation* allocation,
                                   SlideAnimatorGtk* slider);
 
-  scoped_ptr<gfx::SlideAnimation> animation_;
+  scoped_ptr<ui::SlideAnimation> animation_;
 
   // The top level widget of the SlideAnimatorGtk. It is a GtkFixed.
   ui::OwnedWidgetGtk widget_;

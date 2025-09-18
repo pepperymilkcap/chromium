@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "base/metrics/histogram.h"
 #include "net/disk_cache/backend_impl.h"
-#include "net/disk_cache/disk_format.h"
 #include "net/disk_cache/entry_impl.h"
 #include "net/disk_cache/errors.h"
 #include "net/disk_cache/histogram_macros.h"
@@ -190,15 +189,6 @@ void UpdateTimes(disk_cache::CacheRankingsBlock* node, bool modified) {
 
 namespace disk_cache {
 
-Rankings::ScopedRankingsBlock::ScopedRankingsBlock() : rankings_(NULL) {}
-
-Rankings::ScopedRankingsBlock::ScopedRankingsBlock(Rankings* rankings)
-    : rankings_(rankings) {}
-
-Rankings::ScopedRankingsBlock::ScopedRankingsBlock(
-    Rankings* rankings, CacheRankingsBlock* node)
-    : scoped_ptr<CacheRankingsBlock>(node), rankings_(rankings) {}
-
 Rankings::Iterator::Iterator(Rankings* rankings) {
   memset(this, 0, sizeof(Iterator));
   my_rankings = rankings;
@@ -283,7 +273,6 @@ void Rankings::Insert(CacheRankingsBlock* node, bool modified, List list) {
   WriteHead(list);
   IncrementCounter(list);
   GenerateCrash(ON_INSERT_4);
-  backend_->FlushIndex();
 }
 
 // If a, b and r are elements on the list, and we want to remove r, the possible
@@ -390,7 +379,6 @@ void Rankings::Remove(CacheRankingsBlock* node, List list, bool strict) {
   DecrementCounter(list);
   UpdateIterators(&next);
   UpdateIterators(&prev);
-  backend_->FlushIndex();
 }
 
 // A crash in between Remove and Insert will lead to a dirty entry not on the
@@ -496,16 +484,13 @@ void Rankings::TrackRankingsBlock(CacheRankingsBlock* node,
 
 int Rankings::SelfCheck() {
   int total = 0;
-  int error = 0;
   for (int i = 0; i < LAST_ELEMENT; i++) {
     int partial = CheckList(static_cast<List>(i));
-    if (partial < 0 && !error)
-      error = partial;
-    else if (partial > 0)
-      total += partial;
+    if (partial < 0)
+      return partial;
+    total += partial;
   }
-
-  return error ? error : total;
+  return total;
 }
 
 bool Rankings::SanityCheck(CacheRankingsBlock* node, bool from_list) const {
@@ -533,8 +518,8 @@ bool Rankings::SanityCheck(CacheRankingsBlock* node, bool from_list) const {
 
   Addr next_addr(data->next);
   Addr prev_addr(data->prev);
-  if (!next_addr.SanityCheckV2() || next_addr.file_type() != RANKINGS ||
-      !prev_addr.SanityCheckV2() || prev_addr.file_type() != RANKINGS)
+  if (!next_addr.SanityCheck() || next_addr.file_type() != RANKINGS ||
+      !prev_addr.SanityCheck() || prev_addr.file_type() != RANKINGS)
     return false;
 
   return true;
@@ -590,16 +575,11 @@ bool Rankings::GetRanking(CacheRankingsBlock* rankings) {
 
   backend_->OnEvent(Stats::OPEN_RANKINGS);
 
-  // Note that if the cache is in read_only mode, open entries are not marked
-  // as dirty, except when an entry is doomed. We have to look for open entries.
-  if (!backend_->read_only() && !rankings->Data()->dirty)
+  if (!rankings->Data()->dirty)
     return true;
 
   EntryImpl* entry = backend_->GetOpenEntry(rankings);
   if (!entry) {
-    if (backend_->read_only())
-      return true;
-
     // We cannot trust this entry, but we cannot initiate a cleanup from this
     // point (we may be in the middle of a cleanup already). The entry will be
     // deleted when detected from a regular open/create path.
@@ -736,7 +716,14 @@ void Rankings::RevertRemove(CacheRankingsBlock* node) {
   prev.Store();
   control_data_->transaction = 0;
   control_data_->operation = 0;
-  backend_->FlushIndex();
+}
+
+bool Rankings::CheckEntry(CacheRankingsBlock* rankings) {
+  if (rankings->VerifyHash())
+    return true;
+
+  // If this entry is not dirty, it is a serious problem.
+  return backend_->GetCurrentEntryId() != rankings->Data()->dirty;
 }
 
 bool Rankings::CheckLinks(CacheRankingsBlock* node, CacheRankingsBlock* prev,
@@ -794,62 +781,44 @@ bool Rankings::CheckSingleLink(CacheRankingsBlock* prev,
 }
 
 int Rankings::CheckList(List list) {
-  Addr last1, last2;
-  int head_items;
-  int rv = CheckListSection(list, last1, last2, true,  // Head to tail.
-                            &last1, &last2, &head_items);
-  if (rv == ERR_NO_ERROR)
-    return head_items;
-
-  return rv;
-}
-
-// Note that the returned error codes assume a forward walk (from head to tail)
-// so they have to be adjusted accordingly by the caller. We use two stop values
-// to be able to detect a corrupt node at the end that is not linked going back.
-int Rankings::CheckListSection(List list, Addr end1, Addr end2, bool forward,
-                               Addr* last, Addr* second_last, int* num_items) {
-  Addr current = forward ? heads_[list] : tails_[list];
-  *last = *second_last = current;
-  *num_items = 0;
-  if (!current.is_initialized())
-    return ERR_NO_ERROR;
-
-  if (!current.SanityCheckForRankings())
+  Addr& my_head = heads_[list];
+  Addr& my_tail = tails_[list];
+  if (!my_head.is_initialized()) {
+    if (!my_tail.is_initialized())
+      return 0;
+    // If there is no head, having a tail is an error.
+    return ERR_INVALID_TAIL;
+  }
+  // If there is no tail, having a head is an error.
+  if (!my_tail.is_initialized())
     return ERR_INVALID_HEAD;
 
+  if (my_tail.is_separate_file())
+    return ERR_INVALID_TAIL;
+
+  if (my_head.is_separate_file())
+    return ERR_INVALID_HEAD;
+
+  int num_items = 0;
+  Addr address(my_head.value());
+  Addr prev(my_head.value());
   scoped_ptr<CacheRankingsBlock> node;
-  Addr prev_addr(current);
   do {
-    node.reset(new CacheRankingsBlock(backend_->File(current), current));
+    node.reset(new CacheRankingsBlock(backend_->File(address), address));
     node->Load();
-    if (!SanityCheck(node.get(), true))
+    if (node->Data()->prev != prev.value())
+      return ERR_INVALID_PREV;
+    if (!CheckEntry(node.get()))
       return ERR_INVALID_ENTRY;
 
-    CacheAddr next = forward ? node->Data()->next : node->Data()->prev;
-    CacheAddr prev = forward ? node->Data()->prev : node->Data()->next;
-
-    if (prev != prev_addr.value())
-      return ERR_INVALID_PREV;
-
-    Addr next_addr(next);
-    if (!next_addr.SanityCheckForRankings())
+    prev.set_value(address.value());
+    address.set_value(node->Data()->next);
+    if (!address.is_initialized() || address.is_separate_file())
       return ERR_INVALID_NEXT;
 
-    prev_addr = current;
-    current = next_addr;
-    *second_last = *last;
-    *last = current;
-    (*num_items)++;
-
-    if (next_addr == prev_addr) {
-      Addr last = forward ? tails_[list] : heads_[list];
-      if (next_addr == last)
-        return ERR_NO_ERROR;
-      return ERR_INVALID_TAIL;
-    }
-  } while (current != end1 && current != end2);
-  return ERR_NO_ERROR;
+    num_items++;
+  } while (node->address().value() != address.value());
+  return num_items;
 }
 
 bool Rankings::IsHead(CacheAddr addr, List* list) const {

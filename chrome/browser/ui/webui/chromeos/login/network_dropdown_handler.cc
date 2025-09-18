@@ -1,16 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/chromeos/login/network_dropdown_handler.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/values.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_dropdown.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
-
-const char kJsScreenPath[] = "cr.ui.DropDown";
 
 // JS API callbacks names.
 const char kJsApiNetworkItemChosen[] = "networkItemChosen";
@@ -22,69 +26,78 @@ const char kJsApiNetworkDropdownRefresh[] = "networkDropdownRefresh";
 
 namespace chromeos {
 
-NetworkDropdownHandler::NetworkDropdownHandler()
-    : BaseScreenHandler(kJsScreenPath) {
+NetworkDropdownHandler::NetworkDropdownHandler() {
 }
 
 NetworkDropdownHandler::~NetworkDropdownHandler() {
 }
 
-void NetworkDropdownHandler::AddObserver(Observer* observer) {
-  if (observer && !observers_.HasObserver(observer))
-    observers_.AddObserver(observer);
-}
-
-void NetworkDropdownHandler::RemoveObserver(Observer* observer) {
-  observers_.RemoveObserver(observer);
-}
-
-void NetworkDropdownHandler::DeclareLocalizedValues(
-    LocalizedValuesBuilder* builder) {
-  builder->Add("selectNetwork", IDS_NETWORK_SELECTION_SELECT);
-  builder->Add("selectAnotherNetwork", IDS_ANOTHER_NETWORK_SELECTION_SELECT);
+void NetworkDropdownHandler::GetLocalizedStrings(
+    base::DictionaryValue* localized_strings) {
+  localized_strings->SetString("selectNetwork",
+      l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_SELECT));
 }
 
 void NetworkDropdownHandler::Initialize() {
 }
 
 void NetworkDropdownHandler::RegisterMessages() {
-  AddCallback(kJsApiNetworkItemChosen,
-              &NetworkDropdownHandler::HandleNetworkItemChosen);
-  AddCallback(kJsApiNetworkDropdownShow,
-              &NetworkDropdownHandler::HandleNetworkDropdownShow);
-  AddCallback(kJsApiNetworkDropdownHide,
-              &NetworkDropdownHandler::HandleNetworkDropdownHide);
-  AddCallback(kJsApiNetworkDropdownRefresh,
-              &NetworkDropdownHandler::HandleNetworkDropdownRefresh);
+  web_ui()->RegisterMessageCallback(kJsApiNetworkItemChosen,
+      base::Bind(&NetworkDropdownHandler::HandleNetworkItemChosen,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(kJsApiNetworkDropdownShow,
+      base::Bind(&NetworkDropdownHandler::HandleNetworkDropdownShow,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(kJsApiNetworkDropdownHide,
+      base::Bind(&NetworkDropdownHandler::HandleNetworkDropdownHide,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(kJsApiNetworkDropdownRefresh,
+      base::Bind(&NetworkDropdownHandler::HandleNetworkDropdownRefresh,
+                 base::Unretained(this)));
 }
 
-void NetworkDropdownHandler::OnConnectToNetworkRequested(
-    const std::string& service_path) {
-  FOR_EACH_OBSERVER(Observer, observers_,
-                    OnConnectToNetworkRequested(service_path));
-}
-
-void NetworkDropdownHandler::HandleNetworkItemChosen(double id) {
-  if (dropdown_.get()) {
-    dropdown_->OnItemChosen(static_cast<int>(id));
-  } else {
-    // It could happen with very low probability but still keep NOTREACHED to
-    // detect if it starts happening all the time.
+void NetworkDropdownHandler::HandleNetworkItemChosen(
+    const base::ListValue* args) {
+  DCHECK(args->GetSize() == 1);
+  double id;
+  if (!args->GetDouble(0, &id))
     NOTREACHED();
-  }
+  DCHECK(dropdown_.get());
+  dropdown_->OnItemChosen(static_cast<int>(id));
 }
 
 void NetworkDropdownHandler::HandleNetworkDropdownShow(
-    const std::string& element_id,
-    bool oobe) {
-  dropdown_.reset(new NetworkDropdown(this, web_ui(), oobe));
+    const base::ListValue* args) {
+  DCHECK(args->GetSize() == 3);
+  std::string element_id;
+  if (!args->GetString(0, &element_id))
+    NOTREACHED();
+  bool oobe;
+  if (!args->GetBoolean(1, &oobe))
+    NOTREACHED();
+
+
+  double last_network_type = -1;  // Javascript passes integer as double.
+  if (!args->GetDouble(2, &last_network_type))
+    NOTREACHED();
+
+  dropdown_.reset(new NetworkDropdown(web_ui(), oobe));
+
+  if (last_network_type >= 0) {
+    dropdown_->SetLastNetworkType(
+        static_cast<ConnectionType>(last_network_type));
+  }
 }
 
-void NetworkDropdownHandler::HandleNetworkDropdownHide() {
+void NetworkDropdownHandler::HandleNetworkDropdownHide(
+    const base::ListValue* args) {
+  DCHECK(args->GetSize() == 0);
   dropdown_.reset();
 }
 
-void NetworkDropdownHandler::HandleNetworkDropdownRefresh() {
+void NetworkDropdownHandler::HandleNetworkDropdownRefresh(
+    const base::ListValue* args) {
+  DCHECK(args->GetSize() == 0);
   // Since language change is async,
   // we may in theory be on another screen during this call.
   if (dropdown_.get())

@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/command_observer_bridge.h"
-#include "chrome/browser/command_updater.h"
 
 #include "base/logging.h"
 

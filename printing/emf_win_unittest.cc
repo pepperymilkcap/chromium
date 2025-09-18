@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,11 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/scoped_temp_dir.h"
 #include "base/win/scoped_hdc.h"
 #include "printing/printing_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -86,7 +86,7 @@ TEST_F(EmfPrintingTest, Enumerate) {
   scoped_ptr<PrintingContext> context(PrintingContext::Create(std::string()));
   EXPECT_EQ(context->InitWithSettings(settings), PrintingContext::OK);
 
-  base::FilePath emf_file;
+  FilePath emf_file;
   EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &emf_file));
   emf_file = emf_file.Append(FILE_PATH_LITERAL("printing"))
                      .Append(FILE_PATH_LITERAL("test"))
@@ -95,7 +95,7 @@ TEST_F(EmfPrintingTest, Enumerate) {
   // Load any EMF with an image.
   Emf emf;
   std::string emf_data;
-  base::ReadFileToString(emf_file, &emf_data);
+  file_util::ReadFileToString(emf_file, &emf_data);
   ASSERT_TRUE(emf_data.size());
   EXPECT_TRUE(emf.InitFromData(&emf_data[0], emf_data.size()));
 
@@ -116,7 +116,7 @@ TEST_F(EmfPrintingTest, Enumerate) {
     // If you get this assert, you need to lookup iType in wingdi.h. It starts
     // with EMR_HEADER.
     EMR_HEADER;
-    EXPECT_TRUE(itr->SafePlayback(&emf_enum.context_)) <<
+    EXPECT_TRUE(itr->SafePlayback(NULL)) <<
         " index: " << index << " type: " << itr->record()->iType;
   }
   context->PageDone();
@@ -169,11 +169,11 @@ TEST_F(EmfPrintingTest, PageBreak) {
 
 TEST(EmfTest, FileBackedEmf) {
   // Simplest use case.
-  base::ScopedTempDir scratch_metafile_dir;
+  ScopedTempDir scratch_metafile_dir;
   ASSERT_TRUE(scratch_metafile_dir.CreateUniqueTempDir());
-  base::FilePath metafile_path;
-  EXPECT_TRUE(base::CreateTemporaryFileInDir(scratch_metafile_dir.path(),
-                                             &metafile_path));
+  FilePath metafile_path;
+  EXPECT_TRUE(file_util::CreateTemporaryFileInDir(scratch_metafile_dir.path(),
+                                                  &metafile_path));
   uint32 size;
   std::vector<BYTE> data;
   {
@@ -189,7 +189,7 @@ TEST(EmfTest, FileBackedEmf) {
     EXPECT_EQ(data.size(), size);
   }
   int64 file_size = 0;
-  base::GetFileSize(metafile_path, &file_size);
+  file_util::GetFileSize(metafile_path, &file_size);
   EXPECT_EQ(size, file_size);
 
   // Playback the data.
@@ -200,31 +200,6 @@ TEST(EmfTest, FileBackedEmf) {
   RECT output_rect = {0, 0, 10, 10};
   EXPECT_TRUE(emf.Playback(hdc, &output_rect));
   EXPECT_TRUE(DeleteDC(hdc));
-}
-
-TEST(EmfTest, RasterizeMetafile) {
-  Emf emf;
-  EXPECT_TRUE(emf.Init());
-  EXPECT_TRUE(emf.context() != NULL);
-  HBRUSH brush = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-  for (int i = 0; i < 4; ++i) {
-    RECT rect = { 5 + i, 5 + i, 5 + i + 1, 5 + i + 2};
-    FillRect(emf.context(), &rect, brush);
-  }
-  EXPECT_TRUE(emf.FinishDocument());
-
-  scoped_ptr<Emf> raster(emf.RasterizeMetafile(1));
-  // Just 1px bitmap but should be stretched to the same bounds.
-  EXPECT_EQ(emf.GetPageBounds(1), raster->GetPageBounds(1));
-
-  raster.reset(emf.RasterizeMetafile(20));
-  EXPECT_EQ(emf.GetPageBounds(1), raster->GetPageBounds(1));
-
-  raster.reset(emf.RasterizeMetafile(16*1024*1024));
-  // Expected size about 64MB.
-  EXPECT_LE(abs(int(raster->GetDataSize()) - 64*1024*1024), 1024*1024);
-  // Bounds should still be the same.
-  EXPECT_EQ(emf.GetPageBounds(1), raster->GetPageBounds(1));
 }
 
 }  // namespace printing

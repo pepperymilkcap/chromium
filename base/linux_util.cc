@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glib.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -19,8 +20,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
-#include "base/process/launch.h"
-#include "base/strings/string_util.h"
+#include "base/process_util.h"
+#include "base/string_util.h"
 #include "base/synchronization/lock.h"
 
 namespace {
@@ -102,7 +103,7 @@ bool ProcPathGetInode(ino_t* inode_out, const char* path, bool log = false) {
     return false;
   }
 
-  char* endptr;
+  char *endptr;
   const unsigned long long int inode_ul =
       strtoull(buf + sizeof(kSocketLinkPrefix) - 1, &endptr, 10);
   if (*endptr != ']')
@@ -124,50 +125,52 @@ bool ProcPathGetInode(ino_t* inode_out, const char* path, bool log = false) {
 
 namespace base {
 
-const char kFindInodeSwitch[] = "--find-inode";
-
 // Account for the terminating null character.
 static const int kDistroSize = 128 + 1;
 
 // We use this static string to hold the Linux distro info. If we
 // crash, the crash handler code will send this in the crash dump.
 char g_linux_distro[kDistroSize] =
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(USE_AURA)
+    "CrOS Aura";
+#elif defined(OS_CHROMEOS)
     "CrOS";
-#elif defined(OS_ANDROID)
-    "Android";
 #else  // if defined(OS_LINUX)
     "Unknown";
 #endif
 
 std::string GetLinuxDistro() {
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(OS_CHROMEOS)
   return g_linux_distro;
 #elif defined(OS_LINUX)
   LinuxDistroHelper* distro_state_singleton = LinuxDistroHelper::GetInstance();
   LinuxDistroState state = distro_state_singleton->State();
-  if (STATE_CHECK_FINISHED == state)
-    return g_linux_distro;
-  if (STATE_CHECK_STARTED == state)
-    return "Unknown"; // Don't wait for other thread to finish.
-  DCHECK_EQ(state, STATE_DID_NOT_CHECK);
-  // We do this check only once per process. If it fails, there's
-  // little reason to believe it will work if we attempt to run
-  // lsb_release again.
-  std::vector<std::string> argv;
-  argv.push_back("lsb_release");
-  argv.push_back("-d");
-  std::string output;
-  base::GetAppOutput(CommandLine(argv), &output);
-  if (output.length() > 0) {
-    // lsb_release -d should return: Description:<tab>Distro Info
-    const char field[] = "Description:\t";
-    if (output.compare(0, strlen(field), field) == 0) {
-      SetLinuxDistro(output.substr(strlen(field)));
+  if (STATE_DID_NOT_CHECK == state) {
+    // We do this check only once per process. If it fails, there's
+    // little reason to believe it will work if we attempt to run
+    // lsb_release again.
+    std::vector<std::string> argv;
+    argv.push_back("lsb_release");
+    argv.push_back("-d");
+    std::string output;
+    base::GetAppOutput(CommandLine(argv), &output);
+    if (output.length() > 0) {
+      // lsb_release -d should return: Description:<tab>Distro Info
+      const char field[] = "Description:\t";
+      if (output.compare(0, strlen(field), field) == 0) {
+        SetLinuxDistro(output.substr(strlen(field)));
+      }
     }
+    distro_state_singleton->CheckFinished();
+    return g_linux_distro;
+  } else if (STATE_CHECK_STARTED == state) {
+    // If the distro check above is in progress in some other thread, we're
+    // not going to wait for the results.
+    return "Unknown";
+  } else {
+    // In STATE_CHECK_FINISHED, no more writing to |linux_distro|.
+    return g_linux_distro;
   }
-  distro_state_singleton->CheckFinished();
-  return g_linux_distro;
 #else
   NOTIMPLEMENTED();
   return "Unknown";
@@ -208,7 +211,7 @@ bool FindProcessHoldingSocket(pid_t* pid_out, ino_t socket_inode) {
 
   struct dirent* dent;
   while ((dent = readdir(proc))) {
-    char* endptr;
+    char *endptr;
     const unsigned long int pid_ul = strtoul(dent->d_name, &endptr, 10);
     if (pid_ul == ULONG_MAX || *endptr)
       continue;
@@ -231,7 +234,7 @@ bool FindProcessHoldingSocket(pid_t* pid_out, ino_t socket_inode) {
         continue;
       }
 
-      ino_t fd_inode = static_cast<ino_t>(-1);
+      ino_t fd_inode;
       if (ProcPathGetInode(&fd_inode, buf)) {
         if (fd_inode == socket_inode) {
           if (already_found) {
@@ -269,7 +272,7 @@ pid_t FindThreadIDWithSyscall(pid_t pid, const std::string& expected_data,
   std::vector<pid_t> tids;
   struct dirent* dent;
   while ((dent = readdir(task))) {
-    char* endptr;
+    char *endptr;
     const unsigned long int tid_ul = strtoul(dent->d_name, &endptr, 10);
     if (tid_ul == ULONG_MAX || *endptr)
       continue;
@@ -277,7 +280,7 @@ pid_t FindThreadIDWithSyscall(pid_t pid, const std::string& expected_data,
   }
   closedir(task);
 
-  scoped_ptr<char[]> syscall_data(new char[expected_data.length()]);
+  scoped_array<char> syscall_data(new char[expected_data.length()]);
   for (std::vector<pid_t>::const_iterator
        i = tids.begin(); i != tids.end(); ++i) {
     const pid_t current_tid = *i;
@@ -287,7 +290,8 @@ pid_t FindThreadIDWithSyscall(pid_t pid, const std::string& expected_data,
       continue;
     if (syscall_supported != NULL)
       *syscall_supported = true;
-    bool read_ret = ReadFromFD(fd, syscall_data.get(), expected_data.length());
+    bool read_ret =
+        file_util::ReadFromFD(fd, syscall_data.get(), expected_data.length());
     close(fd);
     if (!read_ret)
       continue;

@@ -13,67 +13,34 @@ using base::WaitableEvent;
 
 namespace browser_sync {
 
-PasswordModelWorker::PasswordModelWorker(
-    const scoped_refptr<PasswordStore>& password_store,
-    syncer::WorkerLoopDestructionObserver* observer)
-  : syncer::ModelSafeWorker(observer),
-    password_store_(password_store) {
-  DCHECK(password_store.get());
-}
-
-void PasswordModelWorker::RegisterForLoopDestruction() {
-  base::AutoLock lock(password_store_lock_);
-  password_store_->ScheduleTask(
-      base::Bind(&PasswordModelWorker::RegisterForPasswordLoopDestruction,
-                 this));
-}
-
-syncer::SyncerError PasswordModelWorker::DoWorkAndWaitUntilDoneImpl(
-    const syncer::WorkCallback& work) {
-  syncer::SyncerError error = syncer::UNSET;
-
-  bool scheduled = false;
-  {
-    base::AutoLock lock(password_store_lock_);
-    if (!password_store_.get())
-      return syncer::CANNOT_DO_WORK;
-
-    scheduled = password_store_->ScheduleTask(
-        base::Bind(&PasswordModelWorker::CallDoWorkAndSignalTask,
-                   this, work, work_done_or_stopped(), &error));
-  }
-
-  if (scheduled)
-    work_done_or_stopped()->Wait();
-  else
-    error = syncer::CANNOT_DO_WORK;
-  return error;
-}
-
-syncer::ModelSafeGroup PasswordModelWorker::GetModelSafeGroup() {
-  return syncer::GROUP_PASSWORD;
+PasswordModelWorker::PasswordModelWorker(PasswordStore* password_store)
+  : password_store_(password_store) {
+  DCHECK(password_store);
 }
 
 PasswordModelWorker::~PasswordModelWorker() {}
 
+SyncerError PasswordModelWorker::DoWorkAndWaitUntilDone(
+    const WorkCallback& work) {
+  WaitableEvent done(false, false);
+  SyncerError error = UNSET;
+  password_store_->ScheduleTask(
+      base::Bind(&PasswordModelWorker::CallDoWorkAndSignalTask,
+                 this, work, &done, &error));
+  done.Wait();
+  return error;
+}
+
 void PasswordModelWorker::CallDoWorkAndSignalTask(
-    const syncer::WorkCallback& work,
+    const WorkCallback& work,
     WaitableEvent* done,
-    syncer::SyncerError *error) {
+    SyncerError *error) {
   *error = work.Run();
   done->Signal();
 }
 
-void PasswordModelWorker::RegisterForPasswordLoopDestruction() {
-  base::MessageLoop::current()->AddDestructionObserver(this);
-  SetWorkingLoopToCurrent();
-}
-
-void PasswordModelWorker::RequestStop() {
-  ModelSafeWorker::RequestStop();
-
-  base::AutoLock lock(password_store_lock_);
-  password_store_ = NULL;
+ModelSafeGroup PasswordModelWorker::GetModelSafeGroup() {
+  return GROUP_PASSWORD;
 }
 
 }  // namespace browser_sync

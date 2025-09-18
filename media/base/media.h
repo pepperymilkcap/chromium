@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,13 @@
 
 #include "media/base/media_export.h"
 
-namespace base {
 class FilePath;
-}
 
 namespace media {
 
 // Attempts to initialize the media library (loading DLLs, DSOs, etc.).
 //
-// If |module_dir| is the empty string, then the system default library paths
+// If |module_dir| is the emptry string, then the system default library paths
 // are searched for the dynamic libraries.  If a |module_dir| is provided, then
 // only the specified |module_dir| will be searched for the dynamic libraries.
 //
@@ -27,7 +25,7 @@ namespace media {
 // of the process.
 //
 // Returns true if everything was successfully initialized, false otherwise.
-MEDIA_EXPORT bool InitializeMediaLibrary(const base::FilePath& module_dir);
+MEDIA_EXPORT bool InitializeMediaLibrary(const FilePath& module_dir);
 
 // Helper function for unit tests to avoid boiler plate code everywhere. This
 // function will crash if it fails to load the media library. This ensures tests
@@ -38,10 +36,10 @@ MEDIA_EXPORT void InitializeMediaLibraryForTesting();
 // for the this process, without actually trying to initialize it.
 MEDIA_EXPORT bool IsMediaLibraryInitialized();
 
-// Use this if you need to initialize CPU specific features WITHOUT loading
-// DLLs, DSOs, etc.  Only necessary if InitializeMediaLibrary() is not called;
-// does nothing if the media library has already been initialized.
-MEDIA_EXPORT void InitializeCPUSpecificMediaFeatures();
+// Attempts to initialize OpenMAX library.
+//
+// Returns true if OpenMAX was successfully initialized and loaded.
+bool InitializeOpenMaxLibrary(const FilePath& module_dir);
 
 }  // namespace media
 

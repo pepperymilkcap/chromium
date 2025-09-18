@@ -1,17 +1,14 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From ppp.idl modified Mon Feb 11 15:48:41 2013. */
+/* From ppp.idl modified Mon Aug  8 06:47:44 2011. */
 
 #ifndef PPAPI_C_PPP_H_
 #define PPAPI_C_PPP_H_
 
 #include "ppapi/c/pp_macros.h"
-#include "ppapi/c/pp_module.h"
-#include "ppapi/c/pp_stdint.h"
-#include "ppapi/c/ppb.h"
 
 /**
  * @file
@@ -31,7 +28,7 @@
 #define PP_EXPORT __declspec(dllexport)
 #endif
 
-/* {PENDING: undefine PP_EXPORT?} */
+// {PENDING: undefine PP_EXPORT?}
 
 /* We don't want name mangling for these external functions.  We only need
  * 'extern "C"' if we're compiling with a C++ compiler.
@@ -59,7 +56,7 @@ extern "C" {
  * for future use.
  *
  * @return <code>PP_OK</code> on success. Any other value on failure.
- */
+*/
 PP_EXPORT int32_t PPP_InitializeModule(PP_Module module,
                                        PPB_GetInterface get_browser_interface);
 /**
@@ -88,7 +85,7 @@ PP_EXPORT int32_t PPP_InitializeModule(PP_Module module,
  * implementations in certain circumstances when Chrome does "fast shutdown"
  * of a web page.
  */
-PP_EXPORT void PPP_ShutdownModule(void);
+PP_EXPORT void PPP_ShutdownModule();
 /**
  * @}
  */
@@ -129,31 +126,6 @@ PP_EXPORT const void* PPP_GetInterface(const char* interface_name);
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
-
-
-/**
- * @addtogroup Typedefs
- * @{
- */
-/**
- * Defines the type of the <code>PPP_InitializeModule</code> function.
- */
-typedef int32_t (*PP_InitializeModule_Func)(
-    PP_Module module,
-    PPB_GetInterface get_browser_interface);
-
-/**
- * Defines the type of the <code>PPP_ShutdownModule</code> function.
- */
-typedef void (*PP_ShutdownModule_Func)(void);
-
-/**
- * Defines the type of the <code>PPP_ShutdownModule</code> function.
- */
-typedef const void* (*PP_GetInterface_Func)(const char* interface_name);
-/**
- * @}
- */
 
 #endif  /* PPAPI_C_PPP_H_ */
 

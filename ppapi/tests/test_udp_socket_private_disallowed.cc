@@ -1,13 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/tests/test_udp_socket_private_disallowed.h"
 
 #include "ppapi/cpp/module.h"
-#include "ppapi/cpp/private/net_address_private.h"
 #include "ppapi/tests/testing_instance.h"
-#include "ppapi/tests/test_utils.h"
 
 REGISTER_TEST_CASE(UDPSocketPrivateDisallowed);
 
@@ -25,21 +23,15 @@ bool TestUDPSocketPrivateDisallowed::Init() {
 }
 
 void TestUDPSocketPrivateDisallowed::RunTests(const std::string& filter) {
-  RUN_TEST(Bind, filter);
+  RUN_TEST(Create, filter);
 }
 
-std::string TestUDPSocketPrivateDisallowed::TestBind() {
+std::string TestUDPSocketPrivateDisallowed::TestCreate() {
   PP_Resource socket =
       udp_socket_private_interface_->Create(instance_->pp_instance());
   if (0 != socket) {
-    PP_NetAddress_Private addr;
-    pp::NetAddressPrivate::GetAnyAddress(false, &addr);
-
-    TestCompletionCallback callback(instance_->pp_instance());
-    callback.WaitForResult(udp_socket_private_interface_->Bind(socket, &addr,
-        callback.GetCallback().pp_completion_callback()));
-    CHECK_CALLBACK_BEHAVIOR(callback);
-    ASSERT_EQ(PP_ERROR_FAILED, callback.result());
+    return "PPB_UDPSocket_Private::Create returns valid socket " \
+        "without allowing switch";
   }
   PASS();
 }

@@ -4,53 +4,55 @@
 
 #proxy-view-tab-content td,
 #proxy-view-tab-content th {
-  font-size: 85%;
-}
-
-#proxy-view-socks-hints {
-  border: 1px solid orange;
-  padding: 1ex;
-}
-
-#proxy-view-socks-hints-flag {
-  margin: 1ex;
+  font-size: 12px;
 }
 
 </style>
 
-<div id=proxy-view-tab-content class=content-box>
- <input type=button value="Re-apply settings" id=proxy-view-reload-settings class="hide-when-not-capturing">
+<div id=proxy-view-tab-content>
+  <h4>
+    Current proxy settings
+    <input type=button value="Re-apply settings" id=proxy-view-reload-settings class="hideOnLoadLog"/>
+  </h4>
 
-  <div id=proxy-view-effective-content>
-    <h4>Effective proxy settings</h4>
-    <pre id=proxy-view-effective-settings></pre>
-  </div>
+  <table><tr>
 
-  <div id=proxy-view-original-content>
-    <h4>Original proxy settings</h4>
-    <pre id=proxy-view-original-settings></pre>
-  </div>
+  <td valign=top>
+  <h3>Effective settings</h3>
+  <pre id=proxy-view-effective-settings></pre>
+  </td>
 
-  <div id=proxy-view-socks-hints>
-    Note that some traffic such as DNS prefetching will NOT go through the proxy
-    server. To prevent the browser from doing local DNS resolves try adding this
-    command line flag:
-    <pre id=proxy-view-socks-hints-flag></pre>
-  </div>
+  <td style='width: 30px'>&nbsp;</td>
 
-  <div id=proxy-view-bad-proxies-div style='display: none'>
-    <h4>
-      Recently failed proxies, marked as bad
-      <input type=button value="Clear bad proxies" id=proxy-view-clear-bad-proxies class="hide-when-not-capturing">
-    </h4>
-    <table class="styled-table">
-      <thead>
-        <tr>
-          <th>Bad proxy server</th>
-          <th>Time for next retry</th>
-        </tr>
-      </thead>
-      <tbody id=proxy-view-bad-proxies-tbody></tbody>
-    </table>
-  </div>
+  <td valign=top>
+  <h3>Original settings</h3>
+  <pre id=proxy-view-original-settings></pre>
+  </td>
+
+  </tr></table>
+
+  <h4>Proxy auto-config initialization</h4>
+  <ul>
+    <li>
+      <a href='#events&q=type:PROXY_SCRIPT_DECIDER'>View all events</a>
+    </li>
+    <li>
+      Latest proxy resolver event:
+      <div id=proxy-view-resolver-log class=event-log></div>
+    </li>
+  </ul>
+
+  <h4>
+    Proxies which have failed recently, and are marked as bad
+    <input type=button value="Clear bad proxies" id=proxy-view-clear-bad-proxies class="hideOnLoadLog" />
+  </h4>
+  <table class="styledTable">
+    <thead>
+      <tr>
+        <th>Bad proxy server</th>
+        <th>Time for next retry</th>
+      </tr>
+    </thead>
+    <tbody id=proxy-view-bad-proxies-tbody></tbody>
+  </table>
 </div>

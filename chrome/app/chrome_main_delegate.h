@@ -4,6 +4,7 @@
 
 #ifndef CHROME_APP_CHROME_MAIN_DELEGATE_H_
 #define CHROME_APP_CHROME_MAIN_DELEGATE_H_
+#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/stats_counters.h"
@@ -16,43 +17,33 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
   ChromeMainDelegate();
   virtual ~ChromeMainDelegate();
 
- protected:
-  // content::ContentMainDelegate implementation:
   virtual bool BasicStartupComplete(int* exit_code) OVERRIDE;
-  virtual void PreSandboxStartup() OVERRIDE;
-  virtual void SandboxInitialized(const std::string& process_type) OVERRIDE;
-  virtual int RunProcess(
-      const std::string& process_type,
-      const content::MainFunctionParams& main_function_params) OVERRIDE;
-  virtual void ProcessExiting(const std::string& process_type) OVERRIDE;
-#if defined(OS_MACOSX)
-  virtual bool ProcessRegistersWithSystemProcess(
-      const std::string& process_type) OVERRIDE;
-  virtual bool ShouldSendMachPort(const std::string& process_type) OVERRIDE;
-  virtual bool DelaySandboxInitialization(
-      const std::string& process_type) OVERRIDE;
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
-  virtual content::ZygoteForkDelegate* ZygoteStarting() OVERRIDE;
-  virtual void ZygoteForked() OVERRIDE;
-#endif
-  virtual content::ContentBrowserClient* CreateContentBrowserClient() OVERRIDE;
-  virtual content::ContentPluginClient* CreateContentPluginClient() OVERRIDE;
-  virtual content::ContentRendererClient*
-      CreateContentRendererClient() OVERRIDE;
-  virtual content::ContentUtilityClient* CreateContentUtilityClient() OVERRIDE;
 
 #if defined(OS_MACOSX)
   void InitMacCrashReporter(const CommandLine& command_line,
                             const std::string& process_type);
 #endif  // defined(OS_MACOSX)
 
-  ChromeContentClient chrome_content_client_;
+  virtual void PreSandboxStartup() OVERRIDE;
+  virtual void SandboxInitialized(const std::string& process_type) OVERRIDE;
+  virtual int RunProcess(
+      const std::string& process_type,
+      const content::MainFunctionParams& main_function_params) OVERRIDE;
+  virtual void ProcessExiting(const std::string& process_type) OVERRIDE;
 
-  // startup_timer_ will hold a reference to stats_counter_timer_. Therefore,
-  // the declaration order of these variables matters. Changing this order will
-  // cause startup_timer_ to be freed before stats_counter_timer_, leaving a
-  // dangling reference.
-  scoped_ptr<base::StatsCounterTimer> stats_counter_timer_;
+#if defined(OS_MACOSX)
+  virtual bool ProcessRegistersWithSystemProcess(
+      const std::string& process_type) OVERRIDE;
+  virtual bool ShouldSendMachPort(const std::string& process_type) OVERRIDE;
+  virtual bool DelaySandboxInitialization(
+      const std::string& process_type) OVERRIDE;
+#elif defined(OS_POSIX)
+  virtual content::ZygoteForkDelegate* ZygoteStarting() OVERRIDE;
+  virtual void ZygoteForked() OVERRIDE;
+#endif
+
+ private:
+  chrome::ChromeContentClient chrome_content_client_;
   scoped_ptr<base::StatsScope<base::StatsCounterTimer> > startup_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeMainDelegate);

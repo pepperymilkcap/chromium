@@ -3,77 +3,43 @@
 // found in the LICENSE file.
 
 #include "base/i18n/string_search.h"
-#include "base/logging.h"
 
-#include "third_party/icu/source/i18n/unicode/usearch.h"
+#include "unicode/usearch.h"
 
-namespace base {
-namespace i18n {
+namespace {
 
-FixedPatternStringSearchIgnoringCaseAndAccents::
-FixedPatternStringSearchIgnoringCaseAndAccents(const string16& find_this)
-    : find_this_(find_this) {
-  // usearch_open requires a valid string argument to be searched, even if we
-  // want to set it by usearch_setText afterwards. So, supplying a dummy text.
-  const string16& dummy = find_this_;
-
+bool CollationSensitiveStringSearch(const string16& find_this,
+                                    const string16& in_this,
+                                    UCollationStrength strength) {
   UErrorCode status = U_ZERO_ERROR;
-  search_ = usearch_open(find_this_.data(), find_this_.size(),
-                         dummy.data(), dummy.size(),
-                         uloc_getDefault(),
-                         NULL,  // breakiter
-                         &status);
-  if (U_SUCCESS(status)) {
-    UCollator* collator = usearch_getCollator(search_);
-    ucol_setStrength(collator, UCOL_PRIMARY);
-    usearch_reset(search_);
-  }
-}
 
-FixedPatternStringSearchIgnoringCaseAndAccents::
-~FixedPatternStringSearchIgnoringCaseAndAccents() {
-  if (search_)
-    usearch_close(search_);
-}
-
-bool FixedPatternStringSearchIgnoringCaseAndAccents::Search(
-    const string16& in_this, size_t* match_index, size_t* match_length) {
-  UErrorCode status = U_ZERO_ERROR;
-  usearch_setText(search_, in_this.data(), in_this.size(), &status);
+  UStringSearch* search = usearch_open(find_this.data(), -1, in_this.data(), -1,
+                                       uloc_getDefault(), NULL, &status);
 
   // Default to basic substring search if usearch fails. According to
   // http://icu-project.org/apiref/icu4c/usearch_8h.html, usearch_open will fail
   // if either |find_this| or |in_this| are empty. In either case basic
   // substring search will give the correct return value.
-  if (!U_SUCCESS(status)) {
-    size_t index = in_this.find(find_this_);
-    if (index == string16::npos) {
-      return false;
-    } else {
-      if (match_index)
-        *match_index = index;
-      if (match_length)
-        *match_length = find_this_.size();
-      return true;
-    }
-  }
+  if (!U_SUCCESS(status))
+    return in_this.find(find_this) != string16::npos;
 
-  int32_t index = usearch_first(search_, &status);
-  if (!U_SUCCESS(status) || index == USEARCH_DONE)
-    return false;
-  if (match_index)
-    *match_index = static_cast<size_t>(index);
-  if (match_length)
-    *match_length = static_cast<size_t>(usearch_getMatchedLength(search_));
-  return true;
+  UCollator* collator = usearch_getCollator(search);
+  ucol_setStrength(collator, strength);
+  usearch_reset(search);
+
+  bool result = usearch_first(search, &status) != USEARCH_DONE;
+  usearch_close(search);
+  return result;
 }
 
+}  // namespace
+
+namespace base {
+namespace i18n {
+
 bool StringSearchIgnoringCaseAndAccents(const string16& find_this,
-                                        const string16& in_this,
-                                        size_t* match_index,
-                                        size_t* match_length) {
-  return FixedPatternStringSearchIgnoringCaseAndAccents(find_this).Search(
-      in_this, match_index, match_length);
+                                        const string16& in_this) {
+  return CollationSensitiveStringSearch(find_this, in_this, UCOL_PRIMARY);
 }
 
 }  // namespace i18n

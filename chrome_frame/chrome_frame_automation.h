@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,12 @@
 #include <string>
 #include <vector>
 
-#include "base/containers/stack_container.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_handle.h"
+#include "base/stack_container.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome_frame/chrome_frame_delegate.h"
@@ -45,6 +45,7 @@ struct DECLSPEC_NOVTABLE ChromeFrameAutomationProxy {  // NOLINT
   virtual void ReleaseTabProxy(AutomationHandle handle) = 0;
   virtual std::string server_version() = 0;
 
+  virtual void SendProxyConfig(const std::string&) = 0;
  protected:
   virtual ~ChromeFrameAutomationProxy() {}
 };
@@ -83,11 +84,15 @@ class ChromeFrameAutomationProxyImpl
     return AutomationProxy::Send(msg);
   }
 
+  virtual void SendProxyConfig(const std::string& p) {
+    AutomationProxy::SendProxyConfig(p);
+  }
+
  protected:
   friend class AutomationProxyCacheEntry;
   ChromeFrameAutomationProxyImpl(AutomationProxyCacheEntry* entry,
                                  std::string channel_id,
-                                 base::TimeDelta launch_timeout);
+                                 int launch_timeout);
 
   class CFMsgDispatcher;
   class TabProxyNotificationMessageFilter;
@@ -102,7 +107,7 @@ class ChromeFrameLaunchParams :  // NOLINT
     public base::RefCountedThreadSafe<ChromeFrameLaunchParams> {
  public:
   ChromeFrameLaunchParams(const GURL& url, const GURL& referrer,
-                          const base::FilePath& profile_path,
+                          const FilePath& profile_path,
                           const std::wstring& profile_name,
                           const std::wstring& language,
                           bool incognito, bool widget_mode,
@@ -142,7 +147,7 @@ class ChromeFrameLaunchParams :  // NOLINT
     referrer_ = referrer;
   }
 
-  const base::FilePath& profile_path() const {
+  const FilePath& profile_path() const {
     return profile_path_;
   }
 
@@ -183,7 +188,7 @@ class ChromeFrameLaunchParams :  // NOLINT
   int launch_timeout_;
   GURL url_;
   GURL referrer_;
-  base::FilePath profile_path_;
+  FilePath profile_path_;
   std::wstring profile_name_;
   std::wstring language_;
   bool version_check_;
@@ -221,8 +226,7 @@ class AutomationProxyCacheEntry
 
   DWORD WaitForThread(DWORD timeout) {  // NOLINT
     DCHECK(thread_.get());
-    return ::WaitForSingleObject(thread_->thread_handle().platform_handle(),
-                                 timeout);
+    return ::WaitForSingleObject(thread_->thread_handle(), timeout);
   }
 
   bool IsSameProfile(const std::wstring& name) const {
@@ -233,7 +237,7 @@ class AutomationProxyCacheEntry
     return thread_.get();
   }
 
-  base::MessageLoop* message_loop() const {
+  MessageLoop* message_loop() const {
     return thread_->message_loop();
   }
 
@@ -283,7 +287,7 @@ class ProxyFactory {
                                        LaunchDelegate* delegate);
 
  private:
-  typedef base::StackVector<scoped_refptr<AutomationProxyCacheEntry>, 4> Vector;
+  typedef StackVector<scoped_refptr<AutomationProxyCacheEntry>, 4> Vector;
   Vector proxies_;
   // Lock if we are going to call GetAutomationServer from more than one thread.
   base::Lock lock_;
@@ -313,10 +317,18 @@ class ChromeFrameAutomationClient
       const std::string& referrer,
       NavigationConstraints* navigation_constraints);
 
+  virtual bool NavigateToIndex(int index);
+  bool ForwardMessageFromExternalHost(const std::string& message,
+                                      const std::string& origin,
+                                      const std::string& target);
+  bool SetProxySettings(const std::string& json_encoded_proxy_settings);
+
   void FindInPage(const std::wstring& search_string,
                   FindInPageDirection forward,
                   FindInPageCase match_case,
                   bool find_next);
+
+  virtual void OnChromeFrameHostMoved();
 
   TabProxy* tab() const { return tab_.get(); }
 
@@ -325,8 +337,15 @@ class ChromeFrameAutomationClient
         TaskMarshallerThroughWindowsMessages<ChromeFrameAutomationClient>)
   END_MSG_MAP()
 
+  // Resizes the hosted chrome window. This is brokered to the chrome
+  // automation instance as the host browser could be running under low IL,
+  // which would cause the SetWindowPos call to fail.
+  void Resize(int width, int height, int flags);
+
   // Sets the passed in window as the parent of the external tab.
   void SetParentWindow(HWND parent_window);
+
+  void SendContextMenuCommandToChromeFrame(int selected_command);
 
   HWND tab_window() const {
     return tab_window_;
@@ -340,10 +359,13 @@ class ChromeFrameAutomationClient
   // BitBlts the contents of the chrome window to the print dc.
   void Print(HDC print_dc, const RECT& print_bounds);
 
+  // Called in full tab mode and indicates a request to chrome to print
+  // the whole tab.
+  void PrintTab();
+
   void set_use_chrome_network(bool use_chrome_network) {
     use_chrome_network_ = use_chrome_network;
   }
-
   bool use_chrome_network() const {
     return use_chrome_network_;
   }
@@ -361,10 +383,26 @@ class ChromeFrameAutomationClient
   // Url request manager set up.
   void SetUrlFetcher(PluginUrlRequestManager* url_fetcher);
 
+  // Attaches an existing external tab to this automation client instance.
+  void AttachExternalTab(uint64 external_tab_cookie);
+  void BlockExternalTab(uint64 cookie);
+
   void SetPageFontSize(enum AutomationPageFontSize);
 
   // For IDeleteBrowsingHistorySupport
   void RemoveBrowsingData(int remove_mask);
+
+  // Sets the current zoom level on the tab.
+  void SetZoomLevel(content::PageZoom zoom_level);
+
+  // Fires before unload and unload handlers on the page if any. Allows the
+  // the website to put up a confirmation dialog on unload.
+  void OnUnload(bool* should_unload);
+
+  void set_route_all_top_level_navigations(
+      bool route_all_top_level_navigations) {
+    route_all_top_level_navigations_ = route_all_top_level_navigations;
+  }
 
  protected:
   // ChromeFrameAutomationProxy::LaunchDelegate implementation.
@@ -375,6 +413,15 @@ class ChromeFrameAutomationClient
   // TabProxyDelegate implementation
   virtual bool OnMessageReceived(TabProxy* tab, const IPC::Message& msg);
   virtual void OnChannelError(TabProxy* tab);
+
+  void CreateExternalTab();
+  AutomationLaunchResult CreateExternalTabComplete(HWND chrome_window,
+                                                   HWND tab_window,
+                                                   int tab_handle,
+                                                   int session_id);
+  // Called in UI thread. Here we fire event to the client notifying for
+  // the result of Initialize() method call.
+  void InitializeComplete(AutomationLaunchResult result);
 
   virtual void OnFinalMessage(HWND wnd) {
     Release();
@@ -389,11 +436,27 @@ class ChromeFrameAutomationClient
   void OnChannelErrorUIThread();
 
   HWND chrome_window() const { return chrome_window_; }
+  void BeginNavigate();
   void BeginNavigateCompleted(AutomationMsg_NavigationResponseValues result);
 
   // Helpers
   void ReportNavigationError(AutomationMsg_NavigationResponseValues error_code,
                              const std::string& url);
+
+  bool ProcessUrlRequestMessage(TabProxy* tab, const IPC::Message& msg,
+                                bool ui_thread);
+
+  // PluginUrlRequestDelegate implementation. Simply adds tab's handle
+  // as parameter and forwards to Chrome via IPC.
+  virtual void OnResponseStarted(int request_id, const char* mime_type,
+      const char* headers, int size, base::Time last_modified,
+      const std::string& redirect_url, int redirect_status,
+      const net::HostPortPair& socket_address);
+  virtual void OnReadComplete(int request_id, const std::string& data);
+  virtual void OnResponseEnd(int request_id,
+                             const net::URLRequestStatus& status);
+  virtual void OnCookiesRetrieved(bool success, const GURL& url,
+      const std::string& cookie_string, int cookie_id);
 
   bool is_initialized() const {
     return init_state_ == INITIALIZED;
@@ -430,6 +493,8 @@ class ChromeFrameAutomationClient
   int tab_handle_;
   // The SessionId used by Chrome as the id in the Javascript Tab object.
   int session_id_;
+  // Only used if we attach to an existing tab.
+  uint64 external_tab_cookie_;
 
   // Set to true if we received a navigation request prior to the automation
   // server being initialized.

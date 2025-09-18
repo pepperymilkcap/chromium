@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,7 @@
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
-#include "ppapi/c/ppb_console.h"
-#include "ppapi/cpp/instance_handle.h"
 #include "ppapi/cpp/view.h"
-
-// Windows defines 'PostMessage', so we have to undef it.
-#ifdef PostMessage
-#undef PostMessage
-#endif
 
 struct PP_InputEvent;
 
@@ -31,7 +24,6 @@ namespace pp {
 class Graphics2D;
 class Graphics3D;
 class InputEvent;
-class InstanceHandle;
 class Rect;
 class URLLoader;
 class Var;
@@ -68,7 +60,8 @@ class Instance {
   virtual ~Instance();
 
   /// This function returns the <code>PP_Instance</code> identifying this
-  /// object.
+  /// object. When using the PPAPI C++ wrappers this is not normally necessary,
+  /// but is required when using the lower-level C APIs.
   ///
   /// @return A <code>PP_Instance</code> identifying this object.
   PP_Instance pp_instance() const { return pp_instance_; }
@@ -92,7 +85,7 @@ class Instance {
   /// match the indices of the corresponding names in <code>argn</code>.
   ///
   /// @return true on success. Returning false causes the instance to be
-  /// deleted and no other functions to be called.
+  /// instance to be deleted and no other functions to be called.
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]);
 
   /// @{
@@ -139,7 +132,7 @@ class Instance {
   /// the clip when the instance is partially visible. Instead, update the
   /// entire region. The time saved doing partial paints is usually not
   /// significant and it can create artifacts when scrolling (this notification
-  /// is sent asynchronously from scrolling so there can be flashes of old
+  /// is sent asynchronously from scolling so there can be flashes of old
   /// content in the exposed regions).
   virtual void DidChangeView(const Rect& position, const Rect& clip);
 
@@ -147,22 +140,12 @@ class Instance {
   /// Having focus means that keyboard events will be sent to the instance.
   /// An instance's default condition is that it will not have focus.
   ///
-  /// The focus flag takes into account both browser tab and window focus as
-  /// well as focus of the plugin element on the page. In order to be deemed
-  /// to have focus, the browser window must be topmost, the tab must be
-  /// selected in the window, and the instance must be the focused element on
-  /// the page.
-  ///
   /// <strong>Note:</strong>Clicks on instances will give focus only if you
-  /// handle the click event. Return <code>true</code> from
-  /// <code>HandleInputEvent</code> in <code>PPP_InputEvent</code> (or use
-  /// unfiltered events) to signal that the click event was handled. Otherwise,
-  /// the browser will bubble the event and give focus to the element on the
-  /// page that actually did end up consuming it. If you're not getting focus,
-  /// check to make sure you're either requesting them via
-  /// <code>RequestInputEvents()<code> (which implicitly marks all input events
-  /// as consumed) or via <code>RequestFilteringInputEvents()</code> and
-  /// returning true from your event handler.
+  /// handle the click event. Return <code>true</code> from HandleInputEvent to
+  /// signal that the click event was handled. Otherwise the browser will bubble
+  /// the event and give focus to the element on the page that actually did end
+  /// up consuming it. If you're not getting focus, check to make sure you're
+  /// returning true from the mouse click in <code>HandleInputEvent</code>.
   ///
   /// @param[in] has_focus Indicates the new focused state of the instance.
   virtual void DidChangeFocus(bool has_focus);
@@ -244,19 +227,13 @@ class Instance {
   /// JavaScript execution will not be blocked while HandleMessage() is
   /// processing the message.
   ///
-  /// When converting JavaScript arrays, any object properties whose name
-  /// is not an array index are ignored. When passing arrays and objects, the
-  /// entire reference graph will be converted and transferred. If the reference
-  /// graph has cycles, the message will not be sent and an error will be logged
-  /// to the console.
-  ///
   /// <strong>Example:</strong>
   ///
   /// The following JavaScript code invokes <code>HandleMessage</code>, passing
   /// the instance on which it was invoked, with <code>message</code> being a
   /// string <code>Var</code> containing "Hello world!"
   ///
-  /// @code{.html}
+  /// <code>
   ///
   /// <body>
   ///   <object id="plugin"
@@ -266,14 +243,13 @@ class Instance {
   ///   </script>
   /// </body>
   ///
-  /// @endcode
+  /// </code>
   ///
   /// Refer to PostMessage() for sending messages to JavaScript.
   ///
-  /// @param[in] message A <code>Var</code> which has been converted from a
-  /// JavaScript value. JavaScript array/object types are supported from Chrome
-  /// M29 onward. All JavaScript values are copied when passing them to the
-  /// plugin.
+  /// @param[in] message A <code>Var</code> containing the data sent from
+  /// JavaScript. Message can have an int32_t, double, bool, or string value
+  /// (objects are not supported).
   virtual void HandleMessage(const Var& message);
 
   /// @}
@@ -340,7 +316,7 @@ class Instance {
   /// do optimizations for scroll or touch events that can be processed
   /// substantially faster if it knows there are no non-default receivers for
   /// that message. Requesting that such messages be delivered, even if they are
-  /// processed very quickly, may have a noticeable effect on the performance of
+  /// processed very quickly, may have a noticable effect on the performance of
   /// the page.
   ///
   /// When requesting input events through this function, the events will be
@@ -350,12 +326,12 @@ class Instance {
   ///
   /// <strong>Example:</strong>
   ///
-  /// @code
+  /// <code>
   ///   RequestInputEvents(PP_INPUTEVENT_CLASS_MOUSE);
   ///   RequestFilteringInputEvents(
   ///       PP_INPUTEVENT_CLASS_WHEEL | PP_INPUTEVENT_CLASS_KEYBOARD);
   ///
-  /// @endcode
+  /// </code>
   ///
   /// @param event_classes A combination of flags from
   /// <code>PP_InputEvent_Class</code> that identifies the classes of events
@@ -388,13 +364,13 @@ class Instance {
   ///
   /// <strong>Example:</strong>
   ///
-  /// @code
+  /// <code>
   ///
   ///   RequestInputEvents(PP_INPUTEVENT_CLASS_MOUSE);
   ///   RequestFilteringInputEvents(
   ///       PP_INPUTEVENT_CLASS_WHEEL | PP_INPUTEVENT_CLASS_KEYBOARD);
   ///
-  /// @endcode
+  /// </code>
   ///
   /// @param event_classes A combination of flags from
   /// <code>PP_InputEvent_Class</code> that identifies the classes of events
@@ -435,35 +411,30 @@ class Instance {
   ///
   /// <strong>Example:</strong>
   ///
-  /// @code{.html}
+  /// <code>
   ///
   /// <body>
   ///   <object id="plugin"
   ///           type="application/x-ppapi-postMessage-example"/>
   ///   <script type="text/javascript">
   ///     var plugin = document.getElementById('plugin');
-  ///     plugin.addEventListener("message",
+  ///     plugin.AddEventListener("message",
   ///                             function(message) { alert(message.data); },
   ///                             false);
   ///   </script>
   /// </body>
   ///
-  /// @endcode
+  /// </code>
   ///
   /// The instance then invokes PostMessage() as follows:
   ///
-  /// @code
+  /// <code>
   ///
   ///  PostMessage(pp::Var("Hello world!"));
   ///
-  /// @endcode
+  /// </code>
   ///
   /// The browser will pop-up an alert saying "Hello world!"
-  ///
-  /// When passing array or dictionary <code>PP_Var</code>s, the entire
-  /// reference graph will be converted and transferred. If the reference graph
-  /// has cycles, the message will not be sent and an error will be logged to
-  /// the console.
   ///
   /// Listeners for message events in JavaScript code will receive an object
   /// conforming to the HTML 5 <code>MessageEvent</code> interface.
@@ -478,38 +449,15 @@ class Instance {
   /// Refer to HandleMessage() for receiving events from JavaScript.
   ///
   /// @param[in] message A <code>Var</code> containing the data to be sent to
-  /// JavaScript. Message can have a numeric, boolean, or string value.
-  /// Array/Dictionary types are supported from Chrome M29 onward.
-  /// All var types are copied when passing them to JavaScript.
+  /// JavaScript. Message can have a numeric, boolean, or string value; arrays
+  /// and dictionaries are not yet supported. Ref-counted var types are copied,
+  /// and are therefore not shared between the instance and the browser.
   void PostMessage(const Var& message);
 
   /// @}
 
-  /// @{
-  /// @name PPB_Console methods for logging to the console:
-
-  /// Logs the given message to the JavaScript console associated with the
-  /// given plugin instance with the given logging level. The name of the plugin
-  /// issuing the log message will be automatically prepended to the message.
-  /// The value may be any type of Var.
-  void LogToConsole(PP_LogLevel level, const Var& value);
-
-  /// Logs a message to the console with the given source information rather
-  /// than using the internal PPAPI plugin name. The name must be a string var.
-  ///
-  /// The regular log function will automatically prepend the name of your
-  /// plugin to the message as the "source" of the message. Some plugins may
-  /// wish to override this. For example, if your plugin is a Python
-  /// interpreter, you would want log messages to contain the source .py file
-  /// doing the log statement rather than have "python" show up in the console.
-  void LogToConsoleWithSource(PP_LogLevel level,
-                              const Var& source,
-                              const Var& value);
-
-  /// @}
-
   /// AddPerInstanceObject() associates an instance with an interface,
-  /// creating an object.
+  /// creating an object... {PENDING: clarify!}
   ///
   /// Many optional interfaces are associated with a plugin instance. For
   /// example, the find in PPP_Find interface receives updates on a per-instance
@@ -538,7 +486,7 @@ class Instance {
   /// @param[in] object
   void AddPerInstanceObject(const std::string& interface_name, void* object);
 
-  // {PENDING: summarize Remove method here}
+  /// {PENDING: summarize Remove method here}
   ///
   /// Refer to AddPerInstanceObject() for further information.
   ///
@@ -546,13 +494,6 @@ class Instance {
   /// instance
   /// @param[in] object
   void RemovePerInstanceObject(const std::string& interface_name, void* object);
-
-  /// Static version of AddPerInstanceObject that takes an InstanceHandle. As
-  /// with all other instance functions, this must only be called on the main
-  /// thread.
-  static void RemovePerInstanceObject(const InstanceHandle& instance,
-                                      const std::string& interface_name,
-                                      void* object);
 
   /// Look up an object previously associated with an instance. Returns NULL
   /// if the instance is invalid or there is no object for the given interface

@@ -41,27 +41,21 @@ var DnsView = (function() {
     g_browser.addHostResolverInfoObserver(this, false);
   }
 
-  DnsView.TAB_ID = 'tab-handle-dns';
-  DnsView.TAB_NAME = 'DNS';
-  DnsView.TAB_HASH = '#dns';
+  // ID for special HTML element in category_tabs.html
+  DnsView.TAB_HANDLE_ID = 'tab-handle-dns';
 
   // IDs for special HTML elements in dns_view.html
   DnsView.MAIN_BOX_ID = 'dns-view-tab-content';
+  DnsView.CACHE_TBODY_ID = 'dns-view-cache-tbody';
+  DnsView.CLEAR_CACHE_BUTTON_ID = 'dns-view-clear-cache';
   DnsView.DEFAULT_FAMILY_SPAN_ID = 'dns-view-default-family';
   DnsView.IPV6_DISABLED_SPAN_ID = 'dns-view-ipv6-disabled';
   DnsView.ENABLE_IPV6_BUTTON_ID = 'dns-view-enable-ipv6';
-
-  DnsView.INTERNAL_DNS_ENABLED_SPAN_ID = 'dns-view-internal-dns-enabled';
-  DnsView.INTERNAL_DNS_INVALID_CONFIG_SPAN_ID =
-      'dns-view-internal-dns-invalid-config';
-  DnsView.INTERNAL_DNS_CONFIG_TBODY_ID = 'dns-view-internal-dns-config-tbody';
-
-  DnsView.CLEAR_CACHE_BUTTON_ID = 'dns-view-clear-cache';
   DnsView.CAPACITY_SPAN_ID = 'dns-view-cache-capacity';
-
   DnsView.ACTIVE_SPAN_ID = 'dns-view-cache-active';
   DnsView.EXPIRED_SPAN_ID = 'dns-view-cache-expired';
-  DnsView.CACHE_TBODY_ID = 'dns-view-cache-tbody';
+  DnsView.TTL_SUCCESS_SPAN_ID = 'dns-view-cache-ttl-success';
+  DnsView.TTL_FAILURE_SPAN_ID = 'dns-view-cache-ttl-failure';
 
   cr.addSingletonGetter(DnsView);
 
@@ -81,16 +75,13 @@ var DnsView = (function() {
       $(DnsView.ACTIVE_SPAN_ID).innerHTML = '0';
       $(DnsView.EXPIRED_SPAN_ID).innerHTML = '0';
 
-      // Update fields containing async DNS configuration information.
-      displayAsyncDnsConfig_(hostResolverInfo);
-
       // No info.
       if (!hostResolverInfo || !hostResolverInfo.cache)
         return false;
 
       var family = hostResolverInfo.default_address_family;
       addTextNode($(DnsView.DEFAULT_FAMILY_SPAN_ID),
-                  addressFamilyToString(family));
+                  getKeyWithValue(AddressFamily, family));
 
       var ipv6Disabled = (family == AddressFamily.ADDRESS_FAMILY_IPV4);
       setNodeDisplay($(DnsView.IPV6_DISABLED_SPAN_ID), ipv6Disabled);
@@ -104,7 +95,14 @@ var DnsView = (function() {
       // logging data, or the date the log dump was created.
       var logDate;
       if (MainView.isViewingLoadedLog()) {
-        logDate = new Date(ClientInfo.numericDate);
+        if (typeof ClientInfo.numericDate == 'number') {
+          logDate = new Date(ClientInfo.numericDate);
+        } else {
+          // This is to prevent displaying entries as expired when loading
+          // old logs.
+          // TODO(mmenke):  Remove when Chrome 17 hits stable.
+          logDate = new Date(0);
+        }
       } else {
         logDate = new Date();
       }
@@ -119,26 +117,31 @@ var DnsView = (function() {
 
         var familyCell = addNode(tr, 'td');
         addTextNode(familyCell,
-                    addressFamilyToString(e.address_family));
+                    getKeyWithValue(AddressFamily, e.address_family));
 
         var addressesCell = addNode(tr, 'td');
 
         if (e.error != undefined) {
           var errorText =
-              e.error + ' (' + netErrorToString(e.error) + ')';
+              e.error + ' (' + getKeyWithValue(NetError, e.error) + ')';
           var errorNode = addTextNode(addressesCell, 'error: ' + errorText);
-          addressesCell.classList.add('warning-text');
+          changeClassName(addressesCell, 'warningText', true);
         } else {
-          addListToNode_(addNode(addressesCell, 'div'), e.addresses);
+          for (var j = 0; j < e.addresses.length; ++j) {
+            var address = e.addresses[j];
+            if (j != 0)
+              addNode(addressesCell, 'br');
+            addTextNode(addressesCell, address);
+          }
         }
 
         var expiresDate = timeutil.convertTimeTicksToDate(e.expiration);
         var expiresCell = addNode(tr, 'td');
-        timeutil.addNodeWithDate(expiresCell, expiresDate);
+        addTextNode(expiresCell, expiresDate.toLocaleString());
         if (logDate > timeutil.convertTimeTicksToDate(e.expiration)) {
           ++expiredEntries;
           var expiredSpan = addNode(expiresCell, 'span');
-          expiredSpan.classList.add('warning-text');
+          changeClassName(expiredSpan, 'warningText', true);
           addTextNode(expiredSpan, ' [Expired]');
         }
       }
@@ -147,67 +150,8 @@ var DnsView = (function() {
           hostResolverCache.entries.length - expiredEntries;
       $(DnsView.EXPIRED_SPAN_ID).innerText = expiredEntries;
       return true;
-    },
-  };
-
-  /**
-   * Displays information corresponding to the current async DNS configuration.
-   * @param {Object} hostResolverInfo The host resolver information.
-   */
-  function displayAsyncDnsConfig_(hostResolverInfo) {
-    // Clear the table.
-    $(DnsView.INTERNAL_DNS_CONFIG_TBODY_ID).innerHTML = '';
-
-    // Figure out if the internal DNS resolver is disabled or has no valid
-    // configuration information, and update display accordingly.
-    var enabled = hostResolverInfo &&
-                  hostResolverInfo.dns_config !== undefined;
-    var noConfig = enabled &&
-                   hostResolverInfo.dns_config.nameservers === undefined;
-    $(DnsView.INTERNAL_DNS_ENABLED_SPAN_ID).innerText = enabled;
-    setNodeDisplay($(DnsView.INTERNAL_DNS_INVALID_CONFIG_SPAN_ID), noConfig);
-
-    // If the internal DNS resolver is disabled or has no valid configuration,
-    // we're done.
-    if (!enabled || noConfig)
-      return;
-
-    var dnsConfig = hostResolverInfo.dns_config;
-
-    // Display nameservers first.
-    var nameserverRow = addNode($(DnsView.INTERNAL_DNS_CONFIG_TBODY_ID), 'tr');
-    addNodeWithText(nameserverRow, 'th', 'nameservers');
-    addListToNode_(addNode(nameserverRow, 'td'), dnsConfig.nameservers);
-
-    // Add everything else in |dnsConfig| to the table.
-    for (var key in dnsConfig) {
-      if (key == 'nameservers')
-        continue;
-      var tr = addNode($(DnsView.INTERNAL_DNS_CONFIG_TBODY_ID), 'tr');
-      addNodeWithText(tr, 'th', key);
-      var td = addNode(tr, 'td');
-
-      // For lists, display each list entry on a separate line.
-      if (typeof dnsConfig[key] == 'object' &&
-          dnsConfig[key].constructor == Array) {
-        addListToNode_(td, dnsConfig[key]);
-        continue;
-      }
-
-      addTextNode(td, dnsConfig[key]);
     }
-  }
-
-  /**
-   * Takes a last of strings and adds them all to a DOM node, displaying them
-   * on separate lines.
-   * @param {DomNode} node The parent node.
-   * @param {Array.<string>} list List of strings to add to the node.
-   */
-  function addListToNode_(node, list) {
-    for (var i = 0; i < list.length; ++i)
-      addNodeWithText(node, 'div', list[i]);
-  }
+  };
 
   return DnsView;
 })();

@@ -38,6 +38,11 @@ NotificationRegistrar::NotificationRegistrar() {
 }
 
 NotificationRegistrar::~NotificationRegistrar() {
+  // TODO(joth): It is incorrect to detatch here, but not doing so causes
+  // some tests to fail flakily. See http://crbug.com/109000 (sub-issue #2).
+  if (registered_.empty())
+    DetachFromThread();
+
   RemoveAll();
 }
 
@@ -61,8 +66,11 @@ void NotificationRegistrar::Remove(NotificationObserver* observer,
   Record record = { observer, type, source };
   RecordVector::iterator found = std::find(
       registered_.begin(), registered_.end(), record);
-  DCHECK(found != registered_.end());
-
+  if (found == registered_.end()) {
+    NOTREACHED() << "Trying to remove unregistered observer of type " <<
+        type << " from list of size " << registered_.size() << ".";
+    return;
+  }
   registered_.erase(found);
 
   // This can be NULL if our owner outlives the NotificationService, e.g. if our

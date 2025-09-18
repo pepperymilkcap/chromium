@@ -15,16 +15,14 @@
 <script>
   var butter = document.getElementById('update_butter');
 
-  var textProperty = butter['innerText'] ? 'innerText' : 'textContent';
-
   var listeners = [];
   function registerListener(fn) {
     listeners.push(fn);
   }
 
   function updateDom() {
-    butter.style.display = 'block';
-    butter[textProperty] = 'Updating';
+    butter.style.display = '';
+    butter.innerText = 'Updating';
     disableForm();
     tick();
   }
@@ -44,9 +42,9 @@
   }
 
   function tick() {
-    var length = butter[textProperty].substring('Updating'.length).length;
+    var length = butter.innerText.substring('Updating'.length).length;
     if (length != 10) {
-      butter[textProperty] += '.';
+      butter.innerText += '.';
       window.setTimeout(tick, 500);
     } else {
       enableForm();
@@ -58,20 +56,17 @@
           break;
         }
       }
-      div[textProperty] = document.forms[0].typer.value;
+      div.innerText = document.forms[0].typer.value;
       div.className = 'label';
       document.forms[0].typer.value = '';
       document.body.appendChild(div);
 
-      butter[textProperty] = 'Done!';
+      butter.innerText = 'Done!';
 
       window.setTimeout(function() {
+        butter.innerText = '';
         while (listeners.length) {
-          try {
-            listeners.shift()(div[textProperty]);
-          } catch (e) {
-            butter[textProperty] = "Exception seen: " + e;
-          }
+          listeners.shift().call(null, div.innerText);
         }
       }, 500);
     }

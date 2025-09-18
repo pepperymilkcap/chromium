@@ -2,21 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom binding for the pageCapture API.
+// Custom bindings for the pageCapture API.
 
-var binding = require('binding').Binding.create('pageCapture');
+(function() {
 
-var pageCaptureNatives = requireNative('page_capture');
-var CreateBlob = pageCaptureNatives.CreateBlob;
-var SendResponseAck = pageCaptureNatives.SendResponseAck;
+native function GetChromeHidden();
+native function CreateBlob(filePath);
+native function SendResponseAck(requestId);
 
-binding.registerCustomHook(function(bindingsAPI) {
+var chromeHidden = GetChromeHidden();
+
+chromeHidden.registerCustomHook('pageCapture', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
 
-  apiFunctions.setCustomCallback('saveAsMHTML',
-                                 function(name, request, response) {
-    var path = response.mhtmlFilePath;
-    var size = response.mhtmlFileLength;
+  apiFunctions.setCustomCallback(
+      "pageCapture.saveAsMHTML", function(name, request, response) {
+    var params = chromeHidden.JSON.parse(response);
+    var path = params.mhtmlFilePath;
+    var size = params.mhtmlFileLength;
 
     if (request.callback)
       request.callback(CreateBlob(path, size));
@@ -28,4 +31,4 @@ binding.registerCustomHook(function(bindingsAPI) {
   });
 });
 
-exports.binding = binding.generate();
+})();

@@ -76,11 +76,10 @@ class CGen(object):
   TypeMap = {
     'Array': {
       'in': 'const %s',
-      'inout': '%s',
+      'inout': '%s*',
       'out': '%s*',
       'store': '%s',
-      'return': '%s',
-      'ref': '%s*'
+      'return': '%s'
     },
     'Callspec': {
       'in': '%s',
@@ -96,20 +95,12 @@ class CGen(object):
       'store': '%s',
       'return': '%s'
     },
-    'Interface': {
-      'in': 'const %s*',
-      'inout': '%s*',
-      'out': '%s**',
-      'return': '%s*',
-      'store': '%s*'
-    },
     'Struct': {
       'in': 'const %s*',
       'inout': '%s*',
       'out': '%s*',
       'return': ' %s*',
-      'store': '%s',
-      'ref': '%s*'
+      'store': '%s'
     },
     'blob_t': {
       'in': 'const %s',
@@ -125,25 +116,11 @@ class CGen(object):
       'return': '%s',
       'store': '%s'
     },
-    'mem_ptr_t': {
-      'in': 'const %s',
-      'inout': '%s',
-      'out': '%s',
-      'return': '%s',
-      'store': '%s'
-    },
     'str_t': {
       'in': 'const %s',
       'inout': '%s',
       'out': '%s',
       'return': 'const %s',
-      'store': '%s'
-    },
-    'cstr_t': {
-      'in': '%s',
-      'inout': '%s*',
-      'out': '%s*',
-      'return': '%s',
       'store': '%s'
     },
     'TypeValue': {
@@ -168,9 +145,7 @@ class CGen(object):
   'double_t': 'double',
   'handle_t': 'int',
   'mem_t': 'void*',
-  'mem_ptr_t': 'void**',
   'str_t': 'char*',
-  'cstr_t': 'const char*',
   'interface_t' : 'const void*'
   }
 
@@ -260,7 +235,6 @@ class CGen(object):
       typeref = node
 
     if typeref is None:
-      node.Error('No type at release %s.' % release)
       raise CGenError('No type for %s' % node)
 
     # If the type is a (BuiltIn) Type then return it's name
@@ -270,13 +244,8 @@ class CGen(object):
       if name is None: name = typeref.GetName()
       name = '%s%s' % (prefix, name)
 
-    # For Interfaces, use the name + version
-    elif typeref.IsA('Interface'):
-      rel = typeref.first_release[release]
-      name = 'struct %s%s' % (prefix, self.GetStructName(typeref, rel, True))
-
     # For structures, preceed with 'struct' or 'union' as appropriate
-    elif typeref.IsA('Struct'):
+    elif typeref.IsA('Interface', 'Struct'):
       if typeref.GetProperty('union'):
         name = 'union %s%s' % (prefix, typeref.GetName())
       else:
@@ -284,16 +253,11 @@ class CGen(object):
 
     # If it's an enum, or typedef then return the Enum's name
     elif typeref.IsA('Enum', 'Typedef'):
-      if not typeref.LastRelease(release):
-        first = node.first_release[release]
-        ver = '_' + node.GetVersion(first).replace('.','_')
-      else:
-        ver = ''
       # The enum may have skipped having a typedef, we need prefix with 'enum'.
       if typeref.GetProperty('notypedef'):
-        name = 'enum %s%s%s' % (prefix, typeref.GetName(), ver)
+        name = 'enum %s%s' % (prefix, typeref.GetName())
       else:
-        name = '%s%s%s' % (prefix, typeref.GetName(), ver)
+        name = '%s%s' % (prefix, typeref.GetName())
 
     else:
       raise RuntimeError('Getting name of non-type %s.' % node)
@@ -399,8 +363,6 @@ class CGen(object):
     if callnode:
       callspec = []
       for param in callnode.GetListOf('Param'):
-        if not param.IsRelease(release):
-          continue
         mode = self.GetParamMode(param)
         ptype, pname, parray, pspec = self.GetComponents(param, release, mode)
         callspec.append((ptype, pname, parray, pspec))
@@ -413,15 +375,9 @@ class CGen(object):
 
 
   def Compose(self, rtype, name, arrayspec, callspec, prefix, func_as_ptr,
-              include_name, unsized_as_ptr):
+              ptr_prefix, include_name):
     self.LogEnter('Compose: %s %s' % (rtype, name))
     arrayspec = ''.join(arrayspec)
-
-    # Switch unsized array to a ptr. NOTE: Only last element can be unsized.
-    if unsized_as_ptr and arrayspec[-2:] == '[]':
-      prefix +=  '*'
-      arrayspec=arrayspec[:-2]
-
     if not include_name:
       name = prefix + arrayspec
     else:
@@ -432,12 +388,9 @@ class CGen(object):
       params = []
       for ptype, pname, parray, pspec in callspec:
         params.append(self.Compose(ptype, pname, parray, pspec, '', True,
-                                   include_name=True,
-                                   unsized_as_ptr=unsized_as_ptr))
+                                   ptr_prefix='', include_name=True))
       if func_as_ptr:
-        name = '(*%s)' % name
-      if not params:
-        params = ['void']
+        name = '(%s*%s)' % (ptr_prefix, name)
       out = '%s %s(%s)' % (rtype, name, ', '.join(params))
     self.LogExit('Exit Compose: %s' % out)
     return out
@@ -448,42 +401,27 @@ class CGen(object):
   # Returns the 'C' style signature of the object
   #  prefix - A prefix for the object's name
   #  func_as_ptr - Formats a function as a function pointer
+  #  ptr_prefix - A prefix that goes before the "*" for a function pointer
   #  include_name - If true, include member name in the signature.
-  #                 If false, leave it out. In any case, prefix is always
-  #                 included.
-  #  include_version - if True, include version in the member name
+  #                 If false, leave it out. In any case, prefix and ptr_prefix
+  #                 are always included.
   #
   def GetSignature(self, node, release, mode, prefix='', func_as_ptr=True,
-                   include_name=True, include_version=False):
+                   ptr_prefix='', include_name=True):
     self.LogEnter('GetSignature %s %s as func=%s' %
                   (node, mode, func_as_ptr))
     rtype, name, arrayspec, callspec = self.GetComponents(node, release, mode)
-    if include_version:
-      name = self.GetStructName(node, release, True)
-
-    # If not a callspec (such as a struct) use a ptr instead of []
-    unsized_as_ptr = not callspec
-
     out = self.Compose(rtype, name, arrayspec, callspec, prefix,
-                       func_as_ptr, include_name, unsized_as_ptr)
-
+                       func_as_ptr, ptr_prefix, include_name)
     self.LogExit('Exit GetSignature: %s' % out)
     return out
 
   # Define a Typedef.
   def DefineTypedef(self, node, releases, prefix='', comment=False):
     __pychecker__ = 'unusednames=comment'
-    build_list = node.GetUniqueReleases(releases)
-
-    out = 'typedef %s;\n' % self.GetSignature(node, build_list[-1], 'return',
-                                              prefix, True,
-                                              include_version=False)
-    # Version mangle any other versions
-    for index, rel in enumerate(build_list[:-1]):
-      out += '\n'
-      out += 'typedef %s;\n' % self.GetSignature(node, rel, 'return',
-                                                 prefix, True,
-                                                 include_version=True)
+    release = releases[0]
+    out = 'typedef %s;\n' % self.GetSignature(node, release, 'return',
+                                              prefix, True)
     self.Log('DefineTypedef: %s' % out)
     return out
 
@@ -494,7 +432,6 @@ class CGen(object):
     name = '%s%s' % (prefix, node.GetName())
     notypedef = node.GetProperty('notypedef')
     unnamed = node.GetProperty('unnamed')
-
     if unnamed:
       out = 'enum {'
     elif notypedef:
@@ -522,10 +459,7 @@ class CGen(object):
     __pychecker__ = 'unusednames=prefix,comment'
     release = releases[0]
     self.LogEnter('DefineMember %s' % node)
-    if node.GetProperty('ref'):
-      out = '%s;' % self.GetSignature(node, release, 'ref', '', True)
-    else:
-      out = '%s;' % self.GetSignature(node, release, 'store', '', True)
+    out = '%s;' % self.GetSignature(node, release, 'store', '', True)
     self.LogExit('Exit DefineMember')
     return out
 
@@ -538,25 +472,17 @@ class CGen(object):
 
   def DefineStructInternals(self, node, release,
                             include_version=False, comment=True):
-    channel = node.GetProperty('FILE').release_map.GetChannel(release)
-    if channel == 'dev':
-      channel_comment = ' /* dev */'
-    else:
-      channel_comment = ''
     out = ''
     if node.GetProperty('union'):
-      out += 'union %s {%s\n' % (
-          self.GetStructName(node, release, include_version), channel_comment)
+      out += 'union %s {\n' % (
+          self.GetStructName(node, release, include_version))
     else:
-      out += 'struct %s {%s\n' % (
-          self.GetStructName(node, release, include_version), channel_comment)
+      out += 'struct %s {\n' % (
+          self.GetStructName(node, release, include_version))
 
-    channel = node.GetProperty('FILE').release_map.GetChannel(release)
     # Generate Member Functions
     members = []
     for child in node.GetListOf('Member'):
-      if channel == 'stable' and child.NodeIsDevOnly():
-        continue
       member = self.Define(child, [release], tabs=1, comment=comment)
       if not member:
         continue
@@ -571,52 +497,26 @@ class CGen(object):
     out = ''
     build_list = node.GetUniqueReleases(releases)
 
-    newest_stable = None
-    newest_dev = None
-    for rel in build_list:
-      channel = node.GetProperty('FILE').release_map.GetChannel(rel)
-      if channel == 'stable':
-        newest_stable = rel
-      if channel == 'dev':
-        newest_dev = rel
-    last_rel = build_list[-1]
-
-    # TODO(noelallen) : Bug 157017 finish multiversion support
-    if node.IsA('Struct'):
-      if len(build_list) != 1:
-        node.Error('Can not support multiple versions of node.')
-      assert len(build_list) == 1
-      # Build the most recent one versioned, with comments
-      out = self.DefineStructInternals(node, last_rel,
-                                       include_version=False, comment=True)
-
     if node.IsA('Interface'):
       # Build the most recent one versioned, with comments
-      out = self.DefineStructInternals(node, last_rel,
+      out = self.DefineStructInternals(node, build_list[-1],
                                        include_version=True, comment=True)
-      if last_rel == newest_stable:
-        # Define an unversioned typedef for the most recent version
-        out += '\ntypedef struct %s %s;\n' % (
-            self.GetStructName(node, last_rel, include_version=True),
-            self.GetStructName(node, last_rel, include_version=False))
 
-      # Build the rest without comments and with the version number appended
-      for rel in build_list[0:-1]:
-        channel = node.GetProperty('FILE').release_map.GetChannel(rel)
-        # Skip dev channel interface versions that are
-        #   Not the newest version, and
-        #   Don't have an equivalent stable version.
-        if channel == 'dev' and rel != newest_dev:
-          if not node.DevInterfaceMatchesStable(rel):
-            continue
-        out += '\n' + self.DefineStructInternals(node, rel,
-                                                 include_version=True,
-                                                 comment=False)
-        if rel == newest_stable:
-          # Define an unversioned typedef for the most recent version
-          out += '\ntypedef struct %s %s;\n' % (
-              self.GetStructName(node, rel, include_version=True),
-              self.GetStructName(node, rel, include_version=False))
+      # Define an unversioned typedef for the most recent version
+      out += '\ntypedef struct %s %s;\n' % (
+          self.GetStructName(node, build_list[-1], include_version=True),
+          self.GetStructName(node, build_list[-1], include_version=False))
+    else:
+      # Build the most recent one versioned, with comments
+      out = self.DefineStructInternals(node, build_list[-1],
+                                       include_version=False, comment=True)
+
+
+    # Build the rest without comments and with the version number appended
+    for rel in build_list[0:-1]:
+      out += '\n' + self.DefineStructInternals(node, rel,
+                                               include_version=True,
+                                               comment=False)
 
     self.LogExit('Exit DefineStruct')
     return out
@@ -627,55 +527,9 @@ class CGen(object):
   #
   # Generate a comment or copyright block
   #
-  def Copyright(self, node, cpp_style=False):
+  def Copyright(self, node, tabs=0):
     lines = node.GetName().split('\n')
-    if cpp_style:
-      return '//' + '\n//'.join(filter(lambda f: f != '', lines)) + '\n'
-    return CommentLines(lines)
-
-
-  def Indent(self, data, tabs=0):
-    """Handles indentation and 80-column line wrapping."""
-    tab = '  ' * tabs
-    lines = []
-    for line in data.split('\n'):
-      # Add indentation
-      line = tab + line
-      space_break = line.rfind(' ', 0, 80)
-      if len(line) <= 80 or 'http' in line:
-        # Ignore normal line and URLs permitted by the style guide.
-        lines.append(line.rstrip())
-      elif not '(' in line and space_break >= 0:
-        # Break long typedefs on nearest space.
-        lines.append(line[0:space_break])
-        lines.append('    ' + line[space_break + 1:])
-      else:
-        left = line.rfind('(') + 1
-        args = line[left:].split(',')
-        orig_args = args
-        orig_left = left
-        # Try to split on '(arg1)' or '(arg1, arg2)', not '()'
-        while args[0][0] == ')':
-          left = line.rfind('(', 0, left - 1) + 1
-          if left == 0:  # No more parens, take the original option
-            args = orig_args
-            left = orig_left
-            break
-          args = line[left:].split(',')
-
-        line_max = 0
-        for arg in args:
-          if len(arg) > line_max: line_max = len(arg)
-
-        if left + line_max >= 80:
-          indent = '%s    ' % tab
-          args =  (',\n%s' % indent).join([arg.strip() for arg in args])
-          lines.append('%s\n%s%s' % (line[:left], indent, args))
-        else:
-          indent = ' ' * (left - 1)
-          args =  (',\n%s' % indent).join(args)
-          lines.append('%s%s' % (line[:left], args))
-    return '\n'.join(lines)
+    return CommentLines(lines, tabs)
 
 
   # Define a top level object.
@@ -707,10 +561,30 @@ class CGen(object):
       out += comment_txt
     out += define_txt
 
-    indented_out = self.Indent(out, tabs)
-    self.LogExit('Exit Define')
-    return indented_out
+    tab = '  ' * tabs
+    lines = []
+    for line in out.split('\n'):
+      # Add indentation
+      line = tab + line
+      if len(line) > 80:
+        left = line.rfind('(') + 1
+        args = line[left:].split(',')
+        line_max = 0
+        for arg in args:
+          if len(arg) > line_max: line_max = len(arg)
 
+        if left + line_max >= 80:
+          space = '%s    ' % tab
+          args =  (',\n%s' % space).join([arg.strip() for arg in args])
+          lines.append('%s\n%s%s' % (line[:left], space, args))
+        else:
+          space = ' ' * (left - 1)
+          args =  (',\n%s' % space).join(args)
+          lines.append('%s%s' % (line[:left], args))
+      else:
+        lines.append(line.rstrip())
+    self.LogExit('Exit Define')
+    return '\n'.join(lines)
 
 # Clean a string representing an object definition and return then string
 # as a single space delimited set of tokens.
@@ -737,8 +611,7 @@ def TestFile(filenode):
     outstr = CleanString(outstr)
 
     if instr != outstr:
-      ErrOut.Log('Failed match of\n>>%s<<\nto:\n>>%s<<\nFor:\n' %
-                 (instr, outstr))
+      ErrOut.Log('Failed match of\n>>%s<<\n>>%s<<\nto:' % (instr, outstr))
       node.Dump(1, comments=True)
       errors += 1
   return errors
@@ -768,20 +641,20 @@ def TestFiles(filenames):
     InfoOut.Log('Passed generator test.')
   return total_errs
 
-def main(args):
+def Main(args):
   filenames = ParseOptions(args)
   if GetOption('test'):
     return TestFiles(filenames)
   ast = ParseFiles(filenames)
-  cgen = CGen()
   for f in ast.GetListOf('File'):
     if f.GetProperty('ERRORS') > 0:
       print 'Skipping %s' % f.GetName()
       continue
+    print DefineDepends(node)
     for node in f.GetChildren()[2:]:
-      print cgen.Define(node, ast.releases, comment=True, prefix='tst_')
+      print Define(node, comment=True, prefix='tst_')
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv[1:]))
+  sys.exit(Main(sys.argv[1:]))
 

@@ -14,17 +14,13 @@ namespace pp {
 
 namespace {
 
-template <> const char* interface_name<PPB_FlashFullscreen_0_1>() {
-  return PPB_FLASHFULLSCREEN_INTERFACE_0_1;
-}
-
-template <> const char* interface_name<PPB_FlashFullscreen_1_0>() {
-  return PPB_FLASHFULLSCREEN_INTERFACE_1_0;
+template <> const char* interface_name<PPB_FlashFullscreen>() {
+  return PPB_FLASHFULLSCREEN_INTERFACE;
 }
 
 }  // namespace
 
-FlashFullscreen::FlashFullscreen(const InstanceHandle& instance)
+FlashFullscreen::FlashFullscreen(Instance* instance)
     : instance_(instance) {
 }
 
@@ -32,43 +28,23 @@ FlashFullscreen::~FlashFullscreen() {
 }
 
 bool FlashFullscreen::IsFullscreen() {
-  if (has_interface<PPB_FlashFullscreen_1_0>()) {
-    return PP_ToBool(get_interface<PPB_FlashFullscreen_1_0>()->IsFullscreen(
-        instance_.pp_instance()));
-  }
-  if (has_interface<PPB_FlashFullscreen_0_1>()) {
-    return PP_ToBool(get_interface<PPB_FlashFullscreen_0_1>()->IsFullscreen(
-        instance_.pp_instance()));
-  }
-  return false;
+  return has_interface<PPB_FlashFullscreen>() &&
+      get_interface<PPB_FlashFullscreen>()->IsFullscreen(
+          instance_->pp_instance());
 }
 
 bool FlashFullscreen::SetFullscreen(bool fullscreen) {
-  if (has_interface<PPB_FlashFullscreen_1_0>()) {
-    return PP_ToBool(get_interface<PPB_FlashFullscreen_1_0>()->SetFullscreen(
-        instance_.pp_instance(), PP_FromBool(fullscreen)));
-  }
-  if (has_interface<PPB_FlashFullscreen_0_1>()) {
-    return PP_ToBool(get_interface<PPB_FlashFullscreen_0_1>()->SetFullscreen(
-        instance_.pp_instance(), PP_FromBool(fullscreen)));
-  }
-  return false;
+  if (!has_interface<PPB_FlashFullscreen>())
+    return false;
+  return PP_ToBool(get_interface<PPB_FlashFullscreen>()->SetFullscreen(
+      instance_->pp_instance(), PP_FromBool(fullscreen)));
 }
 
 bool FlashFullscreen::GetScreenSize(Size* size) {
-  if (has_interface<PPB_FlashFullscreen_1_0>()) {
-    return PP_ToBool(get_interface<PPB_FlashFullscreen_1_0>()->GetScreenSize(
-        instance_.pp_instance(), &size->pp_size()));
-  }
-  if (has_interface<PPB_FlashFullscreen_0_1>()) {
-    return PP_ToBool(get_interface<PPB_FlashFullscreen_0_1>()->GetScreenSize(
-        instance_.pp_instance(), &size->pp_size()));
-  }
-  return false;
-}
-
-bool FlashFullscreen::MustRecreateContexts() {
-  return !get_interface<PPB_FlashFullscreen_1_0>();
+  if (!has_interface<PPB_FlashFullscreen>())
+    return false;
+  return PP_ToBool(get_interface<PPB_FlashFullscreen>()->GetScreenSize(
+      instance_->pp_instance(), &size->pp_size()));
 }
 
 }  // namespace pp

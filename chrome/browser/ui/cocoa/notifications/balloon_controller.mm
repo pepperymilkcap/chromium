@@ -1,28 +1,31 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/notifications/balloon_controller.h"
 
 #include "base/mac/bundle_locations.h"
+#import "base/mac/cocoa_protocols.h"
 #include "base/mac/mac_util.h"
-#include "base/strings/utf_string_conversions.h"
+#import "base/memory/scoped_nsobject.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_options_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
+#import "chrome/browser/ui/cocoa/hover_image_button.h"
+#import "chrome/browser/ui/cocoa/menu_controller.h"
 #import "chrome/browser/ui/cocoa/notifications/balloon_view.h"
 #include "chrome/browser/ui/cocoa/notifications/balloon_view_host_mac.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#import "ui/base/cocoa/hover_image_button.h"
-#import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 namespace {
 
@@ -59,13 +62,13 @@ const int kRightMargin = 2;
   DCHECK([self window]);
   DCHECK_EQ(self, [[self window] delegate]);
 
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  [optionsButton_ setDefaultImage:
-      rb.GetNativeImageNamed(IDR_BALLOON_WRENCH).ToNSImage()];
-  [optionsButton_ setHoverImage:
-      rb.GetNativeImageNamed(IDR_BALLOON_WRENCH_H).ToNSImage()];
-  [optionsButton_ setPressedImage:
-      rb.GetNativeImageNamed(IDR_BALLOON_WRENCH_P).ToNSImage()];
+  NSImage* image = gfx::GetCachedImageWithName(@"balloon_wrench.pdf");
+  [optionsButton_ setDefaultImage:image];
+  [optionsButton_ setDefaultOpacity:0.6];
+  [optionsButton_ setHoverImage:image];
+  [optionsButton_ setHoverOpacity:0.9];
+  [optionsButton_ setPressedImage:image];
+  [optionsButton_ setPressedOpacity:1.0];
   [[optionsButton_ cell] setHighlightsBy:NSNoCellMask];
 
   NSString* sourceLabelText = l10n_util::GetNSStringF(

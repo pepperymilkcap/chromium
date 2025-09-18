@@ -4,13 +4,14 @@
 
 #ifndef NET_BASE_DIRECTORY_LISTER_H_
 #define NET_BASE_DIRECTORY_LISTER_H_
+#pragma once
 
 #include <vector>
 
-#include "base/files/file_enumerator.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/message_loop_proxy.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "net/base/net_export.h"
 
 namespace net {
@@ -26,8 +27,8 @@ class NET_EXPORT DirectoryLister  {
  public:
   // Represents one file found.
   struct DirectoryListerData {
-    base::FileEnumerator::FileInfo info;
-    base::FilePath path;
+    file_util::FileEnumerator::FindInfo info;
+    FilePath path;
   };
 
   // Implement this class to receive directory entries.
@@ -55,10 +56,10 @@ class NET_EXPORT DirectoryLister  {
     FULL_PATH
   };
 
-  DirectoryLister(const base::FilePath& dir,
+  DirectoryLister(const FilePath& dir,
                   DirectoryListerDelegate* delegate);
 
-  DirectoryLister(const base::FilePath& dir,
+  DirectoryLister(const FilePath& dir,
                   bool recursive,
                   SortType sort,
                   DirectoryListerDelegate* delegate);
@@ -76,7 +77,7 @@ class NET_EXPORT DirectoryLister  {
  private:
   class Core : public base::RefCountedThreadSafe<Core> {
    public:
-    Core(const base::FilePath& dir,
+    Core(const FilePath& dir,
          bool recursive,
          SortType sort,
          DirectoryLister* lister);
@@ -98,7 +99,7 @@ class NET_EXPORT DirectoryLister  {
 
     void OnDone(int error);
 
-    base::FilePath dir_;
+    FilePath dir_;
     bool recursive_;
     SortType sort_;
     scoped_refptr<base::MessageLoopProxy> origin_loop_;

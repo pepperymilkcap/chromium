@@ -10,13 +10,9 @@
 
 #ifndef BASE_WIN_PE_IMAGE_H_
 #define BASE_WIN_PE_IMAGE_H_
+#pragma once
 
 #include <windows.h>
-
-#if defined(_WIN32_WINNT_WIN8)
-// The Windows 8 SDK defines FACILITY_VISUALCPP in winerror.h.
-#undef FACILITY_VISUALCPP
-#endif
 #include <DelayIMP.h>
 
 namespace base {

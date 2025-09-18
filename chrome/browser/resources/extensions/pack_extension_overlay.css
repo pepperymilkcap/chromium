@@ -2,22 +2,20 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-.pack-extension-heading {
-  padding-bottom: 5px;
+.packExtensionHeading {
   width: 520px;
+  padding-bottom: 5px;
 }
 
-.pack-extension-text-boxes {
+.packExtensionTextBoxes {
   text-align: right;
 }
 
-.pack-extension-text-area {
+.packExtensionTextArea {
   width: 260px;
 }
 
-<if expr="pp_ifdef('toolkit_views')">
 /* TODO(estade): apply this everywhere. */
-.button-strip {
+html:not([toolkit=views]) .button-strip {
   -webkit-box-direction: reverse;
 }
-</if>

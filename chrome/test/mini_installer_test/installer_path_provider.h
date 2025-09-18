@@ -4,9 +4,10 @@
 
 #ifndef CHROME_TEST_MINI_INSTALLER_TEST_INSTALLER_PATH_PROVIDER_H_
 #define CHROME_TEST_MINI_INSTALLER_TEST_INSTALLER_PATH_PROVIDER_H_
+#pragma once
 
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 
 namespace installer_test {
 
@@ -21,12 +22,12 @@ class InstallerPathProvider {
   explicit InstallerPathProvider(const std::string& build_under_test);
   ~InstallerPathProvider();
 
-  bool GetFullInstaller(base::FilePath* path);
-  bool GetDiffInstaller(base::FilePath* path);
-  bool GetMiniInstaller(base::FilePath* path);
-  bool GetPreviousInstaller(base::FilePath* path);
-  bool GetStandaloneInstaller(base::FilePath* path);
-  bool GetSignedStandaloneInstaller(base::FilePath* path);
+  bool GetFullInstaller(FilePath* path);
+  bool GetDiffInstaller(FilePath* path);
+  bool GetMiniInstaller(FilePath* path);
+  bool GetPreviousInstaller(FilePath* path);
+  bool GetStandaloneInstaller(FilePath* path);
+  bool GetSignedStandaloneInstaller(FilePath* path);
 
   std::string GetCurrentBuild();
   std::string GetPreviousBuild();
@@ -34,9 +35,9 @@ class InstallerPathProvider {
  private:
   // Returns the local file path for the given file |name|.
   // Assumes file is located in the current working directory.
-  base::FilePath PathFromExeDir(const base::FilePath::StringType& name);
+  FilePath PathFromExeDir(const FilePath::StringType& name);
 
-  bool GetInstaller(const std::string& pattern, base::FilePath* path);
+  bool GetInstaller(const std::string& pattern, FilePath* path);
 
   // Build numbers.
   std::string current_build_, previous_build_;

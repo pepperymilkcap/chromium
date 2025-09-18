@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_TEST_COCOA_TEST_EVENT_UTILS_H_
 #define UI_BASE_TEST_COCOA_TEST_EVENT_UTILS_H_
+#pragma once
 
 #include <utility>
 
@@ -47,12 +48,6 @@ NSEvent* KeyEventWithCharacter(unichar c);
 
 // Returns a key event with the given type and modifier flags.
 NSEvent* KeyEventWithType(NSEventType event_type, NSUInteger modifiers);
-
-// Returns a key event with the given key code, type, and modifier flags.
-NSEvent* KeyEventWithKeyCode(unsigned short key_code,
-                             unichar c,
-                             NSEventType event_type,
-                             NSUInteger modifiers);
 
 // Returns a mouse enter/exit event with the given type.
 NSEvent* EnterExitEventWithType(NSEventType event_type);

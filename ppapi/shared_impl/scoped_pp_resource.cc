@@ -55,8 +55,7 @@ ScopedPPResource& ScopedPPResource::operator=(
 }
 
 PP_Resource ScopedPPResource::Release() {
-  // We do NOT call CallRelease, because we want to pass our reference to the
-  // caller.
+  CallRelease();
 
   PP_Resource ret = id_;
   id_ = 0;

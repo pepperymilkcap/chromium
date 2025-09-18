@@ -6,6 +6,8 @@
 
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/shared/platform/nacl_check.h"
+#include "native_client/tests/ppapi_test_lib/get_browser_interface.h"
+#include "native_client/tests/ppapi_test_lib/test_interface.h"
 
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_errors.h"
@@ -13,9 +15,6 @@
 #include "ppapi/c/ppb_instance.h"
 #include "ppapi/c/ppb_url_loader.h"
 #include "ppapi/c/ppp_instance.h"
-
-#include "ppapi/native_client/tests/ppapi_test_lib/get_browser_interface.h"
-#include "ppapi/native_client/tests/ppapi_test_lib/test_interface.h"
 
 namespace {
 
@@ -58,10 +57,10 @@ void ReadCallback(void* user_data, int32_t pp_error_or_bytes) {
   PP_Resource url_loader = reinterpret_cast<PP_Resource>(user_data);
 
   EXPECT_ON_LOAD(pp_error_or_bytes >= PP_OK);
-  if (pp_error_or_bytes < PP_OK) {
-    PPBCore()->ReleaseResource(url_loader);
+  // EXPECT_ON_LOAD just records an error, make sure to stop processing too.
+  // On error we may end up leaking the URLLoader from HandleDocumentLoad.
+  if (pp_error_or_bytes < PP_OK)
     return;
-  }
 
   if (PP_OK == pp_error_or_bytes) {
     // Check the contents of the file against the known contents.
@@ -70,34 +69,32 @@ void ReadCallback(void* user_data, int32_t pp_error_or_bytes) {
                       strlen(kKnownFileContents));
     EXPECT_ON_LOAD(diff == 0);
     PPBURLLoader()->Close(url_loader);
-    PPBCore()->ReleaseResource(url_loader);
     ON_LOAD_PASSED;
   } else {
     buffer_pos += pp_error_or_bytes;
     PP_CompletionCallback callback =
-        PP_MakeCompletionCallback(ReadCallback, user_data);
+        PP_MakeOptionalCompletionCallback(ReadCallback, user_data);
     pp_error_or_bytes =
         PPBURLLoader()->ReadResponseBody(url_loader,
                                          buffer + buffer_pos,
                                          kMaxFileSize - buffer_pos,
                                          callback);
-    EXPECT(pp_error_or_bytes == PP_OK_COMPLETIONPENDING);
+    if (pp_error_or_bytes != PP_OK_COMPLETIONPENDING)
+      PP_RunCompletionCallback(&callback, pp_error_or_bytes);
   }
 }
 
 PP_Bool HandleDocumentLoad(PP_Instance instance,
                            PP_Resource url_loader) {
-  // The browser will release url_loader after this method returns. We need to
-  // keep it around until we have read all bytes or get an error.
-  PPBCore()->AddRefResource(url_loader);
   void* user_data = reinterpret_cast<void*>(url_loader);
   PP_CompletionCallback callback =
-      PP_MakeCompletionCallback(ReadCallback, user_data);
+      PP_MakeOptionalCompletionCallback(ReadCallback, user_data);
   int32_t pp_error_or_bytes = PPBURLLoader()->ReadResponseBody(url_loader,
                                                                buffer,
                                                                kMaxFileSize,
                                                                callback);
-  EXPECT(pp_error_or_bytes == PP_OK_COMPLETIONPENDING);
+  if (pp_error_or_bytes != PP_OK_COMPLETIONPENDING)
+    PP_RunCompletionCallback(&callback, pp_error_or_bytes);
   return PP_TRUE;
 }
 

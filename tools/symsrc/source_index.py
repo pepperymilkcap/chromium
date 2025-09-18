@@ -35,21 +35,8 @@ import tempfile
 # from repositories listed here will be source indexed.  Second, it allows us
 # to map from one SVN URL to another, so we can map to external SVN servers.
 REPO_MAP = {
-  "svn://chrome-svn/blink": "http://src.chromium.org/blink",
-  "svn://chrome-svn/chrome": "http://src.chromium.org/chrome",
-  "svn://chrome-svn/multivm": "http://src.chromium.org/multivm",
-  "svn://chrome-svn/native_client": "http://src.chromium.org/native_client",
-  "svn://chrome-svn.corp.google.com/blink": "http://src.chromium.org/blink",
-  "svn://chrome-svn.corp.google.com/chrome": "http://src.chromium.org/chrome",
-  "svn://chrome-svn.corp.google.com/multivm": "http://src.chromium.org/multivm",
-  "svn://chrome-svn.corp.google.com/native_client":
-      "http://src.chromium.org/native_client",
-  "svn://svn-mirror.golo.chromium.org/blink": "http://src.chromium.org/blink",
-  "svn://svn-mirror.golo.chromium.org/chrome": "http://src.chromium.org/chrome",
-  "svn://svn-mirror.golo.chromium.org/multivm":
-      "http://src.chromium.org/multivm",
-  "svn://svn-mirror.golo.chromium.org/native_client":
-      "http://src.chromium.org/native_client",
+  "svn://chrome-svn/chrome": "http://src.chromium.org/svn",
+  "svn://chrome-svn.corp.google.com/chrome": "http://src.chromium.org/svn",
   "http://v8.googlecode.com/svn": None,
   "http://google-breakpad.googlecode.com/svn": None,
   "http://googletest.googlecode.com/svn": None,
@@ -148,9 +135,8 @@ def UpdatePDB(pdb_filename, verbose=False):
     'VERCTRL=Subversion',
     'DATETIME=%s' % time.asctime(),
     'SRCSRV: variables ------------------------------------------',
-    'SVN_EXTRACT_TARGET_DIR=%targ%\%fnbksl%(%var3%)\%var4%',
-    'SVN_EXTRACT_TARGET=%svn_extract_target_dir%\%fnfile%(%var1%)',
-    'SVN_EXTRACT_CMD=cmd /c mkdir "%svn_extract_target_dir%" && cmd /c svn cat "%var2%%var3%@%var4%" --non-interactive > "%svn_extract_target%"',
+    'SVN_EXTRACT_TARGET=%targ%\%fnbksl%(%var3%)\%var4%\%fnfile%(%var1%)',
+    'SVN_EXTRACT_CMD=cmd /c svn cat "%var2%%var3%@%var4%" --non-interactive > "%svn_extract_target%"',
     'SRCSRVTRG=%SVN_extract_target%',
     'SRCSRVCMD=%SVN_extract_cmd%',
     'SRCSRV: source files ---------------------------------------',

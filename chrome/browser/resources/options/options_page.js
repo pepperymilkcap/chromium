@@ -3,16 +3,16 @@
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  /** @const */ var FocusOutlineManager = cr.ui.FocusOutlineManager;
-
   /////////////////////////////////////////////////////////////////////////////
   // OptionsPage class:
 
   /**
    * Base class for options page.
    * @constructor
-   * @param {string} name Options page name.
-   * @param {string} title Options page title, used for history.
+   * @param {string} name Options page name, also defines id of the div element
+   *     containing the options view and the name of options page navigation bar
+   *     item as name+'PageNav'.
+   * @param {string} title Options page title, used for navigation bar
    * @extends {EventTarget}
    */
   function OptionsPage(name, title, pageDivName) {
@@ -20,28 +20,10 @@ cr.define('options', function() {
     this.title = title;
     this.pageDivName = pageDivName;
     this.pageDiv = $(this.pageDivName);
-    // |pageDiv.page| is set to the page object (this) when the page is visible
-    // to track which page is being shown when multiple pages can share the same
-    // underlying div.
-    this.pageDiv.page = null;
     this.tab = null;
-    this.lastFocusedElement = null;
   }
 
-  /**
-   * This is the absolute difference maintained between standard and
-   * fixed-width font sizes. Refer http://crbug.com/91922.
-   * @const
-   */
-  OptionsPage.SIZE_DIFFERENCE_FIXED_STANDARD = 3;
-
-  /**
-   * Offset of page container in pixels, to allow room for side menu.
-   * Simplified settings pages can override this if they don't use the menu.
-   * The default (155) comes from -webkit-margin-start in uber_shared.css
-   * @private
-   */
-  OptionsPage.horizontalOffset = 155;
+  const SUBPAGE_SHEET_COUNT = 2;
 
   /**
    * Main level option pages. Maps lower-case page names to the respective page
@@ -56,6 +38,12 @@ cr.define('options', function() {
    * @protected
    */
   OptionsPage.registeredOverlayPages = {};
+
+  /**
+   * Whether or not |initialize| has been called.
+   * @private
+   */
+  OptionsPage.initialized_ = false;
 
   /**
    * Gets the default page (to be shown on initial load).
@@ -81,23 +69,13 @@ cr.define('options', function() {
   };
 
   /**
-   * Shows a registered page. This handles both top-level and overlay pages.
+   * Shows a registered page. This handles both top-level pages and sub-pages.
    * @param {string} pageName Page name.
    * @param {boolean} updateHistory True if we should update the history after
    *     showing the page.
-   * @param {Object=} opt_propertyBag An optional bag of properties including
-   *     replaceState (if history state should be replaced instead of pushed).
    * @private
    */
-  OptionsPage.showPageByName = function(pageName,
-                                        updateHistory,
-                                        opt_propertyBag) {
-    // If |opt_propertyBag| is non-truthy, homogenize to object.
-    opt_propertyBag = opt_propertyBag || {};
-
-    // If a bubble is currently being shown, hide it.
-    this.hideBubble();
-
+  OptionsPage.showPageByName = function(pageName, updateHistory) {
     // Find the currently visible root-level page.
     var rootPage = null;
     for (var name in this.registeredPages) {
@@ -114,7 +92,7 @@ cr.define('options', function() {
       // If it's not a page, try it as an overlay.
       if (!targetPage && this.showOverlay_(pageName, rootPage)) {
         if (updateHistory)
-          this.updateHistoryState_(!!opt_propertyBag.replaceState);
+          this.updateHistoryState_();
         return;
       } else {
         targetPage = this.getDefaultPage();
@@ -125,125 +103,150 @@ cr.define('options', function() {
     var targetPageWasVisible = targetPage.visible;
 
     // Determine if the root page is 'sticky', meaning that it
-    // shouldn't change when showing an overlay. This can happen for special
+    // shouldn't change when showing a sub-page.  This can happen for special
     // pages like Search.
     var isRootPageLocked =
         rootPage && rootPage.sticky && targetPage.parentPage;
 
-    var allPageNames = Array.prototype.concat.call(
-        Object.keys(this.registeredPages),
-        Object.keys(this.registeredOverlayPages));
-
     // Notify pages if they will be hidden.
-    for (var i = 0; i < allPageNames.length; ++i) {
-      var name = allPageNames[i];
-      var page = this.registeredPages[name] ||
-                 this.registeredOverlayPages[name];
+    for (var name in this.registeredPages) {
+      var page = this.registeredPages[name];
       if (!page.parentPage && isRootPageLocked)
         continue;
       if (page.willHidePage && name != pageName &&
-          !page.isAncestorOfPage(targetPage)) {
+          !page.isAncestorOfPage(targetPage))
         page.willHidePage();
-      }
     }
 
     // Update visibilities to show only the hierarchy of the target page.
-    for (var i = 0; i < allPageNames.length; ++i) {
-      var name = allPageNames[i];
-      var page = this.registeredPages[name] ||
-                 this.registeredOverlayPages[name];
+    for (var name in this.registeredPages) {
+      var page = this.registeredPages[name];
       if (!page.parentPage && isRootPageLocked)
         continue;
-      page.visible = name == pageName || page.isAncestorOfPage(targetPage);
+      page.visible = name == pageName ||
+          (!document.documentElement.classList.contains('hide-menu') &&
+           page.isAncestorOfPage(targetPage));
     }
 
     // Update the history and current location.
     if (updateHistory)
-      this.updateHistoryState_(!!opt_propertyBag.replaceState);
+      this.updateHistoryState_();
 
-    // Update tab title.
-    this.setTitle_(targetPage.title);
-
-    // Update focus if any other control was focused on the previous page,
-    // or the previous page is not known.
-    if (document.activeElement != document.body &&
-        (!rootPage || rootPage.pageDiv.contains(document.activeElement))) {
-      targetPage.focus();
-    }
+    // Always update the page title.
+    document.title = targetPage.title;
 
     // Notify pages if they were shown.
-    for (var i = 0; i < allPageNames.length; ++i) {
-      var name = allPageNames[i];
-      var page = this.registeredPages[name] ||
-                 this.registeredOverlayPages[name];
+    for (var name in this.registeredPages) {
+      var page = this.registeredPages[name];
       if (!page.parentPage && isRootPageLocked)
         continue;
-      if (!targetPageWasVisible && page.didShowPage &&
-          (name == pageName || page.isAncestorOfPage(targetPage))) {
+      if (!targetPageWasVisible && page.didShowPage && (name == pageName ||
+          page.isAncestorOfPage(targetPage)))
         page.didShowPage();
-      }
     }
   };
 
   /**
-   * Sets the title of the page. This is accomplished by calling into the
-   * parent page API.
-   * @param {string} title The title string.
+   * Updates the parts of the UI necessary for correctly hiding or displaying
+   * subpages.
    * @private
    */
-  OptionsPage.setTitle_ = function(title) {
-    uber.invokeMethodOnParent('setTitle', {title: title});
+  OptionsPage.updateDisplayForShowOrHideSubpage_ = function() {
+    OptionsPage.updateSubpageBackdrop_();
+    OptionsPage.updateAriaHiddenForPages_();
+    OptionsPage.updateScrollPosition_();
   };
 
   /**
-   * Scrolls the page to the correct position (the top when opening an overlay,
-   * or the old scroll position a previously hidden overlay becomes visible).
+   * Sets the aria-hidden attribute for pages which have been 'overlapped' by a
+   * sub-page, and removes aria-hidden from the topmost page or subpage.
    * @private
    */
-  OptionsPage.updateScrollPosition_ = function() {
-    var container = $('page-container');
+  OptionsPage.updateAriaHiddenForPages_ = function() {
+    var visiblePages = OptionsPage.getVisiblePages_();
+
+    // |visiblePages| is empty when switching top-level pages.
+    if (!visiblePages.length)
+      return;
+
+    var topmostPage = visiblePages.pop();
+
+    for (var i = 0; i < visiblePages.length; ++i) {
+      var page = visiblePages[i];
+      var nestingLevel = page.nestingLevel;
+      var container = nestingLevel > 0 ?
+        $('subpage-sheet-container-' + nestingLevel) : $('page-container');
+      container.setAttribute('aria-hidden', true);
+    }
+
+    var topmostPageContainer = topmostPage.nestingLevel > 0 ?
+        $('subpage-sheet-container-' + topmostPage.nestingLevel) :
+        $('page-container');
+    topmostPageContainer.removeAttribute('aria-hidden');
+  };
+
+  /**
+   * Updates the visibility and stacking order of the subpage backdrop
+   * according to which subpage is topmost and visible.
+   * @private
+   */
+  OptionsPage.updateSubpageBackdrop_ = function () {
+    var topmostPage = OptionsPage.getTopmostVisibleNonOverlayPage_();
+    var nestingLevel = topmostPage ? topmostPage.nestingLevel : 0;
+
+    var subpageBackdrop = $('subpage-backdrop');
+    if (nestingLevel > 0) {
+      var container = $('subpage-sheet-container-' + nestingLevel);
+      subpageBackdrop.style.zIndex =
+          parseInt(window.getComputedStyle(container).zIndex) - 1;
+      subpageBackdrop.hidden = false;
+    } else {
+      subpageBackdrop.hidden = true;
+    }
+  };
+
+  /**
+   * Scrolls the page to the correct position (the top when opening a subpage,
+   * or the old scroll position a previously hidden subpage becomes visible).
+   * @private
+   */
+  OptionsPage.updateScrollPosition_ = function () {
+    var topmostPage = OptionsPage.getTopmostVisibleNonOverlayPage_();
+    var nestingLevel = topmostPage ? topmostPage.nestingLevel : 0;
+
+    var container = (nestingLevel > 0) ?
+       $('subpage-sheet-container-' + nestingLevel) : $('page-container');
+
     var scrollTop = container.oldScrollTop || 0;
     container.oldScrollTop = undefined;
-    window.scroll(scrollLeftForDocument(document), scrollTop);
+    window.scroll(document.body.scrollLeft, scrollTop);
   };
 
   /**
    * Pushes the current page onto the history stack, overriding the last page
    * if it is the generic chrome://settings/.
-   * @param {boolean} replace If true, allow no history events to be created.
-   * @param {object=} opt_params A bag of optional params, including:
-   *     {boolean} ignoreHash Whether to include the hash or not.
    * @private
    */
-  OptionsPage.updateHistoryState_ = function(replace, opt_params) {
+  OptionsPage.updateHistoryState_ = function() {
     var page = this.getTopmostVisiblePage();
-    var path = window.location.pathname + window.location.hash;
+    var path = location.pathname;
     if (path)
-      path = path.slice(1).replace(/\/(?:#|$)/, '');  // Remove trailing slash.
-
-    // Update tab title.
-    this.setTitle_(page.title);
-
+      path = path.slice(1).replace(/\/$/, '');  // Remove trailing slash.
     // The page is already in history (the user may have clicked the same link
     // twice). Do nothing.
-    if (path == page.name && !OptionsPage.isLoading())
+    if (path == page.name)
       return;
-
-    var hash = opt_params && opt_params.ignoreHash ? '' : window.location.hash;
-
-    // If settings are embedded, tell the outer page to set its "path" to the
-    // inner frame's path.
-    var outerPath = (page == this.getDefaultPage() ? '' : page.name) + hash;
-    uber.invokeMethodOnParent('setPath', {path: outerPath});
 
     // If there is no path, the current location is chrome://settings/.
     // Override this with the new page.
-    var historyFunction = path && !replace ? window.history.pushState :
-                                             window.history.replaceState;
+    var historyFunction = path ? window.history.pushState :
+                                 window.history.replaceState;
     historyFunction.call(window.history,
                          {pageName: page.name},
                          page.title,
-                         '/' + page.name + hash);
+                         '/' + page.name);
+    // Update tab title.
+    document.title = page.title;
   };
 
   /**
@@ -257,39 +260,12 @@ cr.define('options', function() {
     if (!overlay || !overlay.canShowPage())
       return false;
 
-    // Save the currently focused element in the page for restoration later.
-    var currentPage = this.getTopmostVisiblePage();
-    if (currentPage)
-      currentPage.lastFocusedElement = document.activeElement;
-
-    if ((!rootPage || !rootPage.sticky) &&
-        overlay.parentPage &&
-        !overlay.parentPage.visible) {
+    if ((!rootPage || !rootPage.sticky) && overlay.parentPage)
       this.showPageByName(overlay.parentPage.name, false);
-    }
 
     if (!overlay.visible) {
       overlay.visible = true;
       if (overlay.didShowPage) overlay.didShowPage();
-    }
-
-    // Update tab title.
-    this.setTitle_(overlay.title);
-
-    // Change focus to the overlay if any other control was focused by keyboard
-    // before. Otherwise, no one should have focus.
-    if (document.activeElement != document.body) {
-      if (FocusOutlineManager.forDocument(document).visible) {
-        overlay.focus();
-      } else if (!overlay.pageDiv.contains(document.activeElement)) {
-        document.activeElement.blur();
-      }
-    }
-
-    if ($('search-field').value == '') {
-      var section = overlay.associatedSection;
-      if (section)
-        options.BrowserOptions.scrollToSection(section);
     }
 
     return true;
@@ -309,24 +285,12 @@ cr.define('options', function() {
    * @return {OptionPage} The visible overlay.
    */
   OptionsPage.getVisibleOverlay_ = function() {
-    var topmostPage = null;
     for (var name in this.registeredOverlayPages) {
       var page = this.registeredOverlayPages[name];
-      if (page.visible &&
-          (!topmostPage || page.nestingLevel > topmostPage.nestingLevel)) {
-        topmostPage = page;
-      }
+      if (page.visible)
+        return page;
     }
-    return topmostPage;
-  };
-
-  /**
-   * Restores the last focused element on a given page.
-   */
-  OptionsPage.restoreLastFocusedElement_ = function() {
-    var currentPage = this.getTopmostVisiblePage();
-    if (currentPage.lastFocusedElement)
-      currentPage.lastFocusedElement.focus();
+    return null;
   };
 
   /**
@@ -339,27 +303,8 @@ cr.define('options', function() {
       return;
 
     overlay.visible = false;
-
     if (overlay.didClosePage) overlay.didClosePage();
-    this.updateHistoryState_(false, {ignoreHash: true});
-
-    this.restoreLastFocusedElement_();
-  };
-
-  /**
-   * Cancels (closes) the overlay, due to the user pressing <Esc>.
-   */
-  OptionsPage.cancelOverlay = function() {
-    // Blur the active element to ensure any changed pref value is saved.
-    document.activeElement.blur();
-    var overlay = this.getVisibleOverlay_();
-    // Let the overlay handle the <Esc> if it wants to.
-    if (overlay.handleCancel) {
-      overlay.handleCancel();
-      this.restoreLastFocusedElement_();
-    } else {
-      this.closeOverlay();
-    }
+    this.updateHistoryState_();
   };
 
   /**
@@ -415,48 +360,49 @@ cr.define('options', function() {
   };
 
   /**
-   * Returns the currently visible bubble, or null if no bubble is visible.
-   * @return {AutoCloseBubble} The bubble currently being shown.
+   * Closes the topmost open subpage, if any.
+   * @private
    */
-  OptionsPage.getVisibleBubble = function() {
-    var bubble = OptionsPage.bubble_;
-    return bubble && !bubble.hidden ? bubble : null;
+  OptionsPage.closeTopSubPage_ = function() {
+    var topPage = this.getTopmostVisiblePage();
+    if (topPage && !topPage.isOverlay && topPage.parentPage) {
+      if (topPage.willHidePage)
+        topPage.willHidePage();
+      topPage.visible = false;
+    }
+
+    this.updateHistoryState_();
   };
 
   /**
-   * Shows an informational bubble displaying |content| and pointing at the
-   * |target| element. If |content| has focusable elements, they join the
-   * current page's tab order as siblings of |domSibling|.
-   * @param {HTMLDivElement} content The content of the bubble.
-   * @param {HTMLElement} target The element at which the bubble points.
-   * @param {HTMLElement} domSibling The element after which the bubble is added
-   *                      to the DOM.
-   * @param {cr.ui.ArrowLocation} location The arrow location.
+   * Closes all subpages below the given level.
+   * @param {number} level The nesting level to close below.
    */
-  OptionsPage.showBubble = function(content, target, domSibling, location) {
-    OptionsPage.hideBubble();
+  OptionsPage.closeSubPagesToLevel = function(level) {
+    var topPage = this.getTopmostVisiblePage();
+    while (topPage && topPage.nestingLevel > level) {
+      if (topPage.willHidePage)
+        topPage.willHidePage();
+      topPage.visible = false;
+      topPage = topPage.parentPage;
+    }
 
-    var bubble = new cr.ui.AutoCloseBubble;
-    bubble.anchorNode = target;
-    bubble.domSibling = domSibling;
-    bubble.arrowLocation = location;
-    bubble.content = content;
-    bubble.show();
-    OptionsPage.bubble_ = bubble;
+    this.updateHistoryState_();
   };
 
   /**
-   * Hides the currently visible bubble, if any.
+   * Updates managed banner visibility state based on the topmost page.
    */
-  OptionsPage.hideBubble = function() {
-    if (OptionsPage.bubble_)
-      OptionsPage.bubble_.hide();
+  OptionsPage.updateManagedBannerVisibility = function() {
+    var topPage = this.getTopmostVisiblePage();
+    if (topPage)
+      topPage.updateManagedBannerVisibility();
   };
 
   /**
-   * Shows the tab contents for the given navigation tab.
-   * @param {!Element} tab The tab that the user clicked.
-   */
+  * Shows the tab contents for the given navigation tab.
+  * @param {!Element} tab The tab that the user clicked.
+  */
   OptionsPage.showTab = function(tab) {
     // Search parents until we find a tab, or the nav bar itself. This allows
     // tabs to have child nodes, e.g. labels in separately-styled spans.
@@ -492,6 +438,40 @@ cr.define('options', function() {
    */
   OptionsPage.register = function(page) {
     this.registeredPages[page.name.toLowerCase()] = page;
+    // Create and add new page <li> element to navbar.
+    var pageNav = document.createElement('li');
+    pageNav.id = page.name + 'PageNav';
+    pageNav.className = 'navbar-item';
+    pageNav.setAttribute('pageName', page.name);
+    pageNav.setAttribute('role', 'tab');
+    pageNav.textContent = page.pageDiv.querySelector('h1').textContent;
+    pageNav.tabIndex = -1;
+    pageNav.onclick = function(event) {
+      OptionsPage.navigateToPage(this.getAttribute('pageName'));
+    };
+    pageNav.onkeydown = function(event) {
+        if ((event.keyCode == 37 || event.keyCode==38) &&
+             this.previousSibling && this.previousSibling.onkeydown) {
+        // Left and up arrow moves back one tab.
+        OptionsPage.navigateToPage(
+            this.previousSibling.getAttribute('pageName'));
+        this.previousSibling.focus();
+        } else if ((event.keyCode == 39 || event.keyCode == 40) &&
+                    this.nextSibling) {
+        // Right and down arrows move forward one tab.
+        OptionsPage.navigateToPage(this.nextSibling.getAttribute('pageName'));
+        this.nextSibling.focus();
+      }
+    };
+    pageNav.onkeypress = function(event) {
+      // Enter or space
+      if (event.keyCode == 13 || event.keyCode == 32) {
+        OptionsPage.navigateToPage(this.getAttribute('pageName'));
+      }
+    };
+    var navbar = $('navbar');
+    navbar.appendChild(pageNav);
+    page.tab = pageNav;
     page.initializePage();
   };
 
@@ -507,6 +487,30 @@ cr.define('options', function() {
         return node;
     }
     return null;
+  };
+
+  /**
+   * Registers a new Sub-page.
+   * @param {OptionsPage} subPage Sub-page to register.
+   * @param {OptionsPage} parentPage Associated parent page for this page.
+   * @param {Array} associatedControls Array of control elements that lead to
+   *     this sub-page. The first item is typically a button in a root-level
+   *     page. There may be additional buttons for nested sub-pages.
+   */
+  OptionsPage.registerSubPage = function(subPage,
+                                         parentPage,
+                                         associatedControls) {
+    this.registeredPages[subPage.name.toLowerCase()] = subPage;
+    subPage.parentPage = parentPage;
+    if (associatedControls) {
+      subPage.associatedControls = associatedControls;
+      if (associatedControls.length) {
+        subPage.associatedSection =
+            this.findSectionForNode_(associatedControls[0]);
+      }
+    }
+    subPage.tab = undefined;
+    subPage.initializePage();
   };
 
   /**
@@ -527,17 +531,12 @@ cr.define('options', function() {
         overlay.associatedSection =
             this.findSectionForNode_(associatedControls[0]);
       }
-
-      // Sanity check.
-      for (var i = 0; i < associatedControls.length; ++i) {
-        assert(associatedControls[i], 'Invalid element passed.');
-      }
     }
 
     // Reverse the button strip for views. See the documentation of
-    // reverseButtonStripIfNecessary_() for an explanation of why this is done.
+    // reverseButtonStrip_() for an explanation of why this is necessary.
     if (cr.isViews)
-      this.reverseButtonStripIfNecessary_(overlay);
+      this.reverseButtonStrip_(overlay);
 
     overlay.tab = undefined;
     overlay.isOverlay = true;
@@ -545,17 +544,16 @@ cr.define('options', function() {
   };
 
   /**
-   * Reverses the child elements of a button strip if it hasn't already been
-   * reversed. This is necessary because WebKit does not alter the tab order for
-   * elements that are visually reversed using -webkit-box-direction: reverse,
-   * and the button order is reversed for views. See http://webk.it/62664 for
-   * more information.
+   * Reverses the child elements of a button strip. This is necessary because
+   * WebKit does not alter the tab order for elements that are visually reversed
+   * using -webkit-box-direction: reverse, and the button order is reversed for
+   * views.  See https://bugs.webkit.org/show_bug.cgi?id=62664 for more
+   * information.
    * @param {Object} overlay The overlay containing the button strip to reverse.
    * @private
    */
-  OptionsPage.reverseButtonStripIfNecessary_ = function(overlay) {
-    var buttonStrips =
-        overlay.pageDiv.querySelectorAll('.button-strip:not([reversed])');
+  OptionsPage.reverseButtonStrip_ = function(overlay) {
+    var buttonStrips = overlay.pageDiv.querySelectorAll('.button-strip');
 
     // Reverse all button-strips in the overlay.
     for (var j = 0; j < buttonStrips.length; j++) {
@@ -564,26 +562,21 @@ cr.define('options', function() {
       var childNodes = buttonStrip.childNodes;
       for (var i = childNodes.length - 1; i >= 0; i--)
         buttonStrip.appendChild(childNodes[i]);
-
-      buttonStrip.setAttribute('reversed', '');
     }
   };
 
   /**
-   * Callback for window.onpopstate to handle back/forward navigations.
+   * Callback for window.onpopstate.
    * @param {Object} data State data pushed into history.
    */
   OptionsPage.setState = function(data) {
     if (data && data.pageName) {
-      var currentOverlay = this.getVisibleOverlay_();
-      var lowercaseName = data.pageName.toLowerCase();
-      var newPage = this.registeredPages[lowercaseName] ||
-                    this.registeredOverlayPages[lowercaseName] ||
-                    this.getDefaultPage();
-      if (currentOverlay && !currentOverlay.isAncestorOfPage(newPage)) {
-        currentOverlay.visible = false;
-        if (currentOverlay.didClosePage) currentOverlay.didClosePage();
+      // It's possible an overlay may be the last top-level page shown.
+      if (this.isOverlayVisible_() &&
+          !this.registeredOverlayPages[data.pageName.toLowerCase()]) {
+        this.hideOverlay_();
       }
+
       this.showPageByName(data.pageName, false);
     }
   };
@@ -599,19 +592,22 @@ cr.define('options', function() {
   };
 
   /**
-   * Freezes/unfreezes the scroll position of the root page container.
+   * Freezes/unfreezes the scroll position of given level's page container.
    * @param {boolean} freeze Whether the page should be frozen.
+   * @param {number} level The level to freeze/unfreeze.
    * @private
    */
-  OptionsPage.setRootPageFrozen_ = function(freeze) {
-    var container = $('page-container');
+  OptionsPage.setPageFrozenAtLevel_ = function(freeze, level) {
+    var container = level == 0 ? $('page-container')
+                               : $('subpage-sheet-container-' + level);
+
     if (container.classList.contains('frozen') == freeze)
       return;
 
     if (freeze) {
       // Lock the width, since auto width computation may change.
       container.style.width = window.getComputedStyle(container).width;
-      container.oldScrollTop = scrollTopForDocument(document);
+      container.oldScrollTop = document.body.scrollTop;
       container.classList.add('frozen');
       var verticalPosition =
           container.getBoundingClientRect().top - container.oldScrollTop;
@@ -627,13 +623,17 @@ cr.define('options', function() {
   };
 
   /**
-   * Freezes/unfreezes the scroll position of the root page based on the current
+   * Freezes/unfreezes the scroll position of visible pages based on the current
    * page stack.
    */
-  OptionsPage.updateRootPageFreezeState = function() {
+  OptionsPage.updatePageFreezeStates = function() {
     var topPage = OptionsPage.getTopmostVisiblePage();
-    if (topPage)
-      this.setRootPageFrozen_(topPage.isOverlay);
+    if (!topPage)
+      return;
+    var nestingLevel = topPage.isOverlay ? 100 : topPage.nestingLevel;
+    for (var i = 0; i <= SUBPAGE_SHEET_COUNT; i++) {
+      this.setPageFrozenAtLevel_(i < nestingLevel, i);
+    }
   };
 
   /**
@@ -642,23 +642,53 @@ cr.define('options', function() {
    */
   OptionsPage.initialize = function() {
     chrome.send('coreOptionsInitialize');
-    uber.onContentFrameLoaded();
-    FocusOutlineManager.forDocument(document);
+    this.initialized_ = true;
+
     document.addEventListener('scroll', this.handleScroll_.bind(this));
+    window.addEventListener('resize', this.handleResize_.bind(this));
 
-    // Trigger the scroll handler manually to set the initial state.
-    this.handleScroll_();
+    if (!document.documentElement.classList.contains('hide-menu')) {
+      // Close subpages if the user clicks on the html body. Listen in the
+      // capturing phase so that we can stop the click from doing anything.
+      document.body.addEventListener('click',
+                                     this.bodyMouseEventHandler_.bind(this),
+                                     true);
+      // We also need to cancel mousedowns on non-subpage content.
+      document.body.addEventListener('mousedown',
+                                     this.bodyMouseEventHandler_.bind(this),
+                                     true);
 
-    // Shake the dialog if the user clicks outside the dialog bounds.
-    var containers = [$('overlay-container-1'), $('overlay-container-2')];
-    for (var i = 0; i < containers.length; i++) {
-      var overlay = containers[i];
-      cr.ui.overlay.setupOverlay(overlay);
-      overlay.addEventListener('cancelOverlay',
-                               OptionsPage.cancelOverlay.bind(OptionsPage));
+      var self = this;
+      // Hook up the close buttons.
+      subpageCloseButtons = document.querySelectorAll('.close-subpage');
+      for (var i = 0; i < subpageCloseButtons.length; i++) {
+        subpageCloseButtons[i].onclick = function() {
+          self.closeTopSubPage_();
+        };
+      };
+
+      // Install handler for key presses.
+      document.addEventListener('keydown',
+                                this.keyDownEventHandler_.bind(this));
+
+      document.addEventListener('focus', this.manageFocusChange_.bind(this),
+                                true);
     }
 
-    cr.ui.overlay.globalInitialization();
+    // Calculate and store the horizontal locations of elements that may be
+    // frozen later.
+    var sidebarWidth =
+        parseInt(window.getComputedStyle($('mainview')).webkitPaddingStart, 10);
+    $('page-container').horizontalOffset = sidebarWidth +
+        parseInt(window.getComputedStyle(
+            $('mainview-content')).webkitPaddingStart, 10);
+    for (var level = 1; level <= SUBPAGE_SHEET_COUNT; level++) {
+      var containerId = 'subpage-sheet-container-' + level;
+      $(containerId).horizontalOffset = sidebarWidth;
+    }
+    $('subpage-backdrop').horizontalOffset = sidebarWidth;
+    // Trigger the resize handler manually to set the initial state.
+    this.handleResize_(null);
   };
 
   /**
@@ -676,12 +706,48 @@ cr.define('options', function() {
   };
 
   /**
-   * Called when the page is scrolled; moves elements that are position:fixed
-   * but should only behave as if they are fixed for vertical scrolling.
+   * Called when focus changes; ensures that focus doesn't move outside
+   * the topmost subpage/overlay.
+   * @param {Event} e The focus change event.
    * @private
    */
-  OptionsPage.handleScroll_ = function() {
-    this.updateAllFrozenElementPositions_();
+  OptionsPage.manageFocusChange_ = function(e) {
+    var focusableItemsRoot;
+    var topPage = this.getTopmostVisiblePage();
+    if (!topPage)
+      return;
+
+    if (topPage.isOverlay) {
+      // If an overlay is visible, that defines the tab loop.
+      focusableItemsRoot = topPage.pageDiv;
+    } else {
+      // If a subpage is visible, use its parent as the tab loop constraint.
+      // (The parent is used because it contains the close button.)
+      if (topPage.nestingLevel > 0)
+        focusableItemsRoot = topPage.pageDiv.parentNode;
+    }
+
+    if (focusableItemsRoot && !focusableItemsRoot.contains(e.target))
+      topPage.focusFirstElement();
+  };
+
+  /**
+   * Called when the page is scrolled; moves elements that are position:fixed
+   * but should only behave as if they are fixed for vertical scrolling.
+   * @param {Event} e The scroll event.
+   * @private
+   */
+  OptionsPage.handleScroll_ = function(e) {
+    var scrollHorizontalOffset = document.body.scrollLeft;
+    // position:fixed doesn't seem to work for horizontal scrolling in RTL mode,
+    // so only adjust in LTR mode (where scroll values will be positive).
+    if (scrollHorizontalOffset >= 0) {
+      $('navbar-container').style.left = -scrollHorizontalOffset + 'px';
+      var subpageBackdrop = $('subpage-backdrop');
+      subpageBackdrop.style.left = subpageBackdrop.horizontalOffset -
+          scrollHorizontalOffset + 'px';
+      this.updateAllFrozenElementPositions_();
+    }
   };
 
   /**
@@ -690,30 +756,113 @@ cr.define('options', function() {
    */
   OptionsPage.updateAllFrozenElementPositions_ = function() {
     var frozenElements = document.querySelectorAll('.frozen');
-    for (var i = 0; i < frozenElements.length; i++)
+    for (var i = 0; i < frozenElements.length; i++) {
       this.updateFrozenElementHorizontalPosition_(frozenElements[i]);
-  };
-
-  /**
-   * Updates the given frozen element to match the horizontal scroll position.
-   * @param {HTMLElement} e The frozen element to update.
-   * @private
-   */
-  OptionsPage.updateFrozenElementHorizontalPosition_ = function(e) {
-    if (isRTL()) {
-      e.style.right = OptionsPage.horizontalOffset + 'px';
-    } else {
-      var scrollLeft = scrollLeftForDocument(document);
-      e.style.left = OptionsPage.horizontalOffset - scrollLeft + 'px';
     }
   };
 
   /**
-   * Change the horizontal offset used to reposition elements while showing an
-   * overlay from the default.
+   * Updates the given frozen element to match the horizontal scroll position.
+   * @param {HTMLElement} e The frozen element to update
+   * @private
    */
-  OptionsPage.setHorizontalOffset = function(value) {
-    OptionsPage.horizontalOffset = value;
+  OptionsPage.updateFrozenElementHorizontalPosition_ = function(e) {
+    if (document.documentElement.dir == 'rtl')
+      e.style.right = e.horizontalOffset + 'px';
+    else
+      e.style.left = e.horizontalOffset - document.body.scrollLeft + 'px';
+  };
+
+  /**
+   * Called when the page is resized; adjusts the size of elements that depend
+   * on the veiwport.
+   * @param {Event} e The resize event.
+   * @private
+   */
+  OptionsPage.handleResize_ = function(e) {
+    // Set an explicit height equal to the viewport on all the subpage
+    // containers shorter than the viewport. This is used instead of
+    // min-height: 100% so that there is an explicit height for the subpages'
+    // min-height: 100%.
+    var viewportHeight = document.documentElement.clientHeight;
+    var subpageContainers =
+        document.querySelectorAll('.subpage-sheet-container');
+    for (var i = 0; i < subpageContainers.length; i++) {
+      if (subpageContainers[i].scrollHeight > viewportHeight)
+        subpageContainers[i].style.removeProperty('height');
+      else
+        subpageContainers[i].style.height = viewportHeight + 'px';
+    }
+  };
+
+  /**
+   * A function to handle mouse events (mousedown or click) on the html body by
+   * closing subpages and/or stopping event propagation.
+   * @return {Event} a mousedown or click event.
+   * @private
+   */
+  OptionsPage.bodyMouseEventHandler_ = function(event) {
+    // Do nothing if a subpage isn't showing.
+    var topPage = this.getTopmostVisiblePage();
+    if (!topPage || topPage.isOverlay || !topPage.parentPage)
+      return;
+
+    // Don't close subpages if a user is clicking in a select element.
+    // This is necessary because WebKit sends click events with strange
+    // coordinates when a user selects a new entry in a select element.
+    // See: http://crbug.com/87199
+    if (event.srcElement.nodeName == 'SELECT')
+      return;
+
+    // Do nothing if the client coordinates are not within the source element.
+    // This occurs if the user toggles a checkbox by pressing spacebar.
+    // This is a workaround to prevent keyboard events from closing the window.
+    // See: crosbug.com/15678
+    if (event.clientX == -document.body.scrollLeft &&
+        event.clientY == -document.body.scrollTop) {
+      return;
+    }
+
+    // Don't interfere with navbar clicks.
+    if ($('navbar').contains(event.target))
+      return;
+
+    // Figure out which page the click happened in.
+    for (var level = topPage.nestingLevel; level >= 0; level--) {
+      var clickIsWithinLevel = level == 0 ? true :
+          OptionsPage.elementContainsPoint_(
+              $('subpage-sheet-' + level), event.clientX, event.clientY);
+
+      if (!clickIsWithinLevel)
+        continue;
+
+      // Event was within the topmost page; do nothing.
+      if (topPage.nestingLevel == level)
+        return;
+
+      // Block propgation of both clicks and mousedowns, but only close subpages
+      // on click.
+      if (event.type == 'click')
+        this.closeSubPagesToLevel(level);
+      event.stopPropagation();
+      event.preventDefault();
+      return;
+    }
+  };
+
+  /**
+   * A function to handle key press events.
+   * @return {Event} a keydown event.
+   * @private
+   */
+  OptionsPage.keyDownEventHandler_ = function(event) {
+    // Close the top overlay or sub-page on esc.
+    if (event.keyCode == 27) {  // Esc
+      if (this.isOverlayVisible_())
+        this.closeOverlay();
+      else
+        this.closeTopSubPage_();
+    }
   };
 
   OptionsPage.setClearPluginLSODataEnabled = function(enabled) {
@@ -724,35 +873,19 @@ cr.define('options', function() {
       document.documentElement.removeAttribute(
           'flashPluginSupportsClearSiteData');
     }
-    if (navigator.plugins['Shockwave Flash'])
-      document.documentElement.setAttribute('hasFlashPlugin', '');
-  };
-
-  OptionsPage.setPepperFlashSettingsEnabled = function(enabled) {
-    if (enabled) {
-      document.documentElement.setAttribute(
-          'enablePepperFlashSettings', '');
-    } else {
-      document.documentElement.removeAttribute(
-          'enablePepperFlashSettings');
-    }
-  };
-
-  OptionsPage.setIsSettingsApp = function() {
-    document.documentElement.classList.add('settings-app');
-  };
-
-  OptionsPage.isSettingsApp = function() {
-    return document.documentElement.classList.contains('settings-app');
   };
 
   /**
-   * Whether the page is still loading (i.e. onload hasn't finished running).
-   * @return {boolean} Whether the page is still loading.
+   * Re-initializes the C++ handlers if necessary. This is called if the
+   * handlers are torn down and recreated but the DOM may not have been (in
+   * which case |initialize| won't be called again). If |initialize| hasn't been
+   * called, this does nothing (since it will be later, once the DOM has
+   * finished loading).
    */
-  OptionsPage.isLoading = function() {
-    return document.documentElement.classList.contains('loading');
-  };
+  OptionsPage.reinitializeCore = function() {
+    if (this.initialized_)
+      chrome.send('coreOptionsInitialize');
+  }
 
   OptionsPage.prototype = {
     __proto__: cr.EventTarget.prototype,
@@ -783,84 +916,109 @@ cr.define('options', function() {
     initializePage: function() {},
 
     /**
-     * Sets focus on the first focusable element. Override for a custom focus
-     * strategy.
+     * Updates managed banner visibility state. This function iterates over
+     * all input fields of a window and if any of these is marked as managed
+     * it triggers the managed banner to be visible. The banner can be enforced
+     * being on through the managed flag of this class but it can not be forced
+     * being off if managed items exist.
      */
-    focus: function() {
-      // Do not change focus if any control on this page is already focused.
-      if (this.pageDiv.contains(document.activeElement))
-        return;
+    updateManagedBannerVisibility: function() {
+      var bannerDiv = $('managed-prefs-banner');
 
-      var elements = this.pageDiv.querySelectorAll(
-          'input, list, select, textarea, button');
-      for (var i = 0; i < elements.length; i++) {
-        var element = elements[i];
-        // Try to focus. If fails, then continue.
-        element.focus();
-        if (document.activeElement == element)
-          return;
+      var controlledByPolicy = false;
+      var controlledByExtension = false;
+      var inputElements = this.pageDiv.querySelectorAll('input[controlled-by]');
+      for (var i = 0, len = inputElements.length; i < len; i++) {
+        if (inputElements[i].controlledBy == 'policy')
+          controlledByPolicy = true;
+        else if (inputElements[i].controlledBy == 'extension')
+          controlledByExtension = true;
       }
-    },
-
-    /**
-     * Gets the container div for this page if it is an overlay.
-     * @type {HTMLElement}
-     */
-    get container() {
-      assert(this.isOverlay);
-      return this.pageDiv.parentNode;
+      if (!controlledByPolicy && !controlledByExtension) {
+        bannerDiv.hidden = true;
+      } else {
+        bannerDiv.hidden = false;
+        var height = window.getComputedStyle(bannerDiv).height;
+        if (controlledByPolicy && !controlledByExtension) {
+          $('managed-prefs-text').textContent =
+              templateData.policyManagedPrefsBannerText;
+        } else if (!controlledByPolicy && controlledByExtension) {
+          $('managed-prefs-text').textContent =
+              templateData.extensionManagedPrefsBannerText;
+        } else if (controlledByPolicy && controlledByExtension) {
+          $('managed-prefs-text').textContent =
+              templateData.policyAndExtensionManagedPrefsBannerText;
+        }
+      }
     },
 
     /**
      * Gets page visibility state.
-     * @type {boolean}
      */
     get visible() {
-      // If this is an overlay dialog it is no longer considered visible while
-      // the overlay is fading out. See http://crbug.com/118629.
-      if (this.isOverlay &&
-          this.container.classList.contains('transparent')) {
-        return false;
-      }
-      if (this.pageDiv.hidden)
-        return false;
-      return this.pageDiv.page == this;
+      return !this.pageDiv.hidden;
     },
 
     /**
      * Sets page visibility.
-     * @type {boolean}
      */
     set visible(visible) {
       if ((this.visible && visible) || (!this.visible && !visible))
         return;
 
-      // If using an overlay, the visibility of the dialog is toggled at the
-      // same time as the overlay to show the dialog's out transition. This
-      // is handled in setOverlayVisible.
-      if (this.isOverlay) {
-        this.setOverlayVisible_(visible);
+      this.setContainerVisibility_(visible);
+      if (visible) {
+        this.pageDiv.hidden = false;
+
+        if (this.tab) {
+          this.tab.classList.add('navbar-item-selected');
+          this.tab.setAttribute('aria-selected', 'true');
+          this.tab.tabIndex = 0;
+        }
       } else {
-        this.pageDiv.page = this;
-        this.pageDiv.hidden = !visible;
-        this.onVisibilityChanged_();
+        this.pageDiv.hidden = true;
+
+        if (this.tab) {
+          this.tab.classList.remove('navbar-item-selected');
+          this.tab.setAttribute('aria-selected', 'false');
+          this.tab.tabIndex = -1;
+        }
       }
+
+      OptionsPage.updatePageFreezeStates();
+
+      // The managed prefs banner is global, so after any visibility change
+      // update it based on the topmost page, not necessarily this page
+      // (e.g., if an ancestor is made visible after a child).
+      OptionsPage.updateManagedBannerVisibility();
+
+      // A subpage was shown or hidden.
+      if (!this.isOverlay && this.nestingLevel > 0)
+        OptionsPage.updateDisplayForShowOrHideSubpage_();
+      else if (this.isOverlay && !visible)
+        OptionsPage.updateScrollPosition_();
 
       cr.dispatchPropertyChange(this, 'visible', visible, !visible);
     },
 
     /**
-     * Shows or hides an overlay (including any visible dialog).
-     * @param {boolean} visible Whether the overlay should be visible or not.
+     * Shows or hides this page's container.
+     * @param {boolean} visible Whether the container should be visible or not.
      * @private
      */
-    setOverlayVisible_: function(visible) {
-      assert(this.isOverlay);
-      var pageDiv = this.pageDiv;
-      var container = this.container;
+    setContainerVisibility_: function(visible) {
+      var container = null;
+      if (this.isOverlay) {
+        container = $('overlay');
+      } else {
+        var nestingLevel = this.nestingLevel;
+        if (nestingLevel > 0)
+          container = $('subpage-sheet-container-' + nestingLevel);
+      }
+      var isSubpage = !this.isOverlay;
 
-      if (visible)
-        uber.invokeMethodOnParent('beginInterceptingEvents');
+      if (!container)
+        return;
 
       if (container.hidden != visible) {
         if (visible) {
@@ -868,87 +1026,54 @@ cr.define('options', function() {
           // again, the fadeCompleted_ callback would cause it to be erroneously
           // hidden again. Removing the transparent tag avoids that.
           container.classList.remove('transparent');
-
-          // Hide all dialogs in this container since a different one may have
-          // been previously visible before fading out.
-          var pages = container.querySelectorAll('.page');
-          for (var i = 0; i < pages.length; i++)
-            pages[i].hidden = true;
-          // Show the new dialog.
-          pageDiv.hidden = false;
-          pageDiv.page = this;
         }
         return;
       }
 
-      var self = this;
-      var loading = OptionsPage.isLoading();
-      if (!loading) {
-        // TODO(flackr): Use an event delegate to avoid having to subscribe and
-        // unsubscribe for webkitTransitionEnd events.
-        container.addEventListener('webkitTransitionEnd', function f(e) {
-            if (e.target != e.currentTarget || e.propertyName != 'opacity')
-              return;
-            container.removeEventListener('webkitTransitionEnd', f);
-            self.fadeCompleted_();
-        });
-      }
-
       if (visible) {
         container.hidden = false;
-        pageDiv.hidden = false;
-        pageDiv.page = this;
-        // NOTE: This is a hacky way to force the container to layout which
-        // will allow us to trigger the webkit transition.
-        container.scrollTop;
-
-        this.pageDiv.removeAttribute('aria-hidden');
-        if (this.parentPage) {
-          this.parentPage.pageDiv.parentElement.setAttribute('aria-hidden',
-                                                             true);
+        if (isSubpage) {
+          var computedStyle = window.getComputedStyle(container);
+          container.style.WebkitPaddingStart =
+              parseInt(computedStyle.WebkitPaddingStart, 10) + 100 + 'px';
         }
-        container.classList.remove('transparent');
-        this.onVisibilityChanged_();
+        // Separate animating changes from the removal of display:none.
+        window.setTimeout(function() {
+          container.classList.remove('transparent');
+          if (isSubpage)
+            container.style.WebkitPaddingStart = '';
+        });
       } else {
-        // Kick change events for text fields.
-        if (pageDiv.contains(document.activeElement))
-          document.activeElement.blur();
+        var self = this;
+        container.addEventListener('webkitTransitionEnd', function f(e) {
+          if (e.propertyName != 'opacity')
+            return;
+          container.removeEventListener('webkitTransitionEnd', f);
+          self.fadeCompleted_(container);
+        });
         container.classList.add('transparent');
       }
-
-      if (loading)
-        this.fadeCompleted_();
     },
 
     /**
      * Called when a container opacity transition finishes.
+     * @param {HTMLElement} container The container element.
      * @private
      */
-    fadeCompleted_: function() {
-      if (this.container.classList.contains('transparent')) {
-        this.pageDiv.hidden = true;
-        this.container.hidden = true;
-
-        if (this.parentPage)
-          this.parentPage.pageDiv.parentElement.removeAttribute('aria-hidden');
-
-        if (this.nestingLevel == 1)
-          uber.invokeMethodOnParent('stopInterceptingEvents');
-
-        this.onVisibilityChanged_();
-      }
+    fadeCompleted_: function(container) {
+      if (container.classList.contains('transparent'))
+        container.hidden = true;
     },
 
     /**
-     * Called when a page is shown or hidden to update the root options page
-     * based on this page's visibility.
-     * @private
+     * Focuses the first control on the page.
      */
-    onVisibilityChanged_: function() {
-      OptionsPage.updateRootPageFreezeState();
-
-      if (this.isOverlay && !this.visible)
-        OptionsPage.updateScrollPosition_();
+    focusFirstElement: function() {
+      // Sets focus on the first interactive element in the page.
+      var focusElement =
+          this.pageDiv.querySelector('button, input, list, select');
+      if (focusElement)
+        focusElement.focus();
     },
 
     /**
@@ -977,8 +1102,8 @@ cr.define('options', function() {
     /**
      * Checks whether this page is an ancestor of the given page in terms of
      * subpage nesting.
-     * @param {OptionsPage} page The potential descendent of this page.
-     * @return {boolean} True if |page| is nested under this page.
+     * @param {OptionsPage} page
+     * @return {boolean} True if this page is nested under |page|
      */
     isAncestorOfPage: function(page) {
       var parent = page.parentPage;
@@ -992,7 +1117,7 @@ cr.define('options', function() {
 
     /**
      * Whether it should be possible to show the page.
-     * @return {boolean} True if the page should be shown.
+     * @return {boolean} True if the page should be shown
      */
     canShowPage: function() {
       return true;

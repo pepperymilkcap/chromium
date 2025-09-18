@@ -6,8 +6,8 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_auth_handler_basic.h"
 #include "net/http/http_request_info.h"
@@ -36,8 +36,8 @@ TEST(HttpAuthHandlerBasicTest, GenerateAuthToken) {
     scoped_ptr<HttpAuthHandler> basic;
     EXPECT_EQ(OK, factory.CreateAuthHandlerFromString(
         challenge, HttpAuth::AUTH_SERVER, origin, BoundNetLog(), &basic));
-    AuthCredentials credentials(base::ASCIIToUTF16(tests[i].username),
-                                base::ASCIIToUTF16(tests[i].password));
+    AuthCredentials credentials(ASCIIToUTF16(tests[i].username),
+                                ASCIIToUTF16(tests[i].password));
     HttpRequestInfo request_info;
     std::string auth_token;
     int rv = basic->GenerateAuthToken(&credentials, &request_info,

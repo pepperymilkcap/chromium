@@ -1,14 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/download/download_item_button.h"
 
 #include "base/logging.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #import "chrome/browser/ui/cocoa/download/download_item_cell.h"
 #import "chrome/browser/ui/cocoa/download/download_item_controller.h"
-#import "chrome/browser/ui/cocoa/download/download_shelf_context_menu_controller.h"
 
 @implementation DownloadItemButton
 
@@ -33,23 +32,15 @@
   if ([reinterpret_cast<DownloadItemCell*>(cell) isMouseOverButtonPart]) {
     [self.draggableButton mouseDownImpl:event];
   } else {
-    base::scoped_nsobject<DownloadShelfContextMenuController> menuController(
-        [[DownloadShelfContextMenuController alloc]
-            initWithItemController:controller_
-                      withDelegate:self]);
-
+    // Hold a reference to our controller in case the download completes and we
+    // represent a file that's auto-removed (e.g. a theme).
+    scoped_nsobject<DownloadItemController> ref([controller_ retain]);
     [cell setHighlighted:YES];
-    [NSMenu popUpContextMenu:[menuController menu]
+    [[self menu] setDelegate:self];
+    [NSMenu popUpContextMenu:[self menu]
                    withEvent:[NSApp currentEvent]
                      forView:self];
   }
-}
-
-// Override to retain the controller, in case a closure is pumped that deletes
-// the DownloadItemController while the menu is open <http://crbug.com/129826>.
-- (void)rightMouseDown:(NSEvent*)event {
-  base::scoped_nsobject<DownloadItemController> ref([controller_ retain]);
-  [super rightMouseDown:event];
 }
 
 - (void)menuDidClose:(NSMenu*)menu {

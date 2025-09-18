@@ -4,6 +4,7 @@
 
 #ifndef NET_PROXY_PROXY_SERVICE_H_
 #define NET_PROXY_PROXY_SERVICE_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -23,12 +24,7 @@
 #include "net/proxy/proxy_server.h"
 
 class GURL;
-
-namespace base {
 class MessageLoop;
-class SingleThreadTaskRunner;
-class TimeDelta;
-}  // namespace base
 
 namespace net {
 
@@ -44,12 +40,9 @@ class ProxyScriptFetcher;
 // HTTP(S) URL.  It uses the given ProxyResolver to handle the actual proxy
 // resolution.  See ProxyResolverV8 for example.
 class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
-                                public NetworkChangeNotifier::DNSObserver,
                                 public ProxyConfigService::Observer,
                                 NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
-  static const size_t kDefaultNumPacThreads = 4;
-
   // This interface defines the set of policies for when to poll the PAC
   // script for changes.
   //
@@ -147,17 +140,6 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
                                 PacRequest** pac_request,
                                 const BoundNetLog& net_log);
 
-  // Explicitly trigger proxy fallback for the given |results| by updating our
-  // list of bad proxies to include the first entry of |results|, and,
-  // optionally, another bad proxy. Will retry after |retry_delay| if positive,
-  // and will use the default proxy retry duration otherwise. Returns true if
-  // there will be at least one proxy remaining in the list after fallback and
-  // false otherwise.
-  bool MarkProxiesAsBad(const ProxyInfo& results,
-                        base::TimeDelta retry_delay,
-                        const ProxyServer& another_bad_proxy,
-                        const BoundNetLog& net_log);
-
   // Called to report that the last proxy connection succeeded.  If |proxy_info|
   // has a non empty proxy_retry_info map, the proxies that have been tried (and
   // failed) for this request will be marked as bad.
@@ -213,8 +195,51 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // to downloading and testing the PAC files.
   void ForceReloadProxyConfig();
 
-  // Same as CreateProxyServiceUsingV8ProxyResolver, except it uses system
-  // libraries for evaluating the PAC script if available, otherwise skips
+  // Creates a proxy service that polls |proxy_config_service| to notice when
+  // the proxy settings change. We take ownership of |proxy_config_service|.
+  //
+  // |num_pac_threads| specifies the maximum number of threads to use for
+  // executing PAC scripts. Threads are created lazily on demand.
+  // If |0| is specified, then a default number of threads will be selected.
+  //
+  // Having more threads avoids stalling proxy resolve requests when the
+  // PAC script takes a while to run. This is particularly a problem when PAC
+  // scripts do synchronous DNS resolutions, since that can take on the order
+  // of seconds.
+  //
+  // However, the disadvantages of using more than 1 thread are:
+  //   (a) can cause compatibility issues for scripts that rely on side effects
+  //       between runs (such scripts should not be common though).
+  //   (b) increases the memory used by proxy resolving, as each thread will
+  //       duplicate its own script context.
+
+  // |proxy_script_fetcher| specifies the dependency to use for downloading
+  // any PAC scripts. The resulting ProxyService will take ownership of it.
+  //
+  // |dhcp_proxy_script_fetcher| specifies the dependency to use for attempting
+  // to retrieve the most appropriate PAC script configured in DHCP. The
+  // resulting ProxyService will take ownership of it.
+  //
+  // |host_resolver| points to the host resolving dependency the PAC script
+  // should use for any DNS queries. It must remain valid throughout the
+  // lifetime of the ProxyService.
+  //
+  // ##########################################################################
+  // # See the warnings in net/proxy/proxy_resolver_v8.h describing the
+  // # multi-threading model. In order for this to be safe to use, *ALL* the
+  // # other V8's running in the process must use v8::Locker.
+  // ##########################################################################
+  static ProxyService* CreateUsingV8ProxyResolver(
+      ProxyConfigService* proxy_config_service,
+      size_t num_pac_threads,
+      ProxyScriptFetcher* proxy_script_fetcher,
+      DhcpProxyScriptFetcher* dhcp_proxy_script_fetcher,
+      HostResolver* host_resolver,
+      NetLog* net_log,
+      NetworkDelegate* network_delegate);
+
+  // Same as CreateUsingV8ProxyResolver, except it uses system libraries
+  // for evaluating the PAC script if available, otherwise skips
   // proxy autoconfig.
   static ProxyService* CreateUsingSystemProxyResolver(
       ProxyConfigService* proxy_config_service,
@@ -246,8 +271,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // Creates a config service appropriate for this platform that fetches the
   // system proxy settings.
   static ProxyConfigService* CreateSystemProxyConfigService(
-      base::SingleThreadTaskRunner* io_thread_task_runner,
-      base::MessageLoop* file_loop);
+      MessageLoop* io_loop, MessageLoop* file_loop);
 
   // This method should only be used by unit tests.
   void set_stall_proxy_auto_config_delay(base::TimeDelta delay) {
@@ -262,41 +286,6 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // This method should only be used by unit tests. Creates an instance
   // of the default internal PacPollPolicy used by ProxyService.
   static scoped_ptr<PacPollPolicy> CreateDefaultPacPollPolicy();
-
-  void set_quick_check_enabled(bool value) {
-    quick_check_enabled_ = value;
-  }
-
-  bool quick_check_enabled() const { return quick_check_enabled_; }
-
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-  // Values of the UMA DataReductionProxy.BypassInfo{Primary|Fallback}
-  // histograms. This enum must remain synchronized with the enum of the same
-  // name in metrics/histograms/histograms.xml.
-  enum DataReductionProxyBypassEventType {
-    // Bypass the proxy for less than 30 minutes.
-    SHORT_BYPASS = 0,
-
-    // Bypass the proxy for 30 minutes or more.
-    LONG_BYPASS,
-
-    // Bypass the proxy because of an internal server error.
-    INTERNAL_SERVER_ERROR_BYPASS,
-
-    // Bypass the proxy because of any other error.
-    ERROR_BYPASS,
-
-    // This must always be last.
-    BYPASS_EVENT_TYPE_MAX
-  };
-
-  // Records a |DataReductionProxyBypassEventType| for either the data reduction
-  // proxy (|is_primary| is true) or the data reduction proxy fallback.
-  void RecordDataReductionProxyBypassInfo(
-      bool is_primary,
-      const ProxyServer& proxy_server,
-      DataReductionProxyBypassEventType bypass_type) const;
-#endif
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ProxyServiceTest, UpdateConfigAfterFailedAutodetect);
@@ -340,7 +329,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   int TryToCompleteSynchronously(const GURL& url, ProxyInfo* result);
 
   // Cancels all of the requests sent to the ProxyResolver. These will be
-  // restarted when calling SetReady().
+  // restarted when calling ResumeAllPendingRequests().
   void SuspendAllPendingRequests();
 
   // Advances the current state to |STATE_READY|, and resumes any pending
@@ -372,10 +361,6 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // NetworkChangeNotifier::IPAddressObserver
   // When this is called, we re-fetch PAC scripts and re-run WPAD.
   virtual void OnIPAddressChanged() OVERRIDE;
-
-  // NetworkChangeNotifier::DNSObserver
-  // We respond as above.
-  virtual void OnDNSChanged() OVERRIDE;
 
   // ProxyConfigService::Observer
   virtual void OnProxyConfigChanged(
@@ -441,9 +426,6 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // The amount of time to stall requests following IP address changes.
   base::TimeDelta stall_proxy_auto_config_delay_;
 
-  // Whether child ProxyScriptDeciders should use QuickCheck
-  bool quick_check_enabled_;
-
   DISALLOW_COPY_AND_ASSIGN(ProxyService);
 };
 
@@ -451,7 +433,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
 class NET_EXPORT SyncProxyServiceHelper
     : public base::RefCountedThreadSafe<SyncProxyServiceHelper> {
  public:
-  SyncProxyServiceHelper(base::MessageLoop* io_message_loop,
+  SyncProxyServiceHelper(MessageLoop* io_message_loop,
                          ProxyService* proxy_service);
 
   int ResolveProxy(const GURL& url,
@@ -471,7 +453,7 @@ class NET_EXPORT SyncProxyServiceHelper
 
   void OnCompletion(int result);
 
-  base::MessageLoop* io_message_loop_;
+  MessageLoop* io_message_loop_;
   ProxyService* proxy_service_;
 
   base::WaitableEvent event_;

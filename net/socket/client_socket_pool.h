@@ -4,20 +4,20 @@
 
 #ifndef NET_SOCKET_CLIENT_SOCKET_POOL_H_
 #define NET_SOCKET_CLIENT_SOCKET_POOL_H_
+#pragma once
 
 #include <deque>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "base/template_util.h"
-#include "base/time/time.h"
 #include "net/base/completion_callback.h"
+#include "net/base/host_resolver.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
-#include "net/dns/host_resolver.h"
 
 namespace base {
 class DictionaryValue;
@@ -29,45 +29,11 @@ class ClientSocketHandle;
 class ClientSocketPoolHistograms;
 class StreamSocket;
 
-// ClientSocketPools are layered. This defines an interface for lower level
-// socket pools to communicate with higher layer pools.
-class NET_EXPORT HigherLayeredPool {
- public:
-  virtual ~HigherLayeredPool() {}
-
-  // Instructs the HigherLayeredPool to close an idle connection. Return true if
-  // one was closed.  Closing an idle connection will call into the lower layer
-  // pool it came from, so must be careful of re-entrancy when using this.
-  virtual bool CloseOneIdleConnection() = 0;
-};
-
-// ClientSocketPools are layered. This defines an interface for higher level
-// socket pools to communicate with lower layer pools.
-class NET_EXPORT LowerLayeredPool {
- public:
-  virtual ~LowerLayeredPool() {}
-
-  // Returns true if a there is currently a request blocked on the per-pool
-  // (not per-host) max socket limit, either in this pool, or one that it is
-  // layered on top of.
-  virtual bool IsStalled() const = 0;
-
-  // Called to add or remove a higher layer pool on top of |this|.  A higher
-  // layer pool may be added at most once to |this|, and must be removed prior
-  // to destruction of |this|.
-  virtual void AddHigherLayeredPool(HigherLayeredPool* higher_pool) = 0;
-  virtual void RemoveHigherLayeredPool(HigherLayeredPool* higher_pool) = 0;
-};
-
 // A ClientSocketPool is used to restrict the number of sockets open at a time.
 // It also maintains a list of idle persistent sockets.
 //
-class NET_EXPORT ClientSocketPool : public LowerLayeredPool {
+class NET_EXPORT ClientSocketPool {
  public:
-  // Subclasses must also have an inner class SocketParams which is
-  // the type for the |params| argument in RequestSocket() and
-  // RequestSockets() below.
-
   // Requests a connected socket for a group_name.
   //
   // There are five possible results from calling this function:
@@ -135,15 +101,14 @@ class NET_EXPORT ClientSocketPool : public LowerLayeredPool {
   // change when it flushes, so it can use this |id| to discard sockets with
   // mismatched ids.
   virtual void ReleaseSocket(const std::string& group_name,
-                             scoped_ptr<StreamSocket> socket,
+                             StreamSocket* socket,
                              int id) = 0;
 
   // This flushes all state from the ClientSocketPool.  This means that all
-  // idle and connecting sockets are discarded with the given |error|.
-  // Active sockets being held by ClientSocketPool clients will be discarded
-  // when released back to the pool.
-  // Does not flush any pools wrapped by |this|.
-  virtual void FlushWithError(int error) = 0;
+  // idle and connecting sockets are discarded.  Active sockets being
+  // held by ClientSocketPool clients will be discarded when released back to
+  // the pool.  Does not flush any pools wrapped by |this|.
+  virtual void Flush() = 0;
 
   // Called to close any idle connections held by the connection manager.
   virtual void CloseIdleSockets() = 0;
@@ -191,13 +156,41 @@ class NET_EXPORT ClientSocketPool : public LowerLayeredPool {
   DISALLOW_COPY_AND_ASSIGN(ClientSocketPool);
 };
 
-template <typename PoolType>
-void RequestSocketsForPool(
-    PoolType* pool,
-    const std::string& group_name,
-    const scoped_refptr<typename PoolType::SocketParams>& params,
-    int num_sockets,
-    const BoundNetLog& net_log) {
+// ClientSocketPool subclasses should indicate valid SocketParams via the
+// REGISTER_SOCKET_PARAMS_FOR_POOL macro below.  By default, any given
+// <PoolType,SocketParams> pair will have its SocketParamsTrait inherit from
+// base::false_type, but REGISTER_SOCKET_PARAMS_FOR_POOL will specialize that
+// pairing to inherit from base::true_type.  This provides compile time
+// verification that the correct SocketParams type is used with the appropriate
+// PoolType.
+template <typename PoolType, typename SocketParams>
+struct SocketParamTraits : public base::false_type {
+};
+
+template <typename PoolType, typename SocketParams>
+void CheckIsValidSocketParamsForPool() {
+  COMPILE_ASSERT(!base::is_pointer<scoped_refptr<SocketParams> >::value,
+                 socket_params_cannot_be_pointer);
+  COMPILE_ASSERT((SocketParamTraits<PoolType,
+                                    scoped_refptr<SocketParams> >::value),
+                 invalid_socket_params_for_pool);
+}
+
+// Provides an empty definition for CheckIsValidSocketParamsForPool() which
+// should be optimized out by the compiler.
+#define REGISTER_SOCKET_PARAMS_FOR_POOL(pool_type, socket_params)             \
+template<>                                                                    \
+struct SocketParamTraits<pool_type, scoped_refptr<socket_params> >            \
+    : public base::true_type {                                                \
+}
+
+template <typename PoolType, typename SocketParams>
+void RequestSocketsForPool(PoolType* pool,
+                           const std::string& group_name,
+                           const scoped_refptr<SocketParams>& params,
+                           int num_sockets,
+                           const BoundNetLog& net_log) {
+  CheckIsValidSocketParamsForPool<PoolType, SocketParams>();
   pool->RequestSockets(group_name, &params, num_sockets, net_log);
 }
 

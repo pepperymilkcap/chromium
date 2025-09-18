@@ -4,17 +4,18 @@
 
 #ifndef CHROME_BROWSER_UI_PANELS_PANEL_BOUNDS_ANIMATION_H_
 #define CHROME_BROWSER_UI_PANELS_PANEL_BOUNDS_ANIMATION_H_
+#pragma once
 
-#include "ui/gfx/animation/linear_animation.h"
+#include "ui/base/animation/linear_animation.h"
 
-namespace gfx {
+namespace ui {
 class AnimationDelegate;
 }
 class Panel;
 
-class PanelBoundsAnimation : public gfx::LinearAnimation {
+class PanelBoundsAnimation : public ui::LinearAnimation {
  public:
-  PanelBoundsAnimation(gfx::AnimationDelegate* target,
+  PanelBoundsAnimation(ui::AnimationDelegate* target,
                        Panel* panel,
                        const gfx::Rect& initial_bounds,
                        const gfx::Rect& final_bounds);

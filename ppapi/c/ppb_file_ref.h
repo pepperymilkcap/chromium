@@ -3,12 +3,11 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_file_ref.idl modified Thu Aug 15 10:50:43 2013. */
+/* From ppb_file_ref.idl modified Wed Oct  5 14:06:02 2011. */
 
 #ifndef PPAPI_C_PPB_FILE_REF_H_
 #define PPAPI_C_PPB_FILE_REF_H_
 
-#include "ppapi/c/pp_array_output.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_file_info.h"
@@ -19,8 +18,7 @@
 #include "ppapi/c/pp_var.h"
 
 #define PPB_FILEREF_INTERFACE_1_0 "PPB_FileRef;1.0"
-#define PPB_FILEREF_INTERFACE_1_1 "PPB_FileRef;1.1"
-#define PPB_FILEREF_INTERFACE PPB_FILEREF_INTERFACE_1_1
+#define PPB_FILEREF_INTERFACE PPB_FILEREF_INTERFACE_1_0
 
 /**
  * @file
@@ -38,14 +36,14 @@
  * a file system.  This struct contains a <code>PP_FileSystemType</code>
  * identifier and a file path string.
  */
-struct PPB_FileRef_1_1 {
+struct PPB_FileRef_1_0 {
   /**
    * Create() creates a weak pointer to a file in the given file system. File
    * paths are POSIX style.
    *
    * @param[in] resource A <code>PP_Resource</code> corresponding to a file
    * system.
-   * @param[in] path A path to the file. Must begin with a '/' character.
+   * @param[in] path A path to the file.
    *
    * @return A <code>PP_Resource</code> corresponding to a file reference if
    * successful or 0 if the path is malformed.
@@ -122,9 +120,9 @@ struct PPB_FileRef_1_1 {
    * if ancestor directories are not needed.
    *
    * @return An int32_t containing an error code from <code>pp_errors.h</code>.
-   * Succeeds if the directory already exists. Fails if ancestor directories
-   * do not exist and <code>make_ancestors</code> was passed as
-   * <code>PP_FALSE</code>.
+   * Fails if the directory already exists or if ancestor directories do not
+   * exist and <code>make_ancestors</code> was not passed as
+   * <code>PP_TRUE</code>.
    */
   int32_t (*MakeDirectory)(PP_Resource directory_ref,
                            PP_Bool make_ancestors,
@@ -179,61 +177,9 @@ struct PPB_FileRef_1_1 {
   int32_t (*Rename)(PP_Resource file_ref,
                     PP_Resource new_file_ref,
                     struct PP_CompletionCallback callback);
-  /**
-   * Query() queries info about a file or directory. You must have access to
-   * read this file or directory if it exists in the external filesystem.
-   *
-   * @param[in] file_ref A <code>PP_Resource</code> corresponding to a file
-   * reference.
-   * @param[out] info A pointer to a <code>PP_FileInfo</code> which will be
-   * populated with information about the file or directory.
-   * @param[in] callback A <code>PP_CompletionCallback</code> to be called upon
-   * completion of Query().
-   *
-   * @return An int32_t containing an error code from <code>pp_errors.h</code>.
-   */
-  int32_t (*Query)(PP_Resource file_ref,
-                   struct PP_FileInfo* info,
-                   struct PP_CompletionCallback callback);
-  /**
-   * ReadDirectoryEntries() reads all entries in a directory.
-   *
-   * @param[in] file_ref A <code>PP_Resource</code> corresponding to a directory
-   * reference.
-   * @param[in] output An output array which will receive
-   * <code>PP_DirectoryEntry</code> objects on success.
-   * @param[in] callback A <code>PP_CompletionCallback</code> to run on
-   * completion.
-   *
-   * @return An int32_t containing an error code from <code>pp_errors.h</code>.
-   */
-  int32_t (*ReadDirectoryEntries)(PP_Resource file_ref,
-                                  struct PP_ArrayOutput output,
-                                  struct PP_CompletionCallback callback);
 };
 
-typedef struct PPB_FileRef_1_1 PPB_FileRef;
-
-struct PPB_FileRef_1_0 {
-  PP_Resource (*Create)(PP_Resource file_system, const char* path);
-  PP_Bool (*IsFileRef)(PP_Resource resource);
-  PP_FileSystemType (*GetFileSystemType)(PP_Resource file_ref);
-  struct PP_Var (*GetName)(PP_Resource file_ref);
-  struct PP_Var (*GetPath)(PP_Resource file_ref);
-  PP_Resource (*GetParent)(PP_Resource file_ref);
-  int32_t (*MakeDirectory)(PP_Resource directory_ref,
-                           PP_Bool make_ancestors,
-                           struct PP_CompletionCallback callback);
-  int32_t (*Touch)(PP_Resource file_ref,
-                   PP_Time last_access_time,
-                   PP_Time last_modified_time,
-                   struct PP_CompletionCallback callback);
-  int32_t (*Delete)(PP_Resource file_ref,
-                    struct PP_CompletionCallback callback);
-  int32_t (*Rename)(PP_Resource file_ref,
-                    PP_Resource new_file_ref,
-                    struct PP_CompletionCallback callback);
-};
+typedef struct PPB_FileRef_1_0 PPB_FileRef;
 /**
  * @}
  */

@@ -1,14 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ipc/ipc_test_sink.h"
-#include "ppapi/c/dev/ppp_class_deprecated.h"
 #include "ppapi/proxy/plugin_var_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppapi_proxy_test.h"
-#include "ppapi/proxy/proxy_object_var.h"
-#include "ppapi/shared_impl/proxy_lock.h"
 
 namespace ppapi {
 namespace proxy {
@@ -21,25 +18,6 @@ PP_Var MakeObject(int32 object_id) {
   ret.value.as_id = object_id;
   return ret;
 }
-
-// A Deallocate() function for PPP_Class that just increments the integer
-// referenced by the pointer so we know how often Deallocate was called.
-void MarkOnDeallocate(void* object) {
-  (*static_cast<int*>(object))++;
-}
-
-// A class that just implements MarkOnDeallocate on destruction.
-PPP_Class_Deprecated mark_on_deallocate_class = {
-  NULL,  // HasProperty,
-  NULL,  // HasMethod,
-  NULL,  // GetProperty,
-  NULL,  // GetAllPropertyNames,
-  NULL,  // SetProperty,
-  NULL,  // RemoveProperty,
-  NULL,  // Call,
-  NULL,  // Construct,
-  &MarkOnDeallocate
-};
 
 }  // namespace
 
@@ -63,7 +41,6 @@ class PluginVarTrackerTest : public PluginProxyTest {
 };
 
 TEST_F(PluginVarTrackerTest, GetHostObject) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObject(12345);
 
   // Round-trip through the tracker to make sure the host object comes out the
@@ -78,7 +55,6 @@ TEST_F(PluginVarTrackerTest, GetHostObject) {
 }
 
 TEST_F(PluginVarTrackerTest, ReceiveObjectPassRef) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObject(12345);
 
   // Receive the object, we should have one ref and no messages.
@@ -114,7 +90,6 @@ TEST_F(PluginVarTrackerTest, ReceiveObjectPassRef) {
 
 // Tests freeing objects that have both refcounts and "tracked with no ref".
 TEST_F(PluginVarTrackerTest, FreeTrackedAndReferencedObject) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObject(12345);
 
   // Phase one: First receive via a "pass ref", then a tracked with no ref.
@@ -162,7 +137,6 @@ TEST_F(PluginVarTrackerTest, FreeTrackedAndReferencedObject) {
 }
 
 TEST_F(PluginVarTrackerTest, RecursiveTrackWithNoRef) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObject(12345);
 
   // Receive a tracked object twice.
@@ -184,64 +158,6 @@ TEST_F(PluginVarTrackerTest, RecursiveTrackWithNoRef) {
   var_tracker().StopTrackingObjectWithNoReference(plugin_var);
   EXPECT_EQ(-1,
             var_tracker().GetTrackedWithNoReferenceCountForObject(plugin_var));
-}
-
-// Tests that objects implemented by the plugin that have no references by
-// the plugin get their Deallocate function called on destruction.
-TEST_F(PluginVarTrackerTest, PluginObjectInstanceDeleted) {
-  ProxyAutoLock lock;
-  PP_Var host_object = MakeObject(12345);
-  PP_Instance pp_instance = 0x12345;
-
-  int deallocate_called = 0;
-  void* user_data = &deallocate_called;
-
-  // Make a var with one reference.
-  scoped_refptr<ProxyObjectVar> object(
-      new ProxyObjectVar(plugin_dispatcher(), host_object.value.as_id));
-  PP_Var plugin_var = MakeObject(var_tracker().AddVar(object.get()));
-  var_tracker().PluginImplementedObjectCreated(
-      pp_instance, plugin_var, &mark_on_deallocate_class, user_data);
-
-  // Release the plugin ref to the var. WebKit hasn't called destroy so
-  // we won't get a destroy call.
-  object = NULL;
-  var_tracker().ReleaseVar(plugin_var);
-  EXPECT_EQ(0, deallocate_called);
-
-  // Synthesize an instance destuction, this should call Deallocate.
-  var_tracker().DidDeleteInstance(pp_instance);
-  EXPECT_EQ(1, deallocate_called);
-}
-
-// Tests what happens when a plugin keeps a ref to a plugin-implemented
-// object var longer than the instance. We should not call the destructor until
-// the plugin releases its last ref.
-TEST_F(PluginVarTrackerTest, PluginObjectLeaked) {
-  ProxyAutoLock lock;
-  PP_Var host_object = MakeObject(12345);
-  PP_Instance pp_instance = 0x12345;
-
-  int deallocate_called = 0;
-  void* user_data = &deallocate_called;
-
-  // Make a var with one reference.
-  scoped_refptr<ProxyObjectVar> object(
-      new ProxyObjectVar(plugin_dispatcher(), host_object.value.as_id));
-  PP_Var plugin_var = MakeObject(var_tracker().AddVar(object.get()));
-  var_tracker().PluginImplementedObjectCreated(
-      pp_instance, plugin_var, &mark_on_deallocate_class, user_data);
-
-  // Destroy the instance. This should not call deallocate since the plugin
-  // still has a ref.
-  var_tracker().DidDeleteInstance(pp_instance);
-  EXPECT_EQ(0, deallocate_called);
-
-  // Release the plugin ref to the var. Since the instance is gone this should
-  // call deallocate.
-  object = NULL;
-  var_tracker().ReleaseVar(plugin_var);
-  EXPECT_EQ(1, deallocate_called);
 }
 
 }  // namespace proxy

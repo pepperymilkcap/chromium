@@ -31,11 +31,10 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_util.h"
-#include "base/time/time.h"
+#include "base/message_loop.h"
+#include "base/string_util.h"
+#include "base/time.h"
 #include "net/disk_cache/backend_impl.h"
-#include "net/disk_cache/disk_format.h"
 #include "net/disk_cache/entry_impl.h"
 #include "net/disk_cache/experiments.h"
 #include "net/disk_cache/histogram_macros.h"
@@ -58,20 +57,14 @@ int LowWaterAdjust(int high_water) {
   return high_water - kCleanUpMargin;
 }
 
-bool FallingBehind(int current_size, int max_size) {
-  return current_size > max_size - kCleanUpMargin * 20;
-}
-
 }  // namespace
 
 namespace disk_cache {
 
-// The real initialization happens during Init(), init_ is the only member that
-// has to be initialized here.
 Eviction::Eviction()
     : backend_(NULL),
       init_(false),
-      ptr_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(ptr_factory_(this)) {
 }
 
 Eviction::~Eviction() {
@@ -84,7 +77,6 @@ void Eviction::Init(BackendImpl* backend) {
   rankings_ = &backend->rankings_;
   header_ = &backend_->data_->header;
   max_size_ = LowWaterAdjust(backend_->max_size_);
-  index_size_ = backend->mask_ + 1;
   new_eviction_ = backend->new_eviction_;
   first_trim_ = true;
   trimming_ = false;
@@ -92,6 +84,7 @@ void Eviction::Init(BackendImpl* backend) {
   trim_delays_ = 0;
   init_ = true;
   test_mode_ = false;
+  in_experiment_ = (header_->experiment == EXPERIMENT_DELETED_LIST_IN);
 }
 
 void Eviction::Stop() {
@@ -143,9 +136,8 @@ void Eviction::TrimCache(bool empty) {
     }
     if (!empty && (deleted_entries > 20 ||
                    (TimeTicks::Now() - start).InMilliseconds() > 20)) {
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&Eviction::TrimCache, ptr_factory_.GetWeakPtr(), false));
+      MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+          &Eviction::TrimCache, ptr_factory_.GetWeakPtr(), false));
       break;
     }
   }
@@ -211,8 +203,7 @@ void Eviction::PostDelayedTrim() {
     return;
   delay_trim_ = true;
   trim_delays_++;
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&Eviction::DelayedTrim, ptr_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(1000));
 }
@@ -226,10 +217,8 @@ void Eviction::DelayedTrim() {
 }
 
 bool Eviction::ShouldTrim() {
-  if (!FallingBehind(header_->num_bytes, max_size_) &&
-      trim_delays_ < kMaxDelayedTrims && backend_->IsLoaded()) {
+  if (trim_delays_ < kMaxDelayedTrims && backend_->IsLoaded())
     return false;
-  }
 
   UMA_HISTOGRAM_COUNTS("DiskCache.TrimDelays", trim_delays_);
   trim_delays_ = 0;
@@ -237,13 +226,12 @@ bool Eviction::ShouldTrim() {
 }
 
 bool Eviction::ShouldTrimDeleted() {
-  int index_load = header_->num_entries * 100 / index_size_;
-
-  // If the index is not loaded, the deleted list will tend to double the size
-  // of the other lists 3 lists (40% of the total). Otherwise, all lists will be
-  // about the same size.
-  int max_length = (index_load < 25) ? header_->num_entries * 2 / 5 :
-                                       header_->num_entries / 4;
+  // Normally we use 25% for each list. The experiment doubles the number of
+  // deleted entries, so the total number of entries increases by 25%. Using
+  // 40% of that value for deleted entries leaves the size of the other three
+  // lists intact.
+  int max_length = in_experiment_ ? header_->num_entries * 2 / 5 :
+                                    header_->num_entries / 4;
   return (!test_mode_ && header_->lru.sizes[Rankings::DELETED] > max_length);
 }
 
@@ -263,6 +251,7 @@ void Eviction::ReportTrimTimes(EntryImpl* entry) {
     if (header_->create_time) {
       // This is the first entry that we have to evict, generate some noise.
       backend_->FirstEviction();
+      in_experiment_ = (header_->experiment == EXPERIMENT_DELETED_LIST_IN);
     } else {
       // This is an old file, but we may want more reports from this user so
       // lets save some create_time.
@@ -290,6 +279,8 @@ bool Eviction::EvictEntry(CacheRankingsBlock* node, bool empty,
   ReportTrimTimes(entry);
   if (empty || !new_eviction_) {
     entry->DoomImpl();
+    if (!empty)
+      backend_->OnEvent(Stats::TRIM_ENTRY);
   } else {
     entry->DeleteEntryData(false);
     EntryStore* info = entry->entry()->Data();
@@ -299,10 +290,8 @@ bool Eviction::EvictEntry(CacheRankingsBlock* node, bool empty,
     info->state = ENTRY_EVICTED;
     entry->entry()->Store();
     rankings_->Insert(entry->rankings(), true, Rankings::DELETED);
-  }
-  if (!empty)
     backend_->OnEvent(Stats::TRIM_ENTRY);
-
+  }
   entry->Release();
 
   return true;
@@ -364,9 +353,8 @@ void Eviction::TrimCacheV2(bool empty) {
       }
       if (!empty && (deleted_entries > 20 ||
                      (TimeTicks::Now() - start).InMilliseconds() > 20)) {
-        base::MessageLoop::current()->PostTask(
-            FROM_HERE,
-            base::Bind(&Eviction::TrimCache, ptr_factory_.GetWeakPtr(), false));
+        MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+            &Eviction::TrimCache, ptr_factory_.GetWeakPtr(), false));
         break;
       }
     }
@@ -377,8 +365,7 @@ void Eviction::TrimCacheV2(bool empty) {
   if (empty) {
     TrimDeleted(true);
   } else if (ShouldTrimDeleted()) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
+    MessageLoop::current()->PostTask(FROM_HERE,
         base::Bind(&Eviction::TrimDeleted, ptr_factory_.GetWeakPtr(), empty));
   }
 
@@ -510,8 +497,7 @@ void Eviction::TrimDeleted(bool empty) {
   }
 
   if (deleted_entries && !empty && ShouldTrimDeleted()) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
+    MessageLoop::current()->PostTask(FROM_HERE,
         base::Bind(&Eviction::TrimDeleted, ptr_factory_.GetWeakPtr(), false));
   }
 

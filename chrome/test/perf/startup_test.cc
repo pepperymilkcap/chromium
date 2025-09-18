@@ -4,31 +4,26 @@
 
 #include "base/environment.h"
 #include "base/file_util.h"
-#include "base/files/file_enumerator.h"
 #include "base/path_service.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/test/test_file_util.h"
 #include "base/test/test_timeouts.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/base/test_switches.h"
-#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/perf/perf_test.h"
-#include "chrome/test/perf/perf_ui_test_suite.h"
 #include "chrome/test/ui/ui_perf_test.h"
-#include "content/public/common/content_switches.h"
 #include "net/base/net_util.h"
-#include "testing/perf/perf_test.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -40,10 +35,8 @@ class StartupTest : public UIPerfTest {
   StartupTest() {
     show_window_ = true;
   }
-  virtual void SetUp() {
-    collect_profiling_stats_ = false;
-  }
-  virtual void TearDown() {}
+  void SetUp() {}
+  void TearDown() {}
 
   enum TestColdness {
     WARM,
@@ -58,21 +51,11 @@ class StartupTest : public UIPerfTest {
   // Load a file on startup rather than about:blank.  This tests a longer
   // startup path, including resource loading.
   void SetUpWithFileURL() {
-    const base::FilePath file_url = ui_test_utils::GetTestFilePath(
-        base::FilePath(base::FilePath::kCurrentDirectory),
-        base::FilePath(FILE_PATH_LITERAL("simple.html")));
-    ASSERT_TRUE(base::PathExists(file_url));
+    const FilePath file_url = ui_test_utils::GetTestFilePath(
+        FilePath(FilePath::kCurrentDirectory),
+        FilePath(FILE_PATH_LITERAL("simple.html")));
+    ASSERT_TRUE(file_util::PathExists(file_url));
     launch_arguments_.AppendArgPath(file_url);
-  }
-
-  // Setup the command line arguments to capture profiling data for tasks.
-  void SetUpWithProfiling() {
-    profiling_file_ = ui_test_utils::GetTestFilePath(
-        base::FilePath(base::FilePath::kCurrentDirectory),
-        base::FilePath(FILE_PATH_LITERAL("task_profile.json")));
-    launch_arguments_.AppendSwitchPath(switches::kProfilingOutputFile,
-                                       profiling_file_);
-    collect_profiling_stats_ = true;
   }
 
   // Load a complex html file on startup represented by |which_tab|.
@@ -84,7 +67,7 @@ class StartupTest : public UIPerfTest {
     unsigned int which_el = which_tab % arraysize(kTestPageCyclerDomains);
     const char* this_domain = kTestPageCyclerDomains[which_el];
 
-    base::FilePath page_cycler_path;
+    FilePath page_cycler_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &page_cycler_path);
     page_cycler_path = page_cycler_path.AppendASCII("data")
         .AppendASCII("page_cycler").AppendASCII("moz")
@@ -96,7 +79,7 @@ class StartupTest : public UIPerfTest {
   // Use the given profile in the test data extensions/profiles dir.  This tests
   // startup with extensions installed.
   void SetUpWithExtensionsProfile(const char* profile) {
-    base::FilePath data_dir;
+    FilePath data_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &data_dir);
     data_dir = data_dir.AppendASCII("extensions").AppendASCII("profiles").
         AppendASCII(profile);
@@ -104,26 +87,24 @@ class StartupTest : public UIPerfTest {
   }
 
   // Rewrite the preferences file to point to the proper image directory.
-  virtual void SetUpProfile() OVERRIDE {
+  virtual void SetUpProfile() {
     UIPerfTest::SetUpProfile();
-    if (profile_type_ != PerfUITestSuite::COMPLEX_THEME)
+    if (profile_type_ != UITestBase::COMPLEX_THEME)
       return;
 
-    const base::FilePath pref_template_path(user_data_dir().
-        AppendASCII("Default").
+    const FilePath pref_template_path(user_data_dir().AppendASCII("Default").
         AppendASCII("PreferencesTemplate"));
-    const base::FilePath pref_path(user_data_dir().
-        AppendASCII(TestingProfile::kTestUserProfileDir).
+    const FilePath pref_path(user_data_dir().AppendASCII("Default").
         AppendASCII("Preferences"));
 
     // Read in preferences template.
     std::string pref_string;
-    EXPECT_TRUE(base::ReadFileToString(pref_template_path, &pref_string));
-    base::string16 format_string = base::ASCIIToUTF16(pref_string);
+    EXPECT_TRUE(file_util::ReadFileToString(pref_template_path, &pref_string));
+    string16 format_string = ASCIIToUTF16(pref_string);
 
     // Make sure temp directory has the proper format for writing to prefs file.
 #if defined(OS_POSIX)
-    std::wstring user_data_dir_w(base::ASCIIToWide(user_data_dir().value()));
+    std::wstring user_data_dir_w(ASCIIToWide(user_data_dir().value()));
 #elif defined(OS_WIN)
     std::wstring user_data_dir_w(user_data_dir().value());
     // In Windows, the FilePath will write '\' for the path separators; change
@@ -133,8 +114,8 @@ class StartupTest : public UIPerfTest {
 #endif
 
     // Rewrite prefs file.
-    std::vector<base::string16> subst;
-    subst.push_back(base::WideToUTF16(user_data_dir_w));
+    std::vector<string16> subst;
+    subst.push_back(WideToUTF16(user_data_dir_w));
     const std::string prefs_string =
         UTF16ToASCII(ReplaceStringPlaceholders(format_string, subst, NULL));
     EXPECT_TRUE(file_util::WriteFile(pref_path, prefs_string.c_str(),
@@ -151,16 +132,16 @@ class StartupTest : public UIPerfTest {
 
   void RunStartupTest(const char* graph, const char* trace,
                       TestColdness test_cold, TestImportance test_importance,
-                      PerfUITestSuite::ProfileType profile_type,
+                      UITestBase::ProfileType profile_type,
                       int num_tabs, int nth_timed_tab) {
     bool important = (test_importance == IMPORTANT);
     profile_type_ = profile_type;
 
     // Sets the profile data for the run.  For now, this is only used for
     // the non-default themes test.
-    if (profile_type != PerfUITestSuite::DEFAULT_THEME) {
-      set_template_user_data(
-          PerfUITestSuite::GetPathForProfileType(profile_type));
+    if (profile_type != UITestBase::DEFAULT_THEME) {
+      set_template_user_data(UITest::ComputeTypicalUserDataSource(
+          profile_type));
     }
 
 #if defined(NDEBUG)
@@ -195,19 +176,17 @@ class StartupTest : public UIPerfTest {
     };
     TimingInfo timings[kNumCyclesMax];
 
-    CommandLine launch_arguments_without_trace_file(launch_arguments_);
     for (int i = 0; i < numCycles; ++i) {
       if (test_cold == COLD) {
-        base::FilePath dir_app;
+        FilePath dir_app;
         ASSERT_TRUE(PathService::Get(chrome::DIR_APP, &dir_app));
 
-        base::FilePath chrome_exe(dir_app.Append(GetExecutablePath()));
-        ASSERT_TRUE(base::EvictFileFromSystemCacheWithRetry(chrome_exe));
+        FilePath chrome_exe(dir_app.Append(GetExecutablePath()));
+        ASSERT_TRUE(EvictFileFromSystemCacheWrapper(chrome_exe));
 #if defined(OS_WIN)
         // chrome.dll is windows specific.
-        base::FilePath chrome_dll(
-            dir_app.Append(FILE_PATH_LITERAL("chrome.dll")));
-        ASSERT_TRUE(base::EvictFileFromSystemCacheWithRetry(chrome_dll));
+        FilePath chrome_dll(dir_app.Append(FILE_PATH_LITERAL("chrome.dll")));
+        ASSERT_TRUE(EvictFileFromSystemCacheWrapper(chrome_dll));
 #endif
       }
       UITest::SetUp();
@@ -222,7 +201,7 @@ class StartupTest : public UIPerfTest {
         ASSERT_TRUE(browser_proxy.get());
 
         if (browser_proxy->GetInitialLoadTimes(
-              TestTimeouts::action_max_timeout(),
+              TestTimeouts::action_max_timeout_ms(),
               &min_start,
               &max_stop,
               &times) &&
@@ -248,7 +227,7 @@ class StartupTest : public UIPerfTest {
         clear_profile_ = false;
         // Clear template_user_data_ so we don't try to copy it over each time
         // through.
-        set_template_user_data(base::FilePath());
+        set_template_user_data(FilePath());
       }
     }
 
@@ -258,8 +237,7 @@ class StartupTest : public UIPerfTest {
                           "%.2f,",
                           timings[i].end_to_end.InMillisecondsF());
     }
-    perf_test::PrintResultList(
-        graph, std::string(), trace, times, "ms", important);
+    perf_test::PrintResultList(graph, "", trace, times, "ms", important);
 
     if (num_tabs > 0) {
       std::string name_base = trace;
@@ -269,15 +247,15 @@ class StartupTest : public UIPerfTest {
       name = name_base + "-start";
       for (int i = 0; i < numCycles; ++i)
         base::StringAppendF(&times, "%.2f,", timings[i].first_start_ms);
-      perf_test::PrintResultList(
-          graph, std::string(), name.c_str(), times, "ms", important);
+      perf_test::PrintResultList(graph, "", name.c_str(), times, "ms",
+                                 important);
 
       times.clear();
       name = name_base + "-first";
       for (int i = 0; i < numCycles; ++i)
         base::StringAppendF(&times, "%.2f,", timings[i].first_stop_ms);
-      perf_test::PrintResultList(
-          graph, std::string(), name.c_str(), times, "ms", important);
+      perf_test::PrintResultList(graph, "", name.c_str(), times, "ms",
+                                 important);
 
       if (nth_timed_tab > 0) {
         // Display only the time necessary to load the first n tabs.
@@ -285,8 +263,8 @@ class StartupTest : public UIPerfTest {
         name = name_base + "-" + base::IntToString(nth_timed_tab);
         for (int i = 0; i < numCycles; ++i)
           base::StringAppendF(&times, "%.2f,", timings[i].nth_tab_stop_ms);
-        perf_test::PrintResultList(
-            graph, std::string(), name.c_str(), times, "ms", important);
+        perf_test::PrintResultList(graph, "", name.c_str(), times, "ms",
+                                   important);
       }
 
       if (num_tabs > 1) {
@@ -295,29 +273,22 @@ class StartupTest : public UIPerfTest {
         name = name_base + "-all";
         for (int i = 0; i < numCycles; ++i)
           base::StringAppendF(&times, "%.2f,", timings[i].last_stop_ms);
-        perf_test::PrintResultList(
-            graph, std::string(), name.c_str(), times, "ms", important);
+        perf_test::PrintResultList(graph, "", name.c_str(), times, "ms",
+                                   important);
       }
     }
   }
-
-  base::FilePath profiling_file_;
-  bool collect_profiling_stats_;
-  std::string trace_file_prefix_;
-
-  // Are we using a profile with a complex theme?
-  PerfUITestSuite::ProfileType profile_type_;
 };
 
 TEST_F(StartupTest, PerfWarm) {
   RunStartupTest("warm", "t", WARM, IMPORTANT,
-                 PerfUITestSuite::DEFAULT_THEME, 0, 0);
+                 UITestBase::DEFAULT_THEME, 0, 0);
 }
 
 TEST_F(StartupTest, PerfReferenceWarm) {
   UseReferenceBuild();
   RunStartupTest("warm", "t_ref", WARM, IMPORTANT,
-                 PerfUITestSuite::DEFAULT_THEME, 0, 0);
+                 UITestBase::DEFAULT_THEME, 0, 0);
 }
 
 // TODO(mpcomplete): Should we have reference timings for all these?
@@ -331,7 +302,7 @@ TEST_F(StartupTest, PerfReferenceWarm) {
 
 TEST_F(StartupTest, MAYBE_PerfCold) {
   RunStartupTest("cold", "t", COLD, NOT_IMPORTANT,
-                 PerfUITestSuite::DEFAULT_THEME, 0, 0);
+                 UITestBase::DEFAULT_THEME, 0, 0);
 }
 
 void StartupTest::RunPerfTestWithManyTabs(const char* graph, const char* trace,
@@ -345,7 +316,7 @@ void StartupTest::RunPerfTestWithManyTabs(const char* graph, const char* trace,
     // Start the browser with these urls so we can save the session and exit.
     UITest::SetUp();
     // Set flags to ensure profile is saved and can be restored.
-#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
+#if defined(OS_MACOSX)
     set_shutdown_type(ProxyLauncher::USER_QUIT);
 #endif
     clear_profile_ = false;
@@ -367,12 +338,12 @@ void StartupTest::RunPerfTestWithManyTabs(const char* graph, const char* trace,
     launch_arguments_ = new_launch_arguments;
   }
   RunStartupTest(graph, trace, WARM, NOT_IMPORTANT,
-                 PerfUITestSuite::DEFAULT_THEME, tab_count, nth_timed_tab);
+                 UITestBase::DEFAULT_THEME, tab_count, nth_timed_tab);
 }
 
 // http://crbug.com/101591
 #if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_PerfFewTabs DISABLED_PerfFewTabs
+#define MAYBE_PerfFewTabs FLAKY_PerfFewTabs
 #else
 #define MAYBE_PerfFewTabs PerfFewTabs
 #endif
@@ -397,22 +368,21 @@ TEST_F(StartupTest, PerfRestoreFewTabsReference) {
 
 #if defined(OS_MACOSX)
 // http://crbug.com/46609
-#define MAYBE_PerfSeveralTabsReference DISABLED_PerfSeveralTabsReference
-#define MAYBE_PerfSeveralTabs DISABLED_PerfSeveralTabs
+#define MAYBE_PerfSeveralTabsReference FLAKY_PerfSeveralTabsReference
+#define MAYBE_PerfSeveralTabs FLAKY_PerfSeveralTabs
 // http://crbug.com/52858
-#define MAYBE_PerfRestoreSeveralTabs DISABLED_PerfRestoreSeveralTabs
-#define MAYBE_PerfExtensionContentScript50 DISABLED_PerfExtensionContentScript50
+#define MAYBE_PerfRestoreSeveralTabs FLAKY_PerfRestoreSeveralTabs
+#define MAYBE_PerfExtensionContentScript50 FLAKY_PerfExtensionContentScript50
 #elif defined(OS_WIN)
 // http://crbug.com/46609
 #if !defined(NDEBUG)
-// This test is disabled on Windows Debug. See bug http://crbug.com/132279
-#define MAYBE_PerfRestoreSeveralTabs DISABLED_PerfRestoreSeveralTabs
-#else
-#define MAYBE_PerfRestoreSeveralTabs PerfRestoreSeveralTabs
-#endif  // !defined(NDEBUG)
 // http://crbug.com/102584
 #define MAYBE_PerfSeveralTabs DISABLED_PerfSeveralTabs
+#else
+#define MAYBE_PerfSeveralTabs FLAKY_PerfSeveralTabs
+#endif
 #define MAYBE_PerfSeveralTabsReference PerfSeveralTabsReference
+#define MAYBE_PerfRestoreSeveralTabs PerfRestoreSeveralTabs
 #define MAYBE_PerfExtensionContentScript50 PerfExtensionContentScript50
 #else
 #define MAYBE_PerfSeveralTabsReference PerfSeveralTabsReference
@@ -423,7 +393,7 @@ TEST_F(StartupTest, PerfRestoreFewTabsReference) {
 
 // http://crbug.com/99604
 #if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_PerfComplexTheme DISABLED_PerfComplexTheme
+#define MAYBE_PerfComplexTheme FLAKY_PerfComplexTheme
 #else
 #define MAYBE_PerfComplexTheme PerfComplexTheme
 #endif
@@ -450,33 +420,43 @@ TEST_F(StartupTest, PerfExtensionEmpty) {
   SetUpWithFileURL();
   SetUpWithExtensionsProfile("empty");
   RunStartupTest("warm", "extension_empty", WARM, NOT_IMPORTANT,
-                 PerfUITestSuite::DEFAULT_THEME, 1, 0);
+                 UITestBase::DEFAULT_THEME, 1, 0);
 }
 
 TEST_F(StartupTest, PerfExtensionContentScript1) {
   SetUpWithFileURL();
   SetUpWithExtensionsProfile("content_scripts1");
   RunStartupTest("warm", "extension_content_scripts1", WARM, NOT_IMPORTANT,
-                 PerfUITestSuite::DEFAULT_THEME, 1, 0);
+                 UITestBase::DEFAULT_THEME, 1, 0);
 }
 
 TEST_F(StartupTest, MAYBE_PerfExtensionContentScript50) {
   SetUpWithFileURL();
   SetUpWithExtensionsProfile("content_scripts50");
   RunStartupTest("warm", "extension_content_scripts50", WARM, NOT_IMPORTANT,
-                 PerfUITestSuite::DEFAULT_THEME, 1, 0);
+                 UITestBase::DEFAULT_THEME, 1, 0);
 }
 
 TEST_F(StartupTest, MAYBE_PerfComplexTheme) {
   RunStartupTest("warm", "t-theme", WARM, NOT_IMPORTANT,
-                 PerfUITestSuite::COMPLEX_THEME, 0, 0);
+                 UITestBase::COMPLEX_THEME, 0, 0);
 }
 
-TEST_F(StartupTest, ProfilingScript1) {
-  SetUpWithFileURL();
-  SetUpWithProfiling();
-  RunStartupTest("warm", "profiling_scripts1", WARM, NOT_IMPORTANT,
-                 PerfUITestSuite::DEFAULT_THEME, 1, 0);
+#if defined(TOOLKIT_USES_GTK)
+TEST_F(StartupTest, PerfGtkTheme) {
+  RunStartupTest("warm", "gtk-theme", WARM, NOT_IMPORTANT,
+                 UITestBase::NATIVE_THEME, 0, 0);
 }
+
+TEST_F(StartupTest, PrefNativeFrame) {
+  RunStartupTest("warm", "custom-frame", WARM, NOT_IMPORTANT,
+                 UITestBase::CUSTOM_FRAME, 0, 0);
+}
+
+TEST_F(StartupTest, PerfNativeFrameGtkTheme) {
+  RunStartupTest("warm", "custom-frame-gtk-theme", WARM, NOT_IMPORTANT,
+                 UITestBase::CUSTOM_FRAME_NATIVE_THEME, 0, 0);
+}
+#endif
 
 }  // namespace

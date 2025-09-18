@@ -44,19 +44,17 @@
 #define PNG_NO_READ_DITHER
 #define PNG_NO_READ_INVERT
 #define PNG_NO_READ_SHIFT
-#if defined(CHROME_PNG_READ_PACK_SUPPORT)
-#undef PNG_NO_READ_PACK  // Required by freetype to support png glyphs.
-#else
 #define PNG_NO_READ_PACK
-#endif
 #define PNG_NO_READ_PACKSWAP
 #undef PNG_NO_READ_FILLER
 #define PNG_NO_READ_SWAP
 #define PNG_NO_READ_SWAP_ALPHA
 #define PNG_NO_READ_INVERT_ALPHA
+#define PNG_NO_READ_STRIP_ALPHA
 #define PNG_NO_READ_RGB_TO_GRAY
+#define PNG_NO_READ_USER_TRANSFORM
 #define PNG_NO_READ_bKGD
-#undef PNG_NO_READ_cHRM
+#define PNG_NO_READ_cHRM
 #undef PNG_NO_READ_gAMA
 #define PNG_NO_READ_hIST
 #undef PNG_NO_READ_iCCP
@@ -111,6 +109,7 @@
 #define PNG_NO_USER_MEM
 #define PNG_NO_FIXED_POINT_SUPPORTED
 #define PNG_NO_MNG_FEATURES
+#define PNG_NO_USER_TRANSFORM_PTR
 #define PNG_NO_HANDLE_AS_UNKNOWN
 #define PNG_NO_CONSOLE_IO
 #define PNG_NO_ZALLOC_ZERO

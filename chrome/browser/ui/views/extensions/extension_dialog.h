@@ -4,102 +4,87 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_DIALOG_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_DIALOG_H_
+#pragma once
 
-#include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "ui/views/window/dialog_delegate.h"
+#include "ui/views/widget/widget_delegate.h"
 
+class Browser;
 class ExtensionDialogObserver;
+class ExtensionHost;
 class GURL;
-class Profile;
 
 namespace content {
 class WebContents;
 }
 
-namespace extensions {
-class ExtensionViewHost;
-}
-
-namespace ui {
-class BaseWindow;
-}
-
 // Modal dialog containing contents provided by an extension.
-// Dialog is automatically centered in the owning window and has fixed size.
+// Dialog is automatically centered in the browser window and has fixed size.
 // For example, used by the Chrome OS file browser.
-class ExtensionDialog : public views::DialogDelegate,
+class ExtensionDialog : public views::WidgetDelegate,
                         public content::NotificationObserver,
                         public base::RefCounted<ExtensionDialog> {
  public:
-  // Create and show a dialog with |url| centered over the provided window.
-  // |base_window| is the window to which the pop-up will be attached.
-  // |profile| is the profile that the extension is registered with.
+  virtual ~ExtensionDialog();
+
+  // Create and show a dialog with |url| centered over the browser window.
+  // |browser| is the browser to which the pop-up will be attached.
   // |web_contents| is the tab that spawned the dialog.
   // |width| and |height| are the size of the dialog in pixels.
-  static ExtensionDialog* Show(const GURL& url,
-                               ui::BaseWindow* base_window,
-                               Profile* profile,
+  static ExtensionDialog* Show(const GURL& url, Browser* browser,
                                content::WebContents* web_contents,
                                int width,
                                int height,
-                               int min_width,
-                               int min_height,
-                               const base::string16& title,
+                               const string16& title,
                                ExtensionDialogObserver* observer);
 
   // Notifies the dialog that the observer has been destroyed and should not
   // be sent notifications.
   void ObserverDestroyed();
 
-  // Focus to the render view if possible.
-  void MaybeFocusRenderView();
+  // Closes the ExtensionDialog.
+  void Close();
 
   // Sets the window title.
-  void set_title(const base::string16& title) { window_title_ = title; }
+  void set_title(const string16& title) { window_title_ = title; }
 
-  // Sets minimum contents size in pixels and makes the window resizable.
-  void SetMinimumContentsSize(int width, int height);
+  ExtensionHost* host() const { return extension_host_.get(); }
 
-  extensions::ExtensionViewHost* host() const { return host_.get(); }
-
-  // views::DialogDelegate override.
-  virtual int GetDialogButtons() const OVERRIDE;
+  // views::WidgetDelegate overrides.
   virtual bool CanResize() const OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
-  virtual bool UseNewStyleForThisDialog() const OVERRIDE;
 
   // content::NotificationObserver overrides.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
- protected:
-  virtual ~ExtensionDialog();
-
  private:
-  friend class base::RefCounted<ExtensionDialog>;
-
   // Use Show() to create instances.
-  ExtensionDialog(extensions::ExtensionViewHost* host,
-                  ExtensionDialogObserver* observer);
+  ExtensionDialog(ExtensionHost* host, ExtensionDialogObserver* observer);
 
-  void InitWindow(ui::BaseWindow* base_window, int width, int height);
+  static ExtensionHost* CreateExtensionHost(const GURL& url,
+                                            Browser* browser);
+
+  void InitWindow(Browser* browser, int width, int height);
+
+  // Window that holds the extension host view.
+  views::Widget* window_;
 
   // Window Title
-  base::string16 window_title_;
+  string16 window_title_;
 
   // The contained host for the view.
-  scoped_ptr<extensions::ExtensionViewHost> host_;
+  scoped_ptr<ExtensionHost> extension_host_;
 
   content::NotificationRegistrar registrar_;
 

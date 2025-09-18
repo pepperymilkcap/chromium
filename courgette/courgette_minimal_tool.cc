@@ -8,6 +8,8 @@
 
 #include <string>
 
+#include "base/file_util.h"
+
 #include "courgette/third_party/bsdiff.h"
 #include "courgette/courgette.h"
 #include "courgette/streams.h"

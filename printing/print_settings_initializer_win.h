@@ -22,6 +22,9 @@ class PRINTING_EXPORT PrintSettingsInitializerWin {
  public:
   static void InitPrintSettings(HDC hdc,
                                 const DEVMODE& dev_mode,
+                                const PageRanges& new_ranges,
+                                const std::wstring& new_device_name,
+                                bool print_selection_only,
                                 PrintSettings* print_settings);
 
  private:

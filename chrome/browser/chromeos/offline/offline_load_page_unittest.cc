@@ -2,16 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/offline/offline_load_page.h"
+#include "chrome/browser/renderer_host/offline_resource_handler.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "content/public/browser/interstitial_page.h"
-#include "content/public/browser/navigation_controller.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/test/web_contents_tester.h"
+#include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/test/test_browser_thread.h"
 
-using content::InterstitialPage;
-using content::WebContents;
-using content::WebContentsTester;
+using content::BrowserThread;
 
 static const char* kURL1 = "http://www.google.com/";
 static const char* kURL2 = "http://www.gmail.com/";
@@ -20,15 +18,21 @@ namespace chromeos {
 
 class OfflineLoadPageTest;
 
+namespace {
+
 // An OfflineLoadPage class that does not create windows.
 class TestOfflineLoadPage :  public chromeos::OfflineLoadPage {
  public:
-  TestOfflineLoadPage(WebContents* web_contents,
+  TestOfflineLoadPage(TabContents* tab_contents,
                       const GURL& url,
                       OfflineLoadPageTest* test_page)
-    : chromeos::OfflineLoadPage(web_contents, url, CompletionCallback()),
+    : chromeos::OfflineLoadPage(tab_contents, url, CompletionCallback()),
       test_page_(test_page) {
-    interstitial_page_->DontCreateViewForTesting();
+  }
+
+  // Overriden from InterstitialPage.  Don't create a view.
+  virtual content::WebContentsView* CreateWebContentsView() OVERRIDE {
+    return NULL;
   }
 
   // chromeos::OfflineLoadPage override.
@@ -40,6 +44,8 @@ class TestOfflineLoadPage :  public chromeos::OfflineLoadPage {
   DISALLOW_COPY_AND_ASSIGN(TestOfflineLoadPage);
 };
 
+}  // namespace
+
 class OfflineLoadPageTest : public ChromeRenderViewHostTestHarness {
  public:
   // The decision the user made.
@@ -48,6 +54,11 @@ class OfflineLoadPageTest : public ChromeRenderViewHostTestHarness {
     OK,
     CANCEL
   };
+
+  OfflineLoadPageTest()
+      : ui_thread_(BrowserThread::UI, MessageLoop::current()),
+        io_thread_(BrowserThread::IO, MessageLoop::current()) {
+  }
 
   virtual void SetUp() {
     ChromeRenderViewHostTestHarness::SetUp();
@@ -62,32 +73,38 @@ class OfflineLoadPageTest : public ChromeRenderViewHostTestHarness {
   }
 
   void Navigate(const char* url, int page_id) {
-    WebContentsTester::For(web_contents())->TestDidNavigate(
-        web_contents()->GetRenderViewHost(), page_id, GURL(url),
+    contents()->TestDidNavigate(
+        contents()->GetRenderViewHost(), page_id, GURL(url),
         content::PAGE_TRANSITION_TYPED);
   }
 
   void ShowInterstitial(const char* url) {
-    (new TestOfflineLoadPage(web_contents(), GURL(url), this))->Show();
+    (new TestOfflineLoadPage(contents(), GURL(url), this))->Show();
   }
 
   // Returns the OfflineLoadPage currently showing or NULL if none is
   // showing.
   InterstitialPage* GetOfflineLoadPage() {
-    return InterstitialPage::GetInterstitialPage(web_contents());
+    return InterstitialPage::GetInterstitialPage(contents());
   }
 
   UserResponse user_response() const { return user_response_; }
 
  private:
-  friend class TestOfflineLoadPage;
-
   UserResponse user_response_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread io_thread_;
+
+  // Initializes / shuts down a stub CrosLibrary.
+  chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
+
+  DISALLOW_COPY_AND_ASSIGN(OfflineLoadPageTest);
 };
 
 void TestOfflineLoadPage::NotifyBlockingPageComplete(bool proceed) {
   test_page_->OnBlockingPageComplete(proceed);
 }
+
 
 TEST_F(OfflineLoadPageTest, OfflinePageProceed) {
   // Start a load.
@@ -101,16 +118,16 @@ TEST_F(OfflineLoadPageTest, OfflinePageProceed) {
   ShowInterstitial(kURL2);
   InterstitialPage* interstitial = GetOfflineLoadPage();
   ASSERT_TRUE(interstitial);
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
 
   // Simulate the user clicking "proceed".
   interstitial->Proceed();
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
 
   EXPECT_EQ(OK, user_response());
 
   // The URL remains to be URL2.
-  EXPECT_EQ(kURL2, web_contents()->GetVisibleURL().spec());
+  EXPECT_EQ(kURL2, contents()->GetURL().spec());
 
   // Commit navigation and the interstitial page is gone.
   Navigate(kURL2, 2);
@@ -128,7 +145,7 @@ TEST_F(OfflineLoadPageTest, OfflinePageDontProceed) {
   ShowInterstitial(kURL2);
   InterstitialPage* interstitial = GetOfflineLoadPage();
   ASSERT_TRUE(interstitial);
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
 
   // Simulate the user clicking "don't proceed".
   interstitial->DontProceed();
@@ -139,7 +156,7 @@ TEST_F(OfflineLoadPageTest, OfflinePageDontProceed) {
   // We did not proceed, the pending entry should be gone.
   EXPECT_FALSE(controller().GetPendingEntry());
   // the URL is set back to kURL1.
-  EXPECT_EQ(kURL1, web_contents()->GetLastCommittedURL().spec());
+  EXPECT_EQ(kURL1, contents()->GetURL().spec());
 }
 
 }  // namespace chromeos

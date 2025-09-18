@@ -4,38 +4,37 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_EXISTING_USER_CONTROLLER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_EXISTING_USER_CONTROLLER_H_
+#pragma once
 
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
-#include "base/time/time.h"
-#include "base/timer/timer.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "base/string16.h"
+#include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/ownership_status_checker.h"
+#include "chrome/browser/chromeos/login/password_changed_view.h"
 #include "chrome/browser/chromeos/login/user.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
-#include "url/gurl.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/legacy_window_manager/wm_message_listener.h"
+#endif
 
 namespace chromeos {
 
-class CrosSettings;
 class LoginDisplayHost;
-
-namespace login {
-class NetworkStateHelper;
-}
+class CrosSettings;
 
 // ExistingUserController is used to handle login when someone has
 // already logged into the machine.
@@ -47,7 +46,8 @@ class NetworkStateHelper;
 class ExistingUserController : public LoginDisplay::Delegate,
                                public content::NotificationObserver,
                                public LoginPerformer::Delegate,
-                               public LoginUtils::Delegate {
+                               public LoginUtils::Delegate,
+                               public PasswordChangedView::Delegate {
  public:
   // All UI initialization is deferred till Init() call.
   explicit ExistingUserController(LoginDisplayHost* host);
@@ -68,35 +68,18 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Tells the controller to resume a pending login.
   void ResumeLogin();
 
-  // Start the public session auto-login timer.
-  void StartPublicSessionAutoLoginTimer();
-
-  // Stop the public session auto-login timer when a login attempt begins.
-  void StopPublicSessionAutoLoginTimer();
-
   // LoginDisplay::Delegate: implementation
-  virtual void CancelPasswordChangedFlow() OVERRIDE;
   virtual void CreateAccount() OVERRIDE;
-  virtual void CompleteLogin(const UserContext& user_context) OVERRIDE;
-  virtual base::string16 GetConnectedNetworkName() OVERRIDE;
-  virtual bool IsSigninInProgress() const OVERRIDE;
-  virtual void Login(const UserContext& user_context) OVERRIDE;
-  virtual void MigrateUserData(const std::string& old_password) OVERRIDE;
-  virtual void LoginAsRetailModeUser() OVERRIDE;
+  virtual string16 GetConnectedNetworkName() OVERRIDE;
+  virtual void FixCaptivePortal() OVERRIDE;
+  virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
+  virtual void CompleteLogin(const std::string& username,
+                             const std::string& password) OVERRIDE;
+  virtual void Login(const std::string& username,
+                     const std::string& password) OVERRIDE;
   virtual void LoginAsGuest() OVERRIDE;
-  virtual void LoginAsPublicAccount(const std::string& username) OVERRIDE;
-  virtual void LoginAsKioskApp(const std::string& app_id) OVERRIDE;
-  virtual void OnSigninScreenReady() OVERRIDE;
   virtual void OnUserSelected(const std::string& username) OVERRIDE;
   virtual void OnStartEnterpriseEnrollment() OVERRIDE;
-  virtual void OnStartKioskEnableScreen() OVERRIDE;
-  virtual void OnStartDeviceReset() OVERRIDE;
-  virtual void OnStartKioskAutolaunchScreen() OVERRIDE;
-  virtual void ResetPublicSessionAutoLoginTimer() OVERRIDE;
-  virtual void ResyncUserData() OVERRIDE;
-  virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
-  virtual void ShowWrongHWIDScreen() OVERRIDE;
-  virtual void Signout() OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -122,31 +105,29 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
  private:
   friend class ExistingUserControllerTest;
-  friend class ExistingUserControllerAutoLoginTest;
-  friend class ExistingUserControllerPublicSessionTest;
   friend class MockLoginPerformerDelegate;
-
-  // Retrieve public session auto-login policy and update the timer.
-  void ConfigurePublicSessionAutoLogin();
-
-  // Trigger public session auto-login.
-  void OnPublicSessionAutoLoginTimerFire();
 
   // LoginPerformer::Delegate implementation:
   virtual void OnLoginFailure(const LoginFailure& error) OVERRIDE;
-  virtual void OnLoginSuccess(const UserContext& user_context) OVERRIDE;
+  virtual void OnLoginSuccess(
+      const std::string& username,
+      const std::string& password,
+      const GaiaAuthConsumer::ClientLoginResult& credentials,
+      bool pending_requests,
+      bool using_oauth) OVERRIDE;
   virtual void OnOffTheRecordLoginSuccess() OVERRIDE;
-  virtual void OnPasswordChangeDetected() OVERRIDE;
+  virtual void OnPasswordChangeDetected(
+      const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
   virtual void WhiteListCheckFailed(const std::string& email) OVERRIDE;
-  virtual void PolicyLoadFailed() OVERRIDE;
   virtual void OnOnlineChecked(
       const std::string& username, bool success) OVERRIDE;
 
   // LoginUtils::Delegate implementation:
   virtual void OnProfilePrepared(Profile* profile) OVERRIDE;
 
-  // Called when device settings change.
-  void DeviceSettingsChanged();
+  // PasswordChangedView::Delegate:
+  virtual void RecoverEncryptedData(const std::string& old_password) OVERRIDE;
+  virtual void ResyncEncryptedData() OVERRIDE;
 
   // Starts WizardController with the specified screen.
   void ActivateWizard(const std::string& screen_name);
@@ -157,6 +138,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Adds first-time login URLs.
   void InitializeStartUrls() const;
 
+  // Changes state of the status area. During login operation it's disabled.
+  void SetStatusAreaEnabled(bool enable);
+
   // Show error message. |error_id| error message ID in resources.
   // If |details| string is not empty, it specify additional error text
   // provided by authenticator, it is not localized.
@@ -165,15 +149,10 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Shows Gaia page because password change was detected.
   void ShowGaiaPasswordChanged(const std::string& username);
 
-  // Handles result of ownership check and starts enterprise or kiosk enrollment
-  // if applicable.
-  void OnEnrollmentOwnershipCheckCompleted(
-      DeviceSettingsService::OwnershipStatus status);
-
-  // Handles result of consumer kiosk configurability check and starts
-  // enable kiosk screen if applicable.
-  void OnConsumerKioskModeCheckCompleted(
-      KioskAppManager::ConsumerKioskModeStatus status);
+  // Handles result of ownership check and starts enterprise enrollment if
+  // applicable.
+  void OnEnrollmentOwnershipCheckCompleted(OwnershipService::Status status,
+                                           bool current_user_is_owner);
 
   // Enters the enterprise enrollment screen. |forced| is true if this is the
   // result of an auto-enrollment check, and the user shouldn't be able to
@@ -181,48 +160,21 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // first logged in.
   void ShowEnrollmentScreen(bool forced, const std::string& user);
 
-  // Shows "reset device" screen.
-  void ShowResetScreen();
-
-  // Shows kiosk feature enable screen.
-  void ShowKioskEnableScreen();
-
-  // Shows "kiosk auto-launch permission" screen.
-  void ShowKioskAutolaunchScreen();
-
-  // Shows "critical TPM error" screen.
-  void ShowTPMError();
-
   // Invoked to complete login. Login might be suspended if auto-enrollment
   // has to be performed, and will resume once auto-enrollment completes.
-  void CompleteLoginInternal(
-      const UserContext& user_context,
-      DeviceSettingsService::OwnershipStatus ownership_status);
-
-  // Creates |login_performer_| if necessary and calls login() on it.
-  // The string arguments aren't passed by const reference because this is
-  // posted as |resume_login_callback_| and resets it.
-  void PerformLogin(const UserContext& user_context,
-                    LoginPerformer::AuthorizationMode auth_mode);
+  void CompleteLoginInternal(std::string username, std::string password);
 
   void set_login_performer_delegate(LoginPerformer::Delegate* d) {
     login_performer_delegate_.reset(d);
   }
 
-  // Updates the |login_display_| attached to this controller.
-  void UpdateLoginDisplay(const UserList& users);
+  // Passes owner user to cryptohomed. Called right before mounting a user.
+  // Subsequent disk space control checks are invoked by cryptohomed timer.
+  void SetOwnerUserInCryptohome();
 
-  // Sends an accessibility alert event to extension listeners.
-  void SendAccessibilityAlert(const std::string& alert_text);
-
-  // Public session auto-login timer.
-  scoped_ptr<base::OneShotTimer<ExistingUserController> > auto_login_timer_;
-
-  // Public session auto-login timeout, in milliseconds.
-  int public_session_auto_login_delay_;
-
-  // Username for public session auto-login.
-  std::string public_session_auto_login_username_;
+  // Prepares and updates/initializes depending on |init| the |login_display_|
+  // attached to this controller.
+  void UpdateLoginDisplay(const UserList& users, bool init);
 
   // Used to execute login operations.
   scoped_ptr<LoginPerformer> login_performer_;
@@ -258,11 +210,23 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // URL to append to start Guest mode with.
   GURL guest_mode_url_;
 
-  // Used for notifications during the login process.
+  // Used for user image changed notifications.
   content::NotificationRegistrar registrar_;
 
   // Factory of callbacks.
   base::WeakPtrFactory<ExistingUserController> weak_factory_;
+
+  // Whether everything is ready to launch the browser.
+  bool ready_for_browser_launch_;
+
+  // Whether two factor credentials were used.
+  bool two_factor_credentials_;
+
+  // Used to verify ownership before starting enterprise enrollment.
+  scoped_ptr<OwnershipStatusChecker> ownership_checker_;
+
+  // Whether it's first login to the device and this user will be owner.
+  bool is_owner_login_;
 
   // The displayed email for the next login attempt set by |SetDisplayEmail|.
   std::string display_email_;
@@ -276,16 +240,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Whether online login attempt succeeded.
   std::string online_succeeded_for_;
 
-  // True if password has been changed for user who is completing sign in.
-  // Set in OnLoginSuccess. Before that use LoginPerformer::password_changed().
-  bool password_changed_;
-
   // True if auto-enrollment should be performed before starting the user's
   // session.
   bool do_auto_enrollment_;
-
-  // Whether the sign-in UI is finished loading.
-  bool signin_screen_ready_;
 
   // The username used for auto-enrollment, if it was triggered.
   std::string auto_enrollment_username_;
@@ -297,21 +254,7 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // from showing the screen until a successful login is performed.
   base::Time time_init_;
 
-  // Timer for the interval to wait for the reboot after TPM error UI was shown.
-  base::OneShotTimer<ExistingUserController> reboot_timer_;
-
-  scoped_ptr<login::NetworkStateHelper> network_state_helper_;
-
-  scoped_ptr<CrosSettings::ObserverSubscription> show_user_names_subscription_;
-  scoped_ptr<CrosSettings::ObserverSubscription> allow_new_user_subscription_;
-  scoped_ptr<CrosSettings::ObserverSubscription> allow_guest_subscription_;
-  scoped_ptr<CrosSettings::ObserverSubscription> users_subscription_;
-  scoped_ptr<CrosSettings::ObserverSubscription>
-      local_account_auto_login_id_subscription_;
-  scoped_ptr<CrosSettings::ObserverSubscription>
-      local_account_auto_login_delay_subscription_;
-
-  FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, ExistingUserLogin);
+  FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, NewUserLogin);
 
   DISALLOW_COPY_AND_ASSIGN(ExistingUserController);
 };

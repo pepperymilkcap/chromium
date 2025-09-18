@@ -4,21 +4,21 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_MENU_CONTROLLER_GTK_H_
 #define CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_MENU_CONTROLLER_GTK_H_
+#pragma once
 
 #include <map>
-#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
-#include "chrome/browser/ui/bookmarks/bookmark_context_menu_controller.h"
+#include "chrome/browser/bookmarks/bookmark_context_menu_controller.h"
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
-#include "ui/base/window_open_disposition.h"
+#include "webkit/glue/window_open_disposition.h"
 
-class Browser;
+class Profile;
 class BookmarkModel;
 class BookmarkNode;
 class MenuGtk;
@@ -37,7 +37,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
  public:
   // Creates a BookmarkMenuController showing the children of |node| starting
   // at index |start_child_index|.
-  BookmarkMenuController(Browser* browser,
+  BookmarkMenuController(Profile* profile,
                          content::PageNavigator* page_navigator,
                          GtkWindow* window,
                          const BookmarkNode* node,
@@ -55,9 +55,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
                                           const BookmarkNode* node) OVERRIDE;
 
   // Overridden from BookmarkContextMenuController::Delegate:
-  virtual void WillExecuteCommand(
-      int command_id,
-      const std::vector<const BookmarkNode*>& bookmarks) OVERRIDE;
+  virtual void WillExecuteCommand() OVERRIDE;
   virtual void CloseMenu() OVERRIDE;
 
  private:
@@ -103,7 +101,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   CHROMEGTK_CALLBACK_4(BookmarkMenuController, void, OnMenuItemDragGet,
                        GdkDragContext*, GtkSelectionData*, guint, guint);
 
-  Browser* browser_;
+  Profile* profile_;
   content::PageNavigator* page_navigator_;
 
   // Parent window of this menu.

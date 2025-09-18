@@ -1,7 +1,3 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file. */
-
 body {
   margin: 20px;
 }
@@ -9,9 +5,7 @@ body {
 h1 {
   -webkit-padding-start: 75px;
   /* TODO(stuartmorgan): Get real art for this image */
-  background-image: -webkit-image-set(
-      url('../../app/theme/default_100_percent/sadtab.png') 1x,
-      url('../../app/theme/default_200_percent/sadtab.png') 2x);
+  background-image: url('../../app/theme/sadtab.png');
   background-position: left;
   background-repeat: no-repeat;
   font-size: 156%;
@@ -26,7 +20,7 @@ html[dir=rtl] h1 {
 }
 
 #countBanner {
-  background-color: rgb(235, 239, 250);
+  background-color: #ebeffa;
   border: 1px solid #bbb;
   border-radius: 2px;
   font-size: 100%;
@@ -50,6 +44,6 @@ html[dir=rtl] h1 {
 }
 
 #disabledMode h2 {
-  color: rgb(141, 51, 42);
+  color: #8d332a;
   font-size: 125%;
 }

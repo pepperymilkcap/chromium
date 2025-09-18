@@ -1,9 +1,12 @@
 {
   "name": "Platform App Test: navigation is disallowed",
+  "platform_app": true,
   "version": "1",
+  "manifest_version": 2,
   "app": {
-    "background": {
-      "scripts": ["test.js"]
+    "launch": {
+      "local_path": "main.html",
+      "container": "shell"
     }
   }
 }

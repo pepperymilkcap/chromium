@@ -7,14 +7,13 @@
   },
   "app": {
     "launch": {
-      "web_url": "https://www.google.com/cloudprint"
+      "web_url": "https://www.google.com/cloudprint/enable_chrome_connector"
     },
     "urls": [
       "https://www.google.com/cloudprint/enable_chrome_connector"
     ]
   },
   "permissions": [
-    "cloudPrintPrivate"
-  ],
-  "display_in_launcher": false
+    "chromeAuthPrivate"
+  ]
 }

@@ -9,7 +9,6 @@
 #include "ppapi/cpp/dev/scrollbar_dev.h"
 #include "ppapi/cpp/dev/widget_dev.h"
 #include "ppapi/cpp/instance.h"
-#include "ppapi/cpp/instance_handle.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
 #include "ppapi/cpp/rect.h"
@@ -25,7 +24,8 @@ const char kPPPWidgetInterface[] = PPP_WIDGET_DEV_INTERFACE;
 void Widget_Invalidate(PP_Instance instance,
                        PP_Resource widget_id,
                        const PP_Rect* dirty_rect) {
-  void* object = Instance::GetPerInstanceObject(instance, kPPPWidgetInterface);
+  void* object =
+      pp::Instance::GetPerInstanceObject(instance, kPPPWidgetInterface);
   if (!object)
     return;
   return static_cast<WidgetClient_Dev*>(object)->InvalidateWidget(
@@ -44,7 +44,7 @@ void Scrollbar_ValueChanged(PP_Instance instance,
                             PP_Resource scrollbar_id,
                             uint32_t value) {
   void* object =
-      Instance::GetPerInstanceObject(instance, kPPPScrollbarInterface);
+      pp::Instance::GetPerInstanceObject(instance, kPPPScrollbarInterface);
   if (!object)
     return;
   return static_cast<WidgetClient_Dev*>(object)->ScrollbarValueChanged(
@@ -55,7 +55,7 @@ void Scrollbar_OverlayChanged(PP_Instance instance,
                               PP_Resource scrollbar_id,
                               PP_Bool overlay) {
   void* object =
-      Instance::GetPerInstanceObject(instance, kPPPScrollbarInterface);
+      pp::Instance::GetPerInstanceObject(instance, kPPPScrollbarInterface);
   if (!object)
     return;
   return static_cast<WidgetClient_Dev*>(object)->ScrollbarOverlayChanged(
@@ -71,18 +71,16 @@ static PPP_Scrollbar_Dev scrollbar_interface = {
 
 WidgetClient_Dev::WidgetClient_Dev(Instance* instance)
     : associated_instance_(instance) {
-  Module::Get()->AddPluginInterface(kPPPWidgetInterface, &widget_interface);
-  instance->AddPerInstanceObject(kPPPWidgetInterface, this);
-  Module::Get()->AddPluginInterface(kPPPScrollbarInterface,
-                                    &scrollbar_interface);
-  instance->AddPerInstanceObject(kPPPScrollbarInterface, this);
+  pp::Module::Get()->AddPluginInterface(kPPPWidgetInterface, &widget_interface);
+  associated_instance_->AddPerInstanceObject(kPPPWidgetInterface, this);
+  pp::Module::Get()->AddPluginInterface(kPPPScrollbarInterface,
+                                        &scrollbar_interface);
+  associated_instance_->AddPerInstanceObject(kPPPScrollbarInterface, this);
 }
 
 WidgetClient_Dev::~WidgetClient_Dev() {
-  Instance::RemovePerInstanceObject(associated_instance_,
-                                    kPPPScrollbarInterface, this);
-  Instance::RemovePerInstanceObject(associated_instance_,
-                                    kPPPWidgetInterface, this);
+  associated_instance_->RemovePerInstanceObject(kPPPScrollbarInterface, this);
+  associated_instance_->RemovePerInstanceObject(kPPPWidgetInterface, this);
 }
 
 }  // namespace pp

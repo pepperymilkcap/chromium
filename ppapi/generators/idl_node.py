@@ -16,10 +16,12 @@
 # as the source data by the various generators.
 #
 
+import hashlib
 import sys
 
 from idl_log import ErrOut, InfoOut, WarnOut
 from idl_propertynode import IDLPropertyNode
+from idl_namespace import IDLNamespace
 from idl_release import IDLRelease, IDLReleaseMap
 
 
@@ -37,6 +39,7 @@ class IDLAttribute(object):
   def __str__(self):
     return '%s=%s' % (self.name, self.value)
 
+
 #
 # IDLNode
 #
@@ -51,6 +54,7 @@ class IDLNode(IDLRelease):
   NamedSet = set(['Enum', 'EnumItem', 'File', 'Function', 'Interface',
                   'Member', 'Param', 'Struct', 'Type', 'Typedef'])
 
+  show_versions = False
   def __init__(self, cls, filename, lineno, pos, children=None):
     # Initialize with no starting or ending Version
     IDLRelease.__init__(self, None, None)
@@ -58,166 +62,179 @@ class IDLNode(IDLRelease):
     self.cls = cls
     self.lineno = lineno
     self.pos = pos
-    self._filename = filename
-    self._deps = {}
+    self.filename = filename
+    self.hashes = {}
+    self.deps = {}
     self.errors = 0
     self.namespace = None
     self.typelist = None
     self.parent = None
-    self._property_node = IDLPropertyNode()
-    self._unique_releases = None
-
-    # A list of unique releases for this node
-    self.releases = None
-
-    # A map from any release, to the first unique release
-    self.first_release = None
-
-    # self._children is a list of children ordered as defined
-    self._children = []
+    self.property_node = IDLPropertyNode()
+    # self.children is a list of children ordered as defined
+    self.children = []
     # Process the passed in list of children, placing ExtAttributes into the
     # property dictionary, and nodes into the local child list in order.  In
     # addition, add nodes to the namespace if the class is in the NamedSet.
-    if children:
-      for child in children:
-        if child.cls == 'ExtAttribute':
-          self.SetProperty(child.name, child.value)
-        else:
-          self.AddChild(child)
+    if not children: children = []
+    for child in children:
+      if child.cls == 'ExtAttribute':
+        self.SetProperty(child.name, child.value)
+      else:
+        self.AddChild(child)
 
+#
+# String related functions
+#
+#
+
+  # Return a string representation of this node
   def __str__(self):
     name = self.GetName()
-    if name is None:
-      name = ''
-    return '%s(%s)' % (self.cls, name)
+    ver = IDLRelease.__str__(self)
+    if name is None: name = ''
+    if not IDLNode.show_versions: ver = ''
+    return '%s(%s%s)' % (self.cls, name, ver)
 
+  # Return file and line number for where node was defined
   def Location(self):
-    """Return a file and line number for where this node was defined."""
-    return '%s(%d)' % (self._filename, self.lineno)
+    return '%s(%d)' % (self.filename, self.lineno)
 
+  # Log an error for this object
   def Error(self, msg):
-    """Log an error for this object."""
     self.errors += 1
-    ErrOut.LogLine(self._filename, self.lineno, 0, ' %s %s' %
+    ErrOut.LogLine(self.filename, self.lineno, 0, ' %s %s' %
                    (str(self), msg))
-    filenode = self.GetProperty('FILE')
-    if filenode:
-      errcnt = filenode.GetProperty('ERRORS')
-      if not errcnt:
-        errcnt = 0
-      filenode.SetProperty('ERRORS', errcnt + 1)
+    if self.lineno == 46: raise Exception("huh?")
 
+  # Log a warning for this object
   def Warning(self, msg):
-    """Log a warning for this object."""
-    WarnOut.LogLine(self._filename, self.lineno, 0, ' %s %s' %
+    WarnOut.LogLine(self.filename, self.lineno, 0, ' %s %s' %
                     (str(self), msg))
 
   def GetName(self):
     return self.GetProperty('NAME')
 
+  def GetNameVersion(self):
+    name = self.GetProperty('NAME', default='')
+    ver = IDLRelease.__str__(self)
+    return '%s%s' % (name, ver)
+
+  # Dump this object and its children
   def Dump(self, depth=0, comments=False, out=sys.stdout):
-    """Dump this object and its children"""
     if self.cls in ['Comment', 'Copyright']:
       is_comment = True
     else:
       is_comment = False
 
     # Skip this node if it's a comment, and we are not printing comments
-    if not comments and is_comment:
-      return
+    if not comments and is_comment: return
 
     tab = ''.rjust(depth * 2)
+
     if is_comment:
-      out.write('%sComment\n' % tab)
       for line in self.GetName().split('\n'):
-        out.write('%s  "%s"\n' % (tab, line))
+        out.write('%s%s\n' % (tab, line))
     else:
-      ver = IDLRelease.__str__(self)
-      if self.releases:
-        release_list = ': ' + ' '.join(self.releases)
-      else:
-        release_list = ': undefined'
-      out.write('%s%s%s%s\n' % (tab, self, ver, release_list))
-    if self.typelist:
-      out.write('%s  Typelist: %s\n' % (tab, self.typelist.GetReleases()[0]))
-    properties = self._property_node.GetPropertyList()
+      out.write('%s%s\n' % (tab, self))
+    properties = self.property_node.GetProperyList()
     if properties:
       out.write('%s  Properties\n' % tab)
       for p in properties:
-        if is_comment and p == 'NAME':
-          # Skip printing the name for comments, since we printed above already
-          continue
         out.write('%s    %s : %s\n' % (tab, p, self.GetProperty(p)))
-    for child in self._children:
+    for child in self.children:
       child.Dump(depth+1, comments=comments, out=out)
 
-  def IsA(self, *typelist):
-    """Check if node is of a given type."""
-    return self.cls in typelist
+#
+# Search related functions
+#
 
+  # Check if node is of a given type
+  def IsA(self, *typelist):
+    if self.cls in typelist: return True
+    return False
+
+  # Get a list of objects for this key
   def GetListOf(self, *keys):
-    """Get a list of objects for the given key(s)."""
     out = []
-    for child in self._children:
-      if child.cls in keys:
-        out.append(child)
+    for child in self.children:
+      if child.cls in keys: out.append(child)
     return out
 
   def GetOneOf(self, *keys):
-    """Get an object for the given key(s)."""
     out = self.GetListOf(*keys)
-    if out:
-      return out[0]
+    if out: return out[0]
     return None
 
   def SetParent(self, parent):
-    self._property_node.AddParent(parent)
+    self.property_node.AddParent(parent)
     self.parent = parent
 
   def AddChild(self, node):
     node.SetParent(self)
-    self._children.append(node)
+    self.children.append(node)
 
   # Get a list of all children
   def GetChildren(self):
-    return self._children
+    return self.children
+
+  # Get a list of all children of a given version
+  def GetChildrenVersion(self, version):
+    out = []
+    for child in self.children:
+      if child.IsVersion(version): out.append(child)
+    return out
+
+  # Get a list of all children in a given range
+  def GetChildrenRange(self, vmin, vmax):
+    out = []
+    for child in self.children:
+      if child.IsRange(vmin, vmax): out.append(child)
+    return out
+
+  def FindVersion(self, name, version):
+    node = self.namespace.FindNode(name, version)
+    if not node and self.parent:
+      node = self.parent.FindVersion(name, version)
+    return node
+
+  def FindRange(self, name, vmin, vmax):
+    nodes = self.namespace.FindNodes(name, vmin, vmax)
+    if not nodes and self.parent:
+      nodes = self.parent.FindVersion(name, vmin, vmax)
+    return nodes
 
   def GetType(self, release):
-    if not self.typelist:
-      return None
+    if not self.typelist: return None
     return self.typelist.FindRelease(release)
 
-  def GetDeps(self, release, visited=None):
-    visited = visited or set()
+  def GetHash(self, release):
+    hashval = self.hashes.get(release, None)
+    if hashval is None:
+      hashval = hashlib.sha1()
+      hashval.update(self.cls)
+      for key in self.property_node.GetPropertyList():
+        val = self.GetProperty(key)
+        hashval.update('%s=%s' % (key, str(val)))
+      typeref = self.GetType(release)
+      if typeref:
+        hashval.update(typeref.GetHash(release))
+      for child in self.GetChildren():
+        if child.IsA('Copyright', 'Comment', 'Label'): continue
+        if not child.IsRelease(release):
+          continue
+        hashval.update( child.GetHash(release) )
+      self.hashes[release] = hashval
+    return hashval.hexdigest()
 
-    # If this release is not valid for this object, then done.
-    if not self.IsRelease(release) or self.IsA('Comment', 'Copyright'):
-      return set([])
-
-    # If we have cached the info for this release, return the cached value
-    deps = self._deps.get(release, None)
-    if deps is not None:
-      return deps
-
-    # If we are already visited, then return
-    if self in visited:
-      return set([self])
-
-    # Otherwise, build the dependency list
-    visited |= set([self])
-    deps = set([self])
-
-    # Get child deps
-    for child in self.GetChildren():
-      deps |= child.GetDeps(release, visited)
-      visited |= set(deps)
-
-    # Get type deps
-    typeref = self.GetType(release)
-    if typeref:
-      deps |= typeref.GetDeps(release, visited)
-
-    self._deps[release] = deps
+  def GetDeps(self, release):
+    deps = self.deps.get(release, None)
+    if deps is None:
+      deps = set([self])
+      for child in self.GetChildren():
+        deps |= child.GetDeps(release)
+      typeref = self.GetType(release)
+      if typeref: deps |= typeref.GetDeps(release)
+      self.deps[release] = deps
     return deps
 
   def GetVersion(self, release):
@@ -226,136 +243,69 @@ class IDLNode(IDLRelease):
       return None
     return filenode.release_map.GetVersion(release)
 
-  def GetUniqueReleases(self, releases):
-    """Return the unique set of first releases corresponding to input
-
-    Since we are returning the corresponding 'first' version for a
-    release, we may return a release version prior to the one in the list."""
-    my_min, my_max = self.GetMinMax(releases)
-    if my_min > releases[-1] or my_max < releases[0]:
-      return []
-
-    out = set()
-    for rel in releases:
-      remapped = self.first_release[rel]
-      if not remapped:
-        continue
-      out |= set([remapped])
-
-    # Cache the most recent set of unique_releases
-    self._unique_releases = sorted(out)
-    return self._unique_releases
-
-  def LastRelease(self, release):
-    # Get the most recent release from the most recently generated set of
-    # cached unique releases.
-    if self._unique_releases and self._unique_releases[-1] > release:
-      return False
-    return True
-
   def GetRelease(self, version):
     filenode = self.GetProperty('FILE')
     if not filenode:
       return None
     return filenode.release_map.GetRelease(version)
 
-  def _GetReleaseList(self, releases, visited=None):
-    visited = visited or set()
-    if not self.releases:
-      # If we are unversionable, then return first available release
-      if self.IsA('Comment', 'Copyright', 'Label'):
-        self.releases = []
-        return self.releases
+  def GetUniqueReleases(self, releases):
+    # Given a list of global release, return a subset of releases
+    # for this object that change.
+    last_hash = None
+    builds = []
+    filenode = self.GetProperty('FILE')
+    file_releases = filenode.release_map.GetReleases()
 
-      # Generate the first and if deprecated within this subset, the
-      # last release for this node
-      my_min, my_max = self.GetMinMax(releases)
+    # Generate a set of unique releases for this object based on versions
+    # available in this file's release labels.
+    for rel in file_releases:
+      # Check if this object is valid for the release in question.
+      if not self.IsRelease(rel): continue
+      # Only add it if the hash is different.
+      cur_hash = self.GetHash(rel)
+      if last_hash != cur_hash:
+        builds.append(rel)
+      last_hash = cur_hash
 
-      if my_max != releases[-1]:
-        my_releases = set([my_min, my_max])
-      else:
-        my_releases = set([my_min])
+    # Remap the requested releases to releases in the unique build set to
+    # use first available release names and remove duplicates.
+    # UNIQUE VERSION: 'M13', 'M14', 'M17'
+    # REQUESTED RANGE: 'M15', 'M16', 'M17', 'M18'
+    # REMAP RESULT:  'M14', 'M17'
+    out_list = []
+    build_len = len(builds)
+    build_index = 0
+    rel_len = len(releases)
+    rel_index = 0
 
-      r = self.GetRelease(self.GetProperty('version'))
-      if not r in my_releases:
-        my_releases |= set([r])
+    while build_index < build_len and rel_index < rel_len:
+      while rel_index < rel_len and releases[rel_index] < builds[build_index]:
+        rel_index = rel_index + 1
 
-      # Break cycle if we reference ourselves
-      if self in visited:
-        return [my_min]
+      # If we've reached the end of the request list, we must be done
+      if rel_index == rel_len:
+        break
 
-      visited |= set([self])
+      # Check this current request
+      cur = releases[rel_index]
+      while build_index < build_len and cur >= builds[build_index]:
+        build_index = build_index + 1
 
-      # Files inherit all their releases from items in the file
-      if self.IsA('AST', 'File'):
-        my_releases = set()
-
-      # Visit all children
-      child_releases = set()
-
-      # Exclude sibling results from parent visited set
-      cur_visits = visited
-
-      for child in self._children:
-        child_releases |= set(child._GetReleaseList(releases, cur_visits))
-        visited |= set(child_releases)
-
-      # Visit my type
-      type_releases = set()
-      if self.typelist:
-        type_list = self.typelist.GetReleases()
-        for typenode in type_list:
-          type_releases |= set(typenode._GetReleaseList(releases, cur_visits))
-
-        type_release_list = sorted(type_releases)
-        if my_min < type_release_list[0]:
-          type_node = type_list[0]
-          self.Error('requires %s in %s which is undefined at %s.' % (
-              type_node, type_node._filename, my_min))
-
-      for rel in child_releases | type_releases:
-        if rel >= my_min and rel <= my_max:
-          my_releases |= set([rel])
-
-      self.releases = sorted(my_releases)
-    return self.releases
-
-  def BuildReleaseMap(self, releases):
-    unique_list = self._GetReleaseList(releases)
-    _, my_max = self.GetMinMax(releases)
-
-    self.first_release = {}
-    last_rel = None
-    for rel in releases:
-      if rel in unique_list:
-        last_rel = rel
-      self.first_release[rel] = last_rel
-      if rel == my_max:
-        last_rel = None
+      out_list.append(builds[build_index - 1])
+      rel_index = rel_index + 1
+    return out_list
 
   def SetProperty(self, name, val):
-    self._property_node.SetProperty(name, val)
+    self.property_node.SetProperty(name, val)
 
-  def GetProperty(self, name):
-    return self._property_node.GetProperty(name)
+  def GetProperty(self, name, default=None):
+    return self.property_node.GetProperty(name, default)
 
-  def GetPropertyLocal(self, name):
-    return self._property_node.GetPropertyLocal(name)
-
-  def NodeIsDevOnly(self):
-    """Returns true iff a node is only in dev channel."""
-    return self.GetProperty('dev_version') and not self.GetProperty('version')
-
-  def DevInterfaceMatchesStable(self, release):
-    """Returns true if an interface has an equivalent stable version."""
-    assert(self.IsA('Interface'))
-    for child in self.GetListOf('Member'):
-      unique = child.GetUniqueReleases([release])
-      if not unique or not child.InReleases([release]):
-        continue
-      if child.NodeIsDevOnly():
-        return False
-    return True
+  def Traverse(self, data, func):
+    func(self, data)
+    for child in self.children:
+      child.Traverse(data, func)
 
 
 #
@@ -367,12 +317,9 @@ class IDLFile(IDLNode):
   def __init__(self, name, children, errors=0):
     attrs = [IDLAttribute('NAME', name),
              IDLAttribute('ERRORS', errors)]
-    if not children:
-      children = []
+    if not children: children = []
     IDLNode.__init__(self, 'File', name, 1, 0, attrs + children)
-    # TODO(teravest): Why do we set release map like this here? This looks
-    # suspicious...
-    self.release_map = IDLReleaseMap([('M13', 1.0, 'stable')])
+    self.release_map = IDLReleaseMap([('M13', 1.0)])
 
 
 #
@@ -393,8 +340,7 @@ def StringTest():
   if str(node) != text_str:
     ErrOut.Log('str() returned >%s< not >%s<' % (str(node), text_str))
     errors += 1
-  if not errors:
-    InfoOut.Log('Passed StringTest')
+  if not errors: InfoOut.Log('Passed StringTest')
   return errors
 
 
@@ -428,8 +374,7 @@ def ChildTest():
     ErrOut.Log('Failed GetChildren2.')
     errors += 1
 
-  if not errors:
-    InfoOut.Log('Passed ChildTest')
+  if not errors: InfoOut.Log('Passed ChildTest')
   return errors
 
 

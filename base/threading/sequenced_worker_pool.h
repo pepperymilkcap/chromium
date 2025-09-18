@@ -1,31 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_THREADING_SEQUENCED_WORKER_POOL_H_
 #define BASE_THREADING_SEQUENCED_WORKER_POOL_H_
+#pragma once
 
-#include <cstddef>
 #include <string>
 
-#include "base/base_export.h"
-#include "base/basictypes.h"
-#include "base/callback_forward.h"
+#include "base/callback.h"
+#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/task_runner.h"
-
-namespace tracked_objects {
-class Location;
-}  // namespace tracked_objects
+#include "base/tracked_objects.h"
+#include "base/base_export.h"
 
 namespace base {
-
-class MessageLoopProxy;
-
-template <class T> class DeleteHelper;
-
-class SequencedTaskRunner;
 
 // A worker thread pool that enforces ordering between sets of tasks. It also
 // allows you to specify what should happen to your tasks on shutdown.
@@ -33,15 +22,6 @@ class SequencedTaskRunner;
 // To enforce ordering, get a unique sequence token from the pool and post all
 // tasks you want to order with the token. All tasks with the same token are
 // guaranteed to execute serially, though not necessarily on the same thread.
-// This means that:
-//
-//   - No two tasks with the same token will run at the same time.
-//
-//   - Given two tasks T1 and T2 with the same token such that T2 will
-//     run after T1, then T2 will start after T1 is destroyed.
-//
-//   - If T2 will run after T1, then all memory changes in T1 and T1's
-//     destruction will be visible to T2.
 //
 // Example:
 //   SequencedWorkerPool::SequenceToken token = pool.GetSequenceToken();
@@ -57,25 +37,18 @@ class SequencedTaskRunner;
 // These will be executed in an unspecified order. The order of execution
 // between tasks with different sequence tokens is also unspecified.
 //
-// This class may be leaked on shutdown to facilitate fast shutdown. The
-// expected usage, however, is to call Shutdown(), which correctly accounts
-// for CONTINUE_ON_SHUTDOWN behavior and is required for BLOCK_SHUTDOWN
-// behavior.
+// This class is designed to be leaked on shutdown to allow the
+// CONTINUE_ON_SHUTDOWN behavior to be implemented. To enforce the
+// BLOCK_SHUTDOWN behavior, you must call Shutdown() which will wait until
+// the necessary tasks have completed.
 //
 // Implementation note: This does not use a base::WorkerPool since that does
 // not enforce shutdown semantics or allow us to specify how many worker
 // threads to run. For the typical use case of random background work, we don't
 // necessarily want to be super aggressive about creating threads.
-//
-// Note that SequencedWorkerPool is RefCountedThreadSafe (inherited
-// from TaskRunner).
-//
-// Test-only code should wrap this in a base::SequencedWorkerPoolOwner to avoid
-// memory leaks. See http://crbug.com/273800
-class BASE_EXPORT SequencedWorkerPool : public TaskRunner {
+class BASE_EXPORT SequencedWorkerPool {
  public:
-  // Defines what should happen to a task posted to the worker pool on
-  // shutdown.
+  // Defines what should happen to a task posted to the worker pool on shutdown.
   enum WorkerShutdown {
     // Tasks posted with this mode which have not run at shutdown will be
     // deleted rather than run, and any tasks with this mode running at
@@ -95,19 +68,14 @@ class BASE_EXPORT SequencedWorkerPool : public TaskRunner {
     // example.
     CONTINUE_ON_SHUTDOWN,
 
-    // Tasks posted with this mode that have not started executing at
-    // shutdown will be deleted rather than executed. However, any tasks that
-    // have already begun executing when shutdown is called will be allowed
-    // to continue, and will block shutdown until completion.
-    //
-    // Note: Because Shutdown() may block while these tasks are executing,
-    // care must be taken to ensure that they do not block on the thread that
-    // called Shutdown(), as this may lead to deadlock.
+    // Tasks posted with this mode that have not started executing at shutdown
+    // will be deleted rather than executed. However, tasks already in progress
+    // will be completed.
     SKIP_ON_SHUTDOWN,
 
-    // Tasks posted with this mode will block shutdown until they're
-    // executed. Since this can have significant performance implications,
-    // use sparingly.
+    // Tasks posted with this mode will block browser shutdown until they're
+    // executed. Since this can have significant performance implications, use
+    // sparingly.
     //
     // Generally, this should be used only for user data, for example, a task
     // writing a preference file.
@@ -119,25 +87,20 @@ class BASE_EXPORT SequencedWorkerPool : public TaskRunner {
   };
 
   // Opaque identifier that defines sequencing of tasks posted to the worker
-  // pool.
+  // pool. See NewSequenceToken().
   class SequenceToken {
    public:
-    SequenceToken() : id_(0) {}
+    explicit SequenceToken() : id_(0) {}
     ~SequenceToken() {}
 
     bool Equals(const SequenceToken& other) const {
       return id_ == other.id_;
     }
 
-    // Returns false if current thread is executing an unsequenced task.
-    bool IsValid() const {
-      return id_ != 0;
-    }
-
    private:
     friend class SequencedWorkerPool;
 
-    explicit SequenceToken(int id) : id_(id) {}
+    SequenceToken(int id) : id_(id) {}
 
     int id_;
   };
@@ -146,33 +109,17 @@ class BASE_EXPORT SequencedWorkerPool : public TaskRunner {
   class TestingObserver {
    public:
     virtual ~TestingObserver() {}
-    virtual void OnHasWork() = 0;
     virtual void WillWaitForShutdown() = 0;
-    virtual void OnDestruct() = 0;
   };
 
-  // Gets the SequencedToken of the current thread.
-  // If current thread is not a SequencedWorkerPool worker thread or is running
-  // an unsequenced task, returns an invalid SequenceToken.
-  static SequenceToken GetSequenceTokenForCurrentThread();
-
-  // When constructing a SequencedWorkerPool, there must be a
-  // MessageLoop on the current thread unless you plan to deliberately
-  // leak it.
-
   // Pass the maximum number of threads (they will be lazily created as needed)
-  // and a prefix for the thread name to aid in debugging.
+  // and a prefix for the thread name to ad in debugging.
   SequencedWorkerPool(size_t max_threads,
                       const std::string& thread_name_prefix);
-
-  // Like above, but with |observer| for testing.  Does not take
-  // ownership of |observer|.
-  SequencedWorkerPool(size_t max_threads,
-                      const std::string& thread_name_prefix,
-                      TestingObserver* observer);
+  ~SequencedWorkerPool();
 
   // Returns a unique token that can be used to sequence tasks posted to
-  // PostSequencedWorkerTask(). Valid tokens are always nonzero.
+  // PostSequencedWorkerTask(). Valid tokens are alwys nonzero.
   SequenceToken GetSequenceToken();
 
   // Returns the sequence token associated with the given name. Calling this
@@ -180,28 +127,6 @@ class BASE_EXPORT SequencedWorkerPool : public TaskRunner {
   // same sequence token. If the name has not been used before, a new token
   // will be created.
   SequenceToken GetNamedSequenceToken(const std::string& name);
-
-  // Returns a SequencedTaskRunner wrapper which posts to this
-  // SequencedWorkerPool using the given sequence token. Tasks with nonzero
-  // delay are posted with SKIP_ON_SHUTDOWN behavior and tasks with zero delay
-  // are posted with BLOCK_SHUTDOWN behavior.
-  scoped_refptr<SequencedTaskRunner> GetSequencedTaskRunner(
-      SequenceToken token);
-
-  // Returns a SequencedTaskRunner wrapper which posts to this
-  // SequencedWorkerPool using the given sequence token. Tasks with nonzero
-  // delay are posted with SKIP_ON_SHUTDOWN behavior and tasks with zero delay
-  // are posted with the given shutdown behavior.
-  scoped_refptr<SequencedTaskRunner> GetSequencedTaskRunnerWithShutdownBehavior(
-      SequenceToken token,
-      WorkerShutdown shutdown_behavior);
-
-  // Returns a TaskRunner wrapper which posts to this SequencedWorkerPool using
-  // the given shutdown behavior. Tasks with nonzero delay are posted with
-  // SKIP_ON_SHUTDOWN behavior and tasks with zero delay are posted with the
-  // given shutdown behavior.
-  scoped_refptr<TaskRunner> GetTaskRunnerWithShutdownBehavior(
-      WorkerShutdown shutdown_behavior);
 
   // Posts the given task for execution in the worker pool. Tasks posted with
   // this function will execute in an unspecified order on a background thread.
@@ -224,25 +149,12 @@ class BASE_EXPORT SequencedWorkerPool : public TaskRunner {
   // Returns true if the task was posted successfully. This may fail during
   // shutdown regardless of the specified ShutdownBehavior.
   bool PostWorkerTask(const tracked_objects::Location& from_here,
-                      const Closure& task);
-
-  // Same as PostWorkerTask but allows a delay to be specified (although doing
-  // so changes the shutdown behavior). The task will be run after the given
-  // delay has elapsed.
-  //
-  // If the delay is nonzero, the task won't be guaranteed to run to completion
-  // before shutdown (SKIP_ON_SHUTDOWN semantics) to avoid shutdown hangs.
-  // If the delay is zero, this behaves exactly like PostWorkerTask, i.e. the
-  // task will be guaranteed to run to completion before shutdown
-  // (BLOCK_SHUTDOWN semantics).
-  bool PostDelayedWorkerTask(const tracked_objects::Location& from_here,
-                             const Closure& task,
-                             TimeDelta delay);
+                      const base::Closure& task);
 
   // Same as PostWorkerTask but allows specification of the shutdown behavior.
   bool PostWorkerTaskWithShutdownBehavior(
       const tracked_objects::Location& from_here,
-      const Closure& task,
+      const base::Closure& task,
       WorkerShutdown shutdown_behavior);
 
   // Like PostWorkerTask above, but provides sequencing semantics. This means
@@ -258,100 +170,49 @@ class BASE_EXPORT SequencedWorkerPool : public TaskRunner {
   // shutdown regardless of the specified ShutdownBehavior.
   bool PostSequencedWorkerTask(SequenceToken sequence_token,
                                const tracked_objects::Location& from_here,
-                               const Closure& task);
+                               const base::Closure& task);
 
   // Like PostSequencedWorkerTask above, but allows you to specify a named
   // token, which saves an extra call to GetNamedSequenceToken.
   bool PostNamedSequencedWorkerTask(const std::string& token_name,
                                     const tracked_objects::Location& from_here,
-                                    const Closure& task);
-
-  // Same as PostSequencedWorkerTask but allows a delay to be specified
-  // (although doing so changes the shutdown behavior). The task will be run
-  // after the given delay has elapsed.
-  //
-  // If the delay is nonzero, the task won't be guaranteed to run to completion
-  // before shutdown (SKIP_ON_SHUTDOWN semantics) to avoid shutdown hangs.
-  // If the delay is zero, this behaves exactly like PostSequencedWorkerTask,
-  // i.e. the task will be guaranteed to run to completion before shutdown
-  // (BLOCK_SHUTDOWN semantics).
-  bool PostDelayedSequencedWorkerTask(
-      SequenceToken sequence_token,
-      const tracked_objects::Location& from_here,
-      const Closure& task,
-      TimeDelta delay);
+                                    const base::Closure& task);
 
   // Same as PostSequencedWorkerTask but allows specification of the shutdown
   // behavior.
   bool PostSequencedWorkerTaskWithShutdownBehavior(
       SequenceToken sequence_token,
       const tracked_objects::Location& from_here,
-      const Closure& task,
+      const base::Closure& task,
       WorkerShutdown shutdown_behavior);
-
-  // TaskRunner implementation. Forwards to PostDelayedWorkerTask().
-  virtual bool PostDelayedTask(const tracked_objects::Location& from_here,
-                               const Closure& task,
-                               TimeDelta delay) OVERRIDE;
-  virtual bool RunsTasksOnCurrentThread() const OVERRIDE;
-
-  // Returns true if the current thread is processing a task with the given
-  // sequence_token.
-  bool IsRunningSequenceOnCurrentThread(SequenceToken sequence_token) const;
 
   // Blocks until all pending tasks are complete. This should only be called in
   // unit tests when you want to validate something that should have happened.
-  // This will not flush delayed tasks; delayed tasks get deleted.
   //
   // Note that calling this will not prevent other threads from posting work to
   // the queue while the calling thread is waiting on Flush(). In this case,
   // Flush will return only when there's no more work in the queue. Normally,
-  // this doesn't come up since in a test, all the work is being posted from
+  // this doesn't come up sine in a test, all the work is being posted from
   // the main thread.
   void FlushForTesting();
-
-  // Spuriously signal that there is work to be done.
-  void SignalHasWorkForTesting();
 
   // Implements the worker pool shutdown. This should be called during app
   // shutdown, and will discard/join with appropriate tasks before returning.
   // After this call, subsequent calls to post tasks will fail.
-  //
-  // Must be called from the same thread this object was constructed on.
-  void Shutdown() { Shutdown(0); }
+  void Shutdown();
 
-  // A variant that allows an arbitrary number of new blocking tasks to
-  // be posted during shutdown from within tasks that execute during shutdown.
-  // Only tasks designated as BLOCKING_SHUTDOWN will be allowed, and only if
-  // posted by tasks that are not designated as CONTINUE_ON_SHUTDOWN. Once
-  // the limit is reached, subsequent calls to post task fail in all cases.
-  //
-  // Must be called from the same thread this object was constructed on.
-  void Shutdown(int max_new_blocking_tasks_after_shutdown);
-
-  // Check if Shutdown was called for given threading pool. This method is used
-  // for aborting time consuming operation to avoid blocking shutdown.
-  //
-  // Can be called from any thread.
-  bool IsShutdownInProgress();
-
- protected:
-  virtual ~SequencedWorkerPool();
-
-  virtual void OnDestruct() const OVERRIDE;
+  // Called by tests to set the testing observer. This is NULL by default
+  // and ownership of the pointer is kept with the caller.
+  void SetTestingObserver(TestingObserver* observer);
 
  private:
-  friend class RefCountedThreadSafe<SequencedWorkerPool>;
-  friend class DeleteHelper<SequencedWorkerPool>;
-
   class Inner;
   class Worker;
 
-  const scoped_refptr<MessageLoopProxy> constructor_message_loop_;
+  friend class Inner;
+  friend class Worker;
 
-  // Avoid pulling in too many headers by putting (almost) everything
-  // into |inner_|.
-  const scoped_ptr<Inner> inner_;
+  scoped_refptr<Inner> inner_;
 
   DISALLOW_COPY_AND_ASSIGN(SequencedWorkerPool);
 };

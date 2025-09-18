@@ -4,49 +4,34 @@
 
 #ifndef BASE_DEBUG_LEAK_ANNOTATIONS_H_
 #define BASE_DEBUG_LEAK_ANNOTATIONS_H_
+#pragma once
 
-#include "base/basictypes.h"
 #include "build/build_config.h"
 
-// This file defines macros which can be used to annotate intentional memory
-// leaks. Support for annotations is implemented in LeakSanitizer. Annotated
-// objects will be treated as a source of live pointers, i.e. any heap objects
-// reachable by following pointers from an annotated object will not be
-// reported as leaks.
-//
-// ANNOTATE_SCOPED_MEMORY_LEAK: all allocations made in the current scope
-// will be annotated as leaks.
-// ANNOTATE_LEAKING_OBJECT_PTR(X): the heap object referenced by pointer X will
-// be annotated as a leak.
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(USE_HEAPCHECKER)
 
-#if defined(LEAK_SANITIZER) && !defined(OS_NACL)
+#include "third_party/tcmalloc/chromium/src/google/heap-checker.h"
 
-// Public LSan API from <sanitizer/lsan_interface.h>.
-extern "C" {
-void __lsan_disable();
-void __lsan_enable();
-void __lsan_ignore_object(const void *p);
-
-// Invoke leak detection immediately. If leaks are found, the process will exit.
-void __lsan_do_leak_check();
-}  // extern "C"
-
-class ScopedLeakSanitizerDisabler {
- public:
-  ScopedLeakSanitizerDisabler() { __lsan_disable(); }
-  ~ScopedLeakSanitizerDisabler() { __lsan_enable(); }
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScopedLeakSanitizerDisabler);
-};
-
+// Annotate a program scope as having memory leaks. Tcmalloc's heap leak
+// checker will ignore them. Note that these annotations may mask real bugs
+// and should not be used in the production code.
 #define ANNOTATE_SCOPED_MEMORY_LEAK \
-    ScopedLeakSanitizerDisabler leak_sanitizer_disabler; static_cast<void>(0)
+    HeapLeakChecker::Disabler heap_leak_checker_disabler
 
-#define ANNOTATE_LEAKING_OBJECT_PTR(X) __lsan_ignore_object(X);
+// Annotate an object pointer as referencing a leaky object. This object and all
+// the heap objects referenced by it will be ignored by the heap checker.
+//
+// X should be referencing an active allocated object. If it is not, the
+// annotation will be ignored.
+// No object should be annotated with ANNOTATE_SCOPED_MEMORY_LEAK twice.
+// Once an object is annotated with ANNOTATE_SCOPED_MEMORY_LEAK, it cannot be
+// deleted.
+#define ANNOTATE_LEAKING_OBJECT_PTR(X) \
+    HeapLeakChecker::IgnoreObject(X)
 
 #else
 
-// If neither HeapChecker nor LSan are used, the annotations should be no-ops.
+// If tcmalloc is not used, the annotations should be no-ops.
 #define ANNOTATE_SCOPED_MEMORY_LEAK ((void)0)
 #define ANNOTATE_LEAKING_OBJECT_PTR(X) ((void)0)
 

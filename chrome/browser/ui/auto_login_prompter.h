@@ -6,14 +6,13 @@
 #define CHROME_BROWSER_UI_AUTO_LOGIN_PROMPTER_H_
 
 #include <string>
-
 #include "base/compiler_specific.h"
-#include "chrome/browser/ui/auto_login_infobar_delegate.h"
-#include "content/public/browser/web_contents_observer.h"
-#include "url/gurl.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+
+class GURL;
 
 namespace content {
-class RenderViewHost;
 class WebContents;
 }
 
@@ -25,10 +24,8 @@ class URLRequest;
 // the currently loaded page with one click.  This is used when the browser
 // detects that the user has navigated to a login page and that there are stored
 // tokens that would allow a one-click login.
-class AutoLoginPrompter : public content::WebContentsObserver {
+class AutoLoginPrompter : public content::NotificationObserver {
  public:
-  typedef AutoLoginInfoBarDelegate::Params Params;
-
   // Looks for the X-Auto-Login response header in the request, and if found,
   // tries to display an infobar in the tab contents identified by the
   // child/route id.
@@ -37,31 +34,39 @@ class AutoLoginPrompter : public content::WebContentsObserver {
                                     int route_id);
 
  private:
-  friend class AutoLoginPrompterTest;
-
   AutoLoginPrompter(content::WebContents* web_contents,
-                    const Params& params,
-                    const GURL& url);
+                    const std::string& username,
+                    const std::string& args,
+                    const std::string& continue_url,
+                    bool use_normal_auto_login_infobar);
 
   virtual ~AutoLoginPrompter();
 
-  static void ShowInfoBarUIThread(Params params,
-                                  const GURL& url,
+  // The portion of ShowInfoBarIfPossible() that needs to run on the UI thread.
+  static void ShowInfoBarUIThread(const std::string& account,
+                                  const std::string& args,
+                                  const GURL& original_url,
                                   int child_id,
                                   int route_id);
 
-  virtual void DidStopLoading(
-      content::RenderViewHost* render_view_host) OVERRIDE;
+  // content::NotificationObserver override.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  virtual void WebContentsDestroyed(
-      content::WebContents* web_contents) OVERRIDE;
+  content::WebContents* web_contents_;
+  const std::string username_;
+  const std::string args_;
+  const std::string continue_url_;
+  content::NotificationRegistrar registrar_;
 
-  // Add the infobar to the WebContents, if it's still needed.
-  void AddInfoBarToWebContents();
-
-  const Params params_;
-  const GURL url_;
-  bool infobar_shown_;
+  // There are two code flows for auto-login.  When the profile is connected
+  // to a Google account, we want to show the infobar asking if the user would
+  // like to automatically sign in.  This is the normal auto-login flow.
+  // When the profile is not connected, we want to show an infobat asking if
+  // the user would like to connect his profile instead.  This the reverse
+  // auto-login flow.
+  bool use_normal_auto_login_infobar_;
 
   DISALLOW_COPY_AND_ASSIGN(AutoLoginPrompter);
 };

@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <algorithm>
 #include <string>
 
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "chrome/browser/history/archived_database.h"
 #include "sql/transaction.h"
 
@@ -13,7 +13,7 @@ namespace history {
 
 namespace {
 
-static const int kCurrentVersionNumber = 4;
+static const int kCurrentVersionNumber = 3;
 static const int kCompatibleVersionNumber = 2;
 
 }  // namespace
@@ -24,7 +24,7 @@ ArchivedDatabase::ArchivedDatabase() {
 ArchivedDatabase::~ArchivedDatabase() {
 }
 
-bool ArchivedDatabase::Init(const base::FilePath& file_name) {
+bool ArchivedDatabase::Init(const FilePath& file_name) {
   // Set the database page size to something a little larger to give us
   // better performance (we're typically seek rather than bandwidth limited).
   // This only has an effect before any tables have been created, otherwise
@@ -42,40 +42,34 @@ bool ArchivedDatabase::Init(const base::FilePath& file_name) {
   if (!db_.Open(file_name))
     return false;
 
-  if (!InitTables()) {
+  sql::Transaction transaction(&db_);
+  if (!transaction.Begin()) {
     db_.Close();
     return false;
   }
 
-  return true;
-}
-
-bool ArchivedDatabase::InitTables() {
-  sql::Transaction transaction(&db_);
-  if (!transaction.Begin())
-    return false;
-
   // Version check.
   if (!meta_table_.Init(&db_, kCurrentVersionNumber,
-                        kCompatibleVersionNumber))
+                        kCompatibleVersionNumber)) {
+    db_.Close();
     return false;
+  }
 
   // Create the tables.
   if (!CreateURLTable(false) || !InitVisitTable() ||
-      !InitKeywordSearchTermsTable())
+      !InitKeywordSearchTermsTable()) {
+    db_.Close();
     return false;
-
+  }
   CreateMainURLIndex();
   CreateKeywordSearchTermsIndices();
 
-  if (EnsureCurrentVersion() != sql::INIT_OK)
+  if (EnsureCurrentVersion() != sql::INIT_OK) {
+    db_.Close();
     return false;
+  }
 
   return transaction.Commit();
-}
-
-void ArchivedDatabase::TrimMemory(bool aggressively) {
-  db_.TrimMemory(aggressively);
 }
 
 void ArchivedDatabase::BeginTransaction() {
@@ -88,11 +82,6 @@ void ArchivedDatabase::CommitTransaction() {
 
 sql::Connection& ArchivedDatabase::GetDB() {
   return db_;
-}
-
-// static
-int ArchivedDatabase::GetCurrentVersion() {
-  return kCurrentVersionNumber;
 }
 
 // Migration -------------------------------------------------------------------
@@ -124,17 +113,6 @@ sql::InitStatus ArchivedDatabase::EnsureCurrentVersion() {
 
   if (cur_version == 2) {
     // This is the version prior to adding visit_source table.
-    ++cur_version;
-    meta_table_.SetVersionNumber(cur_version);
-  }
-
-  if (cur_version == 3) {
-    // This is the version prior to adding the visit_duration field in visits
-    // database. We need to migrate the database.
-    if (!MigrateVisitsWithoutDuration()) {
-      LOG(WARNING) << "Unable to update archived database to version 4.";
-      return sql::INIT_FAILURE;
-    }
     ++cur_version;
     meta_table_.SetVersionNumber(cur_version);
   }

@@ -1,14 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_TABS_DRAG_DATA_H_
 #define CHROME_BROWSER_UI_GTK_TABS_DRAG_DATA_H_
+#pragma once
 
 #include <vector>
 
 #include "base/basictypes.h"
 
+class TabContentsWrapper;
 class TabGtk;
 
 namespace content {
@@ -20,28 +22,29 @@ struct DraggedTabData {
  public:
   DraggedTabData();
   DraggedTabData(TabGtk* tab,
-                 content::WebContents* contents,
+                 TabContentsWrapper* contents,
                  content::WebContentsDelegate* original_delegate,
                  int source_model_index,
                  bool pinned,
                  bool mini);
   ~DraggedTabData();
 
-  // Resets the delegate of |contents_| to |original_delegate_|.
+  // Resetting the delegate of |contents_->web_contents()| to
+  // |original_delegate_|.
   void ResetDelegate();
 
   // The tab being dragged.
   TabGtk* tab_;
 
-  // The WebContents being dragged.
-  content::WebContents* contents_;
+  // The TabContents being dragged.
+  TabContentsWrapper* contents_;
 
-  // The original content::WebContentsDelegate of |contents_|, before it was
+  // The original content::WebContentsDelegate of |contents|, before it was
   // detached from the browser window. We store this so that we can forward
   // certain delegate notifications back to it if we can't handle them locally.
   content::WebContentsDelegate* original_delegate_;
 
-  // This is the index of |contents_| in |source_tabstrip_| when the drag
+  // This is the index of |contents| in |source_tabstrip_| when the drag
   // began. This is used to restore the previous state if the drag is aborted.
   int source_model_index_;
 
@@ -87,6 +90,9 @@ class DragData {
   int non_mini_tab_count() const { return non_mini_tab_count_; }
 
   // Convenience for |source_tab_drag_data()->contents_|.
+  TabContentsWrapper* GetSourceTabContentsWrapper();
+
+  // Convenience for |source_tab_drag_data()->contents_->web_contents()|.
   content::WebContents* GetSourceWebContents();
 
   // Convenience for getting the DraggedTabData corresponding to the tab that

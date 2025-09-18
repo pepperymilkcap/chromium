@@ -6,8 +6,9 @@
     "newtab": "newTab.html"
   },
   "permissions": [
-    "topSites",
-    "chrome://favicon/"
+    "experimental",
+    "chrome://favicon/",
+    "chrome://thumb/"
   ],
   "manifest_version": 2
 }

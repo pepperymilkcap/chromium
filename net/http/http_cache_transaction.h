@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,22 @@
 
 #ifndef NET_HTTP_HTTP_CACHE_TRANSACTION_H_
 #define NET_HTTP_HTTP_CACHE_TRANSACTION_H_
+#pragma once
 
 #include <string>
 
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
-#include "net/base/request_priority.h"
 #include "net/http/http_cache.h"
-#include "net/http/http_request_headers.h"
 #include "net/http/http_response_info.h"
+#include "net/http/http_request_headers.h"
 #include "net/http/http_transaction.h"
 
 namespace net {
 
 class PartialData;
 struct HttpRequestInfo;
-struct LoadTimingInfo;
 
 // This is the transaction that is returned by the HttpCache transaction
 // factory.
@@ -58,8 +57,7 @@ class HttpCache::Transaction : public HttpTransaction {
     UPDATE          = READ_META | WRITE,  // READ_WRITE & ~READ_DATA
   };
 
-  Transaction(RequestPriority priority,
-              HttpCache* cache);
+  explicit Transaction(HttpCache* cache);
   virtual ~Transaction();
 
   Mode mode() const { return mode_; }
@@ -87,11 +85,8 @@ class HttpCache::Transaction : public HttpTransaction {
 
   // This transaction is being deleted and we are not done writing to the cache.
   // We need to indicate that the response data was truncated.  Returns true on
-  // success. Keep in mind that this operation may have side effects, such as
-  // deleting the active entry.
+  // success.
   bool AddTruncatedFlag();
-
-  HttpCache::ActiveEntry* entry() { return entry_; }
 
   // Returns the LoadState of the writer transaction of a given ActiveEntry. In
   // other words, returns the LoadState of this transaction without asking the
@@ -104,9 +99,8 @@ class HttpCache::Transaction : public HttpTransaction {
   const BoundNetLog& net_log() const;
 
   // HttpTransaction methods:
-  virtual int Start(const HttpRequestInfo* request_info,
-                    const CompletionCallback& callback,
-                    const BoundNetLog& net_log) OVERRIDE;
+  virtual int Start(const HttpRequestInfo*, const CompletionCallback&,
+                    const BoundNetLog&) OVERRIDE;
   virtual int RestartIgnoringLastError(
       const CompletionCallback& callback) OVERRIDE;
   virtual int RestartWithCertificate(
@@ -119,18 +113,10 @@ class HttpCache::Transaction : public HttpTransaction {
                    int buf_len,
                    const CompletionCallback& callback) OVERRIDE;
   virtual void StopCaching() OVERRIDE;
-  virtual bool GetFullRequestHeaders(
-      HttpRequestHeaders* headers) const OVERRIDE;
-  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
   virtual void DoneReading() OVERRIDE;
   virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
   virtual LoadState GetLoadState() const OVERRIDE;
-  virtual UploadProgress GetUploadProgress(void) const OVERRIDE;
-  virtual bool GetLoadTimingInfo(
-      LoadTimingInfo* load_timing_info) const OVERRIDE;
-  virtual void SetPriority(RequestPriority priority) OVERRIDE;
-  virtual void SetWebSocketHandshakeStreamCreateHelper(
-      net::WebSocketHandshakeStreamBase::CreateHelper* create_helper) OVERRIDE;
+  virtual uint64 GetUploadProgress(void) const OVERRIDE;
 
  private:
   static const size_t kNumValidationHeaders = 2;
@@ -184,23 +170,6 @@ class HttpCache::Transaction : public HttpTransaction {
     STATE_CACHE_READ_DATA_COMPLETE,
     STATE_CACHE_WRITE_DATA,
     STATE_CACHE_WRITE_DATA_COMPLETE
-  };
-
-  // Used for categorizing transactions for reporting in histograms. Patterns
-  // cover relatively common use cases being measured and considered for
-  // optimization. Many use cases that are more complex or uncommon are binned
-  // as PATTERN_NOT_COVERED, and details are not reported.
-  // NOTE: This enumeration is used in histograms, so please do not add entries
-  // in the middle.
-  enum TransactionPattern {
-    PATTERN_UNDEFINED,
-    PATTERN_NOT_COVERED,
-    PATTERN_ENTRY_NOT_CACHED,
-    PATTERN_ENTRY_USED,
-    PATTERN_ENTRY_VALIDATED,
-    PATTERN_ENTRY_UPDATED,
-    PATTERN_ENTRY_CANT_CONDITIONALIZE,
-    PATTERN_MAX,
   };
 
   // This is a helper function used to trigger a completion callback.  It may
@@ -314,9 +283,6 @@ class HttpCache::Transaction : public HttpTransaction {
   // satisfiable).
   void FailRangeRequest();
 
-  // Setups the transaction for reading from the cache entry.
-  int SetupEntryForRead();
-
   // Reads data from the network.
   int ReadFromNetwork(IOBuffer* data, int data_len);
 
@@ -341,11 +307,6 @@ class HttpCache::Transaction : public HttpTransaction {
   // Called when we are done writing to the cache entry.
   void DoneWritingToEntry(bool success);
 
-  // Returns an error to signal the caller that the current read failed. The
-  // current operation |result| is also logged. If |restart| is true, the
-  // transaction should be restarted.
-  int OnCacheReadError(int result, bool restart);
-
   // Deletes the current partial cache entry (sparse), and optionally removes
   // the control object (partial_).
   void DoomPartialEntry(bool delete_object);
@@ -358,29 +319,16 @@ class HttpCache::Transaction : public HttpTransaction {
   // working with range requests.
   int DoPartialCacheReadCompleted(int result);
 
-  // Restarts this transaction after deleting the cached data. It is meant to
-  // be used when the current request cannot be fulfilled due to conflicts
-  // between the byte range request and the cached entry.
-  int DoRestartPartialRequest();
-
-  // Resets |network_trans_|, which must be non-NULL.  Also updates
-  // |old_network_trans_load_timing_|, which must be NULL when this is called.
-  void ResetNetworkTransaction();
-
   // Returns true if we should bother attempting to resume this request if it
   // is aborted while in progress. If |has_data| is true, the size of the stored
   // data is considered for the result.
   bool CanResume(bool has_data);
-
-  void UpdateTransactionPattern(TransactionPattern new_transaction_pattern);
-  void RecordHistograms();
 
   // Called to signal completion of asynchronous IO.
   void OnIOComplete(int result);
 
   State next_state_;
   const HttpRequestInfo* request_;
-  RequestPriority priority_;
   BoundNetLog net_log_;
   scoped_ptr<HttpRequestInfo> custom_request_;
   HttpRequestHeaders request_headers_copy_;
@@ -389,6 +337,7 @@ class HttpCache::Transaction : public HttpTransaction {
   ValidationHeaders external_validation_;
   base::WeakPtr<HttpCache> cache_;
   HttpCache::ActiveEntry* entry_;
+  base::TimeTicks entry_lock_waiting_since_;
   HttpCache::ActiveEntry* new_entry_;
   scoped_ptr<HttpTransaction> network_trans_;
   CompletionCallback callback_;  // Consumer's callback.
@@ -398,47 +347,23 @@ class HttpCache::Transaction : public HttpTransaction {
   std::string cache_key_;
   Mode mode_;
   State target_state_;
-  bool reading_;  // We are already reading. Never reverts to false once set.
+  bool reading_;  // We are already reading.
   bool invalid_range_;  // We may bypass the cache for this request.
   bool truncated_;  // We don't have all the response data.
   bool is_sparse_;  // The data is stored in sparse byte ranges.
   bool range_requested_;  // The user requested a byte range.
   bool handling_206_;  // We must deal with this 206 response.
   bool cache_pending_;  // We are waiting for the HttpCache.
-  bool done_reading_;  // All available data was read.
-  bool vary_mismatch_;  // The request doesn't match the stored vary data.
-  bool couldnt_conditionalize_request_;
+  bool done_reading_;
   scoped_refptr<IOBuffer> read_buf_;
   int io_buf_len_;
   int read_offset_;
   int effective_load_flags_;
   int write_len_;
   scoped_ptr<PartialData> partial_;  // We are dealing with range requests.
-  UploadProgress final_upload_progress_;
+  uint64 final_upload_progress_;
   base::WeakPtrFactory<Transaction> weak_factory_;
   CompletionCallback io_callback_;
-
-  // Members used to track data for histograms.
-  TransactionPattern transaction_pattern_;
-  base::TimeTicks entry_lock_waiting_since_;
-  base::TimeTicks first_cache_access_since_;
-  base::TimeTicks send_request_since_;
-
-  int64 total_received_bytes_;
-
-  // Load timing information for the last network request, if any.  Set in the
-  // 304 and 206 response cases, as the network transaction may be destroyed
-  // before the caller requests load timing information.
-  scoped_ptr<LoadTimingInfo> old_network_trans_load_timing_;
-
-  // The helper object to use to create WebSocketHandshakeStreamBase
-  // objects. Only relevant when establishing a WebSocket connection.
-  // This is passed to the underlying network transaction. It is stored here in
-  // case the transaction does not exist yet.
-  WebSocketHandshakeStreamBase::CreateHelper*
-      websocket_handshake_stream_base_create_helper_;
-
-  DISALLOW_COPY_AND_ASSIGN(Transaction);
 };
 
 }  // namespace net

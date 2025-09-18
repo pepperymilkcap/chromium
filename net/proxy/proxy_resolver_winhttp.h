@@ -4,10 +4,11 @@
 
 #ifndef NET_PROXY_PROXY_RESOLVER_WINHTTP_H_
 #define NET_PROXY_PROXY_RESOLVER_WINHTTP_H_
+#pragma once
 
 #include "base/compiler_specific.h"
+#include "googleurl/src/gurl.h"
 #include "net/proxy/proxy_resolver.h"
-#include "url/gurl.h"
 
 typedef void* HINTERNET;  // From winhttp.h
 
@@ -29,6 +30,9 @@ class NET_EXPORT_PRIVATE ProxyResolverWinHttp : public ProxyResolver {
   virtual void CancelRequest(RequestHandle request) OVERRIDE;
 
   virtual LoadState GetLoadState(RequestHandle request) const OVERRIDE;
+
+  virtual LoadState GetLoadStateThreadSafe(
+      RequestHandle request) const OVERRIDE;
 
   virtual void CancelSetPacScript() OVERRIDE;
 

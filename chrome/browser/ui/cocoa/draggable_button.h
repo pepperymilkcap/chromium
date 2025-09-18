@@ -4,10 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_DRAGGABLE_BUTTON_H_
 #define CHROME_BROWSER_UI_COCOA_DRAGGABLE_BUTTON_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/scoped_nsobject.h"
+#import "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/draggable_button_mixin.h"
 
 // Class for buttons that can be drag sources. If the mouse is clicked and moved
@@ -15,7 +16,7 @@
 // |-performClick:|. Subclasses should override these two methods.
 @interface DraggableButton : NSButton<DraggableButtonMixin> {
  @private
-  base::scoped_nsobject<DraggableButtonImpl> draggableButtonImpl_;
+  scoped_nsobject<DraggableButtonImpl> draggableButtonImpl_;
 }
 
 @property(readonly, nonatomic) DraggableButtonImpl* draggableButton;

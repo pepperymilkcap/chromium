@@ -4,21 +4,15 @@
 
 /**
  * Dictionary of constants (Initialized soon after loading by data from browser,
- * updated on load log).  The *Types dictionaries map strings to numeric IDs,
- * while the *TypeNames are the other way around.
+ * updated on load log).
  */
-var EventType = null;
-var EventTypeNames = null;
-var EventPhase = null;
-var EventSourceType = null;
-var EventSourceTypeNames = null;
-var LogLevelType = null;
+var LogEventType = null;
+var LogEventPhase = null;
 var ClientInfo = null;
+var LogSourceType = null;
+var LogLevelType = null;
 var NetError = null;
-var QuicError = null;
-var QuicRstStreamError = null;
 var LoadFlag = null;
-var LoadState = null;
 var AddressFamily = null;
 
 /**
@@ -40,8 +34,8 @@ var g_browser = null;
 var MainView = (function() {
   'use strict';
 
-  // We inherit from WindowView
-  var superClass = WindowView;
+  // We inherit from ResizableVerticalSplitView.
+  var superClass = ResizableVerticalSplitView;
 
   /**
    * Main entry point. Called once the page has loaded.
@@ -49,9 +43,6 @@ var MainView = (function() {
    */
   function MainView() {
     assertFirstConstructorCall(MainView);
-
-    if (hasTouchScreen())
-      document.body.classList.add('touch');
 
     // This must be initialized before the tabs, so they can register as
     // observers.
@@ -62,31 +53,94 @@ var MainView = (function() {
     // the constants themselves.
     g_browser.addConstantsObserver(new ConstantsObserver());
 
-    // Create the tab switcher.
-    this.initTabs_();
+    // This view is a left (resizable) navigation bar.
+    this.categoryTabSwitcher_ = new TabSwitcherView();
+    var tabs = this.categoryTabSwitcher_;
+
+    // Call superclass's constructor, initializing the view which lets you tab
+    // between the different sub-views.
+    superClass.call(this,
+                    new DivView(MainView.CATEGORY_TAB_HANDLES_ID),
+                    tabs,
+                    new DivView(MainView.SPLITTER_BOX_FOR_MAIN_TABS_ID));
+
+    // By default the split for the left navbar will be at 50% of the entire
+    // width. This is not aesthetically pleasing, so we will shrink it.
+    // TODO(eroman): Should set this dynamically based on the largest tab
+    //               name rather than using a fixed width.
+    this.setLeftSplit(150);
+
+    // Populate the main tabs.  Even tabs that don't contain information for the
+    // running OS should be created, so they can load log dumps from other
+    // OSes.
+    tabs.addTab(CaptureView.TAB_HANDLE_ID, CaptureView.getInstance(),
+                false, true);
+    tabs.addTab(ExportView.TAB_HANDLE_ID, ExportView.getInstance(),
+                false, true);
+    tabs.addTab(ImportView.TAB_HANDLE_ID, ImportView.getInstance(),
+                false, true);
+    tabs.addTab(ProxyView.TAB_HANDLE_ID, ProxyView.getInstance(),
+                false, true);
+    tabs.addTab(EventsView.TAB_HANDLE_ID, EventsView.getInstance(),
+                false, true);
+    tabs.addTab(TimelineView.TAB_HANDLE_ID, TimelineView.getInstance(),
+                false, true);
+    tabs.addTab(DnsView.TAB_HANDLE_ID, DnsView.getInstance(),
+                false, true);
+    tabs.addTab(SocketsView.TAB_HANDLE_ID, SocketsView.getInstance(),
+                false, true);
+    tabs.addTab(SpdyView.TAB_HANDLE_ID, SpdyView.getInstance(), false, true);
+    tabs.addTab(HttpPipelineView.TAB_HANDLE_ID, HttpPipelineView.getInstance(),
+                false, true);
+    tabs.addTab(HttpCacheView.TAB_HANDLE_ID, HttpCacheView.getInstance(),
+                false, true);
+    tabs.addTab(HttpThrottlingView.TAB_HANDLE_ID,
+                HttpThrottlingView.getInstance(), false, true);
+    tabs.addTab(ServiceProvidersView.TAB_HANDLE_ID,
+                ServiceProvidersView.getInstance(), false, cr.isWindows);
+    tabs.addTab(TestView.TAB_HANDLE_ID, TestView.getInstance(), false, true);
+    tabs.addTab(HSTSView.TAB_HANDLE_ID, HSTSView.getInstance(), false, true);
+    tabs.addTab(LogsView.TAB_HANDLE_ID, LogsView.getInstance(),
+                false, cr.isChromeOS);
+    tabs.addTab(PrerenderView.TAB_HANDLE_ID, PrerenderView.getInstance(),
+                false, true);
+    tabs.addTab(CrosView.TAB_HANDLE_ID, CrosView.getInstance(),
+                false, cr.isChromeOS);
+
+    // Build a map from the anchor name of each tab handle to its "tab ID".
+    // We will consider navigations to the #hash as a switch tab request.
+    var anchorMap = {};
+    var tabIds = tabs.getAllTabIds();
+    for (var i = 0; i < tabIds.length; ++i) {
+      var aNode = $(tabIds[i]);
+      anchorMap[aNode.hash] = tabIds[i];
+    }
+    // Default the empty hash to the data tab.
+    anchorMap['#'] = anchorMap[''] = ExportView.TAB_HANDLE_ID;
+
+    window.onhashchange = onUrlHashChange.bind(null, tabs, anchorMap);
 
     // Cut out a small vertical strip at the top of the window, to display
     // a high level status (i.e. if we are capturing events, or displaying a
     // log file). Below it we will position the main tabs and their content
     // area.
-    this.topBarView_ = TopBarView.getInstance(this);
-    var verticalSplitView = new VerticalSplitView(
-        this.topBarView_, this.tabSwitcher_);
-
-    superClass.call(this, verticalSplitView);
+    this.statusView_ = StatusView.getInstance(this);
+    var verticalSplitView = new VerticalSplitView(this.statusView_, this);
+    var windowView = new WindowView(verticalSplitView);
 
     // Trigger initial layout.
-    this.resetGeometry();
-
-    window.onhashchange = this.onUrlHashChange_.bind(this);
+    windowView.resetGeometry();
 
     // Select the initial view based on the current URL.
     window.onhashchange();
 
     // Tell the browser that we are ready to start receiving log events.
-    this.topBarView_.switchToSubView('capture');
     g_browser.sendReady();
   }
+
+  // IDs for special HTML elements in index.html
+  MainView.CATEGORY_TAB_HANDLES_ID = 'category-tab-handles';
+  MainView.SPLITTER_BOX_FOR_MAIN_TABS_ID = 'splitter-box-for-main-tabs';
 
   cr.addSingletonGetter(MainView);
 
@@ -104,8 +158,8 @@ var MainView = (function() {
 
     // This is exposed both so the log import/export code can enumerate all the
     // tabs, and for testing.
-    tabSwitcher: function() {
-      return this.tabSwitcher_;
+    categoryTabSwitcher: function() {
+      return this.categoryTabSwitcher_;
     },
 
     /**
@@ -115,25 +169,21 @@ var MainView = (function() {
      * without reloading the page.  Must be called before passing loaded data
      * to the individual views.
      *
-     * @param {string} opt_fileName The name of the log file that has been
+     * @param {String} opt_fileName The name of the log file that has been
      *     loaded, if we're loading a log file.
      */
     onLoadLog: function(opt_fileName) {
       isViewingLoadedLog = true;
 
+      g_browser.sourceTracker.setSecurityStripping(false);
       this.stopCapturing();
       if (opt_fileName != undefined) {
         // If there's a file name, a log file was loaded, so swap out the status
-        // bar to indicate we're no longer capturing events.  Also disable
-        // hiding cookies, so if the log dump has them, they'll be displayed.
-        this.topBarView_.switchToSubView('loaded').setFileName(opt_fileName);
-        $(ExportView.PRIVACY_STRIPPING_CHECKBOX_ID).checked = false;
-        SourceTracker.getInstance().setPrivacyStripping(false);
+        // bar to indicate we're no longer capturing events.
+        this.statusView_.onSwitchMode(StatusView.FOR_FILE_ID, opt_fileName);
       } else {
         // Otherwise, the "Stop Capturing" button was presumably pressed.
-        // Don't disable hiding cookies, so created log dumps won't have them,
-        // unless the user toggles the option.
-        this.topBarView_.switchToSubView('halted');
+        this.statusView_.onSwitchMode(StatusView.FOR_VIEW_ID, '');
       }
     },
 
@@ -145,126 +195,24 @@ var MainView = (function() {
 
     stopCapturing: function() {
       g_browser.disable();
-      document.styleSheets[0].insertRule(
-          '.hide-when-not-capturing { display: none; }', 0);
-    },
-
-    initTabs_: function() {
-      this.tabIdToHash_ = {};
-      this.hashToTabId_ = {};
-
-      this.tabSwitcher_ = new TabSwitcherView(
-          $(TopBarView.TAB_DROPDOWN_MENU_ID),
-          this.onTabSwitched_.bind(this));
-
-      // Helper function to add a tab given the class for a view singleton.
-      var addTab = function(viewClass) {
-        var tabId = viewClass.TAB_ID;
-        var tabHash = viewClass.TAB_HASH;
-        var tabName = viewClass.TAB_NAME;
-        var view = viewClass.getInstance();
-
-        if (!tabId || !view || !tabHash || !tabName) {
-          throw Error('Invalid view class for tab');
-        }
-
-        if (tabHash.charAt(0) != '#') {
-          throw Error('Tab hashes must start with a #');
-        }
-
-        this.tabSwitcher_.addTab(tabId, view, tabName);
-        this.tabIdToHash_[tabId] = tabHash;
-        this.hashToTabId_[tabHash] = tabId;
-      }.bind(this);
-
-      // Populate the main tabs.  Even tabs that don't contain information for
-      // the running OS should be created, so they can load log dumps from other
-      // OSes.
-      addTab(CaptureView);
-      addTab(ExportView);
-      addTab(ImportView);
-      addTab(ProxyView);
-      addTab(EventsView);
-      addTab(WaterfallView);
-      addTab(TimelineView);
-      addTab(DnsView);
-      addTab(SocketsView);
-      addTab(SpdyView);
-      addTab(QuicView);
-      addTab(HttpPipelineView);
-      addTab(HttpCacheView);
-      addTab(ModulesView);
-      addTab(TestView);
-      addTab(CrosLogVisualizerView);
-      addTab(HSTSView);
-      addTab(LogsView);
-      addTab(BandwidthView);
-      addTab(PrerenderView);
-      addTab(CrosView);
-
-      this.tabSwitcher_.showMenuItem(LogsView.TAB_ID, cr.isChromeOS);
-      this.tabSwitcher_.showMenuItem(CrosView.TAB_ID, cr.isChromeOS);
-      this.tabSwitcher_.showMenuItem(CrosLogVisualizerView.TAB_ID,
-                                     cr.isChromeOS);
-    },
-
-    /**
-     * This function is called by the tab switcher when the current tab has been
-     * changed. It will update the current URL to reflect the new active tab,
-     * so the back can be used to return to previous view.
-     */
-    onTabSwitched_: function(oldTabId, newTabId) {
-      // Update data needed by newly active tab, as it may be
-      // significantly out of date.
-      if (g_browser)
-        g_browser.checkForUpdatedInfo();
-
-      // Change the URL to match the new tab.
-
-      var newTabHash = this.tabIdToHash_[newTabId];
-      var parsed = parseUrlHash_(window.location.hash);
-      if (parsed.tabHash != newTabHash) {
-        window.location.hash = newTabHash;
-      }
-    },
-
-    onUrlHashChange_: function() {
-      var parsed = parseUrlHash_(window.location.hash);
-
-      if (!parsed)
-        return;
-
-      if (!parsed.tabHash) {
-        // Default to the export tab.
-        parsed.tabHash = ExportView.TAB_HASH;
-      }
-
-      var tabId = this.hashToTabId_[parsed.tabHash];
-
-      if (tabId) {
-        this.tabSwitcher_.switchToTab(tabId);
-        if (parsed.parameters) {
-          var view = this.tabSwitcher_.getTabView(tabId);
-          view.setParameters(parsed.parameters);
-        }
-      }
-    },
-
+      document.styleSheets[0].insertRule('.hideOnLoadLog { display: none; }');
+    }
   };
 
   /**
-   * Takes the current hash in form of "#tab&param1=value1&param2=value2&..."
-   * and parses it into a dictionary.
+   * Takes the current hash in form of "#tab&param1=value1&param2=value2&...".
+   * Puts the parameters in an object, and passes the resulting object to
+   * |categoryTabSwitcher|.  Uses tab and |anchorMap| to find a tab ID,
+   * which it also passes to the tab switcher.
    *
    * Parameters and values are decoded with decodeURIComponent().
    */
-  function parseUrlHash_(hash) {
-    var parameters = hash.split('&');
+  function onUrlHashChange(categoryTabSwitcher, anchorMap) {
+    var parameters = window.location.hash.split('&');
 
-    var tabHash = parameters[0];
-    if (tabHash == '' || tabHash == '#') {
-      tabHash = undefined;
-    }
+    var tabId = anchorMap[parameters[0]];
+    if (!tabId)
+      return;
 
     // Split each string except the first around the '='.
     var paramDict = null;
@@ -279,7 +227,7 @@ var MainView = (function() {
       paramDict[key] = value;
     }
 
-    return {tabHash: tabHash, parameters: paramDict};
+    categoryTabSwitcher.switchToTab(tabId, paramDict);
   }
 
   return MainView;
@@ -288,37 +236,31 @@ var MainView = (function() {
 function ConstantsObserver() {}
 
 /**
- * Loads all constants from |constants|.  On failure, global dictionaries are
- * not modifed.
- * @param {Object} receivedConstants The map of received constants.
+ * Attempts to load all constants from |constants|.  Returns false if one or
+ * more entries are missing.  On failure, global dictionaries are not
+ * modified.
  */
-ConstantsObserver.prototype.onReceivedConstants = function(receivedConstants) {
+ConstantsObserver.prototype.onReceivedConstants =
+    function(receivedConstants) {
   if (!areValidConstants(receivedConstants))
-    return;
+    return false;
 
   Constants = receivedConstants;
 
-  EventType = Constants.logEventTypes;
-  EventTypeNames = makeInverseMap(EventType);
-  EventPhase = Constants.logEventPhase;
-  EventSourceType = Constants.logSourceType;
-  EventSourceTypeNames = makeInverseMap(EventSourceType);
-  LogLevelType = Constants.logLevelType;
+  LogEventType = Constants.logEventTypes;
   ClientInfo = Constants.clientInfo;
+  LogEventPhase = Constants.logEventPhase;
+  LogSourceType = Constants.logSourceType;
+  LogLevelType = Constants.logLevelType;
   LoadFlag = Constants.loadFlag;
   NetError = Constants.netError;
-  QuicError = Constants.quicError;
-  QuicRstStreamError = Constants.quicRstStreamError;
   AddressFamily = Constants.addressFamily;
-  LoadState = Constants.loadState;
 
   timeutil.setTimeTickOffset(Constants.timeTickOffset);
 };
 
 /**
  * Returns true if it's given a valid-looking constants object.
- * @param {Object} receivedConstants The received map of constants.
- * @return {boolean} True if the |receivedConstants| object appears valid.
  */
 function areValidConstants(receivedConstants) {
   return typeof(receivedConstants) == 'object' &&
@@ -332,55 +274,4 @@ function areValidConstants(receivedConstants) {
          typeof(receivedConstants.addressFamily) == 'object' &&
          typeof(receivedConstants.timeTickOffset) == 'string' &&
          typeof(receivedConstants.logFormatVersion) == 'number';
-}
-
-/**
- * Returns the name for netError.
- *
- * Example: netErrorToString(-105) should return
- * "ERR_NAME_NOT_RESOLVED".
- * @param {number} netError The net error code.
- * @return {string} The name of the given error.
- */
-function netErrorToString(netError) {
-  var str = getKeyWithValue(NetError, netError);
-  if (str == '?')
-    return str;
-  return 'ERR_' + str;
-}
-
-/**
- * Returns the name for quicError.
- *
- * Example: quicErrorToString(25) should return
- * "TIMED_OUT".
- * @param {number} quicError The QUIC error code.
- * @return {string} The name of the given error.
- */
-function quicErrorToString(quicError) {
-  return getKeyWithValue(QuicError, quicError);
-}
-
-/**
- * Returns the name for quicRstStreamError.
- *
- * Example: quicRstStreamErrorToString(3) should return
- * "BAD_APPLICATION_PAYLOAD".
- * @param {number} quicRstStreamError The QUIC RST_STREAM error code.
- * @return {string} The name of the given error.
- */
-function quicRstStreamErrorToString(quicRstStreamError) {
-  return getKeyWithValue(QuicRstStreamError, quicRstStreamError);
-}
-
-/**
- * Returns a string representation of |family|.
- * @param {number} family An AddressFamily
- * @return {string} A representation of the given family.
- */
-function addressFamilyToString(family) {
-  var str = getKeyWithValue(AddressFamily, family);
-  // All the address family start with ADDRESS_FAMILY_*.
-  // Strip that prefix since it is redundant and only clutters the output.
-  return str.replace(/^ADDRESS_FAMILY_/, '');
 }

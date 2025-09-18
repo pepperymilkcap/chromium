@@ -7,14 +7,14 @@
 #include "chrome/installer/util/logging_installer.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/logging_win.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
@@ -30,11 +30,11 @@ namespace installer {
 // InitInstallerLogging() and the beginning of EndInstallerLogging().
 bool installer_logging_ = false;
 
-TruncateResult TruncateLogFileIfNeeded(const base::FilePath& log_file) {
+TruncateResult TruncateLogFileIfNeeded(const FilePath& log_file) {
   TruncateResult result = LOGFILE_UNTOUCHED;
 
   int64 log_size = 0;
-  if (base::GetFileSize(log_file, &log_size) &&
+  if (file_util::GetFileSize(log_file, &log_size) &&
       log_size > kMaxInstallerLogFileSize) {
     // Cause the old log file to be deleted when we are done with it.
     const int file_flags = base::PLATFORM_FILE_OPEN |
@@ -46,9 +46,9 @@ TruncateResult TruncateLogFileIfNeeded(const base::FilePath& log_file) {
 
     if (old_log_file.IsValid()) {
       result = LOGFILE_DELETED;
-      base::FilePath tmp_log(log_file.value() + FILE_PATH_LITERAL(".tmp"));
-      // Note that base::Move will attempt to replace existing files.
-      if (base::Move(log_file, tmp_log)) {
+      FilePath tmp_log(log_file.value() + FILE_PATH_LITERAL(".tmp"));
+      // Note that file_util::Move will attempt to replace existing files.
+      if (file_util::Move(log_file, tmp_log)) {
         int64 offset = log_size - kTruncatedInstallerLogFileSize;
         std::string old_log_data(kTruncatedInstallerLogFileSize, 0);
         int bytes_read = base::ReadPlatformFile(old_log_file,
@@ -59,11 +59,11 @@ TruncateResult TruncateLogFileIfNeeded(const base::FilePath& log_file) {
             (bytes_read == file_util::WriteFile(log_file,
                                                 &old_log_data[0],
                                                 bytes_read) ||
-             base::PathExists(log_file))) {
+             file_util::PathExists(log_file))) {
           result = LOGFILE_TRUNCATED;
         }
       }
-    } else if (base::DeleteFile(log_file, false)) {
+    } else if (file_util::Delete(log_file, false)) {
       // Couldn't get sufficient access to the log file, optimistically try to
       // delete it.
       result = LOGFILE_DELETED;
@@ -86,13 +86,15 @@ void InitInstallerLogging(const installer::MasterPreferences& prefs) {
     return;
   }
 
-  base::FilePath log_file_path(GetLogFilePath(prefs));
+  FilePath log_file_path(GetLogFilePath(prefs));
   TruncateLogFileIfNeeded(log_file_path);
 
-  logging::LoggingSettings settings;
-  settings.logging_dest = logging::LOG_TO_FILE;
-  settings.log_file = log_file_path.value().c_str();
-  logging::InitLogging(settings);
+  logging::InitLogging(
+      log_file_path.value().c_str(),
+      logging::LOG_ONLY_TO_FILE,
+      logging::LOCK_LOG_FILE,
+      logging::APPEND_TO_OLD_LOG_FILE,
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
   if (prefs.GetBool(installer::master_preferences::kVerboseLogging,
                     &value) && value) {
@@ -111,19 +113,23 @@ void EndInstallerLogging() {
   installer_logging_ = false;
 }
 
-base::FilePath GetLogFilePath(const installer::MasterPreferences& prefs) {
+FilePath GetLogFilePath(const installer::MasterPreferences& prefs) {
   std::string path;
   prefs.GetString(installer::master_preferences::kLogFile, &path);
-  if (!path.empty())
-    return base::FilePath(base::UTF8ToWide(path));
+  if (!path.empty()) {
+    return FilePath(UTF8ToWide(path));
+  }
 
-  static const base::FilePath::CharType kLogFilename[] =
-      FILE_PATH_LITERAL("chrome_installer.log");
+  std::wstring log_filename = prefs.install_chrome_frame() ?
+      L"chrome_frame_installer.log" : L"chrome_installer.log";
 
-  // Fallback to current directory if getting the temp directory fails.
-  base::FilePath tmp_path;
-  ignore_result(PathService::Get(base::DIR_TEMP, &tmp_path));
-  return tmp_path.Append(kLogFilename);
+  FilePath log_path;
+  if (PathService::Get(base::DIR_TEMP, &log_path)) {
+    log_path = log_path.Append(log_filename);
+    return log_path;
+  } else {
+    return FilePath(log_filename);
+  }
 }
 
 }  // namespace installer

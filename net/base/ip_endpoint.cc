@@ -1,12 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/base/ip_endpoint.h"
 
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/sys_byteorder.h"
+#include "base/string_number_conversions.h"
 #if defined(OS_WIN)
 #include <winsock2.h>
 #elif defined(OS_POSIX)
@@ -14,12 +13,6 @@
 #endif
 
 namespace net {
-
-namespace {
-// By definition, socklen_t is large enough to hold both sizes.
-const socklen_t kSockaddrInSize = sizeof(struct sockaddr_in);
-const socklen_t kSockaddrIn6Size = sizeof(struct sockaddr_in6);
-}
 
 IPEndPoint::IPEndPoint() : port_(0) {}
 
@@ -34,79 +27,97 @@ IPEndPoint::IPEndPoint(const IPEndPoint& endpoint) {
   port_ = endpoint.port_;
 }
 
-AddressFamily IPEndPoint::GetFamily() const {
-  return GetAddressFamily(address_);
-}
-
-int IPEndPoint::GetSockAddrFamily() const {
+int IPEndPoint::GetFamily() const {
   switch (address_.size()) {
-    case kIPv4AddressSize:
+    case kIPv4AddressSize: {
       return AF_INET;
-    case kIPv6AddressSize:
+    }
+    case kIPv6AddressSize: {
       return AF_INET6;
-    default:
+    }
+    default: {
       NOTREACHED() << "Bad IP address";
       return AF_UNSPEC;
+    }
   }
 }
 
 bool IPEndPoint::ToSockAddr(struct sockaddr* address,
-                            socklen_t* address_length) const {
+                            size_t* address_length) const {
   DCHECK(address);
   DCHECK(address_length);
   switch (address_.size()) {
     case kIPv4AddressSize: {
-      if (*address_length < kSockaddrInSize)
+      if (*address_length < sizeof(struct sockaddr_in))
         return false;
-      *address_length = kSockaddrInSize;
+      *address_length = sizeof(struct sockaddr_in);
       struct sockaddr_in* addr = reinterpret_cast<struct sockaddr_in*>(address);
       memset(addr, 0, sizeof(struct sockaddr_in));
       addr->sin_family = AF_INET;
-      addr->sin_port = base::HostToNet16(port_);
+      addr->sin_port = htons(port_);
       memcpy(&addr->sin_addr, &address_[0], kIPv4AddressSize);
       break;
     }
     case kIPv6AddressSize: {
-      if (*address_length < kSockaddrIn6Size)
+      if (*address_length < sizeof(struct sockaddr_in6))
         return false;
-      *address_length = kSockaddrIn6Size;
+      *address_length = sizeof(struct sockaddr_in6);
       struct sockaddr_in6* addr6 =
           reinterpret_cast<struct sockaddr_in6*>(address);
       memset(addr6, 0, sizeof(struct sockaddr_in6));
       addr6->sin6_family = AF_INET6;
-      addr6->sin6_port = base::HostToNet16(port_);
+      addr6->sin6_port = htons(port_);
       memcpy(&addr6->sin6_addr, &address_[0], kIPv6AddressSize);
       break;
     }
-    default:
-      return false;
+    default: {
+      NOTREACHED() << "Bad IP address";
+      break;
+    }
   }
   return true;
 }
 
-bool IPEndPoint::FromSockAddr(const struct sockaddr* sock_addr,
-                              socklen_t sock_addr_len) {
-  DCHECK(sock_addr);
-
-  const uint8* address;
-  size_t address_len;
-  uint16 port;
-  if (!GetIPAddressFromSockAddr(sock_addr, sock_addr_len, &address,
-                                &address_len, &port)) {
-    return false;
+bool IPEndPoint::FromSockAddr(const struct sockaddr* address,
+                              size_t address_length) {
+  DCHECK(address);
+  switch (address->sa_family) {
+    case AF_INET: {
+      if (address_length < sizeof(struct sockaddr_in))
+        return false;
+      const struct sockaddr_in* addr =
+          reinterpret_cast<const struct sockaddr_in*>(address);
+      port_ = ntohs(addr->sin_port);
+      const char* bytes = reinterpret_cast<const char*>(&addr->sin_addr);
+      address_.assign(&bytes[0], &bytes[kIPv4AddressSize]);
+      break;
+    }
+    case AF_INET6: {
+      if (address_length < sizeof(struct sockaddr_in6))
+        return false;
+      const struct sockaddr_in6* addr =
+          reinterpret_cast<const struct sockaddr_in6*>(address);
+      port_ = ntohs(addr->sin6_port);
+      const char* bytes = reinterpret_cast<const char*>(&addr->sin6_addr);
+      address_.assign(&bytes[0], &bytes[kIPv6AddressSize]);
+      break;
+    }
+    default: {
+      NOTREACHED() << "Bad IP address";
+      break;
+    }
   }
-
-  address_.assign(address, address + address_len);
-  port_ = port;
   return true;
 }
 
 std::string IPEndPoint::ToString() const {
-  return IPAddressToStringWithPort(address_, port_);
-}
-
-std::string IPEndPoint::ToStringWithoutPort() const {
-  return IPAddressToString(address_);
+  struct sockaddr_storage addr_storage;
+  size_t addr_len = sizeof(addr_storage);
+  struct sockaddr* addr = reinterpret_cast<struct sockaddr*>(&addr_storage);
+  if (!ToSockAddr(addr, &addr_len)) {
+    return "";
+  }
+  return NetAddressToStringWithPort(addr, addr_len);
 }
 
 bool IPEndPoint::operator<(const IPEndPoint& that) const {

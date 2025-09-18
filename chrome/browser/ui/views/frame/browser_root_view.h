@@ -1,14 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_ROOT_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_ROOT_VIEW_H_
+#pragma once
 
 #include "ui/views/widget/root_view.h"
 
+class AbstractTabStripView;
 class BrowserView;
-class TabStrip;
 
 namespace ui {
 class OSExchangeData;
@@ -33,27 +34,24 @@ class BrowserRootView : public views::internal::RootView {
       std::set<ui::OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
   virtual bool AreDropTypesRequired() OVERRIDE;
   virtual bool CanDrop(const ui::OSExchangeData& data) OVERRIDE;
-  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual void OnDragEntered(const views::DropTargetEvent& event) OVERRIDE;
+  virtual int OnDragUpdated(const views::DropTargetEvent& event) OVERRIDE;
   virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
-
-  // Overridden from internal::RootView:
-  virtual void DispatchGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
  private:
   // Returns true if the event should be forwarded to the tabstrip.
-  bool ShouldForwardToTabStrip(const ui::DropTargetEvent& event);
+  bool ShouldForwardToTabStrip(const views::DropTargetEvent& event);
 
   // Converts the event from the hosts coordinate system to the tabstrips
   // coordinate system.
-  ui::DropTargetEvent* MapEventToTabStrip(
-      const ui::DropTargetEvent& event,
+  views::DropTargetEvent* MapEventToTabStrip(
+      const views::DropTargetEvent& event,
       const ui::OSExchangeData& data);
 
-  inline TabStrip* tabstrip() const;
+  inline AbstractTabStripView* tabstrip() const;
 
   // Returns true if |data| has string contents and the user can "paste and go".
   // If |url| is non-NULL and the user can "paste and go", |url| is set to the

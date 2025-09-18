@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_DATABASE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -18,16 +19,7 @@
 #include "sql/init_status.h"
 #include "sql/meta_table.h"
 
-#if defined(OS_ANDROID)
-#include "chrome/browser/history/android/android_cache_database.h"
-#include "chrome/browser/history/android/android_urls_database.h"
-#endif
-
-namespace base {
 class FilePath;
-}
-
-class HistoryQuickProviderTest;
 
 namespace history {
 
@@ -39,10 +31,6 @@ namespace history {
 // as the storage interface. Logic for manipulating this storage layer should
 // be in HistoryBackend.cc.
 class HistoryDatabase : public DownloadDatabase,
-#if defined(OS_ANDROID)
-                        public AndroidURLsDatabase,
-                        public AndroidCacheDatabase,
-#endif
                         public URLDatabase,
                         public VisitDatabase,
                         public VisitSegmentDatabase {
@@ -68,21 +56,11 @@ class HistoryDatabase : public DownloadDatabase,
 
   virtual ~HistoryDatabase();
 
-  // Call before Init() to set the error callback to be used for the
-  // underlying database connection.
-  void set_error_callback(
-      const sql::Connection::ErrorCallback& error_callback) {
-    error_callback_ = error_callback;
-  }
-
-  // Must call this function to complete initialization. Will return
-  // sql::INIT_OK on success. Otherwise, no other function should be called. You
-  // may want to call BeginExclusiveMode after this when you are ready.
-  sql::InitStatus Init(const base::FilePath& history_name);
-
-  // Computes and records various metrics for the database. Should only be
-  // called once and only upon successful Init.
-  void ComputeDatabaseMetrics(const base::FilePath& filename);
+  // Must call this function to complete initialization. Will return true on
+  // success. On false, no other function should be called. You may want to call
+  // BeginExclusiveMode after this when you are ready.
+  sql::InitStatus Init(const FilePath& history_name,
+                       const FilePath& tmp_bookmarks_path);
 
   // Call to set the mode on the database to exclusive. The default locking mode
   // is "normal" but we want to run in exclusive mode for slightly better
@@ -106,7 +84,6 @@ class HistoryDatabase : public DownloadDatabase,
   int transaction_nesting() const {  // for debugging and assertion purposes
     return db_.transaction_nesting();
   }
-  void RollbackTransaction();
 
   // Drops all tables except the URL, and download tables, and recreates them
   // from scratch. This is done to rapidly clean up stuff when deleting all
@@ -115,7 +92,7 @@ class HistoryDatabase : public DownloadDatabase,
   //
   // We don't delete the downloads table, since there may be in progress
   // downloads. We handle the download history clean up separately in:
-  // content::DownloadManager::RemoveDownloadsFromHistoryBetween.
+  // DownloadManager::RemoveDownloadsFromHistoryBetween.
   //
   // Returns true on success. On failure, the caller should assume that the
   // database is invalid. There could have been an error recreating a table.
@@ -131,13 +108,6 @@ class HistoryDatabase : public DownloadDatabase,
   // unused space in the file. It can be VERY SLOW.
   void Vacuum();
 
-  // Try to trim the cache memory used by the database.  If |aggressively| is
-  // true try to trim all unused cache, otherwise trim by half.
-  void TrimMemory(bool aggressively);
-
-  // Razes the database. Returns true if successful.
-  bool Raze();
-
   // Returns true if the history backend should erase the full text search
   // and archived history files as part of version 16 -> 17 migration. The
   // time format changed in this revision, and these files would be much slower
@@ -148,6 +118,12 @@ class HistoryDatabase : public DownloadDatabase,
   bool needs_version_17_migration() const {
     return needs_version_17_migration_;
   }
+
+  // Marks the database as no longer needing migration.
+  void ThumbnailMigrationDone();
+
+  // Returns true if thumbnails needs to be migrated.
+  bool GetNeedsThumbnailMigration();
 
   // Visit table functions ----------------------------------------------------
 
@@ -165,13 +141,7 @@ class HistoryDatabase : public DownloadDatabase,
   virtual void UpdateEarlyExpirationThreshold(base::Time threshold);
 
  private:
-#if defined(OS_ANDROID)
-  // AndroidProviderBackend uses the |db_|.
-  friend class AndroidProviderBackend;
-  FRIEND_TEST_ALL_PREFIXES(AndroidURLsMigrationTest, MigrateToVersion22);
-#endif
-  friend class ::HistoryQuickProviderTest;
-  friend class InMemoryURLIndexTest;
+  FRIEND_TEST_ALL_PREFIXES(IconMappingMigrationTest, TestIconMappingMigration);
 
   // Overridden from URLDatabase:
   virtual sql::Connection& GetDB() OVERRIDE;
@@ -179,12 +149,13 @@ class HistoryDatabase : public DownloadDatabase,
   // Migration -----------------------------------------------------------------
 
   // Makes sure the version is up-to-date, updating if necessary. If the
-  // database is too old to migrate, the user will be notified. Returns
-  // sql::INIT_OK iff  the DB is up-to-date and ready for use.
+  // database is too old to migrate, the user will be notified. In this case, or
+  // for other errors, false will be returned. True means it is up-to-date and
+  // ready for use.
   //
   // This assumes it is called from the init function inside a transaction. It
   // may commit the transaction and start a new one if migration requires it.
-  sql::InitStatus EnsureCurrentVersion();
+  sql::InitStatus EnsureCurrentVersion(const FilePath& tmp_bookmarks_path);
 
 #if !defined(OS_WIN)
   // Converts the time epoch in the database from being 1970-based to being
@@ -194,7 +165,6 @@ class HistoryDatabase : public DownloadDatabase,
 
   // ---------------------------------------------------------------------------
 
-  sql::Connection::ErrorCallback error_callback_;
   sql::Connection db_;
   sql::MetaTable meta_table_;
 

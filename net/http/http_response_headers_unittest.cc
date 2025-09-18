@@ -1,14 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <algorithm>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/pickle.h"
-#include "base/time/time.h"
-#include "base/values.h"
+#include "base/time.h"
 #include "net/http/http_response_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -454,18 +452,6 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Content-Length: 450\n"
       "Content-Encoding: gzip\n"
     },
-    // Test filtering of transport security state headers.
-    { net::HttpResponseHeaders::PERSIST_SANS_SECURITY_STATE,
-      "HTTP/1.1 200 OK\n"
-      "Strict-Transport-Security: max-age=1576800\n"
-      "Bar: 1\n"
-      "Public-Key-Pins: max-age=100000; "
-          "pin-sha1=\"ObT42aoSpAqWdY9WfRfL7i0HsVk=\";"
-          "pin-sha1=\"7kW49EVwZG0hSNx41ZO/fUPN0ek=\"",
-
-      "HTTP/1.1 200 OK\n"
-      "Bar: 1\n"
-    },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
@@ -477,7 +463,7 @@ TEST(HttpResponseHeadersTest, Persist) {
     Pickle pickle;
     parsed1->Persist(&pickle, tests[i].options);
 
-    PickleIterator iter(pickle);
+    void* iter = NULL;
     scoped_refptr<net::HttpResponseHeaders> parsed2(
         new net::HttpResponseHeaders(pickle, &iter));
 
@@ -545,36 +531,6 @@ TEST(HttpResponseHeadersTest, EnumerateHeader_DateValued) {
   EXPECT_EQ("Tue, 07 Aug 2007 23:10:55 GMT", value);
   EXPECT_TRUE(parsed->EnumerateHeader(NULL, "last-modified", &value));
   EXPECT_EQ("Wed, 01 Aug 2007 23:23:45 GMT", value);
-}
-
-TEST(HttpResponseHeadersTest, DefaultDateToGMT) {
-  // Verify we make the best interpretation when parsing dates that incorrectly
-  // do not end in "GMT" as RFC2616 requires.
-  std::string headers =
-      "HTTP/1.1 200 OK\n"
-      "Date: Tue, 07 Aug 2007 23:10:55\n"
-      "Last-Modified: Tue, 07 Aug 2007 19:10:55 EDT\n"
-      "Expires: Tue, 07 Aug 2007 23:10:55 UTC\n";
-  HeadersToRaw(&headers);
-  scoped_refptr<net::HttpResponseHeaders> parsed(
-      new net::HttpResponseHeaders(headers));
-  base::Time expected_value;
-  ASSERT_TRUE(base::Time::FromString("Tue, 07 Aug 2007 23:10:55 GMT",
-                                     &expected_value));
-
-  base::Time value;
-  // When the timezone is missing, GMT is a good guess as its what RFC2616
-  // requires.
-  EXPECT_TRUE(parsed->GetDateValue(&value));
-  EXPECT_EQ(expected_value, value);
-  // If GMT is missing but an RFC822-conforming one is present, use that.
-  EXPECT_TRUE(parsed->GetLastModifiedValue(&value));
-  EXPECT_EQ(expected_value, value);
-  // If an unknown timezone is present, treat like a missing timezone and
-  // default to GMT.  The only example of a web server not specifying "GMT"
-  // used "UTC" which is equivalent to GMT.
-  if (parsed->GetExpiresValue(&value))
-    EXPECT_EQ(expected_value, value);
 }
 
 TEST(HttpResponseHeadersTest, GetMimeType) {
@@ -922,40 +878,6 @@ TEST(HttpResponseHeadersTest, Update) {
       "Cache-control: max-age=10001\n"
       "Content-Length: 450\n"
     },
-    { "HTTP/1.1 200 OK\n"
-      "X-Frame-Options: DENY\n",
-
-      "HTTP/1/1 304 Not Modified\n"
-      "X-Frame-Options: ALLOW\n",
-
-      "HTTP/1.1 200 OK\n"
-      "X-Frame-Options: DENY\n",
-    },
-    { "HTTP/1.1 200 OK\n"
-      "X-WebKit-CSP: default-src 'none'\n",
-
-      "HTTP/1/1 304 Not Modified\n"
-      "X-WebKit-CSP: default-src *\n",
-
-      "HTTP/1.1 200 OK\n"
-      "X-WebKit-CSP: default-src 'none'\n",
-    },
-    { "HTTP/1.1 200 OK\n"
-      "X-XSS-Protection: 1\n",
-
-      "HTTP/1/1 304 Not Modified\n"
-      "X-XSS-Protection: 0\n",
-
-      "HTTP/1.1 200 OK\n"
-      "X-XSS-Protection: 1\n",
-    },
-    { "HTTP/1.1 200 OK\n",
-
-      "HTTP/1/1 304 Not Modified\n"
-      "X-Content-Type-Options: nosniff\n",
-
-      "HTTP/1.1 200 OK\n"
-    },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
@@ -969,7 +891,7 @@ TEST(HttpResponseHeadersTest, Update) {
     scoped_refptr<net::HttpResponseHeaders> new_parsed(
         new net::HttpResponseHeaders(new_headers));
 
-    parsed->Update(*new_parsed.get());
+    parsed->Update(*new_parsed);
 
     std::string resulting_headers;
     parsed->GetNormalizedHeaders(&resulting_headers);
@@ -1749,35 +1671,7 @@ TEST(HttpResponseHeadersTest, RemoveIndividualHeader) {
       "Content-Length: 450\n"
       "Cache-control: max-age=10000\n"
     },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive  \n"
-      "Foo: bar, baz\n"
-      "Foo: bar\n"
-      "Cache-control: max-age=10000\n",
 
-      "Foo",
-
-      "bar, baz",  // Space in value.
-
-      "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Foo: bar\n"
-      "Cache-control: max-age=10000\n"
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive  \n"
-      "Foo: bar, baz\n"
-      "Cache-control: max-age=10000\n",
-
-      "Foo",
-
-      "baz",  // Only partial match -> ignored.
-
-      "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Foo: bar, baz\n"
-      "Cache-control: max-age=10000\n"
-    },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
@@ -1788,7 +1682,7 @@ TEST(HttpResponseHeadersTest, RemoveIndividualHeader) {
 
     std::string name(tests[i].to_remove_name);
     std::string value(tests[i].to_remove_value);
-    parsed->RemoveHeaderLine(name, value);
+    parsed->RemoveHeaderWithValue(name, value);
 
     std::string resulting_headers;
     parsed->GetNormalizedHeaders(&resulting_headers);
@@ -1850,199 +1744,3 @@ TEST(HttpResponseHeadersTest, ReplaceStatus) {
     EXPECT_EQ(std::string(tests[i].expected_headers), resulting_headers);
   }
 }
-
-TEST(HttpResponseHeadersTest, ToNetLogParamAndBackAgain) {
-  std::string headers("HTTP/1.1 404\n"
-                      "Content-Length: 450\n"
-                      "Connection: keep-alive\n");
-  HeadersToRaw(&headers);
-  scoped_refptr<net::HttpResponseHeaders> parsed(
-      new net::HttpResponseHeaders(headers));
-
-  scoped_ptr<base::Value> event_param(
-      parsed->NetLogCallback(net::NetLog::LOG_ALL_BUT_BYTES));
-  scoped_refptr<net::HttpResponseHeaders> recreated;
-
-  ASSERT_TRUE(net::HttpResponseHeaders::FromNetLogParam(event_param.get(),
-                                                        &recreated));
-  ASSERT_TRUE(recreated.get());
-  EXPECT_EQ(parsed->GetHttpVersion(), recreated->GetHttpVersion());
-  EXPECT_EQ(parsed->response_code(), recreated->response_code());
-  EXPECT_EQ(parsed->GetContentLength(), recreated->GetContentLength());
-  EXPECT_EQ(parsed->IsKeepAlive(), recreated->IsKeepAlive());
-
-  std::string normalized_parsed;
-  parsed->GetNormalizedHeaders(&normalized_parsed);
-  std::string normalized_recreated;
-  parsed->GetNormalizedHeaders(&normalized_recreated);
-  EXPECT_EQ(normalized_parsed, normalized_recreated);
-}
-
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-TEST(HttpResponseHeadersTest, GetProxyBypassInfo) {
-  const struct {
-     const char* headers;
-     bool expected_result;
-     int64 expected_retry_delay;
-     bool expected_bypass_all;
-  } tests[] = {
-    { "HTTP/1.1 200 OK\n"
-      "Content-Length: 999\n",
-      false,
-      0,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Content-Length: 999\n",
-      false,
-      0,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=86400\n"
-      "Content-Length: 999\n",
-      true,
-      86400,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=0\n"
-      "Content-Length: 999\n",
-      true,
-      0,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=-1\n"
-      "Content-Length: 999\n",
-      false,
-      0,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=xyz\n"
-      "Content-Length: 999\n",
-      false,
-      0,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass\n"
-      "Content-Length: 999\n",
-      false,
-      0,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: foo=abc, bypass=86400\n"
-      "Content-Length: 999\n",
-      true,
-      86400,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=86400, bar=abc\n"
-      "Content-Length: 999\n",
-      true,
-      86400,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=3600\n"
-      "Chrome-Proxy: bypass=86400\n"
-      "Content-Length: 999\n",
-      true,
-      3600,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=3600, bypass=86400\n"
-      "Content-Length: 999\n",
-      true,
-      3600,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=, bypass=86400\n"
-      "Content-Length: 999\n",
-      true,
-      86400,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass\n"
-      "Chrome-Proxy: bypass=86400\n"
-      "Content-Length: 999\n",
-      true,
-      86400,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: block=, block=3600\n"
-      "Content-Length: 999\n",
-      true,
-      3600,
-      true,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: keep-alive\n"
-      "Chrome-Proxy: bypass=86400, block=3600\n"
-      "Content-Length: 999\n",
-      true,
-      3600,
-      true,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: proxy-bypass\n"
-      "Chrome-Proxy: block=, bypass=86400\n"
-      "Content-Length: 999\n",
-      true,
-      86400,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: proxy-bypass\n"
-      "Chrome-Proxy: block=-1\n"
-      "Content-Length: 999\n",
-      false,
-      0,
-      false,
-    },
-    { "HTTP/1.1 200 OK\n"
-      "connection: proxy-bypass\n"
-      "Chrome-Proxy: block=99999999999999999999\n"
-      "Content-Length: 999\n",
-      false,
-      0,
-      false,
-    },
-  };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    std::string headers(tests[i].headers);
-    HeadersToRaw(&headers);
-    scoped_refptr<net::HttpResponseHeaders> parsed(
-        new net::HttpResponseHeaders(headers));
-
-    net::HttpResponseHeaders::ChromeProxyInfo chrome_proxy_info;
-    EXPECT_EQ(tests[i].expected_result,
-              parsed->GetChromeProxyInfo(&chrome_proxy_info));
-    EXPECT_EQ(tests[i].expected_retry_delay,
-              chrome_proxy_info.bypass_duration.InSeconds());
-    EXPECT_EQ(tests[i].expected_bypass_all,
-              chrome_proxy_info.bypass_all);
-  }
-}
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)

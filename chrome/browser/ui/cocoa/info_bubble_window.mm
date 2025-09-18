@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,12 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/mac/scoped_nsobject.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/memory/scoped_nsobject.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
+#include "content/public/browser/notification_types.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 
 namespace {
 const CGFloat kOrderInSlideOffset = 10;
@@ -22,9 +22,9 @@ const NSTimeInterval kOrderOutAnimationDuration = 0.15;
 // animation as quickly as possible.
 const NSTimeInterval kMinimumTimeInterval =
     std::numeric_limits<NSTimeInterval>::min();
-}  // namespace
+}
 
-@interface InfoBubbleWindow (Private)
+@interface InfoBubbleWindow(Private)
 - (void)appIsTerminating;
 - (void)finishCloseAfterAnimation;
 @end
@@ -33,17 +33,16 @@ const NSTimeInterval kMinimumTimeInterval =
 class AppNotificationBridge : public content::NotificationObserver {
  public:
   explicit AppNotificationBridge(InfoBubbleWindow* owner) : owner_(owner) {
-    registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
+    registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
                    content::NotificationService::AllSources());
   }
 
   // Overridden from content::NotificationObserver.
-  virtual void Observe(
-      int type,
-      const content::NotificationSource& source,
-      const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) {
     switch (type) {
-      case chrome::NOTIFICATION_APP_TERMINATING:
+      case content::NOTIFICATION_APP_TERMINATING:
         [owner_ appIsTerminating];
         break;
       default:
@@ -94,7 +93,7 @@ class AppNotificationBridge : public content::NotificationObserver {
 
 @implementation InfoBubbleWindow
 
-@synthesize allowedAnimations = allowedAnimations_;
+@synthesize delayOnClose = delayOnClose_;
 @synthesize canBecomeKeyWindow = canBecomeKeyWindow_;
 
 - (id)initWithContentRect:(NSRect)contentRect
@@ -109,9 +108,8 @@ class AppNotificationBridge : public content::NotificationObserver {
     [self setExcludedFromWindowsMenu:YES];
     [self setOpaque:NO];
     [self setHasShadow:YES];
+    delayOnClose_ = YES;
     canBecomeKeyWindow_ = YES;
-    allowedAnimations_ = info_bubble::kAnimateOrderIn |
-                         info_bubble::kAnimateOrderOut;
     notificationBridge_.reset(new AppNotificationBridge(self));
 
     // Start invisible. Will be made visible when ordered front.
@@ -123,7 +121,7 @@ class AppNotificationBridge : public content::NotificationObserver {
     // Notice that only the alphaValue Animation is replaced in case
     // superclasses set up animations.
     CAAnimation* alphaAnimation = [CABasicAnimation animation];
-    base::scoped_nsobject<InfoBubbleWindowCloser> delegate(
+    scoped_nsobject<InfoBubbleWindowCloser> delegate(
         [[InfoBubbleWindowCloser alloc] initWithWindow:self]);
     [alphaAnimation setDelegate:delegate];
     NSMutableDictionary* animations =
@@ -153,7 +151,7 @@ class AppNotificationBridge : public content::NotificationObserver {
   // Block the window from receiving events while it fades out.
   closing_ = YES;
 
-  if ((allowedAnimations_ & info_bubble::kAnimateOrderOut) == 0) {
+  if (!delayOnClose_) {
     [self finishCloseAfterAnimation];
   } else {
     // Apply animations to hide self.
@@ -170,7 +168,7 @@ class AppNotificationBridge : public content::NotificationObserver {
 // animation and close the window to prevent it from leaking.
 // See http://crbug.com/37717
 - (void)appIsTerminating {
-  if ((allowedAnimations_ & info_bubble::kAnimateOrderOut) == 0)
+  if (!delayOnClose_)
     return;  // The close has already happened with no Core Animation.
 
   // Cancel the current animation so that it closes immediately, triggering
@@ -207,12 +205,9 @@ class AppNotificationBridge : public content::NotificationObserver {
     // Apply animations to show and move self.
     [NSAnimationContext beginGrouping];
     // The star currently triggers on mouse down, not mouse up.
-    NSTimeInterval duration =
-        (allowedAnimations_ & info_bubble::kAnimateOrderIn)
-            ? kOrderInAnimationDuration : kMinimumTimeInterval;
     [[NSAnimationContext currentContext]
-        gtm_setDuration:duration
-              eventMask:NSLeftMouseUpMask | NSLeftMouseDownMask];
+        gtm_setDuration:kOrderInAnimationDuration
+              eventMask:NSLeftMouseUpMask|NSLeftMouseDownMask];
     [[self animator] setAlphaValue:1.0];
     [[self animator] setFrame:frame display:YES];
     [NSAnimationContext endGrouping];

@@ -4,27 +4,25 @@
 
 #ifndef ASH_WM_STACKING_CONTROLLER_H_
 #define ASH_WM_STACKING_CONTROLLER_H_
+#pragma once
 
-#include "ash/ash_export.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "ui/aura/client/window_tree_client.h"
+#include "ui/aura/client/stacking_client.h"
 
 namespace ash {
 namespace internal {
-class AlwaysOnTopController;
-}
 
-class ASH_EXPORT StackingController : public aura::client::WindowTreeClient {
+class AlwaysOnTopController;
+
+class StackingController : public aura::client::StackingClient {
  public:
   StackingController();
   virtual ~StackingController();
 
-  // Overridden from aura::client::WindowTreeClient:
-  virtual aura::Window* GetDefaultParent(aura::Window* context,
-                                         aura::Window* window,
-                                         const gfx::Rect& bounds) OVERRIDE;
+  // Overridden from aura::client::StackingClient:
+  virtual aura::Window* GetDefaultParent(aura::Window* window) OVERRIDE;
 
  private:
   // Returns corresponding system modal container for a modal window.
@@ -32,12 +30,14 @@ class ASH_EXPORT StackingController : public aura::client::WindowTreeClient {
   // normal modal container.
   // Otherwise those that originate from LockScreen container and above are
   // placed in the screen lock modal container.
-  aura::Window* GetSystemModalContainer(aura::Window* root,
-                                        aura::Window* window) const;
+  aura::Window* GetSystemModalContainer(aura::Window* window) const;
+
+  scoped_ptr<internal::AlwaysOnTopController> always_on_top_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(StackingController);
 };
 
+}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_WM_STACKING_CONTROLLER_H_

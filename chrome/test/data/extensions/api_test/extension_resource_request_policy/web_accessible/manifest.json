@@ -6,8 +6,5 @@
    "web_accessible_resources": [
      "test.png",
      "nonexistent.png"
-   ],
-   "chrome_url_overrides": {
-     "newtab": "newtab_override.html"
-   }
+   ]
 }

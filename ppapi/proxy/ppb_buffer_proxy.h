@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef PPAPI_PROXY_PPB_BUFFER_PROXY_H_
 #define PPAPI_PROXY_PPB_BUFFER_PROXY_H_
 
-#include "base/memory/shared_memory.h"
+#include "base/shared_memory.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/shared_impl/resource.h"
@@ -16,8 +16,6 @@ namespace ppapi {
 class HostResource;
 
 namespace proxy {
-
-class SerializedHandle;
 
 class Buffer : public thunk::PPB_Buffer_API, public Resource {
  public:
@@ -35,12 +33,10 @@ class Buffer : public thunk::PPB_Buffer_API, public Resource {
   virtual void* Map() OVERRIDE;
   virtual void Unmap() OVERRIDE;
 
-  // Trusted
-  virtual int32_t GetSharedMemory(int* handle) OVERRIDE;
-
  private:
   base::SharedMemory shm_;
   uint32_t size_;
+  void* mapped_data_;
   int map_count_;
 
   DISALLOW_COPY_AND_ASSIGN(Buffer);
@@ -67,7 +63,7 @@ class PPB_Buffer_Proxy : public InterfaceProxy {
   void OnMsgCreate(PP_Instance instance,
                    uint32_t size,
                    HostResource* result_resource,
-                   ppapi::proxy::SerializedHandle* result_shm_handle);
+                   base::SharedMemoryHandle* result_shm_handle);
 };
 
 }  // namespace proxy

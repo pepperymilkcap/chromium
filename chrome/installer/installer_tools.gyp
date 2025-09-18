@@ -6,7 +6,7 @@
   'variables': {
     'version_py': '<(DEPTH)/chrome/tools/build/version.py',
     'version_path': '<(DEPTH)/chrome/VERSION',
-    'lastchange_path': '<(DEPTH)/build/util/LASTCHANGE',
+    'lastchange_path': '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
     # 'branding_dir' is set in the 'conditions' section at the bottom.
     'msvs_use_common_release': 0,
     'msvs_use_common_linker_extras': 0,
@@ -19,9 +19,9 @@
           'type': 'executable',
           'dependencies': [
             '<(DEPTH)/base/base.gyp:base',
+            '<(DEPTH)/chrome/chrome.gyp:common_constants',
             '<(DEPTH)/chrome/chrome.gyp:installer_util',
             '<(DEPTH)/chrome/chrome.gyp:installer_util_strings',
-            '<(DEPTH)/chrome/common_constants.gyp:common_constants',
           ],
           'include_dirs': [
             '<(DEPTH)',

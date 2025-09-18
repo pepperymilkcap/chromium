@@ -1,29 +1,35 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/resources_util.h"
 
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace {
+
+struct TestCase {
+  const char* name;
+  int id;
+};
+
+}  // namespace
+
 TEST(ResourcesUtil, SpotCheckIds) {
-  const struct {
-    const char* name;
-    int id;
-  } kCases[] = {
-    // IDRs from chrome/app/theme/theme_resources.grd should be valid.
+  const TestCase kTestCases[] = {
     {"IDR_BACK", IDR_BACK},
     {"IDR_STOP", IDR_STOP},
-    // IDRs from ui/resources/ui_resources.grd should be valid.
-    {"IDR_CHECKMARK", IDR_CHECKMARK},
-    {"IDR_THROBBER", IDR_THROBBER},
-    // Unknown names should be invalid and return -1.
-    {"foobar", -1},
-    {"backstar", -1},
+    {"IDR_OMNIBOX_STAR", IDR_OMNIBOX_STAR},
+    {"IDR_SAD_TAB", IDR_SAD_TAB},
   };
+  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
+    EXPECT_EQ(kTestCases[i].id,
+              ResourcesUtil::GetThemeResourceId(kTestCases[i].name));
+  }
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kCases); ++i)
-    EXPECT_EQ(kCases[i].id, ResourcesUtil::GetThemeResourceId(kCases[i].name));
+  // Should return -1 of unknown names.
+  EXPECT_EQ(-1, ResourcesUtil::GetThemeResourceId("foobar"));
+  EXPECT_EQ(-1, ResourcesUtil::GetThemeResourceId("backstar"));
 }

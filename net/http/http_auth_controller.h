@@ -4,6 +4,7 @@
 
 #ifndef NET_HTTP_HTTP_AUTH_CONTROLLER_H_
 #define NET_HTTP_HTTP_AUTH_CONTROLLER_H_
+#pragma once
 
 #include <set>
 #include <string>
@@ -12,11 +13,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/http/http_auth.h"
-#include "url/gurl.h"
 
 namespace net {
 
@@ -71,7 +72,6 @@ class NET_EXPORT_PRIVATE HttpAuthController
 
   virtual bool IsAuthSchemeDisabled(HttpAuth::Scheme scheme) const;
   virtual void DisableAuthScheme(HttpAuth::Scheme scheme);
-  virtual void DisableEmbeddedIdentity();
 
  private:
   // Actions for InvalidateCurrentHandler()

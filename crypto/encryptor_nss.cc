@@ -53,6 +53,10 @@ bool Encryptor::Init(SymmetricKey* key,
   if (mode == CBC && iv.size() != AES_BLOCK_SIZE)
     return false;
 
+  slot_.reset(PK11_GetBestSlot(GetMechanism(mode), NULL));
+  if (!slot_.get())
+    return false;
+
   switch (mode) {
     case CBC:
       SECItem iv_item;
@@ -95,18 +99,9 @@ bool Encryptor::Decrypt(const base::StringPiece& ciphertext,
   if (!context.get())
     return false;
 
-  if (mode_ == CTR)
-    return CryptCTR(context.get(), ciphertext, plaintext);
-
-  if (ciphertext.size() % AES_BLOCK_SIZE != 0) {
-    // Decryption will fail if the input is not a multiple of the block size.
-    // PK11_CipherOp has a bug where it will do an invalid memory access before
-    // the start of the input, so avoid calling it. (NSS bug 922780).
-    plaintext->clear();
-    return false;
-  }
-
-  return Crypt(context.get(), ciphertext, plaintext);
+  return (mode_ == CTR) ?
+      CryptCTR(context.get(), ciphertext, plaintext) :
+      Crypt(context.get(), ciphertext, plaintext);
 }
 
 bool Encryptor::Crypt(PK11Context* context,

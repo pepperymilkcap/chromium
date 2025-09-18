@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,14 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/ref_counted_memory.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/enumerate_modules_model_win.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -24,14 +25,13 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
-#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::UserMetricsAction;
@@ -40,9 +40,9 @@ using content::WebUIMessageHandler;
 
 namespace {
 
-content::WebUIDataSource* CreateConflictsUIHTMLSource() {
-  content::WebUIDataSource* source =
-      content::WebUIDataSource::Create(chrome::kChromeUIConflictsHost);
+ChromeWebUIDataSource* CreateConflictsUIHTMLSource() {
+  ChromeWebUIDataSource* source =
+      new ChromeWebUIDataSource(chrome::kChromeUIConflictsHost);
 
   source->AddLocalizedString("loadingMessage", IDS_CONFLICTS_LOADING_MESSAGE);
   source->AddLocalizedString("modulesLongTitle",
@@ -62,9 +62,9 @@ content::WebUIDataSource* CreateConflictsUIHTMLSource() {
   source->AddLocalizedString("headerLocation", IDS_CONFLICTS_HEADER_LOCATION);
   source->AddLocalizedString("headerVersion", IDS_CONFLICTS_HEADER_VERSION);
   source->AddLocalizedString("headerHelpTip", IDS_CONFLICTS_HEADER_HELP_TIP);
-  source->SetJsonPath("strings.js");
-  source->AddResourcePath("conflicts.js", IDR_ABOUT_CONFLICTS_JS);
-  source->SetDefaultResource(IDR_ABOUT_CONFLICTS_HTML);
+  source->set_json_path("strings.js");
+  source->add_resource_path("conflicts.js", IDR_ABOUT_CONFLICTS_JS);
+  source->set_default_resource(IDR_ABOUT_CONFLICTS_HTML);
   return source;
 }
 
@@ -85,7 +85,7 @@ class ConflictsDOMHandler : public WebUIMessageHandler,
   virtual void RegisterMessages();
 
   // Callback for the "requestModuleList" message.
-  void HandleRequestModuleList(const base::ListValue* args);
+  void HandleRequestModuleList(const ListValue* args);
 
  private:
   void SendModuleList();
@@ -105,7 +105,7 @@ void ConflictsDOMHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void ConflictsDOMHandler::HandleRequestModuleList(const base::ListValue* args) {
+void ConflictsDOMHandler::HandleRequestModuleList(const ListValue* args) {
   // This request is handled asynchronously. See Observe for when we reply back.
   registrar_.Add(this, chrome::NOTIFICATION_MODULE_LIST_ENUMERATED,
                  content::NotificationService::AllSources());
@@ -114,14 +114,14 @@ void ConflictsDOMHandler::HandleRequestModuleList(const base::ListValue* args) {
 
 void ConflictsDOMHandler::SendModuleList() {
   EnumerateModulesModel* loaded_modules = EnumerateModulesModel::GetInstance();
-  base::ListValue* list = loaded_modules->GetModuleList();
-  base::DictionaryValue results;
+  ListValue* list = loaded_modules->GetModuleList();
+  DictionaryValue results;
   results.Set("moduleList", list);
 
   // Add the section title and the total count for bad modules found.
   int confirmed_bad = loaded_modules->confirmed_bad_modules_detected();
   int suspected_bad = loaded_modules->suspected_bad_modules_detected();
-  base::string16 table_title;
+  string16 table_title;
   if (!confirmed_bad && !suspected_bad) {
     table_title += l10n_util::GetStringFUTF16(
         IDS_CONFLICTS_CHECK_PAGE_TABLE_TITLE_SUFFIX_ONE,
@@ -166,15 +166,14 @@ ConflictsUI::ConflictsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the about:conflicts source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  content::WebUIDataSource::Add(profile, CreateConflictsUIHTMLSource());
+  profile->GetChromeURLDataManager()->AddDataSource(
+      CreateConflictsUIHTMLSource());
 }
 
 // static
-base::RefCountedMemory* ConflictsUI::GetFaviconResourceBytes(
-      ui::ScaleFactor scale_factor) {
-  return static_cast<base::RefCountedMemory*>(
-      ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
-          IDR_CONFLICT_FAVICON, scale_factor));
+RefCountedMemory* ConflictsUI::GetFaviconResourceBytes() {
+  return ResourceBundle::GetSharedInstance().
+      LoadDataResourceBytes(IDR_CONFLICT_FAVICON);
 }
 
 #endif

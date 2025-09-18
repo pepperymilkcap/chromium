@@ -7,11 +7,11 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_intents_dispatcher.h"
 #include "content/public/common/url_constants.h"
-#include "content/public/common/bindings_policy.h"
 #include "ui/gfx/rect.h"
+#include "webkit/glue/web_intent_data.h"
 
 namespace content {
 
@@ -27,9 +27,11 @@ bool WebContentsDelegate::IsPopupOrPanel(const WebContents* source) const {
   return false;
 }
 
-bool WebContentsDelegate::CanLoadDataURLsInWebUI() const { return false; }
+bool WebContentsDelegate::IsApplication() const { return false; }
 
-bool WebContentsDelegate::CanOverscrollContent() const { return false; }
+bool WebContentsDelegate::CanReloadContents(WebContents* source) const {
+  return true;
+}
 
 gfx::Rect WebContentsDelegate::GetRootWindowResizerRect() const {
   return gfx::Rect();
@@ -39,29 +41,17 @@ bool WebContentsDelegate::ShouldSuppressDialogs() {
   return false;
 }
 
-bool WebContentsDelegate::AddMessageToConsole(WebContents* source,
-                                              int32 level,
-                                              const base::string16& message,
-                                              int32 line_no,
-                                              const base::string16& source_id) {
-  return false;
-}
-
-void WebContentsDelegate::BeforeUnloadFired(WebContents* web_contents,
+void WebContentsDelegate::BeforeUnloadFired(WebContents* tab,
                                             bool proceed,
                                             bool* proceed_to_fire_unload) {
   *proceed_to_fire_unload = true;
-}
-
-bool WebContentsDelegate::ShouldFocusLocationBarByDefault(WebContents* source) {
-  return false;
 }
 
 bool WebContentsDelegate::ShouldFocusPageAfterCrash() {
   return true;
 }
 
-bool WebContentsDelegate::TakeFocus(WebContents* source, bool reverse) {
+bool WebContentsDelegate::TakeFocus(bool reverse) {
   return false;
 }
 
@@ -69,16 +59,15 @@ int WebContentsDelegate::GetExtraRenderViewHeight() const {
   return 0;
 }
 
-void WebContentsDelegate::CanDownload(
-    RenderViewHost* render_view_host,
-    int request_id,
-    const std::string& request_method,
-    const base::Callback<void(bool)>& callback) {
-  callback.Run(true);
+bool WebContentsDelegate::CanDownload(WebContents* source, int request_id) {
+  return true;
 }
 
-bool WebContentsDelegate::HandleContextMenu(
-    const content::ContextMenuParams& params) {
+bool WebContentsDelegate::HandleContextMenu(const ContextMenuParams& params) {
+  return false;
+}
+
+bool WebContentsDelegate::ExecuteContextMenuCommand(int command) {
   return false;
 }
 
@@ -87,7 +76,8 @@ void WebContentsDelegate::ViewSourceForTab(WebContents* source,
   // Fall back implementation based entirely on the view-source scheme.
   // It suffers from http://crbug.com/523 and that is why browser overrides
   // it with proper implementation.
-  GURL url = GURL(kViewSourceScheme + std::string(":") + page_url.spec());
+  GURL url = GURL(chrome::kViewSourceScheme + std::string(":") +
+                      page_url.spec());
   OpenURLFromTab(source, OpenURLParams(url, Referrer(),
                                        NEW_FOREGROUND_TAB,
                                        PAGE_TRANSITION_LINK, false));
@@ -95,76 +85,57 @@ void WebContentsDelegate::ViewSourceForTab(WebContents* source,
 
 void WebContentsDelegate::ViewSourceForFrame(WebContents* source,
                                              const GURL& frame_url,
-                                             const PageState& page_state) {
+                                             const std::string& content_state) {
   // Same as ViewSourceForTab, but for given subframe.
-  GURL url = GURL(kViewSourceScheme + std::string(":") + frame_url.spec());
+  GURL url = GURL(chrome::kViewSourceScheme + std::string(":") +
+                      frame_url.spec());
   OpenURLFromTab(source, OpenURLParams(url, Referrer(),
                                        NEW_FOREGROUND_TAB,
                                        PAGE_TRANSITION_LINK, false));
 }
 
 bool WebContentsDelegate::PreHandleKeyboardEvent(
-    WebContents* source,
     const NativeWebKeyboardEvent& event,
     bool* is_keyboard_shortcut) {
   return false;
-}
-
-bool WebContentsDelegate::CanDragEnter(
-    WebContents* source,
-    const DropData& data,
-    blink::WebDragOperationsMask operations_allowed) {
-  return true;
 }
 
 bool WebContentsDelegate::OnGoToEntryOffset(int offset) {
   return true;
 }
 
+bool WebContentsDelegate::ShouldAddNavigationToHistory(
+    const history::HistoryAddPageArgs& add_page_args,
+    NavigationType navigation_type) {
+  return true;
+}
+
+gfx::NativeWindow WebContentsDelegate::GetFrameNativeWindow() {
+  return NULL;
+}
+
 bool WebContentsDelegate::ShouldCreateWebContents(
     WebContents* web_contents,
     int route_id,
     WindowContainerType window_container_type,
-    const base::string16& frame_name,
-    const GURL& target_url,
-    const std::string& partition_id,
-    SessionStorageNamespace* session_storage_namespace) {
+    const string16& frame_name) {
   return true;
 }
 
-JavaScriptDialogManager* WebContentsDelegate::GetJavaScriptDialogManager() {
+JavaScriptDialogCreator* WebContentsDelegate::GetJavaScriptDialogCreator() {
   return NULL;
 }
 
-bool WebContentsDelegate::EmbedsFullscreenWidget() const {
+bool WebContentsDelegate::IsFullscreenForTab(const WebContents* tab) const {
   return false;
 }
 
-bool WebContentsDelegate::IsFullscreenForTabOrPending(
-    const WebContents* web_contents) const {
-  return false;
-}
-
-content::ColorChooser* WebContentsDelegate::OpenColorChooser(
-    WebContents* web_contents,
-    SkColor color,
-    const std::vector<ColorSuggestion>& suggestions) {
-  return NULL;
-}
-
-void WebContentsDelegate::RequestMediaAccessPermission(
-    WebContents* web_contents,
-    const MediaStreamRequest& request,
-    const MediaResponseCallback& callback) {
-  callback.Run(MediaStreamDevices(), scoped_ptr<MediaStreamUI>());
-}
-
-bool WebContentsDelegate::RequestPpapiBrokerPermission(
-    WebContents* web_contents,
-    const GURL& url,
-    const base::FilePath& plugin_path,
-    const base::Callback<void(bool)>& callback) {
-  return false;
+void WebContentsDelegate::WebIntentDispatch(
+    WebContents* tab,
+    WebIntentsDispatcher* intents_dispatcher) {
+  // The caller passes this method ownership of the |intents_dispatcher|, but
+  // this empty implementation will not use it, so we delete it immediately.
+  delete intents_dispatcher;
 }
 
 WebContentsDelegate::~WebContentsDelegate() {
@@ -183,11 +154,6 @@ void WebContentsDelegate::Attach(WebContents* web_contents) {
 void WebContentsDelegate::Detach(WebContents* web_contents) {
   DCHECK(attached_contents_.find(web_contents) != attached_contents_.end());
   attached_contents_.erase(web_contents);
-}
-
-gfx::Size WebContentsDelegate::GetSizeForNewRenderView(
-    const WebContents* web_contents) const {
-  return gfx::Size();
 }
 
 }  // namespace content

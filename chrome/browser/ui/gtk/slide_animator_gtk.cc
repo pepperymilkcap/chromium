@@ -1,12 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 
+#include "ui/base/animation/animation.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
-#include "ui/gfx/animation/animation.h"
-#include "ui/gfx/animation/slide_animation.h"
 
 namespace {
 
@@ -55,10 +55,10 @@ SlideAnimatorGtk::SlideAnimatorGtk(GtkWidget* child,
 
   child_needs_move_ = (direction == DOWN);
 
-  animation_.reset(new gfx::SlideAnimation(this));
+  animation_.reset(new ui::SlideAnimation(this));
   // Default tween type is EASE_OUT.
   if (linear)
-    animation_->SetTweenType(gfx::Tween::LINEAR);
+    animation_->SetTweenType(ui::Tween::LINEAR);
   if (duration != 0)
     animation_->SetSlideDuration(duration);
 }
@@ -112,14 +112,14 @@ bool SlideAnimatorGtk::IsAnimating() {
   return animation_->is_animating();
 }
 
-void SlideAnimatorGtk::AnimationProgressed(const gfx::Animation* animation) {
+void SlideAnimatorGtk::AnimationProgressed(const ui::Animation* animation) {
   GtkRequisition req;
   gtk_widget_size_request(child_, &req);
 
   int showing_height = static_cast<int>(req.height *
                                         animation_->GetCurrentValue());
   if (direction_ == DOWN) {
-    if (gtk_widget_get_parent(widget_.get())) {
+    if (widget_.get()->parent) {
       gtk_expanded_container_move(GTK_EXPANDED_CONTAINER(widget_.get()),
                                   child_, 0, showing_height - req.height);
     }
@@ -128,7 +128,7 @@ void SlideAnimatorGtk::AnimationProgressed(const gfx::Animation* animation) {
   gtk_widget_set_size_request(widget_.get(), -1, showing_height);
 }
 
-void SlideAnimatorGtk::AnimationEnded(const gfx::Animation* animation) {
+void SlideAnimatorGtk::AnimationEnded(const ui::Animation* animation) {
   if (!animation_->IsShowing()) {
     gtk_widget_hide(widget_.get());
     if (delegate_)

@@ -4,66 +4,108 @@
 
 #ifndef CHROME_BROWSER_FIRST_RUN_FIRST_RUN_INTERNAL_H_
 #define CHROME_BROWSER_FIRST_RUN_FIRST_RUN_INTERNAL_H_
+#pragma once
 
-class MasterPrefs;
-class Profile;
+#include <vector>
 
-namespace base {
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
+#include "ui/gfx/native_widget_types.h"
+
+class CommandLine;
 class FilePath;
-}
+class GURL;
+class ImporterHost;
+class ImporterList;
+class Profile;
+class ProcessSingleton;
+class TemplateURLService;
 
 namespace installer {
 class MasterPreferences;
 }
 
 namespace first_run {
-
 namespace internal {
 
 enum FirstRunState {
   FIRST_RUN_UNKNOWN,  // The state is not tested or set yet.
   FIRST_RUN_TRUE,
-  FIRST_RUN_FALSE,
-  FIRST_RUN_CANCEL,  // This shouldn't be considered first run but the sentinel
-                     // should be created anyways.
+  FIRST_RUN_FALSE
 };
 
 // This variable should only be accessed through IsChromeFirstRun().
 extern FirstRunState first_run_;
 
-// Generates an initial user preference file in |user_data_dir| using the data
-// in |master_prefs|.
-bool GeneratePrefFile(const base::FilePath& user_data_dir,
-                      const installer::MasterPreferences& master_prefs);
+// The kSentinelFile file absence will tell us it is a first run.
+extern const char* const kSentinelFile;
+
+// Loads master preferences from the master preference file into the installer
+// master preferences. Passes the master preference file path out in
+// master_prefs_path. Returns the pointer to installer::MasterPreferences object
+// if successful; otherwise, returns NULL.
+installer::MasterPreferences* LoadMasterPrefs(FilePath* master_prefs_path);
+
+// Copies user preference file to master preference file. Returns true if
+// successful.
+bool CopyPrefFile(const FilePath& user_data_dir,
+                  const FilePath& master_prefs_path);
 
 // Sets up master preferences by preferences passed by installer.
 void SetupMasterPrefsFromInstallPrefs(
-    const installer::MasterPreferences& install_prefs,
-    MasterPrefs* out_prefs);
-
-// Creates the sentinel file that signals that chrome has been configured.
-bool CreateSentinel();
+    MasterPrefs* out_prefs,
+    installer::MasterPreferences* install_prefs);
 
 // -- Platform-specific functions --
-
-void DoPostImportPlatformSpecificTasks(Profile* profile);
 
 // Gives the full path to the sentinel file. The file might not exist.
 // This function has a common implementation on OS_POSIX and a windows specific
 // implementation.
-bool GetFirstRunSentinelFilePath(base::FilePath* path);
+bool GetFirstRunSentinelFilePath(FilePath* path);
 
 // This function has a common implementationin for all non-linux platforms, and
 // a linux specific implementation.
 bool IsOrganicFirstRun();
 
-// Shows the EULA dialog if required. Returns true if the EULA is accepted,
-// returns false if the EULA has not been accepted, in which case the browser
-// should exit.
-bool ShowPostInstallEULAIfNeeded(installer::MasterPreferences* install_prefs);
+// Imports settings. This may be done in a separate process depending on the
+// platform, but it will always block until done. The return value indicates
+// success.
+// This functions has a common implementation for OS_POSIX, and a
+// windows specific implementation.
+bool ImportSettings(Profile* profile,
+                    scoped_refptr<ImporterHost> importer_host,
+                    scoped_refptr<ImporterList> importer_list,
+                    int items_to_import);
 
-// Returns the path for the master preferences file.
-base::FilePath MasterPrefsPath();
+#if defined(OS_WIN)
+// TODO(jennyz): This fuction will be moved to first_run_win.cc anonymous
+// namespace once we refactor its calling code in first_run.cc later.
+bool ImportSettingsWin(Profile* profile,
+                       int importer_type,
+                       int items_to_import,
+                       const FilePath& import_bookmarks_path,
+                       bool skip_first_run_ui);
+#endif  // OS_WIN
+
+#if !defined(USE_AURA)
+// AutoImport code which is common to all platforms.
+void AutoImportPlatformCommon(
+    scoped_refptr<ImporterHost> importer_host,
+    Profile* profile,
+    bool homepage_defined,
+    int import_items,
+    int dont_import_items,
+    bool make_chrome_default);
+#endif  // !defined(USE_AURA)
+
+int ImportBookmarkFromFileIfNeeded(Profile* profile,
+                                   const CommandLine& cmdline);
+
+#if !defined(OS_WIN)
+bool ImportBookmarks(const FilePath& import_bookmarks_path);
+#endif
 
 }  // namespace internal
 }  // namespace first_run

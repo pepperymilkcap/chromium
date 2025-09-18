@@ -1,56 +1,37 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef REMOTING_HOST_CONTINUE_WINDOW_H_
-#define REMOTING_HOST_CONTINUE_WINDOW_H_
+#ifndef REMOTING_HOST_CONTINUE_WINDOW_H
+#define REMOTING_HOST_CONTINUE_WINDOW_H
 
-#include "base/basictypes.h"
-#include "base/memory/weak_ptr.h"
-#include "base/timer/timer.h"
-#include "remoting/host/host_window.h"
+#include "base/callback.h"
 
 namespace remoting {
 
-class ContinueWindow : public HostWindow {
+class ChromotingHost;
+
+class ContinueWindow {
  public:
-  virtual ~ContinueWindow();
+  // ContinueSessionCallback is called when the user clicks on the
+  // Continue button to resume the session, or dismisses the window to
+  // terminate the session.  This callback is provided as a parameter to the
+  // Show() method, and will be triggered on the UI thread.
+  typedef base::Callback<void(bool)> ContinueSessionCallback;
 
-  // HostWindow override.
-  virtual void Start(
-      const base::WeakPtr<ClientSessionControl>& client_session_control)
-      OVERRIDE;
+  virtual ~ContinueWindow() {}
 
-  // Resumes paused client session.
-  void ContinueSession();
+  // Show the continuation window requesting that the user approve continuing
+  // the session.
+  virtual void Show(ChromotingHost* host,
+                    const ContinueSessionCallback& callback) = 0;
 
-  // Disconnects the client session.
-  void DisconnectSession();
+  // Hide the continuation window if it is visible.
+  virtual void Hide() = 0;
 
- protected:
-  ContinueWindow();
-
-  // Shows and hides the UI.
-  virtual void ShowUi() = 0;
-  virtual void HideUi() = 0;
-
- private:
-  // Invoked periodically to ask for the local user whether the session should
-  // be continued.
-  void OnSessionExpired();
-
-  // Used to disconnect the client session.
-  base::WeakPtr<ClientSessionControl> client_session_control_;
-
-  // Used to disconnect the client session when timeout expires.
-  base::OneShotTimer<ContinueWindow> disconnect_timer_;
-
-  // Used to ask the local user whether the session should be continued.
-  base::OneShotTimer<ContinueWindow> session_expired_timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContinueWindow);
+  static ContinueWindow* Create();
 };
 
-}  // namespace remoting
+}
 
-#endif  // REMOTING_HOST_CONTINUE_WINDOW_H_
+#endif  // REMOTING_HOST_CONTINUE_WINDOW_H

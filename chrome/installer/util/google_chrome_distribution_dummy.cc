@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -12,7 +12,7 @@
 
 #include <windows.h>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/values.h"
 
@@ -22,64 +22,43 @@ GoogleChromeDistribution::GoogleChromeDistribution()
 
 void GoogleChromeDistribution::DoPostUninstallOperations(
     const Version& version,
-    const base::FilePath& local_data_path,
-    const base::string16& distribution_data) {
+    const FilePath& local_data_path,
+    const std::wstring& distribution_data) {
 }
 
-base::string16 GoogleChromeDistribution::GetActiveSetupGuid() {
+std::wstring GoogleChromeDistribution::GetAppGuid() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetAppGuid() {
+std::wstring GoogleChromeDistribution::GetApplicationName() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetBaseAppName() {
+std::wstring GoogleChromeDistribution::GetAlternateApplicationName() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetShortcutName(
-    ShortcutType shortcut_type) {
+std::wstring GoogleChromeDistribution::GetBrowserAppId() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-int GoogleChromeDistribution::GetIconIndex(ShortcutType shortcut_type) {
+std::wstring GoogleChromeDistribution::GetInstallSubDir() {
   NOTREACHED();
-  return 0;
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetBaseAppId() {
+std::wstring GoogleChromeDistribution::GetPublisherName() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetBrowserProgIdPrefix() {
+std::wstring GoogleChromeDistribution::GetAppDescription() {
   NOTREACHED();
-  return base::string16();
-}
-
-base::string16 GoogleChromeDistribution::GetBrowserProgIdDesc() {
-  NOTREACHED();
-  return base::string16();
-}
-
-base::string16 GoogleChromeDistribution::GetInstallSubDir() {
-  NOTREACHED();
-  return base::string16();
-}
-
-base::string16 GoogleChromeDistribution::GetPublisherName() {
-  NOTREACHED();
-  return base::string16();
-}
-
-base::string16 GoogleChromeDistribution::GetAppDescription() {
-  NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
 std::string GoogleChromeDistribution::GetSafeBrowsingName() {
@@ -87,14 +66,19 @@ std::string GoogleChromeDistribution::GetSafeBrowsingName() {
   return std::string();
 }
 
-base::string16 GoogleChromeDistribution::GetStateKey() {
+std::wstring GoogleChromeDistribution::GetStateKey() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetStateMediumKey() {
+std::wstring GoogleChromeDistribution::GetStateMediumKey() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
+}
+
+std::wstring GoogleChromeDistribution::GetStatsServerURL() {
+  NOTREACHED();
+  return std::wstring();
 }
 
 std::string GoogleChromeDistribution::GetNetworkStatsServer() const {
@@ -102,45 +86,24 @@ std::string GoogleChromeDistribution::GetNetworkStatsServer() const {
   return std::string();
 }
 
-std::string GoogleChromeDistribution::GetHttpPipeliningTestServer() const {
+std::wstring GoogleChromeDistribution::GetDistributionData(HKEY root_key) {
   NOTREACHED();
-  return std::string();
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetDistributionData(HKEY root_key) {
+std::wstring GoogleChromeDistribution::GetUninstallLinkName() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetUninstallLinkName() {
+std::wstring GoogleChromeDistribution::GetUninstallRegPath() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 GoogleChromeDistribution::GetUninstallRegPath() {
+std::wstring GoogleChromeDistribution::GetVersionKey() {
   NOTREACHED();
-  return base::string16();
-}
-
-base::string16 GoogleChromeDistribution::GetVersionKey() {
-  NOTREACHED();
-  return base::string16();
-}
-
-base::string16 GoogleChromeDistribution::GetIconFilename() {
-  NOTREACHED();
-  return base::string16();
-}
-
-bool GoogleChromeDistribution::GetCommandExecuteImplClsid(
-    base::string16* handler_class_uuid) {
-  NOTREACHED();
-  return false;
-}
-
-bool GoogleChromeDistribution::AppHostIsSupported() {
-  NOTREACHED();
-  return false;
+  return std::wstring();
 }
 
 void GoogleChromeDistribution::UpdateInstallStatus(bool system_install,
@@ -149,12 +112,40 @@ void GoogleChromeDistribution::UpdateInstallStatus(bool system_install,
   NOTREACHED();
 }
 
-bool GoogleChromeDistribution::ShouldSetExperimentLabels() {
+bool GoogleChromeDistribution::GetExperimentDetails(
+    UserExperiment* experiment, int flavor) {
   NOTREACHED();
   return false;
 }
 
-bool GoogleChromeDistribution::HasUserExperiments() {
+void GoogleChromeDistribution::LaunchUserExperiment(
+    const FilePath& setup_path, installer::InstallStatus status,
+    const Version& version, const installer::Product& installation,
+    bool system_level) {
+  NOTREACHED();
+}
+
+void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
+    const std::wstring& experiment_group,
+    const installer::Product& installation,
+    const FilePath& application_path) {
+  NOTREACHED();
+}
+
+bool GoogleChromeDistribution::ExtractUninstallMetricsFromFile(
+    const FilePath& file_path, std::wstring* uninstall_metrics_string) {
+  NOTREACHED();
+  return false;
+}
+
+bool GoogleChromeDistribution::ExtractUninstallMetrics(
+    const DictionaryValue& root, std::wstring* uninstall_metrics_string) {
+  NOTREACHED();
+  return false;
+}
+
+bool GoogleChromeDistribution::BuildUninstallMetricsString(
+    DictionaryValue* uninstall_metrics_dict, std::wstring* metrics) {
   NOTREACHED();
   return false;
 }

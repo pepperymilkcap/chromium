@@ -4,12 +4,9 @@
 
 #ifndef CHROME_BROWSER_FIRST_RUN_UPGRADE_UTIL_H_
 #define CHROME_BROWSER_FIRST_RUN_UPGRADE_UTIL_H_
+#pragma once
 
 #include "build/build_config.h"
-
-#if defined(OS_WIN)
-#include <string>
-#endif
 
 #if !defined(OS_CHROMEOS)
 
@@ -20,30 +17,6 @@ namespace upgrade_util {
 // Launches Chrome again simulating a "user" launch. If Chrome could not be
 // launched, returns false.
 bool RelaunchChromeBrowser(const CommandLine& command_line);
-
-#if defined(OS_WIN)
-
-extern const char kRelaunchModeMetro[];
-extern const char kRelaunchModeDesktop[];
-extern const char kRelaunchModeDefault[];
-
-enum RelaunchMode {
-  RELAUNCH_MODE_METRO = 0,
-  RELAUNCH_MODE_DESKTOP = 1,
-  // Default mode indicates caller is not sure which mode to launch.
-  RELAUNCH_MODE_DEFAULT = 2,
-};
-
-std::string RelaunchModeEnumToString(const RelaunchMode& relaunch_mode);
-
-RelaunchMode RelaunchModeStringToEnum(const std::string& relaunch_mode);
-
-// Like RelaunchChromeBrowser() but for Windows 8 it will read pref and restart
-// chrome accordingly in desktop or metro mode.
-bool RelaunchChromeWithMode(const CommandLine& command_line,
-                            const RelaunchMode& relaunch_mode);
-
-#endif
 
 #if !defined(OS_MACOSX)
 

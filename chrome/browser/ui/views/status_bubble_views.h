@@ -1,18 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_STATUS_BUBBLE_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_STATUS_BUBBLE_VIEWS_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "chrome/browser/ui/status_bubble.h"
+#include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
-#include "url/gurl.h"
 
 namespace gfx {
 class Point;
@@ -54,14 +55,12 @@ class StatusBubbleViews : public StatusBubble {
   void SetBubbleWidth(int width);
 
   // Overridden from StatusBubble:
-  virtual void SetStatus(const base::string16& status) OVERRIDE;
+  virtual void SetStatus(const string16& status) OVERRIDE;
   virtual void SetURL(const GURL& url, const std::string& languages) OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual void MouseMoved(const gfx::Point& location,
                           bool left_content) OVERRIDE;
   virtual void UpdateDownloadShelfVisibility(bool visible) OVERRIDE;
-
-  views::Widget* GetPopupForTest() { return popup(); }
 
  protected:
   views::Widget* popup() { return popup_.get(); }
@@ -94,10 +93,10 @@ class StatusBubbleViews : public StatusBubble {
   int GetMaxStatusBubbleWidth();
 
   // The status text we want to display when there are no URLs to display.
-  base::string16 status_text_;
+  string16 status_text_;
 
   // The url we want to display when there is no status text to display.
-  base::string16 url_text_;
+  string16 url_text_;
 
   // The original, non-elided URL.
   GURL url_;
@@ -110,12 +109,6 @@ class StatusBubbleViews : public StatusBubble {
   // original_position_ adjusted according to the current RTL.
   gfx::Point position_;
   gfx::Size size_;
-
-  // Last location passed to MouseMoved().
-  gfx::Point last_mouse_moved_location_;
-
-  // Whether the view contains the mouse.
-  bool contains_mouse_;
 
   // How vertically offset the bubble is from its root position_.
   int offset_;

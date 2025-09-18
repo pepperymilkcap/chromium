@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_BASE_CAPTURING_NET_LOG_H_
 #define NET_BASE_CAPTURING_NET_LOG_H_
+#pragma once
 
-#include <string>
 #include <vector>
 
 #include "base/atomicops.h"
@@ -14,108 +14,70 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "net/base/net_export.h"
 #include "net/base/net_log.h"
-
-namespace base {
-class DictionaryValue;
-class ListValue;
-}
 
 namespace net {
 
-// CapturingNetLog is a NetLog which instantiates Observer that saves messages
-// to a bounded buffer.  It is intended for testing only, and is part of the
-// net_test_support project. This is provided for convinience and compatilbility
-// with the old unittests.
-class CapturingNetLog : public NetLog {
+// CapturingNetLog is an implementation of NetLog that saves messages to a
+// bounded buffer.
+class NET_EXPORT CapturingNetLog : public NetLog {
  public:
-  struct CapturedEntry {
-    CapturedEntry(EventType type,
-                  const base::TimeTicks& time,
-                  Source source,
-                  EventPhase phase,
-                  scoped_ptr<base::DictionaryValue> params);
-    // Copy constructor needed to store in a std::vector because of the
-    // scoped_ptr.
-    CapturedEntry(const CapturedEntry& entry);
-
-    ~CapturedEntry();
-
-    // Equality operator needed to store in a std::vector because of the
-    // scoped_ptr.
-    CapturedEntry& operator=(const CapturedEntry& entry);
-
-    // Attempt to retrieve an value of the specified type with the given name
-    // from |params|.  Returns true on success, false on failure.  Does not
-    // modify |value| on failure.
-    bool GetStringValue(const std::string& name, std::string* value) const;
-    bool GetIntegerValue(const std::string& name, int* value) const;
-    bool GetListValue(const std::string& name, base::ListValue** value) const;
-
-    // Same as GetIntegerValue, but returns the error code associated with a
-    // log entry.
-    bool GetNetErrorCode(int* value) const;
-
-    // Returns the parameters as a JSON string, or empty string if there are no
-    // parameters.
-    std::string GetParamsJson() const;
+  struct NET_EXPORT Entry {
+    Entry(EventType type,
+          const base::TimeTicks& time,
+          Source source,
+          EventPhase phase,
+          EventParameters* extra_parameters);
+    ~Entry();
 
     EventType type;
     base::TimeTicks time;
     Source source;
     EventPhase phase;
-    scoped_ptr<base::DictionaryValue> params;
+    scoped_refptr<EventParameters> extra_parameters;
   };
 
   // Ordered set of entries that were logged.
-  typedef std::vector<CapturedEntry> CapturedEntryList;
+  typedef std::vector<Entry> EntryList;
 
-  CapturingNetLog();
+  enum { kUnbounded = -1 };
+
+  // Creates a CapturingNetLog that logs a maximum of |max_num_entries|
+  // messages.
+  explicit CapturingNetLog(size_t max_num_entries);
   virtual ~CapturingNetLog();
 
-  void SetLogLevel(LogLevel log_level);
+  // Returns the list of all entries in the log.
+  void GetEntries(EntryList* entry_list) const;
 
-  // Below methods are forwarded to capturing_net_log_observer_.
-  void GetEntries(CapturedEntryList* entry_list) const;
-  void GetEntriesForSource(Source source, CapturedEntryList* entry_list) const;
-  size_t GetSize() const;
   void Clear();
 
+  void SetLogLevel(NetLog::LogLevel log_level);
+
+  // NetLog implementation:
+  virtual void AddEntry(EventType type,
+                        const base::TimeTicks& time,
+                        const Source& source,
+                        EventPhase phase,
+                        EventParameters* extra_parameters) OVERRIDE;
+  virtual uint32 NextID() OVERRIDE;
+  virtual LogLevel GetLogLevel() const OVERRIDE;
+  virtual void AddThreadSafeObserver(ThreadSafeObserver* observer) OVERRIDE;
+  virtual void RemoveThreadSafeObserver(ThreadSafeObserver* observer) OVERRIDE;
+
  private:
-  // Observer is an implementation of NetLog::ThreadSafeObserver
-  // that saves messages to a bounded buffer. It is intended for testing only,
-  // and is part of the net_test_support project.
-  class Observer : public NetLog::ThreadSafeObserver {
-   public:
-    Observer();
-    virtual ~Observer();
+  // Needs to be "mutable" so can use it in GetEntries().
+  mutable base::Lock lock_;
 
-    // Returns the list of all entries in the log.
-    void GetEntries(CapturedEntryList* entry_list) const;
+  // Last assigned source ID.  Incremented to get the next one.
+  base::subtle::Atomic32 last_id_;
 
-    // Fills |entry_list| with all entries in the log from the specified Source.
-    void GetEntriesForSource(Source source,
-                             CapturedEntryList* entry_list) const;
+  size_t max_num_entries_;
+  EntryList entries_;
 
-    // Returns number of entries in the log.
-    size_t GetSize() const;
-
-    void Clear();
-
-   private:
-    // ThreadSafeObserver implementation:
-    virtual void OnAddEntry(const Entry& entry) OVERRIDE;
-
-    // Needs to be "mutable" so can use it in GetEntries().
-    mutable base::Lock lock_;
-
-    CapturedEntryList captured_entries_;
-
-    DISALLOW_COPY_AND_ASSIGN(Observer);
-  };
-
-  Observer capturing_net_log_observer_;
+  NetLog::LogLevel log_level_;
 
   DISALLOW_COPY_AND_ASSIGN(CapturingNetLog);
 };
@@ -125,24 +87,21 @@ class CapturingNetLog : public NetLog {
 //
 // CapturingBoundNetLog can easily be converted to a BoundNetLog using the
 // bound() method.
-class CapturingBoundNetLog {
+class NET_EXPORT_PRIVATE CapturingBoundNetLog {
  public:
-  CapturingBoundNetLog();
+  CapturingBoundNetLog(const NetLog::Source& source, CapturingNetLog* net_log);
+
+  explicit CapturingBoundNetLog(size_t max_num_entries);
+
   ~CapturingBoundNetLog();
 
   // The returned BoundNetLog is only valid while |this| is alive.
-  BoundNetLog bound() const { return net_log_; }
+  BoundNetLog bound() const {
+    return BoundNetLog(source_, capturing_net_log_.get());
+  }
 
   // Fills |entry_list| with all entries in the log.
-  void GetEntries(CapturingNetLog::CapturedEntryList* entry_list) const;
-
-  // Fills |entry_list| with all entries in the log from the specified Source.
-  void GetEntriesForSource(
-      NetLog::Source source,
-      CapturingNetLog::CapturedEntryList* entry_list) const;
-
-  // Returns number of entries in the log.
-  size_t GetSize() const;
+  void GetEntries(CapturingNetLog::EntryList* entry_list) const;
 
   void Clear();
 
@@ -150,8 +109,8 @@ class CapturingBoundNetLog {
   void SetLogLevel(NetLog::LogLevel log_level);
 
  private:
-  CapturingNetLog capturing_net_log_;
-  const BoundNetLog net_log_;
+  NetLog::Source source_;
+  scoped_ptr<CapturingNetLog> capturing_net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(CapturingBoundNetLog);
 };

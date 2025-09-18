@@ -2,27 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "skia/ext/vector_platform_device_emf_win.h"
-
 #include <windows.h>
 
-#include "base/logging.h"
-#include "base/strings/string16.h"
+#include "skia/ext/vector_platform_device_emf_win.h"
+
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/skia_utils_win.h"
-#include "third_party/skia/include/core/SkFontHost.h"
-#include "third_party/skia/include/core/SkPathEffect.h"
 #include "third_party/skia/include/core/SkTemplates.h"
 #include "third_party/skia/include/core/SkUtils.h"
 #include "third_party/skia/include/ports/SkTypeface_win.h"
 
 namespace skia {
 
-#define CHECK_FOR_NODRAW_ANNOTATION(paint) \
-    do { if (paint.isNoDrawAnnotation()) { return; } } while (0)
-
 // static
-SkBaseDevice* VectorPlatformDeviceEmf::CreateDevice(
+SkDevice* VectorPlatformDeviceEmf::CreateDevice(
     int width, int height, bool is_opaque, HANDLE shared_section) {
   if (!is_opaque) {
     // TODO(maruel):  http://crbug.com/18382 When restoring a semi-transparent
@@ -33,7 +26,7 @@ SkBaseDevice* VectorPlatformDeviceEmf::CreateDevice(
     // EMF-based VectorDevice and have this device registers the drawing. When
     // playing back the device into a bitmap, do it at the printer's dpi instead
     // of the layout's dpi (which is much lower).
-    return BitmapPlatformDevice::Create(width, height, is_opaque,
+    return BitmapPlatformDevice::create(width, height, is_opaque,
                                         shared_section);
   }
 
@@ -46,7 +39,7 @@ SkBaseDevice* VectorPlatformDeviceEmf::CreateDevice(
   // SkScalarRound(value) as SkScalarRound(value * 10). Safari is already
   // doing the same for text rendering.
   SkASSERT(shared_section);
-  SkBaseDevice* device = VectorPlatformDeviceEmf::create(
+  SkDevice* device = VectorPlatformDeviceEmf::create(
       reinterpret_cast<HDC>(shared_section), width, height);
   return device;
 }
@@ -65,7 +58,7 @@ static void FillBitmapInfoHeader(int width, int height, BITMAPINFOHEADER* hdr) {
   hdr->biClrImportant = 0;
 }
 
-SkBaseDevice* VectorPlatformDeviceEmf::create(HDC dc, int width, int height) {
+SkDevice* VectorPlatformDeviceEmf::create(HDC dc, int width, int height) {
   InitializeDC(dc);
 
   // Link the SkBitmap to the current selected bitmap in the device context.
@@ -100,10 +93,11 @@ SkBaseDevice* VectorPlatformDeviceEmf::create(HDC dc, int width, int height) {
 }
 
 VectorPlatformDeviceEmf::VectorPlatformDeviceEmf(HDC dc, const SkBitmap& bitmap)
-    : SkBitmapDevice(bitmap),
+    : SkDevice(bitmap),
       hdc_(dc),
       previous_brush_(NULL),
-      previous_pen_(NULL) {
+      previous_pen_(NULL),
+      alpha_blend_used_(false) {
   transform_.reset();
   SetPlatformDevice(this, this);
 }
@@ -118,7 +112,7 @@ HDC VectorPlatformDeviceEmf::BeginPlatformPaint() {
 }
 
 uint32_t VectorPlatformDeviceEmf::getDeviceCapabilities() {
-  return SkBitmapDevice::getDeviceCapabilities() | kVector_Capability;
+  return SkDevice::getDeviceCapabilities() | kVector_Capability;
 }
 
 void VectorPlatformDeviceEmf::drawPaint(const SkDraw& draw,
@@ -178,7 +172,6 @@ void VectorPlatformDeviceEmf::drawPoints(const SkDraw& draw,
 void VectorPlatformDeviceEmf::drawRect(const SkDraw& draw,
                                        const SkRect& rect,
                                        const SkPaint& paint) {
-  CHECK_FOR_NODRAW_ANNOTATION(paint);
   if (paint.getPathEffect()) {
     // Draw a path instead.
     SkPath path_orginal;
@@ -190,7 +183,7 @@ void VectorPlatformDeviceEmf::drawRect(const SkDraw& draw,
 
     // Removes the path effect from the temporary SkPaint object.
     SkPaint paint_no_effet(paint);
-    paint_no_effet.setPathEffect(NULL);
+    SkSafeUnref(paint_no_effet.setPathEffect(NULL));
 
     // Draw the calculated path.
     drawPath(draw, path_modified, paint_no_effet);
@@ -211,19 +204,11 @@ void VectorPlatformDeviceEmf::drawRect(const SkDraw& draw,
   Cleanup();
 }
 
-void VectorPlatformDeviceEmf::drawRRect(const SkDraw& draw, const SkRRect& rr,
-                                        const SkPaint& paint) {
-  SkPath path;
-  path.addRRect(rr);
-  this->drawPath(draw, path, paint, NULL, true);
-}
-
 void VectorPlatformDeviceEmf::drawPath(const SkDraw& draw,
                                        const SkPath& path,
                                        const SkPaint& paint,
                                        const SkMatrix* prePathMatrix,
                                        bool pathIsMutable) {
-  CHECK_FOR_NODRAW_ANNOTATION(paint);
   if (paint.getPathEffect()) {
     // Apply the path effect forehand.
     SkPath path_modified;
@@ -231,7 +216,7 @@ void VectorPlatformDeviceEmf::drawPath(const SkDraw& draw,
 
     // Removes the path effect from the temporary SkPaint object.
     SkPaint paint_no_effet(paint);
-    paint_no_effet.setPathEffect(NULL);
+    SkSafeUnref(paint_no_effet.setPathEffect(NULL));
 
     // Draw the calculated path.
     drawPath(draw, path_modified, paint_no_effet);
@@ -268,66 +253,9 @@ void VectorPlatformDeviceEmf::drawPath(const SkDraw& draw,
   Cleanup();
 }
 
-void VectorPlatformDeviceEmf::drawBitmapRect(const SkDraw& draw,
-                                             const SkBitmap& bitmap,
-                                             const SkRect* src,
-                                             const SkRect& dst,
-                                             const SkPaint& paint,
-                                             SkCanvas::DrawBitmapRectFlags flags) {
-    SkMatrix    matrix;
-    SkRect      bitmapBounds, tmpSrc, tmpDst;
-    SkBitmap    tmpBitmap;
-
-    bitmapBounds.isetWH(bitmap.width(), bitmap.height());
-
-    // Compute matrix from the two rectangles
-    if (src) {
-        tmpSrc = *src;
-    } else {
-        tmpSrc = bitmapBounds;
-    }
-    matrix.setRectToRect(tmpSrc, dst, SkMatrix::kFill_ScaleToFit);
-
-    const SkBitmap* bitmapPtr = &bitmap;
-
-    // clip the tmpSrc to the bounds of the bitmap, and recompute dstRect if
-    // needed (if the src was clipped). No check needed if src==null.
-    if (src) {
-        if (!bitmapBounds.contains(*src)) {
-            if (!tmpSrc.intersect(bitmapBounds)) {
-                return; // nothing to draw
-            }
-            // recompute dst, based on the smaller tmpSrc
-            matrix.mapRect(&tmpDst, tmpSrc);
-        }
-
-        // since we may need to clamp to the borders of the src rect within
-        // the bitmap, we extract a subset.
-        // TODO: make sure this is handled in drawrect and remove it from here.
-        SkIRect srcIR;
-        tmpSrc.roundOut(&srcIR);
-        if (!bitmap.extractSubset(&tmpBitmap, srcIR)) {
-            return;
-        }
-        bitmapPtr = &tmpBitmap;
-
-        // Since we did an extract, we need to adjust the matrix accordingly
-        SkScalar dx = 0, dy = 0;
-        if (srcIR.fLeft > 0) {
-            dx = SkIntToScalar(srcIR.fLeft);
-        }
-        if (srcIR.fTop > 0) {
-            dy = SkIntToScalar(srcIR.fTop);
-        }
-        if (dx || dy) {
-            matrix.preTranslate(dx, dy);
-        }
-    }
-    this->drawBitmap(draw, *bitmapPtr, matrix, paint);
-}
-
 void VectorPlatformDeviceEmf::drawBitmap(const SkDraw& draw,
                                          const SkBitmap& bitmap,
+                                         const SkIRect* srcRectOrNull,
                                          const SkMatrix& matrix,
                                          const SkPaint& paint) {
   // Load the temporary matrix. This is what will translate, rotate and resize
@@ -433,48 +361,6 @@ static UINT getTextOutOptions(const SkPaint& paint) {
   }
 }
 
-static SkiaEnsureTypefaceCharactersAccessible
-    g_skia_ensure_typeface_characters_accessible = NULL;
-
-SK_API void SetSkiaEnsureTypefaceCharactersAccessible(
-    SkiaEnsureTypefaceCharactersAccessible func) {
-  // This function is supposed to be called once in process life time.
-  SkASSERT(g_skia_ensure_typeface_characters_accessible == NULL);
-  g_skia_ensure_typeface_characters_accessible = func;
-}
-
-void EnsureTypefaceCharactersAccessible(
-    const SkTypeface& typeface, const wchar_t* text, unsigned int text_length) {
-  LOGFONT lf;
-  SkLOGFONTFromTypeface(&typeface, &lf);
-  g_skia_ensure_typeface_characters_accessible(lf, text, text_length);
-}
-
-bool EnsureExtTextOut(HDC hdc, int x, int y, UINT options, const RECT * lprect,
-                      LPCWSTR text, unsigned int characters, const int * lpDx,
-                      SkTypeface* const typeface) {
-  bool success = ExtTextOut(hdc, x, y, options, lprect, text, characters, lpDx);
-  if (!success) {
-    if (typeface) {
-      EnsureTypefaceCharactersAccessible(*typeface,
-                                         text,
-                                         characters);
-      success = ExtTextOut(hdc, x, y, options, lprect, text, characters, lpDx);
-      if (!success) {
-        LOGFONT lf;
-        SkLOGFONTFromTypeface(typeface, &lf);
-        VLOG(1) << "SkFontHost::EnsureTypefaceCharactersAccessible FAILED for "
-                << " FaceName = " << lf.lfFaceName
-                << " and characters: " << base::string16(text, characters);
-      }
-    } else {
-      VLOG(1) << "ExtTextOut FAILED for default FaceName "
-              << " and characters: " << base::string16(text, characters);
-    }
-  }
-  return success;
-}
-
 void VectorPlatformDeviceEmf::drawText(const SkDraw& draw,
                                        const void* text,
                                        size_t byteLength,
@@ -482,19 +368,13 @@ void VectorPlatformDeviceEmf::drawText(const SkDraw& draw,
                                        SkScalar y,
                                        const SkPaint& paint) {
   SkGDIFontSetup setup;
-  bool useDrawPath = true;
-
   if (SkPaint::kUTF8_TextEncoding != paint.getTextEncoding()
       && setup.useGDI(hdc_, paint)) {
     UINT options = getTextOutOptions(paint);
     UINT count = byteLength >> 1;
-    useDrawPath = !EnsureExtTextOut(hdc_, SkScalarRound(x),
-        SkScalarRound(y + getAscent(paint)), options, 0,
-        reinterpret_cast<const wchar_t*>(text), count, NULL,
-        paint.getTypeface());
-  }
-
-  if (useDrawPath) {
+    ExtTextOut(hdc_, SkScalarRound(x), SkScalarRound(y + getAscent(paint)),
+        options, 0, reinterpret_cast<const wchar_t*>(text), count, NULL);
+  } else {
     SkPath path;
     paint.getTextPath(text, byteLength, x, y, &path);
     drawPath(draw, path, paint);
@@ -522,8 +402,6 @@ void VectorPlatformDeviceEmf::drawPosText(const SkDraw& draw,
                                           int scalarsPerPos,
                                           const SkPaint& paint) {
   SkGDIFontSetup setup;
-  bool useDrawText = true;
-
   if (2 == scalarsPerPos
       && SkPaint::kUTF8_TextEncoding != paint.getTextEncoding()
       && setup.useGDI(hdc_, paint)) {
@@ -536,12 +414,9 @@ void VectorPlatformDeviceEmf::drawPosText(const SkDraw& draw,
       advances[i] = SkScalarRound(pos[2] - pos[0]);
       pos += 2;
     }
-    useDrawText = !EnsureExtTextOut(hdc_, startX, startY,
-        getTextOutOptions(paint), 0, reinterpret_cast<const wchar_t*>(text),
-        count, advances, paint.getTypeface());
-  }
-
-  if (useDrawText) {
+    ExtTextOut(hdc_, startX, startY, getTextOutOptions(paint), 0,
+        reinterpret_cast<const wchar_t*>(text), count, advances);
+  } else {
     size_t (*bytesPerCodePoint)(const char*);
     switch (paint.getTextEncoding()) {
     case SkPaint::kUTF8_TextEncoding:
@@ -593,7 +468,7 @@ void VectorPlatformDeviceEmf::drawVertices(const SkDraw& draw,
 }
 
 void VectorPlatformDeviceEmf::drawDevice(const SkDraw& draw,
-                                         SkBaseDevice* device,
+                                         SkDevice* device,
                                          int x,
                                          int y,
                                          const SkPaint& paint) {
@@ -609,7 +484,7 @@ bool VectorPlatformDeviceEmf::ApplyPaint(const SkPaint& paint) {
 
   SkPaint::Style style = paint.getStyle();
   if (!paint.getAlpha())
-      style = (SkPaint::Style) SkPaint::kStyleCount;
+    style = SkPaint::kStyleCount;
 
   switch (style) {
     case SkPaint::kFill_Style:
@@ -700,7 +575,7 @@ void VectorPlatformDeviceEmf::LoadClipRegion() {
   LoadClippingRegionToDC(hdc_, clip_region_, t);
 }
 
-SkBaseDevice* VectorPlatformDeviceEmf::onCreateCompatibleDevice(
+SkDevice* VectorPlatformDeviceEmf::onCreateCompatibleDevice(
     SkBitmap::Config config, int width, int height, bool isOpaque,
     Usage /*usage*/) {
   SkASSERT(config == SkBitmap::kARGB_8888_Config);
@@ -903,7 +778,7 @@ void VectorPlatformDeviceEmf::InternalDrawBitmap(const SkBitmap& bitmap,
   bitmap_header.bV4AlphaMask = 0xff000000;
 
   SkAutoLockPixels lock(bitmap);
-  SkASSERT(bitmap.config() == SkBitmap::kARGB_8888_Config);
+  SkASSERT(bitmap.getConfig() == SkBitmap::kARGB_8888_Config);
   const uint32_t* pixels = static_cast<const uint32_t*>(bitmap.getPixels());
   if (pixels == NULL) {
     SkASSERT(false);
@@ -972,6 +847,8 @@ void VectorPlatformDeviceEmf::InternalDrawBitmap(const SkBitmap& bitmap,
     SkASSERT(result);
     result = SetStretchBltMode(dc, previous_mode);
     SkASSERT(result);
+
+    alpha_blend_used_ = true;
 
     ::SelectObject(bitmap_dc, static_cast<HBITMAP>(old_bitmap));
     DeleteObject(hbitmap);

@@ -1,27 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Defines base::PathProviderMac which replaces base::PathProviderPosix for Mac
-// in base/path_service.cc.
+#include "base/base_paths_mac.h"
 
 #include <dlfcn.h>
 #import <Foundation/Foundation.h>
 #include <mach-o/dyld.h>
 
-#include "base/base_paths.h"
 #include "base/compiler_specific.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "build/build_config.h"
+#include "base/string_util.h"
 
 namespace {
 
-void GetNSExecutablePath(base::FilePath* path) {
+void GetNSExecutablePath(FilePath* path) {
   DCHECK(path);
   // Executable path can have relative references ("..") depending on
   // how the app was launched.
@@ -32,24 +29,19 @@ void GetNSExecutablePath(base::FilePath* path) {
   int rv = _NSGetExecutablePath(WriteInto(&executable_path, executable_length),
                                 &executable_length);
   DCHECK_EQ(rv, 0);
-
-  // _NSGetExecutablePath may return paths containing ./ or ../ which makes
-  // FilePath::DirName() work incorrectly, convert it to absolute path so that
-  // paths such as DIR_SOURCE_ROOT can work, since we expect absolute paths to
-  // be returned here.
-  *path = base::MakeAbsoluteFilePath(base::FilePath(executable_path));
+  *path = FilePath(executable_path);
 }
 
 // Returns true if the module for |address| is found. |path| will contain
 // the path to the module. Note that |path| may not be absolute.
-bool GetModulePathForAddress(base::FilePath* path,
+bool GetModulePathForAddress(FilePath* path,
                              const void* address) WARN_UNUSED_RESULT;
 
-bool GetModulePathForAddress(base::FilePath* path, const void* address) {
+bool GetModulePathForAddress(FilePath* path, const void* address) {
   Dl_info info;
   if (dladdr(address, &info) == 0)
     return false;
-  *path = base::FilePath(info.dli_fname);
+  *path = FilePath(info.dli_fname);
   return true;
 }
 
@@ -57,7 +49,7 @@ bool GetModulePathForAddress(base::FilePath* path, const void* address) {
 
 namespace base {
 
-bool PathProviderMac(int key, base::FilePath* result) {
+bool PathProviderMac(int key, FilePath* result) {
   switch (key) {
     case base::FILE_EXE:
       GetNSExecutablePath(result);
@@ -65,25 +57,17 @@ bool PathProviderMac(int key, base::FilePath* result) {
     case base::FILE_MODULE:
       return GetModulePathForAddress(result,
           reinterpret_cast<const void*>(&base::PathProviderMac));
-    case base::DIR_APP_DATA: {
-      bool success = base::mac::GetUserDirectory(NSApplicationSupportDirectory,
-                                                 result);
-#if defined(OS_IOS)
-      // On IOS, this directory does not exist unless it is created explicitly.
-      if (success && !base::PathExists(*result))
-        success = base::CreateDirectory(*result);
-#endif  // defined(OS_IOS)
-      return success;
-    }
-    case base::DIR_SOURCE_ROOT:
+    case base::DIR_CACHE:
+      return base::mac::GetUserDirectory(NSCachesDirectory, result);
+    case base::DIR_APP_DATA:
+      return base::mac::GetUserDirectory(NSApplicationSupportDirectory, result);
+    case base::DIR_SOURCE_ROOT: {
       // Go through PathService to catch overrides.
       if (!PathService::Get(base::FILE_EXE, result))
         return false;
 
       // Start with the executable's directory.
       *result = result->DirName();
-
-#if !defined(OS_IOS)
       if (base::mac::AmIBundled()) {
         // The bundled app executables (Chromium, TestShell, etc) live five
         // levels down, eg:
@@ -94,21 +78,8 @@ bool PathProviderMac(int key, base::FilePath* result) {
         // src/xcodebuild/{Debug|Release}/base_unittests
         *result = result->DirName().DirName();
       }
-#endif
       return true;
-    case base::DIR_USER_DESKTOP:
-#if defined(OS_IOS)
-      // iOS does not have desktop directories.
-      NOTIMPLEMENTED();
-      return false;
-#else
-      return base::mac::GetUserDirectory(NSDesktopDirectory, result);
-#endif
-    case base::DIR_CACHE:
-      return base::mac::GetUserDirectory(NSCachesDirectory, result);
-    case base::DIR_HOME:
-      *result = base::mac::NSStringToFilePath(NSHomeDirectory());
-      return true;
+    }
     default:
       return false;
   }

@@ -4,6 +4,7 @@
 
 #ifndef NET_DNS_DNS_TRANSACTION_H_
 #define NET_DNS_DNS_TRANSACTION_H_
+#pragma once
 
 #include <string>
 
@@ -34,8 +35,9 @@ class NET_EXPORT_PRIVATE DnsTransaction {
   // Returns the |qtype|.
   virtual uint16 GetType() const = 0;
 
-  // Starts the transaction.  Always completes asynchronously.
-  virtual void Start() = 0;
+  // Starts the transaction. Returns the net error on synchronous failure or
+  // ERR_IO_PENDING in which case the result will be passed via the callback.
+  virtual int Start() = 0;
 };
 
 // Creates DnsTransaction which performs asynchronous DNS search.
@@ -59,12 +61,12 @@ class NET_EXPORT_PRIVATE DnsTransactionFactory {
   // search. |hostname| should not be an IP literal.
   //
   // The transaction will run |callback| upon asynchronous completion.
-  // The |net_log| is used as the parent log.
+  // The source of |source_net_log| is used as source dependency in log.
   virtual scoped_ptr<DnsTransaction> CreateTransaction(
       const std::string& hostname,
       uint16 qtype,
       const CallbackType& callback,
-      const BoundNetLog& net_log) WARN_UNUSED_RESULT = 0;
+      const BoundNetLog& source_net_log) WARN_UNUSED_RESULT = 0;
 
   // Creates a DnsTransactionFactory which creates DnsTransactionImpl using the
   // |session|.

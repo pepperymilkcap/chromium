@@ -46,10 +46,10 @@ namespace compiler {
 namespace cpp {
 
 EnumGenerator::EnumGenerator(const EnumDescriptor* descriptor,
-                             const Options& options)
+                             const string& dllexport_decl)
   : descriptor_(descriptor),
     classname_(ClassName(descriptor, false)),
-    options_(options) {
+    dllexport_decl_(dllexport_decl) {
 }
 
 EnumGenerator::~EnumGenerator() {}
@@ -88,10 +88,10 @@ void EnumGenerator::GenerateDefinition(io::Printer* printer) {
   vars["min_name"] = min_value->name();
   vars["max_name"] = max_value->name();
 
-  if (options_.dllexport_decl.empty()) {
+  if (dllexport_decl_.empty()) {
     vars["dllexport"] = "";
   } else {
-    vars["dllexport"] = options_.dllexport_decl + " ";
+    vars["dllexport"] = dllexport_decl_ + " ";
   }
 
   printer->Print(vars,

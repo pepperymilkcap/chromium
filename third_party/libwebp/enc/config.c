@@ -1,16 +1,15 @@
-// Copyright 2011 Google Inc. All Rights Reserved.
+// Copyright 2011 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 // Coding tools configuration
 //
 // Author: Skal (pascal.massimino@gmail.com)
 
+#include <assert.h>
 #include "../webp/encode.h"
 
 #if defined(__cplusplus) || defined(c_plusplus)
@@ -21,9 +20,9 @@ extern "C" {
 // WebPConfig
 //------------------------------------------------------------------------------
 
-int WebPConfigInitInternal(WebPConfig* config,
+int WebPConfigInitInternal(WebPConfig* const config,
                            WebPPreset preset, float quality, int version) {
-  if (WEBP_ABI_IS_INCOMPATIBLE(version, WEBP_ENCODER_ABI_VERSION)) {
+  if (version != WEBP_ENCODER_ABI_VERSION) {
     return 0;   // caller/system version mismatch!
   }
   if (config == NULL) return 0;
@@ -33,24 +32,17 @@ int WebPConfigInitInternal(WebPConfig* config,
   config->target_PSNR = 0.;
   config->method = 4;
   config->sns_strength = 50;
-  config->filter_strength = 60;   // rather high filtering, helps w/ gradients.
+  config->filter_strength = 20;   // default: light filtering
   config->filter_sharpness = 0;
-  config->filter_type = 1;        // default: strong (so U/V is filtered too)
+  config->filter_type = 0;        // default: simple
   config->partitions = 0;
   config->segments = 4;
   config->pass = 1;
   config->show_compressed = 0;
   config->preprocessing = 0;
   config->autofilter = 0;
+  config->alpha_compression = 0;
   config->partition_limit = 0;
-  config->alpha_compression = 1;
-  config->alpha_filtering = 1;
-  config->alpha_quality = 100;
-  config->lossless = 0;
-  config->image_hint = WEBP_HINT_DEFAULT;
-  config->emulate_jpeg_size = 0;
-  config->thread_level = 0;
-  config->low_memory = 0;
 
   // TODO(skal): tune.
   switch (preset) {
@@ -85,7 +77,7 @@ int WebPConfigInitInternal(WebPConfig* config,
   return WebPValidateConfig(config);
 }
 
-int WebPValidateConfig(const WebPConfig* config) {
+int WebPValidateConfig(const WebPConfig* const config) {
   if (config == NULL) return 0;
   if (config->quality < 0 || config->quality > 100)
     return 0;
@@ -118,20 +110,6 @@ int WebPValidateConfig(const WebPConfig* config) {
   if (config->partition_limit < 0 || config->partition_limit > 100)
     return 0;
   if (config->alpha_compression < 0)
-    return 0;
-  if (config->alpha_filtering < 0)
-    return 0;
-  if (config->alpha_quality < 0 || config->alpha_quality > 100)
-    return 0;
-  if (config->lossless < 0 || config->lossless > 1)
-    return 0;
-  if (config->image_hint >= WEBP_HINT_LAST)
-    return 0;
-  if (config->emulate_jpeg_size < 0 || config->emulate_jpeg_size > 1)
-    return 0;
-  if (config->thread_level < 0 || config->thread_level > 1)
-    return 0;
-  if (config->low_memory < 0 || config->low_memory > 1)
     return 0;
   return 1;
 }

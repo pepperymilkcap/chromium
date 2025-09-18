@@ -6,58 +6,48 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/dom_operation_notification_details.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "content/public/test/browser_test_utils.h"
-#include "net/test/embedded_test_server/embedded_test_server.h"
-#include "ui/events/keycodes/keyboard_codes.h"
+#include "net/test/test_server.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 
-// TODO(kbr): remove: http://crbug.com/222296
-#if defined(OS_MACOSX)
-#import "base/mac/mac_util.h"
-#endif
-
-using content::DomOperationNotificationDetails;
 using content::NavigationController;
-using content::RenderViewHost;
 
 namespace {
 
-const char kTestingPage[] = "/keyevents_test.html";
-const char kSuppressEventJS[] =
-    "window.domAutomationController.send(setDefaultAction('%ls', %ls));";
-const char kGetResultJS[] =
-    "window.domAutomationController.send(keyEventResult[%d]);";
-const char kGetResultLengthJS[] =
-    "window.domAutomationController.send(keyEventResult.length);";
-const char kGetFocusedElementJS[] =
-    "window.domAutomationController.send(focusedElement);";
-const char kSetFocusedElementJS[] =
-    "window.domAutomationController.send(setFocusedElement('%ls'));";
-const char kGetTextBoxValueJS[] =
-    "window.domAutomationController.send("
-    "    document.getElementById('%ls').value);";
-const char kSetTextBoxValueJS[] =
-    "window.domAutomationController.send("
-    "    document.getElementById('%ls').value = '%ls');";
-const char kStartTestJS[] =
-    "window.domAutomationController.send(startTest(%d));";
+const char kTestingPage[] = "files/keyevents_test.html";
+const wchar_t kSuppressEventJS[] =
+    L"window.domAutomationController.send(setDefaultAction('%ls', %ls));";
+const wchar_t kGetResultJS[] =
+    L"window.domAutomationController.send(keyEventResult[%d]);";
+const wchar_t kGetResultLengthJS[] =
+    L"window.domAutomationController.send(keyEventResult.length);";
+const wchar_t kGetFocusedElementJS[] =
+    L"window.domAutomationController.send(focusedElement);";
+const wchar_t kSetFocusedElementJS[] =
+    L"window.domAutomationController.send(setFocusedElement('%ls'));";
+const wchar_t kGetTextBoxValueJS[] =
+    L"window.domAutomationController.send("
+    L"document.getElementById('%ls').value);";
+const wchar_t kSetTextBoxValueJS[] =
+    L"window.domAutomationController.send("
+    L"document.getElementById('%ls').value = '%ls');";
+const wchar_t kStartTestJS[] =
+    L"window.domAutomationController.send(startTest(%d));";
 
 // Maximum lenght of the result array in KeyEventTestData structure.
 const size_t kMaxResultLength = 10;
@@ -98,14 +88,14 @@ class TestFinishObserver : public content::NotificationObserver {
  public:
   explicit TestFinishObserver(RenderViewHost* render_view_host)
       : finished_(false), waiting_(false) {
-    registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
+    registrar_.Add(this, chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
                    content::Source<RenderViewHost>(render_view_host));
   }
 
   bool WaitForFinish() {
     if (!finished_) {
       waiting_ = true;
-      content::RunMessageLoop();
+      ui_test_utils::RunMessageLoop();
       waiting_ = false;
     }
     return finished_;
@@ -113,15 +103,15 @@ class TestFinishObserver : public content::NotificationObserver {
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
-    DCHECK(type == content::NOTIFICATION_DOM_OPERATION_RESPONSE);
+                       const content::NotificationDetails& details) {
+    DCHECK(type == chrome::NOTIFICATION_DOM_OPERATION_RESPONSE);
     content::Details<DomOperationNotificationDetails> dom_op_details(details);
     // We might receive responses for other script execution, but we only
     // care about the test finished message.
-    if (dom_op_details->json == "\"FINISHED\"") {
+    if (dom_op_details->json() == "\"FINISHED\"") {
       finished_ = true;
       if (waiting_)
-        base::MessageLoopForUI::current()->Quit();
+        MessageLoopForUI::current()->Quit();
     }
   }
 
@@ -135,7 +125,10 @@ class TestFinishObserver : public content::NotificationObserver {
 
 class BrowserKeyEventsTest : public InProcessBrowserTest {
  public:
-  BrowserKeyEventsTest() {}
+  BrowserKeyEventsTest() {
+    set_show_window(true);
+    EnableDOMAutomation();
+  }
 
   bool IsViewFocused(ViewID vid) {
     return ui_test_utils::IsViewFocused(browser(), vid);
@@ -149,10 +142,11 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   // true then the web page will suppress all events with |type|. Following
   // event types are supported: keydown, keypress, keyup and textInput.
   void SuppressEventByType(int tab_index, const wchar_t* type, bool suppress) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
+    ASSERT_LT(tab_index, browser()->tab_count());
     bool actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+    ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
+        L"",
         base::StringPrintf(kSuppressEventJS, type, GetBoolString(!suppress)),
         &actual));
     ASSERT_EQ(!suppress, actual);
@@ -175,24 +169,22 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   }
 
   void GetResultLength(int tab_index, int* length) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    ASSERT_TRUE(content::ExecuteScriptAndExtractInt(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        kGetResultLengthJS,
-        length));
+    ASSERT_LT(tab_index, browser()->tab_count());
+    ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractInt(
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
+        L"", kGetResultLengthJS, length));
   }
 
   void CheckResult(int tab_index, int length, const char* const result[]) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
+    ASSERT_LT(tab_index, browser()->tab_count());
     int actual_length;
     ASSERT_NO_FATAL_FAILURE(GetResultLength(tab_index, &actual_length));
     ASSERT_GE(actual_length, length);
     for (int i = 0; i < actual_length; ++i) {
       std::string actual;
-      ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-          browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-          base::StringPrintf(kGetResultJS, i),
-          &actual));
+      ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
+          browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
+          L"", base::StringPrintf(kGetResultJS, i), &actual));
 
       // If more events were received than expected, then the additional events
       // must be keyup events.
@@ -204,20 +196,20 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   }
 
   void CheckFocusedElement(int tab_index, const wchar_t* focused) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
+    ASSERT_LT(tab_index, browser()->tab_count());
     std::string actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        kGetFocusedElementJS,
-        &actual));
-    ASSERT_EQ(base::WideToUTF8(focused), actual);
+    ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
+        L"", kGetFocusedElementJS, &actual));
+    ASSERT_EQ(WideToUTF8(focused), actual);
   }
 
   void SetFocusedElement(int tab_index, const wchar_t* focused) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
+    ASSERT_LT(tab_index, browser()->tab_count());
     bool actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+    ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
+        L"",
         base::StringPrintf(kSetFocusedElementJS, focused),
         &actual));
     ASSERT_TRUE(actual);
@@ -225,39 +217,40 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
 
   void CheckTextBoxValue(int tab_index, const wchar_t* id,
                          const wchar_t* value) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
+    ASSERT_LT(tab_index, browser()->tab_count());
     std::string actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+    ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
+        L"",
         base::StringPrintf(kGetTextBoxValueJS, id),
         &actual));
-    ASSERT_EQ(base::WideToUTF8(value), actual);
+    ASSERT_EQ(WideToUTF8(value), actual);
   }
 
   void SetTextBoxValue(int tab_index, const wchar_t* id,
                        const wchar_t* value) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
+    ASSERT_LT(tab_index, browser()->tab_count());
     std::string actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+    ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
+        L"",
         base::StringPrintf(kSetTextBoxValueJS, id, value),
         &actual));
-    ASSERT_EQ(base::WideToUTF8(value), actual);
+    ASSERT_EQ(WideToUTF8(value), actual);
   }
 
   void StartTest(int tab_index, int result_length) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
+    ASSERT_LT(tab_index, browser()->tab_count());
     bool actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        base::StringPrintf(kStartTestJS, result_length),
-        &actual));
+    ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
+        L"", base::StringPrintf(kStartTestJS, result_length), &actual));
     ASSERT_TRUE(actual);
   }
 
   void TestKeyEvent(int tab_index, const KeyEventTestData& test) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    ASSERT_EQ(tab_index, browser()->tab_strip_model()->active_index());
+    ASSERT_LT(tab_index, browser()->tab_count());
+    ASSERT_EQ(tab_index, browser()->active_index());
 
     // Inform our testing web page that we are about to start testing a key
     // event.
@@ -270,8 +263,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     // because the test finished message might be arrived before returning
     // from the SendKeyPressSync() method.
     TestFinishObserver finish_observer(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index)->
-            GetRenderViewHost());
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost());
 
     ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
         browser(), test.key, test.ctrl, test.shift, test.alt, test.command));
@@ -297,8 +289,13 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   }
 };
 
-// Flaky: http://crbug.com/129235, http://crbug.com/81451.
+#if defined(OS_MACOSX)
+// http://crbug.com/81451
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_NormalKeyEvents) {
+#else
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, NormalKeyEvents) {
+#endif
+
   static const KeyEventTestData kTestNoInput[] = {
     // a
     { ui::VKEY_A, false, false, false, false,
@@ -358,16 +355,16 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_NormalKeyEvents) {
         "U 65 0 false false false false" } },
   };
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = embedded_test_server()->GetURL(kTestingPage);
+  GURL url = test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
-  int tab_index = browser()->tab_strip_model()->active_index();
+  int tab_index = browser()->active_index();
   for (size_t i = 0; i < arraysize(kTestNoInput); ++i) {
     EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestNoInput[i]))
         << "kTestNoInput[" << i << "] failed:\n"
@@ -394,16 +391,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_NormalKeyEvents) {
 }
 
 #if defined(OS_WIN) || defined(OS_LINUX)
-
-#if defined(OS_LINUX) || (defined(OS_WIN) && defined(USE_AURA))
-// Linux: http://crbug.com/129235
-// Win Aura: crbug.com/269564
-#define MAYBE_CtrlKeyEvents DISABLED_CtrlKeyEvents
-#else
-#define MAYBE_CtrlKeyEvents CtrlKeyEvents
-#endif
-
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_CtrlKeyEvents) {
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, CtrlKeyEvents) {
   static const KeyEventTestData kTestCtrlF = {
     ui::VKEY_F, true, false, false, false,
     false, false, false, false, 2,
@@ -452,16 +440,16 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_CtrlKeyEvents) {
       "U 17 0 true false false false" }
   };
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = embedded_test_server()->GetURL(kTestingPage);
+  GURL url = test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
-  int tab_index = browser()->tab_strip_model()->active_index();
+  int tab_index = browser()->active_index();
   // Press Ctrl+F, which will make the Find box open and request focus.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlF));
   EXPECT_TRUE(IsViewFocused(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD));
@@ -469,11 +457,11 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_CtrlKeyEvents) {
   // Press Escape to close the Find box and move the focus back to the web page.
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
       browser(), ui::VKEY_ESCAPE, false, false, false, false));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
   // Press Ctrl+F with keydown suppressed shall not open the find box.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlFSuppressKeyDown));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlZ));
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlZSuppressKeyDown));
@@ -481,7 +469,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_CtrlKeyEvents) {
 }
 #elif defined(OS_MACOSX)
 // http://crbug.com/81451
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FLAKY_CommandKeyEvents) {
   static const KeyEventTestData kTestCmdF = {
     ui::VKEY_F, false, false, false, true,
     false, false, false, false, 2,
@@ -498,16 +486,16 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
       "U 91 0 false false false true" }
   };
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = embedded_test_server()->GetURL(kTestingPage);
+  GURL url = test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
-  int tab_index = browser()->tab_strip_model()->active_index();
+  int tab_index = browser()->active_index();
   // Press Cmd+F, which will make the Find box open and request focus.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCmdF));
   EXPECT_TRUE(IsViewFocused(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD));
@@ -515,17 +503,20 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
   // Press Escape to close the Find box and move the focus back to the web page.
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
       browser(), ui::VKEY_ESCAPE, false, false, false, false));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
   // Press Cmd+F with keydown suppressed shall not open the find box.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCmdFSuppressKeyDown));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 }
 #endif
 
-// Flaky: http://crbug.com/81451 , http://crbug.com/129235 ,
-// also fails on Windows.
+#if defined(OS_MACOSX)
+// http://crbug.com/81451 for mac
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
+#else
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, AccessKeys) {
+#endif
 #if defined(OS_MACOSX)
   // On Mac, access keys use ctrl+alt modifiers.
   static const KeyEventTestData kTestAccessA = {
@@ -586,7 +577,6 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
       "U 18 0 false false true false" }
   };
 
-#if !defined(USE_ASH)
   static const KeyEventTestData kTestAccess1 = {
     ui::VKEY_1, false, false, true, false,
     false, false, false, false, 4,
@@ -596,19 +586,18 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
       "U 18 0 false false true false" }
   };
 #endif
-#endif
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = embedded_test_server()->GetURL(kTestingPage);
+  GURL url = test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
-  int tab_index = browser()->tab_strip_model()->active_index();
+  int tab_index = browser()->active_index();
   // Make sure no element is focused.
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
   // Alt+A should focus the element with accesskey = "A".
@@ -626,14 +615,18 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
 
   // TODO(isherman): This is an experimental change to help diagnose
   // http://crbug.com/55713
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
+#if defined(USE_AURA)
   EXPECT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
+#else
+  EXPECT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
+#endif
   // No element should be focused, as Alt+D was handled by the browser.
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
 
   // Move the focus back to the web page.
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
   // Make sure no element is focused.
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
@@ -644,16 +637,13 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
   // a part of the default action of the key event, so it should not be
   // suppressed at all.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAccessDSuppress));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L"D"));
 
   // Blur the focused element.
   EXPECT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L""));
   // Make sure no element is focused.
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
-#if !defined(USE_ASH)
-  // On Ash, alt-1..9 are assigned as window selection global accelerators, so
-  // they can not be used as accesskeys.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAccess1));
 #if defined(TOOLKIT_GTK)
   // On GTK, alt-0..9 are assigned as tab selection accelerators, so they can
@@ -662,26 +652,25 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
 #else
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L"1"));
 #endif
-#endif
 }
 
 // Flaky, http://crbug.com/69475.
-#if defined(OS_LINUX) || (defined(OS_WIN) && defined(USE_AURA))
-#define MAYBE_ReservedAccelerators DISABLED_ReservedAccelerators
+#if defined(OS_LINUX)
+#define MAYBE_ReservedAccelerators FLAKY_ReservedAccelerators
 #else
 #define MAYBE_ReservedAccelerators ReservedAccelerators
 #endif
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = embedded_test_server()->GetURL(kTestingPage);
+  GURL url = test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
-  ASSERT_EQ(1, browser()->tab_strip_model()->count());
+  ASSERT_EQ(1, browser()->tab_count());
 
   static const KeyEventTestData kTestCtrlOrCmdT = {
 #if defined(OS_MACOSX)
@@ -695,8 +684,8 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
 #endif
   };
 
-  content::WindowedNotificationObserver wait_for_new_tab(
-      chrome::NOTIFICATION_TAB_PARENTED,
+  ui_test_utils::WindowedNotificationObserver wait_for_new_tab(
+      content::NOTIFICATION_TAB_PARENTED,
       content::NotificationService::AllSources());
 
   // Press Ctrl/Cmd+T, which will open a new tab. It cannot be suppressed.
@@ -707,23 +696,25 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
   ASSERT_NO_FATAL_FAILURE(GetResultLength(0, &result_length));
   EXPECT_EQ(1, result_length);
 
-  EXPECT_EQ(2, browser()->tab_strip_model()->count());
-  ASSERT_EQ(1, browser()->tab_strip_model()->active_index());
+  EXPECT_EQ(2, browser()->tab_count());
+  ASSERT_EQ(1, browser()->active_index());
 
-  // Because of issue <http://crbug.com/65375>, switching back to the first tab
+  // Because of issue http://crbug.com/65375, switching back to the first tab
   // may cause the focus to be grabbed by omnibox. So instead, we load our
   // testing page in the newly created tab and try Cmd-W here.
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Make sure the focus is in the testing page.
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
   // Reserved accelerators can't be suppressed.
   ASSERT_NO_FATAL_FAILURE(SuppressAllEvents(1, true));
 
-  content::WebContentsDestroyedWatcher destroyed_watcher(
-      browser()->tab_strip_model()->GetWebContentsAt(1));
+  ui_test_utils::WindowedNotificationObserver wait_for_tab_closed(
+      content::NOTIFICATION_TAB_CLOSED,
+      content::Source<NavigationController>(
+          &browser()->GetWebContentsAt(1)->GetController()));
 
   // Press Ctrl/Cmd+W, which will close the tab.
 #if defined(OS_MACOSX)
@@ -734,17 +725,13 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
       browser(), ui::VKEY_W, true, false, false, false));
 #endif
 
-  ASSERT_NO_FATAL_FAILURE(destroyed_watcher.Wait());
+  ASSERT_NO_FATAL_FAILURE(wait_for_tab_closed.Wait());
 
-  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+  EXPECT_EQ(1, browser()->tab_count());
 }
 
 #if defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
-  // TODO(kbr): re-enable: http://crbug.com/222296
-  if (base::mac::IsOSMountainLionOrLater())
-    return;
-
   static const KeyEventTestData kTestCtrlA = {
     ui::VKEY_A, true, false, false, false,
     false, false, false, false, 4,
@@ -772,16 +759,16 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
       "U 17 0 true false false false" }
   };
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = embedded_test_server()->GetURL(kTestingPage);
+  GURL url = test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
-  int tab_index = browser()->tab_strip_model()->active_index();
+  int tab_index = browser()->active_index();
   ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L"A"));
   ASSERT_NO_FATAL_FAILURE(SetTextBoxValue(tab_index, L"A", L"Hello"));
   // Move the caret to the beginning of the line.
@@ -794,8 +781,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
 }
 #endif
 
-// See http://crbug.com/147579
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_PageUpDownKeys) {
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, PageUpDownKeys) {
   static const KeyEventTestData kTestPageUp = {
     ui::VKEY_PRIOR, false, false, false, false,
     false, false, false, false, 2,
@@ -810,24 +796,23 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_PageUpDownKeys) {
       "U 34 0 false false false false" }
   };
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = embedded_test_server()->GetURL(kTestingPage);
+  GURL url = test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
-  int tab_index = browser()->tab_strip_model()->active_index();
+  int tab_index = browser()->active_index();
   ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L"A"));
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestPageUp));
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestPageDown));
   EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, L"A", L""));
 }
 
-#if defined(OS_WIN)
-// AltKey is enabled only on Windows. See crbug.com/114537.
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FocusMenuBarByAltKey) {
   static const KeyEventTestData kTestAltKey = {
     ui::VKEY_MENU, false, false, false, false,
@@ -852,30 +837,30 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FocusMenuBarByAltKey) {
       "U 17 0 true false false false" }
   };
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = embedded_test_server()->GetURL(kTestingPage);
+  GURL url = test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
-  int tab_index = browser()->tab_strip_model()->active_index();
+  int tab_index = browser()->active_index();
   // Press and release Alt key to focus wrench menu button.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAltKey));
   EXPECT_TRUE(IsViewFocused(VIEW_ID_APP_MENU));
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
   // Alt key can be suppressed.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAltKeySuppress));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
   // Ctrl+Alt should have no effect.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlAltKey));
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
+  ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 }
 #endif
 

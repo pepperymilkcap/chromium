@@ -1,15 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/proxy/multi_threaded_proxy_resolver.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/metrics/histogram.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/message_loop_proxy.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "net/base/net_errors.h"
@@ -21,6 +19,20 @@
 //               testing bogus scripts.
 
 namespace net {
+
+namespace {
+
+class PurgeMemoryTask : public base::RefCountedThreadSafe<PurgeMemoryTask> {
+ public:
+  explicit PurgeMemoryTask(ProxyResolver* resolver) : resolver_(resolver) {}
+  void PurgeMemory() { resolver_->PurgeMemory(); }
+ private:
+  friend class base::RefCountedThreadSafe<PurgeMemoryTask>;
+  ~PurgeMemoryTask() {}
+  ProxyResolver* resolver_;
+};
+
+}  // namespace
 
 // An "executor" is a job-runner for PAC requests. It encapsulates a worker
 // thread and a synchronous ProxyResolver (which will be operated on said
@@ -188,9 +200,6 @@ class MultiThreadedProxyResolver::SetPacScriptJob
         base::Bind(&SetPacScriptJob::RequestComplete, this, rv));
   }
 
- protected:
-  virtual ~SetPacScriptJob() {}
-
  private:
   // Runs the completion callback on the origin thread.
   void RequestComplete(int result_code) {
@@ -221,28 +230,28 @@ class MultiThreadedProxyResolver::GetProxyForURLJob
         url_(url),
         was_waiting_for_thread_(false) {
     DCHECK(!callback.is_null());
-    start_time_ = base::TimeTicks::Now();
   }
 
   BoundNetLog* net_log() { return &net_log_; }
 
   virtual void WaitingForThread() OVERRIDE {
     was_waiting_for_thread_ = true;
-    net_log_.BeginEvent(NetLog::TYPE_WAITING_FOR_PROXY_RESOLVER_THREAD);
+    net_log_.BeginEvent(
+        NetLog::TYPE_WAITING_FOR_PROXY_RESOLVER_THREAD, NULL);
   }
 
   virtual void FinishedWaitingForThread() OVERRIDE {
     DCHECK(executor());
 
-    submitted_to_thread_time_ = base::TimeTicks::Now();
-
     if (was_waiting_for_thread_) {
-      net_log_.EndEvent(NetLog::TYPE_WAITING_FOR_PROXY_RESOLVER_THREAD);
+      net_log_.EndEvent(
+          NetLog::TYPE_WAITING_FOR_PROXY_RESOLVER_THREAD, NULL);
     }
 
     net_log_.AddEvent(
         NetLog::TYPE_SUBMITTED_TO_RESOLVER_THREAD,
-        NetLog::IntegerCallback("thread_number", executor()->thread_number()));
+        make_scoped_refptr(new NetLogIntegerParameter(
+            "thread_number", executor()->thread_number())));
   }
 
   // Runs on the worker thread.
@@ -257,35 +266,17 @@ class MultiThreadedProxyResolver::GetProxyForURLJob
         base::Bind(&GetProxyForURLJob::QueryComplete, this, rv));
   }
 
- protected:
-  virtual ~GetProxyForURLJob() {}
-
  private:
   // Runs the completion callback on the origin thread.
   void QueryComplete(int result_code) {
     // The Job may have been cancelled after it was started.
     if (!was_cancelled()) {
-      RecordPerformanceMetrics();
       if (result_code >= OK) {  // Note: unit-tests use values > 0.
         results_->Use(results_buf_);
       }
       RunUserCallback(result_code);
     }
     OnJobCompleted();
-  }
-
-  void RecordPerformanceMetrics() {
-    DCHECK(!was_cancelled());
-
-    base::TimeTicks now = base::TimeTicks::Now();
-
-    // Log the total time the request took to complete.
-    UMA_HISTOGRAM_MEDIUM_TIMES("Net.MTPR_GetProxyForUrl_Time",
-                               now - start_time_);
-
-    // Log the time the request was stalled waiting for a thread to free up.
-    UMA_HISTOGRAM_MEDIUM_TIMES("Net.MTPR_GetProxyForUrl_Thread_Wait_Time",
-                               submitted_to_thread_time_ - start_time_);
   }
 
   // Must only be used on the "origin" thread.
@@ -297,9 +288,6 @@ class MultiThreadedProxyResolver::GetProxyForURLJob
 
   // Usable from within DoQuery on the worker thread.
   ProxyInfo results_buf_;
-
-  base::TimeTicks start_time_;
-  base::TimeTicks submitted_to_thread_time_;
 
   bool was_waiting_for_thread_;
 };
@@ -325,7 +313,7 @@ MultiThreadedProxyResolver::Executor::Executor(
 }
 
 void MultiThreadedProxyResolver::Executor::StartJob(Job* job) {
-  DCHECK(!outstanding_job_.get());
+  DCHECK(!outstanding_job_);
   outstanding_job_ = job;
 
   // Run the job. Once it has completed (regardless of whether it was
@@ -346,6 +334,11 @@ void MultiThreadedProxyResolver::Executor::OnJobCompleted(Job* job) {
 void MultiThreadedProxyResolver::Executor::Destroy() {
   DCHECK(coordinator_);
 
+  // Give the resolver an opportunity to shutdown from THIS THREAD before
+  // joining on the resolver thread. This allows certain implementations
+  // to avoid deadlocks.
+  resolver_->Shutdown();
+
   {
     // See http://crbug.com/69710.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
@@ -355,7 +348,7 @@ void MultiThreadedProxyResolver::Executor::Destroy() {
   }
 
   // Cancel any outstanding job.
-  if (outstanding_job_.get()) {
+  if (outstanding_job_) {
     outstanding_job_->Cancel();
     // Orphan the job (since this executor may be deleted soon).
     outstanding_job_->set_executor(NULL);
@@ -371,10 +364,10 @@ void MultiThreadedProxyResolver::Executor::Destroy() {
 }
 
 void MultiThreadedProxyResolver::Executor::PurgeMemory() {
+  scoped_refptr<PurgeMemoryTask> helper(new PurgeMemoryTask(resolver_.get()));
   thread_->message_loop()->PostTask(
       FROM_HERE,
-      base::Bind(&ProxyResolver::PurgeMemory,
-                 base::Unretained(resolver_.get())));
+      base::Bind(&PurgeMemoryTask::PurgeMemory, helper.get()));
 }
 
 MultiThreadedProxyResolver::Executor::~Executor() {
@@ -383,7 +376,7 @@ MultiThreadedProxyResolver::Executor::~Executor() {
   DCHECK(!coordinator_) << "Destroy() was not called";
   DCHECK(!thread_.get());
   DCHECK(!resolver_.get());
-  DCHECK(!outstanding_job_.get());
+  DCHECK(!outstanding_job_);
 }
 
 // MultiThreadedProxyResolver --------------------------------------------------
@@ -423,7 +416,7 @@ int MultiThreadedProxyResolver::GetProxyForURL(
   Executor* executor = FindIdleExecutor();
   if (executor) {
     DCHECK_EQ(0u, pending_jobs_.size());
-    executor->StartJob(job.get());
+    executor->StartJob(job);
     return ERR_IO_PENDING;
   }
 
@@ -466,7 +459,17 @@ void MultiThreadedProxyResolver::CancelRequest(RequestHandle req) {
 LoadState MultiThreadedProxyResolver::GetLoadState(RequestHandle req) const {
   DCHECK(CalledOnValidThread());
   DCHECK(req);
+
+  Job* job = reinterpret_cast<Job*>(req);
+  if (job->executor())
+    return job->executor()->resolver()->GetLoadStateThreadSafe(NULL);
   return LOAD_STATE_RESOLVING_PROXY_FOR_URL;
+}
+
+LoadState MultiThreadedProxyResolver::GetLoadStateThreadSafe(
+    RequestHandle req) const {
+  NOTIMPLEMENTED();
+  return LOAD_STATE_IDLE;
 }
 
 void MultiThreadedProxyResolver::CancelSetPacScript() {
@@ -487,7 +490,7 @@ void MultiThreadedProxyResolver::PurgeMemory() {
   DCHECK(CalledOnValidThread());
   for (ExecutorList::iterator it = executors_.begin();
        it != executors_.end(); ++it) {
-    Executor* executor = it->get();
+    Executor* executor = *it;
     executor->PurgeMemory();
   }
 }
@@ -521,7 +524,7 @@ void MultiThreadedProxyResolver::CheckNoOutstandingUserRequests() const {
 
   for (ExecutorList::const_iterator it = executors_.begin();
        it != executors_.end(); ++it) {
-    const Executor* executor = it->get();
+    const Executor* executor = *it;
     Job* job = executor->outstanding_job();
     // The "has_user_callback()" is to exclude jobs for which the callback
     // has already been invoked, or was not user-initiated (as in the case of
@@ -537,7 +540,7 @@ void MultiThreadedProxyResolver::ReleaseAllExecutors() {
   DCHECK(CalledOnValidThread());
   for (ExecutorList::iterator it = executors_.begin();
        it != executors_.end(); ++it) {
-    Executor* executor = it->get();
+    Executor* executor = *it;
     executor->Destroy();
   }
   executors_.clear();
@@ -548,7 +551,7 @@ MultiThreadedProxyResolver::FindIdleExecutor() {
   DCHECK(CalledOnValidThread());
   for (ExecutorList::iterator it = executors_.begin();
        it != executors_.end(); ++it) {
-    Executor* executor = it->get();
+    Executor* executor = *it;
     if (!executor->outstanding_job())
       return executor;
   }
@@ -577,7 +580,7 @@ void MultiThreadedProxyResolver::OnExecutorReady(Executor* executor) {
   // to the executor.
   scoped_refptr<Job> job = pending_jobs_.front();
   pending_jobs_.pop_front();
-  executor->StartJob(job.get());
+  executor->StartJob(job);
 }
 
 }  // namespace net

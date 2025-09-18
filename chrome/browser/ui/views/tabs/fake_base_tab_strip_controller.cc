@@ -1,55 +1,29 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/tabs/fake_base_tab_strip_controller.h"
 
-#include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
-#include "chrome/browser/ui/views/tabs/tab_strip.h"
-
-FakeBaseTabStripController::FakeBaseTabStripController()
-    : tab_strip_(NULL),
-      num_tabs_(0),
-      active_index_(-1) {
+FakeBaseTabStripController::FakeBaseTabStripController() {
 }
 
 FakeBaseTabStripController::~FakeBaseTabStripController() {
 }
 
-void FakeBaseTabStripController::AddTab(int index, bool is_active) {
-  num_tabs_++;
-  tab_strip_->AddTabAt(index, TabRendererData(), is_active);
-  if (is_active)
-    active_index_ = index;
-}
-
-void FakeBaseTabStripController::RemoveTab(int index) {
-  num_tabs_--;
-  tab_strip_->RemoveTabAt(index);
-  if (active_index_ == index)
-    active_index_ = -1;
-}
-
-const ui::ListSelectionModel& FakeBaseTabStripController::GetSelectionModel() {
+const TabStripSelectionModel& FakeBaseTabStripController::GetSelectionModel() {
   return selection_model_;
 }
 
 int FakeBaseTabStripController::GetCount() const {
-  return num_tabs_;
+  return 0;
 }
 
 bool FakeBaseTabStripController::IsValidIndex(int index) const {
-  return index >= 0 && index < num_tabs_;
+  return false;
 }
 
 bool FakeBaseTabStripController::IsActiveTab(int index) const {
-  if (!IsValidIndex(index))
-    return false;
-  return active_index_ == index;
-}
-
-int FakeBaseTabStripController::GetActiveIndex() const {
-  return active_index_;
+  return false;
 }
 
 bool FakeBaseTabStripController::IsTabSelected(int index) const {
@@ -57,6 +31,10 @@ bool FakeBaseTabStripController::IsTabSelected(int index) const {
 }
 
 bool FakeBaseTabStripController::IsTabPinned(int index) const {
+  return false;
+}
+
+bool FakeBaseTabStripController::IsTabCloseable(int index) const {
   return false;
 }
 
@@ -76,13 +54,11 @@ void FakeBaseTabStripController::ToggleSelected(int index) {
 void FakeBaseTabStripController::AddSelectionFromAnchorTo(int index) {
 }
 
-void FakeBaseTabStripController::CloseTab(int index, CloseTabSource source) {
+void FakeBaseTabStripController::CloseTab(int index) {
 }
 
-void FakeBaseTabStripController::ShowContextMenuForTab(
-    Tab* tab,
-    const gfx::Point& p,
-    ui::MenuSourceType source_type) {
+void FakeBaseTabStripController::ShowContextMenuForTab(BaseTab* tab,
+                                                       const gfx::Point& p) {
 }
 
 void FakeBaseTabStripController::UpdateLoadingAnimations() {
@@ -108,23 +84,9 @@ bool FakeBaseTabStripController::IsCompatibleWith(TabStrip* other) const {
 void FakeBaseTabStripController::CreateNewTab() {
 }
 
-void FakeBaseTabStripController::CreateNewTabWithLocation(
-    const base::string16& location) {
+void FakeBaseTabStripController::ClickActiveTab(int index) {
 }
 
 bool FakeBaseTabStripController::IsIncognito() {
   return false;
-}
-
-void FakeBaseTabStripController::LayoutTypeMaybeChanged() {
-}
-
-void FakeBaseTabStripController::OnStartedDraggingTabs() {
-}
-
-void FakeBaseTabStripController::OnStoppedDraggingTabs() {
-}
-
-void FakeBaseTabStripController::CheckFileSupported(const GURL& url) {
-  tab_strip_->FileSupported(url, true);
 }

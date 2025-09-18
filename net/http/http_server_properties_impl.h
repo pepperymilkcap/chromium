@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/containers/hash_tables.h"
-#include "base/containers/mru_cache.h"
 #include "base/gtest_prod_util.h"
+#include "base/hash_tables.h"
+#include "base/memory/mru_cache.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/values.h"
 #include "net/base/host_port_pair.h"
@@ -73,9 +73,6 @@ class NET_EXPORT HttpServerPropertiesImpl
   // HttpServerProperties methods:
   // -----------------------------
 
-  // Gets a weak pointer for this object.
-  virtual base::WeakPtr<HttpServerProperties> GetWeakPtr() OVERRIDE;
-
   // Deletes all data.
   virtual void Clear() OVERRIDE;
 
@@ -106,25 +103,20 @@ class NET_EXPORT HttpServerPropertiesImpl
   // Returns all Alternate-Protocol mappings.
   virtual const AlternateProtocolMap& alternate_protocol_map() const OVERRIDE;
 
-  // Gets a reference to the SettingsMap stored for a host.
-  // If no settings are stored, returns an empty SettingsMap.
-  virtual const SettingsMap& GetSpdySettings(
+  // Gets a reference to the SpdySettings stored for a host.
+  // If no settings are stored, returns an empty set of settings.
+  virtual const spdy::SpdySettings& GetSpdySettings(
       const HostPortPair& host_port_pair) const OVERRIDE;
 
-  // Saves an individual SPDY setting for a host. Returns true if SPDY setting
-  // is to be persisted.
-  virtual bool SetSpdySetting(const HostPortPair& host_port_pair,
-                              SpdySettingsIds id,
-                              SpdySettingsFlags flags,
-                              uint32 value) OVERRIDE;
+  // Saves settings for a host. Returns true if SpdySettings are to be
+  // persisted because |spdy_settings_map_| has been updated.
+  virtual bool SetSpdySettings(const HostPortPair& host_port_pair,
+                               const spdy::SpdySettings& settings) OVERRIDE;
 
-  // Clears all entries in |spdy_settings_map_| for a host.
-  virtual void ClearSpdySettings(const HostPortPair& host_port_pair) OVERRIDE;
+  // Clears all spdy_settings.
+  virtual void ClearSpdySettings() OVERRIDE;
 
-  // Clears all entries in |spdy_settings_map_|.
-  virtual void ClearAllSpdySettings() OVERRIDE;
-
-  // Returns all persistent SPDY settings.
+  // Returns all persistent SpdySettings.
   virtual const SpdySettingsMap& spdy_settings_map() const OVERRIDE;
 
   virtual HttpPipelinedHostCapability GetPipelineCapability(
@@ -144,14 +136,11 @@ class NET_EXPORT HttpServerPropertiesImpl
   // |spdy_servers_table_| has flattened representation of servers (host/port
   // pair) that either support or not support SPDY protocol.
   typedef base::hash_map<std::string, bool> SpdyServerHostPortTable;
-
   SpdyServerHostPortTable spdy_servers_table_;
 
   AlternateProtocolMap alternate_protocol_map_;
   SpdySettingsMap spdy_settings_map_;
   scoped_ptr<CachedPipelineCapabilityMap> pipeline_capability_map_;
-
-  base::WeakPtrFactory<HttpServerPropertiesImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpServerPropertiesImpl);
 };

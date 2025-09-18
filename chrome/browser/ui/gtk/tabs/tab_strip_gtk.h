@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_TABS_TAB_STRIP_GTK_H_
 #define CHROME_BROWSER_UI_GTK_TABS_TAB_STRIP_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <vector>
@@ -11,12 +12,12 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/gtk/tabs/tab_gtk.h"
 #include "chrome/browser/ui/gtk/tabstrip_origin_provider.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/tabs/hover_tab_selector.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
@@ -34,7 +35,7 @@ class Image;
 
 class TabStripGtk : public TabStripModelObserver,
                     public TabGtk::TabDelegate,
-                    public base::MessageLoopForUI::Observer,
+                    public MessageLoopForUI::Observer,
                     public content::NotificationObserver,
                     public TabstripOriginProvider,
                     public ViewIDUtil::Delegate {
@@ -108,31 +109,29 @@ class TabStripGtk : public TabStripModelObserver,
 
  protected:
   // TabStripModelObserver implementation:
-  virtual void TabInsertedAt(content::WebContents* contents,
+  virtual void TabInsertedAt(TabContentsWrapper* contents,
                              int index,
                              bool foreground) OVERRIDE;
-  virtual void TabDetachedAt(content::WebContents* contents,
-                             int index) OVERRIDE;
-  virtual void TabMoved(content::WebContents* contents,
+  virtual void TabDetachedAt(TabContentsWrapper* contents, int index) OVERRIDE;
+  virtual void TabMoved(TabContentsWrapper* contents,
                         int from_index,
                         int to_index) OVERRIDE;
-  virtual void ActiveTabChanged(content::WebContents* old_contents,
-                                content::WebContents* new_contents,
+  virtual void ActiveTabChanged(TabContentsWrapper* old_contents,
+                                TabContentsWrapper* new_contents,
                                 int index,
-                                int reason) OVERRIDE;
+                                bool user_gesture) OVERRIDE;
   virtual void TabSelectionChanged(
       TabStripModel* tab_strip_model,
-      const ui::ListSelectionModel& old_model) OVERRIDE;
-  virtual void TabChangedAt(content::WebContents* contents,
-                            int index,
+      const TabStripSelectionModel& old_model) OVERRIDE;
+  virtual void TabChangedAt(TabContentsWrapper* contents, int index,
                             TabChangeType change_type) OVERRIDE;
   virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             content::WebContents* old_contents,
-                             content::WebContents* new_contents,
+                             TabContentsWrapper* old_contents,
+                             TabContentsWrapper* new_contents,
                              int index) OVERRIDE;
-  virtual void TabMiniStateChanged(content::WebContents* contents,
+  virtual void TabMiniStateChanged(TabContentsWrapper* contents,
                                    int index) OVERRIDE;
-  virtual void TabBlockedStateChanged(content::WebContents* contents,
+  virtual void TabBlockedStateChanged(TabContentsWrapper* contents,
                                       int index) OVERRIDE;
 
   // TabGtk::TabDelegate implementation:
@@ -355,7 +354,7 @@ class TabStripGtk : public TabStripModelObserver,
   // Calculates the available width for tabs, assuming a Tab is to be closed.
   int GetAvailableWidthForTabs(TabGtk* last_tab) const;
 
-  // Finds the index of the WebContents corresponding to |tab| in our
+  // Finds the index of the TabContents corresponding to |tab| in our
   // associated TabStripModel, or -1 if there is none (e.g. the specified |tab|
   // is being animated closed).
   int GetIndexOfTab(const TabGtk* tab) const;
@@ -395,7 +394,7 @@ class TabStripGtk : public TabStripModelObserver,
   // Determines whether the data is acceptable by the tabstrip and opens a new
   // tab with the data as URL if it is.  Returns true if the drop was
   // successful.
-  bool CompleteDrop(const guchar* data, bool is_plain_text);
+  bool CompleteDrop(guchar* data, bool is_plain_text);
 
   // Returns the image to use for indicating a drop on a tab. If is_down is
   // true, this returns an arrow pointing down.
@@ -482,6 +481,13 @@ class TabStripGtk : public TabStripModelObserver,
   // the drag session.
   scoped_ptr<DraggedTabControllerGtk> drag_controller_;
 
+  // A factory that is used to construct a delayed callback to the
+  // ResizeLayoutTabsNow method.
+  base::WeakPtrFactory<TabStripGtk> weak_factory_;
+
+  // A different factory for calls to Layout().
+  base::WeakPtrFactory<TabStripGtk> layout_factory_;
+
   // True if the tabstrip has already been added as a MessageLoop observer.
   bool added_as_message_loop_observer_;
 
@@ -489,13 +495,6 @@ class TabStripGtk : public TabStripModelObserver,
   HoverTabSelector hover_tab_selector_;
 
   content::NotificationRegistrar registrar_;
-
-  // A factory that is used to construct a delayed callback to the
-  // ResizeLayoutTabsNow method.
-  base::WeakPtrFactory<TabStripGtk> weak_factory_;
-
-  // A different factory for calls to Layout().
-  base::WeakPtrFactory<TabStripGtk> layout_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TabStripGtk);
 };

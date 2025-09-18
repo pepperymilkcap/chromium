@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,30 +12,18 @@
 
 namespace ppapi {
 
-const int kBitsPerAudioInputSample = 16;
-const int kAudioInputChannels = 1;
-
-// TODO(dalecurtis, yzshen): PPAPI shouldn't hard code these values for all
-// clients.
-const int kBitsPerAudioOutputSample = 16;
-const int kAudioOutputChannels = 2;
-
 class PPAPI_SHARED_EXPORT PPB_AudioConfig_Shared
     : public Resource,
       public thunk::PPB_AudioConfig_API {
  public:
   virtual ~PPB_AudioConfig_Shared();
 
-  static PP_Resource Create(ResourceObjectType type,
-                            PP_Instance instance,
-                            PP_AudioSampleRate sample_rate,
-                            uint32_t sample_frame_count);
-  static uint32_t RecommendSampleFrameCount_1_0(PP_AudioSampleRate sample_rate,
-      uint32_t request_sample_frame_count);
-  static uint32_t RecommendSampleFrameCount_1_1(PP_Instance instance,
-      PP_AudioSampleRate sample_rate,
-      uint32_t request_sample_frame_count);
-  static PP_AudioSampleRate RecommendSampleRate(PP_Instance);
+  static PP_Resource CreateAsImpl(PP_Instance instance,
+                                  PP_AudioSampleRate sample_rate,
+                                  uint32_t sample_frame_count);
+  static PP_Resource CreateAsProxy(PP_Instance instance,
+                                   PP_AudioSampleRate sample_rate,
+                                   uint32_t sample_frame_count);
 
   // Resource overrides.
   virtual thunk::PPB_AudioConfig_API* AsPPB_AudioConfig_API() OVERRIDE;
@@ -46,7 +34,10 @@ class PPAPI_SHARED_EXPORT PPB_AudioConfig_Shared
 
  private:
   // You must call Init before using this object.
-  PPB_AudioConfig_Shared(ResourceObjectType type, PP_Instance instance);
+  // Construct as implementation.
+  explicit PPB_AudioConfig_Shared(PP_Instance instance);
+  // Construct as proxy.
+  explicit PPB_AudioConfig_Shared(const HostResource& host_resource);
 
   // Returns false if the arguments are invalid, the object should not be
   // used in this case.

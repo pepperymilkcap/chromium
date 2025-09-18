@@ -6,29 +6,17 @@
 #define CHROME_BROWSER_AUTOFILL_PERSONAL_DATA_MANAGER_FACTORY_H_
 
 #include "base/compiler_specific.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 template <typename T> struct DefaultSingletonTraits;
-class Profile;
-
-namespace autofill {
-
 class PersonalDataManager;
-
-// A wrapper of PersonalDataManager so we can use it as a profiled keyed
-// service. This should only be subclassed in tests, e.g. to provide a mock
-// PersonalDataManager.
-class PersonalDataManagerService : public BrowserContextKeyedService {
- public:
-  virtual PersonalDataManager* GetPersonalDataManager() = 0;
-};
+class Profile;
 
 // Singleton that owns all PersonalDataManagers and associates them with
 // Profiles.
 // Listens for the Profile's destruction notification and cleans up the
 // associated PersonalDataManager.
-class PersonalDataManagerFactory : public BrowserContextKeyedServiceFactory {
+class PersonalDataManagerFactory : public ProfileKeyedServiceFactory {
  public:
   // Returns the PersonalDataManager for |profile|, creating it if it is not
   // yet created.
@@ -42,13 +30,9 @@ class PersonalDataManagerFactory : public BrowserContextKeyedServiceFactory {
   PersonalDataManagerFactory();
   virtual ~PersonalDataManagerFactory();
 
-  // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  // ProfileKeyedServiceFactory:
+  virtual ProfileKeyedService* BuildServiceInstanceFor(
+      Profile* profile) const OVERRIDE;
 };
-
-}  // namespace autofill
 
 #endif  // CHROME_BROWSER_AUTOFILL_PERSONAL_DATA_MANAGER_FACTORY_H_

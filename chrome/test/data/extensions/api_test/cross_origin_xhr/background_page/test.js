@@ -6,7 +6,7 @@ chrome.test.getConfig(function(config) {
 
   function doReq(domain, expectSuccess) {
     var req = new XMLHttpRequest();
-    var url = domain + ":PORT/extensions/test_file.txt";
+    var url = domain + ":PORT/files/extensions/test_file.txt";
     url = url.replace(/PORT/, config.testServer.port);
 
     chrome.test.log("Requesting url: " + url);
@@ -17,7 +17,7 @@ chrome.test.getConfig(function(config) {
       req.onload = function() {
         chrome.test.assertEq(200, req.status);
         chrome.test.assertEq("Hello!", req.responseText);
-        chrome.test.succeed();
+        chrome.test.runNextTest();
       }
       req.onerror = function() {
         chrome.test.log("status: " + req.status);
@@ -30,7 +30,7 @@ chrome.test.getConfig(function(config) {
       }
       req.onerror = function() {
         chrome.test.assertEq(0, req.status);
-        chrome.test.succeed();
+        chrome.test.runNextTest();
       }
     }
 
@@ -53,9 +53,8 @@ chrome.test.getConfig(function(config) {
     function disallowedSubdomain() {
       doReq("http://foob.com", false);
     },
-    // TODO(asargent): Explicitly create SSL test server and enable the test.
-    // function disallowedSSL() {
-    //   doReq("https://a.com", false);
-    // }
+    function disallowedSSL() {
+      doReq("https://a.com", false);
+    }
   ]);
 });

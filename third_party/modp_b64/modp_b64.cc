@@ -77,22 +77,20 @@
 #define CHARPAD '\0'
 #endif
 
-size_t modp_b64_encode(char* dest, const char* str, size_t len)
+int modp_b64_encode(char* dest, const char* str, int len)
 {
-    size_t i = 0;
+    int i;
     uint8_t* p = (uint8_t*) dest;
 
     /* unsigned here is important! */
     uint8_t t1, t2, t3;
 
-    if (len > 2) {
-        for (; i < len - 2; i += 3) {
-            t1 = str[i]; t2 = str[i+1]; t3 = str[i+2];
-            *p++ = e0[t1];
-            *p++ = e1[((t1 & 0x03) << 4) | ((t2 >> 4) & 0x0F)];
-            *p++ = e1[((t2 & 0x0F) << 2) | ((t3 >> 6) & 0x03)];
-            *p++ = e2[t3];
-        }
+    for (i = 0; i < len - 2; i += 3) {
+        t1 = str[i]; t2 = str[i+1]; t3 = str[i+2];
+        *p++ = e0[t1];
+        *p++ = e1[((t1 & 0x03) << 4) | ((t2 >> 4) & 0x0F)];
+        *p++ = e1[((t2 & 0x0F) << 2) | ((t3 >> 6) & 0x03)];
+        *p++ = e2[t3];
     }
 
     switch (len - i) {
@@ -126,7 +124,7 @@ int modp_b64_decode(char* dest, const char* src, int len)
     /* if padding is used, then the message must be at least
        4 chars and be a multiple of 4.
        there can be at most 2 pad chars at the end */
-    if (len < 4 || (len % 4 != 0)) return MODP_B64_ERROR;
+    if (len < 4 || (len % 4 != 0)) return -1;
     if (src[len-1] == CHARPAD) {
         len--;
         if (src[len -1] == CHARPAD) {
@@ -135,9 +133,9 @@ int modp_b64_decode(char* dest, const char* src, int len)
     }
 #endif  /* DOPAD */
 
-    size_t i;
+    int i;
     int leftover = len % 4;
-    size_t chunks = (leftover == 0) ? len / 4 - 1 : len /4;
+    int chunks = (leftover == 0) ? len / 4 - 1 : len /4;
 
     uint8_t* p = (uint8_t*) dest;
     uint32_t x = 0;
@@ -148,7 +146,7 @@ int modp_b64_decode(char* dest, const char* src, int len)
         x = d0[y >> 24 & 0xff] | d1[y >> 16 & 0xff] |
             d2[y >> 8 & 0xff] | d3[y & 0xff];
 
-        if (x >= BADCHAR)  return MODP_B64_ERROR;
+        if (x >= BADCHAR)  return -1;
         *destInt = x << 8;
         p += 3;
         destInt = (uint32_t*)p;
@@ -159,7 +157,7 @@ int modp_b64_decode(char* dest, const char* src, int len)
     case 0:
         x = d0[y >> 24 & 0xff] | d1[y >> 16 & 0xff] |
             d2[y >>  8 & 0xff] | d3[y & 0xff];
-        if (x >= BADCHAR)  return MODP_B64_ERROR;
+        if (x >= BADCHAR)  return -1;
         *p++ = ((uint8_t*)&x)[1];
         *p++ = ((uint8_t*)&x)[2];
         *p = ((uint8_t*)&x)[3];
@@ -180,13 +178,13 @@ int modp_b64_decode(char* dest, const char* src, int len)
         break;
     }
 
-    if (x >= BADCHAR) return MODP_B64_ERROR;
+    if (x >= BADCHAR) return -1;
     return 3*chunks + (6*leftover)/8;
 }
 
 #else /* LITTLE  ENDIAN -- INTEL AND FRIENDS */
 
-size_t modp_b64_decode(char* dest, const char* src, size_t len)
+int modp_b64_decode(char* dest, const char* src, int len)
 {
     if (len == 0) return 0;
 
@@ -195,7 +193,7 @@ size_t modp_b64_decode(char* dest, const char* src, size_t len)
      * if padding is used, then the message must be at least
      * 4 chars and be a multiple of 4
      */
-    if (len < 4 || (len % 4 != 0)) return MODP_B64_ERROR; /* error */
+    if (len < 4 || (len % 4 != 0)) return -1; /* error */
     /* there can be at most 2 pad chars at the end */
     if (src[len-1] == CHARPAD) {
         len--;
@@ -205,9 +203,9 @@ size_t modp_b64_decode(char* dest, const char* src, size_t len)
     }
 #endif
 
-    size_t i;
+    int i;
     int leftover = len % 4;
-    size_t chunks = (leftover == 0) ? len / 4 - 1 : len /4;
+    int chunks = (leftover == 0) ? len / 4 - 1 : len /4;
 
     uint8_t* p = (uint8_t*)dest;
     uint32_t x = 0;
@@ -220,7 +218,7 @@ size_t modp_b64_decode(char* dest, const char* src, size_t len)
             d2[(y >> 16) & 0xff] |
             d3[(y >> 24) & 0xff];
 
-        if (x >= BADCHAR) return MODP_B64_ERROR;
+        if (x >= BADCHAR) return -1;
         *destInt = x ;
         p += 3;
         destInt = (uint32_t*)p;
@@ -234,7 +232,7 @@ size_t modp_b64_decode(char* dest, const char* src, size_t len)
             d2[(y >> 16) & 0xff] |
             d3[(y >> 24) & 0xff];
 
-        if (x >= BADCHAR) return MODP_B64_ERROR;
+        if (x >= BADCHAR) return -1;
         *p++ =  ((uint8_t*)(&x))[0];
         *p++ =  ((uint8_t*)(&x))[1];
         *p =    ((uint8_t*)(&x))[2];
@@ -257,7 +255,7 @@ size_t modp_b64_decode(char* dest, const char* src, size_t len)
         break;
     }
 
-    if (x >= BADCHAR) return MODP_B64_ERROR;
+    if (x >= BADCHAR) return -1;
 
     return 3*chunks + (6*leftover)/8;
 }

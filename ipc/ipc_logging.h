@@ -4,6 +4,7 @@
 
 #ifndef IPC_IPC_LOGGING_H_
 #define IPC_IPC_LOGGING_H_
+#pragma once
 
 #include "ipc/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
 
@@ -11,10 +12,10 @@
 
 #include <vector>
 
-#include "base/containers/hash_tables.h"
+#include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "ipc/ipc_export.h"
 
 // Logging function. |name| is a string in ASCII and |params| is a string in
@@ -28,7 +29,6 @@ typedef base::hash_map<uint32, LogFunction > LogFunctionMap;
 namespace IPC {
 
 class Message;
-class Sender;
 
 // One instance per process.  Needs to be created on the main thread (the UI
 // thread in the browser) but OnPreDispatchMessage/OnPostDispatchMessage
@@ -59,7 +59,7 @@ class IPC_EXPORT Logging {
 
   // Called by child processes to give the logger object the channel to send
   // logging data to the browser process.
-  void SetIPCSender(Sender* sender);
+  void SetIPCSender(Message::Sender* sender);
 
   // Called in the browser process when logging data from a child process is
   // received.
@@ -112,8 +112,8 @@ class IPC_EXPORT Logging {
   std::vector<LogData> queued_logs_;
   bool queue_invoke_later_pending_;
 
-  Sender* sender_;
-  base::MessageLoop* main_thread_;
+  Message::Sender* sender_;
+  MessageLoop* main_thread_;
 
   Consumer* consumer_;
 

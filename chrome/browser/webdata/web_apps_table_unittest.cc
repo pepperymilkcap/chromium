@@ -1,16 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/files/scoped_temp_dir.h"
+#include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/time/time.h"
+#include "base/string_number_conversions.h"
+#include "base/time.h"
 #include "chrome/browser/webdata/web_apps_table.h"
-#include "components/webdata/common/web_database.h"
+#include "chrome/browser/webdata/web_database.h"
+#include "chrome/common/chrome_paths.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "url/gurl.h"
 
 using base::Time;
 
@@ -21,19 +22,19 @@ class WebAppsTableTest : public testing::Test {
 
  protected:
   virtual void SetUp() {
-    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    file_ = temp_dir_.path().AppendASCII("TestWebDatabase");
-
-    table_.reset(new WebAppsTable);
-    db_.reset(new WebDatabase);
-    db_->AddTable(table_.get());
-    ASSERT_EQ(sql::INIT_OK, db_->Init(file_));
+    PathService::Get(chrome::DIR_TEST_DATA, &file_);
+    const std::string test_db = "TestWebDatabase" +
+        base::Int64ToString(Time::Now().ToTimeT()) +
+        ".db";
+    file_ = file_.AppendASCII(test_db);
+    file_util::Delete(file_, false);
   }
 
-  base::FilePath file_;
-  base::ScopedTempDir temp_dir_;
-  scoped_ptr<WebAppsTable> table_;
-  scoped_ptr<WebDatabase> db_;
+  virtual void TearDown() {
+    file_util::Delete(file_, false);
+  }
+
+  FilePath file_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebAppsTableTest);
@@ -41,26 +42,32 @@ class WebAppsTableTest : public testing::Test {
 
 
 TEST_F(WebAppsTableTest, WebAppHasAllImages) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
   GURL url("http://google.com/");
 
   // Initial value for unknown web app should be false.
-  EXPECT_FALSE(table_->GetWebAppHasAllImages(url));
+  EXPECT_FALSE(db.GetWebAppsTable()->GetWebAppHasAllImages(url));
 
   // Set the value and make sure it took.
-  EXPECT_TRUE(table_->SetWebAppHasAllImages(url, true));
-  EXPECT_TRUE(table_->GetWebAppHasAllImages(url));
+  EXPECT_TRUE(db.GetWebAppsTable()->SetWebAppHasAllImages(url, true));
+  EXPECT_TRUE(db.GetWebAppsTable()->GetWebAppHasAllImages(url));
 
   // Remove the app and make sure value reverts to default.
-  EXPECT_TRUE(table_->RemoveWebApp(url));
-  EXPECT_FALSE(table_->GetWebAppHasAllImages(url));
+  EXPECT_TRUE(db.GetWebAppsTable()->RemoveWebApp(url));
+  EXPECT_FALSE(db.GetWebAppsTable()->GetWebAppHasAllImages(url));
 }
 
 TEST_F(WebAppsTableTest, WebAppImages) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
   GURL url("http://google.com/");
 
   // Web app should initially have no images.
   std::vector<SkBitmap> images;
-  ASSERT_TRUE(table_->GetWebAppImages(url, &images));
+  ASSERT_TRUE(db.GetWebAppsTable()->GetWebAppImages(url, &images));
   ASSERT_EQ(0U, images.size());
 
   // Add an image.
@@ -68,10 +75,10 @@ TEST_F(WebAppsTableTest, WebAppImages) {
   image.setConfig(SkBitmap::kARGB_8888_Config, 16, 16);
   image.allocPixels();
   image.eraseColor(SK_ColorBLACK);
-  ASSERT_TRUE(table_->SetWebAppImage(url, image));
+  ASSERT_TRUE(db.GetWebAppsTable()->SetWebAppImage(url, image));
 
   // Make sure we get the image back.
-  ASSERT_TRUE(table_->GetWebAppImages(url, &images));
+  ASSERT_TRUE(db.GetWebAppsTable()->GetWebAppImages(url, &images));
   ASSERT_EQ(1U, images.size());
   ASSERT_EQ(16, images[0].width());
   ASSERT_EQ(16, images[0].height());
@@ -90,9 +97,9 @@ TEST_F(WebAppsTableTest, WebAppImages) {
   image.getAddr32(0, 1)[1] = test_pixel_2;
   image.getAddr32(0, 1)[2] = test_pixel_3;
 
-  ASSERT_TRUE(table_->SetWebAppImage(url, image));
+  ASSERT_TRUE(db.GetWebAppsTable()->SetWebAppImage(url, image));
   images.clear();
-  ASSERT_TRUE(table_->GetWebAppImages(url, &images));
+  ASSERT_TRUE(db.GetWebAppsTable()->GetWebAppImages(url, &images));
   ASSERT_EQ(1U, images.size());
   ASSERT_EQ(16, images[0].width());
   ASSERT_EQ(16, images[0].height());
@@ -107,11 +114,11 @@ TEST_F(WebAppsTableTest, WebAppImages) {
   image.setConfig(SkBitmap::kARGB_8888_Config, 32, 32);
   image.allocPixels();
   image.eraseColor(SK_ColorBLACK);
-  ASSERT_TRUE(table_->SetWebAppImage(url, image));
+  ASSERT_TRUE(db.GetWebAppsTable()->SetWebAppImage(url, image));
 
   // Make sure we get both images back.
   images.clear();
-  ASSERT_TRUE(table_->GetWebAppImages(url, &images));
+  ASSERT_TRUE(db.GetWebAppsTable()->GetWebAppImages(url, &images));
   ASSERT_EQ(2U, images.size());
   if (images[0].width() == 16) {
     ASSERT_EQ(16, images[0].width());

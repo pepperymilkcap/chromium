@@ -16,8 +16,8 @@ InMemoryUrlProtocol::InMemoryUrlProtocol(const uint8* data, int64 size,
 
 InMemoryUrlProtocol::~InMemoryUrlProtocol() {}
 
-int InMemoryUrlProtocol::Read(int size, uint8* data) {
-  int available_bytes = size_ - position_;
+size_t InMemoryUrlProtocol::Read(size_t size, uint8* data) {
+  size_t available_bytes = size_ - position_;
   if (size > available_bytes)
     size = available_bytes;
 
@@ -35,7 +35,7 @@ bool InMemoryUrlProtocol::GetPosition(int64* position_out) {
 }
 
 bool InMemoryUrlProtocol::SetPosition(int64 position) {
-  if (position < 0 || position > size_)
+  if (position < 0 || position >= size_)
     return false;
   position_ = position;
   return true;

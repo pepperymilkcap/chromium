@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,11 @@
 #import <AppKit/AppKit.h>
 
 #include "base/bind.h"
-#include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/message_loop.h"
 #include "base/threading/thread.h"
-#include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/image/image_skia_util_mac.h"
-
-// static
-IconGroupID IconLoader::ReadGroupIDFromFilepath(
-    const base::FilePath& filepath) {
-  return filepath.Extension();
-}
-
-bool IconLoader::IsIconMutableFromFilepath(const base::FilePath&) {
-  return false;
-}
+#include "base/sys_string_conversions.h"
+#include "skia/ext/skia_utils_mac.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 void IconLoader::ReadIcon() {
   NSString* group = base::SysUTF8ToNSString(group_);
@@ -44,11 +33,8 @@ void IconLoader::ReadIcon() {
       default:
         NOTREACHED();
     }
-    gfx::ImageSkia image_skia(gfx::ImageSkiaFromResizedNSImage(icon, size));
-    if (!image_skia.isNull()) {
-      image_skia.MakeThreadSafe();
-      image_.reset(new gfx::Image(image_skia));
-    }
+    image_.reset(new gfx::Image(new SkBitmap(
+        gfx::NSImageToSkBitmap(icon, size, false))));
   }
 
   target_message_loop_->PostTask(FROM_HERE,

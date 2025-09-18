@@ -8,7 +8,7 @@
 
 #include "base/logging.h"
 #include "base/sys_info.h"
-#include "base/time/time.h"
+#include "base/time.h"
 
 namespace {
 
@@ -58,10 +58,6 @@ void CaptureScheduler::RecordCaptureTime(base::TimeDelta capture_time) {
 
 void CaptureScheduler::RecordEncodeTime(base::TimeDelta encode_time) {
   encode_time_.Record(encode_time.InMilliseconds());
-}
-
-void CaptureScheduler::SetNumOfProcessorsForTest(int num_of_processors) {
-  num_of_processors_ = num_of_processors;
 }
 
 }  // namespace remoting

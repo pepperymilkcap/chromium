@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,13 @@
 #include <vector>
 
 #include "base/metrics/histogram.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_variant.h"
+#include "grit/chrome_frame_resources.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/url_constants.h"
 #include "chrome_frame/chrome_frame_plugin.h"
@@ -34,9 +35,8 @@
 #include "chrome_frame/urlmon_url_request.h"
 #include "chrome_frame/urlmon_url_request_private.h"
 #include "chrome_frame/utils.h"
-#include "grit/chrome_frame_resources.h"
 #include "grit/generated_resources.h"
-#include "net/cookies/cookie_monster.h"
+#include "net/base/cookie_monster.h"
 
 // Connection point class to support firing IChromeFrameEvents (dispinterface).
 template<class T>
@@ -81,6 +81,12 @@ class ATL_NO_VTABLE ProxyDIChromeFrameEvents
     FireMethodWithParams(dispid, &param, 1);
   }
 
+  void Fire_onload(IDispatch* event) {
+    VARIANT var = { VT_DISPATCH };
+    var.pdispVal = event;
+    FireMethodWithParam(CF_EVENT_DISPID_ONLOAD, var);
+  }
+
   void Fire_onloaderror(IDispatch* event) {
     VARIANT var = { VT_DISPATCH };
     var.pdispVal = event;
@@ -114,9 +120,25 @@ class ATL_NO_VTABLE ProxyDIChromeFrameEvents
   void Fire_onchannelerror() {  // NOLINT
     FireMethodWithParams(CF_EVENT_DISPID_ONCHANNELERROR, NULL, 0);
   }
+
+  void Fire_onclose() {  // NOLINT
+    FireMethodWithParams(CF_EVENT_DISPID_ONCLOSE, NULL, 0);
+  }
 };
 
 extern bool g_first_launch_by_process_;
+
+namespace chrome_frame {
+// Implemented outside this file so that the header doesn't include
+// automation_messages.h.
+std::string ActiveXCreateUrl(const GURL& parsed_url,
+                             const AttachExternalTabParams& params);
+int GetDisposition(const AttachExternalTabParams& params);
+void GetMiniContextMenuData(UINT cmd,
+                            const MiniContextMenuParams& params,
+                            GURL* referrer,
+                            GURL* url);
+}  // namespace chrome_frame
 
 // Common implementation for ActiveX and Active Document
 template <class T, const CLSID& class_id>
@@ -189,6 +211,7 @@ END_CONNECTION_POINT_MAP()
 
 BEGIN_MSG_MAP(ChromeFrameActivexBase)
   MESSAGE_HANDLER(WM_CREATE, OnCreate)
+  MESSAGE_HANDLER(WM_DOWNLOAD_IN_HOST, OnDownloadRequestInHost)
   MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
   CHAIN_MSG_MAP(ChromeFramePlugin<T>)
   CHAIN_MSG_MAP(CComControl<T>)
@@ -313,6 +336,33 @@ END_MSG_MAP()
     return CComControlBase::IOleObject_SetClientSite(client_site);
   }
 
+  bool HandleContextMenuCommand(UINT cmd, const MiniContextMenuParams& params) {
+    if (cmd == IDC_ABOUT_CHROME_FRAME) {
+      int tab_handle = automation_client_->tab()->handle();
+      HostNavigate(GURL("about:version"), GURL(), NEW_WINDOW);
+      return true;
+    } else {
+      switch (cmd) {
+        case IDS_CONTENT_CONTEXT_SAVEAUDIOAS:
+        case IDS_CONTENT_CONTEXT_SAVEVIDEOAS:
+        case IDS_CONTENT_CONTEXT_SAVEIMAGEAS:
+        case IDS_CONTENT_CONTEXT_SAVELINKAS: {
+          GURL referrer, url;
+          chrome_frame::GetMiniContextMenuData(cmd, params, &referrer, &url);
+          DoFileDownloadInIE(UTF8ToWide(url.spec()).c_str());
+          return true;
+        }
+
+        case IDC_PRINT: {
+          automation_client_->PrintTab();
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   // Should connections initiated by this class try to block
   // responses served with the X-Frame-Options header?
   // ActiveX controls genereally will want to do this,
@@ -328,6 +378,11 @@ END_MSG_MAP()
     return !is_privileged();
   }
 
+  // Needed to support PostTask.
+  static bool ImplementsThreadSafeReferenceCounting() {
+    return true;
+  }
+
   static void BringWebBrowserWindowToTop(IWebBrowser2* web_browser2) {
     DCHECK(web_browser2);
     if (web_browser2) {
@@ -340,7 +395,7 @@ END_MSG_MAP()
 
  protected:
   virtual void GetProfilePath(const std::wstring& profile_name,
-                              base::FilePath* profile_path) {
+                              FilePath* profile_path) {
     bool is_IE = (lstrcmpi(profile_name.c_str(), kIexploreProfileName) == 0) ||
                  (lstrcmpi(profile_name.c_str(), kRundllProfileName) == 0);
     // Browsers without IDeleteBrowsingHistory in non-priv mode
@@ -354,8 +409,96 @@ END_MSG_MAP()
     DVLOG(1) << __FUNCTION__ << ": " << profile_path->value();
   }
 
+  void OnLoad(const GURL& url) {
+    if (ready_state_ < READYSTATE_COMPLETE) {
+      ready_state_ = READYSTATE_COMPLETE;
+      FireOnChanged(DISPID_READYSTATE);
+    }
+
+    HRESULT hr = InvokeScriptFunction(onload_handler_, url.spec());
+  }
+
   void OnLoadFailed(int error_code, const std::string& url) {
     HRESULT hr = InvokeScriptFunction(onerror_handler_, url);
+  }
+
+  void OnMessageFromChromeFrame(const std::string& message,
+                                const std::string& origin,
+                                const std::string& target) {
+    base::win::ScopedComPtr<IDispatch> message_event;
+    if (SUCCEEDED(CreateDomEvent("message", message, origin,
+                                 message_event.Receive()))) {
+      base::win::ScopedVariant event_var;
+      event_var.Set(static_cast<IDispatch*>(message_event));
+      InvokeScriptFunction(onmessage_handler_, event_var.AsInput());
+    }
+  }
+
+  virtual void OnTabbedOut(bool reverse) {
+    DCHECK(m_bInPlaceActive);
+
+    HWND parent = ::GetParent(m_hWnd);
+    ::SetFocus(parent);
+    base::win::ScopedComPtr<IOleControlSite> control_site;
+    control_site.QueryFrom(m_spClientSite);
+    if (control_site)
+      control_site->OnFocus(FALSE);
+  }
+
+  virtual void OnOpenURL(const GURL& url_to_open,
+                         const GURL& referrer, int open_disposition) {
+    HostNavigate(url_to_open, referrer, open_disposition);
+  }
+
+  // Called when Chrome has decided that a request needs to be treated as a
+  // download.  The caller will be the UrlRequest worker thread.
+  // The worker thread will block while we process the request and take
+  // ownership of the request object.
+  // There's room for improvement here and also see todo below.
+  LPARAM OnDownloadRequestInHost(UINT message, WPARAM wparam, LPARAM lparam,
+                                 BOOL& handled) {
+    ChromeFrameUrl cf_url;
+    cf_url.Parse(UTF8ToWide(GetDocumentUrl()));
+
+    // Always issue the download request in a new window to ensure that the
+    // currently loaded ChromeFrame document does not inadvartently see an
+    // unload request. This runs javascript unload handlers on the page which
+    // renders the page non functional.
+    VARIANT flags = { VT_I4 };
+    V_I4(&flags) = navNoHistory;
+    if (!cf_url.attach_to_external_tab())
+      V_I4(&flags) |= navOpenInNewWindow;
+
+    DownloadInHostParams* download_params =
+        reinterpret_cast<DownloadInHostParams*>(wparam);
+    DCHECK(download_params);
+    // TODO(tommi): It looks like we might have to switch the request object
+    // into a pass-through request object and serve up any thus far received
+    // content and headers to IE in order to prevent what can currently happen
+    // which is reissuing requests and turning POST into GET.
+    if (download_params->moniker) {
+      NavigateBrowserToMoniker(
+          doc_site_, download_params->moniker,
+          UTF8ToWide(download_params->request_headers).c_str(),
+          download_params->bind_ctx, NULL, download_params->post_data,
+          &flags);
+    }
+    delete download_params;
+    return TRUE;
+  }
+
+  virtual void OnAttachExternalTab(const AttachExternalTabParams& params) {
+    GURL current_url(static_cast<BSTR>(url_));
+    std::string url = chrome_frame::ActiveXCreateUrl(current_url, params);
+    // Pass the current document url as the referrer for the new navigation.
+    HostNavigate(GURL(url), current_url, chrome_frame::GetDisposition(params));
+  }
+
+  virtual void OnHandleContextMenu(const ContextMenuModel& menu_model,
+                                   int align_flags,
+                                   const MiniContextMenuParams& params) {
+    scoped_refptr<BasePlugin> ref(this);
+    ChromeFramePlugin<T>::OnHandleContextMenu(menu_model, align_flags, params);
   }
 
   LRESULT OnCreate(UINT message, WPARAM wparam, LPARAM lparam,
@@ -402,6 +545,10 @@ END_MSG_MAP()
     FireOnChanged(DISPID_READYSTATE);
   }
 
+  virtual void OnCloseTab() {
+    Fire_onclose();
+  }
+
   // Overridden to take advantage of readystate prop changes and send those
   // to potential listeners.
   HRESULT FireOnChanged(DISPID dispid) {
@@ -430,7 +577,7 @@ END_MSG_MAP()
 
     // Switch the src to UTF8 and try to expand to full URL
     std::string src_utf8;
-    base::WideToUTF8(src, SysStringLen(src), &src_utf8);
+    WideToUTF8(src, SysStringLen(src), &src_utf8);
     std::string full_url = ResolveURL(GetDocumentUrl(), src_utf8);
 
     // We can initiate navigation here even if ready_state is not complete.
@@ -445,7 +592,7 @@ END_MSG_MAP()
     }
 
     // Save full URL in BSTR member
-    url_.Reset(::SysAllocString(base::UTF8ToWide(full_url).c_str()));
+    url_.Reset(::SysAllocString(UTF8ToWide(full_url).c_str()));
 
     return S_OK;
   }
@@ -560,6 +707,43 @@ END_MSG_MAP()
 
   // Posts a message to the chrome frame.
   STDMETHOD(postMessage)(BSTR message, VARIANT target) {
+    if (NULL == message) {
+      return E_INVALIDARG;
+    }
+
+    if (!automation_client_.get())
+      return E_FAIL;
+
+    std::string utf8_target;
+    if (target.vt == VT_BSTR) {
+      int len = ::SysStringLen(target.bstrVal);
+      if (len == 1 && target.bstrVal[0] == L'*') {
+        utf8_target = "*";
+      } else {
+        GURL resolved(target.bstrVal);
+        if (!resolved.is_valid()) {
+          Error(L"Unable to parse the specified target URL.");
+          return E_INVALIDARG;
+        }
+
+        utf8_target = resolved.spec();
+      }
+    } else {
+      utf8_target = "*";
+    }
+
+    std::string utf8_message;
+    WideToUTF8(message, ::SysStringLen(message), &utf8_message);
+
+    GURL url(GURL(document_url_).GetOrigin());
+    std::string origin(url.is_empty() ? "null" : url.spec());
+    if (!automation_client_->ForwardMessageFromExternalHost(utf8_message,
+                                                            origin,
+                                                            utf8_target)) {
+      Error(L"Failed to post message to chrome frame");
+      return E_FAIL;
+    }
+
     return S_OK;
   }
 
@@ -605,6 +789,27 @@ END_MSG_MAP()
   }
 
   STDMETHOD(postPrivateMessage)(BSTR message, BSTR origin, BSTR target) {
+    if (NULL == message)
+      return E_INVALIDARG;
+
+    if (!is_privileged()) {
+      DLOG(ERROR) << "Attempt to postPrivateMessage in non-privileged mode";
+      return E_ACCESSDENIED;
+    }
+
+    DCHECK(automation_client_.get());
+    std::string utf8_message, utf8_origin, utf8_target;
+    WideToUTF8(message, ::SysStringLen(message), &utf8_message);
+    WideToUTF8(origin, ::SysStringLen(origin), &utf8_origin);
+    WideToUTF8(target, ::SysStringLen(target), &utf8_target);
+
+    if (!automation_client_->ForwardMessageFromExternalHost(utf8_message,
+                                                            utf8_origin,
+                                                            utf8_target)) {
+      Error(L"Failed to post message to chrome frame");
+      return E_FAIL;
+    }
+
     return S_OK;
   }
 
@@ -702,8 +907,7 @@ END_MSG_MAP()
   // Helper function to execute a function on a script IDispatch interface.
   HRESULT InvokeScriptFunction(const VARIANT& script_object,
                                const std::string& param) {
-    base::win::ScopedVariant script_arg(
-        base::UTF8ToWide(param.c_str()).c_str());
+    base::win::ScopedVariant script_arg(UTF8ToWide(param.c_str()).c_str());
     return InvokeScriptFunction(script_object, script_arg.AsInput());
   }
 
@@ -818,6 +1022,51 @@ END_MSG_MAP()
     return hr;
   }
 
+  virtual void OnAcceleratorPressed(const MSG& accel_message) {
+    DCHECK(m_spInPlaceSite != NULL);
+    // Allow our host a chance to handle the accelerator.
+    // This catches things like Ctrl+F, Ctrl+O etc, but not browser
+    // accelerators such as F11, Ctrl+T etc.
+    // (see AllowFrameToTranslateAccelerator for those).
+    HRESULT hr = TranslateAccelerator(const_cast<MSG*>(&accel_message));
+    if (hr != S_OK)
+      hr = AllowFrameToTranslateAccelerator(accel_message);
+
+    DVLOG(1) << __FUNCTION__ << " browser response: "
+             << base::StringPrintf("0x%08x", hr);
+
+    if (hr != S_OK) {
+      // The WM_SYSKEYDOWN/WM_SYSKEYUP messages are not processed by the
+      // IOleControlSite and IBrowserService2::v_MayTranslateAccelerator
+      // implementations. We need to understand this better. That is for
+      // another day. For now we just post these messages back to the parent
+      // which forwards it off to the frame. This should not cause major
+      // grief for Chrome as it does not need to handle WM_SYSKEY* messages in
+      // in ChromeFrame mode.
+      // TODO(iyengar)
+      // Understand and fix WM_SYSCHAR handling
+      // We should probably unify the accelerator handling for the active
+      // document and the activex.
+      if (accel_message.message == WM_SYSCHAR ||
+          accel_message.message == WM_SYSKEYDOWN ||
+          accel_message.message == WM_SYSKEYUP) {
+        ::PostMessage(GetParent(), accel_message.message, accel_message.wParam,
+                      accel_message.lParam);
+        return;
+      }
+    }
+    // Last chance to handle the keystroke is to pass it to chromium.
+    // We do this last partially because there's no way for us to tell if
+    // chromium actually handled the keystroke, but also since the browser
+    // should have first dibs anyway.
+    if (hr != S_OK && automation_client_.get()) {
+      TabProxy* tab = automation_client_->tab();
+      if (tab) {
+        tab->ProcessUnhandledAccelerator(accel_message);
+      }
+    }
+  }
+
  protected:
   void HostNavigate(const GURL& url_to_open,
                     const GURL& referrer, int open_disposition) {
@@ -832,15 +1081,15 @@ END_MSG_MAP()
     // using chrome frame full tab mode by using 'cf:' protocol handler.
     // Also change the disposition to NEW_WINDOW since IE6 doesn't have tabs.
     if (url_to_open.has_scheme() &&
-        (url_to_open.SchemeIs(content::kViewSourceScheme) ||
+        (url_to_open.SchemeIs(chrome::kViewSourceScheme) ||
         url_to_open.SchemeIs(chrome::kAboutScheme))) {
       std::wstring chrome_url;
       chrome_url.append(kChromeProtocolPrefix);
-      chrome_url.append(base::UTF8ToWide(url_to_open.spec()));
+      chrome_url.append(UTF8ToWide(url_to_open.spec()));
       url.Set(chrome_url.c_str());
       open_disposition = NEW_WINDOW;
     } else {
-      url.Set(base::UTF8ToWide(url_to_open.spec()).c_str());
+      url.Set(UTF8ToWide(url_to_open.spec()).c_str());
     }
 
     VARIANT flags = { VT_I4 };
@@ -887,7 +1136,7 @@ END_MSG_MAP()
     // CComQIPtr<ITargetFramePriv2> target_frame = web_browser2;
     // if (target_frame) {
     //   CComPtr<IUri> uri;
-    //   CreateUri(base::UTF8ToWide(open_url_command->url_.spec()).c_str(),
+    //   CreateUri(UTF8ToWide(open_url_command->url_.spec()).c_str(),
     //             Uri_CREATE_IE_SETTINGS, 0, &uri);
     //   CComPtr<IBindCtx> bind_ctx;
     //   CreateBindCtx(0, &bind_ctx);
@@ -901,7 +1150,7 @@ END_MSG_MAP()
 
     if (referrer.is_valid()) {
       std::wstring referrer_header = L"Referer: ";
-      referrer_header += base::UTF8ToWide(referrer.spec());
+      referrer_header += UTF8ToWide(referrer.spec());
       referrer_header += L"\r\n\r\n";
       http_headers.Set(referrer_header.c_str());
     }

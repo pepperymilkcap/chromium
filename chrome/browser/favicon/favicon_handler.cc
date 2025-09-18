@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,171 +6,53 @@
 
 #include "build/build_config.h"
 
-#include <algorithm>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted_memory.h"
-#include "chrome/browser/bookmarks/bookmark_service.h"
-#include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/favicon/favicon_util.h"
-#include "chrome/browser/history/select_favicon_frames.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/icon_messages.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
 #include "skia/ext/image_operations.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_util.h"
 
-using content::FaviconURL;
 using content::NavigationEntry;
 
 namespace {
 
-// Size (along each axis) of a touch icon. This currently corresponds to
-// the apple touch icon for iPad.
-const int kTouchIconSize = 144;
-
-// Returns chrome::IconType the given icon_type corresponds to.
-chrome::IconType ToHistoryIconType(FaviconURL::IconType icon_type) {
+// Returns history::IconType the given icon_type corresponds to.
+history::IconType ToHistoryIconType(FaviconURL::IconType icon_type) {
   switch (icon_type) {
     case FaviconURL::FAVICON:
-      return chrome::FAVICON;
+      return history::FAVICON;
     case FaviconURL::TOUCH_ICON:
-      return chrome::TOUCH_ICON;
+      return history::TOUCH_ICON;
     case FaviconURL::TOUCH_PRECOMPOSED_ICON:
-      return chrome::TOUCH_PRECOMPOSED_ICON;
+      return history::TOUCH_PRECOMPOSED_ICON;
     case FaviconURL::INVALID_ICON:
-      return chrome::INVALID_ICON;
+      return history::INVALID_ICON;
   }
   NOTREACHED();
-  return chrome::INVALID_ICON;
-}
-
-// Get the maximal icon size in pixels for a icon of type |icon_type| for the
-// current platform.
-int GetMaximalIconSize(chrome::IconType icon_type) {
-  switch (icon_type) {
-    case chrome::FAVICON:
-#if defined(OS_ANDROID)
-      return 192;
-#else
-      return gfx::ImageSkia::GetMaxSupportedScale() * gfx::kFaviconSize;
-#endif
-    case chrome::TOUCH_ICON:
-    case chrome::TOUCH_PRECOMPOSED_ICON:
-      return kTouchIconSize;
-    case chrome::INVALID_ICON:
-      return 0;
-  }
-  NOTREACHED();
-  return 0;
+  // Shouldn't reach here, just make compiler happy.
+  return history::INVALID_ICON;
 }
 
 bool DoUrlAndIconMatch(const FaviconURL& favicon_url,
                        const GURL& url,
-                       chrome::IconType icon_type) {
+                       history::IconType icon_type) {
   return favicon_url.icon_url == url &&
       favicon_url.icon_type == static_cast<FaviconURL::IconType>(icon_type);
 }
 
-// Returns true if all of the icon URLs and icon types in |bitmap_results| are
-// identical and if they match the icon URL and icon type in |favicon_url|.
-// Returns false if |bitmap_results| is empty.
-bool DoUrlsAndIconsMatch(
-    const FaviconURL& favicon_url,
-    const std::vector<chrome::FaviconBitmapResult>& bitmap_results) {
-  if (bitmap_results.empty())
-    return false;
-
-  chrome::IconType icon_type = ToHistoryIconType(favicon_url.icon_type);
-
-  for (size_t i = 0; i < bitmap_results.size(); ++i) {
-    if (favicon_url.icon_url != bitmap_results[i].icon_url ||
-        icon_type != bitmap_results[i].icon_type) {
-      return false;
-    }
-  }
-  return true;
-}
-
-std::string UrlWithoutFragment(const GURL& gurl) {
-  GURL::Replacements replacements;
-  replacements.ClearRef();
-  return gurl.ReplaceComponents(replacements).spec();
-}
-
-bool UrlMatches(const GURL& gurl_a, const GURL& gurl_b) {
-  return UrlWithoutFragment(gurl_a) == UrlWithoutFragment(gurl_b);
-}
-
-// Return true if |bitmap_result| is expired.
-bool IsExpired(const chrome::FaviconBitmapResult& bitmap_result) {
-  return bitmap_result.expired;
-}
-
-// Return true if |bitmap_result| is valid.
-bool IsValid(const chrome::FaviconBitmapResult& bitmap_result) {
-  return bitmap_result.is_valid();
-}
-
-// Returns true if at least one of the bitmaps in |bitmap_results| is expired or
-// if |bitmap_results| is missing favicons for |desired_size_in_dip| and one of
-// the scale factors in FaviconUtil::GetFaviconScaleFactors().
-bool HasExpiredOrIncompleteResult(
-    int desired_size_in_dip,
-    const std::vector<chrome::FaviconBitmapResult>& bitmap_results) {
-  // Check if at least one of the bitmaps is expired.
-  std::vector<chrome::FaviconBitmapResult>::const_iterator it =
-      std::find_if(bitmap_results.begin(), bitmap_results.end(), IsExpired);
-  if (it != bitmap_results.end())
-    return true;
-
-   // Any favicon size is good if the desired size is 0.
-   if (desired_size_in_dip == 0)
-     return false;
-
-  // Check if the favicon for at least one of the scale factors is missing.
-  // |bitmap_results| should always be complete for data inserted by
-  // FaviconHandler as the FaviconHandler stores favicons resized to all
-  // of FaviconUtil::GetFaviconScaleFactors() into the history backend.
-  // Examples of when |bitmap_results| can be incomplete:
-  // - Favicons inserted into the history backend by sync.
-  // - Favicons for imported bookmarks.
-  std::vector<gfx::Size> favicon_sizes;
-  for (size_t i = 0; i < bitmap_results.size(); ++i)
-    favicon_sizes.push_back(bitmap_results[i].pixel_size);
-
-  std::vector<ui::ScaleFactor> scale_factors =
-      FaviconUtil::GetFaviconScaleFactors();
-  for (size_t i = 0; i < scale_factors.size(); ++i) {
-    int edge_size_in_pixel = floor(
-        desired_size_in_dip * ui::GetImageScale(scale_factors[i]));
-    std::vector<gfx::Size>::iterator it = std::find(favicon_sizes.begin(),
-        favicon_sizes.end(), gfx::Size(edge_size_in_pixel, edge_size_in_pixel));
-    if (it == favicon_sizes.end())
-      return true;
-  }
-  return false;
-}
-
-// Returns true if at least one of |bitmap_results| is valid.
-bool HasValidResult(
-    const std::vector<chrome::FaviconBitmapResult>& bitmap_results) {
-  std::vector<chrome::FaviconBitmapResult>::const_iterator it =
-      std::find_if(bitmap_results.begin(), bitmap_results.end(), IsValid);
-  return it != bitmap_results.end();
-}
-
 }  // namespace
 
-////////////////////////////////////////////////////////////////////////////////
-
 FaviconHandler::DownloadRequest::DownloadRequest()
-    : icon_type(chrome::INVALID_ICON) {
+    : icon_type(history::INVALID_ICON) {
 }
 
 FaviconHandler::DownloadRequest::~DownloadRequest() {
@@ -179,44 +61,22 @@ FaviconHandler::DownloadRequest::~DownloadRequest() {
 FaviconHandler::DownloadRequest::DownloadRequest(
     const GURL& url,
     const GURL& image_url,
-    chrome::IconType icon_type)
+    const FaviconTabHelper::ImageDownloadCallback& callback,
+    history::IconType icon_type)
     : url(url),
       image_url(image_url),
+      callback(callback),
       icon_type(icon_type) {
 }
-
-////////////////////////////////////////////////////////////////////////////////
-
-FaviconHandler::FaviconCandidate::FaviconCandidate()
-    : score(0),
-      icon_type(chrome::INVALID_ICON) {
-}
-
-FaviconHandler::FaviconCandidate::~FaviconCandidate() {
-}
-
-FaviconHandler::FaviconCandidate::FaviconCandidate(
-    const GURL& url,
-    const GURL& image_url,
-    const gfx::Image& image,
-    float score,
-    chrome::IconType icon_type)
-    : url(url),
-      image_url(image_url),
-      image(image),
-      score(score),
-      icon_type(icon_type) {
-}
-
-////////////////////////////////////////////////////////////////////////////////
 
 FaviconHandler::FaviconHandler(Profile* profile,
                                FaviconHandlerDelegate* delegate,
                                Type icon_type)
     : got_favicon_from_history_(false),
-      favicon_expired_or_incomplete_(false),
-      icon_types_(icon_type == FAVICON ? chrome::FAVICON :
-          chrome::TOUCH_ICON | chrome::TOUCH_PRECOMPOSED_ICON),
+      favicon_expired_(false),
+      icon_types_(icon_type == FAVICON ? history::FAVICON :
+          history::TOUCH_ICON | history::TOUCH_PRECOMPOSED_ICON),
+      current_url_index_(0),
       profile_(profile),
       delegate_(delegate) {
   DCHECK(profile_);
@@ -224,151 +84,131 @@ FaviconHandler::FaviconHandler(Profile* profile,
 }
 
 FaviconHandler::~FaviconHandler() {
+  // Call pending download callbacks with error to allow caller to clean up.
+  for (DownloadRequests::iterator i = download_requests_.begin();
+       i != download_requests_.end(); ++i) {
+    if (!i->second.callback.is_null()) {
+      i->second.callback.Run(i->first, true, SkBitmap());
+    }
+  }
 }
 
 void FaviconHandler::FetchFavicon(const GURL& url) {
-  cancelable_task_tracker_.TryCancelAll();
+  cancelable_consumer_.CancelAllRequests();
 
   url_ = url;
 
-  favicon_expired_or_incomplete_ = got_favicon_from_history_ = false;
-  image_urls_.clear();
+  favicon_expired_ = got_favicon_from_history_ = false;
+  current_url_index_ = 0;
+  urls_.clear();
 
   // Request the favicon from the history service. In parallel to this the
-  // renderer is going to notify us (well WebContents) when the favicon url is
+  // renderer is going to notify us (well TabContents) when the favicon url is
   // available.
   if (GetFaviconService()) {
-    GetFaviconForURL(
-        url_,
-        icon_types_,
+    GetFaviconForURL(url_, icon_types_, &cancelable_consumer_,
         base::Bind(&FaviconHandler::OnFaviconDataForInitialURL,
-                   base::Unretained(this)),
-        &cancelable_task_tracker_);
+                   base::Unretained(this)));
   }
+}
+
+int FaviconHandler::DownloadImage(
+    const GURL& image_url,
+    int image_size,
+    history::IconType icon_type,
+    const FaviconTabHelper::ImageDownloadCallback& callback) {
+  return ScheduleDownload(GURL(), image_url, image_size, icon_type, callback);
 }
 
 FaviconService* FaviconHandler::GetFaviconService() {
-  return FaviconServiceFactory::GetForProfile(
-      profile_, Profile::EXPLICIT_ACCESS);
-}
-
-bool FaviconHandler::UpdateFaviconCandidate(const GURL& url,
-                                            const GURL& image_url,
-                                            const gfx::Image& image,
-                                            float score,
-                                            chrome::IconType icon_type) {
-  bool update_candidate = false;
-  bool exact_match = score == 1;
-  if (preferred_icon_size() == 0) {
-    // No preferred size, use this icon.
-    update_candidate = true;
-    exact_match = true;
-  } else if (favicon_candidate_.icon_type == chrome::INVALID_ICON) {
-    // No current candidate, use this.
-    update_candidate = true;
-  } else {
-    if (exact_match) {
-      // Exact match, use this.
-      update_candidate = true;
-    } else {
-      // Compare against current candidate.
-      if (score > favicon_candidate_.score)
-        update_candidate = true;
-    }
-  }
-  if (update_candidate) {
-    favicon_candidate_ = FaviconCandidate(
-        url, image_url, image, score, icon_type);
-  }
-  return exact_match;
+  return profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
 }
 
 void FaviconHandler::SetFavicon(
     const GURL& url,
-    const GURL& icon_url,
+    const GURL& image_url,
     const gfx::Image& image,
-    chrome::IconType icon_type) {
-  if (GetFaviconService() && ShouldSaveFavicon(url))
-    SetHistoryFavicons(url, icon_url, icon_type, image);
+    history::IconType icon_type) {
+  const SkBitmap& bitmap = image;
+  const gfx::Image& sized_image = (preferred_icon_size() == 0 ||
+      (preferred_icon_size() == bitmap.width() &&
+       preferred_icon_size() == bitmap.height())) ?
+      image : ResizeFaviconIfNeeded(image);
 
-  if (UrlMatches(url, url_) && icon_type == chrome::FAVICON) {
+  if (GetFaviconService() && ShouldSaveFavicon(url)) {
+    std::vector<unsigned char> image_data;
+    if (gfx::PNGEncodedDataFromImage(sized_image, &image_data))
+      SetHistoryFavicon(url, image_url, image_data, icon_type);
+  }
+
+  if (url == url_ && icon_type == history::FAVICON) {
     NavigationEntry* entry = GetEntry();
     if (entry)
-      UpdateFavicon(entry, icon_url, image);
+      UpdateFavicon(entry, &sized_image);
   }
 }
 
 void FaviconHandler::UpdateFavicon(NavigationEntry* entry,
-    const std::vector<chrome::FaviconBitmapResult>& favicon_bitmap_results) {
-  gfx::Image resized_image = FaviconUtil::SelectFaviconFramesFromPNGs(
-      favicon_bitmap_results,
-      FaviconUtil::GetFaviconScaleFactors(),
-      preferred_icon_size());
-  // The history service sends back results for a single icon URL, so it does
-  // not matter which result we get the |icon_url| from.
-  const GURL icon_url = favicon_bitmap_results.empty() ?
-      GURL() : favicon_bitmap_results[0].icon_url;
-  UpdateFavicon(entry, icon_url, resized_image);
+                                   scoped_refptr<RefCountedMemory> data) {
+  scoped_ptr<gfx::Image> image(gfx::ImageFromPNGEncodedData(data->front(),
+                                                            data->size()));
+  UpdateFavicon(entry, image.get());
 }
 
 void FaviconHandler::UpdateFavicon(NavigationEntry* entry,
-                                   const GURL& icon_url,
-                                   const gfx::Image& image) {
+                                   const gfx::Image* image) {
   // No matter what happens, we need to mark the favicon as being set.
   entry->GetFavicon().valid = true;
 
-  bool icon_url_changed = (entry->GetFavicon().url != icon_url);
-  entry->GetFavicon().url = icon_url;
-
-  if (image.IsEmpty())
+  if (!image)
     return;
 
-  gfx::Image image_with_adjusted_colorspace = image;
-  FaviconUtil::SetFaviconColorSpace(&image_with_adjusted_colorspace);
-
-  entry->GetFavicon().image = image_with_adjusted_colorspace;
-  NotifyFaviconUpdated(icon_url_changed);
+  entry->GetFavicon().bitmap = *image;
+  delegate_->NotifyFaviconUpdated();
 }
 
 void FaviconHandler::OnUpdateFaviconURL(
     int32 page_id,
     const std::vector<FaviconURL>& candidates) {
+  NavigationEntry* entry = GetEntry();
+  if (!entry)
+    return;
 
-  image_urls_.clear();
-  favicon_candidate_ = FaviconCandidate();
+  bool got_favicon_url_update = false;
   for (std::vector<FaviconURL>::const_iterator i = candidates.begin();
        i != candidates.end(); ++i) {
-    if (!i->icon_url.is_empty() && (i->icon_type & icon_types_))
-      image_urls_.push_back(*i);
+    if (!i->icon_url.is_empty() && (i->icon_type & icon_types_)) {
+      if (!got_favicon_url_update) {
+        got_favicon_url_update = true;
+        urls_.clear();
+        current_url_index_ = 0;
+      }
+      urls_.push_back(*i);
+    }
   }
 
   // TODO(davemoore) Should clear on empty url. Currently we ignore it.
   // This appears to be what FF does as well.
-  if (image_urls_.empty())
+  // No URL was added.
+  if (!got_favicon_url_update)
     return;
 
   if (!GetFaviconService())
     return;
 
-  ProcessCurrentUrl();
-}
-
-void FaviconHandler::ProcessCurrentUrl() {
-  DCHECK(!image_urls_.empty());
-
-  NavigationEntry* entry = GetEntry();
-  if (!entry)
-    return;
-
   // For FAVICON.
   if (current_candidate()->icon_type == FaviconURL::FAVICON) {
-    if (!favicon_expired_or_incomplete_ && entry->GetFavicon().valid &&
+    if (!favicon_expired_ && entry->GetFavicon().valid &&
         DoUrlAndIconMatch(*current_candidate(), entry->GetFavicon().url,
-                          chrome::FAVICON))
+                          history::FAVICON))
       return;
-  } else if (!favicon_expired_or_incomplete_ && got_favicon_from_history_ &&
-             HasValidResult(history_results_) &&
-             DoUrlsAndIconsMatch(*current_candidate(), history_results_)) {
+
+    entry->GetFavicon().url = current_candidate()->icon_url;
+  } else if (!favicon_expired_ && got_favicon_from_history_ &&
+              history_icon_.is_valid() &&
+              DoUrlAndIconMatch(
+                  *current_candidate(),
+                  history_icon_.icon_url, history_icon_.icon_type)) {
     return;
   }
 
@@ -377,49 +217,31 @@ void FaviconHandler::ProcessCurrentUrl() {
         ToHistoryIconType(current_candidate()->icon_type));
 }
 
-void FaviconHandler::OnDidDownloadFavicon(
-    int id,
-    const GURL& image_url,
-    const std::vector<SkBitmap>& bitmaps,
-    const std::vector<gfx::Size>& original_bitmap_sizes) {
+void FaviconHandler::OnDidDownloadFavicon(int id,
+                                          const GURL& image_url,
+                                          bool errored,
+                                          const gfx::Image& image) {
   DownloadRequests::iterator i = download_requests_.find(id);
   if (i == download_requests_.end()) {
-    // Currently WebContents notifies us of ANY downloads so that it is
+    // Currently TabContents notifies us of ANY downloads so that it is
     // possible to get here.
     return;
   }
 
-  if (current_candidate() &&
-      DoUrlAndIconMatch(*current_candidate(), image_url, i->second.icon_type)) {
-    float score = 0.0f;
-    std::vector<ui::ScaleFactor> scale_factors =
-        FaviconUtil::GetFaviconScaleFactors();
-    gfx::Image image(SelectFaviconFrames(bitmaps,
-                                         original_bitmap_sizes,
-                                         scale_factors,
-                                         preferred_icon_size(),
-                                         &score));
-
+  if (!i->second.callback.is_null()) {
+    i->second.callback.Run(id, errored, *(&image));
+  } else if (current_candidate() &&
+             DoUrlAndIconMatch(*current_candidate(), image_url,
+                               i->second.icon_type)) {
     // The downloaded icon is still valid when there is no FaviconURL update
     // during the downloading.
-    bool request_next_icon = true;
-    if (!bitmaps.empty()) {
-      request_next_icon = !UpdateFaviconCandidate(
-          i->second.url, image_url, image, score, i->second.icon_type);
-    }
-    if (request_next_icon && GetEntry() && image_urls_.size() > 1) {
-      // Remove the first member of image_urls_ and process the remaining.
-      image_urls_.pop_front();
-      ProcessCurrentUrl();
-    } else if (favicon_candidate_.icon_type != chrome::INVALID_ICON) {
-      // No more icons to request, set the favicon from the candidate.
-      SetFavicon(favicon_candidate_.url,
-                 favicon_candidate_.image_url,
-                 favicon_candidate_.image,
-                 favicon_candidate_.icon_type);
-      // Reset candidate.
-      image_urls_.clear();
-      favicon_candidate_ = FaviconCandidate();
+    if (!errored) {
+      SetFavicon(i->second.url, image_url, image, i->second.icon_type);
+    } else if (GetEntry() && ++current_url_index_ < urls_.size()) {
+      // Copies all candidate except first one and notifies the FaviconHandler,
+      // so the next candidate can be processed.
+      std::vector<FaviconURL> new_candidates(++urls_.begin(), urls_.end());
+      OnUpdateFaviconURL(0, new_candidates);
     }
   }
   download_requests_.erase(i);
@@ -427,7 +249,7 @@ void FaviconHandler::OnDidDownloadFavicon(
 
 NavigationEntry* FaviconHandler::GetEntry() {
   NavigationEntry* entry = delegate_->GetActiveEntry();
-  if (entry && UrlMatches(entry->GetURL(), url_))
+  if (entry && entry->GetURL() == url_)
     return entry;
 
   // If the URL has changed out from under us (as will happen with redirects)
@@ -435,55 +257,50 @@ NavigationEntry* FaviconHandler::GetEntry() {
   return NULL;
 }
 
-int FaviconHandler::DownloadFavicon(const GURL& image_url,
-                                    int max_bitmap_size) {
+int FaviconHandler::DownloadFavicon(const GURL& image_url, int image_size) {
   if (!image_url.is_valid()) {
     NOTREACHED();
     return 0;
   }
-  return delegate_->StartDownload(image_url, max_bitmap_size);
+  static int next_id = 1;
+  int id = next_id++;
+  delegate_->StartDownload(id, image_url, image_size);
+  return id;
 }
 
 void FaviconHandler::UpdateFaviconMappingAndFetch(
     const GURL& page_url,
     const GURL& icon_url,
-    chrome::IconType icon_type,
-    const FaviconService::FaviconResultsCallback& callback,
-    CancelableTaskTracker* tracker) {
-  // TODO(pkotwicz): pass in all of |image_urls_| to
-  // UpdateFaviconMappingsAndFetch().
-  std::vector<GURL> icon_urls;
-  icon_urls.push_back(icon_url);
-  GetFaviconService()->UpdateFaviconMappingsAndFetch(
-      page_url, icon_urls, icon_type, preferred_icon_size(), callback, tracker);
+    history::IconType icon_type,
+    CancelableRequestConsumerBase* consumer,
+    const FaviconService::FaviconDataCallback& callback) {
+  GetFaviconService()->UpdateFaviconMappingAndFetch(page_url, icon_url,
+      icon_type, consumer, callback);
 }
 
 void FaviconHandler::GetFavicon(
     const GURL& icon_url,
-    chrome::IconType icon_type,
-    const FaviconService::FaviconResultsCallback& callback,
-    CancelableTaskTracker* tracker) {
-  GetFaviconService()->GetFavicon(
-      icon_url, icon_type, preferred_icon_size(), callback, tracker);
+    history::IconType icon_type,
+    CancelableRequestConsumerBase* consumer,
+    const FaviconService::FaviconDataCallback& callback) {
+  GetFaviconService()->GetFavicon(icon_url, icon_type, consumer, callback);
 }
 
 void FaviconHandler::GetFaviconForURL(
     const GURL& page_url,
     int icon_types,
-    const FaviconService::FaviconResultsCallback& callback,
-    CancelableTaskTracker* tracker) {
-  GetFaviconService()->GetFaviconForURL(
-      FaviconService::FaviconForURLParams(page_url, icon_types,
-                                          preferred_icon_size()),
-      callback,
-      tracker);
+    CancelableRequestConsumerBase* consumer,
+    const FaviconService::FaviconDataCallback& callback) {
+  GetFaviconService()->GetFaviconForURL(page_url, icon_types, consumer,
+                                        callback);
 }
 
-void FaviconHandler::SetHistoryFavicons(const GURL& page_url,
-                                        const GURL& icon_url,
-                                        chrome::IconType icon_type,
-                                        const gfx::Image& image) {
-  GetFaviconService()->SetFavicons(page_url, icon_url, icon_type, image);
+void FaviconHandler::SetHistoryFavicon(
+    const GURL& page_url,
+    const GURL& icon_url,
+    const std::vector<unsigned char>& image_data,
+    history::IconType icon_type) {
+  GetFaviconService()->SetFavicon(page_url, icon_url, image_data, icon_type);
 }
 
 bool FaviconHandler::ShouldSaveFavicon(const GURL& url) {
@@ -491,55 +308,47 @@ bool FaviconHandler::ShouldSaveFavicon(const GURL& url) {
     return true;
 
   // Otherwise store the favicon if the page is bookmarked.
-  BookmarkService* bookmark_service =
-      BookmarkService::FromBrowserContext(profile_);
-  return bookmark_service && bookmark_service->IsBookmarked(url);
-}
-
-void FaviconHandler::NotifyFaviconUpdated(bool icon_url_changed) {
-  delegate_->NotifyFaviconUpdated(icon_url_changed);
+  BookmarkModel* bookmark_model = profile_->GetBookmarkModel();
+  return bookmark_model && bookmark_model->IsBookmarked(url);
 }
 
 void FaviconHandler::OnFaviconDataForInitialURL(
-    const std::vector<chrome::FaviconBitmapResult>& favicon_bitmap_results) {
+    FaviconService::Handle handle,
+    history::FaviconData favicon) {
   NavigationEntry* entry = GetEntry();
   if (!entry)
     return;
 
   got_favicon_from_history_ = true;
-  history_results_ = favicon_bitmap_results;
+  history_icon_ = favicon;
 
-  bool has_results = !favicon_bitmap_results.empty();
-  favicon_expired_or_incomplete_ = has_results && HasExpiredOrIncompleteResult(
-      preferred_icon_size(), favicon_bitmap_results);
+  favicon_expired_ = (favicon.known_icon && favicon.expired);
 
-  if (has_results && icon_types_ == chrome::FAVICON &&
+  if (favicon.known_icon && favicon.icon_type == history::FAVICON &&
       !entry->GetFavicon().valid &&
       (!current_candidate() ||
-       DoUrlsAndIconsMatch(*current_candidate(), favicon_bitmap_results))) {
-    if (HasValidResult(favicon_bitmap_results)) {
-      // The db knows the favicon (although it may be out of date) and the entry
-      // doesn't have an icon. Set the favicon now, and if the favicon turns out
-      // to be expired (or the wrong url) we'll fetch later on. This way the
-      // user doesn't see a flash of the default favicon.
-      UpdateFavicon(entry, favicon_bitmap_results);
-    } else {
-      // If |favicon_bitmap_results| does not have any valid results, treat the
-      // favicon as if it's expired.
-      // TODO(pkotwicz): Do something better.
-      favicon_expired_or_incomplete_ = true;
-    }
+       DoUrlAndIconMatch(
+           *current_candidate(), favicon.icon_url, favicon.icon_type))) {
+    // The db knows the favicon (although it may be out of date) and the entry
+    // doesn't have an icon. Set the favicon now, and if the favicon turns out
+    // to be expired (or the wrong url) we'll fetch later on. This way the
+    // user doesn't see a flash of the default favicon.
+    entry->GetFavicon().url = favicon.icon_url;
+    if (favicon.is_valid())
+      UpdateFavicon(entry, favicon.image_data);
+    entry->GetFavicon().valid = true;
   }
 
-  if (has_results && !favicon_expired_or_incomplete_) {
+  if (favicon.known_icon && !favicon.expired) {
     if (current_candidate() &&
-        !DoUrlsAndIconsMatch(*current_candidate(), favicon_bitmap_results)) {
+        !DoUrlAndIconMatch(
+             *current_candidate(), favicon.icon_url, favicon.icon_type)) {
       // Mapping in the database is wrong. DownloadFavIconOrAskHistory will
       // update the mapping for this url and download the favicon if we don't
       // already have it.
       DownloadFaviconOrAskHistory(entry->GetURL(),
           current_candidate()->icon_url,
-          static_cast<chrome::IconType>(current_candidate()->icon_type));
+          static_cast<history::IconType>(current_candidate()->icon_type));
     }
   } else if (current_candidate()) {
     // We know the official url for the favicon, by either don't have the
@@ -555,19 +364,18 @@ void FaviconHandler::OnFaviconDataForInitialURL(
 void FaviconHandler::DownloadFaviconOrAskHistory(
     const GURL& page_url,
     const GURL& icon_url,
-    chrome::IconType icon_type) {
-  if (favicon_expired_or_incomplete_) {
+    history::IconType icon_type) {
+  if (favicon_expired_) {
     // We have the mapping, but the favicon is out of date. Download it now.
-    ScheduleDownload(page_url, icon_url, icon_type);
+    ScheduleDownload(page_url, icon_url, preferred_icon_size(), icon_type,
+                     FaviconTabHelper::ImageDownloadCallback());
   } else if (GetFaviconService()) {
     // We don't know the favicon, but we may have previously downloaded the
     // favicon for another page that shares the same favicon. Ask for the
     // favicon given the favicon URL.
     if (profile_->IsOffTheRecord()) {
-      GetFavicon(
-          icon_url, icon_type,
-          base::Bind(&FaviconHandler::OnFaviconData, base::Unretained(this)),
-          &cancelable_task_tracker_);
+      GetFavicon(icon_url, icon_type, &cancelable_consumer_,
+          base::Bind(&FaviconHandler::OnFaviconData, base::Unretained(this)));
     } else {
       // Ask the history service for the icon. This does two things:
       // 1. Attempts to fetch the favicon data from the database.
@@ -575,62 +383,78 @@ void FaviconHandler::DownloadFaviconOrAskHistory(
       //    include the mapping between the page url and the favicon url.
       // This is asynchronous. The history service will call back when done.
       // Issue the request and associate the current page ID with it.
-      UpdateFaviconMappingAndFetch(
-          page_url, icon_url, icon_type,
-          base::Bind(&FaviconHandler::OnFaviconData, base::Unretained(this)),
-          &cancelable_task_tracker_);
+      UpdateFaviconMappingAndFetch(page_url, icon_url, icon_type,
+          &cancelable_consumer_,
+          base::Bind(&FaviconHandler::OnFaviconData, base::Unretained(this)));
     }
   }
 }
 
-void FaviconHandler::OnFaviconData(
-    const std::vector<chrome::FaviconBitmapResult>& favicon_bitmap_results) {
+void FaviconHandler::OnFaviconData(FaviconService::Handle handle,
+                                  history::FaviconData favicon) {
   NavigationEntry* entry = GetEntry();
   if (!entry)
     return;
 
-  bool has_results = !favicon_bitmap_results.empty();
-  bool has_expired_or_incomplete_result = HasExpiredOrIncompleteResult(
-      preferred_icon_size(), favicon_bitmap_results);
-
-  if (has_results && icon_types_ == chrome::FAVICON) {
-    if (HasValidResult(favicon_bitmap_results)) {
+  // No need to update the favicon url. By the time we get here
+  // UpdateFaviconURL will have set the favicon url.
+  if (favicon.icon_type == history::FAVICON) {
+    if (favicon.is_valid()) {
       // There is a favicon, set it now. If expired we'll download the current
       // one again, but at least the user will get some icon instead of the
       // default and most likely the current one is fine anyway.
-      UpdateFavicon(entry, favicon_bitmap_results);
+      UpdateFavicon(entry, favicon.image_data);
     }
-    if (has_expired_or_incomplete_result) {
-      // The favicon is out of date. Request the current one.
+    if (!favicon.known_icon || favicon.expired) {
+      // We don't know the favicon, or it is out of date. Request the current
+      // one.
       ScheduleDownload(entry->GetURL(), entry->GetFavicon().url,
-                       chrome::FAVICON);
+                       preferred_icon_size(),
+                       history::FAVICON,
+                       FaviconTabHelper::ImageDownloadCallback());
     }
-  } else if (current_candidate() &&
-      (!has_results || has_expired_or_incomplete_result ||
-       !(DoUrlsAndIconsMatch(*current_candidate(), favicon_bitmap_results)))) {
+  } else if (current_candidate() && (!favicon.known_icon || favicon.expired ||
+      !(DoUrlAndIconMatch(
+            *current_candidate(), favicon.icon_url, favicon.icon_type)))) {
     // We don't know the favicon, it is out of date or its type is not same as
     // one got from page. Request the current one.
     ScheduleDownload(entry->GetURL(), current_candidate()->icon_url,
-        ToHistoryIconType(current_candidate()->icon_type));
+        preferred_icon_size(),
+        ToHistoryIconType(current_candidate()->icon_type),
+        FaviconTabHelper::ImageDownloadCallback());
   }
-  history_results_ = favicon_bitmap_results;
+  history_icon_ = favicon;
 }
 
 int FaviconHandler::ScheduleDownload(
     const GURL& url,
     const GURL& image_url,
-    chrome::IconType icon_type) {
-  // A max bitmap size is specified to avoid receiving huge bitmaps in
-  // OnDidDownloadFavicon(). See FaviconHandlerDelegate::StartDownload()
-  // for more details about the max bitmap size.
-  const int download_id = DownloadFavicon(image_url,
-      GetMaximalIconSize(icon_type));
+    int image_size,
+    history::IconType icon_type,
+    const FaviconTabHelper::ImageDownloadCallback& callback) {
+  const int download_id = DownloadFavicon(image_url, image_size);
   if (download_id) {
     // Download ids should be unique.
     DCHECK(download_requests_.find(download_id) == download_requests_.end());
     download_requests_[download_id] =
-        DownloadRequest(url, image_url, icon_type);
+        DownloadRequest(url, image_url, callback, icon_type);
   }
 
   return download_id;
+}
+
+gfx::Image FaviconHandler::ResizeFaviconIfNeeded(const gfx::Image& image) {
+  // Get an SkBitmap from the gfx::Image.
+  const SkBitmap& bitmap = image;
+  int width = bitmap.width();
+  int height = bitmap.height();
+  if (width > 0 && height > 0) {
+    gfx::CalculateFaviconTargetSize(&width, &height);
+    return gfx::Image(new SkBitmap(
+                          skia::ImageOperations::Resize(
+                              bitmap, skia::ImageOperations::RESIZE_LANCZOS3,
+                              width, height)));
+  }
+
+  return image;
 }

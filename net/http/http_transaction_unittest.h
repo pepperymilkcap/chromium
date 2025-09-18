@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_TRANSACTION_UNITTEST_H_
 #define NET_HTTP_HTTP_TRANSACTION_UNITTEST_H_
+#pragma once
 
 #include "net/http/http_transaction.h"
 
@@ -11,13 +12,10 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
-#include "net/base/request_priority.h"
 #include "net/base/test_completion_callback.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
@@ -26,7 +24,6 @@
 #include "net/http/http_response_info.h"
 
 namespace net {
-class HttpRequestHeaders;
 class IOBuffer;
 }
 
@@ -66,9 +63,6 @@ struct MockTransaction {
   int test_mode;
   MockTransactionHandler handler;
   net::CertStatus cert_status;
-  // Value returned by MockNetworkTransaction::Start (potentially
-  // asynchronously if |!(test_mode & TEST_MODE_SYNC_NET_START)|.)
-  net::Error return_code;
 };
 
 extern const MockTransaction kSimpleGET_Transaction;
@@ -111,8 +105,7 @@ class MockHttpRequest : public net::HttpRequestInfo {
 
 class TestTransactionConsumer {
  public:
-  TestTransactionConsumer(net::RequestPriority priority,
-                          net::HttpTransactionFactory* factory);
+  explicit TestTransactionConsumer(net::HttpTransactionFactory* factory);
   virtual ~TestTransactionConsumer();
 
   void Start(const net::HttpRequestInfo* request,
@@ -159,13 +152,9 @@ class MockNetworkLayer;
 // find data for the request URL.  It supports IO operations that complete
 // synchronously or asynchronously to help exercise different code paths in the
 // HttpCache implementation.
-class MockNetworkTransaction
-    : public net::HttpTransaction,
-      public base::SupportsWeakPtr<MockNetworkTransaction> {
-  typedef net::WebSocketHandshakeStreamBase::CreateHelper CreateHelper;
+class MockNetworkTransaction : public net::HttpTransaction {
  public:
-  MockNetworkTransaction(net::RequestPriority priority,
-                         MockNetworkLayer* factory);
+  explicit MockNetworkTransaction(MockNetworkLayer* factory);
   virtual ~MockNetworkTransaction();
 
   virtual int Start(const net::HttpRequestInfo* request,
@@ -190,54 +179,24 @@ class MockNetworkTransaction
 
   virtual void StopCaching() OVERRIDE;
 
-  virtual bool GetFullRequestHeaders(
-      net::HttpRequestHeaders* headers) const OVERRIDE;
-
-  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
-
   virtual void DoneReading() OVERRIDE;
 
   virtual const net::HttpResponseInfo* GetResponseInfo() const OVERRIDE;
 
   virtual net::LoadState GetLoadState() const OVERRIDE;
 
-  virtual net::UploadProgress GetUploadProgress() const OVERRIDE;
-
-  virtual bool GetLoadTimingInfo(
-      net::LoadTimingInfo* load_timing_info) const OVERRIDE;
-
-  virtual void SetPriority(net::RequestPriority priority) OVERRIDE;
-
-  virtual void SetWebSocketHandshakeStreamCreateHelper(
-      CreateHelper* create_helper) OVERRIDE;
-
-  CreateHelper* websocket_handshake_stream_create_helper() {
-    return websocket_handshake_stream_create_helper_;
-  }
-  net::RequestPriority priority() const { return priority_; }
+  virtual uint64 GetUploadProgress() const OVERRIDE;
 
  private:
-  int StartInternal(const net::HttpRequestInfo* request,
-                    const net::CompletionCallback& callback,
-                    const net::BoundNetLog& net_log);
   void CallbackLater(const net::CompletionCallback& callback, int result);
   void RunCallback(const net::CompletionCallback& callback, int result);
 
   base::WeakPtrFactory<MockNetworkTransaction> weak_factory_;
-  const net::HttpRequestInfo* request_;
   net::HttpResponseInfo response_;
   std::string data_;
   int data_cursor_;
   int test_mode_;
-  net::RequestPriority priority_;
-  CreateHelper* websocket_handshake_stream_create_helper_;
   base::WeakPtr<MockNetworkLayer> transaction_factory_;
-  int64 received_bytes_;
-
-  // NetLog ID of the fake / non-existent underlying socket used by the
-  // connection. Requires Start() be passed a BoundNetLog with a real NetLog to
-  // be initialized.
-  unsigned int socket_log_id_;
 };
 
 class MockNetworkLayer : public net::HttpTransactionFactory,
@@ -250,30 +209,8 @@ class MockNetworkLayer : public net::HttpTransactionFactory,
   bool done_reading_called() const { return done_reading_called_; }
   void TransactionDoneReading();
 
-  // Returns the last priority passed to CreateTransaction, or
-  // DEFAULT_PRIORITY if it hasn't been called yet.
-  net::RequestPriority last_create_transaction_priority() const {
-    return last_create_transaction_priority_;
-  }
-
-  // Returns the last transaction created by
-  // CreateTransaction. Returns a NULL WeakPtr if one has not been
-  // created yet, or the last transaction has been destroyed, or
-  // ClearLastTransaction() has been called and a new transaction
-  // hasn't been created yet.
-  base::WeakPtr<MockNetworkTransaction> last_transaction() {
-    return last_transaction_;
-  }
-
-  // Makes last_transaction() return NULL until the next transaction
-  // is created.
-  void ClearLastTransaction() {
-    last_transaction_.reset();
-  }
-
   // net::HttpTransactionFactory:
   virtual int CreateTransaction(
-      net::RequestPriority priority,
       scoped_ptr<net::HttpTransaction>* trans) OVERRIDE;
   virtual net::HttpCache* GetCache() OVERRIDE;
   virtual net::HttpNetworkSession* GetSession() OVERRIDE;
@@ -281,8 +218,6 @@ class MockNetworkLayer : public net::HttpTransactionFactory,
  private:
   int transaction_count_;
   bool done_reading_called_;
-  net::RequestPriority last_create_transaction_priority_;
-  base::WeakPtr<MockNetworkTransaction> last_transaction_;
 };
 
 //-----------------------------------------------------------------------------

@@ -4,10 +4,11 @@
 
 #ifndef CHROME_INSTALLER_UTIL_CONDITIONAL_WORK_ITEM_LIST_H_
 #define CHROME_INSTALLER_UTIL_CONDITIONAL_WORK_ITEM_LIST_H_
+#pragma once
 
 #include "chrome/installer/util/work_item_list.h"
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 
 // A WorkItemList subclass that permits conditionally executing a set of
@@ -36,12 +37,12 @@ class ConditionalWorkItemList : public WorkItemList {
 //------------------------------------------------------------------------------
 class ConditionRunIfFileExists : public WorkItem::Condition {
  public:
-  explicit ConditionRunIfFileExists(const base::FilePath& key_path)
+  explicit ConditionRunIfFileExists(const FilePath& key_path)
       : key_path_(key_path) {}
   bool ShouldRun() const;
 
  private:
-  base::FilePath key_path_;
+  FilePath key_path_;
 };
 
 // Condition class that inverts the ShouldRun result of another Condition.

@@ -1,21 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_BROWSER_TOOLBAR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_BROWSER_TOOLBAR_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_member.h"
-#include "chrome/browser/command_observer.h"
+#include "chrome/browser/command_updater.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
-#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -33,6 +33,7 @@ class GtkThemeService;
 class LocationBar;
 class LocationBarViewGtk;
 class ReloadButtonGtk;
+class ToolbarModel;
 
 namespace content {
 class WebContents;
@@ -40,7 +41,7 @@ class WebContents;
 
 // View class that displays the GTK version of the toolbar and routes gtk
 // events back to the Browser.
-class BrowserToolbarGtk : public CommandObserver,
+class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
                           public ui::AcceleratorProvider,
                           public MenuGtk::Delegate,
                           public content::NotificationObserver {
@@ -86,7 +87,7 @@ class BrowserToolbarGtk : public CommandObserver,
 
   void ShowAppMenu();
 
-  // Overridden from CommandObserver:
+  // Overridden from CommandUpdater::CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
 
   // Overridden from MenuGtk::Delegate:
@@ -104,17 +105,13 @@ class BrowserToolbarGtk : public CommandObserver,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Whether the wrench/hotdogs menu is currently visible to the user.
-  bool IsWrenchMenuShowing() const;
-
   // Message that we should react to a state change.
-  void UpdateWebContents(content::WebContents* contents);
+  void UpdateWebContents(content::WebContents* contents,
+                         bool should_restore_state);
 
  private:
-  void OnZoomLevelChanged(const content::HostZoomMap::ZoomLevelChange& host);
-
   // Connect/Disconnect signals for dragging a url onto the home button.
-  void SetUpDragForHomeButton();
+  void SetUpDragForHomeButton(bool enable);
 
   // Sets the top corners of the toolbar to rounded, or sets them to normal,
   // depending on the state of the browser window. Returns false if no action
@@ -144,6 +141,9 @@ class BrowserToolbarGtk : public CommandObserver,
   CHROMEGTK_CALLBACK_1(BrowserToolbarGtk, gboolean, OnWrenchMenuButtonExpose,
                        GdkEventExpose*);
 
+  // Updates preference-dependent state.
+  void NotifyPrefChanged(const std::string* pref);
+
   static void SetSyncMenuLabel(GtkWidget* widget, gpointer userdata);
 
   // Sometimes we only want to show the location w/o the toolbar buttons (e.g.,
@@ -152,8 +152,6 @@ class BrowserToolbarGtk : public CommandObserver,
 
   // Rebuilds the wrench menu.
   void RebuildWrenchMenu();
-
-  void UpdateShowHomeButton();
 
   // An event box that holds |toolbar_|. We need the toolbar to have its own
   // GdkWindow when we use the GTK drawing because otherwise the color from our
@@ -190,6 +188,9 @@ class BrowserToolbarGtk : public CommandObserver,
   // The image shown in GTK+ mode in the wrench button.
   GtkWidget* wrench_menu_image_;
 
+  // The model that contains the security level, text, icon to display...
+  ToolbarModel* model_;
+
   GtkThemeService* theme_service_;
 
   scoped_ptr<MenuGtk> wrench_menu_;
@@ -209,7 +210,6 @@ class BrowserToolbarGtk : public CommandObserver,
   StringPrefMember home_page_;
   BooleanPrefMember home_page_is_new_tab_page_;
 
-  scoped_ptr<content::HostZoomMap::Subscription> zoom_subscription_;
   content::NotificationRegistrar registrar_;
 
   // A GtkEntry that isn't part of the hierarchy. We keep this for native

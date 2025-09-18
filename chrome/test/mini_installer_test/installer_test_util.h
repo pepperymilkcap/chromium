@@ -4,11 +4,12 @@
 
 #ifndef CHROME_TEST_MINI_INSTALLER_TEST_INSTALLER_TEST_UTIL_H_
 #define CHROME_TEST_MINI_INSTALLER_TEST_INSTALLER_TEST_UTIL_H_
+#pragma once
 
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "chrome/installer/util/installation_validator.h"
 #include "chrome/test/mini_installer_test/switch_builder.h"
 
@@ -38,13 +39,13 @@ bool DeleteRegistryKey(
 // Locates the Chrome installation directory based on the
 // provided |system_level|. Returns true if successful, otherwise false.
 // Returns true if successful, otherwise false.
-bool GetChromeInstallDirectory(bool system_level, base::FilePath* path);
+bool GetChromeInstallDirectory(bool system_level, FilePath* path);
 
 // Gets the installation directory of either Chrome or Chrome Frame
 // as specified by the |system_level| and |type|.
 // Returns true if successful, otherwise false.
 bool GetInstallDirectory(bool system_level,
-                         BrowserDistribution::Type type, base::FilePath* path);
+                         BrowserDistribution::Type type, FilePath* path);
 
 // Returns the version of the specified |product|.
 std::string GetVersion(
@@ -54,8 +55,8 @@ std::string GetVersion(
 // Returns true if there are installed products.
 bool GetInstalledProducts(std::vector<InstalledProduct>* products);
 
-bool Install(const base::FilePath& installer);
-bool Install(const base::FilePath& installer, const SwitchBuilder& switches);
+bool Install(const FilePath& installer);
+bool Install(const FilePath& installer, const SwitchBuilder& switches);
 bool LaunchChrome(bool close_after_launch, bool system_level);
 bool LaunchIE(const std::string& url);
 

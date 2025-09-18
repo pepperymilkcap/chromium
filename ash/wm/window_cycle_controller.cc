@@ -4,53 +4,74 @@
 
 #include "ash/wm/window_cycle_controller.h"
 
-#include <algorithm>
-
-#include "ash/session_state_delegate.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
-#include "ash/wm/mru_window_tracker.h"
+#include "ash/shell_delegate.h"
 #include "ash/wm/window_cycle_list.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace_controller.h"
+#include "ui/aura/event.h"
+#include "ui/aura/event_filter.h"
 #include "ui/aura/root_window.h"
-#include "ui/events/event.h"
-#include "ui/events/event_handler.h"
 
 namespace ash {
 
-namespace {
-
 // Filter to watch for the termination of a keyboard gesture to cycle through
 // multiple windows.
-class WindowCycleEventFilter : public ui::EventHandler {
+class WindowCycleEventFilter : public aura::EventFilter {
  public:
   WindowCycleEventFilter();
   virtual ~WindowCycleEventFilter();
 
-  // Overridden from ui::EventHandler:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  // Overridden from aura::EventFilter:
+  virtual bool PreHandleKeyEvent(aura::Window* target,
+                                 aura::KeyEvent* event) OVERRIDE;
+  virtual bool PreHandleMouseEvent(aura::Window* target,
+                                   aura::MouseEvent* event) OVERRIDE;
+  virtual ui::TouchStatus PreHandleTouchEvent(aura::Window* target,
+                                              aura::TouchEvent* event) OVERRIDE;
+  virtual ui::GestureStatus PreHandleGestureEvent(
+      aura::Window* target,
+      aura::GestureEvent* event) OVERRIDE;
  private:
   DISALLOW_COPY_AND_ASSIGN(WindowCycleEventFilter);
 };
 
 // Watch for all keyboard events by filtering the root window.
-WindowCycleEventFilter::WindowCycleEventFilter() {
+WindowCycleEventFilter::WindowCycleEventFilter()
+    : aura::EventFilter(aura::RootWindow::GetInstance()) {
 }
 
 WindowCycleEventFilter::~WindowCycleEventFilter() {
 }
 
-void WindowCycleEventFilter::OnKeyEvent(ui::KeyEvent* event) {
+bool WindowCycleEventFilter::PreHandleKeyEvent(
+    aura::Window* target,
+    aura::KeyEvent* event) {
   // Views uses VKEY_MENU for both left and right Alt keys.
   if (event->key_code() == ui::VKEY_MENU &&
       event->type() == ui::ET_KEY_RELEASED) {
     Shell::GetInstance()->window_cycle_controller()->AltKeyReleased();
     // Warning: |this| will be deleted from here on.
   }
+  return false;  // Always let the event propagate.
 }
 
-}  // namespace
+bool WindowCycleEventFilter::PreHandleMouseEvent(
+    aura::Window* target,
+    aura::MouseEvent* event) {
+  return false;  // Not handled.
+}
+
+ui::TouchStatus WindowCycleEventFilter::PreHandleTouchEvent(
+    aura::Window* target,
+    aura::TouchEvent* event) {
+  return ui::TOUCH_STATUS_UNKNOWN;  // Not handled.
+}
+
+ui::GestureStatus WindowCycleEventFilter::PreHandleGestureEvent(
+    aura::Window* target,
+    aura::GestureEvent* event) {
+  return ui::GESTURE_STATUS_UNKNOWN;  // Not handled.
+}
 
 //////////////////////////////////////////////////////////////////////////////
 // WindowCycleController, public:
@@ -66,8 +87,8 @@ WindowCycleController::~WindowCycleController() {
 bool WindowCycleController::CanCycle() {
   // Don't allow window cycling if the screen is locked or a modal dialog is
   // open.
-  return !Shell::GetInstance()->session_state_delegate()->IsScreenLocked() &&
-         !Shell::GetInstance()->IsSystemModalWindowOpen();
+  return !Shell::GetInstance()->IsScreenLocked() &&
+         !Shell::GetInstance()->IsModalWindowOpen();
 }
 
 void WindowCycleController::HandleCycleWindow(Direction direction,
@@ -94,16 +115,6 @@ void WindowCycleController::HandleCycleWindow(Direction direction,
   }
 }
 
-void WindowCycleController::HandleLinearCycleWindow() {
-  if (!CanCycle() || IsCycling())
-    return;
-
-  // Use the reversed list of windows to prevent a 2-cycle of the most recent
-  // windows occurring.
-  WindowCycleList cycle_list(MruWindowTracker::BuildWindowList(true));
-  cycle_list.Step(WindowCycleList::FORWARD);
-}
-
 void WindowCycleController::AltKeyReleased() {
   StopCycling();
 }
@@ -112,28 +123,33 @@ void WindowCycleController::AltKeyReleased() {
 // WindowCycleController, private:
 
 void WindowCycleController::StartCycling() {
-  windows_.reset(new WindowCycleList(ash::Shell::GetInstance()->
-      mru_window_tracker()->BuildMruWindowList()));
+  // Most-recently-used cycling is confusing in compact window mode because
+  // you can't see all the windows.
+  windows_.reset(new WindowCycleList(
+      ash::Shell::GetInstance()->delegate()->GetCycleWindowList(
+          ShellDelegate::SOURCE_KEYBOARD,
+          Shell::GetInstance()->IsWindowModeCompact() ?
+          ShellDelegate::ORDER_LINEAR : ShellDelegate::ORDER_MRU)));
 }
 
 void WindowCycleController::Step(Direction direction) {
-  DCHECK(windows_.get());
-  windows_->Step(direction == FORWARD ? WindowCycleList::FORWARD :
-                 WindowCycleList::BACKWARD);
+    DCHECK(windows_.get());
+    windows_->Step(direction == FORWARD ? WindowCycleList::FORWARD :
+                   WindowCycleList::BACKWARD);
 }
 
 void WindowCycleController::StopCycling() {
   windows_.reset();
   // Remove our key event filter.
-  if (event_handler_) {
-    Shell::GetInstance()->RemovePreTargetHandler(event_handler_.get());
-    event_handler_.reset();
+  if (event_filter_.get()) {
+    Shell::GetInstance()->RemoveRootWindowEventFilter(event_filter_.get());
+    event_filter_.reset();
   }
 }
 
 void WindowCycleController::InstallEventFilter() {
-  event_handler_.reset(new WindowCycleEventFilter());
-  Shell::GetInstance()->AddPreTargetHandler(event_handler_.get());
+  event_filter_.reset(new WindowCycleEventFilter());
+  Shell::GetInstance()->AddRootWindowEventFilter(event_filter_.get());
 }
 
 }  // namespace ash

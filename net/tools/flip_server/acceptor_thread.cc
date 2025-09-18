@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@
 
 namespace net {
 
-SMAcceptorThread::SMAcceptorThread(FlipAcceptor* acceptor,
+SMAcceptorThread::SMAcceptorThread(FlipAcceptor *acceptor,
                                    MemoryCache* memory_cache)
     : SimpleThread("SMAcceptorThread"),
       acceptor_(acceptor),
@@ -48,7 +48,7 @@ SMAcceptorThread::SMAcceptorThread(FlipAcceptor* acceptor,
 
 SMAcceptorThread::~SMAcceptorThread() {
   for (std::vector<SMConnection*>::iterator i =
-           allocated_server_connections_.begin();
+       allocated_server_connections_.begin();
        i != allocated_server_connections_.end();
        ++i) {
     delete *i;
@@ -57,8 +57,10 @@ SMAcceptorThread::~SMAcceptorThread() {
 }
 
 SMConnection* SMAcceptorThread::NewConnection() {
-  SMConnection* server = SMConnection::NewSMConnection(
-      &epoll_server_, ssl_state_, memory_cache_, acceptor_, "client_conn: ");
+  SMConnection* server =
+    SMConnection::NewSMConnection(&epoll_server_, ssl_state_,
+                                  memory_cache_, acceptor_,
+                                  "client_conn: ");
   allocated_server_connections_.push_back(server);
   VLOG(2) << ACCEPTOR_CLIENT_IDENT << "Acceptor: Making new server.";
   return server;
@@ -79,18 +81,15 @@ void SMAcceptorThread::InitWorker() {
 }
 
 void SMAcceptorThread::HandleConnection(int server_fd,
-                                        struct sockaddr_in* remote_addr) {
+                                        struct sockaddr_in *remote_addr) {
   int on = 1;
   int rc;
   if (acceptor_->disable_nagle_) {
-    rc = setsockopt(server_fd,
-                    IPPROTO_TCP,
-                    TCP_NODELAY,
-                    reinterpret_cast<char*>(&on),
-                    sizeof(on));
+    rc = setsockopt(server_fd, IPPROTO_TCP,  TCP_NODELAY,
+                    reinterpret_cast<char*>(&on), sizeof(on));
     if (rc < 0) {
       close(server_fd);
-      LOG(ERROR) << "setsockopt() failed fd=" << server_fd;
+      LOG(ERROR) << "setsockopt() failed fd=" + server_fd;
       return;
     }
   }
@@ -106,9 +105,7 @@ void SMAcceptorThread::HandleConnection(int server_fd,
                                       NULL,
                                       &epoll_server_,
                                       server_fd,
-                                      std::string(),
-                                      std::string(),
-                                      remote_ip,
+                                      "", "", remote_ip,
                                       use_ssl_);
   if (server_connection->initialized())
     active_server_connections_.push_back(server_connection);
@@ -129,7 +126,7 @@ void SMAcceptorThread::AcceptFromListenFD() {
         break;
       }
       VLOG(1) << ACCEPTOR_CLIENT_IDENT << " Accepted connection";
-      HandleConnection(fd, (struct sockaddr_in*)&address);
+      HandleConnection(fd, (struct sockaddr_in *)&address);
     }
   } else {
     while (true) {
@@ -145,7 +142,7 @@ void SMAcceptorThread::AcceptFromListenFD() {
         break;
       }
       VLOG(1) << ACCEPTOR_CLIENT_IDENT << "Accepted connection";
-      HandleConnection(fd, (struct sockaddr_in*)&address);
+      HandleConnection(fd, (struct sockaddr_in *)&address);
     }
   }
 }
@@ -163,7 +160,7 @@ void SMAcceptorThread::HandleConnectionIdleTimeout() {
   //                is already in-order.
   std::list<SMConnection*>::iterator iter = active_server_connections_.begin();
   while (iter != active_server_connections_.end()) {
-    SMConnection* conn = *iter;
+    SMConnection *conn = *iter;
     int elapsed_time = (cur_time - conn->last_read_time_);
     if (elapsed_time > idle_socket_timeout_s_) {
       conn->Cleanup("Connection idle timeout reached.");
@@ -209,3 +206,5 @@ void SMAcceptorThread::SMConnectionDone(SMConnection* sc) {
 }
 
 }  // namespace net
+
+

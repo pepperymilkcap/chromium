@@ -6,6 +6,7 @@
 
 #include <cstring>
 
+#include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/pp_input_event.h"
 #include "ppapi/cpp/input_event.h"
 #include "ppapi/cpp/instance.h"
@@ -17,7 +18,7 @@ REGISTER_TEST_CASE(Scrollbar);
 TestScrollbar::TestScrollbar(TestingInstance* instance)
     : TestCase(instance),
       WidgetClient_Dev(instance),
-      scrollbar_(instance, true),
+      scrollbar_(*instance, true),
       scrollbar_value_changed_(false) {
 }
 
@@ -26,7 +27,7 @@ bool TestScrollbar::Init() {
 }
 
 void TestScrollbar::RunTests(const std::string& filter) {
-  RUN_TEST(HandleEvent, filter);
+  instance_->LogTest("HandleEvent", TestHandleEvent());
 }
 
 std::string TestScrollbar::TestHandleEvent() {

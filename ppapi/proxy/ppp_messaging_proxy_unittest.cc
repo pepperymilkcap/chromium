@@ -9,7 +9,6 @@
 #include "ppapi/c/ppb_var.h"
 #include "ppapi/c/ppp_messaging.h"
 #include "ppapi/proxy/ppapi_proxy_test.h"
-#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/var.h"
 
 namespace ppapi {
@@ -42,6 +41,8 @@ PPP_Messaging ppp_messaging_mock = {
   &HandleMessage
 };
 
+}  // namespace
+
 class PPP_Messaging_ProxyTest : public TwoWayTest {
  public:
   PPP_Messaging_ProxyTest()
@@ -50,22 +51,6 @@ class PPP_Messaging_ProxyTest : public TwoWayTest {
                                    &ppp_messaging_mock);
   }
 };
-
-void CompareAndReleaseStringVar(PluginProxyTestHarness* plugin_harness,
-                                PP_Var received_var,
-                                const std::string& test_string) {
-  ProxyAutoLock lock;
-  Var* received_string = plugin_harness->var_tracker().GetVar(received_var);
-  ASSERT_TRUE(received_string);
-  ASSERT_TRUE(received_string->AsStringVar());
-  EXPECT_EQ(test_string, received_string->AsStringVar()->value());
-  // Now release the var, and the string should go away (because the ref
-  // count should be one).
-  plugin_harness->var_tracker().ReleaseVar(received_var);
-  EXPECT_FALSE(StringVar::FromPPVar(received_var));
-}
-
-}  // namespace
 
 TEST_F(PPP_Messaging_ProxyTest, SendMessages) {
   // Grab the host-side proxy of ppp_messaging.
@@ -124,11 +109,14 @@ TEST_F(PPP_Messaging_ProxyTest, SendMessages) {
   handle_message_called.Wait();
   EXPECT_EQ(expected_instance, received_instance);
   EXPECT_EQ(expected_var.type, received_var.type);
-  PostTaskOnRemoteHarness(
-      base::Bind(CompareAndReleaseStringVar,
-                 &plugin(),
-                 received_var,
-                 kTestString));
+  Var* received_string = plugin().var_tracker().GetVar(received_var);
+  ASSERT_TRUE(received_string);
+  ASSERT_TRUE(received_string->AsStringVar());
+  EXPECT_EQ(kTestString, received_string->AsStringVar()->value());
+  // Now release the var, and the string should go away (because the ref
+  // count should be one).
+  plugin().var_tracker().ReleaseVar(received_var);
+  EXPECT_FALSE(StringVar::FromPPVar(received_var));
 }
 
 }  // namespace proxy

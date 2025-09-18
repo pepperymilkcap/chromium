@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/protocol/connection_tester.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/socket/stream_socket.h"
@@ -18,10 +18,11 @@ StreamConnectionTester::StreamConnectionTester(net::StreamSocket* client_socket,
                                                net::StreamSocket* host_socket,
                                                int message_size,
                                                int message_count)
-    : message_loop_(base::MessageLoop::current()),
+    : message_loop_(MessageLoop::current()),
       host_socket_(host_socket),
       client_socket_(client_socket),
       message_size_(message_size),
+      message_count_(message_count),
       test_data_size_(message_size * message_count),
       done_(false),
       write_errors_(0),
@@ -52,7 +53,7 @@ void StreamConnectionTester::CheckResults() {
 
 void StreamConnectionTester::Done() {
   done_ = true;
-  message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 void StreamConnectionTester::InitBuffers() {
@@ -74,8 +75,7 @@ void StreamConnectionTester::DoWrite() {
     int bytes_to_write = std::min(output_buffer_->BytesRemaining(),
                                   message_size_);
     result = client_socket_->Write(
-        output_buffer_.get(),
-        bytes_to_write,
+        output_buffer_, bytes_to_write,
         base::Bind(&StreamConnectionTester::OnWritten, base::Unretained(this)));
     HandleWriteResult(result);
   }
@@ -101,8 +101,7 @@ void StreamConnectionTester::DoRead() {
   while (result > 0) {
     input_buffer_->SetCapacity(input_buffer_->offset() + message_size_);
     result = host_socket_->Read(
-        input_buffer_.get(),
-        message_size_,
+        input_buffer_, message_size_,
         base::Bind(&StreamConnectionTester::OnRead, base::Unretained(this)));
     HandleReadResult(result);
   };
@@ -132,7 +131,7 @@ DatagramConnectionTester::DatagramConnectionTester(net::Socket* client_socket,
                                                    int message_size,
                                                    int message_count,
                                                    int delay_ms)
-    : message_loop_(base::MessageLoop::current()),
+    : message_loop_(MessageLoop::current()),
       host_socket_(host_socket),
       client_socket_(client_socket),
       message_size_(message_size),
@@ -163,13 +162,13 @@ void DatagramConnectionTester::CheckResults() {
 
   // Verify that we've received at least one packet.
   EXPECT_GT(packets_received_, 0);
-  VLOG(0) << "Received " << packets_received_ << " packets out of "
-          << message_count_;
+  LOG(INFO) << "Received " << packets_received_ << " packets out of "
+            << message_count_;
 }
 
 void DatagramConnectionTester::Done() {
   done_ = true;
-  message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 void DatagramConnectionTester::DoWrite() {
@@ -187,8 +186,7 @@ void DatagramConnectionTester::DoWrite() {
   memcpy(packet->data(), &packets_sent_, sizeof(packets_sent_));
 
   int result = client_socket_->Write(
-      packet.get(),
-      message_size_,
+      packet, message_size_,
       base::Bind(&DatagramConnectionTester::OnWritten, base::Unretained(this)));
   HandleWriteResult(result);
 }
@@ -205,10 +203,8 @@ void DatagramConnectionTester::HandleWriteResult(int result) {
   } else if (result > 0) {
     EXPECT_EQ(message_size_, result);
     packets_sent_++;
-    message_loop_->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&DatagramConnectionTester::DoWrite, base::Unretained(this)),
-        base::TimeDelta::FromMilliseconds(delay_ms_));
+    message_loop_->PostDelayedTask(FROM_HERE, base::Bind(
+        &DatagramConnectionTester::DoWrite, base::Unretained(this)), delay_ms_);
   }
 }
 
@@ -219,8 +215,7 @@ void DatagramConnectionTester::DoRead() {
     read_buffer_ = new net::IOBuffer(kReadSize);
 
     result = host_socket_->Read(
-        read_buffer_.get(),
-        kReadSize,
+        read_buffer_, kReadSize,
         base::Bind(&DatagramConnectionTester::OnRead, base::Unretained(this)));
     HandleReadResult(result);
   };

@@ -6,9 +6,8 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/mac/scoped_nsobject.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_pump_mac.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/message_pump_mac.h"
 
 // This class is scheduled with a delayed selector to quit the message pump.
 @interface CocoaQuitTask : NSObject {
@@ -38,13 +37,13 @@ namespace chrome {
 namespace testing {
 
 void NSRunLoopRunAllPending() {
-  scoped_ptr<base::MessagePumpNSRunLoop> message_pump(
+  scoped_refptr<base::MessagePumpNSRunLoop> message_pump(
       new base::MessagePumpNSRunLoop);
 
   // Put a delayed selector on the queue. All other pending delayed selectors
   // will run before this, after which the internal loop can end.
-  base::scoped_nsobject<CocoaQuitTask> quit_task(
-      [[CocoaQuitTask alloc] initWithMessagePump:message_pump.get()]);
+  scoped_nsobject<CocoaQuitTask> quit_task(
+      [[CocoaQuitTask alloc] initWithMessagePump:message_pump]);
 
   [quit_task performSelector:@selector(doQuit)
                   withObject:nil

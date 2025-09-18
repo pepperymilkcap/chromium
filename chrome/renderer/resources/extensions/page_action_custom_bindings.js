@@ -2,19 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom binding for the pageAction API.
+// Custom bindings for the pageAction API.
 
-var binding = require('binding').Binding.create('pageAction');
+(function() {
 
-var setIcon = require('setIcon').setIcon;
+native function GetChromeHidden();
 
-binding.registerCustomHook(function(bindingsAPI) {
+GetChromeHidden().registerCustomHook('pageAction', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
+  var setIcon = bindingsAPI.setIcon;
 
-  apiFunctions.setHandleRequest('setIcon', function(details, callback) {
-    setIcon(details, callback, this.name, this.definition.parameters,
-        'page action');
+  apiFunctions.setHandleRequest('pageAction.setIcon', function(details) {
+    setIcon(details, this.name, this.definition.parameters, 'page action');
   });
 });
 
-exports.binding = binding.generate();
+})();

@@ -4,14 +4,12 @@
 
 #include "content/worker/worker_webapplicationcachehost_impl.h"
 
-#include "content/child/appcache/appcache_dispatcher.h"
+#include "content/common/appcache/appcache_dispatcher.h"
 #include "content/worker/worker_thread.h"
-
-namespace content {
 
 WorkerWebApplicationCacheHostImpl::WorkerWebApplicationCacheHostImpl(
     const WorkerAppCacheInitInfo& init_info,
-    blink::WebApplicationCacheHostClient* client)
+    WebKit::WebApplicationCacheHostClient* client)
     : WebApplicationCacheHostImpl(client,
           WorkerThread::current()->appcache_dispatcher()->backend_proxy()) {
   backend()->SelectCacheForSharedWorker(host_id(),
@@ -19,11 +17,11 @@ WorkerWebApplicationCacheHostImpl::WorkerWebApplicationCacheHostImpl(
 }
 
 void WorkerWebApplicationCacheHostImpl::willStartMainResourceRequest(
-    blink::WebURLRequest&, const blink::WebFrame*) {
+    WebKit::WebURLRequest&, const WebKit::WebFrame*) {
 }
 
 void WorkerWebApplicationCacheHostImpl::didReceiveResponseForMainResource(
-    const blink::WebURLResponse&) {
+    const WebKit::WebURLResponse&) {
 }
 
 void WorkerWebApplicationCacheHostImpl::didReceiveDataForMainResource(
@@ -38,8 +36,6 @@ void WorkerWebApplicationCacheHostImpl::selectCacheWithoutManifest() {
 }
 
 bool WorkerWebApplicationCacheHostImpl::selectCacheWithManifest(
-    const blink::WebURL&) {
+    const WebKit::WebURL&) {
   return true;
 }
-
-}  // namespace content

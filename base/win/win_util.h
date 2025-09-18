@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,13 +21,14 @@
 
 #ifndef BASE_WIN_WIN_UTIL_H_
 #define BASE_WIN_WIN_UTIL_H_
+#pragma once
 
 #include <windows.h>
 
 #include <string>
 
 #include "base/base_export.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 struct IPropertyStore;
 struct _tagpropertykey;
@@ -35,6 +36,14 @@ typedef _tagpropertykey PROPERTYKEY;
 
 namespace base {
 namespace win {
+
+// A Windows message reflected from other windows. This message is sent
+// with the following arguments:
+// hWnd - Target window
+// uMsg - kReflectedMessage
+// wParam - Should be 0
+// lParam - Pointer to MSG struct containing the original message.
+const int kReflectedMessage = WM_APP + 3;
 
 BASE_EXPORT void GetNonClientMetrics(NONCLIENTMETRICS* metrics);
 
@@ -50,11 +59,6 @@ BASE_EXPORT bool IsCtrlPressed();
 // Returns true if the alt key is currently pressed.
 BASE_EXPORT bool IsAltPressed();
 
-// Returns true if the altgr key is currently pressed.
-// Windows does not have specific key code and modifier bit and Alt+Ctrl key is
-// used as AltGr key in Windows.
-BASE_EXPORT bool IsAltGrPressed();
-
 // Returns false if user account control (UAC) has been disabled with the
 // EnableLUA registry flag. Returns true if user account control is enabled.
 // NOTE: The EnableLUA registry flag, which is ignored on Windows XP
@@ -63,13 +67,7 @@ BASE_EXPORT bool IsAltGrPressed();
 // if the OS is Vista or later.
 BASE_EXPORT bool UserAccountControlIsEnabled();
 
-// Sets the boolean value for a given key in given IPropertyStore.
-BASE_EXPORT bool SetBooleanValueForPropertyStore(
-    IPropertyStore* property_store,
-    const PROPERTYKEY& property_key,
-    bool property_bool_value);
-
-// Sets the string value for a given key in given IPropertyStore.
+// Sets the string value for given key in given IPropertyStore.
 BASE_EXPORT bool SetStringValueForPropertyStore(
     IPropertyStore* property_store,
     const PROPERTYKEY& property_key,
@@ -95,40 +93,12 @@ BASE_EXPORT bool ReadCommandFromAutoRun(HKEY root_key,
                                         const string16& name,
                                         string16* command);
 
-// Sets whether to crash the process during exit. This is inspected by DLLMain
-// and used to intercept unexpected terminations of the process (via calls to
-// exit(), abort(), _exit(), ExitProcess()) and convert them into crashes.
-// Note that not all mechanisms for terminating the process are covered by
-// this. In particular, TerminateProcess() is not caught.
-BASE_EXPORT void SetShouldCrashOnProcessDetach(bool crash);
-BASE_EXPORT bool ShouldCrashOnProcessDetach();
-
-// Adjusts the abort behavior so that crash reports can be generated when the
-// process is aborted.
-BASE_EXPORT void SetAbortBehaviorForCrashReporting();
-
-// A touch enabled device by this definition is something that has
-// integrated multi-touch ready to use and has Windows version > Windows7.
-BASE_EXPORT bool IsTouchEnabledDevice();
-
 // Get the size of a struct up to and including the specified member.
 // This is necessary to set compatible struct sizes for different versions
 // of certain Windows APIs (e.g. SystemParametersInfo).
 #define SIZEOF_STRUCT_WITH_SPECIFIED_LAST_MEMBER(struct_name, member) \
     offsetof(struct_name, member) + \
     (sizeof static_cast<struct_name*>(NULL)->member)
-
-// Displays the on screen keyboard on Windows 8 and above. Returns true on
-// success.
-BASE_EXPORT bool DisplayVirtualKeyboard();
-
-// Dismisses the on screen keyboard if it is being displayed on Windows 8 and.
-// above. Returns true on success.
-BASE_EXPORT bool DismissVirtualKeyboard();
-
-// Returns monitor info after correcting rcWorkArea based on metro version.
-// see bug #247430 for more details.
-BASE_EXPORT BOOL GetMonitorInfoWrapper(HMONITOR monitor, MONITORINFO* mi);
 
 }  // namespace win
 }  // namespace base

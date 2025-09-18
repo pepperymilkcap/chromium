@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -33,7 +33,7 @@ USAGE = ''
 
 def ReadFile(filename):
   try:
-    file = open(filename, 'rb')
+    file = open(filename, 'r')
   except IOError, e:
     print >> sys.stderr, ('I/O Error reading file %s(%s): %s' %
                           (filename, e.errno, e.strerror))
@@ -101,10 +101,10 @@ def GetRowDigest(rowdata, key):
   return sha1.hexdigest()[0:8]
 
 
-def WriteJson(filename, data, keys, calculate_sha1=True):
+def WriteJson(filename, data, keys):
   """Write a list of |keys| in |data| to the file specified in |filename|."""
   try:
-    file = open(filename, 'wb')
+    file = open(filename, 'w')
   except IOError, e:
     print >> sys.stderr, ('I/O Error writing file %s(%s): %s' %
                           (filename, e.errno, e.strerror))
@@ -112,23 +112,14 @@ def WriteJson(filename, data, keys, calculate_sha1=True):
   jsondata = []
   for key in keys:
     rowdata = GetRowData(data, key)
-    if calculate_sha1:
-      # Include an updated checksum.
-      rowdata.append('"sha1": "%s"' % GetRowDigest(rowdata, key))
-    else:
-      if 'sha1' in data[key]:
-        rowdata.append('"sha1": "%s"' % (data[key]['sha1']))
+    # Include an updated checksum.
+    rowdata.append('"sha1": "%s"' % GetRowDigest(rowdata, key))
     jsondata.append('"%s": {%s}' % (key, ', '.join(rowdata)))
   jsondata.append('"load": true')
   jsontext = '{%s\n}' % ',\n '.join(jsondata)
   file.write(jsontext + '\n')
   file.close()
   return True
-
-
-def FloatIsInt(f):
-  epsilon = 1.0e-10
-  return abs(f - int(f)) <= epsilon
 
 
 last_key_printed = None
@@ -302,39 +293,23 @@ def Main(args):
     # If the existing values assume regressions are low deltas relative to
     # improvements, swap our regress and improve.  This value must be a
     # scores-like result.
-    if 'regress' in perf[key] and 'improve' in perf[key]:
-      if perf[key]['regress'] < perf[key]['improve']:
-        assert(better != 'lower')
-        better = 'higher'
-        temp = regress
-        regress = improve
-        improve = temp
-      else:
-        # Sometimes values are equal, e.g., when they are both 0,
-        # 'better' may still be set to 'higher'.
-        assert(better != 'higher' or
-               perf[key]['regress'] == perf[key]['improve'])
-        better = 'lower'
-
-    # If both were ints keep as int, otherwise use the float version.
-    originally_ints = False
-    if FloatIsInt(regress) and FloatIsInt(improve):
-      originally_ints = True
+    if ('regress' in perf[key] and 'improve' in perf[key] and
+        perf[key]['regress'] < perf[key]['improve']):
+      assert(better != 'lower')
+      better = 'higher'
+      temp = regress
+      regress = improve
+      improve = temp
+    else:
+      assert(better != 'higher')
+      better = 'lower'
 
     if better == 'higher':
-      if originally_ints:
-        regress = int(math.floor(regress - abs(regress*tolerance)))
-        improve = int(math.ceil(improve + abs(improve*tolerance)))
-      else:
-        regress = regress - abs(regress*tolerance)
-        improve = improve + abs(improve*tolerance)
+      regress = int(math.floor(regress - abs(regress*tolerance)))
+      improve = int(math.ceil(improve + abs(improve*tolerance)))
     else:
-      if originally_ints:
-        improve = int(math.floor(improve - abs(improve*tolerance)))
-        regress = int(math.ceil(regress + abs(regress*tolerance)))
-      else:
-        improve = improve - abs(improve*tolerance)
-        regress = regress + abs(regress*tolerance)
+      improve = int(math.floor(improve - abs(improve*tolerance)))
+      regress = int(math.ceil(regress + abs(regress*tolerance)))
 
     # Calculate the new checksum to test if this is the only thing that may have
     # changed.

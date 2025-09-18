@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,27 +6,14 @@
 
 #include <string>
 
-#include "ash/system/chromeos/network/network_icon.h"
-#include "ash/system/chromeos/network/network_icon_animation.h"
-#include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/login/login_display_host.h"
-#include "chrome/browser/chromeos/login/login_display_host_impl.h"
-#include "chromeos/network/network_state_handler.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
+#include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
+#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/models/menu_model.h"
-#include "ui/base/webui/web_ui_util.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/image/image.h"
-#include "ui/gfx/image/image_skia.h"
-
-namespace {
-
-// Timeout between consecutive requests to network library for network
-// scan.
-const int kNetworkScanIntervalSecs = 60;
-
-}  // namespace
 
 namespace chromeos {
 
@@ -87,13 +74,9 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
     base::DictionaryValue* item = new base::DictionaryValue();
     item->SetInteger("id", id);
     item->SetString("label", model->GetLabelAt(i));
-    gfx::Image icon;
-    if (model->GetIconAt(i, &icon)) {
-      SkBitmap icon_bitmap = icon.ToImageSkia()->GetRepresentation(
-          ui::GetImageScale(
-              web_ui_->GetDeviceScaleFactor())).sk_bitmap();
-      item->SetString("icon", webui::GetBitmapDataUrl(icon_bitmap));
-    }
+    SkBitmap icon;
+    if (model->GetIconAt(i, &icon))
+      item->SetString("icon", web_ui_util::GetImageDataUrl(icon));
     if (id >= 0) {
       item->SetBoolean("enabled", model->IsEnabledAt(i));
       const gfx::Font* font = model->GetLabelFontAt(i);
@@ -110,69 +93,52 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
 
 // NetworkDropdown -------------------------------------------------------------
 
-NetworkDropdown::NetworkDropdown(Actor* actor,
-                                 content::WebUI* web_ui,
+NetworkDropdown::NetworkDropdown(content::WebUI* web_ui,
                                  bool oobe)
-    : actor_(actor),
-      web_ui_(web_ui),
+    : web_ui_(web_ui),
       oobe_(oobe) {
-  DCHECK(actor_);
   network_menu_.reset(new NetworkMenuWebUI(this, web_ui));
-  DCHECK(NetworkHandler::IsInitialized());
-  NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
-  handler->RequestScan();
-  handler->AddObserver(this, FROM_HERE);
+  network_icon_.reset(
+      new NetworkMenuIcon(this, NetworkMenuIcon::DROPDOWN_MODE));
+  CrosLibrary::Get()->GetNetworkLibrary()->AddNetworkManagerObserver(this);
   Refresh();
-  network_scan_timer_.Start(
-      FROM_HERE,
-      base::TimeDelta::FromSeconds(kNetworkScanIntervalSecs),
-      this, &NetworkDropdown::RequestNetworkScan);
 }
 
 NetworkDropdown::~NetworkDropdown() {
-  ash::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
-  if (NetworkHandler::IsInitialized()) {
-    NetworkHandler::Get()->network_state_handler()->RemoveObserver(
-        this, FROM_HERE);
-  }
+  CrosLibrary::Get()->GetNetworkLibrary()->RemoveNetworkManagerObserver(this);
+}
+
+void NetworkDropdown::SetLastNetworkType(ConnectionType last_network_type) {
+  network_icon_->set_last_network_type(last_network_type);
 }
 
 void NetworkDropdown::OnItemChosen(int id) {
   network_menu_->OnItemChosen(id);
 }
 
+views::MenuButton* NetworkDropdown::GetMenuButton() {
+  NOTREACHED();
+  return NULL;
+}
+
 gfx::NativeWindow NetworkDropdown::GetNativeWindow() const {
-  return LoginDisplayHostImpl::default_host()->GetNativeWindow();
+  return BaseLoginDisplayHost::default_host()->GetNativeWindow();
 }
 
 void NetworkDropdown::OpenButtonOptions() {
-  LoginDisplayHostImpl::default_host()->OpenProxySettings();
+  if (proxy_settings_dialog_.get() == NULL) {
+    proxy_settings_dialog_.reset(
+        new ProxySettingsDialog(this, GetNativeWindow()));
+  }
+  proxy_settings_dialog_->Show();
 }
 
 bool NetworkDropdown::ShouldOpenButtonOptions() const {
   return !oobe_;
 }
 
-void NetworkDropdown::OnConnectToNetworkRequested(
-    const std::string& service_path) {
-  actor_->OnConnectToNetworkRequested(service_path);
-}
-
-void NetworkDropdown::DefaultNetworkChanged(const NetworkState* network) {
+void NetworkDropdown::OnNetworkManagerChanged(NetworkLibrary* cros) {
   Refresh();
-}
-
-void NetworkDropdown::NetworkConnectionStateChanged(
-    const NetworkState* network) {
-  Refresh();
-}
-
-void NetworkDropdown::NetworkListChanged() {
-  Refresh();
-}
-
-void NetworkDropdown::NetworkIconChanged() {
-  SetNetworkIconAndText();
 }
 
 void NetworkDropdown::Refresh() {
@@ -180,32 +146,23 @@ void NetworkDropdown::Refresh() {
   network_menu_->UpdateMenu();
 }
 
+void NetworkDropdown::OnDialogClosed() {
+}
+
+void NetworkDropdown::NetworkMenuIconChanged() {
+  SetNetworkIconAndText();
+}
+
 void NetworkDropdown::SetNetworkIconAndText() {
-  base::string16 text;
-  gfx::ImageSkia icon_image;
-  bool animating = false;
-  ash::network_icon::GetDefaultNetworkImageAndLabel(
-      ash::network_icon::ICON_TYPE_LIST, &icon_image, &text, &animating);
-  if (animating) {
-    ash::network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
-  } else {
-    ash::network_icon::NetworkIconAnimation::GetInstance()->
-        RemoveObserver(this);
-  }
-  SkBitmap icon_bitmap = icon_image.GetRepresentation(
-      ui::GetImageScale(web_ui_->GetDeviceScaleFactor())).sk_bitmap();
-  std::string icon_str;
-  if (!icon_image.isNull())
-    icon_str = webui::GetBitmapDataUrl(icon_bitmap);
+  string16 text;
+  const SkBitmap icon_bitmap = network_icon_->GetIconAndText(&text);
+  std::string icon_str =
+      icon_bitmap.empty() ?
+          std::string() : web_ui_util::GetImageDataUrl(icon_bitmap);
   base::StringValue title(text);
   base::StringValue icon(icon_str);
   web_ui_->CallJavascriptFunction("cr.ui.DropDown.updateNetworkTitle",
                                   title, icon);
-}
-
-void NetworkDropdown::RequestNetworkScan() {
-  NetworkHandler::Get()->network_state_handler()->RequestScan();
-  Refresh();
 }
 
 }  // namespace chromeos

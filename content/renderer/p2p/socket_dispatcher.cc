@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,54 +6,75 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "content/child/child_process.h"
+#include "base/message_loop_proxy.h"
 #include "content/common/p2p_messages.h"
 #include "content/renderer/p2p/host_address_request.h"
-#include "content/renderer/p2p/network_list_observer.h"
-#include "content/renderer/p2p/socket_client_impl.h"
+#include "content/renderer/p2p/socket_client.h"
 #include "content/renderer/render_view_impl.h"
 
 namespace content {
 
-P2PSocketDispatcher::P2PSocketDispatcher(
-    base::MessageLoopProxy* ipc_message_loop)
-    : message_loop_(ipc_message_loop),
+class P2PSocketDispatcher::AsyncMessageSender
+    : public base::RefCountedThreadSafe<AsyncMessageSender> {
+ public:
+  explicit AsyncMessageSender(IPC::Message::Sender* message_sender)
+      : message_loop_(base::MessageLoopProxy::current()),
+        message_sender_(message_sender) {
+  }
+
+  void Detach() {
+    DCHECK(message_loop_->BelongsToCurrentThread());
+    message_sender_ = NULL;
+  }
+
+  void Send(IPC::Message* msg) {
+    message_loop_->PostTask(FROM_HERE,
+                            base::Bind(&AsyncMessageSender::DoSend, this, msg));
+  }
+
+ private:
+  void DoSend(IPC::Message* msg) {
+    DCHECK(message_loop_->BelongsToCurrentThread());
+    if (message_sender_)
+      message_sender_->Send(msg);
+  }
+
+  scoped_refptr<base::MessageLoopProxy> message_loop_;
+  IPC::Message::Sender* message_sender_;
+
+  DISALLOW_COPY_AND_ASSIGN(AsyncMessageSender);
+};
+
+P2PSocketDispatcher::P2PSocketDispatcher(RenderViewImpl* render_view)
+    : content::RenderViewObserver(render_view),
+      message_loop_(base::MessageLoopProxy::current()),
       network_notifications_started_(false),
       network_list_observers_(
           new ObserverListThreadSafe<NetworkListObserver>()),
-      channel_(NULL) {
+      async_message_sender_(new AsyncMessageSender(this)) {
 }
 
 P2PSocketDispatcher::~P2PSocketDispatcher() {
-  network_list_observers_->AssertEmpty();
-  for (IDMap<P2PSocketClientImpl>::iterator i(&clients_); !i.IsAtEnd();
+  if (network_notifications_started_)
+    Send(new P2PHostMsg_StopNetworkNotifications(routing_id()));
+  for (IDMap<P2PSocketClient>::iterator i(&clients_); !i.IsAtEnd();
        i.Advance()) {
     i.GetCurrentValue()->Detach();
   }
+  async_message_sender_->Detach();
 }
 
 void P2PSocketDispatcher::AddNetworkListObserver(
     NetworkListObserver* network_list_observer) {
   network_list_observers_->AddObserver(network_list_observer);
   network_notifications_started_ = true;
-  SendP2PMessage(new P2PHostMsg_StartNetworkNotifications());
+  async_message_sender_->Send(
+      new P2PHostMsg_StartNetworkNotifications(routing_id()));
 }
 
 void P2PSocketDispatcher::RemoveNetworkListObserver(
     NetworkListObserver* network_list_observer) {
   network_list_observers_->RemoveObserver(network_list_observer);
-}
-
-void P2PSocketDispatcher::Send(IPC::Message* message) {
-  DCHECK(message_loop_->BelongsToCurrentThread());
-  if (!channel_) {
-    DLOG(WARNING) << "P2PSocketDispatcher::Send() - Channel closed.";
-    delete message;
-    return;
-  }
-
-  channel_->Send(message);
 }
 
 bool P2PSocketDispatcher::OnMessageReceived(const IPC::Message& message) {
@@ -63,7 +84,6 @@ bool P2PSocketDispatcher::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(P2PMsg_GetHostAddressResult, OnGetHostAddressResult)
     IPC_MESSAGE_HANDLER(P2PMsg_OnSocketCreated, OnSocketCreated)
     IPC_MESSAGE_HANDLER(P2PMsg_OnIncomingTcpConnection, OnIncomingTcpConnection)
-    IPC_MESSAGE_HANDLER(P2PMsg_OnSendComplete, OnSendComplete)
     IPC_MESSAGE_HANDLER(P2PMsg_OnError, OnError)
     IPC_MESSAGE_HANDLER(P2PMsg_OnDataReceived, OnDataReceived)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -71,75 +91,53 @@ bool P2PSocketDispatcher::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void P2PSocketDispatcher::OnFilterAdded(IPC::Channel* channel) {
-  DVLOG(1) << "P2PSocketDispatcher::OnFilterAdded()";
-  channel_ = channel;
-}
-
-void P2PSocketDispatcher::OnFilterRemoved() {
-  channel_ = NULL;
-}
-
-void P2PSocketDispatcher::OnChannelClosing() {
-  channel_ = NULL;
-}
-
 base::MessageLoopProxy* P2PSocketDispatcher::message_loop() {
-  return message_loop_.get();
+  return message_loop_;
 }
 
-int P2PSocketDispatcher::RegisterClient(P2PSocketClientImpl* client) {
-  DCHECK(message_loop_->BelongsToCurrentThread());
+int P2PSocketDispatcher::RegisterClient(P2PSocketClient* client) {
   return clients_.Add(client);
 }
 
 void P2PSocketDispatcher::UnregisterClient(int id) {
-  DCHECK(message_loop_->BelongsToCurrentThread());
   clients_.Remove(id);
 }
 
 void P2PSocketDispatcher::SendP2PMessage(IPC::Message* msg) {
-  if (!message_loop_->BelongsToCurrentThread()) {
-    message_loop_->PostTask(FROM_HERE,
-                            base::Bind(&P2PSocketDispatcher::Send,
-                                       this, msg));
-    return;
-  }
+  msg->set_routing_id(routing_id());
   Send(msg);
 }
 
 int P2PSocketDispatcher::RegisterHostAddressRequest(
-    P2PAsyncAddressResolver* request) {
-  DCHECK(message_loop_->BelongsToCurrentThread());
+    P2PHostAddressRequest* request) {
   return host_address_requests_.Add(request);
 }
 
 void P2PSocketDispatcher::UnregisterHostAddressRequest(int id) {
-  DCHECK(message_loop_->BelongsToCurrentThread());
   host_address_requests_.Remove(id);
 }
 
 void P2PSocketDispatcher::OnNetworkListChanged(
     const net::NetworkInterfaceList& networks) {
-  network_list_observers_->Notify(
-      &NetworkListObserver::OnNetworkListChanged, networks);
+  network_list_observers_->Notify(&NetworkListObserver::OnNetworkListChanged,
+                                  networks);
 }
 
 void P2PSocketDispatcher::OnGetHostAddressResult(
     int32 request_id,
-    const net::IPAddressList& addresses) {
-  P2PAsyncAddressResolver* request = host_address_requests_.Lookup(request_id);
+    const net::IPAddressNumber& address) {
+  P2PHostAddressRequest* request = host_address_requests_.Lookup(request_id);
   if (!request) {
     VLOG(1) << "Received P2P message for socket that doesn't exist.";
     return;
   }
 
-  request->OnResponse(addresses);
+  request->OnResponse(address);
 }
 
 void P2PSocketDispatcher::OnSocketCreated(
     int socket_id, const net::IPEndPoint& address) {
-  P2PSocketClientImpl* client = GetClient(socket_id);
+  P2PSocketClient* client = GetClient(socket_id);
   if (client) {
     client->OnSocketCreated(address);
   }
@@ -147,21 +145,14 @@ void P2PSocketDispatcher::OnSocketCreated(
 
 void P2PSocketDispatcher::OnIncomingTcpConnection(
     int socket_id, const net::IPEndPoint& address) {
-  P2PSocketClientImpl* client = GetClient(socket_id);
+  P2PSocketClient* client = GetClient(socket_id);
   if (client) {
     client->OnIncomingTcpConnection(address);
   }
 }
 
-void P2PSocketDispatcher::OnSendComplete(int socket_id) {
-  P2PSocketClientImpl* client = GetClient(socket_id);
-  if (client) {
-    client->OnSendComplete();
-  }
-}
-
 void P2PSocketDispatcher::OnError(int socket_id) {
-  P2PSocketClientImpl* client = GetClient(socket_id);
+  P2PSocketClient* client = GetClient(socket_id);
   if (client) {
     client->OnError();
   }
@@ -169,16 +160,15 @@ void P2PSocketDispatcher::OnError(int socket_id) {
 
 void P2PSocketDispatcher::OnDataReceived(
     int socket_id, const net::IPEndPoint& address,
-    const std::vector<char>& data,
-    const base::TimeTicks& timestamp) {
-  P2PSocketClientImpl* client = GetClient(socket_id);
+    const std::vector<char>& data) {
+  P2PSocketClient* client = GetClient(socket_id);
   if (client) {
-    client->OnDataReceived(address, data, timestamp);
+    client->OnDataReceived(address, data);
   }
 }
 
-P2PSocketClientImpl* P2PSocketDispatcher::GetClient(int socket_id) {
-  P2PSocketClientImpl* client = clients_.Lookup(socket_id);
+P2PSocketClient* P2PSocketDispatcher::GetClient(int socket_id) {
+  P2PSocketClient* client = clients_.Lookup(socket_id);
   if (client == NULL) {
     // This may happen if the socket was closed, but the browser side
     // hasn't processed the close message by the time it sends the

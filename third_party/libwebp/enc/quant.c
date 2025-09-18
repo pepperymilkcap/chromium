@@ -1,10 +1,8 @@
-// Copyright 2011 Google Inc. All Rights Reserved.
+// Copyright 2011 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 //   Quantization
@@ -14,8 +12,8 @@
 #include <assert.h>
 #include <math.h>
 
-#include "./vp8enci.h"
-#include "./cost.h"
+#include "vp8enci.h"
+#include "cost.h"
 
 #define DO_TRELLIS_I4  1
 #define DO_TRELLIS_I16 1   // not a huge gain, but ok at low bitrate.
@@ -29,8 +27,6 @@
 #define SNS_TO_DQ 0.9     // Scaling constant between the sns value and the QP
                           // power-law modulation. Must be strictly less than 1.
 
-#define I4_PENALTY 4000   // Rate-penalty for quick i4/i16 decision
-
 #define MULT_8B(a, b) (((a) * (b) + 128) >> 8)
 
 #if defined(__cplusplus) || defined(c_plusplus)
@@ -39,7 +35,7 @@ extern "C" {
 
 //------------------------------------------------------------------------------
 
-static WEBP_INLINE int clip(int v, int m, int M) {
+static inline int clip(int v, int m, int M) {
   return v < m ? m : v > M ? M : v;
 }
 
@@ -228,90 +224,28 @@ static void SetupFilterStrength(VP8Encoder* const enc) {
 // We want to emulate jpeg-like behaviour where the expected "good" quality
 // is around q=75. Internally, our "good" middle is around c=50. So we
 // map accordingly using linear piece-wise function
-static double QualityToCompression(double c) {
-  const double linear_c = (c < 0.75) ? c * (2. / 3.) : 2. * c - 1.;
-  // The file size roughly scales as pow(quantizer, 3.). Actually, the
-  // exponent is somewhere between 2.8 and 3.2, but we're mostly interested
-  // in the mid-quant range. So we scale the compressibility inversely to
-  // this power-law: quant ~= compression ^ 1/3. This law holds well for
-  // low quant. Finer modelling for high-quant would make use of kAcTable[]
-  // more explicitly.
-  const double v = pow(linear_c, 1 / 3.);
-  return v;
-}
-
-static double QualityToJPEGCompression(double c, double alpha) {
-  // We map the complexity 'alpha' and quality setting 'c' to a compression
-  // exponent empirically matched to the compression curve of libjpeg6b.
-  // On average, the WebP output size will be roughly similar to that of a
-  // JPEG file compressed with same quality factor.
-  const double amin = 0.30;
-  const double amax = 0.85;
-  const double exp_min = 0.4;
-  const double exp_max = 0.9;
-  const double slope = (exp_min - exp_max) / (amax - amin);
-  // Linearly interpolate 'expn' from exp_min to exp_max
-  // in the [amin, amax] range.
-  const double expn = (alpha > amax) ? exp_min
-                    : (alpha < amin) ? exp_max
-                    : exp_max + slope * (alpha - amin);
-  const double v = pow(c, expn);
-  return v;
-}
-
-static int SegmentsAreEquivalent(const VP8SegmentInfo* const S1,
-                                 const VP8SegmentInfo* const S2) {
-  return (S1->quant_ == S2->quant_) && (S1->fstrength_ == S2->fstrength_);
-}
-
-static void SimplifySegments(VP8Encoder* const enc) {
-  int map[NUM_MB_SEGMENTS] = { 0, 1, 2, 3 };
-  const int num_segments = enc->segment_hdr_.num_segments_;
-  int num_final_segments = 1;
-  int s1, s2;
-  for (s1 = 1; s1 < num_segments; ++s1) {    // find similar segments
-    const VP8SegmentInfo* const S1 = &enc->dqm_[s1];
-    int found = 0;
-    // check if we already have similar segment
-    for (s2 = 0; s2 < num_final_segments; ++s2) {
-      const VP8SegmentInfo* const S2 = &enc->dqm_[s2];
-      if (SegmentsAreEquivalent(S1, S2)) {
-        found = 1;
-        break;
-      }
-    }
-    map[s1] = s2;
-    if (!found) {
-      if (num_final_segments != s1) {
-        enc->dqm_[num_final_segments] = enc->dqm_[s1];
-      }
-      ++num_final_segments;
-    }
-  }
-  if (num_final_segments < num_segments) {  // Remap
-    int i = enc->mb_w_ * enc->mb_h_;
-    while (i-- > 0) enc->mb_info_[i].segment_ = map[enc->mb_info_[i].segment_];
-    enc->segment_hdr_.num_segments_ = num_final_segments;
-    // Replicate the trailing segment infos (it's mostly cosmetics)
-    for (i = num_final_segments; i < num_segments; ++i) {
-      enc->dqm_[i] = enc->dqm_[num_final_segments - 1];
-    }
-  }
+static double QualityToCompression(double q) {
+  const double c = q / 100.;
+  return (c < 0.75) ? c * (2. / 3.) : 2. * c - 1.;
 }
 
 void VP8SetSegmentParams(VP8Encoder* const enc, float quality) {
   int i;
   int dq_uv_ac, dq_uv_dc;
-  const int num_segments = enc->segment_hdr_.num_segments_;
+  const int num_segments = enc->config_->segments;
   const double amp = SNS_TO_DQ * enc->config_->sns_strength / 100. / 128.;
-  const double Q = quality / 100.;
-  const double c_base = enc->config_->emulate_jpeg_size ?
-      QualityToJPEGCompression(Q, enc->alpha_ / 255.) :
-      QualityToCompression(Q);
+  const double c_base = QualityToCompression(quality);
   for (i = 0; i < num_segments; ++i) {
-    // We modulate the base coefficient to accommodate for the quantization
-    // susceptibility and allow denser segments to be quantized more.
-    const double expn = 1. - amp * enc->dqm_[i].alpha_;
+    // The file size roughly scales as pow(quantizer, 3.). Actually, the
+    // exponent is somewhere between 2.8 and 3.2, but we're mostly interested
+    // in the mid-quant range. So we scale the compressibility inversely to
+    // this power-law: quant ~= compression ^ 1/3. This law holds well for
+    // low quant. Finer modelling for high-quant would make use of kAcTable[]
+    // more explicitely.
+    // Additionally, we modulate the base exponent 1/3 to accommodate for the
+    // quantization susceptibility and allow denser segments to be quantized
+    // more.
+    const double expn = (1. - amp * enc->dqm_[i].alpha_) / 3.;
     const double c = pow(c_base, expn);
     const int q = (int)(127. * (1. - c));
     assert(expn > 0.);
@@ -347,11 +281,9 @@ void VP8SetSegmentParams(VP8Encoder* const enc, float quality) {
   enc->dq_uv_dc_ = dq_uv_dc;
   enc->dq_uv_ac_ = dq_uv_ac;
 
+  SetupMatrices(enc);
+
   SetupFilterStrength(enc);   // initialize segments' filtering, eventually
-
-  if (num_segments > 1) SimplifySegments(enc);
-
-  SetupMatrices(enc);         // finalize quantization matrices
 }
 
 //------------------------------------------------------------------------------
@@ -367,16 +299,16 @@ const int VP8I4ModeOffsets[NUM_BMODES] = {
 };
 
 void VP8MakeLuma16Preds(const VP8EncIterator* const it) {
-  const VP8Encoder* const enc = it->enc_;
-  const uint8_t* const left = it->x_ ? enc->y_left_ : NULL;
-  const uint8_t* const top = it->y_ ? enc->y_top_ + it->x_ * 16 : NULL;
+  VP8Encoder* const enc = it->enc_;
+  const uint8_t* left = it->x_ ? enc->y_left_ : NULL;
+  const uint8_t* top = it->y_ ? enc->y_top_ + it->x_ * 16 : NULL;
   VP8EncPredLuma16(it->yuv_p_, left, top);
 }
 
 void VP8MakeChroma8Preds(const VP8EncIterator* const it) {
-  const VP8Encoder* const enc = it->enc_;
-  const uint8_t* const left = it->x_ ? enc->u_left_ : NULL;
-  const uint8_t* const top = it->y_ ? enc->uv_top_ + it->x_ * 16 : NULL;
+  VP8Encoder* const enc = it->enc_;
+  const uint8_t* left = it->x_ ? enc->u_left_ : NULL;
+  const uint8_t* top = it->y_ ? enc->uv_top_ + it->x_ * 16 : NULL;
   VP8EncPredChroma8(it->yuv_p_, left, top);
 }
 
@@ -474,13 +406,13 @@ typedef struct {
 #define NUM_NODES (MIN_DELTA + 1 + MAX_DELTA)
 #define NODE(n, l) (nodes[(n) + 1][(l) + MIN_DELTA])
 
-static WEBP_INLINE void SetRDScore(int lambda, VP8ModeScore* const rd) {
+static inline void SetRDScore(int lambda, VP8ModeScore* const rd) {
   // TODO: incorporate the "* 256" in the tables?
   rd->score = rd->R * lambda + 256 * (rd->D + rd->SD);
 }
 
-static WEBP_INLINE score_t RDScoreTrellis(int lambda, score_t rate,
-                                          score_t distortion) {
+static inline score_t RDScoreTrellis(int lambda, score_t rate,
+                                     score_t distortion) {
   return rate * lambda + 256 * distortion;
 }
 
@@ -768,7 +700,7 @@ static void SwapOut(VP8EncIterator* const it) {
 }
 
 static void PickBestIntra16(VP8EncIterator* const it, VP8ModeScore* const rd) {
-  const VP8Encoder* const enc = it->enc_;
+  VP8Encoder* const enc = it->enc_;
   const VP8SegmentInfo* const dqm = &enc->dqm_[it->mb_->segment_];
   const int lambda = dqm->lambda_i16_;
   const int tlambda = dqm->tlambda_;
@@ -777,7 +709,7 @@ static void PickBestIntra16(VP8EncIterator* const it, VP8ModeScore* const rd) {
   int mode;
 
   rd->mode_i16 = -1;
-  for (mode = 0; mode < NUM_PRED_MODES; ++mode) {
+  for (mode = 0; mode < 4; ++mode) {
     uint8_t* const tmp_dst = it->yuv_out2_ + Y_OFF;  // scratch buffer
     int nz;
 
@@ -810,7 +742,7 @@ static void PickBestIntra16(VP8EncIterator* const it, VP8ModeScore* const rd) {
 
 // return the cost array corresponding to the surrounding prediction modes.
 static const uint16_t* GetCostModeI4(VP8EncIterator* const it,
-                                     const uint8_t modes[16]) {
+                                     const int modes[16]) {
   const int preds_w = it->enc_->preds_w_;
   const int x = (it->i4_ & 3), y = it->i4_ >> 2;
   const int left = (x == 0) ? it->preds_[y * preds_w - 1] : modes[it->i4_ - 1];
@@ -819,7 +751,7 @@ static const uint16_t* GetCostModeI4(VP8EncIterator* const it,
 }
 
 static int PickBestIntra4(VP8EncIterator* const it, VP8ModeScore* const rd) {
-  const VP8Encoder* const enc = it->enc_;
+  VP8Encoder* const enc = it->enc_;
   const VP8SegmentInfo* const dqm = &enc->dqm_[it->mb_->segment_];
   const int lambda = dqm->lambda_i4_;
   const int tlambda = dqm->tlambda_;
@@ -895,7 +827,7 @@ static int PickBestIntra4(VP8EncIterator* const it, VP8ModeScore* const rd) {
 //------------------------------------------------------------------------------
 
 static void PickBestUV(VP8EncIterator* const it, VP8ModeScore* const rd) {
-  const VP8Encoder* const enc = it->enc_;
+  VP8Encoder* const enc = it->enc_;
   const VP8SegmentInfo* const dqm = &enc->dqm_[it->mb_->segment_];
   const int lambda = dqm->lambda_uv_;
   const uint8_t* const src = it->yuv_in_ + U_OFF;
@@ -906,7 +838,7 @@ static void PickBestUV(VP8EncIterator* const it, VP8ModeScore* const rd) {
 
   rd->mode_uv = -1;
   InitScore(&rd_best);
-  for (mode = 0; mode < NUM_PRED_MODES; ++mode) {
+  for (mode = 0; mode < 4; ++mode) {
     VP8ModeScore rd_uv;
 
     // Reconstruct
@@ -935,10 +867,10 @@ static void PickBestUV(VP8EncIterator* const it, VP8ModeScore* const rd) {
 
 static void SimpleQuantize(VP8EncIterator* const it, VP8ModeScore* const rd) {
   const VP8Encoder* const enc = it->enc_;
-  const int is_i16 = (it->mb_->type_ == 1);
+  const int i16 = (it->mb_->type_ == 1);
   int nz = 0;
 
-  if (is_i16) {
+  if (i16) {
     nz = ReconstructIntra16(it, rd, it->yuv_out_ + Y_OFF, it->preds_[0]);
   } else {
     VP8IteratorStartI4(it);
@@ -957,66 +889,11 @@ static void SimpleQuantize(VP8EncIterator* const it, VP8ModeScore* const rd) {
   rd->nz = nz;
 }
 
-// Refine intra16/intra4 sub-modes based on distortion only (not rate).
-static void DistoRefine(VP8EncIterator* const it, int try_both_i4_i16) {
-  const int is_i16 = (it->mb_->type_ == 1);
-  score_t best_score = MAX_COST;
-
-  if (try_both_i4_i16 || is_i16) {
-    int mode;
-    int best_mode = -1;
-    for (mode = 0; mode < NUM_PRED_MODES; ++mode) {
-      const uint8_t* const ref = it->yuv_p_ + VP8I16ModeOffsets[mode];
-      const uint8_t* const src = it->yuv_in_ + Y_OFF;
-      const score_t score = VP8SSE16x16(src, ref);
-      if (score < best_score) {
-        best_mode = mode;
-        best_score = score;
-      }
-    }
-    VP8SetIntra16Mode(it, best_mode);
-  }
-  if (try_both_i4_i16 || !is_i16) {
-    uint8_t modes_i4[16];
-    // We don't evaluate the rate here, but just account for it through a
-    // constant penalty (i4 mode usually needs more bits compared to i16).
-    score_t score_i4 = (score_t)I4_PENALTY;
-
-    VP8IteratorStartI4(it);
-    do {
-      int mode;
-      int best_sub_mode = -1;
-      score_t best_sub_score = MAX_COST;
-      const uint8_t* const src = it->yuv_in_ + Y_OFF + VP8Scan[it->i4_];
-
-      // TODO(skal): we don't really need the prediction pixels here,
-      // but just the distortion against 'src'.
-      VP8MakeIntra4Preds(it);
-      for (mode = 0; mode < NUM_BMODES; ++mode) {
-        const uint8_t* const ref = it->yuv_p_ + VP8I4ModeOffsets[mode];
-        const score_t score = VP8SSE4x4(src, ref);
-        if (score < best_sub_score) {
-          best_sub_mode = mode;
-          best_sub_score = score;
-        }
-      }
-      modes_i4[it->i4_] = best_sub_mode;
-      score_i4 += best_sub_score;
-      if (score_i4 >= best_score) break;
-    } while (VP8IteratorRotateI4(it, it->yuv_in_ + Y_OFF));
-    if (score_i4 < best_score) {
-      VP8SetIntra4Mode(it, modes_i4);
-    }
-  }
-}
-
 //------------------------------------------------------------------------------
 // Entry point
 
-int VP8Decimate(VP8EncIterator* const it, VP8ModeScore* const rd,
-                VP8RDLevel rd_opt) {
+int VP8Decimate(VP8EncIterator* const it, VP8ModeScore* const rd, int rd_opt) {
   int is_skipped;
-  const int method = it->enc_->method_;
 
   InitScore(rd);
 
@@ -1025,21 +902,22 @@ int VP8Decimate(VP8EncIterator* const it, VP8ModeScore* const rd,
   VP8MakeLuma16Preds(it);
   VP8MakeChroma8Preds(it);
 
-  if (rd_opt > RD_OPT_NONE) {
-    it->do_trellis_ = (rd_opt >= RD_OPT_TRELLIS_ALL);
+  // for rd_opt = 2, we perform trellis-quant on the final decision only.
+  // for rd_opt > 2, we use it for every scoring (=much slower).
+  if (rd_opt > 0) {
+    it->do_trellis_ = (rd_opt > 2);
     PickBestIntra16(it, rd);
-    if (method >= 2) {
+    if (it->enc_->method_ >= 2) {
       PickBestIntra4(it, rd);
     }
     PickBestUV(it, rd);
-    if (rd_opt == RD_OPT_TRELLIS) {   // finish off with trellis-optim now
+    if (rd_opt == 2) {
       it->do_trellis_ = 1;
       SimpleQuantize(it, rd);
     }
   } else {
-    // For method == 2, pick the best intra4/intra16 based on SSE (~tad slower).
-    // For method <= 1, we refine intra4 or intra16 (but don't re-examine mode).
-    DistoRefine(it, (method >= 2));
+    // TODO: for method_ == 2, pick the best intra4/intra16 based on SSE
+    it->do_trellis_ = (it->enc_->method_ == 2);
     SimpleQuantize(it, rd);
   }
   is_skipped = (rd->nz == 0);

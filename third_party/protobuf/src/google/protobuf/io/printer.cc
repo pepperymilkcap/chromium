@@ -35,6 +35,7 @@
 #include <google/protobuf/io/printer.h>
 #include <google/protobuf/io/zero_copy_stream.h>
 #include <google/protobuf/stubs/common.h>
+#include <google/protobuf/stubs/strutil.h>
 
 namespace google {
 namespace protobuf {
@@ -50,8 +51,8 @@ Printer::Printer(ZeroCopyOutputStream* output, char variable_delimiter)
 }
 
 Printer::~Printer() {
-  // Only BackUp() if we have called Next() at least once and never failed.
-  if (buffer_size_ > 0 && !failed_) {
+  // Only BackUp() if we're sure we've successfully called Next() at least once.
+  if (buffer_size_ > 0) {
     output_->BackUp(buffer_size_);
   }
 }
@@ -168,7 +169,7 @@ void Printer::WriteRaw(const char* data, int size) {
   if (failed_) return;
   if (size == 0) return;
 
-  if (at_start_of_line_ && (size > 0) && (data[0] != '\n')) {
+  if (at_start_of_line_) {
     // Insert an indent.
     at_start_of_line_ = false;
     WriteRaw(indent_.data(), indent_.size());

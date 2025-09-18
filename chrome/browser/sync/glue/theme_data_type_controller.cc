@@ -1,10 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/glue/theme_data_type_controller.h"
 
-#include "chrome/browser/extensions/extension_system.h"
+#include "base/metrics/histogram.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_components_factory.h"
 
 namespace browser_sync {
 
@@ -12,17 +14,45 @@ ThemeDataTypeController::ThemeDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile,
     ProfileSyncService* sync_service)
-    : UIDataTypeController(syncer::THEMES,
-                           profile_sync_factory,
-                           profile,
-                           sync_service) {
+    : FrontendDataTypeController(profile_sync_factory,
+                                 profile,
+                                 sync_service) {
 }
 
-ThemeDataTypeController::~ThemeDataTypeController() {}
+ThemeDataTypeController::~ThemeDataTypeController() {
+}
+
+syncable::ModelType ThemeDataTypeController::type() const {
+  return syncable::THEMES;
+}
 
 bool ThemeDataTypeController::StartModels() {
-  extensions::ExtensionSystem::Get(profile_)->InitForRegularProfile(true);
+  profile_->InitExtensions(true);
   return true;
+}
+
+void ThemeDataTypeController::CreateSyncComponents() {
+  ProfileSyncComponentsFactory::SyncComponents sync_components =
+      profile_sync_factory_->CreateThemeSyncComponents(sync_service_,
+                                                     this);
+  set_model_associator(sync_components.model_associator);
+  set_change_processor(sync_components.change_processor);
+}
+
+void ThemeDataTypeController::RecordUnrecoverableError(
+    const tracked_objects::Location& from_here,
+    const std::string& message) {
+  UMA_HISTOGRAM_COUNTS("Sync.ThemeRunFailures", 1);
+}
+
+void ThemeDataTypeController::RecordAssociationTime(base::TimeDelta time) {
+  UMA_HISTOGRAM_TIMES("Sync.ThemeAssociationTime", time);
+}
+
+void ThemeDataTypeController::RecordStartFailure(StartResult result) {
+  UMA_HISTOGRAM_ENUMERATION("Sync.ThemeStartFailures",
+                            result,
+                            MAX_START_RESULT);
 }
 
 }  // namespace browser_sync

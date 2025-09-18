@@ -4,53 +4,34 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_TAB_MODAL_CONFIRM_DIALOG_MAC_H_
 #define CHROME_BROWSER_UI_COCOA_TAB_MODAL_CONFIRM_DIALOG_MAC_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/cocoa/constrained_window/constrained_window_mac.h"
-#include "chrome/browser/ui/tab_modal_confirm_dialog.h"
+#include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 
-@class ConstrainedWindowAlert;
-
-namespace content {
-class WebContents;
-}
-
+class TabContentsWrapper;
 class TabModalConfirmDialogDelegate;
-@class TabModalConfirmDialogMacBridge;
 
 // Displays a tab-modal dialog, i.e. a dialog that will block the current page
 // but still allow the user to switch to a different page.
 // To display the dialog, allocate this object on the heap. It will open the
 // dialog from its constructor and then delete itself when the user dismisses
 // the dialog.
-class TabModalConfirmDialogMac : public TabModalConfirmDialog,
-                                 public ConstrainedWindowMacDelegate {
+class TabModalConfirmDialogMac
+    : public ConstrainedWindowMacDelegateSystemSheet {
  public:
   TabModalConfirmDialogMac(TabModalConfirmDialogDelegate* delegate,
-                           content::WebContents* web_contents);
+                           TabContentsWrapper* wrapper);
+
+  // ConstrainedWindowDelegateMacSystemSheet methods:
+  virtual void DeleteDelegate() OVERRIDE;
 
  private:
   virtual ~TabModalConfirmDialogMac();
 
-  // TabModalConfirmDialog:
-  virtual void AcceptTabModalDialog() OVERRIDE;
-  virtual void CancelTabModalDialog() OVERRIDE;
-
-  // TabModalConfirmDialogCloseDelegate:
-  virtual void CloseDialog() OVERRIDE;
-
-  // ConstrainedWindowMacDelegate:
-  virtual void OnConstrainedWindowClosed(
-      ConstrainedWindowMac* window) OVERRIDE;
-
-  bool closing_;
-
-  scoped_ptr<ConstrainedWindowMac> window_;
   scoped_ptr<TabModalConfirmDialogDelegate> delegate_;
-  base::scoped_nsobject<ConstrainedWindowAlert> alert_;
-  base::scoped_nsobject<TabModalConfirmDialogMacBridge> bridge_;
 
   DISALLOW_COPY_AND_ASSIGN(TabModalConfirmDialogMac);
 };

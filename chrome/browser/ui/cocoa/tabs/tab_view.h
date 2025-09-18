@@ -4,12 +4,13 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_TABS_TAB_VIEW_H_
 #define CHROME_BROWSER_UI_COCOA_TABS_TAB_VIEW_H_
+#pragma once
 
-#include <ApplicationServices/ApplicationServices.h>
 #import <Cocoa/Cocoa.h>
+#include <ApplicationServices/ApplicationServices.h>
 
-#include "base/mac/scoped_cftyperef.h"
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
+#import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/hover_close_button.h"
 
 namespace tabs {
@@ -30,10 +31,6 @@ enum AlertState {
   kAlertFalling
 };
 
-// When the window doesn't have focus then we want to draw the button with a
-// slightly lighter color. We do this by just reducing the alpha.
-const CGFloat kImageNoFocusAlpha = 0.65;
-
 }  // namespace tabs
 
 @class TabController, TabWindowController;
@@ -42,12 +39,12 @@ const CGFloat kImageNoFocusAlpha = 0.65;
 // on the tab strip. Relies on an associated TabController to provide a
 // target/action for selecting the tab.
 
-@interface TabView : NSView {
+@interface TabView : BackgroundGradientView {
  @private
-  TabController* controller_;
+  IBOutlet TabController* controller_;
   // TODO(rohitrao): Add this button to a CoreAnimation layer so we can fade it
   // in and out on mouseovers.
-  HoverCloseButton* closeButton_;  // Weak.
+  IBOutlet HoverCloseButton* closeButton_;
 
   BOOL closing_;
 
@@ -70,13 +67,7 @@ const CGFloat kImageNoFocusAlpha = 0.65;
   NSCellStateValue state_;
 
   // The tool tip text for this tab view.
-  base::scoped_nsobject<NSString> toolTipText_;
-
-  // A one-element mask image cache.  This cache makes drawing roughly 16%
-  // faster.
-  base::ScopedCFTypeRef<CGImageRef> maskCache_;
-  CGFloat maskCacheWidth_;
-  CGFloat maskCacheScale_;
+  scoped_nsobject<NSString> toolTipText_;
 }
 
 @property(assign, nonatomic) NSCellStateValue state;
@@ -89,10 +80,6 @@ const CGFloat kImageNoFocusAlpha = 0.65;
 // clicks inside it from sending messages.
 @property(assign, nonatomic, getter=isClosing) BOOL closing;
 
-// Designated initializer.
-- (id)initWithFrame:(NSRect)frame
-         controller:(TabController*)controller
-        closeButton:(HoverCloseButton*)closeButton;
 
 // Returns the inset multiplier used to compute the inset of the top of the tab.
 + (CGFloat)insetMultiplier;

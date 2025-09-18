@@ -2,21 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/extensions/extension_uninstall_dialog.h"
-
 #import <Cocoa/Cocoa.h>
 
 #include <string>
 
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "extensions/common/extension.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/extension_uninstall_dialog.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/common/extensions/extension.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image/image_skia_util_mac.h"
 
 namespace {
 
@@ -26,10 +25,7 @@ namespace {
 // so there's no way for the dialog to outlive its delegate.
 class ExtensionUninstallDialogCocoa : public ExtensionUninstallDialog {
  public:
-  ExtensionUninstallDialogCocoa(
-      Profile* profile,
-      Browser* browser,
-      Delegate* delegate);
+  ExtensionUninstallDialogCocoa(Profile* profile, Delegate* delegate);
   virtual ~ExtensionUninstallDialogCocoa() OVERRIDE;
 
  private:
@@ -37,10 +33,8 @@ class ExtensionUninstallDialogCocoa : public ExtensionUninstallDialog {
 };
 
 ExtensionUninstallDialogCocoa::ExtensionUninstallDialogCocoa(
-    Profile* profile,
-    Browser* browser,
-    ExtensionUninstallDialog::Delegate* delegate)
-    : ExtensionUninstallDialog(profile, browser, delegate) {}
+    Profile* profile, ExtensionUninstallDialog::Delegate* delegate)
+    : ExtensionUninstallDialog(profile, delegate) {}
 
 ExtensionUninstallDialogCocoa::~ExtensionUninstallDialogCocoa() {}
 
@@ -59,9 +53,9 @@ void ExtensionUninstallDialogCocoa::Show() {
 
   [alert setMessageText:l10n_util::GetNSStringF(
        IDS_EXTENSION_UNINSTALL_PROMPT_HEADING,
-       base::UTF8ToUTF16(extension_->name()))];
+       UTF8ToUTF16(extension_->name()))];
   [alert setAlertStyle:NSWarningAlertStyle];
-  [alert setIcon:gfx::NSImageFromImageSkia(icon_)];
+  [alert setIcon:gfx::SkBitmapToNSImage(icon_)];
 
   if ([alert runModal] == NSAlertFirstButtonReturn)
     delegate_->ExtensionUninstallAccepted();
@@ -73,8 +67,6 @@ void ExtensionUninstallDialogCocoa::Show() {
 
 // static
 ExtensionUninstallDialog* ExtensionUninstallDialog::Create(
-    Profile* profile,
-    Browser* browser,
-    Delegate* delegate) {
-  return new ExtensionUninstallDialogCocoa(profile, browser, delegate);
+    Profile* profile, Delegate* delegate) {
+  return new ExtensionUninstallDialogCocoa(profile, delegate);
 }

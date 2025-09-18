@@ -4,10 +4,6 @@
 
 #include "content/common/message_router.h"
 
-#include "ipc/ipc_message.h"
-
-namespace content {
-
 MessageRouter::MessageRouter() {
 }
 
@@ -26,7 +22,8 @@ bool MessageRouter::Send(IPC::Message* msg) {
   return false;
 }
 
-void MessageRouter::AddRoute(int32 routing_id, IPC::Listener* listener) {
+void MessageRouter::AddRoute(int32 routing_id,
+                             IPC::Channel::Listener* listener) {
   routes_.AddWithID(listener, routing_id);
 }
 
@@ -42,7 +39,7 @@ bool MessageRouter::OnMessageReceived(const IPC::Message& msg) {
 }
 
 bool MessageRouter::RouteMessage(const IPC::Message& msg) {
-  IPC::Listener* listener = routes_.Lookup(msg.routing_id());
+  IPC::Channel::Listener* listener = ResolveRoute(msg.routing_id());
   if (!listener)
     return false;
 
@@ -50,4 +47,6 @@ bool MessageRouter::RouteMessage(const IPC::Message& msg) {
   return true;
 }
 
-}  // namespace content
+IPC::Channel::Listener* MessageRouter::ResolveRoute(int32 routing_id) {
+  return routes_.Lookup(routing_id);
+}

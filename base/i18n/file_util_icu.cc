@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,20 +6,16 @@
 
 #include "base/i18n/file_util_icu.h"
 
-#include "base/files/file_path.h"
-#include "base/i18n/icu_string_conversions.h"
-#include "base/i18n/string_compare.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "build/build_config.h"
-#include "third_party/icu/source/common/unicode/uniset.h"
-#include "third_party/icu/source/i18n/unicode/coll.h"
-
-using base::string16;
+#include "unicode/coll.h"
+#include "unicode/uniset.h"
 
 namespace {
 
@@ -82,6 +78,56 @@ IllegalCharacters::IllegalCharacters() {
   set->freeze();
 }
 
+class LocaleAwareComparator {
+ public:
+  static LocaleAwareComparator* GetInstance() {
+    return Singleton<LocaleAwareComparator,
+                     LeakySingletonTraits<LocaleAwareComparator> >::get();
+  }
+
+  // Note: A similar function is available in l10n_util.
+  // We cannot use it because base should not depend on l10n_util.
+  // TODO(yuzo): Move some of l10n_util to base.
+  int Compare(const string16& a, const string16& b) {
+    // We are not sure if Collator::compare is thread-safe.
+    // Use an AutoLock just in case.
+    base::AutoLock auto_lock(lock_);
+
+    UErrorCode error_code = U_ZERO_ERROR;
+    UCollationResult result = collator_->compare(
+        static_cast<const UChar*>(a.c_str()),
+        static_cast<int>(a.length()),
+        static_cast<const UChar*>(b.c_str()),
+        static_cast<int>(b.length()),
+        error_code);
+    DCHECK(U_SUCCESS(error_code));
+    return result;
+  }
+
+ private:
+  friend struct DefaultSingletonTraits<LocaleAwareComparator>;
+
+  LocaleAwareComparator() {
+    UErrorCode error_code = U_ZERO_ERROR;
+    // Use the default collator. The default locale should have been properly
+    // set by the time this constructor is called.
+    collator_.reset(icu::Collator::createInstance(error_code));
+    DCHECK(U_SUCCESS(error_code));
+    // Make it case-sensitive.
+    collator_->setStrength(icu::Collator::TERTIARY);
+    // Note: We do not set UCOL_NORMALIZATION_MODE attribute. In other words, we
+    // do not pay performance penalty to guarantee sort order correctness for
+    // non-FCD (http://unicode.org/notes/tn5/#FCD) file names. This should be a
+    // reasonable tradeoff because such file names should be rare and the sort
+    // order doesn't change much anyway.
+  }
+
+  scoped_ptr<icu::Collator> collator_;
+  base::Lock lock_;
+
+  DISALLOW_COPY_AND_ASSIGN(LocaleAwareComparator);
+};
+
 }  // namespace
 
 namespace file_util {
@@ -90,7 +136,7 @@ bool IsFilenameLegal(const string16& file_name) {
   return IllegalCharacters::GetInstance()->containsNone(file_name);
 }
 
-void ReplaceIllegalCharactersInPath(base::FilePath::StringType* file_name,
+void ReplaceIllegalCharactersInPath(FilePath::StringType* file_name,
                                     char replace_char) {
   DCHECK(file_name);
 
@@ -133,41 +179,23 @@ void ReplaceIllegalCharactersInPath(base::FilePath::StringType* file_name,
   }
 }
 
-bool LocaleAwareCompareFilenames(const base::FilePath& a,
-                                 const base::FilePath& b) {
-  UErrorCode error_code = U_ZERO_ERROR;
-  // Use the default collator. The default locale should have been properly
-  // set by the time this constructor is called.
-  scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(error_code));
-  DCHECK(U_SUCCESS(error_code));
-  // Make it case-sensitive.
-  collator->setStrength(icu::Collator::TERTIARY);
-
+bool LocaleAwareCompareFilenames(const FilePath& a, const FilePath& b) {
 #if defined(OS_WIN)
-  return base::i18n::CompareString16WithCollator(collator.get(),
-      base::WideToUTF16(a.value()), base::WideToUTF16(b.value())) == UCOL_LESS;
+  return LocaleAwareComparator::GetInstance()->Compare(a.value().c_str(),
+                                                       b.value().c_str()) < 0;
 
 #elif defined(OS_POSIX)
   // On linux, the file system encoding is not defined. We assume
   // SysNativeMBToWide takes care of it.
-  return base::i18n::CompareString16WithCollator(
-      collator.get(),
-      base::WideToUTF16(base::SysNativeMBToWide(a.value().c_str())),
-      base::WideToUTF16(base::SysNativeMBToWide(b.value().c_str()))
-      ) == UCOL_LESS;
+  //
+  // ICU's collator can take strings in OS native encoding. But we convert the
+  // strings to UTF-16 ourselves to ensure conversion consistency.
+  // TODO(yuzo): Perhaps we should define SysNativeMBToUTF16?
+  return LocaleAwareComparator::GetInstance()->Compare(
+      WideToUTF16(base::SysNativeMBToWide(a.value().c_str())),
+      WideToUTF16(base::SysNativeMBToWide(b.value().c_str()))) < 0;
 #else
   #error Not implemented on your system
-#endif
-}
-
-void NormalizeFileNameEncoding(base::FilePath* file_name) {
-#if defined(OS_CHROMEOS)
-  std::string normalized_str;
-  if (base::ConvertToUtf8AndNormalize(file_name->BaseName().value(),
-                                      base::kCodepageUTF8,
-                                      &normalized_str)) {
-    *file_name = file_name->DirName().Append(base::FilePath(normalized_str));
-  }
 #endif
 }
 

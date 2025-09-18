@@ -6,13 +6,14 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_BALLOON_COLLECTION_IMPL_H_
 #define CHROME_BROWSER_NOTIFICATIONS_BALLOON_COLLECTION_IMPL_H_
+#pragma once
 
 #include <deque>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_collection_base.h"
 #include "content/public/browser/notification_observer.h"
@@ -36,7 +37,7 @@
 class BalloonCollectionImpl : public BalloonCollection,
                               public content::NotificationObserver
 #if USE_OFFSETS
-                            , public base::MessageLoopForUI::Observer
+                            , public MessageLoopForUI::Observer
 #endif
 {
  public:
@@ -46,10 +47,8 @@ class BalloonCollectionImpl : public BalloonCollection,
   // BalloonCollection interface.
   virtual void Add(const Notification& notification,
                    Profile* profile) OVERRIDE;
-  virtual const Notification* FindById(const std::string& id) const OVERRIDE;
   virtual bool RemoveById(const std::string& id) OVERRIDE;
   virtual bool RemoveBySourceOrigin(const GURL& source_origin) OVERRIDE;
-  virtual bool RemoveByProfile(Profile* profile) OVERRIDE;
   virtual void RemoveAll() OVERRIDE;
   virtual bool HasSpace() const OVERRIDE;
   virtual void ResizeBalloon(Balloon* balloon, const gfx::Size& size) OVERRIDE;
@@ -68,7 +67,7 @@ class BalloonCollectionImpl : public BalloonCollection,
   virtual base::EventStatus WillProcessEvent(
       const base::NativeEvent& event) OVERRIDE;
   virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
-#elif defined(TOOLKIT_GTK)
+#elif defined(TOOLKIT_USES_GTK)
   virtual void WillProcessEvent(GdkEvent* event) OVERRIDE;
   virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;
 #endif
@@ -76,11 +75,6 @@ class BalloonCollectionImpl : public BalloonCollection,
   // base_ is embedded, so this is a simple accessor for the number of
   // balloons in the collection.
   int count() const { return base_.count(); }
-
-  static int min_balloon_width() { return Layout::min_balloon_width(); }
-  static int max_balloon_width() { return Layout::max_balloon_width(); }
-  static int min_balloon_height() { return Layout::min_balloon_height(); }
-  static int max_balloon_height() { return Layout::max_balloon_height(); }
 
  protected:
   // Calculates layout values for the balloons including
@@ -147,11 +141,7 @@ class BalloonCollectionImpl : public BalloonCollection,
 
     // Returns true if there is change to the offset that requires the balloons
     // to be repositioned.
-    bool ComputeOffsetToMoveAbovePanels();
-
-    void enable_computing_panel_offset() {
-      need_to_compute_panel_offset_ = true;
-    }
+    bool ComputeOffsetToMoveAbovePanels(const gfx::Rect& panel_bounds);
 
    private:
     // Layout parameters
@@ -170,10 +160,6 @@ class BalloonCollectionImpl : public BalloonCollection,
 
     Placement placement_;
     gfx::Rect work_area_;
-
-    // The flag that indicates that the panel offset computation should be
-    // performed.
-    bool need_to_compute_panel_offset_;
 
     // The offset that guarantees that the notificaitions shown in the
     // lower-right or lower-left corner of the screen will go above currently

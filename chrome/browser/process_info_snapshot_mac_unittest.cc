@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,11 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/files/file_path.h"
+#include "base/eintr_wrapper.h"
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/posix/eintr_wrapper.h"
-#include "base/process/kill.h"
-#include "base/process/launch.h"
-#include "base/process/process_handle.h"
-#include "base/process/process_metrics.h"
+#include "base/process_util.h"
+
 #include "testing/gtest/include/gtest/gtest.h"
 
 typedef testing::Test ProcessInfoSnapshotMacTest;
@@ -101,7 +99,7 @@ TEST_F(ProcessInfoSnapshotMacTest, EffectiveVsRealUserIDTest) {
   // Create a pipe to be able to read top's output.
   int fds[2];
   PCHECK(pipe(fds) == 0);
-  base::FileHandleMappingVector fds_to_remap;
+  base::file_handle_mapping_vector fds_to_remap;
   fds_to_remap.push_back(std::make_pair(fds[1], 1));
 
   // Hook up top's stderr to the test process' stderr.
@@ -116,7 +114,7 @@ TEST_F(ProcessInfoSnapshotMacTest, EffectiveVsRealUserIDTest) {
   base::LaunchOptions options;
   options.fds_to_remap = &fds_to_remap;
   ASSERT_TRUE(base::LaunchProcess(argv, options, &process_handle));
-  PCHECK(IGNORE_EINTR(close(fds[1])) == 0);
+  PCHECK(HANDLE_EINTR(close(fds[1])) == 0);
 
   // Wait until there's some output form top. This is an easy way to tell that
   // the exec() call is done and top is actually running.
@@ -136,5 +134,5 @@ TEST_F(ProcessInfoSnapshotMacTest, EffectiveVsRealUserIDTest) {
   EXPECT_EQ(proc_info.uid, geteuid());
 
   ASSERT_TRUE(base::KillProcess(process_handle, 0, true));
-  PCHECK(IGNORE_EINTR(close(fds[0])) == 0);
+  PCHECK(HANDLE_EINTR(close(fds[0])) == 0);
 }

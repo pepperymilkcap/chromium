@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_H_
 #define UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_H_
+#pragma once
 
 #include <string>
 
@@ -12,12 +13,7 @@
 
 namespace views {
 
-class NativeViewHostAuraTest;
 class NativeViewHostWrapper;
-
-// If a NativeViewHost's native view is a Widget, this native window
-// property is set on the widget, pointing to the owning NativeViewHost.
-extern const char kWidgetNativeViewHostKey[];
 
 // A View type that hosts a gfx::NativeView. The bounds of the native view are
 // kept in sync with the bounds of this view as it is moved and sized.
@@ -90,21 +86,15 @@ class VIEWS_EXPORT NativeViewHost : public View {
  protected:
   virtual bool NeedsNotificationWhenVisibleBoundsChange() const OVERRIDE;
   virtual void OnVisibleBoundsChanged() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
  private:
-  friend class NativeViewHostAuraTest;
-
   // Detach the native view. |destroyed| is true if the native view is
   // detached because it's being destroyed, or false otherwise.
   void Detach(bool destroyed);
-
-  // Invokes ViewRemoved() on the FocusManager for all the child Widgets of our
-  // NativeView. This is used when detaching to ensure the FocusManager doesn't
-  // have a reference to a View that is no longer reachable.
-  void ClearFocus();
 
   // The attached native view. There is exactly one native_view_ attached.
   gfx::NativeView native_view_;

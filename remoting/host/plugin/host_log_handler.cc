@@ -5,7 +5,6 @@
 #include "remoting/host/plugin/host_log_handler.h"
 
 #include "base/lazy_instance.h"
-#include "remoting/base/logging.h"
 #include "remoting/base/util.h"
 #include "remoting/host/plugin/host_script_object.h"
 
@@ -38,7 +37,7 @@ void HostLogHandler::RegisterLogMessageHandler() {
   if (g_has_registered_log_handler)
     return;
 
-  HOST_LOG << "Registering global log handler";
+  LOG(INFO) << "Registering global log handler";
 
   // Record previous handler so we can call it in a chain.
   g_logging_old_handler = logging::GetLogMessageHandler();

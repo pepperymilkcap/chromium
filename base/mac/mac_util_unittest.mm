@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,15 @@
 
 #include "base/mac/mac_util.h"
 
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/scoped_temp_dir.h"
 #include "base/sys_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-
-#include <errno.h>
-#include <sys/xattr.h>
 
 namespace base {
 namespace mac {
@@ -124,9 +121,22 @@ TEST_F(MacUtilTest, TestExcludeFileFromBackups) {
   EXPECT_FALSE(excluded_by_path);
 }
 
+TEST_F(MacUtilTest, CopyNSImageToCGImage) {
+  scoped_nsobject<NSImage> nsImage(
+      [[NSImage alloc] initWithSize:NSMakeSize(20, 20)]);
+  [nsImage lockFocus];
+  [[NSColor redColor] set];
+  NSRect rect = NSZeroRect;
+  rect.size = [nsImage size];
+  NSRectFill(rect);
+  [nsImage unlockFocus];
+
+  ScopedCFTypeRef<CGImageRef> cgImage(CopyNSImageToCGImage(nsImage.get()));
+  EXPECT_TRUE(cgImage.get());
+}
+
 TEST_F(MacUtilTest, NSObjectRetainRelease) {
-  base::scoped_nsobject<NSArray> array(
-      [[NSArray alloc] initWithObjects:@"foo", nil]);
+  scoped_nsobject<NSArray> array([[NSArray alloc] initWithObjects:@"foo", nil]);
   EXPECT_EQ(1U, [array retainCount]);
 
   NSObjectRetain(array);
@@ -141,119 +151,41 @@ TEST_F(MacUtilTest, IsOSEllipsis) {
   base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
 
   if (major == 10) {
-    if (minor == 6) {
-      EXPECT_TRUE(IsOSSnowLeopard());
+    if (minor == 5) {
+      EXPECT_TRUE(IsOSLeopard());
+      EXPECT_TRUE(IsOSLeopardOrEarlier());
+      EXPECT_FALSE(IsOSSnowLeopard());
+      EXPECT_TRUE(IsOSSnowLeopardOrEarlier());
+      EXPECT_FALSE(IsOSSnowLeopardOrLater());
       EXPECT_FALSE(IsOSLion());
-      EXPECT_TRUE(IsOSLionOrEarlier());
       EXPECT_FALSE(IsOSLionOrLater());
-      EXPECT_FALSE(IsOSMountainLion());
-      EXPECT_TRUE(IsOSMountainLionOrEarlier());
-      EXPECT_FALSE(IsOSMountainLionOrLater());
-      EXPECT_FALSE(IsOSMavericks());
-      EXPECT_FALSE(IsOSMavericksOrLater());
-      EXPECT_FALSE(IsOSLaterThanMavericks_DontCallThis());
+      EXPECT_FALSE(IsOSLaterThanLion());
+    } else if (minor == 6) {
+      EXPECT_FALSE(IsOSLeopard());
+      EXPECT_FALSE(IsOSLeopardOrEarlier());
+      EXPECT_TRUE(IsOSSnowLeopard());
+      EXPECT_TRUE(IsOSSnowLeopardOrEarlier());
+      EXPECT_TRUE(IsOSSnowLeopardOrLater());
+      EXPECT_FALSE(IsOSLion());
+      EXPECT_FALSE(IsOSLionOrLater());
+      EXPECT_FALSE(IsOSLaterThanLion());
     } else if (minor == 7) {
+      EXPECT_FALSE(IsOSLeopard());
+      EXPECT_FALSE(IsOSLeopardOrEarlier());
       EXPECT_FALSE(IsOSSnowLeopard());
+      EXPECT_FALSE(IsOSSnowLeopardOrEarlier());
+      EXPECT_TRUE(IsOSSnowLeopardOrLater());
       EXPECT_TRUE(IsOSLion());
-      EXPECT_TRUE(IsOSLionOrEarlier());
       EXPECT_TRUE(IsOSLionOrLater());
-      EXPECT_FALSE(IsOSMountainLion());
-      EXPECT_TRUE(IsOSMountainLionOrEarlier());
-      EXPECT_FALSE(IsOSMountainLionOrLater());
-      EXPECT_FALSE(IsOSMavericks());
-      EXPECT_FALSE(IsOSMavericksOrLater());
-      EXPECT_FALSE(IsOSLaterThanMavericks_DontCallThis());
-    } else if (minor == 8) {
-      EXPECT_FALSE(IsOSSnowLeopard());
-      EXPECT_FALSE(IsOSLion());
-      EXPECT_FALSE(IsOSLionOrEarlier());
-      EXPECT_TRUE(IsOSLionOrLater());
-      EXPECT_TRUE(IsOSMountainLion());
-      EXPECT_TRUE(IsOSMountainLionOrEarlier());
-      EXPECT_TRUE(IsOSMountainLionOrLater());
-      EXPECT_FALSE(IsOSMavericks());
-      EXPECT_FALSE(IsOSMavericksOrLater());
-      EXPECT_FALSE(IsOSLaterThanMavericks_DontCallThis());
-    } else if (minor == 9) {
-      EXPECT_FALSE(IsOSSnowLeopard());
-      EXPECT_FALSE(IsOSLion());
-      EXPECT_FALSE(IsOSLionOrEarlier());
-      EXPECT_TRUE(IsOSLionOrLater());
-      EXPECT_FALSE(IsOSMountainLion());
-      EXPECT_FALSE(IsOSMountainLionOrEarlier());
-      EXPECT_TRUE(IsOSMountainLionOrLater());
-      EXPECT_TRUE(IsOSMavericks());
-      EXPECT_TRUE(IsOSMavericksOrLater());
-      EXPECT_FALSE(IsOSLaterThanMavericks_DontCallThis());
+      EXPECT_FALSE(IsOSLaterThanLion());
     } else {
-      // Not five, six, seven, eight, or nine. Ah, ah, ah.
+      // Not five, six, or seven. Ah, ah, ah.
       EXPECT_TRUE(false);
     }
   } else {
     // Not ten. What you gonna do?
     EXPECT_FALSE(true);
   }
-}
-
-TEST_F(MacUtilTest, ParseModelIdentifier) {
-  std::string model;
-  int32 major = 1, minor = 2;
-
-  EXPECT_FALSE(ParseModelIdentifier("", &model, &major, &minor));
-  EXPECT_EQ(0U, model.length());
-  EXPECT_EQ(1, major);
-  EXPECT_EQ(2, minor);
-  EXPECT_FALSE(ParseModelIdentifier("FooBar", &model, &major, &minor));
-
-  EXPECT_TRUE(ParseModelIdentifier("MacPro4,1", &model, &major, &minor));
-  EXPECT_EQ(model, "MacPro");
-  EXPECT_EQ(4, major);
-  EXPECT_EQ(1, minor);
-
-  EXPECT_TRUE(ParseModelIdentifier("MacBookPro6,2", &model, &major, &minor));
-  EXPECT_EQ(model, "MacBookPro");
-  EXPECT_EQ(6, major);
-  EXPECT_EQ(2, minor);
-}
-
-TEST_F(MacUtilTest, TestRemoveQuarantineAttribute) {
-  ScopedTempDir temp_dir_;
-  ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  FilePath dummy_folder_path = temp_dir_.path().Append("DummyFolder");
-  ASSERT_TRUE(base::CreateDirectory(dummy_folder_path));
-  const char* quarantine_str = "0000;4b392bb2;Chromium;|org.chromium.Chromium";
-  const char* file_path_str = dummy_folder_path.value().c_str();
-  EXPECT_EQ(0, setxattr(file_path_str, "com.apple.quarantine",
-      quarantine_str, strlen(quarantine_str), 0, 0));
-  EXPECT_EQ(static_cast<long>(strlen(quarantine_str)),
-      getxattr(file_path_str, "com.apple.quarantine",
-          NULL, 0, 0, 0));
-  EXPECT_TRUE(RemoveQuarantineAttribute(dummy_folder_path));
-  EXPECT_EQ(-1, getxattr(file_path_str, "com.apple.quarantine", NULL, 0, 0, 0));
-  EXPECT_EQ(ENOATTR, errno);
-}
-
-TEST_F(MacUtilTest, TestRemoveQuarantineAttributeTwice) {
-  ScopedTempDir temp_dir_;
-  ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  FilePath dummy_folder_path = temp_dir_.path().Append("DummyFolder");
-  const char* file_path_str = dummy_folder_path.value().c_str();
-  ASSERT_TRUE(base::CreateDirectory(dummy_folder_path));
-  EXPECT_EQ(-1, getxattr(file_path_str, "com.apple.quarantine", NULL, 0, 0, 0));
-  // No quarantine attribute to begin with, but RemoveQuarantineAttribute still
-  // succeeds because in the end the folder still doesn't have the quarantine
-  // attribute set.
-  EXPECT_TRUE(RemoveQuarantineAttribute(dummy_folder_path));
-  EXPECT_TRUE(RemoveQuarantineAttribute(dummy_folder_path));
-  EXPECT_EQ(ENOATTR, errno);
-}
-
-TEST_F(MacUtilTest, TestRemoveQuarantineAttributeNonExistentPath) {
-  ScopedTempDir temp_dir_;
-  ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  FilePath non_existent_path = temp_dir_.path().Append("DummyPath");
-  ASSERT_FALSE(PathExists(non_existent_path));
-  EXPECT_FALSE(RemoveQuarantineAttribute(non_existent_path));
 }
 
 }  // namespace

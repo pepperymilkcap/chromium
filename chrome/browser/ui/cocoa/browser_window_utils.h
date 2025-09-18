@@ -4,25 +4,21 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_UTILS_H_
 #define CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_UTILS_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "chrome/browser/ui/cocoa/themed_window.h"
-
 class Browser;
-
-namespace content {
 struct NativeWebKeyboardEvent;
-}
 
 @interface BrowserWindowUtils : NSObject
 
 // Returns YES if keyboard event should be handled.
-+ (BOOL)shouldHandleKeyboardEvent:(const content::NativeWebKeyboardEvent&)event;
++ (BOOL)shouldHandleKeyboardEvent:(const NativeWebKeyboardEvent&)event;
 
 // Determines the command associated with the keyboard event.
 // Returns -1 if no command found.
-+ (int)getCommandId:(const content::NativeWebKeyboardEvent&)event;
++ (int)getCommandId:(const NativeWebKeyboardEvent&)event;
 
 // NSWindow must be a ChromeEventProcessingWindow.
 + (BOOL)handleKeyboardEvent:(NSEvent*)event
@@ -39,19 +35,8 @@ struct NativeWebKeyboardEvent;
                         withNewTitle:(NSString*)newTitle
                            forWindow:(NSWindow*)window;
 
-// Returns the position in the coordinates of |windowView| that the top left of
-// a theme image should be painted at. See
-// [BrowserWindowController themeImagePositionForAlignment:] for more details.
-+ (NSPoint)themeImagePositionFor:(NSView*)windowView
-                    withTabStrip:(NSView*)tabStripView
-                       alignment:(ThemeImageAlignment)alignment;
-
-// Returns the position in the coordinates of |tabStripView| that the top left
-// of a theme image should be painted at. This method exists so that the
-// position can be queried by the new tab button before the tab strip is layed
-// out.
-+ (NSPoint)themeImagePositionInTabStripCoords:(NSView*)tabStripView
-                                    alignment:(ThemeImageAlignment)alignment;
++ (NSPoint)themePatternPhaseFor:(NSView*)windowView
+                   withTabStrip:(NSView*)tabStripView;
 
 + (void)activateWindowForController:(NSWindowController*)controller;
 @end

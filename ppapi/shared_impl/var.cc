@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,21 @@
 #include <limits>
 
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
-#include "ppapi/shared_impl/resource_var.h"
 #include "ppapi/shared_impl/var_tracker.h"
 
 namespace ppapi {
 
 // Var -------------------------------------------------------------------------
+
+Var::Var() : var_id_(0) {
+}
+
+Var::~Var() {
+}
 
 // static
 std::string Var::PPVarToLogString(PP_Var var) {
@@ -52,25 +56,6 @@ std::string Var::PPVarToLogString(PP_Var var) {
     }
     case PP_VARTYPE_OBJECT:
       return "[Object]";
-    case PP_VARTYPE_ARRAY:
-      return "[Array]";
-    case PP_VARTYPE_DICTIONARY:
-      return "[Dictionary]";
-    case PP_VARTYPE_ARRAY_BUFFER:
-      return "[Array buffer]";
-    case PP_VARTYPE_RESOURCE: {
-      ResourceVar* resource(ResourceVar::FromPPVar(var));
-      if (!resource)
-        return "[Invalid resource]";
-
-      if (resource->IsPending()) {
-        return base::StringPrintf("[Pending resource]");
-      } else if (resource->GetPPResource()) {
-        return base::StringPrintf("[Resource %d]", resource->GetPPResource());
-      } else {
-        return "[Null resource]";
-      }
-    }
     default:
       return "[Invalid var]";
   }
@@ -92,18 +77,6 @@ ProxyObjectVar* Var::AsProxyObjectVar() {
   return NULL;
 }
 
-ArrayVar* Var::AsArrayVar() {
-  return NULL;
-}
-
-DictionaryVar* Var::AsDictionaryVar() {
-  return NULL;
-}
-
-ResourceVar* Var::AsResourceVar() {
-  return NULL;
-}
-
 PP_Var Var::GetPPVar() {
   int32 id = GetOrCreateVarID();
   if (!id)
@@ -118,12 +91,6 @@ PP_Var Var::GetPPVar() {
 
 int32 Var::GetExistingVarID() const {
   return var_id_;
-}
-
-Var::Var() : var_id_(0) {
-}
-
-Var::~Var() {
 }
 
 int32 Var::GetOrCreateVarID() {
@@ -146,9 +113,6 @@ void Var::AssignVarID(int32 id) {
 
 // StringVar -------------------------------------------------------------------
 
-StringVar::StringVar() {
-}
-
 StringVar::StringVar(const std::string& str)
     : value_(str) {
 }
@@ -170,13 +134,13 @@ PP_VarType StringVar::GetType() const {
 
 // static
 PP_Var StringVar::StringToPPVar(const std::string& var) {
-  return StringToPPVar(var.c_str(), static_cast<uint32>(var.size()));
+  return StringToPPVar(var.c_str(), var.size());
 }
 
 // static
 PP_Var StringVar::StringToPPVar(const char* data, uint32 len) {
   scoped_refptr<StringVar> str(new StringVar(data, len));
-  if (!str.get() || !IsStringUTF8(str->value()))
+  if (!str || !IsStringUTF8(str->value()))
     return PP_MakeNull();
   return str->GetPPVar();
 }
@@ -187,16 +151,9 @@ StringVar* StringVar::FromPPVar(PP_Var var) {
     return NULL;
   scoped_refptr<Var> var_object(
       PpapiGlobals::Get()->GetVarTracker()->GetVar(var));
-  if (!var_object.get())
+  if (!var_object)
     return NULL;
   return var_object->AsStringVar();
-}
-
-// static
-PP_Var StringVar::SwapValidatedUTF8StringIntoPPVar(std::string* src) {
-  scoped_refptr<StringVar> str(new StringVar);
-  str->value_.swap(*src);
-  return str->GetPPVar();
 }
 
 // ArrayBufferVar --------------------------------------------------------------
@@ -221,7 +178,7 @@ ArrayBufferVar* ArrayBufferVar::FromPPVar(PP_Var var) {
     return NULL;
   scoped_refptr<Var> var_object(
       PpapiGlobals::Get()->GetVarTracker()->GetVar(var));
-  if (!var_object.get())
+  if (!var_object)
     return NULL;
   return var_object->AsArrayBufferVar();
 }

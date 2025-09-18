@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,10 @@
 
 #include <set>
 
-#include "base/memory/weak_ptr.h"
-#include "ui/base/models/menu_model.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_controller_delegate.h"
 #include "ui/views/controls/menu/menu_delegate.h"
-#include "ui/views/controls/menu/menu_model_adapter.h"
-#include "ui/views/controls/menu/menu_runner_handler.h"
-#include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
@@ -34,8 +29,6 @@ class MenuRunnerImpl : public internal::MenuControllerDelegate {
 
   MenuItemView* menu() { return menu_; }
 
-  bool running() const { return running_; }
-
   // See description above class for details.
   void Release();
 
@@ -48,15 +41,12 @@ class MenuRunnerImpl : public internal::MenuControllerDelegate {
 
   void Cancel();
 
-  // Returns the time from the event which closed the menu - or 0.
-  base::TimeDelta closing_event_time() const;
-
   // MenuControllerDelegate:
   virtual void DropMenuClosed(NotifyType type, MenuItemView* menu) OVERRIDE;
   virtual void SiblingMenuCreated(MenuItemView* menu) OVERRIDE;
 
  private:
-  virtual ~MenuRunnerImpl();
+  ~MenuRunnerImpl();
 
   // Cleans up after the menu is no longer showing. |result| is the menu that
   // the user selected, or NULL if nothing was selected.
@@ -93,12 +83,6 @@ class MenuRunnerImpl : public internal::MenuControllerDelegate {
   // Do we own the controller?
   bool owns_controller_;
 
-  // The timestamp of the event which closed the menu - or 0.
-  base::TimeDelta closing_event_time_;
-
-  // Used to detect deletion of |this| when notifying delegate of success.
-  base::WeakPtrFactory<MenuRunnerImpl> weak_factory_;
-
   DISALLOW_COPY_AND_ASSIGN(MenuRunnerImpl);
 };
 
@@ -108,9 +92,7 @@ MenuRunnerImpl::MenuRunnerImpl(MenuItemView* menu)
       delete_after_run_(false),
       for_drop_(false),
       controller_(NULL),
-      owns_controller_(false),
-      closing_event_time_(base::TimeDelta()),
-      weak_factory_(this) {
+      owns_controller_(false) {
 }
 
 void MenuRunnerImpl::Release() {
@@ -146,7 +128,6 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(
     const gfx::Rect& bounds,
     MenuItemView::AnchorPosition anchor,
     int32 types) {
-  closing_event_time_ = base::TimeDelta();
   if (running_) {
     // Ignore requests to show the menu while it's already showing. MenuItemView
     // doesn't handle this very well (meaning it crashes).
@@ -174,46 +155,36 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(
       controller = NULL;
     }
   }
-
   running_ = true;
   for_drop_ = (types & MenuRunner::FOR_DROP) != 0;
   bool has_mnemonics = (types & MenuRunner::HAS_MNEMONICS) != 0 && !for_drop_;
+  menu_->PrepareForRun(has_mnemonics,
+                       !for_drop_ && ShouldShowMnemonics(button));
+  int mouse_event_flags = 0;
   owns_controller_ = false;
   if (!controller) {
     // No menus are showing, show one.
-    ui::NativeTheme* theme = parent ? parent->GetNativeTheme() :
-        ui::NativeTheme::instance();
-    controller = new MenuController(theme, !for_drop_, this);
+    controller = new MenuController(!for_drop_, this);
     owns_controller_ = true;
   }
-  controller->set_accept_on_f4((types & MenuRunner::COMBOBOX) != 0);
   controller_ = controller;
   menu_->set_controller(controller_);
-  menu_->PrepareForRun(owns_controller_,
-                       has_mnemonics,
-                       !for_drop_ && ShouldShowMnemonics(button));
 
   // Run the loop.
-  int mouse_event_flags = 0;
   MenuItemView* result = controller->Run(parent, button, menu_, bounds, anchor,
-                                        (types & MenuRunner::CONTEXT_MENU) != 0,
                                          &mouse_event_flags);
-  // Get the time of the event which closed this menu.
-  closing_event_time_ = controller->closing_event_time();
+
   if (for_drop_) {
     // Drop menus return immediately. We finish processing in DropMenuClosed.
     return MenuRunner::NORMAL_EXIT;
   }
+
   return MenuDone(result, mouse_event_flags);
 }
 
 void MenuRunnerImpl::Cancel() {
   if (running_)
     controller_->Cancel(MenuController::EXIT_ALL);
-}
-
-base::TimeDelta MenuRunnerImpl::closing_event_time() const {
-  return closing_event_time_;
 }
 
 void MenuRunnerImpl::DropMenuClosed(NotifyType type, MenuItemView* menu) {
@@ -257,12 +228,8 @@ MenuRunner::RunResult MenuRunnerImpl::MenuDone(MenuItemView* result,
   }
   running_ = false;
   if (result && menu_->GetDelegate()) {
-    // Executing the command may also delete this.
-    base::WeakPtr<MenuRunnerImpl> ref(weak_factory_.GetWeakPtr());
     menu_->GetDelegate()->ExecuteCommand(result->GetCommand(),
                                          mouse_event_flags);
-    if (!ref)
-      return MenuRunner::MENU_DELETED;
   }
   return MenuRunner::NORMAL_EXIT;
 }
@@ -271,29 +238,15 @@ bool MenuRunnerImpl::ShouldShowMnemonics(MenuButton* button) {
   // Show mnemonics if the button has focus or alt is pressed.
   bool show_mnemonics = button ? button->HasFocus() : false;
 #if defined(OS_WIN)
-  // This is only needed on Windows.
+  // We don't currently need this on gtk as showing the menu gives focus to the
+  // button first.
   if (!show_mnemonics)
     show_mnemonics = base::win::IsAltPressed();
 #endif
   return show_mnemonics;
 }
 
-// In theory we could implement this every where, but for now we're only
-// implementing it on aura.
-#if !defined(USE_AURA)
-// static
-DisplayChangeListener* DisplayChangeListener::Create(Widget* widget,
-                                                     MenuRunner* runner) {
-  return NULL;
-}
-#endif
-
 }  // namespace internal
-
-MenuRunner::MenuRunner(ui::MenuModel* menu_model)
-    : menu_model_adapter_(new MenuModelAdapter(menu_model)),
-      holder_(new internal::MenuRunnerImpl(menu_model_adapter_->CreateMenu())) {
-}
 
 MenuRunner::MenuRunner(MenuItemView* menu)
     : holder_(new internal::MenuRunnerImpl(menu)) {
@@ -311,55 +264,12 @@ MenuRunner::RunResult MenuRunner::RunMenuAt(Widget* parent,
                                             MenuButton* button,
                                             const gfx::Rect& bounds,
                                             MenuItemView::AnchorPosition anchor,
-                                            ui::MenuSourceType source_type,
                                             int32 types) {
-  if (runner_handler_.get()) {
-    return runner_handler_->RunMenuAt(parent, button, bounds, anchor,
-                                      source_type, types);
-  }
-
-  // The parent of the nested menu will have created a DisplayChangeListener, so
-  // we avoid creating a DisplayChangeListener if nested. Drop menus are
-  // transient, so we don't cancel in that case.
-  if ((types & (IS_NESTED | FOR_DROP)) == 0 && parent) {
-    display_change_listener_.reset(
-        internal::DisplayChangeListener::Create(parent, this));
-  }
-
-  if (types & CONTEXT_MENU) {
-    switch (source_type) {
-      case ui::MENU_SOURCE_NONE:
-      case ui::MENU_SOURCE_KEYBOARD:
-      case ui::MENU_SOURCE_MOUSE:
-        anchor = MenuItemView::TOPLEFT;
-        break;
-      case ui::MENU_SOURCE_TOUCH:
-      case ui::MENU_SOURCE_TOUCH_EDIT_MENU:
-        anchor = MenuItemView::BOTTOMCENTER;
-        break;
-      default:
-        break;
-    }
-  }
-
   return holder_->RunMenuAt(parent, button, bounds, anchor, types);
-}
-
-bool MenuRunner::IsRunning() const {
-  return holder_->running();
 }
 
 void MenuRunner::Cancel() {
   holder_->Cancel();
-}
-
-base::TimeDelta MenuRunner::closing_event_time() const {
-  return holder_->closing_event_time();
-}
-
-void MenuRunner::SetRunnerHandler(
-    scoped_ptr<MenuRunnerHandler> runner_handler) {
-  runner_handler_ = runner_handler.Pass();
 }
 
 }  // namespace views

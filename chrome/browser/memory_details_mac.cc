@@ -9,17 +9,18 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/file_path.h"
 #include "base/file_version_info.h"
-#include "base/files/file_path.h"
 #include "base/mac/mac_util.h"
-#include "base/process/process_iterator.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/process_util.h"
+#include "base/string_util.h"
 #include "base/threading/thread.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/process_info_snapshot.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/backing_store_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/process_type.h"
 #include "grit/chromium_strings.h"
@@ -48,8 +49,7 @@ enum BrowserType {
 } BrowserProcess;
 
 
-MemoryDetails::MemoryDetails()
-    : user_metrics_mode_(UPDATE_USER_METRICS) {
+MemoryDetails::MemoryDetails() {
   const std::string google_browser_name =
       l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
   // (Human and process) names of browsers; should match the ordering for
@@ -72,9 +72,8 @@ MemoryDetails::MemoryDetails()
 
   for (size_t index = 0; index < MAX_BROWSERS; ++index) {
     ProcessData process;
-    process.name = base::UTF8ToUTF16(process_template[index].name);
-    process.process_name =
-        base::UTF8ToUTF16(process_template[index].process_name);
+    process.name = UTF8ToUTF16(process_template[index].name);
+    process.process_name = UTF8ToUTF16(process_template[index].process_name);
     process_data_.push_back(process);
   }
 }
@@ -105,7 +104,7 @@ void MemoryDetails::CollectProcessData(
   std::vector<base::ProcessId> all_pids;
   for (size_t index = CHROME_BROWSER; index < MAX_BROWSERS; index++) {
     base::NamedProcessIterator process_it(
-        base::UTF16ToUTF8(process_data_[index].process_name), NULL);
+        UTF16ToUTF8(process_data_[index].process_name), NULL);
 
     while (const base::ProcessEntry* entry = process_it.NextProcessEntry()) {
       pids_by_browser[index].push_back(entry->pid());
@@ -148,7 +147,7 @@ void MemoryDetails::CollectProcessData(
          it != pids_by_browser[index].end(); ++it) {
       ProcessMemoryInformation info;
       info.pid = *it;
-      info.process_type = content::PROCESS_TYPE_UNKNOWN;
+      info.type = content::PROCESS_TYPE_UNKNOWN;
 
       // Try to get version information. To do this, we need first to get the
       // executable's name (we can only believe |proc_info.command| if it looks
@@ -158,8 +157,8 @@ void MemoryDetails::CollectProcessData(
       ProcessInfoSnapshot::ProcInfoEntry proc_info;
       if (process_info.GetProcInfo(info.pid, &proc_info)) {
         if (proc_info.command.length() > 1 && proc_info.command[0] == '/') {
-          base::FilePath bundle_name =
-              base::mac::GetAppBundlePath(base::FilePath(proc_info.command));
+          FilePath bundle_name =
+              base::mac::GetAppBundlePath(FilePath(proc_info.command));
           if (!bundle_name.empty()) {
             version_info.reset(FileVersionInfo::CreateFileVersionInfo(
                 bundle_name));
@@ -171,7 +170,7 @@ void MemoryDetails::CollectProcessData(
         info.version = version_info->product_version();
       } else {
         info.product_name = process_data_[index].name;
-        info.version = base::string16();
+        info.version = string16();
       }
 
       // Memory info.
@@ -209,17 +208,17 @@ void MemoryDetails::CollectProcessDataChrome(
   ProcessMemoryInformation info;
   info.pid = pid;
   if (info.pid == base::GetCurrentProcId())
-    info.process_type = content::PROCESS_TYPE_BROWSER;
+    info.type = content::PROCESS_TYPE_BROWSER;
   else
-    info.process_type = content::PROCESS_TYPE_UNKNOWN;
+    info.type = content::PROCESS_TYPE_UNKNOWN;
 
   chrome::VersionInfo version_info;
   if (version_info.is_valid()) {
-    info.product_name = base::ASCIIToUTF16(version_info.Name());
-    info.version = base::ASCIIToUTF16(version_info.Version());
+    info.product_name = ASCIIToUTF16(version_info.Name());
+    info.version = ASCIIToUTF16(version_info.Version());
   } else {
     info.product_name = process_data_[CHROME_BROWSER].name;
-    info.version = base::string16();
+    info.version = string16();
   }
 
   // Check if this is one of the child processes whose data we collected
@@ -227,7 +226,7 @@ void MemoryDetails::CollectProcessDataChrome(
   for (size_t child = 0; child < child_info.size(); child++) {
     if (child_info[child].pid == info.pid) {
       info.titles = child_info[child].titles;
-      info.process_type = child_info[child].process_type;
+      info.type = child_info[child].type;
       break;
     }
   }

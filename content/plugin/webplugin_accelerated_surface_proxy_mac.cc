@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,23 +9,19 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "content/plugin/webplugin_proxy.h"
-#include "content/public/common/content_switches.h"
-#include "ui/gl/io_surface_support_mac.h"
-#include "ui/surface/accelerated_surface_mac.h"
-#include "ui/surface/transport_dib.h"
-
-namespace content {
+#include "ui/base/ui_base_switches.h"
+#include "ui/gfx/surface/accelerated_surface_mac.h"
+#include "ui/gfx/surface/io_surface_support_mac.h"
+#include "ui/gfx/surface/transport_dib.h"
 
 WebPluginAcceleratedSurfaceProxy* WebPluginAcceleratedSurfaceProxy::Create(
     WebPluginProxy* plugin_proxy,
     gfx::GpuPreference gpu_preference) {
-  // This code path shouldn't be taken if CA plugins are disabled
-  // because the CA drawing model shouldn't be advertised.
-  DCHECK(!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableCoreAnimationPlugins));
+  bool composited = !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableCompositedCoreAnimationPlugins);
 
   // Require IOSurface support for drawing Core Animation plugins.
-  if (!IOSurfaceSupport::Initialize())
+  if (composited && !IOSurfaceSupport::Initialize())
     return NULL;
 
   AcceleratedSurface* surface = new AcceleratedSurface;
@@ -33,17 +29,31 @@ WebPluginAcceleratedSurfaceProxy* WebPluginAcceleratedSurfaceProxy::Create(
   // mode is forced via flags), so handle that gracefully.
   if (!surface->Initialize(NULL, true, gpu_preference)) {
     delete surface;
-    return NULL;
+    surface = NULL;
+    if (composited)
+      return NULL;
   }
 
-  return new WebPluginAcceleratedSurfaceProxy(plugin_proxy, surface);
+  if (!composited && surface) {
+    // Only used for 10.5 support, but harmless on 10.6+.
+    surface->SetTransportDIBAllocAndFree(
+        base::Bind(&WebPluginProxy::AllocSurfaceDIB,
+                   base::Unretained(plugin_proxy)),
+        base::Bind(&WebPluginProxy::FreeSurfaceDIB,
+                   base::Unretained(plugin_proxy)));
+  }
+
+  return new WebPluginAcceleratedSurfaceProxy(
+      plugin_proxy, surface, composited);
 }
 
 WebPluginAcceleratedSurfaceProxy::WebPluginAcceleratedSurfaceProxy(
     WebPluginProxy* plugin_proxy,
-    AcceleratedSurface* surface)
+    AcceleratedSurface* surface,
+    bool composited)
         : plugin_proxy_(plugin_proxy),
-          surface_(surface) {
+          surface_(surface),
+          composited_(composited) {
 }
 
 WebPluginAcceleratedSurfaceProxy::~WebPluginAcceleratedSurfaceProxy() {
@@ -54,14 +64,35 @@ WebPluginAcceleratedSurfaceProxy::~WebPluginAcceleratedSurfaceProxy() {
   }
 }
 
+void WebPluginAcceleratedSurfaceProxy::SetWindowHandle(
+    gfx::PluginWindowHandle window) {
+  window_handle_ = window;
+}
+
+bool WebPluginAcceleratedSurfaceProxy::IsComposited() {
+  return composited_;
+}
+
 void WebPluginAcceleratedSurfaceProxy::SetSize(const gfx::Size& size) {
   if (!surface_)
     return;
 
-  uint32 io_surface_id = surface_->SetSurfaceSize(size);
-  // If allocation fails for some reason, still inform the plugin proxy.
-  plugin_proxy_->AcceleratedPluginAllocatedIOSurface(
-      size.width(), size.height(), io_surface_id);
+  if (composited_) {
+    uint32 io_surface_id = surface_->SetSurfaceSize(size);
+    // If allocation fails for some reason, still inform the plugin proxy.
+    plugin_proxy_->AcceleratedPluginAllocatedIOSurface(
+        size.width(), size.height(), io_surface_id);
+  } else {
+    uint32 io_surface_id = surface_->SetSurfaceSize(size);
+    if (io_surface_id) {
+      plugin_proxy_->SetAcceleratedSurface(window_handle_, size, io_surface_id);
+    } else {
+      TransportDIB::Handle transport_dib = surface_->SetTransportDIBSize(size);
+      if (TransportDIB::is_valid_handle(transport_dib)) {
+        plugin_proxy_->SetAcceleratedDIB(window_handle_, size, transport_dib);
+      }
+    }
+  }
 }
 
 CGLContextObj WebPluginAcceleratedSurfaceProxy::context() {
@@ -81,7 +112,10 @@ void WebPluginAcceleratedSurfaceProxy::EndDrawing() {
     return;
 
   surface_->SwapBuffers();
-  plugin_proxy_->AcceleratedPluginSwappedIOSurface();
+  if (composited_) {
+    plugin_proxy_->AcceleratedPluginSwappedIOSurface();
+  } else {
+    plugin_proxy_->AcceleratedFrameBuffersDidSwap(
+        window_handle_, surface_->GetSurfaceId());
+  }
 }
-
-}  // namespace content

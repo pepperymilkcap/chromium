@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,8 @@
 #define GPU_COMMAND_BUFFER_CLIENT_FENCED_ALLOCATOR_H_
 
 #include <vector>
-
-#include "base/logging.h"
-#include "gpu/command_buffer/common/types.h"
-#include "gpu/gpu_export.h"
+#include "../common/logging.h"
+#include "../common/types.h"
 
 namespace gpu {
 class CommandBufferHelper;
@@ -26,7 +24,7 @@ class CommandBufferHelper;
 // environment which is multi-process, this class isn't "thread safe", because
 // it isn't meant to be shared across modules. It is thread-compatible though
 // (see http://www.corp.google.com/eng/doc/cpp_primer.html#thread_safety).
-class GPU_EXPORT FencedAllocator {
+class FencedAllocator {
  public:
   typedef unsigned int Offset;
   // Invalid offset, returned by Alloc in case of failure.
@@ -83,9 +81,6 @@ class GPU_EXPORT FencedAllocator {
   // True if any memory is allocated.
   bool InUse();
 
-  // Return bytes of memory that is IN_USE
-  size_t bytes_in_use() const { return bytes_in_use_; }
-
  private:
   // Status of a block of memory, for book-keeping.
   enum State {
@@ -137,7 +132,6 @@ class GPU_EXPORT FencedAllocator {
 
   CommandBufferHelper *helper_;
   Container blocks_;
-  size_t bytes_in_use_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FencedAllocator);
 };
@@ -187,7 +181,7 @@ class FencedAllocatorWrapper {
   // Parameters:
   //   pointer: the pointer to the memory block to free.
   void Free(void *pointer) {
-    DCHECK(pointer);
+    GPU_DCHECK(pointer);
     allocator_.Free(GetOffset(pointer));
   }
 
@@ -198,7 +192,7 @@ class FencedAllocatorWrapper {
   //   pointer: the pointer to the memory block to free.
   //   token: the token value to wait for before re-using the memory.
   void FreePendingToken(void *pointer, int32 token) {
-    DCHECK(pointer);
+    GPU_DCHECK(pointer);
     allocator_.FreePendingToken(GetOffset(pointer), token);
   }
 
@@ -246,8 +240,6 @@ class FencedAllocatorWrapper {
   }
 
   FencedAllocator &allocator() { return allocator_; }
-
-  size_t bytes_in_use() const { return allocator_.bytes_in_use(); }
 
  private:
   FencedAllocator allocator_;

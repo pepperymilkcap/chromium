@@ -1,28 +1,26 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/pack_extension_job.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_creator.h"
-#include "extensions/common/constants.h"
+#include "chrome/common/chrome_constants.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 
-namespace extensions {
-
 PackExtensionJob::PackExtensionJob(Client* client,
-                                   const base::FilePath& root_directory,
-                                   const base::FilePath& key_file,
+                                   const FilePath& root_directory,
+                                   const FilePath& key_file,
                                    int run_flags)
     : client_(client), key_file_(key_file), asynchronous_(true),
-      run_flags_(run_flags | ExtensionCreator::kRequireModernManifestVersion) {
+      run_flags_(run_flags) {
   root_directory_ = root_directory.StripTrailingSeparators();
   CHECK(BrowserThread::GetCurrentThreadIdentifier(&client_thread_id_));
 }
@@ -44,12 +42,12 @@ void PackExtensionJob::ClearClient() {
 PackExtensionJob::~PackExtensionJob() {}
 
 void PackExtensionJob::Run() {
-  crx_file_out_ = base::FilePath(root_directory_.value() +
-                                 kExtensionFileExtension);
+  crx_file_out_ = FilePath(root_directory_.value() +
+                           chrome::kExtensionFileExtension);
 
   if (key_file_.empty())
-    key_file_out_ = base::FilePath(root_directory_.value() +
-                                   kExtensionKeyFileExtension);
+    key_file_out_ = FilePath(root_directory_.value() +
+                             chrome::kExtensionKeyFileExtension);
 
   // TODO(aa): Need to internationalize the errors that ExtensionCreator
   // returns. See bug 20734.
@@ -90,11 +88,10 @@ void PackExtensionJob::ReportFailureOnClientThread(
 }
 
 // static
-base::string16 PackExtensionJob::StandardSuccessMessage(
-    const base::FilePath& crx_file,
-    const base::FilePath& key_file) {
-  base::string16 crx_file_string = crx_file.LossyDisplayName();
-  base::string16 key_file_string = key_file.LossyDisplayName();
+string16 PackExtensionJob::StandardSuccessMessage(const FilePath& crx_file,
+                                                  const FilePath& key_file) {
+  string16 crx_file_string = crx_file.LossyDisplayName();
+  string16 key_file_string = key_file.LossyDisplayName();
   if (key_file_string.empty()) {
     return l10n_util::GetStringFUTF16(
         IDS_EXTENSION_PACK_DIALOG_SUCCESS_BODY_UPDATE,
@@ -106,5 +103,3 @@ base::string16 PackExtensionJob::StandardSuccessMessage(
         key_file_string);
   }
 }
-
-}  // namespace extensions

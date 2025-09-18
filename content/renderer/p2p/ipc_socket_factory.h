@@ -6,9 +6,8 @@
 #define CONTENT_RENDERER_P2P_IPC_SOCKET_FACTORY_H_
 
 #include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "content/common/content_export.h"
-#include "third_party/libjingle/source/talk/p2p/base/packetsocketfactory.h"
+#include "third_party/libjingle/source/talk/base/packetsocketfactory.h"
 
 namespace content {
 
@@ -33,14 +32,13 @@ class IpcPacketSocketFactory : public talk_base::PacketSocketFactory {
       const talk_base::SocketAddress& local_address,
       int min_port,
       int max_port,
-      int opts) OVERRIDE;
+      bool ssl) OVERRIDE;
   virtual talk_base::AsyncPacketSocket* CreateClientTcpSocket(
       const talk_base::SocketAddress& local_address,
       const talk_base::SocketAddress& remote_address,
       const talk_base::ProxyInfo& proxy_info,
       const std::string& user_agent,
-      int opts) OVERRIDE;
-  virtual talk_base::AsyncResolverInterface* CreateAsyncResolver() OVERRIDE;
+      bool ssl) OVERRIDE;
 
  private:
   P2PSocketDispatcher* socket_dispatcher_;

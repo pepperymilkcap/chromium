@@ -1,18 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_SSL_SSL_REQUEST_INFO_H_
 #define CONTENT_BROWSER_SSL_SSL_REQUEST_INFO_H_
+#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "net/cert/cert_status_flags.h"
-#include "url/gurl.h"
-#include "webkit/common/resource_type.h"
-
-namespace content {
+#include "googleurl/src/gurl.h"
+#include "net/base/cert_status_flags.h"
+#include "webkit/glue/resource_type.h"
 
 // SSLRequestInfo wraps up the information SSLPolicy needs about a request in
 // order to update our security IU.  SSLRequestInfo is RefCounted in case we
@@ -44,7 +43,5 @@ class SSLRequestInfo : public base::RefCounted<SSLRequestInfo> {
 
   DISALLOW_COPY_AND_ASSIGN(SSLRequestInfo);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_SSL_SSL_REQUEST_INFO_H_

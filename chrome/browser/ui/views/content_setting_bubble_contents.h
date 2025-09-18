@@ -4,32 +4,18 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_CONTENT_SETTING_BUBBLE_CONTENTS_H_
 #define CHROME_BROWSER_UI_VIEWS_CONTENT_SETTING_BUBBLE_CONTENTS_H_
+#pragma once
 
 #include <map>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/common/content_settings_types.h"
-#include "content/public/common/media_stream_request.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/link_listener.h"
-
-class ContentSettingBubbleModel;
-class ContentSettingMediaMenuModel;
-class Profile;
-
-namespace ui {
-class SimpleMenuModel;
-}
-
-namespace views {
-class LabelButton;
-class MenuButton;
-class MenuRunner;
-class RadioButton;
-}
 
 // ContentSettingBubbleContents is used when the user turns on different kinds
 // of content blocking (e.g. "block images").  When viewing a page with blocked
@@ -40,22 +26,36 @@ class RadioButton;
 // the blocking settings for the current site, a close button, and a link to
 // get to a more comprehensive settings management dialog.  A few types have
 // more or fewer controls than this.
+
+class ContentSettingBubbleModel;
+class Profile;
+
+namespace content {
+class WebContents;
+}
+
+namespace views {
+class TextButton;
+class RadioButton;
+}
+
 class ContentSettingBubbleContents : public views::BubbleDelegateView,
                                      public views::ButtonListener,
                                      public views::LinkListener,
-                                     public views::MenuButtonListener {
+                                     public content::NotificationObserver {
  public:
   ContentSettingBubbleContents(
       ContentSettingBubbleModel* content_setting_bubble_model,
+      Profile* profile,
+      content::WebContents* web_contents,
       views::View* anchor_view,
-      views::BubbleBorder::Arrow arrow);
+      views::BubbleBorder::ArrowLocation arrow_location);
   virtual ~ContentSettingBubbleContents();
 
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
-  // Callback to allow ContentSettingMediaMenuModel to update the menu label.
-  void UpdateMenuLabel(content::MediaStreamType type,
-                       const std::string& label);
+  // views::BubbleDelegateView:
+  virtual gfx::Rect GetAnchorRect() OVERRIDE;
 
  protected:
   // views::BubbleDelegateView:
@@ -63,28 +63,32 @@ class ContentSettingBubbleContents : public views::BubbleDelegateView,
 
  private:
   class Favicon;
-  struct MediaMenuParts;
 
   typedef std::map<views::Link*, int> PopupLinks;
-  typedef std::map<views::MenuButton*, MediaMenuParts*> MediaMenuPartsMap;
 
   // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   // views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
-  // views::MenuButtonListener:
-  virtual void OnMenuButtonClicked(views::View* source,
-                                   const gfx::Point& point) OVERRIDE;
-
-  // Helper to get the preferred width of the media menu.
-  int GetPreferredMediaMenuWidth(views::MenuButton* button,
-                                 ui::SimpleMenuModel* menu_model);
+  // content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Provides data for this bubble.
   scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model_;
+
+  // The active profile.
+  Profile* profile_;
+
+  // The active web contents.
+  content::WebContents* web_contents_;
+
+  // A registrar for listening for WEB_CONTENTS_DESTROYED notifications.
+  content::NotificationRegistrar registrar_;
 
   // Some of our controls, so we can tell what's been clicked when we get a
   // message.
@@ -93,9 +97,7 @@ class ContentSettingBubbleContents : public views::BubbleDelegateView,
   RadioGroup radio_group_;
   views::Link* custom_link_;
   views::Link* manage_link_;
-  views::LabelButton* close_button_;
-  scoped_ptr<views::MenuRunner> menu_runner_;
-  MediaMenuPartsMap media_menus_;
+  views::TextButton* close_button_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ContentSettingBubbleContents);
 };

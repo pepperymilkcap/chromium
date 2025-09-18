@@ -1,22 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/callback.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/test/base/view_event_test_base.h"
 #include "ui/base/models/menu_model.h"
-#include "ui/base/test/ui_controls.h"
 #include "ui/views/controls/button/menu_button.h"
-#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 #include "ui/views/test/test_views_delegate.h"
+#include "ui/views/views_delegate.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
@@ -25,13 +24,76 @@ namespace {
 const int kTopMenuBaseId = 100;
 const int kSubMenuBaseId = 200;
 
+// ViewsDelegate::GetDispositionForEvent() is used by views::MenuModelAdapter.
+class TestViewsDelegate : public views::ViewsDelegate {
+ public:
+  TestViewsDelegate() {
+  }
+
+  ~TestViewsDelegate() {
+  }
+
+  // views::ViewsDelegate implementation
+  virtual ui::Clipboard* GetClipboard() const OVERRIDE {
+    return NULL;
+  }
+
+  virtual void SaveWindowPlacement(const views::Widget* widget,
+                                   const std::string& window_name,
+                                   const gfx::Rect& bounds,
+                                   ui::WindowShowState show_state) OVERRIDE {
+  }
+
+  virtual bool GetSavedWindowPlacement(
+      const std::string& window_name,
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE {
+    return false;
+  }
+
+  virtual void NotifyAccessibilityEvent(
+      views::View* view, ui::AccessibilityTypes::Event event_type) OVERRIDE {
+  }
+
+  virtual void NotifyMenuItemFocused(const string16& menu_name,
+                                     const string16& menu_item_name,
+                                     int item_index,
+                                     int item_count,
+                                     bool has_submenu) OVERRIDE {
+  }
+
+#if defined(OS_WIN)
+  virtual HICON GetDefaultWindowIcon() const OVERRIDE {
+    return NULL;
+  }
+#endif
+  virtual views::NonClientFrameView* CreateDefaultNonClientFrameView(
+      views::Widget* widget) OVERRIDE {
+    return NULL;
+  }
+
+  virtual void AddRef() OVERRIDE {
+  }
+
+  virtual void ReleaseRef() OVERRIDE {
+  }
+
+  // Converts views::Event::flags to a WindowOpenDisposition.
+  virtual int GetDispositionForEvent(int event_flags) OVERRIDE {
+    return 0;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestViewsDelegate);
+};
+
 // Implement most of the ui::MenuModel pure virtual methods for subclasses
 //
 // Exceptions:
 //  virtual int GetItemCount() const = 0;
 //  virtual ItemType GetTypeAt(int index) const = 0;
 //  virtual int GetCommandIdAt(int index) const = 0;
-//  virtual base::string16 GetLabelAt(int index) const = 0;
+//  virtual string16 GetLabelAt(int index) const = 0;
 class CommonMenuModel : public ui::MenuModel {
  public:
   CommonMenuModel() {
@@ -55,10 +117,6 @@ class CommonMenuModel : public ui::MenuModel {
     return false;
   }
 
-  virtual ui::MenuSeparatorType GetSeparatorTypeAt(int index) const OVERRIDE {
-    return ui::NORMAL_SEPARATOR;
-  }
-
   virtual bool IsItemCheckedAt(int index) const OVERRIDE {
     return false;
   }
@@ -67,7 +125,7 @@ class CommonMenuModel : public ui::MenuModel {
     return 0;
   }
 
-  virtual bool GetIconAt(int index, gfx::Image* icon) OVERRIDE {
+  virtual bool GetIconAt(int index, SkBitmap* icon) OVERRIDE {
     return false;
   }
 
@@ -93,10 +151,6 @@ class CommonMenuModel : public ui::MenuModel {
   virtual void SetMenuModelDelegate(ui::MenuModelDelegate* delegate) OVERRIDE {
   }
 
-  virtual ui::MenuModelDelegate* GetMenuModelDelegate() const OVERRIDE {
-    return NULL;
-  }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(CommonMenuModel);
 };
@@ -107,7 +161,7 @@ class SubMenuModel : public CommonMenuModel {
       : showing_(false) {
   }
 
-  virtual ~SubMenuModel() {
+  ~SubMenuModel() {
   }
 
   bool showing() const {
@@ -128,16 +182,16 @@ class SubMenuModel : public CommonMenuModel {
     return index + kSubMenuBaseId;
   }
 
-  virtual base::string16 GetLabelAt(int index) const OVERRIDE {
-    return base::ASCIIToUTF16("Item");
+  virtual string16 GetLabelAt(int index) const OVERRIDE {
+    return ASCIIToUTF16("Item");
   }
 
-  virtual void MenuWillShow() OVERRIDE {
+  virtual void MenuWillShow() {
     showing_ = true;
   }
 
   // Called when the menu has been closed.
-  virtual void MenuClosed() OVERRIDE {
+  virtual void MenuClosed() {
     showing_ = false;
   }
 
@@ -151,7 +205,7 @@ class TopMenuModel : public CommonMenuModel {
   TopMenuModel() {
   }
 
-  virtual ~TopMenuModel() {
+  ~TopMenuModel() {
   }
 
   bool IsSubmenuShowing() {
@@ -172,8 +226,8 @@ class TopMenuModel : public CommonMenuModel {
     return index + kTopMenuBaseId;
   }
 
-  virtual base::string16 GetLabelAt(int index) const OVERRIDE {
-    return base::ASCIIToUTF16("submenu");
+  virtual string16 GetLabelAt(int index) const OVERRIDE {
+    return ASCIIToUTF16("submenu");
   }
 
   virtual MenuModel* GetSubmenuModelAt(int index) const OVERRIDE {
@@ -188,7 +242,7 @@ class TopMenuModel : public CommonMenuModel {
 }  // namespace
 
 class MenuModelAdapterTest : public ViewEventTestBase,
-                             public views::MenuButtonListener {
+                             public views::ViewMenuDelegate {
  public:
   MenuModelAdapterTest()
       : ViewEventTestBase(),
@@ -207,7 +261,7 @@ class MenuModelAdapterTest : public ViewEventTestBase,
 
   virtual void SetUp() OVERRIDE {
     button_ = new views::MenuButton(
-        NULL, base::ASCIIToUTF16("Menu Adapter Test"), this, true);
+        NULL, ASCIIToUTF16("Menu Adapter Test"), this, true);
 
     menu_ = menu_model_adapter_.CreateMenu();
     menu_runner_.reset(new views::MenuRunner(menu_));
@@ -229,9 +283,8 @@ class MenuModelAdapterTest : public ViewEventTestBase,
     return button_->GetPreferredSize();
   }
 
-  // views::MenuButtonListener implementation.
-  virtual void OnMenuButtonClicked(views::View* source,
-                                   const gfx::Point& point) OVERRIDE {
+  // views::ViewMenuDelegate implementation.
+  virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE {
     gfx::Point screen_location;
     views::View::ConvertPointToScreen(source, &screen_location);
     gfx::Rect bounds(screen_location, source->size());
@@ -240,7 +293,6 @@ class MenuModelAdapterTest : public ViewEventTestBase,
         button_,
         bounds,
         views::MenuItemView::TOPLEFT,
-        ui::MENU_SOURCE_NONE,
         views::MenuRunner::HAS_MNEMONICS));
   }
 
@@ -271,8 +323,9 @@ class MenuModelAdapterTest : public ViewEventTestBase,
 
     menu_model_adapter_.BuildMenu(menu_);
 
-    base::MessageLoopForUI::current()->PostTask(
-        FROM_HERE, CreateEventTask(this, &MenuModelAdapterTest::Step3));
+    MessageLoopForUI::current()->PostTask(
+        FROM_HERE,
+        CreateEventTask(this, &MenuModelAdapterTest::Step3));
   }
 
   // Verify that the submenu MenuModel received the close callback
@@ -300,7 +353,7 @@ class MenuModelAdapterTest : public ViewEventTestBase,
  private:
   // Generate a mouse click on the specified view and post a new task.
   virtual void Click(views::View* view, const base::Closure& next) {
-    ui_test_utils::MoveMouseToCenterAndPress(
+    ui_controls::MoveMouseToCenterAndPress(
         view,
         ui_controls::LEFT,
         ui_controls::DOWN | ui_controls::UP,
@@ -308,7 +361,7 @@ class MenuModelAdapterTest : public ViewEventTestBase,
   }
 
   views::ViewsDelegate* old_views_delegate_;
-  views::TestViewsDelegate views_delegate_;
+  TestViewsDelegate views_delegate_;
 
   views::MenuButton* button_;
   TopMenuModel top_menu_model_;

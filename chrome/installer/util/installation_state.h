@@ -1,22 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_INSTALLER_UTIL_INSTALLATION_STATE_H_
 #define CHROME_INSTALLER_UTIL_INSTALLATION_STATE_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/installer/util/app_commands.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/channel_info.h"
 
-namespace base {
 class Version;
+
+namespace base {
 namespace win {
 class RegKey;
 }
@@ -44,16 +46,16 @@ class ProductState {
   const ChannelInfo& channel() const { return channel_; }
 
   // Returns the path to the product's "setup.exe"; may be empty.
-  base::FilePath GetSetupPath() const;
+  FilePath GetSetupPath() const;
 
   // Returns the product's version.  This method may only be called on an
   // instance that has been initialized for an installed product.
-  const base::Version& version() const;
+  const Version& version() const;
 
   // Returns the current version of the product if a new version is awaiting
   // update; may be NULL.  Ownership of a returned value is not passed to the
   // caller.
-  const base::Version* old_version() const { return old_version_.get(); }
+  const Version* old_version() const { return old_version_.get(); }
 
   // Returns the brand code the product is currently installed with.
   const std::wstring& brand() const { return brand_; }
@@ -152,7 +154,6 @@ class InstallationState {
     CHROME_BROWSER_INDEX,
     CHROME_FRAME_INDEX,
     CHROME_BINARIES_INDEX,
-    CHROME_APP_HOST_INDEX,
     NUM_PRODUCTS
   };
 

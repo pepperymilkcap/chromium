@@ -5,11 +5,10 @@
 #include "chrome/browser/history/top_sites_backend.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/history/top_sites_database.h"
-#include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -20,7 +19,7 @@ TopSitesBackend::TopSitesBackend()
     : db_(new TopSitesDatabase()) {
 }
 
-void TopSitesBackend::Init(const base::FilePath& path) {
+void TopSitesBackend::Init(const FilePath& path) {
   db_path_ = path;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
@@ -33,18 +32,18 @@ void TopSitesBackend::Shutdown() {
       base::Bind(&TopSitesBackend::ShutdownDBOnDBThread, this));
 }
 
-void TopSitesBackend::GetMostVisitedThumbnails(
-      const GetMostVisitedThumbnailsCallback& callback,
-      CancelableTaskTracker* tracker) {
-  scoped_refptr<MostVisitedThumbnails> thumbnails = new MostVisitedThumbnails();
-
-  tracker->PostTaskAndReply(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get(),
-      FROM_HERE,
-      base::Bind(&TopSitesBackend::GetMostVisitedThumbnailsOnDBThread,
-                 this,
-                 thumbnails),
-      base::Bind(callback, thumbnails));
+TopSitesBackend::Handle TopSitesBackend::GetMostVisitedThumbnails(
+    CancelableRequestConsumerBase* consumer,
+    const GetMostVisitedThumbnailsCallback& callback) {
+  GetMostVisitedThumbnailsRequest* request =
+      new GetMostVisitedThumbnailsRequest(callback);
+  request->value = new MostVisitedThumbnails;
+  AddRequest(request, consumer);
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(&TopSitesBackend::GetMostVisitedThumbnailsOnDBThread, this,
+                 make_scoped_refptr(request)));
+  return request->handle();
 }
 
 void TopSitesBackend::UpdateTopSites(const TopSitesDelta& delta) {
@@ -68,24 +67,27 @@ void TopSitesBackend::ResetDatabase() {
       base::Bind(&TopSitesBackend::ResetDatabaseOnDBThread, this, db_path_));
 }
 
-void TopSitesBackend::DoEmptyRequest(const base::Closure& reply,
-                                     CancelableTaskTracker* tracker) {
-  tracker->PostTaskAndReply(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get(),
-      FROM_HERE,
-      base::Bind(&base::DoNothing),
-      reply);
+TopSitesBackend::Handle TopSitesBackend::DoEmptyRequest(
+    CancelableRequestConsumerBase* consumer,
+    const EmptyRequestCallback& callback) {
+  EmptyRequestRequest* request = new EmptyRequestRequest(callback);
+  AddRequest(request, consumer);
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(&TopSitesBackend::DoEmptyRequestOnDBThread, this,
+                 make_scoped_refptr(request)));
+  return request->handle();
 }
 
 TopSitesBackend::~TopSitesBackend() {
-  DCHECK(!db_);  // Shutdown should have happened first (which results in
-                 // nulling out db).
+  DCHECK(!db_.get());  // Shutdown should have happened first (which results in
+                       // nulling out db).
 }
 
-void TopSitesBackend::InitDBOnDBThread(const base::FilePath& path) {
+void TopSitesBackend::InitDBOnDBThread(const FilePath& path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   if (!db_->Init(path)) {
-    LOG(ERROR) << "Failed to initialize database.";
+    NOTREACHED() << "Failed to initialize database.";
     db_.reset();
   }
 }
@@ -96,17 +98,24 @@ void TopSitesBackend::ShutdownDBOnDBThread() {
 }
 
 void TopSitesBackend::GetMostVisitedThumbnailsOnDBThread(
-    scoped_refptr<MostVisitedThumbnails> thumbnails) {
+    scoped_refptr<GetMostVisitedThumbnailsRequest> request) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
 
-  if (db_) {
-    db_->GetPageThumbnails(&(thumbnails->most_visited),
-                           &(thumbnails->url_to_images_map));
+  if (request->canceled())
+    return;
+
+  bool may_need_history_migration = false;
+  if (db_.get()) {
+    db_->GetPageThumbnails(&(request->value->most_visited),
+                           &(request->value->url_to_images_map));
+    may_need_history_migration = db_->may_need_history_migration();
   }
+  request->ForwardResult(request->handle(), request->value,
+                         may_need_history_migration);
 }
 
 void TopSitesBackend::UpdateTopSitesOnDBThread(const TopSitesDelta& delta) {
-  if (!db_)
+  if (!db_.get())
     return;
 
   for (size_t i = 0; i < delta.deleted.size(); ++i)
@@ -122,18 +131,23 @@ void TopSitesBackend::UpdateTopSitesOnDBThread(const TopSitesDelta& delta) {
 void TopSitesBackend::SetPageThumbnailOnDBThread(const MostVisitedURL& url,
                                                  int url_rank,
                                                  const Images& thumbnail) {
-  if (!db_)
+  if (!db_.get())
     return;
 
   db_->SetPageThumbnail(url, url_rank, thumbnail);
 }
 
-void TopSitesBackend::ResetDatabaseOnDBThread(const base::FilePath& file_path) {
+void TopSitesBackend::ResetDatabaseOnDBThread(const FilePath& file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   db_.reset(NULL);
-  sql::Connection::Delete(db_path_);
+  file_util::Delete(db_path_, false);
   db_.reset(new TopSitesDatabase());
   InitDBOnDBThread(db_path_);
+}
+
+void TopSitesBackend::DoEmptyRequestOnDBThread(
+    scoped_refptr<EmptyRequestRequest> request) {
+  request->ForwardResult(request->handle());
 }
 
 }  // namespace history

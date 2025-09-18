@@ -5,46 +5,36 @@
 #ifndef MEDIA_FILTERS_FFMPEG_VIDEO_DECODER_H_
 #define MEDIA_FILTERS_FFMPEG_VIDEO_DECODER_H_
 
-#include <list>
+#include <deque>
 
-#include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "media/base/video_decoder.h"
-#include "media/base/video_decoder_config.h"
-#include "media/base/video_frame_pool.h"
+#include "media/base/filters.h"
+#include "ui/gfx/size.h"
+
+class MessageLoop;
 
 struct AVCodecContext;
 struct AVFrame;
 
-namespace base {
-class SingleThreadTaskRunner;
-}
-
 namespace media {
-
-class DecoderBuffer;
-class ScopedPtrAVFreeContext;
-class ScopedPtrAVFreeFrame;
 
 class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
  public:
-  explicit FFmpegVideoDecoder(
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
+  explicit FFmpegVideoDecoder(MessageLoop* message_loop);
   virtual ~FFmpegVideoDecoder();
 
-  // VideoDecoder implementation.
-  virtual void Initialize(const VideoDecoderConfig& config,
-                          const PipelineStatusCB& status_cb) OVERRIDE;
-  virtual void Decode(const scoped_refptr<DecoderBuffer>& buffer,
-                      const DecodeCB& decode_cb) OVERRIDE;
-  virtual void Reset(const base::Closure& closure) OVERRIDE;
-  virtual void Stop(const base::Closure& closure) OVERRIDE;
+  // Filter implementation.
+  virtual void Stop(const base::Closure& callback) OVERRIDE;
+  virtual void Seek(base::TimeDelta time, const FilterStatusCB& cb) OVERRIDE;
+  virtual void Pause(const base::Closure& callback) OVERRIDE;
+  virtual void Flush(const base::Closure& callback) OVERRIDE;
 
-  // Callback called from within FFmpeg to allocate a buffer based on
-  // the dimensions of |codec_context|. See AVCodecContext.get_buffer
-  // documentation inside FFmpeg.
-  int GetVideoBuffer(AVCodecContext *codec_context, AVFrame* frame);
+  // VideoDecoder implementation.
+  virtual void Initialize(DemuxerStream* demuxer_stream,
+                          const PipelineStatusCB& callback,
+                          const StatisticsCallback& stats_callback) OVERRIDE;
+  virtual void Read(const ReadCB& callback) OVERRIDE;
+  virtual const gfx::Size& natural_size() OVERRIDE;
 
  private:
   enum DecoderState {
@@ -52,41 +42,53 @@ class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
     kNormal,
     kFlushCodec,
     kDecodeFinished,
-    kError
   };
 
-  // Handles decoding an unencrypted encoded buffer.
-  void DecodeBuffer(const scoped_refptr<DecoderBuffer>& buffer);
-  bool FFmpegDecode(const scoped_refptr<DecoderBuffer>& buffer,
-                    scoped_refptr<VideoFrame>* video_frame);
+  // Carries out the reading operation scheduled by Read().
+  void DoRead(const ReadCB& callback);
 
-  // Handles (re-)initializing the decoder with a (new) config.
-  // Returns true if initialization was successful.
-  bool ConfigureDecoder();
+  // Reads from the demuxer stream with corresponding callback method.
+  void ReadFromDemuxerStream();
+  void DecodeBuffer(const scoped_refptr<Buffer>& buffer);
+
+  // Carries out the decoding operation scheduled by DecodeBuffer().
+  void DoDecodeBuffer(const scoped_refptr<Buffer>& buffer);
+  bool Decode(const scoped_refptr<Buffer>& buffer,
+              scoped_refptr<VideoFrame>* video_frame);
+
+  // Delivers the frame to |read_cb_| and resets the callback.
+  void DeliverFrame(const scoped_refptr<VideoFrame>& video_frame);
 
   // Releases resources associated with |codec_context_| and |av_frame_|
   // and resets them to NULL.
   void ReleaseFFmpegResources();
 
-  // Reset decoder and call |reset_cb_|.
-  void DoReset();
+  // Allocates a video frame based on the current format and dimensions based on
+  // the current state of |codec_context_|.
+  scoped_refptr<VideoFrame> AllocateVideoFrame();
 
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  base::WeakPtrFactory<FFmpegVideoDecoder> weak_factory_;
-  base::WeakPtr<FFmpegVideoDecoder> weak_this_;
+  MessageLoop* message_loop_;
 
   DecoderState state_;
 
-  DecodeCB decode_cb_;
-  base::Closure reset_cb_;
+  StatisticsCallback statistics_callback_;
+
+  ReadCB read_cb_;
 
   // FFmpeg structures owned by this object.
-  scoped_ptr_malloc<AVCodecContext, ScopedPtrAVFreeContext> codec_context_;
-  scoped_ptr_malloc<AVFrame, ScopedPtrAVFreeFrame> av_frame_;
+  AVCodecContext* codec_context_;
+  AVFrame* av_frame_;
 
-  VideoDecoderConfig config_;
+  // Frame rate of the video.
+  int frame_rate_numerator_;
+  int frame_rate_denominator_;
 
-  VideoFramePool frame_pool_;
+  // TODO(scherkus): I think this should be calculated by VideoRenderers based
+  // on information provided by VideoDecoders (i.e., aspect ratio).
+  gfx::Size natural_size_;
+
+  // Pointer to the demuxer stream that will feed us compressed buffers.
+  scoped_refptr<DemuxerStream> demuxer_stream_;
 
   DISALLOW_COPY_AND_ASSIGN(FFmpegVideoDecoder);
 };

@@ -4,13 +4,14 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_BROWSER_THREAD_MODEL_WORKER_H_
 #define CHROME_BROWSER_SYNC_GLUE_BROWSER_THREAD_MODEL_WORKER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
+#include "chrome/browser/sync/engine/model_safe_worker.h"
+#include "chrome/browser/sync/internal_api/includes/syncer_error.h"
 #include "content/public/browser/browser_thread.h"
-#include "sync/internal_api/public/engine/model_safe_worker.h"
-#include "sync/internal_api/public/util/syncer_error.h"
 
 namespace base {
 class WaitableEvent;
@@ -18,37 +19,32 @@ class WaitableEvent;
 
 namespace browser_sync {
 
-// A syncer::ModelSafeWorker for models that accept requests from the
-// syncapi that need to be fulfilled on a browser thread, for example
-// autofill on the DB thread.
+// A ModelSafeWorker for models that accept requests from the syncapi that need
+// to be fulfilled on a browser thread, for example autofill on the DB thread.
 // TODO(sync): Try to generalize other ModelWorkers (e.g. history, etc).
-class BrowserThreadModelWorker : public syncer::ModelSafeWorker {
+class BrowserThreadModelWorker : public ModelSafeWorker {
  public:
   BrowserThreadModelWorker(content::BrowserThread::ID thread,
-                           syncer::ModelSafeGroup group,
-                           syncer::WorkerLoopDestructionObserver* observer);
-
-  // syncer::ModelSafeWorker implementation. Called on the sync thread.
-  virtual void RegisterForLoopDestruction() OVERRIDE;
-  virtual syncer::ModelSafeGroup GetModelSafeGroup() OVERRIDE;
-
- protected:
+                           ModelSafeGroup group);
   virtual ~BrowserThreadModelWorker();
 
-  virtual syncer::SyncerError DoWorkAndWaitUntilDoneImpl(
-      const syncer::WorkCallback& work) OVERRIDE;
+  // ModelSafeWorker implementation. Called on the sync thread.
+  virtual SyncerError DoWorkAndWaitUntilDone(
+      const WorkCallback& work) OVERRIDE;
+  virtual ModelSafeGroup GetModelSafeGroup() OVERRIDE;
 
+ protected:
   // Marked pure virtual so subclasses have to override, but there is
   // an implementation that subclasses should use.  This is so that
   // (subclass)::CallDoWorkAndSignalTask shows up in callstacks.
   virtual void CallDoWorkAndSignalTask(
-      const syncer::WorkCallback& work,
+      const WorkCallback& work,
       base::WaitableEvent* done,
-      syncer::SyncerError* error) = 0;
+      SyncerError* error) = 0;
 
  private:
   content::BrowserThread::ID thread_;
-  syncer::ModelSafeGroup group_;
+  ModelSafeGroup group_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserThreadModelWorker);
 };
@@ -58,30 +54,26 @@ class BrowserThreadModelWorker : public syncer::ModelSafeWorker {
 
 class DatabaseModelWorker : public BrowserThreadModelWorker {
  public:
-  explicit DatabaseModelWorker(syncer::WorkerLoopDestructionObserver* observer);
+  DatabaseModelWorker();
+  virtual ~DatabaseModelWorker();
 
  protected:
   virtual void CallDoWorkAndSignalTask(
-      const syncer::WorkCallback& work,
+      const WorkCallback& work,
       base::WaitableEvent* done,
-      syncer::SyncerError* error) OVERRIDE;
-
- private:
-  virtual ~DatabaseModelWorker();
+      SyncerError* error) OVERRIDE;
 };
 
 class FileModelWorker : public BrowserThreadModelWorker {
  public:
-  explicit FileModelWorker(syncer::WorkerLoopDestructionObserver* observer);
+  FileModelWorker();
+  virtual ~FileModelWorker();
 
  protected:
   virtual void CallDoWorkAndSignalTask(
-      const syncer::WorkCallback& work,
+      const WorkCallback& work,
       base::WaitableEvent* done,
-      syncer::SyncerError* error) OVERRIDE;
-
- private:
-  virtual ~FileModelWorker();
+      SyncerError* error) OVERRIDE;
 };
 
 }  // namespace browser_sync

@@ -4,17 +4,17 @@
 
 #import "chrome/browser/ui/cocoa/drag_util.h"
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/url_constants.h"
-#include "content/public/common/webplugininfo.h"
+#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #import "ui/base/dragdrop/cocoa_dnd_util.h"
-#include "url/gurl.h"
+#include "webkit/plugins/webplugininfo.h"
 
 using content::PluginService;
 
@@ -23,7 +23,7 @@ namespace drag_util {
 namespace {
 
 BOOL IsSupportedFileURL(Profile* profile, const GURL& url) {
-  base::FilePath full_path;
+  FilePath full_path;
   net::FileURLToFilePath(url, &full_path);
 
   std::string mime_type;
@@ -39,7 +39,7 @@ BOOL IsSupportedFileURL(Profile* profile, const GURL& url) {
   // TODO(bauerb): This possibly uses stale information, but it's guaranteed not
   // to do disk access.
   bool allow_wildcard = false;
-  content::WebPluginInfo plugin;
+  webkit::WebPluginInfo plugin;
   return PluginService::GetInstance()->GetPluginInfo(
       -1,                // process ID
       MSG_ROUTING_NONE,  // routing ID
@@ -58,7 +58,7 @@ GURL GetFileURLFromDropData(id<NSDraggingInfo> info) {
                                           [info draggingPasteboard],
                                           YES);
 
-    if (url.SchemeIs(content::kFileScheme))
+    if (url.SchemeIs(chrome::kFileScheme))
       return url;
   }
   return GURL();

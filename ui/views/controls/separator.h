@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_SEPARATOR_H_
 #define UI_VIEWS_CONTROLS_SEPARATOR_H_
+#pragma once
 
 #include <string>
 
@@ -12,30 +13,23 @@
 namespace views {
 
 // The Separator class is a view that shows a line used to visually separate
-// other views.
+// other views.  The current implementation is only horizontal.
 
 class VIEWS_EXPORT Separator : public View {
  public:
-  enum Orientation {
-    HORIZONTAL,
-    VERTICAL
-  };
-
   // The separator's class name.
   static const char kViewClassName[];
 
-  explicit Separator(Orientation orientation);
+  Separator();
   virtual ~Separator();
 
   // Overridden from View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void Paint(gfx::Canvas* canvas) OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
  private:
-  const Orientation orientation_;
-
   DISALLOW_COPY_AND_ASSIGN(Separator);
 };
 

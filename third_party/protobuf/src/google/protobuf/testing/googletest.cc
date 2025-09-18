@@ -223,17 +223,16 @@ ScopedMemoryLog::~ScopedMemoryLog() {
   active_log_ = NULL;
 }
 
-const vector<string>& ScopedMemoryLog::GetMessages(LogLevel level) {
-  GOOGLE_CHECK(level == ERROR ||
-               level == WARNING);
-  return messages_[level];
+const vector<string>& ScopedMemoryLog::GetMessages(LogLevel dummy) const {
+  GOOGLE_CHECK_EQ(dummy, ERROR);
+  return messages_;
 }
 
 void ScopedMemoryLog::HandleLog(LogLevel level, const char* filename,
                                 int line, const string& message) {
   GOOGLE_CHECK(active_log_ != NULL);
-  if (level == ERROR || level == WARNING) {
-    active_log_->messages_[level].push_back(message);
+  if (level == ERROR) {
+    active_log_->messages_.push_back(message);
   }
 }
 

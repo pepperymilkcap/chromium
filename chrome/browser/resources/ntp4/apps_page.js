@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('ntp', function() {
+cr.define('ntp4', function() {
   'use strict';
+
+  var localStrings = new LocalStrings;
 
   var APP_LAUNCH = {
     // The histogram buckets (keep in sync with extension_constants.h).
@@ -14,7 +16,6 @@ cr.define('ntp', function() {
     NTP_RECENTLY_CLOSED: 4,
     NTP_APP_RE_ENABLE: 16,
     NTP_WEBSTORE_FOOTER: 18,
-    NTP_WEBSTORE_PLUS_ICON: 19,
   };
 
   // Histogram buckets for UMA tracking of where a DnD drop came from.
@@ -49,10 +50,7 @@ cr.define('ntp', function() {
       this.launch_.addEventListener('activate', this.onLaunch_.bind(this));
 
       menu.appendChild(cr.ui.MenuItem.createSeparator());
-      if (loadTimeData.getBoolean('enableStreamlinedHostedApps'))
-        this.launchRegularTab_ = this.appendMenuItem_('applaunchtypetab');
-      else
-        this.launchRegularTab_ = this.appendMenuItem_('applaunchtyperegular');
+      this.launchRegularTab_ = this.appendMenuItem_('applaunchtyperegular');
       this.launchPinnedTab_ = this.appendMenuItem_('applaunchtypepinned');
       if (!cr.isMac)
         this.launchNewWindow_ = this.appendMenuItem_('applaunchtypewindow');
@@ -64,21 +62,20 @@ cr.define('ntp', function() {
             self.onLaunchTypeChanged_.bind(self));
       });
 
-      this.launchTypeMenuSeparator_ = cr.ui.MenuItem.createSeparator();
-      menu.appendChild(this.launchTypeMenuSeparator_);
+      menu.appendChild(cr.ui.MenuItem.createSeparator());
       this.options_ = this.appendMenuItem_('appoptions');
-      this.details_ = this.appendMenuItem_('appdetails');
+      this.disableNotifications_ =
+          this.appendMenuItem_('appdisablenotifications');
       this.uninstall_ = this.appendMenuItem_('appuninstall');
       this.options_.addEventListener('activate',
                                      this.onShowOptions_.bind(this));
-      this.details_.addEventListener('activate',
-                                     this.onShowDetails_.bind(this));
+      this.disableNotifications_.addEventListener(
+          'activate', this.onDisableNotifications_.bind(this));
       this.uninstall_.addEventListener('activate',
                                        this.onUninstall_.bind(this));
 
-      if (!cr.isChromeOS) {
-        this.createShortcutSeparator_ =
-            menu.appendChild(cr.ui.MenuItem.createSeparator());
+      if (!cr.isMac && !cr.isChromeOS) {
+        menu.appendChild(cr.ui.MenuItem.createSeparator());
         this.createShortcut_ = this.appendMenuItem_('appcreateshortcut');
         this.createShortcut_.addEventListener(
             'activate', this.onCreateShortcut_.bind(this));
@@ -89,7 +86,7 @@ cr.define('ntp', function() {
 
     /**
      * Appends a menu item to |this.menu|.
-     * @param {?string} textId If non-null, the ID for the localized string
+     * @param {?String} textId If non-null, the ID for the localized string
      *     that acts as the item's label.
      */
     appendMenuItem_: function(textId) {
@@ -97,7 +94,7 @@ cr.define('ntp', function() {
       this.menu.appendChild(button);
       cr.ui.decorate(button, cr.ui.MenuItem);
       if (textId)
-        button.textContent = loadTimeData.getString(textId);
+        button.textContent = localStrings.getString(textId);
       return button;
     },
 
@@ -109,10 +106,10 @@ cr.define('ntp', function() {
      */
     forAllLaunchTypes_: function(f) {
       // Order matters: index matches launchType id.
-      var launchTypes = [this.launchPinnedTab_,
-                         this.launchRegularTab_,
-                         this.launchFullscreen_,
-                         this.launchNewWindow_];
+      var launchTypes = [ this.launchPinnedTab_,
+                          this.launchRegularTab_,
+                          this.launchFullscreen_,
+                          this.launchNewWindow_ ];
 
       for (var i = 0; i < launchTypes.length; ++i) {
         if (!launchTypes[i])
@@ -131,31 +128,19 @@ cr.define('ntp', function() {
 
       this.launch_.textContent = app.appData.title;
 
-      var launchTypeRegularTab = this.launchRegularTab_;
       this.forAllLaunchTypes_(function(launchTypeButton, id) {
         launchTypeButton.disabled = false;
         launchTypeButton.checked = app.appData.launch_type == id;
-        // Streamlined hosted apps should only show the "Open as tab" button.
-        launchTypeButton.hidden = app.appData.packagedApp ||
-            (loadTimeData.getBoolean('enableStreamlinedHostedApps') &&
-             launchTypeButton != launchTypeRegularTab);
       });
 
-      this.launchTypeMenuSeparator_.hidden = app.appData.packagedApp;
+      this.options_.disabled = !app.appData.options_url || !app.appData.enabled;
+      this.uninstall_.disabled = !app.appData.can_uninstall;
 
-      this.options_.disabled = !app.appData.optionsUrl || !app.appData.enabled;
-      this.details_.disabled = !app.appData.detailsUrl;
-      this.uninstall_.disabled = !app.appData.mayDisable;
-
-      if (cr.isMac) {
-        // On Windows and Linux, these should always be visible. On ChromeOS,
-        // they are never created. On Mac, shortcuts can only be created for
-        // new-style packaged apps, so hide the menu item. Also check if
-        // loadTimeData explicitly disables this as the feature is not yet
-        // enabled by default on Mac.
-        this.createShortcutSeparator_.hidden = this.createShortcut_.hidden =
-            !app.appData.packagedApp ||
-            loadTimeData.getBoolean('disableCreateAppShortcut');
+      this.disableNotifications_.hidden = true;
+      var notificationsDisabled = app.appData.notifications_disabled;
+      if (typeof notificationsDisabled != 'undefined') {
+        this.disableNotifications_.hidden = false;
+        this.disableNotifications_.checked = notificationsDisabled;
       }
     },
 
@@ -170,15 +155,8 @@ cr.define('ntp', function() {
     onLaunchTypeChanged_: function(e) {
       var pressed = e.currentTarget;
       var app = this.app_;
-      var targetLaunchType = pressed;
-      // Streamlined hosted apps can only toggle between open as window and open
-      // as tab.
-      if (loadTimeData.getBoolean('enableStreamlinedHostedApps')) {
-        targetLaunchType = this.launchRegularTab_.checked ?
-            this.launchNewWindow_ : this.launchRegularTab_;
-      }
       this.forAllLaunchTypes_(function(launchTypeButton, id) {
-        if (launchTypeButton == targetLaunchType) {
+        if (launchTypeButton == pressed) {
           chrome.send('setLaunchType', [app.appId, id]);
           // Manually update the launch type. We will only get
           // appsPrefChangeCallback calls after changes to other NTP instances.
@@ -187,12 +165,15 @@ cr.define('ntp', function() {
       });
     },
     onShowOptions_: function(e) {
-      window.location = this.app_.appData.optionsUrl;
+      window.location = this.app_.appData.options_url;
     },
-    onShowDetails_: function(e) {
-      var url = this.app_.appData.detailsUrl;
-      url = appendParam(url, 'utm_source', 'chrome-ntp-launcher');
-      window.location = url;
+    onDisableNotifications_: function(e) {
+      var app = this.app_;
+      app.removeBubble();
+      // Toggle the current disable setting.
+      var newSetting = !this.disableNotifications_.checked;
+      app.appData.notifications_disabled = newSetting;
+      chrome.send('setNotificationsDisabled', [app.appData.id, newSetting]);
     },
     onUninstall_: function(e) {
       chrome.send('uninstallApp', [this.app_.appData.id]);
@@ -227,7 +208,6 @@ cr.define('ntp', function() {
       this.appData = appData;
       assert(this.appData_.id, 'Got an app without an ID');
       this.id = this.appData_.id;
-      this.setAttribute('role', 'menuitem');
 
       this.className = 'app focusable';
 
@@ -247,19 +227,24 @@ cr.define('ntp', function() {
       if (this.useSmallIcon_) {
         this.imgDiv_ = this.querySelector('.app-icon-div');
         this.addLaunchClickTarget_(this.imgDiv_);
-        this.imgDiv_.title = this.appData_.full_name;
+        this.imgDiv_.title = this.appData_.title;
         chrome.send('getAppIconDominantColor', [this.id]);
       } else {
         this.addLaunchClickTarget_(this.appImgContainer_);
-        this.appImgContainer_.title = this.appData_.full_name;
+        this.appImgContainer_.title = this.appData_.title;
       }
 
-      // The app's full name is shown in the tooltip, whereas the short name
-      // is used for the label.
       var appSpan = this.appContents_.querySelector('.title');
-      appSpan.textContent = this.appData_.title;
-      appSpan.title = this.appData_.full_name;
+      appSpan.textContent = appSpan.title = this.appData_.title;
       this.addLaunchClickTarget_(appSpan);
+
+      var notification = this.appData_.notification;
+      var hasNotification = typeof notification != 'undefined' &&
+                            typeof notification['title'] != 'undefined' &&
+                            typeof notification['body'] != 'undefined' &&
+                            !this.appData_.notifications_disabled;
+      if (hasNotification)
+        this.setupNotification_(notification);
 
       this.addEventListener('keydown', cr.ui.contextMenuHandler);
       this.addEventListener('keyup', cr.ui.contextMenuHandler);
@@ -273,9 +258,12 @@ cr.define('ntp', function() {
       this.appContents_.addEventListener('contextmenu',
                                          cr.ui.contextMenuHandler);
 
+      if (this.appData_.is_webstore)
+        this.createAppsPromoExtras_();
+
       this.addEventListener('mousedown', this.onMousedown_, true);
       this.addEventListener('keydown', this.onKeydown_);
-      this.addEventListener('keyup', this.onKeyup_);
+      this.addEventListener('blur', this.onBlur_, true);
     },
 
     /**
@@ -306,7 +294,7 @@ cr.define('ntp', function() {
       var src = this.useSmallIcon_ ? this.appData_.icon_small :
                                      this.appData_.icon_big;
       if (!this.appData_.enabled ||
-          (!this.appData_.offlineEnabled && !navigator.onLine)) {
+          (!this.appData_.offline_enabled && !navigator.onLine)) {
         src += '?grayscale=true';
       }
 
@@ -324,8 +312,121 @@ cr.define('ntp', function() {
         this.appImg_.classList.remove('invisible');
         this.appImgSrc_ = null;
       }
-
       this.classList.remove('icon-loading');
+    },
+
+    /**
+     * Creates a bubble node.
+     * @param {Object} notification The notification to show in the bubble.
+     * @param {boolean} full Whether we want the headline or just the content.
+     * @private
+     */
+    createBubbleNode_: function(notification, full) {
+      if (!full) {
+        var titleItem = this.ownerDocument.createElement('span');
+        titleItem.textContent = notification['title'];
+        return titleItem;
+      } else {
+        var container = this.ownerDocument.createElement('div');
+
+        var messageItem = this.ownerDocument.createElement('div');
+        messageItem.textContent = notification['body'];
+        container.appendChild(messageItem);
+
+        if (notification['linkUrl'] && notification['linkText']) {
+          var anchor = this.ownerDocument.createElement('a');
+          anchor.href = notification['linkUrl'];
+          anchor.textContent = notification['linkText'];
+          container.appendChild(anchor);
+        }
+
+        return container;
+      }
+    },
+
+    /**
+     * Sets up a notification for the app icon.
+     * @param {Object} notification The notification to show in the bubble.
+     * @private
+     */
+    setupNotification_: function(notification) {
+      if (notification) {
+        var infoBubble;
+        if (!this.currentBubbleShowing_) {
+          // Create a new bubble.
+          infoBubble = new cr.ui.ExpandableBubble;
+          infoBubble.anchorNode = this;
+          infoBubble.appId = this.appData_.id;
+          infoBubble.handleCloseEvent = function() {
+            chrome.send('closeNotification', [this.appId]);
+            infoBubble.hide();
+          };
+        } else {
+          // Reuse the old bubble instead of popping up a new bubble over
+          // the old one.
+          infoBubble = this.currentBubbleShowing_;
+          infoBubble.collapseBubble_();
+        }
+        infoBubble.contentTitle = this.createBubbleNode_(notification, false);
+        infoBubble.content = this.createBubbleNode_(notification, true);
+        infoBubble.show();
+        infoBubble.resizeAndReposition();
+
+        this.currentBubbleShowing_ = infoBubble;
+      }
+    },
+
+    /**
+     *  Removes the info bubble if there is one.
+     */
+    removeBubble: function() {
+      if (this.currentBubbleShowing_) {
+        this.currentBubbleShowing_.hide();
+        this.currentBubbleShowing_ = null;
+      }
+    },
+
+    /**
+     * Creates the apps-promo section of the app (should only be called for the
+     * webstore app).
+     * @private
+     */
+    createAppsPromoExtras_: function() {
+      this.classList.add('webstore');
+
+      this.appsPromoExtras_ = $('apps-promo-extras-template').cloneNode(true);
+      this.appsPromoExtras_.id = '';
+      this.appsPromoHeading_ =
+          this.appsPromoExtras_.querySelector('.apps-promo-heading');
+      this.appsPromoLink_ =
+          this.appsPromoExtras_.querySelector('.apps-promo-link');
+      this.appsPromoLink_.addEventListener('click', this.onClick_.bind(this));
+
+      this.appsPromoLogo_ = this.ownerDocument.createElement('img');
+      this.appsPromoLogo_.className = 'apps-promo-logo';
+      this.appImgContainer_.appendChild(this.appsPromoLogo_);
+
+      this.appendChild(this.appsPromoExtras_);
+    },
+
+    /**
+     * Sets the apps promo appearance. If |data| is null, there is no promo. If
+     * |data| is non-null, it contains strings to be shown for the promo. The
+     * promo is only shown when the webstore app icon is alone on a page.
+     * @param {Object} data A dictionary that contains apps promo strings.
+     */
+    setAppsPromoData: function(data) {
+      if (data) {
+        this.classList.add('has-promo');
+      } else {
+        this.classList.remove('has-promo');
+        return;
+      }
+
+      this.appsPromoHeading_.textContent = data.promoHeader;
+      this.appsPromoLink_.href = data.promoLink;
+      this.appsPromoLink_.textContent = data.promoButton;
+      this.appsPromoLogo_.src = data.promoLogo;
     },
 
     /**
@@ -338,24 +439,27 @@ cr.define('ntp', function() {
     setBounds: function(size, x, y) {
       var imgSize = size * APP_IMG_SIZE_FRACTION;
       this.appImgContainer_.style.width = this.appImgContainer_.style.height =
-          toCssPx(this.useSmallIcon_ ? 16 : imgSize);
+          this.useSmallIcon_ ? '16px' : imgSize + 'px';
       if (this.useSmallIcon_) {
         // 3/4 is the ratio of 96px to 128px (the used height and full height
         // of icons in apps).
-        var iconSize = imgSize * 3 / 4;
+        var iconSize = imgSize * 3/4;
         // The -2 is for the div border to improve the visual alignment for the
         // icon div.
         this.imgDiv_.style.width = this.imgDiv_.style.height =
-            toCssPx(iconSize - 2);
+            (iconSize - 2) + 'px';
         // Margins set to get the icon placement right and the text to line up.
         this.imgDiv_.style.marginTop = this.imgDiv_.style.marginBottom =
-            toCssPx((imgSize - iconSize) / 2);
+            ((imgSize - iconSize) / 2) + 'px';
       }
 
-      this.style.width = this.style.height = toCssPx(size);
-      this.style.left = toCssPx(x);
-      this.style.right = toCssPx(x);
-      this.style.top = toCssPx(y);
+      this.style.width = this.style.height = size + 'px';
+      this.style.left = x + 'px';
+      this.style.right = x + 'px';
+      this.style.top = y + 'px';
+
+      if (this.currentBubbleShowing_)
+        this.currentBubbleShowing_.resizeAndReposition();
     },
 
     /**
@@ -364,10 +468,13 @@ cr.define('ntp', function() {
      * @private
      */
     onClick_: function(e) {
+      var is_promo = this.appsPromoExtras_ &&
+          window.getComputedStyle(this.appsPromoExtras_).display != 'none';
       var url = !this.appData_.is_webstore ? '' :
-          appendParam(this.appData_.url,
-                      'utm_source',
-                      'chrome-ntp-icon');
+          is_promo ? this.appsPromoLink_.href :
+                     appendParam(this.appData_.url,
+                                 'utm_source',
+                                 'chrome-ntp-icon');
 
       chrome.send('launchApp',
                   [this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, url,
@@ -390,33 +497,6 @@ cr.define('ntp', function() {
         e.preventDefault();
         e.stopPropagation();
       }
-      this.onKeyboardUsed_(e.keyCode);
-    },
-
-    /**
-     * Invoked when the user releases a key while the app is focused.
-     * @param {Event} e The key event.
-     * @private
-     */
-    onKeyup_: function(e) {
-      this.onKeyboardUsed_(e.keyCode);
-    },
-
-    /**
-     * Called when the keyboard has been used (key down or up). The .click-focus
-     * hack is removed if the user presses a key that can change focus.
-     * @param {number} keyCode The key code of the keyboard event.
-     * @private
-     */
-    onKeyboardUsed_: function(keyCode) {
-      switch (keyCode) {
-        case 9:  // Tab.
-        case 37:  // Left arrow.
-        case 38:  // Up arrow.
-        case 39:  // Right arrow.
-        case 40:  // Down arrow.
-          this.classList.remove('click-focus');
-      }
     },
 
     /**
@@ -434,17 +514,12 @@ cr.define('ntp', function() {
 
     /**
      * Handler for mousedown on the App. Adds a class that allows us to
-     * not display as :active for right clicks (specifically, don't pulse on
-     * these occasions). Also, we don't pulse for clicks that aren't within the
-     * clickable regions.
+     * not display as :active for right clicks and clicks on app notifications
+     * (specifically, don't pulse on these occasions). Also, we don't pulse
+     * for clicks that aren't within the clickable regions.
      * @param {Event} e The mousedown event.
      */
     onMousedown_: function(e) {
-      // If the current platform uses middle click to autoscroll and this
-      // mousedown isn't handled, onClick_() will never fire. crbug.com/142939
-      if (e.button == 1)
-        e.preventDefault();
-
       if (e.button == 2 ||
           !findAncestorByClass(e.target, 'launch-click-target')) {
         this.appContents_.classList.add('suppress-active');
@@ -455,6 +530,14 @@ cr.define('ntp', function() {
       // This class is here so we don't show the focus state for apps that
       // gain keyboard focus via mouse clicking.
       this.classList.add('click-focus');
+    },
+
+    /**
+     * This app is losing keyboard focus.
+     * @param {Event} e The event.
+     */
+    onBlur_: function(e) {
+      this.classList.remove('click-focus');
     },
 
     /**
@@ -500,7 +583,7 @@ cr.define('ntp', function() {
      * @return {boolean} True if the app can be uninstalled.
      */
     canBeRemoved: function() {
-      return this.appData_.mayDisable;
+      return this.appData_.can_uninstall;
     },
 
     /**
@@ -509,6 +592,8 @@ cr.define('ntp', function() {
     removeFromChrome: function() {
       chrome.send('uninstallApp', [this.appData_.id, true]);
       this.tile.tilePage.removeTile(this.tile, true);
+      if (this.currentBubbleShowing_)
+        currentBubbleShowing_.hide();
     },
 
     /**
@@ -521,7 +606,7 @@ cr.define('ntp', function() {
     },
   };
 
-  var TilePage = ntp.TilePage;
+  var TilePage = ntp4.TilePage;
 
   // The fraction of the app tile size that the icon uses.
   var APP_IMG_SIZE_FRACTION = 4 / 5;
@@ -562,6 +647,12 @@ cr.define('ntp', function() {
       this.classList.add('apps-page');
 
       this.addEventListener('cardselected', this.onCardSelected_);
+      // Add event listeners for two events, so we can temporarily suppress
+      // the app notification bubbles when the app card slides in and out of
+      // view.
+      this.addEventListener('carddeselected', this.onCardDeselected_);
+      this.addEventListener('cardSlider:card_change_ended',
+                            this.onCardChangeEnded_);
 
       this.addEventListener('tilePage:tile_added', this.onTileAdded_);
 
@@ -569,32 +660,19 @@ cr.define('ntp', function() {
     },
 
     /**
-     * Highlight a newly installed app as it's added to the NTP.
+     * Creates an app DOM element and places it at the last position on the
+     * page.
      * @param {Object} appData The data object that describes the app.
+     * @param {boolean=} animate If true, the app tile plays an animation.
      */
-    insertAndHighlightApp: function(appData) {
-      ntp.getCardSlider().selectCardByValue(this);
-      this.content_.scrollTop = this.content_.scrollHeight;
-      this.insertApp(appData, true);
-    },
-
-    /**
-     * Similar to appendApp, but it respects the app_launch_ordinal field of
-     * |appData|.
-     * @param {Object} appData The data that describes the app.
-     * @param {boolean} animate Whether to animate the insertion.
-     */
-    insertApp: function(appData, animate) {
-      var index = this.tileElements_.length;
-      for (var i = 0; i < this.tileElements_.length; i++) {
-        if (appData.app_launch_ordinal <
-            this.tileElements_[i].firstChild.appData.app_launch_ordinal) {
-          index = i;
-          break;
-        }
+    appendApp: function(appData, animate) {
+      if (animate) {
+        // Select the page and scroll all the way down so the animation is
+        // visible.
+        ntp4.getCardSlider().selectCardByValue(this);
+        this.content_.scrollTop = this.content_.scrollHeight;
       }
-
-      this.addTileAt(new App(appData), index, animate);
+      this.appendTile(new App(appData), animate);
     },
 
     /**
@@ -606,6 +684,8 @@ cr.define('ntp', function() {
       var apps = this.querySelectorAll('.app.icon-loading');
       for (var i = 0; i < apps.length; i++) {
         apps[i].loadIcon();
+        if (apps[i].currentBubbleShowing_)
+          apps[i].currentBubbleShowing_.suppressed = false;
       }
     },
 
@@ -621,6 +701,36 @@ cr.define('ntp', function() {
     },
 
     /**
+     * Handler for the when this.cardSlider ends change its card. If animated,
+     * this happens when the -webkit-transition is done, otherwise happens
+     * immediately (but after cardSlider:card_changed).
+     * @private
+     */
+    onCardChangeEnded_: function(e) {
+      for (var i = 0; i < this.tileElements_.length; i++) {
+        var app = this.tileElements_[i].firstChild;
+        assert(app instanceof App);
+        if (app.currentBubbleShowing_)
+          app.currentBubbleShowing_.suppressed = false;
+      }
+    },
+
+    /**
+     * Handler for the 'carddeselected' event, fired when the user switches
+     * to another 'card' than the App 'card' on the NTP (|this| gets
+     * deselected).
+     * @private
+     */
+    onCardDeselected_: function(e) {
+      for (var i = 0; i < this.tileElements_.length; i++) {
+        var app = this.tileElements_[i].firstChild;
+        assert(app instanceof App);
+        if (app.currentBubbleShowing_)
+          app.currentBubbleShowing_.suppressed = true;
+      }
+    },
+
+    /**
      * A handler for when the apps page is scrolled (then we need to reposition
      * the bubbles.
      * @private
@@ -631,35 +741,32 @@ cr.define('ntp', function() {
       for (var i = 0; i < this.tileElements_.length; i++) {
         var app = this.tileElements_[i].firstChild;
         assert(app instanceof App);
-      }
+        if (app.currentBubbleShowing_)
+          app.currentBubbleShowing_.resizeAndReposition();
+        }
     },
 
-    /** @override */
+    /** @inheritdoc */
     doDragOver: function(e) {
-      // Only animatedly re-arrange if the user is currently dragging an app.
-      var tile = ntp.getCurrentlyDraggingTile();
-      if (tile && tile.querySelector('.app')) {
-        TilePage.prototype.doDragOver.call(this, e);
-      } else {
+      var tile = ntp4.getCurrentlyDraggingTile();
+      if (tile && !tile.querySelector('.app')) {
         e.preventDefault();
         this.setDropEffect(e.dataTransfer);
+      } else {
+        TilePage.prototype.doDragOver.call(this, e);
       }
     },
 
-    /** @override */
+    /** @inheritDoc */
     shouldAcceptDrag: function(e) {
-      if (ntp.getCurrentlyDraggingTile())
-        return true;
-      if (!e.dataTransfer || !e.dataTransfer.types)
-        return false;
-      return Array.prototype.indexOf.call(e.dataTransfer.types,
-                                          'text/uri-list') != -1;
+      return !!ntp4.getCurrentlyDraggingTile() ||
+          (e.dataTransfer && e.dataTransfer.types.indexOf('url') != -1);
     },
 
-    /** @override */
+    /** @inheritDoc */
     addDragData: function(dataTransfer, index) {
       var sourceId = -1;
-      var currentlyDraggingTile = ntp.getCurrentlyDraggingTile();
+      var currentlyDraggingTile = ntp4.getCurrentlyDraggingTile();
       if (currentlyDraggingTile) {
         var tileContents = currentlyDraggingTile.firstChild;
         if (tileContents.classList.contains('app')) {
@@ -729,16 +836,16 @@ cr.define('ntp', function() {
     generateAppForLink: function(data) {
       assert(data.url != undefined);
       assert(data.title != undefined);
-      var pageIndex = ntp.getAppsPageIndex(this);
+      var pageIndex = ntp4.getAppsPageIndex(this);
       chrome.send('generateAppForLink', [data.url, data.title, pageIndex]);
     },
 
-    /** @override */
+    /** @inheritDoc */
     tileMoved: function(draggedTile) {
       if (!(draggedTile.firstChild instanceof App))
         return;
 
-      var pageIndex = ntp.getAppsPageIndex(this);
+      var pageIndex = ntp4.getAppsPageIndex(this);
       chrome.send('setPageIndex', [draggedTile.firstChild.appId, pageIndex]);
 
       var appIds = [];
@@ -751,28 +858,47 @@ cr.define('ntp', function() {
       chrome.send('reorderApps', [draggedTile.firstChild.appId, appIds]);
     },
 
-    /** @override */
+    /** @inheritDoc */
     setDropEffect: function(dataTransfer) {
-      var tile = ntp.getCurrentlyDraggingTile();
+      var tile = ntp4.getCurrentlyDraggingTile();
       if (tile && tile.querySelector('.app'))
-        ntp.setCurrentDropEffect(dataTransfer, 'move');
+        ntp4.setCurrentDropEffect(dataTransfer, 'move');
       else
-        ntp.setCurrentDropEffect(dataTransfer, 'copy');
+        ntp4.setCurrentDropEffect(dataTransfer, 'copy');
     },
+  };
+
+  AppsPage.setPromo = function(data) {
+    var store = document.querySelector('.webstore');
+    if (store)
+      store.setAppsPromoData(data);
   };
 
   /**
    * Launches the specified app using the APP_LAUNCH_NTP_APP_RE_ENABLE
    * histogram. This should only be invoked from the AppLauncherHandler.
-   * @param {string} appID The ID of the app.
+   * @param {String} appID The ID of the app.
    */
   function launchAppAfterEnable(appId) {
     chrome.send('launchApp', [appId, APP_LAUNCH.NTP_APP_RE_ENABLE]);
   }
 
+  function appNotificationChanged(id, notification) {
+    var app = $(id);
+    // The app might have been uninstalled, or notifications might be disabled.
+    if (app && !app.appData.notifications_disabled)
+      app.setupNotification_(notification);
+  }
+
   return {
     APP_LAUNCH: APP_LAUNCH,
+    appNotificationChanged: appNotificationChanged,
     AppsPage: AppsPage,
     launchAppAfterEnable: launchAppAfterEnable,
   };
 });
+
+// TODO(estade): update the content handlers to use ntp namespace instead of
+// making these global.
+var appNotificationChanged = ntp4.appNotificationChanged;
+var launchAppAfterEnable = ntp4.launchAppAfterEnable;

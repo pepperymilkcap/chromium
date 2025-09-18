@@ -11,7 +11,7 @@
 
 #include <deletebrowsinghistory.h>
 
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "chrome_frame/bho.h"
 #include "chrome_frame/chrome_frame_plugin.h"
 #include "chrome_frame/chrome_tab.h"
@@ -53,11 +53,11 @@ END_MSG_MAP()
       AutomationLaunchResult reason, const std::string& server_version);
 
   virtual void GetProfilePath(const std::wstring& profile_name,
-                              base::FilePath* profile_path);
+                              FilePath* profile_path);
 
  private:
   unsigned long remove_mask_;
-  base::MessageLoopForUI loop_;
+  MessageLoopForUI loop_;
 };
 
 #endif  // CHROME_FRAME_DELETE_CHROME_HISTORY_H_

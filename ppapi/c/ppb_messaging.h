@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_messaging.idl modified Wed Jun  5 10:32:59 2013. */
+/* From ppb_messaging.idl modified Wed Oct  5 14:06:02 2011. */
 
 #ifndef PPAPI_C_PPB_MESSAGING_H_
 #define PPAPI_C_PPB_MESSAGING_H_
@@ -44,14 +44,9 @@ struct PPB_Messaging_1_0 {
    * of a module.
    * @param[in] message A <code>PP_Var</code> containing the data to be sent to
    * JavaScript.
-   * <code>message</code> can be any <code>PP_Var</code> type except
-   * <code>PP_VARTYPE_OBJECT</code>. Array/Dictionary types are supported from
-   * Chrome M29 onward. All var types are copied when passing them to
-   * JavaScript.
-   *
-   * When passing array or dictionary <code>PP_Var</code>s, the entire reference
-   * graph will be converted and transferred. If the reference graph has cycles,
-   * the message will not be sent and an error will be logged to the console.
+   * Message can have a numeric, boolean, or string value; arrays and
+   * dictionaries are not yet supported. Ref-counted var types are copied, and
+   * are therefore not shared between the module instance and the browser.
    *
    * Listeners for message events in JavaScript code will receive an object
    * conforming to the HTML 5 <code>MessageEvent</code> interface.
@@ -65,24 +60,25 @@ struct PPB_Messaging_1_0 {
    *
    * <strong>Example:</strong>
    *
-   * @code
+   * <code>
    *
    * <body>
    *   <object id="plugin"
    *           type="application/x-ppapi-postMessage-example"/>
    *   <script type="text/javascript">
    *     var plugin = document.getElementById('plugin');
-   *     plugin.addEventListener("message",
+   *     plugin.AddEventListener("message",
    *                             function(message) { alert(message.data); },
    *                             false);
    *   </script>
    * </body>
    *
-   * @endcode
+   * </code>
    *
    * The module instance then invokes PostMessage() as follows:
    *
-   * @code
+   * <code>
+   *
    *
    *  char hello_world[] = "Hello world!";
    *  PP_Var hello_var = ppb_var_interface->VarFromUtf8(instance,
@@ -91,7 +87,7 @@ struct PPB_Messaging_1_0 {
    *  ppb_messaging_interface->PostMessage(instance, hello_var); // Copies var.
    *  ppb_var_interface->Release(hello_var);
    *
-   * @endcode
+   * </code>
    *
    * The browser will pop-up an alert saying "Hello world!"
    */

@@ -7,14 +7,19 @@
 #include <string>
 
 #include "base/atomic_sequence_num.h"
+#include "base/bind.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/values.h"
 
 namespace media {
 
-// A count of all MediaLogs created in the current process. Used to generate
-// unique IDs.
-static base::StaticAtomicSequenceNumber g_media_log_count;
+// A count of all MediaLogs created on this render process.
+// Used to generate unique ids.
+static base::LazyInstance<base::AtomicSequenceNumber>::Leaky media_log_count =
+    LAZY_INSTANCE_INITIALIZER;
 
 const char* MediaLog::EventTypeToString(MediaLogEvent::Type type) {
   switch (type) {
@@ -46,20 +51,51 @@ const char* MediaLog::EventTypeToString(MediaLogEvent::Type type) {
       return "TOTAL_BYTES_SET";
     case MediaLogEvent::NETWORK_ACTIVITY_SET:
       return "NETWORK_ACTIVITY_SET";
-    case MediaLogEvent::AUDIO_ENDED:
-      return "AUDIO_ENDED";
-    case MediaLogEvent::VIDEO_ENDED:
-      return "VIDEO_ENDED";
-    case MediaLogEvent::TEXT_ENDED:
-      return "TEXT_ENDED";
+    case MediaLogEvent::ENDED:
+      return "ENDED";
     case MediaLogEvent::AUDIO_RENDERER_DISABLED:
       return "AUDIO_RENDERER_DISABLED";
     case MediaLogEvent::BUFFERED_EXTENTS_CHANGED:
       return "BUFFERED_EXTENTS_CHANGED";
-    case MediaLogEvent::MEDIA_SOURCE_ERROR:
-      return "MEDIA_SOURCE_ERROR";
-    case MediaLogEvent::PROPERTY_CHANGE:
-      return "PROPERTY_CHANGE";
+    case MediaLogEvent::STATISTICS_UPDATED:
+      return "STATISTICS_UPDATED";
+  }
+  NOTREACHED();
+  return NULL;
+}
+
+const char* MediaLog::PipelineStateToString(Pipeline::State state) {
+  switch (state) {
+    case Pipeline::kCreated:
+      return "created";
+    case Pipeline::kInitDemuxer:
+      return "initDemuxer";
+    case Pipeline::kInitAudioDecoder:
+      return "initAudioDecoder";
+    case Pipeline::kInitAudioRenderer:
+      return "initAudioRenderer";
+    case Pipeline::kInitVideoDecoder:
+      return "initVideoDecoder";
+    case Pipeline::kInitVideoRenderer:
+      return "initVideoRenderer";
+    case Pipeline::kPausing:
+      return "pausing";
+    case Pipeline::kSeeking:
+      return "seeking";
+    case Pipeline::kFlushing:
+      return "flushing";
+    case Pipeline::kStarting:
+      return "starting";
+    case Pipeline::kStarted:
+      return "started";
+    case Pipeline::kEnded:
+      return "ended";
+    case Pipeline::kStopping:
+      return "stopping";
+    case Pipeline::kStopped:
+      return "stopped";
+    case Pipeline::kError:
+      return "error";
   }
   NOTREACHED();
   return NULL;
@@ -75,16 +111,20 @@ const char* MediaLog::PipelineStatusToString(PipelineStatus status) {
       return "pipeline: network error";
     case PIPELINE_ERROR_DECODE:
       return "pipeline: decode error";
-    case PIPELINE_ERROR_DECRYPT:
-      return "pipeline: decrypt error";
     case PIPELINE_ERROR_ABORT:
       return "pipeline: abort";
     case PIPELINE_ERROR_INITIALIZATION_FAILED:
       return "pipeline: initialization failed";
+    case PIPELINE_ERROR_REQUIRED_FILTER_MISSING:
+      return "pipeline: required filter missing";
+    case PIPELINE_ERROR_OUT_OF_MEMORY:
+      return "pipeline: out of memory";
     case PIPELINE_ERROR_COULD_NOT_RENDER:
       return "pipeline: could not render";
     case PIPELINE_ERROR_READ:
       return "pipeline: read error";
+    case PIPELINE_ERROR_AUDIO_HARDWARE:
+      return "pipeline: audio hardware error";
     case PIPELINE_ERROR_OPERATION_PENDING:
       return "pipeline: operation pending";
     case PIPELINE_ERROR_INVALID_STATE:
@@ -95,34 +135,32 @@ const char* MediaLog::PipelineStatusToString(PipelineStatus status) {
       return "dumuxer: could not parse";
     case DEMUXER_ERROR_NO_SUPPORTED_STREAMS:
       return "demuxer: no supported streams";
+    case DEMUXER_ERROR_COULD_NOT_CREATE_THREAD:
+      return "demuxer: could not create thread";
     case DECODER_ERROR_NOT_SUPPORTED:
       return "decoder: not supported";
-    case PIPELINE_STATUS_MAX:
-      NOTREACHED();
+    case DATASOURCE_ERROR_URL_NOT_SUPPORTED:
+      return "data source: url not supported";
   }
   NOTREACHED();
   return NULL;
 }
 
-LogHelper::LogHelper(const LogCB& log_cb) : log_cb_(log_cb) {}
-
-LogHelper::~LogHelper() {
-  if (log_cb_.is_null())
-    return;
-  log_cb_.Run(stream_.str());
+MediaLog::MediaLog() {
+  id_ = media_log_count.Get().GetNext();
+  stats_update_pending_ = false;
 }
-
-MediaLog::MediaLog() : id_(g_media_log_count.GetNext()) {}
 
 MediaLog::~MediaLog() {}
 
-void MediaLog::AddEvent(scoped_ptr<MediaLogEvent> event) {}
+void MediaLog::AddEvent(scoped_ptr<MediaLogEvent> event) {
+}
 
 scoped_ptr<MediaLogEvent> MediaLog::CreateEvent(MediaLogEvent::Type type) {
   scoped_ptr<MediaLogEvent> event(new MediaLogEvent);
   event->id = id_;
   event->type = type;
-  event->time = base::TimeTicks::Now();
+  event->time = base::Time::Now();
   return event.Pass();
 }
 
@@ -133,10 +171,10 @@ scoped_ptr<MediaLogEvent> MediaLog::CreateBooleanEvent(
   return event.Pass();
 }
 
-scoped_ptr<MediaLogEvent> MediaLog::CreateStringEvent(
-    MediaLogEvent::Type type, const char* property, const std::string& value) {
+scoped_ptr<MediaLogEvent> MediaLog::CreateIntegerEvent(
+    MediaLogEvent::Type type, const char* property, int64 value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(type));
-  event->params.SetString(property, value);
+  event->params.SetInteger(property, value);
   return event.Pass();
 }
 
@@ -163,7 +201,7 @@ scoped_ptr<MediaLogEvent> MediaLog::CreatePipelineStateChangedEvent(
     Pipeline::State state) {
   scoped_ptr<MediaLogEvent> event(
       CreateEvent(MediaLogEvent::PIPELINE_STATE_CHANGED));
-  event->params.SetString("pipeline_state", Pipeline::GetStateString(state));
+  event->params.SetString("pipeline_state", PipelineStateToString(state));
   return event.Pass();
 }
 
@@ -183,51 +221,45 @@ scoped_ptr<MediaLogEvent> MediaLog::CreateVideoSizeSetEvent(
 }
 
 scoped_ptr<MediaLogEvent> MediaLog::CreateBufferedExtentsChangedEvent(
-    int64 start, int64 current, int64 end) {
+    size_t start, size_t current, size_t end) {
   scoped_ptr<MediaLogEvent> event(
       CreateEvent(MediaLogEvent::BUFFERED_EXTENTS_CHANGED));
-  // These values are headed to JS where there is no int64 so we use a double
-  // and accept loss of precision above 2^53 bytes (8 Exabytes).
-  event->params.SetDouble("buffer_start", start);
-  event->params.SetDouble("buffer_current", current);
-  event->params.SetDouble("buffer_end", end);
+  event->params.SetInteger("buffer_start", start);
+  event->params.SetInteger("buffer_current", current);
+  event->params.SetInteger("buffer_end", end);
   return event.Pass();
 }
 
-scoped_ptr<MediaLogEvent> MediaLog::CreateMediaSourceErrorEvent(
-    const std::string& error) {
+void MediaLog::QueueStatisticsUpdatedEvent(PipelineStatistics stats) {
+  base::AutoLock auto_lock(stats_lock_);
+  last_statistics_ = stats;
+
+  // Sadly, this function can get dispatched on threads not running a message
+  // loop.  Happily, this is pretty rare (only VideoRendererBase at this time)
+  // so we simply leave stats updating for another call to trigger.
+  if (!stats_update_pending_ && MessageLoop::current()) {
+    stats_update_pending_ = true;
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&media::MediaLog::AddStatisticsUpdatedEvent, this),
+        base::TimeDelta::FromMilliseconds(500));
+  }
+}
+
+void MediaLog::AddStatisticsUpdatedEvent() {
+  base::AutoLock auto_lock(stats_lock_);
   scoped_ptr<MediaLogEvent> event(
-      CreateEvent(MediaLogEvent::MEDIA_SOURCE_ERROR));
-  event->params.SetString("error", error);
-  return event.Pass();
-}
-
-void MediaLog::SetStringProperty(
-    const char* key, const std::string& value) {
-  scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
-  event->params.SetString(key, value);
+      CreateEvent(MediaLogEvent::STATISTICS_UPDATED));
+  event->params.SetInteger("audio_bytes_decoded",
+                           last_statistics_.audio_bytes_decoded);
+  event->params.SetInteger("video_bytes_decoded",
+                           last_statistics_.video_bytes_decoded);
+  event->params.SetInteger("video_frames_decoded",
+                           last_statistics_.video_frames_decoded);
+  event->params.SetInteger("video_frames_dropped",
+                           last_statistics_.video_frames_dropped);
   AddEvent(event.Pass());
-}
-
-void MediaLog::SetIntegerProperty(
-    const char* key, int value) {
-  scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
-  event->params.SetInteger(key, value);
-  AddEvent(event.Pass());
-}
-
-void MediaLog::SetDoubleProperty(
-    const char* key, double value) {
-  scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
-  event->params.SetDouble(key, value);
-  AddEvent(event.Pass());
-}
-
-void MediaLog::SetBooleanProperty(
-    const char* key, bool value) {
-  scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
-  event->params.SetBoolean(key, value);
-  AddEvent(event.Pass());
+  stats_update_pending_ = false;
 }
 
 }  //namespace media

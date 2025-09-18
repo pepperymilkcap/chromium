@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_TOOLS_FLIP_SERVER_FLIP_CONFIG_H_
-#define NET_TOOLS_FLIP_SERVER_FLIP_CONFIG_H_
+#ifndef NET_TOOLS_FLIP_PROXY_CONFIG_H
+#define NET_TOOLS_FLIP_PROXY_CONFIG_H
+#pragma once
 
-#include <arpa/inet.h>
+#include <arpa/inet.h>  // in_addr_t
 
 #include <string>
 #include <vector>
@@ -16,9 +17,9 @@
 namespace net {
 
 enum FlipHandlerType {
-  FLIP_HANDLER_PROXY,
-  FLIP_HANDLER_SPDY_SERVER,
-  FLIP_HANDLER_HTTP_SERVER
+    FLIP_HANDLER_PROXY,
+    FLIP_HANDLER_SPDY_SERVER,
+    FLIP_HANDLER_HTTP_SERVER
 };
 
 class FlipAcceptor {
@@ -38,7 +39,7 @@ class FlipAcceptor {
                int accepts_per_wake,
                bool reuseport,
                bool wait_for_iface,
-               void* memory_cache);
+               void *memory_cache);
   ~FlipAcceptor();
 
   enum FlipHandlerType flip_handler_type_;
@@ -81,7 +82,7 @@ class FlipConfig {
                    int accepts_per_wake,
                    bool reuseport,
                    bool wait_for_iface,
-                   void* memory_cache);
+                   void *memory_cache);
 
   std::vector<FlipAcceptor*> acceptors_;
   double server_think_time_in_s_;
@@ -93,6 +94,7 @@ class FlipConfig {
   int idle_socket_timeout_s_;
 };
 
-}  // namespace net
+}  // namespace
 
-#endif  // NET_TOOLS_FLIP_SERVER_FLIP_CONFIG_H_
+#endif  // NET_TOOLS_FLIP_PROXY_CONFIG_H
+

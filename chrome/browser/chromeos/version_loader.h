@@ -4,31 +4,32 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_VERSION_LOADER_H_
 #define CHROME_BROWSER_CHROMEOS_VERSION_LOADER_H_
+#pragma once
 
 #include <string>
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
-#include "chrome/common/cancelable_task_tracker.h"
+#include "chrome/browser/cancelable_request.h"
 
 namespace chromeos {
 
 // ChromeOSVersionLoader loads the version of Chrome OS from the file system.
-// Loading is done asynchronously in the blocking thread pool. Once loaded,
+// Loading is done asynchronously on the file thread. Once loaded,
 // ChromeOSVersionLoader callback to a method of your choice with the version
 // (or an empty string if the version couldn't be found).
 // To use ChromeOSVersionLoader do the following:
 //
 // . In your class define a member field of type chromeos::VersionLoader and
-//   CancelableTaskTracker.
+//   CancelableRequestConsumerBase.
 // . Define the callback method, something like:
-//   void OnGetChromeOSVersion(const std::string& version);
-// . When you want the version invoke:
-//   VersionLoader::GetVersion()
+//   void OnGetChromeOSVersion(chromeos::VersionLoader::Handle,
+//                             std::string version);
+// . When you want the version invoke:  loader.GetVersion(&consumer, callback);
 //
 // This class also provides the ability to load the bios firmware using
-//   VersionLoader::GetFirmware()
-class VersionLoader {
+//   loader.GetFirmware(&consumer, callback);
+class VersionLoader : public CancelableRequestProvider {
  public:
   VersionLoader();
   virtual ~VersionLoader();
@@ -40,35 +41,52 @@ class VersionLoader {
   };
 
   // Signature
-  typedef base::Callback<void(const std::string&)> GetVersionCallback;
-  typedef base::Callback<void(const std::string&)> GetFirmwareCallback;
+  typedef base::Callback<void(Handle, std::string)> GetVersionCallback;
+  typedef CancelableRequest<GetVersionCallback> GetVersionRequest;
+
+  typedef base::Callback<void(Handle, std::string)> GetFirmwareCallback;
+  typedef CancelableRequest<GetFirmwareCallback> GetFirmwareRequest;
 
   // Asynchronously requests the version.
   // If |full_version| is true version string with extra info is extracted,
   // otherwise it's in short format x.x.xx.x.
-  CancelableTaskTracker::TaskId GetVersion(VersionFormat format,
-                                           const GetVersionCallback& callback,
-                                           CancelableTaskTracker* tracker);
+  Handle GetVersion(CancelableRequestConsumerBase* consumer,
+                    const GetVersionCallback& callback,
+                    VersionFormat format);
 
-  CancelableTaskTracker::TaskId GetFirmware(const GetFirmwareCallback& callback,
-                                            CancelableTaskTracker* tracker);
+  Handle GetFirmware(CancelableRequestConsumerBase* consumer,
+                     const GetFirmwareCallback& callback);
+
+  // Parse the version information as a Chrome platfrom, not Chrome OS
+  // TODO(rkc): Change this and everywhere it is used once we switch Chrome OS
+  // over to xx.yyy.zz version numbers instead of 0.xx.yyy.zz
+  // Refer to http://code.google.com/p/chromium-os/issues/detail?id=15789
+  void EnablePlatformVersions(bool enable);
+
+  static const char kFullVersionPrefix[];
+  static const char kVersionPrefix[];
+  static const char kFirmwarePrefix[];
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(VersionLoaderTest, ParseFullVersion);
+  FRIEND_TEST_ALL_PREFIXES(VersionLoaderTest, ParseVersion);
   FRIEND_TEST_ALL_PREFIXES(VersionLoaderTest, ParseFirmware);
 
-  // VersionLoader calls into the Backend in the blocking thread pool to load
+  // VersionLoader calls into the Backend on the file thread to load
   // and extract the version.
   class Backend : public base::RefCountedThreadSafe<Backend> {
    public:
     Backend() {}
 
-    // Gets the version number from base::SysInfo. This is invoked on the
-    // blocking thread pool.
-    void GetVersion(VersionFormat format, std::string* version);
+    // Calls ParseVersion to get the version # and notifies request.
+    // This is invoked on the file thread.
+    // If |full_version| is true then extra info is passed in version string.
+    void GetVersion(scoped_refptr<GetVersionRequest> request,
+                    VersionFormat format);
 
-    // Calls ParseFirmware to get the firmware value. This is invoked on the
-    // blocking thread pool.
-    void GetFirmware(std::string* firmware);
+    // Calls ParseFirmware to get the firmware # and notifies request.
+    // This is invoked on the file thread.
+    void GetFirmware(scoped_refptr<GetFirmwareRequest> request);
 
    private:
     friend class base::RefCountedThreadSafe<Backend>;
@@ -77,6 +95,11 @@ class VersionLoader {
 
     DISALLOW_COPY_AND_ASSIGN(Backend);
   };
+
+  // Extracts the version from the file.
+  // |prefix| specifies what key defines version data.
+  static std::string ParseVersion(const std::string& contents,
+                                  const std::string& prefix);
 
   // Extracts the firmware from the file.
   static std::string ParseFirmware(const std::string& contents);

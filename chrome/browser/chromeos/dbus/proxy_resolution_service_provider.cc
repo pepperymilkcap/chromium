@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/threading/platform_thread.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "content/public/browser/browser_thread.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/exported_object.h"
@@ -29,7 +29,8 @@ class ProxyResolverImpl : public ProxyResolverInterface {
   class Request {
    public:
     explicit Request(const std::string& source_url)
-        : callback_(base::Bind(&Request::OnCompletion, base::Unretained(this))),
+        : ALLOW_THIS_IN_INITIALIZER_LIST(callback_(
+            base::Bind(&Request::OnCompletion, base::Unretained(this)))),
           source_url_(source_url) {
     }
 
@@ -78,7 +79,7 @@ class ProxyResolverImpl : public ProxyResolverInterface {
       const std::string& source_url,
       const std::string& signal_interface,
       const std::string& signal_name,
-      scoped_refptr<dbus::ExportedObject> exported_object) OVERRIDE {
+      scoped_refptr<dbus::ExportedObject> exported_object) {
     DCHECK(OnOriginThread());
 
     // Create a request slot for this proxy resolution request.
@@ -92,9 +93,9 @@ class ProxyResolverImpl : public ProxyResolverInterface {
         request);
     all_requests_.insert(request);
 
-    // GetPrimaryUserProfile() and GetRequestContext() must be called on UI
+    // GetDefaultProfile() and GetRequestContext() must be called on UI
     // thread.
-    Profile* profile = ProfileManager::GetPrimaryUserProfile();
+    Profile* profile = ProfileManager::GetDefaultProfile();
     scoped_refptr<net::URLRequestContextGetter> getter =
         profile->GetRequestContext();
 
@@ -116,7 +117,7 @@ class ProxyResolverImpl : public ProxyResolverInterface {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
     // Check if we have the URLRequestContextGetter.
-    if (!getter.get()) {
+    if (!getter) {
       request->error_ = "No URLRequestContextGetter";
       request->OnCompletion(net::ERR_UNEXPECTED);
       return;
@@ -238,7 +239,7 @@ void ProxyResolutionServiceProvider::ResolveProxyHandler(
       !reader.PopString(&signal_interface) ||
       !reader.PopString(&signal_name)) {
     LOG(ERROR) << "Unexpected method call: " << method_call->ToString();
-    response_sender.Run(scoped_ptr<dbus::Response>());
+    response_sender.Run(NULL);
     return;
   }
 
@@ -249,7 +250,8 @@ void ProxyResolutionServiceProvider::ResolveProxyHandler(
 
   // Send an empty response for now. We'll send a signal once the network proxy
   // resolution is completed.
-  response_sender.Run(dbus::Response::FromMethodCall(method_call));
+  dbus::Response* response = dbus::Response::FromMethodCall(method_call);
+  response_sender.Run(response);
 }
 
 // static
@@ -259,7 +261,7 @@ void ProxyResolutionServiceProvider::CallResolveProxyHandler(
     dbus::ExportedObject::ResponseSender response_sender) {
   if (!provider_weak_ptr) {
     LOG(WARNING) << "Called after the object is deleted";
-    response_sender.Run(scoped_ptr<dbus::Response>());
+    response_sender.Run(NULL);
     return;
   }
   provider_weak_ptr->ResolveProxyHandler(method_call, response_sender);

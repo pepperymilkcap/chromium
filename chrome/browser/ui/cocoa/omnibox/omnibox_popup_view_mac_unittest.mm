@@ -1,135 +1,107 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_popup_view_mac.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
-#import "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
-#include "chrome/test/base/testing_profile.h"
-#include "ui/gfx/font_list.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/text_elider.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
+#include "testing/platform_test.h"
+#include "ui/base/text/text_elider.h"
 
 namespace {
 
 const float kLargeWidth = 10000;
 
-// Returns the length of the run starting at |location| for which
-// |attributeName| remains the same.
-NSUInteger RunLengthForAttribute(NSAttributedString* string,
-                                 NSUInteger location,
-                                 NSString* attributeName) {
-  const NSRange full_range = NSMakeRange(0, [string length]);
-  NSRange range;
-  [string attribute:attributeName
-            atIndex:location longestEffectiveRange:&range inRange:full_range];
-
-  // In order to signal when the run doesn't start exactly at location, return
-  // a weirdo length.  This causes the incorrect expectation to manifest at the
-  // calling location, which is more useful than an EXPECT_EQ() would be here.
-  if (range.location != location) {
-    return -1;
-  }
-
-  return range.length;
-}
-
-// Return true if the run starting at |location| has |color| for attribute
-// NSForegroundColorAttributeName.
-bool RunHasColor(NSAttributedString* string,
-                 NSUInteger location,
-                 NSColor* color) {
-  const NSRange full_range = NSMakeRange(0, [string length]);
-  NSRange range;
-  NSColor* run_color = [string attribute:NSForegroundColorAttributeName
-                                 atIndex:location
-                   longestEffectiveRange:&range
-                                 inRange:full_range];
-
-  // According to one "Ali Ozer", you can compare objects within the same color
-  // space using -isEqual:.  Converting color spaces seems too heavyweight for
-  // these tests.
-  // http://lists.apple.com/archives/cocoa-dev/2005/May/msg00186.html
-  return [run_color isEqual:color] ? true : false;
-}
-
-// Return true if the run starting at |location| has the font trait(s) in |mask|
-// font in NSFontAttributeName.
-bool RunHasFontTrait(NSAttributedString* string,
-                     NSUInteger location,
-                     NSFontTraitMask mask) {
-  const NSRange full_range = NSMakeRange(0, [string length]);
-  NSRange range;
-  NSFont* run_font = [string attribute:NSFontAttributeName
-                               atIndex:location
-                 longestEffectiveRange:&range
-                               inRange:full_range];
-  NSFontManager* fontManager = [NSFontManager sharedFontManager];
-  if (run_font && (mask == ([fontManager traitsOfFont:run_font] & mask))) {
-    return true;
-  }
-  return false;
-}
-
-// AutocompleteMatch doesn't really have the right constructor for our
-// needs.  Fake one for us to use.
-AutocompleteMatch MakeMatch(const base::string16& contents,
-                            const base::string16& description) {
-  AutocompleteMatch m(NULL, 1, true, AutocompleteMatchType::URL_WHAT_YOU_TYPED);
-  m.contents = contents;
-  m.description = description;
-  return m;
-}
-
-class MockOmniboxPopupViewMac : public OmniboxPopupViewMac {
+class OmniboxPopupViewMacTest : public PlatformTest {
  public:
-  MockOmniboxPopupViewMac(OmniboxView* omnibox_view,
-                          OmniboxEditModel* edit_model,
-                          NSTextField* field)
-      : OmniboxPopupViewMac(omnibox_view, edit_model, field) {
-  }
+  OmniboxPopupViewMacTest() {}
 
-  void SetResultCount(size_t count) {
-    ACMatches matches;
-    for (size_t i = 0; i < count; ++i)
-      matches.push_back(AutocompleteMatch());
-    result_.Reset();
-    result_.AppendMatches(matches);
-  }
+  virtual void SetUp() {
+    PlatformTest::SetUp();
 
- protected:
-  virtual const AutocompleteResult& GetResult() const OVERRIDE {
-    return result_;
-  }
-
- private:
-  AutocompleteResult result_;
-};
-
-class OmniboxPopupViewMacTest : public CocoaProfileTest {
- public:
-  OmniboxPopupViewMacTest() {
+    // These are here because there is no autorelease pool for the
+    // constructor.
     color_ = [NSColor blackColor];
-    dim_color_ = [NSColor darkGrayColor];
+    dimColor_ = [NSColor darkGrayColor];
     font_ = gfx::Font(
         base::SysNSStringToUTF8([[NSFont userFontOfSize:12] fontName]), 12);
   }
 
- protected:
-  NSColor* color_;  // weak
-  NSColor* dim_color_;  // weak
-  gfx::Font font_;
+  // Returns the length of the run starting at |location| for which
+  // |attributeName| remains the same.
+  static NSUInteger RunLengthForAttribute(NSAttributedString* string,
+                                          NSUInteger location,
+                                          NSString* attributeName) {
+    const NSRange fullRange = NSMakeRange(0, [string length]);
+    NSRange range;
+    [string attribute:attributeName
+              atIndex:location longestEffectiveRange:&range inRange:fullRange];
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(OmniboxPopupViewMacTest);
+    // In order to signal when the run doesn't start exactly at
+    // location, return a weirdo length.  This causes the incorrect
+    // expectation to manifest at the calling location, which is more
+    // useful than an EXPECT_EQ() would be here.
+    if (range.location != location) {
+      return -1;
+    }
+
+    return range.length;
+  }
+
+  // Return true if the run starting at |location| has |color| for
+  // attribute NSForegroundColorAttributeName.
+  static bool RunHasColor(NSAttributedString* string,
+                          NSUInteger location, NSColor* color) {
+    const NSRange fullRange = NSMakeRange(0, [string length]);
+    NSRange range;
+    NSColor* runColor = [string attribute:NSForegroundColorAttributeName
+                                  atIndex:location
+                    longestEffectiveRange:&range inRange:fullRange];
+
+    // According to one "Ali Ozer", you can compare objects within the
+    // same color space using -isEqual:.  Converting color spaces
+    // seems too heavyweight for these tests.
+    // http://lists.apple.com/archives/cocoa-dev/2005/May/msg00186.html
+    return [runColor isEqual:color] ? true : false;
+  }
+
+  // Return true if the run starting at |location| has the font
+  // trait(s) in |mask| font in NSFontAttributeName.
+  static bool RunHasFontTrait(NSAttributedString* string, NSUInteger location,
+                              NSFontTraitMask mask) {
+    const NSRange fullRange = NSMakeRange(0, [string length]);
+    NSRange range;
+    NSFont* runFont = [string attribute:NSFontAttributeName
+                                atIndex:location
+                  longestEffectiveRange:&range inRange:fullRange];
+    NSFontManager* fontManager = [NSFontManager sharedFontManager];
+    if (runFont && (mask == ([fontManager traitsOfFont:runFont]&mask))) {
+      return true;
+    }
+    return false;
+  }
+
+  // AutocompleteMatch doesn't really have the right constructor for our
+  // needs.  Fake one for us to use.
+  static AutocompleteMatch MakeMatch(const string16 &contents,
+                                     const string16 &description) {
+    AutocompleteMatch m(NULL, 1, true, AutocompleteMatch::URL_WHAT_YOU_TYPED);
+    m.contents = contents;
+    m.description = description;
+    return m;
+  }
+
+  NSColor* color_;  // weak
+  NSColor* dimColor_;  // weak
+  gfx::Font font_;
 };
 
-// Simple inputs with no matches should result in styled output who's text
-// matches the input string, with the passed-in color, and nothing bolded.
+// Simple inputs with no matches should result in styled output who's
+// text matches the input string, with the passed-in color, and
+// nothing bolded.
 TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringNoMatch) {
   NSString* const string = @"This is a test";
   AutocompleteMatch::ACMatchClassifications classifications;
@@ -137,7 +109,7 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringNoMatch) {
   NSAttributedString* decorated =
       OmniboxPopupViewMac::DecorateMatchedString(
           base::SysNSStringToUTF16(string), classifications,
-          color_, dim_color_, font_);
+          color_, dimColor_, font_);
 
   // Result has same characters as the input.
   EXPECT_EQ([decorated length], [string length]);
@@ -150,13 +122,13 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringNoMatch) {
   EXPECT_TRUE(RunHasColor(decorated, 0U, color_));
 
   // An unbolded font for the entire string.
-  EXPECT_EQ(RunLengthForAttribute(decorated, 0U, NSFontAttributeName),
-            [string length]);
+  EXPECT_EQ(RunLengthForAttribute(decorated, 0U,
+                                  NSFontAttributeName), [string length]);
   EXPECT_FALSE(RunHasFontTrait(decorated, 0U, NSBoldFontMask));
 }
 
-// Identical to DecorateMatchedStringNoMatch, except test that URL style gets a
-// different color than we passed in.
+// Identical to DecorateMatchedStringNoMatch, except test that URL
+// style gets a different color than we passed in.
 TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringURLNoMatch) {
   NSString* const string = @"This is a test";
   AutocompleteMatch::ACMatchClassifications classifications;
@@ -167,7 +139,7 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringURLNoMatch) {
   NSAttributedString* decorated =
       OmniboxPopupViewMac::DecorateMatchedString(
           base::SysNSStringToUTF16(string), classifications,
-          color_, dim_color_, font_);
+          color_, dimColor_, font_);
 
   // Result has same characters as the input.
   EXPECT_EQ([decorated length], [string length]);
@@ -189,24 +161,24 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringURLNoMatch) {
 TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringDimNoMatch) {
   NSString* const string = @"This is a test";
   // Dim "is".
-  const NSUInteger run_length_1 = 5, run_length_2 = 2, run_length_3 = 7;
+  const NSUInteger runLength1 = 5, runLength2 = 2, runLength3 = 7;
   // Make sure nobody messed up the inputs.
-  EXPECT_EQ(run_length_1 + run_length_2 + run_length_3, [string length]);
+  EXPECT_EQ(runLength1 + runLength2 + runLength3, [string length]);
 
   // Push each run onto classifications.
   AutocompleteMatch::ACMatchClassifications classifications;
   classifications.push_back(
       ACMatchClassification(0, ACMatchClassification::NONE));
   classifications.push_back(
-      ACMatchClassification(run_length_1, ACMatchClassification::DIM));
+      ACMatchClassification(runLength1, ACMatchClassification::DIM));
   classifications.push_back(
-      ACMatchClassification(run_length_1 + run_length_2,
+      ACMatchClassification(runLength1 + runLength2,
                             ACMatchClassification::NONE));
 
   NSAttributedString* decorated =
       OmniboxPopupViewMac::DecorateMatchedString(
           base::SysNSStringToUTF16(string), classifications,
-          color_, dim_color_, font_);
+          color_, dimColor_, font_);
 
   // Result has same characters as the input.
   EXPECT_EQ([decorated length], [string length]);
@@ -215,18 +187,18 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringDimNoMatch) {
   // Should have three font runs, normal, dim, normal.
   EXPECT_EQ(RunLengthForAttribute(decorated, 0U,
                                   NSForegroundColorAttributeName),
-            run_length_1);
+            runLength1);
   EXPECT_TRUE(RunHasColor(decorated, 0U, color_));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, run_length_1,
+  EXPECT_EQ(RunLengthForAttribute(decorated, runLength1,
                                   NSForegroundColorAttributeName),
-            run_length_2);
-  EXPECT_TRUE(RunHasColor(decorated, run_length_1, dim_color_));
+            runLength2);
+  EXPECT_TRUE(RunHasColor(decorated, runLength1, dimColor_));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, run_length_1 + run_length_2,
+  EXPECT_EQ(RunLengthForAttribute(decorated, runLength1 + runLength2,
                                   NSForegroundColorAttributeName),
-            run_length_3);
-  EXPECT_TRUE(RunHasColor(decorated, run_length_1 + run_length_2, color_));
+            runLength3);
+  EXPECT_TRUE(RunHasColor(decorated, runLength1 + runLength2, color_));
 
   // An unbolded font for the entire string.
   EXPECT_EQ(RunLengthForAttribute(decorated, 0U,
@@ -234,28 +206,29 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringDimNoMatch) {
   EXPECT_FALSE(RunHasFontTrait(decorated, 0U, NSBoldFontMask));
 }
 
-// Test that the matched run gets bold-faced, but keeps the same color.
+// Test that the matched run gets bold-faced, but keeps the same
+// color.
 TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringMatch) {
   NSString* const string = @"This is a test";
   // Match "is".
-  const NSUInteger run_length_1 = 5, run_length_2 = 2, run_length_3 = 7;
+  const NSUInteger runLength1 = 5, runLength2 = 2, runLength3 = 7;
   // Make sure nobody messed up the inputs.
-  EXPECT_EQ(run_length_1 + run_length_2 + run_length_3, [string length]);
+  EXPECT_EQ(runLength1 + runLength2 + runLength3, [string length]);
 
   // Push each run onto classifications.
   AutocompleteMatch::ACMatchClassifications classifications;
   classifications.push_back(
       ACMatchClassification(0, ACMatchClassification::NONE));
   classifications.push_back(
-      ACMatchClassification(run_length_1, ACMatchClassification::MATCH));
+      ACMatchClassification(runLength1, ACMatchClassification::MATCH));
   classifications.push_back(
-      ACMatchClassification(run_length_1 + run_length_2,
+      ACMatchClassification(runLength1 + runLength2,
                             ACMatchClassification::NONE));
 
   NSAttributedString* decorated =
       OmniboxPopupViewMac::DecorateMatchedString(
           base::SysNSStringToUTF16(string), classifications,
-          color_, dim_color_, font_);
+          color_, dimColor_, font_);
 
   // Result has same characters as the input.
   EXPECT_EQ([decorated length], [string length]);
@@ -269,16 +242,16 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringMatch) {
 
   // Should have three font runs, not bold, bold, then not bold again.
   EXPECT_EQ(RunLengthForAttribute(decorated, 0U,
-                                  NSFontAttributeName), run_length_1);
+                                  NSFontAttributeName), runLength1);
   EXPECT_FALSE(RunHasFontTrait(decorated, 0U, NSBoldFontMask));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, run_length_1,
-                                  NSFontAttributeName), run_length_2);
-  EXPECT_TRUE(RunHasFontTrait(decorated, run_length_1, NSBoldFontMask));
+  EXPECT_EQ(RunLengthForAttribute(decorated, runLength1,
+                                  NSFontAttributeName), runLength2);
+  EXPECT_TRUE(RunHasFontTrait(decorated, runLength1, NSBoldFontMask));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, run_length_1 + run_length_2,
-                                  NSFontAttributeName), run_length_3);
-  EXPECT_FALSE(RunHasFontTrait(decorated, run_length_1 + run_length_2,
+  EXPECT_EQ(RunLengthForAttribute(decorated, runLength1 + runLength2,
+                                  NSFontAttributeName), runLength3);
+  EXPECT_FALSE(RunHasFontTrait(decorated, runLength1 + runLength2,
                                NSBoldFontMask));
 }
 
@@ -286,24 +259,24 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringMatch) {
 TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringURLMatch) {
   NSString* const string = @"http://hello.world/";
   // Match "hello".
-  const NSUInteger run_length_1 = 7, run_length_2 = 5, run_length_3 = 7;
+  const NSUInteger runLength1 = 7, runLength2 = 5, runLength3 = 7;
   // Make sure nobody messed up the inputs.
-  EXPECT_EQ(run_length_1 + run_length_2 + run_length_3, [string length]);
+  EXPECT_EQ(runLength1 + runLength2 + runLength3, [string length]);
 
   // Push each run onto classifications.
   AutocompleteMatch::ACMatchClassifications classifications;
   classifications.push_back(
       ACMatchClassification(0, ACMatchClassification::URL));
   const int kURLMatch = ACMatchClassification::URL|ACMatchClassification::MATCH;
-  classifications.push_back(ACMatchClassification(run_length_1, kURLMatch));
+  classifications.push_back(ACMatchClassification(runLength1, kURLMatch));
   classifications.push_back(
-      ACMatchClassification(run_length_1 + run_length_2,
+      ACMatchClassification(runLength1 + runLength2,
                             ACMatchClassification::URL));
 
   NSAttributedString* decorated =
       OmniboxPopupViewMac::DecorateMatchedString(
           base::SysNSStringToUTF16(string), classifications,
-          color_, dim_color_, font_);
+          color_, dimColor_, font_);
 
   // Result has same characters as the input.
   EXPECT_EQ([decorated length], [string length]);
@@ -317,16 +290,16 @@ TEST_F(OmniboxPopupViewMacTest, DecorateMatchedStringURLMatch) {
 
   // Should have three font runs, not bold, bold, then not bold again.
   EXPECT_EQ(RunLengthForAttribute(decorated, 0U,
-                                  NSFontAttributeName), run_length_1);
+                                  NSFontAttributeName), runLength1);
   EXPECT_FALSE(RunHasFontTrait(decorated, 0U, NSBoldFontMask));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, run_length_1,
-                                  NSFontAttributeName), run_length_2);
-  EXPECT_TRUE(RunHasFontTrait(decorated, run_length_1, NSBoldFontMask));
+  EXPECT_EQ(RunLengthForAttribute(decorated, runLength1,
+                                  NSFontAttributeName), runLength2);
+  EXPECT_TRUE(RunHasFontTrait(decorated, runLength1, NSBoldFontMask));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, run_length_1 + run_length_2,
-                                  NSFontAttributeName), run_length_3);
-  EXPECT_FALSE(RunHasFontTrait(decorated, run_length_1 + run_length_2,
+  EXPECT_EQ(RunLengthForAttribute(decorated, runLength1 + runLength2,
+                                  NSFontAttributeName), runLength3);
+  EXPECT_FALSE(RunHasFontTrait(decorated, runLength1 + runLength2,
                                NSBoldFontMask));
 }
 
@@ -369,20 +342,20 @@ TEST_F(OmniboxPopupViewMacTest, MatchText) {
 TEST_F(OmniboxPopupViewMacTest, MatchTextContentsMatch) {
   NSString* const contents = @"This is a test";
   // Match "is".
-  const NSUInteger run_length_1 = 5, run_length_2 = 2, run_length_3 = 7;
+  const NSUInteger runLength1 = 5, runLength2 = 2, runLength3 = 7;
   // Make sure nobody messed up the inputs.
-  EXPECT_EQ(run_length_1 + run_length_2 + run_length_3, [contents length]);
+  EXPECT_EQ(runLength1 + runLength2 + runLength3, [contents length]);
 
   AutocompleteMatch m = MakeMatch(base::SysNSStringToUTF16(contents),
-                                  base::string16());
+                                  string16());
 
   // Push each run onto contents classifications.
   m.contents_class.push_back(
       ACMatchClassification(0, ACMatchClassification::NONE));
   m.contents_class.push_back(
-      ACMatchClassification(run_length_1, ACMatchClassification::MATCH));
+      ACMatchClassification(runLength1, ACMatchClassification::MATCH));
   m.contents_class.push_back(
-      ACMatchClassification(run_length_1 + run_length_2,
+      ACMatchClassification(runLength1 + runLength2,
                             ACMatchClassification::NONE));
 
   NSAttributedString* decorated =
@@ -399,16 +372,16 @@ TEST_F(OmniboxPopupViewMacTest, MatchTextContentsMatch) {
 
   // Should have three font runs, not bold, bold, then not bold again.
   EXPECT_EQ(RunLengthForAttribute(decorated, 0U,
-                                  NSFontAttributeName), run_length_1);
+                                  NSFontAttributeName), runLength1);
   EXPECT_FALSE(RunHasFontTrait(decorated, 0U, NSBoldFontMask));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, run_length_1,
-                                  NSFontAttributeName), run_length_2);
-  EXPECT_TRUE(RunHasFontTrait(decorated, run_length_1, NSBoldFontMask));
+  EXPECT_EQ(RunLengthForAttribute(decorated, runLength1,
+                                  NSFontAttributeName), runLength2);
+  EXPECT_TRUE(RunHasFontTrait(decorated, runLength1, NSBoldFontMask));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, run_length_1 + run_length_2,
-                                  NSFontAttributeName), run_length_3);
-  EXPECT_FALSE(RunHasFontTrait(decorated, run_length_1 + run_length_2,
+  EXPECT_EQ(RunLengthForAttribute(decorated, runLength1 + runLength2,
+                                  NSFontAttributeName), runLength3);
+  EXPECT_FALSE(RunHasFontTrait(decorated, runLength1 + runLength2,
                                NSBoldFontMask));
 }
 
@@ -417,9 +390,9 @@ TEST_F(OmniboxPopupViewMacTest, MatchTextDescriptionMatch) {
   NSString* const contents = @"This is a test";
   NSString* const description = @"That was a test";
   // Match "That was".
-  const NSUInteger run_length_1 = 8, run_length_2 = 7;
+  const NSUInteger runLength1 = 8, runLength2 = 7;
   // Make sure nobody messed up the inputs.
-  EXPECT_EQ(run_length_1 + run_length_2, [description length]);
+  EXPECT_EQ(runLength1 + runLength2, [description length]);
 
   AutocompleteMatch m = MakeMatch(base::SysNSStringToUTF16(contents),
                                   base::SysNSStringToUTF16(description));
@@ -428,7 +401,7 @@ TEST_F(OmniboxPopupViewMacTest, MatchTextDescriptionMatch) {
   m.description_class.push_back(
       ACMatchClassification(0, ACMatchClassification::MATCH));
   m.description_class.push_back(
-      ACMatchClassification(run_length_1, ACMatchClassification::NONE));
+      ACMatchClassification(runLength1, ACMatchClassification::NONE));
 
   NSAttributedString* decorated =
       OmniboxPopupViewMac::MatchText(m, font_, kLargeWidth);
@@ -457,18 +430,18 @@ TEST_F(OmniboxPopupViewMacTest, MatchTextDescriptionMatch) {
   EXPECT_FALSE(RunHasFontTrait(decorated, 0U, NSBoldFontMask));
 
   EXPECT_EQ(RunLengthForAttribute(decorated, descriptionLocation,
-                                  NSFontAttributeName), run_length_1);
+                                  NSFontAttributeName), runLength1);
   EXPECT_TRUE(RunHasFontTrait(decorated, descriptionLocation, NSBoldFontMask));
 
-  EXPECT_EQ(RunLengthForAttribute(decorated, descriptionLocation + run_length_1,
-                                  NSFontAttributeName), run_length_2);
-  EXPECT_FALSE(RunHasFontTrait(decorated, descriptionLocation + run_length_1,
+  EXPECT_EQ(RunLengthForAttribute(decorated, descriptionLocation + runLength1,
+                                  NSFontAttributeName), runLength2);
+  EXPECT_FALSE(RunHasFontTrait(decorated, descriptionLocation + runLength1,
                                NSBoldFontMask));
 }
 
 TEST_F(OmniboxPopupViewMacTest, ElideString) {
   NSString* const contents = @"This is a test with long contents";
-  const base::string16 contents16(base::SysNSStringToUTF16(contents));
+  const string16 contents16(base::SysNSStringToUTF16(contents));
 
   const float kWide = 1000.0;
   const float kNarrow = 20.0;
@@ -476,7 +449,7 @@ TEST_F(OmniboxPopupViewMacTest, ElideString) {
   NSDictionary* attributes =
       [NSDictionary dictionaryWithObject:font_.GetNativeFont()
                                   forKey:NSFontAttributeName];
-  base::scoped_nsobject<NSMutableAttributedString> as(
+  scoped_nsobject<NSMutableAttributedString> as(
       [[NSMutableAttributedString alloc] initWithString:contents
                                              attributes:attributes]);
 
@@ -487,17 +460,15 @@ TEST_F(OmniboxPopupViewMacTest, ElideString) {
   EXPECT_TRUE([[as string] isEqualToString:contents]);
 
   // When elided, result is the same as ElideText().
-  gfx::FontList font_list(font_);
   ret = OmniboxPopupViewMac::ElideString(as, contents16, font_, kNarrow);
-  base::string16 elided =
-      gfx::ElideText(contents16, font_list, kNarrow, gfx::ELIDE_AT_END);
+  string16 elided = ui::ElideText(contents16, font_, kNarrow, ui::ELIDE_AT_END);
   EXPECT_TRUE(ret == as);
   EXPECT_FALSE([[as string] isEqualToString:contents]);
   EXPECT_TRUE([[as string] isEqualToString:base::SysUTF16ToNSString(elided)]);
 
   // When elided, result is the same as ElideText().
   ret = OmniboxPopupViewMac::ElideString(as, contents16, font_, 0.0);
-  elided = gfx::ElideText(contents16, font_list, 0.0, gfx::ELIDE_AT_END);
+  elided = ui::ElideText(contents16, font_, 0.0, ui::ELIDE_AT_END);
   EXPECT_TRUE(ret == as);
   EXPECT_FALSE([[as string] isEqualToString:contents]);
   EXPECT_TRUE([[as string] isEqualToString:base::SysUTF16ToNSString(elided)]);
@@ -507,9 +478,9 @@ TEST_F(OmniboxPopupViewMacTest, MatchTextElide) {
   NSString* const contents = @"This is a test with long contents";
   NSString* const description = @"That was a test";
   // Match "long".
-  const NSUInteger run_length_1 = 20, run_length_2 = 4, run_length_3 = 9;
+  const NSUInteger runLength1 = 20, runLength2 = 4, runLength3 = 9;
   // Make sure nobody messed up the inputs.
-  EXPECT_EQ(run_length_1 + run_length_2 + run_length_3, [contents length]);
+  EXPECT_EQ(runLength1 + runLength2 + runLength3, [contents length]);
 
   AutocompleteMatch m = MakeMatch(base::SysNSStringToUTF16(contents),
                                   base::SysNSStringToUTF16(description));
@@ -518,9 +489,9 @@ TEST_F(OmniboxPopupViewMacTest, MatchTextElide) {
   m.contents_class.push_back(
       ACMatchClassification(0, ACMatchClassification::NONE));
   m.contents_class.push_back(
-      ACMatchClassification(run_length_1, ACMatchClassification::MATCH));
+      ACMatchClassification(runLength1, ACMatchClassification::MATCH));
   m.contents_class.push_back(
-      ACMatchClassification(run_length_1 + run_length_2,
+      ACMatchClassification(runLength1 + runLength2,
                             ACMatchClassification::URL));
 
   // Figure out the width of the contents.
@@ -548,7 +519,7 @@ TEST_F(OmniboxPopupViewMacTest, MatchTextElide) {
   // values being passed to NSAttributedString.  Push the ellipsis
   // through part of each run to verify that we don't continue to see
   // such things.
-  while([commonPrefix length] > run_length_1 - 3) {
+  while([commonPrefix length] > runLength1 - 3) {
     EXPECT_GT(cellWidth, 0.0);
     cellWidth -= 1.0;
     decorated = OmniboxPopupViewMac::MatchText(m, font_, cellWidth);
@@ -558,33 +529,24 @@ TEST_F(OmniboxPopupViewMacTest, MatchTextElide) {
   }
 }
 
-TEST_F(OmniboxPopupViewMacTest, UpdatePopupAppearance) {
-  base::scoped_nsobject<NSTextField> field(
-      [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)]);
-  [[test_window() contentView] addSubview:field];
+// TODO(shess): Test that
+// OmniboxPopupViewMac::UpdatePopupAppearance() creates/destroys
+// the popup according to result contents.  Test that the matrix gets
+// the right number of results.  Test the contents of the cells for
+// the right strings.  Icons?  Maybe, that seems harder to test.
+// Styling seems almost impossible.
 
-  OmniboxViewMac view(NULL, profile(), NULL, NULL);
-  MockOmniboxPopupViewMac popup_view(&view, view.model(), field);
+// TODO(shess): Test that OmniboxPopupViewMac::PaintUpdatesNow()
+// updates the matrix selection.
 
-  popup_view.UpdatePopupAppearance();
-  EXPECT_FALSE(popup_view.IsOpen());
-  EXPECT_EQ(0, [popup_view.matrix() numberOfRows]);
+// TODO(shess): Test that OmniboxPopupViewMac::AcceptInput()
+// updates the model's selection from the matrix before returning.
+// Could possibly test that via -select:.
 
-  popup_view.SetResultCount(3);
-  popup_view.UpdatePopupAppearance();
-  EXPECT_TRUE(popup_view.IsOpen());
-  EXPECT_EQ(3, [popup_view.matrix() numberOfRows]);
+// TODO(shess): Test that AutocompleteButtonCell returns the right
+// background colors for on, highlighted, and neither.
 
-  int old_height = popup_view.GetTargetBounds().height();
-  popup_view.SetResultCount(5);
-  popup_view.UpdatePopupAppearance();
-  EXPECT_GT(popup_view.GetTargetBounds().height(), old_height);
-  EXPECT_EQ(5, [popup_view.matrix() numberOfRows]);
-
-  popup_view.SetResultCount(0);
-  popup_view.UpdatePopupAppearance();
-  EXPECT_FALSE(popup_view.IsOpen());
-  EXPECT_EQ(0, [popup_view.matrix() numberOfRows]);
-}
+// TODO(shess): Test that AutocompleteMatrixTarget can be initialized
+// and then sends -select: to the view.
 
 }  // namespace

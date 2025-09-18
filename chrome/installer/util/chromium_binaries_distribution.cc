@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -20,57 +20,46 @@ ChromiumBinariesDistribution::ChromiumBinariesDistribution()
           BrowserDistribution::GetSpecificDistribution(CHROME_BROWSER)) {
 }
 
-base::string16 ChromiumBinariesDistribution::GetAppGuid() {
-  return base::string16();
+std::wstring ChromiumBinariesDistribution::GetAppGuid() {
+  return std::wstring();
 }
 
-base::string16 ChromiumBinariesDistribution::GetBaseAppName() {
+std::wstring ChromiumBinariesDistribution::GetApplicationName() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 ChromiumBinariesDistribution::GetBrowserProgIdPrefix() {
-  NOTREACHED();
-  return base::string16();
-}
-
-base::string16 ChromiumBinariesDistribution::GetBrowserProgIdDesc() {
-  NOTREACHED();
-  return base::string16();
-}
-
-base::string16 ChromiumBinariesDistribution::GetDisplayName() {
+std::wstring ChromiumBinariesDistribution::GetAppShortCutName() {
   return kChromiumBinariesName;
 }
 
-base::string16 ChromiumBinariesDistribution::GetShortcutName(
-    ShortcutType shortcut_type) {
+std::wstring ChromiumBinariesDistribution::GetAlternateApplicationName() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 ChromiumBinariesDistribution::GetBaseAppId() {
+std::wstring ChromiumBinariesDistribution::GetBrowserAppId() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 ChromiumBinariesDistribution::GetInstallSubDir() {
+std::wstring ChromiumBinariesDistribution::GetInstallSubDir() {
   return browser_distribution_->GetInstallSubDir();
 }
 
-base::string16 ChromiumBinariesDistribution::GetPublisherName() {
+std::wstring ChromiumBinariesDistribution::GetPublisherName() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 ChromiumBinariesDistribution::GetAppDescription() {
+std::wstring ChromiumBinariesDistribution::GetAppDescription() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 ChromiumBinariesDistribution::GetLongAppDescription() {
+std::wstring ChromiumBinariesDistribution::GetLongAppDescription() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
 std::string ChromiumBinariesDistribution::GetSafeBrowsingName() {
@@ -78,44 +67,39 @@ std::string ChromiumBinariesDistribution::GetSafeBrowsingName() {
   return std::string();
 }
 
-base::string16 ChromiumBinariesDistribution::GetStateKey() {
-  return base::string16(L"Software\\").append(kChromiumBinariesName);
+std::wstring ChromiumBinariesDistribution::GetStateKey() {
+  return std::wstring(L"Software\\").append(kChromiumBinariesName);
 }
 
-base::string16 ChromiumBinariesDistribution::GetStateMediumKey() {
-  return base::string16(L"Software\\").append(kChromiumBinariesName);
+std::wstring ChromiumBinariesDistribution::GetStateMediumKey() {
+  return std::wstring(L"Software\\").append(kChromiumBinariesName);
 }
 
-base::string16 ChromiumBinariesDistribution::GetUninstallLinkName() {
+std::wstring ChromiumBinariesDistribution::GetUninstallLinkName() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 ChromiumBinariesDistribution::GetUninstallRegPath() {
+std::wstring ChromiumBinariesDistribution::GetUninstallRegPath() {
   NOTREACHED();
-  return base::string16();
+  return std::wstring();
 }
 
-base::string16 ChromiumBinariesDistribution::GetVersionKey() {
-  return base::string16(L"Software\\").append(kChromiumBinariesName);
+std::wstring ChromiumBinariesDistribution::GetVersionKey() {
+  return std::wstring(L"Software\\").append(kChromiumBinariesName);
 }
 
-BrowserDistribution::DefaultBrowserControlPolicy
-    ChromiumBinariesDistribution::GetDefaultBrowserControlPolicy() {
-  return DEFAULT_BROWSER_UNSUPPORTED;
-}
-
-int ChromiumBinariesDistribution::GetIconIndex(ShortcutType shortcut_type) {
-  NOTREACHED();
-  return 0;
-}
-
-bool ChromiumBinariesDistribution::GetChromeChannel(base::string16* channel) {
+bool ChromiumBinariesDistribution::CanSetAsDefault() {
   NOTREACHED();
   return false;
 }
 
-bool ChromiumBinariesDistribution::GetCommandExecuteImplClsid(
-    base::string16* handler_class_uuid) {
+int ChromiumBinariesDistribution::GetIconIndex() {
+  NOTREACHED();
+  return 0;
+}
+
+bool ChromiumBinariesDistribution::GetChromeChannel(std::wstring* channel) {
+  NOTREACHED();
   return false;
 }

@@ -4,46 +4,34 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_HISTORY_MODEL_WORKER_H_
 #define CHROME_BROWSER_SYNC_GLUE_HISTORY_MODEL_WORKER_H_
+#pragma once
 
-#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "chrome/browser/sync/engine/model_safe_worker.h"
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
-#include "chrome/browser/common/cancelable_request.h"
-#include "chrome/browser/history/history_db_task.h"
-#include "chrome/browser/history/history_service.h"
+#include "chrome/browser/cancelable_request.h"
 
 class HistoryService;
 
 namespace browser_sync {
 
-// A syncer::ModelSafeWorker for history models that accepts requests
+// A ModelSafeWorker for history models that accepts requests
 // from the syncapi that need to be fulfilled on the history thread.
-class HistoryModelWorker : public syncer::ModelSafeWorker {
+class HistoryModelWorker : public browser_sync::ModelSafeWorker {
  public:
-  explicit HistoryModelWorker(
-      const base::WeakPtr<HistoryService>& history_service,
-      syncer::WorkerLoopDestructionObserver* observer);
-
-  // syncer::ModelSafeWorker implementation. Called on syncapi SyncerThread.
-  virtual void RegisterForLoopDestruction() OVERRIDE;
-  virtual syncer::ModelSafeGroup GetModelSafeGroup() OVERRIDE;
-
-  // Called on history DB thread to register HistoryModelWorker to observe
-  // destruction of history backend loop.
-  void RegisterOnDBThread();
-
- protected:
-  virtual syncer::SyncerError DoWorkAndWaitUntilDoneImpl(
-      const syncer::WorkCallback& work) OVERRIDE;
-
- private:
+  explicit HistoryModelWorker(HistoryService* history_service);
   virtual ~HistoryModelWorker();
 
-  const base::WeakPtr<HistoryService> history_service_;
+  // ModelSafeWorker implementation. Called on syncapi SyncerThread.
+  virtual SyncerError DoWorkAndWaitUntilDone(
+      const WorkCallback& work) OVERRIDE;
+  virtual ModelSafeGroup GetModelSafeGroup() OVERRIDE;
+
+ private:
+  scoped_refptr<HistoryService> history_service_;
   // Helper object to make sure we don't leave tasks running on the history
   // thread.
   CancelableRequestConsumerT<int, 0> cancelable_consumer_;

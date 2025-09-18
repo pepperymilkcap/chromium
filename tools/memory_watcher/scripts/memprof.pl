@@ -1,7 +1,5 @@
 #!/usr/bin/perl
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
+
 #
 # Given a memwatcher logfile, group memory allocations by callstack.
 #
@@ -47,7 +45,7 @@ sub process_raw($$) {
     my $line = $_;
 #print "$line";
     chomp($line);
-    if ($line =~ m/([0-9]*) bytes, ([0-9]*) allocs/) {
+    if ($line =~ m/([0-9]*) bytes, ([0-9]*) items/) {
 
       # If we didn't find any frames to account this to, log that.
       if ($blamed == 0) {

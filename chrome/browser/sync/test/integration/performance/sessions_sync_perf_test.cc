@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/performance/sync_timing_helper.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sessions_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 
 using content::OpenURLParams;
 using sessions_helper::GetLocalSession;
@@ -61,13 +59,13 @@ void SessionsSyncPerfTest::UpdateTabs(int profile) {
   Browser* browser = GetBrowser(profile);
   GURL url;
   std::vector<GURL> urls;
-  for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
-    chrome::SelectNumberedTab(browser, i);
+  for (int i = 0; i < browser->tab_count(); ++i) {
+    browser->SelectNumberedTab(i);
     url = NextURL();
     browser->OpenURL(
         OpenURLParams(url,
         content::Referrer(GURL("http://localhost"),
-                          blink::WebReferrerPolicyDefault),
+                          WebKit::WebReferrerPolicyDefault),
         CURRENT_TAB,
         content::PageTransitionFromInt(0), false));
     urls.push_back(url);
@@ -76,7 +74,7 @@ void SessionsSyncPerfTest::UpdateTabs(int profile) {
 }
 
 void SessionsSyncPerfTest::RemoveTabs(int profile) {
-  GetBrowser(profile)->tab_strip_model()->CloseAllTabs();
+  GetBrowser(profile)->CloseAllTabs();
 }
 
 int SessionsSyncPerfTest::GetTabCount(int profile) {
@@ -112,7 +110,7 @@ GURL SessionsSyncPerfTest::NextURL() {
 }
 
 GURL SessionsSyncPerfTest::IntToURL(int n) {
-  return GURL(base::StringPrintf("http://localhost/%d", n));
+  return GURL(StringPrintf("http://localhost/%d", n));
 }
 
 // TODO(lipalani): Re-enable after crbug.com/96921 is fixed.

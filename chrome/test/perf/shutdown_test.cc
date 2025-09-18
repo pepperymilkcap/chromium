@@ -5,10 +5,10 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
+#include "base/string_number_conversions.h"
 #include "base/sys_info.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/env_vars.h"
@@ -17,7 +17,6 @@
 #include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
 #include "net/base/net_util.h"
-#include "testing/perf/perf_test.h"
 
 using base::TimeDelta;
 
@@ -28,8 +27,8 @@ class ShutdownTest : public UIPerfTest {
   ShutdownTest() {
     show_window_ = true;
   }
-  virtual void SetUp() {}
-  virtual void TearDown() {}
+  void SetUp() {}
+  void TearDown() {}
 
   enum TestSize {
     SIMPLE,  // Runs with no command line arguments (loads about:blank).
@@ -44,21 +43,21 @@ class ShutdownTest : public UIPerfTest {
         automation()->GetBrowserWindow(0));
     ASSERT_TRUE(browser_proxy.get());
 
-    const base::FilePath kFastShutdownDir(FILE_PATH_LITERAL("fast_shutdown"));
-    const base::FilePath kCurrentDir(base::FilePath::kCurrentDirectory);
-    const base::FilePath test_cases[] = {
+    const FilePath kFastShutdownDir(FILE_PATH_LITERAL("fast_shutdown"));
+    const FilePath kCurrentDir(FilePath::kCurrentDirectory);
+    const FilePath test_cases[] = {
       ui_test_utils::GetTestFilePath(kFastShutdownDir,
-          base::FilePath(FILE_PATH_LITERAL("on_before_unloader.html"))),
+          FilePath(FILE_PATH_LITERAL("on_before_unloader.html"))),
       ui_test_utils::GetTestFilePath(kCurrentDir,
-          base::FilePath(FILE_PATH_LITERAL("animated-gifs.html"))),
+          FilePath(FILE_PATH_LITERAL("animated-gifs.html"))),
       ui_test_utils::GetTestFilePath(kCurrentDir,
-          base::FilePath(FILE_PATH_LITERAL("french_page.html"))),
+          FilePath(FILE_PATH_LITERAL("french_page.html"))),
       ui_test_utils::GetTestFilePath(kCurrentDir,
-          base::FilePath(FILE_PATH_LITERAL("setcookie.html"))),
+          FilePath(FILE_PATH_LITERAL("onunload_cookie.html"))),
     };
 
     for (size_t i = 0; i < arraysize(test_cases); i++) {
-      ASSERT_TRUE(base::PathExists(test_cases[i]));
+      ASSERT_TRUE(file_util::PathExists(test_cases[i]));
       for (size_t j = 0; j < 5; j++) {
         ASSERT_TRUE(browser_proxy->AppendTab(
             net::FilePathToFileURL(test_cases[i])));
@@ -108,19 +107,18 @@ class ShutdownTest : public UIPerfTest {
         clear_profile_ = false;
         // Clear template_user_data_ so we don't try to copy it over each time
         // through.
-        set_template_user_data(base::FilePath());
+        set_template_user_data(FilePath());
       }
     }
 
     std::string times;
     for (int i = 0; i < numCycles; ++i)
       base::StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
-    perf_test::PrintResultList(
-        graph, std::string(), trace, times, "ms", important);
+    perf_test::PrintResultList(graph, "", trace, times, "ms", important);
   }
 };
 
-TEST_F(ShutdownTest, DISABLED_SimpleWindowClose) {
+TEST_F(ShutdownTest, SimpleWindowClose) {
   RunShutdownTest("shutdown", "simple-window-close",
                   true, /* important */ SIMPLE, ProxyLauncher::WINDOW_CLOSE);
 }
@@ -138,10 +136,8 @@ TEST_F(ShutdownTest, SimpleSessionEnding) {
 // http://crbug.com/110471
 #if defined(OS_WIN) && !defined(NDEBUG)
 #define MAYBE_TwentyTabsWindowClose DISABLED_TwentyTabsWindowClose
-#define MAYBE_TwentyTabsUserQuit DISABLED_TwentyTabsUserQuit
 #else
 #define MAYBE_TwentyTabsWindowClose TwentyTabsWindowClose
-#define MAYBE_TwentyTabsUserQuit TwentyTabsUserQuit
 #endif
 
 TEST_F(ShutdownTest, MAYBE_TwentyTabsWindowClose) {
@@ -150,7 +146,7 @@ TEST_F(ShutdownTest, MAYBE_TwentyTabsWindowClose) {
                   ProxyLauncher::WINDOW_CLOSE);
 }
 
-TEST_F(ShutdownTest, MAYBE_TwentyTabsUserQuit) {
+TEST_F(ShutdownTest, TwentyTabsUserQuit) {
   RunShutdownTest("shutdown", "twentytabs-user-quit",
                   true, /* important */ TWENTY_TABS, ProxyLauncher::USER_QUIT);
 }

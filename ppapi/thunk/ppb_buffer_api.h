@@ -7,12 +7,11 @@
 
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_stdint.h"
-#include "ppapi/thunk/ppapi_thunk_export.h"
 
 namespace ppapi {
 namespace thunk {
 
-class PPAPI_THUNK_EXPORT PPB_Buffer_API {
+class PPB_Buffer_API {
  public:
   virtual ~PPB_Buffer_API() {}
 
@@ -20,9 +19,6 @@ class PPAPI_THUNK_EXPORT PPB_Buffer_API {
   virtual PP_Bool IsMapped() = 0;
   virtual void* Map() = 0;
   virtual void Unmap() = 0;
-
-  // Trusted API
-  virtual int32_t GetSharedMemory(int* handle) = 0;
 };
 
 }  // namespace thunk

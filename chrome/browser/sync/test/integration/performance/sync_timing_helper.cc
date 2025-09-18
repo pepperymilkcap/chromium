@@ -4,9 +4,9 @@
 
 #include "chrome/browser/sync/test/integration/performance/sync_timing_helper.h"
 
-#include "base/strings/string_number_conversions.h"
-#include "base/time/time.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
+#include "base/string_number_conversions.h"
+#include "base/time.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 SyncTimingHelper::SyncTimingHelper() {}
@@ -17,7 +17,7 @@ SyncTimingHelper::~SyncTimingHelper() {}
 base::TimeDelta SyncTimingHelper::TimeSyncCycle(
     ProfileSyncServiceHarness* client) {
   base::Time start = base::Time::Now();
-  EXPECT_TRUE(client->AwaitFullSyncCompletion());
+  EXPECT_TRUE(client->AwaitFullSyncCompletion("Timing sync cycle."));
   return base::Time::Now() - start;
 }
 

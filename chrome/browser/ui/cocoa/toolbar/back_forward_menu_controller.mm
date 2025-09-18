@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,15 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
+#import "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
-#import "ui/base/cocoa/cocoa_event_utils.h"
-#include "ui/gfx/image/image.h"
+#include "skia/ext/skia_utils_mac.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 using base::SysUTF16ToNSString;
+using gfx::SkBitmapToNSImage;
 
 @implementation BackForwardMenuController
 
@@ -69,10 +71,10 @@ using base::SysUTF16ToNSString;
               keyEquivalent:@""];
       [menuItem autorelease];
 
-      gfx::Image icon;
+      SkBitmap icon;
       // Icon (if it has one).
       if (model_->GetIconAt(menuID, &icon))
-        [menuItem setImage:icon.ToNSImage()];
+        [menuItem setImage:SkBitmapToNSImage(icon)];
 
       // This will make it call our |-executeMenuItem:| method. We store the
       // |menuID| (or |menu_id|) in the tag.
@@ -92,7 +94,7 @@ using base::SysUTF16ToNSString;
 - (void)executeMenuItem:(id)sender {
   DCHECK([sender isKindOfClass:[NSMenuItem class]]);
   int menuID = [sender tag];
-  int event_flags = ui::EventFlagsFromNSEvent([NSApp currentEvent]);
+  int event_flags = event_utils::EventFlagsFromNSEvent([NSApp currentEvent]);
   model_->ActivatedAt(menuID, event_flags);
 }
 

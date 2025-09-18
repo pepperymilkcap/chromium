@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,7 @@
 #include "base/gtest_prod_util.h"
 #include "printing/metafile.h"
 
-namespace base {
 class FilePath;
-}
 
 namespace gfx {
 class Rect;
@@ -24,11 +22,6 @@ class Size;
 }
 
 namespace printing {
-
-// http://msdn2.microsoft.com/en-us/library/ms535522.aspx
-// Windows 2000/XP: When a page in a spooled file exceeds approximately 350
-// MB, it can fail to print and not send an error message.
-const size_t kMetafileMaxSize = 350*1024*1024;
 
 // Simple wrapper class that manage an EMF data stream and its virtual HDC.
 class PRINTING_EXPORT Emf : public Metafile {
@@ -44,17 +37,17 @@ class PRINTING_EXPORT Emf : public Metafile {
 
   // Generates a new metafile that will record every GDI command, and will
   // be saved to |metafile_path|.
-  virtual bool InitToFile(const base::FilePath& metafile_path);
+  virtual bool InitToFile(const FilePath& metafile_path);
 
   // Initializes the Emf with the data in |metafile_path|.
-  virtual bool InitFromFile(const base::FilePath& metafile_path);
+  virtual bool InitFromFile(const FilePath& metafile_path);
 
   // Metafile methods.
   virtual bool Init() OVERRIDE;
   virtual bool InitFromData(const void* src_buffer,
                             uint32 src_buffer_size) OVERRIDE;
 
-  virtual SkBaseDevice* StartPageForVectorCanvas(
+  virtual SkDevice* StartPageForVectorCanvas(
       const gfx::Size& page_size, const gfx::Rect& content_area,
       const float& scale_factor) OVERRIDE;
   // Inserts a custom GDICOMMENT records indicating StartPage/EndPage calls
@@ -73,7 +66,7 @@ class PRINTING_EXPORT Emf : public Metafile {
   // Saves the EMF data to a file as-is. It is recommended to use the .emf file
   // extension but it is not enforced. This function synchronously writes to the
   // file. For testing only.
-  virtual bool SaveTo(const base::FilePath& file_path) const OVERRIDE;
+  virtual bool SaveTo(const FilePath& file_path) const OVERRIDE;
 
   // Should be passed to Playback to keep the exact same size.
   virtual gfx::Rect GetPageBounds(unsigned int page_number) const OVERRIDE;
@@ -92,17 +85,6 @@ class PRINTING_EXPORT Emf : public Metafile {
   virtual HENHMETAFILE emf() const OVERRIDE {
     return emf_;
   }
-
-  // Returns true if metafile contains alpha blend.
-  bool IsAlphaBlendUsed() const;
-
-  // Returns new metafile with only bitmap created by playback of the current
-  // metafile. Returns NULL if fails.
-  Emf* RasterizeMetafile(int raster_area_in_pixels) const;
-
-  // Returns new metafile where AlphaBlend replaced by bitmaps. Returns NULL
-  // if fails.
-  Emf* RasterizeAlphaBlend() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(EmfTest, DC);
@@ -131,13 +113,9 @@ class PRINTING_EXPORT Emf : public Metafile {
 };
 
 struct Emf::EnumerationContext {
-  EnumerationContext();
-
   HANDLETABLE* handle_table;
   int objects_count;
   HDC hdc;
-  const XFORM* base_matrix;
-  int dc_on_page_start;
 };
 
 // One EMF record. It keeps pointers to the EMF buffer held by Emf::emf_.
@@ -145,22 +123,24 @@ struct Emf::EnumerationContext {
 class PRINTING_EXPORT Emf::Record {
  public:
   // Plays the record.
-  bool Play(EnumerationContext* context) const;
+  bool Play() const;
 
   // Plays the record working around quirks with SetLayout,
   // SetWorldTransform and ModifyWorldTransform. See implementation for details.
-  bool SafePlayback(EnumerationContext* context) const;
+  bool SafePlayback(const XFORM* base_matrix) const;
 
   // Access the underlying EMF record.
   const ENHMETARECORD* record() const { return record_; }
 
  protected:
-  explicit Record(const ENHMETARECORD* record);
+  Record(const EnumerationContext* context,
+         const ENHMETARECORD* record);
 
  private:
   friend class Emf;
   friend class Enumerator;
   const ENHMETARECORD* record_;
+  const EnumerationContext* context_;
 };
 
 // Retrieves individual records out of a Emf buffer. The main use is to skip
@@ -183,8 +163,6 @@ class PRINTING_EXPORT Emf::Enumerator {
   const_iterator end() const;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(EmfPrintingTest, Enumerate);
-
   // Processes one EMF record and saves it in the items_ array.
   static int CALLBACK EnhMetaFileProc(HDC hdc,
                                       HANDLETABLE* handle_table,

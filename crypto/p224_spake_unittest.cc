@@ -7,9 +7,7 @@
 #include "base/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace crypto {
-
-namespace {
+using namespace crypto;
 
 bool RunExchange(P224EncryptedKeyExchange* client,
                  P224EncryptedKeyExchange* server) {
@@ -44,9 +42,7 @@ bool RunExchange(P224EncryptedKeyExchange* client,
   }
 }
 
-const char kPassword[] = "foo";
-
-}  // namespace
+static const char kPassword[] = "foo";
 
 TEST(MutualAuth, CorrectAuth) {
   P224EncryptedKeyExchange client(
@@ -126,5 +122,3 @@ TEST(MutualAuth, Fuzz) {
     }
   }
 }
-
-}  // namespace crypto

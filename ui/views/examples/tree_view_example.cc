@@ -4,28 +4,22 @@
 
 #include "ui/views/examples/tree_view_example.h"
 
-#include "base/strings/utf_string_conversions.h"
-#include "ui/views/controls/button/label_button.h"
+#include "base/utf_string_conversions.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/tree/tree_view.h"
+#include "ui/views/controls/tree/tree_view.h"
 #include "ui/views/layout/grid_layout.h"
-
-using base::ASCIIToUTF16;
 
 namespace views {
 namespace examples {
 
 TreeViewExample::TreeViewExample()
     : ExampleBase("Tree View"),
-      tree_view_(NULL),
       model_(new NodeType(ASCIIToUTF16("root"), 1)) {
 }
 
 TreeViewExample::~TreeViewExample() {
-  // Delete the view before the model.
-  delete tree_view_;
-  tree_view_ = NULL;
 }
 
 void TreeViewExample::CreateExampleView(View* container) {
@@ -44,14 +38,15 @@ void TreeViewExample::CreateExampleView(View* container) {
   tree_view_ = new TreeView();
   tree_view_->set_context_menu_controller(this);
   tree_view_->SetRootShown(false);
+  tree_view_->set_lines_at_root(true);
   tree_view_->SetModel(&model_);
   tree_view_->SetController(this);
-  add_ = new LabelButton(this, ASCIIToUTF16("Add"));
-  add_->SetFocusable(true);
-  remove_ = new LabelButton(this, ASCIIToUTF16("Remove"));
-  remove_->SetFocusable(true);
-  change_title_ = new LabelButton(this, ASCIIToUTF16("Change Title"));
-  change_title_->SetFocusable(true);
+  add_ = new TextButton(this, ASCIIToUTF16("Add"));
+  add_->set_focusable(true);
+  remove_ = new TextButton(this, ASCIIToUTF16("Remove"));
+  remove_->set_focusable(true);
+  change_title_ = new TextButton(this, ASCIIToUTF16("Change Title"));
+  change_title_->set_focusable(true);
 
   GridLayout* layout = new GridLayout(container);
   container->SetLayoutManager(layout);
@@ -92,7 +87,7 @@ bool TreeViewExample::IsCommandIdEnabled(int command_id) {
       tree_view_->GetSelectedNode() != model_.GetRoot();
 }
 
-void TreeViewExample::ButtonPressed(Button* sender, const ui::Event& event) {
+void TreeViewExample::ButtonPressed(Button* sender, const Event& event) {
   NodeType* selected_node =
       static_cast<NodeType*>(tree_view_->GetSelectedNode());
   if (sender == add_) {
@@ -125,16 +120,17 @@ bool TreeViewExample::CanEdit(TreeView* tree_view,
 }
 
 void TreeViewExample::ShowContextMenuForView(View* source,
-                                             const gfx::Point& point,
-                                             ui::MenuSourceType source_type) {
+                                             const gfx::Point& p,
+                                             bool is_mouse_gesture) {
   ui::SimpleMenuModel context_menu_model(this);
   context_menu_model.AddItem(ID_EDIT, ASCIIToUTF16("Edit"));
   context_menu_model.AddItem(ID_REMOVE, ASCIIToUTF16("Remove"));
   context_menu_model.AddItem(ID_ADD, ASCIIToUTF16("Add"));
-  context_menu_runner_.reset(new MenuRunner(&context_menu_model));
+  views::MenuModelAdapter menu_adapter(&context_menu_model);
+  context_menu_runner_.reset(new views::MenuRunner(menu_adapter.CreateMenu()));
   if (context_menu_runner_->RunMenuAt(source->GetWidget(), NULL,
-      gfx::Rect(point, gfx::Size()), MenuItemView::TOPLEFT, source_type, 0) ==
-      MenuRunner::MENU_DELETED)
+      gfx::Rect(p, gfx::Size()), views::MenuItemView::TOPLEFT, 0) ==
+      views::MenuRunner::MENU_DELETED)
     return;
 }
 
@@ -152,7 +148,7 @@ bool TreeViewExample::GetAcceleratorForCommandId(
   return false;
 }
 
-void TreeViewExample::ExecuteCommand(int command_id, int event_flags) {
+void TreeViewExample::ExecuteCommand(int command_id) {
   NodeType* selected_node =
       static_cast<NodeType*>(tree_view_->GetSelectedNode());
   switch (command_id) {

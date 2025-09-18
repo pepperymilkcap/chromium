@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_WEB_RESOURCE_NOTIFICATION_PROMO_H_
 #define CHROME_BROWSER_WEB_RESOURCE_NOTIFICATION_PROMO_H_
+#pragma once
 
 #include <string>
 
@@ -11,120 +12,156 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "url/gurl.h"
-
-class PrefRegistrySimple;
-class PrefService;
 
 namespace base {
-class DictionaryValue;
-class ListValue;
+  class DictionaryValue;
 }
 
-namespace user_prefs {
-class PrefRegistrySyncable;
+namespace net {
+  class URLRequestContextGetter;
 }
+
+class PrefService;
+class Profile;
 
 // Helper class for PromoResourceService that parses promo notification info
 // from json or prefs.
-class NotificationPromo {
+class NotificationPromo
+  : public base::RefCountedThreadSafe<NotificationPromo> {
  public:
-  static GURL PromoServerURL();
-
-  enum PromoType {
-    NO_PROMO,
-    NTP_NOTIFICATION_PROMO,
-    NTP_BUBBLE_PROMO,
-    MOBILE_NTP_SYNC_PROMO,
+  class Delegate {
+   public:
+     virtual ~Delegate() {}
+     virtual void OnNotificationParsed(double start, double end,
+                                       bool new_notification) = 0;
+     // For testing.
+     virtual bool IsBuildAllowed(int builds_targeted) const { return false; }
+     virtual int CurrentPlatform() const { return PLATFORM_NONE; }
   };
 
-  NotificationPromo();
-  ~NotificationPromo();
+  // Static factory for creating new notification promos.
+  static NotificationPromo* Create(Profile* profile, Delegate* delegate);
 
   // Initialize from json/prefs.
-  void InitFromJson(const base::DictionaryValue& json, PromoType promo_type);
-  void InitFromPrefs(PromoType promo_type);
+  void InitFromJson(const base::DictionaryValue& json, bool do_cookie_check);
+  void InitFromPrefs();
 
   // Can this promo be shown?
   bool CanShow() const;
 
   // Calculates promo notification start time with group-based time slice
   // offset.
-  double StartTimeForGroup() const;
-  double EndTime() const;
+  double StartTimeWithOffset() const;
 
   // Helpers for NewTabPageHandler.
-  // Mark the promo as closed when the user dismisses it.
-  static void HandleClosed(PromoType promo_type);
-  // Mark the promo has having been viewed. This returns true if views
-  // exceeds the maximum allowed.
-  static bool HandleViewed(PromoType promo_type);
-
-  bool new_notification() const { return new_notification_; }
-
-  const std::string& promo_text() const { return promo_text_; }
-  PromoType promo_type() const { return promo_type_; }
-  const base::DictionaryValue* promo_payload() const {
-    return promo_payload_.get();
-  }
+  void HandleClosed();
+  bool HandleViewed();  // returns true if views exceeds maximum allowed.
 
   // Register preferences.
-  static void RegisterPrefs(PrefRegistrySimple* registry);
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
-  static void MigrateUserPrefs(PrefService* user_prefs);
+  static void RegisterUserPrefs(PrefService* prefs);
 
  private:
+  friend class base::RefCountedThreadSafe<NotificationPromo>;
+  NotificationPromo(Profile* profile, Delegate* delegate);
+  virtual ~NotificationPromo();
+
   // For testing.
-  friend class NotificationPromoTest;
+  friend class NotificationPromoTestDelegate;
+  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, GetNextQuestionValueTest);
+  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, NewGroupTest);
+
+  enum PlatformType {
+    PLATFORM_NONE = 0,
+    PLATFORM_WIN = 1,
+    PLATFORM_MAC = 1 << 1,
+    PLATFORM_LINUX = 1 << 2,
+    PLATFORM_CHROMEOS = 1 << 3,
+    PLATFORM_ALL = (1 << 4) -1,
+  };
+
+  // Flags for feature_mask_.
+  enum Feature {
+    NO_FEATURE = 0,
+    FEATURE_GPLUS = 1,
+  };
+
+  // Users are randomly assigned to one of kMaxGroupSize + 1 buckets, in order
+  // to be able to roll out promos slowly, or display different promos to
+  // different groups.
+  static const int kMaxGroupSize = 99;
+
+  // Parse the answers array element. Set the data members of this instance
+  // and trigger OnNewNotification callback if necessary.
+  void Parse(const base::DictionaryValue* dict);
+
+  // Set promo notification params from a question string, which is of the form
+  // <build_type>:<time_slice>:<max_group>:<max_views>:<platform>:<feature_mask>
+  void ParseParams(const base::DictionaryValue* dict);
 
   // Check if this promo notification is new based on start/end times,
   // and trigger events accordingly.
-  void CheckForNewNotification();
+  void CheckForNewNotification(bool found_cookie);
 
   // Actions on receiving a new promo notification.
   void OnNewNotification();
 
+  // Async method to get cookies from GPlus url. Used to check if user is
+  // logged in to GPlus.
+  void GetCookies(scoped_refptr<net::URLRequestContextGetter> getter);
+
+  // Callback for GetCookies.
+  void GetCookiesCallback(const std::string& cookies);
+
+  // Parse cookies in search of a SID= value.
+  static bool CheckForGPlusCookie(const std::string& cookies);
+
+  // Create a new promo notification group.
+  static int NewGroup();
+
+  // Returns an int converted from the question substring starting at index
+  // till the next colon. Sets index to the location right after the colon.
+  // Returns 0 if *err is true, and sets *err to true upon error.
+  static int GetNextQuestionValue(const std::string& question,
+                                  size_t* index,
+                                  bool* err);
+
   // Flush data members to prefs for storage.
   void WritePrefs();
 
-  // Tests group_ against max_group_.
-  // When max_group_ is 0, all groups pass.
-  bool ExceedsMaxGroup() const;
+  // Match our channel with specified build type.
+  bool IsBuildAllowed(int builds_allowed) const;
 
-  // Tests views_ against max_views_.
-  // When max_views_ is 0, we don't cap the number of views.
-  bool ExceedsMaxViews() const;
+  // Match our platform with the specified platform bitfield.
+  bool IsPlatformAllowed(int target_platform) const;
 
-  // Returns false if this promo should not be displayed because it is a promo
-  // for the app launcher, and the user has already enabled the app launcher.
-  bool CheckAppLauncher() const;
+  // Current platform.
+  static int CurrentPlatform();
 
+  // For testing.
+  bool operator==(const NotificationPromo& other) const;
+
+  Profile* profile_;
+  Delegate* delegate_;
   PrefService* prefs_;
-
-  PromoType promo_type_;
-  std::string promo_text_;
-
-  scoped_ptr<const base::DictionaryValue> promo_payload_;
 
   double start_;
   double end_;
 
-  int num_groups_;
-  int initial_segment_;
-  int increment_;
+  int build_;
   int time_slice_;
   int max_group_;
-
-  // When max_views_ is 0, we don't cap the number of views.
   int max_views_;
+  int platform_;
+  int feature_mask_;
 
   int group_;
   int views_;
+  std::string text_;
   bool closed_;
-
-  bool new_notification_;
+  bool gplus_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationPromo);
 };
 
 #endif  // CHROME_BROWSER_WEB_RESOURCE_NOTIFICATION_PROMO_H_
+

@@ -4,21 +4,22 @@
 
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_EXTENSIONS_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_EXTENSIONS_H_
+#pragma once
 
 #include <string>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 
 namespace download_util {
 
 enum DownloadDangerLevel {
-  NOT_DANGEROUS,
-  ALLOW_ON_USER_GESTURE,
-  DANGEROUS
+  NotDangerous,
+  AllowOnUserGesture,
+  Dangerous
 };
 
 // Determine the download danger level of a file.
-DownloadDangerLevel GetFileDangerLevel(const base::FilePath& path);
+DownloadDangerLevel GetFileDangerLevel(const FilePath& path);
 
 // Tests if we think the server means for this mime_type to be executable.
 bool IsExecutableMimeType(const std::string& mime_type);

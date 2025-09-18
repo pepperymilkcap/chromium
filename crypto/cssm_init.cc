@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/singleton.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 
 // When writing crypto code for Mac OS X, you may find the following
 // documentation useful:
@@ -50,8 +50,8 @@ class CSSMInitSingleton {
  private:
   CSSMInitSingleton()
       : inited_(false), csp_loaded_(false), cl_loaded_(false),
-        tp_loaded_(false), csp_handle_(CSSM_INVALID_HANDLE),
-        cl_handle_(CSSM_INVALID_HANDLE), tp_handle_(CSSM_INVALID_HANDLE) {
+        tp_loaded_(false), csp_handle_(NULL), cl_handle_(NULL),
+        tp_handle_(NULL) {
     static CSSM_VERSION version = {2, 0};
     // TODO(wtc): what should our caller GUID be?
     static const CSSM_GUID test_guid = {
@@ -184,7 +184,7 @@ void CSSMFree(void* ptr) {
 void LogCSSMError(const char* fn_name, CSSM_RETURN err) {
   if (!err)
     return;
-  base::ScopedCFTypeRef<CFStringRef> cfstr(
+  base::mac::ScopedCFTypeRef<CFStringRef> cfstr(
       SecCopyErrorMessageString(err, NULL));
   LOG(ERROR) << fn_name << " returned " << err
              << " (" << base::SysCFStringRefToUTF8(cfstr) << ")";

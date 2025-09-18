@@ -39,7 +39,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "base/basictypes.h"
+#include "base/macros.h"  // For COMPILE_ASSERT
+#include "base/port.h"  // ATTRIBUTE_WEAK
 
 typedef int32_t Atomic32;
 

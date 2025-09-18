@@ -1,5 +1,8 @@
+set noparent
+avi@chromium.org
+ben@chromium.org
+brettw@chromium.org
+darin@chromium.org
+jam@chromium.org
 jamesr@chromium.org
-
-# Mac Sandbox profiles.
-per-file *.sb=set noparent
-per-file *.sb=jeremy@chromium.org
+piman@chromium.org

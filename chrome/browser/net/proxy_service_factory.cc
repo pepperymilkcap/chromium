@@ -1,50 +1,43 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/net/proxy_service_factory.h"
 
 #include "base/command_line.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
-#include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
+#include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_log.h"
 #include "net/proxy/dhcp_proxy_script_fetcher_factory.h"
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
-#include "net/proxy/proxy_service_v8.h"
 #include "net/url_request/url_request_context.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
-#include "chromeos/network/dhcp_proxy_script_fetcher_chromeos.h"
 #endif  // defined(OS_CHROMEOS)
-
-#if defined(OS_WIN)
-#include "win8/util/win8_util.h"
-#endif
 
 using content::BrowserThread;
 
 // static
-net::ProxyConfigService* ProxyServiceFactory::CreateProxyConfigService(
-    PrefProxyConfigTracker* tracker) {
+ChromeProxyConfigService* ProxyServiceFactory::CreateProxyConfigService(
+    bool wait_for_first_update) {
   // The linux gconf-based proxy settings getter relies on being initialized
   // from the UI thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  scoped_ptr<net::ProxyConfigService> base_service;
+  net::ProxyConfigService* base_service = NULL;
 
 #if !defined(OS_CHROMEOS)
   // On ChromeOS, base service is NULL; chromeos::ProxyConfigServiceImpl
   // determines the effective proxy config to take effect in the network layer,
-  // be it from prefs or system (which is network shill on chromeos).
+  // be it from prefs or system (which is network flimflam on chromeos).
 
   // For other platforms, create a baseline service that provides proxy
   // configuration in case nothing is configured through prefs (Note: prefs
@@ -53,51 +46,37 @@ net::ProxyConfigService* ProxyServiceFactory::CreateProxyConfigService(
   // TODO(port): the IO and FILE message loops are only used by Linux.  Can
   // that code be moved to chrome/browser instead of being in net, so that it
   // can use BrowserThread instead of raw MessageLoop pointers? See bug 25354.
-  base_service.reset(net::ProxyService::CreateSystemProxyConfigService(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get(),
-      BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::FILE)));
+  base_service = net::ProxyService::CreateSystemProxyConfigService(
+      BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::IO),
+      BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::FILE));
 #endif  // !defined(OS_CHROMEOS)
 
-  return tracker->CreateTrackingProxyConfigService(base_service.Pass())
-      .release();
+  return new ChromeProxyConfigService(base_service, wait_for_first_update);
 }
 
-// static
-PrefProxyConfigTracker*
-ProxyServiceFactory::CreatePrefProxyConfigTrackerOfProfile(
-    PrefService* profile_prefs,
-    PrefService* local_state_prefs) {
 #if defined(OS_CHROMEOS)
-  return new chromeos::ProxyConfigServiceImpl(profile_prefs, local_state_prefs);
-#else
-  return new PrefProxyConfigTrackerImpl(profile_prefs);
-#endif  // defined(OS_CHROMEOS)
-}
-
 // static
-PrefProxyConfigTracker*
-ProxyServiceFactory::CreatePrefProxyConfigTrackerOfLocalState(
-    PrefService* local_state_prefs) {
-#if defined(OS_CHROMEOS)
-  return new chromeos::ProxyConfigServiceImpl(NULL, local_state_prefs);
-#else
-  return new PrefProxyConfigTrackerImpl(local_state_prefs);
-#endif  // defined(OS_CHROMEOS)
+chromeos::ProxyConfigServiceImpl*
+    ProxyServiceFactory::CreatePrefProxyConfigTracker(
+        PrefService* pref_service) {
+  return new chromeos::ProxyConfigServiceImpl(pref_service);
 }
+#else
+// static
+PrefProxyConfigTrackerImpl* ProxyServiceFactory::CreatePrefProxyConfigTracker(
+    PrefService* pref_service) {
+  return new PrefProxyConfigTrackerImpl(pref_service);
+}
+#endif  // defined(OS_CHROMEOS)
 
 // static
 net::ProxyService* ProxyServiceFactory::CreateProxyService(
     net::NetLog* net_log,
     net::URLRequestContext* context,
-    net::NetworkDelegate* network_delegate,
     net::ProxyConfigService* proxy_config_service,
-    const CommandLine& command_line,
-    bool quick_check_enabled) {
+    const CommandLine& command_line) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-#if defined(OS_IOS)
-  bool use_v8 = false;
-#else
   bool use_v8 = !command_line.HasSwitch(switches::kWinHttpProxyResolver);
   if (use_v8 && command_line.HasSwitch(switches::kSingleProcess)) {
     // See the note about V8 multithreading in net/proxy/proxy_resolver_v8.h
@@ -105,13 +84,6 @@ net::ProxyService* ProxyServiceFactory::CreateProxyService(
     LOG(ERROR) << "Cannot use V8 Proxy resolver in single process mode.";
     use_v8 = false;  // Fallback to non-v8 implementation.
   }
-#endif  // defined(OS_IOS)
-
-#if defined(OS_WIN)
-  // Crashes. http://crbug.com/266838
-  if (use_v8 && win8::IsSingleWindowMetroMode())
-    use_v8 = false;
-#endif
 
   size_t num_pac_threads = 0u;  // Use default number of threads.
 
@@ -129,38 +101,27 @@ net::ProxyService* ProxyServiceFactory::CreateProxyService(
     }
   }
 
-  net::ProxyService* proxy_service = NULL;
+  net::ProxyService* proxy_service;
   if (use_v8) {
-#if defined(OS_IOS)
-    NOTREACHED();
-#else
-    net::DhcpProxyScriptFetcher* dhcp_proxy_script_fetcher;
-#if defined(OS_CHROMEOS)
-    dhcp_proxy_script_fetcher =
-        new chromeos::DhcpProxyScriptFetcherChromeos(context);
-#else
     net::DhcpProxyScriptFetcherFactory dhcp_factory;
-    if (command_line.HasSwitch(switches::kDisableDhcpWpad))
+    if (command_line.HasSwitch(switches::kDisableDhcpWpad)) {
       dhcp_factory.set_enabled(false);
-    dhcp_proxy_script_fetcher = dhcp_factory.Create(context);
-#endif
+    }
 
-    proxy_service = net::CreateProxyServiceUsingV8ProxyResolver(
+    proxy_service = net::ProxyService::CreateUsingV8ProxyResolver(
         proxy_config_service,
+        num_pac_threads,
         new net::ProxyScriptFetcherImpl(context),
-        dhcp_proxy_script_fetcher,
+        dhcp_factory.Create(context),
         context->host_resolver(),
         net_log,
-        network_delegate);
-#endif  // defined(OS_IOS)
+        context->network_delegate());
   } else {
     proxy_service = net::ProxyService::CreateUsingSystemProxyResolver(
         proxy_config_service,
         num_pac_threads,
         net_log);
   }
-
-  proxy_service->set_quick_check_enabled(quick_check_enabled);
 
   return proxy_service;
 }

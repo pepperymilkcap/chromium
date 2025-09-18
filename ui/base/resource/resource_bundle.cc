@@ -4,185 +4,83 @@
 
 #include "ui/base/resource/resource_bundle.h"
 
-#include <vector>
-
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_piece.h"
 #include "base/synchronization/lock.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "grit/app_locale_settings.h"
-#include "net/base/big_endian.h"
-#include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/data_pack.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
-#include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/image/image_skia_source.h"
-#include "ui/gfx/safe_integer_conversions.h"
-#include "ui/gfx/screen.h"
-#include "ui/gfx/size_conversions.h"
-#include "ui/gfx/skbitmap_operations.h"
-
-#if defined(OS_CHROMEOS)
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/platform_font_pango.h"
-#endif
-
-#if defined(OS_WIN)
-#include "ui/base/win/dpi_setup.h"
-#include "ui/gfx/win/dpi.h"
-#endif
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-#include "base/mac/mac_util.h"
-#endif
+#include "ui/gfx/font.h"
+#include "ui/gfx/image/image.h"
 
 namespace ui {
 
 namespace {
 
 // Font sizes relative to base font.
-const int kSmallFontSizeDelta = -1;
+#if defined(OS_CHROMEOS) && defined(CROS_FONTS_USING_BCI)
+const int kSmallFontSizeDelta = -3;
+const int kMediumFontSizeDelta = 2;
+const int kLargeFontSizeDelta = 7;
+#else
+const int kSmallFontSizeDelta = -2;
 const int kMediumFontSizeDelta = 3;
 const int kLargeFontSizeDelta = 8;
-
-// PNG-related constants.
-const unsigned char kPngMagic[8] = { 0x89, 'P', 'N', 'G', 13, 10, 26, 10 };
-const size_t kPngChunkMetadataSize = 12;  // length, type, crc32
-const unsigned char kPngScaleChunkType[4] = { 'c', 's', 'C', 'l' };
-const unsigned char kPngDataChunkType[4] = { 'I', 'D', 'A', 'T' };
-
-ResourceBundle* g_shared_instance_ = NULL;
-
-void InitDefaultFontList() {
-#if defined(OS_CHROMEOS)
-  gfx::FontList::SetDefaultFontDescription(
-      l10n_util::GetStringUTF8(IDS_UI_FONT_FAMILY_CROS));
-
-  // TODO(yukishiino): Remove SetDefaultFontDescription() once the migration to
-  // the font list is done.  We will no longer need SetDefaultFontDescription()
-  // after every client gets started using a FontList instead of a Font.
-  gfx::PlatformFontPango::SetDefaultFontDescription(
-      l10n_util::GetStringUTF8(IDS_UI_FONT_FAMILY_CROS));
-#else
-  // Use a single default font as the default font list.
-  gfx::FontList::SetDefaultFontDescription(std::string());
 #endif
-}
 
 }  // namespace
 
-// An ImageSkiaSource that loads bitmaps for the requested scale factor from
-// ResourceBundle on demand for a given |resource_id|. If the bitmap for the
-// requested scale factor does not exist, it will return the 1x bitmap scaled
-// by the scale factor. This may lead to broken UI if the correct size of the
-// scaled image is not exactly |scale_factor| * the size of the 1x resource.
-// When --highlight-missing-scaled-resources flag is specified, scaled 1x images
-// are higlighted by blending them with red.
-class ResourceBundle::ResourceBundleImageSource : public gfx::ImageSkiaSource {
- public:
-  ResourceBundleImageSource(ResourceBundle* rb, int resource_id)
-      : rb_(rb), resource_id_(resource_id) {}
-  virtual ~ResourceBundleImageSource() {}
+ResourceBundle* ResourceBundle::g_shared_instance_ = NULL;
 
-  // gfx::ImageSkiaSource overrides:
-  virtual gfx::ImageSkiaRep GetImageForScale(float scale) OVERRIDE {
-    SkBitmap image;
-    bool fell_back_to_1x = false;
-    ScaleFactor scale_factor = GetSupportedScaleFactor(scale);
-    bool found = rb_->LoadBitmap(resource_id_, &scale_factor,
-                                 &image, &fell_back_to_1x);
-    // Force to a supported scale.
-    scale = ui::GetImageScale(scale_factor);
-    if (!found)
-      return gfx::ImageSkiaRep();
-
-    if (fell_back_to_1x) {
-      // GRIT fell back to the 100% image, so rescale it to the correct size.
-      image = skia::ImageOperations::Resize(
-          image,
-          skia::ImageOperations::RESIZE_LANCZOS3,
-          gfx::ToCeiledInt(image.width() * scale),
-          gfx::ToCeiledInt(image.height() * scale));
-      // If --highlight-missing-scaled-resources is specified, log the resource
-      // id and blend the created resource with red.
-      if (ShouldHighlightMissingScaledResources()) {
-        LOG(ERROR) << "Missing " << scale << "x scaled resource. id="
-                   << resource_id_;
-
-        SkBitmap mask;
-        mask.setConfig(SkBitmap::kARGB_8888_Config,
-                       image.width(), image.height());
-        mask.allocPixels();
-        mask.eraseColor(SK_ColorRED);
-        image = SkBitmapOperations::CreateBlendedBitmap(image, mask, 0.2);
-      }
-    }
-
-    return gfx::ImageSkiaRep(image, scale);
-  }
-
- private:
-  ResourceBundle* rb_;
-  const int resource_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResourceBundleImageSource);
-};
+// static
+const SkColor ResourceBundle::toolbar_color =
+     SkColorSetRGB(210, 225, 246);
+const SkColor ResourceBundle::toolbar_separator_color =
+     SkColorSetRGB(182, 186, 192);
 
 // static
 std::string ResourceBundle::InitSharedInstanceWithLocale(
-    const std::string& pref_locale, Delegate* delegate) {
-  InitSharedInstance(delegate);
+    const std::string& pref_locale) {
+  DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
+  g_shared_instance_ = new ResourceBundle();
+
   g_shared_instance_->LoadCommonResources();
-  std::string result = g_shared_instance_->LoadLocaleResources(pref_locale);
-  InitDefaultFontList();
-  return result;
+  return g_shared_instance_->LoadLocaleResources(pref_locale);
 }
 
 // static
-std::string ResourceBundle::InitSharedInstanceLocaleOnly(
-    const std::string& pref_locale, Delegate* delegate) {
-  InitSharedInstance(delegate);
-  std::string result = g_shared_instance_->LoadLocaleResources(pref_locale);
-  InitDefaultFontList();
-  return result;
+void ResourceBundle::InitSharedInstanceWithPakFile(const FilePath& path) {
+  DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
+  g_shared_instance_ = new ResourceBundle();
+
+  g_shared_instance_->LoadTestResources(path);
 }
 
 // static
-void ResourceBundle::InitSharedInstanceWithPakFile(
-    base::File pak_file, bool should_load_common_resources) {
-  InitSharedInstance(NULL);
-  if (should_load_common_resources)
-    g_shared_instance_->LoadCommonResources();
-
-  scoped_ptr<DataPack> data_pack(
-      new DataPack(SCALE_FACTOR_100P));
-  if (!data_pack->LoadFromFile(pak_file.Pass())) {
-    NOTREACHED() << "failed to load pak file";
-    return;
+DataPack* ResourceBundle::LoadResourcesDataPak(const FilePath& path) {
+  DataPack* datapack = new DataPack;
+  bool success = datapack->Load(path);
+  if (!success) {
+    delete datapack;
+    datapack = NULL;
   }
-  g_shared_instance_->locale_resources_data_.reset(data_pack.release());
-  InitDefaultFontList();
+  return datapack;
 }
 
 // static
-void ResourceBundle::InitSharedInstanceWithPakPath(const base::FilePath& path) {
-  InitSharedInstance(NULL);
-  g_shared_instance_->LoadTestResources(path, path);
-
-  InitDefaultFontList();
+void ResourceBundle::AddDataPackToSharedInstance(const FilePath& path) {
+  DCHECK(g_shared_instance_ != NULL) << "ResourceBundle not initialized";
+  g_shared_instance_->data_packs_.push_back(new LoadedDataPack(path));
 }
 
 // static
@@ -205,57 +103,23 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
   return *g_shared_instance_;
 }
 
+// static
 bool ResourceBundle::LocaleDataPakExists(const std::string& locale) {
-  return !GetLocaleFilePath(locale, true).empty();
+  return !GetLocaleFilePath(locale).empty();
 }
 
-void ResourceBundle::AddDataPackFromPath(const base::FilePath& path,
-                                         ScaleFactor scale_factor) {
-  AddDataPackFromPathInternal(path, scale_factor, false);
-}
-
-void ResourceBundle::AddOptionalDataPackFromPath(const base::FilePath& path,
-                                         ScaleFactor scale_factor) {
-  AddDataPackFromPathInternal(path, scale_factor, true);
-}
-
-void ResourceBundle::AddDataPackFromFile(base::File file,
-                                         ScaleFactor scale_factor) {
-  scoped_ptr<DataPack> data_pack(
-      new DataPack(scale_factor));
-  if (data_pack->LoadFromFile(file.Pass())) {
-    AddDataPack(data_pack.release());
-  } else {
-    LOG(ERROR) << "Failed to load data pack from file."
-               << "\nSome features may not be available.";
-  }
-}
-
-#if !defined(OS_MACOSX)
-base::FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
-                                                 bool test_file_exists) {
-  if (app_locale.empty())
-    return base::FilePath();
-
-  base::FilePath locale_file_path;
-
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+// static
+FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale) {
+  FilePath locale_file_path;
   PathService::Get(ui::DIR_LOCALES, &locale_file_path);
-
-  if (!locale_file_path.empty())
-    locale_file_path = locale_file_path.AppendASCII(app_locale + ".pak");
-
-  if (delegate_) {
-    locale_file_path =
-        delegate_->GetPathForLocalePack(locale_file_path, app_locale);
-  }
-
-  // Don't try to load empty values or values that are not absolute paths.
-  if (locale_file_path.empty() || !locale_file_path.IsAbsolute())
-    return base::FilePath();
-
-  if (test_file_exists && !base::PathExists(locale_file_path))
-    return base::FilePath();
-
+  if (locale_file_path.empty())
+    return locale_file_path;
+  if (app_locale.empty())
+    return FilePath();
+  locale_file_path = locale_file_path.AppendASCII(app_locale + ".pak");
+  if (!file_util::PathExists(locale_file_path))
+    return FilePath();
   return locale_file_path;
 }
 #endif
@@ -264,61 +128,79 @@ std::string ResourceBundle::LoadLocaleResources(
     const std::string& pref_locale) {
   DCHECK(!locale_resources_data_.get()) << "locale.pak already loaded";
   std::string app_locale = l10n_util::GetApplicationLocale(pref_locale);
-  base::FilePath locale_file_path = GetOverriddenPakPath();
+  FilePath locale_file_path = GetOverriddenPakPath();
   if (locale_file_path.empty()) {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    CommandLine *command_line = CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kLocalePak)) {
       locale_file_path =
           command_line->GetSwitchValuePath(switches::kLocalePak);
     } else {
-      locale_file_path = GetLocaleFilePath(app_locale, true);
+      locale_file_path = GetLocaleFilePath(app_locale);
     }
   }
-
   if (locale_file_path.empty()) {
     // It's possible that there is no locale.pak.
-    LOG(WARNING) << "locale_file_path.empty()";
-    return std::string();
-  }
-
-  scoped_ptr<DataPack> data_pack(
-      new DataPack(SCALE_FACTOR_100P));
-  if (!data_pack->LoadFromPath(locale_file_path)) {
-    UMA_HISTOGRAM_ENUMERATION("ResourceBundle.LoadLocaleResourcesError",
-                              logging::GetLastSystemErrorCode(), 16000);
-    LOG(ERROR) << "failed to load locale.pak";
     NOTREACHED();
     return std::string();
   }
-
-  locale_resources_data_.reset(data_pack.release());
-  return app_locale;
-}
-
-void ResourceBundle::LoadTestResources(const base::FilePath& path,
-                                       const base::FilePath& locale_path) {
-  // Use the given resource pak for both common and localized resources.
-  scoped_ptr<DataPack> data_pack(new DataPack(SCALE_FACTOR_100P));
-  if (!path.empty() && data_pack->LoadFromPath(path))
-    AddDataPack(data_pack.release());
-
-  data_pack.reset(new DataPack(ui::SCALE_FACTOR_NONE));
-  if (!locale_path.empty() && data_pack->LoadFromPath(locale_path)) {
-    locale_resources_data_.reset(data_pack.release());
-  } else {
-    locale_resources_data_.reset(new DataPack(ui::SCALE_FACTOR_NONE));
+  locale_resources_data_.reset(LoadResourcesDataPak(locale_file_path));
+  if (!locale_resources_data_.get()) {
+    UMA_HISTOGRAM_ENUMERATION("ResourceBundle.LoadLocaleResourcesError",
+                              logging::GetLastSystemErrorCode(), 16000);
+    NOTREACHED() << "failed to load locale.pak";
+    return std::string();
   }
+  return app_locale;
 }
 
 void ResourceBundle::UnloadLocaleResources() {
   locale_resources_data_.reset();
 }
 
-void ResourceBundle::OverrideLocalePakForTest(const base::FilePath& pak_path) {
+string16 ResourceBundle::GetLocalizedString(int message_id) {
+  // Ensure that ReloadLocaleResources() doesn't drop the resources while
+  // we're using them.
+  base::AutoLock lock_scope(*locale_resources_data_lock_);
+
+  // If for some reason we were unable to load the resources , return an empty
+  // string (better than crashing).
+  if (!locale_resources_data_.get()) {
+    LOG(WARNING) << "locale resources are not loaded";
+    return string16();
+  }
+
+  base::StringPiece data;
+  if (!locale_resources_data_->GetStringPiece(message_id, &data)) {
+    // Fall back on the main data pack (shouldn't be any strings here except in
+    // unittests).
+    data = GetRawDataResource(message_id);
+    if (data.empty()) {
+      NOTREACHED() << "unable to find resource: " << message_id;
+      return string16();
+    }
+  }
+
+  // Strings should not be loaded from a data pack that contains binary data.
+  DCHECK(locale_resources_data_->GetTextEncodingType() == DataPack::UTF16 ||
+         locale_resources_data_->GetTextEncodingType() == DataPack::UTF8)
+      << "requested localized string from binary pack file";
+
+  // Data pack encodes strings as either UTF8 or UTF16.
+  string16 msg;
+  if (locale_resources_data_->GetTextEncodingType() == DataPack::UTF16) {
+    msg = string16(reinterpret_cast<const char16*>(data.data()),
+                   data.length() / 2);
+  } else if (locale_resources_data_->GetTextEncodingType() == DataPack::UTF8) {
+    msg = UTF8ToUTF16(data);
+  }
+  return msg;
+}
+
+void ResourceBundle::OverrideLocalePakForTest(const FilePath& pak_path) {
   overridden_pak_path_ = pak_path;
 }
 
-const base::FilePath& ResourceBundle::GetOverriddenPakPath() {
+const FilePath& ResourceBundle::GetOverriddenPakPath() {
   return overridden_pak_path_;
 }
 
@@ -329,477 +211,203 @@ std::string ResourceBundle::ReloadLocaleResources(
   return LoadLocaleResources(pref_locale);
 }
 
-gfx::ImageSkia* ResourceBundle::GetImageSkiaNamed(int resource_id) {
-  const gfx::ImageSkia* image = GetImageNamed(resource_id).ToImageSkia();
-  return const_cast<gfx::ImageSkia*>(image);
+SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
+  const SkBitmap* bitmap =
+      static_cast<const SkBitmap*>(GetImageNamed(resource_id));
+  return const_cast<SkBitmap*>(bitmap);
 }
 
 gfx::Image& ResourceBundle::GetImageNamed(int resource_id) {
   // Check to see if the image is already in the cache.
   {
     base::AutoLock lock_scope(*images_and_fonts_lock_);
+    ImageMap::const_iterator found = images_.find(resource_id);
+    if (found != images_.end())
+      return *found->second;
+  }
+
+  DCHECK(resources_data_) << "Missing call to SetResourcesDataDLL?";
+  scoped_ptr<SkBitmap> bitmap(LoadBitmap(resources_data_, resource_id));
+  if (bitmap.get()) {
+    // Check if there's a large version of the image as well.
+    scoped_ptr<SkBitmap> large_bitmap;
+    if (large_icon_resources_data_)
+      large_bitmap.reset(LoadBitmap(large_icon_resources_data_, resource_id));
+
+    // The load was successful, so cache the image.
+    base::AutoLock lock_scope(*images_and_fonts_lock_);
+
+    // Another thread raced the load and has already cached the image.
     if (images_.count(resource_id))
-      return images_[resource_id];
+      return *images_[resource_id];
+
+    std::vector<const SkBitmap*> bitmaps;
+    bitmaps.push_back(bitmap.release());
+    if (large_bitmap.get())
+      bitmaps.push_back(large_bitmap.release());
+    gfx::Image* image = new gfx::Image(bitmaps);
+    images_[resource_id] = image;
+    return *image;
   }
 
-  gfx::Image image;
-  if (delegate_)
-    image = delegate_->GetImageNamed(resource_id);
-
-  if (image.IsEmpty()) {
-    DCHECK(!data_packs_.empty()) <<
-        "Missing call to SetResourcesDataDLL?";
-
-#if defined(OS_CHROMEOS)
-    ui::ScaleFactor scale_factor_to_load = GetMaxScaleFactor();
-#else
-    ui::ScaleFactor scale_factor_to_load = ui::SCALE_FACTOR_100P;
-#endif
-
-    float scale = GetImageScale(scale_factor_to_load);
-    // TODO(oshima): Consider reading the image size from png IHDR chunk and
-    // skip decoding here and remove #ifdef below.
-    // ResourceBundle::GetSharedInstance() is destroyed after the
-    // BrowserMainLoop has finished running. |image_skia| is guaranteed to be
-    // destroyed before the resource bundle is destroyed.
-    gfx::ImageSkia image_skia(new ResourceBundleImageSource(this, resource_id),
-                              scale);
-    if (image_skia.isNull()) {
-      LOG(WARNING) << "Unable to load image with id " << resource_id;
-      NOTREACHED();  // Want to assert in debug mode.
-      // The load failed to retrieve the image; show a debugging red square.
-      return GetEmptyImage();
-    }
-    image_skia.SetReadOnly();
-    image = gfx::Image(image_skia);
-  }
-
-  // The load was successful, so cache the image.
-  base::AutoLock lock_scope(*images_and_fonts_lock_);
-
-  // Another thread raced the load and has already cached the image.
-  if (images_.count(resource_id))
-    return images_[resource_id];
-
-  images_[resource_id] = image;
-  return images_[resource_id];
+  // The load failed to retrieve the image; show a debugging red square.
+  LOG(WARNING) << "Unable to load image with id " << resource_id;
+  NOTREACHED();  // Want to assert in debug mode.
+  return *GetEmptyImage();
 }
 
-gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
-  return GetNativeImageNamed(resource_id, RTL_DISABLED);
-}
-
-base::RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
+RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
     int resource_id) const {
-  return LoadDataResourceBytesForScale(resource_id, ui::SCALE_FACTOR_NONE);
-}
+  RefCountedStaticMemory* bytes =
+      LoadResourceBytes(resources_data_, resource_id);
 
-base::RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytesForScale(
-    int resource_id,
-    ScaleFactor scale_factor) const {
-  base::RefCountedStaticMemory* bytes = NULL;
-  if (delegate_)
-    bytes = delegate_->LoadDataResourceBytes(resource_id, scale_factor);
-
-  if (!bytes) {
-    base::StringPiece data =
-        GetRawDataResourceForScale(resource_id, scale_factor);
-    if (!data.empty()) {
-      bytes = new base::RefCountedStaticMemory(
-          reinterpret_cast<const unsigned char*>(data.data()), data.length());
-    }
+  // Check all our additional data packs for the resources if it wasn't loaded
+  // from our main source.
+  for (std::vector<LoadedDataPack*>::const_iterator it = data_packs_.begin();
+       !bytes && it != data_packs_.end(); ++it) {
+    bytes = (*it)->GetStaticMemory(resource_id);
   }
 
   return bytes;
 }
 
-base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) const {
-  return GetRawDataResourceForScale(resource_id, ui::SCALE_FACTOR_NONE);
-}
-
-base::StringPiece ResourceBundle::GetRawDataResourceForScale(
-    int resource_id,
-    ScaleFactor scale_factor) const {
-  base::StringPiece data;
-  if (delegate_ &&
-      delegate_->GetRawDataResource(resource_id, scale_factor, &data))
-    return data;
-
-  if (scale_factor != ui::SCALE_FACTOR_100P) {
-    for (size_t i = 0; i < data_packs_.size(); i++) {
-      if (data_packs_[i]->GetScaleFactor() == scale_factor &&
-          data_packs_[i]->GetStringPiece(resource_id, &data))
-        return data;
-    }
-  }
-  for (size_t i = 0; i < data_packs_.size(); i++) {
-    if ((data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_100P ||
-         data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_NONE) &&
-        data_packs_[i]->GetStringPiece(resource_id, &data))
-      return data;
-  }
-
-  return base::StringPiece();
-}
-
-base::string16 ResourceBundle::GetLocalizedString(int message_id) {
-  base::string16 string;
-  if (delegate_ && delegate_->GetLocalizedString(message_id, &string))
-    return string;
-
-  // Ensure that ReloadLocaleResources() doesn't drop the resources while
-  // we're using them.
-  base::AutoLock lock_scope(*locale_resources_data_lock_);
-
-  // If for some reason we were unable to load the resources , return an empty
-  // string (better than crashing).
-  if (!locale_resources_data_.get()) {
-    LOG(WARNING) << "locale resources are not loaded";
-    return base::string16();
-  }
-
-  base::StringPiece data;
-  if (!locale_resources_data_->GetStringPiece(message_id, &data)) {
-    // Fall back on the main data pack (shouldn't be any strings here except in
-    // unittests).
-    data = GetRawDataResource(message_id);
-    if (data.empty()) {
-      NOTREACHED() << "unable to find resource: " << message_id;
-      return base::string16();
-    }
-  }
-
-  // Strings should not be loaded from a data pack that contains binary data.
-  ResourceHandle::TextEncodingType encoding =
-      locale_resources_data_->GetTextEncodingType();
-  DCHECK(encoding == ResourceHandle::UTF16 || encoding == ResourceHandle::UTF8)
-      << "requested localized string from binary pack file";
-
-  // Data pack encodes strings as either UTF8 or UTF16.
-  base::string16 msg;
-  if (encoding == ResourceHandle::UTF16) {
-    msg = base::string16(reinterpret_cast<const base::char16*>(data.data()),
-                         data.length() / 2);
-  } else if (encoding == ResourceHandle::UTF8) {
-    msg = base::UTF8ToUTF16(data);
-  }
-  return msg;
-}
-
-const gfx::FontList& ResourceBundle::GetFontList(FontStyle style) {
+const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
   {
     base::AutoLock lock_scope(*images_and_fonts_lock_);
     LoadFontsIfNecessary();
   }
   switch (style) {
     case BoldFont:
-      return *bold_font_list_;
+      return *bold_font_;
     case SmallFont:
-      return *small_font_list_;
+      return *small_font_;
     case MediumFont:
-      return *medium_font_list_;
-    case SmallBoldFont:
-      return *small_bold_font_list_;
+      return *medium_font_;
     case MediumBoldFont:
-      return *medium_bold_font_list_;
+      return *medium_bold_font_;
     case LargeFont:
-      return *large_font_list_;
+      return *large_font_;
     case LargeBoldFont:
-      return *large_bold_font_list_;
+      return *large_bold_font_;
     default:
-      return *base_font_list_;
+      return *base_font_;
   }
-}
-
-const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
-  return GetFontList(style).GetPrimaryFont();
 }
 
 void ResourceBundle::ReloadFonts() {
   base::AutoLock lock_scope(*images_and_fonts_lock_);
-  base_font_list_.reset();
+  base_font_.reset();
   LoadFontsIfNecessary();
 }
 
-ScaleFactor ResourceBundle::GetMaxScaleFactor() const {
-#if defined(OS_CHROMEOS)
-  return max_scale_factor_;
-#else
-  return GetSupportedScaleFactors().back();
-#endif
-}
-
-ResourceBundle::ResourceBundle(Delegate* delegate)
-    : delegate_(delegate),
-      images_and_fonts_lock_(new base::Lock),
+ResourceBundle::ResourceBundle()
+    : images_and_fonts_lock_(new base::Lock),
       locale_resources_data_lock_(new base::Lock),
-      max_scale_factor_(SCALE_FACTOR_100P) {
-}
-
-ResourceBundle::~ResourceBundle() {
-  FreeImages();
-  UnloadLocaleResources();
-}
-
-// static
-void ResourceBundle::InitSharedInstance(Delegate* delegate) {
-  DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
-  g_shared_instance_ = new ResourceBundle(delegate);
-  static std::vector<ScaleFactor> supported_scale_factors;
-#if !defined(OS_IOS)
-  // On platforms other than iOS, 100P is always a supported scale factor.
-  supported_scale_factors.push_back(SCALE_FACTOR_100P);
-#endif
-#if defined(OS_ANDROID)
-  const gfx::Display display =
-      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
-  const float display_density = display.device_scale_factor();
-  const ScaleFactor closest = FindClosestScaleFactorUnsafe(display_density);
-  if (closest != SCALE_FACTOR_100P)
-    supported_scale_factors.push_back(closest);
-#elif defined(OS_IOS)
-    gfx::Display display = gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
-  if (display.device_scale_factor() > 1.0) {
-    DCHECK_EQ(2.0, display.device_scale_factor());
-    supported_scale_factors.push_back(SCALE_FACTOR_200P);
-  } else {
-    supported_scale_factors.push_back(SCALE_FACTOR_100P);
-  }
-#elif defined(OS_MACOSX)
-  if (base::mac::IsOSLionOrLater())
-    supported_scale_factors.push_back(SCALE_FACTOR_200P);
-#elif defined(OS_CHROMEOS)
-  // TODO(oshima): Include 200P only if the device support 200P
-  supported_scale_factors.push_back(SCALE_FACTOR_200P);
-#endif
-  ui::SetSupportedScaleFactors(supported_scale_factors);
-#if defined(OS_WIN)
-  // Must be called _after_ supported scale factors are set since it
-  // uses them.
-  ui::win::InitDeviceScaleFactor();
-#endif
+      resources_data_(NULL),
+      large_icon_resources_data_(NULL) {
 }
 
 void ResourceBundle::FreeImages() {
+  STLDeleteContainerPairSecondPointers(images_.begin(),
+                                       images_.end());
   images_.clear();
-}
-
-void ResourceBundle::AddDataPackFromPathInternal(const base::FilePath& path,
-                                                 ScaleFactor scale_factor,
-                                                 bool optional) {
-  // Do not pass an empty |path| value to this method. If the absolute path is
-  // unknown pass just the pack file name.
-  DCHECK(!path.empty());
-
-  base::FilePath pack_path = path;
-  if (delegate_)
-    pack_path = delegate_->GetPathForResourcePack(pack_path, scale_factor);
-
-  // Don't try to load empty values or values that are not absolute paths.
-  if (pack_path.empty() || !pack_path.IsAbsolute())
-    return;
-
-  scoped_ptr<DataPack> data_pack(
-      new DataPack(scale_factor));
-  if (data_pack->LoadFromPath(pack_path)) {
-    AddDataPack(data_pack.release());
-  } else if (!optional) {
-    LOG(ERROR) << "Failed to load " << pack_path.value()
-               << "\nSome features may not be available.";
-  }
-}
-
-void ResourceBundle::AddDataPack(DataPack* data_pack) {
-  data_packs_.push_back(data_pack);
-
-  if (GetImageScale(data_pack->GetScaleFactor()) >
-      GetImageScale(max_scale_factor_))
-    max_scale_factor_ = data_pack->GetScaleFactor();
 }
 
 void ResourceBundle::LoadFontsIfNecessary() {
   images_and_fonts_lock_->AssertAcquired();
-  if (!base_font_list_.get()) {
-    if (delegate_) {
-      base_font_list_ = GetFontListFromDelegate(BaseFont);
-      bold_font_list_ = GetFontListFromDelegate(BoldFont);
-      small_font_list_ = GetFontListFromDelegate(SmallFont);
-      small_bold_font_list_ = GetFontListFromDelegate(SmallBoldFont);
-      medium_font_list_ = GetFontListFromDelegate(MediumFont);
-      medium_bold_font_list_ = GetFontListFromDelegate(MediumBoldFont);
-      large_font_list_ = GetFontListFromDelegate(LargeFont);
-      large_bold_font_list_ = GetFontListFromDelegate(LargeBoldFont);
-    }
+  if (!base_font_.get()) {
+    base_font_.reset(new gfx::Font());
 
-    if (!base_font_list_.get())
-      base_font_list_.reset(new gfx::FontList());
+    bold_font_.reset(new gfx::Font());
+    *bold_font_ =
+        base_font_->DeriveFont(0, base_font_->GetStyle() | gfx::Font::BOLD);
 
-    if (!bold_font_list_.get()) {
-      bold_font_list_.reset(new gfx::FontList());
-      *bold_font_list_ = base_font_list_->DeriveFontList(
-          base_font_list_->GetFontStyle() | gfx::Font::BOLD);
-    }
+    small_font_.reset(new gfx::Font());
+    *small_font_ = base_font_->DeriveFont(kSmallFontSizeDelta);
 
-    if (!small_font_list_.get()) {
-      small_font_list_.reset(new gfx::FontList());
-      *small_font_list_ = base_font_list_->DeriveFontListWithSize(
-          base_font_list_->GetFontSize() + kSmallFontSizeDelta);
-    }
+    medium_font_.reset(new gfx::Font());
+    *medium_font_ = base_font_->DeriveFont(kMediumFontSizeDelta);
 
-    if (!small_bold_font_list_.get()) {
-      small_bold_font_list_.reset(new gfx::FontList());
-      *small_bold_font_list_ = small_font_list_->DeriveFontList(
-          small_font_list_->GetFontStyle() | gfx::Font::BOLD);
-    }
+    medium_bold_font_.reset(new gfx::Font());
+    *medium_bold_font_ =
+        base_font_->DeriveFont(kMediumFontSizeDelta,
+                               base_font_->GetStyle() | gfx::Font::BOLD);
 
-    if (!medium_font_list_.get()) {
-      medium_font_list_.reset(new gfx::FontList());
-      *medium_font_list_ = base_font_list_->DeriveFontListWithSize(
-          base_font_list_->GetFontSize() + kMediumFontSizeDelta);
-    }
+    large_font_.reset(new gfx::Font());
+    *large_font_ = base_font_->DeriveFont(kLargeFontSizeDelta);
 
-    if (!medium_bold_font_list_.get()) {
-      medium_bold_font_list_.reset(new gfx::FontList());
-      *medium_bold_font_list_ = medium_font_list_->DeriveFontList(
-          medium_font_list_->GetFontStyle() | gfx::Font::BOLD);
-    }
-
-    if (!large_font_list_.get()) {
-      large_font_list_.reset(new gfx::FontList());
-      *large_font_list_ = base_font_list_->DeriveFontListWithSize(
-          base_font_list_->GetFontSize() + kLargeFontSizeDelta);
-    }
-
-    if (!large_bold_font_list_.get()) {
-      large_bold_font_list_.reset(new gfx::FontList());
-      *large_bold_font_list_ = large_font_list_->DeriveFontList(
-          large_font_list_->GetFontStyle() | gfx::Font::BOLD);
-    }
+    large_bold_font_.reset(new gfx::Font());
+    *large_bold_font_ =
+        base_font_->DeriveFont(kLargeFontSizeDelta,
+                               base_font_->GetStyle() | gfx::Font::BOLD);
   }
 }
 
-scoped_ptr<gfx::FontList> ResourceBundle::GetFontListFromDelegate(
-    FontStyle style) {
-  DCHECK(delegate_);
-  scoped_ptr<gfx::Font> font = delegate_->GetFont(style);
-  if (font.get())
-    return scoped_ptr<gfx::FontList>(new gfx::FontList(*font));
-  return scoped_ptr<gfx::FontList>();
-}
+// static
+SkBitmap* ResourceBundle::LoadBitmap(DataHandle data_handle, int resource_id) {
+  scoped_refptr<RefCountedMemory> memory(
+      LoadResourceBytes(data_handle, resource_id));
+  if (!memory)
+    return NULL;
 
-bool ResourceBundle::LoadBitmap(const ResourceHandle& data_handle,
-                                int resource_id,
-                                SkBitmap* bitmap,
-                                bool* fell_back_to_1x) const {
-  DCHECK(fell_back_to_1x);
-  scoped_refptr<base::RefCountedMemory> memory(
-      data_handle.GetStaticMemory(resource_id));
-  if (!memory.get())
-    return false;
-
-  if (DecodePNG(memory->front(), memory->size(), bitmap, fell_back_to_1x))
-    return true;
-
-#if !defined(OS_IOS)
-  // iOS does not compile or use the JPEG codec.  On other platforms,
-  // 99% of our assets are PNGs, however fallback to JPEG.
-  scoped_ptr<SkBitmap> jpeg_bitmap(
-      gfx::JPEGCodec::Decode(memory->front(), memory->size()));
-  if (jpeg_bitmap.get()) {
-    bitmap->swap(*jpeg_bitmap.get());
-    *fell_back_to_1x = false;
-    return true;
+  SkBitmap bitmap;
+  if (!gfx::PNGCodec::Decode(memory->front(), memory->size(), &bitmap)) {
+    NOTREACHED() << "Unable to decode theme image resource " << resource_id;
+    return NULL;
   }
-#endif
 
-  NOTREACHED() << "Unable to decode theme image resource " << resource_id;
-  return false;
+  return new SkBitmap(bitmap);
 }
 
-bool ResourceBundle::LoadBitmap(int resource_id,
-                                ScaleFactor* scale_factor,
-                                SkBitmap* bitmap,
-                                bool* fell_back_to_1x) const {
-  DCHECK(fell_back_to_1x);
-  for (size_t i = 0; i < data_packs_.size(); ++i) {
-    // If the resource is in the package with SCALE_FACTOR_NONE, it
-    // can be used in any scale factor, but set 100P in ImageSkia so
-    // that it will be scaled property.
-    if (data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_NONE &&
-        LoadBitmap(*data_packs_[i], resource_id, bitmap, fell_back_to_1x)) {
-      *scale_factor = ui::SCALE_FACTOR_100P;
-      DCHECK(!*fell_back_to_1x);
-      return true;
-    }
-    if (data_packs_[i]->GetScaleFactor() == *scale_factor &&
-        LoadBitmap(*data_packs_[i], resource_id, bitmap, fell_back_to_1x)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-gfx::Image& ResourceBundle::GetEmptyImage() {
+gfx::Image* ResourceBundle::GetEmptyImage() {
   base::AutoLock lock(*images_and_fonts_lock_);
 
-  if (empty_image_.IsEmpty()) {
+  static gfx::Image* empty_image = NULL;
+  if (!empty_image) {
     // The placeholder bitmap is bright red so people notice the problem.
-    SkBitmap bitmap;
-    bitmap.setConfig(SkBitmap::kARGB_8888_Config, 32, 32);
-    bitmap.allocPixels();
-    bitmap.eraseARGB(255, 255, 0, 0);
-    empty_image_ = gfx::Image::CreateFrom1xBitmap(bitmap);
+    // This bitmap will be leaked, but this code should never be hit.
+    SkBitmap* bitmap = new SkBitmap();
+    bitmap->setConfig(SkBitmap::kARGB_8888_Config, 32, 32);
+    bitmap->allocPixels();
+    bitmap->eraseARGB(255, 255, 0, 0);
+    empty_image = new gfx::Image(bitmap);
   }
-  return empty_image_;
+  return empty_image;
 }
 
-// static
-bool ResourceBundle::ShouldHighlightMissingScaledResources() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kHighlightMissingScaledResources);
+// LoadedDataPack -------------------------------------------------------------
+
+ResourceBundle::LoadedDataPack::LoadedDataPack(const FilePath& path)
+    : path_(path) {
+  // Always preload the data packs so we can maintain constness.
+  Load();
 }
 
-// static
-bool ResourceBundle::PNGContainsFallbackMarker(const unsigned char* buf,
-                               size_t size) {
-  if (size < arraysize(kPngMagic) ||
-      memcmp(buf, kPngMagic, arraysize(kPngMagic)) != 0) {
-    // Data invalid or a JPEG.
+ResourceBundle::LoadedDataPack::~LoadedDataPack() {
+}
+
+void ResourceBundle::LoadedDataPack::Load() {
+  DCHECK(!data_pack_.get());
+  data_pack_.reset(new ui::DataPack);
+  bool success = data_pack_->Load(path_);
+  LOG_IF(ERROR, !success) << "Failed to load " << path_.value()
+      << "\nSome features may not be available.";
+  if (!success)
+    data_pack_.reset();
+}
+
+bool ResourceBundle::LoadedDataPack::GetStringPiece(
+    int resource_id, base::StringPiece* data) const {
+  if (!data_pack_.get())
     return false;
-  }
-  size_t pos = arraysize(kPngMagic);
-
-  // Scan for custom chunks until we find one, find the IDAT chunk, or run out
-  // of chunks.
-  for (;;) {
-    if (size - pos < kPngChunkMetadataSize)
-      break;
-    uint32 length = 0;
-    net::ReadBigEndian(reinterpret_cast<const char*>(buf + pos), &length);
-    if (size - pos - kPngChunkMetadataSize < length)
-      break;
-    if (length == 0 && memcmp(buf + pos + sizeof(uint32), kPngScaleChunkType,
-                              arraysize(kPngScaleChunkType)) == 0) {
-      return true;
-    }
-    if (memcmp(buf + pos + sizeof(uint32), kPngDataChunkType,
-               arraysize(kPngDataChunkType)) == 0) {
-      // Stop looking for custom chunks, any custom chunks should be before an
-      // IDAT chunk.
-      break;
-    }
-    pos += length + kPngChunkMetadataSize;
-  }
-  return false;
+  return data_pack_->GetStringPiece(static_cast<uint32>(resource_id), data);
 }
 
-// static
-bool ResourceBundle::DecodePNG(const unsigned char* buf,
-                               size_t size,
-                               SkBitmap* bitmap,
-                               bool* fell_back_to_1x) {
-  *fell_back_to_1x = PNGContainsFallbackMarker(buf, size);
-  return gfx::PNGCodec::Decode(buf, size, bitmap);
+RefCountedStaticMemory* ResourceBundle::LoadedDataPack::GetStaticMemory(
+    int resource_id) const {
+  if (!data_pack_.get())
+    return NULL;
+  return data_pack_->GetStaticMemory(resource_id);
 }
 
 }  // namespace ui

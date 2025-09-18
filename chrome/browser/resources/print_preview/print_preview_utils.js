@@ -15,6 +15,7 @@ function isInteger(toTest) {
 /**
  * Returns true if |value| is a valid non zero positive integer.
  * @param {string} value The string to be tested.
+ *
  * @return {boolean} true if the |value| is valid non zero positive integer.
  */
 function isPositiveInteger(value) {
@@ -23,8 +24,9 @@ function isPositiveInteger(value) {
 
 /**
  * Returns true if the contents of the two arrays are equal.
- * @param {Array.<{from: number, to: number}>} array1 The first array.
- * @param {Array.<{from: number, to: number}>} array2 The second array.
+ * @param {Array} array1 The first array.
+ * @param {Array} array2 The second array.
+ *
  * @return {boolean} true if the arrays are equal.
  */
 function areArraysEqual(array1, array2) {
@@ -33,23 +35,6 @@ function areArraysEqual(array1, array2) {
   for (var i = 0; i < array1.length; i++)
     if (array1[i] !== array2[i])
       return false;
-  return true;
-}
-
-/**
- * Returns true if the contents of the two page ranges are equal.
- * @param {Array} array1 The first array.
- * @param {Array} array2 The second array.
- * @return {boolean} true if the arrays are equal.
- */
-function areRangesEqual(array1, array2) {
-  if (array1.length != array2.length)
-    return false;
-  for (var i = 0; i < array1.length; i++)
-    if (array1[i].from != array2[i].from ||
-        array1[i].to != array2[i].to) {
-    return false;
-  }
   return true;
 }
 
@@ -73,89 +58,92 @@ function removeDuplicates(inArray) {
 }
 
 /**
- * Returns a list of ranges in |pageRangeText|. The ranges are
- * listed in the order they appear in |pageRangeText| and duplicates are not
- * eliminated. If |pageRangeText| is not valid null is returned.
+ * Checks if |pageRangeText| represents a valid page selection.
  * A valid selection has a parsable format and every page identifier is
- * greater the 0 and less or equal to |totalPageCount| unless wildcards are
- * used(see examples).
- * If |totalPageCount| is 0 or undefined function uses impossibly large number
- * instead.
- * Wildcard the first number must be larger then 0 and less or equal then
- * |totalPageCount|. If it's missed then 1 is used as the first number.
- * Wildcard the second number must be larger then the first number. If it's
- * missed then |totalPageCount| is used as the second number.
+ * <= |totalPageCount| unless wildcards are used (see examples).
  * Example: "1-4, 9, 3-6, 10, 11" is valid, assuming |totalPageCount| >= 11.
- * Example: "1-4, -6" is valid, assuming |totalPageCount| >= 6.
+ * Example: "1-4, 6-6" is valid, assuming |totalPageCount| >= 6.
  * Example: "2-" is valid, assuming |totalPageCount| >= 2, means from 2 to the
- *          end.
- * Example: "4-2, 11, -6" is invalid.
- * Example: "-" is valid, assuming |totalPageCount| >= 1.
+ * end.
+ * Example: "1-10000" is valid, regardless of |totalPageCount|, means from 1 to
+ * the end if |totalPageCount| < 10000.
  * Example: "1-4dsf, 11" is invalid regardless of |totalPageCount|.
+ * Example: "4-2, 11, -6" is invalid regardless of |totalPageCount|.
+ *
+ * Note: If |totalPageCount| is undefined the validation does not take
+ * |totalPageCount| into account.
+ * Example: "34853253" is valid.
+ * Example: "1-4, 9, 3-6, 10, 11" is valid.
+ *
  * @param {string} pageRangeText The text to be checked.
  * @param {number} totalPageCount The total number of pages.
- * @return {Array.<{from: number, to: number}>} An array of page range objects.
+ * @return {boolean} true if the |pageRangeText| is valid.
  */
-function pageRangeTextToPageRanges(pageRangeText, totalPageCount) {
-  if (pageRangeText == '') {
-    return [];
-  }
+function isPageRangeTextValid(pageRangeText, totalPageCount) {
+  var regex = /^\s*([0-9]+)\s*-\s*([0-9]*)\s*$/;
+  var successfullyParsed = 0;
 
-  var MAX_PAGE_NUMBER = 1000000000;
-  totalPageCount = totalPageCount ? totalPageCount : MAX_PAGE_NUMBER;
-
-  var regex = /^\s*([0-9]*)\s*-\s*([0-9]*)\s*$/;
+  // Splitting around commas.
   var parts = pageRangeText.split(/,/);
 
-  var pageRanges = [];
   for (var i = 0; i < parts.length; ++i) {
+    // Removing whitespace.
+    parts[i] = parts[i].replace(/\s*/g, '');
     var match = parts[i].match(regex);
-    if (match) {
-      if (!isPositiveInteger(match[1]) && match[1] !== '')
-        return null;
-      if (!isPositiveInteger(match[2]) && match[2] !== '')
-        return null;
-      var from = match[1] ? parseInt(match[1], 10) : 1;
-      var to = match[2] ? parseInt(match[2], 10) : totalPageCount;
+    if (parts[i].length == 0)
+      continue;
+
+    if (match && match[1] && isPositiveInteger(match[1])) {
+      var from = parseInt(match[1], 10);
+      var to = isPositiveInteger(match[2]) ? parseInt(match[2], 10) :
+          totalPageCount;
       if (from > to || from > totalPageCount)
-        return null;
-      pageRanges.push({'from': from, 'to': to});
-    } else {
-      if (!isPositiveInteger(parts[i]))
-        return null;
-      var singlePageNumber = parseInt(parts[i], 10);
-      if (singlePageNumber > totalPageCount)
-        return null;
-      pageRanges.push({'from': singlePageNumber, 'to': singlePageNumber});
+        return false;
+    } else if (!isPositiveInteger(parts[i]) || (totalPageCount != -1 &&
+          parseInt(parts[i], 10) > totalPageCount)) {
+      return false;
     }
+    successfullyParsed++;
   }
-  return pageRanges;
+  return successfullyParsed > 0;
 }
 
 /**
- * Returns a list of pages defined by |pagesRangeText|. The pages are
+ * Returns a list of all pages specified in |pagesRangeText|. The pages are
  * listed in the order they appear in |pageRangeText| and duplicates are not
- * eliminated. If |pageRangeText| is not valid according or
- * |totalPageCount| undefined [1,2,...,totalPageCount] is returned.
- * See pageRangeTextToPageRanges for details.
+ * eliminated. If |pageRangeText| is not valid according to
+ * isPageRangeTextValid(), or |totalPageCount| is undefined an empty list is
+ * returned.
  * @param {string} pageRangeText The text to be checked.
  * @param {number} totalPageCount The total number of pages.
  * @return {Array.<number>} A list of all pages.
  */
 function pageRangeTextToPageList(pageRangeText, totalPageCount) {
-  var pageRanges = pageRangeTextToPageRanges(pageRangeText, totalPageCount);
-  pageList = [];
-  if (pageRanges) {
-    for (var i = 0; i < pageRanges.length; ++i) {
-      for (var j = pageRanges[i].from; j <= Math.min(pageRanges[i].to,
-                                                     totalPageCount); ++j) {
+  var pageList = [];
+  if ((totalPageCount && !isPageRangeTextValid(pageRangeText, totalPageCount))
+      || !totalPageCount) {
+    return pageList;
+  }
+
+  var regex = /^\s*([0-9]+)\s*-\s*([0-9]*)\s*$/;
+  var parts = pageRangeText.split(/,/);
+
+  for (var i = 0; i < parts.length; ++i) {
+    var match = parts[i].match(regex);
+
+    if (match && match[1]) {
+      var from = parseInt(match[1], 10);
+      var to = match[2] ? parseInt(match[2], 10) : totalPageCount;
+
+      for (var j = from; j <= Math.min(to, totalPageCount); ++j)
         pageList.push(j);
+    } else {
+      var singlePageNumber = parseInt(parts[i], 10);
+      if (isPositiveInteger(singlePageNumber.toString()) &&
+          singlePageNumber <= totalPageCount) {
+        pageList.push(singlePageNumber);
       }
     }
-  }
-  if (pageList.length == 0) {
-    for (var j = 1; j <= totalPageCount; ++j)
-      pageList.push(j);
   }
   return pageList;
 }
@@ -178,27 +166,101 @@ function pageListToPageSet(pageList) {
 }
 
 /**
- * @param {!HTMLElement} element Element to check for visibility.
- * @return {boolean} Whether the given element is visible.
+ * Converts |pageSet| to page ranges. It squashes whenever possible.
+ * Example: '1-2,3,5-7' becomes 1-3,5-7.
+ *
+ * @param {Array.<number>} pageSet The set of pages to be processed. Callers
+ *     should ensure that no duplicates exist.
+ * @return {Array.<{from: number, to: number}>} An array of page range objects.
  */
-function getIsVisible(element) {
-  return !element.hidden;
+function pageSetToPageRanges(pageSet) {
+  var pageRanges = [];
+  for (var i = 0; i < pageSet.length; ++i) {
+    var tempFrom = pageSet[i];
+    while (i + 1 < pageSet.length && pageSet[i + 1] == pageSet[i] + 1)
+      ++i;
+    var tempTo = pageSet[i];
+    pageRanges.push({'from': tempFrom, 'to': tempTo});
+  }
+  return pageRanges;
 }
 
 /**
- * Shows or hides an element.
- * @param {!HTMLElement} element Element to show or hide.
- * @param {boolean} isVisible Whether the element should be visible or not.
+ * Constructs a url for getting a specific page.
+ * @param {string} id The id of the preview data.
+ * @param {number} pageNumber The number of the desired page.
+ * @return {string} The constructed URL.
  */
-function setIsVisible(element, isVisible) {
-  element.hidden = !isVisible;
+function getPageSrcURL(id, pageNumber) {
+  return 'chrome://print/' + id + '/' + pageNumber + '/print.pdf';
 }
 
 /**
- * @param {!Array} array Array to check for item.
- * @param {*} item Item to look for in array.
- * @return {boolean} Whether the item is in the array.
+ * Returns a random integer within the specified range, |endPointA| and
+ * |endPointB| are included.
+ * @param {number} endPointA One end of the desired range.
+ * @param {number} endPointB  The other end of the desired range.
+ * @return {number} The random integer.
  */
-function arrayContains(array, item) {
-  return array.indexOf(item) != -1;
+function randomInteger(endPointA, endPointB) {
+  var from = Math.min(endPointA, endPointB);
+  var to = Math.max(endPointA, endPointB);
+  return Math.floor(Math.random() * (to - from + 1) + from);
+}
+
+// Number of points per inch.
+var POINTS_PER_INCH = 72;
+// Number of points per millimeter.
+var POINTS_PER_MILLIMETER = 2.83464567;
+
+/**
+ * Converts |value| from inches to points.
+ * @param {number} value The number in inches.
+ * @return {number} |value| in points.
+ */
+function convertInchesToPoints(value) {
+  return value * POINTS_PER_INCH;
+}
+
+/**
+ * Converts |value| from points to inches.
+ * @param {number} value The number in points.
+ * @return {number} |value| in inches.
+ */
+function convertPointsToInches(value) {
+  return value / POINTS_PER_INCH;
+}
+
+/**
+ * Converts |value| from millimeters to points.
+ * @param {number} value The number in millimeters.
+ * @return {number} |value| in points.
+ */
+function convertMillimetersToPoints(value) {
+  return value * POINTS_PER_MILLIMETER;
+}
+
+/**
+ * Converts |value| from points to millimeters.
+ * @param {number} value The number in points.
+ * @return {number} |value| in millimeters.
+ */
+function convertPointsToMillimeters(value) {
+  return value / POINTS_PER_MILLIMETER;
+}
+
+/**
+ * Parses |numberFormat| and extracts the symbols used for the thousands point
+ * and decimal point.
+ * @param {string} numberFormat The formatted version of the number 12345678.
+ * @return {!Array.<string>} The extracted symbols in the order
+ *     [thousandsSymbol, decimalSymbol]]. For example
+ *     parseNumberFormat("123,456.78") returns [",", "."].
+ */
+function parseNumberFormat(numberFormat) {
+  if (!numberFormat)
+    numberFormat = '';
+  var regex = /^(\d+)(\W{0,1})(\d+)(\W{0,1})(\d+)$/;
+  var matches = numberFormat.match(regex) || ['', '', ',', '', '.'];
+  return [matches[2], matches[4]];
 }

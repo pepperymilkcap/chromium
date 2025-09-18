@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var kNewInputMethod = "fr::fra";
+var kNewInputMethod = "ru::rus";
 
 function setAndGetTest() {
   console.log('Changing input method to: ' + kNewInputMethod);

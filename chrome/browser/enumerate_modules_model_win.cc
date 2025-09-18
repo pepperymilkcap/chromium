@@ -1,44 +1,42 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/enumerate_modules_model_win.h"
 
+#include <algorithm>
 #include <Tlhelp32.h>
 #include <wintrust.h>
-#include <algorithm>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/environment.h"
+#include "base/file_path.h"
 #include "base/file_version_info_win.h"
-#include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
-#include "base/win/windows_version.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "crypto/sha2.h"
 #include "chrome/browser/net/service_providers_win.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
-#include "crypto/sha2.h"
 #include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 
 // The period of time (in milliseconds) to wait until checking to see if any
 // incompatible modules exist.
-static const int kModuleCheckDelayMs = 45 * 1000;
+static const int kModuleCheckDelayMs = 60 * 1000;
 
 // The path to the Shell Extension key in the Windows registry.
 static const wchar_t kRegPath[] =
@@ -90,8 +88,7 @@ struct FindModule {
 // Returns the long path name given a short path name. A short path name is a
 // path that follows the 8.3 convention and has ~x in it. If the path is already
 // a long path name, the function returns the current path without modification.
-bool ConvertToLongPath(const base::string16& short_path,
-                       base::string16* long_path) {
+bool ConvertToLongPath(const string16& short_path, string16* long_path) {
   wchar_t long_path_buf[MAX_PATH];
   DWORD return_value = GetLongPathName(short_path.c_str(), long_path_buf,
                                        MAX_PATH);
@@ -121,195 +118,161 @@ const ModuleEnumerator::BlacklistEntry ModuleEnumerator::kModuleBlacklist[] = {
   // Version 3.2.1.6 seems to be implicated in most cases (and 3.2.2.2 in some).
   // There is a more recent version available for download.
   // accelerator.dll, "%programfiles%\\speedbit video accelerator\\".
-  { "7ba9402f", "c9132d48", "", "", "", ALL, kInvestigatingLink },
+  { "7ba9402f", "c9132d48", "", "", "", kInvestigatingLink },
 
   // apiqq0.dll, "%temp%\\".
-  { "26134911", "59145acf", "", "", "", ALL, kUninstallLink },
+  { "26134911", "59145acf", "", "", "", kUninstallLink },
 
   // arking0.dll, "%systemroot%\\system32\\".
-  { "f5d8f549", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "f5d8f549", "23d01d5b", "", "", "", kUninstallLink },
 
   // arking1.dll, "%systemroot%\\system32\\".
-  { "c60ca062", "23d01d5b", "", "", "", ALL, kUninstallLink },
-
-  // aswjsflt.dll, "%ProgramFiles%\\avast software\\avast\\", "AVAST Software".
-  // NOTE: The digital signature of the DLL is double null terminated.
-  // Avast Antivirus prior to version 8.0 would kill the Chrome child process
-  // when blocked from running.
-  { "2ea5422a", "6b3a1b00", "a7db0e0c", "", "8.0", XP,
-    static_cast<RecommendedAction>(UPDATE | SEE_LINK | NOTIFY_USER) },
-
-  // aswjsflt.dll, "%ProgramFiles%\\alwil software\\avast5\\", "AVAST Software".
-  // NOTE: The digital signature of the DLL is double null terminated.
-  // Avast Antivirus prior to version 8.0 would kill the Chrome child process
-  // when blocked from running.
-  { "2ea5422a", "d8686924", "a7db0e0c", "", "8.0", XP,
-    static_cast<RecommendedAction>(UPDATE | SEE_LINK | NOTIFY_USER) },
+  { "c60ca062", "23d01d5b", "", "", "", kUninstallLink },
 
   // Said to belong to Killer NIC from BigFoot Networks (not verified). Versions
   // 6.0.0.7 and 6.0.0.10 implicated.
   // bfllr.dll, "%systemroot%\\system32\\".
-  { "6bb57633", "23d01d5b", "", "", "", ALL, kInvestigatingLink },
+  { "6bb57633", "23d01d5b", "", "", "", kInvestigatingLink },
 
   // clickpotatolitesahook.dll, "". Different version each report.
-  { "0396e037.dll", "", "", "", "", ALL, kUninstallLink },
+  { "0396e037.dll", "", "", "", "", kUninstallLink },
 
   // cvasds0.dll, "%temp%\\".
-  { "5ce0037c", "59145acf", "", "", "", ALL, kUninstallLink },
+  { "5ce0037c", "59145acf", "", "", "", kUninstallLink },
 
   // cwalsp.dll, "%systemroot%\\system32\\".
-  { "e579a039", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "e579a039", "23d01d5b", "", "", "", kUninstallLink },
 
-  // datamngr.dll (1), "%programfiles%\\searchqu toolbar\\datamngr\\".
-  { "7add320b", "470a3da3", "", "", "", ALL, kUninstallLink },
-
-  // datamngr.dll (2), "%programfiles%\\windows searchqu toolbar\\".
-  { "7add320b", "7a3c8be3", "", "", "", ALL, kUninstallLink },
+  // datamngr.dll, "%programfiles%\\windows searchqu toolbar\\".
+  { "7add320b", "7a3c8be3", "", "", "", kUninstallLink },
 
   // dsoqq0.dll, "%temp%\\".
-  { "1c4df325", "59145acf", "", "", "", ALL, kUninstallLink },
+  { "1c4df325", "59145acf", "", "", "", kUninstallLink },
 
   // flt.dll, "%programfiles%\\tueagles\\".
-  { "6d01f4a1", "7935e9c2", "", "", "", ALL, kUninstallLink },
+  { "6d01f4a1", "7935e9c2", "", "", "", kUninstallLink },
 
   // This looks like a malware edition of a Brazilian Bank plugin, sometimes
   // referred to as Malware.Banc.A.
   // gbieh.dll, "%programfiles%\\gbplugin\\".
-  { "4cb4f2e3", "88e4a3b1", "", "", "", ALL, kUninstallLink },
+  { "4cb4f2e3", "88e4a3b1", "", "", "", kUninstallLink },
 
   // hblitesahook.dll. Each report has different version number in location.
-  { "5d10b363", "", "", "", "", ALL, kUninstallLink },
+  { "5d10b363", "", "", "", "", kUninstallLink },
 
   // icf.dll, "%systemroot%\\system32\\".
-  { "303825ed", "23d01d5b", "", "", "", ALL, INVESTIGATING },
+  { "303825ed", "23d01d5b", "", "", "", INVESTIGATING },
 
   // idmmbc.dll (IDM), "%systemroot%\\system32\\". See: http://crbug.com/26892/.
-  { "b8dce5c3", "23d01d5b", "", "", "6.03", ALL,
+  { "b8dce5c3", "23d01d5b", "", "", "6.03",
       static_cast<RecommendedAction>(UPDATE | DISABLE) },
 
   // imon.dll (NOD32), "%systemroot%\\system32\\". See: http://crbug.com/21715.
-  { "8f42f22e", "23d01d5b", "", "", "4.0", ALL,
+  { "8f42f22e", "23d01d5b", "", "", "4.0",
       static_cast<RecommendedAction>(UPDATE | DISABLE) },
 
   // is3lsp.dll, "%commonprogramfiles%\\is3\\anti-spyware\\".
-  { "7ffbdce9", "bc5673f2", "", "", "", ALL,
+  { "7ffbdce9", "bc5673f2", "", "", "",
       static_cast<RecommendedAction>(UPDATE | DISABLE | SEE_LINK) },
 
   // jsi.dll, "%programfiles%\\profilecraze\\".
-  { "f9555eea", "e3548061", "", "", "", ALL, kUninstallLink },
+  { "f9555eea", "e3548061", "", "", "", kUninstallLink },
 
   // kernel.dll, "%programfiles%\\contentwatch\\internet protection\\modules\\".
-  { "ead2768e", "4e61ce60", "", "", "", ALL, INVESTIGATING },
+  { "ead2768e", "4e61ce60", "", "", "", INVESTIGATING },
 
   // mgking0.dll, "%systemroot%\\system32\\".
-  { "d0893e38", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "d0893e38", "23d01d5b", "", "", "", kUninstallLink },
 
   // mgking0.dll, "%temp%\\".
-  { "d0893e38", "59145acf", "", "", "", ALL, kUninstallLink },
+  { "d0893e38", "59145acf", "", "", "", kUninstallLink },
 
   // mgking1.dll, "%systemroot%\\system32\\".
-  { "3e837222", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "3e837222", "23d01d5b", "", "", "", kUninstallLink },
 
   // mgking1.dll, "%temp%\\".
-  { "3e837222", "59145acf", "", "", "", ALL, kUninstallLink },
+  { "3e837222", "59145acf", "", "", "", kUninstallLink },
 
   // mstcipha.ime, "%systemroot%\\system32\\".
-  { "5523579e", "23d01d5b", "", "", "", ALL, INVESTIGATING },
+  { "5523579e", "23d01d5b", "", "", "", INVESTIGATING },
 
   // mwtsp.dll, "%systemroot%\\system32\\".
-  { "9830bff6", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "9830bff6", "23d01d5b", "", "", "", kUninstallLink },
 
   // nodqq0.dll, "%temp%\\".
-  { "b86ce04d", "59145acf", "", "", "", ALL, kUninstallLink },
+  { "b86ce04d", "59145acf", "", "", "", kUninstallLink },
 
   // nProtect GameGuard Anti-cheat system. Every report has a different
   // location, since it is installed into and run from a game folder. Various
   // versions implicated.
   // npggnt.des, no fixed location.
-  { "f2c8790d", "", "", "", "", ALL, kInvestigatingLink },
+  { "f2c8790d", "", "", "", "", kInvestigatingLink },
 
   // nvlsp.dll,
   // "%programfiles%\\nvidia corporation\\networkaccessmanager\\bin32\\".
-  { "37f907e2", "3ad0ff23", "", "", "", ALL, INVESTIGATING },
+  { "37f907e2", "3ad0ff23", "", "", "", INVESTIGATING },
 
   // post0.dll, "%systemroot%\\system32\\".
-  { "7405c0c8", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "7405c0c8", "23d01d5b", "", "", "", kUninstallLink },
 
   // questbrwsearch.dll, "%programfiles%\\questbrwsearch\\".
-  { "0953ed09", "f0d5eeda", "", "", "", ALL, kUninstallLink },
+  { "0953ed09", "f0d5eeda", "", "", "", kUninstallLink },
 
   // questscan.dll, "%programfiles%\\questscan\\".
-  { "f4f3391e", "119d20f7", "", "", "", ALL, kUninstallLink },
+  { "f4f3391e", "119d20f7", "", "", "", kUninstallLink },
 
   // radhslib.dll (Naomi web filter), "%programfiles%\\rnamfler\\".
   // See http://crbug.com/12517.
-  { "7edcd250", "0733dc3e", "", "", "", ALL, INVESTIGATING },
+  { "7edcd250", "0733dc3e", "", "", "", INVESTIGATING },
 
   // rlls.dll, "%programfiles%\\relevantknowledge\\".
-  { "a1ed94a7", "ea9d6b36", "", "", "", ALL, kUninstallLink },
+  { "a1ed94a7", "ea9d6b36", "", "", "", kUninstallLink },
 
   // rooksdol.dll, "%programfiles%\\trusteer\\rapport\\bin\\".
-  { "802aefef", "06120e13", "", "", "3.5.1008.40", ALL, UPDATE },
+  { "802aefef", "06120e13", "", "", "3.5.1008.40", UPDATE },
 
   // scanquery.dll, "%programfiles%\\scanquery\\".
-  { "0b52d2ae", "a4cc88b1", "", "", "", ALL, kUninstallLink },
+  { "0b52d2ae", "a4cc88b1", "", "", "", kUninstallLink },
 
   // sdata.dll, "%programdata%\\srtserv\\".
-  { "1936d5cc", "223c44be", "", "", "", ALL, kUninstallLink },
+  { "1936d5cc", "223c44be", "", "", "", kUninstallLink },
 
   // searchtree.dll,
   // "%programfiles%\\contentwatch\\internet protection\\modules\\".
-  { "f6915a31", "4e61ce60", "", "", "", ALL, INVESTIGATING },
+  { "f6915a31", "4e61ce60", "", "", "", INVESTIGATING },
 
   // sgprxy.dll, "%commonprogramfiles%\\is3\\anti-spyware\\".
-  { "005965ea", "bc5673f2", "", "", "", ALL, INVESTIGATING },
-
-  // snxhk.dll, "%ProgramFiles%\\avast software\\avast\\", "AVAST Software".
-  // NOTE: The digital signature of the DLL is double null terminated.
-  // Avast Antivirus prior to version 8.0 would kill the Chrome child process
-  // when blocked from running.
-  { "46c16aa8", "6b3a1b00", "a7db0e0c", "", "8.0", XP,
-    static_cast<RecommendedAction>(UPDATE | SEE_LINK | NOTIFY_USER) },
-
-  // snxhk.dll, "%ProgramFiles%\\alwil software\\avast5\\", "AVAST Software".
-  // NOTE: The digital signature of the DLL is double null terminated.
-  // Avast Antivirus prior to version 8.0 would kill the Chrome child process
-  // when blocked from running.
-  { "46c16aa8", "d8686924", "a7db0e0c", "", "8.0", XP,
-    static_cast<RecommendedAction>(UPDATE | SEE_LINK | NOTIFY_USER) },
-
-  // sprotector.dll, "". Different location each report.
-  { "24555d74", "", "", "", "", ALL, kUninstallLink },
+  { "005965ea", "bc5673f2", "", "", "", INVESTIGATING },
 
   // swi_filter_0001.dll (Sophos Web Intelligence),
   // "%programfiles%\\sophos\\sophos anti-virus\\web intelligence\\".
   // A small random sample all showed version 1.0.5.0.
-  { "61112d7b", "25fb120f", "", "", "", ALL, kInvestigatingLink },
+  { "61112d7b", "25fb120f", "", "", "", kInvestigatingLink },
 
   // twking0.dll, "%systemroot%\\system32\\".
-  { "0355549b", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "0355549b", "23d01d5b", "", "", "", kUninstallLink },
 
   // twking1.dll, "%systemroot%\\system32\\".
-  { "02e44508", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "02e44508", "23d01d5b", "", "", "", kUninstallLink },
 
   // vksaver.dll, "%systemroot%\\system32\\".
-  { "c4a784d5", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "c4a784d5", "23d01d5b", "", "", "", kUninstallLink },
 
   // vlsp.dll (Venturi Firewall?), "%systemroot%\\system32\\".
-  { "2e4eb93d", "23d01d5b", "", "", "", ALL, INVESTIGATING },
+  { "2e4eb93d", "23d01d5b", "", "", "", INVESTIGATING },
 
   // vmn3_1dn.dll, "%appdata%\\roaming\\vmndtxtb\\".
-  { "bba2037d", "9ab68585", "", "", "", ALL, kUninstallLink },
+  { "bba2037d", "9ab68585", "", "", "", kUninstallLink },
 
   // webanalyzer.dll,
   // "%programfiles%\\contentwatch\\internet protection\\modules\\".
-  { "c70b697d", "4e61ce60", "", "", "", ALL, INVESTIGATING },
+  { "c70b697d", "4e61ce60", "", "", "", INVESTIGATING },
 
   // wowst0.dll, "%systemroot%\\system32\\".
-  { "38ad9963", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "38ad9963", "23d01d5b", "", "", "", kUninstallLink },
 
   // wxbase28u_vc_cw.dll, "%systemroot%\\system32\\".
-  { "e967210d", "23d01d5b", "", "", "", ALL, kUninstallLink },
+  { "e967210d", "23d01d5b", "", "", "", kUninstallLink },
 };
 
 // Generates an 8 digit hash from the input given.
@@ -328,7 +291,7 @@ static void GenerateHash(const std::string& input, std::string* output) {
 
 // static
 void ModuleEnumerator::NormalizeModule(Module* module) {
-  base::string16 path = module->location;
+  string16 path = module->location;
   if (!ConvertToLongPath(path, &module->location))
     module->location = path;
 
@@ -337,7 +300,7 @@ void ModuleEnumerator::NormalizeModule(Module* module) {
   // Location contains the filename, so the last slash is where the path
   // ends.
   size_t last_slash = module->location.find_last_of(L"\\");
-  if (last_slash != base::string16::npos) {
+  if (last_slash != string16::npos) {
     module->name = module->location.substr(last_slash + 1);
     module->location = module->location.substr(0, last_slash + 1);
   } else {
@@ -348,7 +311,7 @@ void ModuleEnumerator::NormalizeModule(Module* module) {
   // Some version strings have things like (win7_rtm.090713-1255) appended
   // to them. Remove that.
   size_t first_space = module->version.find_first_of(L" ");
-  if (first_space != base::string16::npos)
+  if (first_space != string16::npos)
     module->version = module->version.substr(0, first_space);
 
   module->normalized = true;
@@ -365,18 +328,9 @@ ModuleEnumerator::ModuleStatus ModuleEnumerator::Match(
   DCHECK(!strstr(blacklisted.version_from, " "));
   DCHECK(!strstr(blacklisted.version_to, " "));
 
-  base::win::Version version = base::win::GetVersion();
-  switch (version) {
-     case base::win::VERSION_XP:
-      if (!(blacklisted.os & XP)) return NOT_MATCHED;
-      break;
-    default:
-      break;
-  }
-
   std::string filename_hash, location_hash;
-  GenerateHash(base::WideToUTF8(module.name), &filename_hash);
-  GenerateHash(base::WideToUTF8(module.location), &location_hash);
+  GenerateHash(WideToUTF8(module.name), &filename_hash);
+  GenerateHash(WideToUTF8(module.location), &location_hash);
 
   // Filenames are mandatory. Location is mandatory if given.
   if (filename_hash == blacklisted.filename &&
@@ -384,17 +338,20 @@ ModuleEnumerator::ModuleStatus ModuleEnumerator::Match(
           location_hash == blacklisted.location)) {
     // We have a name match against the blacklist (and possibly location match
     // also), so check version.
-    Version module_version(UTF16ToASCII(module.version));
-    Version version_min(blacklisted.version_from);
-    Version version_max(blacklisted.version_to);
-    bool version_ok = !version_min.IsValid() && !version_max.IsValid();
+    scoped_ptr<Version> module_version(
+        Version::GetVersionFromString(UTF16ToASCII(module.version)));
+    scoped_ptr<Version> version_min(
+        Version::GetVersionFromString(blacklisted.version_from));
+    scoped_ptr<Version> version_max(
+        Version::GetVersionFromString(blacklisted.version_to));
+    bool version_ok = !version_min.get() && !version_max.get();
     if (!version_ok) {
-      bool too_low = version_min.IsValid() &&
-          (!module_version.IsValid() ||
-          module_version.CompareTo(version_min) < 0);
-      bool too_high = version_max.IsValid() &&
-          (!module_version.IsValid() ||
-          module_version.CompareTo(version_max) >= 0);
+      bool too_low = version_min.get() &&
+          (!module_version.get() ||
+          module_version->CompareTo(*version_min.get()) < 0);
+      bool too_high = version_max.get() &&
+          (!module_version.get() ||
+          module_version->CompareTo(*version_max.get()) >= 0);
       version_ok = !too_low && !too_high;
     }
 
@@ -404,8 +361,8 @@ ModuleEnumerator::ModuleStatus ModuleEnumerator::Match(
 
       std::string desc_or_signer(blacklisted.desc_or_signer);
       std::string signer_hash, description_hash;
-      GenerateHash(base::WideToUTF8(module.digital_signer), &signer_hash);
-      GenerateHash(base::WideToUTF8(module.description), &description_hash);
+      GenerateHash(WideToUTF8(module.digital_signer), &signer_hash);
+      GenerateHash(WideToUTF8(module.description), &description_hash);
 
       // If signatures match (or both are empty), then we have a winner.
       if (signer_hash == desc_or_signer)
@@ -414,8 +371,9 @@ ModuleEnumerator::ModuleStatus ModuleEnumerator::Match(
       // If descriptions match (or both are empty) and the locations match, then
       // we also have a confirmed match.
       if (description_hash == desc_or_signer &&
-          !location_hash.empty() && location_hash == blacklisted.location)
+          !location_hash.empty() && location_hash == blacklisted.location) {
         return CONFIRMED_BAD;
+      }
 
       // We are not sure, but it is likely bad.
       return SUSPECTED_BAD;
@@ -442,6 +400,7 @@ void ModuleEnumerator::ScanNow(ModulesVector* list, bool limited_mode) {
 
   if (!limited_mode_) {
     CHECK(BrowserThread::GetCurrentThreadIdentifier(&callback_thread_id_));
+    DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::FILE));
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
                             base::Bind(&ModuleEnumerator::ScanImpl, this));
   } else {
@@ -539,7 +498,7 @@ void ModuleEnumerator::ReadShellExtensions(HKEY parent) {
       ++registration;
       continue;
     }
-    base::string16 dll;
+    string16 dll;
     if (clsid.ReadValue(L"", &dll) != ERROR_SUCCESS) {
       ++registration;
       continue;
@@ -578,7 +537,7 @@ void ModuleEnumerator::EnumerateWinsockModules() {
         entry.location.c_str(), expanded, MAX_PATH);
     if (size != 0 && size <= MAX_PATH) {
       entry.digital_signer =
-          GetSubjectNameFromDigitalSignature(base::FilePath(expanded));
+          GetSubjectNameFromDigitalSignature(FilePath(expanded));
     }
     entry.version = base::IntToString16(layered_providers[i].version);
 
@@ -593,10 +552,10 @@ void ModuleEnumerator::PopulateModuleInformation(Module* module) {
   module->duplicate_count = 0;
   module->normalized = false;
   module->digital_signer =
-      GetSubjectNameFromDigitalSignature(base::FilePath(module->location));
+      GetSubjectNameFromDigitalSignature(FilePath(module->location));
   module->recommended_action = NONE;
   scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfo(base::FilePath(module->location)));
+      FileVersionInfo::CreateFileVersionInfo(FilePath(module->location)));
   if (version_info.get()) {
     FileVersionInfoWin* version_info_win =
         static_cast<FileVersionInfoWin*>(version_info.get());
@@ -632,7 +591,7 @@ void ModuleEnumerator::PreparePathMappings() {
   path_mapping_.clear();
 
   scoped_ptr<base::Environment> environment(base::Environment::Create());
-  std::vector<base::string16> env_vars;
+  std::vector<string16> env_vars;
   env_vars.push_back(L"LOCALAPPDATA");
   env_vars.push_back(L"ProgramFiles");
   env_vars.push_back(L"ProgramData");
@@ -641,12 +600,12 @@ void ModuleEnumerator::PreparePathMappings() {
   env_vars.push_back(L"TEMP");
   env_vars.push_back(L"TMP");
   env_vars.push_back(L"CommonProgramFiles");
-  for (std::vector<base::string16>::const_iterator variable = env_vars.begin();
+  for (std::vector<string16>::const_iterator variable = env_vars.begin();
        variable != env_vars.end(); ++variable) {
     std::string path;
     if (environment->GetVar(WideToASCII(*variable).c_str(), &path)) {
       path_mapping_.push_back(
-          std::make_pair(base::i18n::ToLower(base::UTF8ToUTF16(path)) + L"\\",
+          std::make_pair(base::i18n::ToLower(UTF8ToUTF16(path)) + L"\\",
                          L"%" + base::i18n::ToLower(*variable) + L"%"));
     }
   }
@@ -658,12 +617,12 @@ void ModuleEnumerator::CollapsePath(Module* entry) {
   // example, %systemroot%. The most collapsed path (the one with the
   // minimum length) wins.
   size_t min_length = MAXINT;
-  base::string16 location = entry->location;
+  string16 location = entry->location;
   for (PathMapping::const_iterator mapping = path_mapping_.begin();
        mapping != path_mapping_.end(); ++mapping) {
-    base::string16 prefix = mapping->first;
+    string16 prefix = mapping->first;
     if (StartsWith(location, prefix, false)) {
-      base::string16 new_location = mapping->second +
+      string16 new_location = mapping->second +
                               location.substr(prefix.length() - 1);
       size_t length = new_location.length() - mapping->second.length();
       if (length < min_length) {
@@ -720,8 +679,8 @@ void ModuleEnumerator::ReportBack() {
   observer_->DoneScanning();
 }
 
-base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
-    const base::FilePath& filename) {
+string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
+    const FilePath& filename) {
   HCERTSTORE store = NULL;
   HCRYPTMSG message = NULL;
 
@@ -738,7 +697,7 @@ base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
                                    &message,
                                    NULL);
   if (!result)
-    return base::string16();
+    return string16();
 
   // Determine the size of the signer info data.
   DWORD signer_info_size = 0;
@@ -748,10 +707,10 @@ base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
                               NULL,
                               &signer_info_size);
   if (!result)
-    return base::string16();
+    return string16();
 
   // Allocate enough space to hold the signer info.
-  scoped_ptr<BYTE[]> signer_info_buffer(new BYTE[signer_info_size]);
+  scoped_array<BYTE> signer_info_buffer(new BYTE[signer_info_size]);
   CMSG_SIGNER_INFO* signer_info =
       reinterpret_cast<CMSG_SIGNER_INFO*>(signer_info_buffer.get());
 
@@ -762,7 +721,7 @@ base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
                               signer_info,
                               &signer_info_size);
   if (!result)
-    return base::string16();
+    return string16();
 
   // Search for the signer certificate.
   CERT_INFO CertInfo = {0};
@@ -778,7 +737,7 @@ base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
       &CertInfo,
       NULL);
   if (!cert_context)
-    return base::string16();
+    return string16();
 
   // Determine the size of the Subject name.
   DWORD subject_name_size = 0;
@@ -788,10 +747,10 @@ base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
                                               NULL,
                                               NULL,
                                               0))) {
-    return base::string16();
+    return string16();
   }
 
-  base::string16 subject_name;
+  string16 subject_name;
   subject_name.resize(subject_name_size);
 
   // Get subject name.
@@ -801,7 +760,7 @@ base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
                           NULL,
                           const_cast<LPWSTR>(subject_name.c_str()),
                           subject_name_size))) {
-    return base::string16();
+    return string16();
   }
 
   return subject_name;
@@ -812,13 +771,6 @@ base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
 // static
 EnumerateModulesModel* EnumerateModulesModel::GetInstance() {
   return Singleton<EnumerateModulesModel>::get();
-}
-
-// static
-void EnumerateModulesModel::RecordLearnMoreStat(bool from_menu) {
-  UMA_HISTOGRAM_ENUMERATION("ConflictingModule.UserSelection",
-      from_menu ? ACTION_MENU_LEARN_MORE : ACTION_BUBBLE_LEARN_MORE,
-      ACTION_BOUNDARY);
 }
 
 bool EnumerateModulesModel::ShouldShowConflictWarning() const {
@@ -857,7 +809,7 @@ void EnumerateModulesModel::ScanNow() {
   module_enumerator_->ScanNow(&enumerated_modules_, limited_mode_);
 }
 
-base::ListValue* EnumerateModulesModel::GetModuleList() const {
+ListValue* EnumerateModulesModel::GetModuleList() const {
   if (scanning_)
     return NULL;
 
@@ -868,27 +820,27 @@ base::ListValue* EnumerateModulesModel::GetModuleList() const {
     return NULL;
   }
 
-  base::ListValue* list = new base::ListValue();
+  ListValue* list = new ListValue();
 
   for (ModuleEnumerator::ModulesVector::const_iterator module =
            enumerated_modules_.begin();
        module != enumerated_modules_.end(); ++module) {
-    base::DictionaryValue* data = new base::DictionaryValue();
+    DictionaryValue* data = new DictionaryValue();
     data->SetInteger("type", module->type);
-    base::string16 type_string;
+    string16 type_string;
     if ((module->type & ModuleEnumerator::LOADED_MODULE) == 0) {
       // Module is not loaded, denote type of module.
       if (module->type & ModuleEnumerator::SHELL_EXTENSION)
-        type_string = base::ASCIIToWide("Shell Extension");
+        type_string = ASCIIToWide("Shell Extension");
       if (module->type & ModuleEnumerator::WINSOCK_MODULE_REGISTRATION) {
         if (!type_string.empty())
-          type_string += base::ASCIIToWide(", ");
-        type_string += base::ASCIIToWide("Winsock");
+          type_string += ASCIIToWide(", ");
+        type_string += ASCIIToWide("Winsock");
       }
       // Must be one of the above type.
       DCHECK(!type_string.empty());
       if (!limited_mode_) {
-        type_string += base::ASCIIToWide(" -- ");
+        type_string += ASCIIToWide(" -- ");
         type_string += l10n_util::GetStringUTF16(IDS_CONFLICTS_NOT_LOADED_YET);
       }
     }
@@ -903,11 +855,10 @@ base::ListValue* EnumerateModulesModel::GetModuleList() const {
 
     if (!limited_mode_) {
       // Figure out the possible resolution help string.
-      base::string16 actions;
-      base::string16 separator = base::ASCIIToWide(" ") +
-          l10n_util::GetStringUTF16(
-              IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_SEPERATOR) +
-          base::ASCIIToWide(" ");
+      string16 actions;
+      string16 separator = ASCIIToWide(" ") + l10n_util::GetStringUTF16(
+          IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_SEPERATOR) +
+          ASCIIToWide(" ");
 
       if (module->recommended_action & ModuleEnumerator::NONE) {
         actions = l10n_util::GetStringUTF16(
@@ -931,11 +882,9 @@ base::ListValue* EnumerateModulesModel::GetModuleList() const {
         actions += l10n_util::GetStringUTF16(
             IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_DISABLE);
       }
-      base::string16 possible_resolution =
-          actions.empty() ? base::ASCIIToWide("")
-                          : l10n_util::GetStringUTF16(
-                                IDS_CONFLICTS_CHECK_POSSIBLE_ACTIONS) +
-          base::ASCIIToWide(" ") +
+      string16 possible_resolution = actions.empty() ? ASCIIToWide("") :
+          l10n_util::GetStringUTF16(IDS_CONFLICTS_CHECK_POSSIBLE_ACTIONS) +
+          ASCIIToWide(" ") +
           actions;
       data->SetString("possibleResolution", possible_resolution);
       data->SetString("help_url",
@@ -949,38 +898,19 @@ base::ListValue* EnumerateModulesModel::GetModuleList() const {
   return list;
 }
 
-GURL EnumerateModulesModel::GetFirstNotableConflict() {
-  lock->Acquire();
-  GURL url;
-
-  if (enumerated_modules_.empty()) {
-    lock->Release();
-    return GURL();
-  }
-
-  for (ModuleEnumerator::ModulesVector::const_iterator module =
-           enumerated_modules_.begin();
-       module != enumerated_modules_.end(); ++module) {
-    if (!(module->recommended_action & ModuleEnumerator::NOTIFY_USER))
-      continue;
-
-    url = ConstructHelpCenterUrl(*module);
-    DCHECK(url.is_valid());
-    break;
-  }
-
-  lock->Release();
-  return url;
-}
-
-
 EnumerateModulesModel::EnumerateModulesModel()
     : limited_mode_(false),
       scanning_(false),
       conflict_notification_acknowledged_(false),
       confirmed_bad_modules_detected_(0),
-      suspected_bad_modules_detected_(0),
-      modules_to_notify_about_(0) {
+      suspected_bad_modules_detected_(0) {
+  const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
+  if (cmd_line.HasSwitch(switches::kConflictingModulesCheck)) {
+    check_modules_timer_.Start(FROM_HERE,
+        base::TimeDelta::FromMilliseconds(kModuleCheckDelayMs),
+        this, &EnumerateModulesModel::ScanNow);
+  }
+
   lock = new base::Lock();
 }
 
@@ -988,37 +918,16 @@ EnumerateModulesModel::~EnumerateModulesModel() {
   delete lock;
 }
 
-void EnumerateModulesModel::MaybePostScanningTask() {
-  static bool done = false;
-  if (!done) {
-    done = true;
-
-    const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
-    if (cmd_line.HasSwitch(switches::kConflictingModulesCheck) ||
-        base::win::GetVersion() == base::win::VERSION_XP) {
-      check_modules_timer_.Start(FROM_HERE,
-          base::TimeDelta::FromMilliseconds(kModuleCheckDelayMs),
-          this, &EnumerateModulesModel::ScanNow);
-    }
-  }
-}
-
 void EnumerateModulesModel::DoneScanning() {
   confirmed_bad_modules_detected_ = 0;
   suspected_bad_modules_detected_ = 0;
-  modules_to_notify_about_ = 0;
   for (ModuleEnumerator::ModulesVector::const_iterator module =
-       enumerated_modules_.begin();
-       module != enumerated_modules_.end(); ++module) {
-    if (module->status == ModuleEnumerator::CONFIRMED_BAD) {
-      ++confirmed_bad_modules_detected_;
-      if (module->recommended_action & ModuleEnumerator::NOTIFY_USER)
-        ++modules_to_notify_about_;
-    } else if (module->status == ModuleEnumerator::SUSPECTED_BAD) {
-      ++suspected_bad_modules_detected_;
-      if (module->recommended_action & ModuleEnumerator::NOTIFY_USER)
-        ++modules_to_notify_about_;
-    }
+    enumerated_modules_.begin();
+    module != enumerated_modules_.end(); ++module) {
+      if (module->status == ModuleEnumerator::CONFIRMED_BAD)
+        ++confirmed_bad_modules_detected_;
+      if (module->status == ModuleEnumerator::SUSPECTED_BAD)
+        ++suspected_bad_modules_detected_;
   }
 
   scanning_ = false;
@@ -1053,20 +962,18 @@ void EnumerateModulesModel::DoneScanning() {
 
 GURL EnumerateModulesModel::ConstructHelpCenterUrl(
     const ModuleEnumerator::Module& module) const {
-  if (!(module.recommended_action & ModuleEnumerator::SEE_LINK) &&
-      !(module.recommended_action & ModuleEnumerator::NOTIFY_USER))
+  if (!(module.recommended_action & ModuleEnumerator::SEE_LINK))
     return GURL();
 
   // Construct the needed hashes.
   std::string filename, location, description, signer;
-  GenerateHash(base::WideToUTF8(module.name), &filename);
-  GenerateHash(base::WideToUTF8(module.location), &location);
-  GenerateHash(base::WideToUTF8(module.description), &description);
-  GenerateHash(base::WideToUTF8(module.digital_signer), &signer);
+  GenerateHash(WideToUTF8(module.name), &filename);
+  GenerateHash(WideToUTF8(module.location), &location);
+  GenerateHash(WideToUTF8(module.description), &description);
+  GenerateHash(WideToUTF8(module.digital_signer), &signer);
 
-  base::string16 url =
-      l10n_util::GetStringFUTF16(IDS_HELP_CENTER_VIEW_CONFLICTS,
-          base::ASCIIToUTF16(filename), base::ASCIIToUTF16(location),
-          base::ASCIIToUTF16(description), base::ASCIIToUTF16(signer));
-  return GURL(base::UTF16ToUTF8(url));
+  string16 url = l10n_util::GetStringFUTF16(IDS_HELP_CENTER_VIEW_CONFLICTS,
+      ASCIIToUTF16(filename), ASCIIToUTF16(location),
+      ASCIIToUTF16(description), ASCIIToUTF16(signer));
+  return GURL(UTF16ToUTF8(url));
 }

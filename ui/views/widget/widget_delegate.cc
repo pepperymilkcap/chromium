@@ -4,8 +4,8 @@
 
 #include "ui/views/widget/widget_delegate.h"
 
-#include "base/strings/utf_string_conversions.h"
-#include "ui/gfx/image/image_skia.h"
+#include "base/utf_string_conversions.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/view.h"
 #include "ui/views/views_delegate.h"
@@ -61,38 +61,34 @@ ui::AccessibilityTypes::Role WidgetDelegate::GetAccessibleWindowRole() const {
   return ui::AccessibilityTypes::ROLE_WINDOW;
 }
 
-base::string16 WidgetDelegate::GetAccessibleWindowTitle() const {
+ui::AccessibilityTypes::State WidgetDelegate::GetAccessibleWindowState() const {
+  return 0;
+}
+
+string16 WidgetDelegate::GetAccessibleWindowTitle() const {
   return GetWindowTitle();
 }
 
-base::string16 WidgetDelegate::GetWindowTitle() const {
-  return base::string16();
+string16 WidgetDelegate::GetWindowTitle() const {
+  return string16();
 }
 
 bool WidgetDelegate::ShouldShowWindowTitle() const {
   return true;
 }
 
-bool WidgetDelegate::ShouldShowCloseButton() const {
+bool WidgetDelegate::ShouldShowClientEdge() const {
   return true;
 }
 
-bool WidgetDelegate::ShouldHandleSystemCommands() const {
-  const Widget* widget = GetWidget();
-  if (!widget)
-    return false;
-
-  return widget->non_client_view() != NULL;
-}
-
-gfx::ImageSkia WidgetDelegate::GetWindowAppIcon() {
+SkBitmap WidgetDelegate::GetWindowAppIcon() {
   // Use the window icon as app icon by default.
   return GetWindowIcon();
 }
 
 // Returns the icon to be displayed in the window.
-gfx::ImageSkia WidgetDelegate::GetWindowIcon() {
-  return gfx::ImageSkia();
+SkBitmap WidgetDelegate::GetWindowIcon() {
+  return SkBitmap();
 }
 
 bool WidgetDelegate::ShouldShowWindowIcon() const {
@@ -118,7 +114,6 @@ void WidgetDelegate::SaveWindowPlacement(const gfx::Rect& bounds,
 }
 
 bool WidgetDelegate::GetSavedWindowPlacement(
-    const Widget* widget,
     gfx::Rect* bounds,
     ui::WindowShowState* show_state) const {
   std::string window_name = GetWindowName();
@@ -126,7 +121,7 @@ bool WidgetDelegate::GetSavedWindowPlacement(
     return false;
 
   return ViewsDelegate::views_delegate->GetSavedWindowPlacement(
-      widget, window_name, bounds, show_state);
+      window_name, bounds, show_state);
 }
 
 bool WidgetDelegate::ShouldRestoreWindowSize() const {
@@ -143,11 +138,7 @@ ClientView* WidgetDelegate::CreateClientView(Widget* widget) {
   return new ClientView(widget, GetContentsView());
 }
 
-NonClientFrameView* WidgetDelegate::CreateNonClientFrameView(Widget* widget) {
-  return NULL;
-}
-
-View* WidgetDelegate::CreateOverlayView() {
+NonClientFrameView* WidgetDelegate::CreateNonClientFrameView() {
   return NULL;
 }
 
@@ -155,37 +146,13 @@ bool WidgetDelegate::WillProcessWorkAreaChange() const {
   return false;
 }
 
-bool WidgetDelegate::WidgetHasHitTestMask() const {
-  return false;
-}
-
-void WidgetDelegate::GetWidgetHitTestMask(gfx::Path* mask) const {
-  DCHECK(mask);
-}
-
-bool WidgetDelegate::ShouldAdvanceFocusToTopLevelWidget() const {
-  return false;
-}
-
-bool WidgetDelegate::ShouldDescendIntoChildForEventHandling(
-    gfx::NativeView child,
-    const gfx::Point& location) {
-  return true;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // WidgetDelegateView:
 
 WidgetDelegateView::WidgetDelegateView() {
-  // A WidgetDelegate should be deleted on DeleteDelegate.
-  set_owned_by_client();
 }
 
 WidgetDelegateView::~WidgetDelegateView() {
-}
-
-void WidgetDelegateView::DeleteDelegate() {
-  delete this;
 }
 
 Widget* WidgetDelegateView::GetWidget() {

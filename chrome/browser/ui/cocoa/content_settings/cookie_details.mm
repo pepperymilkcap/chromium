@@ -1,17 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/content_settings/cookie_details.h"
 
 #import "base/i18n/time_formatting.h"
-#include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/browsing_data/cookies_tree_model.h"
+#include "base/sys_string_conversions.h"
 #include "grit/generated_resources.h"
-#include "net/cookies/canonical_cookie.h"
+#include "chrome/browser/cookies_tree_model.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/text/bytes_formatting.h"
-#include "webkit/browser/appcache/appcache_service.h"
+#include "webkit/appcache/appcache_service.h"
 
 #pragma mark Cocoa Cookie Details
 
@@ -117,18 +116,19 @@
   return self;
 }
 
-- (id)initWithCookie:(const net::CanonicalCookie*)cookie
+- (id)initWithCookie:(const net::CookieMonster::CanonicalCookie*)cookie
+              origin:(NSString*)origin
    canEditExpiration:(BOOL)canEditExpiration {
   if ((self = [super init])) {
     type_ = kCocoaCookieDetailsTypeCookie;
-    hasExpiration_ = cookie->IsPersistent();
+    hasExpiration_ = cookie->DoesExpire();
     canEditExpiration_ = canEditExpiration && hasExpiration_;
     name_.reset([base::SysUTF8ToNSString(cookie->Name()) retain]);
     content_.reset([base::SysUTF8ToNSString(cookie->Value()) retain]);
     path_.reset([base::SysUTF8ToNSString(cookie->Path()) retain]);
-    domain_.reset([base::SysUTF8ToNSString(cookie->Domain()) retain]);
+    domain_.reset([origin retain]);
 
-    if (cookie->IsPersistent()) {
+    if (cookie->DoesExpire()) {
       expires_.reset([base::SysUTF16ToNSString(
           base::TimeFormatFriendlyDateAndTime(cookie->ExpiryDate())) retain]);
     } else {
@@ -171,8 +171,7 @@
   if ((self = [super init])) {
     type_ = kCocoaCookieDetailsTypeTreeLocalStorage;
     canEditExpiration_ = NO;
-    domain_.reset(
-        [base::SysUTF8ToNSString(storageInfo->origin_url.spec()) retain]);
+    domain_.reset([base::SysUTF8ToNSString(storageInfo->origin) retain]);
     fileSize_.reset(
         [base::SysUTF16ToNSString(ui::FormatBytes(storageInfo->size)) retain]);
     lastModified_.reset([base::SysUTF16ToNSString(
@@ -201,8 +200,8 @@
 }
 
 - (id)initWithDatabase:(const std::string&)domain
-          databaseName:(const base::string16&)databaseName
-   databaseDescription:(const base::string16&)databaseDescription
+          databaseName:(const string16&)databaseName
+   databaseDescription:(const string16&)databaseDescription
               fileSize:(unsigned long)fileSize {
   if ((self = [super init])) {
     type_ = kCocoaCookieDetailsTypePromptDatabase;
@@ -218,8 +217,8 @@
 }
 
 - (id)initWithLocalStorage:(const std::string&)domain
-                       key:(const base::string16&)key
-                     value:(const base::string16&)value {
+                       key:(const string16&)key
+                     value:(const string16&)value {
   if ((self = [super init])) {
     type_ = kCocoaCookieDetailsTypePromptLocalStorage;
     canEditExpiration_ = NO;
@@ -240,17 +239,17 @@
 }
 
 - (id)initWithIndexedDBInfo:
-    (const content::IndexedDBInfo*)indexedDBInfo {
+    (const BrowsingDataIndexedDBHelper::IndexedDBInfo*)indexedDBInfo {
   if ((self = [super init])) {
     type_ = kCocoaCookieDetailsTypeTreeIndexedDB;
     canEditExpiration_ = NO;
     domain_.reset([base::SysUTF8ToNSString(
-        indexedDBInfo->origin_.spec()) retain]);
+        indexedDBInfo->origin.spec()) retain]);
     fileSize_.reset([base::SysUTF16ToNSString(
-        ui::FormatBytes(indexedDBInfo->size_)) retain]);
+        ui::FormatBytes(indexedDBInfo->size)) retain]);
     lastModified_.reset([base::SysUTF16ToNSString(
         base::TimeFormatFriendlyDateAndTime(
-            indexedDBInfo->last_modified_)) retain]);
+            indexedDBInfo->last_modified)) retain]);
   }
   return self;
 }
@@ -258,9 +257,12 @@
 + (CocoaCookieDetails*)createFromCookieTreeNode:(CookieTreeNode*)treeNode {
   CookieTreeNode::DetailedInfo info = treeNode->GetDetailedInfo();
   CookieTreeNode::DetailedInfo::NodeType nodeType = info.node_type;
+  NSString* origin;
   switch (nodeType) {
     case CookieTreeNode::DetailedInfo::TYPE_COOKIE:
+      origin = base::SysWideToNSString(info.origin.c_str());
       return [[[CocoaCookieDetails alloc] initWithCookie:info.cookie
+                                                  origin:origin
                                        canEditExpiration:NO] autorelease];
     case CookieTreeNode::DetailedInfo::TYPE_DATABASE:
       return [[[CocoaCookieDetails alloc]

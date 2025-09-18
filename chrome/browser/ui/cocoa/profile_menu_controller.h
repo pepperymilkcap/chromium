@@ -4,12 +4,14 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_PROFILE_MENU_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_PROFILE_MENU_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 
-class AvatarMenu;
+class AvatarMenuModel;
 class Browser;
 
 namespace ProfileMenuControllerInternal {
@@ -21,11 +23,11 @@ class Observer;
 // whenever the active browser changes.
 @interface ProfileMenuController : NSObject {
  @private
-  // The controller for the profile submenu.
-  scoped_ptr<AvatarMenu> menu_;
+  // The model for the profile submenu.
+  scoped_ptr<AvatarMenuModel> model_;
 
   // An observer to be notified when the active browser changes and when the
-  // menu model changes.
+  // model changes.
   scoped_ptr<ProfileMenuControllerInternal::Observer> observer_;
 
   // The main menu item to which the profile menu is attached.
@@ -36,17 +38,9 @@ class Observer;
 - (id)initWithMainMenuItem:(NSMenuItem*)item;
 
 // Actions for the menu items.
-- (IBAction)switchToProfileFromMenu:(id)sender;
-- (IBAction)switchToProfileFromDock:(id)sender;
+- (IBAction)switchToProfile:(id)sender;
 - (IBAction)editProfile:(id)sender;
 - (IBAction)newProfile:(id)sender;
-
-// If profiles are enabled and there is more than one profile, this inserts
-// profile menu items into the specified menu at the specified offset and
-// returns YES. Otherwise, this returns NO and does not modify the menu.
-- (BOOL)insertItemsIntoMenu:(NSMenu*)menu
-                   atOffset:(NSInteger)offset
-                   fromDock:(BOOL)dock;
 
 @end
 

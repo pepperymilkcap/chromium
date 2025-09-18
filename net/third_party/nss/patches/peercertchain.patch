@@ -1,15 +1,62 @@
-diff -pu a/nss/lib/ssl/sslauth.c b/nss/lib/ssl/sslauth.c
---- a/nss/lib/ssl/sslauth.c	2013-07-31 12:07:10.974699609 -0700
-+++ b/nss/lib/ssl/sslauth.c	2013-07-31 12:32:07.996451064 -0700
-@@ -28,6 +28,41 @@ SSL_PeerCertificate(PRFileDesc *fd)
+From 40714671513378227413d1542c2911c2f62e3840 Mon Sep 17 00:00:00 2001
+From: Adam Langley <agl@chromium.org>
+Date: Mon, 3 Oct 2011 12:20:43 -0400
+Subject: [PATCH] peercertchain.patch
+
+---
+ mozilla/security/nss/lib/ssl/ssl.def   |    1 +
+ mozilla/security/nss/lib/ssl/ssl.h     |   11 +++++++++
+ mozilla/security/nss/lib/ssl/sslauth.c |   36 ++++++++++++++++++++++++++++++++
+ 3 files changed, 48 insertions(+), 0 deletions(-)
+
+diff --git a/mozilla/security/nss/lib/ssl/ssl.def b/mozilla/security/nss/lib/ssl/ssl.def
+index a1f4b51..0fa8777 100644
+--- a/mozilla/security/nss/lib/ssl/ssl.def
++++ b/mozilla/security/nss/lib/ssl/ssl.def
+@@ -155,6 +155,7 @@ SSL_SNISocketConfigHook;
+ ;+NSS_CHROMIUM {
+ ;+    global:
+ SSL_GetNextProto;
++SSL_PeerCertificateChain;
+ SSL_SetNextProtoNego;
+ ;+    local:
+ ;+*;
+diff --git a/mozilla/security/nss/lib/ssl/ssl.h b/mozilla/security/nss/lib/ssl/ssl.h
+index ffa973c..cccb49a 100644
+--- a/mozilla/security/nss/lib/ssl/ssl.h
++++ b/mozilla/security/nss/lib/ssl/ssl.h
+@@ -264,6 +264,17 @@ SSL_IMPORT SECStatus SSL_SecurityStatus(PRFileDesc *fd, int *on, char **cipher,
+ SSL_IMPORT CERTCertificate *SSL_PeerCertificate(PRFileDesc *fd);
+ 
+ /*
++** Return references to the certificates presented by the SSL peer. On entry,
++** |*certs_size| must contain the size of the |certs| array. On successful
++** return, |*certs_size| contains the number of certificates available and
++** |certs| will contain references to as many certificates as would fit.
++** Therefore if, on exit, |*certs_size| contains a value less than, or equal to,
++** the entry value then all certificates were returned.
++*/
++SSL_IMPORT SECStatus SSL_PeerCertificateChain(
++	PRFileDesc *fd, CERTCertificate **certs, unsigned int *certs_size);
++
++/*
+ ** Authenticate certificate hook. Called when a certificate comes in
+ ** (because of SSL_REQUIRE_CERTIFICATE in SSL_Enable) to authenticate the
+ ** certificate.
+diff --git a/mozilla/security/nss/lib/ssl/sslauth.c b/mozilla/security/nss/lib/ssl/sslauth.c
+index 6d1eab0..df40f30 100644
+--- a/mozilla/security/nss/lib/ssl/sslauth.c
++++ b/mozilla/security/nss/lib/ssl/sslauth.c
+@@ -60,6 +60,42 @@ SSL_PeerCertificate(PRFileDesc *fd)
  }
  
  /* NEED LOCKS IN HERE.  */
 +SECStatus
 +SSL_PeerCertificateChain(PRFileDesc *fd, CERTCertificate **certs,
-+			 unsigned int *numCerts, unsigned int maxNumCerts)
++			 unsigned int *certsSize)
 +{
 +    sslSocket *ss;
++    unsigned int inSize = *certsSize;
 +    ssl3CertNode* cur;
 +
 +    ss = ssl_FindSocket(fd);
@@ -22,18 +69,18 @@ diff -pu a/nss/lib/ssl/sslauth.c b/nss/lib/ssl/sslauth.c
 +	return SECFailure;
 +
 +    if (ss->sec.peerCert == NULL) {
-+      *numCerts = 0;
++      *certsSize = 0;
 +      return SECSuccess;
 +    }
 +
-+    *numCerts = 1;  /* for the leaf certificate */
-+    if (maxNumCerts > 0)
++    *certsSize = 1;  /* for the leaf certificate */
++    if (inSize > 0)
 +	certs[0] = CERT_DupCertificate(ss->sec.peerCert);
 +
 +    for (cur = ss->ssl3.peerCertChain; cur; cur = cur->next) {
-+	if (*numCerts < maxNumCerts)
-+	    certs[*numCerts] = CERT_DupCertificate(cur->cert);
-+	(*numCerts)++;
++	if (*certsSize < inSize)
++	    certs[*certsSize] = CERT_DupCertificate(cur->cert);
++	(*certsSize)++;
 +    }
 +
 +    return SECSuccess;
@@ -43,25 +90,3 @@ diff -pu a/nss/lib/ssl/sslauth.c b/nss/lib/ssl/sslauth.c
  CERTCertificate *
  SSL_LocalCertificate(PRFileDesc *fd)
  {
-diff -pu a/nss/lib/ssl/ssl.h b/nss/lib/ssl/ssl.h
---- a/nss/lib/ssl/ssl.h	2013-07-31 12:07:10.964699464 -0700
-+++ b/nss/lib/ssl/ssl.h	2013-07-31 12:32:07.996451065 -0700
-@@ -426,6 +426,18 @@ SSL_SetStapledOCSPResponses(PRFileDesc *
- 			    SSLKEAType kea);
- 
- /*
-+** Return references to the certificates presented by the SSL peer.
-+** |maxNumCerts| must contain the size of the |certs| array. On successful
-+** return, |*numCerts| contains the number of certificates available and
-+** |certs| will contain references to as many certificates as would fit.
-+** Therefore if |*numCerts| contains a value less than or equal to
-+** |maxNumCerts|, then all certificates were returned.
-+*/
-+SSL_IMPORT SECStatus SSL_PeerCertificateChain(
-+	PRFileDesc *fd, CERTCertificate **certs,
-+	unsigned int *numCerts, unsigned int maxNumCerts);
-+
-+/*
- ** Authenticate certificate hook. Called when a certificate comes in
- ** (because of SSL_REQUIRE_CERTIFICATE in SSL_Enable) to authenticate the
- ** certificate.

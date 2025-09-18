@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 #include "base/pickle.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_headers.h"
@@ -64,7 +64,7 @@ bool HttpVaryData::Init(const HttpRequestInfo& request_info,
   return is_valid_ = true;
 }
 
-bool HttpVaryData::InitFromPickle(const Pickle& pickle, PickleIterator* iter) {
+bool HttpVaryData::InitFromPickle(const Pickle& pickle, void** iter) {
   is_valid_ = false;
   const char* data;
   if (pickle.ReadBytes(iter, &data, sizeof(request_digest_))) {
@@ -105,7 +105,7 @@ std::string HttpVaryData::GetRequestValue(
   if (request_info.extra_headers.GetHeader(request_header, &result))
     return result;
 
-  return std::string();
+  return "";
 }
 
 // static

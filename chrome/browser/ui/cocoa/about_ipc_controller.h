@@ -4,13 +4,14 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_ABOUT_IPC_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_ABOUT_IPC_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/memory/scoped_ptr.h"
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_message_utils.h"
-#include "third_party/google_toolbox_for_mac/src/Foundation/GTMRegex.h"
+#include "third_party/GTM/Foundation/GTMRegex.h"
 
 // Must be included after IPC_MESSAGE_LOG_ENABLED gets defined
 #import "chrome/browser/ui/cocoa/about_ipc_dialog.h"

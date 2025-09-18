@@ -1,42 +1,28 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/collected_cookies_gtk.h"
 
 #include <string>
-#include "base/prefs/pref_service.h"
-#include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_database_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
-#include "chrome/browser/browsing_data/cookies_tree_model.h"
-#include "chrome/browser/browsing_data/local_data_container.h"
-#include "chrome/browser/chrome_notification_types.h"
+
 #include "chrome/browser/content_settings/cookie_settings.h"
-#include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/cookies_tree_model.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_cookie_view.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
-#include "net/cookies/canonical_cookie.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
-
-using web_modal::WebContentsModalDialogManager;
 
 namespace {
 // Width and height of the cookie tree view.
@@ -54,7 +40,7 @@ const int kBannerPadding = 3;
 // created.
 const std::string GetInfobarLabel(ContentSetting setting,
                                   bool multiple_domains_added,
-                                  const base::string16& domain_name) {
+                                  const string16& domain_name) {
   if (multiple_domains_added) {
     switch (setting) {
       case CONTENT_SETTING_BLOCK:
@@ -96,26 +82,13 @@ const std::string GetInfobarLabel(ContentSetting setting,
 
 }  // namespace
 
-namespace chrome {
-
-// Declared in browser_dialogs.h so others don't have to depend on our header.
-void ShowCollectedCookiesDialog(content::WebContents* web_contents) {
-  // Deletes itself on close.
-  new CollectedCookiesGtk(
-      web_contents->GetView()->GetTopLevelNativeWindow(),
-      web_contents);
-}
-
-}  // namespace chrome
-
 CollectedCookiesGtk::CollectedCookiesGtk(GtkWindow* parent,
-                                         content::WebContents* web_contents)
-    : web_contents_(web_contents),
+                                         TabContentsWrapper* wrapper)
+    : wrapper_(wrapper),
       status_changed_(false) {
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents);
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
-                 content::Source<TabSpecificContentSettings>(content_settings));
+                 content::Source<TabSpecificContentSettings>(
+                     wrapper->content_settings()));
 
   Init();
 }
@@ -123,7 +96,6 @@ CollectedCookiesGtk::CollectedCookiesGtk(GtkWindow* parent,
 void CollectedCookiesGtk::Init() {
   dialog_ = gtk_vbox_new(FALSE, ui::kContentAreaSpacing);
   gtk_box_set_spacing(GTK_BOX(dialog_), ui::kContentAreaSpacing);
-  g_signal_connect(dialog_, "destroy", G_CALLBACK(OnDestroyThunk), this);
 
   GtkWidget* label = gtk_label_new(
       l10n_util::GetStringUTF8(IDS_COLLECTED_COOKIES_DIALOG_TITLE).c_str());
@@ -193,11 +165,7 @@ void CollectedCookiesGtk::Init() {
   blocked_cookies_tree_adapter_->Init();
   EnableControls();
   ShowCookieInfo(gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook_)));
-  window_ = CreateWebContentsModalDialogGtk(dialog_, close_button_);
-
-  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents_);
-  web_contents_modal_dialog_manager->ShowDialog(window_);
+  window_ = new ConstrainedWindowGtk(wrapper_, this);
 }
 
 GtkWidget* CollectedCookiesGtk::CreateAllowedPane() {
@@ -218,13 +186,10 @@ GtkWidget* CollectedCookiesGtk::CreateAllowedPane() {
                                       GTK_SHADOW_ETCHED_IN);
   gtk_box_pack_start(GTK_BOX(cookie_list_vbox), scroll_window, TRUE, TRUE, 0);
 
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents_);
+  TabSpecificContentSettings* content_settings = wrapper_->content_settings();
 
-  const LocalSharedObjectsContainer& allowed_data =
-      content_settings->allowed_local_shared_objects();
-  allowed_cookies_tree_model_ = allowed_data.CreateCookiesTreeModel();
-
+  allowed_cookies_tree_model_.reset(
+      content_settings->GetAllowedCookiesTreeModel());
   allowed_cookies_tree_adapter_.reset(
       new gtk_tree::TreeAdapter(this, allowed_cookies_tree_model_.get()));
   allowed_tree_ = gtk_tree_view_new_with_model(
@@ -275,8 +240,7 @@ GtkWidget* CollectedCookiesGtk::CreateAllowedPane() {
 }
 
 GtkWidget* CollectedCookiesGtk::CreateBlockedPane() {
-  PrefService* prefs = Profile::FromBrowserContext(
-      web_contents_->GetBrowserContext())->GetPrefs();
+  PrefService* prefs = wrapper_->profile()->GetPrefs();
 
   GtkWidget* cookie_list_vbox = gtk_vbox_new(FALSE, ui::kControlSpacing);
 
@@ -299,13 +263,10 @@ GtkWidget* CollectedCookiesGtk::CreateBlockedPane() {
                                       GTK_SHADOW_ETCHED_IN);
   gtk_box_pack_start(GTK_BOX(cookie_list_vbox), scroll_window, TRUE, TRUE, 0);
 
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents_);
+  TabSpecificContentSettings* content_settings = wrapper_->content_settings();
 
-  const LocalSharedObjectsContainer& blocked_data =
-      content_settings->blocked_local_shared_objects();
-  blocked_cookies_tree_model_ = blocked_data.CreateCookiesTreeModel();
-
+  blocked_cookies_tree_model_.reset(
+      content_settings->GetBlockedCookiesTreeModel());
   blocked_cookies_tree_adapter_.reset(
       new gtk_tree::TreeAdapter(this, blocked_cookies_tree_model_.get()));
   blocked_tree_ = gtk_tree_view_new_with_model(
@@ -403,13 +364,25 @@ CollectedCookiesGtk::~CollectedCookiesGtk() {
   gtk_widget_destroy(dialog_);
 }
 
-bool CollectedCookiesGtk::SelectionContainsHostNode(
+GtkWidget* CollectedCookiesGtk::GetWidgetRoot() {
+  return dialog_;
+}
+
+GtkWidget* CollectedCookiesGtk::GetFocusWidget() {
+  return close_button_;
+}
+
+void CollectedCookiesGtk::DeleteDelegate() {
+  delete this;
+}
+
+bool CollectedCookiesGtk::SelectionContainsOriginNode(
     GtkTreeSelection* selection, gtk_tree::TreeAdapter* adapter) {
   // Check whether at least one "origin" node is selected.
   GtkTreeModel* model;
   GList* paths =
       gtk_tree_selection_get_selected_rows(selection, &model);
-  bool contains_host_node = false;
+  bool contains_origin_node = false;
   for (GList* item = paths; item; item = item->next) {
     GtkTreeIter iter;
     gtk_tree_model_get_iter(
@@ -417,29 +390,29 @@ bool CollectedCookiesGtk::SelectionContainsHostNode(
     CookieTreeNode* node =
         static_cast<CookieTreeNode*>(adapter->GetNode(&iter));
     if (node->GetDetailedInfo().node_type !=
-        CookieTreeNode::DetailedInfo::TYPE_HOST)
+        CookieTreeNode::DetailedInfo::TYPE_ORIGIN)
       continue;
-    CookieTreeHostNode* host_node = static_cast<CookieTreeHostNode*>(
+    CookieTreeOriginNode* origin_node = static_cast<CookieTreeOriginNode*>(
         node);
-    if (!host_node->CanCreateContentException())
+    if (!origin_node->CanCreateContentException())
       continue;
-    contains_host_node = true;
+    contains_origin_node = true;
   }
   g_list_foreach(paths, reinterpret_cast<GFunc>(gtk_tree_path_free), NULL);
   g_list_free(paths);
-  return contains_host_node;
+  return contains_origin_node;
 }
 
 void CollectedCookiesGtk::EnableControls() {
   // Update button states.
   bool enable_for_allowed_cookies =
-      SelectionContainsHostNode(allowed_selection_,
+      SelectionContainsOriginNode(allowed_selection_,
                                   allowed_cookies_tree_adapter_.get());
   gtk_widget_set_sensitive(block_allowed_cookie_button_,
                            enable_for_allowed_cookies);
 
   bool enable_for_blocked_cookies =
-      SelectionContainsHostNode(blocked_selection_,
+      SelectionContainsOriginNode(blocked_selection_,
                                   blocked_cookies_tree_adapter_.get());
   gtk_widget_set_sensitive(allow_blocked_cookie_button_,
                            enable_for_blocked_cookies);
@@ -451,15 +424,16 @@ void CollectedCookiesGtk::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN);
-  gtk_widget_destroy(window_);
+  window_->CloseConstrainedWindow();
 }
 
 void CollectedCookiesGtk::OnClose(GtkWidget* close_button) {
   if (status_changed_) {
-    CollectedCookiesInfoBarDelegate::Create(
-        InfoBarService::FromWebContents(web_contents_));
+    InfoBarTabHelper* infobar_helper = wrapper_->infobar_tab_helper();
+    infobar_helper->AddInfoBar(
+        new CollectedCookiesInfoBarDelegate(infobar_helper));
   }
-  gtk_widget_destroy(window_);
+  window_->CloseConstrainedWindow();
 }
 
 void CollectedCookiesGtk::AddExceptions(GtkTreeSelection* selection,
@@ -468,7 +442,7 @@ void CollectedCookiesGtk::AddExceptions(GtkTreeSelection* selection,
   GtkTreeModel* model;
   GList* paths =
       gtk_tree_selection_get_selected_rows(selection, &model);
-  base::string16 last_domain_name;
+  string16 last_domain_name;
   bool multiple_domains_added = false;
   for (GList* item = paths; item; item = item->next) {
     GtkTreeIter iter;
@@ -477,18 +451,17 @@ void CollectedCookiesGtk::AddExceptions(GtkTreeSelection* selection,
     CookieTreeNode* node =
         static_cast<CookieTreeNode*>(adapter->GetNode(&iter));
     if (node->GetDetailedInfo().node_type !=
-        CookieTreeNode::DetailedInfo::TYPE_HOST)
+        CookieTreeNode::DetailedInfo::TYPE_ORIGIN)
       continue;
-    CookieTreeHostNode* host_node = static_cast<CookieTreeHostNode*>(
+    CookieTreeOriginNode* origin_node = static_cast<CookieTreeOriginNode*>(
         node);
-    if (host_node->CanCreateContentException()) {
+    if (origin_node->CanCreateContentException()) {
       if (!last_domain_name.empty())
         multiple_domains_added = true;
-      last_domain_name = host_node->GetTitle();
-      Profile* profile =
-          Profile::FromBrowserContext(web_contents_->GetBrowserContext());
-      host_node->CreateContentException(
-          CookieSettings::Factory::GetForProfile(profile).get(), setting);
+      last_domain_name = origin_node->GetTitle();
+      Profile* profile = wrapper_->profile();
+      origin_node->CreateContentException(
+          CookieSettings::GetForProfile(profile), setting);
     }
   }
   g_list_foreach(paths, reinterpret_cast<GFunc>(gtk_tree_path_free), NULL);
@@ -540,8 +513,4 @@ void CollectedCookiesGtk::OnTreeViewRowExpanded(GtkWidget* tree_view,
 void CollectedCookiesGtk::OnTreeViewSelectionChange(GtkWidget* selection) {
   EnableControls();
   ShowCookieInfo(gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook_)));
-}
-
-void CollectedCookiesGtk::OnDestroy(GtkWidget* widget) {
-  delete this;
 }

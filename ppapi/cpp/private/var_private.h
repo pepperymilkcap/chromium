@@ -9,14 +9,14 @@
 
 namespace pp {
 
-class InstanceHandle;
+class InstancePrivate;
 
 namespace deprecated {
 class ScriptableObject;
 }
 
 // VarPrivate is a version of Var that exposes the private scripting API.
-// It's designed to be mostly interchangeable with Var since most callers will
+// It's designed to be mostly interchangable with Var since most callers will
 // be dealing with Vars from various places.
 class VarPrivate : public Var {
  public:
@@ -29,8 +29,7 @@ class VarPrivate : public Var {
   VarPrivate(const std::string& utf8_str) : Var(utf8_str) {}
   VarPrivate(PassRef, PP_Var var) : Var(PassRef(), var) {}
   VarPrivate(DontManage, PP_Var var) : Var(DontManage(), var) {}
-  VarPrivate(const InstanceHandle& instance,
-             deprecated::ScriptableObject* object);
+  VarPrivate(InstancePrivate* instance, deprecated::ScriptableObject* object);
   VarPrivate(const Var& other) : Var(other) {}
 
   virtual ~VarPrivate() {}

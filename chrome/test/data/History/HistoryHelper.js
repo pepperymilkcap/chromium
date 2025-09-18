@@ -20,10 +20,8 @@ function onFinished(name, id, result)
     statusPanel.innerHTML = result;
   }
 
-  if (result == "OK")
-    document.title = "OK";
-  else
-    document.title = "FAIL";
+  var cookie = name + "." + id + ".status=" + result + "; path=/";
+  document.cookie = cookie;
 }
 
 function readCookie(name) {

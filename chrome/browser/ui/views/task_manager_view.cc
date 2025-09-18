@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,14 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/metrics/stats_table.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/memory_purger.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -25,34 +23,27 @@
 #include "grit/theme_resources.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/models/simple_menu_model.h"
-#include "ui/base/models/table_model.h"
 #include "ui/base/models/table_model_observer.h"
-#include "ui/events/event_constants.h"
-#include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/canvas.h"
+#include "ui/views/background.h"
 #include "ui/views/context_menu_controller.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
-#include "ui/views/controls/menu/menu_runner.h"
-#include "ui/views/controls/table/table_grouper.h"
-#include "ui/views/controls/table/table_view.h"
+#include "ui/views/controls/menu/menu.h"
+#include "ui/views/controls/table/group_table_model.h"
+#include "ui/views/controls/table/group_table_view.h"
 #include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
-#if defined(USE_ASH)
-#include "ash/wm/window_util.h"
-#endif
+// The task manager window default size.
+static const int kDefaultWidth = 460;
+static const int kDefaultHeight = 270;
 
-#if defined(OS_WIN)
-#include "chrome/browser/shell_integration.h"
-#include "ui/base/win/shell.h"
-#include "ui/views/win/hwnd_util.h"
-#include "win8/util/win8_util.h"
-#endif
+// Yellow highlight used when highlighting background resources.
+static const SkColor kBackgroundResourceHighlight =
+    SkColorSetRGB(0xff, 0xf1, 0xcd);
 
 namespace {
 
@@ -60,10 +51,8 @@ namespace {
 // TaskManagerTableModel class
 ////////////////////////////////////////////////////////////////////////////////
 
-class TaskManagerTableModel
-    : public ui::TableModel,
-      public views::TableGrouper,
-      public TaskManagerModelObserver {
+class TaskManagerTableModel : public views::GroupTableModel,
+                              public TaskManagerModelObserver {
  public:
   explicit TaskManagerTableModel(TaskManagerModel* model)
       : model_(model),
@@ -71,44 +60,119 @@ class TaskManagerTableModel
     model_->AddObserver(this);
   }
 
-  virtual ~TaskManagerTableModel() {
+  ~TaskManagerTableModel() {
     model_->RemoveObserver(this);
   }
 
-  // TableModel overrides:
-  virtual int RowCount() OVERRIDE;
-  virtual base::string16 GetText(int row, int column) OVERRIDE;
-  virtual gfx::ImageSkia GetIcon(int row) OVERRIDE;
-  virtual void SetObserver(ui::TableModelObserver* observer) OVERRIDE;
+  // GroupTableModel.
+  int RowCount() OVERRIDE;
+  string16 GetText(int row, int column) OVERRIDE;
+  SkBitmap GetIcon(int row) OVERRIDE;
+  void GetGroupRangeForItem(int item, views::GroupRange* range) OVERRIDE;
+  void SetObserver(ui::TableModelObserver* observer) OVERRIDE;
   virtual int CompareValues(int row1, int row2, int column_id) OVERRIDE;
 
-  // TableGrouper overrides:
-  virtual void GetGroupRange(int model_index,
-                             views::GroupRange* range) OVERRIDE;
+  // TaskManagerModelObserver.
+  virtual void OnModelChanged();
+  virtual void OnItemsChanged(int start, int length);
+  virtual void OnItemsAdded(int start, int length);
+  virtual void OnItemsRemoved(int start, int length);
 
-  // TaskManagerModelObserver overrides:
-  virtual void OnModelChanged() OVERRIDE;
-  virtual void OnItemsChanged(int start, int length) OVERRIDE;
-  virtual void OnItemsAdded(int start, int length) OVERRIDE;
-  virtual void OnItemsRemoved(int start, int length) OVERRIDE;
+  // Returns true if resource corresponding to |row| is a background resource.
+  bool IsBackgroundResource(int row);
 
  private:
   TaskManagerModel* model_;
   ui::TableModelObserver* observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(TaskManagerTableModel);
 };
 
 int TaskManagerTableModel::RowCount() {
   return model_->ResourceCount();
 }
 
-base::string16 TaskManagerTableModel::GetText(int row, int col_id) {
-  return model_->GetResourceById(row, col_id);
+string16 TaskManagerTableModel::GetText(int row, int col_id) {
+  switch (col_id) {
+    case IDS_TASK_MANAGER_PAGE_COLUMN:  // Process
+      return model_->GetResourceTitle(row);
+
+    case IDS_TASK_MANAGER_PROFILE_NAME_COLUMN:  // Profile Name
+      return model_->GetResourceProfileName(row);
+
+    case IDS_TASK_MANAGER_NET_COLUMN:  // Net
+      return model_->GetResourceNetworkUsage(row);
+
+    case IDS_TASK_MANAGER_CPU_COLUMN:  // CPU
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourceCPUUsage(row);
+
+    case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:  // Memory
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourcePrivateMemory(row);
+
+    case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:  // Memory
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourceSharedMemory(row);
+
+    case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN:  // Memory
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourcePhysicalMemory(row);
+
+    case IDS_TASK_MANAGER_PROCESS_ID_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourceProcessId(row);
+
+    case IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN:  // Goats Teleported!
+      return model_->GetResourceGoatsTeleported(row);
+
+    case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourceWebCoreImageCacheSize(row);
+
+    case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourceWebCoreScriptsCacheSize(row);
+
+    case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourceWebCoreCSSCacheSize(row);
+
+    case IDS_TASK_MANAGER_FPS_COLUMN:
+      return model_->GetResourceFPS(row);
+
+    case IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourceSqliteMemoryUsed(row);
+
+    case IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return string16();
+      return model_->GetResourceV8MemoryAllocatedSize(row);
+
+    default:
+      NOTREACHED();
+      return string16();
+  }
 }
 
-gfx::ImageSkia TaskManagerTableModel::GetIcon(int row) {
+SkBitmap TaskManagerTableModel::GetIcon(int row) {
   return model_->GetResourceIcon(row);
+}
+
+
+void TaskManagerTableModel::GetGroupRangeForItem(int item,
+                                                 views::GroupRange* range) {
+  std::pair<int, int> range_pair = model_->GetGroupRangeForResource(item);
+  range->start = range_pair.first;
+  range->length = range_pair.second;
 }
 
 void TaskManagerTableModel::SetObserver(ui::TableModelObserver* observer) {
@@ -117,14 +181,6 @@ void TaskManagerTableModel::SetObserver(ui::TableModelObserver* observer) {
 
 int TaskManagerTableModel::CompareValues(int row1, int row2, int column_id) {
   return model_->CompareValues(row1, row2, column_id);
-}
-
-void TaskManagerTableModel::GetGroupRange(int model_index,
-                                          views::GroupRange* range) {
-  TaskManagerModel::GroupRange range_pair =
-      model_->GetGroupRangeForResource(model_index);
-  range->start = range_pair.first;
-  range->length = range_pair.second;
 }
 
 void TaskManagerTableModel::OnModelChanged() {
@@ -140,12 +196,69 @@ void TaskManagerTableModel::OnItemsChanged(int start, int length) {
 void TaskManagerTableModel::OnItemsAdded(int start, int length) {
   if (observer_)
     observer_->OnItemsAdded(start, length);
+  // There's a bug in the Windows ListView where inserting items with groups
+  // enabled puts them in the wrong position, so we will need to rebuild the
+  // list view in this case.
+  // (see: http://connect.microsoft.com/VisualStudio/feedback/details/115345/).
+  //
+  // Turns out, forcing a list view rebuild causes http://crbug.com/69391
+  // because items are added to the ListView one-at-a-time when initially
+  // displaying the TaskManager, resulting in many ListView rebuilds. So we are
+  // no longer forcing a rebuild for now because the current UI doesn't use
+  // groups - if we are going to add groups in the upcoming TaskManager UI
+  // revamp, we'll need to re-enable this call to OnModelChanged() and also add
+  // code to avoid doing multiple rebuilds on startup (maybe just generate a
+  // single OnModelChanged() call after the initial population).
+
+  // OnModelChanged();
 }
 
 void TaskManagerTableModel::OnItemsRemoved(int start, int length) {
   if (observer_)
     observer_->OnItemsRemoved(start, length);
+
+  // We may need to change the indentation of some items if the topmost item
+  // in the group was removed, so update the view.
+  OnModelChanged();
 }
+
+bool TaskManagerTableModel::IsBackgroundResource(int row) {
+  return model_->IsBackgroundResource(row);
+}
+
+// Thin wrapper around GroupTableView to enable setting the background
+// resource highlight color.
+class BackgroundColorGroupTableView : public views::GroupTableView {
+ public:
+  BackgroundColorGroupTableView(TaskManagerTableModel* model,
+                                const std::vector<ui::TableColumn>& columns,
+                                bool highlight_background_resources)
+      : views::GroupTableView(model, columns, views::ICON_AND_TEXT,
+                              false, true, true, true),
+        model_(model) {
+    SetCustomColorsEnabled(highlight_background_resources);
+  }
+
+  virtual ~BackgroundColorGroupTableView() {}
+
+ private:
+  virtual bool GetCellColors(int model_row,
+                             int column,
+                             ItemColor* foreground,
+                             ItemColor* background,
+                             LOGFONT* logfont) {
+    if (!model_->IsBackgroundResource(model_row))
+      return false;
+
+    // Render background resources with a yellow highlight.
+    background->color_is_set = true;
+    background->color = kBackgroundResourceHighlight;
+    foreground->color_is_set = false;
+    return true;
+  }
+
+  TaskManagerTableModel* model_;
+};
 
 // The Task manager UI container.
 class TaskManagerView : public views::ButtonListener,
@@ -153,59 +266,56 @@ class TaskManagerView : public views::ButtonListener,
                         public views::TableViewObserver,
                         public views::LinkListener,
                         public views::ContextMenuController,
-                        public ui::SimpleMenuModel::Delegate {
+                        public views::Menu::Delegate {
  public:
-  explicit TaskManagerView(chrome::HostDesktopType desktop_type);
+  explicit TaskManagerView(bool highlight_background_resources);
   virtual ~TaskManagerView();
 
-  // Shows the Task manager window, or re-activates an existing one.
-  static void Show(Browser* browser);
+  // Shows the Task manager window, or re-activates an existing one. If
+  // |highlight_background_resources| is true, highlights the background
+  // resources in the resource display.
+  static void Show(bool highlight_background_resources);
 
-  // views::View:
+  // views::View
   virtual void Layout() OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add, views::View* parent,
+                                    views::View* child) OVERRIDE;
 
-  // views::ButtonListener:
+  // ButtonListener implementation.
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
-  // views::DialogDelegateView:
+  // views::DialogDelegate
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
   virtual bool ExecuteWindowsCommand(int command_id) OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual std::string GetWindowName() const OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
-  virtual bool UseNewStyleForThisDialog() const OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
 
-  // views::TableViewObserver:
+  // views::TableViewObserver implementation.
   virtual void OnSelectionChanged() OVERRIDE;
   virtual void OnDoubleClick() OVERRIDE;
   virtual void OnKeyDown(ui::KeyboardCode keycode) OVERRIDE;
 
-  // views::LinkListener:
+  // views::LinkListener implementation.
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
   // Called by the column picker to pick up any new stat counters that
   // may have appeared since last time.
   void UpdateStatsCounters();
 
-  // views::ContextMenuController:
+  // views::ContextMenuController
   virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& point,
-                                      ui::MenuSourceType source_type) OVERRIDE;
+                                      const gfx::Point& p,
+                                      bool is_mouse_gesture) OVERRIDE;
 
-  // ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int id, int event_flags) OVERRIDE;
+  // views::Menu::Delegate
+  virtual bool IsItemChecked(int id) const OVERRIDE;
+  virtual void ExecuteCommand(int id) OVERRIDE;
 
  private:
   // Creates the child controls.
@@ -223,11 +333,10 @@ class TaskManagerView : public views::ButtonListener,
   // Restores saved always on top state from a previous session.
   bool GetSavedAlwaysOnTopState(bool* always_on_top) const;
 
-  views::LabelButton* purge_memory_button_;
-  views::LabelButton* kill_button_;
+  views::TextButton* purge_memory_button_;
+  views::TextButton* kill_button_;
   views::Link* about_memory_link_;
-  views::TableView* tab_table_;
-  views::View* tab_table_parent_;
+  views::GroupTableView* tab_table_;
 
   TaskManager* task_manager_;
 
@@ -241,17 +350,15 @@ class TaskManagerView : public views::ButtonListener,
   // True when the Task Manager window should be shown on top of other windows.
   bool is_always_on_top_;
 
-  // The host desktop type this task manager belongs to.
-  const chrome::HostDesktopType desktop_type_;
+  // True when the Task Manager should highlight background resources.
+  bool highlight_background_resources_;
 
   // We need to own the text of the menu, the Windows API does not copy it.
-  base::string16 always_on_top_menu_text_;
+  std::wstring always_on_top_menu_text_;
 
   // An open Task manager window. There can only be one open at a time. This
   // is reset to NULL when the window is closed.
   static TaskManagerView* instance_;
-
-  scoped_ptr<views::MenuRunner> menu_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerView);
 };
@@ -260,16 +367,12 @@ class TaskManagerView : public views::ButtonListener,
 TaskManagerView* TaskManagerView::instance_ = NULL;
 
 
-TaskManagerView::TaskManagerView(chrome::HostDesktopType desktop_type)
+TaskManagerView::TaskManagerView(bool highlight_background_resources)
     : purge_memory_button_(NULL),
-      kill_button_(NULL),
-      about_memory_link_(NULL),
-      tab_table_(NULL),
-      tab_table_parent_(NULL),
       task_manager_(TaskManager::GetInstance()),
       model_(TaskManager::GetInstance()->model()),
       is_always_on_top_(false),
-      desktop_type_(desktop_type) {
+      highlight_background_resources_(highlight_background_resources) {
   Init();
 }
 
@@ -282,7 +385,7 @@ void TaskManagerView::Init() {
   table_model_.reset(new TaskManagerTableModel(model_));
 
   // Page column has no header label.
-  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_TASK_COLUMN,
+  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PAGE_COLUMN,
                                      ui::TableColumn::LEFT, -1, 1));
   columns_.back().sortable = true;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PROFILE_NAME_COLUMN,
@@ -306,14 +409,6 @@ void TaskManagerView::Init() {
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_PROCESS_ID_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
-#if defined(OS_WIN)
-  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_GDI_HANDLES_COLUMN,
-                                     ui::TableColumn::RIGHT, -1, 0));
-  columns_.back().sortable = true;
-  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_USER_HANDLES_COLUMN,
-                                     ui::TableColumn::RIGHT, -1, 0));
-  columns_.back().sortable = true;
-#endif
   columns_.push_back(ui::TableColumn(
       IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN,
       ui::TableColumn::RIGHT, -1, 0));
@@ -328,9 +423,6 @@ void TaskManagerView::Init() {
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_FPS_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
-  columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN,
-                                     ui::TableColumn::RIGHT, -1, 0));
-  columns_.back().sortable = true;
   columns_.push_back(ui::TableColumn(IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN,
                                      ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
@@ -339,12 +431,12 @@ void TaskManagerView::Init() {
                       ui::TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
 
-  tab_table_ = new views::TableView(
-      table_model_.get(), columns_, views::ICON_AND_TEXT, false);
-  tab_table_->SetGrouper(table_model_.get());
+  tab_table_ = new BackgroundColorGroupTableView(
+      table_model_.get(), columns_, highlight_background_resources_);
 
   // Hide some columns by default
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_PROFILE_NAME_COLUMN, false);
+  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_PROCESS_ID_COLUMN, false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_SHARED_MEM_COLUMN, false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN, false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN,
@@ -353,16 +445,12 @@ void TaskManagerView::Init() {
                                   false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN,
                                   false);
-  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN,
-                                  false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN,
                                   false);
   tab_table_->SetColumnVisibility(
       IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN, false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN,
                                   false);
-  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_GDI_HANDLES_COLUMN, false);
-  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_USER_HANDLES_COLUMN, false);
 
   UpdateStatsCounters();
   tab_table_->SetObserver(this);
@@ -371,22 +459,21 @@ void TaskManagerView::Init() {
   // If we're running with --purge-memory-button, add a "Purge memory" button.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPurgeMemoryButton)) {
-    purge_memory_button_ = new views::LabelButton(this,
-        l10n_util::GetStringUTF16(IDS_TASK_MANAGER_PURGE_MEMORY));
-    purge_memory_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+    purge_memory_button_ = new views::NativeTextButton(this,
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER_PURGE_MEMORY)));
   }
-  kill_button_ = new views::LabelButton(this,
-      l10n_util::GetStringUTF16(IDS_TASK_MANAGER_KILL));
-  kill_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+  kill_button_ = new views::NativeTextButton(
+      this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER_KILL)));
+  kill_button_->AddAccelerator(ui::Accelerator(ui::VKEY_E, false, false,
+                                               false));
+  kill_button_->SetAccessibleKeyboardShortcut(L"E");
+  kill_button_->set_prefix_type(views::TextButtonBase::PREFIX_SHOW);
   about_memory_link_ = new views::Link(
       l10n_util::GetStringUTF16(IDS_TASK_MANAGER_ABOUT_MEMORY_LINK));
   about_memory_link_->set_listener(this);
 
   // Makes sure our state is consistent.
   OnSelectionChanged();
-
-  ui::Accelerator ctrl_w(ui::VKEY_W, ui::EF_CONTROL_DOWN);
-  AddAccelerator(ctrl_w);
 }
 
 void TaskManagerView::UpdateStatsCounters() {
@@ -400,13 +487,10 @@ void TaskManagerView::UpdateStatsCounters() {
         // TODO(erikkay): Use l10n to get display names for stats.  Right
         // now we're just displaying the internal counter name.  Perhaps
         // stat names not in the string table would be filtered out.
-        ui::TableColumn col;
-        col.id = i;
-        col.title = base::ASCIIToUTF16(row);
-        col.alignment = ui::TableColumn::RIGHT;
         // TODO(erikkay): Width is hard-coded right now, so many column
         // names are clipped.
-        col.width = 90;
+        ui::TableColumn col(i, ASCIIToUTF16(row), ui::TableColumn::RIGHT, 90,
+                            0);
         col.sortable = true;
         columns_.push_back(col);
         tab_table_->AddColumn(col);
@@ -415,38 +499,54 @@ void TaskManagerView::UpdateStatsCounters() {
   }
 }
 
-void TaskManagerView::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
+void TaskManagerView::ViewHierarchyChanged(bool is_add,
+                                           views::View* parent,
+                                           views::View* child) {
   // Since we want the Kill button and the Memory Details link to show up in
   // the same visual row as the close button, which is provided by the
   // framework, we must add the buttons to the non-client view, which is the
   // parent of this view. Similarly, when we're removed from the view
   // hierarchy, we must take care to clean up those items as well.
-  if (details.child == this) {
-    if (details.is_add) {
-      details.parent->AddChildView(about_memory_link_);
+  if (child == this) {
+    if (is_add) {
+      parent->AddChildView(about_memory_link_);
       if (purge_memory_button_)
-        details.parent->AddChildView(purge_memory_button_);
-      details.parent->AddChildView(kill_button_);
-      tab_table_parent_ = tab_table_->CreateParentIfNecessary();
-      AddChildView(tab_table_parent_);
+        parent->AddChildView(purge_memory_button_);
+      parent->AddChildView(kill_button_);
+      AddChildView(tab_table_);
     } else {
-      details.parent->RemoveChildView(kill_button_);
+      parent->RemoveChildView(kill_button_);
       if (purge_memory_button_)
-        details.parent->RemoveChildView(purge_memory_button_);
-      details.parent->RemoveChildView(about_memory_link_);
+        parent->RemoveChildView(purge_memory_button_);
+      parent->RemoveChildView(about_memory_link_);
     }
   }
 }
 
 void TaskManagerView::Layout() {
+  // views::kPanelHorizMargin is too big.
+  const int kTableButtonSpacing = 12;
+
   gfx::Size size = kill_button_->GetPreferredSize();
+  int prefered_width = size.width();
+  int prefered_height = size.height();
+
+  tab_table_->SetBounds(
+      x() + views::kPanelHorizMargin,
+      y() + views::kPanelVertMargin,
+      width() - 2 * views::kPanelHorizMargin,
+      height() - 2 * views::kPanelVertMargin - prefered_height);
+
+  // y-coordinate of button top left.
   gfx::Rect parent_bounds = parent()->GetContentsBounds();
-  const int horizontal_margin = views::kPanelHorizMargin;
-  const int vertical_margin = views::kButtonVEdgeMargin;
-  int x = width() - size.width() - horizontal_margin;
-  int y_buttons = parent_bounds.bottom() - size.height() - vertical_margin;
-  kill_button_->SetBounds(x, y_buttons, size.width(), size.height());
+  int y_buttons =
+      parent_bounds.bottom() - prefered_height - views::kButtonVEdgeMargin;
+
+  kill_button_->SetBounds(
+      x() + width() - prefered_width - views::kPanelHorizMargin,
+      y_buttons,
+      prefered_width,
+      prefered_height);
 
   if (purge_memory_button_) {
     size = purge_memory_button_->GetPreferredSize();
@@ -457,66 +557,38 @@ void TaskManagerView::Layout() {
   }
 
   size = about_memory_link_->GetPreferredSize();
+  int link_prefered_width = size.width();
+  int link_prefered_height = size.height();
+  // center between the two buttons horizontally, and line up with
+  // bottom of buttons vertically.
+  int link_y_offset = std::max(0, prefered_height - link_prefered_height) / 2;
   about_memory_link_->SetBounds(
-      horizontal_margin,
-      y_buttons + (kill_button_->height() - size.height()) / 2,
-      size.width(), size.height());
-
-  gfx::Rect rect = GetLocalBounds();
-  rect.Inset(horizontal_margin, views::kPanelVertMargin);
-  rect.Inset(0, 0, 0,
-             kill_button_->height() + views::kUnrelatedControlVerticalSpacing);
-  tab_table_parent_->SetBoundsRect(rect);
+      x() + views::kPanelHorizMargin,
+      y_buttons + prefered_height - link_prefered_height - link_y_offset,
+      link_prefered_width,
+      link_prefered_height);
 }
 
 gfx::Size TaskManagerView::GetPreferredSize() {
-  return gfx::Size(460, 270);
-}
-
-bool TaskManagerView::AcceleratorPressed(const ui::Accelerator& accelerator) {
-  DCHECK_EQ(ui::VKEY_W, accelerator.key_code());
-  DCHECK_EQ(ui::EF_CONTROL_DOWN, accelerator.modifiers());
-  GetWidget()->Close();
-  return true;
+  return gfx::Size(kDefaultWidth, kDefaultHeight);
 }
 
 // static
-void TaskManagerView::Show(Browser* browser) {
-#if defined(OS_WIN)
-  // In Windows Metro it's not good to open this native window.
-  DCHECK(!win8::IsSingleWindowMetroMode());
-#endif
-  // In ash we can come here through the ChromeShellDelegate. If there is no
-  // browser window at that time of the call, browser could be passed as NULL.
-  const chrome::HostDesktopType desktop_type =
-      browser ? browser->host_desktop_type() : chrome::HOST_DESKTOP_TYPE_ASH;
-
+void TaskManagerView::Show(bool highlight_background_resources) {
   if (instance_) {
-    // If there's a Task manager window open already, just activate it.
-    instance_->GetWidget()->Activate();
-    return;
+    if (instance_->highlight_background_resources_ !=
+        highlight_background_resources) {
+      instance_->GetWidget()->Close();
+    } else {
+      // If there's a Task manager window open already, just activate it.
+      instance_->GetWidget()->Activate();
+      return;
+    }
   }
-  instance_ = new TaskManagerView(desktop_type);
-  gfx::NativeWindow window =
-      browser ? browser->window()->GetNativeWindow() : NULL;
-#if defined(USE_ASH)
-  if (!window)
-    window = ash::wm::GetActiveWindow();
-#endif
-  DialogDelegate::CreateDialogWidget(instance_, window, NULL);
+  instance_ = new TaskManagerView(highlight_background_resources);
+  views::Widget::CreateWindow(instance_);
   instance_->InitAlwaysOnTopState();
   instance_->model_->StartUpdating();
-#if defined(OS_WIN)
-  // Set the app id for the task manager to the app id of its parent browser. If
-  // no parent is specified, the app id will default to that of the initial
-  // process.
-  if (browser) {
-    ui::win::SetAppIdForWindow(
-        ShellIntegration::GetChromiumModelIdForProfile(
-            browser->profile()->GetPath()),
-        views::HWNDForWidget(instance_->GetWidget()));
-  }
-#endif
   instance_->GetWidget()->Show();
 
   // Set the initial focus to the list of tasks.
@@ -527,18 +599,14 @@ void TaskManagerView::Show(Browser* browser) {
 
 // ButtonListener implementation.
 void TaskManagerView::ButtonPressed(
-    views::Button* sender,
-    const ui::Event& event) {
+    views::Button* sender, const views::Event& event) {
   if (purge_memory_button_ && (sender == purge_memory_button_)) {
     MemoryPurger::PurgeAll();
   } else {
-    typedef ui::ListSelectionModel::SelectedIndices SelectedIndices;
-    DCHECK_EQ(kill_button_, sender);
-    SelectedIndices selection(tab_table_->selection_model().selected_indices());
-    for (SelectedIndices::const_reverse_iterator i = selection.rbegin();
-         i != selection.rend(); ++i) {
-      task_manager_->KillProcess(*i);
-    }
+    DCHECK_EQ(sender, kill_button_);
+    for (views::TableSelectionIterator iter  = tab_table_->SelectionBegin();
+         iter != tab_table_->SelectionEnd(); ++iter)
+      task_manager_->KillProcess(*iter);
   }
 }
 
@@ -576,7 +644,7 @@ bool TaskManagerView::ExecuteWindowsCommand(int command_id) {
     if (g_browser_process->local_state()) {
       DictionaryPrefUpdate update(g_browser_process->local_state(),
                                   GetWindowName().c_str());
-      base::DictionaryValue* window_preferences = update.Get();
+      DictionaryValue* window_preferences = update.Get();
       window_preferences->SetBoolean("always_on_top", is_always_on_top_);
     }
     return true;
@@ -585,7 +653,7 @@ bool TaskManagerView::ExecuteWindowsCommand(int command_id) {
   return false;
 }
 
-base::string16 TaskManagerView::GetWindowTitle() const {
+string16 TaskManagerView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_TITLE);
 }
 
@@ -606,23 +674,22 @@ void TaskManagerView::WindowClosing() {
   task_manager_->OnWindowClosed();
 }
 
-bool TaskManagerView::UseNewStyleForThisDialog() const {
-  return false;
+views::View* TaskManagerView::GetContentsView() {
+  return this;
 }
 
 // views::TableViewObserver implementation.
 void TaskManagerView::OnSelectionChanged() {
-  const ui::ListSelectionModel::SelectedIndices& selection(
-      tab_table_->selection_model().selected_indices());
   bool selection_contains_browser_process = false;
-  for (size_t i = 0; i < selection.size(); ++i) {
-    if (task_manager_->IsBrowserProcess(selection[i])) {
+  for (views::TableSelectionIterator iter  = tab_table_->SelectionBegin();
+       iter != tab_table_->SelectionEnd(); ++iter) {
+    if (task_manager_->IsBrowserProcess(*iter)) {
       selection_contains_browser_process = true;
       break;
     }
   }
   kill_button_->SetEnabled(!selection_contains_browser_process &&
-                           !selection.empty());
+                           tab_table_->SelectedRowCount() > 0);
 }
 
 void TaskManagerView::OnDoubleClick() {
@@ -635,42 +702,29 @@ void TaskManagerView::OnKeyDown(ui::KeyboardCode keycode) {
 }
 
 void TaskManagerView::LinkClicked(views::Link* source, int event_flags) {
-  DCHECK_EQ(about_memory_link_, source);
-  task_manager_->OpenAboutMemory(desktop_type_);
+  DCHECK(source == about_memory_link_);
+  task_manager_->OpenAboutMemory();
 }
 
 void TaskManagerView::ShowContextMenuForView(views::View* source,
-                                             const gfx::Point& point,
-                                             ui::MenuSourceType source_type) {
+                                             const gfx::Point& p,
+                                             bool is_mouse_gesture) {
   UpdateStatsCounters();
-  ui::SimpleMenuModel menu_model(this);
-  for (std::vector<ui::TableColumn>::iterator i(columns_.begin());
-       i != columns_.end(); ++i) {
-    menu_model.AddCheckItem(i->id, l10n_util::GetStringUTF16(i->id));
+  scoped_ptr<views::Menu> menu(views::Menu::Create(
+      this, views::Menu::TOPLEFT, source->GetWidget()->GetNativeView()));
+  for (std::vector<ui::TableColumn>::iterator i =
+       columns_.begin(); i != columns_.end(); ++i) {
+    menu->AppendMenuItem(i->id, l10n_util::GetStringUTF16(i->id),
+        views::Menu::CHECKBOX);
   }
-  menu_runner_.reset(new views::MenuRunner(&menu_model));
-  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
-                              views::MenuItemView::TOPLEFT, source_type,
-                              views::MenuRunner::CONTEXT_MENU) ==
-      views::MenuRunner::MENU_DELETED)
-    return;
+  menu->RunMenuAt(p.x(), p.y());
 }
 
-bool TaskManagerView::IsCommandIdChecked(int id) const {
+bool TaskManagerView::IsItemChecked(int id) const {
   return tab_table_->IsColumnVisible(id);
 }
 
-bool TaskManagerView::IsCommandIdEnabled(int id) const {
-  return true;
-}
-
-bool TaskManagerView::GetAcceleratorForCommandId(
-    int command_id,
-    ui::Accelerator* accelerator) {
-  return false;
-}
-
-void TaskManagerView::ExecuteCommand(int id, int event_flags) {
+void TaskManagerView::ExecuteCommand(int id) {
   tab_table_->SetColumnVisibility(id, !tab_table_->IsColumnVisible(id));
 }
 
@@ -682,15 +736,20 @@ void TaskManagerView::InitAlwaysOnTopState() {
 }
 
 void TaskManagerView::ActivateFocusedTab() {
-  const int active_row = tab_table_->selection_model().active();
-  if (active_row != -1)
-    task_manager_->ActivateProcess(active_row);
+  int row_count = tab_table_->RowCount();
+  for (int i = 0; i < row_count; ++i) {
+    if (tab_table_->ItemHasTheFocus(i)) {
+      task_manager_->ActivateProcess(i);
+      break;
+    }
+  }
 }
 
 void TaskManagerView::AddAlwaysOnTopSystemMenuItem() {
 #if defined(OS_WIN) && !defined(USE_AURA)
   // The Win32 API requires that we own the text.
-  always_on_top_menu_text_ = l10n_util::GetStringUTF16(IDS_ALWAYS_ON_TOP);
+  always_on_top_menu_text_ =
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_ALWAYS_ON_TOP));
 
   // Let's insert a menu to the window.
   HMENU system_menu = ::GetSystemMenu(GetWidget()->GetNativeWindow(), FALSE);
@@ -724,7 +783,7 @@ bool TaskManagerView::GetSavedAlwaysOnTopState(bool* always_on_top) const {
   if (!g_browser_process->local_state())
     return false;
 
-  const base::DictionaryValue* dictionary =
+  const DictionaryValue* dictionary =
       g_browser_process->local_state()->GetDictionary(GetWindowName().c_str());
   return dictionary &&
       dictionary->GetBoolean("always_on_top", always_on_top) && always_on_top;
@@ -732,11 +791,15 @@ bool TaskManagerView::GetSavedAlwaysOnTopState(bool* always_on_top) const {
 
 }  // namespace
 
-namespace chrome {
+namespace browser {
 
 // Declared in browser_dialogs.h so others don't need to depend on our header.
-void ShowTaskManager(Browser* browser) {
-  TaskManagerView::Show(browser);
+void ShowTaskManager() {
+  TaskManagerView::Show(false);
 }
 
-}  // namespace chrome
+void ShowBackgroundPages() {
+  TaskManagerView::Show(true);
+}
+
+}  // namespace browser

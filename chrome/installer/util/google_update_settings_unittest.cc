@@ -6,7 +6,6 @@
 #include <shlwapi.h>  // For SHDeleteKey.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "chrome/common/chrome_constants.h"
@@ -14,7 +13,6 @@
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/fake_installation_state.h"
 #include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/google_update_experiment_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
@@ -25,6 +23,10 @@ using installer::ChannelInfo;
 
 namespace {
 
+const wchar_t kHKCUReplacement[] =
+    L"Software\\Google\\InstallUtilUnittest\\HKCU";
+const wchar_t kHKLMReplacement[] =
+    L"Software\\Google\\InstallUtilUnittest\\HKLM";
 const wchar_t kGoogleUpdatePoliciesKey[] =
     L"SOFTWARE\\Policies\\Google\\Update";
 const wchar_t kGoogleUpdateUpdateDefault[] = L"UpdateDefault";
@@ -37,16 +39,44 @@ const GoogleUpdateSettings::UpdatePolicy kDefaultUpdatePolicy =
 #endif
 
 const wchar_t kTestProductGuid[] = L"{89F1B351-B15D-48D4-8F10-1298721CF13D}";
-const wchar_t kTestExperimentLabel[] = L"test_label_value";
 
 // This test fixture redirects the HKLM and HKCU registry hives for
 // the duration of the test to make it independent of the machine
 // and user settings.
-class GoogleUpdateSettingsTest : public testing::Test {
+class GoogleUpdateSettingsTest: public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
-    registry_overrides_.OverrideRegistry(HKEY_LOCAL_MACHINE, L"HKLM_pit");
-    registry_overrides_.OverrideRegistry(HKEY_CURRENT_USER, L"HKCU_pit");
+  virtual void SetUp() {
+    // Wipe the keys we redirect to.
+    // This gives us a stable run, even in the presence of previous
+    // crashes or failures.
+    LSTATUS err = SHDeleteKey(HKEY_CURRENT_USER, kHKCUReplacement);
+    EXPECT_TRUE(err == ERROR_SUCCESS || err == ERROR_FILE_NOT_FOUND);
+    err = SHDeleteKey(HKEY_CURRENT_USER, kHKLMReplacement);
+    EXPECT_TRUE(err == ERROR_SUCCESS || err == ERROR_FILE_NOT_FOUND);
+
+    // Create the keys we're redirecting HKCU and HKLM to.
+    ASSERT_EQ(ERROR_SUCCESS,
+        hkcu_.Create(HKEY_CURRENT_USER, kHKCUReplacement, KEY_READ));
+    ASSERT_EQ(ERROR_SUCCESS,
+        hklm_.Create(HKEY_CURRENT_USER, kHKLMReplacement, KEY_READ));
+
+    // And do the switcharoo.
+    ASSERT_EQ(ERROR_SUCCESS,
+              ::RegOverridePredefKey(HKEY_CURRENT_USER, hkcu_.Handle()));
+    ASSERT_EQ(ERROR_SUCCESS,
+              ::RegOverridePredefKey(HKEY_LOCAL_MACHINE, hklm_.Handle()));
+  }
+
+  virtual void TearDown() {
+    // Undo the redirection.
+    EXPECT_EQ(ERROR_SUCCESS, ::RegOverridePredefKey(HKEY_CURRENT_USER, NULL));
+    EXPECT_EQ(ERROR_SUCCESS, ::RegOverridePredefKey(HKEY_LOCAL_MACHINE, NULL));
+
+    // Close our handles and delete the temp keys we redirected to.
+    hkcu_.Close();
+    hklm_.Close();
+    EXPECT_EQ(ERROR_SUCCESS, SHDeleteKey(HKEY_CURRENT_USER, kHKCUReplacement));
+    EXPECT_EQ(ERROR_SUCCESS, SHDeleteKey(HKEY_CURRENT_USER, kHKLMReplacement));
   }
 
   enum SystemUserInstall {
@@ -102,7 +132,7 @@ class GoogleUpdateSettingsTest : public testing::Test {
           const wchar_t* channel = expectations[j].channel;
 
           SetApField(install, ap.c_str());
-          base::string16 ret_channel;
+          string16 ret_channel;
 
           EXPECT_TRUE(GoogleUpdateSettings::GetChromeChannelAndModifiers(
               is_system, &ret_channel));
@@ -112,61 +142,6 @@ class GoogleUpdateSettingsTest : public testing::Test {
         }
       }
     }
-  }
-
-  // Test the writing and deleting functionality of the experiments label
-  // helper.
-  void TestExperimentsLabelHelper(SystemUserInstall install) {
-    BrowserDistribution* chrome =
-        BrowserDistribution::GetSpecificDistribution(
-            BrowserDistribution::CHROME_BROWSER);
-    std::wstring value;
-#if defined(GOOGLE_CHROME_BUILD)
-    EXPECT_TRUE(chrome->ShouldSetExperimentLabels());
-
-    // Before anything is set, ReadExperimentLabels should succeed but return
-    // an empty string.
-    EXPECT_TRUE(GoogleUpdateSettings::ReadExperimentLabels(
-        install == SYSTEM_INSTALL, &value));
-    EXPECT_EQ(base::string16(), value);
-
-    EXPECT_TRUE(GoogleUpdateSettings::SetExperimentLabels(
-        install == SYSTEM_INSTALL, kTestExperimentLabel));
-
-    // Validate that something is written. Only worry about the label itself.
-    RegKey key;
-    HKEY root = install == SYSTEM_INSTALL ?
-        HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-    base::string16 state_key = install == SYSTEM_INSTALL ?
-        chrome->GetStateMediumKey() : chrome->GetStateKey();
-
-    EXPECT_EQ(ERROR_SUCCESS,
-              key.Open(root, state_key.c_str(), KEY_QUERY_VALUE));
-    EXPECT_EQ(ERROR_SUCCESS,
-        key.ReadValue(google_update::kExperimentLabels, &value));
-    EXPECT_EQ(kTestExperimentLabel, value);
-    EXPECT_TRUE(GoogleUpdateSettings::ReadExperimentLabels(
-        install == SYSTEM_INSTALL, &value));
-    EXPECT_EQ(kTestExperimentLabel, value);
-    key.Close();
-
-    // Now that the label is set, test the delete functionality. An empty label
-    // should result in deleting the value.
-    EXPECT_TRUE(GoogleUpdateSettings::SetExperimentLabels(
-        install == SYSTEM_INSTALL, base::string16()));
-    EXPECT_EQ(ERROR_SUCCESS,
-              key.Open(root, state_key.c_str(), KEY_QUERY_VALUE));
-    EXPECT_EQ(ERROR_FILE_NOT_FOUND,
-        key.ReadValue(google_update::kExperimentLabels, &value));
-    EXPECT_TRUE(GoogleUpdateSettings::ReadExperimentLabels(
-        install == SYSTEM_INSTALL, &value));
-    EXPECT_EQ(base::string16(), value);
-    key.Close();
-#else
-    EXPECT_FALSE(chrome->ShouldSetExperimentLabels());
-    EXPECT_FALSE(GoogleUpdateSettings::ReadExperimentLabels(
-        install == SYSTEM_INSTALL, &value));
-#endif  // GOOGLE_CHROME_BUILD
   }
 
   // Creates "ap" key with the value given as parameter. Also adds work
@@ -206,7 +181,8 @@ class GoogleUpdateSettingsTest : public testing::Test {
     return ap_key_value;
   }
 
-  registry_util::RegistryOverrideManager registry_overrides_;
+  RegKey hkcu_;
+  RegKey hklm_;
 };
 
 }  // namespace
@@ -215,7 +191,7 @@ class GoogleUpdateSettingsTest : public testing::Test {
 // whether per-system or per-user install.
 TEST_F(GoogleUpdateSettingsTest, CurrentChromeChannelAbsent) {
   // Per-system first.
-  base::string16 channel;
+  string16 channel;
   EXPECT_TRUE(GoogleUpdateSettings::GetChromeChannelAndModifiers(true,
                                                                  &channel));
   EXPECT_STREQ(L"", channel.c_str());
@@ -229,7 +205,7 @@ TEST_F(GoogleUpdateSettingsTest, CurrentChromeChannelAbsent) {
 // Test an empty Ap key for system and user.
 TEST_F(GoogleUpdateSettingsTest, CurrentChromeChannelEmptySystem) {
   SetApField(SYSTEM_INSTALL, L"");
-  base::string16 channel;
+  string16 channel;
   EXPECT_TRUE(GoogleUpdateSettings::GetChromeChannelAndModifiers(true,
                                                                  &channel));
   EXPECT_STREQ(L"", channel.c_str());
@@ -243,7 +219,7 @@ TEST_F(GoogleUpdateSettingsTest, CurrentChromeChannelEmptySystem) {
 TEST_F(GoogleUpdateSettingsTest, CurrentChromeChannelEmptyUser) {
   SetApField(USER_INSTALL, L"");
   // Per-system lookups still succeed and return empty string.
-  base::string16 channel;
+  string16 channel;
   EXPECT_TRUE(GoogleUpdateSettings::GetChromeChannelAndModifiers(true,
                                                                  &channel));
   EXPECT_STREQ(L"", channel.c_str());
@@ -455,7 +431,7 @@ TEST_F(GoogleUpdateSettingsTest, SetEULAConsent) {
 
   // Chrome is installed.
   machine_state.AddChrome(system_level, multi_install,
-      new Version(chrome::kChromeVersion));
+      Version::GetVersionFromString(chrome::kChromeVersion));
 
   RegKey key;
   DWORD value;
@@ -545,21 +521,11 @@ TEST_F(GoogleUpdateSettingsTest, GetAppUpdatePolicyDefaultOverride) {
                                                      &is_overridden));
   EXPECT_FALSE(is_overridden);
 
-  EXPECT_EQ(ERROR_SUCCESS,
-            RegKey(HKEY_LOCAL_MACHINE, kGoogleUpdatePoliciesKey,
-                   KEY_SET_VALUE).WriteValue(kGoogleUpdateUpdateDefault,
-                                             static_cast<DWORD>(3)));
-  is_overridden = true;
-  EXPECT_EQ(GoogleUpdateSettings::AUTO_UPDATES_ONLY,
-            GoogleUpdateSettings::GetAppUpdatePolicy(kTestProductGuid,
-                                                     &is_overridden));
-  EXPECT_FALSE(is_overridden);
-
   // The default policy should be in force for bogus values.
   EXPECT_EQ(ERROR_SUCCESS,
             RegKey(HKEY_LOCAL_MACHINE, kGoogleUpdatePoliciesKey,
                    KEY_SET_VALUE).WriteValue(kGoogleUpdateUpdateDefault,
-                                             static_cast<DWORD>(4)));
+                                             static_cast<DWORD>(3)));
   is_overridden = true;
   EXPECT_EQ(kDefaultUpdatePolicy,
             GoogleUpdateSettings::GetAppUpdatePolicy(kTestProductGuid,
@@ -610,21 +576,11 @@ TEST_F(GoogleUpdateSettingsTest, GetAppUpdatePolicyAppOverride) {
                                                      &is_overridden));
   EXPECT_TRUE(is_overridden);
 
-  EXPECT_EQ(ERROR_SUCCESS,
-            RegKey(HKEY_LOCAL_MACHINE, kGoogleUpdatePoliciesKey,
-                   KEY_SET_VALUE).WriteValue(app_policy_value.c_str(),
-                                             static_cast<DWORD>(3)));
-  is_overridden = false;
-  EXPECT_EQ(GoogleUpdateSettings::AUTO_UPDATES_ONLY,
-            GoogleUpdateSettings::GetAppUpdatePolicy(kTestProductGuid,
-                                                     &is_overridden));
-  EXPECT_TRUE(is_overridden);
-
   // The default policy should be in force for bogus values.
   EXPECT_EQ(ERROR_SUCCESS,
             RegKey(HKEY_LOCAL_MACHINE, kGoogleUpdatePoliciesKey,
                    KEY_SET_VALUE).WriteValue(app_policy_value.c_str(),
-                                             static_cast<DWORD>(4)));
+                                             static_cast<DWORD>(3)));
   is_overridden = true;
   EXPECT_EQ(GoogleUpdateSettings::UPDATES_DISABLED,
             GoogleUpdateSettings::GetAppUpdatePolicy(kTestProductGuid,
@@ -632,134 +588,7 @@ TEST_F(GoogleUpdateSettingsTest, GetAppUpdatePolicyAppOverride) {
   EXPECT_FALSE(is_overridden);
 }
 
-TEST_F(GoogleUpdateSettingsTest, ExperimentsLabelHelperSystem) {
-  TestExperimentsLabelHelper(SYSTEM_INSTALL);
-}
-
-TEST_F(GoogleUpdateSettingsTest, ExperimentsLabelHelperUser) {
-  TestExperimentsLabelHelper(USER_INSTALL);
-}
-
 #endif  // defined(GOOGLE_CHROME_BUILD)
-
-// Test GoogleUpdateSettings::GetUninstallCommandLine at system- or user-level,
-// according to the param.
-class GetUninstallCommandLine : public GoogleUpdateSettingsTest,
-                                public testing::WithParamInterface<bool> {
- protected:
-  static const wchar_t kDummyCommand[];
-
-  virtual void SetUp() OVERRIDE {
-    GoogleUpdateSettingsTest::SetUp();
-    system_install_ = GetParam();
-    root_key_ = system_install_ ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-  }
-
-  HKEY root_key_;
-  bool system_install_;
-};
-
-const wchar_t GetUninstallCommandLine::kDummyCommand[] =
-    L"\"goopdate.exe\" /spam";
-
-// Tests that GetUninstallCommandLine returns an empty string if there's no
-// Software\Google\Update key.
-TEST_P(GetUninstallCommandLine, TestNoKey) {
-  EXPECT_EQ(base::string16(),
-            GoogleUpdateSettings::GetUninstallCommandLine(system_install_));
-}
-
-// Tests that GetUninstallCommandLine returns an empty string if there's no
-// UninstallCmdLine value in the Software\Google\Update key.
-TEST_P(GetUninstallCommandLine, TestNoValue) {
-  RegKey(root_key_, google_update::kRegPathGoogleUpdate, KEY_SET_VALUE);
-  EXPECT_EQ(base::string16(),
-            GoogleUpdateSettings::GetUninstallCommandLine(system_install_));
-}
-
-// Tests that GetUninstallCommandLine returns an empty string if there's an
-// empty UninstallCmdLine value in the Software\Google\Update key.
-TEST_P(GetUninstallCommandLine, TestEmptyValue) {
-  RegKey(root_key_, google_update::kRegPathGoogleUpdate, KEY_SET_VALUE)
-    .WriteValue(google_update::kRegUninstallCmdLine, L"");
-  EXPECT_EQ(base::string16(),
-            GoogleUpdateSettings::GetUninstallCommandLine(system_install_));
-}
-
-// Tests that GetUninstallCommandLine returns the correct string if there's an
-// UninstallCmdLine value in the Software\Google\Update key.
-TEST_P(GetUninstallCommandLine, TestRealValue) {
-  RegKey(root_key_, google_update::kRegPathGoogleUpdate, KEY_SET_VALUE)
-      .WriteValue(google_update::kRegUninstallCmdLine, kDummyCommand);
-  EXPECT_EQ(base::string16(kDummyCommand),
-            GoogleUpdateSettings::GetUninstallCommandLine(system_install_));
-  // Make sure that there's no value in the other level (user or system).
-  EXPECT_EQ(base::string16(),
-            GoogleUpdateSettings::GetUninstallCommandLine(!system_install_));
-}
-
-INSTANTIATE_TEST_CASE_P(GetUninstallCommandLineAtLevel, GetUninstallCommandLine,
-                        testing::Bool());
-
-// Test GoogleUpdateSettings::GetGoogleUpdateVersion at system- or user-level,
-// according to the param.
-class GetGoogleUpdateVersion : public GoogleUpdateSettingsTest,
-                               public testing::WithParamInterface<bool> {
- protected:
-  static const wchar_t kDummyVersion[];
-
-  virtual void SetUp() OVERRIDE {
-    GoogleUpdateSettingsTest::SetUp();
-    system_install_ = GetParam();
-    root_key_ = system_install_ ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-  }
-
-  HKEY root_key_;
-  bool system_install_;
-};
-
-const wchar_t GetGoogleUpdateVersion::kDummyVersion[] = L"1.2.3.4";
-
-// Tests that GetGoogleUpdateVersion returns an empty string if there's no
-// Software\Google\Update key.
-TEST_P(GetGoogleUpdateVersion, TestNoKey) {
-  EXPECT_FALSE(
-      GoogleUpdateSettings::GetGoogleUpdateVersion(system_install_).IsValid());
-}
-
-// Tests that GetGoogleUpdateVersion returns an empty string if there's no
-// version value in the Software\Google\Update key.
-TEST_P(GetGoogleUpdateVersion, TestNoValue) {
-  RegKey(root_key_, google_update::kRegPathGoogleUpdate, KEY_SET_VALUE);
-  EXPECT_FALSE(
-      GoogleUpdateSettings::GetGoogleUpdateVersion(system_install_).IsValid());
-}
-
-// Tests that GetGoogleUpdateVersion returns an empty string if there's an
-// empty version value in the Software\Google\Update key.
-TEST_P(GetGoogleUpdateVersion, TestEmptyValue) {
-  RegKey(root_key_, google_update::kRegPathGoogleUpdate, KEY_SET_VALUE)
-      .WriteValue(google_update::kRegGoogleUpdateVersion, L"");
-  EXPECT_FALSE(
-      GoogleUpdateSettings::GetGoogleUpdateVersion(system_install_).IsValid());
-}
-
-// Tests that GetGoogleUpdateVersion returns the correct string if there's a
-// version value in the Software\Google\Update key.
-TEST_P(GetGoogleUpdateVersion, TestRealValue) {
-  RegKey(root_key_, google_update::kRegPathGoogleUpdate, KEY_SET_VALUE)
-      .WriteValue(google_update::kRegGoogleUpdateVersion, kDummyVersion);
-  Version expected(base::UTF16ToUTF8(kDummyVersion));
-  EXPECT_TRUE(expected.Equals(
-      GoogleUpdateSettings::GetGoogleUpdateVersion(system_install_)));
-  // Make sure that there's no value in the other level (user or system).
-  EXPECT_FALSE(
-      GoogleUpdateSettings::GetGoogleUpdateVersion(!system_install_)
-          .IsValid());
-}
-
-INSTANTIATE_TEST_CASE_P(GetGoogleUpdateVersionAtLevel, GetGoogleUpdateVersion,
-                        testing::Bool());
 
 // Test values for use by the CollectStatsConsent test fixture.
 class StatsState {

@@ -9,7 +9,7 @@
 #include "ipc/ipc_platform_file.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/proxy_completion_callback_factory.h"
+#include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
 #include "ppapi/utility/completion_callback_factory.h"
 
 namespace ppapi {
@@ -41,7 +41,8 @@ class PPB_Broker_Proxy : public InterfaceProxy {
   void ConnectCompleteInHost(int32_t result,
                              const ppapi::HostResource& host_resource);
 
-  ProxyCompletionCallbackFactory<PPB_Broker_Proxy> callback_factory_;
+  pp::CompletionCallbackFactory<PPB_Broker_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 };
 
 }  // namespace proxy

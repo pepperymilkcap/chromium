@@ -4,10 +4,11 @@
 
 #ifndef CHROME_INSTALLER_UTIL_APP_COMMAND_H_
 #define CHROME_INSTALLER_UTIL_APP_COMMAND_H_
+#pragma once
 
 #include <windows.h>
 
-#include "base/strings/string16.h"
+#include <string>
 
 class WorkItemList;
 
@@ -25,9 +26,8 @@ namespace installer {
 class AppCommand {
  public:
   AppCommand();
-  // Constructs a new command that will execute the given |command_line|.
-  // All other properties default to false.
-  explicit AppCommand(const base::string16& command_line);
+  AppCommand(const std::wstring& command_line, bool send_pings,
+             bool is_web_accessible);
   // The implicit dtor, copy ctor and assignment operator are desired.
 
   // Initializes an instance from the command in |key|.
@@ -36,14 +36,14 @@ class AppCommand {
   // Adds to |item_list| work items to write this object to the key named
   // |command_path| under |predefined_root|.
   void AddWorkItems(HKEY predefined_root,
-                    const base::string16& command_path,
+                    const std::wstring& command_path,
                     WorkItemList* item_list) const;
 
   // Returns the command-line for the app command as it is represented in the
   // registry.  Use CommandLine::FromString() on this value to check arguments
   // or to launch the command.
-  const base::string16& command_line() const { return command_line_; }
-  void set_command_line(const base::string16& command_line) {
+  const std::wstring& command_line() const { return command_line_; }
+  void set_command_line(const std::wstring& command_line) {
     command_line_ = command_line;
   }
 
@@ -55,30 +55,10 @@ class AppCommand {
     is_web_accessible_ = is_web_accessible;
   }
 
-  bool is_auto_run_on_os_upgrade() const { return is_auto_run_on_os_upgrade_; }
-  void set_is_auto_run_on_os_upgrade(bool is_auto_run_on_os_upgrade) {
-    is_auto_run_on_os_upgrade_ = is_auto_run_on_os_upgrade;
-  }
-
-  bool is_run_as_user() const { return is_run_as_user_; }
-  void set_is_run_as_user(bool is_run_as_user) {
-    is_run_as_user_ = is_run_as_user;
-  }
-
  protected:
-  base::string16 command_line_;
+  std::wstring command_line_;
   bool sends_pings_;
   bool is_web_accessible_;
-  bool is_auto_run_on_os_upgrade_;
-  bool is_run_as_user_;
-
- private:
-  struct NamedBoolVar {
-    bool AppCommand::* data;
-    const wchar_t* name;
-  };
-
-  static const NamedBoolVar kNameBoolVars[];
 };
 
 }  // namespace installer

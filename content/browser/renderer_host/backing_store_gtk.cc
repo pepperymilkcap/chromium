@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,26 +16,24 @@
 #endif
 
 #include <algorithm>
+#include <utility>
 #include <limits>
 #include <queue>
-#include <utility>
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/x/x11_util.h"
 #include "ui/base/x/x11_util_internal.h"
+#include "ui/base/gtk/gtk_signal.h"
 #include "ui/gfx/rect.h"
-#include "ui/gfx/rect_conversions.h"
-#include "ui/gfx/x/x11_types.h"
-#include "ui/surface/transport_dib.h"
+#include "ui/gfx/surface/transport_dib.h"
 
-namespace content {
 namespace {
 
 // Assume that somewhere along the line, someone will do width * height * 4
@@ -59,7 +57,7 @@ static const int kMaxVideoLayerSize = 23170;
 
 // Destroys the image and the associated shared memory structures. This is a
 // helper function for code using shared memory.
-void DestroySharedImage(XDisplay* display,
+void DestroySharedImage(Display* display,
                         XImage* image,
                         XShmSegmentInfo* shminfo) {
   XShmDetach(display, shminfo);
@@ -72,7 +70,7 @@ void DestroySharedImage(XDisplay* display,
 // XSyncExtension to push a callback into the X11 event queue and get a
 // callback instead of blocking until the event queue is cleared.
 //
-// TODO(erg): If gfx::GetXDisplay() ever gets fixed to handle multiple Displays,
+// TODO(erg): If ui::GetXDisplay() ever gets fixed to handle multiple Displays,
 // this must be modified to be per Display instead of a Singleton.
 class XSyncHandler {
  public:
@@ -84,10 +82,7 @@ class XSyncHandler {
     return loaded_extension_;
   }
 
-  void PushPaintCounter(TransportDIB* dib,
-                        XDisplay* display,
-                        Picture picture,
-                        Pixmap pixmap,
+  void PushPaintCounter(Display* display, Picture picture, Pixmap pixmap,
                         const base::Closure& completion_callback);
 
  private:
@@ -96,20 +91,16 @@ class XSyncHandler {
   // A struct that has cleanup and callback tasks that were queued into the
   // future and are run on |g_backing_store_sync_alarm| firing.
   struct BackingStoreEvents {
-    BackingStoreEvents(TransportDIB* dib, XDisplay* d, Picture pic, Pixmap pix,
+    BackingStoreEvents(Display* d, Picture pic, Pixmap pix,
                        const base::Closure& c)
-        : dib(dib),
-          display(d),
+        : display(d),
           picture(pic),
           pixmap(pix),
           closure(c) {
-      dib->IncreaseInFlightCounter();
     }
 
-    TransportDIB* dib;
-
     // The display we're running on.
-    XDisplay* display;
+    Display* display;
 
     // Data to delete.
     Picture picture;
@@ -141,19 +132,18 @@ class XSyncHandler {
   std::queue<BackingStoreEvents*> backing_store_events_;
 };
 
-void XSyncHandler::PushPaintCounter(TransportDIB* dib,
-                                    XDisplay* display,
+void XSyncHandler::PushPaintCounter(Display* display,
                                     Picture picture,
                                     Pixmap pixmap,
                                     const base::Closure& completion_callback) {
-  backing_store_events_.push(new BackingStoreEvents(
-        dib, display, picture, pixmap, completion_callback));
+  backing_store_events_.push(
+      new BackingStoreEvents(display, picture, pixmap, completion_callback));
 
   // Push a change counter event into the X11 event queue that will trigger our
   // alarm when it is processed.
   XSyncValue value;
   XSyncIntToValue(&value, 1);
-  XSyncChangeCounter(gfx::GetXDisplay(),
+  XSyncChangeCounter(ui::GetXDisplay(),
                      backing_store_sync_counter_,
                      value);
 }
@@ -164,7 +154,7 @@ XSyncHandler::XSyncHandler()
       xsync_error_base_(0),
       backing_store_sync_counter_(0),
       backing_store_sync_alarm_(0) {
-  XDisplay* display = gfx::GetXDisplay();
+  Display* display = ui::GetXDisplay();
   if (XSyncQueryExtension(display,
                           &xsync_event_base_,
                           &xsync_error_base_)) {
@@ -191,7 +181,6 @@ XSyncHandler::~XSyncHandler() {
   if (loaded_extension_)
     gdk_window_remove_filter(NULL, &OnEventThunk, this);
 
-  XSync(gfx::GetXDisplay(), False);
   while (!backing_store_events_.empty()) {
     // We delete the X11 resources we're holding onto. We don't run the
     // callbacks because we are shutting down.
@@ -199,7 +188,6 @@ XSyncHandler::~XSyncHandler() {
     backing_store_events_.pop();
     XRenderFreePicture(data->display, data->picture);
     XFreePixmap(data->display, data->pixmap);
-    data->dib->DecreaseInFlightCounter();
     delete data;
   }
 }
@@ -230,8 +218,6 @@ GdkFilterReturn XSyncHandler::OnEvent(GdkXEvent* gdkxevent,
 
       // Dispatch the closure we were given.
       data->closure.Run();
-
-      data->dib->DecreaseInFlightCounter();
       delete data;
 
       return GDK_FILTER_REMOVE;
@@ -248,7 +234,7 @@ BackingStoreGtk::BackingStoreGtk(RenderWidgetHost* widget,
                                  void* visual,
                                  int depth)
     : BackingStore(widget, size),
-      display_(gfx::GetXDisplay()),
+      display_(ui::GetXDisplay()),
       shared_memory_support_(ui::QuerySharedMemorySupport(display_)),
       use_render_(ui::QueryRenderSupport(display_)),
       visual_(visual),
@@ -272,7 +258,7 @@ BackingStoreGtk::BackingStoreGtk(RenderWidgetHost* widget,
     pixmap_bpp_ = 0;
   } else {
     picture_ = 0;
-    pixmap_bpp_ = gfx::BitsPerPixelForPixmapDepth(display_, depth);
+    pixmap_bpp_ = ui::BitsPerPixelForPixmapDepth(display_, depth);
   }
 
   pixmap_gc_ = XCreateGC(display_, pixmap_, 0, NULL);
@@ -320,9 +306,9 @@ void BackingStoreGtk::PaintRectWithoutXrender(
                                 visual_depth_);
 
   // Draw ARGB transport DIB onto our pixmap.
-  gfx::PutARGBImage(display_, visual_, visual_depth_, pixmap,
-                    pixmap_gc_, static_cast<uint8*>(bitmap->memory()),
-                    width, height);
+  ui::PutARGBImage(display_, visual_, visual_depth_, pixmap,
+                   pixmap_gc_, static_cast<uint8*>(bitmap->memory()),
+                   width, height);
 
   for (size_t i = 0; i < copy_rects.size(); i++) {
     const gfx::Rect& copy_rect = copy_rects[i];
@@ -342,11 +328,10 @@ void BackingStoreGtk::PaintRectWithoutXrender(
 }
 
 void BackingStoreGtk::PaintToBackingStore(
-    RenderProcessHost* process,
+    content::RenderProcessHost* process,
     TransportDIB::Id bitmap,
     const gfx::Rect& bitmap_rect,
     const std::vector<gfx::Rect>& copy_rects,
-    float scale_factor,
     const base::Closure& completion_callback,
     bool* scheduled_completion_callback) {
   *scheduled_completion_callback = false;
@@ -357,10 +342,8 @@ void BackingStoreGtk::PaintToBackingStore(
   if (bitmap_rect.IsEmpty())
     return;
 
-  gfx::Rect pixel_bitmap_rect = gfx::ToEnclosedRect(
-      gfx::ScaleRect(bitmap_rect, scale_factor));
-  const int width = pixel_bitmap_rect.width();
-  const int height = pixel_bitmap_rect.height();
+  const int width = bitmap_rect.width();
+  const int height = bitmap_rect.height();
 
   if (width <= 0 || width > kMaxVideoLayerSize ||
       height <= 0 || height > kMaxVideoLayerSize)
@@ -417,14 +400,12 @@ void BackingStoreGtk::PaintToBackingStore(
 #if defined(ARCH_CPU_ARM_FAMILY)
       for (size_t i = 0; i < copy_rects.size(); i++) {
         const gfx::Rect& copy_rect = copy_rects[i];
-        gfx::Rect pixel_copy_rect = gfx::ToEnclosedRect(
-            gfx::ScaleRect(copy_rect, scale_factor));
         XShmPutImage(display_, pixmap, gc, image,
-                     pixel_copy_rect.x() - pixel_bitmap_rect.x(), /* source x */
-                     pixel_copy_rect.y() - pixel_bitmap_rect.y(), /* source y */
-                     pixel_copy_rect.x() - pixel_bitmap_rect.x(), /* dest x */
-                     pixel_copy_rect.y() - pixel_bitmap_rect.y(), /* dest y */
-                     pixel_copy_rect.width(), pixel_copy_rect.height(),
+                     copy_rect.x() - bitmap_rect.x(), /* source x */
+                     copy_rect.y() - bitmap_rect.y(), /* source y */
+                     copy_rect.x() - bitmap_rect.x(), /* dest x */
+                     copy_rect.y() - bitmap_rect.y(), /* dest y */
+                     copy_rect.width(), copy_rect.height(),
                      False /* send_event */);
       }
 #else
@@ -465,16 +446,6 @@ void BackingStoreGtk::PaintToBackingStore(
 
   picture = ui::CreatePictureFromSkiaPixmap(display_, pixmap);
 
-  if (scale_factor != 1.0) {
-    float up_scale = 1.0 / scale_factor;
-    XTransform scaling = { {
-        { XDoubleToFixed(1), XDoubleToFixed(0), XDoubleToFixed(0) },
-        { XDoubleToFixed(0), XDoubleToFixed(1), XDoubleToFixed(0) },
-        { XDoubleToFixed(0), XDoubleToFixed(0), XDoubleToFixed(up_scale) }
-        } };
-    XRenderSetPictureTransform(display_, picture, &scaling);
-    XRenderSetPictureFilter(display_, picture, FilterGood, NULL, 0);
-  }
   for (size_t i = 0; i < copy_rects.size(); i++) {
     const gfx::Rect& copy_rect = copy_rects[i];
     XRenderComposite(display_,
@@ -499,8 +470,7 @@ void BackingStoreGtk::PaintToBackingStore(
     XSyncHandler* handler = XSyncHandler::GetInstance();
     if (handler->Enabled()) {
       *scheduled_completion_callback = true;
-      handler->PushPaintCounter(
-          dib, display_, picture, pixmap, completion_callback);
+      handler->PushPaintCounter(display_, picture, pixmap, completion_callback);
     } else {
       XSync(display_, False);
     }
@@ -514,7 +484,7 @@ void BackingStoreGtk::PaintToBackingStore(
 }
 
 bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
-                                           skia::PlatformBitmap* output) {
+                                           skia::PlatformCanvas* output) {
   base::TimeTicks begin_time = base::TimeTicks::Now();
 
   if (visual_depth_ < 24) {
@@ -547,14 +517,10 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
       return false;
     }
     shminfo.shmid = shmget(IPC_PRIVATE, image->bytes_per_line * image->height,
-                           IPC_CREAT|0600);
+                           IPC_CREAT|0666);
     if (shminfo.shmid == -1) {
       XDestroyImage(image);
-      LOG(WARNING) << "Failed to get shared memory segment. "
-                      "Performance may be degraded.";
       return false;
-    } else {
-      VLOG(1) << "Got shared memory segment " << shminfo.shmid;
     }
 
     void* mapped_memory = shmat(shminfo.shmid, NULL, SHM_RDONLY);
@@ -569,14 +535,9 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
         !XShmGetImage(display_, pixmap_, image, rect.x(), rect.y(),
                       AllPlanes)) {
       DestroySharedImage(display_, image, &shminfo);
-      LOG(WARNING) << "X failed to get shared memory segment. "
-                      "Performance may be degraded.";
       return false;
     }
-
-    VLOG(1) << "Using X shared memory segment " << shminfo.shmid;
   } else {
-    LOG(WARNING) << "Not using X shared memory.";
     // Non-shared memory case just copy the image from the server.
     image = XGetImage(display_, pixmap_,
                       rect.x(), rect.y(), width, height,
@@ -586,7 +547,7 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
   // TODO(jhawkins): Need to convert the image data if the image bits per pixel
   // is not 32.
   // Note that this also initializes the output bitmap as opaque.
-  if (!output->Allocate(width, height, true) ||
+  if (!output->initialize(width, height, true) ||
       image->bits_per_pixel != 32) {
     if (shared_memory_support_ != ui::SHARED_MEMORY_NONE)
       DestroySharedImage(display_, image, &shminfo);
@@ -599,9 +560,7 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
   // it and copy each row out, only up to the pixels we're actually
   // using.  This code assumes a visual mode where a pixel is
   // represented using a 32-bit unsigned int, with a byte per component.
-  const SkBitmap& bitmap = output->GetBitmap();
-  SkAutoLockPixels alp(bitmap);
-
+  SkBitmap bitmap = skia::GetTopDevice(*output)->accessBitmap(true);
   for (int y = 0; y < height; y++) {
     const uint32* src_row = reinterpret_cast<uint32*>(
         &image->data[image->bytes_per_line * y]);
@@ -622,36 +581,35 @@ bool BackingStoreGtk::CopyFromBackingStore(const gfx::Rect& rect,
   return true;
 }
 
-void BackingStoreGtk::ScrollBackingStore(const gfx::Vector2d& delta,
+void BackingStoreGtk::ScrollBackingStore(int dx, int dy,
                                          const gfx::Rect& clip_rect,
                                          const gfx::Size& view_size) {
   if (!display_)
     return;
 
   // We only support scrolling in one direction at a time.
-  DCHECK(delta.x() == 0 || delta.y() == 0);
+  DCHECK(dx == 0 || dy == 0);
 
-  if (delta.y()) {
-    // Positive values of |delta|.y() scroll up
-    if (abs(delta.y()) < clip_rect.height()) {
+  if (dy) {
+    // Positive values of |dy| scroll up
+    if (abs(dy) < clip_rect.height()) {
       XCopyArea(display_, pixmap_, pixmap_, static_cast<GC>(pixmap_gc_),
                 clip_rect.x() /* source x */,
-                std::max(clip_rect.y(), clip_rect.y() - delta.y()),
+                std::max(clip_rect.y(), clip_rect.y() - dy),
                 clip_rect.width(),
-                clip_rect.height() - abs(delta.y()),
+                clip_rect.height() - abs(dy),
                 clip_rect.x() /* dest x */,
-                std::max(clip_rect.y(), clip_rect.y() + delta.y()) /* dest y */
-                );
+                std::max(clip_rect.y(), clip_rect.y() + dy) /* dest y */);
     }
-  } else if (delta.x()) {
-    // Positive values of |delta|.x() scroll right
-    if (abs(delta.x()) < clip_rect.width()) {
+  } else if (dx) {
+    // Positive values of |dx| scroll right
+    if (abs(dx) < clip_rect.width()) {
       XCopyArea(display_, pixmap_, pixmap_, static_cast<GC>(pixmap_gc_),
-                std::max(clip_rect.x(), clip_rect.x() - delta.x()),
+                std::max(clip_rect.x(), clip_rect.x() - dx),
                 clip_rect.y() /* source y */,
-                clip_rect.width() - abs(delta.x()),
+                clip_rect.width() - abs(dx),
                 clip_rect.height(),
-                std::max(clip_rect.x(), clip_rect.x() + delta.x()) /* dest x */,
+                std::max(clip_rect.x(), clip_rect.x() + dx) /* dest x */,
                 clip_rect.y() /* dest x */);
     }
   }
@@ -662,6 +620,20 @@ void BackingStoreGtk::XShowRect(const gfx::Point &origin,
   XCopyArea(display_, pixmap_, target, static_cast<GC>(pixmap_gc_),
             rect.x(), rect.y(), rect.width(), rect.height(),
             rect.x() + origin.x(), rect.y() + origin.y());
+}
+
+void BackingStoreGtk::CairoShowRect(const gfx::Rect& rect,
+                                    GdkDrawable* drawable) {
+  cairo_surface_t* surface = cairo_xlib_surface_create(
+      display_, pixmap_, static_cast<Visual*>(visual_),
+      size().width(), size().height());
+  cairo_t* cr = gdk_cairo_create(drawable);
+  cairo_set_source_surface(cr, surface, 0, 0);
+
+  cairo_rectangle(cr, rect.x(), rect.y(), rect.width(), rect.height());
+  cairo_fill(cr);
+  cairo_destroy(cr);
+  cairo_surface_destroy(surface);
 }
 
 #if defined(TOOLKIT_GTK)
@@ -688,5 +660,3 @@ void BackingStoreGtk::PaintToRect(const gfx::Rect& rect, GdkDrawable* target) {
   cairo_destroy(cr);
 }
 #endif
-
-}  // namespace content

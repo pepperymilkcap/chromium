@@ -12,8 +12,6 @@
 #include "base/android/scoped_java_ref.h"
 #include "content/browser/renderer_host/java/java_type.h"
 
-namespace content {
-
 // Wrapper around java.lang.reflect.Method. This class must be used on a single
 // thread only.
 class JavaMethod {
@@ -41,7 +39,5 @@ class JavaMethod {
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(JavaMethod);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_METHOD_H_

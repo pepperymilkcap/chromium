@@ -1,39 +1,29 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/test/test_views_delegate.h"
 
-#include "base/command_line.h"
 #include "base/logging.h"
-#include "content/public/test/web_contents_tester.h"
-
-#if defined(USE_AURA) && !defined(OS_CHROMEOS)
-#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
-#include "ui/views/widget/native_widget_aura.h"
-#endif
-
-#if defined(USE_AURA)
-#include "ui/views/corewm/wm_state.h"
-#endif
+#include "ui/base/clipboard/clipboard.h"
 
 namespace views {
 
-TestViewsDelegate::TestViewsDelegate()
-    : use_transparent_windows_(false) {
+TestViewsDelegate::TestViewsDelegate() {
   DCHECK(!ViewsDelegate::views_delegate);
   ViewsDelegate::views_delegate = this;
-#if defined(USE_AURA)
-  wm_state_.reset(new views::corewm::WMState);
-#endif
 }
 
 TestViewsDelegate::~TestViewsDelegate() {
   ViewsDelegate::views_delegate = NULL;
 }
 
-void TestViewsDelegate::SetUseTransparentWindows(bool transparent) {
-  use_transparent_windows_ = transparent;
+ui::Clipboard* TestViewsDelegate::GetClipboard() const {
+  if (!clipboard_.get()) {
+    // Note that we need a MessageLoop for the next call to work.
+    clipboard_.reset(new ui::Clipboard);
+  }
+  return clipboard_.get();
 }
 
 void TestViewsDelegate::SaveWindowPlacement(const Widget* window,
@@ -43,43 +33,19 @@ void TestViewsDelegate::SaveWindowPlacement(const Widget* window,
 }
 
 bool TestViewsDelegate::GetSavedWindowPlacement(
-    const Widget* window,
     const std::string& window_name,
     gfx::Rect* bounds,
     ui:: WindowShowState* show_state) const {
   return false;
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-gfx::ImageSkia* TestViewsDelegate::GetDefaultWindowIcon() const {
-  return NULL;
-}
-#endif
-
 NonClientFrameView* TestViewsDelegate::CreateDefaultNonClientFrameView(
     Widget* widget) {
   return NULL;
 }
 
-content::WebContents* TestViewsDelegate::CreateWebContents(
-    content::BrowserContext* browser_context,
-    content::SiteInstance* site_instance) {
-  return NULL;
-}
-
-void TestViewsDelegate::OnBeforeWidgetInit(
-    Widget::InitParams* params,
-    internal::NativeWidgetDelegate* delegate) {
-  if (params->opacity == Widget::InitParams::INFER_OPACITY) {
-    if (use_transparent_windows_)
-      params->opacity = Widget::InitParams::TRANSLUCENT_WINDOW;
-    else
-      params->opacity = Widget::InitParams::OPAQUE_WINDOW;
-  }
-}
-
-base::TimeDelta TestViewsDelegate::GetDefaultTextfieldObscuredRevealDuration() {
-  return base::TimeDelta();
+int TestViewsDelegate::GetDispositionForEvent(int event_flags) {
+  return 0;
 }
 
 }  // namespace views

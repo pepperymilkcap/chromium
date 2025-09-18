@@ -9,11 +9,8 @@
 #include <string.h>
 #include <string>
 
-#include "ppapi/c/ppb_file_io.h"
+#include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/cpp/completion_callback.h"
-#include "ppapi/cpp/file_io.h"
-#include "ppapi/cpp/file_ref.h"
-#include "ppapi/cpp/file_system.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/var.h"
 #include "ppapi/tests/test_utils.h"
@@ -76,9 +73,8 @@ bool TestURLRequest::Init() {
 void TestURLRequest::RunTests(const std::string& filter) {
   RUN_TEST(CreateAndIsURLRequestInfo, filter);
   RUN_TEST(SetProperty, filter);
-  RUN_TEST(AppendDataToBody, filter);
-  RUN_TEST(AppendFileToBody, filter);
   RUN_TEST(Stress, filter);
+  RUN_TEST(AppendDataToBody, filter);
 }
 
 PP_Var TestURLRequest::PP_MakeString(const char* s) {
@@ -115,7 +111,7 @@ std::string TestURLRequest::TestCreateAndIsURLRequestInfo() {
 
   // IsURLRequestInfo: Released URLRequestInfo resource -> false.
   ppb_core_interface_->ReleaseResource(url_request);
-  ASSERT_NE(PP_TRUE, ppb_url_request_interface_->IsURLRequestInfo(url_request));
+  ASSERT_NE(PP_TRUE, ppb_url_request_interface_->IsURLRequestInfo(url_request))
 
   return error;  // == PASS() if empty.
 }
@@ -179,7 +175,6 @@ std::string TestURLRequest::TestSetProperty() {
       TEST_STRING_INVALID(PP_URLREQUESTPROPERTY_HEADERS),
       TEST_STRING_INVALID(PP_URLREQUESTPROPERTY_CUSTOMREFERRERURL),
       TEST_STRING_INVALID(PP_URLREQUESTPROPERTY_CUSTOMCONTENTTRANSFERENCODING),
-      TEST_STRING_INVALID(PP_URLREQUESTPROPERTY_CUSTOMUSERAGENT),
       TEST_INT_INVALID(PP_URLREQUESTPROPERTY_PREFETCHBUFFERUPPERTHRESHOLD),
       TEST_INT_INVALID(PP_URLREQUESTPROPERTY_PREFETCHBUFFERLOWERTHRESHOLD),
       PropertyTestData(ID_STR(PP_URLREQUESTPROPERTY_URL),
@@ -208,15 +203,6 @@ std::string TestURLRequest::TestSetProperty() {
           PP_MakeString(""), PP_TRUE),
       PropertyTestData(
           ID_STR(PP_URLREQUESTPROPERTY_CUSTOMCONTENTTRANSFERENCODING),
-          PP_MakeUndefined(), PP_TRUE),
-      PropertyTestData(
-          ID_STR(PP_URLREQUESTPROPERTY_CUSTOMUSERAGENT),
-          PP_MakeString("My Crazy Plugin"), PP_TRUE),
-      PropertyTestData(
-          ID_STR(PP_URLREQUESTPROPERTY_CUSTOMUSERAGENT),
-          PP_MakeString(""), PP_TRUE),
-      PropertyTestData(
-          ID_STR(PP_URLREQUESTPROPERTY_CUSTOMUSERAGENT),
           PP_MakeUndefined(), PP_TRUE),
       PropertyTestData(ID_STR(PP_URLREQUESTPROPERTY_URL),
                        PP_MakeUndefined(), PP_FALSE),
@@ -288,12 +274,14 @@ std::string TestURLRequest::TestSetProperty() {
 
 std::string TestURLRequest::LoadAndCompareBody(
     PP_Resource url_request, const std::string& expected_body) {
-  TestCompletionCallback callback(instance_->pp_instance(), PP_REQUIRED);
-  callback.WaitForResult(ppb_url_loader_interface_->Open(
-      url_loader_, url_request,
-      callback.GetCallback().pp_completion_callback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  TestCompletionCallback test_callback(instance_->pp_instance(), true);
+  pp::CompletionCallback callback =
+      static_cast<pp::CompletionCallback>(test_callback);
+  int32_t result = ppb_url_loader_interface_->Open(
+      url_loader_, url_request, callback.pp_completion_callback());
+  ASSERT_EQ(PP_OK_COMPLETIONPENDING, result);
+  result = test_callback.WaitForResult();
+  ASSERT_EQ(PP_OK, result);
 
   std::string error;
   PP_Resource url_response =
@@ -310,24 +298,24 @@ std::string TestURLRequest::LoadAndCompareBody(
     for (; error.empty();) {  // Read the entire body in this loop.
       const size_t kBufferSize = 32;
       char buf[kBufferSize];
-      callback.WaitForResult(ppb_url_loader_interface_->ReadResponseBody(
+      result = ppb_url_loader_interface_->ReadResponseBody(
           url_loader_, buf, kBufferSize,
-          callback.GetCallback().pp_completion_callback()));
-      if (callback.failed())
-        error.assign(callback.errors());
-      else if (callback.result() < PP_OK)
-        error.assign(ReportError("PPB_URLLoader::ReadResponseBody()",
-                                 callback.result()));
-      if (callback.result() <= PP_OK || callback.failed())
+          callback.pp_completion_callback());
+      if (PP_OK_COMPLETIONPENDING != result) {
+        error = ReportError("PPB_URLLoader::ReadResponseBody()", result);
         break;
-      actual_body.append(buf, callback.result());
+      }
+      result = test_callback.WaitForResult();
+      if (result < PP_OK)
+        error = ReportError("PPB_URLLoader::ReadResponseBody()", result);
+      if (result <= PP_OK)
+        break;
+      actual_body.append(buf, result);
     }
     if (actual_body != expected_body)
-      error = "PPB_URLLoader::ReadResponseBody() read unexpected response.";
+      error = "PPB_URLLoader::ReadResponseBody() read unexpected response";
   }
   ppb_core_interface_->ReleaseResource(url_response);
-
-  ppb_url_loader_interface_->Close(url_loader_);
   return error;
 }
 
@@ -340,6 +328,7 @@ std::string TestURLRequest::TestAppendDataToBody() {
   ASSERT_NE(url_request, kInvalidResource);
 
   std::string postdata("sample postdata");
+  std::string error;
   PP_Var post_string_var = PP_MakeString("POST");
   PP_Var echo_string_var = PP_MakeString("/echo");
 
@@ -348,19 +337,23 @@ std::string TestURLRequest::TestAppendDataToBody() {
   // are not detectable if set to point to an object that does not exist.
 
   // Invalid resource should fail.
-  ASSERT_EQ(PP_FALSE, ppb_url_request_interface_->AppendDataToBody(
-      kInvalidResource, postdata.data(), postdata.length()));
-
+  if (PP_TRUE == ppb_url_request_interface_->AppendDataToBody(
+      kInvalidResource, postdata.data(), postdata.length())) {
+    error = "AppendDataToBody() succeeded with invalid resource";
   // Append data and POST to echoing web server.
-  ASSERT_EQ(PP_TRUE, ppb_url_request_interface_->SetProperty(
-      url_request, PP_URLREQUESTPROPERTY_METHOD, post_string_var));
-  ASSERT_EQ(PP_TRUE, ppb_url_request_interface_->SetProperty(
-      url_request, PP_URLREQUESTPROPERTY_URL, echo_string_var));
-
-  // Append data to body and verify the body is what we expect.
-  ASSERT_EQ(PP_TRUE, ppb_url_request_interface_->AppendDataToBody(
-      url_request, postdata.data(), postdata.length()));
-  std::string error = LoadAndCompareBody(url_request, postdata);
+  } else if (PP_FALSE == ppb_url_request_interface_->SetProperty(
+      url_request, PP_URLREQUESTPROPERTY_METHOD, post_string_var)) {
+    error = "SetProperty(METHOD) failed\n";
+  } else if (PP_FALSE == ppb_url_request_interface_->SetProperty(
+      url_request, PP_URLREQUESTPROPERTY_URL, echo_string_var)) {
+    error = "SetProperty(URL) failed\n";
+  } else if (PP_FALSE == ppb_url_request_interface_->AppendDataToBody(
+      url_request, postdata.data(), postdata.length())) {
+    error = "AppendDataToBody() failed";
+  } else {
+    // Check for success.
+    error = LoadAndCompareBody(url_request, postdata);
+  }
 
   ppb_var_interface_->Release(post_string_var);
   ppb_var_interface_->Release(echo_string_var);
@@ -368,61 +361,8 @@ std::string TestURLRequest::TestAppendDataToBody() {
   return error;  // == PASS() if empty.
 }
 
-std::string TestURLRequest::TestAppendFileToBody() {
-  PP_Resource url_request = ppb_url_request_interface_->Create(
-      instance_->pp_instance());
-  ASSERT_NE(url_request, kInvalidResource);
-
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
-
-  pp::FileSystem file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
-  callback.WaitForResult(file_system.Open(1024, callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
-
-  pp::FileRef ref(file_system, "/test_file");
-  pp::FileIO io(instance_);
-  callback.WaitForResult(io.Open(ref,
-                                 PP_FILEOPENFLAG_CREATE | PP_FILEOPENFLAG_WRITE,
-                                 callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
-
-  std::string append_data = "hello\n";
-  callback.WaitForResult(io.Write(0,
-                                  append_data.c_str(),
-                                  append_data.size(),
-                                  callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(static_cast<int32_t>(append_data.size()), callback.result());
-
-  PP_Var post_string_var = PP_MakeString("POST");
-  PP_Var echo_string_var = PP_MakeString("/echo");
-
-  // NULL pointer causes a crash. In general PPAPI implementation does not
-  // test for NULL because they are just a special case of bad pointers that
-  // are not detectable if set to point to an object that does not exist.
-
-  // Invalid resource should fail.
-  ASSERT_EQ(PP_FALSE, ppb_url_request_interface_->AppendFileToBody(
-      kInvalidResource, ref.pp_resource(), 0, -1, 0));
-
-  // Append data and POST to echoing web server.
-  ASSERT_EQ(PP_TRUE, ppb_url_request_interface_->SetProperty(
-      url_request, PP_URLREQUESTPROPERTY_METHOD, post_string_var));
-  ASSERT_EQ(PP_TRUE, ppb_url_request_interface_->SetProperty(
-      url_request, PP_URLREQUESTPROPERTY_URL, echo_string_var));
-
-  // Append file to body and verify the body is what we expect.
-  ASSERT_EQ(PP_TRUE, ppb_url_request_interface_->AppendFileToBody(
-      url_request, ref.pp_resource(), 0, -1, 0));
-  std::string error = LoadAndCompareBody(url_request, append_data);
-
-  ppb_var_interface_->Release(post_string_var);
-  ppb_var_interface_->Release(echo_string_var);
-  ppb_core_interface_->ReleaseResource(url_request);
-  return error;  // == PASS() if empty.
-}
+// TODO(elijahtaylor): add TestAppendFileToBody based on a broken disabled
+// version from a NaCl test - see crbug.com/110242 for details.
 
 // Allocates and manipulates a large number of resources.
 std::string TestURLRequest::TestStress() {

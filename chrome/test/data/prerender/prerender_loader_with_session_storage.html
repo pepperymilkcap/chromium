@@ -1,7 +1,16 @@
 <html>
 <head>
 <title>Preloader</title>
-<script src="prerender_events_common.js"></script>
+
+<script>
+  function Click() {
+    var eventObject = document.createEvent('MouseEvents');
+    eventObject.initMouseEvent('click');
+    document.getElementById('toClick').dispatchEvent(eventObject);
+  }
+
+</script>
+
 </head>
 <body>
 <script>
@@ -11,7 +20,8 @@
     if (storage.counter) {
       oldCounter = parseInt(storage.counter);
     } else {
-      AddPrerender('REPLACE_WITH_DESTINATION_URL', 0);
+       document.write(
+           '<link rel="prerender" href="REPLACE_WITH_PRERENDER_URL"/>');
     }
     storage.counter = oldCounter + 1;
   }
@@ -22,6 +32,6 @@
 
   window.onload = loader;
 </script>
-<a id="toClick" href="REPLACE_WITH_DESTINATION_URL">Link to click</a>
+<a id="toClick" href="REPLACE_WITH_PRERENDER_URL">Link to click</a>
 </body>
 </html>

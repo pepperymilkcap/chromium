@@ -4,10 +4,9 @@
 
 #include "ui/views/examples/radio_button_example.h"
 
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
-#include "ui/views/controls/button/label_button.h"
-#include "ui/views/controls/button/radio_button.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
+#include "ui/views/controls/button/text_button.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/view.h"
 
@@ -23,13 +22,13 @@ RadioButtonExample::~RadioButtonExample() {
 }
 
 void RadioButtonExample::CreateExampleView(View* container) {
-  select_ = new LabelButton(this, base::ASCIIToUTF16("Select"));
-  status_ = new LabelButton(this, base::ASCIIToUTF16("Show Status"));
+  select_ = new TextButton(this, ASCIIToUTF16("Select"));
+  status_ = new TextButton(this, ASCIIToUTF16("Show Status"));
 
   int group = 1;
   for (size_t i = 0; i < arraysize(radio_buttons_); ++i) {
     radio_buttons_[i] = new RadioButton(
-        base::UTF8ToUTF16(base::StringPrintf(
+        UTF8ToUTF16(base::StringPrintf(
             "Radio %d in group %d", static_cast<int>(i) + 1, group)),
         group);
     radio_buttons_[i]->set_listener(this);
@@ -51,7 +50,7 @@ void RadioButtonExample::CreateExampleView(View* container) {
   layout->AddView(status_);
 }
 
-void RadioButtonExample::ButtonPressed(Button* sender, const ui::Event& event) {
+void RadioButtonExample::ButtonPressed(Button* sender, const Event& event) {
   if (sender == select_) {
     radio_buttons_[2]->SetChecked(true);
   } else if (sender == status_) {

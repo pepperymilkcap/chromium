@@ -6,8 +6,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/posix/eintr_wrapper.h"
+#include "base/eintr_wrapper.h"
+#include "base/message_loop_proxy.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/common/multi_process_lock.h"
 
@@ -86,12 +86,9 @@ void ServiceProcessState::StateData::SignalReady(base::WaitableEvent* signal,
                                                  bool* success) {
   DCHECK_EQ(g_signal_socket, -1);
   DCHECK(!signal->IsSignaled());
-  *success = base::MessageLoopForIO::current()->WatchFileDescriptor(
-      sockets_[0],
-      true,
-      base::MessageLoopForIO::WATCH_READ,
-      &watcher_,
-      terminate_monitor_.get());
+   *success = MessageLoopForIO::current()->WatchFileDescriptor(
+      sockets_[0], true, MessageLoopForIO::WATCH_READ,
+      &watcher_, terminate_monitor_.get());
   if (!*success) {
     DLOG(ERROR) << "WatchFileDescriptor";
     signal->Signal();
@@ -133,12 +130,12 @@ void ServiceProcessState::StateData::SignalReady(base::WaitableEvent* signal,
 
 ServiceProcessState::StateData::~StateData() {
   if (sockets_[0] != -1) {
-    if (IGNORE_EINTR(close(sockets_[0]))) {
+    if (HANDLE_EINTR(close(sockets_[0]))) {
       DPLOG(ERROR) << "close";
     }
   }
   if (sockets_[1] != -1) {
-    if (IGNORE_EINTR(close(sockets_[1]))) {
+    if (HANDLE_EINTR(close(sockets_[1]))) {
       DPLOG(ERROR) << "close";
     }
   }

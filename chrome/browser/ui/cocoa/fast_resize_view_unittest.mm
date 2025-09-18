@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
+#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 
 namespace {
 
@@ -12,13 +12,12 @@ class FastResizeViewTest : public CocoaTest {
  public:
   FastResizeViewTest() {
     NSRect frame = NSMakeRect(0, 0, 100, 30);
-    base::scoped_nsobject<FastResizeView> view(
+    scoped_nsobject<FastResizeView> view(
         [[FastResizeView alloc] initWithFrame:frame]);
     view_ = view.get();
     [[test_window() contentView] addSubview:view_];
 
-    base::scoped_nsobject<NSView> childView(
-        [[NSView alloc] initWithFrame:frame]);
+    scoped_nsobject<NSView> childView([[NSView alloc] initWithFrame:frame]);
     childView_ = childView.get();
     [view_ addSubview:childView_];
   }

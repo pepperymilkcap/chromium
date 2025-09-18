@@ -1,9 +1,9 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
   'dependencies': [
-    '<@(chrome_dll_project)',
+    '<(chrome_dll_project)',
     '../chrome.gyp:chrome',
     '../chrome.gyp:chrome_nacl_win64',
     '../chrome.gyp:default_extensions',
@@ -46,14 +46,16 @@
       'ExceptionHandling': '0',
     },
     'VCLinkerTool': {
-      'OutputFile': '<(output_dir)/mini_installer.exe',
+      'OutputFile': '<(output_dir)/mini_installer.exe', 
       'RandomizedBaseAddress': '1',
       'DataExecutionPrevention': '0',
       'AdditionalLibraryDirectories': [
+        '<(DEPTH)/third_party/platformsdk_win7/files/Lib',
         '<(PRODUCT_DIR)/lib'
       ],
       'DelayLoadDLLs': [],
       'EntryPointSymbol': 'MainEntryPoint',
+      'GenerateMapFile': 'true',
       'IgnoreAllDefaultLibraries': 'true',
       'OptimizeForWindows98': '1',
       'SubSystem': '2',  # Set /SUBSYSTEM:WINDOWS
@@ -153,43 +155,10 @@
         'create_installer_archive_py_path':
           '../tools/build/win/create_installer_archive.py',
       },
-      'conditions': [
-        ['enable_hidpi == 1', {
-          'variables': {
-            'enable_hidpi_flag': '--enable_hidpi=1',
-          },
-        }, {
-          'variables': {
-            'enable_hidpi_flag': '',
-          },
-        }],
-        ['enable_touch_ui == 1', {
-          'variables': {
-            'enable_touch_ui_flag': '--enable_touch_ui=1',
-          },
-        }, {
-          'variables': {
-            'enable_touch_ui_flag': '',
-          },
-        }],
-        ['target_arch=="x64"', {
-          'inputs!': [
-            '<(PRODUCT_DIR)/nacl64.exe',
-            '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
-          ],
-          'variables': {
-            'target_arch_flag': '--target_arch=x64',
-          },
-        }, {
-          'variables': {
-            'target_arch_flag': '--target_arch=x86',
-          },
-        }],
-      ],
       'inputs': [
         '<(create_installer_archive_py_path)',
         '<(PRODUCT_DIR)/chrome.exe',
-        '<@(chrome_dll_path)',
+        '<(chrome_dll_path)',
         '<(PRODUCT_DIR)/nacl64.exe',
         '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.dll',
         '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
@@ -212,9 +181,6 @@
         '--staging_dir=<(INTERMEDIATE_DIR)',
         '--input_file=<(RULE_INPUT_PATH)',
         '--resource_file_path=<(INTERMEDIATE_DIR)/packed_files.rc',
-        '<(enable_hidpi_flag)',
-        '<(enable_touch_ui_flag)',
-        '<(target_arch_flag)',
         # TODO(sgk):  may just use environment variables
         #'--distribution=$(CHROMIUM_BUILD)',
         '--distribution=_google_chrome',
@@ -223,8 +189,7 @@
         #'--setup_exe_format=DIFF',
         #'--diff_algorithm=COURGETTE',
       ],
-      'message': 'Create installer archive',
-      'msvs_cygwin_shell': 1,
+      'message': 'Create installer archive'
     },
   ],
   # TODO(mark):  <(branding_dir) should be defined by the

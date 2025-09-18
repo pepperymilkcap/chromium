@@ -6,30 +6,19 @@
 #define CONTENT_BROWSER_RENDERER_HOST_P2P_SOCKET_HOST_H_
 
 #include "content/common/content_export.h"
-#include "content/public/common/p2p_socket_type.h"
+#include "content/common/p2p_sockets.h"
+
+#include "ipc/ipc_message.h"
 #include "net/base/ip_endpoint.h"
-#include "net/udp/datagram_socket.h"
-
-namespace IPC {
-class Sender;
-}
-
-namespace net {
-class URLRequestContextGetter;
-}
 
 namespace content {
-class P2PMessageThrottler;
 
 // Base class for P2P sockets.
 class CONTENT_EXPORT P2PSocketHost {
  public:
-  static const int kStunHeaderSize = 20;
   // Creates P2PSocketHost of the specific type.
-  static P2PSocketHost* Create(IPC::Sender* message_sender,
-                               int id, P2PSocketType type,
-                               net::URLRequestContextGetter* url_context,
-                               P2PMessageThrottler* throttler);
+  static P2PSocketHost* Create(IPC::Message::Sender* message_sender,
+                               int routing_id, int id, P2PSocketType type);
 
   virtual ~P2PSocketHost();
 
@@ -39,18 +28,14 @@ class CONTENT_EXPORT P2PSocketHost {
 
   // Sends |data| on the socket to |to|.
   virtual void Send(const net::IPEndPoint& to,
-                    const std::vector<char>& data,
-                    net::DiffServCodePoint dscp,
-                    uint64 packet_id) = 0;
+                    const std::vector<char>& data) = 0;
 
   virtual P2PSocketHost* AcceptIncomingTcpConnection(
       const net::IPEndPoint& remote_address, int id) = 0;
 
  protected:
-  friend class P2PSocketHostTcpTestBase;
+  friend class P2PSocketHostTcpTest;
 
-  // TODO(mallinath) - Remove this below enum and use one defined in
-  // libjingle/souce/talk/p2p/base/stun.h
   enum StunMessageType {
     STUN_BINDING_REQUEST = 0x0001,
     STUN_BINDING_RESPONSE = 0x0101,
@@ -64,26 +49,26 @@ class CONTENT_EXPORT P2PSocketHost {
     STUN_SEND_REQUEST = 0x0004,
     STUN_SEND_RESPONSE = 0x0104,
     STUN_SEND_ERROR_RESPONSE = 0x0114,
-    STUN_DATA_INDICATION = 0x0115,
-    TURN_SEND_INDICATION = 0x0016,
-    TURN_DATA_INDICATION = 0x0017,
-    TURN_CREATE_PERMISSION_REQUEST = 0x0008,
-    TURN_CREATE_PERMISSION_RESPONSE = 0x0108,
-    TURN_CREATE_PERMISSION_ERROR_RESPONSE = 0x0118,
-    TURN_CHANNEL_BIND_REQUEST = 0x0009,
-    TURN_CHANNEL_BIND_RESPONSE = 0x0109,
-    TURN_CHANNEL_BIND_ERROR_RESPONSE = 0x0119,
+    STUN_DATA_INDICATION = 0x0115
   };
 
   enum State {
     STATE_UNINITIALIZED,
     STATE_CONNECTING,
-    STATE_TLS_CONNECTING,
     STATE_OPEN,
     STATE_ERROR,
   };
 
-  P2PSocketHost(IPC::Sender* message_sender, int id);
+  // Maximum size of send buffers. Must be big enough to fit data for
+  // one data burst. Send buffers size needs to be limited to prevent
+  // from consuming too much memory with misbehaving renderer process.
+  //
+  // TODO(sergeyu): Consider implementing congestion notifications to
+  // minimize buffering. This will require some fixes in libjingle,
+  // see crbug.com/91495 .
+  static const int kMaxSendBufferSize = 256 * 1024;
+
+  P2PSocketHost(IPC::Message::Sender* message_sender, int routing_id, int id);
 
   // Verifies that the packet |data| has a valid STUN header. In case
   // of success stores type of the message in |type|.
@@ -91,7 +76,8 @@ class CONTENT_EXPORT P2PSocketHost {
                                 StunMessageType* type);
   static bool IsRequestOrResponse(StunMessageType type);
 
-  IPC::Sender* message_sender_;
+  IPC::Message::Sender* message_sender_;
+  int routing_id_;
   int id_;
   State state_;
 

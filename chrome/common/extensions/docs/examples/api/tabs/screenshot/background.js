@@ -1,18 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // To make sure we can uniquely identify each screenshot tab, add an id as a
 // query param to the url that displays the screenshot.
-// Note: It's OK that this is a global variable (and not in localStorage),
-// because the event page will stay open as long as any screenshot tabs are
-// open.
 var id = 100;
 
 function takeScreenshot() {
   chrome.tabs.captureVisibleTab(null, function(img) {
     var screenshotUrl = img;
-    var viewTabUrl = chrome.extension.getURL('screenshot.html?id=' + id++)
+    var viewTabUrl = [chrome.extension.getURL('screenshot.html'),
+                      '?id=', id++].join('');
 
     chrome.tabs.create({url: viewTabUrl}, function(tab) {
       var targetId = tab.id;
@@ -43,13 +41,14 @@ function takeScreenshot() {
         }
       };
       chrome.tabs.onUpdated.addListener(addSnapshotImageToTab);
+
     });
   });
 }
 
 // Listen for a click on the camera icon.  On that click, take a screenshot.
 chrome.browserAction.onClicked.addListener(function(tab) {
-  if (tab.url.match("^https?://code.google.com")) {
+  if (tab.url.match(/code.google.com/)) {
     takeScreenshot();
   } else {
     alert('This sample can only take screenshots of code.google.com pages');

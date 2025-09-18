@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 #include <atlbase.h>
 #include <atlwin.h>
 
-#include "base/test/test_timeouts.h"
-#include "base/threading/platform_thread.h"
 #include "chrome_frame/utils.h"
 
 namespace simulate_input {
@@ -35,7 +33,7 @@ END_MSG_MAP()
     MSG msg = {0};
     PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE);
 
-    SendMnemonic(VK_F22, NONE, false, false, KEY_DOWN);
+    SendMnemonic(VK_F22, NONE, false, false);
     // There are scenarios where the WM_HOTKEY is not dispatched by the
     // the corresponding foreground thread. To prevent us from indefinitely
     // waiting for the hotkey, we set a timer and exit the loop.
@@ -103,7 +101,7 @@ bool EnsureProcessInForeground(base::ProcessId process_id) {
   PidAndWindow paw = { process_id };
   EnumWindows(FindWindowInProcessCallback, reinterpret_cast<LPARAM>(&paw));
   if (!IsWindow(paw.hwnd)) {
-    LOG(ERROR) << "failed to find process window";
+    DLOG(ERROR) << "failed to find process window";
     return false;
   }
 
@@ -113,7 +111,7 @@ bool EnsureProcessInForeground(base::ProcessId process_id) {
   return ret;
 }
 
-void SendScanCode(short scan_code, uint32 modifiers) {
+void SendScanCode(short scan_code, Modifier modifiers) {
   DCHECK(-1 != scan_code);
 
   // High order byte in |scan_code| is SHIFT/CTRL/ALT key state.
@@ -121,26 +119,22 @@ void SendScanCode(short scan_code, uint32 modifiers) {
   DCHECK(modifiers <= ALT);
 
   // Low order byte in |scan_code| is the actual scan code.
-  SendMnemonic(LOBYTE(scan_code), modifiers, false, true, KEY_DOWN);
+  SendMnemonic(LOBYTE(scan_code), modifiers, false, true);
 }
 
-void SendCharA(char c, uint32 modifiers) {
+void SendCharA(char c, Modifier modifiers) {
   SendScanCode(VkKeyScanA(c), modifiers);
 }
 
-void SendCharW(wchar_t c, uint32 modifiers) {
+void SendCharW(wchar_t c, Modifier modifiers) {
   SendScanCode(VkKeyScanW(c), modifiers);
 }
 
 // Sends a keystroke to the currently active application with optional
 // modifiers set.
-void SendMnemonic(WORD mnemonic_char,
-                  uint32 modifiers,
-                  bool extended,
-                  bool unicode,
-                  KeyMode key_mode) {
-  const int kMaxInputs = 4;
-  INPUT keys[kMaxInputs] = {0};  // Keyboard events
+void SendMnemonic(WORD mnemonic_char, Modifier modifiers, bool extended,
+                  bool unicode) {
+  INPUT keys[4] = {0};  // Keyboard events
   int key_count = 0;  // Number of generated events
 
   if (modifiers & SHIFT) {
@@ -164,28 +158,34 @@ void SendMnemonic(WORD mnemonic_char,
     key_count++;
   }
 
-  if (mnemonic_char) {
-    keys[key_count].type = INPUT_KEYBOARD;
-    keys[key_count].ki.wVk = mnemonic_char;
-    keys[key_count].ki.wScan = MapVirtualKey(mnemonic_char, 0);
+  keys[key_count].type = INPUT_KEYBOARD;
+  keys[key_count].ki.wVk = mnemonic_char;
+  keys[key_count].ki.wScan = MapVirtualKey(mnemonic_char, 0);
 
-    if (extended)
-      keys[key_count].ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
-    if (unicode)
-      keys[key_count].ki.dwFlags |= KEYEVENTF_UNICODE;
-    key_count++;
-  }
+  if (extended)
+    keys[key_count].ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+  if (unicode)
+    keys[key_count].ki.dwFlags |= KEYEVENTF_UNICODE;
+  key_count++;
 
-  DCHECK_LE(key_count, kMaxInputs);
+  bool should_sleep = key_count > 1;
 
-  // Add the key up bit if needed.
-  if (key_mode == KEY_UP) {
-    for (int i = 0; i < key_count; i++) {
-      keys[i].ki.dwFlags |= KEYEVENTF_KEYUP;
+  // Send key downs
+  for (int i = 0; i < key_count; i++) {
+    SendInput(1, &keys[ i ], sizeof(keys[0]));
+    keys[i].ki.dwFlags |= KEYEVENTF_KEYUP;
+    if (should_sleep) {
+      Sleep(10);
     }
   }
 
-  SendInput(key_count, &keys[0], sizeof(keys[0]));
+  // Now send key ups in reverse order
+  for (int i = key_count; i; i--) {
+    SendInput(1, &keys[ i - 1 ], sizeof(keys[0]));
+    if (should_sleep) {
+      Sleep(10);
+    }
+  }
 }
 
 void SetKeyboardFocusToWindow(HWND window) {
@@ -193,7 +193,6 @@ void SetKeyboardFocusToWindow(HWND window) {
 }
 
 void SendMouseClick(int x, int y, MouseButton button) {
-  const base::TimeDelta kMessageTimeout = TestTimeouts::tiny_timeout();
   // TODO(joshia): Fix this. GetSystemMetrics(SM_CXSCREEN) will
   // retrieve screen size of the primarary monitor only. And monitors
   // arrangement could be pretty arbitrary.
@@ -211,15 +210,16 @@ void SendMouseClick(int x, int y, MouseButton button) {
   input_info.mi.dx = static_cast<LONG>(location_x);
   input_info.mi.dy = static_cast<LONG>(location_y);
   ::SendInput(1, &input_info, sizeof(INPUT));
-  base::PlatformThread::Sleep(kMessageTimeout);
+
+  Sleep(10);
 
   input_info.mi.dwFlags = button_flag | MOUSEEVENTF_ABSOLUTE;
   ::SendInput(1, &input_info, sizeof(INPUT));
-  base::PlatformThread::Sleep(kMessageTimeout);
+
+  Sleep(10);
 
   input_info.mi.dwFlags = (button_flag << 1) | MOUSEEVENTF_ABSOLUTE;
   ::SendInput(1, &input_info, sizeof(INPUT));
-  base::PlatformThread::Sleep(kMessageTimeout);
 }
 
 void SendMouseClick(HWND window, int x, int y, MouseButton button) {
@@ -240,8 +240,8 @@ void SendMouseClick(HWND window, int x, int y, MouseButton button) {
   SendMouseClick(cursor_position.x, cursor_position.y, button);
 }
 
-void SendExtendedKey(WORD key, uint32 modifiers) {
-  SendMnemonic(key, modifiers, true, false, KEY_UP);
+void SendExtendedKey(WORD key, Modifier modifiers) {
+  SendMnemonic(key, modifiers, true, false);
 }
 
 void SendStringW(const std::wstring& s) {
@@ -259,3 +259,4 @@ void SendStringA(const std::string& s) {
 }
 
 }  // namespace simulate_input
+

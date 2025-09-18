@@ -22,15 +22,13 @@ var BASE_INSTRUCTIONS = {
 var MODIFIER_TO_CLASS = {
   'SHIFT': 'modifier-shift',
   'CTRL': 'modifier-ctrl',
-  'ALT': 'modifier-alt',
-  'SEARCH': 'modifier-search'
+  'ALT': 'modifier-alt'
 };
 
 var IDENTIFIER_TO_CLASS = {
   '2A': 'is-shift',
   '1D': 'is-ctrl',
-  '38': 'is-alt',
-  'E0 5B': 'is-search'
+  '38': 'is-alt'
 };
 
 var LABEL_TO_IDENTIFIER = {
@@ -38,112 +36,28 @@ var LABEL_TO_IDENTIFIER = {
   'ctrl': '1D',
   'alt': '38',
   'caps lock': '3A',
-  'esc': '01',
   'disabled': 'DISABLED'
-};
-
-var KEYCODE_TO_LABEL = {
-  8: 'backspace',
-  9: 'tab',
-  13: 'enter',
-  27: 'esc',
-  32: 'space',
-  33: 'pageup',
-  34: 'pagedown',
-  35: 'end',
-  36: 'home',
-  37: 'left',
-  38: 'up',
-  39: 'right',
-  40: 'down',
-  46: 'delete',
-  91: 'search',
-  92: 'search',
-  96: '0',
-  97: '1',
-  98: '2',
-  99: '3',
-  100: '4',
-  101: '5',
-  102: '6',
-  103: '7',
-  104: '8',
-  105: '9',
-  106: '*',
-  107: '+',
-  109: '-',
-  110: '.',
-  111: '/',
-  112: 'back',
-  113: 'forward',
-  114: 'reload',
-  115: 'full screen',
-  116: 'switch window',
-  117: 'bright down',
-  118: 'bright up',
-  119: 'mute',
-  120: 'vol. down',
-  121: 'vol. up',
-  186: ';',
-  187: '+',
-  188: ',',
-  189: '-',
-  190: '.',
-  191: '/',
-  192: '`',
-  219: '[',
-  220: '\\',
-  221: ']',
-  222: '\'',
-};
+}
 
 var keyboardOverlayId = 'en_US';
 var identifierMap = {};
 
 /**
- * Returns the layout name.
- * @return {string} layout name.
+ * Returns layouts data.
  */
-function getLayoutName() {
-  return getKeyboardGlyphData().layoutName;
+function getLayouts() {
+  return keyboardOverlayData['layouts'];
 }
-
-/**
- * Returns layout data.
- * @return {Array} Keyboard layout data.
- */
-function getLayout() {
-  return keyboardOverlayData['layouts'][getLayoutName()];
-}
-
-// Cache the shortcut data after it is constructed.
-var shortcutDataCache;
 
 /**
  * Returns shortcut data.
- * @return {Object} Keyboard shortcut data.
  */
 function getShortcutData() {
-  if (shortcutDataCache)
-    return shortcutDataCache;
-
-  shortcutDataCache = keyboardOverlayData['shortcut'];
-
-  if (!isDisplayUIScalingEnabled()) {
-    // Zoom screen in
-    delete shortcutDataCache['+<>CTRL<>SHIFT'];
-    // Zoom screen out
-    delete shortcutDataCache['-<>CTRL<>SHIFT'];
-    // Reset screen zoom
-    delete shortcutDataCache['0<>CTRL<>SHIFT'];
-  }
-
-  return shortcutDataCache;
+  return keyboardOverlayData['shortcut'];
 }
 
 /**
  * Returns the keyboard overlay ID.
- * @return {string} Keyboard overlay ID.
  */
 function getKeyboardOverlayId() {
   return keyboardOverlayId;
@@ -151,7 +65,6 @@ function getKeyboardOverlayId() {
 
 /**
  * Returns keyboard glyph data.
- * @return {Object} Keyboard glyph data.
  */
 function getKeyboardGlyphData() {
   return keyboardOverlayData['keyboardGlyph'][getKeyboardOverlayId()];
@@ -159,8 +72,6 @@ function getKeyboardGlyphData() {
 
 /**
  * Converts a single hex number to a character.
- * @param {string} hex Hexadecimal string.
- * @return {string} Unicode values of hexadecimal string.
  */
 function hex2char(hex) {
   if (!hex) {
@@ -180,38 +91,31 @@ function hex2char(hex) {
   return result;
 }
 
-var searchIsPressed = false;
-
 /**
  * Returns a list of modifiers from the key event.
- * @param {Event} e The key event.
- * @return {Array} List of modifiers based on key event.
  */
 function getModifiers(e) {
-  if (!e)
+  if (!e) {
     return [];
-
+  }
   var isKeyDown = (e.type == 'keydown');
   var keyCodeToModifier = {
     16: 'SHIFT',
     17: 'CTRL',
     18: 'ALT',
-    91: 'SEARCH',
+    91: 'ALT', // left ALT pressed with SHIFT
+    92: 'ALT', // right ALT pressed with SHIFT
   };
   var modifierWithKeyCode = keyCodeToModifier[e.keyCode];
-  var isPressed = {
-      'SHIFT': e.shiftKey,
-      'CTRL': e.ctrlKey,
-      'ALT': e.altKey,
-      'SEARCH': searchIsPressed
-  };
-  if (modifierWithKeyCode)
+  var isPressed = {'SHIFT': e.shiftKey, 'CTRL': e.ctrlKey, 'ALT': e.altKey};
+  // if e.keyCode is one of Shift, Ctrl and Alt, isPressed should
+  // be changed because the key currently pressed
+  // does not affect the values of e.shiftKey, e.ctrlKey and e.altKey
+  if(modifierWithKeyCode){
     isPressed[modifierWithKeyCode] = isKeyDown;
-
-  searchIsPressed = isPressed['SEARCH'];
-
+  }
   // make the result array
-  return ['SHIFT', 'CTRL', 'ALT', 'SEARCH'].filter(
+  return ['SHIFT', 'CTRL', 'ALT'].filter(
       function(modifier) {
         return isPressed[modifier];
       }).sort();
@@ -219,9 +123,6 @@ function getModifiers(e) {
 
 /**
  * Returns an ID of the key.
- * @param {string} identifier Key identifier.
- * @param {number} i Key number.
- * @return {string} Key ID.
  */
 function keyId(identifier, i) {
   return identifier + '-key-' + i;
@@ -229,9 +130,6 @@ function keyId(identifier, i) {
 
 /**
  * Returns an ID of the text on the key.
- * @param {string} identifier Key identifier.
- * @param {number} i Key number.
- * @return {string} Key text ID.
  */
 function keyTextId(identifier, i) {
   return identifier + '-key-text-' + i;
@@ -239,9 +137,6 @@ function keyTextId(identifier, i) {
 
 /**
  * Returns an ID of the shortcut text.
- * @param {string} identifier Key identifier.
- * @param {number} i Key number.
- * @return {string} Key shortcut text ID.
  */
 function shortcutTextId(identifier, i) {
   return identifier + '-shortcut-text-' + i;
@@ -249,9 +144,6 @@ function shortcutTextId(identifier, i) {
 
 /**
  * Returns true if |list| contains |e|.
- * @param {Array} list Container list.
- * @param {string} e Element string.
- * @return {boolean} Returns true if the list contains the element.
  */
 function contains(list, e) {
   return list.indexOf(e) != -1;
@@ -260,9 +152,6 @@ function contains(list, e) {
 /**
  * Returns a list of the class names corresponding to the identifier and
  * modifiers.
- * @param {string} identifier Key identifier.
- * @param {Array} modifiers List of key modifiers.
- * @return {Array} List of class names corresponding to specified params.
  */
 function getKeyClasses(identifier, modifiers) {
   var classes = ['keyboard-overlay-key'];
@@ -272,8 +161,7 @@ function getKeyClasses(identifier, modifiers) {
 
   if ((identifier == '2A' && contains(modifiers, 'SHIFT')) ||
       (identifier == '1D' && contains(modifiers, 'CTRL')) ||
-      (identifier == '38' && contains(modifiers, 'ALT')) ||
-      (identifier == 'E0 5B' && contains(modifiers, 'SEARCH'))) {
+      (identifier == '38' && contains(modifiers, 'ALT'))) {
     classes.push('pressed');
     classes.push(IDENTIFIER_TO_CLASS[identifier]);
   }
@@ -282,8 +170,6 @@ function getKeyClasses(identifier, modifiers) {
 
 /**
  * Returns true if a character is a ASCII character.
- * @param {string} c A character to be checked.
- * @return {boolean} True if the character is an ASCII character.
  */
 function isAscii(c) {
   var charCode = c.charCodeAt(0);
@@ -292,8 +178,6 @@ function isAscii(c) {
 
 /**
  * Returns a remapped identiifer based on the preference.
- * @param {string} identifier Key identifier.
- * @return {string} Remapped identifier.
  */
 function remapIdentifier(identifier) {
   return identifierMap[identifier] || identifier;
@@ -301,9 +185,6 @@ function remapIdentifier(identifier) {
 
 /**
  * Returns a label of the key.
- * @param {string} keyData Key glyph data.
- * @param {Array} modifiers Key Modifier list.
- * @return {string} Label of the key.
  */
 function getKeyLabel(keyData, modifiers) {
   if (!keyData) {
@@ -314,7 +195,7 @@ function getKeyLabel(keyData, modifiers) {
   }
   var keyLabel = '';
   for (var j = 1; j <= 9; j++) {
-    var pos = keyData['p' + j];
+    var pos =  keyData['p' + j];
     if (!pos) {
       continue;
     }
@@ -334,32 +215,26 @@ function getKeyLabel(keyData, modifiers) {
  * Returns a normalized string used for a key of shortcutData.
  *
  * Examples:
- *   keyCode: 'd', modifiers: ['CTRL', 'SHIFT'] => 'd<>CTRL<>SHIFT'
- *   keyCode: 'alt', modifiers: ['ALT', 'SHIFT'] => 'ALT<>SHIFT'
- *
- * @param {string} keyCode Key code.
- * @param {Array} modifiers Key Modifier list.
- * @return {string} Normalized key shortcut data string.
+ *   keycode: 'd', modifiers: ['CTRL', 'SHIFT'] => 'd<>CTRL<>SHIFT'
+ *   keycode: 'alt', modifiers: ['ALT', 'SHIFT'] => 'ALT<>SHIFT'
  */
-function getAction(keyCode, modifiers) {
-  /** @const */ var separatorStr = '<>';
-  if (keyCode.toUpperCase() in MODIFIER_TO_CLASS) {
-    keyCode = keyCode.toUpperCase();
-    if (keyCode in modifiers) {
-      return modifiers.join(separatorStr);
+function getAction(keycode, modifiers) {
+  const SEPARATOR = '<>';
+  if (keycode.toUpperCase() in MODIFIER_TO_CLASS) {
+    keycode = keycode.toUpperCase();
+    if (keycode in modifiers) {
+      return modifiers.join(SEPARATOR);
     } else {
-      var action = [keyCode].concat(modifiers);
+      var action = [keycode].concat(modifiers)
       action.sort();
-      return action.join(separatorStr);
+      return action.join(SEPARATOR);
     }
   }
-  return [keyCode].concat(modifiers).join(separatorStr);
+  return [keycode].concat(modifiers).join(SEPARATOR);
 }
 
 /**
  * Returns a text which displayed on a key.
- * @param {string} keyData Key glyph data.
- * @return {string} Key text value.
  */
 function getKeyTextValue(keyData) {
   if (keyData.label) {
@@ -382,10 +257,9 @@ function getKeyTextValue(keyData) {
 
 /**
  * Updates the whole keyboard.
- * @param {Array} modifiers Key Modifier list.
  */
 function update(modifiers) {
-  var instructions = $('instructions');
+  var instructions = document.getElementById('instructions');
   if (modifiers.length == 0) {
     instructions.style.visibility = 'visible';
   } else {
@@ -394,7 +268,7 @@ function update(modifiers) {
 
   var keyboardGlyphData = getKeyboardGlyphData();
   var shortcutData = getShortcutData();
-  var layout = getLayout();
+  var layout = getLayouts()[keyboardGlyphData.layoutName];
   for (var i = 0; i < layout.length; ++i) {
     var identifier = remapIdentifier(layout[i][0]);
     var keyData = keyboardGlyphData.keys[identifier];
@@ -415,14 +289,14 @@ function update(modifiers) {
       classes.push('is-shortcut');
     }
 
-    var key = $(keyId(identifier, i));
+    var key = document.getElementById(keyId(identifier, i));
     key.className = classes.join(' ');
 
     if (!keyData) {
       continue;
     }
 
-    var keyText = $(keyTextId(identifier, i));
+    var keyText = document.getElementById(keyTextId(identifier, i));
     var keyTextValue = getKeyTextValue(keyData);
     if (keyTextValue) {
        keyText.style.visibility = 'visible';
@@ -431,16 +305,16 @@ function update(modifiers) {
     }
     keyText.textContent = keyTextValue;
 
-    var shortcutText = $(shortcutTextId(identifier, i));
+    var shortcutText = document.getElementById(shortcutTextId(identifier, i));
     if (shortcutId) {
       shortcutText.style.visibility = 'visible';
-      shortcutText.textContent = loadTimeData.getString(shortcutId);
+      shortcutText.textContent = templateData[shortcutId];
     } else {
       shortcutText.style.visibility = 'hidden';
     }
 
-    var format = keyboardGlyphData.keys[layout[i][0]].format;
-    if (format) {
+    if (keyData.format) {
+      var format = keyData.format;
       if (format == 'left' || format == 'right') {
         shortcutText.style.textAlign = format;
         keyText.style.textAlign = format;
@@ -451,16 +325,14 @@ function update(modifiers) {
 
 /**
  * A callback function for onkeydown and onkeyup events.
- * @param {Event} e Key event.
  */
-function handleKeyEvent(e) {
+function handleKeyEvent(e){
+  var modifiers = getModifiers(e);
   if (!getKeyboardOverlayId()) {
     return;
   }
-  var modifiers = getModifiers(e);
   update(modifiers);
   KeyboardOverlayAccessibilityHelper.maybeSpeakAllShortcuts(modifiers);
-  e.preventDefault();
 }
 
 /**
@@ -475,7 +347,7 @@ function initLayout() {
   // Add data for the special key representing a disabled key
   keys['DISABLED'] = {label: 'disabled', format: 'left'};
 
-  var layout = getLayout();
+  var layout = getLayouts()[getKeyboardGlyphData().layoutName];
   var keyboard = document.body;
   var minX = window.innerWidth;
   var maxX = 0;
@@ -540,86 +412,23 @@ function initLayout() {
   var instructionsText = document.createElement('div');
   instructionsText.id = 'instructions-text';
   instructionsText.className = 'keyboard-overlay-instructions-text';
-  instructionsText.innerHTML =
-      loadTimeData.getString('keyboardOverlayInstructions');
+  instructionsText.innerHTML = templateData.keyboardOverlayInstructions;
   instructions.appendChild(instructionsText);
   var instructionsHideText = document.createElement('div');
   instructionsHideText.id = 'instructions-hide-text';
   instructionsHideText.className = 'keyboard-overlay-instructions-hide-text';
-  instructionsHideText.innerHTML =
-      loadTimeData.getString('keyboardOverlayInstructionsHide');
+  instructionsHideText.innerHTML = templateData.keyboardOverlayInstructionsHide;
   instructions.appendChild(instructionsHideText);
   var learnMoreLinkText = document.createElement('div');
   learnMoreLinkText.id = 'learn-more-text';
   learnMoreLinkText.className = 'keyboard-overlay-learn-more-text';
   learnMoreLinkText.addEventListener('click', learnMoreClicked);
   var learnMoreLinkAnchor = document.createElement('a');
-  learnMoreLinkAnchor.href =
-      loadTimeData.getString('keyboardOverlayLearnMoreURL');
-  learnMoreLinkAnchor.textContent =
-      loadTimeData.getString('keyboardOverlayLearnMore');
+  learnMoreLinkAnchor.href = templateData.keyboardOverlayLearnMoreURL;
+  learnMoreLinkAnchor.textContent = templateData.keyboardOverlayLearnMore;
   learnMoreLinkText.appendChild(learnMoreLinkAnchor);
   instructions.appendChild(learnMoreLinkText);
   keyboard.appendChild(instructions);
-}
-
-/**
- * Returns true if the device has a diamond key.
- * @return {boolean} Returns true if the device has a diamond key.
- */
-function hasDiamondKey() {
-  return loadTimeData.getBoolean('keyboardOverlayHasChromeOSDiamondKey');
-}
-
-/**
- * Returns true if display scaling feature is enabled.
- * @return {boolean} True if display scaling feature is enabled.
- */
-function isDisplayUIScalingEnabled() {
-  return loadTimeData.getBoolean('keyboardOverlayIsDisplayUIScalingEnabled');
-}
-
-/**
- * Initializes the layout and the key labels for the keyboard that has a diamond
- * key.
- */
-function initDiamondKey() {
-  var newLayoutData = {
-    '1D': [65.0, 287.0, 60.0, 60.0],  // left Ctrl
-    '38': [185.0, 287.0, 60.0, 60.0],  // left Alt
-    'E0 5B': [125.0, 287.0, 60.0, 60.0],  // search
-    '3A': [5.0, 167.0, 105.0, 60.0],  // caps lock
-    '5B': [803.0, 6.0, 72.0, 35.0],  // lock key
-    '5D': [5.0, 287.0, 60.0, 60.0]  // diamond key
-  };
-
-  var layout = getLayout();
-  var powerKeyIndex = -1;
-  var powerKeyId = '00';
-  for (var i = 0; i < layout.length; i++) {
-    var keyId = layout[i][0];
-    if (keyId in newLayoutData) {
-      layout[i] = [keyId].concat(newLayoutData[keyId]);
-      delete newLayoutData[keyId];
-    }
-    if (keyId == powerKeyId)
-      powerKeyIndex = i;
-  }
-  for (var keyId in newLayoutData)
-    layout.push([keyId].concat(newLayoutData[keyId]));
-
-  // Remove the power key.
-  if (powerKeyIndex != -1)
-    layout.splice(powerKeyIndex, 1);
-
-  var keyData = getKeyboardGlyphData()['keys'];
-  var newKeyData = {
-    '3A': {'label': 'caps lock', 'format': 'left'},
-    '5B': {'label': 'lock'},
-    '5D': {'label': 'diamond', 'format': 'left'}
-  };
-  for (var keyId in newKeyData)
-    keyData[keyId] = newKeyData[keyId];
 }
 
 /**
@@ -635,7 +444,6 @@ function init() {
  * Initializes the global map for remapping identifiers of modifier keys based
  * on the preference.
  * Called after sending the 'getLabelMap' message.
- * @param {Object} remap Identifier map.
  */
 function initIdentifierMap(remap) {
   for (var key in remap) {
@@ -654,14 +462,12 @@ function initIdentifierMap(remap) {
 /**
  * Initializes the global keyboad overlay ID and the layout of keys.
  * Called after sending the 'getInputMethodId' message.
- * @param {inputMethodId} inputMethodId Input Method Identifier.
  */
 function initKeyboardOverlayId(inputMethodId) {
   // Libcros returns an empty string when it cannot find the keyboard overlay ID
   // corresponding to the current input method.
   // In such a case, fallback to the default ID (en_US).
-  var inputMethodIdToOverlayId =
-      keyboardOverlayData['inputMethodIdToOverlayId'];
+  var inputMethodIdToOverlayId = keyboardOverlayData['inputMethodIdToOverlayId']
   if (inputMethodId) {
     keyboardOverlayId = inputMethodIdToOverlayId[inputMethodId];
   }
@@ -669,23 +475,15 @@ function initKeyboardOverlayId(inputMethodId) {
     console.error('No keyboard overlay ID for ' + inputMethodId);
     keyboardOverlayId = 'en_US';
   }
-  while (document.body.firstChild) {
+  while(document.body.firstChild) {
     document.body.removeChild(document.body.firstChild);
   }
-  // We show Japanese layout as-is because the user has chosen the layout
-  // that is quite diffrent from the physical layout that has a diamond key.
-  if (hasDiamondKey() && getLayoutName() != 'J')
-    initDiamondKey();
   initLayout();
   update([]);
-  window.webkitRequestAnimationFrame(function() {
-    chrome.send('didPaint');
-  });
 }
 
 /**
  * Handles click events of the learn more link.
- * @param {Event} e Mouse click event.
  */
 function learnMoreClicked(e) {
   chrome.send('openLearnMorePage');

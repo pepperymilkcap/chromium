@@ -4,15 +4,15 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_GLOBAL_ERROR_BUBBLE_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_GLOBAL_ERROR_BUBBLE_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #import "chrome/browser/ui/cocoa/base_bubble_controller.h"
 
 class Browser;
-class GlobalErrorWithStandardBubble;
+class GlobalError;
 @class GTMUILocalizerAndLayoutTweaker;
 @class GTMWidthBasedTweaker;
 class Profile;
@@ -25,7 +25,7 @@ class Bridge;
 // about a global error.
 @interface GlobalErrorBubbleController : BaseBubbleController {
  @private
-  base::WeakPtr<GlobalErrorWithStandardBubble> error_;
+  base::WeakPtr<GlobalError> error_;
   scoped_ptr<GlobalErrorBubbleControllerInternal::Bridge> bridge_;
   Browser* browser_;
 

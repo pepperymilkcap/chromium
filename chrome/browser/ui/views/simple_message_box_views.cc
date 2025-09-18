@@ -2,155 +2,100 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/browser/ui/views/simple_message_box_views.h"
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
+#include "chrome/browser/simple_message_box.h"
+#include "chrome/browser/ui/dialog_style.h"
+#include "chrome/browser/ui/views/window.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/native_widget_types.h"
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_delegate.h"
 
 #if defined(USE_AURA)
-#include "ui/aura/client/dispatcher_client.h"
-#include "ui/aura/env.h"
-#include "ui/aura/root_window.h"
-#if defined(OS_WIN)
-#include "chrome/browser/ui/views/simple_message_box_win.h"
-#endif
+#include "ui/views/focus/accelerator_handler.h"
 #endif
 
-namespace chrome {
+namespace browser {
 
-namespace {
+void ShowErrorBox(gfx::NativeWindow parent,
+                  const string16& title,
+                  const string16& message) {
+  SimpleMessageBoxViews::ShowErrorBox(parent, title, message);
+}
 
-// Multiple SimpleMessageBoxViews can show up at the same time. Each of these
-// start a nested message-loop. However, these SimpleMessageBoxViews can be
-// deleted in any order. This creates problems if a box in an inner-loop gets
-// destroyed before a box in an outer-loop. So to avoid this, ref-counting is
-// used so that the SimpleMessageBoxViews gets deleted at the right time.
-class SimpleMessageBoxViews : public views::DialogDelegate,
-                              public base::MessageLoop::Dispatcher,
-                              public base::RefCounted<SimpleMessageBoxViews> {
- public:
-  SimpleMessageBoxViews(const base::string16& title,
-                        const base::string16& message,
-                        MessageBoxType type,
-                        const base::string16& yes_text,
-                        const base::string16& no_text);
+bool ShowYesNoBox(gfx::NativeWindow parent,
+                  const string16& title,
+                  const string16& message) {
+  return SimpleMessageBoxViews::ShowYesNoBox(parent, title, message);
+}
 
-  MessageBoxResult result() const { return result_; }
-
-  // Overridden from views::DialogDelegate:
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-
-  // Overridden from views::WidgetDelegate:
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
-
-  // Overridden from MessageLoop::Dispatcher:
-  virtual bool Dispatch(const base::NativeEvent& event) OVERRIDE;
-
- private:
-  friend class base::RefCounted<SimpleMessageBoxViews>;
-  virtual ~SimpleMessageBoxViews();
-
-  const base::string16 window_title_;
-  const MessageBoxType type_;
-  base::string16 yes_text_;
-  base::string16 no_text_;
-  MessageBoxResult result_;
-  views::MessageBoxView* message_box_view_;
-
-  // Set to false as soon as the user clicks a dialog button; this tells the
-  // dispatcher we're done.
-  bool should_show_dialog_;
-
-  DISALLOW_COPY_AND_ASSIGN(SimpleMessageBoxViews);
-};
+}  // namespace browser
 
 ////////////////////////////////////////////////////////////////////////////////
 // SimpleMessageBoxViews, public:
 
-SimpleMessageBoxViews::SimpleMessageBoxViews(const base::string16& title,
-                                             const base::string16& message,
-                                             MessageBoxType type,
-                                             const base::string16& yes_text,
-                                             const base::string16& no_text)
-    : window_title_(title),
-      type_(type),
-      yes_text_(yes_text),
-      no_text_(no_text),
-      result_(MESSAGE_BOX_RESULT_NO),
-      message_box_view_(new views::MessageBoxView(
-          views::MessageBoxView::InitParams(message))),
-      should_show_dialog_(true) {
-  AddRef();
-
-  if (yes_text_.empty()) {
-    if (type_ == MESSAGE_BOX_TYPE_QUESTION)
-      yes_text_ =
-          l10n_util::GetStringUTF16(IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL);
-    else if (type_ == MESSAGE_BOX_TYPE_OK_CANCEL)
-      yes_text_ = l10n_util::GetStringUTF16(IDS_OK);
-    else
-      yes_text_ = l10n_util::GetStringUTF16(IDS_OK);
-  }
-
-  if (no_text_.empty()) {
-    if (type_ == MESSAGE_BOX_TYPE_QUESTION)
-      no_text_ =
-          l10n_util::GetStringUTF16(IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL);
-    else if (type_ == MESSAGE_BOX_TYPE_OK_CANCEL)
-      no_text_ = l10n_util::GetStringUTF16(IDS_CANCEL);
-  }
+// static
+void SimpleMessageBoxViews::ShowErrorBox(gfx::NativeWindow parent_window,
+                                         const string16& title,
+                                         const string16& message) {
+  // This is a reference counted object so it is given an initial increment
+  // in the constructor with a corresponding decrement in DeleteDelegate().
+  new SimpleMessageBoxViews(parent_window, DIALOG_ERROR, title, message);
 }
 
-int SimpleMessageBoxViews::GetDialogButtons() const {
-  if (type_ == MESSAGE_BOX_TYPE_QUESTION ||
-      type_ == MESSAGE_BOX_TYPE_OK_CANCEL) {
-    return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
-  }
+bool SimpleMessageBoxViews::ShowYesNoBox(gfx::NativeWindow parent_window,
+                                         const string16& title,
+                                         const string16& message) {
+  // This is a reference counted object so it is given an initial increment
+  // in the constructor plus an extra one below to ensure the dialog persists
+  // until we retrieve the user response..
+  scoped_refptr<SimpleMessageBoxViews> dialog =
+      new SimpleMessageBoxViews(parent_window, DIALOG_YES_NO, title, message);
 
-  return ui::DIALOG_BUTTON_OK;
-}
+  // Make sure Chrome doesn't attempt to shut down with the dialog up.
+  g_browser_process->AddRefModule();
 
-base::string16 SimpleMessageBoxViews::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_CANCEL)
-    return no_text_;
-  return yes_text_;
+  bool old_state = MessageLoopForUI::current()->NestableTasksAllowed();
+  MessageLoopForUI::current()->SetNestableTasksAllowed(true);
+  MessageLoopForUI::current()->RunWithDispatcher(dialog);
+  MessageLoopForUI::current()->SetNestableTasksAllowed(old_state);
+
+  g_browser_process->ReleaseModule();
+
+  return dialog->Accepted();
 }
 
 bool SimpleMessageBoxViews::Cancel() {
-  should_show_dialog_= false;
-  result_ = MESSAGE_BOX_RESULT_NO;
+  disposition_ = DISPOSITION_CANCEL;
   return true;
 }
 
 bool SimpleMessageBoxViews::Accept() {
-  should_show_dialog_ = false;
-  result_ = MESSAGE_BOX_RESULT_YES;
+  disposition_ = DISPOSITION_OK;
   return true;
 }
 
-base::string16 SimpleMessageBoxViews::GetWindowTitle() const {
-  return window_title_;
+int SimpleMessageBoxViews::GetDialogButtons() const {
+  if (type_ == DIALOG_ERROR)
+    return ui::DIALOG_BUTTON_OK;
+  return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
+}
+
+string16 SimpleMessageBoxViews::GetDialogButtonLabel(
+    ui::DialogButton button) const {
+  return button == ui::DIALOG_BUTTON_OK ? l10n_util::GetStringUTF16(IDS_OK)
+                                        : l10n_util::GetStringUTF16(IDS_CLOSE);
+}
+
+bool SimpleMessageBoxViews::ShouldShowWindowTitle() const {
+  return true;
+}
+
+string16 SimpleMessageBoxViews::GetWindowTitle() const {
+  return message_box_title_;
 }
 
 void SimpleMessageBoxViews::DeleteDelegate() {
@@ -173,82 +118,48 @@ const views::Widget* SimpleMessageBoxViews::GetWidget() const {
   return message_box_view_->GetWidget();
 }
 
-bool SimpleMessageBoxViews::Dispatch(const base::NativeEvent& event) {
-#if defined(OS_WIN)
-  TranslateMessage(&event);
-  DispatchMessage(&event);
-#elif defined(USE_AURA)
-  aura::Env::GetInstance()->GetDispatcher()->Dispatch(event);
-#endif
-  return should_show_dialog_;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // SimpleMessageBoxViews, private:
+
+SimpleMessageBoxViews::SimpleMessageBoxViews(gfx::NativeWindow parent_window,
+                                             DialogType type,
+                                             const string16& title,
+                                             const string16& message)
+    : type_(type),
+      disposition_(DISPOSITION_UNKNOWN) {
+  message_box_title_ = title;
+  message_box_view_ = new views::MessageBoxView(
+      views::MessageBoxView::NO_OPTIONS,
+      message,
+      string16());
+  browser::CreateViewsWindow(parent_window, this, STYLE_GENERIC)->Show();
+
+  // Add reference to be released in DeleteDelegate().
+  AddRef();
+}
 
 SimpleMessageBoxViews::~SimpleMessageBoxViews() {
 }
 
-MessageBoxResult ShowMessageBoxImpl(gfx::NativeWindow parent,
-                                    const base::string16& title,
-                                    const base::string16& message,
-                                    MessageBoxType type,
-                                    const base::string16& yes_text,
-                                    const base::string16& no_text) {
+#if defined(OS_WIN)
+bool SimpleMessageBoxViews::Dispatch(const MSG& msg) {
+  TranslateMessage(&msg);
+  DispatchMessage(&msg);
+  return disposition_ == DISPOSITION_UNKNOWN;
+}
+#elif defined(USE_AURA)
+base::MessagePumpDispatcher::DispatchStatus
+    SimpleMessageBoxViews::Dispatch(XEvent* xev) {
+  if (!views::DispatchXEvent(xev))
+    return EVENT_IGNORED;
 
-#if defined(USE_AURA) && defined(OS_WIN)
-  // If we're very early, we can't show a GPU-based dialog, so fallback to
-  // plain Windows MessageBox.
-  if (!ui::ContextFactory::GetInstance())
-    return NativeShowMessageBox(NULL, title, message, type);
-#endif
-
-  scoped_refptr<SimpleMessageBoxViews> dialog(
-      new SimpleMessageBoxViews(title, message, type, yes_text, no_text));
-  CreateBrowserModalDialogViews(dialog.get(), parent)->Show();
-
-#if defined(USE_AURA)
-  aura::Window* anchor = parent;
-  aura::client::DispatcherClient* client = anchor ?
-      aura::client::GetDispatcherClient(anchor->GetRootWindow()) : NULL;
-  if (!client) {
-    // Use the widget's window itself so that the message loop
-    // exists when the dialog is closed by some other means than
-    // |Cancel| or |Accept|.
-    anchor = dialog->GetWidget()->GetNativeWindow();
-    client = aura::client::GetDispatcherClient(anchor->GetRootWindow());
-  }
-  client->RunWithDispatcher(dialog.get(), anchor, true);
+  if (disposition_ == DISPOSITION_UNKNOWN)
+    return base::MessagePumpDispatcher::EVENT_PROCESSED;
+  return base::MessagePumpDispatcher::EVENT_QUIT;
+}
 #else
-  {
-    base::MessageLoop::ScopedNestableTaskAllower allow(
-        base::MessageLoopForUI::current());
-    base::RunLoop run_loop(dialog);
-    run_loop.Run();
-  }
-#endif
-  return dialog->result();
-}
-
-}  // namespace
-
-MessageBoxResult ShowMessageBox(gfx::NativeWindow parent,
-                                const base::string16& title,
-                                const base::string16& message,
-                                MessageBoxType type) {
-  return ShowMessageBoxImpl(
-      parent, title, message, type, base::string16(), base::string16());
-}
-
-#if defined(USE_AURA)
-MessageBoxResult ShowMessageBoxWithButtonText(gfx::NativeWindow parent,
-                                              const base::string16& title,
-                                              const base::string16& message,
-                                              const base::string16& yes_text,
-                                              const base::string16& no_text) {
-  return ShowMessageBoxImpl(
-      parent, title, message, MESSAGE_BOX_TYPE_QUESTION, yes_text, no_text);
+bool SimpleMessageBoxViews::Dispatch(GdkEvent* event) {
+  gtk_main_do_event(event);
+  return disposition_ == DISPOSITION_UNKNOWN;
 }
 #endif
-
-}  // namespace chrome

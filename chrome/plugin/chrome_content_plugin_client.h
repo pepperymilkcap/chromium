@@ -4,6 +4,7 @@
 
 #ifndef CHROME_PLUGIN_CHROME_CONTENT_PLUGIN_CLIENT_H_
 #define CHROME_PLUGIN_CHROME_CONTENT_PLUGIN_CLIENT_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "content/public/plugin/content_plugin_client.h"
@@ -12,7 +13,7 @@ namespace chrome {
 
 class ChromeContentPluginClient : public content::ContentPluginClient {
  public:
-  virtual void PreSandboxInitialization() OVERRIDE;
+  virtual void PluginProcessStarted(const string16& plugin_name) OVERRIDE;
 };
 
 }  // namespace chrome

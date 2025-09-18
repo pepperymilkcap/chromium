@@ -1,86 +1,101 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_TABBED_PANE_TABBED_PANE_H_
 #define UI_VIEWS_CONTROLS_TABBED_PANE_TABBED_PANE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "ui/views/view.h"
 
 namespace views {
 
-class Tab;
+class NativeTabbedPaneWrapper;
 class TabbedPaneListener;
-class TabStrip;
 
 // TabbedPane is a view that shows tabs. When the user clicks on a tab, the
 // associated view is displayed.
 class VIEWS_EXPORT TabbedPane : public View {
  public:
-  // Internal class name.
-  static const char kViewClassName[];
-
   TabbedPane();
   virtual ~TabbedPane();
 
   TabbedPaneListener* listener() const { return listener_; }
   void set_listener(TabbedPaneListener* listener) { listener_ = listener; }
 
-  int selected_tab_index() const { return selected_tab_index_; }
+  NativeTabbedPaneWrapper* native_wrapper() const {
+    return native_tabbed_pane_;
+  }
 
   // Returns the number of tabs.
   int GetTabCount();
 
-  // Returns the contents of the selected tab or NULL if there is none.
+  // Returns the index of the selected tab.
+  int GetSelectedTabIndex();
+
+  // Returns the contents of the selected tab.
   View* GetSelectedTab();
 
   // Adds a new tab at the end of this TabbedPane with the specified |title|.
   // |contents| is the view displayed when the tab is selected and is owned by
   // the TabbedPane.
-  void AddTab(const base::string16& title, View* contents);
+  void AddTab(const string16& title, View* contents);
 
-  // Adds a new tab at |index| with |title|. |contents| is the view displayed
-  // when the tab is selected and is owned by the TabbedPane. If the tabbed pane
-  // is currently empty, the new tab is selected.
-  void AddTabAtIndex(int index, const base::string16& title, View* contents);
+  // Adds a new tab at |index| with |title|.
+  // |contents| is the view displayed when the tab is selected and is owned by
+  // the TabbedPane. If |select_if_first_tab| is true and the tabbed pane is
+  // currently empty, the new tab is selected. If you pass in false for
+  // |select_if_first_tab| you need to explicitly invoke SelectTabAt, otherwise
+  // the tabbed pane will not have a valid selection.
+  void AddTabAtIndex(int index,
+                     const string16& title,
+                     View* contents,
+                     bool select_if_first_tab);
+
+  // Removes the tab at |index| and returns the associated content view.
+  // The caller becomes the owner of the returned view.
+  View* RemoveTabAtIndex(int index);
 
   // Selects the tab at |index|, which must be valid.
   void SelectTabAt(int index);
 
-  // Selects |tab| (the tabstrip view, not its content) if it is valid.
-  void SelectTab(Tab* tab);
+  void SetAccessibleName(const string16& name);
 
-  // Overridden from View:
+  // View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+
+ protected:
+  // The object that actually implements the tabbed-pane.
+  // Protected for tests access.
+  NativeTabbedPaneWrapper* native_tabbed_pane_;
 
  private:
-   friend class TabStrip;
+  // The tabbed-pane's class name.
+  static const char kViewClassName[];
 
-   // Get the Tab (the tabstrip view, not its content) at the valid |index|.
-   Tab* GetTabAt(int index);
+  // We support Ctrl+Tab and Ctrl+Shift+Tab to navigate tabbed option pages.
+  void LoadAccelerators();
 
-  // Overridden from View:
+  // View:
   virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
+  // Handles Ctrl+Tab and Ctrl+Shift+Tab navigation of pages.
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
   virtual void OnFocus() OVERRIDE;
+  virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // A listener notified when tab selection changes. Weak, not owned.
+  // The listener we notify about tab selection changes.
   TabbedPaneListener* listener_;
 
-  // The tab strip and contents container. The child indices of these members
-  // correspond to match each Tab with its respective content View.
-  TabStrip* tab_strip_;
-  View* contents_;
-
-  // The selected tab index or -1 if invalid.
-  int selected_tab_index_;
+  // The accessible name of this view.
+  string16 accessible_name_;
 
   DISALLOW_COPY_AND_ASSIGN(TabbedPane);
 };

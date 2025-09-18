@@ -5,7 +5,7 @@
 #include "net/ftp/ftp_auth_cache.h"
 
 #include "base/logging.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace net {
 

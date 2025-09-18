@@ -4,14 +4,15 @@
 
 #ifndef CHROME_BROWSER_PRERENDER_PRERENDER_HISTORY_H_
 #define CHROME_BROWSER_PRERENDER_PRERENDER_HISTORY_H_
+#pragma once
 
 #include <list>
 
 #include "base/threading/non_thread_safe.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_origin.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace base {
 class Value;

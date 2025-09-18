@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppp_instance.idl modified Thu Apr 25 13:07:47 2013. */
+/* From ppp_instance.idl modified Wed Jan  4 06:11:56 2012. */
 
 #ifndef PPAPI_C_PPP_INSTANCE_H_
 #define PPAPI_C_PPP_INSTANCE_H_
@@ -115,17 +115,11 @@ struct PPP_Instance_1_1 {
    * <code>DidChangeView() is called when the position, size, or other view
    * attributes of the instance has changed.
    */
-  void (*DidChangeView)(PP_Instance instance, PP_Resource view);
+  void (*DidChangeView)(PP_Instance instance, PP_Resource view_resource);
   /**
    * DidChangeFocus() is called when an instance has gained or lost focus.
    * Having focus means that keyboard events will be sent to the instance.
    * An instance's default condition is that it will not have focus.
-   *
-   * The focus flag takes into account both browser tab and window focus as
-   * well as focus of the plugin element on the page. In order to be deemed
-   * to have focus, the browser window must be topmost, the tab must be
-   * selected in the window, and the instance must be the focused element on
-   * the page.
    *
    * <strong>Note:</strong>Clicks on instances will give focus only if you
    * handle the click event. Return <code>true</code> from
@@ -133,10 +127,8 @@ struct PPP_Instance_1_1 {
    * unfiltered events) to signal that the click event was handled. Otherwise,
    * the browser will bubble the event and give focus to the element on the page
    * that actually did end up consuming it. If you're not getting focus, check
-   * to make sure you're either requesting them via
-   * <code>RequestInputEvents()<code> (which implicitly marks all input events
-   * as consumed) or via <code>RequestFilteringInputEvents()</code> and
-   * returning true from your event handler.
+   * to make sure you're returning true from the mouse click in
+   * <code>HandleInputEvent</code>.
    *
    * @param[in] instance A <code>PP_Instance</code> identifying the instance
    * receiving the input event.
@@ -146,7 +138,7 @@ struct PPP_Instance_1_1 {
   void (*DidChangeFocus)(PP_Instance instance, PP_Bool has_focus);
   /**
    * HandleDocumentLoad() is called after initialize for a full-frame
-   * instance that was instantiated based on the MIME type of a DOMWindow
+   * module that was instantiated based on the MIME type of a DOMWindow
    * navigation. This situation only applies to modules that are pre-registered
    * to handle certain MIME types. If you haven't specifically registered to
    * handle a MIME type or aren't positive this applies to you, your
@@ -169,8 +161,7 @@ struct PPP_Instance_1_1 {
    * @param[in] url_loader An open <code>PPB_URLLoader</code> instance.
    *
    * @return <code>PP_TRUE</code> if the data was handled,
-   * <code>PP_FALSE</code> otherwise.  If you return false, the load will be
-   * canceled for you.
+   * <code>PP_FALSE</code> otherwise.
    */
   PP_Bool (*HandleDocumentLoad)(PP_Instance instance, PP_Resource url_loader);
 };

@@ -7,7 +7,7 @@
 #include <gtk/gtk.h>
 
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -54,8 +54,9 @@ UpdateRecommendedDialog::~UpdateRecommendedDialog() {
 void UpdateRecommendedDialog::OnResponse(GtkWidget* dialog, int response_id) {
   gtk_widget_destroy(dialog_);
 
-  if (response_id == GTK_RESPONSE_ACCEPT)
-    chrome::AttemptRestart();
+  if (response_id == GTK_RESPONSE_ACCEPT) {
+    BrowserList::AttemptRestart();
+  }
 
   delete this;
 }

@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SEARCH_ENGINES_SEARCH_PROVIDER_INSTALL_DATA_H_
 #define CHROME_BROWSER_SEARCH_ENGINES_SEARCH_PROVIDER_INSTALL_DATA_H_
+#pragma once
 
 #include <string>
 
@@ -41,11 +42,11 @@ class SearchProviderInstallData : public WebDataServiceConsumer,
     INSTALLED_AS_DEFAULT = 2
   };
 
-  // |ui_death_notification| and |ui_death_source| identify a notification that
+  // |ui_death_notification| and |ui_death_source| indentify a notification that
   // may be observed on the UI thread to know when this class no longer needs to
   // be kept up to date. (Note that this class may be deleted before or after
   // that notification occurs. It doesn't matter.)
-  SearchProviderInstallData(Profile* profile,
+  SearchProviderInstallData(WebDataService* web_service,
                             int ui_death_notification,
                             const content::NotificationSource& ui_death_source);
   virtual ~SearchProviderInstallData();
@@ -96,7 +97,7 @@ class SearchProviderInstallData : public WebDataServiceConsumer,
   scoped_ptr<SearchHostToURLsMap> provider_map_;
 
   // The list of template urls that are owned by the class.
-  ScopedVector<TemplateURL> template_urls_;
+  ScopedVector<const TemplateURL> template_urls_;
 
   // The security origin for the default search provider.
   std::string default_search_origin_;

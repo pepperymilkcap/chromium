@@ -6,8 +6,7 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
 #include "chrome/common/chrome_paths.h"
 
 namespace google_update {
@@ -24,11 +23,11 @@ static const char kConsentToSendStats[] = "Consent To Send Stats";
 
 // static
 bool GoogleUpdateSettings::GetCollectStatsConsent() {
-  base::FilePath consent_file;
+  FilePath consent_file;
   PathService::Get(chrome::DIR_USER_DATA, &consent_file);
   consent_file = consent_file.Append(kConsentToSendStats);
   std::string tmp_guid;
-  bool consented = base::ReadFileToString(consent_file, &tmp_guid);
+  bool consented = file_util::ReadFileToString(consent_file, &tmp_guid);
   if (consented)
     google_update::posix_guid().assign(tmp_guid);
   return consented;
@@ -36,15 +35,15 @@ bool GoogleUpdateSettings::GetCollectStatsConsent() {
 
 // static
 bool GoogleUpdateSettings::SetCollectStatsConsent(bool consented) {
-  base::FilePath consent_dir;
+  FilePath consent_dir;
   PathService::Get(chrome::DIR_USER_DATA, &consent_dir);
-  if (!base::DirectoryExists(consent_dir))
+  if (!file_util::DirectoryExists(consent_dir))
     return false;
 
-  base::FilePath consent_file = consent_dir.AppendASCII(kConsentToSendStats);
+  FilePath consent_file = consent_dir.AppendASCII(kConsentToSendStats);
   if (consented) {
-    if ((!base::PathExists(consent_file)) ||
-        (base::PathExists(consent_file) &&
+    if ((!file_util::PathExists(consent_file)) ||
+        (file_util::PathExists(consent_file) &&
          !google_update::posix_guid().empty())) {
       const char* c_str = google_update::posix_guid().c_str();
       int size = google_update::posix_guid().size();
@@ -52,29 +51,21 @@ bool GoogleUpdateSettings::SetCollectStatsConsent(bool consented) {
     }
   } else {
     google_update::posix_guid().clear();
-    return base::DeleteFile(consent_file, false);
+    return file_util::Delete(consent_file, false);
   }
   return true;
 }
 
-// static
-bool GoogleUpdateSettings::GetMetricsId(std::string* metrics_id) {
-  *metrics_id = google_update::posix_guid();
-  return true;
-}
-
-// static
-bool GoogleUpdateSettings::SetMetricsId(const std::string& client_id) {
+bool GoogleUpdateSettings::SetMetricsId(const std::wstring& client_id) {
   // Make sure that user has consented to send crashes.
-  base::FilePath consent_dir;
+  FilePath consent_dir;
   PathService::Get(chrome::DIR_USER_DATA, &consent_dir);
-  if (!base::DirectoryExists(consent_dir) ||
-      !GoogleUpdateSettings::GetCollectStatsConsent()) {
+  if (!file_util::DirectoryExists(consent_dir) ||
+      !GoogleUpdateSettings::GetCollectStatsConsent())
     return false;
-  }
 
   // Since user has consented, write the metrics id to the file.
-  google_update::posix_guid() = client_id;
+  google_update::posix_guid() = WideToASCII(client_id);
   return GoogleUpdateSettings::SetCollectStatsConsent(true);
 }
 

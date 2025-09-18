@@ -4,15 +4,15 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_WEB_UI_H_
 #define CONTENT_PUBLIC_BROWSER_WEB_UI_H_
+#pragma once
 
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "content/common/content_export.h"
 #include "content/public/common/page_transition_types.h"
-#include "ui/base/layout.h"
 
 class GURL;
 
@@ -41,7 +41,7 @@ class CONTENT_EXPORT WebUI {
 
   // Returns JavaScript code that, when executed, calls the function specified
   // by |function_name| with the arguments specified in |arg_list|.
-  static base::string16 GetJavascriptCall(
+  static string16 GetJavascriptCall(
       const std::string& function_name,
       const std::vector<const base::Value*>& arg_list);
 
@@ -52,16 +52,26 @@ class CONTENT_EXPORT WebUI {
   virtual WebUIController* GetController() const = 0;
   virtual void SetController(WebUIController* controller) = 0;
 
-  // Returns the device scale factor of the monitor that the renderer is on.
-  // Whenever possible, WebUI should push resources with this scale factor to
-  // Javascript.
-  virtual ui::ScaleFactor GetDeviceScaleFactor() const = 0;
+  // Returns true if the favicon should be hidden for the current tab.
+  virtual bool ShouldHideFavicon() const = 0;
+  virtual void HideFavicon() = 0;
+
+  // Returns true if the location bar should be focused by default rather than
+  // the page contents. Some pages will want to use this to encourage the user
+  // to type in the URL bar.
+  virtual bool ShouldFocusLocationBarByDefault() const = 0;
+  virtual void FocusLocationBarByDefault() = 0;
+
+  // Returns true if the page's URL should be hidden. Some Web UI pages
+  // like the new tab page will want to hide it.
+  virtual bool ShouldHideURL() const = 0;
+  virtual void HideURL() = 0;
 
   // Gets a custom tab title provided by the Web UI. If there is no title
   // override, the string will be empty which should trigger the default title
   // behavior for the tab.
-  virtual const base::string16& GetOverriddenTitle() const = 0;
-  virtual void OverrideTitle(const base::string16& title) = 0;
+  virtual const string16& GetOverriddenTitle() const = 0;
+  virtual void OverrideTitle(const string16& title) = 0;
 
   // Returns the transition type that should be used for link clicks on this
   // Web UI. This will default to LINK but may be overridden.

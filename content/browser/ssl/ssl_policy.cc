@@ -1,30 +1,43 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/ssl/ssl_policy.h"
 
-#include "base/base_switches.h"
 #include "base/bind.h"
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
-#include "content/browser/frame_host/navigation_entry_impl.h"
+#include "base/string_piece.h"
+#include "base/string_util.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/ssl/ssl_request_info.h"
-#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/browser/tab_contents/navigation_entry_impl.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/common/ssl_status.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/common/url_constants.h"
-#include "net/ssl/ssl_info.h"
-#include "webkit/common/resource_type.h"
+#include "net/base/cert_status_flags.h"
+#include "net/base/ssl_info.h"
+#include "webkit/glue/resource_type.h"
 
+using content::NavigationEntryImpl;
+using content::SiteInstance;
+using content::SSLStatus;
 
-namespace content {
+namespace {
+
+static const char kDot = '.';
+
+static bool IsIntranetHost(const std::string& host) {
+  const size_t dot = host.find(kDot);
+  return dot == std::string::npos || dot == host.length() - 1;
+}
+
+}  // namespace
 
 SSLPolicy::SSLPolicy(SSLPolicyBackend* backend)
     : backend_(backend) {
@@ -33,10 +46,9 @@ SSLPolicy::SSLPolicy(SSLPolicyBackend* backend)
 
 void SSLPolicy::OnCertError(SSLCertErrorHandler* handler) {
   // First we check if we know the policy for this error.
-  net::CertPolicy::Judgment judgment = backend_->QueryPolicy(
-      handler->ssl_info().cert.get(),
-      handler->request_url().host(),
-      handler->cert_error());
+  net::CertPolicy::Judgment judgment =
+      backend_->QueryPolicy(handler->ssl_info().cert,
+                            handler->request_url().host());
 
   if (judgment == net::CertPolicy::ALLOWED) {
     handler->ContinueRequest();
@@ -52,9 +64,7 @@ void SSLPolicy::OnCertError(SSLCertErrorHandler* handler) {
     case net::ERR_CERT_DATE_INVALID:
     case net::ERR_CERT_AUTHORITY_INVALID:
     case net::ERR_CERT_WEAK_SIGNATURE_ALGORITHM:
-    case net::ERR_CERT_WEAK_KEY:
-    case net::ERR_CERT_NAME_CONSTRAINT_VIOLATION:
-      OnCertErrorInternal(handler, !handler->fatal(), handler->fatal());
+      OnCertErrorInternal(handler, !handler->fatal());
       break;
     case net::ERR_CERT_NO_REVOCATION_MECHANISM:
       // Ignore this error.
@@ -68,9 +78,8 @@ void SSLPolicy::OnCertError(SSLCertErrorHandler* handler) {
     case net::ERR_CERT_CONTAINS_ERRORS:
     case net::ERR_CERT_REVOKED:
     case net::ERR_CERT_INVALID:
-    case net::ERR_SSL_WEAK_SERVER_EPHEMERAL_DH_KEY:
-    case net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN:
-      OnCertErrorInternal(handler, false, handler->fatal());
+    case net::ERR_CERT_NOT_IN_DNS:
+      OnCertErrorInternal(handler, false);
       break;
     default:
       NOTREACHED();
@@ -102,7 +111,7 @@ void SSLPolicy::OnRequestStarted(SSLRequestInfo* info) {
 }
 
 void SSLPolicy::UpdateEntry(NavigationEntryImpl* entry,
-                            WebContentsImpl* web_contents) {
+                            TabContents* tab_contents) {
   DCHECK(entry);
 
   InitializeEntryIfNeeded(entry);
@@ -114,8 +123,16 @@ void SSLPolicy::UpdateEntry(NavigationEntryImpl* entry,
   // happens, use the unauthenticated (HTTP) rather than the authentication
   // broken security style so that we can detect this error condition.
   if (!entry->GetSSL().cert_id) {
-    entry->GetSSL().security_style = SECURITY_STYLE_UNAUTHENTICATED;
+    entry->GetSSL().security_style = content::SECURITY_STYLE_UNAUTHENTICATED;
     return;
+  }
+
+  if (!(entry->GetSSL().cert_status & net::CERT_STATUS_COMMON_NAME_INVALID)) {
+    // CAs issue certificates for intranet hosts to everyone.  Therefore, we
+    // mark intranet hosts as being non-unique.
+    if (IsIntranetHost(entry->GetURL().host())) {
+      entry->GetSSL().cert_status |= net::CERT_STATUS_NON_UNIQUE_NAME;
+    }
   }
 
   if (net::IsCertStatusError(entry->GetSSL().cert_status)) {
@@ -123,7 +140,7 @@ void SSLPolicy::UpdateEntry(NavigationEntryImpl* entry,
     // SECURITY_STYLE_AUTHENTICATION_BROKEN.
     if (!net::IsCertStatusMinorError(entry->GetSSL().cert_status)) {
       entry->GetSSL().security_style =
-          SECURITY_STYLE_AUTHENTICATION_BROKEN;
+          content::SECURITY_STYLE_AUTHENTICATION_BROKEN;
     }
     return;
   }
@@ -136,19 +153,16 @@ void SSLPolicy::UpdateEntry(NavigationEntryImpl* entry,
       backend_->DidHostRunInsecureContent(
           entry->GetURL().host(), site_instance->GetProcess()->GetID())) {
     entry->GetSSL().security_style =
-        SECURITY_STYLE_AUTHENTICATION_BROKEN;
+        content::SECURITY_STYLE_AUTHENTICATION_BROKEN;
     entry->GetSSL().content_status |= SSLStatus::RAN_INSECURE_CONTENT;
     return;
   }
 
-  if (web_contents->DisplayedInsecureContent())
+  if (tab_contents->DisplayedInsecureContent())
     entry->GetSSL().content_status |= SSLStatus::DISPLAYED_INSECURE_CONTENT;
-  else
-    entry->GetSSL().content_status &= ~SSLStatus::DISPLAYED_INSECURE_CONTENT;
 }
 
-void SSLPolicy::OnAllowCertificate(scoped_refptr<SSLCertErrorHandler> handler,
-                                   bool allow) {
+void SSLPolicy::OnAllowCertificate(SSLCertErrorHandler* handler, bool allow) {
   if (allow) {
     // Default behavior for accepting a certificate.
     // Note that we should not call SetMaxSecurityStyle here, because the active
@@ -160,9 +174,8 @@ void SSLPolicy::OnAllowCertificate(scoped_refptr<SSLCertErrorHandler> handler,
     // While AllowCertForHost() executes synchronously on this thread,
     // ContinueRequest() gets posted to a different thread. Calling
     // AllowCertForHost() first ensures deterministic ordering.
-    backend_->AllowCertForHost(handler->ssl_info().cert.get(),
-                               handler->request_url().host(),
-                               handler->cert_error());
+    backend_->AllowCertForHost(handler->ssl_info().cert,
+                               handler->request_url().host());
     handler->ContinueRequest();
   } else {
     // Default behavior for rejecting a certificate.
@@ -170,9 +183,8 @@ void SSLPolicy::OnAllowCertificate(scoped_refptr<SSLCertErrorHandler> handler,
     // While DenyCertForHost() executes synchronously on this thread,
     // CancelRequest() gets posted to a different thread. Calling
     // DenyCertForHost() first ensures deterministic ordering.
-    backend_->DenyCertForHost(handler->ssl_info().cert.get(),
-                              handler->request_url().host(),
-                              handler->cert_error());
+    backend_->DenyCertForHost(handler->ssl_info().cert,
+                              handler->request_url().host());
     handler->CancelRequest();
   }
 }
@@ -181,42 +193,29 @@ void SSLPolicy::OnAllowCertificate(scoped_refptr<SSLCertErrorHandler> handler,
 // Certificate Error Routines
 
 void SSLPolicy::OnCertErrorInternal(SSLCertErrorHandler* handler,
-                                    bool overridable,
-                                    bool strict_enforcement) {
-  CertificateRequestResultType result =
-      CERTIFICATE_REQUEST_RESULT_TYPE_CONTINUE;
-  GetContentClient()->browser()->AllowCertificateError(
-      handler->render_process_id(),
-      handler->render_frame_id(),
-      handler->cert_error(),
-      handler->ssl_info(),
-      handler->request_url(),
-      handler->resource_type(),
-      overridable,
-      strict_enforcement,
-      base::Bind(&SSLPolicy::OnAllowCertificate, base::Unretained(this),
-                 make_scoped_refptr(handler)),
-      &result);
-  switch (result) {
-    case CERTIFICATE_REQUEST_RESULT_TYPE_CONTINUE:
-      break;
-    case CERTIFICATE_REQUEST_RESULT_TYPE_CANCEL:
-      handler->CancelRequest();
-      break;
-    case CERTIFICATE_REQUEST_RESULT_TYPE_DENY:
-      handler->DenyRequest();
-      break;
-    default:
-      NOTREACHED();
+                                    bool overridable) {
+  if (handler->resource_type() != ResourceType::MAIN_FRAME) {
+    // A sub-resource has a certificate error.  The user doesn't really
+    // have a context for making the right decision, so block the
+    // request hard, without an info bar to allow showing the insecure
+    // content.
+    handler->DenyRequest();
+    return;
   }
+
+  content::GetContentClient()->browser()->AllowCertificateError(
+      handler,
+      overridable,
+      base::Bind(&SSLPolicy::OnAllowCertificate, base::Unretained(this)));
 }
 
 void SSLPolicy::InitializeEntryIfNeeded(NavigationEntryImpl* entry) {
-  if (entry->GetSSL().security_style != SECURITY_STYLE_UNKNOWN)
+  if (entry->GetSSL().security_style != content::SECURITY_STYLE_UNKNOWN)
     return;
 
   entry->GetSSL().security_style = entry->GetURL().SchemeIsSecure() ?
-      SECURITY_STYLE_AUTHENTICATED : SECURITY_STYLE_UNAUTHENTICATED;
+      content::SECURITY_STYLE_AUTHENTICATED :
+      content::SECURITY_STYLE_UNAUTHENTICATED;
 }
 
 void SSLPolicy::OriginRanInsecureContent(const std::string& origin, int pid) {
@@ -224,5 +223,3 @@ void SSLPolicy::OriginRanInsecureContent(const std::string& origin, int pid) {
   if (parsed_origin.SchemeIsSecure())
     backend_->HostRanInsecureContent(parsed_origin.host(), pid);
 }
-
-}  // namespace content

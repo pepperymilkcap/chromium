@@ -5,7 +5,6 @@
 #include <gtk/gtk.h>
 
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/common/url_constants.h"
@@ -19,7 +18,7 @@ class ViewIDTest : public InProcessBrowserTest {
 
   void CheckViewID(ViewID id, bool should_have) {
     if (!root_window_)
-      root_window_ = GTK_WIDGET(browser()->window()->GetNativeWindow());
+      root_window_ = GTK_WIDGET(browser()->window()->GetNativeHandle());
 
     ASSERT_TRUE(root_window_);
     EXPECT_EQ(should_have, !!ViewIDUtil::GetWidget(root_window_, id))
@@ -33,7 +32,7 @@ class ViewIDTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
   // Make sure FindBar is created to test
   // VIEW_ID_FIND_IN_PAGE_TEXT_FIELD and VIEW_ID_FIND_IN_PAGE.
-  chrome::ShowFindBar(browser());
+  browser()->ShowFindBar();
 
   for (int i = VIEW_ID_TOOLBAR; i < VIEW_ID_PREDEFINED_COUNT; ++i) {
     // The following ids are used only in views implementation.
@@ -44,9 +43,7 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
         i == VIEW_ID_BOOKMARK_BAR_ELEMENT ||
         i == VIEW_ID_TAB ||
         i == VIEW_ID_FEEDBACK_BUTTON ||
-        i == VIEW_ID_SCRIPT_BUBBLE ||
-        i == VIEW_ID_MIC_SEARCH_BUTTON ||
-        i == VIEW_ID_TRANSLATE_BUTTON) {
+        i == VIEW_ID_OMNIBOX) {
       continue;
     }
 
@@ -60,7 +57,7 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Delegate) {
   CheckViewID(VIEW_ID_TAB_0, true);
   CheckViewID(VIEW_ID_TAB_1, false);
 
-  browser()->OpenURL(OpenURLParams(GURL(content::kAboutBlankURL),
+  browser()->OpenURL(OpenURLParams(GURL(chrome::kAboutBlankURL),
                      content::Referrer(),
                      NEW_BACKGROUND_TAB, content::PAGE_TRANSITION_TYPED,
                      false));

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,15 @@
 
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "ui/base/accelerators/accelerator.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
-#include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/canvas.h"
+#include "ui/base/win/window_impl.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
-#include "ui/gfx/win/window_impl.h"
-#include "ui/views/layout/layout_constants.h"
 
 namespace views {
 
@@ -30,6 +29,8 @@ const int kItemTopMargin = 3;
 const int kItemBottomMargin = 4;
 // Margins between the left of the item and the icon.
 const int kItemLeftMargin = 4;
+// Margins between the right of the item and the label.
+const int kItemRightMargin = 10;
 // The width for displaying the sub-menu arrow.
 const int kArrowWidth = 10;
 
@@ -38,8 +39,8 @@ static MenuHostWindow* active_host_window = NULL;
 
 // The data of menu items needed to display.
 struct MenuWin::ItemData {
-  base::string16 label;
-  gfx::ImageSkia icon;
+  string16 label;
+  SkBitmap icon;
   bool submenu;
 };
 
@@ -61,7 +62,7 @@ static int ChromeGetMenuItemID(HMENU hMenu, int pos) {
 // to intercept right clicks on the HMENU and notify the delegate as well as
 // for drawing icons.
 //
-class MenuHostWindow : public gfx::WindowImpl {
+class MenuHostWindow : public ui::WindowImpl {
  public:
   MenuHostWindow(MenuWin* menu, HWND parent_window) : menu_(menu) {
     int extended_style = 0;
@@ -104,12 +105,12 @@ class MenuHostWindow : public gfx::WindowImpl {
     if (data != NULL) {
       gfx::Font font;
       lpmis->itemWidth = font.GetStringWidth(data->label) + kIconWidth +
-          kItemLeftMargin + views::kItemLabelSpacing -
+          kItemLeftMargin + kItemRightMargin -
           GetSystemMetrics(SM_CXMENUCHECK);
       if (data->submenu)
         lpmis->itemWidth += kArrowWidth;
       // If the label contains an accelerator, make room for tab.
-      if (data->label.find(L'\t') != base::string16::npos)
+      if (data->label.find(L'\t') != string16::npos)
         lpmis->itemWidth += font.GetStringWidth(L" ");
       lpmis->itemHeight = font.GetHeight() + kItemBottomMargin + kItemTopMargin;
     } else {
@@ -149,7 +150,7 @@ class MenuHostWindow : public gfx::WindowImpl {
       rect.top += kItemTopMargin;
       // Should we add kIconWidth only when icon.width() != 0 ?
       rect.left += kItemLeftMargin + kIconWidth;
-      rect.right -= views::kItemLabelSpacing;
+      rect.right -= kItemRightMargin;
       UINT format = DT_TOP | DT_SINGLELINE;
       // Check whether the mnemonics should be underlined.
       BOOL underline_mnemonics;
@@ -165,10 +166,10 @@ class MenuHostWindow : public gfx::WindowImpl {
       // left and the accelerator on the right.
       // TODO(jungshik): This will break in RTL UI. Currently, he/ar use the
       //                 window system UI font and will not hit here.
-      base::string16 label = data->label;
-      base::string16 accel;
-      base::string16::size_type tab_pos = label.find(L'\t');
-      if (tab_pos != base::string16::npos) {
+      string16 label = data->label;
+      string16 accel;
+      string16::size_type tab_pos = label.find(L'\t');
+      if (tab_pos != string16::npos) {
         accel = label.substr(tab_pos);
         label = label.substr(0, tab_pos);
       }
@@ -182,9 +183,8 @@ class MenuHostWindow : public gfx::WindowImpl {
 
       // Draw the icon after the label, otherwise it would be covered
       // by the label.
-      gfx::ImageSkiaRep icon_image_rep = data->icon.GetRepresentation(1.0f);
       if (data->icon.width() != 0 && data->icon.height() != 0) {
-        gfx::Canvas canvas(icon_image_rep, false);
+        gfx::CanvasSkia canvas(data->icon, false);
         skia::DrawToNativeContext(
             canvas.sk_canvas(), hDC, lpdis->rcItem.left + kItemLeftMargin,
             lpdis->rcItem.top + (lpdis->rcItem.bottom - lpdis->rcItem.top -
@@ -262,16 +262,16 @@ MenuWin::~MenuWin() {
 
 void MenuWin::AddMenuItemWithIcon(int index,
                                   int item_id,
-                                  const base::string16& label,
-                                  const gfx::ImageSkia& icon) {
+                                  const string16& label,
+                                  const SkBitmap& icon) {
   owner_draw_ = true;
   Menu::AddMenuItemWithIcon(index, item_id, label, icon);
 }
 
 Menu* MenuWin::AddSubMenuWithIcon(int index,
                                   int item_id,
-                                  const base::string16& label,
-                                  const gfx::ImageSkia& icon) {
+                                  const string16& label,
+                                  const SkBitmap& icon) {
   MenuWin* submenu = new MenuWin(this);
   submenus_.push_back(submenu);
   AddMenuItemInternal(index, item_id, label, icon, submenu->menu_, NORMAL);
@@ -296,7 +296,7 @@ void MenuWin::EnableMenuItemAt(int index, bool enabled) {
   EnableMenuItem(menu_, index, MF_BYPOSITION | enable_flags);
 }
 
-void MenuWin::SetMenuLabel(int item_id, const base::string16& label) {
+void MenuWin::SetMenuLabel(int item_id, const string16& label) {
   MENUITEMINFO mii = {0};
   mii.cbSize = sizeof(mii);
   mii.fMask = MIIM_STRING;
@@ -305,7 +305,7 @@ void MenuWin::SetMenuLabel(int item_id, const base::string16& label) {
   SetMenuItemInfo(menu_, item_id, false, &mii);
 }
 
-bool MenuWin::SetIcon(const gfx::ImageSkia& icon, int item_id) {
+bool MenuWin::SetIcon(const SkBitmap& icon, int item_id) {
   if (!owner_draw_)
     owner_draw_ = true;
 
@@ -385,21 +385,21 @@ int MenuWin::ItemCount() {
 
 void MenuWin::AddMenuItemInternal(int index,
                                   int item_id,
-                                  const base::string16& label,
-                                  const gfx::ImageSkia& icon,
+                                  const string16& label,
+                                  const SkBitmap& icon,
                                   MenuItemType type) {
   AddMenuItemInternal(index, item_id, label, icon, NULL, type);
 }
 
 void MenuWin::AddMenuItemInternal(int index,
                                   int item_id,
-                                  const base::string16& label,
-                                  const gfx::ImageSkia& icon,
+                                  const string16& label,
+                                  const SkBitmap& icon,
                                   HMENU submenu,
                                   MenuItemType type) {
   DCHECK(type != SEPARATOR) << "Call AddSeparator instead!";
 
-  if (!owner_draw_ && !icon.isNull())
+  if (!owner_draw_ && !icon.empty())
     owner_draw_ = true;
 
   if (label.empty() && !delegate()) {
@@ -437,11 +437,10 @@ void MenuWin::AddMenuItemInternal(int index,
   item_data_.push_back(data);
   data->submenu = submenu != NULL;
 
-  base::string16 actual_label(
-      label.empty() ? delegate()->GetLabel(item_id) : label);
+  string16 actual_label(label.empty() ? delegate()->GetLabel(item_id) : label);
 
   // Find out if there is a shortcut we need to append to the label.
-  ui::Accelerator accelerator(ui::VKEY_UNKNOWN, ui::EF_NONE);
+  ui::Accelerator accelerator(ui::VKEY_UNKNOWN, false, false, false);
   if (delegate() && delegate()->GetAcceleratorInfo(item_id, &accelerator)) {
     actual_label += L'\t';
     actual_label += accelerator.GetShortcutText();
@@ -496,7 +495,7 @@ void MenuWin::SetMenuInfo() {
 
       // Validate the label. If there is a contextual label, use it, otherwise
       // default to the static label
-      base::string16 label;
+      string16 label;
       if (!delegate()->GetContextualLabel(id, &label))
         label = labels_[i - sep_count];
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,10 @@
 
 #include "base/metrics/histogram.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -27,13 +24,29 @@ BookmarkDataTypeController::BookmarkDataTypeController(
     ProfileSyncService* sync_service)
     : FrontendDataTypeController(profile_sync_factory,
                                  profile,
-                                 sync_service),
-      bookmark_model_(NULL),
-      installed_bookmark_observer_(false) {
+                                 sync_service) {
 }
 
-syncer::ModelType BookmarkDataTypeController::type() const {
-  return syncer::BOOKMARKS;
+BookmarkDataTypeController::~BookmarkDataTypeController() {
+}
+
+// We want to start the bookmark model before we begin associating.
+bool BookmarkDataTypeController::StartModels() {
+  // If the bookmarks model is loaded, continue with association.
+  BookmarkModel* bookmark_model = profile_->GetBookmarkModel();
+  if (bookmark_model && bookmark_model->IsLoaded()) {
+    return true;  // Continue to Associate().
+  }
+
+  // Add an observer and continue when the bookmarks model is loaded.
+  registrar_.Add(this, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
+                 content::Source<Profile>(sync_service_->profile()));
+  return false;  // Don't continue Start.
+}
+
+// Cleanup for our extra registrar usage.
+void BookmarkDataTypeController::CleanUpState() {
+  registrar_.RemoveAll();
 }
 
 void BookmarkDataTypeController::Observe(
@@ -41,42 +54,15 @@ void BookmarkDataTypeController::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED, type);
+  registrar_.RemoveAll();
   DCHECK_EQ(state_, MODEL_STARTING);
-  DCHECK_EQ(chrome::NOTIFICATION_HISTORY_LOADED, type);
-
-  if (!DependentsLoaded())
-    return;
-
-  bookmark_model_->RemoveObserver(this);
-  installed_bookmark_observer_ = false;
-
-  registrar_.RemoveAll();
-  OnModelLoaded();
+  state_ = ASSOCIATING;
+  Associate();
 }
 
-BookmarkDataTypeController::~BookmarkDataTypeController() {
-  if (installed_bookmark_observer_ && bookmark_model_) {
-    DCHECK(profile_);
-    bookmark_model_->RemoveObserver(this);
-  }
-}
-
-bool BookmarkDataTypeController::StartModels() {
-  bookmark_model_ = BookmarkModelFactory::GetForProfile(profile_);
-  if (!DependentsLoaded()) {
-    bookmark_model_->AddObserver(this);
-    installed_bookmark_observer_ = true;
-
-    registrar_.Add(this, chrome::NOTIFICATION_HISTORY_LOADED,
-                   content::Source<Profile>(sync_service_->profile()));
-    return false;
-  }
-  return true;
-}
-
-// Cleanup for our extra registrar usage.
-void BookmarkDataTypeController::CleanUpState() {
-  registrar_.RemoveAll();
+syncable::ModelType BookmarkDataTypeController::type() const {
+  return syncable::BOOKMARKS;
 }
 
 void BookmarkDataTypeController::CreateSyncComponents() {
@@ -87,40 +73,20 @@ void BookmarkDataTypeController::CreateSyncComponents() {
   set_change_processor(sync_components.change_processor);
 }
 
-void BookmarkDataTypeController::BookmarkModelChanged() {
+void BookmarkDataTypeController::RecordUnrecoverableError(
+    const tracked_objects::Location& from_here,
+    const std::string& message) {
+  UMA_HISTOGRAM_COUNTS("Sync.BookmarkRunFailures", 1);
 }
 
-void BookmarkDataTypeController::BookmarkModelLoaded(BookmarkModel* model,
-                                                     bool ids_reassigned) {
-  DCHECK(model->loaded());
-  model->RemoveObserver(this);
-  installed_bookmark_observer_ = false;
-
-  if (!DependentsLoaded())
-    return;
-
-  registrar_.RemoveAll();
-  OnModelLoaded();
+void BookmarkDataTypeController::RecordAssociationTime(base::TimeDelta time) {
+  UMA_HISTOGRAM_TIMES("Sync.BookmarkAssociationTime", time);
 }
 
-void BookmarkDataTypeController::BookmarkModelBeingDeleted(
-    BookmarkModel* model) {
-  installed_bookmark_observer_ = false;
-}
-
-// Check that both the bookmark model and the history service (for favicons)
-// are loaded.
-bool BookmarkDataTypeController::DependentsLoaded() {
-  if (!bookmark_model_ || !bookmark_model_->loaded())
-    return false;
-
-  HistoryService* history = HistoryServiceFactory::GetForProfile(
-      profile_, Profile::EXPLICIT_ACCESS);
-  if (!history || !history->BackendLoaded())
-    return false;
-
-  // All necessary services are loaded.
-  return true;
+void BookmarkDataTypeController::RecordStartFailure(StartResult result) {
+  UMA_HISTOGRAM_ENUMERATION("Sync.BookmarkStartFailures",
+                            result,
+                            MAX_START_RESULT);
 }
 
 }  // namespace browser_sync

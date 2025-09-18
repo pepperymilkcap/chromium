@@ -4,16 +4,14 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string16.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_auth_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using base::ASCIIToUTF16;
 
 namespace net {
 
@@ -33,26 +31,26 @@ class MockAuthHandler : public HttpAuthHandler {
   }
 
   virtual HttpAuth::AuthorizationResult HandleAnotherChallenge(
-      HttpAuth::ChallengeTokenizer* challenge) OVERRIDE {
+      HttpAuth::ChallengeTokenizer* challenge) {
     return HttpAuth::AUTHORIZATION_RESULT_REJECT;
   }
 
  protected:
-  virtual bool Init(HttpAuth::ChallengeTokenizer* challenge) OVERRIDE {
+  virtual bool Init(HttpAuth::ChallengeTokenizer* challenge) {
     return false;  // Unused.
   }
 
   virtual int GenerateAuthTokenImpl(const AuthCredentials*,
                                     const HttpRequestInfo*,
                                     const CompletionCallback& callback,
-                                    std::string* auth_token) OVERRIDE {
+                                    std::string* auth_token) {
     *auth_token = "mock-credentials";
     return OK;
   }
 
 
  private:
-  virtual ~MockAuthHandler() {}
+  ~MockAuthHandler() {}
 };
 
 const char* kRealm1 = "Realm1";
@@ -60,15 +58,15 @@ const char* kRealm2 = "Realm2";
 const char* kRealm3 = "Realm3";
 const char* kRealm4 = "Realm4";
 const char* kRealm5 = "Realm5";
-const base::string16 k123(ASCIIToUTF16("123"));
-const base::string16 k1234(ASCIIToUTF16("1234"));
-const base::string16 kAdmin(ASCIIToUTF16("admin"));
-const base::string16 kAlice(ASCIIToUTF16("alice"));
-const base::string16 kAlice2(ASCIIToUTF16("alice2"));
-const base::string16 kPassword(ASCIIToUTF16("password"));
-const base::string16 kRoot(ASCIIToUTF16("root"));
-const base::string16 kUsername(ASCIIToUTF16("username"));
-const base::string16 kWileCoyote(ASCIIToUTF16("wilecoyote"));
+const string16 k123(ASCIIToUTF16("123"));
+const string16 k1234(ASCIIToUTF16("1234"));
+const string16 kAdmin(ASCIIToUTF16("admin"));
+const string16 kAlice(ASCIIToUTF16("alice"));
+const string16 kAlice2(ASCIIToUTF16("alice2"));
+const string16 kPassword(ASCIIToUTF16("password"));
+const string16 kRoot(ASCIIToUTF16("root"));
+const string16 kUsername(ASCIIToUTF16("username"));
+const string16 kWileCoyote(ASCIIToUTF16("wilecoyote"));
 
 AuthCredentials CreateASCIICredentials(const char* username,
                                        const char* password) {
@@ -108,13 +106,11 @@ TEST(HttpAuthCacheTest, Basic) {
       new MockAuthHandler(HttpAuth::AUTH_SCHEME_BASIC,
                           kRealm3,
                           HttpAuth::AUTH_PROXY));
-  cache.Add(
-      origin,
-      realm3_basic_handler->realm(),
-      realm3_basic_handler->auth_scheme(),
-      "Basic realm=Realm3",
-      CreateASCIICredentials("realm3-basic-user", "realm3-basic-password"),
-      std::string());
+  cache.Add(origin, realm3_basic_handler->realm(),
+            realm3_basic_handler->auth_scheme(), "Basic realm=Realm3",
+            CreateASCIICredentials("realm3-basic-user",
+                                   "realm3-basic-password"),
+            "");
 
   scoped_ptr<HttpAuthHandler> realm3_digest_handler(
       new MockAuthHandler(HttpAuth::AUTH_SCHEME_DIGEST,
@@ -209,7 +205,7 @@ TEST(HttpAuthCacheTest, Basic) {
   // Negative tests:
   entry = cache.LookupByPath(origin, "/foo3/index.html");
   EXPECT_FALSE(realm2_entry == entry);
-  entry = cache.LookupByPath(origin, std::string());
+  entry = cache.LookupByPath(origin, "");
   EXPECT_FALSE(realm2_entry == entry);
 
   // Confirm we find the same realm, different auth scheme by path lookup
@@ -235,7 +231,7 @@ TEST(HttpAuthCacheTest, Basic) {
   EXPECT_FALSE(realm3DigestEntry == entry);
 
   // Lookup using empty path (may be used for proxy).
-  entry = cache.LookupByPath(origin, std::string());
+  entry = cache.LookupByPath(origin, "");
   EXPECT_FALSE(NULL == entry);
   EXPECT_EQ(HttpAuth::AUTH_SCHEME_BASIC, entry->scheme());
   EXPECT_EQ(kRealm3, entry->realm());
@@ -544,10 +540,7 @@ class HttpAuthCacheEvictionTest : public testing::Test {
   }
 
   void AddPathToRealm(int realm_i, int path_i) {
-    cache_.Add(origin_,
-               GenerateRealm(realm_i),
-               HttpAuth::AUTH_SCHEME_BASIC,
-               std::string(),
+    cache_.Add(origin_, GenerateRealm(realm_i), HttpAuth::AUTH_SCHEME_BASIC, "",
                AuthCredentials(kUsername, kPassword),
                GeneratePath(realm_i, path_i));
   }

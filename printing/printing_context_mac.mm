@@ -7,34 +7,15 @@
 #import <ApplicationServices/ApplicationServices.h>
 #import <AppKit/AppKit.h>
 
-#import <iomanip>
-#import <numeric>
-
 #include "base/logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/mac/scoped_nsexception_enabler.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "base/values.h"
 #include "printing/print_settings_initializer_mac.h"
-#include "printing/units.h"
 
 namespace printing {
-
-namespace {
-
-// Return true if PPD name of paper is equal.
-bool IsPaperNameEqual(const PMPaper& paper1, const PMPaper& paper2) {
-  CFStringRef name1 = NULL;
-  CFStringRef name2 = NULL;
-  return (PMPaperGetPPDPaperName(paper1, &name1) == noErr) &&
-         (PMPaperGetPPDPaperName(paper2, &name2) == noErr) &&
-         (CFStringCompare(name1, name2,
-                          kCFCompareCaseInsensitive) == kCFCompareEqualTo);
-}
-
-}  // namespace
 
 // static
 PrintingContext* PrintingContext::Create(const std::string& app_locale) {
@@ -99,73 +80,85 @@ void PrintingContextMac::AskUserForSettings(
   NSInteger selection = [panel runModalWithPrintInfo:printInfo];
   if (selection == NSOKButton) {
     print_info_.reset([[panel printInfo] retain]);
-    settings_.set_ranges(GetPageRangesFromPrintInfo());
-    InitPrintSettingsFromPrintInfo();
+    InitPrintSettingsFromPrintInfo(GetPageRangesFromPrintInfo());
     callback.Run(OK);
   } else {
     callback.Run(CANCEL);
   }
 }
 
-gfx::Size PrintingContextMac::GetPdfPaperSizeDeviceUnits() {
-  // NOTE: Reset |print_info_| with a copy of |sharedPrintInfo| so as to start
-  // with a clean slate.
-  print_info_.reset([[NSPrintInfo sharedPrintInfo] copy]);
-  UpdatePageFormatWithPaperInfo();
-
-  PMPageFormat page_format =
-      static_cast<PMPageFormat>([print_info_.get() PMPageFormat]);
-  PMRect paper_rect;
-  PMGetAdjustedPaperRect(page_format, &paper_rect);
-
-  // Device units are in points. Units per inch is 72.
-  gfx::Size physical_size_device_units(
-      (paper_rect.right - paper_rect.left),
-      (paper_rect.bottom - paper_rect.top));
-  DCHECK(settings_.device_units_per_inch() == kPointsPerInch);
-  return physical_size_device_units;
-}
-
 PrintingContext::Result PrintingContextMac::UseDefaultSettings() {
   DCHECK(!in_print_job_);
 
   print_info_.reset([[NSPrintInfo sharedPrintInfo] copy]);
-  settings_.set_ranges(GetPageRangesFromPrintInfo());
-  InitPrintSettingsFromPrintInfo();
+  InitPrintSettingsFromPrintInfo(GetPageRangesFromPrintInfo());
 
   return OK;
 }
 
 PrintingContext::Result PrintingContextMac::UpdatePrinterSettings(
-    bool external_preview) {
+    const DictionaryValue& job_settings, const PageRanges& ranges) {
   DCHECK(!in_print_job_);
 
   // NOTE: Reset |print_info_| with a copy of |sharedPrintInfo| so as to start
   // with a clean slate.
   print_info_.reset([[NSPrintInfo sharedPrintInfo] copy]);
 
-  if (external_preview) {
-    if (!SetPrintPreviewJob())
-      return OnError();
-  } else {
-    // Don't need this for preview.
-    if (!SetPrinter(base::UTF16ToUTF8(settings_.device_name())) ||
-        !SetCopiesInPrintSettings(settings_.copies()) ||
-        !SetCollateInPrintSettings(settings_.collate()) ||
-        !SetDuplexModeInPrintSettings(settings_.duplex_mode()) ||
-        !SetOutputColor(settings_.color())) {
-      return OnError();
-    }
-  }
+  bool collate;
+  int color;
+  bool landscape;
+  bool print_to_pdf;
+  bool is_cloud_dialog;
+  int copies;
+  int duplex_mode;
+  std::string device_name;
 
-  if (!UpdatePageFormatWithPaperInfo() ||
-      !SetOrientationIsLandscape(settings_.landscape())) {
+  if (!job_settings.GetBoolean(kSettingLandscape, &landscape) ||
+      !job_settings.GetBoolean(kSettingCollate, &collate) ||
+      !job_settings.GetInteger(kSettingColor, &color) ||
+      !job_settings.GetBoolean(kSettingPrintToPDF, &print_to_pdf) ||
+      !job_settings.GetInteger(kSettingDuplexMode, &duplex_mode) ||
+      !job_settings.GetInteger(kSettingCopies, &copies) ||
+      !job_settings.GetString(kSettingDeviceName, &device_name) ||
+      !job_settings.GetBoolean(kSettingCloudPrintDialog, &is_cloud_dialog)) {
     return OnError();
   }
 
+  bool print_to_cloud = job_settings.HasKey(kSettingCloudPrintId);
+  bool open_pdf_in_preview = job_settings.HasKey(kSettingOpenPDFInPreview);
+
+  if (!print_to_pdf && !print_to_cloud && !is_cloud_dialog) {
+    if (!SetPrinter(device_name))
+      return OnError();
+
+    if (!SetCopiesInPrintSettings(copies))
+      return OnError();
+
+    if (!SetCollateInPrintSettings(collate))
+      return OnError();
+
+    if (!SetDuplexModeInPrintSettings(
+            static_cast<DuplexMode>(duplex_mode))) {
+      return OnError();
+    }
+
+    if (!SetOutputColor(color))
+      return OnError();
+  }
+  if (open_pdf_in_preview) {
+    if (!SetPrintPreviewJob())
+      return OnError();
+  }
+
+  if (!UpdatePageFormatWithPaperInfo())
+    return OnError();
+
+  if (!SetOrientationIsLandscape(landscape))
+    return OnError();
+
   [print_info_.get() updateFromPMPrintSettings];
 
-  InitPrintSettingsFromPrintInfo();
+  InitPrintSettingsFromPrintInfo(ranges);
   return OK;
 }
 
@@ -179,7 +172,8 @@ bool PrintingContextMac::SetPrintPreviewJob() {
       NULL, NULL) == noErr;
 }
 
-void PrintingContextMac::InitPrintSettingsFromPrintInfo() {
+void PrintingContextMac::InitPrintSettingsFromPrintInfo(
+    const PageRanges& ranges) {
   PMPrintSession print_session =
       static_cast<PMPrintSession>([print_info_.get() PMPrintSession]);
   PMPageFormat page_format =
@@ -187,7 +181,7 @@ void PrintingContextMac::InitPrintSettingsFromPrintInfo() {
   PMPrinter printer;
   PMSessionGetCurrentPrinter(print_session, &printer);
   PrintSettingsInitializerMac::InitPrintSettings(
-      printer, page_format, &settings_);
+      printer, page_format, ranges, false, &settings_);
 }
 
 bool PrintingContextMac::SetPrinter(const std::string& device_name) {
@@ -203,7 +197,7 @@ bool PrintingContextMac::SetPrinter(const std::string& device_name) {
   if (!current_printer_id)
     return false;
 
-  base::ScopedCFTypeRef<CFStringRef> new_printer_id(
+  base::mac::ScopedCFTypeRef<CFStringRef> new_printer_id(
       base::SysUTF8ToCFStringRef(device_name));
   if (!new_printer_id.get())
     return false;
@@ -233,8 +227,7 @@ bool PrintingContextMac::UpdatePageFormatWithPaperInfo() {
   if (PMGetPageFormatPaper(default_page_format, &default_paper) != noErr)
     return false;
 
-  double default_page_width = 0.0;
-  double default_page_height = 0.0;
+  double default_page_width, default_page_height;
   if (PMPaperGetWidth(default_paper, &default_page_width) != noErr)
     return false;
 
@@ -252,24 +245,22 @@ bool PrintingContextMac::UpdatePageFormatWithPaperInfo() {
   if (PMPrinterGetPaperList(current_printer, &paper_list) != noErr)
     return false;
 
-  double best_match = std::numeric_limits<double>::max();
   PMPaper best_matching_paper = kPMNoData;
   int num_papers = CFArrayGetCount(paper_list);
   for (int i = 0; i < num_papers; ++i) {
-    PMPaper paper = (PMPaper)[(NSArray*)paper_list objectAtIndex: i];
-    double paper_width = 0.0;
-    double paper_height = 0.0;
+    PMPaper paper = (PMPaper) [(NSArray* ) paper_list objectAtIndex: i];
+    double paper_width, paper_height;
     PMPaperGetWidth(paper, &paper_width);
     PMPaperGetHeight(paper, &paper_height);
-    double current_match = std::max(fabs(default_page_width - paper_width),
-                                    fabs(default_page_height - paper_height));
-    // Ignore paper sizes that are very different.
-    if (current_match > 2)
-      continue;
-    current_match += IsPaperNameEqual(paper, default_paper) ? 0 : 1;
-    if (current_match < best_match) {
+    if (default_page_width == paper_width &&
+        default_page_height == paper_height) {
       best_matching_paper = paper;
-      best_match = current_match;
+      break;
+    }
+    // Trying to find the best matching paper.
+    if (fabs(default_page_width - paper_width) < 2 &&
+        fabs(default_page_height - paper_height) < 2) {
+      best_matching_paper = paper;
     }
   }
 
@@ -374,9 +365,9 @@ bool PrintingContextMac::SetOutputColor(int color_mode) {
   std::string color_setting_name;
   std::string color_value;
   GetColorModelForMode(color_mode, &color_setting_name, &color_value);
-  base::ScopedCFTypeRef<CFStringRef> color_setting(
+  base::mac::ScopedCFTypeRef<CFStringRef> color_setting(
       base::SysUTF8ToCFStringRef(color_setting_name));
-  base::ScopedCFTypeRef<CFStringRef> output_color(
+  base::mac::ScopedCFTypeRef<CFStringRef> output_color(
       base::SysUTF8ToCFStringRef(color_value));
 
   return PMPrintSettingsSetValue(pmPrintSettings,
@@ -409,7 +400,7 @@ PrintingContext::Result PrintingContextMac::InitWithSettings(
 }
 
 PrintingContext::Result PrintingContextMac::NewDocument(
-    const base::string16& document_name) {
+    const string16& document_name) {
   DCHECK(!in_print_job_);
 
   in_print_job_ = true;
@@ -421,7 +412,7 @@ PrintingContext::Result PrintingContextMac::NewDocument(
   PMPageFormat page_format =
       static_cast<PMPageFormat>([print_info_.get() PMPageFormat]);
 
-  base::ScopedCFTypeRef<CFStringRef> job_title(
+  base::mac::ScopedCFTypeRef<CFStringRef> job_title(
       base::SysUTF16ToCFStringRef(document_name));
   PMPrintSettingsSetJobName(print_settings, job_title.get());
 

@@ -7,14 +7,14 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/login/startup_utils.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -22,6 +22,7 @@ using content::BrowserThread;
 namespace {
 
 // Config attributes names.
+const char kVersionAttr[] = "version";
 const char kAcceptedConfigVersion[] = "1.0";
 const char kDefaultAttr[] = "default";
 
@@ -41,10 +42,7 @@ const char kInfoURLAttr[] = "info_url";
 const char kNotificationCountAttr[] = "notification_count";
 const char kDealExpireDateAttr[] = "expire_date";
 const char kLocalizedContentAttr[] = "localized_content";
-
-// Initial locale carrier config attributes.
-const char kInitialLocalesAttr[] = "initial_locales";
-const char kSetupURLAttr[] = "setup_url";
+const char kNotificationTextAttr[] = "notification_text";
 
 // Local config properties.
 const char kExcludeDealsAttr[] = "exclude_deals";
@@ -63,13 +61,13 @@ namespace chromeos {
 
 // MobileConfig::CarrierDeal implementation. -----------------------------------
 
-MobileConfig::CarrierDeal::CarrierDeal(const base::DictionaryValue* deal_dict)
+MobileConfig::CarrierDeal::CarrierDeal(DictionaryValue* deal_dict)
     : notification_count_(0),
       localized_strings_(NULL) {
   deal_dict->GetString(kDealIdAttr, &deal_id_);
 
   // Extract list of deal locales.
-  const base::ListValue* locale_list = NULL;
+  ListValue* locale_list = NULL;
   if (deal_dict->GetList(kDealLocalesAttr, &locale_list)) {
     for (size_t i = 0; i < locale_list->GetSize(); ++i) {
       std::string locale;
@@ -95,7 +93,7 @@ std::string MobileConfig::CarrierDeal::GetLocalizedString(
     const std::string& locale, const std::string& id) const {
   std::string result;
   if (localized_strings_) {
-    const base::DictionaryValue* locale_dict = NULL;
+    DictionaryValue* locale_dict = NULL;
     if (localized_strings_->GetDictionary(locale, &locale_dict) &&
         locale_dict->GetString(id, &result)) {
       return result;
@@ -109,7 +107,7 @@ std::string MobileConfig::CarrierDeal::GetLocalizedString(
 
 // MobileConfig::Carrier implementation. ---------------------------------------
 
-MobileConfig::Carrier::Carrier(const base::DictionaryValue* carrier_dict,
+MobileConfig::Carrier::Carrier(DictionaryValue* carrier_dict,
                                const std::string& initial_locale)
     : show_portal_button_(false) {
   InitFromDictionary(carrier_dict, initial_locale);
@@ -146,8 +144,7 @@ const MobileConfig::CarrierDeal* MobileConfig::Carrier::GetDeal(
 }
 
 void MobileConfig::Carrier::InitFromDictionary(
-    const base::DictionaryValue* carrier_dict,
-    const std::string& initial_locale) {
+    base::DictionaryValue* carrier_dict, const std::string& initial_locale) {
   carrier_dict->GetString(kTopUpURLAttr, &top_up_url_);
   carrier_dict->GetBoolean(kShowPortalButtonAttr, &show_portal_button_);
 
@@ -158,10 +155,10 @@ void MobileConfig::Carrier::InitFromDictionary(
   }
 
   // Extract list of external IDs for this carrier.
-  const base::ListValue* id_list = NULL;
+  ListValue* id_list = NULL;
   if (carrier_dict->GetList(kCarrierIdsAttr, &id_list)) {
     for (size_t i = 0; i < id_list->GetSize(); ++i) {
-      const base::DictionaryValue* id_dict = NULL;
+      DictionaryValue* id_dict = NULL;
       std::string external_id;
       if (id_list->GetDictionary(i, &id_dict) &&
           id_dict->GetString(kCarrierIdAttr, &external_id)) {
@@ -171,10 +168,10 @@ void MobileConfig::Carrier::InitFromDictionary(
   }
 
   // Extract list of deals for this carrier.
-  const base::ListValue* deals_list = NULL;
+  ListValue* deals_list = NULL;
   if (carrier_dict->GetList(kDealsAttr, &deals_list)) {
     for (size_t i = 0; i < deals_list->GetSize(); ++i) {
-      const base::DictionaryValue* deal_dict = NULL;
+      DictionaryValue* deal_dict = NULL;
       if (deals_list->GetDictionary(i, &deal_dict)) {
         scoped_ptr<CarrierDeal> deal(new CarrierDeal(deal_dict));
         // Filter out deals by initial_locale right away.
@@ -193,20 +190,6 @@ void MobileConfig::Carrier::InitFromDictionary(
 
 void MobileConfig::Carrier::RemoveDeals() {
   STLDeleteValues(&deals_);
-}
-
-// MobileConfig::LocaleConfig implementation. ----------------------------------
-
-MobileConfig::LocaleConfig::LocaleConfig(base::DictionaryValue* locale_dict) {
-  InitFromDictionary(locale_dict);
-}
-
-MobileConfig::LocaleConfig::~LocaleConfig() {
-}
-
-void MobileConfig::LocaleConfig::InitFromDictionary(
-    base::DictionaryValue* locale_dict) {
-  locale_dict->GetString(kSetupURLAttr, &setup_url_);
 }
 
 // MobileConfig implementation, public -----------------------------------------
@@ -232,10 +215,6 @@ const MobileConfig::Carrier* MobileConfig::GetCarrier(
     return NULL;
 }
 
-const MobileConfig::LocaleConfig* MobileConfig::GetLocaleConfig() const {
-  return locale_config_.get();
-}
-
 // MobileConfig implementation, protected --------------------------------------
 
 bool MobileConfig::LoadManifestFromString(const std::string& manifest) {
@@ -254,18 +233,18 @@ bool MobileConfig::LoadManifestFromString(const std::string& manifest) {
   }
 
   // Other parts are optional and are the same among global/local config.
-  base::DictionaryValue* carriers = NULL;
+  DictionaryValue* carriers = NULL;
   if (root_.get() && root_->GetDictionary(kCarriersAttr, &carriers)) {
-    for (base::DictionaryValue::Iterator iter(*carriers); !iter.IsAtEnd();
-         iter.Advance()) {
-      const base::DictionaryValue* carrier_dict = NULL;
-      if (iter.value().GetAsDictionary(&carrier_dict)) {
-        const std::string& internal_id = iter.key();
-        Carriers::iterator inner_iter = carriers_.find(internal_id);
-        if (inner_iter != carriers_.end()) {
+    for (DictionaryValue::key_iterator iter = carriers->begin_keys();
+         iter != carriers->end_keys(); ++iter) {
+      DictionaryValue* carrier_dict = NULL;
+      if (carriers->GetDictionary(*iter, &carrier_dict)) {
+        const std::string& internal_id = *iter;
+        Carriers::iterator iter = carriers_.find(internal_id);
+        if (iter != carriers_.end()) {
           // Carrier already defined i.e. loading from the local config.
           // New ID mappings in local config is not supported.
-          inner_iter->second->InitFromDictionary(carrier_dict, initial_locale_);
+          iter->second->InitFromDictionary(carrier_dict, initial_locale_);
         } else {
           Carrier* carrier = new Carrier(carrier_dict, initial_locale_);
           if (!carrier->external_ids().empty()) {
@@ -285,17 +264,6 @@ bool MobileConfig::LoadManifestFromString(const std::string& manifest) {
     }
   }
 
-  base::DictionaryValue* initial_locales = NULL;
-  if (root_.get() && root_->GetDictionary(kInitialLocalesAttr,
-                                          &initial_locales)) {
-    base::DictionaryValue* locale_config_dict = NULL;
-    // Search for a config based on current initial locale.
-    if (initial_locales->GetDictionary(initial_locale_,
-                                       &locale_config_dict)) {
-      locale_config_.reset(new LocaleConfig(locale_config_dict));
-    }
-  }
-
   return true;
 }
 
@@ -303,7 +271,7 @@ bool MobileConfig::LoadManifestFromString(const std::string& manifest) {
 
 MobileConfig::MobileConfig()
     : CustomizationDocument(kAcceptedConfigVersion),
-      initial_locale_(StartupUtils::GetInitialLocale()) {
+      initial_locale_(WizardController::GetInitialLocale()) {
   LoadConfig();
 }
 
@@ -322,8 +290,8 @@ void MobileConfig::LoadConfig() {
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       base::Bind(&MobileConfig::ReadConfigInBackground,
                  base::Unretained(this),  // this class is a singleton.
-                 base::FilePath(kGlobalCarrierConfigPath),
-                 base::FilePath(kLocalCarrierConfigPath)));
+                 FilePath(kGlobalCarrierConfigPath),
+                 FilePath(kLocalCarrierConfigPath)));
 }
 
 void MobileConfig::ProcessConfig(const std::string& global_config,
@@ -352,17 +320,16 @@ void MobileConfig::ProcessConfig(const std::string& global_config,
   }
 }
 
-void MobileConfig::ReadConfigInBackground(
-    const base::FilePath& global_config_file,
-    const base::FilePath& local_config_file) {
+void MobileConfig::ReadConfigInBackground(const FilePath& global_config_file,
+                                          const FilePath& local_config_file) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   std::string global_config;
   std::string local_config;
-  if (!base::ReadFileToString(global_config_file, &global_config)) {
+  if (!file_util::ReadFileToString(global_config_file, &global_config)) {
     VLOG(1) << "Failed to load global mobile config from: "
             << global_config_file.value();
   }
-  if (!base::ReadFileToString(local_config_file, &local_config)) {
+  if (!file_util::ReadFileToString(local_config_file, &local_config)) {
     VLOG(1) << "Failed to load local mobile config from: "
             << local_config_file.value();
   }

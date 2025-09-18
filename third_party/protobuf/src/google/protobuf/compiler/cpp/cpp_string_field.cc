@@ -46,14 +46,11 @@ namespace cpp {
 namespace {
 
 void SetStringVariables(const FieldDescriptor* descriptor,
-                        map<string, string>* variables,
-                        const Options& options) {
-  SetCommonFieldVariables(descriptor, variables, options);
+                        map<string, string>* variables) {
+  SetCommonFieldVariables(descriptor, variables);
   (*variables)["default"] = DefaultValue(descriptor);
-  (*variables)["default_length"] =
-      SimpleItoa(descriptor->default_value_string().length());
   (*variables)["default_variable"] = descriptor->default_value_string().empty()
-      ? "&::google::protobuf::internal::kEmptyString"
+      ? "::google::protobuf::internal::kEmptyString"
       : "_default_" + FieldName(descriptor) + "_";
   (*variables)["pointer_type"] =
       descriptor->type() == FieldDescriptor::TYPE_BYTES ? "void" : "char";
@@ -64,10 +61,9 @@ void SetStringVariables(const FieldDescriptor* descriptor,
 // ===================================================================
 
 StringFieldGenerator::
-StringFieldGenerator(const FieldDescriptor* descriptor,
-                     const Options& options)
+StringFieldGenerator(const FieldDescriptor* descriptor)
   : descriptor_(descriptor) {
-  SetStringVariables(descriptor, &variables_, options);
+  SetStringVariables(descriptor, &variables_);
 }
 
 StringFieldGenerator::~StringFieldGenerator() {}
@@ -76,7 +72,7 @@ void StringFieldGenerator::
 GeneratePrivateMembers(io::Printer* printer) const {
   printer->Print(variables_, "::std::string* $name$_;\n");
   if (!descriptor_->default_value_string().empty()) {
-    printer->Print(variables_, "static ::std::string* $default_variable$;\n");
+    printer->Print(variables_, "static const ::std::string $default_variable$;\n");
   }
 }
 
@@ -113,9 +109,7 @@ GenerateAccessorDeclarations(io::Printer* printer) const {
     "inline void set_$name$(const $pointer_type$* value, size_t size)"
                  "$deprecation$;\n"
     "inline ::std::string* mutable_$name$()$deprecation$;\n"
-    "inline ::std::string* release_$name$()$deprecation$;\n"
-    "inline void set_allocated_$name$(::std::string* $name$)$deprecation$;\n");
-
+    "inline ::std::string* release_$name$()$deprecation$;\n");
 
   if (descriptor_->options().ctype() != FieldOptions::STRING) {
     printer->Outdent();
@@ -132,14 +126,14 @@ GenerateInlineAccessorDefinitions(io::Printer* printer) const {
     "}\n"
     "inline void $classname$::set_$name$(const ::std::string& value) {\n"
     "  set_has_$name$();\n"
-    "  if ($name$_ == $default_variable$) {\n"
+    "  if ($name$_ == &$default_variable$) {\n"
     "    $name$_ = new ::std::string;\n"
     "  }\n"
     "  $name$_->assign(value);\n"
     "}\n"
     "inline void $classname$::set_$name$(const char* value) {\n"
     "  set_has_$name$();\n"
-    "  if ($name$_ == $default_variable$) {\n"
+    "  if ($name$_ == &$default_variable$) {\n"
     "    $name$_ = new ::std::string;\n"
     "  }\n"
     "  $name$_->assign(value);\n"
@@ -147,20 +141,20 @@ GenerateInlineAccessorDefinitions(io::Printer* printer) const {
     "inline "
     "void $classname$::set_$name$(const $pointer_type$* value, size_t size) {\n"
     "  set_has_$name$();\n"
-    "  if ($name$_ == $default_variable$) {\n"
+    "  if ($name$_ == &$default_variable$) {\n"
     "    $name$_ = new ::std::string;\n"
     "  }\n"
     "  $name$_->assign(reinterpret_cast<const char*>(value), size);\n"
     "}\n"
     "inline ::std::string* $classname$::mutable_$name$() {\n"
     "  set_has_$name$();\n"
-    "  if ($name$_ == $default_variable$) {\n");
+    "  if ($name$_ == &$default_variable$) {\n");
   if (descriptor_->default_value_string().empty()) {
     printer->Print(variables_,
       "    $name$_ = new ::std::string;\n");
   } else {
     printer->Print(variables_,
-      "    $name$_ = new ::std::string(*$default_variable$);\n");
+      "    $name$_ = new ::std::string($default_variable$);\n");
   }
   printer->Print(variables_,
     "  }\n"
@@ -168,24 +162,12 @@ GenerateInlineAccessorDefinitions(io::Printer* printer) const {
     "}\n"
     "inline ::std::string* $classname$::release_$name$() {\n"
     "  clear_has_$name$();\n"
-    "  if ($name$_ == $default_variable$) {\n"
+    "  if ($name$_ == &$default_variable$) {\n"
     "    return NULL;\n"
     "  } else {\n"
     "    ::std::string* temp = $name$_;\n"
-    "    $name$_ = const_cast< ::std::string*>($default_variable$);\n"
+    "    $name$_ = const_cast< ::std::string*>(&$default_variable$);\n"
     "    return temp;\n"
-    "  }\n"
-    "}\n"
-    "inline void $classname$::set_allocated_$name$(::std::string* $name$) {\n"
-    "  if ($name$_ != $default_variable$) {\n"
-    "    delete $name$_;\n"
-    "  }\n"
-    "  if ($name$) {\n"
-    "    set_has_$name$();\n"
-    "    $name$_ = $name$;\n"
-    "  } else {\n"
-    "    clear_has_$name$();\n"
-    "    $name$_ = const_cast< ::std::string*>($default_variable$);\n"
     "  }\n"
     "}\n");
 }
@@ -193,9 +175,8 @@ GenerateInlineAccessorDefinitions(io::Printer* printer) const {
 void StringFieldGenerator::
 GenerateNonInlineAccessorDefinitions(io::Printer* printer) const {
   if (!descriptor_->default_value_string().empty()) {
-    // Initialized in GenerateDefaultInstanceAllocator.
     printer->Print(variables_,
-      "::std::string* $classname$::$default_variable$ = NULL;\n");
+      "const ::std::string $classname$::$default_variable$($default$);\n");
   }
 }
 
@@ -203,13 +184,13 @@ void StringFieldGenerator::
 GenerateClearingCode(io::Printer* printer) const {
   if (descriptor_->default_value_string().empty()) {
     printer->Print(variables_,
-      "if ($name$_ != $default_variable$) {\n"
+      "if ($name$_ != &$default_variable$) {\n"
       "  $name$_->clear();\n"
       "}\n");
   } else {
     printer->Print(variables_,
-      "if ($name$_ != $default_variable$) {\n"
-      "  $name$_->assign(*$default_variable$);\n"
+      "if ($name$_ != &$default_variable$) {\n"
+      "  $name$_->assign($default_variable$);\n"
       "}\n");
   }
 }
@@ -227,32 +208,15 @@ GenerateSwappingCode(io::Printer* printer) const {
 void StringFieldGenerator::
 GenerateConstructorCode(io::Printer* printer) const {
   printer->Print(variables_,
-    "$name$_ = const_cast< ::std::string*>($default_variable$);\n");
+    "$name$_ = const_cast< ::std::string*>(&$default_variable$);\n");
 }
 
 void StringFieldGenerator::
 GenerateDestructorCode(io::Printer* printer) const {
   printer->Print(variables_,
-    "if ($name$_ != $default_variable$) {\n"
+    "if ($name$_ != &$default_variable$) {\n"
     "  delete $name$_;\n"
     "}\n");
-}
-
-void StringFieldGenerator::
-GenerateDefaultInstanceAllocator(io::Printer* printer) const {
-  if (!descriptor_->default_value_string().empty()) {
-    printer->Print(variables_,
-      "$classname$::$default_variable$ =\n"
-      "    new ::std::string($default$, $default_length$);\n");
-  }
-}
-
-void StringFieldGenerator::
-GenerateShutdownCode(io::Printer* printer) const {
-  if (!descriptor_->default_value_string().empty()) {
-    printer->Print(variables_,
-      "delete $classname$::$default_variable$;\n");
-  }
 }
 
 void StringFieldGenerator::
@@ -309,10 +273,9 @@ GenerateByteSize(io::Printer* printer) const {
 // ===================================================================
 
 RepeatedStringFieldGenerator::
-RepeatedStringFieldGenerator(const FieldDescriptor* descriptor,
-                             const Options& options)
+RepeatedStringFieldGenerator(const FieldDescriptor* descriptor)
   : descriptor_(descriptor) {
-  SetStringVariables(descriptor, &variables_, options);
+  SetStringVariables(descriptor, &variables_);
 }
 
 RepeatedStringFieldGenerator::~RepeatedStringFieldGenerator() {}
@@ -365,7 +328,7 @@ void RepeatedStringFieldGenerator::
 GenerateInlineAccessorDefinitions(io::Printer* printer) const {
   printer->Print(variables_,
     "inline const ::std::string& $classname$::$name$(int index) const {\n"
-    "  return $name$_.$cppget$(index);\n"
+    "  return $name$_.Get(index);\n"
     "}\n"
     "inline ::std::string* $classname$::mutable_$name$(int index) {\n"
     "  return $name$_.Mutable(index);\n"
@@ -435,8 +398,7 @@ GenerateMergeFromCodedStream(io::Printer* printer) const {
       descriptor_->type() == FieldDescriptor::TYPE_STRING) {
     printer->Print(variables_,
       "::google::protobuf::internal::WireFormat::VerifyUTF8String(\n"
-      "  this->$name$(this->$name$_size() - 1).data(),\n"
-      "  this->$name$(this->$name$_size() - 1).length(),\n"
+      "  this->$name$(0).data(), this->$name$(0).length(),\n"
       "  ::google::protobuf::internal::WireFormat::PARSE);\n");
   }
 }

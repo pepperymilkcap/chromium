@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/process/process.h"
-#include "base/time/time.h"
+#include "base/process.h"
+#include "base/scoped_temp_dir.h"
+#include "base/time.h"
 
 class AutomationProxy;
 
@@ -44,7 +44,7 @@ class ProxyLauncher {
 
     // If set, the profiles in this path are copied
     // into the user data directory for the test.
-    base::FilePath template_user_data;
+    FilePath template_user_data;
 
     // Called just before starting the browser to allow any setup of the
     // profile for the run time environment.
@@ -89,8 +89,18 @@ class ProxyLauncher {
   void CloseBrowserAndServer();
 
   // Launches the browser with the given command line. Returns true on success.
-  // TODO(phajdan.jr): Make LaunchBrowser private.
+  // TODO(phajdan.jr): Make LaunchBrowser private. Tests should use
+  // LaunchAnotherBrowserBlockUntilClosed.
   bool LaunchBrowser(const LaunchState& state) WARN_UNUSED_RESULT;
+
+#if !defined(OS_MACOSX)
+  // This function is not defined on the Mac because the concept
+  // doesn't apply to Mac; you can't have N browser processes.
+
+  // Launches another browser process and waits for it to finish.
+  // Returns true on success.
+  bool LaunchAnotherBrowserBlockUntilClosed(const LaunchState& state);
+#endif
 
   // Exits out of browser instance.
   void QuitBrowser();
@@ -105,12 +115,12 @@ class ProxyLauncher {
   // Wait for the browser process to shut down on its own (i.e. as a result of
   // some action that your test has taken). If it has exited within |timeout|,
   // puts the exit code in |exit_code| and returns true.
-  bool WaitForBrowserProcessToQuit(base::TimeDelta timeout, int* exit_code);
+  bool WaitForBrowserProcessToQuit(int timeout, int* exit_code);
 
   AutomationProxy* automation() const;
 
   // Return the user data directory being used by the browser instance.
-  base::FilePath user_data_dir() const;
+  FilePath user_data_dir() const;
 
   // Get the handle of browser process connected to the automation. This
   // function only returns a reference to the handle so the caller does not
@@ -134,7 +144,7 @@ class ProxyLauncher {
  protected:
   // Creates an automation proxy.
   virtual AutomationProxy* CreateAutomationProxy(
-      base::TimeDelta execution_timeout) = 0;
+      int execution_timeout) = 0;
 
   // Returns the automation proxy's channel with any prefixes prepended,
   // for passing as a command line parameter over to the browser.
@@ -143,6 +153,10 @@ class ProxyLauncher {
   // Paired with ConnectToRunningBrowser().
   // Disconnects the testing IPC from the browser.
   void DisconnectFromRunningBrowser();
+
+  virtual bool ShouldFilterInet() {
+    return true;
+  }
 
  private:
   bool WaitForBrowserLaunch(bool wait_for_initial_loads) WARN_UNUSED_RESULT;
@@ -160,7 +174,7 @@ class ProxyLauncher {
 
   // We use a temporary directory for profile to avoid issues with being
   // unable to delete some files because they're in use, etc.
-  base::ScopedTempDir temp_profile_dir_;
+  ScopedTempDir temp_profile_dir_;
 
   // Handle to the first Chrome process.
   base::ProcessHandle process_;
@@ -185,6 +199,9 @@ class ProxyLauncher {
 
   // If true, a user is paying attention to the test, so show error dialogs.
   bool show_error_dialogs_;
+
+  // Include histograms in log on exit.
+  bool dump_histograms_on_exit_;
 
   // Enable dchecks in release mode.
   bool enable_dcheck_;
@@ -215,8 +232,7 @@ class NamedProxyLauncher : public ProxyLauncher {
   NamedProxyLauncher(const std::string& channel_id,
                      bool launch_browser, bool disconnect_on_failure);
 
-  virtual AutomationProxy* CreateAutomationProxy(
-      base::TimeDelta execution_timeout);
+  virtual AutomationProxy* CreateAutomationProxy(int execution_timeout);
   virtual bool InitializeConnection(
       const LaunchState& state,
       bool wait_for_initial_loads) OVERRIDE WARN_UNUSED_RESULT;
@@ -236,8 +252,7 @@ class NamedProxyLauncher : public ProxyLauncher {
 class AnonymousProxyLauncher : public ProxyLauncher {
  public:
   explicit AnonymousProxyLauncher(bool disconnect_on_failure);
-  virtual AutomationProxy* CreateAutomationProxy(
-      base::TimeDelta execution_timeout);
+  virtual AutomationProxy* CreateAutomationProxy(int execution_timeout);
   virtual bool InitializeConnection(
       const LaunchState& state,
       bool wait_for_initial_loads) OVERRIDE WARN_UNUSED_RESULT;

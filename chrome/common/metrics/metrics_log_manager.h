@@ -4,92 +4,41 @@
 
 #ifndef CHROME_COMMON_METRICS_METRICS_LOG_MANAGER_H_
 #define CHROME_COMMON_METRICS_METRICS_LOG_MANAGER_H_
+#pragma once
 
+#include "base/basictypes.h"
+#include "base/memory/scoped_ptr.h"
 
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
-#include "chrome/common/metrics/metrics_log_base.h"
+class MetricsLogBase;
 
 // Manages all the log objects used by a MetricsService implementation. Keeps
 // track of both an in progress log and a log that is staged for uploading as
 // text, as well as saving logs to, and loading logs from, persistent storage.
 class MetricsLogManager {
  public:
-  typedef MetricsLogBase::LogType LogType;
-
   MetricsLogManager();
   ~MetricsLogManager();
 
-  class SerializedLog {
-   public:
-    SerializedLog();
-    ~SerializedLog();
-
-    const std::string& log_text() const { return log_text_; }
-    const std::string& log_hash() const { return log_hash_; }
-
-    // Returns true if the log is empty.
-    bool IsEmpty() const;
-
-    // Swaps log text with |log_text| and updates the hash. This is more
-    // performant than a regular setter as it avoids doing a large string copy.
-    void SwapLogText(std::string* log_text);
-
-    // Clears the log.
-    void Clear();
-
-    // Swaps log contents with |other|.
-    void Swap(SerializedLog* other);
-
-   private:
-    // Non-human readable log text (serialized proto).
-    std::string log_text_;
-
-    // Non-human readable SHA1 of |log_text| or empty if |log_text| is empty.
-    std::string log_hash_;
-
-    // Intentionally omits DISALLOW_COPY_AND_ASSIGN() so that it can be used
-    // in std::vector<SerializedLog>.
-  };
-
-  enum StoreType {
-    NORMAL_STORE,       // A standard store operation.
-    PROVISIONAL_STORE,  // A store operation that can be easily reverted later.
-  };
-
-  // Takes ownership of |log|, which has type |log_type|, and makes it the
-  // current_log. This should only be called if there is not a current log.
-  void BeginLoggingWithLog(MetricsLogBase* log, LogType log_type);
+  // Takes ownership of |log|, and makes it the current_log.
+  // This should only be called if there is not a current log.
+  void BeginLoggingWithLog(MetricsLogBase* log);
 
   // Returns the in-progress log.
   MetricsLogBase* current_log() { return current_log_.get(); }
 
-  // Closes current_log(), compresses it, and stores the compressed log for
-  // later, leaving current_log() NULL.
-  void FinishCurrentLog();
-
-  // Returns true if there are any logs waiting to be uploaded.
-  bool has_unsent_logs() const {
-    return !unsent_initial_logs_.empty() || !unsent_ongoing_logs_.empty();
-  }
-
-  // Populates staged_log_text() with the next stored log to send.
-  // Should only be called if has_unsent_logs() is true.
-  void StageNextLogForUpload();
+  // Closes |current_log| and stages it for upload, leaving |current_log| NULL.
+  void StageCurrentLogForUpload();
 
   // Returns true if there is a log that needs to be, or is being, uploaded.
+  // Note that this returns true even if compressing the log text failed.
   bool has_staged_log() const;
 
-  // The text of the staged log, as a serialized protobuf. Empty if there is no
-  // staged log, or if compression of the staged log failed.
-  const std::string& staged_log_text() const { return staged_log_.log_text(); }
-
-  // The SHA1 hash (non-human readable) of the staged log or empty if there is
-  // no staged log.
-  const std::string& staged_log_hash() const { return staged_log_.log_hash(); }
+  // The compressed text of the staged log. Empty if there is no staged log,
+  // or if compression of the staged log failed.
+  const std::string& staged_log_text() { return compressed_staged_log_text_; }
 
   // Discards the staged log.
   void DiscardStagedLog();
@@ -104,27 +53,32 @@ class MetricsLogManager {
   // removed.
   void PauseCurrentLog();
 
-  // Restores the previously paused log (if any) to current_log().
+  // Restores the previously paused log (if any) to current_log.
   // This should only be called if there is not a current log.
   void ResumePausedLog();
 
-  // Saves the staged log, then clears staged_log().
-  // If |store_type| is PROVISIONAL_STORE, it can be dropped from storage with
-  // a later call to DiscardLastProvisionalStore (if it hasn't already been
-  // staged again).
-  // This is intended to be used when logs are being saved while an upload is in
-  // progress, in case the upload later succeeds.
-  // This can only be called if has_staged_log() is true.
-  void StoreStagedLogAsUnsent(StoreType store_type);
+  // Returns true if there are any logs left over from previous sessions that
+  // need to be uploaded.
+  bool has_unsent_logs() const {
+    return !unsent_initial_logs_.empty() || !unsent_ongoing_logs_.empty();
+  }
 
-  // Discards the last log stored with StoreStagedLogAsUnsent with |store_type|
-  // set to PROVISIONAL_STORE, as long as it hasn't already been re-staged. If
-  // the log is no longer present, this is a no-op.
-  void DiscardLastProvisionalStore();
+  enum LogType {
+    INITIAL_LOG,  // The first log of a session.
+    ONGOING_LOG,  // Subsequent logs in a session.
+  };
 
-  // Sets the threshold for how large an onging log can be and still be written
-  // to persistant storage. Ongoing logs larger than this will be discarded
-  // before persisting. 0 is interpreted as no limit.
+  // Saves the staged log as the given type (or discards it in accordance with
+  // set_max_ongoing_log_store_size), then clears the staged log.
+  // This can only be called after StageCurrentLogForUpload.
+  void StoreStagedLogAsUnsent(LogType log_type);
+
+  // Populates staged_log_text with the next stored log to send.
+  void StageNextStoredLogForUpload();
+
+  // Sets the threshold for how large an onging log can be and still be stored.
+  // Ongoing logs larger than this will be discarded. 0 is interpreted as no
+  // limit.
   void set_max_ongoing_log_store_size(size_t max_size) {
     max_ongoing_log_store_size_ = max_size;
   }
@@ -137,13 +91,13 @@ class MetricsLogManager {
 
     // Serializes |logs| to persistent storage, replacing any previously
     // serialized logs of the same type.
-    virtual void SerializeLogs(const std::vector<SerializedLog>& logs,
+    virtual void SerializeLogs(const std::vector<std::string>& logs,
                                LogType log_type) = 0;
 
     // Populates |logs| with logs of type |log_type| deserialized from
     // persistent storage.
     virtual void DeserializeLogs(LogType log_type,
-                                 std::vector<SerializedLog>* logs) = 0;
+                                 std::vector<std::string>* logs) = 0;
   };
 
   // Sets the serializer to use for persisting and loading logs; takes ownership
@@ -161,52 +115,38 @@ class MetricsLogManager {
   void LoadPersistedUnsentLogs();
 
  private:
-  // Saves |log| as the given type (or discards it in accordance with
-  // |max_ongoing_log_store_size_|).
-  // NOTE: This clears the contents of |log| (to avoid an expensive copy),
-  // so the log should be discarded after this call.
-  void StoreLog(SerializedLog* log,
-                LogType log_type,
-                StoreType store_type);
+  // Compresses staged_log_ and stores the result in
+  // compressed_staged_log_text_.
+  void CompressStagedLog();
 
-  // Compresses |current_log_| into |compressed_log|.
-  void CompressCurrentLog(SerializedLog* compressed_log);
-
-  // Tracks whether unsent logs (if any) have been loaded from the serializer.
-  bool unsent_logs_loaded_;
+  // Compresses the text in |input| using bzip2, store the result in |output|.
+  static bool Bzip2Compress(const std::string& input, std::string* output);
 
   // The log that we are still appending to.
   scoped_ptr<MetricsLogBase> current_log_;
-  LogType current_log_type_;
 
   // A paused, previously-current log.
   scoped_ptr<MetricsLogBase> paused_log_;
-  LogType paused_log_type_;
+
+  // The log that we are currently transmiting, or about to try to transmit.
+  // Note that when using StageNextStoredLogForUpload, this can be NULL while
+  // compressed_staged_log_text_ is non-NULL.
+  scoped_ptr<MetricsLogBase> staged_log_;
 
   // Helper class to handle serialization/deserialization of logs for persistent
   // storage. May be NULL.
   scoped_ptr<LogSerializer> log_serializer_;
 
-  // The current staged log, ready for upload to the server.
-  SerializedLog staged_log_;
-  LogType staged_log_type_;
+  // The compressed text of the staged log, ready for upload to the server.
+  std::string compressed_staged_log_text_;
 
   // Logs from a previous session that have not yet been sent.
   // Note that the vector has the oldest logs listed first (early in the
   // vector), and we'll discard old logs if we have gathered too many logs.
-  std::vector<SerializedLog> unsent_initial_logs_;
-  std::vector<SerializedLog> unsent_ongoing_logs_;
+  std::vector<std::string> unsent_initial_logs_;
+  std::vector<std::string> unsent_ongoing_logs_;
 
   size_t max_ongoing_log_store_size_;
-
-  // The index and type of the last provisional store. If nothing has been
-  // provisionally stored, or the last provisional store has already been
-  // re-staged, the index will be -1;
-  // This is necessary because during an upload there are two logs (staged
-  // and current) and a client might store them in either order, so it's
-  // not necessarily the case that the provisional store is the last store.
-  int last_provisional_store_index_;
-  LogType last_provisional_store_type_;
 
   DISALLOW_COPY_AND_ASSIGN(MetricsLogManager);
 };

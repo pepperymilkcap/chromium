@@ -1,25 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_NODE_DATA_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_NODE_DATA_H_
+#pragma once
 
 #include <vector>
 
-#include "base/files/file_path.h"
-#include "base/strings/string16.h"
-#include "base/time/time.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
-#include "ui/base/clipboard/clipboard_types.h"
+#include "base/file_path.h"
+#include "base/string16.h"
+#include "googleurl/src/gurl.h"
 
-#include "url/gurl.h"
 #if defined(TOOLKIT_VIEWS)
 #include "ui/base/dragdrop/os_exchange_data.h"
 #endif
 
+class BookmarkNode;
 class Pickle;
-class PickleIterator;
 class Profile;
 
 // BookmarkNodeData is used to represent the following:
@@ -54,37 +52,29 @@ struct BookmarkNodeData {
     GURL url;
 
     // Title of the entry, used for both urls and folders.
-    base::string16 title;
-
-    // Date of when this node was created.
-    base::Time date_added;
-
-    // Date of the last modification. Only used for folders.
-    base::Time date_folder_modified;
+    string16 title;
 
     // Children, only used for non-URL nodes.
     std::vector<Element> children;
 
-    // Meta info for the bookmark node.
-    BookmarkNode::MetaInfoMap meta_info_map;
-
-    int64 id() const { return id_; }
+    int64 id() { return id_; }
 
    private:
     friend struct BookmarkNodeData;
 
     // For reading/writing this Element.
     void WriteToPickle(Pickle* pickle) const;
-    bool ReadFromPickle(Pickle* pickle, PickleIterator* iterator);
+    bool ReadFromPickle(Pickle* pickle, void** iterator);
 
     // ID of the node.
     int64 id_;
   };
 
-  // The MIME type for the clipboard format for BookmarkNodeData.
-  static const char* kClipboardFormatString;
-
   BookmarkNodeData();
+
+#if defined(TOOLKIT_VIEWS)
+  static ui::OSExchangeData::CustomFormat GetBookmarkCustomFormat();
+#endif
 
   // Created a BookmarkNodeData populated from the arguments.
   explicit BookmarkNodeData(const BookmarkNode* node);
@@ -92,24 +82,24 @@ struct BookmarkNodeData {
 
   ~BookmarkNodeData();
 
-#if defined(TOOLKIT_VIEWS)
-  static const ui::OSExchangeData::CustomFormat& GetBookmarkCustomFormat();
-#endif
-
-  static bool ClipboardContainsBookmarks();
-
   // Reads bookmarks from the given vector.
   bool ReadFromVector(const std::vector<const BookmarkNode*>& nodes);
 
   // Creates a single-bookmark DragData from url/title pair.
-  bool ReadFromTuple(const GURL& url, const base::string16& title);
+  bool ReadFromTuple(const GURL& url, const string16& title);
 
-  // Writes bookmarks to the specified clipboard.
-  void WriteToClipboard(ui::ClipboardType type);
+  // Writes elements to the clipboard.
+  void WriteToClipboard(Profile* profile) const;
 
-  // Reads bookmarks from the specified clipboard. Prefers data written via
-  // WriteToClipboard() but will also attempt to read a plain bookmark.
-  bool ReadFromClipboard(ui::ClipboardType type);
+  // Reads bookmarks from the general copy/paste clipboard. Prefers data
+  // written via WriteToClipboard but will also attempt to read a plain
+  // bookmark.
+  bool ReadFromClipboard();
+#if defined(OS_MACOSX)
+  // Reads bookmarks that are being dragged from the drag and drop
+  // pasteboard.
+  bool ReadFromDragClipboard();
+#endif
 
 #if defined(TOOLKIT_VIEWS)
   // Writes elements to data. If there is only one element and it is a URL
@@ -162,9 +152,14 @@ struct BookmarkNodeData {
   // The actual elements written to the clipboard.
   std::vector<Element> elements;
 
+  // The MIME type for the clipboard format for BookmarkNodeData.
+  static const char* kClipboardFormatString;
+
+  static bool ClipboardContainsBookmarks();
+
  private:
   // Path of the profile we originated from.
-  base::FilePath profile_path_;
+  FilePath profile_path_;
 };
 
 #endif  // CHROME_BROWSER_BOOKMARKS_BOOKMARK_NODE_DATA_H_

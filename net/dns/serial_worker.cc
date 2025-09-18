@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop_proxy.h"
 #include "base/threading/worker_pool.h"
 
 namespace net {
@@ -28,11 +28,10 @@ void SerialWorker::WorkNow() {
         NOTREACHED() << "WorkerPool::PostTask is not expected to fail on posix";
 #else
         LOG(WARNING) << "Failed to WorkerPool::PostTask, will retry later";
-        const int kWorkerPoolRetryDelayMs = 100;
         message_loop_->PostDelayedTask(
             FROM_HERE,
             base::Bind(&SerialWorker::RetryWork, this),
-            base::TimeDelta::FromMilliseconds(kWorkerPoolRetryDelayMs));
+            kWorkerPoolRetryDelayMs);
         state_ = WAITING;
         return;
 #endif

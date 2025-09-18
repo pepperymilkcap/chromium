@@ -1,22 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_DISK_CACHE_STATS_H_
 #define NET_DISK_CACHE_STATS_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "net/disk_cache/addr.h"
+#include "base/memory/scoped_ptr.h"
 #include "net/disk_cache/stats_histogram.h"
 
-namespace base {
-class HistogramSamples;
-}  // namespace base
-
 namespace disk_cache {
+
+class BackendImpl;
 
 typedef std::vector<std::pair<std::string, std::string> > StatsItems;
 
@@ -47,21 +46,13 @@ class Stats {
     LAST_REPORT,  // Time of the last time we sent a report.
     LAST_REPORT_TIMER,  // Timer count of the last time we sent a report.
     DOOM_RECENT,  // The cache was partially cleared.
-    UNUSED,  // Was: ga.js was evicted from the cache.
     MAX_COUNTER
   };
 
   Stats();
   ~Stats();
 
-  // Initializes this object with |data| from disk.
-  bool Init(void* data, int num_bytes, Addr address);
-
-  // Generates a size distribution histogram.
-  void InitSizeHistogram();
-
-  // Returns the number of bytes needed to store the stats on disk.
-  int StorageSize();
+  bool Init(BackendImpl* backend, uint32* storage_addr);
 
   // Tracks changes to the stoage space used by an entry.
   void ModifyStorageStats(int32 old_size, int32 new_size);
@@ -79,20 +70,20 @@ class Stats {
   // Returns the lower bound of the space used by entries bigger than 512 KB.
   int GetLargeEntriesSize();
 
-  // Writes the stats into |data|, to be stored at the given cache address.
-  // Returns the number of bytes copied.
-  int SerializeStats(void* data, int num_bytes, Addr* address);
+  // Saves the stats to disk.
+  void Store();
 
   // Support for StatsHistograms. Together, these methods allow StatsHistograms
   // to take a snapshot of the data_sizes_ as the histogram data.
   int GetBucketRange(size_t i) const;
-  void Snapshot(base::HistogramSamples* samples) const;
+  void Snapshot(StatsHistogram::StatsSamples* samples) const;
 
  private:
   int GetStatsBucket(int32 size);
   int GetRatio(Counters hit, Counters miss) const;
 
-  Addr storage_addr_;
+  BackendImpl* backend_;
+  uint32 storage_addr_;
   int data_sizes_[kDataSizesLength];
   int64 counters_[MAX_COUNTER];
   StatsHistogram* size_histogram_;

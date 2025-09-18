@@ -1,17 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_INTERPOLATED_TRANSFORM_H_
 #define UI_GFX_INTERPOLATED_TRANSFORM_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/gfx/point.h"
-#include "ui/gfx/point3_f.h"
+#include "ui/gfx/point3.h"
 #include "ui/gfx/transform.h"
-#include "ui/gfx/transform_util.h"
-#include "ui/gfx/vector3d_f.h"
 
 namespace ui {
 
@@ -25,7 +24,7 @@ namespace ui {
 // scale from 0.3 to 1 from between times 0.75 and 1.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class GFX_EXPORT InterpolatedTransform {
+class UI_EXPORT InterpolatedTransform {
  public:
   InterpolatedTransform();
   // The interpolated transform varies only when t in (start_time, end_time).
@@ -35,7 +34,7 @@ class GFX_EXPORT InterpolatedTransform {
   virtual ~InterpolatedTransform();
 
   // Returns the interpolated transform at time t. Note: not virtual.
-  gfx::Transform Interpolate(float t) const;
+  ui::Transform Interpolate(float t) const;
 
   // The Intepolate ultimately returns the product of our transform at time t
   // and our child's transform at time t (if we have one).
@@ -43,14 +42,14 @@ class GFX_EXPORT InterpolatedTransform {
   // This function takes ownership of the passed InterpolatedTransform.
   void SetChild(InterpolatedTransform* child);
 
-  // If the interpolated transform is reversed, Interpolate(t) will return
-  // Interpolate(1 - t)
-  void SetReversed(bool reversed) { reversed_ = reversed; }
-  bool Reversed() const { return reversed_; }
+  static bool FactorTRS(const ui::Transform& transform,
+                        gfx::Point* translation,
+                        float* rotation,
+                        gfx::Point3f* scale);
 
  protected:
   // Calculates the interpolated transform without considering our child.
-  virtual gfx::Transform InterpolateButDoNotCompose(float t) const = 0;
+  virtual ui::Transform InterpolateButDoNotCompose(float t) const = 0;
 
   // If time in (start_time_, end_time_], this function linearly interpolates
   // between start_value and end_value.  More precisely it returns
@@ -73,8 +72,6 @@ class GFX_EXPORT InterpolatedTransform {
   // transform, we can chain collections of transforms together.
   scoped_ptr<InterpolatedTransform> child_;
 
-  bool reversed_;
-
   DISALLOW_COPY_AND_ASSIGN(InterpolatedTransform);
 };
 
@@ -84,7 +81,7 @@ class GFX_EXPORT InterpolatedTransform {
 // Represents an animated rotation.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class GFX_EXPORT InterpolatedRotation : public InterpolatedTransform {
+class UI_EXPORT InterpolatedRotation : public InterpolatedTransform {
  public:
   InterpolatedRotation(float start_degrees, float end_degrees);
   InterpolatedRotation(float start_degrees,
@@ -94,7 +91,7 @@ class GFX_EXPORT InterpolatedRotation : public InterpolatedTransform {
   virtual ~InterpolatedRotation();
 
  protected:
-  virtual gfx::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
+  virtual ui::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
 
  private:
   const float start_degrees_;
@@ -104,64 +101,35 @@ class GFX_EXPORT InterpolatedRotation : public InterpolatedTransform {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// class InterpolatedAxisAngleRotation
-//
-// Represents an animated rotation.
-//
-///////////////////////////////////////////////////////////////////////////////
-class GFX_EXPORT InterpolatedAxisAngleRotation : public InterpolatedTransform {
- public:
-  InterpolatedAxisAngleRotation(const gfx::Vector3dF& axis,
-                                float start_degrees,
-                                float end_degrees);
-  InterpolatedAxisAngleRotation(const gfx::Vector3dF& axis,
-                                float start_degrees,
-                                float end_degrees,
-                                float start_time,
-                                float end_time);
-  virtual ~InterpolatedAxisAngleRotation();
-
- protected:
-  virtual gfx::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
-
- private:
-  gfx::Vector3dF axis_;
-  const float start_degrees_;
-  const float end_degrees_;
-
-  DISALLOW_COPY_AND_ASSIGN(InterpolatedAxisAngleRotation);
-};
-
-///////////////////////////////////////////////////////////////////////////////
 // class InterpolatedScale
 //
 // Represents an animated scale.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class GFX_EXPORT InterpolatedScale : public InterpolatedTransform {
+class UI_EXPORT InterpolatedScale : public InterpolatedTransform {
  public:
   InterpolatedScale(float start_scale, float end_scale);
   InterpolatedScale(float start_scale, float end_scale,
                     float start_time, float end_time);
-  InterpolatedScale(const gfx::Point3F& start_scale,
-                    const gfx::Point3F& end_scale);
-  InterpolatedScale(const gfx::Point3F& start_scale,
-                    const gfx::Point3F& end_scale,
+  InterpolatedScale(const gfx::Point3f& start_scale,
+                    const gfx::Point3f& end_scale);
+  InterpolatedScale(const gfx::Point3f& start_scale,
+                    const gfx::Point3f& end_scale,
                     float start_time,
                     float end_time);
   virtual ~InterpolatedScale();
 
  protected:
-  virtual gfx::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
+  virtual ui::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
 
  private:
-  const gfx::Point3F start_scale_;
-  const gfx::Point3F end_scale_;
+  const gfx::Point3f start_scale_;
+  const gfx::Point3f end_scale_;
 
   DISALLOW_COPY_AND_ASSIGN(InterpolatedScale);
 };
 
-class GFX_EXPORT InterpolatedTranslation : public InterpolatedTransform {
+class UI_EXPORT InterpolatedTranslation : public InterpolatedTransform {
  public:
   InterpolatedTranslation(const gfx::Point& start_pos,
                           const gfx::Point& end_pos);
@@ -172,7 +140,7 @@ class GFX_EXPORT InterpolatedTranslation : public InterpolatedTransform {
   virtual ~InterpolatedTranslation();
 
  protected:
-  virtual gfx::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
+  virtual ui::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
 
  private:
   const gfx::Point start_pos_;
@@ -190,16 +158,16 @@ class GFX_EXPORT InterpolatedTranslation : public InterpolatedTransform {
 // See InterpolatedTransformAboutPivot for an example of its usage.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class GFX_EXPORT InterpolatedConstantTransform : public InterpolatedTransform {
+class UI_EXPORT InterpolatedConstantTransform : public InterpolatedTransform {
  public:
-  explicit InterpolatedConstantTransform(const gfx::Transform& transform);
+  InterpolatedConstantTransform(const ui::Transform& transform);
   virtual ~InterpolatedConstantTransform();
 
  protected:
-  virtual gfx::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
+  virtual ui::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
 
  private:
-  const gfx::Transform transform_;
+  const ui::Transform transform_;
 
   DISALLOW_COPY_AND_ASSIGN(InterpolatedConstantTransform);
 };
@@ -212,8 +180,7 @@ class GFX_EXPORT InterpolatedConstantTransform : public InterpolatedTransform {
 // P * T * P^-1 where P is a constant transform to the new origin.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class GFX_EXPORT InterpolatedTransformAboutPivot
-    : public InterpolatedTransform {
+class UI_EXPORT InterpolatedTransformAboutPivot : public InterpolatedTransform {
  public:
   // Takes ownership of the passed transform.
   InterpolatedTransformAboutPivot(const gfx::Point& pivot,
@@ -227,7 +194,7 @@ class GFX_EXPORT InterpolatedTransformAboutPivot
   virtual ~InterpolatedTransformAboutPivot();
 
  protected:
-  virtual gfx::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
+  virtual Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
 
  private:
   void Init(const gfx::Point& pivot, InterpolatedTransform* transform);
@@ -237,29 +204,28 @@ class GFX_EXPORT InterpolatedTransformAboutPivot
   DISALLOW_COPY_AND_ASSIGN(InterpolatedTransformAboutPivot);
 };
 
-class GFX_EXPORT InterpolatedMatrixTransform : public InterpolatedTransform {
+class UI_EXPORT InterpolatedTRSTransform : public InterpolatedTransform {
  public:
-  InterpolatedMatrixTransform(const gfx::Transform& start_transform,
-                              const gfx::Transform& end_transform);
+  InterpolatedTRSTransform(const Transform& start_transform,
+                           const Transform& end_transform);
 
-  InterpolatedMatrixTransform(const gfx::Transform& start_transform,
-                              const gfx::Transform& end_transform,
-                              float start_time,
-                              float end_time);
+  InterpolatedTRSTransform(const Transform& start_transform,
+                           const Transform& end_transform,
+                           float start_time,
+                           float end_time);
 
-  virtual ~InterpolatedMatrixTransform();
+  virtual ~InterpolatedTRSTransform();
 
  protected:
-  virtual gfx::Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
+  virtual Transform InterpolateButDoNotCompose(float t) const OVERRIDE;
 
  private:
-  void Init(const gfx::Transform& start_transform,
-            const gfx::Transform& end_transform);
+  void Init(const ui::Transform& start_transform,
+            const ui::Transform& end_transform);
 
-  gfx::DecomposedTransform start_decomp_;
-  gfx::DecomposedTransform end_decomp_;
+  scoped_ptr<InterpolatedTransform> transform_;
 };
 
 } // namespace ui
 
-#endif  // UI_GFX_INTERPOLATED_TRANSFORM_H_
+#endif // UI_GFX_INTERPOLATED_TRANSFORM_H_

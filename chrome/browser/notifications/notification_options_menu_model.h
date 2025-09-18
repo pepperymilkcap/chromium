@@ -4,13 +4,10 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_OPTIONS_MENU_MODEL_H_
 #define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_OPTIONS_MENU_MODEL_H_
+#pragma once
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
+#include "chrome/browser/notifications/balloon.h"
 #include "ui/base/models/simple_menu_model.h"
-
-class Balloon;
 
 // Model for the corner-selection submenu.
 class CornerSelectionMenuModel : public ui::SimpleMenuModel,
@@ -25,7 +22,7 @@ class CornerSelectionMenuModel : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
 
  private:
   // Not owned.
@@ -43,7 +40,7 @@ class NotificationOptionsMenuModel : public ui::SimpleMenuModel,
 
   // Overridden from ui::SimpleMenuModel:
   virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
-  virtual base::string16 GetLabelForCommandId(int command_id) const OVERRIDE;
+  virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
 
   // Overridden from ui::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
@@ -51,7 +48,7 @@ class NotificationOptionsMenuModel : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
 
  private:
   Balloon* balloon_; // Not owned.

@@ -7,10 +7,10 @@
 namespace net {
 
 HttpRequestInfo::HttpRequestInfo()
-    : upload_data_stream(NULL),
-      load_flags(0),
+    : load_flags(0),
+      priority(LOWEST),
       motivation(NORMAL_MOTIVATION),
-      privacy_mode(kPrivacyModeDisabled) {
+      request_id(0) {
 }
 
 HttpRequestInfo::~HttpRequestInfo() {}

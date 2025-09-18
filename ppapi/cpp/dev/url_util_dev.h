@@ -10,15 +10,16 @@
 
 namespace pp {
 
-class InstanceHandle;
+class Instance;
 
 // Simple wrapper around the PPB_URLUtil interface.
 class URLUtil_Dev {
  public:
   // This class is just a collection of random functions that aren't
-  // particularly attached to anything. This may return NULL if the
-  // browser doesn't support the URLUtil interface. Since this is a
-  // singleton, don't delete the pointer.
+  // particularly attached to anything. So this getter returns a cached
+  // instance of this interface. This may return NULL if the browser doesn't
+  // support the URLUtil inteface. Since this is a singleton, don't delete the
+  // pointer.
   static const URLUtil_Dev* Get();
 
   Var Canonicalize(const Var& url,
@@ -27,28 +28,28 @@ class URLUtil_Dev {
   Var ResolveRelativeToURL(const Var& base_url,
                            const Var& relative_string,
                            PP_URLComponents_Dev* components = NULL) const;
-  Var ResolveRelativeToDocument(const InstanceHandle& instance,
+  Var ResolveRelativeToDocument(const Instance& instance,
                                 const Var& relative_string,
                                 PP_URLComponents_Dev* components = NULL) const;
 
   bool IsSameSecurityOrigin(const Var& url_a, const Var& url_b) const;
-  bool DocumentCanRequest(const InstanceHandle& instance, const Var& url) const;
-  bool DocumentCanAccessDocument(const InstanceHandle& active,
-                                 const InstanceHandle& target) const;
-  Var GetDocumentURL(const InstanceHandle& instance,
+  bool DocumentCanRequest(const Instance& instance, const Var& url) const;
+  bool DocumentCanAccessDocument(const Instance& active,
+                                 const Instance& target) const;
+  Var GetDocumentURL(const Instance& instance,
                      PP_URLComponents_Dev* components = NULL) const;
 
-  Var GetPluginInstanceURL(const InstanceHandle& instance,
-                           PP_URLComponents_Dev* components = NULL) const;
-  Var GetPluginReferrerURL(const InstanceHandle& instance,
+  Var GetPluginInstanceURL(const Instance& instance,
                            PP_URLComponents_Dev* components = NULL) const;
 
  private:
-  URLUtil_Dev() {}
+  URLUtil_Dev() : interface_(NULL) {}
 
   // Copy and assignment are disallowed.
   URLUtil_Dev(const URLUtil_Dev& other);
   URLUtil_Dev& operator=(const URLUtil_Dev& other);
+
+  const PPB_URLUtil_Dev* interface_;
 };
 
 }  // namespace pp

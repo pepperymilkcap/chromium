@@ -1,17 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PULIC_COMMON_CHILD_PROCESS_HOST_H_
 #define CONTENT_PULIC_COMMON_CHILD_PROCESS_HOST_H_
+#pragma once
 
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_channel_proxy.h"
 
-namespace base {
 class FilePath;
-}
 
 namespace content {
 
@@ -20,7 +19,7 @@ class ChildProcessHostDelegate;
 // This represents a non-browser process. This can include traditional child
 // processes like plugins, or an embedder could even use this for long lived
 // processes that run independent of the browser process.
-class CONTENT_EXPORT ChildProcessHost : public IPC::Sender {
+class CONTENT_EXPORT ChildProcessHost : public IPC::Message::Sender {
  public:
   virtual ~ChildProcessHost() {}
 
@@ -73,7 +72,7 @@ class CONTENT_EXPORT ChildProcessHost : public IPC::Sender {
   // if none of these special behaviors are required.
   //
   // On failure, returns an empty FilePath.
-  static base::FilePath GetChildPath(int flags);
+  static FilePath GetChildPath(int flags);
 
   // Send the shutdown message to the child process.
   // Does not check with the delegate's CanShutdown.

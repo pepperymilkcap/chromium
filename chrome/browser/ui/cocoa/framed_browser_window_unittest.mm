@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/debug/debugger.h"
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/browser_frame_view.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,9 +21,13 @@ class FramedBrowserWindowTest : public CocoaTest {
   virtual void SetUp() {
     CocoaTest::SetUp();
     // Create a window.
+    const NSUInteger mask = NSTitledWindowMask | NSClosableWindowMask |
+        NSMiniaturizableWindowMask | NSResizableWindowMask;
     window_ = [[FramedBrowserWindow alloc]
                initWithContentRect:NSMakeRect(0, 0, 800, 600)
-                       hasTabStrip:YES];
+                         styleMask:mask
+                           backing:NSBackingStoreBuffered
+                             defer:NO];
     if (base::debug::BeingDebugged()) {
       [window_ orderFront:nil];
     } else {
@@ -43,18 +48,10 @@ class FramedBrowserWindowTest : public CocoaTest {
     while ([frameView superview]) {
       frameView = [frameView superview];
     }
-
-    // Inset to mask off left and right edges which vary in HighDPI.
-    NSRect bounds = NSInsetRect([frameView bounds], 4, 0);
-
-    // On 10.6, the grippy changes appearance slightly when painted the second
-    // time in a textured window. Since this test cares about the window title,
-    // cut off the bottom of the window.
-    bounds.size.height -= 40;
-    bounds.origin.y += 40;
+    const NSRect bounds = [frameView bounds];
 
     [frameView lockFocus];
-    base::scoped_nsobject<NSBitmapImageRep> bitmap(
+    scoped_nsobject<NSBitmapImageRep> bitmap(
         [[NSBitmapImageRep alloc] initWithFocusedViewRect:bounds]);
     [frameView unlockFocus];
 
@@ -107,10 +104,6 @@ TEST_F(FramedBrowserWindowTest, WindowWidgetLocation) {
   BOOL no = NO;
 
   // First without a tabstrip.
-  [window_ close];
-  window_ = [[FramedBrowserWindow alloc]
-             initWithContentRect:NSMakeRect(0, 0, 800, 600)
-                     hasTabStrip:NO];
   id controller = [OCMockObject mockForClass:[BrowserWindowController class]];
   [[[controller stub] andReturnValue:OCMOCK_VALUE(yes)]
       isKindOfClass:[BrowserWindowController class]];
@@ -140,13 +133,8 @@ TEST_F(FramedBrowserWindowTest, WindowWidgetLocation) {
                 kFramedWindowButtonsWithoutTabStripOffsetFromTop);
   EXPECT_EQ(NSMinX(miniaturizeFrame),
             NSMaxX(closeBoxFrame) + [window_ windowButtonsInterButtonSpacing]);
-  [window_ setWindowController:nil];
 
   // Then with a tabstrip.
-  [window_ close];
-  window_ = [[FramedBrowserWindow alloc]
-             initWithContentRect:NSMakeRect(0, 0, 800, 600)
-                     hasTabStrip:YES];
   controller = [OCMockObject mockForClass:[BrowserWindowController class]];
   [[[controller stub] andReturnValue:OCMOCK_VALUE(yes)]
       isKindOfClass:[BrowserWindowController class]];

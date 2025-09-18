@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_FIND_BAR_FIND_BAR_VIEW_H_
 #define CHROME_BROWSER_UI_COCOA_FIND_BAR_FIND_BAR_VIEW_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 

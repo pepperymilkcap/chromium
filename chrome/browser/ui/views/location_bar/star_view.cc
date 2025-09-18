@@ -1,54 +1,67 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 
-#include "base/metrics/histogram.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/bookmarks/bookmark_stats.h"
+#include "chrome/browser/command_updater.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
+#include "chrome/browser/ui/views/browser_dialogs.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 StarView::StarView(CommandUpdater* command_updater)
-    : BubbleIconView(command_updater, IDC_BOOKMARK_PAGE_FROM_STAR) {
+    : command_updater_(command_updater) {
   set_id(VIEW_ID_STAR_BUTTON);
   SetToggled(false);
+  set_accessibility_focusable(true);
 }
 
-StarView::~StarView() {}
+StarView::~StarView() {
+}
 
 void StarView::SetToggled(bool on) {
   SetTooltipText(l10n_util::GetStringUTF16(
       on ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR));
-  SetImage(ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+  SetImage(ResourceBundle::GetSharedInstance().GetBitmapNamed(
       on ? IDR_STAR_LIT : IDR_STAR));
 }
 
-bool StarView::IsBubbleShowing() const {
-  return BookmarkBubbleView::IsShowing();
+void StarView::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->name = l10n_util::GetStringUTF16(IDS_ACCNAME_STAR);
+  state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
 }
 
-void StarView::OnExecuting(
-    BubbleIconView::ExecuteSource execute_source) {
-  BookmarkEntryPoint entry_point = BOOKMARK_ENTRY_POINT_STAR_MOUSE;
-  switch (execute_source) {
-    case EXECUTE_SOURCE_MOUSE:
-      entry_point = BOOKMARK_ENTRY_POINT_STAR_MOUSE;
-      break;
-    case EXECUTE_SOURCE_KEYBOARD:
-      entry_point = BOOKMARK_ENTRY_POINT_STAR_KEY;
-      break;
-    case EXECUTE_SOURCE_GESTURE:
-      entry_point = BOOKMARK_ENTRY_POINT_STAR_GESTURE;
-      break;
+bool StarView::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
+  // Don't show tooltip to distract user if BookmarkBubbleView is showing.
+  if (browser::IsBookmarkBubbleViewShowing())
+    return false;
+
+  return ImageView::GetTooltipText(p, tooltip);
+}
+
+bool StarView::OnMousePressed(const views::MouseEvent& event) {
+  // We want to show the bubble on mouse release; that is the standard behavior
+  // for buttons.
+  return true;
+}
+
+void StarView::OnMouseReleased(const views::MouseEvent& event) {
+  if (event.IsOnlyLeftMouseButton() && HitTest(event.location()))
+    command_updater_->ExecuteCommand(IDC_BOOKMARK_PAGE);
+}
+
+bool StarView::OnKeyPressed(const views::KeyEvent& event) {
+  if (event.key_code() == ui::VKEY_SPACE ||
+      event.key_code() == ui::VKEY_RETURN) {
+    command_updater_->ExecuteCommand(IDC_BOOKMARK_PAGE);
+    return true;
   }
-  UMA_HISTOGRAM_ENUMERATION("Bookmarks.EntryPoint",
-                            entry_point,
-                            BOOKMARK_ENTRY_POINT_LIMIT);
+  return false;
 }

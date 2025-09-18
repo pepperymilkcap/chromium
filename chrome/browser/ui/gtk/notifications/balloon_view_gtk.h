@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_NOTIFICATIONS_BALLOON_VIEW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_NOTIFICATIONS_BALLOON_VIEW_GTK_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -16,8 +17,8 @@
 #include "chrome/browser/ui/gtk/notifications/balloon_view_host_gtk.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
-#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
@@ -28,7 +29,7 @@ class GtkThemeService;
 class MenuGtk;
 class NotificationOptionsMenuModel;
 
-namespace gfx {
+namespace ui {
 class SlideAnimation;
 }
 
@@ -37,7 +38,7 @@ class SlideAnimation;
 class BalloonViewImpl : public BalloonView,
                         public MenuGtk::Delegate,
                         public content::NotificationObserver,
-                        public gfx::AnimationDelegate {
+                        public ui::AnimationDelegate {
  public:
   explicit BalloonViewImpl(BalloonCollection* collection);
   virtual ~BalloonViewImpl();
@@ -59,8 +60,8 @@ class BalloonViewImpl : public BalloonView,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // gfx::AnimationDelegate interface.
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  // ui::AnimationDelegate interface.
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
   // Do the delayed close work.  The balloon and all view components will be
   // destroyed at this time, so it shouldn't be called while still processing
@@ -112,11 +113,14 @@ class BalloonViewImpl : public BalloonView,
   // The renderer of the HTML contents.
   scoped_ptr<BalloonViewHost> html_contents_;
 
+  // The following factory is used to call methods at a later time.
+  base::WeakPtrFactory<BalloonViewImpl> weak_factory_;
+
   // Close button.
   scoped_ptr<CustomDrawButton> close_button_;
 
   // An animation to move the balloon on the screen as its position changes.
-  scoped_ptr<gfx::SlideAnimation> animation_;
+  scoped_ptr<ui::SlideAnimation> animation_;
   gfx::Rect anim_frame_start_;
   gfx::Rect anim_frame_end_;
 
@@ -133,8 +137,6 @@ class BalloonViewImpl : public BalloonView,
 
   // Is there a pending system-initiated close?
   bool pending_close_;
-
-  base::WeakPtrFactory<BalloonViewImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BalloonViewImpl);
 };

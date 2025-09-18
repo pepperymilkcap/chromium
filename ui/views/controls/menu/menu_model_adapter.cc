@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/logging.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
-#include "ui/gfx/image/image.h"
 #include "ui/views/controls/menu/submenu_view.h"
 #include "ui/views/views_delegate.h"
 
@@ -51,84 +50,6 @@ MenuItemView* MenuModelAdapter::CreateMenu() {
   return item;
 }
 
-// Static.
-MenuItemView* MenuModelAdapter::AddMenuItemFromModelAt(ui::MenuModel* model,
-                                                       int model_index,
-                                                       MenuItemView* menu,
-                                                       int menu_index,
-                                                       int item_id) {
-  gfx::Image icon;
-  model->GetIconAt(model_index, &icon);
-  base::string16 label, sublabel, minor_text;
-  ui::MenuSeparatorType separator_style = ui::NORMAL_SEPARATOR;
-  MenuItemView::Type type;
-  ui::MenuModel::ItemType menu_type = model->GetTypeAt(model_index);
-
-  switch (menu_type) {
-    case ui::MenuModel::TYPE_COMMAND:
-      type = MenuItemView::NORMAL;
-      label = model->GetLabelAt(model_index);
-      sublabel = model->GetSublabelAt(model_index);
-      minor_text = model->GetMinorTextAt(model_index);
-      break;
-    case ui::MenuModel::TYPE_CHECK:
-      type = MenuItemView::CHECKBOX;
-      label = model->GetLabelAt(model_index);
-      sublabel = model->GetSublabelAt(model_index);
-      minor_text = model->GetMinorTextAt(model_index);
-      break;
-    case ui::MenuModel::TYPE_RADIO:
-      type = MenuItemView::RADIO;
-      label = model->GetLabelAt(model_index);
-      sublabel = model->GetSublabelAt(model_index);
-      minor_text = model->GetMinorTextAt(model_index);
-      break;
-    case ui::MenuModel::TYPE_SEPARATOR:
-      icon = gfx::Image();
-      type = MenuItemView::SEPARATOR;
-      separator_style = model->GetSeparatorTypeAt(model_index);
-      break;
-    case ui::MenuModel::TYPE_SUBMENU:
-      type = MenuItemView::SUBMENU;
-      label = model->GetLabelAt(model_index);
-      sublabel = model->GetSublabelAt(model_index);
-      minor_text = model->GetMinorTextAt(model_index);
-      break;
-    default:
-      NOTREACHED();
-      type = MenuItemView::NORMAL;
-      break;
-  }
-
-  return menu->AddMenuItemAt(
-      menu_index,
-      item_id,
-      label,
-      sublabel,
-      minor_text,
-      icon.IsEmpty() ? gfx::ImageSkia() : *icon.ToImageSkia(),
-      type,
-      separator_style);
-}
-
-// Static.
-MenuItemView* MenuModelAdapter::AppendMenuItemFromModel(ui::MenuModel* model,
-                                                        int model_index,
-                                                        MenuItemView* menu,
-                                                        int item_id) {
-  const int menu_index = menu->HasSubmenu() ?
-      menu->GetSubmenu()->child_count() : 0;
-  return AddMenuItemFromModelAt(model, model_index, menu, menu_index, item_id);
-}
-
-
-MenuItemView* MenuModelAdapter::AppendMenuItem(MenuItemView* menu,
-                                               ui::MenuModel* model,
-                                               int index) {
-  return AppendMenuItemFromModel(model, index, menu,
-                                 model->GetCommandIdAt(index));
-}
-
 // MenuModelAdapter, MenuDelegate implementation:
 
 void MenuModelAdapter::ExecuteCommand(int id) {
@@ -154,10 +75,8 @@ void MenuModelAdapter::ExecuteCommand(int id, int mouse_event_flags) {
 }
 
 bool MenuModelAdapter::IsTriggerableEvent(MenuItemView* source,
-                                          const ui::Event& e) {
-  return e.type() == ui::ET_GESTURE_TAP ||
-         e.type() == ui::ET_GESTURE_TAP_DOWN ||
-         (e.IsMouseEvent() && (triggerable_event_flags_ & e.flags()) != 0);
+                                          const MouseEvent& e) {
+  return (triggerable_event_flags_ & e.flags()) != 0;
 }
 
 bool MenuModelAdapter::GetAccelerator(int id,
@@ -171,23 +90,22 @@ bool MenuModelAdapter::GetAccelerator(int id,
   return false;
 }
 
-base::string16 MenuModelAdapter::GetLabel(int id) const {
+string16 MenuModelAdapter::GetLabel(int id) const {
   ui::MenuModel* model = menu_model_;
   int index = 0;
   if (ui::MenuModel::GetModelAndIndexForCommandId(id, &model, &index))
     return model->GetLabelAt(index);
 
   NOTREACHED();
-  return base::string16();
+  return string16();
 }
 
-const gfx::Font* MenuModelAdapter::GetLabelFont(int id) const {
+const gfx::Font& MenuModelAdapter::GetLabelFont(int id) const {
   ui::MenuModel* model = menu_model_;
   int index = 0;
   if (ui::MenuModel::GetModelAndIndexForCommandId(id, &model, &index)) {
     const gfx::Font* font = model->GetLabelFontAt(index);
-    if (font)
-      return font;
+    return font ? *font : MenuDelegate::GetLabelFont(id);
   }
 
   // This line may be reached for the empty menu item.
@@ -259,27 +177,24 @@ void MenuModelAdapter::WillHideMenu(MenuItemView* menu) {
 void MenuModelAdapter::BuildMenuImpl(MenuItemView* menu, ui::MenuModel* model) {
   DCHECK(menu);
   DCHECK(model);
-  bool has_icons = model->HasIcons();
   const int item_count = model->GetItemCount();
   for (int i = 0; i < item_count; ++i) {
-    MenuItemView* item = AppendMenuItem(menu, model, i);
+    const int index = i + model->GetFirstItemIndex(NULL);
+    MenuItemView* item = menu->AppendMenuItemFromModel(
+        model, index, model->GetCommandIdAt(index));
 
-    if (item)
-      item->SetVisible(model->IsVisibleAt(i));
-
-    if (model->GetTypeAt(i) == ui::MenuModel::TYPE_SUBMENU) {
+    if (model->GetTypeAt(index) == ui::MenuModel::TYPE_SUBMENU) {
       DCHECK(item);
       DCHECK_EQ(MenuItemView::SUBMENU, item->GetType());
-      ui::MenuModel* submodel = model->GetSubmenuModelAt(i);
+      ui::MenuModel* submodel = model->GetSubmenuModelAt(index);
       DCHECK(submodel);
       BuildMenuImpl(item, submodel);
-      has_icons = has_icons || item->has_icons();
 
       menu_map_[item] = submodel;
     }
   }
 
-  menu->set_has_icons(has_icons);
+  menu->set_has_icons(model->HasIcons());
 }
 
 }  // namespace views

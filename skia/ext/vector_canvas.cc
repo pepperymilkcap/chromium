@@ -7,8 +7,8 @@
 
 namespace skia {
 
-VectorCanvas::VectorCanvas(SkBaseDevice* device)
-    : PlatformCanvas(device) {
+VectorCanvas::VectorCanvas(SkDevice* device) {
+  setDevice(device)->unref(); // Created with refcount 1, and setDevice refs.
 }
 
 VectorCanvas::~VectorCanvas() {
@@ -30,8 +30,8 @@ SkDrawFilter* VectorCanvas::setDrawFilter(SkDrawFilter* filter) {
 }
 
 bool VectorCanvas::IsTopDeviceVectorial() const {
-  SkBaseDevice* device = GetTopDevice(*this);
-  return device->getDeviceCapabilities() & SkBaseDevice::kVector_Capability;
+  SkDevice* device = GetTopDevice(*this);
+  return device->getDeviceCapabilities() & SkDevice::kVector_Capability;
 }
 
 }  // namespace skia

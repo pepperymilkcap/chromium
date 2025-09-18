@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,24 +8,29 @@
 
 #include "base/i18n/rtl.h"
 #include "chrome/browser/ui/gtk/status_bubble_gtk.h"
-#include "content/public/browser/render_widget_host_view.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_floating_container.h"
 #include "ui/gfx/native_widget_types.h"
 
-namespace {
-void HideWidget(GtkWidget* widget, gpointer ignored) {
-  gtk_widget_hide(widget);
-}
-}  // namespace
+using content::WebContents;
 
-TabContentsContainerGtk::TabContentsContainerGtk(StatusBubbleGtk* status_bubble,
-                                                 bool embed_fullscreen_widget)
-    : status_bubble_(status_bubble),
-      should_embed_fullscreen_widgets_(embed_fullscreen_widget),
-      is_embedding_fullscreen_widget_(false) {
+TabContentsContainerGtk::TabContentsContainerGtk(StatusBubbleGtk* status_bubble)
+    : tab_(NULL),
+      preview_(NULL),
+      status_bubble_(status_bubble) {
+  Init();
+}
+
+TabContentsContainerGtk::~TabContentsContainerGtk() {
+  floating_.Destroy();
+}
+
+void TabContentsContainerGtk::Init() {
   // A high level overview of the TabContentsContainer:
   //
   // +- GtkFloatingContainer |floating_| -------------------------------+
@@ -41,6 +46,7 @@ TabContentsContainerGtk::TabContentsContainerGtk(StatusBubbleGtk* status_bubble,
 
   floating_.Own(gtk_floating_container_new());
   gtk_widget_set_name(floating_.get(), "chrome-tab-contents-container");
+  g_signal_connect(floating_.get(), "focus", G_CALLBACK(OnFocusThunk), this);
 
   expanded_ = gtk_expanded_container_new();
   gtk_container_add(GTK_CONTAINER(floating_.get()), expanded_);
@@ -58,129 +64,163 @@ TabContentsContainerGtk::TabContentsContainerGtk(StatusBubbleGtk* status_bubble,
   ViewIDUtil::SetDelegateForWidget(widget(), this);
 }
 
-TabContentsContainerGtk::~TabContentsContainerGtk() {
-  floating_.Destroy();
+void TabContentsContainerGtk::SetTab(TabContentsWrapper* tab) {
+  HideTab(tab_);
+  if (tab_) {
+    registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                      content::Source<WebContents>(tab_->web_contents()));
+  }
+
+  tab_ = tab;
+
+  if (tab_ == preview_) {
+    // If the preview contents is becoming the new permanent tab contents, we
+    // just reassign some pointers.
+    preview_ = NULL;
+  } else if (tab_) {
+    // Otherwise we actually have to add it to the widget hierarchy.
+    PackTab(tab);
+    registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                   content::Source<WebContents>(tab_->web_contents()));
+  }
 }
 
-void TabContentsContainerGtk::SetTab(content::WebContents* tab) {
-  if (tab == web_contents())
+TabContentsWrapper* TabContentsContainerGtk::GetVisibleTab() {
+  return preview_ ? preview_ : tab_;
+}
+
+void TabContentsContainerGtk::SetPreview(TabContentsWrapper* preview) {
+  if (preview_)
+    RemovePreview();
+  else
+    HideTab(tab_);
+
+  preview_ = preview;
+
+  PackTab(preview);
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                 content::Source<WebContents>(preview_->web_contents()));
+}
+
+void TabContentsContainerGtk::RemovePreview() {
+  if (!preview_)
     return;
 
-  HideTab();
-  WebContentsObserver::Observe(tab);
-  is_embedding_fullscreen_widget_ =
-      should_embed_fullscreen_widgets_ &&
-      tab && tab->GetFullscreenRenderWidgetHostView();
-  PackTab();
+  HideTab(preview_);
+
+  GtkWidget* preview_widget = preview_->web_contents()->GetNativeView();
+  if (preview_widget)
+    gtk_container_remove(GTK_CONTAINER(expanded_), preview_widget);
+
+  registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                    content::Source<WebContents>(preview_->web_contents()));
+  preview_ = NULL;
 }
 
-void TabContentsContainerGtk::PackTab() {
-  content::WebContents* const tab = web_contents();
+void TabContentsContainerGtk::PopPreview() {
+  if (!preview_)
+    return;
+
+  RemovePreview();
+
+  PackTab(tab_);
+}
+
+void TabContentsContainerGtk::PackTab(TabContentsWrapper* tab) {
   if (!tab)
     return;
 
-  const gfx::NativeView widget = is_embedding_fullscreen_widget_ ?
-      tab->GetFullscreenRenderWidgetHostView()->GetNativeView() :
-      tab->GetView()->GetNativeView();
+  gfx::NativeView widget = tab->web_contents()->GetNativeView();
   if (widget) {
-    if (gtk_widget_get_parent(widget) != expanded_)
+    if (widget->parent != expanded_)
       gtk_container_add(GTK_CONTAINER(expanded_), widget);
     gtk_widget_show(widget);
   }
 
-  if (is_embedding_fullscreen_widget_)
-    return;
-
-  tab->WasShown();
-
-  // Make sure that the tab is below the find bar. Sometimes the content
-  // native view will be null.
-  GtkWidget* const content_widget = tab->GetView()->GetContentNativeView();
-  if (content_widget) {
-    GdkWindow* const content_gdk_window = gtk_widget_get_window(content_widget);
+  // We need to make sure that we are below the findbar.
+  // Sometimes the content native view will be null.
+  if (tab->web_contents()->GetContentNativeView()) {
+    GdkWindow* content_gdk_window =
+        tab->web_contents()->GetContentNativeView()->window;
     if (content_gdk_window)
       gdk_window_lower(content_gdk_window);
   }
+
+  tab->web_contents()->ShowContents();
 }
 
-void TabContentsContainerGtk::HideTab() {
-  content::WebContents* const tab = web_contents();
+void TabContentsContainerGtk::HideTab(TabContentsWrapper* tab) {
   if (!tab)
     return;
 
-  gtk_container_foreach(GTK_CONTAINER(expanded_), &HideWidget, NULL);
-  if (is_embedding_fullscreen_widget_)
-    return;
-  tab->WasHidden();
+  gfx::NativeView widget = tab->web_contents()->GetNativeView();
+  if (widget)
+    gtk_widget_hide(widget);
+
+  tab->web_contents()->WasHidden();
 }
 
-void TabContentsContainerGtk::DetachTab(content::WebContents* tab) {
-  if (!tab)
-    return;
-  if (tab == web_contents()) {
-    HideTab();
-    WebContentsObserver::Observe(NULL);
-  }
+void TabContentsContainerGtk::DetachTab(TabContentsWrapper* tab) {
+  gfx::NativeView widget = tab->web_contents()->GetNativeView();
 
-  const gfx::NativeView widget = tab->GetView()->GetNativeView();
-  const gfx::NativeView fs_widget =
-      (should_embed_fullscreen_widgets_ &&
-       tab->GetFullscreenRenderWidgetHostView()) ?
-          tab->GetFullscreenRenderWidgetHostView()->GetNativeView() : NULL;
-
-  // It is possible to detach an unrealized, unparented WebContents if you
+  // It is possible to detach an unrealized, unparented TabContents if you
   // slow things down enough in valgrind. Might happen in the real world, too.
   if (widget) {
-    GtkWidget* const parent = gtk_widget_get_parent(widget);
+    GtkWidget* parent = gtk_widget_get_parent(widget);
     if (parent) {
       DCHECK_EQ(parent, expanded_);
       gtk_container_remove(GTK_CONTAINER(expanded_), widget);
     }
   }
-  if (fs_widget) {
-    GtkWidget* const parent = gtk_widget_get_parent(fs_widget);
-    if (parent) {
-      DCHECK_EQ(parent, expanded_);
-      gtk_container_remove(GTK_CONTAINER(expanded_), fs_widget);
-    }
-  }
 }
 
-void TabContentsContainerGtk::WebContentsDestroyed(
-    content::WebContents* contents) {
+void TabContentsContainerGtk::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
+
+  WebContentsDestroyed(content::Source<WebContents>(source).ptr());
+}
+
+void TabContentsContainerGtk::WebContentsDestroyed(WebContents* contents) {
   // Sometimes, a WebContents is destroyed before we know about it. This allows
   // us to clean up our state in case this happens.
-  DetachTab(contents);
+  if (preview_ && contents == preview_->web_contents())
+    PopPreview();
+  else if (tab_ && contents == tab_->web_contents())
+    SetTab(NULL);
+  else
+    NOTREACHED();
+}
+
+// Prevent |preview_| from getting focus via the tab key. If |tab_| exists, try
+// to focus that. Otherwise, do nothing, but stop event propagation. See bug
+// http://crbug.com/63365
+gboolean TabContentsContainerGtk::OnFocus(GtkWidget* widget,
+                                          GtkDirectionType focus) {
+  if (preview_) {
+    gtk_widget_child_focus(tab_->web_contents()->GetContentNativeView(), focus);
+    return TRUE;
+  }
+
+  // No preview contents; let the default handler run.
+  return FALSE;
 }
 
 // -----------------------------------------------------------------------------
 // ViewIDUtil::Delegate implementation
 
 GtkWidget* TabContentsContainerGtk::GetWidgetForViewID(ViewID view_id) {
-  if (view_id == VIEW_ID_TAB_CONTAINER)
+  if (view_id == VIEW_ID_TAB_CONTAINER ||
+      view_id == VIEW_ID_TAB_CONTAINER_FOCUS_VIEW) {
     return widget();
+  }
 
   return NULL;
 }
 
 // -----------------------------------------------------------------------------
-
-void TabContentsContainerGtk::DidShowFullscreenWidget(int routing_id) {
-  if (!should_embed_fullscreen_widgets_)
-    return;
-  HideTab();
-  is_embedding_fullscreen_widget_ =
-      web_contents() && web_contents()->GetFullscreenRenderWidgetHostView();
-  PackTab();
-}
-
-void TabContentsContainerGtk::DidDestroyFullscreenWidget(int routing_id) {
-  if (!should_embed_fullscreen_widgets_)
-    return;
-  HideTab();
-  is_embedding_fullscreen_widget_ = false;
-  PackTab();
-}
 
 // static
 void TabContentsContainerGtk::OnSetFloatingPosition(

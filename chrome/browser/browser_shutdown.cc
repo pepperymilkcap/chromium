@@ -9,46 +9,47 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
+#include "base/process_util.h"
+#include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/jankometer.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/metrics_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/service_process/service_process_control.h"
+#include "chrome/browser/service/service_process_control.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
+#include "content/browser/plugin_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/browser_util_win.h"
 #include "chrome/browser/first_run/upgrade_util_win.h"
-#endif
-
-#if defined(ENABLE_RLZ)
 #include "chrome/browser/rlz/rlz.h"
 #endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
 #endif
 
 using base::Time;
@@ -63,22 +64,19 @@ bool g_trying_to_quit = false;
 // Whether the browser should quit without closing browsers.
 bool g_shutting_down_without_closing_browsers = false;
 
-#if defined(OS_WIN)
-upgrade_util::RelaunchMode g_relaunch_mode =
-    upgrade_util::RELAUNCH_MODE_DEFAULT;
-#endif
-
 Time* shutdown_started_ = NULL;
 ShutdownType shutdown_type_ = NOT_VALID;
 int shutdown_num_processes_;
 int shutdown_num_processes_slow_;
 
+bool delete_resources_on_shutdown = true;
+
 const char kShutdownMsFile[] = "chrome_shutdown_ms.txt";
 
-void RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterIntegerPref(prefs::kShutdownType, NOT_VALID);
-  registry->RegisterIntegerPref(prefs::kShutdownNumProcesses, 0);
-  registry->RegisterIntegerPref(prefs::kShutdownNumProcessesSlow, 0);
+void RegisterPrefs(PrefService* local_state) {
+  local_state->RegisterIntegerPref(prefs::kShutdownType, NOT_VALID);
+  local_state->RegisterIntegerPref(prefs::kShutdownNumProcesses, 0);
+  local_state->RegisterIntegerPref(prefs::kShutdownNumProcessesSlow, 0);
 }
 
 ShutdownType GetShutdownType() {
@@ -88,12 +86,6 @@ ShutdownType GetShutdownType() {
 void OnShutdownStarting(ShutdownType type) {
   if (shutdown_type_ != NOT_VALID)
     return;
-
-#if !defined(OS_CHROMEOS)
-  // Start the shutdown tracing. Note that On ChromeOS we have started this
-  // already.
-  chrome::StartShutdownTracing();
-#endif
 
   shutdown_type_ = type;
   // For now, we're only counting the number of renderer processes
@@ -117,8 +109,8 @@ void OnShutdownStarting(ShutdownType type) {
   }
 }
 
-base::FilePath GetShutdownMsPath() {
-  base::FilePath shutdown_ms_file;
+FilePath GetShutdownMsPath() {
+  FilePath shutdown_ms_file;
   PathService::Get(chrome::DIR_USER_DATA, &shutdown_ms_file);
   return shutdown_ms_file.AppendASCII(kShutdownMsFile);
 }
@@ -128,6 +120,11 @@ bool ShutdownPreThreadsStop() {
   chromeos::BootTimesLoader::Get()->AddLogoutTimeMarker(
       "BrowserShutdownStarted", false);
 #endif
+  // During shutdown we will end up some blocking operations.  But the
+  // work needs to get done and we're going to wait for them no matter
+  // what thread they're on, so don't worry about it slowing down
+  // shutdown.
+  base::ThreadRestrictions::SetIOAllowed(true);
 
   // Shutdown the IPC channel to the service processes.
   ServiceProcessControl::GetInstance()->Disconnect();
@@ -156,20 +153,11 @@ bool ShutdownPreThreadsStop() {
     restart_last_session =
         prefs->GetBoolean(prefs::kRestartLastSessionOnShutdown);
     prefs->ClearPref(prefs::kRestartLastSessionOnShutdown);
-#if defined(OS_WIN)
-    if (restart_last_session) {
-      if (prefs->HasPrefPath(prefs::kRelaunchMode)) {
-        g_relaunch_mode = upgrade_util::RelaunchModeStringToEnum(
-            prefs->GetString(prefs::kRelaunchMode));
-        prefs->ClearPref(prefs::kRelaunchMode);
-      }
-    }
-#endif
   }
 
   prefs->CommitPendingWrite();
 
-#if defined(ENABLE_RLZ)
+#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
   // Cleanup any statics created by RLZ. Must be done before NotificationService
   // is destroyed.
   RLZTracker::CleanupRlz();
@@ -195,6 +183,9 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
 
   // Uninstall Jank-O-Meter here after the IO thread is no longer running.
   UninstallJankometer();
+
+  if (delete_resources_on_shutdown)
+    ResourceBundle::CleanupSharedInstance();
 
 #if defined(OS_WIN)
   if (!browser_util::IsBrowserAlreadyRunning() &&
@@ -228,13 +219,7 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
       else
         new_cl->AppendSwitch(i->first);
     }
-
-#if defined(OS_WIN)
-    upgrade_util::RelaunchChromeWithMode(*new_cl.get(), g_relaunch_mode);
-#else
     upgrade_util::RelaunchChromeBrowser(*new_cl.get());
-#endif  // defined(OS_WIN)
-
 #else
     NOTIMPLEMENTED();
 #endif  // !defined(OS_CHROMEOS)
@@ -248,32 +233,35 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
     std::string shutdown_ms =
         base::Int64ToString(shutdown_delta.InMilliseconds());
     int len = static_cast<int>(shutdown_ms.length()) + 1;
-    base::FilePath shutdown_ms_file = GetShutdownMsPath();
+    FilePath shutdown_ms_file = GetShutdownMsPath();
     file_util::WriteFile(shutdown_ms_file, shutdown_ms.c_str(), len);
   }
 
 #if defined(OS_CHROMEOS)
-  chrome::NotifyAndTerminate(false);
+  BrowserList::NotifyAndTerminate(false);
 #endif
+
+  ChromeURLDataManager::DeleteDataSources();
 }
 
-void ReadLastShutdownFile(ShutdownType type,
-                          int num_procs,
-                          int num_procs_slow) {
+void ReadLastShutdownFile(
+    ShutdownType type,
+    int num_procs,
+    int num_procs_slow) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  base::FilePath shutdown_ms_file = GetShutdownMsPath();
+  FilePath shutdown_ms_file = GetShutdownMsPath();
   std::string shutdown_ms_str;
   int64 shutdown_ms = 0;
-  if (base::ReadFileToString(shutdown_ms_file, &shutdown_ms_str))
+  if (file_util::ReadFileToString(shutdown_ms_file, &shutdown_ms_str))
     base::StringToInt64(shutdown_ms_str, &shutdown_ms);
-  base::DeleteFile(shutdown_ms_file, false);
+  file_util::Delete(shutdown_ms_file, false);
 
   if (type == NOT_VALID || shutdown_ms == 0 || num_procs == 0)
     return;
 
-  const char* time_fmt = "Shutdown.%s.time";
-  const char* time_per_fmt = "Shutdown.%s.time_per_process";
+  const char *time_fmt = "Shutdown.%s.time";
+  const char *time_per_fmt = "Shutdown.%s.time_per_process";
   std::string time;
   std::string time_per;
   if (type == WINDOW_CLOSE) {

@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_BOOT_TIMES_LOADER_H_
 #define CHROME_BROWSER_CHROMEOS_BOOT_TIMES_LOADER_H_
+#pragma once
 
 #include <set>
 #include <string>
@@ -11,30 +12,66 @@
 #include "base/atomic_sequence_num.h"
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
-#include "base/time/time.h"
-#include "chrome/common/cancelable_task_tracker.h"
+#include "base/time.h"
+#include "chrome/browser/cancelable_request.h"
+#include "content/browser/renderer_host/render_widget_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/render_widget_host.h"
 
 namespace chromeos {
 
 // BootTimesLoader loads the bootimes of Chrome OS from the file system.
 // Loading is done asynchronously on the file thread. Once loaded,
 // BootTimesLoader calls back to a method of your choice with the boot times.
-// To use BootTimesLoader, do the following:
+// To use BootTimesLoader do the following:
 //
 // . In your class define a member field of type chromeos::BootTimesLoader and
-//   CancelableTaskTracker.
+//   CancelableRequestConsumerBase.
 // . Define the callback method, something like:
-//   void OnBootTimesLoaded(const BootTimesLoader::BootTimes& boot_times);
-// . When you want the version invoke: loader.GetBootTimes(callback, &tracker_);
-class BootTimesLoader : public content::NotificationObserver {
+//   void OnBootTimesLoader(chromeos::BootTimesLoader::Handle,
+//                             BootTimesLoader::BootTimes boot_times);
+// . When you want the version invoke: loader.GetBootTimes(&consumer, callback);
+class BootTimesLoader
+    : public CancelableRequestProvider,
+      public content::NotificationObserver {
  public:
   BootTimesLoader();
   virtual ~BootTimesLoader();
 
+  // All fields are 0.0 if they couldn't be found.
+  typedef struct BootTimes {
+    double firmware;           // Time from power button to kernel being loaded.
+    double pre_startup;        // Time from kernel to system code being called.
+    double x_started;          // Time X server is ready to be connected to.
+    double chrome_exec;        // Time session manager executed Chrome.
+    double chrome_main;        // Time chrome's main() was called.
+    double login_prompt_ready; // Time login (or OOB) panel is displayed.
+    double system;             // Time system took to start chrome.
+    double chrome;             // Time chrome took to display login panel.
+    double total;              // Time from power button to login panel.
+
+    BootTimes() : firmware(0),
+                  pre_startup(0),
+                  x_started(0),
+                  chrome_exec(0),
+                  chrome_main(0),
+                  login_prompt_ready(0),
+                  system(0),
+                  chrome(0),
+                  total(0) {}
+  } BootTimes;
+
+  // Signature
+  typedef base::Callback<void(Handle, BootTimes)> GetBootTimesCallback;
+
+  typedef CancelableRequest<GetBootTimesCallback> GetBootTimesRequest;
+
   static BootTimesLoader* Get();
+
+  // Asynchronously requests the info.
+  Handle GetBootTimes(
+      CancelableRequestConsumerBase* consumer,
+      const GetBootTimesCallback& callback);
 
   // Add a time marker for login. A timeline will be dumped to
   // /tmp/login-times-sent after login is done. If |send_to_uma| is true
@@ -83,6 +120,8 @@ class BootTimesLoader : public content::NotificationObserver {
    public:
     Backend() {}
 
+    void GetBootTimes(const scoped_refptr<GetBootTimesRequest>& request);
+
    private:
     friend class base::RefCountedThreadSafe<Backend>;
 
@@ -100,11 +139,6 @@ class BootTimesLoader : public content::NotificationObserver {
     std::string name() const { return name_; }
     base::Time time() const { return time_; }
     bool send_to_uma() const { return send_to_uma_; }
-
-    // comparitor for sorting
-    bool operator<(const TimeMarker& other) const {
-      return time_ < other.time_;
-    }
 
    private:
     friend class std::vector<TimeMarker>;
@@ -125,9 +159,7 @@ class BootTimesLoader : public content::NotificationObserver {
   static void WriteTimes(const std::string base_name,
                          const std::string uma_name,
                          const std::string uma_prefix,
-                         std::vector<TimeMarker> login_times);
-  static void AddMarker(std::vector<TimeMarker>* vector, TimeMarker marker);
-
+                         const std::vector<TimeMarker> login_times);
   void LoginDone();
 
   // Used to hold the stats at main().
@@ -141,7 +173,7 @@ class BootTimesLoader : public content::NotificationObserver {
 
   std::vector<TimeMarker> login_time_markers_;
   std::vector<TimeMarker> logout_time_markers_;
-  std::set<content::RenderWidgetHost*> render_widget_hosts_loading_;
+  std::set<RenderWidgetHost*> render_widget_hosts_loading_;
 
   DISALLOW_COPY_AND_ASSIGN(BootTimesLoader);
 };

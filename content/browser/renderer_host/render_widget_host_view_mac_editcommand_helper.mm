@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,10 @@
 
 #import <objc/runtime.h>
 
-#include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac.h"
 
-namespace content {
 namespace {
-
 // The names of all the objc selectors w/o ':'s added to an object by
 // AddEditingSelectorsToClass().
 //
@@ -139,9 +137,8 @@ void EditCommandImp(id self, SEL _cmd, id sender) {
       renderWidgetHostViewMac];
   DCHECK(rwhv);
 
-  RenderWidgetHostImpl* rwh =
-      RenderWidgetHostImpl::From(rwhv->GetRenderWidgetHost());
   // The second parameter is the core command value which isn't used here.
+  RenderWidgetHost* rwh = rwhv->GetRenderWidgetHost();
   rwh->ExecuteEditCommand(command, "");
 }
 
@@ -236,5 +233,3 @@ NSArray* RenderWidgetHostViewMacEditCommandHelper::GetEditSelectorNames() {
 
   return ret;
 }
-
-}  // namespace content

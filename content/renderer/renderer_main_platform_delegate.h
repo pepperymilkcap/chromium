@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_RENDERER_MAIN_PLATFORM_DELEGATE_H_
 #define CHROME_RENDERER_RENDERER_MAIN_PLATFORM_DELEGATE_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -21,12 +22,10 @@
 class NSBundle;
 #endif  // __OBJC__
 
-namespace content {
-
 class CONTENT_EXPORT RendererMainPlatformDelegate {
  public:
   explicit RendererMainPlatformDelegate(
-      const MainFunctionParams& parameters);
+      const content::MainFunctionParams& parameters);
   ~RendererMainPlatformDelegate();
 
   // Called first thing and last thing in the process' lifecycle, i.e. before
@@ -42,10 +41,10 @@ class CONTENT_EXPORT RendererMainPlatformDelegate {
   bool EnableSandbox();
 
   // Runs Sandbox tests.
-  void RunSandboxTests(bool no_sandbox);
+  void RunSandboxTests();
 
  private:
-  const MainFunctionParams& parameters_;
+  const content::MainFunctionParams& parameters_;
 #if defined(OS_WIN)
   HMODULE sandbox_test_module_;
 #elif defined(OS_MACOSX)
@@ -54,7 +53,5 @@ class CONTENT_EXPORT RendererMainPlatformDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(RendererMainPlatformDelegate);
 };
-
-}  // namespace content
 
 #endif  // CHROME_RENDERER_RENDERER_MAIN_PLATFORM_DELEGATE_H_

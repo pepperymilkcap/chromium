@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorPriv.h"
-#include "third_party/skia/include/core/SkRect.h"
-#include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/core/SkUnPreMultiply.h"
 
 namespace {
@@ -63,9 +60,10 @@ SkBitmap ReferenceCreateHSLShiftedBitmap(
     color_utils::HSL hsl_shift) {
   SkBitmap shifted;
   shifted.setConfig(SkBitmap::kARGB_8888_Config, bitmap.width(),
-                    bitmap.height());
+                    bitmap.height(), 0);
   shifted.allocPixels();
   shifted.eraseARGB(0, 0, 0, 0);
+  shifted.setIsOpaque(false);
 
   SkAutoLockPixels lock_bitmap(bitmap);
   SkAutoLockPixels lock_shifted(shifted);
@@ -199,15 +197,14 @@ TEST(SkBitmapOperationsTest, CreateMaskedBitmap) {
       SkColor masked_pixel = *masked.getAddr32(x, y);
 
       int alpha_value = SkAlphaMul(SkColorGetA(src_pixel),
-                                   SkAlpha255To256(SkColorGetA(alpha_pixel)));
-      int alpha_value_256 = SkAlpha255To256(alpha_value);
+                                   SkColorGetA(alpha_pixel));
       SkColor expected_pixel = SkColorSetARGB(
           alpha_value,
-          SkAlphaMul(SkColorGetR(src_pixel), alpha_value_256),
-          SkAlphaMul(SkColorGetG(src_pixel), alpha_value_256),
-          SkAlphaMul(SkColorGetB(src_pixel), alpha_value_256));
+          SkAlphaMul(SkColorGetR(src_pixel), alpha_value),
+          SkAlphaMul(SkColorGetG(src_pixel), alpha_value),
+          SkAlphaMul(SkColorGetB(src_pixel), alpha_value));
 
-      EXPECT_EQ(expected_pixel, masked_pixel);
+      EXPECT_TRUE(ColorsClose(expected_pixel, masked_pixel));
     }
   }
 }
@@ -276,7 +273,7 @@ TEST(SkBitmapOperationsTest, CreateHSLShiftedBitmapHueOnly) {
 
   for (int y = 0, i = 0; y < src_h; y++) {
     for (int x = 0; x < src_w; x++) {
-      EXPECT_TRUE(ColorsClose(shifted.getColor(x, y),
+      EXPECT_TRUE(ColorsClose(*shifted.getAddr32(x, y),
                               SkColorSetARGB(255, i % 255, 0, 0)));
       i++;
     }
@@ -480,11 +477,10 @@ TEST(SkBitmapOperationsTest, UnPreMultiply) {
   input.setConfig(SkBitmap::kARGB_8888_Config, 2, 2);
   input.allocPixels();
 
-  // Set PMColors into the bitmap
-  *input.getAddr32(0, 0) = SkPackARGB32NoCheck(0x80, 0x00, 0x00, 0x00);
-  *input.getAddr32(1, 0) = SkPackARGB32NoCheck(0x80, 0x80, 0x80, 0x80);
-  *input.getAddr32(0, 1) = SkPackARGB32NoCheck(0xFF, 0x00, 0xCC, 0x88);
-  *input.getAddr32(1, 1) = SkPackARGB32NoCheck(0x00, 0x00, 0xCC, 0x88);
+  *input.getAddr32(0, 0) = 0x80000000;
+  *input.getAddr32(1, 0) = 0x80808080;
+  *input.getAddr32(0, 1) = 0xFF00CC88;
+  *input.getAddr32(1, 1) = 0x0000CC88;
 
   SkBitmap result = SkBitmapOperations::UnPreMultiply(input);
   EXPECT_EQ(2, result.width());
@@ -497,7 +493,7 @@ TEST(SkBitmapOperationsTest, UnPreMultiply) {
   EXPECT_EQ(0x00000000u, *result.getAddr32(1, 1));  // "Division by zero".
 }
 
-TEST(SkBitmapOperationsTest, CreateTransposedBitmap) {
+TEST(SkBitmapOperationsTest, CreateTransposedBtmap) {
   SkBitmap input;
   input.setConfig(SkBitmap::kARGB_8888_Config, 2, 3);
   input.allocPixels();
@@ -508,7 +504,7 @@ TEST(SkBitmapOperationsTest, CreateTransposedBitmap) {
     }
   }
 
-  SkBitmap result = SkBitmapOperations::CreateTransposedBitmap(input);
+  SkBitmap result = SkBitmapOperations::CreateTransposedBtmap(input);
   EXPECT_EQ(3, result.width());
   EXPECT_EQ(2, result.height());
 
@@ -516,67 +512,6 @@ TEST(SkBitmapOperationsTest, CreateTransposedBitmap) {
   for (int x = 0; x < input.width(); ++x) {
     for (int y = 0; y < input.height(); ++y) {
       EXPECT_EQ(*input.getAddr32(x, y), *result.getAddr32(y, x));
-    }
-  }
-}
-
-// Check that Rotate provides the desired results
-TEST(SkBitmapOperationsTest, RotateImage) {
-  const int src_w = 6, src_h = 4;
-  SkBitmap src;
-  // Create a simple 4 color bitmap:
-  // RRRBBB
-  // RRRBBB
-  // GGGYYY
-  // GGGYYY
-  src.setConfig(SkBitmap::kARGB_8888_Config, src_w, src_h);
-  src.allocPixels();
-
-  SkCanvas canvas(src);
-  src.eraseARGB(0, 0, 0, 0);
-  SkRegion region;
-
-  region.setRect(0, 0, src_w / 2, src_h / 2);
-  canvas.setClipRegion(region);
-  // This region is a semi-transparent red to test non-opaque pixels.
-  canvas.drawColor(0x1FFF0000, SkXfermode::kSrc_Mode);
-  region.setRect(src_w / 2, 0, src_w, src_h / 2);
-  canvas.setClipRegion(region);
-  canvas.drawColor(SK_ColorBLUE, SkXfermode::kSrc_Mode);
-  region.setRect(0, src_h / 2, src_w / 2, src_h);
-  canvas.setClipRegion(region);
-  canvas.drawColor(SK_ColorGREEN, SkXfermode::kSrc_Mode);
-  region.setRect(src_w / 2, src_h / 2, src_w, src_h);
-  canvas.setClipRegion(region);
-  canvas.drawColor(SK_ColorYELLOW, SkXfermode::kSrc_Mode);
-  canvas.flush();
-
-  SkBitmap rotate90, rotate180, rotate270;
-  rotate90 = SkBitmapOperations::Rotate(src,
-                                        SkBitmapOperations::ROTATION_90_CW);
-  rotate180 = SkBitmapOperations::Rotate(src,
-                                         SkBitmapOperations::ROTATION_180_CW);
-  rotate270 = SkBitmapOperations::Rotate(src,
-                                         SkBitmapOperations::ROTATION_270_CW);
-
-  ASSERT_EQ(rotate90.width(), src.height());
-  ASSERT_EQ(rotate90.height(), src.width());
-  ASSERT_EQ(rotate180.width(), src.width());
-  ASSERT_EQ(rotate180.height(), src.height());
-  ASSERT_EQ(rotate270.width(), src.height());
-  ASSERT_EQ(rotate270.height(), src.width());
-
-  SkAutoLockPixels lock_src(src);
-  SkAutoLockPixels lock_90(rotate90);
-  SkAutoLockPixels lock_180(rotate180);
-  SkAutoLockPixels lock_270(rotate270);
-
-  for (int x=0; x < src_w; ++x) {
-    for (int y=0; y < src_h; ++y) {
-      ASSERT_EQ(*src.getAddr32(x,y), *rotate90.getAddr32(src_h - (y+1),x));
-      ASSERT_EQ(*src.getAddr32(x,y), *rotate270.getAddr32(y, src_w - (x+1)));
-      ASSERT_EQ(*src.getAddr32(x,y),
-                *rotate180.getAddr32(src_w - (x+1), src_h - (y+1)));
     }
   }
 }

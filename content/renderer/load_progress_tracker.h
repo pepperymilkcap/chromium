@@ -7,14 +7,13 @@
 
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
+#include "base/time.h"
 
-namespace blink {
+class RenderViewImpl;
+
+namespace WebKit {
 class WebFrame;
 }
-
-namespace content {
-class RenderViewImpl;
 
 class LoadProgressTracker {
  public:
@@ -23,7 +22,7 @@ class LoadProgressTracker {
 
   void DidStopLoading();
 
-  void DidChangeLoadProgress(blink::WebFrame* frame, double progress);
+  void DidChangeLoadProgress(WebKit::WebFrame* frame, double progress);
 
  private:
   void ResetStates();
@@ -32,7 +31,7 @@ class LoadProgressTracker {
 
   RenderViewImpl* render_view_;
 
-  blink::WebFrame* tracked_frame_;
+  WebKit::WebFrame* tracked_frame_;
 
   double progress_;
 
@@ -42,7 +41,5 @@ class LoadProgressTracker {
 
   DISALLOW_COPY_AND_ASSIGN(LoadProgressTracker);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_RENDERER_LOAD_PROGRESS_TRACKER_H_

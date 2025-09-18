@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,14 @@
 
 #include <math.h>
 
-#include "base/time/time.h"
+#include "base/time.h"
 #include "content/public/renderer/document_state.h"
-#include "net/http/http_response_info.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "v8/include/v8.h"
 
-using blink::WebDataSource;
-using blink::WebFrame;
-using blink::WebNavigationType;
+using WebKit::WebDataSource;
+using WebKit::WebFrame;
+using WebKit::WebNavigationType;
 using content::DocumentState;
 
 // Values for CSI "tran" property
@@ -52,30 +51,29 @@ class LoadTimesExtensionWrapper : public v8::Extension {
       "  return GetCSI();"
       "}") {}
 
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
-      v8::Isolate* isolate,
-      v8::Handle<v8::String> name) OVERRIDE {
-    if (name->Equals(v8::String::NewFromUtf8(isolate, "GetLoadTimes"))) {
-      return v8::FunctionTemplate::New(isolate, GetLoadTimes);
-    } else if (name->Equals(v8::String::NewFromUtf8(isolate, "GetCSI"))) {
-      return v8::FunctionTemplate::New(isolate, GetCSI);
+  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
+      v8::Handle<v8::String> name) {
+    if (name->Equals(v8::String::New("GetLoadTimes"))) {
+      return v8::FunctionTemplate::New(GetLoadTimes);
+    } else if (name->Equals(v8::String::New("GetCSI"))) {
+      return v8::FunctionTemplate::New(GetCSI);
     }
     return v8::Handle<v8::FunctionTemplate>();
   }
 
   static const char* GetNavigationType(WebNavigationType nav_type) {
     switch (nav_type) {
-      case blink::WebNavigationTypeLinkClicked:
+      case WebKit::WebNavigationTypeLinkClicked:
         return "LinkClicked";
-      case blink::WebNavigationTypeFormSubmitted:
+      case WebKit::WebNavigationTypeFormSubmitted:
         return "FormSubmitted";
-      case blink::WebNavigationTypeBackForward:
+      case WebKit::WebNavigationTypeBackForward:
         return "BackForward";
-      case blink::WebNavigationTypeReload:
+      case WebKit::WebNavigationTypeReload:
         return "Reload";
-      case blink::WebNavigationTypeFormResubmitted:
+      case WebKit::WebNavigationTypeFormResubmitted:
         return "Resubmitted";
-      case blink::WebNavigationTypeOther:
+      case WebKit::WebNavigationTypeOther:
         return "Other";
     }
     return "";
@@ -83,121 +81,102 @@ class LoadTimesExtensionWrapper : public v8::Extension {
 
   static int GetCSITransitionType(WebNavigationType nav_type) {
     switch (nav_type) {
-      case blink::WebNavigationTypeLinkClicked:
-      case blink::WebNavigationTypeFormSubmitted:
-      case blink::WebNavigationTypeFormResubmitted:
+      case WebKit::WebNavigationTypeLinkClicked:
+      case WebKit::WebNavigationTypeFormSubmitted:
+      case WebKit::WebNavigationTypeFormResubmitted:
         return kTransitionLink;
-      case blink::WebNavigationTypeBackForward:
+      case WebKit::WebNavigationTypeBackForward:
         return kTransitionForwardBack;
-      case blink::WebNavigationTypeReload:
+      case WebKit::WebNavigationTypeReload:
         return kTransitionReload;
-      case blink::WebNavigationTypeOther:
+      case WebKit::WebNavigationTypeOther:
         return kTransitionOther;
     }
     return kTransitionOther;
   }
 
-  static void GetLoadTimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  static v8::Handle<v8::Value> GetLoadTimes(const v8::Arguments& args) {
     WebFrame* frame = WebFrame::frameForCurrentContext();
     if (frame) {
       WebDataSource* data_source = frame->dataSource();
       if (data_source) {
         DocumentState* document_state =
             DocumentState::FromDataSource(data_source);
-        v8::Isolate* isolate = args.GetIsolate();
-        v8::Local<v8::Object> load_times = v8::Object::New(isolate);
+        v8::Local<v8::Object> load_times = v8::Object::New();
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "requestTime"),
-            v8::Number::New(isolate,
-                            document_state->request_time().ToDoubleT()));
+            v8::String::New("requestTime"),
+            v8::Number::New(document_state->request_time().ToDoubleT()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "startLoadTime"),
-            v8::Number::New(isolate,
-                            document_state->start_load_time().ToDoubleT()));
+            v8::String::New("startLoadTime"),
+            v8::Number::New(document_state->start_load_time().ToDoubleT()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "commitLoadTime"),
-            v8::Number::New(isolate,
-                            document_state->commit_load_time().ToDoubleT()));
+            v8::String::New("commitLoadTime"),
+            v8::Number::New(document_state->commit_load_time().ToDoubleT()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "finishDocumentLoadTime"),
+            v8::String::New("finishDocumentLoadTime"),
             v8::Number::New(
-                isolate,
                 document_state->finish_document_load_time().ToDoubleT()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "finishLoadTime"),
-            v8::Number::New(isolate,
-                            document_state->finish_load_time().ToDoubleT()));
+            v8::String::New("finishLoadTime"),
+            v8::Number::New(document_state->finish_load_time().ToDoubleT()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "firstPaintTime"),
-            v8::Number::New(isolate,
-                            document_state->first_paint_time().ToDoubleT()));
+            v8::String::New("firstPaintTime"),
+            v8::Number::New(document_state->first_paint_time().ToDoubleT()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "firstPaintAfterLoadTime"),
+            v8::String::New("firstPaintAfterLoadTime"),
             v8::Number::New(
-                isolate,
                 document_state->first_paint_after_load_time().ToDoubleT()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "navigationType"),
-            v8::String::NewFromUtf8(
-                isolate, GetNavigationType(data_source->navigationType())));
+            v8::String::New("navigationType"),
+            v8::String::New(GetNavigationType(data_source->navigationType())));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "wasFetchedViaSpdy"),
-            v8::Boolean::New(isolate, document_state->was_fetched_via_spdy()));
+            v8::String::New("wasFetchedViaSpdy"),
+            v8::Boolean::New(document_state->was_fetched_via_spdy()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "wasNpnNegotiated"),
-            v8::Boolean::New(isolate, document_state->was_npn_negotiated()));
+            v8::String::New("wasNpnNegotiated"),
+            v8::Boolean::New(document_state->was_npn_negotiated()));
         load_times->Set(
-            v8::String::NewFromUtf8(isolate, "npnNegotiatedProtocol"),
-            v8::String::NewFromUtf8(
-                isolate, document_state->npn_negotiated_protocol().c_str()));
-        load_times->Set(
-            v8::String::NewFromUtf8(isolate, "wasAlternateProtocolAvailable"),
+            v8::String::New("wasAlternateProtocolAvailable"),
             v8::Boolean::New(
-                isolate, document_state->was_alternate_protocol_available()));
-        load_times->Set(v8::String::NewFromUtf8(isolate, "connectionInfo"),
-                        v8::String::NewFromUtf8(
-                            isolate,
-                            net::HttpResponseInfo::ConnectionInfoToString(
-                                document_state->connection_info()).c_str()));
-        args.GetReturnValue().Set(load_times);
-        return;
+                document_state->was_alternate_protocol_available()));
+        return load_times;
       }
     }
-    args.GetReturnValue().SetNull();
+    return v8::Null();
   }
 
-  static void GetCSI(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  static v8::Handle<v8::Value> GetCSI(const v8::Arguments& args) {
     WebFrame* frame = WebFrame::frameForCurrentContext();
     if (frame) {
       WebDataSource* data_source = frame->dataSource();
       if (data_source) {
         DocumentState* document_state =
             DocumentState::FromDataSource(data_source);
-        v8::Isolate* isolate = args.GetIsolate();
-        v8::Local<v8::Object> csi = v8::Object::New(isolate);
+        v8::Local<v8::Object> csi = v8::Object::New();
         base::Time now = base::Time::Now();
         base::Time start = document_state->request_time().is_null() ?
             document_state->start_load_time() :
             document_state->request_time();
         base::Time onload = document_state->finish_document_load_time();
         base::TimeDelta page = now - start;
-        csi->Set(v8::String::NewFromUtf8(isolate, "startE"),
-                 v8::Number::New(isolate, floor(start.ToDoubleT() * 1000)));
-        csi->Set(v8::String::NewFromUtf8(isolate, "onloadT"),
-                 v8::Number::New(isolate, floor(onload.ToDoubleT() * 1000)));
-        csi->Set(v8::String::NewFromUtf8(isolate, "pageT"),
-                 v8::Number::New(isolate, page.InMillisecondsF()));
         csi->Set(
-            v8::String::NewFromUtf8(isolate, "tran"),
+            v8::String::New("startE"),
+            v8::Number::New(floor(start.ToDoubleT() * 1000)));
+        csi->Set(
+            v8::String::New("onloadT"),
+            v8::Number::New(floor(onload.ToDoubleT() * 1000)));
+        csi->Set(
+          v8::String::New("pageT"),
+          v8::Number::New(page.InMillisecondsF()));
+        csi->Set(
+            v8::String::New("tran"),
             v8::Number::New(
-                isolate, GetCSITransitionType(data_source->navigationType())));
+                GetCSITransitionType(data_source->navigationType())));
 
-        args.GetReturnValue().Set(csi);
-        return;
+        return csi;
       }
     }
-    args.GetReturnValue().SetNull();
-    return;
+    return v8::Null();
   }
 };
 

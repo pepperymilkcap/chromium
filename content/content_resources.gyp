@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -6,16 +6,16 @@
 # content.gyp doesn't depend on gyp files from chrome/ anymore:
 # http://crbug.com/10394
 {
+  'variables': {
+    'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/content',
+  },
   'targets': [
     {
       'target_name': 'content_resources',
       'type': 'none',
-      'variables': {
-        'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/content',
-      },
       'actions': [
         {
-          'action_name': 'generate_content_resources',
+          'action_name': 'content_resources',
           'variables': {
             'grit_grd_file': 'content_resources.grd',
           },

@@ -29,9 +29,6 @@ CR_OCMOCK_RETURN_IMPL(Bool, BOOL);
 CR_OCMOCK_RETURN_IMPL(Integer, NSInteger);
 CR_OCMOCK_RETURN_IMPL(UnsignedInteger, NSUInteger);
 
-#if !TARGET_OS_IPHONE
-CR_OCMOCK_RETURN_IMPL(CGFloat, CGFloat);
-
 - (id)andReturnNSRect:(NSRect)rect {
   return [self andReturnValue:[NSValue valueWithRect:rect]];
 }
@@ -47,7 +44,6 @@ CR_OCMOCK_RETURN_IMPL(CGFloat, CGFloat);
 - (id)andReturnCGPoint:(CGPoint)point {
   return [self andReturnNSPoint:NSPointFromCGPoint(point)];
 }
-#endif  // !TARGET_OS_IPHONE
 
 @end
 

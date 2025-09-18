@@ -10,14 +10,14 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/strings/string_split.h"
+#include "base/string_split.h"
 #include "base/values.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace {
 
@@ -30,22 +30,10 @@ const char* kTypeNames[] = {
   "popups",
   "geolocation",
   "notifications",
+  "intents",
   "auto-select-certificate",
   "fullscreen",
-  "mouselock",
-  "mixed-script",
-  "media-stream",
-  "media-stream-mic",
-  "media-stream-camera",
-  "register-protocol-handler",
-  "ppapi-broker",
-  "multiple-automatic-downloads",
-  "midi-sysex",
-#if defined(OS_WIN)
-  "metro-switch-to-desktop",
-#elif defined(OS_ANDROID) || defined(OS_CHROMEOS)
-  "protected-media-identifier",
-#endif
+  "mouselock"
 };
 COMPILE_ASSERT(arraysize(kTypeNames) == CONTENT_SETTINGS_NUM_TYPES,
                type_names_incorrect_size);
@@ -194,10 +182,10 @@ ContentSetting GetContentSetting(const ProviderInterface* provider,
 
 void GetRendererContentSettingRules(const HostContentSettingsMap* map,
                                     RendererContentSettingRules* rules) {
-  map->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_IMAGES, std::string(), &(rules->image_rules));
-  map->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string(), &(rules->script_rules));
+  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_IMAGES, "",
+                             &(rules->image_rules));
+  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_JAVASCRIPT, "",
+                             &(rules->script_rules));
 }
 
 }  // namespace content_settings

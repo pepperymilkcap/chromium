@@ -4,8 +4,6 @@
 
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 
-#include "content/public/browser/stream_handle.h"
-
 namespace content {
 
 bool ResourceDispatcherHostDelegate::ShouldBeginRequest(
@@ -14,38 +12,37 @@ bool ResourceDispatcherHostDelegate::ShouldBeginRequest(
     const std::string& method,
     const GURL& url,
     ResourceType::Type resource_type,
-    ResourceContext* resource_context) {
+    const ResourceContext& resource_context,
+    const Referrer& referrer) {
   return true;
 }
 
-void ResourceDispatcherHostDelegate::RequestBeginning(
+ResourceHandler* ResourceDispatcherHostDelegate::RequestBeginning(
+    ResourceHandler* handler,
     net::URLRequest* request,
-    ResourceContext* resource_context,
-    appcache::AppCacheService* appcache_service,
-    ResourceType::Type resource_type,
+    const ResourceContext& resource_context,
+    bool is_subresource,
     int child_id,
     int route_id,
-    ScopedVector<ResourceThrottle>* throttles) {
+    bool is_continuation_of_transferred_request) {
+  return handler;
 }
 
-void ResourceDispatcherHostDelegate::WillTransferRequestToNewProcess(
-      int old_child_id,
-      int old_route_id,
-      int old_request_id,
-      int new_child_id,
-      int new_route_id,
-      int new_request_id) {
-}
-
-void ResourceDispatcherHostDelegate::DownloadStarting(
+ResourceHandler* ResourceDispatcherHostDelegate::DownloadStarting(
+    ResourceHandler* handler,
+    const ResourceContext& resource_context,
     net::URLRequest* request,
-    ResourceContext* resource_context,
     int child_id,
     int route_id,
     int request_id,
-    bool is_content_initiated,
-    bool must_download,
-    ScopedVector<ResourceThrottle>* throttles) {
+    bool is_new_request) {
+  return handler;
+}
+
+bool ResourceDispatcherHostDelegate::ShouldDeferStart(
+    net::URLRequest* request,
+    const ResourceContext& resource_context) {
+  return false;
 }
 
 bool ResourceDispatcherHostDelegate::AcceptSSLClientCertificateRequest(
@@ -67,10 +64,9 @@ ResourceDispatcherHostLoginDelegate*
   return NULL;
 }
 
-bool ResourceDispatcherHostDelegate::HandleExternalProtocol(const GURL& url,
+void ResourceDispatcherHostDelegate::HandleExternalProtocol(const GURL& url,
                                                             int child_id,
                                                             int route_id) {
-  return true;
 }
 
 bool ResourceDispatcherHostDelegate::ShouldForceDownloadResource(
@@ -79,35 +75,14 @@ bool ResourceDispatcherHostDelegate::ShouldForceDownloadResource(
   return false;
 }
 
-bool ResourceDispatcherHostDelegate::ShouldInterceptResourceAsStream(
-    content::ResourceContext* resource_context,
-    const GURL& url,
-    const std::string& mime_type,
-    GURL* origin,
-    std::string* target_id) {
-  return false;
-}
-
-void ResourceDispatcherHostDelegate::OnStreamCreated(
-    content::ResourceContext* resource_context,
-    int render_process_id,
-    int render_view_id,
-    const std::string& target_id,
-    scoped_ptr<StreamHandle> stream,
-    int64 expected_content_size) {
-}
-
 void ResourceDispatcherHostDelegate::OnResponseStarted(
     net::URLRequest* request,
-    ResourceContext* resource_context,
     ResourceResponse* response,
-    IPC::Sender* sender) {
+    IPC::Message::Sender* sender) {
 }
 
 void ResourceDispatcherHostDelegate::OnRequestRedirected(
-    const GURL& redirect_url,
     net::URLRequest* request,
-    ResourceContext* resource_context,
     ResourceResponse* response) {
 }
 

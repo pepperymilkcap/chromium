@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,18 +18,16 @@
 #include "base/mac/scoped_cftyperef.h"
 #endif
 
-namespace base {
 class FilePath;
-}
 
 namespace gfx {
 class Rect;
 class Size;
 }
 
-class SkBaseDevice;
+class SkDevice;
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(OS_CHROMEOS)
 namespace base {
 struct FileDescriptor;
 }
@@ -41,37 +39,6 @@ namespace printing {
 // (usually PDF or EMF).
 class PRINTING_EXPORT Metafile {
  public:
-#if defined(OS_MACOSX)
-  // |shrink_to_fit| specifies whether the output should be shrunk to fit a
-  // destination page if the source PDF is bigger than the destination page in
-  // any dimension. If this is false, parts of the source PDF page that lie
-  // outside the bounds will be clipped.
-  // |stretch_to_fit| specifies whether the output should be stretched to fit
-  // the destination page if the source page size is smaller in all dimensions.
-  // |center_horizontally| specifies whether the output (after any scaling is
-  // done) should be centered horizontally within the destination page.
-  // |center_vertically| specifies whether the output (after any scaling is
-  // done) should be centered vertically within the destination page.
-  // Note that all scaling preserves the original aspect ratio of the page.
-  // |autorotate| specifies whether the source PDF should be autorotated to fit
-  // on the destination page.
-  struct MacRenderPageParams {
-    MacRenderPageParams()
-        : shrink_to_fit(false),
-          stretch_to_fit(false),
-          center_horizontally(false),
-          center_vertically(false),
-          autorotate(false) {
-    }
-
-    bool shrink_to_fit;
-    bool stretch_to_fit;
-    bool center_horizontally;
-    bool center_vertically;
-    bool autorotate;
-  };
-#endif  // defined(OS_MACOSX)
-
   virtual ~Metafile() {}
 
   // Initializes a fresh new metafile for rendering. Returns false on failure.
@@ -87,7 +54,7 @@ class PRINTING_EXPORT Metafile {
   // This method calls StartPage and then returns an appropriate
   // VectorPlatformDevice implementation bound to the context created by
   // StartPage or NULL on error.
-  virtual SkBaseDevice* StartPageForVectorCanvas(
+  virtual SkDevice* StartPageForVectorCanvas(
       const gfx::Size& page_size,
       const gfx::Rect& content_area,
       const float& scale_factor) = 0;
@@ -119,7 +86,7 @@ class PRINTING_EXPORT Metafile {
 
   // Saves the underlying data to the given file. This function should ONLY be
   // called after the metafile is closed. Returns true if writing succeeded.
-  virtual bool SaveTo(const base::FilePath& file_path) const = 0;
+  virtual bool SaveTo(const FilePath& file_path) const = 0;
 
   // Returns the bounds of the given page. Pages use a 1-based index.
   virtual gfx::Rect GetPageBounds(unsigned int page_number) const = 0;
@@ -149,18 +116,33 @@ class PRINTING_EXPORT Metafile {
   virtual HENHMETAFILE emf() const = 0;
 #elif defined(OS_MACOSX)
   // Renders the given page into |rect| in the given context.
-  // Pages use a 1-based index. The rendering uses the arguments in
-  // |params| to determine scaling, translation, and rotation.
+  // Pages use a 1-based index. The rendering uses the following arguments
+  // to determine scaling and translation factors.
+  // |shrink_to_fit| specifies whether the output should be shrunk to fit the
+  // supplied |rect| if the page size is larger than |rect| in any dimension.
+  // If this is false, parts of the PDF page that lie outside the bounds will be
+  // clipped.
+  // |stretch_to_fit| specifies whether the output should be stretched to fit
+  // the supplied bounds if the page size is smaller than |rect| in all
+  // dimensions.
+  // |center_horizontally| specifies whether the final image (after any scaling
+  // is done) should be centered horizontally within the given |rect|.
+  // |center_vertically| specifies whether the final image (after any scaling
+  // is done) should be centered vertically within the given |rect|.
+  // Note that all scaling preserves the original aspect ratio of the page.
   virtual bool RenderPage(unsigned int page_number,
                           gfx::NativeDrawingContext context,
                           const CGRect rect,
-                          const MacRenderPageParams& params) const = 0;
-#elif defined(OS_CHROMEOS) || defined(OS_ANDROID)
+                          bool shrink_to_fit,
+                          bool stretch_to_fit,
+                          bool center_horizontally,
+                          bool center_vertically) const = 0;
+#elif defined(OS_CHROMEOS)
   // Saves the underlying data to the file associated with fd. This function
   // should ONLY be called after the metafile is closed.
   // Returns true if writing succeeded.
   virtual bool SaveToFD(const base::FileDescriptor& fd) const = 0;
-#endif  // if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#endif  // if defined(OS_CHROMEOS)
 };
 
 }  // namespace printing

@@ -4,13 +4,13 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_FOLDER_TARGET_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_FOLDER_TARGET_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
 @class BookmarkButton;
 @protocol BookmarkButtonControllerProtocol;
 class BookmarkNode;
-class Profile;
 
 // Target (in the target/action sense) of a bookmark folder button.
 // Since ObjC doesn't have multiple inheritance we use has-a instead
@@ -22,14 +22,17 @@ class Profile;
 @interface BookmarkFolderTarget : NSObject {
   // The owner of the bookmark folder button
   id<BookmarkButtonControllerProtocol> controller_;  // weak
-  Profile* profile_;
 }
 
-- (id)initWithController:(id<BookmarkButtonControllerProtocol>)controller
-                 profile:(Profile*)profile;
+- (id)initWithController:(id<BookmarkButtonControllerProtocol>)controller;
 
 // Main IBAction for a button click.
 - (IBAction)openBookmarkFolderFromButton:(id)sender;
+
+// Copies the given bookmark node to the given pasteboard, declaring appropriate
+// types (to paste a URL with a title).
+- (void)copyBookmarkNode:(const BookmarkNode*)node
+            toPasteboard:(NSPasteboard*)pboard;
 
 // Fill the given pasteboard with appropriate data when the given button is
 // dragged. Since the delegate has no way of providing pasteboard data later,

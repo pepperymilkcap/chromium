@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_HUNG_RENDERER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_HUNG_RENDERER_CONTROLLER_H_
+#pragma once
 
 // A controller for the Mac hung renderer dialog window.  Only one
 // instance of this controller can exist at any time, although a given
@@ -19,7 +20,8 @@
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#import "base/memory/scoped_nsobject.h"
 #import "base/memory/scoped_ptr.h"
 
 @class MultiKeyEquivalentButton;
@@ -46,11 +48,11 @@ class WebContents;
 
   // Backing data for |tableView_|.  Titles of each WebContents that
   // shares a renderer process with |hungContents_|.
-  base::scoped_nsobject<NSArray> hungTitles_;
+  scoped_nsobject<NSArray> hungTitles_;
 
   // Favicons of each WebContents that shares a renderer process with
   // |hungContents_|.
-  base::scoped_nsobject<NSArray> hungFavicons_;
+  scoped_nsobject<NSArray> hungFavicons_;
 }
 
 // Kills the hung renderers.
@@ -73,7 +75,7 @@ class WebContents;
 
 // Called by |hungContentsObserver_| to indicate that |hungContents_|
 // has gone away.
-- (void)renderProcessGone;
+- (void)renderViewGone;
 
 @end  // HungRendererController
 

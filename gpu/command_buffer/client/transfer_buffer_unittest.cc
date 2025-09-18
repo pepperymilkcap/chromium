@@ -6,22 +6,19 @@
 
 #include "gpu/command_buffer/client/transfer_buffer.h"
 
-#include "base/compiler_specific.h"
 #include "gpu/command_buffer/client/client_test_helper.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/common/command_buffer.h"
+#include "gpu/command_buffer/common/compiler_specific.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using ::testing::_;
-using ::testing::AtMost;
 using ::testing::Invoke;
 using ::testing::Return;
-using ::testing::SetArgPointee;
 using ::testing::StrictMock;
 
 namespace gpu {
-
 
 class TransferBufferTest : public testing::Test {
  protected:
@@ -39,28 +36,18 @@ class TransferBufferTest : public testing::Test {
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
 
-  virtual void Initialize(unsigned int size_to_flush) {
-    ASSERT_TRUE(transfer_buffer_->Initialize(
-        kTransferBufferSize,
-        kStartingOffset,
-        kTransferBufferSize,
-        kTransferBufferSize,
-        kAlignment,
-        size_to_flush));
-  }
-
-  MockClientCommandBufferMockFlush* command_buffer() const {
+  MockClientCommandBuffer* command_buffer() const {
     return command_buffer_.get();
   }
 
-  scoped_ptr<MockClientCommandBufferMockFlush> command_buffer_;
+  scoped_ptr<MockClientCommandBuffer> command_buffer_;
   scoped_ptr<CommandBufferHelper> helper_;
   scoped_ptr<TransferBuffer> transfer_buffer_;
   int32 transfer_buffer_id_;
 };
 
 void TransferBufferTest::SetUp() {
-  command_buffer_.reset(new StrictMock<MockClientCommandBufferMockFlush>());
+  command_buffer_.reset(new StrictMock<MockClientCommandBuffer>());
   ASSERT_TRUE(command_buffer_->Initialize());
 
   helper_.reset(new CommandBufferHelper(command_buffer()));
@@ -69,19 +56,23 @@ void TransferBufferTest::SetUp() {
   transfer_buffer_id_ = command_buffer()->GetNextFreeTransferBufferId();
 
   transfer_buffer_.reset(new TransferBuffer(helper_.get()));
+  ASSERT_TRUE(transfer_buffer_->Initialize(
+      kTransferBufferSize,
+      kStartingOffset,
+      kTransferBufferSize,
+      kTransferBufferSize,
+      kAlignment));
 }
 
 void TransferBufferTest::TearDown() {
   if (transfer_buffer_->HaveBuffer()) {
+    EXPECT_CALL(*command_buffer(), OnFlush())
+        .Times(1)
+        .RetiresOnSaturation();
     EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
         .Times(1)
         .RetiresOnSaturation();
   }
-  // For command buffer.
-  EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*command_buffer(), OnFlush()).Times(AtMost(1));
   transfer_buffer_.reset();
 }
 
@@ -95,7 +86,6 @@ const size_t TransferBufferTest::kTransferBufferSize;
 #endif
 
 TEST_F(TransferBufferTest, Basic) {
-  Initialize(0);
   EXPECT_TRUE(transfer_buffer_->HaveBuffer());
   EXPECT_EQ(transfer_buffer_id_, transfer_buffer_->GetShmId());
   EXPECT_EQ(
@@ -104,11 +94,13 @@ TEST_F(TransferBufferTest, Basic) {
 }
 
 TEST_F(TransferBufferTest, Free) {
-  Initialize(0);
   EXPECT_TRUE(transfer_buffer_->HaveBuffer());
   EXPECT_EQ(transfer_buffer_id_, transfer_buffer_->GetShmId());
 
   // Free buffer.
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -120,6 +112,9 @@ TEST_F(TransferBufferTest, Free) {
   EXPECT_TRUE(transfer_buffer_->HaveBuffer());
 
   // Free buffer.
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -131,6 +126,9 @@ TEST_F(TransferBufferTest, Free) {
   EXPECT_TRUE(transfer_buffer_->HaveBuffer());
 
   // Free buffer.
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -145,6 +143,9 @@ TEST_F(TransferBufferTest, Free) {
   transfer_buffer_->FreePendingToken(data, 1);
 
   // Free buffer.
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -160,6 +161,9 @@ TEST_F(TransferBufferTest, Free) {
       transfer_buffer_->GetCurrentMaxAllocationWithoutRealloc());
 
   // Test freeing twice.
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -168,7 +172,6 @@ TEST_F(TransferBufferTest, Free) {
 }
 
 TEST_F(TransferBufferTest, TooLargeAllocation) {
-  Initialize(0);
   // Check that we can't allocate large than max size.
   void* ptr = transfer_buffer_->Alloc(kTransferBufferSize + 1);
   EXPECT_TRUE(ptr == NULL);
@@ -181,43 +184,17 @@ TEST_F(TransferBufferTest, TooLargeAllocation) {
   transfer_buffer_->FreePendingToken(ptr, 1);
 }
 
-TEST_F(TransferBufferTest, Flush) {
-  Initialize(16u);
-  unsigned int size_allocated = 0;
-  for (int i = 0; i < 8; ++i) {
-    void* ptr = transfer_buffer_->AllocUpTo(8u, &size_allocated);
-    ASSERT_TRUE(ptr != NULL);
-    EXPECT_EQ(8u, size_allocated);
-    if (i % 2) {
-      EXPECT_CALL(*command_buffer(), Flush(_))
-          .Times(1)
-          .RetiresOnSaturation();
-    }
-    transfer_buffer_->FreePendingToken(ptr, helper_->InsertToken());
-  }
-  for (int i = 0; i < 8; ++i) {
-    void* ptr = transfer_buffer_->Alloc(8u);
-    ASSERT_TRUE(ptr != NULL);
-    if (i % 2) {
-      EXPECT_CALL(*command_buffer(), Flush(_))
-          .Times(1)
-          .RetiresOnSaturation();
-    }
-    transfer_buffer_->FreePendingToken(ptr, helper_->InsertToken());
-  }
-}
-
-class MockClientCommandBufferCanFail : public MockClientCommandBufferMockFlush {
+class MockClientCommandBufferCanFail : public MockClientCommandBuffer {
  public:
   MockClientCommandBufferCanFail() {
   }
   virtual ~MockClientCommandBufferCanFail() {
   }
 
-  MOCK_METHOD2(CreateTransferBuffer, Buffer(size_t size, int32* id));
+  MOCK_METHOD2(CreateTransferBuffer, int32(size_t size, int32 id_request));
 
-  Buffer RealCreateTransferBuffer(size_t size, int32* id) {
-    return MockCommandBufferBase::CreateTransferBuffer(size, id);
+  int32 RealCreateTransferBuffer(size_t size, int32 id_request) {
+    return MockCommandBufferBase::CreateTransferBuffer(size, id_request);
   }
 };
 
@@ -278,20 +255,18 @@ void TransferBufferExpandContractTest::SetUp() {
       kStartingOffset,
       kMinTransferBufferSize,
       kMaxTransferBufferSize,
-      kAlignment,
-      0));
+      kAlignment));
 }
 
 void TransferBufferExpandContractTest::TearDown() {
   if (transfer_buffer_->HaveBuffer()) {
+    EXPECT_CALL(*command_buffer(), OnFlush())
+        .Times(1)
+        .RetiresOnSaturation();
     EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
         .Times(1)
         .RetiresOnSaturation();
   }
-  // For command buffer.
-  EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
-      .Times(1)
-      .RetiresOnSaturation();
   transfer_buffer_.reset();
 }
 
@@ -312,6 +287,9 @@ TEST_F(TransferBufferExpandContractTest, Expand) {
       kStartTransferBufferSize - kStartingOffset,
       transfer_buffer_->GetCurrentMaxAllocationWithoutRealloc());
 
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -331,6 +309,9 @@ TEST_F(TransferBufferExpandContractTest, Expand) {
   EXPECT_EQ(kSize1, transfer_buffer_->GetCurrentMaxAllocationWithoutRealloc());
   transfer_buffer_->FreePendingToken(ptr, 1);
 
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -365,6 +346,9 @@ TEST_F(TransferBufferExpandContractTest, Contract) {
       transfer_buffer_->GetCurrentMaxAllocationWithoutRealloc());
 
   // Free buffer.
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -375,7 +359,7 @@ TEST_F(TransferBufferExpandContractTest, Contract) {
   // Try to allocate again, fail first request
   EXPECT_CALL(*command_buffer(),
               CreateTransferBuffer(kStartTransferBufferSize, _))
-      .WillOnce(DoAll(SetArgPointee<1>(-1), Return(Buffer())))
+      .WillOnce(Return(-1))
       .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(),
               CreateTransferBuffer(kMinTransferBufferSize, _))
@@ -394,6 +378,9 @@ TEST_F(TransferBufferExpandContractTest, Contract) {
   transfer_buffer_->FreePendingToken(ptr, 1);
 
   // Free buffer.
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -418,6 +405,9 @@ TEST_F(TransferBufferExpandContractTest, Contract) {
 
 TEST_F(TransferBufferExpandContractTest, OutOfMemory) {
   // Free buffer.
+  EXPECT_CALL(*command_buffer(), OnFlush())
+      .Times(1)
+      .RetiresOnSaturation();
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
       .RetiresOnSaturation();
@@ -427,9 +417,9 @@ TEST_F(TransferBufferExpandContractTest, OutOfMemory) {
 
   // Try to allocate again, fail both requests.
   EXPECT_CALL(*command_buffer(), CreateTransferBuffer(_, _))
-      .WillOnce(DoAll(SetArgPointee<1>(-1), Return(Buffer())))
-      .WillOnce(DoAll(SetArgPointee<1>(-1), Return(Buffer())))
-      .WillOnce(DoAll(SetArgPointee<1>(-1), Return(Buffer())))
+      .WillOnce(Return(-1))
+      .WillOnce(Return(-1))
+      .WillOnce(Return(-1))
       .RetiresOnSaturation();
 
   const size_t kSize1 = 512 - kStartingOffset;
@@ -437,31 +427,6 @@ TEST_F(TransferBufferExpandContractTest, OutOfMemory) {
   void* ptr = transfer_buffer_->AllocUpTo(kSize1, &size_allocated);
   ASSERT_TRUE(ptr == NULL);
   EXPECT_FALSE(transfer_buffer_->HaveBuffer());
-}
-
-TEST_F(TransferBufferExpandContractTest, ReallocsToDefault) {
-  // Free buffer.
-  EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
-      .Times(1)
-      .RetiresOnSaturation();
-  transfer_buffer_->Free();
-  // See it's freed.
-  EXPECT_FALSE(transfer_buffer_->HaveBuffer());
-
-  // See that it gets reallocated.
-  EXPECT_CALL(*command_buffer(),
-              CreateTransferBuffer(kStartTransferBufferSize, _))
-      .WillOnce(Invoke(
-          command_buffer(),
-          &MockClientCommandBufferCanFail::RealCreateTransferBuffer))
-      .RetiresOnSaturation();
-  EXPECT_EQ(transfer_buffer_id_, transfer_buffer_->GetShmId());
-  EXPECT_TRUE(transfer_buffer_->HaveBuffer());
-
-  // Check it's the default size.
-  EXPECT_EQ(
-      kStartTransferBufferSize - kStartingOffset,
-      transfer_buffer_->GetCurrentMaxAllocationWithoutRealloc());
 }
 
 }  // namespace gpu

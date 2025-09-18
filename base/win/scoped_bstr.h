@@ -4,13 +4,14 @@
 
 #ifndef BASE_WIN_SCOPED_BSTR_H_
 #define BASE_WIN_SCOPED_BSTR_H_
+#pragma once
 
 #include <windows.h>
 #include <oleauto.h>
 
 #include "base/base_export.h"
 #include "base/logging.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 namespace base {
 namespace win {

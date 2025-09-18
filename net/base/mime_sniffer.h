@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_MIME_SNIFFER_H__
 #define NET_BASE_MIME_SNIFFER_H__
+#pragma once
 
 #include <string>
 
@@ -40,22 +41,6 @@ NET_EXPORT bool ShouldSniffMimeType(const GURL& url,
 NET_EXPORT bool SniffMimeType(const char* content, size_t content_size,
                               const GURL& url, const std::string& type_hint,
                               std::string* result);
-
-// Attempt to identify a MIME type from the first few bytes of content only.
-// Uses a bigger set of media file searches than |SniffMimeType()|.
-// If finds a match, fills in |result| and returns true,
-// otherwise returns false.
-//
-// The caller should understand the security ramifications of trusting
-// uncontrolled data before accepting the results of this function.
-//
-// @param content A buffer containing the bytes to sniff.
-// @param content_size The number of bytes in the |content| buffer.
-// @param result Address at which to place the sniffed mime type.
-// @return Returns true if a MIME type match was found.
-NET_EXPORT bool SniffMimeTypeFromLocalData(const char* content,
-                                           size_t content_size,
-                                           std::string* result);
 
 }  // namespace net
 

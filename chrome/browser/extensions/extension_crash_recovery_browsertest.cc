@@ -1,97 +1,101 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/process_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/notifications/balloon.h"
-#include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_host.h"
-#include "chrome/browser/notifications/balloon_notification_ui_manager.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_delegate.h"
+#include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
-#include "extensions/browser/process_manager.h"
-#include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_switches.h"
-#include "ui/message_center/message_center_util.h"
-#include "ui/message_center/notification_list.h"
 
 using content::NavigationController;
 using content::WebContents;
-using extensions::Extension;
 
-// Tests are timing out waiting for extension to crash.
-// http://crbug.com/174705
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_LINUX)
-#define MAYBE_ExtensionCrashRecoveryTest DISABLED_ExtensionCrashRecoveryTest
-#else
-#define MAYBE_ExtensionCrashRecoveryTest ExtensionCrashRecoveryTest
-#endif  // defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_LINUX)
-
-class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
+class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
  protected:
-  virtual void AcceptNotification(size_t index) = 0;
-  virtual void CancelNotification(size_t index) = 0;
-  virtual size_t CountBalloons() = 0;
-
   ExtensionService* GetExtensionService() {
     return browser()->profile()->GetExtensionService();
   }
 
-  extensions::ProcessManager* GetProcessManager() {
-    return extensions::ExtensionSystem::Get(browser()->profile())->
-        process_manager();
+  ExtensionProcessManager* GetExtensionProcessManager() {
+    return browser()->profile()->GetExtensionProcessManager();
+  }
+
+  Balloon* GetNotificationDelegate(size_t index) {
+    NotificationUIManager* manager =
+        g_browser_process->notification_ui_manager();
+    BalloonCollection::Balloons balloons =
+        manager->balloon_collection()->GetActiveBalloons();
+    return balloons.at(index);
+  }
+
+  void AcceptNotification(size_t index) {
+    Balloon* balloon = GetNotificationDelegate(index);
+    ASSERT_TRUE(balloon);
+    balloon->OnClick();
+    WaitForExtensionLoad();
+  }
+
+  void CancelNotification(size_t index) {
+    Balloon* balloon = GetNotificationDelegate(index);
+    NotificationUIManager* manager =
+        g_browser_process->notification_ui_manager();
+    ASSERT_TRUE(manager->CancelById(balloon->notification().notification_id()));
+  }
+
+  size_t CountBalloons() {
+    NotificationUIManager* manager =
+        g_browser_process->notification_ui_manager();
+    BalloonCollection::Balloons balloons =
+        manager->balloon_collection()->GetActiveBalloons();
+    return balloons.size();
   }
 
   void CrashExtension(std::string extension_id) {
     const Extension* extension =
-        GetExtensionService()->GetExtensionById(extension_id, false);
+        GetExtensionService()->extensions()->GetByID(extension_id);
     ASSERT_TRUE(extension);
-    extensions::ExtensionHost* extension_host = GetProcessManager()->
+    ExtensionHost* extension_host = GetExtensionProcessManager()->
         GetBackgroundHostForExtension(extension_id);
     ASSERT_TRUE(extension_host);
 
-    base::KillProcess(extension_host->render_process_host()->GetHandle(),
-                      content::RESULT_CODE_KILLED, false);
+    content::RenderProcessHost* extension_rph =
+        extension_host->render_view_host()->process();
+    base::KillProcess(extension_rph->GetHandle(), content::RESULT_CODE_KILLED,
+                      false);
     ASSERT_TRUE(WaitForExtensionCrash(extension_id));
-    ASSERT_FALSE(GetProcessManager()->
+    ASSERT_FALSE(GetExtensionProcessManager()->
                  GetBackgroundHostForExtension(extension_id));
-
-    // Wait for extension crash balloon to appear.
-    base::MessageLoop::current()->RunUntilIdle();
   }
 
   void CheckExtensionConsistency(std::string extension_id) {
     const Extension* extension =
         GetExtensionService()->extensions()->GetByID(extension_id);
     ASSERT_TRUE(extension);
-    extensions::ExtensionHost* extension_host = GetProcessManager()->
+    ExtensionHost* extension_host = GetExtensionProcessManager()->
         GetBackgroundHostForExtension(extension_id);
     ASSERT_TRUE(extension_host);
-    extensions::ProcessManager::ViewSet all_views =
-        GetProcessManager()->GetAllViews();
-    extensions::ProcessManager::ViewSet::const_iterator it =
-        all_views.find(extension_host->host_contents()->GetRenderViewHost());
-    ASSERT_FALSE(it == all_views.end());
+    ASSERT_TRUE(GetExtensionProcessManager()->HasExtensionHost(extension_host));
     ASSERT_TRUE(extension_host->IsRenderViewLive());
     extensions::ProcessMap* process_map =
         browser()->profile()->GetExtensionService()->process_map();
     ASSERT_TRUE(process_map->Contains(
-        extension_id,
-        extension_host->render_view_host()->GetProcess()->GetID()));
+        extension_id, extension_host->render_view_host()->process()->GetID()));
   }
 
   void LoadTestExtension() {
@@ -115,66 +119,7 @@ class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
   std::string second_extension_id_;
 };
 
-class MAYBE_ExtensionCrashRecoveryTest
-    : public ExtensionCrashRecoveryTestBase {
- protected:
-  virtual void AcceptNotification(size_t index) OVERRIDE {
-    if (message_center::IsRichNotificationEnabled()) {
-      message_center::MessageCenter* message_center =
-          message_center::MessageCenter::Get();
-      ASSERT_GT(message_center->NotificationCount(), index);
-      message_center::NotificationList::Notifications::reverse_iterator it =
-          message_center->GetVisibleNotifications().rbegin();
-      for (size_t i=0; i < index; ++i)
-        it++;
-      std::string id = (*it)->id();
-      message_center->ClickOnNotification(id);
-    } else {
-      Balloon* balloon = GetNotificationDelegate(index);
-      ASSERT_TRUE(balloon);
-      balloon->OnClick();
-    }
-    WaitForExtensionLoad();
-  }
-
-  virtual void CancelNotification(size_t index) OVERRIDE {
-    if (message_center::IsRichNotificationEnabled()) {
-      message_center::MessageCenter* message_center =
-          message_center::MessageCenter::Get();
-      ASSERT_GT(message_center->NotificationCount(), index);
-      message_center::NotificationList::Notifications::reverse_iterator it =
-          message_center->GetVisibleNotifications().rbegin();
-      for (size_t i=0; i < index; i++) { it++; }
-      ASSERT_TRUE(g_browser_process->notification_ui_manager()->
-          CancelById((*it)->id()));
-    } else {
-      Balloon* balloon = GetNotificationDelegate(index);
-      ASSERT_TRUE(balloon);
-      std::string id = balloon->notification().notification_id();
-      ASSERT_TRUE(g_browser_process->notification_ui_manager()->CancelById(id));
-    }
-  }
-
-  virtual size_t CountBalloons() OVERRIDE {
-    if (message_center::IsRichNotificationEnabled())
-      return message_center::MessageCenter::Get()->NotificationCount();
-
-    return BalloonNotificationUIManager::GetInstanceForTesting()->
-        balloon_collection()->GetActiveBalloons().size();
-  }
-
-private:
-     Balloon* GetNotificationDelegate(size_t index) {
-       BalloonNotificationUIManager* manager =
-           BalloonNotificationUIManager::GetInstanceForTesting();
-       BalloonCollection::Balloons balloons =
-           manager->balloon_collection()->GetActiveBalloons();
-       return index < balloons.size() ? balloons.at(index) : NULL;
-     }
-};
-
-// Flaky: http://crbug.com/242167.
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, DISABLED_Basic) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, Basic) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();
@@ -183,7 +128,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, DISABLED_Basic) {
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
   ASSERT_EQ(crash_size_before + 1,
             GetExtensionService()->terminated_extensions()->size());
-  ASSERT_NO_FATAL_FAILURE(AcceptNotification(0));
+  AcceptNotification(0);
 
   SCOPED_TRACE("after clicking the balloon");
   CheckExtensionConsistency(first_extension_id_);
@@ -191,9 +136,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest, DISABLED_Basic) {
             GetExtensionService()->terminated_extensions()->size());
 }
 
-// Flaky, http://crbug.com/241191.
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       DISABLED_CloseAndReload) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, CloseAndReload) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();
@@ -204,7 +147,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   ASSERT_EQ(crash_size_before + 1,
             GetExtensionService()->terminated_extensions()->size());
 
-  ASSERT_NO_FATAL_FAILURE(CancelNotification(0));
+  CancelNotification(0);
   ReloadExtension(first_extension_id_);
 
   SCOPED_TRACE("after reloading");
@@ -213,14 +156,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
             GetExtensionService()->terminated_extensions()->size());
 }
 
-// Test is timing out on Windows http://crbug.com/174705.
-#if defined(OS_WIN)
-#define MAYBE_ReloadIndependently DISABLED_ReloadIndependently
-#else
-#define MAYBE_ReloadIndependently ReloadIndependently
-#endif  // defined(OS_WIN)
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       MAYBE_ReloadIndependently) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, ReloadIndependently) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(first_extension_id_);
@@ -231,8 +167,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   SCOPED_TRACE("after reloading");
   CheckExtensionConsistency(first_extension_id_);
 
-  WebContents* current_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  WebContents* current_tab = browser()->GetSelectedWebContents();
   ASSERT_TRUE(current_tab);
 
   // The balloon should automatically hide after the extension is successfully
@@ -240,29 +175,20 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   ASSERT_EQ(0U, CountBalloons());
 }
 
-// Test is timing out on Windows http://crbug.com/174705.
-#if defined(OS_WIN)
-#define MAYBE_ReloadIndependentlyChangeTabs DISABLED_ReloadIndependentlyChangeTabs
-#else
-#define MAYBE_ReloadIndependentlyChangeTabs ReloadIndependentlyChangeTabs
-#endif  // defined(OS_WIN)
-
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       MAYBE_ReloadIndependentlyChangeTabs) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
+                       ReloadIndependentlyChangeTabs) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(first_extension_id_);
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 
-  WebContents* original_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  WebContents* original_tab = browser()->GetSelectedWebContents();
   ASSERT_TRUE(original_tab);
   ASSERT_EQ(1U, CountBalloons());
 
   // Open a new tab, but the balloon will still be there.
-  chrome::NewTab(browser());
-  WebContents* new_current_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  browser()->NewTab();
+  WebContents* new_current_tab = browser()->GetSelectedWebContents();
   ASSERT_TRUE(new_current_tab);
   ASSERT_NE(new_current_tab, original_tab);
   ASSERT_EQ(1U, CountBalloons());
@@ -277,23 +203,21 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   ASSERT_EQ(0U, CountBalloons());
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       DISABLED_ReloadIndependentlyNavigatePage) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
+                       ReloadIndependentlyNavigatePage) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(first_extension_id_);
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 
-  WebContents* current_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  WebContents* current_tab = browser()->GetSelectedWebContents();
   ASSERT_TRUE(current_tab);
   ASSERT_EQ(1U, CountBalloons());
 
   // Navigate to another page.
-  ui_test_utils::NavigateToURL(
-      browser(), ui_test_utils::GetTestUrl(
-                     base::FilePath(base::FilePath::kCurrentDirectory),
-                     base::FilePath(FILE_PATH_LITERAL("title1.html"))));
+  ui_test_utils::NavigateToURL(browser(),
+      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
+                                FilePath(FILE_PATH_LITERAL("title1.html"))));
   ASSERT_EQ(1U, CountBalloons());
 
   ReloadExtension(first_extension_id_);
@@ -317,45 +241,40 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 #define MAYBE_ShutdownWhileCrashed ShutdownWhileCrashed
 #endif  // defined(OS_LINUX)
 
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       MAYBE_ShutdownWhileCrashed) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, MAYBE_ShutdownWhileCrashed) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(first_extension_id_);
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 }
 
-// Flaky, http://crbug.com/241245.
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       DISABLED_TwoExtensionsCrashFirst) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, TwoExtensionsCrashFirst) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
   CrashExtension(first_extension_id_);
   ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
-  ASSERT_NO_FATAL_FAILURE(AcceptNotification(0));
+  AcceptNotification(0);
 
   SCOPED_TRACE("after clicking the balloon");
   CheckExtensionConsistency(first_extension_id_);
   CheckExtensionConsistency(second_extension_id_);
 }
 
-// Flaky: http://crbug.com/242196
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       DISABLED_TwoExtensionsCrashSecond) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, TwoExtensionsCrashSecond) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
   CrashExtension(second_extension_id_);
   ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
-  ASSERT_NO_FATAL_FAILURE(AcceptNotification(0));
+  AcceptNotification(0);
 
   SCOPED_TRACE("after clicking the balloon");
   CheckExtensionConsistency(first_extension_id_);
   CheckExtensionConsistency(second_extension_id_);
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
                        TwoExtensionsCrashBothAtOnce) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
@@ -373,20 +292,19 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 
   {
     SCOPED_TRACE("first balloon");
-    ASSERT_NO_FATAL_FAILURE(AcceptNotification(0));
+    AcceptNotification(0);
     CheckExtensionConsistency(first_extension_id_);
   }
 
   {
     SCOPED_TRACE("second balloon");
-    ASSERT_NO_FATAL_FAILURE(AcceptNotification(0));
+    AcceptNotification(0);
     CheckExtensionConsistency(first_extension_id_);
     CheckExtensionConsistency(second_extension_id_);
   }
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       TwoExtensionsOneByOne) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, TwoExtensionsOneByOne) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(first_extension_id_);
@@ -397,13 +315,13 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 
   {
     SCOPED_TRACE("first balloon");
-    ASSERT_NO_FATAL_FAILURE(AcceptNotification(0));
+    AcceptNotification(0);
     CheckExtensionConsistency(first_extension_id_);
   }
 
   {
     SCOPED_TRACE("second balloon");
-    ASSERT_NO_FATAL_FAILURE(AcceptNotification(0));
+    AcceptNotification(0);
     CheckExtensionConsistency(first_extension_id_);
     CheckExtensionConsistency(second_extension_id_);
   }
@@ -421,7 +339,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 // Make sure that when we don't do anything about the crashed extensions
 // and close the browser, it doesn't crash. The browser is closed implicitly
 // at the end of each browser test.
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
                        MAYBE_TwoExtensionsShutdownWhileCrashed) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
@@ -432,9 +350,8 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 }
 
-// Flaky, http://crbug.com/241573.
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       DISABLED_TwoExtensionsIgnoreFirst) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
+                       TwoExtensionsIgnoreFirst) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -446,17 +363,16 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   // Accept notification 1 before canceling notification 0.
   // Otherwise, on Linux and Windows, there is a race here, in which
   // canceled notifications do not immediately go away.
-  ASSERT_NO_FATAL_FAILURE(AcceptNotification(1));
-  ASSERT_NO_FATAL_FAILURE(CancelNotification(0));
+  AcceptNotification(1);
+  CancelNotification(0);
 
   SCOPED_TRACE("balloons done");
   ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
   CheckExtensionConsistency(second_extension_id_);
 }
 
-// Flaky, http://crbug.com/241164.
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       DISABLED_TwoExtensionsReloadIndependently) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
+                       TwoExtensionsReloadIndependently) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -467,8 +383,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 
   {
     SCOPED_TRACE("first: reload");
-    WebContents* current_tab =
-        browser()->tab_strip_model()->GetActiveWebContents();
+    WebContents* current_tab = browser()->GetSelectedWebContents();
     ASSERT_TRUE(current_tab);
     // At the beginning we should have one balloon displayed for each extension.
     ASSERT_EQ(2U, CountBalloons());
@@ -480,20 +395,13 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 
   {
     SCOPED_TRACE("second: balloon");
-    ASSERT_NO_FATAL_FAILURE(AcceptNotification(0));
+    AcceptNotification(0);
     CheckExtensionConsistency(first_extension_id_);
     CheckExtensionConsistency(second_extension_id_);
   }
 }
 
-// http://crbug.com/243648
-#if defined(OS_WIN)
-#define MAYBE_CrashAndUninstall DISABLED_CrashAndUninstall
-#else
-#define MAYBE_CrashAndUninstall CrashAndUninstall
-#endif
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       MAYBE_CrashAndUninstall) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, CrashAndUninstall) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();
@@ -506,7 +414,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 
   ASSERT_EQ(1U, CountBalloons());
   UninstallExtension(first_extension_id_);
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
 
   SCOPED_TRACE("after uninstalling");
   ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
@@ -522,8 +430,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
 #define MAYBE_CrashAndUnloadAll CrashAndUnloadAll
 #endif  // defined(OS_LINUX)
 
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       MAYBE_CrashAndUnloadAll) {
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, MAYBE_CrashAndUnloadAll) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();
@@ -534,32 +441,24 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
   ASSERT_EQ(crash_size_before + 1,
             GetExtensionService()->terminated_extensions()->size());
 
-  GetExtensionService()->UnloadAllExtensionsForTest();
+  GetExtensionService()->UnloadAllExtensions();
   ASSERT_EQ(crash_size_before,
             GetExtensionService()->terminated_extensions()->size());
 }
 
-// Fails a DCHECK on Aura and Linux: http://crbug.com/169622
-// Failing on Windows: http://crbug.com/232340
-#if defined(USE_AURA) || defined(OS_WIN) || defined(OS_LINUX)
-#define MAYBE_ReloadTabsWithBackgroundPage DISABLED_ReloadTabsWithBackgroundPage
-#else
-#define MAYBE_ReloadTabsWithBackgroundPage ReloadTabsWithBackgroundPage
-#endif
-
 // Test that when an extension with a background page that has a tab open
 // crashes, the tab stays open, and reloading it reloads the extension.
 // Regression test for issue 71629.
-IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
-                       MAYBE_ReloadTabsWithBackgroundPage) {
-  TabStripModel* tab_strip = browser()->tab_strip_model();
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
+                       ReloadTabsWithBackgroundPage) {
+  TabStripModel* tab_strip = browser()->tabstrip_model();
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();
   LoadTestExtension();
 
   // Open a tab extension.
-  chrome::NewTab(browser());
+  browser()->NewTab();
   ui_test_utils::NavigateToURL(
       browser(),
       GURL("chrome-extension://" + first_extension_id_ + "/background.html"));
@@ -574,12 +473,12 @@ IN_PROC_BROWSER_TEST_F(MAYBE_ExtensionCrashRecoveryTest,
             GetExtensionService()->terminated_extensions()->size());
 
   {
-    content::WindowedNotificationObserver observer(
+    ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
         content::Source<NavigationController>(
-            &browser()->tab_strip_model()->GetActiveWebContents()->
+            &browser()->GetSelectedTabContentsWrapper()->web_contents()->
                 GetController()));
-    chrome::Reload(browser(), CURRENT_TAB);
+    browser()->Reload(CURRENT_TAB);
     observer.Wait();
   }
   // Extension should now be loaded.

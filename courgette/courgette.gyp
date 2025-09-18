@@ -22,16 +22,10 @@
       'difference_estimator.h',
       'disassembler.cc',
       'disassembler.h',
-      'disassembler_elf_32.cc',
-      'disassembler_elf_32.h',
-      'disassembler_elf_32_arm.cc',
-      'disassembler_elf_32_arm.h',
       'disassembler_elf_32_x86.cc',
       'disassembler_elf_32_x86.h',
       'disassembler_win32_x86.cc',
       'disassembler_win32_x86.h',
-      'disassembler_win32_x64.cc',
-      'disassembler_win32_x64.h',
       'encoded_program.cc',
       'encoded_program.h',
       'ensemble.cc',
@@ -101,12 +95,11 @@
         'difference_estimator_unittest.cc',
         'disassembler_elf_32_x86_unittest.cc',
         'disassembler_win32_x86_unittest.cc',
-        'disassembler_win32_x64_unittest.cc',
         'encoded_program_unittest.cc',
         'encode_decode_unittest.cc',
         'ensemble_unittest.cc',
+        'run_all_unittests.cc',
         'streams_unittest.cc',
-        'typedrva_unittest.cc',
         'versioning_unittest.cc',
         'third_party/paged_array_unittest.cc'
       ],
@@ -114,20 +107,10 @@
         'courgette_lib',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
-        '../base/base.gyp:run_all_unittests',
         '../base/base.gyp:test_support_base',
         '../testing/gtest.gyp:gtest',
       ],
       'conditions': [
-        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
-          'conditions': [
-            ['linux_use_tcmalloc==1', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
-              ],
-            }],
-          ],
-        }],
         [ 'toolkit_uses_gtk == 1', {
           'dependencies': [
             # Workaround for gyp bug 69.
@@ -138,8 +121,6 @@
           ],
         }],
       ],
-      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-      'msvs_disabled_warnings': [4267, ],
     },
     {
       'target_name': 'courgette_fuzz',
@@ -170,7 +151,7 @@
     },
   ],
   'conditions': [
-    ['OS=="win" and target_arch=="ia32"', {
+    ['OS=="win"', {
       'targets': [
         {
           'target_name': 'courgette_lib64',
@@ -203,33 +184,6 @@
               'msvs_target_platform': 'x64',
             },
           },
-        },
-      ],
-    }],
-    # The build infrastructure needs courgette to be named courgette64.
-    ['OS=="win" and target_arch=="x64"', {
-      'targets': [
-        {
-          'target_name': 'courgette64',
-          'type': 'none',
-          'dependencies': [
-            'courgette',
-          ],
-          'actions': [{
-            'action_name': 'courgette64',
-            'inputs': [
-              '<(PRODUCT_DIR)/courgette.exe',
-            ],
-            'outputs': [
-              '<(PRODUCT_DIR)/courgette64.exe',
-            ],
-            'action': [
-              'python',
-              '../build/cp.py',
-              '<@(_inputs)',
-              '<@(_outputs)'
-            ],
-          }],
         },
       ],
     }],

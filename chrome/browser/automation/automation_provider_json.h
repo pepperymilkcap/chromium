@@ -6,15 +6,19 @@
 
 #ifndef CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_JSON_H_
 #define CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_JSON_H_
+#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "chrome/common/automation_constants.h"
 
+class AutomationId;
 class AutomationProvider;
 class Browser;
+class Extension;
 class Profile;
+class RenderViewHost;
 
 namespace base {
 class DictionaryValue;
@@ -22,12 +26,7 @@ class Value;
 }
 
 namespace content {
-class RenderViewHost;
 class WebContents;
-}
-
-namespace extensions {
-class Extension;
 }
 
 namespace IPC {
@@ -51,6 +50,13 @@ class AutomationJSONReply {
 
   // Send an error reply along with error message |error_message|.
   void SendError(const std::string& error_message);
+
+  // Send an error reply along with the specified error code and its
+  // associated error message.
+  void SendErrorCode(automation::ErrorCode code);
+
+  // Send an automation error.
+  void SendError(const automation::Error& error);
 
  private:
   AutomationProvider* provider_;
@@ -82,6 +88,14 @@ bool GetBrowserAndTabFromJSONArgs(base::DictionaryValue* args,
                                   content::WebContents** tab,
                                   std::string* error) WARN_UNUSED_RESULT;
 
+// Gets an automation ID from the given value in the given dicitionary |args|.
+// Returns true on success and sets |id|. Otherwise, |error| will be set.
+bool GetAutomationIdFromJSONArgs(
+    base::DictionaryValue* args,
+    const std::string& key,
+    AutomationId* id,
+    std::string* error) WARN_UNUSED_RESULT;
+
 // Gets the render view specified by the given dictionary |args|. |args|
 // should contain a key 'view_id' which refers to an automation ID for the
 // render view. Returns true on success and sets |rvh|. Otherwise, |error|
@@ -89,7 +103,7 @@ bool GetBrowserAndTabFromJSONArgs(base::DictionaryValue* args,
 bool GetRenderViewFromJSONArgs(
     base::DictionaryValue* args,
     Profile* profile,
-    content::RenderViewHost** rvh,
+    RenderViewHost** rvh,
     std::string* error) WARN_UNUSED_RESULT;
 
 // Gets the extension specified by the given dictionary |args|. |args|
@@ -100,7 +114,7 @@ bool GetExtensionFromJSONArgs(
     base::DictionaryValue* args,
     const std::string& key,
     Profile* profile,
-    const extensions::Extension** extension,
+    const Extension** extension,
     std::string* error) WARN_UNUSED_RESULT;
 
 // Gets the enabled extension specified by the given dictionary |args|. |args|
@@ -111,7 +125,7 @@ bool GetEnabledExtensionFromJSONArgs(
     base::DictionaryValue* args,
     const std::string& key,
     Profile* profile,
-    const extensions::Extension** extension,
+    const Extension** extension,
     std::string* error) WARN_UNUSED_RESULT;
 
 #endif  // CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_JSON_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,22 +8,18 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
-#include "base/strings/string_util.h"
+#include "base/message_loop.h"
+#include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/web_contents.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
-#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -73,15 +69,11 @@ void RunExternalProtocolDialogWithDelegate(
 
 void LaunchUrlWithoutSecurityCheckWithDelegate(
     const GURL& url,
-    int render_process_host_id,
-    int tab_contents_id,
     ExternalProtocolHandler::Delegate* delegate) {
-  if (!delegate) {
-    ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(
-        url, render_process_host_id, tab_contents_id);
-  } else {
+  if (!delegate)
+    ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(url);
+  else
     delegate->LaunchUrlWithoutSecurityCheck(url);
-  }
 }
 
 // When we are about to launch a URL with the default OS level application,
@@ -103,7 +95,7 @@ class ExternalDefaultProtocolObserver
 
   virtual void SetDefaultWebClientUIState(
       ShellIntegration::DefaultWebClientUIState state) OVERRIDE {
-    DCHECK_EQ(base::MessageLoop::TYPE_UI, base::MessageLoop::current()->type());
+    DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
 
     // If we are still working out if we're the default, or we've found
     // out we definately are the default, we end here.
@@ -131,8 +123,7 @@ class ExternalDefaultProtocolObserver
       return;
     }
 
-    LaunchUrlWithoutSecurityCheckWithDelegate(
-        escaped_url_, render_process_host_id_, tab_contents_id_, delegate_);
+    LaunchUrlWithoutSecurityCheckWithDelegate(escaped_url_, delegate_);
   }
 
   virtual bool IsOwnedByWorker() OVERRIDE { return true; }
@@ -145,11 +136,10 @@ class ExternalDefaultProtocolObserver
   bool prompt_user_;
 };
 
-}  // namespace
+} // namespace
 
 // static
-void ExternalProtocolHandler::PrepopulateDictionary(
-    base::DictionaryValue* win_pref) {
+void ExternalProtocolHandler::PrepopulateDictionary(DictionaryValue* win_pref) {
   static bool is_warm = false;
   if (is_warm)
     return;
@@ -182,9 +172,6 @@ void ExternalProtocolHandler::PrepopulateDictionary(
     "mailto",
     "news",
     "snews",
-#if defined(OS_WIN)
-    "ms-windows-store",
-#endif
   };
 
   bool should_block;
@@ -246,7 +233,8 @@ void ExternalProtocolHandler::SetBlockState(const std::string& scheme,
     if (state == UNKNOWN) {
       update_excluded_schemas->Remove(scheme, NULL);
     } else {
-      update_excluded_schemas->SetBoolean(scheme, (state == BLOCK));
+      update_excluded_schemas->SetBoolean(scheme,
+                                          state == BLOCK ? true : false);
     }
   }
 }
@@ -256,7 +244,7 @@ void ExternalProtocolHandler::LaunchUrlWithDelegate(const GURL& url,
                                                     int render_process_host_id,
                                                     int tab_contents_id,
                                                     Delegate* delegate) {
-  DCHECK_EQ(base::MessageLoop::TYPE_UI, base::MessageLoop::current()->type());
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
 
   // Escape the input scheme to be sure that the command does not
   // have parameters unexpected by the external program.
@@ -291,26 +279,27 @@ void ExternalProtocolHandler::LaunchUrlWithDelegate(const GURL& url,
 }
 
 // static
-void ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(
-    const GURL& url,
-    int render_process_host_id,
-    int tab_contents_id) {
-  content::WebContents* web_contents = tab_util::GetWebContentsByID(
-      render_process_host_id, tab_contents_id);
-  if (!web_contents)
-    return;
-
-  platform_util::OpenExternal(
-      Profile::FromBrowserContext(web_contents->GetBrowserContext()), url);
+void ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(const GURL& url) {
+#if defined(OS_MACOSX)
+  // This must run on the UI thread on OS X.
+  platform_util::OpenExternal(url);
+#else
+  // Otherwise put this work on the file thread. On Windows ShellExecute may
+  // block for a significant amount of time, and it shouldn't hurt on Linux.
+  BrowserThread::PostTask(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&platform_util::OpenExternal, url));
+#endif
 }
 
 // static
-void ExternalProtocolHandler::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterDictionaryPref(prefs::kExcludedSchemes);
+void ExternalProtocolHandler::RegisterPrefs(PrefService* prefs) {
+  prefs->RegisterDictionaryPref(prefs::kExcludedSchemes);
 }
 
 // static
 void ExternalProtocolHandler::PermitLaunchUrl() {
-  DCHECK_EQ(base::MessageLoop::TYPE_UI, base::MessageLoop::current()->type());
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
   g_accept_requests = true;
 }

@@ -6,10 +6,9 @@
 
 #include <assert.h>
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "content/browser/geolocation/device_data_provider.h"
 #include "content/browser/geolocation/wifi_data_provider_common.h"
-
-namespace content {
 
 bool ConvertToAccessPointData(const NDIS_WLAN_BSSID& data,
                               AccessPointData *access_point_data) {
@@ -19,9 +18,9 @@ bool ConvertToAccessPointData(const NDIS_WLAN_BSSID& data,
   access_point_data->mac_address = MacAddressAsString16(data.MacAddress);
   access_point_data->radio_signal_strength = data.Rssi;
   // Note that _NDIS_802_11_SSID::Ssid::Ssid is not null-terminated.
-  base::UTF8ToUTF16(reinterpret_cast<const char*>(data.Ssid.Ssid),
-                    data.Ssid.SsidLength,
-                    &access_point_data->ssid);
+  UTF8ToUTF16(reinterpret_cast<const char*>(data.Ssid.Ssid),
+              data.Ssid.SsidLength,
+              &access_point_data->ssid);
   return true;
 }
 
@@ -51,5 +50,3 @@ int GetDataFromBssIdList(const NDIS_802_11_BSSID_LIST& bss_id_list,
   }
   return found;
 }
-
-}  // namespace content

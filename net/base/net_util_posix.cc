@@ -6,16 +6,15 @@
 
 #include <sys/types.h>
 
-#include "base/files/file_path.h"
+#include "base/eintr_wrapper.h"
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "url/gurl.h"
 
 #if !defined(OS_ANDROID)
 #include <ifaddrs.h>
@@ -23,14 +22,10 @@
 #include <net/if.h>
 #include <netinet/in.h>
 
-#if defined(OS_ANDROID)
-#include "net/android/network_library.h"
-#endif
-
 namespace net {
 
-bool FileURLToFilePath(const GURL& url, base::FilePath* path) {
-  *path = base::FilePath();
+bool FileURLToFilePath(const GURL& url, FilePath* path) {
+  *path = FilePath();
   std::string& file_path_str = const_cast<std::string&>(path->value());
   file_path_str.clear();
 
@@ -63,33 +58,14 @@ bool FileURLToFilePath(const GURL& url, base::FilePath* path) {
   return !file_path_str.empty();
 }
 
-bool GetNetworkList(NetworkInterfaceList* networks,
-                    HostScopeVirtualInterfacePolicy policy) {
+bool GetNetworkList(NetworkInterfaceList* networks) {
 #if defined(OS_ANDROID)
-  std::string network_list = android::GetNetworkList();
-  base::StringTokenizer network_interfaces(network_list, "\n");
-  while (network_interfaces.GetNext()) {
-    std::string network_item = network_interfaces.token();
-    base::StringTokenizer network_tokenizer(network_item, "\t");
-    CHECK(network_tokenizer.GetNext());
-    std::string name = network_tokenizer.token();
-
-    CHECK(network_tokenizer.GetNext());
-    std::string interface_address = network_tokenizer.token();
-    IPAddressNumber address;
-    size_t network_prefix = 0;
-    CHECK(ParseCIDRBlock(network_tokenizer.token(),
-                         &address,
-                         &network_prefix));
-
-    CHECK(network_tokenizer.GetNext());
-    uint32 index = 0;
-    CHECK(base::StringToUint(network_tokenizer.token(), &index));
-
-    networks->push_back(
-        NetworkInterface(name, index, address, network_prefix));
-  }
-  return true;
+  // TODO: Android API doesn't support ifaddrs. This method was only used by
+  // P2PMessage. Consider to implement it until really needed. The possible
+  // approach is implementing the similar feature by
+  // java.net.NetworkInterface through JNI.
+  NOTIMPLEMENTED();
+  return false;
 #else
   // getifaddrs() may require IO operations.
   base::ThreadRestrictions::AssertIOAllowed();
@@ -113,52 +89,29 @@ bool GetNetworkList(NetworkInterfaceList* networks,
     struct sockaddr* addr = interface->ifa_addr;
     if (!addr)
       continue;
-
-    // Skip unspecified addresses (i.e. made of zeroes) and loopback addresses
-    // configured on non-loopback interfaces.
+    // Skip loopback addresses configured on non-loopback interfaces.
     int addr_size = 0;
     if (addr->sa_family == AF_INET6) {
       struct sockaddr_in6* addr_in6 =
           reinterpret_cast<struct sockaddr_in6*>(addr);
       struct in6_addr* sin6_addr = &addr_in6->sin6_addr;
       addr_size = sizeof(*addr_in6);
-      if (IN6_IS_ADDR_LOOPBACK(sin6_addr) ||
-          IN6_IS_ADDR_UNSPECIFIED(sin6_addr)) {
+      if (IN6_IS_ADDR_LOOPBACK(sin6_addr))
         continue;
-      }
     } else if (addr->sa_family == AF_INET) {
       struct sockaddr_in* addr_in =
           reinterpret_cast<struct sockaddr_in*>(addr);
       addr_size = sizeof(*addr_in);
-      if (addr_in->sin_addr.s_addr == INADDR_LOOPBACK ||
-          addr_in->sin_addr.s_addr == 0) {
+      if (addr_in->sin_addr.s_addr == INADDR_LOOPBACK)
         continue;
-      }
     } else {
       // Skip non-IP addresses.
       continue;
     }
-
-    const std::string& name = interface->ifa_name;
-    // Filter out VMware interfaces, typically named vmnet1 and vmnet8.
-    if (policy == EXCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES &&
-        ((name.find("vmnet") != std::string::npos) ||
-         (name.find("vnic") != std::string::npos))) {
-      continue;
-    }
     IPEndPoint address;
+    std::string name = interface->ifa_name;
     if (address.FromSockAddr(addr, addr_size)) {
-      uint8 net_mask = 0;
-      if (interface->ifa_netmask) {
-        IPEndPoint netmask;
-        if (netmask.FromSockAddr(interface->ifa_netmask, addr_size)) {
-          net_mask = MaskPrefixLength(netmask.address());
-        }
-      }
-
-      networks->push_back(
-          NetworkInterface(name, if_nametoindex(name.c_str()),
-                           address.address(), net_mask));
+      networks->push_back(NetworkInterface(name, address.address()));
     }
   }
 
@@ -166,10 +119,6 @@ bool GetNetworkList(NetworkInterfaceList* networks,
 
   return true;
 #endif
-}
-
-WifiPHYLayerProtocol GetWifiPHYLayerProtocol() {
-  return WIFI_PHY_LAYER_PROTOCOL_UNKNOWN;
 }
 
 }  // namespace net

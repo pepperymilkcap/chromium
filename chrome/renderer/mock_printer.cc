@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,14 @@
 
 #include "base/basictypes.h"
 #include "base/file_util.h"
-#include "base/memory/shared_memory.h"
-#include "base/strings/string16.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/shared_memory.h"
+#include "base/string16.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/print_messages.h"
 #include "ipc/ipc_message_utils.h"
 #include "printing/metafile_impl.h"
 #include "printing/units.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#if defined(OS_MACOSX)
-#include "printing/pdf_metafile_cg_mac.h"
-#endif
 
 namespace {
 
@@ -40,7 +36,7 @@ void UpdateMargins(int margins_type, int dpi, PrintMsg_Print_Params* params) {
   }
 }
 
-}  // namespace
+} // end
 
 MockPrinterPage::MockPrinterPage(const void* source_data,
                                  uint32 source_size,
@@ -61,7 +57,6 @@ MockPrinter::MockPrinter()
     min_shrink_(1.25),
     desired_dpi_(printing::kPointsPerInch),
     selection_only_(false),
-    should_print_backgrounds_(false),
     document_cookie_(-1),
     current_document_cookie_(0),
     printer_status_(PRINTER_READY),
@@ -70,10 +65,10 @@ MockPrinter::MockPrinter()
     is_first_request_(true),
     print_to_pdf_(false),
     preview_request_id_(0),
-    print_scaling_option_(blink::WebPrintScalingOptionSourceSize),
     display_header_footer_(false),
-    title_(base::ASCIIToUTF16("title")),
-    url_(base::ASCIIToUTF16("url")),
+    date_(ASCIIToUTF16("date")),
+    title_(ASCIIToUTF16("title")),
+    url_(ASCIIToUTF16("url")),
     use_invalid_settings_(false) {
   page_size_.SetSize(static_cast<int>(8.5 * dpi_),
                      static_cast<int>(11.0 * dpi_));
@@ -111,13 +106,13 @@ void MockPrinter::SetDefaultPrintSettings(const PrintMsg_Print_Params& params) {
   min_shrink_ = params.min_shrink;
   desired_dpi_ = params.desired_dpi;
   selection_only_ = params.selection_only;
-  should_print_backgrounds_ = params.should_print_backgrounds;
   page_size_ = params.page_size;
   content_size_ = params.content_size;
   printable_area_ = params.printable_area;
   margin_left_ = params.margin_left;
   margin_top_ = params.margin_top;
   display_header_footer_ = params.display_header_footer;
+  date_ = params.date;
   title_ = params.title;
   url_ = params.url;
 }
@@ -126,14 +121,6 @@ void MockPrinter::UseInvalidSettings() {
   use_invalid_settings_ = true;
   PrintMsg_Print_Params empty_param;
   SetDefaultPrintSettings(empty_param);
-}
-
-void MockPrinter::UseInvalidPageSize() {
-  page_size_.SetSize(0, 0);
-}
-
-void MockPrinter::UseInvalidContentSize() {
-  content_size_.SetSize(0, 0);
 }
 
 void MockPrinter::ScriptedPrint(int cookie,
@@ -150,16 +137,15 @@ void MockPrinter::ScriptedPrint(int cookie,
   settings->params.min_shrink = min_shrink_;
   settings->params.desired_dpi = desired_dpi_;
   settings->params.selection_only = selection_only_;
-  settings->params.should_print_backgrounds = should_print_backgrounds_;
   settings->params.document_cookie = document_cookie_;
   settings->params.page_size = page_size_;
   settings->params.content_size = content_size_;
   settings->params.printable_area = printable_area_;
   settings->params.is_first_request = is_first_request_;
-  settings->params.print_scaling_option = print_scaling_option_;
   settings->params.print_to_pdf = print_to_pdf_;
   settings->params.preview_request_id = preview_request_id_;
   settings->params.display_header_footer = display_header_footer_;
+  settings->params.date = date_;
   settings->params.title = title_;
   settings->params.url = url_;
   printer_status_ = PRINTER_PRINTING;
@@ -223,6 +209,11 @@ void MockPrinter::PrintPage(const PrintHostMsg_DidPrintPage_Params& params) {
   MockPrinterPage* page_data = new MockPrinterPage(metafile_data.memory(),
                                                    params.data_size,
                                                    image);
+  if (!page_data) {
+    printer_status_ = PRINTER_ERROR;
+    return;
+  }
+
   scoped_refptr<MockPrinterPage> page(page_data);
   pages_.push_back(page);
 #endif
@@ -242,7 +233,7 @@ int MockPrinter::GetPrintedPages() const {
 
 const MockPrinterPage* MockPrinter::GetPrintedPage(unsigned int pageno) const {
   if (pages_.size() > pageno)
-    return pages_[pageno].get();
+    return pages_[pageno];
   else
     return NULL;
 }
@@ -268,7 +259,7 @@ bool MockPrinter::GetBitmapChecksum(
 }
 
 bool MockPrinter::SaveSource(
-    unsigned int page, const base::FilePath& filepath) const {
+    unsigned int page, const FilePath& filepath) const {
   if (printer_status_ != PRINTER_READY || page >= pages_.size())
     return false;
   const uint8* source_data = pages_[page]->source_data();
@@ -279,7 +270,7 @@ bool MockPrinter::SaveSource(
 }
 
 bool MockPrinter::SaveBitmap(
-    unsigned int page, const base::FilePath& filepath) const {
+    unsigned int page, const FilePath& filepath) const {
   if (printer_status_ != PRINTER_READY || page >= pages_.size())
     return false;
 
@@ -297,7 +288,6 @@ void MockPrinter::SetPrintParams(PrintMsg_Print_Params* params) {
   params->min_shrink = min_shrink_;
   params->desired_dpi = desired_dpi_;
   params->selection_only = selection_only_;
-  params->should_print_backgrounds = should_print_backgrounds_;
   params->document_cookie = document_cookie_;
   params->page_size = page_size_;
   params->content_size = content_size_;
@@ -305,10 +295,10 @@ void MockPrinter::SetPrintParams(PrintMsg_Print_Params* params) {
   params->margin_left = margin_left_;
   params->margin_top = margin_top_;
   params->is_first_request = is_first_request_;
-  params->print_scaling_option = print_scaling_option_;
   params->print_to_pdf = print_to_pdf_;
   params->preview_request_id = preview_request_id_;
   params->display_header_footer = display_header_footer_;
+  params->date = date_;
   params->title = title_;
   params->url = url_;
 }

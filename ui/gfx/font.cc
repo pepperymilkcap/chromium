@@ -4,7 +4,8 @@
 
 #include "ui/gfx/font.h"
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/platform_font.h"
 
 namespace gfx {
@@ -54,16 +55,12 @@ int Font::GetBaseline() const {
   return platform_font_->GetBaseline();
 }
 
-int Font::GetCapHeight() const {
-  return platform_font_->GetCapHeight();
-}
-
 int Font::GetAverageCharacterWidth() const {
   return platform_font_->GetAverageCharacterWidth();
 }
 
-int Font::GetStringWidth(const base::string16& text) const {
-  return platform_font_->GetStringWidth(text);
+int Font::GetStringWidth(const string16& text) const {
+  return CanvasSkia::GetStringWidth(text, *this);
 }
 
 int Font::GetExpectedTextWidth(int length) const {
@@ -76,10 +73,6 @@ int Font::GetStyle() const {
 
 std::string Font::GetFontName() const {
   return platform_font_->GetFontName();
-}
-
-std::string Font::GetActualFontNameForTesting() const {
-  return platform_font_->GetActualFontNameForTesting();
 }
 
 int Font::GetFontSize() const {

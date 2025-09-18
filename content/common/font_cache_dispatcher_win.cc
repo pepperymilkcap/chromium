@@ -1,19 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/common/font_cache_dispatcher_win.h"
 
-#include <map>
 #include <vector>
+#include <map>
 
 #include "base/logging.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "content/common/child_process_messages.h"
 
-namespace content {
 namespace {
-typedef std::vector<base::string16> FontNameVector;
+typedef std::vector<string16> FontNameVector;
 typedef std::map<FontCacheDispatcher*, FontNameVector> DispatcherToFontNames;
 
 class FontCache {
@@ -23,7 +22,7 @@ class FontCache {
   }
 
   void PreCacheFont(const LOGFONT& font, FontCacheDispatcher* dispatcher) {
-    typedef std::map<base::string16, FontCache::CacheElement> FontNameToElement;
+    typedef std::map<string16, FontCache::CacheElement> FontNameToElement;
 
     base::AutoLock lock(mutex_);
 
@@ -41,7 +40,7 @@ class FontCache {
     BOOL ret = GetTextMetrics(hdc, &tm);
     DCHECK(ret);
 
-    base::string16 font_name = font.lfFaceName;
+    string16 font_name = font.lfFaceName;
     int ref_count_inc = 1;
     FontNameVector::iterator it =
         std::find(dispatcher_font_map_[dispatcher].begin(),
@@ -57,18 +56,16 @@ class FontCache {
     if (cache_[font_name].ref_count_ == 0) {  // Requested font is new to cache.
       cache_[font_name].ref_count_ = 1;
     } else {  // Requested font is already in cache, release old handles.
-      SelectObject(cache_[font_name].dc_, cache_[font_name].old_font_);
       DeleteObject(cache_[font_name].font_);
-      ReleaseDC(NULL, cache_[font_name].dc_);
+      DeleteDC(cache_[font_name].dc_);
     }
     cache_[font_name].font_ = font_handle;
     cache_[font_name].dc_ = hdc;
-    cache_[font_name].old_font_ = old_font;
     cache_[font_name].ref_count_ += ref_count_inc;
   }
 
   void ReleaseCachedFonts(FontCacheDispatcher* dispatcher) {
-    typedef std::map<base::string16, FontCache::CacheElement> FontNameToElement;
+    typedef std::map<string16, FontCache::CacheElement> FontNameToElement;
 
     base::AutoLock lock(mutex_);
 
@@ -100,23 +97,19 @@ class FontCache {
  private:
   struct CacheElement {
     CacheElement()
-        : font_(NULL), old_font_(NULL), dc_(NULL), ref_count_(0) {
+        : font_(NULL), dc_(NULL), ref_count_(0) {
     }
 
     ~CacheElement() {
       if (font_) {
-        if (dc_ && old_font_) {
-          SelectObject(dc_, old_font_);
-        }
         DeleteObject(font_);
       }
       if (dc_) {
-        ReleaseDC(NULL, dc_);
+        DeleteDC(dc_);
       }
     }
 
     HFONT font_;
-    HGDIOBJ old_font_;
     HDC dc_;
     int ref_count_;
   };
@@ -125,7 +118,7 @@ class FontCache {
   FontCache() {
   }
 
-  std::map<base::string16, CacheElement> cache_;
+  std::map<string16, CacheElement> cache_;
   DispatcherToFontNames dispatcher_font_map_;
   base::Lock mutex_;
 
@@ -190,5 +183,3 @@ void FontCacheDispatcher::OnReleaseCachedFonts() {
   // count.  When ref count is zero, the handles are released.
   FontCache::GetInstance()->ReleaseCachedFonts(this);
 }
-
-}  // namespace content

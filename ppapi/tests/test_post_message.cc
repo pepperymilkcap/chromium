@@ -4,22 +4,14 @@
 
 #include "ppapi/tests/test_post_message.h"
 
-#include <string.h>
 #include <algorithm>
-#include <map>
 #include <sstream>
 
+#include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/c/ppb_file_io.h"
-#include "ppapi/cpp/dev/var_resource_dev.h"
-#include "ppapi/cpp/file_io.h"
-#include "ppapi/cpp/file_ref.h"
-#include "ppapi/cpp/file_system.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/var.h"
-#include "ppapi/cpp/var_array.h"
 #include "ppapi/cpp/var_array_buffer.h"
-#include "ppapi/cpp/var_dictionary.h"
 #include "ppapi/tests/pp_thread.h"
 #include "ppapi/tests/test_utils.h"
 #include "ppapi/tests/testing_instance.h"
@@ -33,21 +25,12 @@ REGISTER_TEST_CASE(PostMessage);
 
 namespace {
 
-const char kTestFilename[] = "testfile.txt";
 const char kTestString[] = "Hello world!";
 const bool kTestBool = true;
 const int32_t kTestInt = 42;
 const double kTestDouble = 42.0;
-
-// On Windows XP bots, the NonMainThread test can run very slowly. So we dial
-// back the number of threads & messages when running on Windows.
-#ifdef PPAPI_OS_WIN
-const int32_t kThreadsToRun = 2;
-const int32_t kMessagesToSendPerThread = 5;
-#else
 const int32_t kThreadsToRun = 4;
 const int32_t kMessagesToSendPerThread = 10;
-#endif
 
 // The struct that invoke_post_message_thread_func expects for its argument.
 // It includes the instance on which to invoke PostMessage, and the value to
@@ -67,81 +50,6 @@ void InvokePostMessageThreadFunc(void* user_data) {
   delete arg;
 }
 
-// TODO(raymes): Consider putting something like this into pp::Var.
-bool VarsEqual(const pp::Var& expected,
-               const pp::Var& actual,
-               std::map<int64_t, int64_t>* visited_ids) {
-  if (expected.pp_var().type != actual.pp_var().type) {
-    if (!expected.is_number() && !actual.is_number())
-      return false;
-  }
-  // TODO(raymes): Implement a pp::Var::IsRefCounted() function.
-  if (expected.pp_var().type > PP_VARTYPE_DOUBLE) {
-    std::map<int64_t, int64_t>::const_iterator it =
-        visited_ids->find(expected.pp_var().value.as_id);
-    if (it != visited_ids->end()) {
-      if (it->second == actual.pp_var().value.as_id)
-        return true;
-      return false;
-    }
-    (*visited_ids)[expected.pp_var().value.as_id] = actual.pp_var().value.as_id;
-  }
-
-  if (expected.is_number()) {
-    return fabs(expected.AsDouble() - actual.AsDouble()) < 1.0e-4;
-  } else if (expected.is_array()) {
-    pp::VarArray expected_array(expected);
-    pp::VarArray actual_array(actual);
-    if (expected_array.GetLength() != actual_array.GetLength())
-      return false;
-    for (uint32_t i = 0; i < expected_array.GetLength(); ++i) {
-      if (!VarsEqual(expected_array.Get(i), actual_array.Get(i), visited_ids))
-        return false;
-    }
-    return true;
-  } else if (expected.is_dictionary()) {
-    pp::VarDictionary expected_dict(expected);
-    pp::VarDictionary actual_dict(actual);
-    if (expected_dict.GetKeys().GetLength() !=
-        actual_dict.GetKeys().GetLength()) {
-      return false;
-    }
-    for (uint32_t i = 0; i < expected_dict.GetKeys().GetLength(); ++i) {
-      pp::Var key = expected_dict.GetKeys().Get(i);
-      if (!actual_dict.HasKey(key))
-        return false;
-      if (!VarsEqual(expected_dict.Get(key), actual_dict.Get(key), visited_ids))
-        return false;
-    }
-    return true;
-  } else {
-    return expected == actual;
-  }
-}
-
-bool VarsEqual(const pp::Var& expected,
-               const pp::Var& actual) {
-  std::map<int64_t, int64_t> visited_ids;
-  return VarsEqual(expected, actual, &visited_ids);
-}
-
-class ScopedArrayBufferSizeSetter {
- public:
-  ScopedArrayBufferSizeSetter(const PPB_Testing_Private* interface,
-                              PP_Instance instance,
-                              uint32_t threshold)
-     : interface_(interface),
-       instance_(instance) {
-    interface_->SetMinimumArrayBufferSizeForShmem(instance_, threshold);
-  }
-  ~ScopedArrayBufferSizeSetter() {
-    interface_->SetMinimumArrayBufferSizeForShmem(instance_, 0);
-  }
- private:
-  const PPB_Testing_Private* interface_;
-  PP_Instance instance_;
-};
-
 #define FINISHED_WAITING_MESSAGE "TEST_POST_MESSAGE_FINISHED_WAITING"
 
 }  // namespace
@@ -151,9 +59,6 @@ TestPostMessage::TestPostMessage(TestingInstance* instance)
 }
 
 TestPostMessage::~TestPostMessage() {
-  instance_->PostMessage(pp::Var("This isn't guaranteed to be received, but "
-                                 "shouldn't cause a crash."));
-
   // Remove the special listener that only responds to a FINISHED_WAITING
   // string. See Init for where it gets added.
   std::string js_code;
@@ -205,10 +110,6 @@ void TestPostMessage::RunTests(const std::string& filter) {
   RUN_TEST(SendInInit, filter);
   RUN_TEST(SendingData, filter);
   RUN_TEST(SendingArrayBuffer, filter);
-  RUN_TEST(SendingArray, filter);
-  RUN_TEST(SendingDictionary, filter);
-  RUN_TEST(SendingResource, filter);
-  RUN_TEST(SendingComplexVar, filter);
   RUN_TEST(MessageEvent, filter);
   RUN_TEST(NoHandler, filter);
   RUN_TEST(ExtraParam, filter);
@@ -250,16 +151,6 @@ bool TestPostMessage::AddEchoingListener(const std::string& expression) {
   return true;
 }
 
-bool TestPostMessage::PostMessageFromJavaScript(const std::string& func) {
-  std::string js_code;
-  js_code += "var plugin = document.getElementById('plugin');"
-             "plugin.postMessage(";
-  js_code += func + "()";
-  js_code += "                      );";
-  instance_->EvalScript(js_code);
-  return true;
-}
-
 bool TestPostMessage::ClearListeners() {
   std::string js_code;
   js_code += "var plugin = document.getElementById('plugin');"
@@ -281,52 +172,6 @@ int TestPostMessage::WaitForMessages() {
   // that all pending messages have been slurped up. Return the number we
   // received (which may be zero).
   return message_data_.size() - message_size_before;
-}
-
-int TestPostMessage::PostAsyncMessageFromJavaScriptAndWait(
-    const std::string& func) {
-  // After the |func| calls callback, post both the given |message|, as well as
-  // the special message FINISHED_WAITING_MESSAGE. This ensures that
-  // RunMessageLoop correctly waits until the callback is called.
-  std::string js_code;
-  js_code += "var plugin = document.getElementById('plugin');"
-             "var callback = function(message) {"
-             "  plugin.postMessage(message);"
-             "  plugin.postMessage('" FINISHED_WAITING_MESSAGE "');"
-             "};";
-  js_code += "(" + func + ")(callback);";
-  instance_->EvalScript(js_code);
-
-  size_t message_size_before = message_data_.size();
-  // Unlike WaitForMessages, we do not post FINISHED_WAITING_MESSAGE. This is
-  // because the above JavaScript code will post it for us, when the
-  // asynchronous operation completes.
-  testing_interface_->RunMessageLoop(instance_->pp_instance());
-  // Now that the FINISHED_WAITING_MESSAGE has been echoed back to us, we know
-  // that all pending messages have been slurped up. Return the number we
-  // received (which may be zero).
-  return message_data_.size() - message_size_before;
-}
-
-std::string TestPostMessage::CheckMessageProperties(
-    const pp::Var& test_data,
-    const std::vector<std::string>& properties_to_check) {
-  typedef std::vector<std::string>::const_iterator Iterator;
-  for (Iterator iter = properties_to_check.begin();
-       iter != properties_to_check.end();
-       ++iter) {
-    ASSERT_TRUE(AddEchoingListener(*iter));
-    message_data_.clear();
-    instance_->PostMessage(test_data);
-    ASSERT_EQ(message_data_.size(), 0);
-    ASSERT_EQ(WaitForMessages(), 1);
-    ASSERT_TRUE(message_data_.back().is_bool());
-    if (!message_data_.back().AsBool())
-      return std::string("Failed: ") + *iter;
-    ASSERT_TRUE(message_data_.back().AsBool());
-    ASSERT_TRUE(ClearListeners());
-  }
-  PASS();
 }
 
 std::string TestPostMessage::TestSendInInit() {
@@ -408,10 +253,7 @@ std::string TestPostMessage::TestSendingArrayBuffer() {
 
   // TODO(sehr,dmichael): Add testing of longer array buffers when
   // crbug.com/110086 is fixed.
-  ScopedArrayBufferSizeSetter setter(testing_interface_,
-                                     instance_->pp_instance(),
-                                     200);
-  uint32_t sizes[] = { 0, 100, 1000, 10000 };
+  uint32_t sizes[] = { 0, 100, 1000, 10000, 100000 };
   for (size_t i = 0; i < sizeof(sizes)/sizeof(sizes[i]); ++i) {
     std::ostringstream size_stream;
     size_stream << sizes[i];
@@ -447,8 +289,20 @@ std::string TestPostMessage::TestSendingArrayBuffer() {
       std::string expected_byte("(message_event.data.byteLength-1)%256");
       properties_to_check.push_back(received_byte + " == " + expected_byte);
     }
-    ASSERT_SUBTEST_SUCCESS(CheckMessageProperties(test_data,
-                                                  properties_to_check));
+    for (std::vector<std::string>::iterator iter = properties_to_check.begin();
+         iter != properties_to_check.end();
+         ++iter) {
+      ASSERT_TRUE(AddEchoingListener(*iter));
+      message_data_.clear();
+      instance_->PostMessage(test_data);
+      ASSERT_EQ(message_data_.size(), 0);
+      ASSERT_EQ(WaitForMessages(), 1);
+      ASSERT_TRUE(message_data_.back().is_bool());
+      if (!message_data_.back().AsBool())
+        return std::string("Failed: ") + *iter + ", size: " + kSizeAsString;
+      ASSERT_TRUE(message_data_.back().AsBool());
+      ASSERT_TRUE(ClearListeners());
+    }
 
     // Set up the JavaScript message event listener to echo the data part of the
     // message event back to us.
@@ -474,247 +328,6 @@ std::string TestPostMessage::TestSendingArrayBuffer() {
     message_data_.clear();
     ASSERT_TRUE(ClearListeners());
   }
-
-  PASS();
-}
-
-std::string TestPostMessage::TestSendingArray() {
-  // Clean up after previous tests. This also swallows the message sent by Init
-  // if we didn't run the 'SendInInit' test. All tests other than 'SendInInit'
-  // should start with these.
-  WaitForMessages();
-  ASSERT_TRUE(ClearListeners());
-
-  pp::VarArray array;
-  array.Set(0, pp::Var(kTestBool));
-  array.Set(1, pp::Var(kTestString));
-  // Purposely leave index 2 empty.
-  array.Set(3, pp::Var(kTestInt));
-  array.Set(4, pp::Var(kTestDouble));
-
-  std::stringstream ss;
-  ss << array.GetLength();
-  std::string length_as_string(ss.str());
-
-  // Have the listener test some properties of the Array.
-  std::vector<std::string> properties_to_check;
-  properties_to_check.push_back(
-      "message_event.data.constructor.name === 'Array'");
-  properties_to_check.push_back(
-      std::string("message_event.data.length === ") + length_as_string);
-  ASSERT_SUBTEST_SUCCESS(CheckMessageProperties(array, properties_to_check));
-
-  // Set up the JavaScript message event listener to echo the data part of the
-  // message event back to us.
-  ASSERT_TRUE(AddEchoingListener("message_event.data"));
-  message_data_.clear();
-  instance_->PostMessage(array);
-  // PostMessage is asynchronous, so we should not receive a response yet.
-  ASSERT_EQ(message_data_.size(), 0);
-  ASSERT_EQ(WaitForMessages(), 1);
-  ASSERT_TRUE(message_data_.back().is_array());
-  ASSERT_TRUE(VarsEqual(array, message_data_.back()));
-
-  message_data_.clear();
-  ASSERT_TRUE(ClearListeners());
-
-  PASS();
-}
-
-std::string TestPostMessage::TestSendingDictionary() {
-  // Clean up after previous tests. This also swallows the message sent by Init
-  // if we didn't run the 'SendInInit' test. All tests other than 'SendInInit'
-  // should start with these.
-  WaitForMessages();
-  ASSERT_TRUE(ClearListeners());
-
-  pp::VarDictionary dictionary;
-  dictionary.Set(pp::Var("foo"), pp::Var(kTestBool));
-  dictionary.Set(pp::Var("bar"), pp::Var(kTestString));
-  dictionary.Set(pp::Var("abc"), pp::Var(kTestInt));
-  dictionary.Set(pp::Var("def"), pp::Var());
-
-  std::stringstream ss;
-  ss << dictionary.GetKeys().GetLength();
-  std::string length_as_string(ss.str());
-
-  // Have the listener test some properties of the Dictionary.
-  std::vector<std::string> properties_to_check;
-  properties_to_check.push_back(
-      "message_event.data.constructor.name === 'Object'");
-  properties_to_check.push_back(
-      std::string("Object.keys(message_event.data).length === ") +
-      length_as_string);
-  ASSERT_SUBTEST_SUCCESS(CheckMessageProperties(dictionary,
-                                                properties_to_check));
-
-  // Set up the JavaScript message event listener to echo the data part of the
-  // message event back to us.
-  ASSERT_TRUE(AddEchoingListener("message_event.data"));
-  message_data_.clear();
-  instance_->PostMessage(dictionary);
-  // PostMessage is asynchronous, so we should not receive a response yet.
-  ASSERT_EQ(message_data_.size(), 0);
-  ASSERT_EQ(WaitForMessages(), 1);
-  ASSERT_TRUE(message_data_.back().is_dictionary());
-  ASSERT_TRUE(VarsEqual(dictionary, message_data_.back()));
-
-  message_data_.clear();
-  ASSERT_TRUE(ClearListeners());
-
-  PASS();
-}
-
-std::string TestPostMessage::TestSendingResource() {
-  // Clean up after previous tests. This also swallows the message sent by Init
-  // if we didn't run the 'SendInInit' test. All tests other than 'SendInInit'
-  // should start with these.
-  WaitForMessages();
-  message_data_.clear();
-  ASSERT_TRUE(ClearListeners());
-
-  // Test sending a DOMFileSystem from JavaScript to the plugin.
-  // This opens a real (temporary) file using the HTML5 FileSystem API and
-  // writes to it.
-  ASSERT_TRUE(AddEchoingListener("message_event.data"));
-  ASSERT_EQ(message_data_.size(), 0);
-  std::string js_code =
-      "function(callback) {"
-      "  window.webkitRequestFileSystem(window.TEMPORARY, 1024,"
-      "                                 function(fileSystem) {"
-      "    fileSystem.root.getFile('";
-  js_code += kTestFilename;
-  js_code += "', {create: true}, function(tempFile) {"
-      "      tempFile.createWriter(function(writer) {"
-      "        writer.onerror = function() { callback(null); };"
-      "        writer.onwriteend = function() { callback(fileSystem); };"
-      "        var blob = new Blob(['";
-  js_code += kTestString;
-  js_code += "'], {'type': 'text/plain'});"
-      "        writer.write(blob);"
-      "      });"
-      "    }, function() { callback(null); });"
-      "  }, function() { callback(null); });"
-      "}";
-  ASSERT_EQ(PostAsyncMessageFromJavaScriptAndWait(js_code), 1);
-  pp::Var var = message_data_.back();
-  ASSERT_TRUE(var.is_resource());
-  pp::VarResource_Dev var_resource(var);
-  pp::Resource result = var_resource.AsResource();
-  ASSERT_TRUE(pp::FileSystem::IsFileSystem(result));
-  {
-    pp::FileSystem file_system(result);
-    std::string file_path("/");
-    file_path += kTestFilename;
-    pp::FileRef file_ref(file_system, file_path.c_str());
-    ASSERT_NE(0, file_ref.pp_resource());
-
-    // Ensure that the file can be queried.
-    TestCompletionCallbackWithOutput<PP_FileInfo> cc(instance_->pp_instance(),
-                                                     callback_type());
-    cc.WaitForResult(file_ref.Query(cc.GetCallback()));
-    CHECK_CALLBACK_BEHAVIOR(cc);
-    ASSERT_EQ(PP_OK, cc.result());
-
-    // Read the file and test that its contents match.
-    pp::FileIO file_io(instance_);
-    ASSERT_NE(0, file_io.pp_resource());
-    TestCompletionCallback callback(instance_->pp_instance(),
-                                    callback_type());
-    callback.WaitForResult(
-        file_io.Open(file_ref, PP_FILEOPENFLAG_READ, callback.GetCallback()));
-    CHECK_CALLBACK_BEHAVIOR(callback);
-    ASSERT_EQ(PP_OK, callback.result());
-
-    int length = strlen(kTestString);
-    std::vector<char> buffer_vector(length);
-    char* buffer = &buffer_vector[0];  // Note: Not null-terminated!
-    callback.WaitForResult(
-        file_io.Read(0, buffer, length, callback.GetCallback()));
-    CHECK_CALLBACK_BEHAVIOR(callback);
-    ASSERT_EQ(length, callback.result());
-    ASSERT_EQ(0, memcmp(buffer, kTestString, length));
-  }
-
-  WaitForMessages();
-  message_data_.clear();
-  ASSERT_TRUE(ClearListeners());
-
-  // TODO(mgiuca): Test roundtrip from plugin to JS and back, when the plugin to
-  // JS support is available.
-
-  PASS();
-}
-
-std::string TestPostMessage::TestSendingComplexVar() {
-  // Clean up after previous tests. This also swallows the message sent by Init
-  // if we didn't run the 'SendInInit' test. All tests other than 'SendInInit'
-  // should start with these.
-  WaitForMessages();
-  message_data_.clear();
-  ASSERT_TRUE(ClearListeners());
-
-  pp::Var string(kTestString);
-  pp::VarDictionary dictionary;
-  dictionary.Set(pp::Var("foo"), pp::Var(kTestBool));
-  dictionary.Set(pp::Var("bar"), string);
-  dictionary.Set(pp::Var("abc"), pp::Var(kTestInt));
-  dictionary.Set(pp::Var("def"), pp::Var());
-
-  // Reference to array.
-  pp::VarArray array;
-  array.Set(0, pp::Var(kTestBool));
-  array.Set(1, string);
-  // Purposely leave index 2 empty (which will place an undefined var there).
-  array.Set(3, pp::Var(kTestInt));
-  array.Set(4, pp::Var(kTestDouble));
-
-  dictionary.Set(pp::Var("array-ref1"), array);
-  dictionary.Set(pp::Var("array-ref2"), array);
-
-  // Set up the JavaScript message event listener to echo the data part of the
-  // message event back to us.
-  ASSERT_TRUE(AddEchoingListener("message_event.data"));
-  instance_->PostMessage(dictionary);
-  // PostMessage is asynchronous, so we should not receive a response yet.
-  ASSERT_EQ(message_data_.size(), 0);
-  ASSERT_EQ(WaitForMessages(), 1);
-  ASSERT_TRUE(message_data_.back().is_dictionary());
-  pp::VarDictionary result(message_data_.back());
-  ASSERT_TRUE(VarsEqual(dictionary, message_data_.back()));
-
-  WaitForMessages();
-  message_data_.clear();
-  ASSERT_TRUE(ClearListeners());
-
-  // Set up a (dictionary -> array -> dictionary) cycle. Cycles shouldn't be
-  // transmitted.
-  pp::VarArray array2;
-  array2.Set(0, dictionary);
-  dictionary.Set(pp::Var("array2"), array2);
-
-  ASSERT_TRUE(AddEchoingListener("message_event.data"));
-  instance_->PostMessage(dictionary);
-  // PostMessage is asynchronous, so we should not receive a response yet.
-  ASSERT_EQ(message_data_.size(), 0);
-  ASSERT_EQ(WaitForMessages(), 0);
-
-  // Break the cycles.
-  dictionary.Delete(pp::Var("array2"));
-
-  WaitForMessages();
-  message_data_.clear();
-  ASSERT_TRUE(ClearListeners());
-
-  // Test sending a cycle from JavaScript to the plugin.
-  ASSERT_TRUE(AddEchoingListener("message_event.data"));
-  PostMessageFromJavaScript("function() { var x = []; x[0] = x; return x; }");
-  ASSERT_EQ(message_data_.size(), 0);
-  ASSERT_EQ(WaitForMessages(), 0);
-
-  WaitForMessages();
-  message_data_.clear();
-  ASSERT_TRUE(ClearListeners());
 
   PASS();
 }

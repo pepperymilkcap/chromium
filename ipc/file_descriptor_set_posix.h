@@ -4,6 +4,7 @@
 
 #ifndef IPC_FILE_DESCRIPTOR_SET_POSIX_H_
 #define IPC_FILE_DESCRIPTOR_SET_POSIX_H_
+#pragma once
 
 #include <vector>
 
@@ -30,7 +31,7 @@ class IPC_EXPORT FileDescriptorSet
   //
   // In debugging mode, it's a fatal error to try and add more than this number
   // of descriptors to a FileDescriptorSet.
-  static const size_t kMaxDescriptorsPerMessage = 7;
+  static const size_t kMaxDescriptorsPerMessage = 5;
 
   // ---------------------------------------------------------------------------
   // Interfaces for building during message serialisation...
@@ -77,9 +78,6 @@ class IPC_EXPORT FileDescriptorSet
   // Returns true if any contained file descriptors appear to be handles to a
   // directory.
   bool ContainsDirectoryDescriptor() const;
-  // Fetch all filedescriptors with the "auto close" property.
-  // Used instead of CommitAll() when closing must be handled manually.
-  void ReleaseFDsToClose(std::vector<int>* fds);
 
   // ---------------------------------------------------------------------------
 

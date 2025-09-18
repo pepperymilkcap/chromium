@@ -1,9 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/ipc/gpu_command_buffer_traits.h"
-#include "gpu/command_buffer/common/mailbox.h"
 
 namespace IPC {
 
@@ -18,7 +17,7 @@ void ParamTraits<gpu::CommandBuffer::State> ::Write(Message* m,
 }
 
 bool ParamTraits<gpu::CommandBuffer::State> ::Read(const Message* m,
-                                                   PickleIterator* iter,
+                                                   void** iter,
                                                    param_type* p) {
   int32 temp;
   if (ReadParam(m, iter, &p->num_entries) &&
@@ -38,26 +37,5 @@ void ParamTraits<gpu::CommandBuffer::State> ::Log(const param_type& p,
                                                   std::string* l) {
   l->append("<CommandBuffer::State>");
 }
-
-void ParamTraits<gpu::Mailbox>::Write(Message* m, const param_type& p) {
-  m->WriteBytes(p.name, sizeof(p.name));
-}
-
-bool ParamTraits<gpu::Mailbox>::Read(const Message* m,
-                                     PickleIterator* iter,
-                                     param_type* p) {
-  const char* bytes = NULL;
-  if (!m->ReadBytes(iter, &bytes, sizeof(p->name)))
-    return false;
-  DCHECK(bytes);
-  memcpy(p->name, bytes, sizeof(p->name));
-  return true;
-}
-
-void ParamTraits<gpu::Mailbox>::Log(const param_type& p, std::string* l) {
-  for (size_t i = 0; i < sizeof(p.name); ++i)
-    *l += base::StringPrintf("%02x", p.name[i]);
-}
-
 
 }  // namespace IPC

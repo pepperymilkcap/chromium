@@ -13,16 +13,9 @@
 
 namespace base {
 
-const PlatformThreadId kNoThreadId = static_cast<PlatformThreadId>(0);
-
 Lock::Lock() : lock_() {
   owned_by_thread_ = false;
-  owning_thread_id_ = kNoThreadId;
-}
-
-Lock::~Lock() {
-  DCHECK(!owned_by_thread_);
-  DCHECK_EQ(kNoThreadId, owning_thread_id_);
+  owning_thread_id_ = static_cast<PlatformThreadId>(0);
 }
 
 void Lock::AssertAcquired() const {
@@ -34,7 +27,7 @@ void Lock::CheckHeldAndUnmark() {
   DCHECK(owned_by_thread_);
   DCHECK_EQ(owning_thread_id_, PlatformThread::CurrentId());
   owned_by_thread_ = false;
-  owning_thread_id_ = kNoThreadId;
+  owning_thread_id_ = static_cast<PlatformThreadId>(0);
 }
 
 void Lock::CheckUnheldAndMark() {

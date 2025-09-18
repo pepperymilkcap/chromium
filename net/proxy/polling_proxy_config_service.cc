@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop_proxy.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/worker_pool.h"
@@ -97,17 +97,15 @@ class PollingProxyConfigService::Core
   }
 
  private:
-  friend class base::RefCountedThreadSafe<Core>;
-  ~Core() {}
-
   void PollOnWorkerThread(GetConfigFunction func) {
     ProxyConfig config;
     func(&config);
 
     base::AutoLock l(lock_);
-    if (origin_loop_proxy_.get()) {
+    if (origin_loop_proxy_) {
       origin_loop_proxy_->PostTask(
-          FROM_HERE, base::Bind(&Core::GetConfigCompleted, this, config));
+          FROM_HERE,
+          base::Bind(&Core::GetConfigCompleted, this, config));
     }
   }
 
@@ -116,7 +114,7 @@ class PollingProxyConfigService::Core
     DCHECK(poll_task_outstanding_);
     poll_task_outstanding_ = false;
 
-    if (!origin_loop_proxy_.get())
+    if (!origin_loop_proxy_)
       return;  // Was orphaned (parent has already been destroyed).
 
     DCHECK(origin_loop_proxy_->BelongsToCurrentThread());

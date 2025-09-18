@@ -8,9 +8,8 @@
 
 #include "base/logging.h"
 #include "chrome/browser/themes/browser_theme_pack.h"
-#include "chrome/browser/themes/theme_properties.h"
 #include "skia/ext/skia_utils_mac.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSColor+Luminance.h"
+#import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
@@ -18,8 +17,6 @@
 
 NSString* const kBrowserThemeDidChangeNotification =
     @"BrowserThemeDidChangeNotification";
-
-typedef ThemeProperties Properties;
 
 namespace {
 
@@ -35,8 +32,11 @@ void HSLToHSB(const color_utils::HSL& hsl, CGFloat* h, CGFloat* s, CGFloat* b) {
 
 }  // namespace
 
-NSImage* ThemeService::GetNSImageNamed(int id) const {
+NSImage* ThemeService::GetNSImageNamed(int id, bool allow_default) const {
   DCHECK(CalledOnValidThread());
+
+  if (!allow_default && !HasCustomImage(id))
+    return nil;
 
   // Check to see if we already have the image in the cache.
   NSImageMap::const_iterator nsimage_iter = nsimage_cache_.find(id);
@@ -48,16 +48,16 @@ NSImage* ThemeService::GetNSImageNamed(int id) const {
   // - For consistency with other platforms.
   // - To get the generated tinted images.
   NSImage* nsimage = nil;
-  if (theme_supplier_.get()) {
-    gfx::Image image = theme_supplier_->GetImageNamed(id);
-    if (!image.IsEmpty())
-      nsimage = image.ToNSImage();
+  if (theme_pack_.get()) {
+    const gfx::Image* image = theme_pack_->GetImageNamed(id);
+    if (image)
+      nsimage = *image;
   }
 
   // If the theme didn't override this image then load it from the resource
   // bundle.
   if (!nsimage) {
-    nsimage = rb_.GetNativeImageNamed(id).ToNSImage();
+    nsimage = rb_.GetNativeImageNamed(id);
   }
 
   // We loaded successfully.  Cache the image.
@@ -85,53 +85,86 @@ NSImage* ThemeService::GetNSImageNamed(int id) const {
   return empty_image;
 }
 
-NSColor* ThemeService::GetNSImageColorNamed(int id) const {
+NSColor* ThemeService::GetNSImageColorNamed(int id, bool allow_default) const {
   DCHECK(CalledOnValidThread());
 
   // Check to see if we already have the color in the cache.
   NSColorMap::const_iterator nscolor_iter = nscolor_cache_.find(id);
-  if (nscolor_iter != nscolor_cache_.end())
-    return nscolor_iter->second;
+  if (nscolor_iter != nscolor_cache_.end()) {
+    bool cached_is_default = nscolor_iter->second.second;
+    if (!cached_is_default || allow_default)
+      return nscolor_iter->second.first;
+  }
 
-  NSImage* image = GetNSImageNamed(id);
+  NSImage* image = GetNSImageNamed(id, allow_default);
   if (!image)
     return nil;
   NSColor* image_color = [NSColor colorWithPatternImage:image];
 
   // We loaded successfully.  Cache the color.
-  if (image_color)
-    nscolor_cache_[id] = [image_color retain];
+  if (image_color) {
+    nscolor_cache_[id] = std::make_pair([image_color retain],
+                                        !HasCustomImage(id));
+  }
 
   return image_color;
 }
 
-NSColor* ThemeService::GetNSColor(int id) const {
+NSColor* ThemeService::GetNSColor(int id, bool allow_default) const {
   DCHECK(CalledOnValidThread());
 
   // Check to see if we already have the color in the cache.
   NSColorMap::const_iterator nscolor_iter = nscolor_cache_.find(id);
-  if (nscolor_iter != nscolor_cache_.end())
-    return nscolor_iter->second;
+  if (nscolor_iter != nscolor_cache_.end()) {
+    bool cached_is_default = nscolor_iter->second.second;
+    if (!cached_is_default || allow_default)
+      return nscolor_iter->second.first;
+  }
 
-  SkColor sk_color = GetColor(id);
+  bool is_default = false;
+  SkColor sk_color;
+  if (theme_pack_.get() && theme_pack_->GetColor(id, &sk_color)) {
+    is_default = false;
+  } else {
+    is_default = true;
+    sk_color = GetDefaultColor(id);
+  }
+
+  if (is_default && !allow_default)
+    return nil;
+
   NSColor* color = gfx::SkColorToCalibratedNSColor(sk_color);
 
   // We loaded successfully.  Cache the color.
   if (color)
-    nscolor_cache_[id] = [color retain];
+    nscolor_cache_[id] = std::make_pair([color retain], is_default);
 
   return color;
 }
 
-NSColor* ThemeService::GetNSColorTint(int id) const {
+NSColor* ThemeService::GetNSColorTint(int id, bool allow_default) const {
   DCHECK(CalledOnValidThread());
 
   // Check to see if we already have the color in the cache.
   NSColorMap::const_iterator nscolor_iter = nscolor_cache_.find(id);
-  if (nscolor_iter != nscolor_cache_.end())
-    return nscolor_iter->second;
+  if (nscolor_iter != nscolor_cache_.end()) {
+    bool cached_is_default = nscolor_iter->second.second;
+    if (!cached_is_default || allow_default)
+      return nscolor_iter->second.first;
+  }
 
-  color_utils::HSL tint = GetTint(id);
+  bool is_default = false;
+  color_utils::HSL tint;
+  if (theme_pack_.get() && theme_pack_->GetTint(id, &tint)) {
+    is_default = false;
+  } else {
+    is_default = true;
+    tint = GetDefaultTint(id);
+  }
+
+  if (is_default && !allow_default)
+    return nil;
+
   NSColor* tint_color = nil;
   if (tint.h == -1 && tint.s == -1 && tint.l == -1) {
     tint_color = [NSColor blackColor];
@@ -147,7 +180,7 @@ NSColor* ThemeService::GetNSColorTint(int id) const {
 
   // We loaded successfully.  Cache the color.
   if (tint_color)
-    nscolor_cache_[id] = [tint_color retain];
+    nscolor_cache_[id] = std::make_pair([tint_color retain], is_default);
 
   return tint_color;
 }
@@ -165,10 +198,10 @@ NSGradient* ThemeService::GetNSGradient(int id) const {
   // Note that we are not leaking when we assign a retained object to
   // |gradient|; in all cases we cache it before we return.
   switch (id) {
-    case Properties::GRADIENT_FRAME_INCOGNITO:
-    case Properties::GRADIENT_FRAME_INCOGNITO_INACTIVE: {
+    case GRADIENT_FRAME_INCOGNITO:
+    case GRADIENT_FRAME_INCOGNITO_INACTIVE: {
       // TODO(avi): can we simplify this?
-      BOOL active = id == Properties::GRADIENT_FRAME_INCOGNITO;
+      BOOL active = id == GRADIENT_FRAME_INCOGNITO;
       NSColor* base_color = [NSColor colorWithCalibratedRed:83/255.0
                                                       green:108.0/255.0
                                                        blue:140/255.0
@@ -193,11 +226,11 @@ NSGradient* ThemeService::GetNSGradient(int id) const {
       break;
     }
 
-    case Properties::GRADIENT_TOOLBAR:
-    case Properties::GRADIENT_TOOLBAR_INACTIVE: {
+    case GRADIENT_TOOLBAR:
+    case GRADIENT_TOOLBAR_INACTIVE: {
       NSColor* base_color = [NSColor colorWithCalibratedWhite:0.2 alpha:1.0];
-      BOOL faded = (id == Properties::GRADIENT_TOOLBAR_INACTIVE ) ||
-                   (id == Properties::GRADIENT_TOOLBAR_BUTTON_INACTIVE);
+      BOOL faded = (id == GRADIENT_TOOLBAR_INACTIVE ) ||
+                   (id == GRADIENT_TOOLBAR_BUTTON_INACTIVE);
       NSColor* start_color =
           [base_color gtm_colorAdjustedFor:GTMColorationLightHighlight
                                      faded:faded];
@@ -220,18 +253,18 @@ NSGradient* ThemeService::GetNSGradient(int id) const {
       break;
     }
 
-    case Properties::GRADIENT_TOOLBAR_BUTTON:
-    case Properties::GRADIENT_TOOLBAR_BUTTON_INACTIVE: {
+    case GRADIENT_TOOLBAR_BUTTON:
+    case GRADIENT_TOOLBAR_BUTTON_INACTIVE: {
       NSColor* start_color = [NSColor colorWithCalibratedWhite:1.0 alpha:0.0];
       NSColor* end_color = [NSColor colorWithCalibratedWhite:1.0 alpha:0.3];
       gradient = [[NSGradient alloc] initWithStartingColor:start_color
                                                endingColor:end_color];
       break;
     }
-    case Properties::GRADIENT_TOOLBAR_BUTTON_PRESSED:
-    case Properties::GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE: {
+    case GRADIENT_TOOLBAR_BUTTON_PRESSED:
+    case GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE: {
       NSColor* base_color = [NSColor colorWithCalibratedWhite:0.5 alpha:1.0];
-      BOOL faded = id == Properties::GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE;
+      BOOL faded = id == GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE;
       NSColor* start_color =
           [base_color gtm_colorAdjustedFor:GTMColorationBaseShadow
                                      faded:faded];
@@ -276,7 +309,7 @@ void ThemeService::FreePlatformCaches() {
   // Free colors.
   for (NSColorMap::iterator i = nscolor_cache_.begin();
        i != nscolor_cache_.end(); i++) {
-    [i->second release];
+    [i->second.first release];
   }
   nscolor_cache_.clear();
 

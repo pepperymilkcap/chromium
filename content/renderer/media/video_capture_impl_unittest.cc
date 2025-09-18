@@ -1,9 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop/message_loop.h"
-#include "content/child/child_process.h"
+#include "base/message_loop.h"
 #include "content/common/media/video_capture_messages.h"
 #include "content/renderer/media/video_capture_impl.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -13,17 +12,18 @@ using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::Return;
 
-namespace content {
+#define CAPABILITY_SMALL {176, 144, 30, 0, media::VideoFrame::I420, \
+    false }
+#define CAPABILITY_LARGE {320, 240, 30, 0, media::VideoFrame::I420, \
+    false }
 
 class MockVideoCaptureMessageFilter : public VideoCaptureMessageFilter {
  public:
   MockVideoCaptureMessageFilter() : VideoCaptureMessageFilter() {}
+  virtual ~MockVideoCaptureMessageFilter() {}
 
   // Filter implementation.
   MOCK_METHOD1(Send, bool(IPC::Message* message));
-
- protected:
-  virtual ~MockVideoCaptureMessageFilter() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockVideoCaptureMessageFilter);
@@ -40,12 +40,12 @@ class MockVideoCaptureClient : public media::VideoCapture::EventHandler {
   MOCK_METHOD1(OnPaused, void(media::VideoCapture* capture));
   MOCK_METHOD2(OnError, void(media::VideoCapture* capture, int error_code));
   MOCK_METHOD1(OnRemoved, void(media::VideoCapture* capture));
-  MOCK_METHOD2(OnFrameReady,
+  MOCK_METHOD2(OnBufferReady,
                void(media::VideoCapture* capture,
-                    const scoped_refptr<media::VideoFrame>& frame));
+                    scoped_refptr<media::VideoCapture::VideoFrameBuffer> buf));
   MOCK_METHOD2(OnDeviceInfoReceived,
                void(media::VideoCapture* capture,
-                    const media::VideoCaptureFormat& device_info));
+                    const media::VideoCaptureParams& device_info));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockVideoCaptureClient);
@@ -58,11 +58,12 @@ class VideoCaptureImplTest : public ::testing::Test {
     MockVideoCaptureImpl(const media::VideoCaptureSessionId id,
                          scoped_refptr<base::MessageLoopProxy> ml_proxy,
                          VideoCaptureMessageFilter* filter)
-        : VideoCaptureImpl(id, ml_proxy.get(), filter) {}
+        : VideoCaptureImpl(id, ml_proxy, filter) {
+    }
     virtual ~MockVideoCaptureImpl() {}
 
     // Override Send() to mimic device to send events.
-    virtual void Send(IPC::Message* message) OVERRIDE {
+    void Send(IPC::Message* message) {
       CHECK(message);
 
       // In this method, messages are sent to the according handlers as if
@@ -81,36 +82,32 @@ class VideoCaptureImplTest : public ::testing::Test {
     }
 
     void DeviceStartCapture(int device_id,
-                            media::VideoCaptureSessionId session_id,
                             const media::VideoCaptureParams& params) {
-      OnStateChanged(VIDEO_CAPTURE_STATE_STARTED);
+      media::VideoCaptureParams device_info = params;
+      OnDeviceInfoReceived(device_info);
+      OnStateChanged(video_capture::kStarted);
     }
 
     void DevicePauseCapture(int device_id) {}
 
     void DeviceStopCapture(int device_id) {
-      OnStateChanged(VIDEO_CAPTURE_STATE_STOPPED);
+      OnStateChanged(video_capture::kStopped);
     }
 
     void DeviceReceiveEmptyBuffer(int device_id, int buffer_id) {}
   };
 
   VideoCaptureImplTest() {
-    params_small_.requested_format = media::VideoCaptureFormat(
-        gfx::Size(176, 144), 30, media::PIXEL_FORMAT_I420);
-
-    params_large_.requested_format = media::VideoCaptureFormat(
-        gfx::Size(320, 240), 30, media::PIXEL_FORMAT_I420);
-
-    message_loop_.reset(new base::MessageLoop(base::MessageLoop::TYPE_IO));
-    message_loop_proxy_ = base::MessageLoopProxy::current().get();
-    child_process_.reset(new ChildProcess());
+    message_loop_.reset(new MessageLoop(MessageLoop::TYPE_IO));
+    message_loop_proxy_ =
+        base::MessageLoopProxy::current().get();
 
     message_filter_ = new MockVideoCaptureMessageFilter;
     session_id_ = 1;
 
-    video_capture_impl_ = new MockVideoCaptureImpl(
-        session_id_, message_loop_proxy_, message_filter_.get());
+    video_capture_impl_ = new MockVideoCaptureImpl(session_id_,
+                                                   message_loop_proxy_,
+                                                   message_filter_);
 
     video_capture_impl_->device_id_ = 2;
   }
@@ -120,14 +117,11 @@ class VideoCaptureImplTest : public ::testing::Test {
   }
 
  protected:
-  scoped_ptr<base::MessageLoop> message_loop_;
+  scoped_ptr<MessageLoop> message_loop_;
   scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
-  scoped_ptr<ChildProcess> child_process_;
   scoped_refptr<MockVideoCaptureMessageFilter> message_filter_;
   media::VideoCaptureSessionId session_id_;
   MockVideoCaptureImpl* video_capture_impl_;
-  media::VideoCaptureParams params_small_;
-  media::VideoCaptureParams params_large_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureImplTest);
@@ -136,12 +130,16 @@ class VideoCaptureImplTest : public ::testing::Test {
 TEST_F(VideoCaptureImplTest, Simple) {
   // Execute SetCapture() and StopCapture() for one client.
   scoped_ptr<MockVideoCaptureClient> client(new MockVideoCaptureClient);
+  media::VideoCapture::VideoCaptureCapability capability =
+      CAPABILITY_SMALL;
 
   EXPECT_CALL(*client, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client, OnDeviceInfoReceived(_,_))
+      .WillOnce(Return());
 
-  video_capture_impl_->StartCapture(client.get(), params_small_);
-  message_loop_->RunUntilIdle();
+  video_capture_impl_->StartCapture(client.get(), capability);
+  message_loop_->RunAllPending();
 
   EXPECT_CALL(*client, OnStopped(_))
       .WillOnce(Return());
@@ -149,18 +147,22 @@ TEST_F(VideoCaptureImplTest, Simple) {
       .WillOnce(Return());
 
   video_capture_impl_->StopCapture(client.get());
-  message_loop_->RunUntilIdle();
+  message_loop_->RunAllPending();
 }
 
 TEST_F(VideoCaptureImplTest, TwoClientsInSequence) {
   // Execute SetCapture() and StopCapture() for 2 clients in sequence.
   scoped_ptr<MockVideoCaptureClient> client(new MockVideoCaptureClient);
+  media::VideoCapture::VideoCaptureCapability capability =
+      CAPABILITY_SMALL;
 
   EXPECT_CALL(*client, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client, OnDeviceInfoReceived(_,_))
+      .WillOnce(Return());
 
-  video_capture_impl_->StartCapture(client.get(), params_small_);
-  message_loop_->RunUntilIdle();
+  video_capture_impl_->StartCapture(client.get(), capability);
+  message_loop_->RunAllPending();
 
   EXPECT_CALL(*client, OnStopped(_))
       .WillOnce(Return());
@@ -168,13 +170,15 @@ TEST_F(VideoCaptureImplTest, TwoClientsInSequence) {
       .WillOnce(Return());
 
   video_capture_impl_->StopCapture(client.get());
-  message_loop_->RunUntilIdle();
+  message_loop_->RunAllPending();
 
   EXPECT_CALL(*client, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client, OnDeviceInfoReceived(_,_))
+      .WillOnce(Return());
 
-  video_capture_impl_->StartCapture(client.get(), params_small_);
-  message_loop_->RunUntilIdle();
+  video_capture_impl_->StartCapture(client.get(), capability);
+  message_loop_->RunAllPending();
 
   EXPECT_CALL(*client, OnStopped(_))
       .WillOnce(Return());
@@ -182,7 +186,7 @@ TEST_F(VideoCaptureImplTest, TwoClientsInSequence) {
       .WillOnce(Return());
 
   video_capture_impl_->StopCapture(client.get());
-  message_loop_->RunUntilIdle();
+  message_loop_->RunAllPending();
 }
 
 TEST_F(VideoCaptureImplTest, LargeAndSmall) {
@@ -190,15 +194,23 @@ TEST_F(VideoCaptureImplTest, LargeAndSmall) {
   // The large client starts first and stops first.
   scoped_ptr<MockVideoCaptureClient> client_small(new MockVideoCaptureClient);
   scoped_ptr<MockVideoCaptureClient> client_large(new MockVideoCaptureClient);
+  media::VideoCapture::VideoCaptureCapability capability_small =
+      CAPABILITY_SMALL;
+  media::VideoCapture::VideoCaptureCapability capability_large =
+      CAPABILITY_LARGE;
 
   EXPECT_CALL(*client_large, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client_large, OnDeviceInfoReceived(_,_))
+      .WillOnce(Return());
   EXPECT_CALL(*client_small, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client_small, OnDeviceInfoReceived(_,_))
+      .WillOnce(Return());
 
-  video_capture_impl_->StartCapture(client_large.get(), params_large_);
-  video_capture_impl_->StartCapture(client_small.get(), params_small_);
-  message_loop_->RunUntilIdle();
+  video_capture_impl_->StartCapture(client_large.get(), capability_large);
+  video_capture_impl_->StartCapture(client_small.get(), capability_small);
+  message_loop_->RunAllPending();
 
   EXPECT_CALL(*client_large, OnStopped(_))
       .WillOnce(Return());
@@ -211,7 +223,7 @@ TEST_F(VideoCaptureImplTest, LargeAndSmall) {
 
   video_capture_impl_->StopCapture(client_large.get());
   video_capture_impl_->StopCapture(client_small.get());
-  message_loop_->RunUntilIdle();
+  message_loop_->RunAllPending();
 }
 
 TEST_F(VideoCaptureImplTest, SmallAndLarge) {
@@ -219,15 +231,24 @@ TEST_F(VideoCaptureImplTest, SmallAndLarge) {
   // The small client starts first and stops first.
   scoped_ptr<MockVideoCaptureClient> client_small(new MockVideoCaptureClient);
   scoped_ptr<MockVideoCaptureClient> client_large(new MockVideoCaptureClient);
+  media::VideoCapture::VideoCaptureCapability capability_small =
+      CAPABILITY_SMALL;
+  media::VideoCapture::VideoCaptureCapability capability_large =
+      CAPABILITY_LARGE;
 
   EXPECT_CALL(*client_large, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client_large, OnDeviceInfoReceived(_,_))
+      .WillOnce(Return());
   EXPECT_CALL(*client_small, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client_small, OnDeviceInfoReceived(_,_))
+      .Times(AtLeast(1))
+      .WillRepeatedly(Return());
 
-  video_capture_impl_->StartCapture(client_small.get(), params_small_);
-  video_capture_impl_->StartCapture(client_large.get(), params_large_);
-  message_loop_->RunUntilIdle();
+  video_capture_impl_->StartCapture(client_small.get(), capability_small);
+  video_capture_impl_->StartCapture(client_large.get(), capability_large);
+  message_loop_->RunAllPending();
 
   EXPECT_CALL(*client_large, OnStopped(_))
       .WillOnce(Return());
@@ -240,7 +261,7 @@ TEST_F(VideoCaptureImplTest, SmallAndLarge) {
 
   video_capture_impl_->StopCapture(client_small.get());
   video_capture_impl_->StopCapture(client_large.get());
-  message_loop_->RunUntilIdle();
+  message_loop_->RunAllPending();
 }
 
 TEST_F(VideoCaptureImplTest, TwoClientsWithSameSize) {
@@ -248,15 +269,20 @@ TEST_F(VideoCaptureImplTest, TwoClientsWithSameSize) {
   // The client1 starts first and stops first.
   scoped_ptr<MockVideoCaptureClient> client1(new MockVideoCaptureClient);
   scoped_ptr<MockVideoCaptureClient> client2(new MockVideoCaptureClient);
+  media::VideoCapture::VideoCaptureCapability capability = CAPABILITY_SMALL;
 
   EXPECT_CALL(*client1, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client1, OnDeviceInfoReceived(_,_))
+      .WillOnce(Return());
   EXPECT_CALL(*client2, OnStarted(_))
       .WillOnce(Return());
+  EXPECT_CALL(*client2, OnDeviceInfoReceived(_,_))
+      .WillOnce(Return());
 
-  video_capture_impl_->StartCapture(client1.get(), params_small_);
-  video_capture_impl_->StartCapture(client2.get(), params_small_);
-  message_loop_->RunUntilIdle();
+  video_capture_impl_->StartCapture(client1.get(), capability);
+  video_capture_impl_->StartCapture(client2.get(), capability);
+  message_loop_->RunAllPending();
 
   EXPECT_CALL(*client1, OnStopped(_))
       .WillOnce(Return());
@@ -269,7 +295,5 @@ TEST_F(VideoCaptureImplTest, TwoClientsWithSameSize) {
 
   video_capture_impl_->StopCapture(client1.get());
   video_capture_impl_->StopCapture(client2.get());
-  message_loop_->RunUntilIdle();
+  message_loop_->RunAllPending();
 }
-
-}  // namespace content

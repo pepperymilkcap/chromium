@@ -4,17 +4,17 @@
 
 #ifndef CHROME_BROWSER_PRINTING_PRINT_JOB_MANAGER_H_
 #define CHROME_BROWSER_PRINTING_PRINT_JOB_MANAGER_H_
+#pragma once
 
-#include <set>
 #include <vector>
 
-#include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/non_thread_safe.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "printing/print_destination_interface.h"
+
+class PrefService;
 
 namespace printing {
 
@@ -22,79 +22,69 @@ class JobEventDetails;
 class PrintJob;
 class PrinterQuery;
 
-class PrintQueriesQueue : public base::RefCountedThreadSafe<PrintQueriesQueue> {
+class PrintJobManager : public content::NotificationObserver {
  public:
-  PrintQueriesQueue();
+  PrintJobManager();
+  virtual ~PrintJobManager();
 
-  // Sets the print destination to be set on the next print job.
-  void SetDestination(PrintDestinationInterface* destination);
+  // Registers for changes to the printing enabled preference in |prefs|.
+  // This method should be called on the UI thread.
+  void InitOnUIThread(PrefService* prefs);
+
+  // On browser quit, we should wait to have the print job finished.
+  void OnQuit();
+
+  // Stops all printing jobs. If wait_for_finish is true, tries to give jobs
+  // a chance to complete before stopping them.
+  void StopJobs(bool wait_for_finish);
 
   // Queues a semi-initialized worker thread. Can be called from any thread.
   // Current use case is queuing from the I/O thread.
   // TODO(maruel):  Have them vanish after a timeout (~5 minutes?)
   void QueuePrinterQuery(PrinterQuery* job);
 
-  // Pops a queued PrintJobWorkerOwner object that was previously queued or
-  // create new one. Can be called from any thread.
-  scoped_refptr<PrinterQuery> PopPrinterQuery(int document_cookie);
+  // Pops a queued PrintJobWorkerOwner object that was previously queued. Can be
+  // called from any thread. Current use case is poping from the browser thread.
+  void PopPrinterQuery(int document_cookie, scoped_refptr<PrinterQuery>* job);
 
-  // Creates new query.
-  scoped_refptr<PrinterQuery> CreatePrinterQuery();
-
-  void Shutdown();
-
- private:
-  friend class base::RefCountedThreadSafe<PrintQueriesQueue>;
-  typedef std::vector<scoped_refptr<PrinterQuery> > PrinterQueries;
-
-  virtual ~PrintQueriesQueue();
-
-  // Used to serialize access to queued_workers_.
-  base::Lock lock_;
-
-  PrinterQueries queued_queries_;
-
-  scoped_refptr<PrintDestinationInterface> destination_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrintQueriesQueue);
-};
-
-class PrintJobManager : public content::NotificationObserver {
- public:
-  PrintJobManager();
-  virtual ~PrintJobManager();
-
-  // On browser quit, we should wait to have the print job finished.
-  void Shutdown();
+  static void RegisterPrefs(PrefService* prefs);
 
   // content::NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Returns queries queue. Never returns NULL. Must be called on Browser UI
-  // Thread. Reference could be stored and used from any thread.
-  scoped_refptr<PrintQueriesQueue> queue();
+  // Only accessed on the IO thread. UI thread can query
+  // prefs::kPrintingEnabled via g_browser_process->local_state() directly.
+  bool printing_enabled() const;
 
  private:
-  typedef std::set<scoped_refptr<PrintJob> > PrintJobs;
+  typedef std::vector<scoped_refptr<PrintJob> > PrintJobs;
+  typedef std::vector<scoped_refptr<PrinterQuery> > PrinterQueries;
 
   // Processes a NOTIFY_PRINT_JOB_EVENT notification.
   void OnPrintJobEvent(PrintJob* print_job,
                        const JobEventDetails& event_details);
 
-  // Stops all printing jobs. If wait_for_finish is true, tries to give jobs
-  // a chance to complete before stopping them.
-  void StopJobs(bool wait_for_finish);
-
   content::NotificationRegistrar registrar_;
+
+  // Printing is enabled/disabled. For printing with the native print dialog,
+  // this variable is checked at only one place, by
+  // PrintingMessageFilter::OnGetDefaultPrintSettings. If its value is true
+  // at that point, then the initiated print flow will complete itself,
+  // even if the value of this variable changes afterwards.
+  // In the print preview workflow, this variable is checked in
+  // PrintingMessageFilter::OnUpdatePrintSettings, which gets called multiple
+  // times in the print preview workflow.
+  BooleanPrefMember printing_enabled_;
+
+  // Used to serialize access to queued_workers_.
+  base::Lock lock_;
+
+  PrinterQueries queued_queries_;
 
   // Current print jobs that are active.
   PrintJobs current_jobs_;
-
-  scoped_refptr<PrintQueriesQueue> queue_;
-
-  bool is_shutdown_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintJobManager);
 };

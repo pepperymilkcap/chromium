@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,16 @@
 
 #include <gtk/gtk.h>
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/process_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/logging_chrome.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
@@ -51,7 +53,7 @@ class HungRendererDialogGtk {
     }
 
     // content::WebContentsObserver overrides:
-    virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE {
+    virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE {
       dialog_->Hide();
     }
     virtual void WebContentsDestroyed(WebContents* tab) OVERRIDE {
@@ -137,8 +139,7 @@ void HungRendererDialogGtk::Init() {
   GtkWidget* icon_vbox = gtk_vbox_new(FALSE, 0);
   gtk_box_pack_start(GTK_BOX(hbox), icon_vbox, FALSE, FALSE, 0);
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  GdkPixbuf* icon_pixbuf = rb.GetNativeImageNamed(
-      IDR_FROZEN_TAB_ICON).ToGdkPixbuf();
+  GdkPixbuf* icon_pixbuf = rb.GetNativeImageNamed(IDR_FROZEN_TAB_ICON);
   GtkWidget* icon = gtk_image_new_from_pixbuf(icon_pixbuf);
   gtk_box_pack_start(GTK_BOX(icon_vbox), icon, FALSE, FALSE, 0);
 
@@ -182,19 +183,18 @@ void HungRendererDialogGtk::ShowForWebContents(WebContents* hung_contents) {
   gtk_list_store_clear(model_);
 
   GtkTreeIter tree_iter;
-  for (TabContentsIterator it; !it.done(); it.Next()) {
-    if (it->GetRenderProcessHost() == hung_contents->GetRenderProcessHost()) {
+  for (TabContentsIterator it; !it.done(); ++it) {
+    if (it->web_contents()->GetRenderProcessHost() ==
+        hung_contents->GetRenderProcessHost()) {
       gtk_list_store_append(model_, &tree_iter);
-      std::string title = base::UTF16ToUTF8(it->GetTitle());
+      std::string title = UTF16ToUTF8(it->web_contents()->GetTitle());
       if (title.empty())
-        title = base::UTF16ToUTF8(CoreTabHelper::GetDefaultTitle());
-      FaviconTabHelper* favicon_tab_helper =
-          FaviconTabHelper::FromWebContents(*it);
-      SkBitmap favicon = favicon_tab_helper->GetFavicon().AsBitmap();
+        title = UTF16ToUTF8(CoreTabHelper::GetDefaultTitle());
+      SkBitmap favicon = it->favicon_tab_helper()->GetFavicon();
 
       GdkPixbuf* pixbuf = NULL;
       if (favicon.width() > 0)
-        pixbuf = gfx::GdkPixbufFromSkBitmap(favicon);
+        pixbuf = gfx::GdkPixbufFromSkBitmap(&favicon);
       gtk_list_store_set(model_, &tree_iter,
           COL_FAVICON, pixbuf,
           COL_TITLE, title.c_str(),
@@ -251,9 +251,9 @@ void HungRendererDialogGtk::OnResponse(GtkWidget* dialog, int response_id) {
 
 }  // namespace
 
-namespace chrome {
+namespace browser {
 
-void ShowHungRendererDialog(WebContents* contents) {
+void ShowNativeHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
     if (!g_instance)
       g_instance = new HungRendererDialogGtk();
@@ -261,9 +261,9 @@ void ShowHungRendererDialog(WebContents* contents) {
   }
 }
 
-void HideHungRendererDialog(WebContents* contents) {
+void HideNativeHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed() && g_instance)
     g_instance->EndForWebContents(contents);
 }
 
-}  // namespace chrome
+}  // namespace browser

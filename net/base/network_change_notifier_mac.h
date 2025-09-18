@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_NETWORK_CHANGE_NOTIFIER_MAC_H_
 #define NET_BASE_NETWORK_CHANGE_NOTIFIER_MAC_H_
+#pragma once
 
 #include <SystemConfiguration/SystemConfiguration.h>
 
@@ -24,7 +25,14 @@ class NetworkChangeNotifierMac: public NetworkChangeNotifier {
   virtual ~NetworkChangeNotifierMac();
 
   // NetworkChangeNotifier implementation:
-  virtual ConnectionType GetCurrentConnectionType() const OVERRIDE;
+  virtual bool IsCurrentlyOffline() const OVERRIDE;
+
+ private:
+  enum OnlineState {
+    UNINITIALIZED = -1,
+    OFFLINE = 0,
+    ONLINE = 1
+  };
 
   // Forwarder just exists to keep the NetworkConfigWatcherMac API out of
   // NetworkChangeNotifierMac's public API.
@@ -34,46 +42,46 @@ class NetworkChangeNotifierMac: public NetworkChangeNotifier {
         : net_config_watcher_(net_config_watcher) {}
 
     // NetworkConfigWatcherMac::Delegate implementation:
-    virtual void Init() OVERRIDE;
-    virtual void StartReachabilityNotifications() OVERRIDE;
+    virtual void Init() OVERRIDE {
+      net_config_watcher_->SetInitialState();
+    }
+    virtual void StartReachabilityNotifications() OVERRIDE {
+      net_config_watcher_->StartReachabilityNotifications();
+    }
     virtual void SetDynamicStoreNotificationKeys(
-        SCDynamicStoreRef store) OVERRIDE;
-    virtual void OnNetworkConfigChange(CFArrayRef changed_keys) OVERRIDE;
+        SCDynamicStoreRef store) OVERRIDE {
+      net_config_watcher_->SetDynamicStoreNotificationKeys(store);
+    }
+    virtual void OnNetworkConfigChange(CFArrayRef changed_keys) OVERRIDE {
+      net_config_watcher_->OnNetworkConfigChange(changed_keys);
+    }
 
    private:
     NetworkChangeNotifierMac* const net_config_watcher_;
     DISALLOW_COPY_AND_ASSIGN(Forwarder);
   };
 
- private:
-  class DnsConfigServiceThread;
-
   // Methods directly called by the NetworkConfigWatcherMac::Delegate:
   void StartReachabilityNotifications();
   void SetDynamicStoreNotificationKeys(SCDynamicStoreRef store);
   void OnNetworkConfigChange(CFArrayRef changed_keys);
 
-  void SetInitialConnectionType();
+  void SetInitialState();
 
   static void ReachabilityCallback(SCNetworkReachabilityRef target,
                                    SCNetworkConnectionFlags flags,
                                    void* notifier);
 
-  static NetworkChangeCalculatorParams NetworkChangeCalculatorParamsMac();
-
   // These must be constructed before config_watcher_ to ensure
   // the lock is in a valid state when Forwarder::Init is called.
-  ConnectionType connection_type_;
-  bool connection_type_initialized_;
-  mutable base::Lock connection_type_lock_;
-  mutable base::ConditionVariable initial_connection_type_cv_;
-  base::ScopedCFTypeRef<SCNetworkReachabilityRef> reachability_;
-  base::ScopedCFTypeRef<CFRunLoopRef> run_loop_;
+  OnlineState online_state_;
+  mutable base::Lock online_state_lock_;
+  mutable base::ConditionVariable initial_state_cv_;
+  base::mac::ScopedCFTypeRef<SCNetworkReachabilityRef> reachability_;
+  base::mac::ScopedCFTypeRef<CFRunLoopRef> run_loop_;
 
   Forwarder forwarder_;
   scoped_ptr<const NetworkConfigWatcherMac> config_watcher_;
-
-  scoped_ptr<DnsConfigServiceThread> dns_config_service_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkChangeNotifierMac);
 };

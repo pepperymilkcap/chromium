@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/stringize_macros.h"
 #include "remoting/host/server_log_entry.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
@@ -61,37 +60,25 @@ class ServerLogEntryTest : public testing::Test {
   }
 };
 
-TEST_F(ServerLogEntryTest, MakeForSessionStateChange) {
+TEST_F(ServerLogEntryTest, MakeSessionStateChange) {
   scoped_ptr<ServerLogEntry> entry(
-      ServerLogEntry::MakeForSessionStateChange(true));
-  scoped_ptr<XmlElement> stanza = entry->ToStanza();
+      ServerLogEntry::MakeSessionStateChange(true));
+  scoped_ptr<XmlElement> stanza(entry->ToStanza());
   std::string error;
   std::map<std::string, std::string> key_value_pairs;
   key_value_pairs["role"] = "host";
   key_value_pairs["event-name"] = "session-state";
   key_value_pairs["session-state"] = "connected";
   std::set<std::string> keys;
-  ASSERT_TRUE(VerifyStanza(key_value_pairs, keys, stanza.get(), &error))
-      << error;
-}
-
-TEST_F(ServerLogEntryTest, MakeForHeartbeat) {
-  scoped_ptr<ServerLogEntry> entry(ServerLogEntry::MakeForHeartbeat());
-  scoped_ptr<XmlElement> stanza = entry->ToStanza();
-  std::string error;
-  std::map<std::string, std::string> key_value_pairs;
-  key_value_pairs["role"] = "host";
-  key_value_pairs["event-name"] = "heartbeat";
-  std::set<std::string> keys;
-  ASSERT_TRUE(VerifyStanza(key_value_pairs, keys, stanza.get(), &error))
-      << error;
+  ASSERT_TRUE(VerifyStanza(key_value_pairs, keys, stanza.get(), &error)) <<
+      error;
 }
 
 TEST_F(ServerLogEntryTest, AddHostFields) {
   scoped_ptr<ServerLogEntry> entry(
-      ServerLogEntry::MakeForSessionStateChange(true));
+      ServerLogEntry::MakeSessionStateChange(true));
   entry->AddHostFields();
-  scoped_ptr<XmlElement> stanza = entry->ToStanza();
+  scoped_ptr<XmlElement> stanza(entry->ToStanza());
   std::string error;
   std::map<std::string, std::string> key_value_pairs;
   key_value_pairs["role"] = "host";
@@ -111,16 +98,15 @@ TEST_F(ServerLogEntryTest, AddHostFields) {
 #elif defined(OS_LINUX)
   key_value_pairs["os-name"] = "Linux";
 #endif
-  key_value_pairs["host-version"] = STRINGIZE(VERSION);
   ASSERT_TRUE(VerifyStanza(key_value_pairs, keys, stanza.get(), &error)) <<
       error;
 }
 
 TEST_F(ServerLogEntryTest, AddModeField1) {
   scoped_ptr<ServerLogEntry> entry(
-      ServerLogEntry::MakeForSessionStateChange(true));
+      ServerLogEntry::MakeSessionStateChange(true));
   entry->AddModeField(ServerLogEntry::IT2ME);
-  scoped_ptr<XmlElement> stanza = entry->ToStanza();
+  scoped_ptr<XmlElement> stanza(entry->ToStanza());
   std::string error;
   std::map<std::string, std::string> key_value_pairs;
   key_value_pairs["role"] = "host";
@@ -134,9 +120,9 @@ TEST_F(ServerLogEntryTest, AddModeField1) {
 
 TEST_F(ServerLogEntryTest, AddModeField2) {
   scoped_ptr<ServerLogEntry> entry(
-      ServerLogEntry::MakeForSessionStateChange(true));
+      ServerLogEntry::MakeSessionStateChange(true));
   entry->AddModeField(ServerLogEntry::ME2ME);
-  scoped_ptr<XmlElement> stanza = entry->ToStanza();
+  scoped_ptr<XmlElement> stanza(entry->ToStanza());
   std::string error;
   std::map<std::string, std::string> key_value_pairs;
   key_value_pairs["role"] = "host";

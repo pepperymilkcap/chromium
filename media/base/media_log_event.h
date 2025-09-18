@@ -4,28 +4,14 @@
 
 #ifndef MEDIA_BASE_MEDIA_LOG_EVENT_H_
 #define MEDIA_BASE_MEDIA_LOG_EVENT_H_
+#pragma once
 
-#include "base/time/time.h"
+#include "base/time.h"
 #include "base/values.h"
 
 namespace media {
 
 struct MediaLogEvent {
-  MediaLogEvent() {}
-
-  MediaLogEvent(const MediaLogEvent& event) {
-    *this = event;
-  }
-
-  MediaLogEvent& operator=(const MediaLogEvent& event) {
-    id = event.id;
-    type = event.type;
-    scoped_ptr<base::DictionaryValue> event_copy(event.params.DeepCopy());
-    params.Swap(event_copy.get());
-    time = event.time;
-    return *this;
-  }
-
   enum Type {
     // A WebMediaPlayer is being created or destroyed.
     // params: none.
@@ -70,10 +56,9 @@ struct MediaLogEvent {
     TOTAL_BYTES_SET,
     NETWORK_ACTIVITY_SET,
 
-    // Audio/Video/Text stream playback has ended.
-    AUDIO_ENDED,
-    VIDEO_ENDED,
-    TEXT_ENDED,
+    // Playback has ended.
+    // params: none.
+    ENDED,
 
     // The audio renderer has been disabled.
     // params: none.
@@ -85,18 +70,16 @@ struct MediaLogEvent {
     //         "buffer_end": <last buffered byte>.
     BUFFERED_EXTENTS_CHANGED,
 
-    // Errors reported by Media Source Extensions code.
-    MEDIA_SOURCE_ERROR,
-    // params: "error": Error string describing the error detected.
-
-    // A property has changed without any special event occurring.
-    PROPERTY_CHANGE,
+    // The recorded statistics of the media pipeline have been updated.
+    // params: "audio_bytes_decoded", "video_bytes_decoded",
+    //         "video_frames_decoded", "video_frames_dropped": <integers>.
+    STATISTICS_UPDATED,
   };
 
   int32 id;
   Type type;
   base::DictionaryValue params;
-  base::TimeTicks time;
+  base::Time time;
 };
 
 }  // namespace media

@@ -1,11 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/test/simple_test_tick_clock.h"
-#include "base/time/clock.h"
+#include "base/test/mock_time_provider.h"
 #include "media/base/clock.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -26,228 +24,167 @@ static std::ostream& operator<<(std::ostream& stream, const TimeDelta& time) {
 
 namespace media {
 
-static const int kDurationInSeconds = 120;
-
-class ClockTest : public ::testing::Test {
- public:
-  ClockTest() : clock_(&test_tick_clock_) {
-    SetDuration();
-  }
-
- protected:
-  void SetDuration() {
-    const base::TimeDelta kDuration =
-        base::TimeDelta::FromSeconds(kDurationInSeconds);
-    clock_.SetDuration(kDuration);
-    EXPECT_EQ(kDuration, clock_.Duration());
-  }
-
-  void AdvanceSystemTime(base::TimeDelta delta) {
-    test_tick_clock_.Advance(delta);
-  }
-
-  base::SimpleTestTickClock test_tick_clock_;
-  Clock clock_;
-  base::TimeDelta time_elapsed_;
-};
-
-TEST_F(ClockTest, Created) {
+TEST(ClockTest, Created) {
+  StrictMock<base::MockTimeProvider> mock_time;
   const base::TimeDelta kExpected = base::TimeDelta::FromSeconds(0);
-  EXPECT_EQ(kExpected, clock_.Elapsed());
+
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  EXPECT_EQ(kExpected, clock.Elapsed());
 }
 
-TEST_F(ClockTest, Play_NormalSpeed) {
+TEST(ClockTest, Play_NormalSpeed) {
+  InSequence s;
+  StrictMock<base::MockTimeProvider> mock_time;
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(4)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(6)));
   const base::TimeDelta kZero;
-  const base::TimeDelta kTimeToAdvance = base::TimeDelta::FromSeconds(2);
+  const base::TimeDelta kExpected = base::TimeDelta::FromSeconds(2);
 
-  EXPECT_EQ(kZero, clock_.Play());
-  AdvanceSystemTime(kTimeToAdvance);
-  EXPECT_EQ(kTimeToAdvance, clock_.Elapsed());
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  EXPECT_EQ(kZero, clock.Play());
+  EXPECT_EQ(kExpected, clock.Elapsed());
 }
 
-TEST_F(ClockTest, Play_DoubleSpeed) {
+TEST(ClockTest, Play_DoubleSpeed) {
+  InSequence s;
+  StrictMock<base::MockTimeProvider> mock_time;
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(4)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(9)));
   const base::TimeDelta kZero;
-  const base::TimeDelta kTimeToAdvance = base::TimeDelta::FromSeconds(5);
+  const base::TimeDelta kExpected = base::TimeDelta::FromSeconds(10);
 
-  clock_.SetPlaybackRate(2.0f);
-  EXPECT_EQ(kZero, clock_.Play());
-  AdvanceSystemTime(kTimeToAdvance);
-  EXPECT_EQ(2 * kTimeToAdvance, clock_.Elapsed());
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  clock.SetPlaybackRate(2.0f);
+  EXPECT_EQ(kZero, clock.Play());
+  EXPECT_EQ(kExpected, clock.Elapsed());
 }
 
-TEST_F(ClockTest, Play_HalfSpeed) {
+TEST(ClockTest, Play_HalfSpeed) {
+  InSequence s;
+  StrictMock<base::MockTimeProvider> mock_time;
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(4)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(8)));
   const base::TimeDelta kZero;
-  const base::TimeDelta kTimeToAdvance = base::TimeDelta::FromSeconds(4);
+  const base::TimeDelta kExpected = base::TimeDelta::FromSeconds(2);
 
-  clock_.SetPlaybackRate(0.5f);
-  EXPECT_EQ(kZero, clock_.Play());
-  AdvanceSystemTime(kTimeToAdvance);
-  EXPECT_EQ(kTimeToAdvance / 2, clock_.Elapsed());
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  clock.SetPlaybackRate(0.5f);
+  EXPECT_EQ(kZero, clock.Play());
+  EXPECT_EQ(kExpected, clock.Elapsed());
 }
 
-TEST_F(ClockTest, Play_ZeroSpeed) {
+TEST(ClockTest, Play_ZeroSpeed) {
   // We'll play for 2 seconds at normal speed, 4 seconds at zero speed, and 8
-  // seconds at normal speed.
+  // seconds at normal speed:
+  //   (1.0 x 2) + (0.0 x 4) + (1.0 x 8) = 10
+  InSequence s;
+  StrictMock<base::MockTimeProvider> mock_time;
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(4)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(6)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(10)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(18)));
   const base::TimeDelta kZero;
-  const base::TimeDelta kPlayDuration1 = base::TimeDelta::FromSeconds(2);
-  const base::TimeDelta kPlayDuration2 = base::TimeDelta::FromSeconds(4);
-  const base::TimeDelta kPlayDuration3 = base::TimeDelta::FromSeconds(8);
-  const base::TimeDelta kExpected = kPlayDuration1 + kPlayDuration3;
+  const base::TimeDelta kExpected = base::TimeDelta::FromSeconds(10);
 
-  EXPECT_EQ(kZero, clock_.Play());
-
-  AdvanceSystemTime(kPlayDuration1);
-  clock_.SetPlaybackRate(0.0f);
-  AdvanceSystemTime(kPlayDuration2);
-  clock_.SetPlaybackRate(1.0f);
-  AdvanceSystemTime(kPlayDuration3);
-
-  EXPECT_EQ(kExpected, clock_.Elapsed());
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  EXPECT_EQ(kZero, clock.Play());
+  clock.SetPlaybackRate(0.0f);
+  clock.SetPlaybackRate(1.0f);
+  EXPECT_EQ(kExpected, clock.Elapsed());
 }
 
-TEST_F(ClockTest, Play_MultiSpeed) {
+TEST(ClockTest, Play_MultiSpeed) {
   // We'll play for 2 seconds at half speed, 4 seconds at normal speed, and 8
-  // seconds at double speed.
+  // seconds at double speed:
+  //   (0.5 x 2) + (1.0 x 4) + (2.0 x 8) = 21
+  InSequence s;
+  StrictMock<base::MockTimeProvider> mock_time;
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(4)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(6)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(10)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(18)));
   const base::TimeDelta kZero;
-  const base::TimeDelta kPlayDuration1 = base::TimeDelta::FromSeconds(2);
-  const base::TimeDelta kPlayDuration2 = base::TimeDelta::FromSeconds(4);
-  const base::TimeDelta kPlayDuration3 = base::TimeDelta::FromSeconds(8);
-  const base::TimeDelta kExpected =
-      kPlayDuration1 / 2 + kPlayDuration2 + 2 * kPlayDuration3;
+  const base::TimeDelta kExpected = base::TimeDelta::FromSeconds(21);
 
-  clock_.SetPlaybackRate(0.5f);
-  EXPECT_EQ(kZero, clock_.Play());
-  AdvanceSystemTime(kPlayDuration1);
-
-  clock_.SetPlaybackRate(1.0f);
-  AdvanceSystemTime(kPlayDuration2);
-
-  clock_.SetPlaybackRate(2.0f);
-  AdvanceSystemTime(kPlayDuration3);
-  EXPECT_EQ(kExpected, clock_.Elapsed());
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  clock.SetPlaybackRate(0.5f);
+  EXPECT_EQ(kZero, clock.Play());
+  clock.SetPlaybackRate(1.0f);
+  clock.SetPlaybackRate(2.0f);
+  EXPECT_EQ(kExpected, clock.Elapsed());
 }
 
-TEST_F(ClockTest, Pause) {
+TEST(ClockTest, Pause) {
+  InSequence s;
+  StrictMock<base::MockTimeProvider> mock_time;
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(4)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(8)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(12)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(16)));
   const base::TimeDelta kZero;
-  const base::TimeDelta kPlayDuration = base::TimeDelta::FromSeconds(4);
-  const base::TimeDelta kPauseDuration = base::TimeDelta::FromSeconds(20);
-  const base::TimeDelta kExpectedFirstPause = kPlayDuration;
-  const base::TimeDelta kExpectedSecondPause = 2 * kPlayDuration;
+  const base::TimeDelta kFirstPause = base::TimeDelta::FromSeconds(4);
+  const base::TimeDelta kSecondPause = base::TimeDelta::FromSeconds(8);
 
-  // Play for 4 seconds.
-  EXPECT_EQ(kZero, clock_.Play());
-  AdvanceSystemTime(kPlayDuration);
-
-  // Pause for 20 seconds.
-  EXPECT_EQ(kExpectedFirstPause, clock_.Pause());
-  EXPECT_EQ(kExpectedFirstPause, clock_.Elapsed());
-  AdvanceSystemTime(kPauseDuration);
-  EXPECT_EQ(kExpectedFirstPause, clock_.Elapsed());
-
-  // Play again for 4 more seconds.
-  EXPECT_EQ(kExpectedFirstPause, clock_.Play());
-  AdvanceSystemTime(kPlayDuration);
-  EXPECT_EQ(kExpectedSecondPause, clock_.Pause());
-  EXPECT_EQ(kExpectedSecondPause, clock_.Elapsed());
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  EXPECT_EQ(kZero, clock.Play());
+  EXPECT_EQ(kFirstPause, clock.Pause());
+  EXPECT_EQ(kFirstPause, clock.Elapsed());
+  EXPECT_EQ(kFirstPause, clock.Play());
+  EXPECT_EQ(kSecondPause, clock.Pause());
+  EXPECT_EQ(kSecondPause, clock.Elapsed());
 }
 
-TEST_F(ClockTest, SetTime_Paused) {
+TEST(ClockTest, SetTime_Paused) {
+  // We'll remain paused while we set the time.  The time should be simply
+  // updated without accessing the time provider.
+  InSequence s;
+  StrictMock<base::MockTimeProvider> mock_time;
   const base::TimeDelta kFirstTime = base::TimeDelta::FromSeconds(4);
   const base::TimeDelta kSecondTime = base::TimeDelta::FromSeconds(16);
 
-  clock_.SetTime(kFirstTime, clock_.Duration());
-  EXPECT_EQ(kFirstTime, clock_.Elapsed());
-  clock_.SetTime(kSecondTime, clock_.Duration());
-  EXPECT_EQ(kSecondTime, clock_.Elapsed());
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  clock.SetTime(kFirstTime);
+  EXPECT_EQ(kFirstTime, clock.Elapsed());
+  clock.SetTime(kSecondTime);
+  EXPECT_EQ(kSecondTime, clock.Elapsed());
 }
 
-TEST_F(ClockTest, SetTime_Playing) {
+TEST(ClockTest, SetTime_Playing) {
   // We'll play for 4 seconds, then set the time to 12, then play for 4 more
-  // seconds.
+  // seconds.  We'll expect a media time of 16.
+  InSequence s;
+  StrictMock<base::MockTimeProvider> mock_time;
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(4)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(8)));
+  EXPECT_CALL(mock_time, Now())
+      .WillOnce(Return(base::Time::FromDoubleT(12)));
   const base::TimeDelta kZero;
-  const base::TimeDelta kPlayDuration = base::TimeDelta::FromSeconds(4);
-  const base::TimeDelta kUpdatedTime = base::TimeDelta::FromSeconds(12);
-  const base::TimeDelta kExpected = kUpdatedTime + kPlayDuration;
+  const base::TimeDelta kExepected = base::TimeDelta::FromSeconds(16);
 
-  EXPECT_EQ(kZero, clock_.Play());
-  AdvanceSystemTime(kPlayDuration);
-
-  clock_.SetTime(kUpdatedTime, clock_.Duration());
-  AdvanceSystemTime(kPlayDuration);
-  EXPECT_EQ(kExpected, clock_.Elapsed());
-}
-
-TEST_F(ClockTest, CapAtMediaDuration_Paused) {
-  const base::TimeDelta kDuration =
-      base::TimeDelta::FromSeconds(kDurationInSeconds);
-  const base::TimeDelta kTimeOverDuration =
-      base::TimeDelta::FromSeconds(kDurationInSeconds + 4);
-
-  // Elapsed time should always be capped at the duration of the media.
-  clock_.SetTime(kTimeOverDuration, kTimeOverDuration);
-  EXPECT_EQ(kDuration, clock_.Elapsed());
-}
-
-TEST_F(ClockTest, CapAtMediaDuration_Playing) {
-  const base::TimeDelta kZero;
-  const base::TimeDelta kDuration =
-      base::TimeDelta::FromSeconds(kDurationInSeconds);
-  const base::TimeDelta kTimeOverDuration =
-      base::TimeDelta::FromSeconds(kDurationInSeconds + 4);
-
-  // Play for twice as long as the duration of the media.
-  EXPECT_EQ(kZero, clock_.Play());
-  AdvanceSystemTime(2 * kDuration);
-  EXPECT_EQ(kDuration, clock_.Elapsed());
-
-  // Manually set the time past the duration.
-  clock_.SetTime(kTimeOverDuration, kTimeOverDuration);
-  EXPECT_EQ(kDuration, clock_.Elapsed());
-}
-
-TEST_F(ClockTest, SetMaxTime) {
-  const base::TimeDelta kZero;
-  const base::TimeDelta kTimeInterval = base::TimeDelta::FromSeconds(4);
-  const base::TimeDelta kMaxTime = base::TimeDelta::FromSeconds(6);
-
-  EXPECT_EQ(kZero, clock_.Play());
-  clock_.SetMaxTime(kMaxTime);
-  AdvanceSystemTime(kTimeInterval);
-  EXPECT_EQ(kTimeInterval, clock_.Elapsed());
-
-  AdvanceSystemTime(kTimeInterval);
-  EXPECT_EQ(kMaxTime, clock_.Elapsed());
-
-  AdvanceSystemTime(kTimeInterval);
-  EXPECT_EQ(kMaxTime, clock_.Elapsed());
-}
-
-TEST_F(ClockTest, SetMaxTime_MultipleTimes) {
-  const base::TimeDelta kZero;
-  const base::TimeDelta kTimeInterval = base::TimeDelta::FromSeconds(4);
-  const base::TimeDelta kMaxTime1 = base::TimeDelta::FromSeconds(6);
-  const base::TimeDelta kMaxTime2 = base::TimeDelta::FromSeconds(12);
-
-  EXPECT_EQ(kZero, clock_.Play());
-  clock_.SetMaxTime(clock_.Duration());
-  AdvanceSystemTime(kTimeInterval);
-  EXPECT_EQ(kTimeInterval, clock_.Elapsed());
-
-  clock_.SetMaxTime(kMaxTime1);
-  AdvanceSystemTime(kTimeInterval);
-  EXPECT_EQ(kMaxTime1, clock_.Elapsed());
-
-  AdvanceSystemTime(kTimeInterval);
-  EXPECT_EQ(kMaxTime1, clock_.Elapsed());
-
-  clock_.SetMaxTime(kMaxTime2);
-  EXPECT_EQ(kMaxTime1, clock_.Elapsed());
-
-  AdvanceSystemTime(kTimeInterval);
-  EXPECT_EQ(kMaxTime1 + kTimeInterval, clock_.Elapsed());
-
-  AdvanceSystemTime(kTimeInterval);
-  EXPECT_EQ(kMaxTime2, clock_.Elapsed());
+  Clock clock(&base::MockTimeProvider::StaticNow);
+  EXPECT_EQ(kZero, clock.Play());
+  clock.SetTime(base::TimeDelta::FromSeconds(12));
+  EXPECT_EQ(kExepected, clock.Elapsed());
 }
 
 }  // namespace media

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,28 +8,26 @@
 #include <cmath>
 
 #include "base/logging.h"
-#include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_action_icon_factory.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/cocoa/extensions/extension_action_context_menu_controller.h"
+#include "base/sys_string_conversions.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
+#include "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
+#import "chrome/browser/ui/cocoa/image_utils.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
-#include "extensions/common/extension.h"
-#include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
-#include "ui/base/resource/resource_bundle.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/gfx/canvas_skia_paint.h"
-#include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/size.h"
 
-using extensions::Extension;
+NSString* const kBrowserActionButtonUpdatedNotification =
+    @"BrowserActionButtonUpdatedNotification";
 
 NSString* const kBrowserActionButtonDraggingNotification =
     @"BrowserActionButtonDraggingNotification";
@@ -37,65 +35,65 @@ NSString* const kBrowserActionButtonDragEndNotification =
     @"BrowserActionButtonDragEndNotification";
 
 static const CGFloat kBrowserActionBadgeOriginYOffset = 5;
-static const CGFloat kAnimationDuration = 0.2;
-static const CGFloat kMinimumDragDistance = 5;
+
+namespace {
+const CGFloat kAnimationDuration = 0.2;
+}  // anonymous namespace
 
 // A helper class to bridge the asynchronous Skia bitmap loading mechanism to
 // the extension's button.
-class ExtensionActionIconFactoryBridge
-    : public content::NotificationObserver,
-      public ExtensionActionIconFactory::Observer {
+class ExtensionImageTrackerBridge : public content::NotificationObserver,
+                                    public ImageLoadingTracker::Observer {
  public:
-  ExtensionActionIconFactoryBridge(BrowserActionButton* owner,
-                                   Profile* profile,
-                                   const Extension* extension)
+  ExtensionImageTrackerBridge(BrowserActionButton* owner,
+                              const Extension* extension)
       : owner_(owner),
-        browser_action_([[owner cell] extensionAction]),
-        icon_factory_(profile, extension, browser_action_, this) {
+        tracker_(this) {
+    // The Browser Action API does not allow the default icon path to be
+    // changed at runtime, so we can load this now and cache it.
+    std::string path = extension->browser_action()->default_icon_path();
+    if (!path.empty()) {
+      tracker_.LoadImage(extension, extension->GetResource(path),
+                         gfx::Size(Extension::kBrowserActionIconMaxSize,
+                                   Extension::kBrowserActionIconMaxSize),
+                         ImageLoadingTracker::DONT_CACHE);
+    }
     registrar_.Add(
         this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
-        content::Source<ExtensionAction>(browser_action_));
+        content::Source<ExtensionAction>(extension->browser_action()));
   }
 
-  virtual ~ExtensionActionIconFactoryBridge() {}
+  ~ExtensionImageTrackerBridge() {}
 
-  // ExtensionActionIconFactory::Observer implementation.
-  virtual void OnIconUpdated() OVERRIDE {
+  // ImageLoadingTracker::Observer implementation.
+  void OnImageLoaded(SkBitmap* image, const ExtensionResource& resource,
+                     int index) {
+    if (image)
+      [owner_ setDefaultIcon:gfx::SkBitmapToNSImage(*image)];
     [owner_ updateState];
   }
 
   // Overridden from content::NotificationObserver.
-  virtual void Observe(
-      int type,
-      const content::NotificationSource& source,
-      const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) {
     if (type == chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED)
       [owner_ updateState];
     else
       NOTREACHED();
   }
 
-  gfx::Image GetIcon(int tabId) {
-    return icon_factory_.GetIcon(tabId);
-  }
-
  private:
   // Weak. Owns us.
   BrowserActionButton* owner_;
 
-  // The browser action whose images we're loading.
-  ExtensionAction* const browser_action_;
-
-  // The object that will be used to get the browser action icon for us.
-  // It may load the icon asynchronously (in which case the initial icon
-  // returned by the factory will be transparent), so we have to observe it for
-  // updates to the icon.
-  ExtensionActionIconFactory icon_factory_;
+  // Loads the button's icons for us on the file thread.
+  ImageLoadingTracker tracker_;
 
   // Used for registering to receive notifications and automatic clean up.
   content::NotificationRegistrar registrar_;
 
-  DISALLOW_COPY_AND_ASSIGN(ExtensionActionIconFactoryBridge);
+  DISALLOW_COPY_AND_ASSIGN(ExtensionImageTrackerBridge);
 };
 
 @interface BrowserActionCell (Internals)
@@ -118,7 +116,7 @@ class ExtensionActionIconFactoryBridge
 
 - (id)initWithFrame:(NSRect)frame
           extension:(const Extension*)extension
-            browser:(Browser*)browser
+            profile:(Profile*)profile
               tabId:(int)tabId {
   if ((self = [super initWithFrame:frame])) {
     BrowserActionCell* cell = [[[BrowserActionCell alloc] init] autorelease];
@@ -129,39 +127,23 @@ class ExtensionActionIconFactoryBridge
     // NSButton between alloc/init and setCell:.
     [self setCell:cell];
     [cell setTabId:tabId];
-    ExtensionAction* browser_action =
-        extensions::ExtensionActionManager::Get(browser->profile())->
-        GetBrowserAction(*extension);
-    [cell setExtensionAction:browser_action];
+    [cell setExtensionAction:extension->browser_action()];
     [cell
         accessibilitySetOverrideValue:base::SysUTF8ToNSString(extension->name())
         forAttribute:NSAccessibilityDescriptionAttribute];
-    [cell setImageID:IDR_BROWSER_ACTION
-      forButtonState:image_button_cell::kDefaultState];
-    [cell setImageID:IDR_BROWSER_ACTION_H
-      forButtonState:image_button_cell::kHoverState];
-    [cell setImageID:IDR_BROWSER_ACTION_P
-      forButtonState:image_button_cell::kPressedState];
-    [cell setImageID:IDR_BROWSER_ACTION
-      forButtonState:image_button_cell::kDisabledState];
 
     [self setTitle:@""];
     [self setButtonType:NSMomentaryChangeButton];
     [self setShowsBorderOnlyWhileMouseInside:YES];
 
-    contextMenuController_.reset([[ExtensionActionContextMenuController alloc]
+    [self setMenu:[[[ExtensionActionContextMenu alloc]
         initWithExtension:extension
-                  browser:browser
-          extensionAction:browser_action]);
-    base::scoped_nsobject<NSMenu> contextMenu(
-        [[NSMenu alloc] initWithTitle:@""]);
-    [contextMenu setDelegate:self];
-    [self setMenu:contextMenu];
+                  profile:profile
+          extensionAction:extension->browser_action()] autorelease]];
 
     tabId_ = tabId;
     extension_ = extension;
-    iconFactoryBridge_.reset(new ExtensionActionIconFactoryBridge(
-        self, browser->profile(), extension));
+    imageLoadingBridge_.reset(new ExtensionImageTrackerBridge(self, extension));
 
     moveAnimation_.reset([[NSViewAnimation alloc] init]);
     [moveAnimation_ gtm_setDuration:kAnimationDuration
@@ -181,7 +163,6 @@ class ExtensionActionIconFactoryBridge
 - (void)mouseDown:(NSEvent*)theEvent {
   [[self cell] setHighlighted:YES];
   dragCouldStart_ = YES;
-  dragStartPoint_ = [theEvent locationInWindow];
 }
 
 - (void)mouseDragged:(NSEvent*)theEvent {
@@ -189,13 +170,6 @@ class ExtensionActionIconFactoryBridge
     return;
 
   if (!isBeingDragged_) {
-    // Don't initiate a drag until it moves at least kMinimumDragDistance.
-    NSPoint currentPoint = [theEvent locationInWindow];
-    CGFloat dx = currentPoint.x - dragStartPoint_.x;
-    CGFloat dy = currentPoint.y - dragStartPoint_.y;
-    if (dx*dx + dy*dy < kMinimumDragDistance*kMinimumDragDistance)
-      return;
-
     // The start of a drag. Position the button above all others.
     [[self superview] addSubview:self positioned:NSWindowAbove relativeTo:nil];
   }
@@ -234,7 +208,8 @@ class ExtensionActionIconFactoryBridge
 - (void)endDrag {
   isBeingDragged_ = NO;
   [[NSNotificationCenter defaultCenter]
-      postNotificationName:kBrowserActionButtonDragEndNotification object:self];
+      postNotificationName:kBrowserActionButtonDragEndNotification
+                    object:self];
   [[self cell] setHighlighted:NO];
 }
 
@@ -257,28 +232,40 @@ class ExtensionActionIconFactoryBridge
   }
 }
 
+- (void)setDefaultIcon:(NSImage*)image {
+  defaultIcon_.reset([image retain]);
+}
+
+- (void)setTabSpecificIcon:(NSImage*)image {
+  tabSpecificIcon_.reset([image retain]);
+}
+
 - (void)updateState {
   if (tabId_ < 0)
     return;
 
-  std::string tooltip = [[self cell] extensionAction]->GetTitle(tabId_);
+  std::string tooltip = extension_->browser_action()->GetTitle(tabId_);
   if (tooltip.empty()) {
     [self setToolTip:nil];
   } else {
     [self setToolTip:base::SysUTF8ToNSString(tooltip)];
   }
 
-  gfx::Image image = iconFactoryBridge_->GetIcon(tabId_);
-
-  if (!image.IsEmpty())
-    [self setImage:image.ToNSImage()];
+  SkBitmap image = extension_->browser_action()->GetIcon(tabId_);
+  if (!image.isNull()) {
+    [self setTabSpecificIcon:gfx::SkBitmapToNSImage(image)];
+    [self setImage:tabSpecificIcon_];
+  } else if (defaultIcon_) {
+    [self setImage:defaultIcon_];
+  }
 
   [[self cell] setTabId:tabId_];
 
-  bool enabled = [[self cell] extensionAction]->GetIsVisible(tabId_);
-  [self setEnabled:enabled];
-
   [self setNeedsDisplay:YES];
+
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:kBrowserActionButtonUpdatedNotification
+      object:self];
 }
 
 - (BOOL)isAnimating {
@@ -303,19 +290,13 @@ class ExtensionActionIconFactoryBridge
                  fromRect:NSZeroRect
                 operation:NSCompositeSourceOver
                  fraction:1.0
-           respectFlipped:YES
-                    hints:nil];
+             neverFlipped:YES];
 
   bounds.origin.y += kBrowserActionBadgeOriginYOffset;
   [[self cell] drawBadgeWithinFrame:bounds];
 
   [image unlockFocus];
   return image;
-}
-
-- (void)menuNeedsUpdate:(NSMenu*)menu {
-  [menu removeAllItems];
-  [contextMenuController_ populateMenu:menu];
 }
 
 @end
@@ -332,22 +313,9 @@ class ExtensionActionIconFactoryBridge
   extensionAction_->PaintBadge(&canvas, boundingRect, tabId_);
 }
 
-- (void)drawWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
+- (void)drawInteriorWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
   gfx::ScopedNSGraphicsContextSaveGState scopedGState;
-  [super drawWithFrame:cellFrame inView:controlView];
-  bool enabled = extensionAction_->GetIsVisible(tabId_);
-  const NSSize imageSize = self.image.size;
-  const NSRect imageRect =
-      NSMakeRect(std::floor((NSWidth(cellFrame) - imageSize.width) / 2.0),
-                 std::floor((NSHeight(cellFrame) - imageSize.height) / 2.0),
-                 imageSize.width, imageSize.height);
-  [self.image drawInRect:imageRect
-                fromRect:NSZeroRect
-               operation:NSCompositeSourceOver
-                fraction:enabled ? 1.0 : 0.4
-          respectFlipped:YES
-                   hints:nil];
-
+  [super drawInteriorWithFrame:cellFrame inView:controlView];
   cellFrame.origin.y += kBrowserActionBadgeOriginYOffset;
   [self drawBadgeWithinFrame:cellFrame];
 }

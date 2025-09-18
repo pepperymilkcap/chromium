@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 The Chromium Authors. All rights reserved.
+ * Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -13,8 +13,8 @@
 #include <map>
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_string.h"
+#include "native_client/src/trusted/plugin/utility.h"
 #include "native_client/src/shared/srpc/nacl_srpc.h"
-#include "ppapi/native_client/src/trusted/plugin/utility.h"
 
 namespace nacl {
 class DescWrapper;
@@ -22,6 +22,7 @@ class DescWrapper;
 
 namespace plugin {
 
+class BrowserInterface;
 class ErrorInfo;
 class MethodInfo;
 class Plugin;
@@ -31,22 +32,21 @@ class SrpcParams;
 class SrpcClient {
  public:
   // Factory method for creating SrpcClients.
-  static SrpcClient* New(nacl::DescWrapper* wrapper);
+  static SrpcClient* New(Plugin* plugin, nacl::DescWrapper* wrapper);
 
   //  Init is passed a DescWrapper.  The SrpcClient performs service
   //  discovery and provides the interface for future rpcs.
-  bool Init(nacl::DescWrapper* socket);
+  bool Init(BrowserInterface* browser_interface, nacl::DescWrapper* socket);
 
   //  The destructor closes the connection to sel_ldr.
   ~SrpcClient();
 
+  bool StartJSObjectProxy(Plugin* plugin, ErrorInfo* error_info);
   //  Test whether the SRPC service has a given method.
-  bool HasMethod(const nacl::string& method_name);
+  bool HasMethod(uintptr_t method_id);
   //  Invoke an SRPC method.
-  bool Invoke(const nacl::string& method_name, SrpcParams* params);
-  // Get the error status from that last method invocation
-  NaClSrpcError GetLastError() { return last_error_; }
-  bool InitParams(const nacl::string& method_name, SrpcParams* params);
+  bool Invoke(uintptr_t method_id, SrpcParams* params);
+  bool InitParams(uintptr_t method_id, SrpcParams* params);
 
   // Attach a service for reverse-direction (from .nexe) RPCs.
   void AttachService(NaClSrpcService* service, void* instance_data);
@@ -55,11 +55,11 @@ class SrpcClient {
   NACL_DISALLOW_COPY_AND_ASSIGN(SrpcClient);
   SrpcClient();
   void GetMethods();
-  typedef std::map<nacl::string, MethodInfo*> Methods;
+  typedef std::map<uintptr_t, MethodInfo*> Methods;
   Methods methods_;
   NaClSrpcChannel srpc_channel_;
   bool srpc_channel_initialised_;
-  NaClSrpcError last_error_;
+  BrowserInterface* browser_interface_;
 };
 
 }  // namespace plugin

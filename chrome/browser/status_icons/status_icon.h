@@ -1,21 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_STATUS_ICONS_STATUS_ICON_H_
 #define CHROME_BROWSER_STATUS_ICONS_STATUS_ICON_H_
+#pragma once
 
-#include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/status_icons/status_icon_menu_model.h"
+#include "base/string16.h"
 
-namespace gfx {
-class ImageSkia;
+class SkBitmap;
+
+namespace ui {
+class MenuModel;
 }
-
-class StatusIconObserver;
 
 class StatusIcon {
  public:
@@ -23,55 +22,61 @@ class StatusIcon {
   virtual ~StatusIcon();
 
   // Sets the image associated with this status icon.
-  virtual void SetImage(const gfx::ImageSkia& image) = 0;
+  virtual void SetImage(const SkBitmap& image) = 0;
 
   // Sets the image associated with this status icon when pressed.
-  virtual void SetPressedImage(const gfx::ImageSkia& image) = 0;
+  virtual void SetPressedImage(const SkBitmap& image) = 0;
 
-  // Sets the hover text for this status icon. This is also used as the label
-  // for the menu item which is created as a replacement for the status icon
-  // click action on platforms that do not support custom click actions for the
-  // status icon (e.g. Ubuntu Unity).
-  virtual void SetToolTip(const base::string16& tool_tip) = 0;
+  // Sets the hover text for this status icon.
+  virtual void SetToolTip(const string16& tool_tip) = 0;
 
   // Displays a notification balloon with the specified contents.
   // Depending on the platform it might not appear by the icon tray.
-  virtual void DisplayBalloon(const gfx::ImageSkia& icon,
-                              const base::string16& title,
-                              const base::string16& contents) = 0;
+  virtual void DisplayBalloon(const SkBitmap& icon,
+                              const string16& title,
+                              const string16& contents) = 0;
 
   // Set the context menu for this icon. The icon takes ownership of the passed
   // context menu. Passing NULL results in no menu at all.
-  void SetContextMenu(scoped_ptr<StatusIconMenuModel> menu);
+  void SetContextMenu(ui::MenuModel* menu);
+
+  class Observer {
+   public:
+    virtual ~Observer() {}
+
+    // Called when the user clicks on the system tray icon. Clicks that result
+    // in the context menu being displayed will not be passed to this observer
+    // (i.e. if there's a context menu set on this status icon, and the user
+    // right clicks on the icon to display the context menu, OnClicked will not
+    // be called).
+    // Note: Chrome OS displays the context menu on left button clicks.
+    // This will only be fired for this platform if no context menu is present.
+    virtual void OnClicked() = 0;
+  };
 
   // Adds/Removes an observer for clicks on the status icon. If an observer is
   // registered, then left clicks on the status icon will result in the observer
   // being called, otherwise, both left and right clicks will display the
   // context menu (if any).
-  void AddObserver(StatusIconObserver* observer);
-  void RemoveObserver(StatusIconObserver* observer);
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   // Returns true if there are registered click observers.
-  bool HasObservers() const;
+  bool HasObservers();
 
   // Dispatches a click event to the observers.
   void DispatchClickEvent();
-#if defined(OS_WIN)
-  void DispatchBalloonClickEvent();
-#endif
 
  protected:
   // Invoked after a call to SetContextMenu() to let the platform-specific
   // subclass update the native context menu based on the new model. If NULL is
   // passed, subclass should destroy the native context menu.
-  virtual void UpdatePlatformContextMenu(StatusIconMenuModel* model) = 0;
+  virtual void UpdatePlatformContextMenu(ui::MenuModel* model) = 0;
 
  private:
-  ObserverList<StatusIconObserver> observers_;
-
+  ObserverList<Observer> observers_;
   // Context menu, if any.
-  scoped_ptr<StatusIconMenuModel> context_menu_contents_;
-
+  scoped_ptr<ui::MenuModel> context_menu_contents_;
   DISALLOW_COPY_AND_ASSIGN(StatusIcon);
 };
 

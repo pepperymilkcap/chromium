@@ -7,7 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class BackgroundContentsService;
 class Profile;
@@ -15,8 +15,7 @@ class Profile;
 // Singleton that owns all BackgroundContentsServices and associates them with
 // Profiles. Listens for the Profile's destruction notification and cleans up
 // the associated BackgroundContentsService.
-class BackgroundContentsServiceFactory
-    : public BrowserContextKeyedServiceFactory {
+class BackgroundContentsServiceFactory : public ProfileKeyedServiceFactory {
  public:
   static BackgroundContentsService* GetForProfile(Profile* profile);
 
@@ -28,15 +27,14 @@ class BackgroundContentsServiceFactory
   BackgroundContentsServiceFactory();
   virtual ~BackgroundContentsServiceFactory();
 
-  // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual void RegisterProfilePrefs(
-      user_prefs::PrefRegistrySyncable* registry) OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  // ProfileKeyedServiceFactory:
+  virtual ProfileKeyedService* BuildServiceInstanceFor(
+      Profile* profile) const OVERRIDE;
+  virtual void RegisterUserPrefs(PrefService* user_prefs) OVERRIDE;
+  // Use a separate background contents service for incognito.
+  virtual bool ServiceHasOwnInstanceInIncognito() OVERRIDE;
+  virtual bool ServiceIsCreatedWithProfile() OVERRIDE;
+  virtual bool ServiceIsNULLWhileTesting() OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_BACKGROUND_BACKGROUND_CONTENTS_SERVICE_FACTORY_H_

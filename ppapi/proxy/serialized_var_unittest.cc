@@ -5,7 +5,6 @@
 #include "ppapi/proxy/ppapi_proxy_test.h"
 
 #include "ppapi/proxy/serialized_var.h"
-#include "ppapi/shared_impl/proxy_lock.h"
 
 namespace ppapi {
 namespace proxy {
@@ -29,7 +28,6 @@ class SerializedVarTest : public PluginProxyTest {
 // Tests output arguments in the plugin. This is when the host calls into the
 // plugin and the plugin returns something via an out param, like an exception.
 TEST_F(SerializedVarTest, PluginSerializedVarInOutParam) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObjectVar(0x31337);
 
   PP_Var plugin_object;
@@ -61,7 +59,7 @@ TEST_F(SerializedVarTest, PluginSerializedVarInOutParam) {
     // object ID. Nothing in the var tracker should have changed yet, and no
     // messages should have been sent.
     SerializedVarTestReader reader(sv);
-    EXPECT_EQ(host_object.value.as_id, reader.GetVar().value.as_id);
+    EXPECT_EQ(host_object.value.as_id, reader.GetIncompleteVar().value.as_id);
     EXPECT_EQ(1, var_tracker().GetRefCountForObject(plugin_object));
     EXPECT_EQ(1u, sink().message_count());
   }
@@ -79,7 +77,6 @@ TEST_F(SerializedVarTest, PluginSerializedVarInOutParam) {
 // Tests output strings in the plugin. This is when the host calls into the
 // plugin with a string and the plugin returns it via an out param.
 TEST_F(SerializedVarTest, PluginSerializedStringVarInOutParam) {
-  ProxyAutoLock lock;
   PP_Var plugin_string;
   const std::string kTestString("elite");
   {
@@ -108,7 +105,7 @@ TEST_F(SerializedVarTest, PluginSerializedStringVarInOutParam) {
     // the var tracker should have changed yet, and no messages should have been
     // sent.
     SerializedVarTestReader reader(sv);
-    //EXPECT_EQ(kTestString, *reader.GetTrackerStringPtr());
+    EXPECT_EQ(kTestString, reader.GetString());
     EXPECT_EQ(2, var_tracker().GetRefCountForObject(plugin_string));
     EXPECT_EQ(0u, sink().message_count());
   }
@@ -121,7 +118,6 @@ TEST_F(SerializedVarTest, PluginSerializedStringVarInOutParam) {
 // Tests receiving an argument and passing it back to the browser as an output
 // parameter.
 TEST_F(SerializedVarTest, PluginSerializedVarOutParam) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObjectVar(0x31337);
 
   // Start tracking this object in the plugin.
@@ -142,7 +138,7 @@ TEST_F(SerializedVarTest, PluginSerializedVarOutParam) {
     // object ID. Nothing in the var tracker should have changed yet, and no
     // messages should have been sent.
     SerializedVarTestReader reader(sv);
-    EXPECT_EQ(host_object.value.as_id, reader.GetVar().value.as_id);
+    EXPECT_EQ(host_object.value.as_id, reader.GetIncompleteVar().value.as_id);
     EXPECT_EQ(1, var_tracker().GetRefCountForObject(plugin_object));
     EXPECT_EQ(0u, sink().message_count());
   }
@@ -161,7 +157,6 @@ TEST_F(SerializedVarTest, PluginSerializedVarOutParam) {
 // Tests the case that the plugin receives the same var twice as an input
 // parameter (not passing ownership).
 TEST_F(SerializedVarTest, PluginReceiveInput) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObjectVar(0x31337);
 
   PP_Var plugin_object;
@@ -202,11 +197,10 @@ TEST_F(SerializedVarTest, PluginReceiveInput) {
 // Tests the case that the plugin receives the same vars twice as an input
 // parameter (not passing ownership) within a vector.
 TEST_F(SerializedVarTest, PluginVectorReceiveInput) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObjectVar(0x31337);
 
-  std::vector<PP_Var> plugin_objects;
-  std::vector<PP_Var> plugin_objects2;
+  PP_Var* plugin_objects;
+  PP_Var* plugin_objects2;
   {
     // Receive the params. The object should be tracked with no refcount and
     // no messages sent. The string should is plugin-side only and should have
@@ -216,10 +210,7 @@ TEST_F(SerializedVarTest, PluginVectorReceiveInput) {
     input1.push_back(SerializedVarTestConstructor("elite"));
     SerializedVarVectorReceiveInput receive_input(input1);
     uint32_t array_size = 0;
-    PP_Var* plugin_objects_array =
-        receive_input.Get(plugin_dispatcher(), &array_size);
-    plugin_objects.insert(plugin_objects.begin(), plugin_objects_array,
-                          plugin_objects_array + array_size);
+    plugin_objects = receive_input.Get(plugin_dispatcher(), &array_size);
     ASSERT_EQ(2u, array_size);
     EXPECT_EQ(0, var_tracker().GetRefCountForObject(plugin_objects[0]));
     EXPECT_EQ(1, var_tracker().GetRefCountForObject(plugin_objects[1]));
@@ -232,10 +223,7 @@ TEST_F(SerializedVarTest, PluginVectorReceiveInput) {
     input2.push_back(SerializedVarTestConstructor("elite"));
     SerializedVarVectorReceiveInput receive_input2(input2);
     uint32_t array_size2 = 0;
-    PP_Var* plugin_objects_array2 =
-        receive_input2.Get(plugin_dispatcher(), &array_size2);
-    plugin_objects2.insert(plugin_objects2.begin(), plugin_objects_array2,
-                           plugin_objects_array2 + array_size2);
+    plugin_objects2 = receive_input2.Get(plugin_dispatcher(), &array_size2);
     ASSERT_EQ(2u, array_size2);
     EXPECT_EQ(plugin_objects[0].value.as_id, plugin_objects2[0].value.as_id);
     EXPECT_EQ(0, var_tracker().GetRefCountForObject(plugin_objects[0]));
@@ -275,7 +263,6 @@ TEST_F(SerializedVarTest, PluginVectorReceiveInput) {
 // Tests the plugin receiving a var as a return value from the browser
 // two different times (passing ownership).
 TEST_F(SerializedVarTest, PluginReceiveReturn) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObjectVar(0x31337);
 
   PP_Var plugin_object;
@@ -319,7 +306,6 @@ TEST_F(SerializedVarTest, PluginReceiveReturn) {
 // Returns a value from the browser to the plugin, then return that one ref
 // back to the browser.
 TEST_F(SerializedVarTest, PluginReturnValue) {
-  ProxyAutoLock lock;
   PP_Var host_object = MakeObjectVar(0x31337);
 
   PP_Var plugin_object;

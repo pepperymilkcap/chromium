@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Test of classes in tracked_time.cc
 
 #include "base/profiler/tracked_time.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "base/tracked_objects.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -28,8 +28,14 @@ TEST(TrackedTimeTest, TrackedTimerMilliseconds) {
   EXPECT_EQ(kReallyBigMilliseconds, (big - base::TimeTicks()).InMilliseconds());
 
   TrackedTime wrapped_big(big);
+#if defined(USE_FAST_TIME_CLASS_FOR_DURATION_CALCULATIONS)
   // Expect wrapping at 32 bits.
   EXPECT_EQ(kSomeMilliseconds, (wrapped_big - TrackedTime()).InMilliseconds());
+#else  // !USE_FAST_TIME_CLASS_FOR_DURATION_CALCULATIONS)
+  // Expect no wrapping at 32 bits.
+  EXPECT_EQ(kReallyBigMilliseconds,
+            (wrapped_big - TrackedTime()).InMilliseconds());
+#endif  // USE_FAST_TIME_CLASS_FOR_DURATION_CALCULATIONS)
 }
 
 TEST(TrackedTimeTest, TrackedTimerDuration) {
@@ -70,7 +76,7 @@ TEST(TrackedTimeTest, TrackedTimerVsTimeTicks) {
 TEST(TrackedTimeTest, TrackedTimerDisabled) {
   // Check to be sure disabling the collection of data induces a null time
   // (which we know will return much faster).
-  if (!ThreadData::InitializeAndSetTrackingStatus(ThreadData::DEACTIVATED))
+  if (!ThreadData::InitializeAndSetTrackingStatus(false))
     return;
   // Since we disabled tracking, we should get a null response.
   TrackedTime track_now = ThreadData::Now();
@@ -82,8 +88,7 @@ TEST(TrackedTimeTest, TrackedTimerDisabled) {
 }
 
 TEST(TrackedTimeTest, TrackedTimerEnabled) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(
-      ThreadData::PROFILING_CHILDREN_ACTIVE))
+  if (!ThreadData::InitializeAndSetTrackingStatus(true))
     return;
   // Make sure that when we enable tracking, we get a real timer result.
 

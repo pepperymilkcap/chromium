@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,26 +6,24 @@
 
 #ifndef NET_DISK_CACHE_FILE_H_
 #define NET_DISK_CACHE_FILE_H_
+#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/platform_file.h"
 #include "net/base/net_export.h"
 
-namespace base {
 class FilePath;
-}
 
 namespace disk_cache {
 
 // This interface is used to support asynchronous ReadData and WriteData calls.
 class FileIOCallback {
  public:
+  virtual ~FileIOCallback() {}
+
   // Notified of the actual number of bytes read or written. This value is
   // negative if an error occurred.
   virtual void OnFileIOComplete(int bytes_copied) = 0;
-
- protected:
-  virtual ~FileIOCallback() {}
 };
 
 // Simple wrapper around a file that allows asynchronous operations.
@@ -43,7 +41,7 @@ class NET_EXPORT_PRIVATE File : public base::RefCounted<File> {
 
   // Initializes the object to point to a given file. The file must aready exist
   // on disk, and allow shared read and write.
-  bool Init(const base::FilePath& name);
+  bool Init(const FilePath& name);
 
   // Returns the handle or file descriptor.
   base::PlatformFile platform_file() const;
@@ -73,17 +71,12 @@ class NET_EXPORT_PRIVATE File : public base::RefCounted<File> {
  protected:
   virtual ~File();
 
- private:
   // Performs the actual asynchronous write. If notify is set and there is no
   // callback, the call will be re-synchronized.
   bool AsyncWrite(const void* buffer, size_t buffer_len, size_t offset,
                   FileIOCallback* callback, bool* completed);
 
-  // Infrastructure for async IO.
-  int DoRead(void* buffer, size_t buffer_len, size_t offset);
-  int DoWrite(const void* buffer, size_t buffer_len, size_t offset);
-  void OnOperationComplete(FileIOCallback* callback, int result);
-
+ private:
   bool init_;
   bool mixed_;
   base::PlatformFile platform_file_;  // Regular, asynchronous IO handle.

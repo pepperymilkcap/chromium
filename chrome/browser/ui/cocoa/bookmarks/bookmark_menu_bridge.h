@@ -19,10 +19,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_MENU_BRIDGE_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_MENU_BRIDGE_H_
+#pragma once
 
 #include <map>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #import "chrome/browser/ui/cocoa/main_menu_item.h"
 
@@ -40,8 +41,7 @@ class BookmarkMenuBridge : public BookmarkModelObserver,
   virtual ~BookmarkMenuBridge();
 
   // BookmarkModelObserver:
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
   virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,
@@ -55,7 +55,6 @@ class BookmarkMenuBridge : public BookmarkModelObserver,
                                    const BookmarkNode* parent,
                                    int old_index,
                                    const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkAllNodesRemoved(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    const BookmarkNode* node) OVERRIDE;
   virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
@@ -140,7 +139,7 @@ class BookmarkMenuBridge : public BookmarkModelObserver,
   BookmarkMenuCocoaController* controller_;  // strong
 
   // The folder image so we can use one copy for all.
-  base::scoped_nsobject<NSImage> folder_image_;
+  scoped_nsobject<NSImage> folder_image_;
 
   // In order to appropriately update items in the bookmark menu, without
   // forcing a rebuild, map the model's nodes to menu items.

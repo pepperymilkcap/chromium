@@ -4,22 +4,17 @@
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_QUICK_PROVIDER_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_QUICK_PROVIDER_H_
+#pragma once
 
 #include <string>
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/history_provider.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/in_memory_url_index.h"
 
 class Profile;
-
-namespace history {
-class ScoredHistoryMatch;
-}  // namespace history
+class TermMatches;
 
 // This class is an autocomplete provider (a pseudo-internal component of
 // the history system) which quickly (and synchronously) provides matching
@@ -27,11 +22,12 @@ class ScoredHistoryMatch;
 // history.
 class HistoryQuickProvider : public HistoryProvider {
  public:
-  HistoryQuickProvider(AutocompleteProviderListener* listener,
-                       Profile* profile);
+  HistoryQuickProvider(ACProviderListener* listener, Profile* profile);
 
-  // AutocompleteProvider. |minimal_changes| is ignored since there is no asynch
-  // completion performed.
+  virtual ~HistoryQuickProvider();
+
+  // AutocompleteProvider. |minimal_changes| is ignored since there
+  // is no asynch completion performed.
   virtual void Start(const AutocompleteInput& input,
                      bool minimal_changes) OVERRIDE;
 
@@ -49,19 +45,34 @@ class HistoryQuickProvider : public HistoryProvider {
   FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, Spans);
   FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, Relevance);
 
-  virtual ~HistoryQuickProvider();
-
   // Performs the autocomplete matching and scoring.
   void DoAutocomplete();
 
-  // Creates an AutocompleteMatch from |history_match|, assigning it
-  // the score |score|.
+  // Creates an AutocompleteMatch from |history_match|. |max_match_score| gives
+  // the maximum possible score for the match.
   AutocompleteMatch QuickMatchToACMatch(
       const history::ScoredHistoryMatch& history_match,
-      int score);
+      bool prevent_inline_autocomplete,
+      int* max_match_score);
+
+  // Determines the relevance score of |history_match|. The maximum allowed
+  // score for the match is passed in |max_match_score|. The |max_match_score|
+  // is always set to the resulting score minus 1 whenever the match's score
+  // has to be limited or is <= to |max_match_score|. This function should be
+  // called in a loop with each match in decreasing order of raw score.
+  static int CalculateRelevance(
+      const history::ScoredHistoryMatch& history_match,
+      int* max_match_score);
 
   // Returns the index that should be used for history lookups.
   history::InMemoryURLIndex* GetIndex();
+
+  // Fill and return an ACMatchClassifications structure given the term
+  // matches (|matches|) to highlight where terms were found.
+  static ACMatchClassifications SpansFromTermMatch(
+      const history::TermMatches& matches,
+      size_t text_length,
+      bool is_url);
 
   // Only for use in unittests.  Takes ownership of |index|.
   void set_index(history::InMemoryURLIndex* index) {
@@ -76,8 +87,6 @@ class HistoryQuickProvider : public HistoryProvider {
 
   // This provider is disabled when true.
   static bool disabled_;
-
-  DISALLOW_COPY_AND_ASSIGN(HistoryQuickProvider);
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_QUICK_PROVIDER_H_

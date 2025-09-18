@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@ const char kIsFirstRequest[] = "isFirstRequest";
 const char kPreviewRequestID[] = "requestID";
 
 // Unique ID to identify a print preview UI.
-const char kPreviewUIID[] = "previewUIID";
+const char kPreviewUIAddr[] = "previewUIAddr";
 
 // Print using cloud print: true if selected, false if not.
 const char kSettingCloudPrintId[] = "cloudPrintID";
@@ -26,9 +26,6 @@ const char kSettingCollate[] = "collate";
 
 // Print out color: true for color, false for grayscale.
 const char kSettingColor[] = "color";
-
-// Default to color on or not.
-const char kSettingSetColorAsDefault[] = "setColorAsDefault";
 
 // Key that specifies the height of the content area of the page.
 const char kSettingContentHeight[] = "contentHeight";
@@ -45,15 +42,27 @@ const char kSettingDeviceName[] = "deviceName";
 // Print job duplex mode.
 const char kSettingDuplexMode[] = "duplex";
 
-// Option to fit source page contents to printer paper size: true if
-// selected else false.
-const char kSettingFitToPageEnabled[] = "fitToPageEnabled";
-
 // True, when a new set of draft preview data is required.
 const char kSettingGenerateDraftData[] = "generateDraftData";
 
 // Option to print headers and Footers: true if selected, false if not.
 const char kSettingHeaderFooterEnabled[] = "headerFooterEnabled";
+
+// Default character spacing for text while printing headers and footers.
+// (For CoreGraphics only).
+const int kSettingHeaderFooterCharacterSpacing = 0;
+
+// Default font family name for printing the headers and footers.
+const char kSettingHeaderFooterFontFamilyName[] = "sans";
+
+// Default font name for printing the headers and footers.
+const char kSettingHeaderFooterFontName[] = "Helvetica";
+
+// Default font size for printing the headers and footers.
+const int kSettingHeaderFooterFontSize = 8;
+
+// Number of horizontal regions for headers and footers.
+const float kSettingHeaderFooterHorizontalRegions = 3;
 
 // Interstice or gap between different header footer components. Hardcoded to
 // about 0.5cm, match the value in PrintSettings::SetPrinterPrintableArea.
@@ -93,9 +102,6 @@ const char kSettingMarginsCustom[] = "marginsCustom";
 // MarginType enum.
 const char kSettingMarginsType[] = "marginsType";
 
-// Number of pages to print.
-const char kSettingPreviewPageCount[] = "pageCount";
-
 // A page range.
 const char kSettingPageRange[] = "pageRange";
 
@@ -105,17 +111,7 @@ const char kSettingPageRangeFrom[] = "from";
 // The last page of a page range. (1-based)
 const char kSettingPageRangeTo[] = "to";
 
-// Page size of document to print.
-const char kSettingPageWidth[] = "pageWidth";
-const char kSettingPageHeight[] = "pageHeight";
-
 const char kSettingPreviewModifiable[] = "previewModifiable";
-
-// Keys that specifies the printable area details.
-const char kSettingPrintableAreaX[] = "printableAreaX";
-const char kSettingPrintableAreaY[] = "printableAreaY";
-const char kSettingPrintableAreaWidth[] = "printableAreaWidth";
-const char kSettingPrintableAreaHeight[] = "printableAreaHeight";
 
 // Printer name.
 const char kSettingPrinterName[] = "printerName";
@@ -123,25 +119,13 @@ const char kSettingPrinterName[] = "printerName";
 // Print to PDF option: true if selected, false if not.
 const char kSettingPrintToPDF[] = "printToPDF";
 
-// Print using Privet option: true if destination is a Privet printer, false if
-// not.
-const char kSettingPrintWithPrivet[] = "printWithPrivet";
-
-// Ticket option. Contains the ticket in CJT format.
-const char kSettingTicket[] = "ticket";
-
-// Whether to print CSS backgrounds.
-const char kSettingShouldPrintBackgrounds[] = "shouldPrintBackgrounds";
-
-// Whether to print selection only.
-const char kSettingShouldPrintSelectionOnly[] = "shouldPrintSelectionOnly";
-
 // Indices used to represent first preview page and complete preview document.
 const int FIRST_PAGE_INDEX = 0;
 const int COMPLETE_PREVIEW_DOCUMENT_INDEX = -1;
 
-// Whether to show PDF in view provided by OS. Implemented for MacOS only.
+#if defined(OS_MACOSX)
 const char kSettingOpenPDFInPreview[] = "OpenPDFInPreview";
+#endif
 
 #if defined (USE_CUPS)
 const char kBlack[] = "Black";

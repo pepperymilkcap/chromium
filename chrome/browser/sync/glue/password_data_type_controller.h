@@ -4,11 +4,12 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_PASSWORD_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_PASSWORD_DATA_TYPE_CONTROLLER_H__
+#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/sync/glue/non_frontend_data_type_controller.h"
 
 class PasswordStore;
@@ -22,22 +23,23 @@ class PasswordDataTypeController : public NonFrontendDataTypeController {
       ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       ProfileSyncService* sync_service);
-
-  // NonFrontendDataTypeController implementation
-  virtual syncer::ModelType type() const OVERRIDE;
-  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
-
- protected:
   virtual ~PasswordDataTypeController();
 
+  // NonFrontendDataTypeController implementation
+  virtual syncable::ModelType type() const OVERRIDE;
+  virtual browser_sync::ModelSafeGroup model_safe_group() const OVERRIDE;
+
+ protected:
   // NonFrontendDataTypeController interface.
-  virtual bool PostTaskOnBackendThread(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task) OVERRIDE;
   virtual bool StartModels() OVERRIDE;
-  virtual ProfileSyncComponentsFactory::SyncComponents CreateSyncComponents()
-      OVERRIDE;
-  virtual void DisconnectProcessor(ChangeProcessor* processor) OVERRIDE;
+  virtual bool StartAssociationAsync() OVERRIDE;
+  virtual void CreateSyncComponents() OVERRIDE;
+  virtual bool StopAssociationAsync() OVERRIDE;
+  virtual void RecordUnrecoverableError(
+      const tracked_objects::Location& from_here,
+      const std::string& message) OVERRIDE;
+  virtual void RecordAssociationTime(base::TimeDelta time) OVERRIDE;
+  virtual void RecordStartFailure(StartResult result) OVERRIDE;
 
  private:
   scoped_refptr<PasswordStore> password_store_;

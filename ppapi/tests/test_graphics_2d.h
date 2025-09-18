@@ -21,10 +21,9 @@ class Rect;
 
 class TestGraphics2D : public TestCase {
  public:
-  explicit TestGraphics2D(TestingInstance* instance);
+  explicit TestGraphics2D(TestingInstance* instance) : TestCase(instance) {}
 
   // TestCase implementation.
-  virtual void DidChangeView(const pp::View& view);
   virtual bool Init();
   virtual void RunTests(const std::string& filter);
 
@@ -67,54 +66,22 @@ class TestGraphics2D : public TestCase {
   bool IsDCUniformColor(const pp::Graphics2D& dc, uint32_t color) const;
 
   // Issues a flush on the given device context and blocks until the flush
-  // has issued its callback. Returns an empty string on success or an error
-  // message on failure.
-  std::string FlushAndWaitForDone(pp::Graphics2D* context);
-
-  // Creates an image and replaces the contents of the Graphics2D with the
-  // image, waiting for completion. This returns the resource ID of the image
-  // data we created. This image data will be released by the time the call
-  // completes, but it can be used for comparisons later.
-  //
-  // Returns 0 on failure.
-  PP_Resource ReplaceContentsAndReturnID(pp::Graphics2D* dc,
-                                         const pp::Size& size);
-
-  // Resets the internal state of view change.
-  void ResetViewChangedState();
-
-  // Waits until we get a view change event. Note that it's possible to receive
-  // an unexpected event, thus post_quit_on_view_changed_ is introduced so that
-  // DidChangeView can check whether the event is from here.
-  bool WaitUntilViewChanged();
+  // has issued its callback. Returns true on success.
+  bool FlushAndWaitForDone(pp::Graphics2D* context);
 
   std::string TestInvalidResource();
   std::string TestInvalidSize();
   std::string TestHumongous();
   std::string TestInitToZero();
   std::string TestDescribe();
-  std::string TestScale();
   std::string TestPaint();
   std::string TestScroll();
   std::string TestReplace();
   std::string TestFlush();
-  std::string TestFlushOffscreenUpdate();
-  std::string TestDev();
-  std::string TestReplaceContentsCaching();
-  std::string TestBindNull();
 
   // Used by the tests that access the C API directly.
-  const PPB_Graphics2D_1_1* graphics_2d_interface_;
-  const PPB_ImageData_1_0* image_data_interface_;
-
-  // Used to indicate that DidChangeView has happened, in order to make plugin
-  // and ui synchronous.
-  bool is_view_changed_;
-
-  // Set to true to request that the next invocation of DidChangeView should
-  // post a quit to the message loop. DidChangeView will also reset the flag so
-  // this will only happen once.
-  bool post_quit_on_view_changed_;
+  const PPB_Graphics2D* graphics_2d_interface_;
+  const PPB_ImageData* image_data_interface_;
 };
 
 #endif  // PPAPI_TESTS_TEST_GRAPHICS_2D_H_

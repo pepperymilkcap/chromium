@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_COMMON_CHROME_RESULT_CODES_H_
 #define CHROME_COMMON_CHROME_RESULT_CODES_H_
+#pragma once
 
 #include "content/public/common/result_codes.h"
 
@@ -67,27 +68,6 @@ enum ResultCode {
 
   // Failed to silently uninstall an extension.
   RESULT_CODE_UNINSTALL_EXTENSION_ERROR,
-
-  // The browser process exited early by passing the command line to another
-  // running browser.
-  RESULT_CODE_NORMAL_EXIT_PROCESS_NOTIFIED,
-
-  // A dummy value we should not use. See crbug.com/152285.
-  RESULT_CODE_NOTUSED_1,
-
-  // Failed to install an item from the webstore when the kInstallFromWebstore
-  // command line flag was present.
-  RESULT_CODE_INSTALL_FROM_WEBSTORE_ERROR_2,
-
-  // A dummy value we should not use. See crbug.com/152285.
-  RESULT_CODE_NOTUSED_2,
-
-  // Returned when the user has not yet accepted the EULA.
-  RESULT_CODE_EULA_REFUSED,
-
-  // Failed to migrate user data directory for side-by-side package support
-  // (Linux-only).
-  RESULT_CODE_SXS_MIGRATION_FAILED,
 
   // Last return code (keep this last).
   RESULT_CODE_CHROME_LAST_CODE,

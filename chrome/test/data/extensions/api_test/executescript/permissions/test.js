@@ -5,7 +5,7 @@
 var assertEq = chrome.test.assertEq;
 var assertTrue = chrome.test.assertTrue;
 var numReceivedRequests = 0;
-var relativePath = 'extensions/api_test/executescript/permissions/';
+var relativePath = 'files/extensions/api_test/executescript/permissions/';
 var testFile = relativePath + 'empty.html';
 var testFileFrames = relativePath + 'frames.html';
 var onTabLoaded;
@@ -42,7 +42,7 @@ chrome.test.getConfig(function(config) {
         chrome.tabs.executeScript(tab.id, {file: 'script.js'});
         window.setTimeout(function() {
           assertEq(0, numReceivedRequests);
-          chrome.test.succeed();
+          chrome.test.runNextTest();
         }, 4000);
       };
     },
@@ -60,7 +60,7 @@ chrome.test.getConfig(function(config) {
                                   {file: 'script.js', allFrames: true});
         window.setTimeout(function() {
           chrome.test.assertEq(3, numReceivedRequests);
-          chrome.test.succeed();
+          chrome.test.runNextTest();
         }, 4000);
       };
     }

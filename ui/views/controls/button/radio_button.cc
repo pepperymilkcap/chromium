@@ -1,61 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/button/radio_button.h"
 
 #include "base/logging.h"
-#include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
 
 // static
-const char RadioButton::kViewClassName[] = "RadioButton";
+const char RadioButton::kViewClassName[] = "views/RadioButton";
 
-RadioButton::RadioButton(const base::string16& label, int group_id)
+RadioButton::RadioButton(const string16& label, int group_id)
     : Checkbox(label) {
   SetGroup(group_id);
-
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-
-  // Unchecked/Unfocused images.
-  SetCustomImage(false, false, STATE_NORMAL,
-                 *rb.GetImageSkiaNamed(IDR_RADIO));
-  SetCustomImage(false, false, STATE_HOVERED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_HOVER));
-  SetCustomImage(false, false, STATE_PRESSED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_PRESSED));
-  SetCustomImage(false, false, STATE_DISABLED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_DISABLED));
-
-  // Checked/Unfocused images.
-  SetCustomImage(true, false, STATE_NORMAL,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_CHECKED));
-  SetCustomImage(true, false, STATE_HOVERED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_CHECKED_HOVER));
-  SetCustomImage(true, false, STATE_PRESSED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_CHECKED_PRESSED));
-  SetCustomImage(true, false, STATE_DISABLED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_CHECKED_DISABLED));
-
-  // Unchecked/Focused images.
-  SetCustomImage(false, true, STATE_NORMAL,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_FOCUSED));
-  SetCustomImage(false, true, STATE_HOVERED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_FOCUSED_HOVER));
-  SetCustomImage(false, true, STATE_PRESSED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_FOCUSED_PRESSED));
-
-  // Checked/Focused images.
-  SetCustomImage(true, true, STATE_NORMAL,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_FOCUSED_CHECKED));
-  SetCustomImage(true, true, STATE_HOVERED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_FOCUSED_CHECKED_HOVER));
-  SetCustomImage(true, true, STATE_PRESSED,
-                 *rb.GetImageSkiaNamed(IDR_RADIO_FOCUSED_CHECKED_PRESSED));
+  set_focusable(true);
 }
 
 RadioButton::~RadioButton() {
@@ -76,7 +37,7 @@ void RadioButton::SetChecked(bool checked) {
       container->GetViewsInGroup(GetGroup(), &other);
       for (Views::iterator i(other.begin()); i != other.end(); ++i) {
         if (*i != this) {
-          if (strcmp((*i)->GetClassName(), kViewClassName)) {
+          if ((*i)->GetClassName() != kViewClassName) {
             NOTREACHED() << "radio-button-nt has same group as other non "
                             "radio-button-nt views.";
             continue;
@@ -90,7 +51,7 @@ void RadioButton::SetChecked(bool checked) {
   Checkbox::SetChecked(checked);
 }
 
-const char* RadioButton::GetClassName() const {
+std::string RadioButton::GetClassName() const {
   return kViewClassName;
 }
 
@@ -123,21 +84,21 @@ bool RadioButton::IsGroupFocusTraversable() const {
 void RadioButton::OnFocus() {
   Checkbox::OnFocus();
   SetChecked(true);
-  ui::MouseEvent event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(), 0, 0);
-  LabelButton::NotifyClick(event);
+  views::MouseEvent event(ui::ET_MOUSE_PRESSED, 0, 0, 0);
+  TextButtonBase::NotifyClick(event);
 }
 
-void RadioButton::NotifyClick(const ui::Event& event) {
+void RadioButton::NotifyClick(const views::Event& event) {
   // Set the checked state to true only if we are unchecked, since we can't
   // be toggled on and off like a checkbox.
   if (!checked())
     SetChecked(true);
   RequestFocus();
-  LabelButton::NotifyClick(event);
+  TextButtonBase::NotifyClick(event);
 }
 
-ui::NativeTheme::Part RadioButton::GetThemePart() const {
-  return ui::NativeTheme::kRadio;
+gfx::NativeTheme::Part RadioButton::GetThemePart() const {
+  return gfx::NativeTheme::kRadio;
 }
 
 }  // namespace views

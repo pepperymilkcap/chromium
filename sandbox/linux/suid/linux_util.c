@@ -5,12 +5,9 @@
 // The following is duplicated from base/linux_utils.cc.
 // We shouldn't link against C++ code in a setuid binary.
 
-#define _GNU_SOURCE  // For O_DIRECTORY
 #include "linux_util.h"
 
 #include <dirent.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,40 +23,27 @@ static const char kSocketLinkPrefix[] = "socket:[";
 // socket.
 //   inode_out: (output) set to the inode number on success
 //   path: e.g. /proc/1234/fd/5 (must be a UNIX domain socket descriptor)
-static bool ProcPathGetInodeAt(ino_t* inode_out, int base_dir_fd,
-                               const char* path) {
-  // We also check that the path is relative.
-  if (!inode_out || !path || *path == '/')
-    return false;
+static bool ProcPathGetInode(ino_t* inode_out, const char* path) {
   char buf[256];
-  const ssize_t n = readlinkat(base_dir_fd, path, buf, sizeof(buf) - 1);
-  if (n < 0)
+  const ssize_t n = readlink(path, buf, sizeof(buf) - 1);
+  if (n == -1)
     return false;
   buf[n] = 0;
 
   if (memcmp(kSocketLinkPrefix, buf, sizeof(kSocketLinkPrefix) - 1))
     return false;
 
-  char *endptr = NULL;
-  errno = 0;
-  const unsigned long long int inode_ull =
+  char *endptr;
+  const unsigned long long int inode_ul =
       strtoull(buf + sizeof(kSocketLinkPrefix) - 1, &endptr, 10);
-  if (inode_ull == ULLONG_MAX || !endptr || *endptr != ']' || errno != 0)
+  if (*endptr != ']')
     return false;
 
-  *inode_out = inode_ull;
+  if (inode_ul == ULLONG_MAX)
+    return false;
+
+  *inode_out = inode_ul;
   return true;
-}
-
-static DIR* opendirat(int base_dir_fd, const char* name) {
-  // Also check that |name| is relative.
-  if (base_dir_fd < 0 || !name || *name == '/')
-    return NULL;
-  int new_dir_fd = openat(base_dir_fd, name, O_RDONLY | O_DIRECTORY);
-  if (new_dir_fd < 0)
-    return NULL;
-
-  return fdopendir(new_dir_fd);
 }
 
 bool FindProcessHoldingSocket(pid_t* pid_out, ino_t socket_inode) {
@@ -72,10 +56,9 @@ bool FindProcessHoldingSocket(pid_t* pid_out, ino_t socket_inode) {
   const uid_t uid = getuid();
   struct dirent* dent;
   while ((dent = readdir(proc))) {
-    char *endptr = NULL;
-    errno = 0;
+    char *endptr;
     const unsigned long int pid_ul = strtoul(dent->d_name, &endptr, 10);
-    if (pid_ul == ULONG_MAX || !endptr || *endptr || errno != 0)
+    if (pid_ul == ULONG_MAX || *endptr)
       continue;
 
     // We have this setuid code here because the zygote and its children have
@@ -83,39 +66,34 @@ bool FindProcessHoldingSocket(pid_t* pid_out, ino_t socket_inode) {
     // extra check so users cannot accidentally gain information about other
     // users' processes. To determine process ownership, we use the property
     // that if user foo owns process N, then /proc/N is owned by foo.
-    int proc_pid_fd = -1;
     {
       char buf[256];
       struct stat statbuf;
       snprintf(buf, sizeof(buf), "/proc/%lu", pid_ul);
-      proc_pid_fd = open(buf, O_RDONLY | O_DIRECTORY);
-      if (proc_pid_fd < 0)
+      if (stat(buf, &statbuf) < 0)
         continue;
-      if (fstat(proc_pid_fd, &statbuf) < 0 || uid != statbuf.st_uid) {
-        close(proc_pid_fd);
+      if (uid != statbuf.st_uid)
         continue;
-      }
     }
 
-    DIR* fd = opendirat(proc_pid_fd, "fd");
-    if (!fd) {
-      close(proc_pid_fd);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "/proc/%lu/fd", pid_ul);
+    DIR* fd = opendir(buf);
+    if (!fd)
       continue;
-    }
 
     while ((dent = readdir(fd))) {
-      char buf[256];
-      int printed = snprintf(buf, sizeof(buf), "fd/%s", dent->d_name);
+      int printed = snprintf(buf, sizeof(buf), "/proc/%lu/fd/%s", pid_ul,
+                             dent->d_name);
       if (printed < 0 || printed >= (int)(sizeof(buf) - 1)) {
         continue;
       }
 
       ino_t fd_inode;
-      if (ProcPathGetInodeAt(&fd_inode, proc_pid_fd, buf)) {
+      if (ProcPathGetInode(&fd_inode, buf)) {
         if (fd_inode == socket_inode) {
           if (already_found) {
             closedir(fd);
-            close(proc_pid_fd);
             closedir(proc);
             return false;
           }
@@ -127,7 +105,6 @@ bool FindProcessHoldingSocket(pid_t* pid_out, ino_t socket_inode) {
       }
     }
     closedir(fd);
-    close(proc_pid_fd);
   }
   closedir(proc);
 

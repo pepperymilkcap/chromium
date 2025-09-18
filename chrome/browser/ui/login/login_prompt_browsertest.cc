@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,22 +6,21 @@
 #include <list>
 #include <map>
 
-#include "base/metrics/field_trial.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/login/login_prompt.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/browser_test_utils.h"
+#include "content/test/test_browser_thread.h"
 #include "net/base/auth.h"
-#include "net/dns/mock_host_resolver.h"
+#include "net/base/mock_host_resolver.h"
 
 using content::NavigationController;
 using content::OpenURLParams;
@@ -32,14 +31,12 @@ namespace {
 class LoginPromptBrowserTest : public InProcessBrowserTest {
  public:
   LoginPromptBrowserTest()
-      : bad_password_("incorrect"),
-        bad_username_("nouser"),
-        password_("secret"),
-        username_basic_("basicuser"),
-        username_digest_("digestuser") {
+      : bad_password_("incorrect"), bad_username_("nouser") {
+    set_show_window(true);
+
     auth_map_["foo"] = AuthInfo("testuser", "foopassword");
     auth_map_["bar"] = AuthInfo("testuser", "barpassword");
-    auth_map_["testrealm"] = AuthInfo(username_basic_, password_);
+    auth_map_["testrealm"] = AuthInfo("basicuser", "secret");
   }
 
  protected:
@@ -49,8 +46,8 @@ class LoginPromptBrowserTest : public InProcessBrowserTest {
 
     AuthInfo() {}
 
-    AuthInfo(const std::string& username,
-             const std::string& password)
+    AuthInfo(const std::string username,
+             const std::string password)
         : username_(username), password_(password) {}
   };
 
@@ -61,9 +58,6 @@ class LoginPromptBrowserTest : public InProcessBrowserTest {
   AuthMap auth_map_;
   std::string bad_password_;
   std::string bad_username_;
-  std::string password_;
-  std::string username_basic_;
-  std::string username_digest_;
 };
 
 void LoginPromptBrowserTest::SetAuthFor(LoginHandler* handler) {
@@ -74,8 +68,8 @@ void LoginPromptBrowserTest::SetAuthFor(LoginHandler* handler) {
   EXPECT_TRUE(auth_map_.end() != i);
   if (i != auth_map_.end()) {
     const AuthInfo& info = i->second;
-    handler->SetAuth(base::UTF8ToUTF16(info.username_),
-                     base::UTF8ToUTF16(info.password_));
+    handler->SetAuth(UTF8ToUTF16(info.username_),
+                     UTF8ToUTF16(info.password_));
   }
 }
 
@@ -90,7 +84,7 @@ class LoginPromptBrowserTestObserver : public content::NotificationObserver {
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const content::NotificationDetails& details);
 
   void AddHandler(LoginHandler* handler);
 
@@ -163,10 +157,10 @@ void LoginPromptBrowserTestObserver::Register(
 
 template <int T>
 class WindowedNavigationObserver
-    : public content::WindowedNotificationObserver {
+    : public ui_test_utils::WindowedNotificationObserver {
  public:
   explicit WindowedNavigationObserver(NavigationController* controller)
-      : content::WindowedNotificationObserver(
+      : ui_test_utils::WindowedNotificationObserver(
           T, content::Source<NavigationController>(controller)) {}
 };
 
@@ -204,21 +198,16 @@ typedef WindowedNavigationObserver<chrome::NOTIFICATION_AUTH_CANCELLED>
 typedef WindowedNavigationObserver<chrome::NOTIFICATION_AUTH_SUPPLIED>
     WindowedAuthSuppliedObserver;
 
-const char kPrefetchAuthPage[] = "files/login/prefetch.html";
+const char* kPrefetchAuthPage = "files/login/prefetch.html";
 
-const char kMultiRealmTestPage[] = "files/login/multi_realm.html";
-const int  kMultiRealmTestRealmCount = 2;
+const char* kMultiRealmTestPage = "files/login/multi_realm.html";
+const int   kMultiRealmTestRealmCount = 2;
+const int   kMultiRealmTestResourceCount = 4;
 
-const char kSingleRealmTestPage[] = "files/login/single_realm.html";
+const char* kSingleRealmTestPage = "files/login/single_realm.html";
+const int   kSingleRealmTestResourceCount = 6;
 
 const char* kAuthBasicPage = "auth-basic";
-const char* kAuthDigestPage = "auth-digest";
-
-base::string16 ExpectedTitleFromAuth(const base::string16& username,
-                                     const base::string16& password) {
-  // The TestServer sets the title to username/password on successful login.
-  return username + base::UTF8ToUTF16("/") + password;
-}
 
 // Confirm that <link rel="prefetch"> targetting an auth required
 // resource does not provide a login dialog.  These types of requests
@@ -236,25 +225,27 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, PrefetchAuthCancels) {
   class SetPrefetchForTest {
    public:
     explicit SetPrefetchForTest(bool prefetch)
-        : old_prerender_mode_(prerender::PrerenderManager::GetMode()) {
-      std::string exp_group = prefetch ? "ExperimentYes" : "ExperimentNo";
-      base::FieldTrialList::CreateFieldTrial("Prefetch", exp_group);
+        : old_prefetch_state_(ResourceDispatcherHost::is_prefetch_enabled()),
+          old_mode_(prerender::PrerenderManager::GetMode()) {
+      ResourceDispatcherHost::set_is_prefetch_enabled(prefetch);
       // Disable prerender so this is just a prefetch of the top-level page.
       prerender::PrerenderManager::SetMode(
           prerender::PrerenderManager::PRERENDER_MODE_DISABLED);
     }
 
     ~SetPrefetchForTest() {
-      prerender::PrerenderManager::SetMode(old_prerender_mode_);
+      ResourceDispatcherHost::set_is_prefetch_enabled(old_prefetch_state_);
+      prerender::PrerenderManager::SetMode(old_mode_);
     }
-
    private:
-    prerender::PrerenderManager::PrerenderManagerMode old_prerender_mode_;
+    bool old_prefetch_state_;
+    prerender::PrerenderManager::PrerenderManagerMode old_mode_;
   } set_prefetch_for_test(true);
 
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
+  TabContentsWrapper* contents =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents);
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
@@ -269,167 +260,6 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, PrefetchAuthCancels) {
   EXPECT_TRUE(test_server()->Stop());
 }
 
-// Test that "Basic" HTTP authentication works.
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestBasicAuth) {
-  ASSERT_TRUE(test_server()->Start());
-  GURL test_page = test_server()->GetURL(kAuthBasicPage);
-
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
-  LoginPromptBrowserTestObserver observer;
-
-  observer.Register(content::Source<NavigationController>(controller));
-
-  {
-    WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(OpenURLParams(
-        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
-        false));
-    auth_needed_waiter.Wait();
-  }
-
-  ASSERT_FALSE(observer.handlers_.empty());
-  {
-    WindowedAuthNeededObserver auth_needed_waiter(controller);
-    WindowedAuthSuppliedObserver auth_supplied_waiter(controller);
-    LoginHandler* handler = *observer.handlers_.begin();
-
-    ASSERT_TRUE(handler);
-    handler->SetAuth(base::UTF8ToUTF16(bad_username_),
-                     base::UTF8ToUTF16(bad_password_));
-    auth_supplied_waiter.Wait();
-
-    // The request should be retried after the incorrect password is
-    // supplied.  This should result in a new AUTH_NEEDED notification
-    // for the same realm.
-    auth_needed_waiter.Wait();
-  }
-
-  ASSERT_EQ(1u, observer.handlers_.size());
-  WindowedAuthSuppliedObserver auth_supplied_waiter(controller);
-  LoginHandler* handler = *observer.handlers_.begin();
-  SetAuthFor(handler);
-  auth_supplied_waiter.Wait();
-
-  base::string16 expected_title =
-      ExpectedTitleFromAuth(base::ASCIIToUTF16("basicuser"),
-                            base::ASCIIToUTF16("secret"));
-  content::TitleWatcher title_watcher(contents, expected_title);
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-}
-
-// Test that "Digest" HTTP authentication works.
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestDigestAuth) {
-  ASSERT_TRUE(test_server()->Start());
-  GURL test_page = test_server()->GetURL(kAuthDigestPage);
-
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
-  LoginPromptBrowserTestObserver observer;
-
-  observer.Register(content::Source<NavigationController>(controller));
-
-  {
-    WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(OpenURLParams(
-        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
-        false));
-    auth_needed_waiter.Wait();
-  }
-
-  ASSERT_FALSE(observer.handlers_.empty());
-  {
-    WindowedAuthNeededObserver auth_needed_waiter(controller);
-    WindowedAuthSuppliedObserver auth_supplied_waiter(controller);
-    LoginHandler* handler = *observer.handlers_.begin();
-
-    ASSERT_TRUE(handler);
-    handler->SetAuth(base::UTF8ToUTF16(bad_username_),
-                     base::UTF8ToUTF16(bad_password_));
-    auth_supplied_waiter.Wait();
-
-    // The request should be retried after the incorrect password is
-    // supplied.  This should result in a new AUTH_NEEDED notification
-    // for the same realm.
-    auth_needed_waiter.Wait();
-  }
-
-  ASSERT_EQ(1u, observer.handlers_.size());
-  WindowedAuthSuppliedObserver auth_supplied_waiter(controller);
-  LoginHandler* handler = *observer.handlers_.begin();
-
-  base::string16 username(base::UTF8ToUTF16(username_digest_));
-  base::string16 password(base::UTF8ToUTF16(password_));
-  handler->SetAuth(username, password);
-  auth_supplied_waiter.Wait();
-
-  base::string16 expected_title = ExpectedTitleFromAuth(username, password);
-  content::TitleWatcher title_watcher(contents, expected_title);
-  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
-}
-
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestTwoAuths) {
-  ASSERT_TRUE(test_server()->Start());
-
-  content::WebContents* contents1 =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller1 = &contents1->GetController();
-  LoginPromptBrowserTestObserver observer;
-
-  observer.Register(content::Source<NavigationController>(controller1));
-
-  // Open a new tab.
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      GURL("about:blank"),
-      NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
-
-  content::WebContents* contents2 =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  ASSERT_NE(contents1, contents2);
-  NavigationController* controller2 = &contents2->GetController();
-  observer.Register(content::Source<NavigationController>(controller2));
-
-  {
-    WindowedAuthNeededObserver auth_needed_waiter(controller1);
-    contents1->OpenURL(OpenURLParams(
-        test_server()->GetURL(kAuthBasicPage), Referrer(),
-        CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
-    auth_needed_waiter.Wait();
-  }
-
-  {
-    WindowedAuthNeededObserver auth_needed_waiter(controller2);
-    contents2->OpenURL(OpenURLParams(
-        test_server()->GetURL(kAuthDigestPage), Referrer(),
-        CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
-    auth_needed_waiter.Wait();
-  }
-
-  ASSERT_EQ(2u, observer.handlers_.size());
-
-  LoginHandler* handler1 = *observer.handlers_.begin();
-  LoginHandler* handler2 = *(++(observer.handlers_.begin()));
-
-  base::string16 expected_title1 = ExpectedTitleFromAuth(
-      base::UTF8ToUTF16(username_basic_), base::UTF8ToUTF16(password_));
-  base::string16 expected_title2 = ExpectedTitleFromAuth(
-      base::UTF8ToUTF16(username_digest_), base::UTF8ToUTF16(password_));
-  content::TitleWatcher title_watcher1(contents1, expected_title1);
-  content::TitleWatcher title_watcher2(contents2, expected_title2);
-
-  handler1->SetAuth(base::UTF8ToUTF16(username_basic_),
-                    base::UTF8ToUTF16(password_));
-  handler2->SetAuth(base::UTF8ToUTF16(username_digest_),
-                    base::UTF8ToUTF16(password_));
-
-  EXPECT_EQ(expected_title1, title_watcher1.WaitAndGetTitle());
-  EXPECT_EQ(expected_title2, title_watcher2.WaitAndGetTitle());
-}
-
 // Test login prompt cancellation.
 IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
   ASSERT_TRUE(test_server()->Start());
@@ -438,9 +268,11 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
   GURL no_auth_page_2 = test_server()->GetURL("b");
   GURL no_auth_page_3 = test_server()->GetURL("c");
 
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
+  TabContentsWrapper* contents =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents);
+
+  NavigationController* controller = &contents->web_contents()->GetController();
 
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller));
@@ -456,8 +288,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
     WindowedLoadStopObserver load_stop_waiter(controller, 2);
     WindowedAuthNeededObserver auth_needed_waiter(controller);
     browser()->OpenURL(OpenURLParams(
-        auth_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
-        false));
+        auth_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
     browser()->OpenURL(OpenURLParams(
@@ -478,8 +309,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
         false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
-    ASSERT_TRUE(chrome::CanGoBack(browser()));
-    chrome::GoBack(browser(), CURRENT_TAB);
+    ASSERT_TRUE(browser()->CanGoBack());
+    browser()->GoBack(CURRENT_TAB);
     auth_cancelled_waiter.Wait();
     load_stop_waiter.Wait();
     EXPECT_TRUE(observer.handlers_.empty());
@@ -489,7 +320,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
   ui_test_utils::NavigateToURL(browser(), no_auth_page_3);
   {
     WindowedLoadStopObserver load_stop_waiter(controller, 1);
-    chrome::GoBack(browser(), CURRENT_TAB);  // Should take us to page 1
+    browser()->GoBack(CURRENT_TAB);  // Should take us to page 1
     load_stop_waiter.Wait();
   }
 
@@ -502,8 +333,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
         false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
-    ASSERT_TRUE(chrome::CanGoForward(browser()));
-    chrome::GoForward(browser(), CURRENT_TAB);  // Should take us to page 3
+    ASSERT_TRUE(browser()->CanGoForward());
+    browser()->GoForward(CURRENT_TAB);  // Should take us to page 3
     auth_cancelled_waiter.Wait();
     load_stop_waiter.Wait();
     EXPECT_TRUE(observer.handlers_.empty());
@@ -536,9 +367,11 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmCancellation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kMultiRealmTestPage);
 
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
+  TabContentsWrapper* contents =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents);
+
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
@@ -587,9 +420,11 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmConfirmation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kMultiRealmTestPage);
 
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
+  TabContentsWrapper* contents =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents);
+
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
@@ -638,9 +473,11 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, IncorrectConfirmation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kSingleRealmTestPage);
 
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
+  TabContentsWrapper* contents =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents);
+
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
@@ -661,8 +498,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, IncorrectConfirmation) {
     LoginHandler* handler = *observer.handlers_.begin();
 
     ASSERT_TRUE(handler);
-    handler->SetAuth(base::UTF8ToUTF16(bad_username_),
-                     base::UTF8ToUTF16(bad_password_));
+    handler->SetAuth(UTF8ToUTF16(bad_username_),
+                     UTF8ToUTF16(bad_password_));
     auth_supplied_waiter.Wait();
 
     // The request should be retried after the incorrect password is
@@ -708,9 +545,11 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, NoLoginPromptForFavicon) {
 
   ASSERT_TRUE(test_server()->Start());
 
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
+  TabContentsWrapper* contents =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents);
+
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
@@ -756,18 +595,18 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, NoLoginPromptForFavicon) {
   EXPECT_TRUE(test_server()->Stop());
 }
 
-// Block crossdomain image login prompting as a phishing defense.
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
-                       BlockCrossdomainPrompt) {
+// Block crossdomain subresource login prompting as a phishing defense.
+IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, BlockCrossdomainPrompt) {
   const char* kTestPage = "files/login/load_img_from_b.html";
 
   host_resolver()->AddRule("www.a.com", "127.0.0.1");
   host_resolver()->AddRule("www.b.com", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
 
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
+  TabContentsWrapper* contents = browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents);
+
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller));
 
@@ -827,61 +666,15 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
   EXPECT_TRUE(test_server()->Stop());
 }
 
-// Allow crossdomain iframe login prompting despite the above.
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
-                       AllowCrossdomainPrompt) {
-  const char* kTestPage = "files/login/load_iframe_from_b.html";
-
-  host_resolver()->AddRule("www.a.com", "127.0.0.1");
-  host_resolver()->AddRule("www.b.com", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
-
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
-  LoginPromptBrowserTestObserver observer;
-  observer.Register(content::Source<NavigationController>(controller));
-
-  // Load a page that has a cross-domain iframe authentication.
-  {
-    GURL test_page = test_server()->GetURL(kTestPage);
-    ASSERT_EQ("127.0.0.1", test_page.host());
-
-    // Change the host from 127.0.0.1 to www.a.com so that when the
-    // page tries to load from b, it will be cross-origin.
-    std::string new_host("www.a.com");
-    GURL::Replacements replacements;
-    replacements.SetHostStr(new_host);
-    test_page = test_page.ReplaceComponents(replacements);
-
-    WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(OpenURLParams(
-        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
-        false));
-    auth_needed_waiter.Wait();
-    ASSERT_EQ(1u, observer.handlers_.size());
-
-    while (!observer.handlers_.empty()) {
-      WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
-      LoginHandler* handler = *observer.handlers_.begin();
-
-      ASSERT_TRUE(handler);
-      handler->CancelAuth();
-      auth_cancelled_waiter.Wait();
-    }
-  }
-
-  EXPECT_EQ(1, observer.auth_needed_count_);
-  EXPECT_TRUE(test_server()->Stop());
-}
-
 IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
   ASSERT_TRUE(test_server()->Start());
 
   // Get NavigationController for tab 1.
-  content::WebContents* contents_1 =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller_1 = &contents_1->GetController();
+  TabContentsWrapper* contents_1 =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents_1);
+  NavigationController* controller_1 =
+      &contents_1->web_contents()->GetController();
 
   // Open a new tab.
   ui_test_utils::NavigateToURLWithDisposition(
@@ -891,10 +684,12 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // Get NavigationController for tab 2.
-  content::WebContents* contents_2 =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  TabContentsWrapper* contents_2 =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents_2);
   ASSERT_NE(contents_1, contents_2);
-  NavigationController* controller_2 = &contents_2->GetController();
+  NavigationController* controller_2 =
+      &contents_2->web_contents()->GetController();
 
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller_1));
@@ -904,13 +699,13 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
     // Open different auth urls in each tab.
     WindowedAuthNeededObserver auth_needed_waiter_1(controller_1);
     WindowedAuthNeededObserver auth_needed_waiter_2(controller_2);
-    contents_1->OpenURL(OpenURLParams(
+    contents_1->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/1"),
         content::Referrer(),
         CURRENT_TAB,
         content::PAGE_TRANSITION_TYPED,
         false));
-    contents_2->OpenURL(OpenURLParams(
+    contents_2->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/2"),
         content::Referrer(),
         CURRENT_TAB,
@@ -943,9 +738,11 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
   ASSERT_TRUE(test_server()->Start());
 
   // Get NavigationController for tab 1.
-  content::WebContents* contents_1 =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller_1 = &contents_1->GetController();
+  TabContentsWrapper* contents_1 =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents_1);
+  NavigationController* controller_1 =
+      &contents_1->web_contents()->GetController();
 
   // Open a new tab.
   ui_test_utils::NavigateToURLWithDisposition(
@@ -955,10 +752,12 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // Get NavigationController for tab 2.
-  content::WebContents* contents_2 =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  TabContentsWrapper* contents_2 =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents_2);
   ASSERT_NE(contents_1, contents_2);
-  NavigationController* controller_2 = &contents_2->GetController();
+  NavigationController* controller_2 =
+      &contents_2->web_contents()->GetController();
 
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller_1));
@@ -968,13 +767,13 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
     // Open different auth urls in each tab.
     WindowedAuthNeededObserver auth_needed_waiter_1(controller_1);
     WindowedAuthNeededObserver auth_needed_waiter_2(controller_2);
-    contents_1->OpenURL(OpenURLParams(
+    contents_1->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/1"),
         content::Referrer(),
         CURRENT_TAB,
         content::PAGE_TRANSITION_TYPED,
         false));
-    contents_2->OpenURL(OpenURLParams(
+    contents_2->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/2"),
         content::Referrer(),
         CURRENT_TAB,
@@ -1008,19 +807,21 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
   ASSERT_TRUE(test_server()->Start());
 
   // Get NavigationController for regular tab.
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
+  TabContentsWrapper* contents =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents);
+  NavigationController* controller = &contents->web_contents()->GetController();
 
   // Open an incognito window.
   Browser* browser_incognito = CreateIncognitoBrowser();
 
   // Get NavigationController for incognito tab.
-  content::WebContents* contents_incognito =
-      browser_incognito->tab_strip_model()->GetActiveWebContents();
+  TabContentsWrapper* contents_incognito =
+      browser_incognito->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(contents_incognito);
   ASSERT_NE(contents, contents_incognito);
   NavigationController* controller_incognito =
-      &contents_incognito->GetController();
+      &contents_incognito->web_contents()->GetController();
 
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller));
@@ -1033,13 +834,13 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
     WindowedAuthNeededObserver auth_needed_waiter(controller);
     WindowedAuthNeededObserver auth_needed_waiter_incognito(
         controller_incognito);
-    contents->OpenURL(OpenURLParams(
+    contents->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/1"),
         content::Referrer(),
         CURRENT_TAB,
         content::PAGE_TRANSITION_TYPED,
         false));
-    contents_incognito->OpenURL(OpenURLParams(
+    contents_incognito->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/2"),
         content::Referrer(),
         CURRENT_TAB,
@@ -1064,7 +865,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
     // nothing".  Run anything pending in the message loop just to be sure.
     // (This shouldn't be necessary since notifications are synchronous, but
     // maybe it will help avoid flake someday in the future..)
-    content::RunAllPendingInMessageLoop();
+    ui_test_utils::RunAllPendingInMessageLoop();
   }
 
   EXPECT_EQ(1, observer.auth_needed_count_);

@@ -19,13 +19,13 @@
 
 #ifndef BASE_METRICS_STATS_TABLE_H_
 #define BASE_METRICS_STATS_TABLE_H_
+#pragma once
 
 #include <string>
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
-#include "base/containers/hash_tables.h"
-#include "base/memory/shared_memory.h"
+#include "base/hash_tables.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_local_storage.h"
 
@@ -53,10 +53,10 @@ class BASE_EXPORT StatsTable {
 
   // For convenience, we create a static table.  This is generally
   // used automatically by the counters.
-  static StatsTable* current();
+  static StatsTable* current() { return global_table_; }
 
   // Set the global table for use in this process.
-  static void set_current(StatsTable* value);
+  static void set_current(StatsTable* value) { global_table_ = value; }
 
   // Get the slot id for the calling thread. Returns 0 if no
   // slot is assigned.
@@ -117,11 +117,6 @@ class BASE_EXPORT StatsTable {
   // The maxinum number of threads/columns in the table.
   int GetMaxThreads() const;
 
-#if defined(OS_POSIX)
-  // Get the underlying shared memory handle for the table.
-  base::SharedMemoryHandle GetSharedMemoryHandle() const;
-#endif
-
   // The maximum length (in characters) of a Thread's name including
   // null terminator, as stored in the shared memory.
   static const int kMaxThreadNameLength = 32;
@@ -136,7 +131,7 @@ class BASE_EXPORT StatsTable {
   static int* FindLocation(const char *name);
 
  private:
-  class Internal;
+  class Private;
   struct TLSData;
   typedef hash_map<std::string, int> CountersMap;
 
@@ -178,7 +173,7 @@ class BASE_EXPORT StatsTable {
   // initialized.
   TLSData* GetTLSData() const;
 
-  Internal* internal_;
+  Private* impl_;
 
   // The counters_lock_ protects the counters_ hash table.
   base::Lock counters_lock_;
@@ -190,6 +185,8 @@ class BASE_EXPORT StatsTable {
   // have created it.
   CountersMap counters_;
   ThreadLocalStorage::Slot tls_index_;
+
+  static StatsTable* global_table_;
 
   DISALLOW_COPY_AND_ASSIGN(StatsTable);
 };

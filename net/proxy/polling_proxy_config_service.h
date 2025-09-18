@@ -4,10 +4,11 @@
 
 #ifndef NET_PROXY_POLLING_PROXY_CONFIG_SERVICE_H_
 #define NET_PROXY_POLLING_PROXY_CONFIG_SERVICE_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/proxy/proxy_config_service.h"
 
 namespace net {

@@ -4,12 +4,14 @@
 
 #ifndef SKIA_EXT_VECTOR_PLATFORM_DEVICE_SKIA_H_
 #define SKIA_EXT_VECTOR_PLATFORM_DEVICE_SKIA_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "skia/ext/platform_device.h"
-#include "skia/ext/refptr.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkTScopedPtr.h"
 #include "third_party/skia/include/pdf/SkPDFDevice.h"
 
 class SkMatrix;
@@ -18,7 +20,7 @@ namespace skia {
 
 class BitmapPlatformDevice;
 
-class VectorPlatformDeviceSkia : public SkPDFDevice, public PlatformDevice {
+class VectorPlatformDeviceSkia : public PlatformDevice, public SkPDFDevice {
  public:
   SK_API VectorPlatformDeviceSkia(const SkISize& pageSize,
                                   const SkISize& contentSize,
@@ -26,7 +28,7 @@ class VectorPlatformDeviceSkia : public SkPDFDevice, public PlatformDevice {
   virtual ~VectorPlatformDeviceSkia();
 
   // PlatformDevice methods.
-  virtual bool SupportsPlatformPaint() OVERRIDE;
+  virtual bool IsNativeFontRenderingAllowed() OVERRIDE;
 
   virtual PlatformSurface BeginPlatformPaint() OVERRIDE;
   virtual void EndPlatformPaint() OVERRIDE;
@@ -41,7 +43,7 @@ class VectorPlatformDeviceSkia : public SkPDFDevice, public PlatformDevice {
                                    int y,
                                    const CGRect* src_rect) OVERRIDE;
   virtual CGContextRef GetBitmapContext() OVERRIDE;
-#elif defined(OS_POSIX)
+#elif defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_OPENBSD)
   virtual void DrawToNativeContext(PlatformSurface surface,
                                    int x,
                                    int y,
@@ -49,7 +51,7 @@ class VectorPlatformDeviceSkia : public SkPDFDevice, public PlatformDevice {
 #endif
 
  private:
-  skia::RefPtr<BitmapPlatformDevice> raster_surface_;
+  SkRefPtr<BitmapPlatformDevice> raster_surface_;
 
   DISALLOW_COPY_AND_ASSIGN(VectorPlatformDeviceSkia);
 };

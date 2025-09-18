@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_CONFIRM_INFOBAR_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_CONFIRM_INFOBAR_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -14,6 +15,7 @@ class ConfirmInfoBarDelegate;
 
 namespace views {
 class Label;
+class TextButton;
 }
 
 // An infobar that shows a message, up to two optional buttons, and an optional,
@@ -22,31 +24,28 @@ class Label;
 class ConfirmInfoBar : public InfoBarView,
                        public views::LinkListener {
  public:
-  explicit ConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate> delegate);
+  ConfirmInfoBar(InfoBarTabHelper* owner, ConfirmInfoBarDelegate* delegate);
 
  private:
   virtual ~ConfirmInfoBar();
 
   // InfoBarView:
   virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
-  virtual int ContentMinimumWidth() OVERRIDE;
+                             const views::Event& event) OVERRIDE;
+  virtual int ContentMinimumWidth() const OVERRIDE;
 
   // views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
   ConfirmInfoBarDelegate* GetDelegate();
 
-  // Returns the width of all content other than the label and link.  Layout()
-  // uses this to determine how much space the label and link can take.
-  int NonLabelWidth() const;
-
   views::Label* label_;
-  views::LabelButton* ok_button_;
-  views::LabelButton* cancel_button_;
+  views::TextButton* ok_button_;
+  views::TextButton* cancel_button_;
   views::Link* link_;
 
   DISALLOW_COPY_AND_ASSIGN(ConfirmInfoBar);

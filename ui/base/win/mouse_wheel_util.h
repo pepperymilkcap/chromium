@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_WIN_MOUSE_WHEEL_UTIL_H_
 #define UI_BASE_WIN_MOUSE_WHEEL_UTIL_H_
+#pragma once
 
 #include <windows.h>
 

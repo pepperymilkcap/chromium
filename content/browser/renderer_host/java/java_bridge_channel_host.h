@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_CHANNEL_HOST_H_
 #define CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_CHANNEL_HOST_H_
+#pragma once
 
-#include "content/child/npapi/np_channel_base.h"
-
-namespace content {
+#include "content/common/np_channel_base.h"
 
 class JavaBridgeChannelHost : public NPChannelBase {
  public:
@@ -35,7 +34,7 @@ class JavaBridgeChannelHost : public NPChannelBase {
  private:
   JavaBridgeChannelHost() {}
   friend class base::RefCountedThreadSafe<JavaBridgeChannelHost>;
-  virtual ~JavaBridgeChannelHost();
+  virtual ~JavaBridgeChannelHost() {}
 
   static NPChannelBase* ClassFactory() {
     return new JavaBridgeChannelHost();
@@ -46,7 +45,5 @@ class JavaBridgeChannelHost : public NPChannelBase {
 
   DISALLOW_COPY_AND_ASSIGN(JavaBridgeChannelHost);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_CHANNEL_HOST_H_

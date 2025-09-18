@@ -4,53 +4,52 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_DOWNLOAD_DOWNLOAD_IN_PROGRESS_DIALOG_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_DOWNLOAD_DOWNLOAD_IN_PROGRESS_DIALOG_VIEW_H_
+#pragma once
+
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/ui/browser.h"
+#include "base/string16.h"
+#include "ui/views/view.h"
 #include "ui/views/window/dialog_delegate.h"
 
-namespace views {
-class MessageBoxView;
+class Browser;
+
+namespace gfx {
+class Size;
 }
 
-class DownloadInProgressDialogView : public views::DialogDelegate {
- public:
-  static void Show(gfx::NativeWindow parent_window,
-                   int download_count,
-                   Browser::DownloadClosePreventionType dialog_type,
-                   bool app_modal,
-                   const base::Callback<void(bool)>& callback);
+namespace views {
+class Label;
+}
 
- private:
-  DownloadInProgressDialogView(int download_count,
-                               Browser::DownloadClosePreventionType dialog_type,
-                               bool app_modal,
-                               const base::Callback<void(bool)>& callback);
+class DownloadInProgressDialogView : public views::DialogDelegateView {
+ public:
+  explicit DownloadInProgressDialogView(Browser* browser);
   virtual ~DownloadInProgressDialogView();
 
-  // views::DialogDelegate:
+ private:
+  // views::View:
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+
+  // views::DialogDelegateView:
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual int GetDefaultDialogButton() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
-
-  // views::WidgetDelegate:
   virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
 
-  const bool app_modal_;
-  const base::Callback<void(bool)> callback_;
-  views::MessageBoxView* message_box_view_;
+  Browser* browser_;
+  views::Label* warning_;
+  views::Label* explanation_;
 
-  base::string16 title_text_;
-  base::string16 ok_button_text_;
-  base::string16 cancel_button_text_;
+  string16 ok_button_text_;
+  string16 cancel_button_text_;
+
+  string16 product_name_;
 
   gfx::Size dialog_dimensions_;
 

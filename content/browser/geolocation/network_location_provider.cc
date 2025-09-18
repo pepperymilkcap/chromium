@@ -5,13 +5,14 @@
 #include "content/browser/geolocation/network_location_provider.h"
 
 #include "base/bind.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "content/public/browser/access_token_store.h"
 
-namespace content {
+using content::AccessTokenStore;
+
 namespace {
-// The maximum period of time we'll wait for a complete set of wifi data
+// The maximum period of time we'll wait for a complete set of device data
 // before sending the request.
 const int kDataCompleteWaitSeconds = 2;
 }  // namespace
@@ -26,8 +27,8 @@ NetworkLocationProvider::PositionCache::~PositionCache() {}
 bool NetworkLocationProvider::PositionCache::CachePosition(
     const WifiData& wifi_data,
     const Geoposition& position) {
-  // Check that we can generate a valid key for the wifi data.
-  base::string16 key;
+  // Check that we can generate a valid key for the device data.
+  string16 key;
   if (!MakeKey(wifi_data, &key)) {
     return false;
   }
@@ -53,11 +54,11 @@ bool NetworkLocationProvider::PositionCache::CachePosition(
   return true;
 }
 
-// Searches for a cached position response for the current WiFi data. Returns
-// the cached position if available, NULL otherwise.
+// Searches for a cached position response for the current set of cell ID and
+// WiFi data. Returns the cached position if available, NULL otherwise.
 const Geoposition* NetworkLocationProvider::PositionCache::FindPosition(
     const WifiData& wifi_data) {
-  base::string16 key;
+  string16 key;
   if (!MakeKey(wifi_data, &key)) {
     return NULL;
   }
@@ -65,19 +66,21 @@ const Geoposition* NetworkLocationProvider::PositionCache::FindPosition(
   return iter == cache_.end() ? NULL : &iter->second;
 }
 
-// Makes the key for the map of cached positions, using the available data.
-// Returns true if a good key was generated, false otherwise.
+// Makes the key for the map of cached positions, using a set of
+// device data. Returns true if a good key was generated, false otherwise.
 //
 // static
 bool NetworkLocationProvider::PositionCache::MakeKey(
     const WifiData& wifi_data,
-    base::string16* key) {
-  // Currently we use only WiFi data and base the key only on the MAC addresses.
+    string16* key) {
+  // Currently we use only the WiFi data, and base the key only on
+  // the MAC addresses.
+  // TODO(joth): Make use of radio_data.
   DCHECK(key);
   key->clear();
   const size_t kCharsPerMacAddress = 6 * 3 + 1;  // e.g. "11:22:33:44:55:66|"
   key->reserve(wifi_data.access_point_data.size() * kCharsPerMacAddress);
-  const base::string16 separator(base::ASCIIToUTF16("|"));
+  const string16 separator(ASCIIToUTF16("|"));
   for (WifiData::AccessPointDataSet::const_iterator iter =
        wifi_data.access_point_data.begin();
        iter != wifi_data.access_point_data.end();
@@ -87,7 +90,7 @@ bool NetworkLocationProvider::PositionCache::MakeKey(
     *key += separator;
   }
   // If the key is the empty string, return false, as we don't want to cache a
-  // position for such data.
+  // position for such a set of device data.
   return !key->empty();
 }
 
@@ -96,7 +99,7 @@ LocationProviderBase* NewNetworkLocationProvider(
     AccessTokenStore* access_token_store,
     net::URLRequestContextGetter* context,
     const GURL& url,
-    const base::string16& access_token) {
+    const string16& access_token) {
   return new NetworkLocationProvider(
       access_token_store, context, url, access_token);
 }
@@ -106,69 +109,77 @@ NetworkLocationProvider::NetworkLocationProvider(
     AccessTokenStore* access_token_store,
     net::URLRequestContextGetter* url_context_getter,
     const GURL& url,
-    const base::string16& access_token)
+    const string16& access_token)
     : access_token_store_(access_token_store),
+      radio_data_provider_(NULL),
       wifi_data_provider_(NULL),
-      wifi_data_update_callback_(
-          base::Bind(&NetworkLocationProvider::WifiDataUpdateAvailable,
-                     base::Unretained(this))),
+      is_radio_data_complete_(false),
       is_wifi_data_complete_(false),
       access_token_(access_token),
-      is_permission_granted_(false),
       is_new_data_available_(false),
-      weak_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   // Create the position cache.
   position_cache_.reset(new PositionCache());
 
-  NetworkLocationRequest::LocationResponseCallback callback =
-      base::Bind(&NetworkLocationProvider::LocationResponseAvailable,
-                 base::Unretained(this));
-  request_.reset(new NetworkLocationRequest(url_context_getter, url, callback));
+  request_.reset(new NetworkLocationRequest(url_context_getter, url, this));
 }
 
 NetworkLocationProvider::~NetworkLocationProvider() {
   StopProvider();
 }
 
-// LocationProvider implementation
-void NetworkLocationProvider::GetPosition(Geoposition* position) {
+// LocationProviderBase implementation
+void NetworkLocationProvider::GetPosition(Geoposition *position) {
   DCHECK(position);
   *position = position_;
 }
 
-void NetworkLocationProvider::RequestRefresh() {
+void NetworkLocationProvider::UpdatePosition() {
   // TODO(joth): When called via the public (base class) interface, this should
   // poke each data provider to get them to expedite their next scan.
   // Whilst in the delayed start, only send request if all data is ready.
-  if (!weak_factory_.HasWeakPtrs() || is_wifi_data_complete_) {
+  if (!weak_factory_.HasWeakPtrs() ||
+      (is_radio_data_complete_ && is_wifi_data_complete_)) {
     RequestPosition();
   }
 }
 
-void NetworkLocationProvider::OnPermissionGranted() {
-  const bool was_permission_granted = is_permission_granted_;
-  is_permission_granted_ = true;
-  if (!was_permission_granted && IsStarted()) {
-    RequestRefresh();
+void NetworkLocationProvider::OnPermissionGranted(
+    const GURL& requesting_frame) {
+  const bool host_was_empty = most_recent_authorized_host_.empty();
+  most_recent_authorized_host_ = requesting_frame.host();
+  if (host_was_empty && !most_recent_authorized_host_.empty()
+      && IsStarted()) {
+    UpdatePosition();
   }
 }
 
-void NetworkLocationProvider::WifiDataUpdateAvailable(
+// DeviceDataProviderInterface::ListenerInterface implementation.
+void NetworkLocationProvider::DeviceDataUpdateAvailable(
+    RadioDataProvider* provider) {
+  DCHECK(provider == radio_data_provider_);
+  is_radio_data_complete_ = radio_data_provider_->GetData(&radio_data_);
+  OnDeviceDataUpdated();
+}
+
+void NetworkLocationProvider::DeviceDataUpdateAvailable(
     WifiDataProvider* provider) {
   DCHECK(provider == wifi_data_provider_);
   is_wifi_data_complete_ = wifi_data_provider_->GetData(&wifi_data_);
-  OnWifiDataUpdated();
+  OnDeviceDataUpdated();
 }
 
+// NetworkLocationRequest::ListenerInterface implementation.
 void NetworkLocationProvider::LocationResponseAvailable(
     const Geoposition& position,
     bool server_error,
-    const base::string16& access_token,
+    const string16& access_token,
+    const RadioData& radio_data,
     const WifiData& wifi_data) {
   DCHECK(CalledOnValidThread());
   // Record the position and update our cache.
   position_ = position;
-  if (position.Validate()) {
+  if (position.IsValidFix()) {
     position_cache_->CachePosition(wifi_data, position);
   }
 
@@ -179,7 +190,7 @@ void NetworkLocationProvider::LocationResponseAvailable(
   }
 
   // Let listeners know that we now have a position available.
-  NotifyCallback(position_);
+  UpdateListeners();
 }
 
 bool NetworkLocationProvider::StartProvider(bool high_accuracy) {
@@ -193,36 +204,31 @@ bool NetworkLocationProvider::StartProvider(bool high_accuracy) {
     return false;
   }
 
-  // Registers a callback with the data provider. The first call to Register
-  // will create a singleton data provider and it will be deleted when the last
-  // callback is removed with Unregister.
-  wifi_data_provider_ = WifiDataProvider::Register(&wifi_data_update_callback_);
+  // Get the device data providers. The first call to Register will create the
+  // provider and it will be deleted by ref counting.
+  radio_data_provider_ = RadioDataProvider::Register(this);
+  wifi_data_provider_ = WifiDataProvider::Register(this);
 
-  base::MessageLoop::current()->PostDelayedTask(
+  MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&NetworkLocationProvider::RequestPosition,
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(kDataCompleteWaitSeconds));
-  // Get the wifi data.
+  // Get the device data.
+  is_radio_data_complete_ = radio_data_provider_->GetData(&radio_data_);
   is_wifi_data_complete_ = wifi_data_provider_->GetData(&wifi_data_);
-  if (is_wifi_data_complete_)
-    OnWifiDataUpdated();
+  if (is_radio_data_complete_ || is_wifi_data_complete_)
+    OnDeviceDataUpdated();
   return true;
-}
-
-void NetworkLocationProvider::OnWifiDataUpdated() {
-  DCHECK(CalledOnValidThread());
-  wifi_data_updated_timestamp_ = base::Time::Now();
-
-  is_new_data_available_ = is_wifi_data_complete_;
-  RequestRefresh();
 }
 
 void NetworkLocationProvider::StopProvider() {
   DCHECK(CalledOnValidThread());
   if (IsStarted()) {
-    wifi_data_provider_->Unregister(&wifi_data_update_callback_);
+    radio_data_provider_->Unregister(this);
+    wifi_data_provider_->Unregister(this);
   }
+  radio_data_provider_ = NULL;
   wifi_data_provider_ = NULL;
   weak_factory_.InvalidateWeakPtrs();
 }
@@ -235,23 +241,23 @@ void NetworkLocationProvider::RequestPosition() {
 
   const Geoposition* cached_position =
       position_cache_->FindPosition(wifi_data_);
-  DCHECK(!wifi_data_updated_timestamp_.is_null()) <<
+  DCHECK(!device_data_updated_timestamp_.is_null()) <<
       "Timestamp must be set before looking up position";
   if (cached_position) {
-    DCHECK(cached_position->Validate());
+    DCHECK(cached_position->IsValidFix());
     // Record the position and update its timestamp.
     position_ = *cached_position;
     // The timestamp of a position fix is determined by the timestamp
     // of the source data update. (The value of position_.timestamp from
     // the cache could be from weeks ago!)
-    position_.timestamp = wifi_data_updated_timestamp_;
+    position_.timestamp = device_data_updated_timestamp_;
     is_new_data_available_ = false;
     // Let listeners know that we now have a position available.
-    NotifyCallback(position_);
+    UpdateListeners();
     return;
   }
   // Don't send network requests until authorized. http://crbug.com/39171
-  if (!is_permission_granted_)
+  if (most_recent_authorized_host_.empty())
     return;
 
   weak_factory_.InvalidateWeakPtrs();
@@ -264,12 +270,23 @@ void NetworkLocationProvider::RequestPosition() {
                 "with new data. Wifi APs: "
              << wifi_data_.access_point_data.size();
   }
-  request_->MakeRequest(access_token_, wifi_data_,
-                        wifi_data_updated_timestamp_);
+  // The hostname sent in the request is just to give a first-order
+  // approximation of usage. We do not need to guarantee that this network
+  // request was triggered by an API call from this specific host.
+  request_->MakeRequest(most_recent_authorized_host_, access_token_,
+                        radio_data_, wifi_data_,
+                        device_data_updated_timestamp_);
+}
+
+void NetworkLocationProvider::OnDeviceDataUpdated() {
+  DCHECK(CalledOnValidThread());
+  device_data_updated_timestamp_ = base::Time::Now();
+
+  is_new_data_available_ = is_radio_data_complete_ || is_wifi_data_complete_;
+  UpdatePosition();
 }
 
 bool NetworkLocationProvider::IsStarted() const {
+  DCHECK_EQ(!!radio_data_provider_, !!wifi_data_provider_);
   return wifi_data_provider_ != NULL;
 }
-
-}  // namespace content

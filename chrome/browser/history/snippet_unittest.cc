@@ -6,9 +6,9 @@
 
 #include <algorithm>
 
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -87,7 +87,7 @@ bool ComparePair1st(const Snippet::MatchPosition& a,
 // For testing, we'll compute the match positions manually instead of using
 // sqlite's FTS matching.  BuildSnippet returns the snippet for matching
 // |query| against |document|.  Matches are surrounded by "**".
-base::string16 BuildSnippet(const std::string& document,
+string16 BuildSnippet(const std::string& document,
                       const std::string& query) {
   // This function assumes that |document| does not contain
   // any character for which lowercasing changes its length. Further,
@@ -120,16 +120,16 @@ base::string16 BuildSnippet(const std::string& document,
   snippet.ComputeSnippet(match_positions, document);
 
   // Now "highlight" all matches in the snippet with **.
-  base::string16 star_snippet;
+  string16 star_snippet;
   Snippet::MatchPositions::const_iterator match;
   size_t pos = 0;
   for (match = snippet.matches().begin();
        match != snippet.matches().end(); ++match) {
     star_snippet += snippet.text().substr(pos, match->first - pos);
-    star_snippet += base::UTF8ToUTF16("**");
+    star_snippet += UTF8ToUTF16("**");
     star_snippet += snippet.text().substr(match->first,
                                           match->second - match->first);
-    star_snippet += base::UTF8ToUTF16("**");
+    star_snippet += UTF8ToUTF16("**");
     pos = match->second;
   }
   star_snippet += snippet.text().substr(pos);
@@ -143,7 +143,7 @@ TEST(Snippets, SimpleQuery) {
             "Goo ...  ... way, Mountain View, CA 94043, United States. This "
             "**document** explains how the agreement is made up, and sets "
             "o ... ",
-            base::UTF16ToUTF8(BuildSnippet(kSampleDocument, "document")));
+            UTF16ToUTF8(BuildSnippet(kSampleDocument, "document")));
 }
 
 // Test that two words that are near each other don't produce two elided bits.
@@ -151,7 +151,7 @@ TEST(Snippets, NearbyWords) {
   ASSERT_EQ(" ... lace of business is at 1600 Amphitheatre Parkway, "
             "**Mountain** **View**, CA 94043, United States. This "
             "document explains  ... ",
-            base::UTF16ToUTF8(BuildSnippet(kSampleDocument, "mountain view")));
+            UTF16ToUTF8(BuildSnippet(kSampleDocument, "mountain view")));
 }
 
 // The above tests already test that we get byte offsets correct, but here's
@@ -160,7 +160,7 @@ TEST(Snippets, UTF8) {
   ASSERT_EQ(" ... ogle\xe2\x84\xa2 Terms of Service Welcome to Google! "
             "1. Your **relationship** with Google 1.1 Your use of Google's "
             "products, so ... ",
-            base::UTF16ToUTF8(BuildSnippet(kSampleDocument, "relationship")));
+            UTF16ToUTF8(BuildSnippet(kSampleDocument, "relationship")));
 }
 
 TEST(Snippets, ThaiUTF8) {
@@ -219,7 +219,7 @@ TEST(Snippets, ThaiUTF8) {
             "\xE0\xB8\xA3\xE0\xB8\xB1\xE0\xB8\x9A\xE0\xB9\x81\xE0\xB8\x95"
             "\xE0\xB9\x88\xE0\xB8\x87\xE0\xB9\x80\xE0\xB8\x99\xE0\xB8\xB7"
             "\xE0\xB9\x89\xE0\xB8\xAD\xE0\xB8\xAB\xE0\xB8\xB2",
-            base::UTF16ToUTF8(BuildSnippet(kThaiSample,
+            UTF16ToUTF8(BuildSnippet(kThaiSample,
                                      "\xE0\xB9\x83\xE0\xB8\xAB\xE0\xB9\x89")));
 }
 

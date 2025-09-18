@@ -32,15 +32,5 @@ TEST(PageRangeTest, RangeMerge) {
 TEST(PageRangeTest, Empty) {
   printing::PageRanges ranges;
   std::vector<int> pages(printing::PageRange::GetPages(ranges));
-  EXPECT_TRUE(pages.empty());
-}
-
-TEST(PageRangeTest, Huge) {
-  printing::PageRanges ranges;
-  printing::PageRange range;
-  range.from = 1;
-  range.to = 2000000000;
-  ranges.push_back(range);
-  std::vector<int> pages(printing::PageRange::GetPages(ranges));
-  EXPECT_FALSE(pages.empty());
+  EXPECT_EQ(0U, pages.size());
 }

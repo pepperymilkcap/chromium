@@ -4,8 +4,11 @@
 
 #ifndef CHROME_TEST_DATA_WEBUI_PRINT_PREVIEW_H_
 #define CHROME_TEST_DATA_WEBUI_PRINT_PREVIEW_H_
+#pragma once
 
-#include "chrome/test/base/web_ui_browsertest.h"
+#include "base/command_line.h"
+#include "chrome/browser/ui/webui/web_ui_browsertest.h"
+#include "chrome/common/chrome_switches.h"
 
 class PrintPreviewWebUITest : public WebUIBrowserTest {
  public:

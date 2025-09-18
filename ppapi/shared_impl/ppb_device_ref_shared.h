@@ -6,7 +6,6 @@
 #define PPAPI_SHARED_IMPL_PPB_DEVICE_REF_SHARED_H_
 
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -21,12 +20,6 @@ namespace ppapi {
 struct PPAPI_SHARED_EXPORT DeviceRefData {
   DeviceRefData();
 
-  bool operator==(const DeviceRefData& other) const {
-    return type == other.type &&
-           name == other.name &&
-           id == other.id;
-  }
-
   PP_DeviceType_Dev type;
   std::string name;
   std::string id;
@@ -36,7 +29,15 @@ class PPAPI_SHARED_EXPORT PPB_DeviceRef_Shared
     : public Resource,
       public thunk::PPB_DeviceRef_API {
  public:
-  PPB_DeviceRef_Shared(ResourceObjectType type,
+  struct InitAsImpl {};
+  struct InitAsProxy {};
+
+  // The dummy arguments control which version of Resource's constructor is
+  // called for this base class.
+  PPB_DeviceRef_Shared(const InitAsImpl&,
+                       PP_Instance instance,
+                       const DeviceRefData& data);
+  PPB_DeviceRef_Shared(const InitAsProxy&,
                        PP_Instance instance,
                        const DeviceRefData& data);
 
@@ -47,11 +48,6 @@ class PPAPI_SHARED_EXPORT PPB_DeviceRef_Shared
   virtual const DeviceRefData& GetDeviceRefData() const OVERRIDE;
   virtual PP_DeviceType_Dev GetType() OVERRIDE;
   virtual PP_Var GetName() OVERRIDE;
-
-  static PP_Resource CreateResourceArray(
-      ResourceObjectType type,
-      PP_Instance instance,
-      const std::vector<DeviceRefData>& devices);
 
  private:
   DeviceRefData data_;

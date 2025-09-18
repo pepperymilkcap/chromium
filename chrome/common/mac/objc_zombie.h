@@ -4,6 +4,7 @@
 
 #ifndef CHROME_COMMON_MAC_OBJC_ZOMBIE_H_
 #define CHROME_COMMON_MAC_OBJC_ZOMBIE_H_
+#pragma once
 
 #include "base/basictypes.h"
 

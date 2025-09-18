@@ -1,16 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-(function() {
+(function () {
 
 // TODO(akalin): Use table.js.
 
-function updateNotificationStateInfo(notificationState) {
-  var notificationStateInfo = $('notificationStateInfo');
+function updateNotificationsEnabledInfo(notificationsEnabled) {
+  var notificationsEnabledInfo =
+    document.getElementById('notificationsEnabledInfo');
   jstProcess(
-      new JsEvalContext({ 'notificationState': notificationState }),
-      notificationStateInfo);
+      new JsEvalContext({ 'notificationsEnabled': notificationsEnabled }),
+      notificationsEnabledInfo);
 }
 
 // Contains all notification data.  The keys are sync types (as strings) and
@@ -61,7 +62,8 @@ function incrementSessionNotificationCount(changedType) {
 }
 
 function updateNotificationInfoTable() {
-  var notificationInfoTable = $('notificationInfo');
+  var notificationInfoTable =
+      document.getElementById('notificationInfo');
   var infos = [];
   for (var k in chrome.sync.notifications) {
     infos.push(chrome.sync.notifications[k]);
@@ -76,10 +78,10 @@ function updateNotificationInfo(notificationInfo) {
 }
 
 function onLoad() {
-  chrome.sync.getNotificationState(updateNotificationStateInfo);
+  chrome.sync.getNotificationState(updateNotificationsEnabledInfo);
   chrome.sync.getNotificationInfo(updateNotificationInfo);
   chrome.sync.onNotificationStateChange.addListener(
-      function(details) { updateNotificationStateInfo(details.state); });
+      function(details) { updateNotificationsEnabledInfo(details.enabled); });
 
   chrome.sync.onIncomingNotification.addListener(function(details) {
     var changedTypes = details.changedTypes;
@@ -93,5 +95,5 @@ function onLoad() {
   });
 }
 
-document.addEventListener('DOMContentLoaded', onLoad, false);
+document.addEventListener("DOMContentLoaded", onLoad, false);
 })();

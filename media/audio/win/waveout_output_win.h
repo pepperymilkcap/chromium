@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_AUDIO_WIN_WAVEOUT_OUTPUT_WIN_H_
 #define MEDIA_AUDIO_WIN_WAVEOUT_OUTPUT_WIN_H_
+#pragma once
 
 #include <windows.h>
 #include <mmsystem.h>
@@ -15,8 +16,6 @@
 #include "base/win/scoped_handle.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_parameters.h"
-
-namespace media {
 
 class AudioManagerWin;
 
@@ -121,21 +120,16 @@ class PCMWaveOutAudioOutputStream : public AudioOutputStream {
   base::win::ScopedHandle buffer_event_;
 
   // Handle returned by RegisterWaitForSingleObject().
-  HANDLE waiting_handle_;
+  base::win::ScopedHandle waiting_handle_;
 
   // Pointer to the allocated audio buffers, we allocate all buffers in one big
   // chunk. This object owns them.
-  scoped_ptr<char[]> buffers_;
+  scoped_array<char> buffers_;
 
   // Lock used to avoid the conflict when callbacks are called simultaneously.
   base::Lock lock_;
 
-  // Container for retrieving data from AudioSourceCallback::OnMoreData().
-  scoped_ptr<AudioBus> audio_bus_;
-
   DISALLOW_COPY_AND_ASSIGN(PCMWaveOutAudioOutputStream);
 };
-
-}  // namespace media
 
 #endif  // MEDIA_AUDIO_WIN_WAVEOUT_OUTPUT_WIN_H_

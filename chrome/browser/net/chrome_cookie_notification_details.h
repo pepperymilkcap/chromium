@@ -1,19 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_NET_CHROME_COOKIE_NOTIFICATION_DETAILS_H_
 #define CHROME_BROWSER_NET_CHROME_COOKIE_NOTIFICATION_DETAILS_H_
+#pragma once
 
-#include "net/cookies/cookie_monster.h"
-
-namespace net {
-class CanonicalCookie;
-}
+#include "net/base/cookie_monster.h"
 
 struct ChromeCookieDetails {
  public:
-  ChromeCookieDetails(const net::CanonicalCookie* cookie_copy,
+  ChromeCookieDetails(const net::CookieMonster::CanonicalCookie* cookie_copy,
                       bool is_removed,
                       net::CookieMonster::Delegate::ChangeCause cause)
       : cookie(cookie_copy),
@@ -21,7 +18,7 @@ struct ChromeCookieDetails {
         cause(cause) {
   }
 
-  const net::CanonicalCookie* cookie;
+  const net::CookieMonster::CanonicalCookie* cookie;
   bool removed;
   net::CookieMonster::Delegate::ChangeCause cause;
 };

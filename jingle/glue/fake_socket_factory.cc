@@ -5,9 +5,8 @@
 #include "jingle/glue/fake_socket_factory.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "jingle/glue/utils.h"
-#include "third_party/libjingle/source/talk/base/asyncpacketsocket.h"
 #include "third_party/libjingle/source/talk/base/asyncsocket.h"
 
 namespace jingle_glue {
@@ -34,15 +33,13 @@ talk_base::SocketAddress FakeUDPPacketSocket::GetRemoteAddress() const {
   return remote_address_;
 }
 
-int FakeUDPPacketSocket::Send(const void *data, size_t data_size,
-                              talk_base::DiffServCodePoint dscp) {
+int FakeUDPPacketSocket::Send(const void *data, size_t data_size) {
   DCHECK(CalledOnValidThread());
-  return SendTo(data, data_size, remote_address_, dscp);
+  return SendTo(data, data_size, remote_address_);
 }
 
 int FakeUDPPacketSocket::SendTo(const void *data, size_t data_size,
-                                const talk_base::SocketAddress& address,
-                                talk_base::DiffServCodePoint dscp) {
+                                const talk_base::SocketAddress& address) {
   DCHECK(CalledOnValidThread());
 
   if (state_ == IS_CLOSED) {
@@ -114,19 +111,19 @@ void FakeUDPPacketSocket::DeliverPacket(const net::IPEndPoint& from,
     return;
   }
 
-  SignalReadPacket(this, &data[0], data.size(), address,
-                   talk_base::CreatePacketTime(0));
+  SignalReadPacket(this, &data[0], data.size(), address);
 }
 
 FakeSocketManager::FakeSocketManager()
-    : message_loop_(base::MessageLoop::current()) {}
+    : message_loop_(MessageLoop::current()) {
+}
 
 FakeSocketManager::~FakeSocketManager() { }
 
 void FakeSocketManager::SendPacket(const net::IPEndPoint& from,
                                    const net::IPEndPoint& to,
                                    const std::vector<char>& data) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   message_loop_->PostTask(
       FROM_HERE,
@@ -136,7 +133,7 @@ void FakeSocketManager::SendPacket(const net::IPEndPoint& from,
 void FakeSocketManager::DeliverPacket(const net::IPEndPoint& from,
                                       const net::IPEndPoint& to,
                                       const std::vector<char>& data) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   std::map<net::IPEndPoint, FakeUDPPacketSocket*>::iterator it =
       endpoints_.find(to);
@@ -149,13 +146,13 @@ void FakeSocketManager::DeliverPacket(const net::IPEndPoint& from,
 }
 
 void FakeSocketManager::AddSocket(FakeUDPPacketSocket* socket_factory) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   endpoints_[socket_factory->endpoint()] = socket_factory;
 }
 
 void FakeSocketManager::RemoveSocket(FakeUDPPacketSocket* socket_factory) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   endpoints_.erase(socket_factory->endpoint());
 }
@@ -175,12 +172,12 @@ talk_base::AsyncPacketSocket* FakeSocketFactory::CreateUdpSocket(
   CHECK_EQ(min_port, 0);
   CHECK_EQ(max_port, 0);
   return new FakeUDPPacketSocket(
-      socket_manager_.get(), net::IPEndPoint(address_, ++last_allocated_port_));
+      socket_manager_, net::IPEndPoint(address_, ++last_allocated_port_));
 }
 
 talk_base::AsyncPacketSocket* FakeSocketFactory::CreateServerTcpSocket(
     const talk_base::SocketAddress& local_address, int min_port, int max_port,
-    int opts) {
+    bool ssl) {
   // TODO(sergeyu): Implement fake TCP sockets.
   NOTIMPLEMENTED();
   return NULL;
@@ -190,7 +187,7 @@ talk_base::AsyncPacketSocket* FakeSocketFactory::CreateClientTcpSocket(
     const talk_base::SocketAddress& local_address,
     const talk_base::SocketAddress& remote_address,
     const talk_base::ProxyInfo& proxy_info, const std::string& user_agent,
-    int opts) {
+    bool ssl) {
   // TODO(sergeyu): Implement fake TCP sockets.
   NOTIMPLEMENTED();
   return NULL;

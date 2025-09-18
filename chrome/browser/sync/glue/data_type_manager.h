@@ -4,15 +4,17 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_MANAGER_H__
 #define CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_MANAGER_H__
+#pragma once
 
 #include <list>
 #include <set>
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
-#include "sync/api/sync_error.h"
-#include "sync/internal_api/public/base/model_type.h"
-#include "sync/internal_api/public/configure_reason.h"
+#include "chrome/browser/sync/internal_api/configure_reason.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 
 namespace browser_sync {
 
@@ -27,7 +29,8 @@ class DataTypeManager {
                        // types.
 
     CONFIGURING,       // Data types are being started.
-    RETRYING,          // Retrying a pending reconfiguration.
+    BLOCKED,           // We can't move forward with configuration because some
+                       // external action must take place (i.e. passphrase).
 
     CONFIGURED,        // All enabled data types are running.
     STOPPING           // Data types are being stopped.
@@ -41,36 +44,25 @@ class DataTypeManager {
     PARTIAL_SUCCESS,     // Some data types had an error while starting up.
     ABORTED,             // Start was aborted by calling Stop() before
                          // all types were started.
+    RETRY,               // Download failed due to a transient error and it
+                         // is being retried.
     UNRECOVERABLE_ERROR  // We got an unrecoverable error during startup.
   };
+
+  typedef syncable::ModelTypeSet TypeSet;
 
   // Note: |errors| is only filled when status is not OK.
   struct ConfigureResult {
     ConfigureResult();
     ConfigureResult(ConfigureStatus status,
-                    syncer::ModelTypeSet requested_types);
+                    TypeSet requested_types);
     ConfigureResult(ConfigureStatus status,
-                    syncer::ModelTypeSet requested_types,
-                    std::map<syncer::ModelType, syncer::SyncError>
-                        failed_data_types,
-                    syncer::ModelTypeSet unfinished_data_types,
-                    syncer::ModelTypeSet needs_crypto);
+                    TypeSet requested_types,
+                    const std::list<SyncError>& errors);
     ~ConfigureResult();
     ConfigureStatus status;
-    syncer::ModelTypeSet requested_types;
-
-    // These types encountered a failure in association.
-    std::map<syncer::ModelType, syncer::SyncError> failed_data_types;
-
-    // List of types that failed to finish loading/associating within our
-    // alloted time period(see |kAssociationTimeOutInSeconds|). We move
-    // forward here and allow these types to continue to load/associate in
-    // the background.
-    syncer::ModelTypeSet unfinished_data_types;
-
-    // Those types that are unable to start due to the cryptographer not being
-    // ready.
-    syncer::ModelTypeSet needs_crypto;
+    TypeSet requested_types;
+    std::list<SyncError> errors;
   };
 
   virtual ~DataTypeManager() {}
@@ -90,11 +82,11 @@ class DataTypeManager {
   // Note that you may call Configure() while configuration is in
   // progress.  Configuration will be complete only when the
   // desired_types supplied in the last call to Configure is achieved.
-  virtual void Configure(syncer::ModelTypeSet desired_types,
-                         syncer::ConfigureReason reason) = 0;
+  virtual void Configure(TypeSet desired_types,
+                         sync_api::ConfigureReason reason) = 0;
 
-  virtual void PurgeForMigration(syncer::ModelTypeSet undesired_types,
-                                 syncer::ConfigureReason reason) = 0;
+  virtual void ConfigureWithoutNigori(TypeSet desired_types,
+      sync_api::ConfigureReason reason) = 0;
 
   // Synchronously stops all registered data types.  If called after
   // Configure() is called but before it finishes, it will abort the
@@ -103,7 +95,7 @@ class DataTypeManager {
   virtual void Stop() = 0;
 
   // The current state of the data type manager.
-  virtual State state() const = 0;
+  virtual State state() = 0;
 };
 
 }  // namespace browser_sync

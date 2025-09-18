@@ -4,11 +4,10 @@
 
 #include "chrome_frame/navigation_constraints.h"
 
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/url_constants.h"
 #include "chrome_frame/utils.h"
-#include "extensions/common/constants.h"
 
 NavigationConstraintsImpl::NavigationConstraintsImpl() : is_privileged_(false) {
 }
@@ -26,21 +25,22 @@ bool NavigationConstraintsImpl::IsSchemeAllowed(const GURL& url) {
   if (!url.is_valid())
     return false;
 
-  if (url.SchemeIs(content::kHttpScheme) || url.SchemeIs(content::kHttpsScheme))
+  if (url.SchemeIs(chrome::kHttpScheme) ||
+      url.SchemeIs(chrome::kHttpsScheme))
     return true;
 
   // Additional checking for view-source. Allow only http and https
   // URLs in view source.
-  if (url.SchemeIs(content::kViewSourceScheme)) {
-    GURL sub_url(url.GetContent());
-    if (sub_url.SchemeIs(content::kHttpScheme) ||
-        sub_url.SchemeIs(content::kHttpsScheme))
+  if (url.SchemeIs(chrome::kViewSourceScheme)) {
+    GURL sub_url(url.path());
+    if (sub_url.SchemeIs(chrome::kHttpScheme) ||
+        sub_url.SchemeIs(chrome::kHttpsScheme))
       return true;
   }
 
   // Allow only about:blank or about:version
   if (url.SchemeIs(chrome::kAboutScheme)) {
-    if (LowerCaseEqualsASCII(url.spec(), content::kAboutBlankURL) ||
+    if (LowerCaseEqualsASCII(url.spec(), chrome::kAboutBlankURL) ||
         LowerCaseEqualsASCII(url.spec(), chrome::kAboutVersionURL)) {
       return true;
     }
@@ -48,7 +48,7 @@ bool NavigationConstraintsImpl::IsSchemeAllowed(const GURL& url) {
 
   if (is_privileged_ &&
       (url.SchemeIs(chrome::kDataScheme) ||
-       url.SchemeIs(extensions::kExtensionScheme))) {
+       url.SchemeIs(chrome::kExtensionScheme))) {
     return true;
   }
 
@@ -66,7 +66,7 @@ bool NavigationConstraintsImpl::IsZoneAllowed(const GURL& url) {
       return true;
     }
     DWORD zone = URLZONE_INVALID;
-    std::wstring unicode_url = base::UTF8ToWide(url.spec());
+    std::wstring unicode_url = UTF8ToWide(url.spec());
     security_manager_->MapUrlToZone(unicode_url.c_str(), &zone, 0);
     if (zone == URLZONE_UNTRUSTED) {
       DLOG(WARNING) << __FUNCTION__

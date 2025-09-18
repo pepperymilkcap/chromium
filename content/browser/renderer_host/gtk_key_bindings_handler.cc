@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,8 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-
-namespace content {
 
 GtkKeyBindingsHandler::GtkKeyBindingsHandler(GtkWidget* parent_widget)
     : handler_(CreateNewHandler()) {
@@ -29,7 +27,7 @@ GtkKeyBindingsHandler::~GtkKeyBindingsHandler() {
 
 bool GtkKeyBindingsHandler::Match(const NativeWebKeyboardEvent& wke,
                                   EditCommands* edit_commands) {
-  if (wke.type == blink::WebInputEvent::Char || !wke.os_event)
+  if (wke.type == WebKit::WebInputEvent::Char || !wke.os_event)
     return false;
 
   edit_commands_.clear();
@@ -132,16 +130,15 @@ GtkKeyBindingsHandler* GtkKeyBindingsHandler::GetHandlerOwner(
 }
 
 void GtkKeyBindingsHandler::BackSpace(GtkTextView* text_view) {
-  GetHandlerOwner(text_view)
-      ->EditCommandMatched("DeleteBackward", std::string());
+  GetHandlerOwner(text_view)->EditCommandMatched("DeleteBackward", "");
 }
 
 void GtkKeyBindingsHandler::CopyClipboard(GtkTextView* text_view) {
-  GetHandlerOwner(text_view)->EditCommandMatched("Copy", std::string());
+  GetHandlerOwner(text_view)->EditCommandMatched("Copy", "");
 }
 
 void GtkKeyBindingsHandler::CutClipboard(GtkTextView* text_view) {
-  GetHandlerOwner(text_view)->EditCommandMatched("Cut", std::string());
+  GetHandlerOwner(text_view)->EditCommandMatched("Cut", "");
 }
 
 void GtkKeyBindingsHandler::DeleteFromCursor(
@@ -192,7 +189,7 @@ void GtkKeyBindingsHandler::DeleteFromCursor(
     count = -count;
   for (; count > 0; --count) {
     for (const char* const* p = commands; *p; ++p)
-      owner->EditCommandMatched(*p, std::string());
+      owner->EditCommandMatched(*p, "");
   }
 }
 
@@ -217,7 +214,7 @@ void GtkKeyBindingsHandler::MoveCursor(
       command = (count > 0 ? "MoveRight" : "MoveLeft");
       break;
     case GTK_MOVEMENT_WORDS:
-      command = (count > 0 ? "MoveWordRight" : "MoveWordLeft");
+      command = (count > 0 ? "MoveWordForward" : "MoveWordBackward");
       break;
     case GTK_MOVEMENT_DISPLAY_LINES:
       command = (count > 0 ? "MoveDown" : "MoveUp");
@@ -248,7 +245,7 @@ void GtkKeyBindingsHandler::MoveCursor(
   if (count < 0)
     count = -count;
   for (; count > 0; --count)
-    owner->EditCommandMatched(command, std::string());
+    owner->EditCommandMatched(command, "");
 }
 
 void GtkKeyBindingsHandler::MoveViewport(
@@ -257,18 +254,18 @@ void GtkKeyBindingsHandler::MoveViewport(
 }
 
 void GtkKeyBindingsHandler::PasteClipboard(GtkTextView* text_view) {
-  GetHandlerOwner(text_view)->EditCommandMatched("Paste", std::string());
+  GetHandlerOwner(text_view)->EditCommandMatched("Paste", "");
 }
 
 void GtkKeyBindingsHandler::SelectAll(GtkTextView* text_view, gboolean select) {
   if (select)
-    GetHandlerOwner(text_view)->EditCommandMatched("SelectAll", std::string());
+    GetHandlerOwner(text_view)->EditCommandMatched("SelectAll", "");
   else
-    GetHandlerOwner(text_view)->EditCommandMatched("Unselect", std::string());
+    GetHandlerOwner(text_view)->EditCommandMatched("Unselect", "");
 }
 
 void GtkKeyBindingsHandler::SetAnchor(GtkTextView* text_view) {
-  GetHandlerOwner(text_view)->EditCommandMatched("SetMark", std::string());
+  GetHandlerOwner(text_view)->EditCommandMatched("SetMark", "");
 }
 
 void GtkKeyBindingsHandler::ToggleCursorVisible(GtkTextView* text_view) {
@@ -289,5 +286,3 @@ void GtkKeyBindingsHandler::MoveFocus(GtkWidget* widget,
                                       GtkDirectionType arg1) {
   // Just for disabling the default handler.
 }
-
-}  // namespace content

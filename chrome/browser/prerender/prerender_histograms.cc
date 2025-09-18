@@ -6,23 +6,17 @@
 
 #include <string>
 
-#include "base/format_macros.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/stringprintf.h"
-#include "chrome/browser/predictors/autocomplete_action_predictor.h"
-#include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_util.h"
-
-using predictors::AutocompleteActionPredictor;
+#include "chrome/browser/prerender/prerender_field_trial.h"
 
 namespace prerender {
 
 namespace {
 
-// Time window for which we will record windowed PLTs from the last observed
-// link rel=prefetch tag. This is not intended to be the same as the prerender
-// ttl, it's just intended to be a window during which a prerender has likely
-// affected performance.
+// Time window for which we will record windowed PLT's from the last
+// observed link rel=prefetch tag.
 const int kWindowDurationSeconds = 30;
 
 std::string ComposeHistogramName(const std::string& prefix_type,
@@ -50,18 +44,8 @@ std::string GetHistogramName(Origin origin, uint8 experiment_id,
   switch (origin) {
     case ORIGIN_OMNIBOX:
       return ComposeHistogramName("omnibox", name);
-    case ORIGIN_NONE:
-      return ComposeHistogramName("none", name);
-    case ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN:
-      return ComposeHistogramName("websame", name);
-    case ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN:
-      return ComposeHistogramName("webcross", name);
-    case ORIGIN_LOCAL_PREDICTOR:
-      return ComposeHistogramName("localpredictor", name);
-    case ORIGIN_EXTERNAL_REQUEST:
-        return ComposeHistogramName("externalrequest", name);
-    case ORIGIN_INSTANT:
-      return ComposeHistogramName("Instant", name);
+    case ORIGIN_LINK_REL_PRERENDER:
+      return ComposeHistogramName("web", name);
     case ORIGIN_GWS_PRERENDER:  // Handled above.
     default:
       NOTREACHED();
@@ -83,8 +67,8 @@ bool OriginIsOmnibox(Origin origin) {
 // All HISTOGRAM arguments must be UMA_HISTOGRAM... macros that contain an
 // argument "name" which these macros will eventually substitute for the
 // actual name used.
-#define PREFIXED_HISTOGRAM(histogram_name, origin, HISTOGRAM)           \
-  PREFIXED_HISTOGRAM_INTERNAL(origin, GetCurrentExperimentId(),         \
+#define PREFIXED_HISTOGRAM(histogram_name, HISTOGRAM) \
+  PREFIXED_HISTOGRAM_INTERNAL(GetCurrentOrigin(), GetCurrentExperimentId(), \
                               IsOriginExperimentWash(), HISTOGRAM, \
                               histogram_name)
 
@@ -96,9 +80,9 @@ bool OriginIsOmnibox(Origin origin) {
 #define PREFIXED_HISTOGRAM_INTERNAL(origin, experiment, wash, HISTOGRAM, \
                                     histogram_name) { \
   { \
-    /* Do not rename.  HISTOGRAM expects a local variable "name". */           \
-    std::string name = ComposeHistogramName(std::string(), histogram_name);    \
-    HISTOGRAM;                                                                 \
+    /* Do not rename.  HISTOGRAM expects a local variable "name". */ \
+    std::string name = ComposeHistogramName("", histogram_name); \
+    HISTOGRAM; \
   } \
   /* Do not rename.  HISTOGRAM expects a local variable "name". */ \
   std::string name = GetHistogramName(origin, experiment, wash, \
@@ -111,19 +95,9 @@ bool OriginIsOmnibox(Origin origin) {
   } else if (experiment != kNoExperiment && \
              (origin != ORIGIN_GWS_PRERENDER || \
               experiment != recording_experiment)) { \
+  } else if (origin == ORIGIN_LINK_REL_PRERENDER) { \
+    HISTOGRAM; \
   } else if (origin == ORIGIN_OMNIBOX) { \
-    HISTOGRAM; \
-  } else if (origin == ORIGIN_NONE) { \
-    HISTOGRAM; \
-  } else if (origin == ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN) { \
-    HISTOGRAM; \
-  } else if (origin == ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN) { \
-    HISTOGRAM; \
-  } else if (origin == ORIGIN_LOCAL_PREDICTOR) { \
-    HISTOGRAM; \
-  } else if (origin == ORIGIN_EXTERNAL_REQUEST) { \
-    HISTOGRAM; \
-  } else if (origin == ORIGIN_INSTANT) { \
     HISTOGRAM; \
   } else if (experiment != kNoExperiment) { \
     HISTOGRAM; \
@@ -134,7 +108,7 @@ bool OriginIsOmnibox(Origin origin) {
 
 PrerenderHistograms::PrerenderHistograms()
     : last_experiment_id_(kNoExperiment),
-      last_origin_(ORIGIN_MAX),
+      last_origin_(ORIGIN_LINK_REL_PRERENDER),
       origin_experiment_wash_(false),
       seen_any_pageload_(true),
       seen_pageload_started_after_prerender_(true) {
@@ -170,48 +144,13 @@ void PrerenderHistograms::RecordPrerender(Origin origin, const GURL& url) {
 }
 
 void PrerenderHistograms::RecordPrerenderStarted(Origin origin) const {
-  if (OriginIsOmnibox(origin)) {
-    UMA_HISTOGRAM_ENUMERATION(
-        base::StringPrintf("Prerender.OmniboxPrerenderCount%s",
-                           PrerenderManager::GetModeString()), 1, 2);
-  }
-}
-
-void PrerenderHistograms::RecordConcurrency(size_t prerender_count) const {
-  static const size_t kMaxRecordableConcurrency = 20;
-  DCHECK_GE(kMaxRecordableConcurrency, Config().max_link_concurrency);
-  UMA_HISTOGRAM_ENUMERATION(
-      base::StringPrintf("Prerender.PrerenderCountOf%" PRIuS "Max",
-                         kMaxRecordableConcurrency),
-      prerender_count, kMaxRecordableConcurrency + 1);
+  if (OriginIsOmnibox(origin))
+    UMA_HISTOGRAM_COUNTS("Prerender.OmniboxPrerenderCount", 1);
 }
 
 void PrerenderHistograms::RecordUsedPrerender(Origin origin) const {
-  if (OriginIsOmnibox(origin)) {
-    UMA_HISTOGRAM_ENUMERATION(
-        base::StringPrintf("Prerender.OmniboxNavigationsUsedPrerenderCount%s",
-                           PrerenderManager::GetModeString()), 1, 2);
-  }
-}
-
-void PrerenderHistograms::RecordTimeSinceLastRecentVisit(
-    Origin origin,
-    base::TimeDelta delta) const {
-  PREFIXED_HISTOGRAM(
-      "TimeSinceLastRecentVisit", origin,
-      UMA_HISTOGRAM_TIMES(name, delta));
-}
-
-void PrerenderHistograms::RecordFractionPixelsFinalAtSwapin(
-    Origin origin,
-    double fraction) const {
-  if (fraction < 0.0 || fraction > 1.0)
-    return;
-  int percentage = static_cast<int>(fraction * 100);
-  if (percentage < 0 || percentage > 100)
-    return;
-  PREFIXED_HISTOGRAM("FractionPixelsFinalAtSwapin",
-                     origin, UMA_HISTOGRAM_PERCENTAGE(name, percentage));
+  if (OriginIsOmnibox(origin))
+    UMA_HISTOGRAM_COUNTS("Prerender.OmniboxNavigationsUsedPrerenderCount", 1);
 }
 
 base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
@@ -221,8 +160,8 @@ base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
 // Helper macro for histograms.
 #define RECORD_PLT(tag, perceived_page_load_time) { \
   PREFIXED_HISTOGRAM( \
-      tag, origin, \
-      UMA_HISTOGRAM_CUSTOM_TIMES( \
+    base::FieldTrial::MakeName(tag, "Prerender"), \
+    UMA_HISTOGRAM_CUSTOM_TIMES( \
         name, \
         perceived_page_load_time, \
         base::TimeDelta::FromMilliseconds(10), \
@@ -254,11 +193,9 @@ base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
 // FirstAfterMissNonOverlapping but NOT FirstAfterMiss
 
 void PrerenderHistograms::RecordPerceivedPageLoadTime(
-    Origin origin,
-    base::TimeDelta perceived_page_load_time,
-    bool was_prerender,
+    base::TimeDelta perceived_page_load_time, bool was_prerender,
     bool was_complete_prerender, const GURL& url) {
-  if (!url.SchemeIsHTTPOrHTTPS())
+  if (!IsWebURL(url))
     return;
   bool within_window = WithinWindow();
   bool is_google_url = IsGoogleDomain(url);
@@ -305,28 +242,6 @@ void PrerenderHistograms::RecordPerceivedPageLoadTime(
   }
 }
 
-void PrerenderHistograms::RecordPageLoadTimeNotSwappedIn(
-    Origin origin,
-    base::TimeDelta page_load_time,
-    const GURL& url) const {
-  // If the URL to be prerendered is not a http[s] URL, or is a Google URL,
-  // do not record.
-  if (!url.SchemeIsHTTPOrHTTPS() || IsGoogleDomain(url))
-    return;
-  RECORD_PLT("PrerenderNotSwappedInPLT", page_load_time);
-}
-
-void PrerenderHistograms::RecordPercentLoadDoneAtSwapin(Origin origin,
-                                                        double fraction) const {
-  if (fraction < 0.0 || fraction > 1.0)
-    return;
-  int percentage = static_cast<int>(fraction * 100);
-  if (percentage < 0 || percentage > 100)
-    return;
-  PREFIXED_HISTOGRAM("PercentLoadDoneAtSwapin",
-                     origin, UMA_HISTOGRAM_PERCENTAGE(name, percentage));
-}
-
 base::TimeDelta PrerenderHistograms::GetTimeSinceLastPrerender() const {
   return base::TimeTicks::Now() - last_prerender_seen_time_;
 }
@@ -338,30 +253,29 @@ bool PrerenderHistograms::WithinWindow() const {
       base::TimeDelta::FromSeconds(kWindowDurationSeconds);
 }
 
+
 void PrerenderHistograms::RecordTimeUntilUsed(
-    Origin origin,
-    base::TimeDelta time_until_used) const {
+    base::TimeDelta time_until_used, base::TimeDelta max_age) const {
   PREFIXED_HISTOGRAM(
-      "TimeUntilUsed2", origin,
+      "TimeUntilUsed",
       UMA_HISTOGRAM_CUSTOM_TIMES(
           name,
           time_until_used,
           base::TimeDelta::FromMilliseconds(10),
-          base::TimeDelta::FromMinutes(30),
+          max_age,
           50));
 }
 
-void PrerenderHistograms::RecordPerSessionCount(Origin origin,
-                                                int count) const {
+void PrerenderHistograms::RecordPerSessionCount(int count) const {
   PREFIXED_HISTOGRAM(
-      "PrerendersPerSessionCount", origin,
+      "PrerendersPerSessionCount",
       UMA_HISTOGRAM_COUNTS(name, count));
 }
 
 void PrerenderHistograms::RecordTimeBetweenPrerenderRequests(
-    Origin origin, base::TimeDelta time) const {
+    base::TimeDelta time) const {
   PREFIXED_HISTOGRAM(
-      "TimeBetweenPrerenderRequests", origin,
+      "TimeBetweenPrerenderRequests",
       UMA_HISTOGRAM_TIMES(name, time));
 }
 
@@ -372,33 +286,41 @@ void PrerenderHistograms::RecordFinalStatus(
     FinalStatus final_status) const {
   DCHECK(final_status != FINAL_STATUS_MAX);
 
-  if (mc_status == PrerenderContents::MATCH_COMPLETE_DEFAULT ||
-      mc_status == PrerenderContents::MATCH_COMPLETE_REPLACED) {
-    PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
-        "FinalStatus", origin, experiment_id,
-        UMA_HISTOGRAM_ENUMERATION(name, final_status, FINAL_STATUS_MAX));
-  }
-  if (mc_status == PrerenderContents::MATCH_COMPLETE_DEFAULT ||
-      mc_status == PrerenderContents::MATCH_COMPLETE_REPLACEMENT ||
-      mc_status == PrerenderContents::MATCH_COMPLETE_REPLACEMENT_PENDING) {
-    PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
-        "FinalStatusMatchComplete", origin, experiment_id,
-        UMA_HISTOGRAM_ENUMERATION(name, final_status, FINAL_STATUS_MAX));
-  }
-}
+  // There are three cases for MatchCompleteStatus:
+  // MATCH_COMPLETE_DEFAULT:
+  // In this case, Match & MatchComplete line up.  So we record this in both
+  // histograms.
+  // MATCH_COMPLETE_REPLACED: The actual prerender was replaced by a dummy.
+  // So we only record it in (the actual) FinalStatus, but not MatchComplete.
+  // MATCH_COMPLETE_REPLACEMENT: This is a pseudo element to emulate what
+  // the control group would do.  Since it won't actually be swapped in,
+  // it may not go into FinalStatus.  Since in the control group it would be
+  // swapped in though, it must go into MatchComplete.
 
-void PrerenderHistograms::RecordEvent(Origin origin, uint8 experiment_id,
-                                      PrerenderEvent event) const {
-  DCHECK_LT(event, PRERENDER_EVENT_MAX);
-  PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
-      "Event", origin, experiment_id,
-      UMA_HISTOGRAM_ENUMERATION(name, event, PRERENDER_EVENT_MAX));
+  if (mc_status != PrerenderContents::MATCH_COMPLETE_REPLACEMENT) {
+    PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
+        base::FieldTrial::MakeName("FinalStatus", "Prerender"),
+        origin, experiment_id,
+        UMA_HISTOGRAM_ENUMERATION(name, final_status, FINAL_STATUS_MAX));
+  }
+  if (mc_status != PrerenderContents::MATCH_COMPLETE_REPLACED) {
+    PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
+        base::FieldTrial::MakeName("FinalStatusMatchComplete", "Prerender"),
+        origin, experiment_id,
+        UMA_HISTOGRAM_ENUMERATION(name, final_status, FINAL_STATUS_MAX));
+  }
 }
 
 uint8 PrerenderHistograms::GetCurrentExperimentId() const {
   if (!WithinWindow())
     return kNoExperiment;
   return last_experiment_id_;
+}
+
+Origin PrerenderHistograms::GetCurrentOrigin() const {
+  if (!WithinWindow())
+    return ORIGIN_LINK_REL_PRERENDER;
+  return last_origin_;
 }
 
 bool PrerenderHistograms::IsOriginExperimentWash() const {

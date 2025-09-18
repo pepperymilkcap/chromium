@@ -4,15 +4,16 @@
 
 #ifndef CHROME_BROWSER_MAC_MASTER_PREFS_H_
 #define CHROME_BROWSER_MAC_MASTER_PREFS_H_
+#pragma once
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 
 namespace master_prefs {
 
 // Returns the path to the master preferences file. Note that this path may be
 // empty (in the case where this type of build cannot have a master preferences
 // file) or may not actually exist on the filesystem.
-base::FilePath MasterPrefsPath();
+FilePath MasterPrefsPath();
 
 }  // namespace master_prefs
 

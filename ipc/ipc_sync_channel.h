@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IPC_IPC_SYNC_CHANNEL_H_
 #define IPC_IPC_SYNC_CHANNEL_H_
+#pragma once
 
 #include <string>
 #include <deque>
@@ -58,26 +59,23 @@ class SyncMessage;
 // is more than this object.  If the message loop goes away while this object
 // is running and it's used to send a message, then it will use the invalid
 // message loop pointer to proxy it to the ipc thread.
-class IPC_EXPORT SyncChannel : public ChannelProxy {
+class IPC_EXPORT SyncChannel : public ChannelProxy,
+                               public base::WaitableEventWatcher::Delegate {
  public:
-  enum RestrictDispatchGroup {
-    kRestrictDispatchGroup_None = 0,
-  };
-
   // Creates and initializes a sync channel. If create_pipe_now is specified,
   // the channel will be initialized synchronously.
   SyncChannel(const IPC::ChannelHandle& channel_handle,
               Channel::Mode mode,
-              Listener* listener,
-              base::SingleThreadTaskRunner* ipc_task_runner,
+              Channel::Listener* listener,
+              base::MessageLoopProxy* ipc_message_loop,
               bool create_pipe_now,
               base::WaitableEvent* shutdown_event);
 
   // Creates an uninitialized sync channel. Call ChannelProxy::Init to
   // initialize the channel. This two-step setup allows message filters to be
   // added before any messages are sent or received.
-  SyncChannel(Listener* listener,
-              base::SingleThreadTaskRunner* ipc_task_runner,
+  SyncChannel(Channel::Listener* listener,
+              base::MessageLoopProxy* ipc_message_loop,
               base::WaitableEvent* shutdown_event);
 
   virtual ~SyncChannel();
@@ -90,22 +88,16 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
     sync_messages_with_no_timeout_allowed_ = value;
   }
 
-  // Sets the dispatch group for this channel, to only allow re-entrant dispatch
-  // of messages to other channels in the same group.
+  // Sets this channel to only dispatch its incoming unblocking messages when it
+  // is itself blocked on sending a sync message, not when other channels are.
   //
   // Normally, any unblocking message coming from any channel can be dispatched
   // when any (possibly other) channel is blocked on sending a message. This is
   // needed in some cases to unblock certain loops (e.g. necessary when some
   // processes share a window hierarchy), but may cause re-entrancy issues in
   // some cases where such loops are not possible. This flags allows the tagging
-  // of some particular channels to only re-enter in known correct cases.
-  //
-  // Incoming messages on channels belonging to a group that is not
-  // kRestrictDispatchGroup_None will only be dispatched while a sync message is
-  // being sent on a channel of the *same* group.
-  // Incoming messages belonging to the kRestrictDispatchGroup_None group (the
-  // default) will be dispatched in any case.
-  void SetRestrictDispatchChannelGroup(int group);
+  // of some particular channels to not re-enter in such cases.
+  void SetRestrictDispatchToSameChannel(bool value);
 
  protected:
   class ReceivedSyncMsgQueue;
@@ -114,10 +106,11 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
   // SyncContext holds the per object data for SyncChannel, so that SyncChannel
   // can be deleted while it's being used in a different thread.  See
   // ChannelProxy::Context for more information.
-  class SyncContext : public Context {
+  class SyncContext : public Context,
+                      public base::WaitableEventWatcher::Delegate {
    public:
-    SyncContext(Listener* listener,
-                base::SingleThreadTaskRunner* ipc_task_runner,
+    SyncContext(Channel::Listener* listener,
+                base::MessageLoopProxy* ipc_thread,
                 base::WaitableEvent* shutdown_event);
 
     // Adds information about an outgoing sync message to the context so that
@@ -150,18 +143,11 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
     base::WaitableEvent* shutdown_event() { return shutdown_event_; }
 
     ReceivedSyncMsgQueue* received_sync_msgs() {
-      return received_sync_msgs_.get();
+      return received_sync_msgs_;
     }
 
-    void set_restrict_dispatch_group(int group) {
-      restrict_dispatch_group_ = group;
-    }
-
-    int restrict_dispatch_group() const {
-      return restrict_dispatch_group_;
-    }
-
-    base::WaitableEventWatcher::EventCallback MakeWaitableEventCallback();
+    void set_restrict_dispatch(bool value) { restrict_dispatch_ = value; }
+    bool restrict_dispatch() const { return restrict_dispatch_; }
 
    private:
     virtual ~SyncContext();
@@ -179,7 +165,8 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
     // Cancels all pending Send calls.
     void CancelPendingSends();
 
-    void OnWaitableEventSignaled(base::WaitableEvent* event);
+    // WaitableEventWatcher::Delegate implementation.
+    virtual void OnWaitableEventSignaled(base::WaitableEvent* arg) OVERRIDE;
 
     typedef std::deque<PendingSyncMsg> PendingSyncMessageQueue;
     PendingSyncMessageQueue deserializers_;
@@ -189,12 +176,12 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
 
     base::WaitableEvent* shutdown_event_;
     base::WaitableEventWatcher shutdown_watcher_;
-    base::WaitableEventWatcher::EventCallback shutdown_watcher_callback_;
-    int restrict_dispatch_group_;
+    bool restrict_dispatch_;
   };
 
  private:
-  void OnWaitableEventSignaled(base::WaitableEvent* arg);
+  // WaitableEventWatcher::Delegate implementation.
+  virtual void OnWaitableEventSignaled(base::WaitableEvent* arg) OVERRIDE;
 
   SyncContext* sync_context() {
     return reinterpret_cast<SyncContext*>(context());
@@ -216,7 +203,6 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
 
   // Used to signal events between the IPC and listener threads.
   base::WaitableEventWatcher dispatch_watcher_;
-  base::WaitableEventWatcher::EventCallback dispatch_watcher_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncChannel);
 };

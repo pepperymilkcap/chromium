@@ -2,7 +2,6 @@
 
 <html id="t">
 <head>
-<meta charset="utf-8">
 <title>About Stats</title>
 <style>
 body {
@@ -70,16 +69,15 @@ h2 {
   text-transform: lowercase;
 }
 </style>
-<script src="chrome://resources/js/util.js"></script>
 <script src="chrome://stats/stats.js"></script>
 <script src="chrome://stats/strings.js"></script>
 </head>
 <body>
     <div style="float: right">
-    <br>Filter: <input id="filter" type="text" value="">
+    <br>Filter: <input id="filter" type="text" value="" onkeyup="doFilter()">
   </div>
   <h1 class="lower">About Stats</h1>
-  <h2>Shhh!  This page is secret!</h2><br>
+  <h2>Shhh!  This page is secret!</h2><br/>
   <table class="details" cellspacing="0" cellpadding="0" border="0">
     <tbody>
       <tr>
@@ -103,7 +101,7 @@ h2 {
             </tbody>
           </table>
         </td>
-        <td width="15"></td>
+        <td width="15"/>
         <td class="outer">
           <table cellspacing="0" cellpadding="0" border="0">
             <tbody>
@@ -129,7 +127,7 @@ h2 {
         </td>
       </tr>
     </tbody>
-  </table><br>
+  </table><br/>
   <script src="chrome://resources/js/jstemplate_compiled.js"></script>
 </body>
 </html>

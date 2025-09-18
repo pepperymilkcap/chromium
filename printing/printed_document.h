@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,14 @@
 #include <map>
 
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/string16.h"
 #include "base/synchronization/lock.h"
 #include "printing/print_settings.h"
 #include "ui/gfx/native_widget_types.h"
 
-namespace base {
 class FilePath;
 class MessageLoop;
-}
 
 namespace printing {
 
@@ -90,14 +89,14 @@ class PRINTING_EXPORT PrintedDocument
 
   // Getters. All these items are immutable hence thread-safe.
   const PrintSettings& settings() const { return immutable_.settings_; }
-  const base::string16& name() const { return immutable_.name_; }
+  const string16& name() const { return immutable_.name_; }
   int cookie() const { return immutable_.cookie_; }
 
   // Sets a path where to dump printing output files for debugging. If never set
   // no files are generated.
-  static void set_debug_dump_path(const base::FilePath& debug_dump_path);
+  static void set_debug_dump_path(const FilePath& debug_dump_path);
 
-  static const base::FilePath& debug_dump_path();
+  static const FilePath& debug_dump_path();
 
  private:
   friend class base::RefCountedThreadSafe<PrintedDocument>;
@@ -146,10 +145,10 @@ class PRINTING_EXPORT PrintedDocument
     PrintSettings settings_;
 
     // Native thread for the render source.
-    base::MessageLoop* source_message_loop_;
+    MessageLoop* source_message_loop_;
 
     // Document name. Immutable.
-    base::string16 name_;
+    string16 name_;
 
     // Cookie to uniquely identify this document. It is used to make sure that a
     // PrintedPage is correctly belonging to the PrintedDocument. Since

@@ -4,28 +4,20 @@
 
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 
-#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
-#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
 
 // static
 TabRestoreService* TabRestoreServiceFactory::GetForProfile(Profile* profile) {
   return static_cast<TabRestoreService*>(
-      GetInstance()->GetServiceForBrowserContext(profile, true));
-}
-
-// static
-TabRestoreService* TabRestoreServiceFactory::GetForProfileIfExisting(
-    Profile* profile) {
-  return static_cast<TabRestoreService*>(
-      GetInstance()->GetServiceForBrowserContext(profile, false));
+      GetInstance()->GetServiceForProfile(profile, true));
 }
 
 // static
 void TabRestoreServiceFactory::ResetForProfile(Profile* profile) {
   TabRestoreServiceFactory* factory = GetInstance();
-  factory->BrowserContextShutdown(profile);
-  factory->BrowserContextDestroyed(profile);
+  factory->ProfileShutdown(profile);
+  factory->ProfileDestroyed(profile);
 }
 
 TabRestoreServiceFactory* TabRestoreServiceFactory::GetInstance() {
@@ -33,14 +25,20 @@ TabRestoreServiceFactory* TabRestoreServiceFactory::GetInstance() {
 }
 
 TabRestoreServiceFactory::TabRestoreServiceFactory()
-    : BrowserContextKeyedServiceFactory(
-        "TabRestoreService",
-        BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("TabRestoreService",
+                                 ProfileDependencyManager::GetInstance()) {
 }
 
 TabRestoreServiceFactory::~TabRestoreServiceFactory() {
 }
 
-bool TabRestoreServiceFactory::ServiceIsNULLWhileTesting() const {
+ProfileKeyedService* TabRestoreServiceFactory::BuildServiceInstanceFor(
+    Profile* profile) const {
+  TabRestoreService* service = NULL;
+  service = new TabRestoreService(profile);
+  return service;
+}
+
+bool TabRestoreServiceFactory::ServiceIsNULLWhileTesting() {
   return true;
 }

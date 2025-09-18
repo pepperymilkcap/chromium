@@ -35,7 +35,7 @@ class ThreadLocalStorageRunner : public DelegateSimpleThread::Delegate {
 
   virtual ~ThreadLocalStorageRunner() {}
 
-  virtual void Run() OVERRIDE {
+  virtual void Run() {
     *tls_value_ptr_ = kInitialTlsValue;
     tls_slot.Set(tls_value_ptr_);
 
@@ -79,17 +79,7 @@ TEST(ThreadLocalStorageTest, Basics) {
   EXPECT_EQ(value, 123);
 }
 
-#if defined(THREAD_SANITIZER)
-// Do not run the test under ThreadSanitizer. Because this test iterates its
-// own TSD destructor for the maximum possible number of times, TSan can't jump
-// in after the last destructor invocation, therefore the destructor remains
-// unsynchronized with the following users of the same TSD slot. This results
-// in race reports between the destructor and functions in other tests.
-#define MAYBE_TLSDestructors DISABLED_TLSDestructors
-#else
-#define MAYBE_TLSDestructors TLSDestructors
-#endif
-TEST(ThreadLocalStorageTest, MAYBE_TLSDestructors) {
+TEST(ThreadLocalStorageTest, TLSDestructors) {
   // Create a TLS index with a destructor.  Create a set of
   // threads that set the TLS, while the destructor cleans it up.
   // After the threads finish, verify that the value is cleaned up.

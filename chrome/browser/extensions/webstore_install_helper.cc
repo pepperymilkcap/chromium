@@ -10,22 +10,17 @@
 #include "base/values.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/utility_process_host.h"
-#include "net/base/load_flags.h"
-#include "net/url_request/url_fetcher.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
 using content::BrowserThread;
-using content::UtilityProcessHost;
 
 namespace {
 
 const char kImageDecodeError[] = "Image decode failed";
 
 }  // namespace
-
-namespace extensions {
 
 WebstoreInstallHelper::WebstoreInstallHelper(
     Delegate* delegate,
@@ -60,11 +55,9 @@ void WebstoreInstallHelper::Start() {
 
   if (!icon_url_.is_empty()) {
     CHECK(context_getter_);
-    url_fetcher_.reset(net::URLFetcher::Create(
-        icon_url_, net::URLFetcher::GET, this));
+    url_fetcher_.reset(content::URLFetcher::Create(
+        icon_url_, content::URLFetcher::GET, this));
     url_fetcher_->SetRequestContext(context_getter_);
-    url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
-                               net::LOAD_DO_NOT_SEND_COOKIES);
 
     url_fetcher_->Start();
     // We'll get called back in OnURLFetchComplete.
@@ -73,8 +66,9 @@ void WebstoreInstallHelper::Start() {
 
 void WebstoreInstallHelper::StartWorkOnIOThread() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  utility_host_ = UtilityProcessHost::Create(
-      this, base::MessageLoopProxy::current().get())->AsWeakPtr();
+  utility_host_ =
+      (new UtilityProcessHost(this, BrowserThread::IO))->AsWeakPtr();
+  utility_host_->set_use_linux_zygote(true);
   utility_host_->StartBatchMode();
 
   if (!icon_base64_data_.empty())
@@ -85,7 +79,7 @@ void WebstoreInstallHelper::StartWorkOnIOThread() {
 }
 
 void WebstoreInstallHelper::OnURLFetchComplete(
-    const net::URLFetcher* source) {
+    const content::URLFetcher* source) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CHECK(source == url_fetcher_.get());
   if (source->GetStatus().status() != net::URLRequestStatus::SUCCESS ||
@@ -110,7 +104,7 @@ void WebstoreInstallHelper::OnURLFetchComplete(
 
 void WebstoreInstallHelper::StartFetchedImageDecode() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  CHECK(utility_host_.get());
+  CHECK(utility_host_);
   utility_host_->Send(new ChromeUtilityMsg_DecodeImage(fetched_icon_data_));
 }
 
@@ -148,15 +142,14 @@ void WebstoreInstallHelper::OnDecodeImageFailed() {
   ReportResultsIfComplete();
 }
 
-void WebstoreInstallHelper::OnJSONParseSucceeded(
-    const base::ListValue& wrapper) {
+void WebstoreInstallHelper::OnJSONParseSucceeded(const ListValue& wrapper) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   manifest_parse_complete_ = true;
-  const base::Value* value = NULL;
+  Value* value = NULL;
   CHECK(wrapper.Get(0, &value));
-  if (value->IsType(base::Value::TYPE_DICTIONARY)) {
+  if (value->IsType(Value::TYPE_DICTIONARY)) {
     parsed_manifest_.reset(
-        static_cast<const base::DictionaryValue*>(value)->DeepCopy());
+        static_cast<DictionaryValue*>(value)->DeepCopy());
   } else {
     parse_error_ = Delegate::MANIFEST_ERROR;
   }
@@ -179,7 +172,7 @@ void WebstoreInstallHelper::ReportResultsIfComplete() {
     return;
 
   // The utility_host_ will take care of deleting itself after this call.
-  if (utility_host_.get()) {
+  if (utility_host_) {
     utility_host_->EndBatchMode();
     utility_host_.reset();
   }
@@ -192,10 +185,8 @@ void WebstoreInstallHelper::ReportResultsIfComplete() {
 
 void WebstoreInstallHelper::ReportResultFromUIThread() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (error_.empty() && parsed_manifest_)
+  if (error_.empty() && parsed_manifest_.get())
     delegate_->OnWebstoreParseSuccess(id_, icon_, parsed_manifest_.release());
   else
     delegate_->OnWebstoreParseFailure(id_, parse_error_, error_);
 }
-
-}  // namespace extensions

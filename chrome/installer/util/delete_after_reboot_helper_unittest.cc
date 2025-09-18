@@ -7,7 +7,7 @@
 
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "base/win/registry.h"
 #include "chrome/installer/util/delete_after_reboot_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,12 +24,13 @@ class DeleteAfterRebootHelperTest : public testing::Test {
  protected:
   virtual void SetUp() {
     // Create a temporary directory for testing and fill it with some files.
-    base::CreateNewTempDirectory(base::FilePath::StringType(), &temp_dir_);
-    base::CreateTemporaryFileInDir(temp_dir_, &temp_file_);
+    std::wstring no_prefix;
+    file_util::CreateNewTempDirectory(no_prefix, &temp_dir_);
+    file_util::CreateTemporaryFileInDir(temp_dir_, &temp_file_);
 
     temp_subdir_ = temp_dir_.Append(L"subdir");
-    base::CreateDirectory(temp_subdir_);
-    base::CreateTemporaryFileInDir(temp_subdir_, &temp_subdir_file_);
+    file_util::CreateDirectory(temp_subdir_);
+    file_util::CreateTemporaryFileInDir(temp_subdir_, &temp_subdir_file_);
 
     // Copy the current pending moves and then clear it if we can:
     if (IsUserAnAdmin()) {
@@ -38,7 +39,7 @@ class DeleteAfterRebootHelperTest : public testing::Test {
   }
   virtual void TearDown() {
     // Delete the temporary directory if it's still there.
-    base::DeleteFile(temp_dir_, true);
+    file_util::Delete(temp_dir_, true);
 
     // Try and restore the pending moves value, if we have one.
     if (IsUserAnAdmin() && original_pending_moves_.size() > 1) {
@@ -90,13 +91,12 @@ class DeleteAfterRebootHelperTest : public testing::Test {
 
   std::vector<PendingMove> original_pending_moves_;
 
-  base::FilePath temp_dir_;
-  base::FilePath temp_file_;
-  base::FilePath temp_subdir_;
-  base::FilePath temp_subdir_file_;
+  FilePath temp_dir_;
+  FilePath temp_file_;
+  FilePath temp_subdir_;
+  FilePath temp_subdir_file_;
 };
-
-}  // namespace
+}
 
 TEST_F(DeleteAfterRebootHelperTest, TestStringListToMultiSZConversions) {
   struct StringTest {
@@ -143,48 +143,46 @@ TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteScheduleAndUnschedule) {
     return;
   }
 
-  EXPECT_TRUE(ScheduleDirectoryForDeletion(temp_dir_));
+  EXPECT_TRUE(ScheduleDirectoryForDeletion(temp_dir_.value().c_str()));
 
   std::vector<PendingMove> pending_moves;
   EXPECT_TRUE(SUCCEEDED(GetPendingMovesValue(&pending_moves)));
 
   // We should see, somewhere in this key, deletion writs for
   // temp_file_, temp_subdir_file_, temp_subdir_ and temp_dir_ in that order.
-  EXPECT_GT(pending_moves.size(), 3U);
+  EXPECT_TRUE(pending_moves.size() > 3);
 
   // Get the short form of temp_file_ and use that to match.
-  base::FilePath short_temp_file(GetShortPathName(temp_file_));
+  std::wstring short_temp_file(GetShortPathName(temp_file_.value().c_str()));
 
   // Scan for the first expected delete.
   std::vector<PendingMove>::const_iterator iter(pending_moves.begin());
   for (; iter != pending_moves.end(); iter++) {
-    base::FilePath move_path(iter->first);
-    if (MatchPendingDeletePath(short_temp_file, move_path))
+    if (MatchPendingDeletePath(short_temp_file, iter->first))
       break;
   }
 
   // Check that each of the deletes we expect are there in order.
-  base::FilePath expected_paths[] =
+  FilePath expected_paths[] =
       { temp_file_, temp_subdir_file_, temp_subdir_, temp_dir_ };
   for (int i = 0; i < arraysize(expected_paths); ++i) {
     EXPECT_FALSE(iter == pending_moves.end());
     if (iter != pending_moves.end()) {
-      base::FilePath short_path_name(GetShortPathName(expected_paths[i]));
-      base::FilePath move_path(iter->first);
-      EXPECT_TRUE(MatchPendingDeletePath(short_path_name, move_path));
+      std::wstring short_path_name(
+          GetShortPathName(expected_paths[i].value().c_str()));
+      EXPECT_TRUE(MatchPendingDeletePath(short_path_name, iter->first));
       ++iter;
     }
   }
 
   // Test that we can remove the pending deletes.
-  EXPECT_TRUE(RemoveFromMovesPendingReboot(temp_dir_));
+  EXPECT_TRUE(RemoveFromMovesPendingReboot(temp_dir_.value().c_str()));
   HRESULT hr = GetPendingMovesValue(&pending_moves);
   EXPECT_TRUE(hr == S_OK || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
 
   std::vector<PendingMove>::const_iterator check_iter(pending_moves.begin());
   for (; check_iter != pending_moves.end(); ++check_iter) {
-    base::FilePath move_path(check_iter->first);
-    EXPECT_FALSE(MatchPendingDeletePath(short_temp_file, move_path));
+    EXPECT_FALSE(MatchPendingDeletePath(short_temp_file, check_iter->first));
   }
 }
 
@@ -197,7 +195,7 @@ TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteSchedulingWithActualDeletes) {
   GetPendingMovesValue(&initial_pending_moves);
   size_t initial_pending_moves_size = initial_pending_moves.size();
 
-  EXPECT_TRUE(ScheduleDirectoryForDeletion(temp_dir_));
+  EXPECT_TRUE(ScheduleDirectoryForDeletion(temp_dir_.value().c_str()));
 
   std::vector<PendingMove> pending_moves;
   EXPECT_TRUE(SUCCEEDED(GetPendingMovesValue(&pending_moves)));
@@ -207,34 +205,33 @@ TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteSchedulingWithActualDeletes) {
   EXPECT_TRUE(pending_moves.size() > 3);
 
   // Get the short form of temp_file_ and use that to match.
-  base::FilePath short_temp_file(GetShortPathName(temp_file_));
+  std::wstring short_temp_file(GetShortPathName(temp_file_.value().c_str()));
 
   // Scan for the first expected delete.
   std::vector<PendingMove>::const_iterator iter(pending_moves.begin());
   for (; iter != pending_moves.end(); iter++) {
-    base::FilePath move_path(iter->first);
-    if (MatchPendingDeletePath(short_temp_file, move_path))
+    if (MatchPendingDeletePath(short_temp_file, iter->first))
       break;
   }
 
   // Check that each of the deletes we expect are there in order.
-  base::FilePath expected_paths[] =
+  FilePath expected_paths[] =
       { temp_file_, temp_subdir_file_, temp_subdir_, temp_dir_ };
   for (int i = 0; i < arraysize(expected_paths); ++i) {
     EXPECT_FALSE(iter == pending_moves.end());
     if (iter != pending_moves.end()) {
-      base::FilePath short_path_name(GetShortPathName(expected_paths[i]));
-      base::FilePath move_path(iter->first);
-      EXPECT_TRUE(MatchPendingDeletePath(short_path_name, move_path));
+      std::wstring short_path_name(
+          GetShortPathName(expected_paths[i].value().c_str()));
+      EXPECT_TRUE(MatchPendingDeletePath(short_path_name, iter->first));
       ++iter;
     }
   }
 
   // Delete the temporary directory.
-  base::DeleteFile(temp_dir_, true);
+  file_util::Delete(temp_dir_, true);
 
   // Test that we can remove the pending deletes.
-  EXPECT_TRUE(RemoveFromMovesPendingReboot(temp_dir_));
+  EXPECT_TRUE(RemoveFromMovesPendingReboot(temp_dir_.value().c_str()));
   HRESULT hr = GetPendingMovesValue(&pending_moves);
   EXPECT_TRUE(hr == S_OK || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
 
@@ -242,8 +239,7 @@ TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteSchedulingWithActualDeletes) {
 
   std::vector<PendingMove>::const_iterator check_iter(pending_moves.begin());
   for (; check_iter != pending_moves.end(); ++check_iter) {
-    base::FilePath move_path(check_iter->first);
-    EXPECT_FALSE(MatchPendingDeletePath(short_temp_file, move_path));
+    EXPECT_FALSE(MatchPendingDeletePath(short_temp_file, check_iter->first));
   }
 }
 

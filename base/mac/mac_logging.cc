@@ -4,11 +4,9 @@
 
 #include "base/mac/mac_logging.h"
 
-#include <iomanip>
-
-#if !defined(OS_IOS)
 #include <CoreServices/CoreServices.h>
-#endif
+
+#include <iomanip>
 
 namespace logging {
 
@@ -21,17 +19,11 @@ OSStatusLogMessage::OSStatusLogMessage(const char* file_path,
 }
 
 OSStatusLogMessage::~OSStatusLogMessage() {
-#if defined(OS_IOS)
-  // TODO(ios): Consider using NSError with NSOSStatusErrorDomain to try to
-  // get a description of the failure.
-  stream() << ": " << status_;
-#else
   stream() << ": "
            << GetMacOSStatusErrorString(status_)
            << " ("
            << status_
            << ")";
-#endif
 }
 
 }  // namespace logging

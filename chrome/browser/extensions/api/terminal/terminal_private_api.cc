@@ -6,23 +6,14 @@
 
 #include "base/bind.h"
 #include "base/json/json_writer.h"
-#include "base/sys_info.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
+#include "chrome/browser/chromeos/process_proxy/process_proxy_registry.h"
+#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/browser/extensions/extension_event_names.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/api/terminal_private.h"
-#include "chromeos/process_proxy/process_proxy_registry.h"
 #include "content/public/browser/browser_thread.h"
-#include "extensions/browser/event_router.h"
-
-namespace terminal_private = extensions::api::terminal_private;
-namespace OnTerminalResize =
-    extensions::api::terminal_private::OnTerminalResize;
-namespace OpenTerminalProcess =
-    extensions::api::terminal_private::OpenTerminalProcess;
-namespace SendInput = extensions::api::terminal_private::SendInput;
 
 namespace {
 
@@ -31,18 +22,45 @@ const char kCroshCommand[] = "/usr/bin/crosh";
 // We make stubbed crosh just echo back input.
 const char kStubbedCroshCommand[] = "cat";
 
+const char kPermissionError[] =
+    "Extension does not have the permission to use this API";
+
+const char* kAllowedExtensionIds[] ={
+    "okddffdblfhhnmhodogpojmfkjmhinfp",  // test SSH/Crosh Client
+    "pnhechapfaindjhompbnflcldabbghjo"  // HTerm App
+};
+
+// Allow component and whitelisted extensions.
+bool AllowAccessToExtension(Profile* profile, const std::string& extension_id) {
+  ExtensionService* service = profile->GetExtensionService();
+  const Extension* extension = service->GetExtensionById(extension_id, false);
+
+  if (!extension)
+    return false;
+
+  if (extension->location() == Extension::COMPONENT)
+    return true;
+
+  for (size_t i = 0; i < arraysize(kAllowedExtensionIds); i++) {
+    if (extension->id() == kAllowedExtensionIds[i])
+      return true;
+  }
+  return false;
+}
+
 const char* GetCroshPath() {
-  if (base::SysInfo::IsRunningOnChromeOS())
+  if (chromeos::system::runtime_environment::IsRunningOnChromeOS())
     return kCroshCommand;
   else
     return kStubbedCroshCommand;
 }
 
 const char* GetProcessCommandForName(const std::string& name) {
-  if (name == kCroshName)
+  if (name == kCroshName) {
     return GetCroshPath();
-  else
+  } else {
     return NULL;
+  }
 }
 
 void NotifyProcessOutput(Profile* profile,
@@ -57,44 +75,55 @@ void NotifyProcessOutput(Profile* profile,
     return;
   }
 
-  scoped_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(new base::FundamentalValue(pid));
-  args->Append(new base::StringValue(output_type));
-  args->Append(new base::StringValue(output));
+  CHECK(AllowAccessToExtension(profile, extension_id));
 
-  if (profile &&
-      extensions::ExtensionSystem::Get(profile)->event_router()) {
-    scoped_ptr<extensions::Event> event(new extensions::Event(
-        terminal_private::OnProcessOutput::kEventName, args.Pass()));
-    extensions::ExtensionSystem::Get(profile)->event_router()->
-        DispatchEventToExtension(extension_id, event.Pass());
+  base::ListValue args;
+  args.Append(new base::FundamentalValue(pid));
+  args.Append(new base::StringValue(output_type));
+  args.Append(new base::StringValue(output));
+
+  std::string args_json;
+  base::JSONWriter::Write(&args, false /* pretty_print */, &args_json);
+
+  if (profile && profile->GetExtensionEventRouter()) {
+    profile->GetExtensionEventRouter()->DispatchEventToExtension(
+        extension_id, extension_event_names::kOnTerminalProcessOutput,
+        args_json, NULL, GURL());
   }
 }
 
 }  // namespace
 
-namespace extensions {
+TerminalPrivateFunction::TerminalPrivateFunction() {
+}
 
-TerminalPrivateFunction::TerminalPrivateFunction() {}
-
-TerminalPrivateFunction::~TerminalPrivateFunction() {}
+TerminalPrivateFunction::~TerminalPrivateFunction() {
+}
 
 bool TerminalPrivateFunction::RunImpl() {
+  if (!AllowAccessToExtension(profile_, extension_id())) {
+    error_ = kPermissionError;
+    return false;
+  }
+
   return RunTerminalFunction();
 }
 
-TerminalPrivateOpenTerminalProcessFunction::
-    TerminalPrivateOpenTerminalProcessFunction() : command_(NULL) {}
+OpenTerminalProcessFunction::OpenTerminalProcessFunction() : command_(NULL) {
+}
 
-TerminalPrivateOpenTerminalProcessFunction::
-    ~TerminalPrivateOpenTerminalProcessFunction() {}
+OpenTerminalProcessFunction::~OpenTerminalProcessFunction() {
+}
 
-bool TerminalPrivateOpenTerminalProcessFunction::RunTerminalFunction() {
-  scoped_ptr<OpenTerminalProcess::Params> params(
-      OpenTerminalProcess::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+bool OpenTerminalProcessFunction::RunTerminalFunction() {
+  if (args_->GetSize() != 1)
+    return false;
 
-  command_ = GetProcessCommandForName(params->process_name);
+  std::string name;
+  if (!args_->GetString(0, &name))
+    return false;
+
+  command_ = GetProcessCommandForName(name);
   if (!command_) {
     error_ = "Invalid process name.";
     return false;
@@ -102,66 +131,61 @@ bool TerminalPrivateOpenTerminalProcessFunction::RunTerminalFunction() {
 
   // Registry lives on FILE thread.
   content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&TerminalPrivateOpenTerminalProcessFunction::OpenOnFileThread,
-                 this));
+      base::Bind(&OpenTerminalProcessFunction::OpenOnFileThread, this));
   return true;
 }
 
-void TerminalPrivateOpenTerminalProcessFunction::OpenOnFileThread() {
+void OpenTerminalProcessFunction::OpenOnFileThread() {
   DCHECK(command_);
 
-  chromeos::ProcessProxyRegistry* registry =
-      chromeos::ProcessProxyRegistry::Get();
+  ProcessProxyRegistry* registry = ProcessProxyRegistry::Get();
   pid_t pid;
-  if (!registry->OpenProcess(
-           command_,
-           &pid,
-           base::Bind(&NotifyProcessOutput, GetProfile(), extension_id()))) {
+  if (!registry->OpenProcess(command_, &pid,
+          base::Bind(&NotifyProcessOutput, profile_, extension_id()))) {
     // If new process could not be opened, we return -1.
     pid = -1;
   }
 
   content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&TerminalPrivateOpenTerminalProcessFunction::RespondOnUIThread,
-                 this, pid));
+      base::Bind(&OpenTerminalProcessFunction::RespondOnUIThread, this, pid));
 }
 
-TerminalPrivateSendInputFunction::~TerminalPrivateSendInputFunction() {}
-
-void TerminalPrivateOpenTerminalProcessFunction::RespondOnUIThread(pid_t pid) {
-  SetResult(new base::FundamentalValue(pid));
+void OpenTerminalProcessFunction::RespondOnUIThread(pid_t pid) {
+  result_.reset(new base::FundamentalValue(pid));
   SendResponse(true);
 }
 
-bool TerminalPrivateSendInputFunction::RunTerminalFunction() {
-  scoped_ptr<SendInput::Params> params(SendInput::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+bool SendInputToTerminalProcessFunction::RunTerminalFunction() {
+  if (args_->GetSize() != 2)
+    return false;
+
+  pid_t pid;
+  std::string text;
+  if (!args_->GetInteger(0, &pid) || !args_->GetString(1, &text))
+    return false;
 
   // Registry lives on the FILE thread.
   content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&TerminalPrivateSendInputFunction::SendInputOnFileThread,
-                 this, params->pid, params->input));
+      base::Bind(&SendInputToTerminalProcessFunction::SendInputOnFileThread,
+                 this, pid, text));
   return true;
 }
 
-void TerminalPrivateSendInputFunction::SendInputOnFileThread(pid_t pid,
+void SendInputToTerminalProcessFunction::SendInputOnFileThread(pid_t pid,
     const std::string& text) {
-  bool success = chromeos::ProcessProxyRegistry::Get()->SendInput(pid, text);
+  bool success = ProcessProxyRegistry::Get()->SendInput(pid, text);
 
   content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&TerminalPrivateSendInputFunction::RespondOnUIThread, this,
+      base::Bind(&SendInputToTerminalProcessFunction::RespondOnUIThread, this,
       success));
 }
 
-void TerminalPrivateSendInputFunction::RespondOnUIThread(bool success) {
-  SetResult(new base::FundamentalValue(success));
+void SendInputToTerminalProcessFunction::RespondOnUIThread(bool success) {
+  result_.reset(new base::FundamentalValue(success));
   SendResponse(true);
 }
 
-TerminalPrivateCloseTerminalProcessFunction::
-    ~TerminalPrivateCloseTerminalProcessFunction() {}
-
-bool TerminalPrivateCloseTerminalProcessFunction::RunTerminalFunction() {
+bool CloseTerminalProcessFunction::RunTerminalFunction() {
   if (args_->GetSize() != 1)
     return false;
   pid_t pid;
@@ -170,55 +194,20 @@ bool TerminalPrivateCloseTerminalProcessFunction::RunTerminalFunction() {
 
   // Registry lives on the FILE thread.
   content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&TerminalPrivateCloseTerminalProcessFunction::
-                 CloseOnFileThread, this, pid));
+      base::Bind(&CloseTerminalProcessFunction::CloseOnFileThread, this, pid));
 
   return true;
 }
 
-void TerminalPrivateCloseTerminalProcessFunction::CloseOnFileThread(pid_t pid) {
-  bool success = chromeos::ProcessProxyRegistry::Get()->CloseProcess(pid);
+void CloseTerminalProcessFunction::CloseOnFileThread(pid_t pid) {
+  bool success = ProcessProxyRegistry::Get()->CloseProcess(pid);
 
   content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&TerminalPrivateCloseTerminalProcessFunction::
-                 RespondOnUIThread, this, success));
+      base::Bind(&CloseTerminalProcessFunction::RespondOnUIThread, this,
+      success));
 }
 
-void TerminalPrivateCloseTerminalProcessFunction::RespondOnUIThread(
-    bool success) {
-  SetResult(new base::FundamentalValue(success));
+void CloseTerminalProcessFunction::RespondOnUIThread(bool success) {
+  result_.reset(new base::FundamentalValue(success));
   SendResponse(true);
 }
-
-TerminalPrivateOnTerminalResizeFunction::
-    ~TerminalPrivateOnTerminalResizeFunction() {}
-
-bool TerminalPrivateOnTerminalResizeFunction::RunTerminalFunction() {
-  scoped_ptr<OnTerminalResize::Params> params(
-      OnTerminalResize::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
-  // Registry lives on the FILE thread.
-  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&TerminalPrivateOnTerminalResizeFunction::OnResizeOnFileThread,
-                 this, params->pid, params->width, params->height));
-
-  return true;
-}
-
-void TerminalPrivateOnTerminalResizeFunction::OnResizeOnFileThread(pid_t pid,
-                                                    int width, int height) {
-  bool success = chromeos::ProcessProxyRegistry::Get()->OnTerminalResize(
-      pid, width, height);
-
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&TerminalPrivateOnTerminalResizeFunction::RespondOnUIThread,
-                 this, success));
-}
-
-void TerminalPrivateOnTerminalResizeFunction::RespondOnUIThread(bool success) {
-  SetResult(new base::FundamentalValue(success));
-  SendResponse(true);
-}
-
-}  // namespace extensions

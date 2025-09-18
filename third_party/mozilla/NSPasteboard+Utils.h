@@ -38,14 +38,12 @@
 
 #import <AppKit/AppKit.h>
 
-#include "MozillaExport.h"
+extern NSString* const kCorePasteboardFlavorType_url;
+extern NSString* const kCorePasteboardFlavorType_urln;
+extern NSString* const kCorePasteboardFlavorType_urld;
 
-MOZILLA_EXPORT extern NSString* const kCorePasteboardFlavorType_url;
-MOZILLA_EXPORT extern NSString* const kCorePasteboardFlavorType_urln;
-MOZILLA_EXPORT extern NSString* const kCorePasteboardFlavorType_urld;
-
-MOZILLA_EXPORT extern NSString* const kCaminoBookmarkListPBoardType;
-MOZILLA_EXPORT extern NSString* const kWebURLsWithTitlesPboardType;
+extern NSString* const kCaminoBookmarkListPBoardType;
+extern NSString* const kWebURLsWithTitlesPboardType;
 
 @interface NSPasteboard(ChimeraPasteboardURLUtils)
 

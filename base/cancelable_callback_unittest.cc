@@ -7,8 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
+#include "base/message_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -166,15 +165,17 @@ TEST(CancelableCallbackTest, PostTask) {
                                            base::Unretained(&count)));
 
   MessageLoop::current()->PostTask(FROM_HERE, cancelable.callback());
-  RunLoop().RunUntilIdle();
+  MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  MessageLoop::current()->Run();
 
   EXPECT_EQ(1, count);
 
   MessageLoop::current()->PostTask(FROM_HERE, cancelable.callback());
+  MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 
   // Cancel before running the message loop.
   cancelable.Cancel();
-  RunLoop().RunUntilIdle();
+  MessageLoop::current()->Run();
 
   // Callback never ran due to cancellation; count is the same.
   EXPECT_EQ(1, count);

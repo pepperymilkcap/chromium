@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,28 +6,17 @@
 
 #ifndef CHROME_BROWSER_GOOGLE_GOOGLE_UTIL_H__
 #define CHROME_BROWSER_GOOGLE_GOOGLE_UTIL_H__
+#pragma once
 
 #include <string>
 
-#include "base/basictypes.h"
+#include <base/basictypes.h>
 
 class GURL;
-class Profile;
 
-// This namespace provides various helpers around handling Google-related URLs
-// and state relating to Google Chrome distributions (such as RLZ).
 namespace google_util {
 
-// True iff |str| contains a "q=" query parameter with a non-empty value.
-// |str| should be a query or a hash fragment, without the ? or # (as
-// returned by GURL::query() or GURL::ref().
-bool HasGoogleSearchQueryParam(const std::string& str);
-
-// The query key that identifies a Google Extended API request for Instant.
-const char kInstantExtendedAPIParam[] = "espv";
-
-GURL LinkDoctorBaseURL();
-void SetMockLinkDoctorBaseURLForTesting();
+extern const char kLinkDoctorBaseURL[];
 
 // Adds the Google locale string to the URL (e.g., hl=en-US).  This does not
 // check to see if the param already exists.
@@ -36,9 +25,9 @@ GURL AppendGoogleLocaleParam(const GURL& url);
 // String version of AppendGoogleLocaleParam.
 std::string StringAppendGoogleLocaleParam(const std::string& url);
 
-// Adds the Google TLD string for the given profile to the URL (e.g., sd=com).
-// This does not check to see if the param already exists.
-GURL AppendGoogleTLDParam(Profile* profile, const GURL& url);
+// Adds the Google TLD string to the URL (e.g., sd=com).  This does not
+// check to see if the param already exists.
+GURL AppendGoogleTLDParam(const GURL& url);
 
 // Returns in |brand| the brand code or distribution tag that has been
 // assigned to a partner. Returns false if the information is not available.
@@ -49,59 +38,8 @@ bool GetBrand(std::string* brand);
 // install. Returns false if the information is not available.
 bool GetReactivationBrand(std::string* brand);
 
-// WARNING: The following IsGoogleXXX() functions use heuristics to rule out
-// "obviously false" answers.  They do NOT guarantee that the string in question
-// is actually on a Google-owned domain, just that it looks plausible.  If you
-// need to restrict some behavior to only happen on Google's officially-owned
-// domains, use TransportSecurityState::IsGooglePinnedProperty() instead.
-
-// Designate whether or not a URL checking function also checks for specific
-// subdomains, or only "www" and empty subdomains.
-enum SubdomainPermission {
-  ALLOW_SUBDOMAIN,
-  DISALLOW_SUBDOMAIN,
-};
-
-// Designate whether or not a URL checking function also checks for standard
-// ports (80 for http, 443 for https), or if it allows all port numbers.
-enum PortPermission {
-  ALLOW_NON_STANDARD_PORTS,
-  DISALLOW_NON_STANDARD_PORTS,
-};
-
-// Returns true if a Google base URL was specified on the command line and |url|
-// begins with that base URL.  This uses a simple string equality check.
-bool StartsWithCommandLineGoogleBaseURL(const GURL& url);
-
-// True if |host| is "[www.]google.<TLD>" with a valid TLD. If
-// |subdomain_permission| is ALLOW_SUBDOMAIN, we check against host
-// "*.google.<TLD>" instead.
-//
-// If the Google base URL has been overridden on the command line, this function
-// will also return true for any URL whose hostname exactly matches the hostname
-// of the URL specified on the command line.  In this case,
-// |subdomain_permission| is ignored.
-bool IsGoogleHostname(const std::string& host,
-                      SubdomainPermission subdomain_permission);
-
-// True if |url| is a valid URL with a host that returns true for
-// IsGoogleHostname(), and an HTTP or HTTPS scheme.  If |port_permission| is
-// DISALLOW_NON_STANDARD_PORTS, this also requires |url| to use the standard
-// port for its scheme (80 for HTTP, 443 for HTTPS).
-//
-// Note that this only checks for google.<TLD> domains, but not other Google
-// properties. There is code in variations_http_header_provider.cc that checks
-// for additional Google properties, which can be moved here if more callers
-// are interested in this in the future.
-bool IsGoogleDomainUrl(const GURL& url,
-                       SubdomainPermission subdomain_permission,
-                       PortPermission port_permission);
-
 // True if |url| represents a valid Google home page URL.
-bool IsGoogleHomePageUrl(const GURL& url);
-
-// True if |url| represents a valid Google search URL.
-bool IsGoogleSearchUrl(const GURL& url);
+bool IsGoogleHomePageUrl(const std::string& url);
 
 // True if a build is strictly organic, according to its brand code.
 bool IsOrganic(const std::string& brand);

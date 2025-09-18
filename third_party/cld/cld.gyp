@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2009 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,10 +11,7 @@
       'target_name': 'cld',
       'type': 'static_library',
       'dependencies': [
-        '../icu/icu.gyp:icuuc',
-      ],
-      'export_dependent_settings': [
-        '../icu/icu.gyp:icuuc',
+      	'../icu/icu.gyp:icuuc',
       ],
       'include_dirs': [
         '.',
@@ -37,8 +34,6 @@
         'encodings/compact_lang_det/getonescriptspan.h',
         'encodings/compact_lang_det/letterscript_enum.cc',
         'encodings/compact_lang_det/letterscript_enum.h',
-        'encodings/compact_lang_det/string_byte_sink.cc',
-        'encodings/compact_lang_det/string_byte_sink.h',
         'encodings/compact_lang_det/subsetsequence.cc',
         'encodings/compact_lang_det/subsetsequence.h',
         'encodings/compact_lang_det/tote.cc',
@@ -104,20 +99,22 @@
       },
       'conditions': [
         ['OS=="win"', {
-          'direct_dependent_settings': {
-            'defines': [
-              'COMPILER_MSVC',
-            ],
-          },
-          # TODO(jschuh): C4267: http://crbug.com/167187 size_t -> int
-          'msvs_disabled_warnings': [4005, 4006, 4018, 4244, 4309, 4800, 4267],
-        }, {
-          'direct_dependent_settings': {
-            'defines': [
-              'COMPILER_GCC',
-            ],
-          },
-        }],
+              'direct_dependent_settings': {
+                'defines': [
+                  'COMPILER_MSVC',
+                ],
+              },
+              'msvs_disabled_warnings': [4005, 4006, 4018, 4244, 4309, 4800],
+            },
+        ],
+        ['OS!="win"', {
+              'direct_dependent_settings': {
+                'defines': [
+                  'COMPILER_GCC',
+                ],
+              },
+            },
+        ],
       ],
     },
   ],

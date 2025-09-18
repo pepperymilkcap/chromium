@@ -1,30 +1,28 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/animation/bounds_animator.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "ui/gfx/animation/animation_container.h"
-#include "ui/gfx/animation/slide_animation.h"
-#include "ui/views/animation/bounds_animator_observer.h"
+#include "ui/base/animation/animation_container.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/views/view.h"
 
 // Duration in milliseconds for animations.
-static const int kDefaultAnimationDuration = 200;
+static const int kAnimationDuration = 200;
 
-using gfx::Animation;
-using gfx::AnimationContainer;
-using gfx::SlideAnimation;
-using gfx::Tween;
+using ui::Animation;
+using ui::AnimationContainer;
+using ui::SlideAnimation;
+using ui::Tween;
 
 namespace views {
 
 BoundsAnimator::BoundsAnimator(View* parent)
     : parent_(parent),
-      container_(new AnimationContainer()),
-      animation_duration_ms_(kDefaultAnimationDuration),
-      tween_type_(Tween::EASE_OUT) {
+      observer_(NULL),
+      container_(new AnimationContainer()) {
   container_->set_observer(this);
 }
 
@@ -77,12 +75,6 @@ void BoundsAnimator::SetTargetBounds(View* view, const gfx::Rect& target) {
   }
 
   data_[view].target_bounds = target;
-}
-
-gfx::Rect BoundsAnimator::GetTargetBounds(View* view) {
-  if (!IsAnimating(view))
-    return view->bounds();
-  return data_[view].target_bounds;
 }
 
 void BoundsAnimator::SetAnimationForView(View* view,
@@ -145,23 +137,11 @@ void BoundsAnimator::Cancel() {
   AnimationContainerProgressed(container_.get());
 }
 
-void BoundsAnimator::SetAnimationDuration(int duration_ms) {
-  animation_duration_ms_ = duration_ms;
-}
-
-void BoundsAnimator::AddObserver(BoundsAnimatorObserver* observer) {
-  observers_.AddObserver(observer);
-}
-
-void BoundsAnimator::RemoveObserver(BoundsAnimatorObserver* observer) {
-  observers_.RemoveObserver(observer);
-}
-
 SlideAnimation* BoundsAnimator::CreateAnimation() {
   SlideAnimation* animation = new SlideAnimation(this);
   animation->SetContainer(container_.get());
-  animation->SetSlideDuration(animation_duration_ms_);
-  animation->SetTweenType(tween_type_);
+  animation->SetSlideDuration(kAnimationDuration);
+  animation->SetTweenType(Tween::EASE_OUT);
   return animation;
 }
 
@@ -235,11 +215,14 @@ void BoundsAnimator::AnimationProgressed(const Animation* animation) {
   gfx::Rect new_bounds =
       animation->CurrentValueBetween(data.start_bounds, data.target_bounds);
   if (new_bounds != view->bounds()) {
-    gfx::Rect total_bounds = gfx::UnionRects(new_bounds, view->bounds());
+    gfx::Rect total_bounds = new_bounds.Union(view->bounds());
 
     // Build up the region to repaint in repaint_bounds_. We'll do the repaint
     // when all animations complete (in AnimationContainerProgressed).
-    repaint_bounds_.Union(total_bounds);
+    if (repaint_bounds_.IsEmpty())
+      repaint_bounds_ = total_bounds;
+    else
+      repaint_bounds_ = repaint_bounds_.Union(total_bounds);
 
     view->SetBoundsRect(new_bounds);
   }
@@ -266,16 +249,10 @@ void BoundsAnimator::AnimationContainerProgressed(
     repaint_bounds_.SetRect(0, 0, 0, 0);
   }
 
-  FOR_EACH_OBSERVER(BoundsAnimatorObserver,
-                    observers_,
-                    OnBoundsAnimatorProgressed(this));
-
-  if (!IsAnimating()) {
+  if (observer_ && !IsAnimating()) {
     // Notify here rather than from AnimationXXX to avoid deleting the animation
     // while the animation is calling us.
-    FOR_EACH_OBSERVER(BoundsAnimatorObserver,
-                      observers_,
-                      OnBoundsAnimatorDone(this));
+    observer_->OnBoundsAnimatorDone(this);
   }
 }
 

@@ -11,15 +11,9 @@
 
 // Duplicated from base/threading/thread_checker.h so that we can be
 // good citizens there and undef the macro.
-#if !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
-#define ENABLE_THREAD_CHECKER 1
-#else
-#define ENABLE_THREAD_CHECKER 0
-#endif
+#define ENABLE_THREAD_CHECKER (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
 
 namespace base {
-
-namespace {
 
 // Simple class to exercise the basics of ThreadChecker.
 // Both the destructor and DoStuff should verify that they were
@@ -47,12 +41,12 @@ class ThreadCheckerClass : public ThreadChecker {
 // Calls ThreadCheckerClass::DoStuff on another thread.
 class CallDoStuffOnThread : public base::SimpleThread {
  public:
-  explicit CallDoStuffOnThread(ThreadCheckerClass* thread_checker_class)
+  CallDoStuffOnThread(ThreadCheckerClass* thread_checker_class)
       : SimpleThread("call_do_stuff_on_thread"),
         thread_checker_class_(thread_checker_class) {
   }
 
-  virtual void Run() OVERRIDE {
+  virtual void Run() {
     thread_checker_class_->DoStuff();
   }
 
@@ -65,13 +59,12 @@ class CallDoStuffOnThread : public base::SimpleThread {
 // Deletes ThreadCheckerClass on a different thread.
 class DeleteThreadCheckerClassOnThread : public base::SimpleThread {
  public:
-  explicit DeleteThreadCheckerClassOnThread(
-      ThreadCheckerClass* thread_checker_class)
+  DeleteThreadCheckerClassOnThread(ThreadCheckerClass* thread_checker_class)
       : SimpleThread("delete_thread_checker_class_on_thread"),
         thread_checker_class_(thread_checker_class) {
   }
 
-  virtual void Run() OVERRIDE {
+  virtual void Run() {
     thread_checker_class_.reset();
   }
 
@@ -80,8 +73,6 @@ class DeleteThreadCheckerClassOnThread : public base::SimpleThread {
 
   DISALLOW_COPY_AND_ASSIGN(DeleteThreadCheckerClassOnThread);
 };
-
-}  // namespace
 
 TEST(ThreadCheckerTest, CallsAllowedOnSameThread) {
   scoped_ptr<ThreadCheckerClass> thread_checker_class(
@@ -136,7 +127,7 @@ void ThreadCheckerClass::MethodOnDifferentThreadImpl() {
 
 #if ENABLE_THREAD_CHECKER
 TEST(ThreadCheckerDeathTest, MethodNotAllowedOnDifferentThreadInDebug) {
-  ASSERT_DEATH({
+  ASSERT_DEBUG_DEATH({
       ThreadCheckerClass::MethodOnDifferentThreadImpl();
     }, "");
 }
@@ -165,7 +156,7 @@ void ThreadCheckerClass::DetachThenCallFromDifferentThreadImpl() {
 
 #if ENABLE_THREAD_CHECKER
 TEST(ThreadCheckerDeathTest, DetachFromThreadInDebug) {
-  ASSERT_DEATH({
+  ASSERT_DEBUG_DEATH({
     ThreadCheckerClass::DetachThenCallFromDifferentThreadImpl();
     }, "");
 }

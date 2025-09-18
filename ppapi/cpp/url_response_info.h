@@ -15,12 +15,16 @@ namespace pp {
 
 class FileRef;
 
-/// URLResponseInfo provides an API for examining URL responses.
+/// URLResponseInfo provides an API for examaning URL responses.
 class URLResponseInfo : public Resource {
  public:
   /// Default constructor. This constructor creates an <code>is_null</code>
   /// resource.
   URLResponseInfo() {}
+
+  /// A special structure used by the constructor that does not increment the
+  /// reference count of the underlying resource.
+  struct PassRef {};
 
   /// A constructor used when you have received a <code>PP_Resource</code> as a
   /// return value that has already been reference counted.

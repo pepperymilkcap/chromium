@@ -17,16 +17,12 @@ class PPAPI_THUNK_EXPORT PPB_View_API {
  public:
   virtual ~PPB_View_API() {}
 
-  // Returns the view data struct.
+  // Returns the view data struct. We could have virtual functions here for
+  // each PPAPI function, but that would be more boilerplate for these simple
+  // getters so the logic is implemented in the thunk layer. If we start
+  // autogenerating the thunk layer and need this to be more regular, adding
+  // the API functions here should be fine.
   virtual const ViewData& GetData() const = 0;
-
-  virtual PP_Bool GetRect(PP_Rect* viewport) const = 0;
-  virtual PP_Bool IsFullscreen() const = 0;
-  virtual PP_Bool IsVisible() const = 0;
-  virtual PP_Bool IsPageVisible() const = 0;
-  virtual PP_Bool GetClipRect(PP_Rect* clip) const = 0;
-  virtual float GetDeviceScale() const = 0;
-  virtual float GetCSSScale() const = 0;
 };
 
 }  // namespace thunk

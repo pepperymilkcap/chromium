@@ -4,15 +4,15 @@
 
 #ifndef NET_HTTP_HTTP_RESPONSE_INFO_H_
 #define NET_HTTP_HTTP_RESPONSE_INFO_H_
+#pragma once
 
 #include <string>
 
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
+#include "net/base/ssl_info.h"
 #include "net/http/http_vary_data.h"
-#include "net/socket/next_proto.h"
-#include "net/ssl/ssl_info.h"
 
 class Pickle;
 
@@ -25,24 +25,6 @@ class SSLCertRequestInfo;
 
 class NET_EXPORT HttpResponseInfo {
  public:
-  // Describes the kind of connection used to fetch this response.
-  //
-  // NOTE: This is persisted to the cache, so make sure not to reorder
-  // these values.
-  //
-  // TODO(akalin): Better yet, just use a string instead of an enum,
-  // like |npn_negotiated_protocol|.
-  enum ConnectionInfo {
-    CONNECTION_INFO_UNKNOWN = 0,
-    CONNECTION_INFO_HTTP1 = 1,
-    CONNECTION_INFO_DEPRECATED_SPDY2 = 2,
-    CONNECTION_INFO_SPDY3 = 3,
-    CONNECTION_INFO_SPDY4A2 = 4,
-    CONNECTION_INFO_QUIC1_SPDY3 = 5,
-    CONNECTION_INFO_HTTP2_DRAFT_04 = 6,
-    NUM_OF_CONNECTION_INFOS,
-  };
-
   HttpResponseInfo();
   HttpResponseInfo(const HttpResponseInfo& rhs);
   ~HttpResponseInfo();
@@ -67,15 +49,6 @@ class NET_EXPORT HttpResponseInfo {
   // when reloading previously visited pages (without going over the network).
   bool was_cached;
 
-  // True if the request was fetched from cache rather than the network
-  // because of a LOAD_FROM_CACHE_IF_OFFLINE flag when the system
-  // was unable to contact the server.
-  bool server_data_unavailable;
-
-  // True if the request accessed the network in the process of retrieving
-  // data.
-  bool network_accessed;
-
   // True if the request was fetched over a SPDY channel.
   bool was_fetched_via_spdy;
 
@@ -86,9 +59,6 @@ class NET_EXPORT HttpResponseInfo {
   // be any type of proxy, HTTP or SOCKS.  Note, we do not know if a
   // transparent proxy may have been involved.
   bool was_fetched_via_proxy;
-
-  // Whether the request use http proxy or server authentication.
-  bool did_use_http_auth;
 
   // Remote address of the socket which fetched this resource.
   //
@@ -101,9 +71,6 @@ class NET_EXPORT HttpResponseInfo {
 
   // Protocol negotiated with the server.
   std::string npn_negotiated_protocol;
-
-  // The type of connection used for this response.
-  ConnectionInfo connection_info;
 
   // The time at which the request was made that resulted in this response.
   // For cached responses, this is the last time the cache entry was validated.
@@ -134,10 +101,6 @@ class NET_EXPORT HttpResponseInfo {
 
   // Any metadata asociated with this resource's cached data.
   scoped_refptr<IOBufferWithSize> metadata;
-
-  static ConnectionInfo ConnectionInfoFromNextProto(NextProto next_proto);
-
-  static std::string ConnectionInfoToString(ConnectionInfo connection_info);
 };
 
 }  // namespace net

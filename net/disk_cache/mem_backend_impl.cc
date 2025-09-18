@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ using base::Time;
 
 namespace {
 
-const int kDefaultInMemoryCacheSize = 10 * 1024 * 1024;
+const int kDefaultCacheSize = 10 * 1024 * 1024;
 const int kCleanUpMargin = 1024 * 1024;
 
 int LowWaterAdjust(int high_water) {
@@ -41,15 +41,15 @@ MemBackendImpl::~MemBackendImpl() {
 }
 
 // Static.
-scoped_ptr<Backend> MemBackendImpl::CreateBackend(int max_bytes,
-                                                  net::NetLog* net_log) {
-  scoped_ptr<MemBackendImpl> cache(new MemBackendImpl(net_log));
+Backend* MemBackendImpl::CreateBackend(int max_bytes, net::NetLog* net_log) {
+  MemBackendImpl* cache = new MemBackendImpl(net_log);
   cache->SetMaxSize(max_bytes);
   if (cache->Init())
-    return cache.PassAs<Backend>();
+    return cache;
 
+  delete cache;
   LOG(ERROR) << "Unable to create cache";
-  return scoped_ptr<Backend>();
+  return NULL;
 }
 
 bool MemBackendImpl::Init() {
@@ -59,15 +59,15 @@ bool MemBackendImpl::Init() {
   int64 total_memory = base::SysInfo::AmountOfPhysicalMemory();
 
   if (total_memory <= 0) {
-    max_size_ = kDefaultInMemoryCacheSize;
+    max_size_ = kDefaultCacheSize;
     return true;
   }
 
   // We want to use up to 2% of the computer's memory, with a limit of 50 MB,
   // reached on systemd with more than 2.5 GB of RAM.
   total_memory = total_memory * 2 / 100;
-  if (total_memory > kDefaultInMemoryCacheSize * 5)
-    max_size_ = kDefaultInMemoryCacheSize * 5;
+  if (total_memory > kDefaultCacheSize * 5)
+    max_size_ = kDefaultCacheSize * 5;
   else
     max_size_ = static_cast<int32>(total_memory);
 
@@ -124,16 +124,12 @@ void MemBackendImpl::RemoveFromRankingList(MemEntryImpl* entry) {
   rankings_.Remove(entry);
 }
 
-net::CacheType MemBackendImpl::GetCacheType() const {
-  return net::MEMORY_CACHE;
-}
-
 int32 MemBackendImpl::GetEntryCount() const {
   return static_cast<int32>(entries_.size());
 }
 
 int MemBackendImpl::OpenEntry(const std::string& key, Entry** entry,
-                              const CompletionCallback& callback) {
+                              const net::CompletionCallback& callback) {
   if (OpenEntry(key, entry))
     return net::OK;
 
@@ -141,7 +137,7 @@ int MemBackendImpl::OpenEntry(const std::string& key, Entry** entry,
 }
 
 int MemBackendImpl::CreateEntry(const std::string& key, Entry** entry,
-                                const CompletionCallback& callback) {
+                                const net::CompletionCallback& callback) {
   if (CreateEntry(key, entry))
     return net::OK;
 
@@ -149,23 +145,23 @@ int MemBackendImpl::CreateEntry(const std::string& key, Entry** entry,
 }
 
 int MemBackendImpl::DoomEntry(const std::string& key,
-                              const CompletionCallback& callback) {
+                              const net::CompletionCallback& callback) {
   if (DoomEntry(key))
     return net::OK;
 
   return net::ERR_FAILED;
 }
 
-int MemBackendImpl::DoomAllEntries(const CompletionCallback& callback) {
+int MemBackendImpl::DoomAllEntries(const net::CompletionCallback& callback) {
   if (DoomAllEntries())
     return net::OK;
 
   return net::ERR_FAILED;
 }
 
-int MemBackendImpl::DoomEntriesBetween(const base::Time initial_time,
-                                       const base::Time end_time,
-                                       const CompletionCallback& callback) {
+int MemBackendImpl::DoomEntriesBetween(
+    const base::Time initial_time, const base::Time end_time,
+    const net::CompletionCallback& callback) {
   if (DoomEntriesBetween(initial_time, end_time))
     return net::OK;
 
@@ -173,7 +169,7 @@ int MemBackendImpl::DoomEntriesBetween(const base::Time initial_time,
 }
 
 int MemBackendImpl::DoomEntriesSince(const base::Time initial_time,
-                                     const CompletionCallback& callback) {
+                                     const net::CompletionCallback& callback) {
   if (DoomEntriesSince(initial_time))
     return net::OK;
 
@@ -181,7 +177,7 @@ int MemBackendImpl::DoomEntriesSince(const base::Time initial_time,
 }
 
 int MemBackendImpl::OpenNextEntry(void** iter, Entry** next_entry,
-                                  const CompletionCallback& callback) {
+                                  const net::CompletionCallback& callback) {
   if (OpenNextEntry(iter, next_entry))
     return net::OK;
 
@@ -250,26 +246,20 @@ bool MemBackendImpl::DoomEntriesBetween(const Time initial_time,
 
   DCHECK(end_time >= initial_time);
 
-  MemEntryImpl* node = rankings_.GetNext(NULL);
-  // Last valid entry before |node|.
-  // Note, that entries after |node| may become invalid during |node| doom in
-  // case when they are child entries of it. It is guaranteed that
-  // parent node will go prior to it childs in ranking list (see
-  // InternalReadSparseData and InternalWriteSparseData).
-  MemEntryImpl* last_valid = NULL;
+  MemEntryImpl* next = rankings_.GetNext(NULL);
 
   // rankings_ is ordered by last used, this will descend through the cache
   // and start dooming items before the end_time, and will stop once it reaches
   // an item used before the initial time.
-  while (node) {
+  while (next) {
+    MemEntryImpl* node = next;
+    next = rankings_.GetNext(next);
+
     if (node->GetLastUsed() < initial_time)
       break;
 
     if (node->GetLastUsed() < end_time)
       node->Doom();
-    else
-      last_valid = node;
-    node = rankings_.GetNext(last_valid);
   }
 
   return true;
@@ -306,8 +296,8 @@ bool MemBackendImpl::OpenNextEntry(void** iter, Entry** next_entry) {
 
 void MemBackendImpl::TrimCache(bool empty) {
   MemEntryImpl* next = rankings_.GetPrev(NULL);
-  if (!next)
-    return;
+
+  DCHECK(next);
 
   int target_size = empty ? 0 : LowWaterAdjust(max_size_);
   while (current_size_ > target_size && next) {

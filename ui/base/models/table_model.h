@@ -1,19 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_MODELS_TABLE_MODEL_H_
 #define UI_BASE_MODELS_TABLE_MODEL_H_
+#pragma once
 
 #include <vector>
 
-#include "base/strings/string16.h"
-#include "third_party/icu/source/i18n/unicode/coll.h"
+#include "base/string16.h"
 #include "ui/base/ui_export.h"
+#include "unicode/coll.h"
 
-namespace gfx {
-class ImageSkia;
-}
+class SkBitmap;
 
 namespace ui {
 
@@ -25,7 +24,7 @@ class UI_EXPORT TableModel {
   // See HasGroups, get GetGroupID for details as to how this is used.
   struct Group {
     // The title text for the group.
-    base::string16 title;
+    string16 title;
 
     // Unique id for the group.
     int id;
@@ -36,18 +35,18 @@ class UI_EXPORT TableModel {
   virtual int RowCount() = 0;
 
   // Returns the value at a particular location in text.
-  virtual base::string16 GetText(int row, int column_id) = 0;
+  virtual string16 GetText(int row, int column_id) = 0;
 
   // Returns the small icon (16x16) that should be displayed in the first
   // column before the text. This is only used when the TableView was created
-  // with the ICON_AND_TEXT table type. Returns an isNull() image if there is
-  // no image.
-  virtual gfx::ImageSkia GetIcon(int row);
+  // with the ICON_AND_TEXT table type. Returns an isNull() bitmap if there is
+  // no bitmap.
+  virtual SkBitmap GetIcon(int row);
 
   // Returns the tooltip, if any, to show for a particular row.  If there are
   // multiple columns in the row, this will only be shown when hovering over
   // column zero.
-  virtual base::string16 GetTooltip(int row);
+  virtual string16 GetTooltip(int row);
 
   // If true, this row should be indented.
   virtual bool ShouldIndent(int row);
@@ -97,13 +96,22 @@ struct UI_EXPORT TableColumn {
   };
 
   TableColumn();
+  TableColumn(int id, const string16& title,
+              Alignment alignment, int width);
+  TableColumn(int id, const string16& title,
+              Alignment alignment, int width, float percent);
+
+  // It's common (but not required) to use the title's IDS_* tag as the column
+  // id. In this case, the provided conveniences look up the title string on
+  // bahalf of the caller.
+  TableColumn(int id, Alignment alignment, int width);
   TableColumn(int id, Alignment alignment, int width, float percent);
 
   // A unique identifier for the column.
   int id;
 
   // The title for the column.
-  base::string16 title;
+  string16 title;
 
   // Alignment for the content.
   Alignment alignment;

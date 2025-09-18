@@ -1,19 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_STATUS_NETWORK_MENU_H_
 #define CHROME_BROWSER_CHROMEOS_STATUS_NETWORK_MENU_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
+#include "chrome/browser/chromeos/cros/network_library.h"  // ConnectionType
 #include "ui/gfx/native_widget_types.h"  // gfx::NativeWindow
-
-class Browser;
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 namespace ui {
 class MenuModel;
@@ -22,6 +21,7 @@ class MenuModel;
 namespace views {
 class MenuItemView;
 class MenuButton;
+class MenuModelAdapter;
 class MenuRunner;
 }
 
@@ -29,17 +29,11 @@ namespace chromeos {
 
 class NetworkMenuModel;
 
-// This class builds and manages a ui::MenuModel used to build network
-// menus. It does not represent an actual menu widget. The menu is populated
-// with the list of wifi and mobile networks, and handles connecting to
-// existing networks or spawning UI to configure a new network.
+// Menu for network menu button in the status area/welcome screen.
+// This class will populating the menu with the list of networks.
+// It will also handle connecting to another wifi/cellular network.
 //
-// This class is now only used to build the dropdown menu in the oobe and
-// other web based login screen UI. See ash::NetworkStateListDetailedView for
-// the status area network list. TODO(stevenjb): Integrate this with the
-// login UI code.
-//
-// The network menu model looks like this:
+// The network menu looks like this:
 //
 // <icon>  Ethernet
 // <icon>  Wifi Network A
@@ -50,11 +44,18 @@ class NetworkMenuModel;
 // <icon>  Cellular Network C
 // <icon>  Other Wi-Fi network...
 // --------------------------------
+// <icon>  Private networks ->
+//         <icon>  Virtual Network A
+//         <icon>  Virtual Network B
+//         ----------------------------------
+//                 Add private network...
+//                 Disconnect private network
+// --------------------------------
 //         Disable Wifi
 //         Disable Celluar
 // --------------------------------
 //         <IP Address>
-//         Proxy settings...
+//         Network settings...
 //
 // <icon> will show the strength of the wifi/cellular networks.
 // The label will be BOLD if the network is currently connected.
@@ -63,12 +64,10 @@ class NetworkMenu {
  public:
   class Delegate {
    public:
-    virtual ~Delegate();
+    virtual views::MenuButton* GetMenuButton() = 0;
     virtual gfx::NativeWindow GetNativeWindow() const = 0;
     virtual void OpenButtonOptions() = 0;
     virtual bool ShouldOpenButtonOptions() const = 0;
-    virtual void OnConnectToNetworkRequested(
-        const std::string& service_path) = 0;
   };
 
   explicit NetworkMenu(Delegate* delegate);
@@ -77,14 +76,26 @@ class NetworkMenu {
   // Access to menu definition.
   ui::MenuModel* GetMenuModel();
 
+  // Cancels the active menu.
+  void CancelMenu();
+
   // Update the menu (e.g. when the network list or status has changed).
   virtual void UpdateMenu();
 
- private:
-  friend class NetworkMenuModel;
+  // Run the menu.
+  void RunMenu(views::View* source);
+
+  // Shows network details in Web UI options window.
+  void ShowTabbedNetworkSettings(const Network* network) const;
 
   // Getters.
   Delegate* delegate() const { return delegate_; }
+
+  // Setters.
+  void set_min_width(int min_width) { min_width_ = min_width; }
+
+ private:
+  friend class NetworkMenuModel;
 
   // Weak ptr to delegate.
   Delegate* delegate_;
@@ -94,11 +105,12 @@ class NetworkMenu {
 
   // The network menu.
   scoped_ptr<NetworkMenuModel> main_menu_model_;
+  scoped_ptr<views::MenuModelAdapter> menu_model_adapter_;
+  views::MenuItemView* menu_item_view_;
+  scoped_ptr<views::MenuRunner> menu_runner_;
 
-  // Weak pointer factory so we can start connections at a later time
-  // without worrying that they will actually try to happen after the lifetime
-  // of this object.
-  base::WeakPtrFactory<NetworkMenu> weak_pointer_factory_;
+  // Holds minimum width of the menu.
+  int min_width_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkMenu);
 };

@@ -524,7 +524,7 @@ ProxyFormController.prototype = {
    * @private
    */
   callbackForRegularSettings_: function() {
-    if (chrome.runtime.lastError) {
+    if (chrome.extension.lastError) {
       this.generateAlert_(chrome.i18n.getMessage('errorSettingRegularProxy'));
       return;
     }
@@ -545,7 +545,7 @@ ProxyFormController.prototype = {
    * @private
    */
   callbackForIncognitoSettings_: function() {
-    if (chrome.runtime.lastError) {
+    if (chrome.extension.lastError) {
       this.generateAlert_(chrome.i18n.getMessage('errorSettingIncognitoProxy'));
       return;
     }

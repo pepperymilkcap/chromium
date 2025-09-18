@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_ADDRESS_FAMILY_H_
 #define NET_BASE_ADDRESS_FAMILY_H_
+#pragma once
 
 namespace net {
 
@@ -24,8 +25,6 @@ enum {
   HOST_RESOLVER_LOOPBACK_ONLY = 1 << 1,
   // Indicate the address family was set because no IPv6 support was detected.
   HOST_RESOLVER_DEFAULT_FAMILY_SET_DUE_TO_NO_IPV6 = 1 << 2,
-  // The resolver should only invoke getaddrinfo, not DnsClient.
-  HOST_RESOLVER_SYSTEM_ONLY = 1 << 3
 };
 typedef int HostResolverFlags;
 

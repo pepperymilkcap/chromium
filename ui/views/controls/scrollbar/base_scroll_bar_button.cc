@@ -12,20 +12,21 @@ namespace views {
 
 BaseScrollBarButton::BaseScrollBarButton(ButtonListener* listener)
     : CustomButton(listener),
-      repeater_(base::Bind(&BaseScrollBarButton::RepeaterNotifyClick,
-                           base::Unretained(this))) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(repeater_(
+          base::Bind(&BaseScrollBarButton::RepeaterNotifyClick,
+                     base::Unretained(this)))) {
 }
 
 BaseScrollBarButton::~BaseScrollBarButton() {
 }
 
-bool BaseScrollBarButton::OnMousePressed(const ui::MouseEvent& event) {
+bool BaseScrollBarButton::OnMousePressed(const MouseEvent& event) {
   Button::NotifyClick(event);
   repeater_.Start();
   return true;
 }
 
-void BaseScrollBarButton::OnMouseReleased(const ui::MouseEvent& event) {
+void BaseScrollBarButton::OnMouseReleased(const MouseEvent& event) {
   OnMouseCaptureLost();
 }
 
@@ -36,16 +37,15 @@ void BaseScrollBarButton::OnMouseCaptureLost() {
 void BaseScrollBarButton::RepeaterNotifyClick() {
   // TODO(sky): See if we can convert to using |Screen| everywhere.
 #if defined(OS_WIN) && !defined(USE_AURA)
-  gfx::Point cursor_point(GetMessagePos());
+  DWORD pos = GetMessagePos();
+  POINTS points = MAKEPOINTS(pos);
+  gfx::Point cursor_point(points.x, points.y);
 #else
-  // TODO(scottmg): Native is wrong: http://crbug.com/133312
-  gfx::Point cursor_point =
-      gfx::Screen::GetNativeScreen()->GetCursorScreenPoint();
+  gfx::Point cursor_point = gfx::Screen::GetCursorScreenPoint();
 #endif
-  ui::MouseEvent event(ui::ET_MOUSE_RELEASED,
-                       cursor_point, cursor_point,
-                       ui::EF_LEFT_MOUSE_BUTTON,
-                       ui::EF_LEFT_MOUSE_BUTTON);
+  views::MouseEvent event(ui::ET_MOUSE_RELEASED,
+                          cursor_point.x(), cursor_point.y(),
+                          ui::EF_LEFT_MOUSE_BUTTON);
   Button::NotifyClick(event);
 }
 

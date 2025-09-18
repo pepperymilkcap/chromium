@@ -4,13 +4,10 @@
 
 #ifndef CHROME_APP_CHROME_COMMAND_IDS_H_
 #define CHROME_APP_CHROME_COMMAND_IDS_H_
+#pragma once
 
 // This file lists all the command IDs understood by e.g. the browser.
 // It is used by Windows RC files, Mac NIB files, and other platforms too.
-
-// Mac NIB files (e.g. chrome/app/nibs/MainMenu.xib) include ID numbers rather
-// than the corresponding #define labels.  If you change a given command's
-// number, any NIB files that refer to it will also need to be updated.
 
 // Values below IDC_MinimumLabelValue are reserved for dynamic menu items.
 #define IDC_MinimumLabelValue           4000
@@ -31,13 +28,10 @@
 #define IDC_OPEN_CURRENT_URL            33004
 #define IDC_STOP                        33006
 #define IDC_RELOAD_IGNORING_CACHE       33007
-#define IDC_LOAD_NEW_TAB_PAGE           33008
-#define IDC_RELOAD_CLEARING_CACHE       33009
 
 // Window management commands
 #define IDC_NEW_WINDOW                  34000
 #define IDC_NEW_INCOGNITO_WINDOW        34001
-#define IDC_PIN_TO_START_SCREEN         34005
 #define IDC_CLOSE_WINDOW                34012
 #define IDC_ALWAYS_ON_TOP               34013
 #define IDC_NEW_TAB                     34014
@@ -64,17 +58,6 @@
 #define IDC_TABPOSE                     34036
 #define IDC_DEBUG_FRAME_TOGGLE          34038
 #define IDC_PRESENTATION_MODE           34039
-#define IDC_METRO_SNAP_ENABLE           34040
-#define IDC_METRO_SNAP_DISABLE          34041
-#define IDC_WIN8_DESKTOP_RESTART        34042
-#define IDC_WIN8_METRO_RESTART          34043
-#define IDC_TOGGLE_ASH_DESKTOP          34044
-#define IDC_WINDOW_MENU                 34045
-#define IDC_MINIMIZE_WINDOW             34046
-#define IDC_MAXIMIZE_WINDOW             34047
-#define IDC_ALL_WINDOWS_FRONT           34048
-#define IDC_VISIT_DESKTOP_OF_LRU_USER_2 34049
-#define IDC_VISIT_DESKTOP_OF_LRU_USER_3 34050
 
 // Page-related commands
 #define IDC_BOOKMARK_PAGE               35000
@@ -85,9 +68,6 @@
 #define IDC_ENCODING_MENU               35005
 #define IDC_EMAIL_PAGE_LOCATION         35006
 #define IDC_ADVANCED_PRINT              35007
-#define IDC_PRINT_TO_DESTINATION        35008
-#define IDC_BOOKMARK_PAGE_FROM_STAR     35009
-#define IDC_TRANSLATE_PAGE              35010
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
@@ -134,6 +114,7 @@
 // Clipboard commands
 #define IDC_CUT                         36000
 #define IDC_COPY                        36001
+#define IDC_COPY_URL                    36002
 #define IDC_PASTE                       36003
 #define IDC_EDIT_MENU                   36004
 
@@ -141,7 +122,6 @@
 #define IDC_FIND                        37000
 #define IDC_FIND_NEXT                   37001
 #define IDC_FIND_PREVIOUS               37002
-#define IDC_FIND_MENU                   37100
 
 // Zoom
 #define IDC_ZOOM_MENU                   38000
@@ -158,20 +138,16 @@
 #define IDC_FOCUS_NEXT_PANE             39004
 #define IDC_FOCUS_PREVIOUS_PANE         39005
 #define IDC_FOCUS_BOOKMARKS             39006
-#define IDC_FOCUS_INFOBARS              39007
+#define IDC_FOCUS_CHROMEOS_STATUS       39007
 
 // Show various bits of UI
 #define IDC_OPEN_FILE                   40000
 #define IDC_CREATE_SHORTCUTS            40001
-#define IDC_CREATE_HOSTED_APP           40002
-#define IDC_DEVELOPER_MENU              40003
-#define IDC_DEV_TOOLS                   40004
-#define IDC_DEV_TOOLS_CONSOLE           40005
-#define IDC_TASK_MANAGER                40006
-#define IDC_DEV_TOOLS_DEVICES           40007
-#if defined(GOOGLE_CHROME_BUILD)
+#define IDC_DEVELOPER_MENU              40002
+#define IDC_DEV_TOOLS                   40003
+#define IDC_DEV_TOOLS_CONSOLE           40004
+#define IDC_TASK_MANAGER                40005
 #define IDC_FEEDBACK                    40008
-#endif
 #define IDC_SHOW_BOOKMARK_BAR           40009
 #define IDC_SHOW_HISTORY                40010
 #define IDC_SHOW_BOOKMARK_MANAGER       40011
@@ -182,33 +158,22 @@
 #define IDC_EDIT_SEARCH_ENGINES         40016
 #define IDC_VIEW_PASSWORDS              40017
 #define IDC_ABOUT                       40018
-#define IDC_HELP_PAGE_VIA_KEYBOARD      40019
-#define IDC_HELP_PAGE_VIA_MENU          40020
-#define IDC_SHOW_APP_MENU               40021
-#define IDC_MANAGE_EXTENSIONS           40022
-#define IDC_DEV_TOOLS_INSPECT           40023
-#define IDC_UPGRADE_DIALOG              40024
-#define IDC_VIEW_INCOMPATIBILITIES      40025
-#define IDC_SHOW_KEYBOARD_OVERLAY       40027
-#define IDC_PROFILING_ENABLED           40028
+#define IDC_HELP_PAGE                   40019
+#define IDC_SHOW_APP_MENU               40020
+#define IDC_MANAGE_EXTENSIONS           40021
+#define IDC_DEV_TOOLS_INSPECT           40022
+#define IDC_UPGRADE_DIALOG              40023
+#define IDC_VIEW_INCOMPATIBILITIES      40024
+#define IDC_VIEW_BACKGROUND_PAGES       40025
+#define IDC_SHOW_KEYBOARD_OVERLAY       40026
+#define IDC_PROFILING_ENABLED           40027
+#define IDC_FILE_MANAGER                40028
 #define IDC_BOOKMARKS_MENU              40029
-// TODO(atwilson): Remove IDC_SHOW_SYNC_SETUP when we officially allow signin
-// when sync is disabled.
 #define IDC_SHOW_SYNC_SETUP             40030
-#define IDC_SHOW_SIGNIN                 40030
 #define IDC_EXTENSION_ERRORS            40031
-#define IDC_SHOW_SIGNIN_ERROR           40032
-#define IDC_SHOW_SETTINGS_CHANGE_FIRST  40033
-#define IDC_SHOW_SETTINGS_CHANGE_LAST   40133
-#define IDC_SHOW_AVATAR_MENU            40134
-#define IDC_EXTENSION_DISABLED_FIRST    40135
-#define IDC_EXTENSION_DISABLED_LAST     40235
-#define IDC_TOGGLE_REQUEST_TABLET_SITE  40236
-#define IDC_DEV_TOOLS_TOGGLE            40237
-#define IDC_EXTERNAL_EXTENSION_ALERT    40238
-#define IDC_RECENT_TABS_MENU            40239
-#define IDC_RECENT_TABS_NO_DEVICE_TABS  40240
-#define IDC_SHOW_SETTINGS_RESET_BUBBLE  40241
+#define IDC_SHOW_SYNC_ERROR             40032
+#define IDC_SHOW_SETTINGS_CHANGES       40033
+#define IDC_SHOW_AVATAR_MENU            40034
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -223,15 +188,16 @@
 // [_FIRST, _LAST).
 #define IDC_SPELLCHECK_LANGUAGES_FIRST  41006
 #define IDC_SPELLCHECK_LANGUAGES_LAST   41106
-#define IDC_CHECK_SPELLING_WHILE_TYPING 41107
+#define IDC_CHECK_SPELLING_OF_THIS_FIELD  41107
+#define IDC_SYNC_BOOKMARKS              41108
 #define IDC_SPELLPANEL_TOGGLE           41109
 #define IDC_SPELLCHECK_ADD_TO_DICTIONARY 41110
 
 // Writing direction
-#define IDC_WRITING_DIRECTION_MENU       41120
-#define IDC_WRITING_DIRECTION_DEFAULT    41121
-#define IDC_WRITING_DIRECTION_LTR        41122
-#define IDC_WRITING_DIRECTION_RTL        41123
+#define IDC_WRITING_DIRECTION_MENU       41120     // OSX only
+#define IDC_WRITING_DIRECTION_DEFAULT    41121     // OSX only
+#define IDC_WRITING_DIRECTION_LTR        41122     // OSX only
+#define IDC_WRITING_DIRECTION_RTL        41123     // OSX only
 
 // Translate
 #define IDC_TRANSLATE_OPTIONS_ALWAYS                42000
@@ -248,9 +214,11 @@
 // Identifiers for platform-specific items.
 // Placed in a common file to help insure they never collide.
 #define IDC_VIEW_MENU                   44000     // OSX only
-#define IDC_FILE_MENU                   44001     // OSX only
-#define IDC_CHROME_MENU                 44002     // OSX only
-#define IDC_HIDE_APP                    44003     // OSX only
+#define IDC_SYSTEM_OPTIONS              45000     // ChromeOS only
+#define IDC_INTERNET_OPTIONS            45100     // ChromeOS only
+#define IDC_LANGUAGE_OPTIONS            45200     // ChromeOS only
+#define IDC_LOCK_SCREEN                 45300     // ChromeOS only
+#define IDC_SHUTDOWN                    45400     // ChromeOS only
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
@@ -277,7 +245,6 @@
 #define IDC_CONTENT_CONTEXT_COPYIMAGELOCATION 50111
 #define IDC_CONTENT_CONTEXT_COPYIMAGE 50112
 #define IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB 50113
-#define IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE 50114
 // Audio/video items.
 #define IDC_CONTENT_CONTEXT_SAVEAVAS 50120
 #define IDC_CONTENT_CONTEXT_COPYAVLOCATION 50121
@@ -307,21 +274,14 @@
 #define IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS 50155
 #define IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION 50156
 #define IDC_CONTENT_CONTEXT_SPELLING_TOGGLE 50157
-#define IDC_CONTENT_CONTEXT_SPEECH_MENU 50158
-#define IDC_CONTENT_CONTEXT_SPEECH_START_SPEAKING 50159
-#define IDC_CONTENT_CONTEXT_SPEECH_STOP_SPEAKING 50160
-#define IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE 50161
-#define IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP 50162
-#define IDC_CONTENT_CONTEXT_RESTART_PACKAGED_APP 50163
-#define IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE 50164
 // Frame items.
-#define IDC_CONTENT_CONTEXT_RELOADFRAME 50170
-#define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50171
-#define IDC_CONTENT_CONTEXT_VIEWFRAMEINFO 50172
+#define IDC_CONTENT_CONTEXT_RELOADFRAME 50160
+#define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50161
+#define IDC_CONTENT_CONTEXT_VIEWFRAMEINFO 50162
 // Search items.
-#define IDC_CONTENT_CONTEXT_GOTOURL 50180
-#define IDC_CONTENT_CONTEXT_SEARCHWEBFOR 50181
-#define IDC_CONTENT_CONTEXT_ADDSEARCHENGINE 50182
+#define IDC_CONTENT_CONTEXT_GOTOURL 50170
+#define IDC_CONTENT_CONTEXT_SEARCHWEBFOR 50171
+#define IDC_CONTENT_CONTEXT_ADDSEARCHENGINE 50172
 
 // Context menu items in the bookmark bar
 #define IDC_BOOKMARK_BAR_OPEN_ALL 51000
@@ -335,9 +295,6 @@
 #define IDC_BOOKMARK_BAR_NEW_FOLDER 51008
 #define IDC_BOOKMARK_MANAGER 51009
 #define IDC_BOOKMARK_BAR_ALWAYS_SHOW 51010
-#define IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT 51011
-#define IDC_BOOKMARK_BAR_UNDO 51012
-#define IDC_BOOKMARK_BAR_REDO 51013
 
 // Context menu items in the status tray
 #define IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND 51100
@@ -346,12 +303,6 @@
 #define IDC_SPEECH_INPUT_MENU 51200
 #define IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES 51201
 #define IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT 51202
-
-// Context menu items for media stream status tray
-#define IDC_MEDIA_STREAM_DEVICE_STATUS_TRAY 51300
-#define IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_FIRST 51301
-#define IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_LAST 51399
-#define IDC_MEDIA_STREAM_DEVICE_ALWAYS_ALLOW 51400
 
 // Protocol handler menu entries
 #define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST     52000

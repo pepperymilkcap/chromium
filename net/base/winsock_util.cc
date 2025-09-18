@@ -13,7 +13,6 @@ namespace {
 
 // Prevent the compiler from optimizing away the arguments so they appear
 // nicely on the stack in crash dumps.
-#pragma warning(push)
 #pragma warning (disable: 4748)
 #pragma optimize( "", off )
 
@@ -29,7 +28,7 @@ void CheckEventWait(WSAEVENT hEvent, DWORD wait_rv, DWORD expected) {
 }
 
 #pragma optimize( "", on )
-#pragma warning(pop)
+#pragma warning (default: 4748)
 
 }  // namespace
 

@@ -1,12 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/message_loop.h"
+#include "base/string16.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_job_worker.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "printing/printed_pages_source.h"
@@ -16,8 +16,8 @@ namespace {
 
 class TestSource : public printing::PrintedPagesSource {
  public:
-  virtual base::string16 RenderSourceName() OVERRIDE {
-    return base::string16();
+  virtual string16 RenderSourceName() OVERRIDE {
+    return string16();
   }
 };
 
@@ -31,13 +31,12 @@ class TestPrintJobWorker : public printing::PrintJobWorker {
 
 class TestOwner : public printing::PrintJobWorkerOwner {
  public:
-  virtual void GetSettingsDone(
-      const printing::PrintSettings& new_settings,
-      printing::PrintingContext::Result result) OVERRIDE {
+  virtual void GetSettingsDone(const printing::PrintSettings& new_settings,
+                               printing::PrintingContext::Result result) {
     EXPECT_FALSE(true);
   }
   virtual printing::PrintJobWorker* DetachWorker(
-      printing::PrintJobWorkerOwner* new_owner) OVERRIDE {
+      printing::PrintJobWorkerOwner* new_owner) {
     // We're screwing up here since we're calling worker from the main thread.
     // That's fine for testing. It is actually simulating PrinterQuery behavior.
     TestPrintJobWorker* worker(new TestPrintJobWorker(new_owner));
@@ -46,20 +45,18 @@ class TestOwner : public printing::PrintJobWorkerOwner {
     settings_ = worker->printing_context()->settings();
     return worker;
   }
-  virtual base::MessageLoop* message_loop() OVERRIDE {
+  virtual MessageLoop* message_loop() {
     EXPECT_FALSE(true);
     return NULL;
   }
-  virtual const printing::PrintSettings& settings() const OVERRIDE {
+  virtual const printing::PrintSettings& settings() const {
     return settings_;
   }
-  virtual int cookie() const OVERRIDE {
+  virtual int cookie() const {
     return 42;
   }
 
  private:
-  virtual ~TestOwner() {}
-
   printing::PrintSettings settings_;
 };
 
@@ -68,7 +65,7 @@ class TestPrintJob : public printing::PrintJob {
   explicit TestPrintJob(volatile bool* check) : check_(check) {
   }
  private:
-  virtual ~TestPrintJob() {
+  ~TestPrintJob() {
     *check_ = true;
   }
   volatile bool* check_;
@@ -79,7 +76,7 @@ class TestPrintNotifObserv : public content::NotificationObserver {
   // content::NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+                       const content::NotificationDetails& details) {
     ADD_FAILURE();
   }
 };
@@ -93,7 +90,7 @@ TEST_F(PrintJobTest, SimplePrint) {
   // known lifetime.
 
   // This message loop is actually never run.
-  base::MessageLoop current;
+  MessageLoop current;
 
   content::NotificationRegistrar registrar_;
   TestPrintNotifObserv observ;
@@ -101,26 +98,18 @@ TEST_F(PrintJobTest, SimplePrint) {
                  content::NotificationService::AllSources());
   volatile bool check = false;
   scoped_refptr<printing::PrintJob> job(new TestPrintJob(&check));
-  EXPECT_EQ(base::MessageLoop::current(), job->message_loop());
+  EXPECT_EQ(MessageLoop::current(), job->message_loop());
   scoped_refptr<TestOwner> owner(new TestOwner);
   TestSource source;
-  job->Initialize(owner.get(), &source, 1);
+  job->Initialize(owner, &source, 1);
   job->Stop();
-  EXPECT_FALSE(job->is_stopped());
-  EXPECT_TRUE(job->is_stopping());
-  while (!job->is_stopped())
-  {
-    current.RunUntilIdle();
-  }
-  EXPECT_TRUE(job->is_stopped());
-  EXPECT_FALSE(job->is_stopping());
   job = NULL;
   EXPECT_TRUE(check);
 }
 
 TEST_F(PrintJobTest, SimplePrintLateInit) {
   volatile bool check = false;
-  base::MessageLoop current;
+  MessageLoop current;
   scoped_refptr<printing::PrintJob> job(new TestPrintJob(&check));
   job = NULL;
   EXPECT_TRUE(check);
@@ -137,7 +126,7 @@ TEST_F(PrintJobTest, SimplePrintLateInit) {
   job->Stop();
   job->Cancel();
   job->RequestMissingPages();
-  job->FlushJob(timeout);
+  job->FlushJob(timeout_ms);
   job->DisconnectSource();
   job->is_job_pending();
   job->document();

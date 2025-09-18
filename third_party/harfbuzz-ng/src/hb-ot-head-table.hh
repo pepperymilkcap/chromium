@@ -1,6 +1,5 @@
 /*
  * Copyright © 2010  Red Hat, Inc.
- * Copyright © 2012  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -23,7 +22,6 @@
  * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  *
  * Red Hat Author(s): Behdad Esfahbod
- * Google Author(s): Behdad Esfahbod
  */
 
 #ifndef HB_OT_HEAD_TABLE_HH
@@ -31,8 +29,6 @@
 
 #include "hb-open-type-private.hh"
 
-
-namespace OT {
 
 
 /*
@@ -43,20 +39,20 @@ namespace OT {
 
 struct head
 {
-  static const hb_tag_t tableTag	= HB_OT_TAG_head;
+  static const hb_tag_t Tag	= HB_OT_TAG_head;
 
   inline unsigned int get_upem (void) const {
     unsigned int upem = unitsPerEm;
-    /* If no valid head table found, assume 1000, which matches typical Type1 usage. */
+    /* If no valid head table found, assume 1000, which matches typicaly Type1 usage. */
     return 16 <= upem && upem <= 16384 ? upem : 1000;
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (c->check_struct (this) && likely (version.major == 1));
+    TRACE_SANITIZE ();
+    return c->check_struct (this) && likely (version.major == 1);
   }
 
-  protected:
+  private:
   FixedVersion	version;		/* Version of the head table--currently
 					 * 0x00010000 for version 1.0. */
   FixedVersion	fontRevision;		/* Set by font manufacturer. */
@@ -142,8 +138,6 @@ struct head
   DEFINE_SIZE_STATIC (54);
 };
 
-
-} /* namespace OT */
 
 
 #endif /* HB_OT_HEAD_TABLE_HH */

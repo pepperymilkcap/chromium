@@ -8,7 +8,7 @@ function testAssertFalse() {
   assertFalse(false);
 }
 
-function DISABLED_testAssertFalse() {
+function FAILS_testAssertFalse() {
   assertFalse(true);
   assertFalse(false);
 }

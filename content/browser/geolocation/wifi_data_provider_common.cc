@@ -5,34 +5,58 @@
 #include "content/browser/geolocation/wifi_data_provider_common.h"
 
 #include "base/bind.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 
-namespace content {
-
-base::string16 MacAddressAsString16(const uint8 mac_as_int[6]) {
+string16 MacAddressAsString16(const uint8 mac_as_int[6]) {
   // mac_as_int is big-endian. Write in byte chunks.
   // Format is XX-XX-XX-XX-XX-XX.
-  static const char* const kMacFormatString =
-      "%02x-%02x-%02x-%02x-%02x-%02x";
-  return base::ASCIIToUTF16(base::StringPrintf(kMacFormatString,
-                                               mac_as_int[0],
-                                               mac_as_int[1],
-                                               mac_as_int[2],
-                                               mac_as_int[3],
-                                               mac_as_int[4],
-                                               mac_as_int[5]));
+  static const wchar_t* const kMacFormatString =
+      L"%02x-%02x-%02x-%02x-%02x-%02x";
+  return WideToUTF16(base::StringPrintf(kMacFormatString,
+                                        mac_as_int[0],
+                                        mac_as_int[1],
+                                        mac_as_int[2],
+                                        mac_as_int[3],
+                                        mac_as_int[4],
+                                        mac_as_int[5]));
 }
 
 WifiDataProviderCommon::WifiDataProviderCommon()
-    : is_first_scan_complete_(false),
-      weak_factory_(this) {
+    : Thread("Geolocation_wifi_provider"),
+      is_first_scan_complete_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 WifiDataProviderCommon::~WifiDataProviderCommon() {
+  // Thread must be stopped before entering destructor chain to avoid race
+  // conditions; see comment in DeviceDataProvider::Unregister.
+  DCHECK(!IsRunning());  // Must call StopDataProvider before destroying me.
 }
 
-void WifiDataProviderCommon::StartDataProvider() {
+bool WifiDataProviderCommon::StartDataProvider() {
+  DCHECK(CalledOnClientThread());
+  DCHECK(!IsRunning());  // StartDataProvider must only be called once.
+  return Start();
+}
+
+void WifiDataProviderCommon::StopDataProvider() {
+  DCHECK(CalledOnClientThread());
+  Stop();
+}
+
+bool WifiDataProviderCommon::GetData(WifiData* data) {
+  DCHECK(CalledOnClientThread());
+  DCHECK(data);
+  base::AutoLock lock(data_mutex_);
+  *data = wifi_data_;
+  // If we've successfully completed a scan, indicate that we have all of the
+  // data we can get.
+  return is_first_scan_complete_;
+}
+
+// Thread implementation
+void WifiDataProviderCommon::Init() {
   DCHECK(wlan_api_ == NULL);
   wlan_api_.reset(NewWlanApi());
   if (wlan_api_ == NULL) {
@@ -50,16 +74,10 @@ void WifiDataProviderCommon::StartDataProvider() {
   ScheduleNextScan(0);
 }
 
-void WifiDataProviderCommon::StopDataProvider() {
+void WifiDataProviderCommon::CleanUp() {
+  // Destroy these instances in the thread on which they were created.
   wlan_api_.reset();
   polling_policy_.reset();
-}
-
-bool WifiDataProviderCommon::GetData(WifiData* data) {
-  *data = wifi_data_;
-  // If we've successfully completed a scan, indicate that we have all of the
-  // data we can get.
-  return is_first_scan_complete_;
 }
 
 void WifiDataProviderCommon::DoWifiScanTask() {
@@ -68,23 +86,24 @@ void WifiDataProviderCommon::DoWifiScanTask() {
   if (!wlan_api_->GetAccessPointData(&new_data.access_point_data)) {
     ScheduleNextScan(polling_policy_->NoWifiInterval());
   } else {
-    update_available = wifi_data_.DiffersSignificantly(new_data);
-    wifi_data_ = new_data;
+    {
+      base::AutoLock lock(data_mutex_);
+      update_available = wifi_data_.DiffersSignificantly(new_data);
+      wifi_data_ = new_data;
+    }
     polling_policy_->UpdatePollingInterval(update_available);
     ScheduleNextScan(polling_policy_->PollingInterval());
   }
   if (update_available || !is_first_scan_complete_) {
     is_first_scan_complete_ = true;
-    RunCallbacks();
+    NotifyListeners();
   }
 }
 
 void WifiDataProviderCommon::ScheduleNextScan(int interval) {
-  client_loop()->PostDelayedTask(
+  message_loop()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&WifiDataProviderCommon::DoWifiScanTask,
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(interval));
 }
-
-}  // namespace content

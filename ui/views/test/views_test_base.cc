@@ -4,16 +4,56 @@
 
 #include "ui/views/test/views_test_base.h"
 
-#include "base/run_loop.h"
-#include "ui/base/clipboard/clipboard.h"
-#include "ui/base/ime/input_method_initializer.h"
+#if defined(OS_WIN)
+#include <ole2.h>
+#endif
 
 #if defined(USE_AURA)
-#include "ui/aura/env.h"
+#include "base/compiler_specific.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/test/aura_test_helper.h"
-#include "ui/views/corewm/capture_controller.h"
-#include "ui/views/corewm/wm_state.h"
+#include "ui/aura/test/test_activation_client.h"
+#include "ui/base/ime/input_method.h"
+
+namespace {
+
+class DummyInputMethod : public ui::InputMethod {
+ public:
+  DummyInputMethod() {}
+  virtual ~DummyInputMethod() {}
+
+  // ui::InputMethod overrides:
+  virtual void SetDelegate(
+      ui::internal::InputMethodDelegate* delegate) OVERRIDE {}
+  virtual void Init(bool focused) OVERRIDE {}
+  virtual void OnFocus() OVERRIDE {}
+  virtual void OnBlur() OVERRIDE {}
+  virtual void SetFocusedTextInputClient(
+      ui::TextInputClient* client) OVERRIDE {}
+  virtual ui::TextInputClient* GetTextInputClient() const OVERRIDE {
+    return NULL;
+  }
+  virtual void DispatchKeyEvent(
+      const base::NativeEvent& native_key_event) OVERRIDE {}
+  virtual void OnTextInputTypeChanged(
+      const ui::TextInputClient* client) OVERRIDE {}
+  virtual void OnCaretBoundsChanged(
+      const ui::TextInputClient* client) OVERRIDE {}
+  virtual void CancelComposition(const ui::TextInputClient* client) OVERRIDE {}
+  virtual std::string GetInputLocale() OVERRIDE { return ""; }
+  virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE {
+    return base::i18n::UNKNOWN_DIRECTION;
+  }
+  virtual bool IsActive() OVERRIDE { return true; }
+  virtual ui::TextInputType GetTextInputType() const OVERRIDE {
+    return ui::TEXT_INPUT_TYPE_NONE;
+  }
+  virtual bool CanComposeInline() const OVERRIDE {
+    return true;
+  }
+};
+
+}  // namespace
 #endif
 
 namespace views {
@@ -21,9 +61,22 @@ namespace views {
 ViewsTestBase::ViewsTestBase()
     : setup_called_(false),
       teardown_called_(false) {
+#if defined(OS_WIN)
+  OleInitialize(NULL);
+#endif
+#if defined(USE_AURA)
+  test_activation_client_.reset(new aura::test::TestActivationClient);
+  test_input_method_.reset(new DummyInputMethod);
+  aura::RootWindow::GetInstance()->SetProperty(
+      aura::client::kRootWindowInputMethod,
+      test_input_method_.get());
+#endif
 }
 
 ViewsTestBase::~ViewsTestBase() {
+#if defined(OS_WIN)
+  OleUninitialize();
+#endif
   CHECK(setup_called_)
       << "You have overridden SetUp but never called super class's SetUp";
   CHECK(teardown_called_)
@@ -35,53 +88,23 @@ void ViewsTestBase::SetUp() {
   setup_called_ = true;
   if (!views_delegate_.get())
     views_delegate_.reset(new TestViewsDelegate());
-#if defined(USE_AURA)
-  aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
-  aura_test_helper_->SetUp();
-  wm_state_.reset(new views::corewm::WMState);
-#endif  // USE_AURA
-  ui::InitializeInputMethodForTesting();
 }
 
 void ViewsTestBase::TearDown() {
-  ui::Clipboard::DestroyClipboardForCurrentThread();
-
   // Flush the message loop because we have pending release tasks
   // and these tasks if un-executed would upset Valgrind.
   RunPendingMessages();
   teardown_called_ = true;
   views_delegate_.reset();
   testing::Test::TearDown();
-  ui::ShutdownInputMethodForTesting();
-#if defined(USE_AURA)
-  aura_test_helper_->TearDown();
-  wm_state_.reset();
-  CHECK(!corewm::ScopedCaptureClient::IsActive());
-#endif  // USE_AURA
 }
 
 void ViewsTestBase::RunPendingMessages() {
-  base::RunLoop run_loop;
 #if defined(USE_AURA)
-  run_loop.set_dispatcher(aura::Env::GetInstance()->GetDispatcher());
-#endif
-  run_loop.RunUntilIdle();
-}
-
-Widget::InitParams ViewsTestBase::CreateParams(
-    Widget::InitParams::Type type) {
-  Widget::InitParams params(type);
-#if defined(USE_AURA)
-  params.context = aura_test_helper_->root_window();
-#endif
-  return params;
-}
-
-gfx::NativeView ViewsTestBase::GetContext() {
-#if defined(USE_AURA)
-  return aura_test_helper_->root_window();
+  message_loop_.RunAllPendingWithDispatcher(
+      aura::RootWindow::GetInstance()->GetDispatcher());
 #else
-  return NULL;
+  message_loop_.RunAllPending();
 #endif
 }
 

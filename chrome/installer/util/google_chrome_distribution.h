@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,13 +7,18 @@
 
 #ifndef CHROME_INSTALLER_UTIL_GOOGLE_CHROME_DISTRIBUTION_H_
 #define CHROME_INSTALLER_UTIL_GOOGLE_CHROME_DISTRIBUTION_H_
+#pragma once
+
+#include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/strings/string16.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/util_constants.h"
+
+class FilePath;
 
 namespace base {
-class FilePath;
+class DictionaryValue;
 }
 
 class GoogleChromeDistribution : public BrowserDistribution {
@@ -29,72 +34,72 @@ class GoogleChromeDistribution : public BrowserDistribution {
   //   the user has opted in to providing anonymous usage data.
   virtual void DoPostUninstallOperations(
       const Version& version,
-      const base::FilePath& local_data_path,
-      const base::string16& distribution_data) OVERRIDE;
+      const FilePath& local_data_path,
+      const std::wstring& distribution_data) OVERRIDE;
 
-  virtual base::string16 GetActiveSetupGuid() OVERRIDE;
+  virtual std::wstring GetAppGuid() OVERRIDE;
 
-  virtual base::string16 GetAppGuid() OVERRIDE;
+  virtual std::wstring GetApplicationName() OVERRIDE;
 
-  virtual base::string16 GetShortcutName(ShortcutType shortcut_type) OVERRIDE;
+  virtual std::wstring GetAlternateApplicationName() OVERRIDE;
 
-  virtual base::string16 GetIconFilename() OVERRIDE;
+  virtual std::wstring GetBrowserAppId() OVERRIDE;
 
-  virtual int GetIconIndex(ShortcutType shortcut_type) OVERRIDE;
+  virtual std::wstring GetInstallSubDir() OVERRIDE;
 
-  virtual base::string16 GetBaseAppName() OVERRIDE;
+  virtual std::wstring GetPublisherName() OVERRIDE;
 
-  virtual base::string16 GetBaseAppId() OVERRIDE;
-
-  virtual base::string16 GetBrowserProgIdPrefix() OVERRIDE;
-
-  virtual base::string16 GetBrowserProgIdDesc() OVERRIDE;
-
-  virtual base::string16 GetInstallSubDir() OVERRIDE;
-
-  virtual base::string16 GetPublisherName() OVERRIDE;
-
-  virtual base::string16 GetAppDescription() OVERRIDE;
+  virtual std::wstring GetAppDescription() OVERRIDE;
 
   virtual std::string GetSafeBrowsingName() OVERRIDE;
 
-  virtual base::string16 GetStateKey() OVERRIDE;
+  virtual std::wstring GetStateKey() OVERRIDE;
 
-  virtual base::string16 GetStateMediumKey() OVERRIDE;
+  virtual std::wstring GetStateMediumKey() OVERRIDE;
+
+  virtual std::wstring GetStatsServerURL() OVERRIDE;
 
   virtual std::string GetNetworkStatsServer() const OVERRIDE;
-
-  virtual std::string GetHttpPipeliningTestServer() const OVERRIDE;
 
   // This method reads data from the Google Update ClientState key for
   // potential use in the uninstall survey. It must be called before the
   // key returned by GetVersionKey() is deleted.
-  virtual base::string16 GetDistributionData(HKEY root_key) OVERRIDE;
+  virtual std::wstring GetDistributionData(HKEY root_key) OVERRIDE;
 
-  virtual base::string16 GetUninstallLinkName() OVERRIDE;
+  virtual std::wstring GetUninstallLinkName() OVERRIDE;
 
-  virtual base::string16 GetUninstallRegPath() OVERRIDE;
+  virtual std::wstring GetUninstallRegPath() OVERRIDE;
 
-  virtual base::string16 GetVersionKey() OVERRIDE;
-
-  virtual bool GetCommandExecuteImplClsid(
-      base::string16* handler_class_uuid) OVERRIDE;
-
-  virtual bool AppHostIsSupported() OVERRIDE;
+  virtual std::wstring GetVersionKey() OVERRIDE;
 
   virtual void UpdateInstallStatus(
       bool system_install,
       installer::ArchiveType archive_type,
       installer::InstallStatus install_status) OVERRIDE;
 
-  virtual bool ShouldSetExperimentLabels() OVERRIDE;
+  virtual bool GetExperimentDetails(UserExperiment* experiment,
+                                    int flavor) OVERRIDE;
 
-  virtual bool HasUserExperiments() OVERRIDE;
+  virtual void LaunchUserExperiment(
+      const FilePath& setup_path,
+      installer::InstallStatus status,
+      const Version& version,
+      const installer::Product& installation,
+      bool system_level) OVERRIDE;
 
-  const base::string16& product_guid() { return product_guid_; }
+  // Assuming that the user qualifies, this function performs the inactive user
+  // toast experiment. It will use chrome to show the UI and it will record the
+  // outcome in the registry.
+  virtual void InactiveUserToastExperiment(
+      int flavor,
+      const std::wstring& experiment_group,
+      const installer::Product& installation,
+      const FilePath& application_path) OVERRIDE;
+
+  const std::wstring& product_guid() { return product_guid_; }
 
  protected:
-  void set_product_guid(const base::string16& guid) { product_guid_ = guid; }
+  void set_product_guid(const std::wstring& guid) { product_guid_ = guid; }
 
   // Disallow construction from others.
   GoogleChromeDistribution();
@@ -102,8 +107,29 @@ class GoogleChromeDistribution : public BrowserDistribution {
  private:
   friend class BrowserDistribution;
 
+  FRIEND_TEST_ALL_PREFIXES(GoogleChromeDistTest, TestExtractUninstallMetrics);
+
+  // Extracts uninstall metrics from the JSON file located at file_path.
+  // Returns them in a form suitable for appending to a url that already
+  // has GET parameters, i.e. &metric1=foo&metric2=bar.
+  // Returns true if uninstall_metrics has been successfully populated with
+  // the uninstall metrics, false otherwise.
+  virtual bool ExtractUninstallMetricsFromFile(
+      const FilePath& file_path, std::wstring* uninstall_metrics);
+
+  // Extracts uninstall metrics from the given JSON value.
+  virtual bool ExtractUninstallMetrics(const base::DictionaryValue& root,
+                                       std::wstring* uninstall_metrics);
+
+  // Given a DictionaryValue containing a set of uninstall metrics,
+  // this builds a URL parameter list of all the contained metrics.
+  // Returns true if at least one uninstall metric was found in
+  // uninstall_metrics_dict, false otherwise.
+  virtual bool BuildUninstallMetricsString(
+      base::DictionaryValue* uninstall_metrics_dict, std::wstring* metrics);
+
   // The product ID for Google Update.
-  base::string16 product_guid_;
+  std::wstring product_guid_;
 };
 
 #endif  // CHROME_INSTALLER_UTIL_GOOGLE_CHROME_DISTRIBUTION_H_

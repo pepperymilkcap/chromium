@@ -4,20 +4,17 @@
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_BOOKMARK_MENU
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
-#import "chrome/browser/ui/cocoa/l10n_util.h"
-#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/cocoa/event_utils.h"
 #include "content/public/browser/user_metrics.h"
-#import "ui/base/cocoa/cocoa_event_utils.h"
-#import "ui/base/cocoa/menu_controller.h"
+#include "ui/base/text/text_elider.h"
 
 using content::OpenURLParams;
 using content::Referrer;
@@ -34,19 +31,29 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 @implementation BookmarkMenuCocoaController
 
 + (NSString*)menuTitleForNode:(const BookmarkNode*)node {
-  base::string16 title = [MenuController elideMenuTitle:node->GetTitle()
-                                          toWidth:kMaximumMenuPixelsWide];
+  NSFont* nsfont = [NSFont menuBarFontOfSize:0];  // 0 means "default"
+  gfx::Font font(base::SysNSStringToUTF8([nsfont fontName]),
+                 static_cast<int>([nsfont pointSize]));
+  string16 title = ui::ElideText(node->GetTitle(),
+                                 font,
+                                 kMaximumMenuPixelsWide,
+                                 ui::ELIDE_AT_END);
   return base::SysUTF16ToNSString(title);
 }
 
 + (NSString*)tooltipForNode:(const BookmarkNode*)node {
   NSString* title = base::SysUTF16ToNSString(node->GetTitle());
-  std::string urlString = node->url().possibly_invalid_spec();
-  NSString* url = base::SysUTF8ToNSString(urlString);
-  return cocoa_l10n_util::TooltipForURLAndTitle(url, title);
+  std::string url_string = node->url().possibly_invalid_spec();
+  NSString* url = [NSString stringWithUTF8String:url_string.c_str()];
+  if ([title length] == 0)
+    return url;
+  else if ([url length] == 0 || [url isEqualToString:title])
+    return title;
+  else
+    return [NSString stringWithFormat:@"%@\n%@", title, url];
 }
 
-- (id)initWithBridge:(BookmarkMenuBridge*)bridge
+- (id)initWithBridge:(BookmarkMenuBridge *)bridge
              andMenu:(NSMenu*)menu {
   if ((self = [super init])) {
     bridge_ = bridge;
@@ -69,7 +76,7 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 
 - (BOOL)validateMenuItem:(NSMenuItem*)menuItem {
   AppController* controller = [NSApp delegate];
-  return ![controller keyWindowIsModal];
+  return [controller keyWindowIsNotModal];
 }
 
 // NSMenu delegate method: called just before menu is displayed.
@@ -85,16 +92,11 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 
 // Open the URL of the given BookmarkNode in the current tab.
 - (void)openURLForNode:(const BookmarkNode*)node {
-  Browser* browser =
-      chrome::FindTabbedBrowser(bridge_->GetProfile(),
-                                true,
-                                chrome::HOST_DESKTOP_TYPE_NATIVE);
-  if (!browser) {
-    browser = new Browser(Browser::CreateParams(
-        bridge_->GetProfile(), chrome::HOST_DESKTOP_TYPE_NATIVE));
-  }
+  Browser* browser = Browser::GetTabbedBrowser(bridge_->GetProfile(), true);
+  if (!browser)
+    browser = Browser::Create(bridge_->GetProfile());
   WindowOpenDisposition disposition =
-      ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+      event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
   OpenURLParams params(
       node->url(), Referrer(), disposition,
       content::PAGE_TRANSITION_AUTO_BOOKMARK, false);
@@ -109,20 +111,16 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
   const BookmarkNode* node = [self nodeForIdentifier:identifier];
   DCHECK(node);
 
-  Browser* browser =
-      chrome::FindTabbedBrowser(bridge_->GetProfile(),
-                                true,
-                                chrome::HOST_DESKTOP_TYPE_NATIVE);
-  if (!browser) {
-    browser = new Browser(Browser::CreateParams(
-        bridge_->GetProfile(), chrome::HOST_DESKTOP_TYPE_NATIVE));
-  }
+  Browser* browser = Browser::GetTabbedBrowser(bridge_->GetProfile(), true);
+  if (!browser)
+    browser = Browser::Create(bridge_->GetProfile());
   DCHECK(browser);
 
   if (!node || !browser)
     return; // shouldn't be reached
 
-  chrome::OpenAll(NULL, browser, node, disposition, browser->profile());
+  bookmark_utils::OpenAll(NULL, browser->profile(), browser, node,
+                          disposition);
 
   if (disposition == NEW_FOREGROUND_TAB) {
     content::RecordAction(UserMetricsAction("OpenAllBookmarks"));

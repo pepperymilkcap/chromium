@@ -4,31 +4,22 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_RESOURCE_DISPATCHER_HOST_DELEGATE_H_
 #define CONTENT_PUBLIC_BROWSER_RESOURCE_DISPATCHER_HOST_DELEGATE_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
-#include "webkit/common/resource_type.h"
+#include "ipc/ipc_message.h"
+#include "webkit/glue/resource_type.h"
 
 class GURL;
-template <class T> class ScopedVector;
-
-namespace appcache {
-class AppCacheService;
-}
+class ResourceHandler;
 
 namespace content {
-class ResourceContext;
-class ResourceThrottle;
-class StreamHandle;
 struct Referrer;
+class ResourceContext;
 struct ResourceResponse;
-}
-
-namespace IPC {
-class Sender;
 }
 
 namespace net {
@@ -52,39 +43,44 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
       const std::string& method,
       const GURL& url,
       ResourceType::Type resource_type,
-      ResourceContext* resource_context);
+      const ResourceContext& resource_context,
+      const Referrer& referrer);
 
-  // Called after ShouldBeginRequest to allow the embedder to add resource
-  // throttles.
-  virtual void RequestBeginning(
+  // Called after ShouldBeginRequest when all the resource handlers from the
+  // content layer have been added.  To add new handlers to the front, return
+  // a new handler that is chained to the given one, otherwise just reutrn the
+  // given handler.
+  virtual ResourceHandler* RequestBeginning(
+      ResourceHandler* handler,
       net::URLRequest* request,
-      ResourceContext* resource_context,
-      appcache::AppCacheService* appcache_service,
-      ResourceType::Type resource_type,
+      const ResourceContext& resource_context,
+      bool is_subresource,
       int child_id,
       int route_id,
-      ScopedVector<ResourceThrottle>* throttles);
-
-  // Called if a navigation request is transferred from one process to another.
-  virtual void WillTransferRequestToNewProcess(
-      int old_child_id,
-      int old_route_id,
-      int old_request_id,
-      int new_child_id,
-      int new_route_id,
-      int new_request_id);
+      bool is_continuation_of_transferred_request);
 
   // Allows an embedder to add additional resource handlers for a download.
-  // |must_download| is set if the request must be handled as a download.
-  virtual void DownloadStarting(
+  // |is_new_request| is true if this is a request that is just starting, i.e.
+  // the content layer has just added its own resource handlers; it's false if
+  // this was originally a non-download request that had some resource handlers
+  // applied already and now we found out it's a download.
+  // |in_complete| is true if this is invoked from |OnResponseCompleted|.
+  virtual ResourceHandler* DownloadStarting(
+      ResourceHandler* handler,
+      const ResourceContext& resource_context,
       net::URLRequest* request,
-      ResourceContext* resource_context,
       int child_id,
       int route_id,
       int request_id,
-      bool is_content_initiated,
-      bool must_download,
-      ScopedVector<ResourceThrottle>* throttles);
+      bool is_new_request);
+
+  // Called to determine whether a request's start should be deferred. This
+  // is only called if the ResourceHandler associated with the request does
+  // not ask for a deferral. A return value of true will defer the start of
+  // the request, false will continue the request.
+  virtual bool ShouldDeferStart(
+      net::URLRequest* request,
+      const ResourceContext& resource_context);
 
   // Called when an SSL Client Certificate is requested. If false is returned,
   // the request is canceled. Otherwise, the certificate is chosen.
@@ -104,10 +100,8 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
   virtual ResourceDispatcherHostLoginDelegate* CreateLoginDelegate(
       net::AuthChallengeInfo* auth_info, net::URLRequest* request);
 
-  // Launches the url for the given tab. Returns true if an attempt to handle
-  // the url was made, e.g. by launching an app. Note that this does not
-  // guarantee that the app successfully handled it.
-  virtual bool HandleExternalProtocol(const GURL& url,
+  // Launches the url for the given tab.
+  virtual void HandleExternalProtocol(const GURL& url,
                                       int child_id,
                                       int route_id);
 
@@ -116,45 +110,15 @@ class CONTENT_EXPORT ResourceDispatcherHostDelegate {
   virtual bool ShouldForceDownloadResource(
       const GURL& url, const std::string& mime_type);
 
-  // Returns true and sets |origin| and |target_id| if a Stream should be
-  // created for the resource.
-  // If true is returned, a new Stream will be created and OnStreamCreated()
-  // will be called with
-  // - the |target_id| returned by this function
-  // - a StreamHandle instance for the Stream. The handle contains the URL for
-  //   reading the Stream etc.
-  // The Stream's origin will be set to |origin|.
-  virtual bool ShouldInterceptResourceAsStream(
-      content::ResourceContext* resource_context,
-      const GURL& url,
-      const std::string& mime_type,
-      GURL* origin,
-      std::string* target_id);
-
-  // Informs the delegate that a Stream was created. |target_id| will be filled
-  // with the parameter returned by ShouldInterceptResourceAsStream(). The
-  // Stream can be read from the blob URL of the Stream, but can only be read
-  // once.
-  virtual void OnStreamCreated(
-      content::ResourceContext* resource_context,
-      int render_process_id,
-      int render_view_id,
-      const std::string& target_id,
-      scoped_ptr<StreamHandle> stream,
-      int64 expected_content_size);
-
   // Informs the delegate that a response has started.
   virtual void OnResponseStarted(
       net::URLRequest* request,
-      ResourceContext* resource_context,
       ResourceResponse* response,
-      IPC::Sender* sender);
+      IPC::Message::Sender* sender);
 
   // Informs the delegate that a request has been redirected.
   virtual void OnRequestRedirected(
-      const GURL& redirect_url,
       net::URLRequest* request,
-      ResourceContext* resource_context,
       ResourceResponse* response);
 
  protected:

@@ -2,51 +2,51 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "media/base/data_buffer.h"
-
 #include "base/logging.h"
+#include "media/base/data_buffer.h"
 
 namespace media {
 
-DataBuffer::DataBuffer(int buffer_size)
-    : buffer_size_(buffer_size),
-      data_size_(0) {
-  CHECK_GE(buffer_size, 0);
-  data_.reset(new uint8[buffer_size_]);
-}
-
-DataBuffer::DataBuffer(scoped_ptr<uint8[]> buffer, int buffer_size)
+DataBuffer::DataBuffer(scoped_array<uint8> buffer, size_t buffer_size)
     : data_(buffer.Pass()),
       buffer_size_(buffer_size),
       data_size_(buffer_size) {
-  CHECK(data_.get());
-  CHECK_GE(buffer_size, 0);
 }
 
-DataBuffer::DataBuffer(const uint8* data, int data_size)
-    : buffer_size_(data_size),
-      data_size_(data_size) {
-  if (!data) {
-    CHECK_EQ(data_size, 0);
-    return;
-  }
+DataBuffer::DataBuffer(size_t buffer_size)
+    : data_(new uint8[buffer_size]),
+      buffer_size_(buffer_size),
+      data_size_(0) {
+  CHECK(data_.get()) << "DataBuffer ctor failed to allocate memory";
 
-  CHECK_GE(data_size, 0);
-  data_.reset(new uint8[buffer_size_]);
-  memcpy(data_.get(), data, data_size_);
+  // Prevent arbitrary pointers.
+  if (buffer_size == 0)
+    data_.reset(NULL);
 }
 
-DataBuffer::~DataBuffer() {}
-
-// static
-scoped_refptr<DataBuffer> DataBuffer::CopyFrom(const uint8* data, int size) {
-  // If you hit this CHECK you likely have a bug in a demuxer. Go fix it.
-  CHECK(data);
-  return make_scoped_refptr(new DataBuffer(data, size));
+DataBuffer::~DataBuffer() {
 }
 
-// static
-scoped_refptr<DataBuffer> DataBuffer::CreateEOSBuffer() {
-  return make_scoped_refptr(new DataBuffer(NULL, 0));
+const uint8* DataBuffer::GetData() const {
+  return data_.get();
 }
+
+size_t DataBuffer::GetDataSize() const {
+  return data_size_;
+}
+
+uint8* DataBuffer::GetWritableData() {
+  return data_.get();
+}
+
+
+void DataBuffer::SetDataSize(size_t data_size) {
+  DCHECK_LE(data_size, buffer_size_);
+  data_size_ = data_size;
+}
+
+size_t DataBuffer::GetBufferSize() const {
+  return buffer_size_;
+}
+
 }  // namespace media

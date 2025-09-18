@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_FOCUS_EXTERNAL_FOCUS_TRACKER_H_
 #define UI_VIEWS_FOCUS_EXTERNAL_FOCUS_TRACKER_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "ui/views/focus/focus_manager.h"
@@ -29,9 +30,9 @@ class ViewStorage;
 class VIEWS_EXPORT ExternalFocusTracker : public FocusChangeListener {
  public:
   ExternalFocusTracker(View* parent_view, FocusManager* focus_manager);
-  virtual ~ExternalFocusTracker();
 
-  // FocusChangeListener:
+  virtual ~ExternalFocusTracker();
+  // FocusChangeListener implementation.
   virtual void OnWillChangeFocus(View* focused_before,
                                  View* focused_now) OVERRIDE;
   virtual void OnDidChangeFocus(View* focused_before,

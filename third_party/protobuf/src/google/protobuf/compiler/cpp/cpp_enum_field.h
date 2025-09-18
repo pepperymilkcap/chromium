@@ -46,8 +46,7 @@ namespace cpp {
 
 class EnumFieldGenerator : public FieldGenerator {
  public:
-  explicit EnumFieldGenerator(const FieldDescriptor* descriptor,
-                              const Options& options);
+  explicit EnumFieldGenerator(const FieldDescriptor* descriptor);
   ~EnumFieldGenerator();
 
   // implements FieldGenerator ---------------------------------------
@@ -72,8 +71,7 @@ class EnumFieldGenerator : public FieldGenerator {
 
 class RepeatedEnumFieldGenerator : public FieldGenerator {
  public:
-  explicit RepeatedEnumFieldGenerator(const FieldDescriptor* descriptor,
-                                      const Options& options);
+  explicit RepeatedEnumFieldGenerator(const FieldDescriptor* descriptor);
   ~RepeatedEnumFieldGenerator();
 
   // implements FieldGenerator ---------------------------------------

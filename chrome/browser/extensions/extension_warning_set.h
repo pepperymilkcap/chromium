@@ -4,27 +4,21 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_WARNING_SET_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_WARNING_SET_H_
+#pragma once
 
 #include <set>
 #include <string>
-#include <vector>
 
-#include "url/gurl.h"
+#include "base/string16.h"
 
-// TODO(battre) Remove the Extension prefix.
+class ExtensionWarning;
+class ExtensionGlobalErrorBadge;
+class Profile;
 
-namespace base {
-class FilePath;
-}
-
-namespace extensions {
-
-class ExtensionSet;
-
-// This class is used by the ExtensionWarningService to represent warnings if
-// extensions misbehave. Note that the ExtensionWarningService deals only with
-// specific warnings that should trigger a badge on the Chrome menu button.
-class ExtensionWarning {
+// A set of warnings caused by extensions. These warnings (e.g. conflicting
+// modifications of network requests by extensions, slow extensions, etc.)
+// trigger a warning badge in the UI and and provide means to resolve them.
+class ExtensionWarningSet {
  public:
   enum WarningType {
     // Don't use this, it is only intended for the default constructor and
@@ -35,87 +29,67 @@ class ExtensionWarning {
     // This extension failed to modify a network request because the
     // modification conflicted with a modification of another extension.
     kNetworkConflict,
-    // This extension failed to redirect a network request because another
-    // extension with higher precedence redirected to a different target.
-    kRedirectConflict,
     // The extension repeatedly flushed WebKit's in-memory cache, which slows
     // down the overall performance.
     kRepeatedCacheFlushes,
-    // The extension failed to determine the filename of a download because
-    // another extension with higher precedence determined a different filename.
-    kDownloadFilenameConflict,
     kMaxWarningType
   };
 
-  // We allow copy&assign for passing containers of ExtensionWarnings between
-  // threads.
-  ExtensionWarning(const ExtensionWarning& other);
-  ~ExtensionWarning();
-  ExtensionWarning& operator=(const ExtensionWarning& other);
+  // Returns a localized string describing |warning_type|.
+  static string16 GetLocalizedWarning(WarningType warning_type);
 
-  // Factory methods for various warning types.
-  static ExtensionWarning CreateNetworkDelayWarning(
-      const std::string& extension_id);
-  static ExtensionWarning CreateNetworkConflictWarning(
-      const std::string& extension_id);
-  static ExtensionWarning CreateRedirectConflictWarning(
-      const std::string& extension_id,
-      const std::string& winning_extension_id,
-      const GURL& attempted_redirect_url,
-      const GURL& winning_redirect_url);
-  static ExtensionWarning CreateRequestHeaderConflictWarning(
-      const std::string& extension_id,
-      const std::string& winning_extension_id,
-      const std::string& conflicting_header);
-  static ExtensionWarning CreateResponseHeaderConflictWarning(
-      const std::string& extension_id,
-      const std::string& winning_extension_id,
-      const std::string& conflicting_header);
-  static ExtensionWarning CreateCredentialsConflictWarning(
-      const std::string& extension_id,
-      const std::string& winning_extension_id);
-  static ExtensionWarning CreateRepeatedCacheFlushesWarning(
-      const std::string& extension_id);
-  static ExtensionWarning CreateDownloadFilenameConflictWarning(
-      const std::string& losing_extension_id,
-      const std::string& winning_extension_id,
-      const base::FilePath& losing_filename,
-      const base::FilePath& winning_filename);
+  // |profile| may be NULL for testing. In this case, be sure to not insert
+  // any warnings.
+  explicit ExtensionWarningSet(Profile* profile);
+  virtual ~ExtensionWarningSet();
 
-  // Returns the specific warning type.
-  WarningType warning_type() const { return type_; }
+  // Adds a warning and triggers a chrome::NOTIFICATION_EXTENSION_WARNING
+  // message if this warning is is new. If the warning is new and has not
+  // been suppressed, this may activate a badge on the wrench menu.
+  void SetWarning(ExtensionWarningSet::WarningType type,
+                  const std::string& extension_id);
 
-  // Returns the id of the extension for which this warning is valid.
-  const std::string& extension_id() const { return extension_id_; }
+  // Clears all warnings of types contained in |types| and triggers a
+  // chrome::NOTIFICATION_EXTENSION_WARNING message if such warnings existed.
+  // If no warning remains that is not suppressed, this may deactivate a
+  // warning badge on the wrench mennu.
+  void ClearWarnings(const std::set<WarningType>& types);
 
-  // Returns a localized warning message.
-  std::string GetLocalizedMessage(const ExtensionSet* extensions) const;
+  // Suppresses showing a badge for all currently existing warnings in the
+  // future.
+  void SuppressBadgeForCurrentWarnings();
+
+  // Stores all warnings for extension |extension_id| in |result|. The previous
+  // content of |result| is erased.
+  void GetWarningsAffectingExtension(
+      const std::string& extension_id,
+      std::set<WarningType>* result) const;
+
+  // Notifies the ExtensionWarningSet of profile |profile_id| that
+  // |extension_ids| caused warning |warning_type|. This function must only be
+  // called on the UI thread.
+  static void NotifyWarningsOnUI(void* profile_id,
+                                 std::set<std::string> extension_ids,
+                                 WarningType warning_type);
+
+ protected:
+  // Virtual for testing.
+  virtual void NotifyWarningsChanged();
 
  private:
-  // Constructs a warning of type |type| for extension |extension_id|. This
-  // could indicate for example the fact that an extension conflicted with
-  // others. The |message_id| refers to an IDS_ string ID. The
-  // |message_parameters| are filled into the message template.
-  ExtensionWarning(WarningType type,
-                   const std::string& extension_id,
-                   int message_id,
-                   const std::vector<std::string>& message_parameters);
+  typedef std::set<ExtensionWarning>::const_iterator const_iterator;
 
-  WarningType type_;
-  std::string extension_id_;
-  // IDS_* resource ID.
-  int message_id_;
-  // Parameters to be filled into the string identified by |message_id_|.
-  std::vector<std::string> message_parameters_;
+  // Shows or hides the warning badge on the wrench menu depending on whether
+  // any non-suppressed warnings exist.
+  void UpdateWarningBadge();
+
+  // Currently existing warnings.
+  std::set<ExtensionWarning> warnings_;
+
+  // Warnings that do not trigger a badge on the wrench menu.
+  std::set<ExtensionWarning> badge_suppressions_;
+
+  Profile* profile_;
 };
-
-// Compare ExtensionWarnings based on the tuple of (extension_id, type).
-// The message associated with ExtensionWarnings is purely informational
-// and does not contribute to distinguishing extensions.
-bool operator<(const ExtensionWarning& a, const ExtensionWarning& b);
-
-typedef std::set<ExtensionWarning> ExtensionWarningSet;
-
-}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_WARNING_SET_H_

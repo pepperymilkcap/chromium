@@ -4,10 +4,11 @@
 
 #ifndef BASE_TEST_THREAD_TEST_HELPER_H_
 #define BASE_TEST_THREAD_TEST_HELPER_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop_proxy.h"
 #include "base/synchronization/waitable_event.h"
 
 namespace base {

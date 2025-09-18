@@ -5,135 +5,100 @@
 #include "chrome/browser/ui/tab_modal_confirm_dialog_browsertest.h"
 
 #include "base/bind.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/ui/browser.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/page_navigator.h"
-#include "content/public/browser/web_contents.h"
+#include "content/browser/tab_contents/test_tab_contents.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/window_open_disposition.h"
 
-MockTabModalConfirmDialogDelegate::MockTabModalConfirmDialogDelegate(
-    content::WebContents* web_contents,
-    Delegate* delegate)
-    : TabModalConfirmDialogDelegate(web_contents),
-      delegate_(delegate) {
-}
+class MockTabModalConfirmDialogDelegate : public TabModalConfirmDialogDelegate {
+ public:
+  explicit MockTabModalConfirmDialogDelegate(content::WebContents* web_contents)
+      : TabModalConfirmDialogDelegate(web_contents) {}
 
-MockTabModalConfirmDialogDelegate::~MockTabModalConfirmDialogDelegate() {
-}
+  virtual string16 GetTitle() OVERRIDE {
+    return ASCIIToUTF16("");
+  }
+  virtual string16 GetMessage() OVERRIDE {
+    return ASCIIToUTF16("");
+  }
 
-base::string16 MockTabModalConfirmDialogDelegate::GetTitle() {
-  return base::string16();
-}
+  MOCK_METHOD0(OnAccepted, void());
+  MOCK_METHOD0(OnCanceled, void());
 
-base::string16 MockTabModalConfirmDialogDelegate::GetMessage() {
-  return base::string16();
-}
-
-void MockTabModalConfirmDialogDelegate::OnAccepted() {
-  if (delegate_)
-    delegate_->OnAccepted();
-}
-
-void MockTabModalConfirmDialogDelegate::OnCanceled() {
-  if (delegate_)
-    delegate_->OnCanceled();
-}
-
-void MockTabModalConfirmDialogDelegate::OnClosed() {
-  if (delegate_)
-    delegate_->OnClosed();
-}
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockTabModalConfirmDialogDelegate);
+};
 
 TabModalConfirmDialogTest::TabModalConfirmDialogTest()
     : delegate_(NULL),
-      dialog_(NULL),
-      accepted_count_(0),
-      canceled_count_(0),
-      closed_count_(0) {
-}
+      dialog_(NULL) {}
 
 void TabModalConfirmDialogTest::SetUpOnMainThread() {
   delegate_ = new MockTabModalConfirmDialogDelegate(
-      browser()->tab_strip_model()->GetActiveWebContents(), this);
-  dialog_ = TabModalConfirmDialog::Create(
-      delegate_, browser()->tab_strip_model()->GetActiveWebContents());
-  content::RunAllPendingInMessageLoop();
+      browser()->GetSelectedWebContents());
+  dialog_ = CreateTestDialog(delegate_,
+                             browser()->GetSelectedTabContentsWrapper());
+  ui_test_utils::RunAllPendingInMessageLoop();
 }
 
 void TabModalConfirmDialogTest::CleanUpOnMainThread() {
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
+  ::testing::Mock::VerifyAndClearExpectations(delegate_);
 }
 
-void TabModalConfirmDialogTest::OnAccepted() {
-  ++accepted_count_;
+// On Mac OS, these methods need to be compiled as Objective-C++, so they're in
+// a separate file.
+#if !defined(OS_MACOSX)
+TabModalConfirmDialog* TabModalConfirmDialogTest::CreateTestDialog(
+    TabModalConfirmDialogDelegate* delegate, TabContentsWrapper* wrapper) {
+  return new TabModalConfirmDialog(delegate, wrapper);
 }
 
-void TabModalConfirmDialogTest::OnCanceled() {
-  ++canceled_count_;
+void TabModalConfirmDialogTest::CloseDialog(bool accept) {
+#if defined(TOOLKIT_GTK)
+  if (accept)
+    dialog_->OnAccept(NULL);
+  else
+    dialog_->OnCancel(NULL);
+#elif defined(OS_CHROMEOS) || defined(USE_AURA)
+  // |dialog_| deletes itself in |OnDialogClosed()|, so we need to save its
+  // ConstrainedHTMLUIDelegate before that.
+  ConstrainedHtmlUIDelegate* constrained_html_ui_delegate =
+      dialog_->constrained_html_ui_delegate();
+  dialog_->OnDialogClosed(accept ? "true" : "false");
+  constrained_html_ui_delegate->OnDialogCloseFromWebUI();
+#elif defined(OS_WIN)
+  if (accept)
+    dialog_->GetDialogClientView()->AcceptWindow();
+  else
+    dialog_->GetDialogClientView()->CancelWindow();
+#endif
 }
-
-void TabModalConfirmDialogTest::OnClosed() {
-  ++closed_count_;
-}
+#endif  // !defined(OS_MACOSX)
 
 IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, Accept) {
-  dialog_->AcceptTabModalDialog();
-  EXPECT_EQ(1, accepted_count_);
-  EXPECT_EQ(0, canceled_count_);
-  EXPECT_EQ(0, closed_count_);
+  EXPECT_CALL(*delegate_, OnAccepted());
+  CloseDialog(true);
 }
 
 IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, Cancel) {
-  dialog_->CancelTabModalDialog();
-  EXPECT_EQ(0, accepted_count_);
-  EXPECT_EQ(1, canceled_count_);
-  EXPECT_EQ(0, closed_count_);
+  EXPECT_CALL(*delegate_, OnCanceled());
+  CloseDialog(false);
 }
 
 IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, CancelSelf) {
+  EXPECT_CALL(*delegate_, OnCanceled());
   delegate_->Cancel();
-  EXPECT_EQ(0, accepted_count_);
-  EXPECT_EQ(1, canceled_count_);
-  EXPECT_EQ(0, closed_count_);
-}
-
-IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, Close) {
-  dialog_->CloseDialog();
-  EXPECT_EQ(0, accepted_count_);
-  EXPECT_EQ(0, canceled_count_);
-  EXPECT_EQ(1, closed_count_);
-}
-
-IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, CloseSelf) {
-  delegate_->Close();
-  EXPECT_EQ(0, accepted_count_);
-  EXPECT_EQ(0, canceled_count_);
-  EXPECT_EQ(1, closed_count_);
-}
-
-IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, Navigate) {
-  content::OpenURLParams params(GURL("about:blank"),
-                                content::Referrer(),
-                                CURRENT_TAB,
-                                content::PAGE_TRANSITION_LINK,
-                                false);
-  browser()->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
-
-  EXPECT_EQ(0, accepted_count_);
-  EXPECT_EQ(0, canceled_count_);
-  EXPECT_EQ(1, closed_count_);
 }
 
 IN_PROC_BROWSER_TEST_F(TabModalConfirmDialogTest, Quit) {
-  base::MessageLoopForUI::current()->PostTask(FROM_HERE,
-                                              base::Bind(&chrome::AttemptExit));
-  content::RunMessageLoop();
-  EXPECT_EQ(0, accepted_count_);
-  EXPECT_EQ(0, canceled_count_);
-  EXPECT_EQ(1, closed_count_);
+  EXPECT_CALL(*delegate_, OnCanceled());
+  MessageLoopForUI::current()->PostTask(FROM_HERE,
+                                        base::Bind(&BrowserList::AttemptExit));
+  ui_test_utils::RunMessageLoop();
 }

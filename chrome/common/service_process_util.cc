@@ -1,18 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <algorithm>
 
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/sha1.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string16.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -67,9 +69,9 @@ ServiceProcessRunningState GetServiceProcessRunningState(
   if (service_version_out)
     *service_version_out = version;
 
-  Version service_version(version);
+  scoped_ptr<Version> service_version(Version::GetVersionFromString(version));
   // If the version string is invalid, treat it like an older version.
-  if (!service_version.IsValid())
+  if (!service_version.get())
     return SERVICE_OLDER_VERSION_RUNNING;
 
   // Get the version of the currently *running* instance of Chrome.
@@ -80,17 +82,18 @@ ServiceProcessRunningState GetServiceProcessRunningState(
     // are out of date.
     return SERVICE_NEWER_VERSION_RUNNING;
   }
-  Version running_version(version_info.Version());
-  if (!running_version.IsValid()) {
+  scoped_ptr<Version> running_version(Version::GetVersionFromString(
+      version_info.Version()));
+  if (!running_version.get()) {
     NOTREACHED() << "Failed to parse version info";
     // Our own version is invalid. This is an error case. Pretend that we
     // are out of date.
     return SERVICE_NEWER_VERSION_RUNNING;
   }
 
-  if (running_version.CompareTo(service_version) > 0) {
+  if (running_version->CompareTo(*service_version) > 0) {
     return SERVICE_OLDER_VERSION_RUNNING;
-  } else if (service_version.CompareTo(running_version) > 0) {
+  } else if (service_version->CompareTo(*running_version) > 0) {
     return SERVICE_NEWER_VERSION_RUNNING;
   }
   return SERVICE_SAME_VERSION_RUNNING;
@@ -102,10 +105,10 @@ ServiceProcessRunningState GetServiceProcessRunningState(
 // use the hash of the user-data-dir as a scoping prefix. We can't use
 // the user-data-dir itself as we have limits on the size of the lock names.
 std::string GetServiceProcessScopedName(const std::string& append_str) {
-  base::FilePath user_data_dir;
+  FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
 #if defined(OS_WIN)
-  std::string user_data_dir_path = base::WideToUTF8(user_data_dir.value());
+  std::string user_data_dir_path = WideToUTF8(user_data_dir.value());
 #elif defined(OS_POSIX)
   std::string user_data_dir_path = user_data_dir.value();
 #endif  // defined(OS_WIN)
@@ -248,7 +251,7 @@ IPC::ChannelHandle ServiceProcessState::GetServiceProcessChannel() {
 #endif  // !OS_MACOSX
 
 void ServiceProcessState::CreateAutoRunCommandLine() {
-  base::FilePath exe_path;
+  FilePath exe_path;
   PathService::Get(content::CHILD_PROCESS_EXE, &exe_path);
   DCHECK(!exe_path.empty()) << "Unable to get service process binary name.";
   autorun_command_line_.reset(new CommandLine(exe_path));
@@ -258,7 +261,7 @@ void ServiceProcessState::CreateAutoRunCommandLine() {
   // The user data directory is the only other flag we currently want to
   // possibly store.
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
-  base::FilePath user_data_dir =
+  FilePath user_data_dir =
     browser_command_line.GetSwitchValuePath(switches::kUserDataDir);
   if (!user_data_dir.empty())
     autorun_command_line_->AppendSwitchPath(switches::kUserDataDir,

@@ -4,12 +4,10 @@
 
 #ifndef UI_GFX_PLATFORM_FONT_PANGO_H_
 #define UI_GFX_PLATFORM_FONT_PANGO_H_
-
-#include <string>
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/platform_font.h"
 
@@ -18,9 +16,10 @@ class SkPaint;
 
 namespace gfx {
 
-class GFX_EXPORT PlatformFontPango : public PlatformFont {
+class UI_EXPORT PlatformFontPango : public PlatformFont {
  public:
   PlatformFontPango();
+  explicit PlatformFontPango(const Font& other);
   explicit PlatformFontPango(NativeFont native_font);
   PlatformFontPango(const std::string& font_name, int font_size);
 
@@ -33,14 +32,9 @@ class GFX_EXPORT PlatformFontPango : public PlatformFont {
   // the locale has changed.
   static void ReloadDefaultFont();
 
-#if defined(OS_CHROMEOS)
-  // Sets the default font.
-  static void SetDefaultFontDescription(const std::string& font_description);
-#endif
-
   // Position as an offset from the height of the drawn text, used to draw
   // an underline. This is a negative number, so the underline would be
-  // drawn at y + height + underline_position.
+  // drawn at y + height + underline_position;
   double underline_position() const;
   // The thickness to draw the underline.
   double underline_thickness() const;
@@ -49,42 +43,34 @@ class GFX_EXPORT PlatformFontPango : public PlatformFont {
   virtual Font DeriveFont(int size_delta, int style) const OVERRIDE;
   virtual int GetHeight() const OVERRIDE;
   virtual int GetBaseline() const OVERRIDE;
-  virtual int GetCapHeight() const OVERRIDE;
   virtual int GetAverageCharacterWidth() const OVERRIDE;
-  virtual int GetStringWidth(const base::string16& text) const OVERRIDE;
   virtual int GetExpectedTextWidth(int length) const OVERRIDE;
   virtual int GetStyle() const OVERRIDE;
   virtual std::string GetFontName() const OVERRIDE;
-  virtual std::string GetActualFontNameForTesting() const OVERRIDE;
   virtual int GetFontSize() const OVERRIDE;
   virtual NativeFont GetNativeFont() const OVERRIDE;
 
  private:
   // Create a new instance of this object with the specified properties. Called
   // from DeriveFont.
-  PlatformFontPango(const skia::RefPtr<SkTypeface>& typeface,
+  PlatformFontPango(SkTypeface* typeface,
                     const std::string& name,
                     int size,
                     int style);
   virtual ~PlatformFontPango();
 
-  // Returns a Pango font description (suitable for parsing by
-  // pango_font_description_from_string()) for the default UI font.
-  static std::string GetDefaultFont();
-
   // Initialize this object.
   void InitWithNameAndSize(const std::string& font_name, int font_size);
-  void InitWithTypefaceNameSizeAndStyle(
-      const skia::RefPtr<SkTypeface>& typeface,
-      const std::string& font_family,
-      int font_size,
-      int style);
+  void InitWithTypefaceNameSizeAndStyle(SkTypeface* typeface,
+                                        const std::string& name,
+                                        int size,
+                                        int style);
   void InitFromPlatformFont(const PlatformFontPango* other);
 
   // Potentially slow call to get pango metrics (average width, underline info).
   void InitPangoMetrics();
 
-  // Setup a Skia context to use the current typeface.
+  // Setup a Skia context to use the current typeface
   void PaintSetup(SkPaint* paint) const;
 
   // Make |this| a copy of |other|.
@@ -93,7 +79,11 @@ class GFX_EXPORT PlatformFontPango : public PlatformFont {
   // The average width of a character, initialized and cached if needed.
   double GetAverageWidth() const;
 
-  skia::RefPtr<SkTypeface> typeface_;
+  // These two both point to the same SkTypeface. We use the SkAutoUnref to
+  // handle the reference counting, but without @typeface_ we would have to
+  // cast the SkRefCnt from @typeface_helper_ every time.
+  scoped_ptr<SkAutoUnref> typeface_helper_;
+  SkTypeface* typeface_;
 
   // Additional information about the face
   // Skia actually expects a family name and not a font name.
@@ -101,10 +91,9 @@ class GFX_EXPORT PlatformFontPango : public PlatformFont {
   int font_size_pixels_;
   int style_;
 
-  // Cached metrics, generated at construction.
+  // Cached metrics, generated at construction
   int height_pixels_;
   int ascent_pixels_;
-  int cap_height_pixels_;
 
   // The pango metrics are much more expensive so we wait until we need them
   // to compute them.
@@ -115,12 +104,6 @@ class GFX_EXPORT PlatformFontPango : public PlatformFont {
 
   // The default font, used for the default constructor.
   static Font* default_font_;
-
-#if defined(OS_CHROMEOS)
-  static std::string* default_font_description_;
-#endif
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformFontPango);
 };
 
 }  // namespace gfx

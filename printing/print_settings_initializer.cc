@@ -8,99 +8,61 @@
 #include <cmath>
 #include <string>
 
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/i18n/time_formatting.h"
+#include "base/string_number_conversions.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "printing/page_size_margins.h"
+#include "googleurl/src/gurl.h"
 #include "printing/print_job_constants.h"
 #include "printing/print_settings.h"
 #include "printing/units.h"
+#include "ui/base/text/text_elider.h"
+
+using base::DictionaryValue;
 
 namespace printing {
 
-bool PrintSettingsInitializer::InitSettings(
-    const base::DictionaryValue& job_settings,
-    const PageRanges& ranges,
-    PrintSettings* settings) {
-  bool display_header_footer = false;
+void PrintSettingsInitializer::InitHeaderFooterStrings(
+      const DictionaryValue& job_settings,
+      PrintSettings* print_settings) {
   if (!job_settings.GetBoolean(kSettingHeaderFooterEnabled,
-                               &display_header_footer)) {
-    return false;
+                               &print_settings->display_header_footer)) {
+    NOTREACHED();
   }
-  settings->set_display_header_footer(display_header_footer);
+  if (!print_settings->display_header_footer)
+    return;
 
-  if (settings->display_header_footer()) {
-    base::string16 title;
-    base::string16 url;
-    if (!job_settings.GetString(kSettingHeaderFooterTitle, &title) ||
-        !job_settings.GetString(kSettingHeaderFooterURL, &url)) {
-      return false;
-    }
-    settings->set_title(title);
-    settings->set_url(url);
+  string16 date = base::TimeFormatShortDateNumeric(base::Time::Now());
+  string16 title;
+  std::string url;
+  if (!job_settings.GetString(kSettingHeaderFooterTitle, &title) ||
+      !job_settings.GetString(kSettingHeaderFooterURL, &url)) {
+    NOTREACHED();
   }
 
-  bool backgrounds = false;
-  bool selection_only = false;
-  if (!job_settings.GetBoolean(kSettingShouldPrintBackgrounds, &backgrounds) ||
-      !job_settings.GetBoolean(kSettingShouldPrintSelectionOnly,
-                               &selection_only)) {
-    return false;
-  }
-  settings->set_should_print_backgrounds(backgrounds);
-  settings->set_selection_only(selection_only);
+  gfx::Font font(
+      kSettingHeaderFooterFontName,
+      ceil(ConvertPointsToPixelDouble(kSettingHeaderFooterFontSize)));
+  double segment_width = GetHeaderFooterSegmentWidth(ConvertUnitDouble(
+      print_settings->page_setup_device_units().physical_size().width(),
+      print_settings->device_units_per_inch(), kPixelsPerInch));
+  date = ui::ElideText(date, font, segment_width, ui::ELIDE_AT_END);
+  print_settings->date = date;
 
-  int margin_type = DEFAULT_MARGINS;
-  if (!job_settings.GetInteger(kSettingMarginsType, &margin_type) ||
-      (margin_type != DEFAULT_MARGINS &&
-       margin_type != NO_MARGINS &&
-       margin_type != CUSTOM_MARGINS &&
-       margin_type != PRINTABLE_AREA_MARGINS)) {
-    margin_type = DEFAULT_MARGINS;
-  }
-  settings->set_margin_type(static_cast<MarginType>(margin_type));
+  // Calculate the available title width. If the date string is not long
+  // enough, increase the available space for the title.
+  // Assumes there is no header text to RIGHT of title.
+  double date_width = font.GetStringWidth(date);
+  double max_title_width = std::min(2 * segment_width,
+                                    2 * (segment_width - date_width) +
+                                        segment_width);
+  print_settings->title =
+      ui::ElideText(title, font, max_title_width, ui::ELIDE_AT_END);
 
-  if (margin_type == CUSTOM_MARGINS) {
-    PageSizeMargins page_size_margins;
-    GetCustomMarginsFromJobSettings(job_settings, &page_size_margins);
-
-    PageMargins margins_in_points;
-    margins_in_points.Clear();
-    margins_in_points.top = page_size_margins.margin_top;
-    margins_in_points.bottom = page_size_margins.margin_bottom;
-    margins_in_points.left = page_size_margins.margin_left;
-    margins_in_points.right = page_size_margins.margin_right;
-
-    settings->SetCustomMargins(margins_in_points);
-  }
-
-  settings->set_ranges(ranges);
-
-  int color = 0;
-  bool landscape = false;
-  int duplex_mode = 0;
-  base::string16 device_name;
-  bool collate = false;
-  int copies = 1;
-
-  if (!job_settings.GetBoolean(kSettingCollate, &collate) ||
-      !job_settings.GetInteger(kSettingCopies, &copies) ||
-      !job_settings.GetInteger(kSettingColor, &color) ||
-      !job_settings.GetInteger(kSettingDuplexMode, &duplex_mode) ||
-      !job_settings.GetBoolean(kSettingLandscape, &landscape) ||
-      !job_settings.GetString(kSettingDeviceName, &device_name)) {
-    return false;
-  }
-
-  settings->set_collate(collate);
-  settings->set_copies(copies);
-  settings->SetOrientation(landscape);
-  settings->set_device_name(device_name);
-  settings->set_duplex_mode(static_cast<DuplexMode>(duplex_mode));
-  settings->set_color(static_cast<ColorModel>(color));
-
-  return true;
+  double max_url_width = 2 * segment_width;
+  GURL gurl(url);
+  print_settings->url = ui::ElideUrl(gurl, font, max_url_width, std::string());
 }
 
 }  // namespace printing

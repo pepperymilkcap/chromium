@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From pp_input_event.idl modified Thu Mar 28 10:52:59 2013. */
+/* From pp_input_event.idl modified Wed Oct  5 14:06:02 2011. */
 
 #ifndef PPAPI_C_PP_INPUT_EVENT_H_
 #define PPAPI_C_PP_INPUT_EVENT_H_
@@ -68,8 +68,8 @@ PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_InputEvent_Key, 8);
  * accent up (it didn't generate a character), letter key down, letter with
  * accent character event (it was modified by the previous accent key), letter
  * key up.  If the letter can't be combined with the accent, like an umlaut and
- * an 'R', the system might send umlaut down, umlaut up, 'R' key down, umlaut
- * character (can't combine it with 'R', so just send the raw umlaut so it
+ * an 'R', the system might send unlaut down, umlaut up, 'R' key down, umlaut
+ * character (can't combine it with 'R', so just send the raw unlaut so it
  * isn't lost"), 'R' character event, 'R' key up.
  */
 struct PP_InputEvent_Character {
@@ -79,7 +79,7 @@ struct PP_InputEvent_Character {
    * This value represents the typed character as a single null-terminated UTF-8
    * character. Any unused bytes will be filled with null bytes. Since the
    * maximum UTF-8 character is 4 bytes, there will always be at least one null
-   * at the end so you can treat this as a null-terminated UTF-8 string.
+   * at the end so you can treat this as a null-termianted UTF-8 string.
    */
   char text[5];
 };

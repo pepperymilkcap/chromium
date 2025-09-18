@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/threading/thread.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
-#include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -23,14 +22,7 @@ namespace gpu {
 class CommandBufferServiceTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    {
-      TransferBufferManager* manager = new TransferBufferManager();
-      transfer_buffer_manager_.reset(manager);
-      EXPECT_TRUE(manager->Initialize());
-    }
-    command_buffer_.reset(
-        new CommandBufferService(transfer_buffer_manager_.get()));
-    EXPECT_TRUE(command_buffer_->Initialize());
+    command_buffer_.reset(new CommandBufferService);
   }
 
   int32 GetGetOffset() {
@@ -49,91 +41,145 @@ class CommandBufferServiceTest : public testing::Test {
     return command_buffer_->GetState().error;
   }
 
-  bool Initialize(size_t size) {
-    int32 id;
-    command_buffer_->CreateTransferBuffer(size, &id);
-    EXPECT_GT(id, 0);
-    command_buffer_->SetGetBuffer(id);
-    return true;
-  }
-
-  scoped_ptr<TransferBufferManagerInterface> transfer_buffer_manager_;
+  base::mac::ScopedNSAutoreleasePool autorelease_pool_;
   scoped_ptr<CommandBufferService> command_buffer_;
 };
 
+TEST_F(CommandBufferServiceTest, NullRingBufferByDefault) {
+  EXPECT_TRUE(NULL == command_buffer_->GetRingBuffer().ptr);
+}
+
 TEST_F(CommandBufferServiceTest, InitializesCommandBuffer) {
-  EXPECT_TRUE(Initialize(1024));
+  EXPECT_TRUE(command_buffer_->Initialize(1024));
+  EXPECT_TRUE(NULL != command_buffer_->GetRingBuffer().ptr);
   CommandBuffer::State state = command_buffer_->GetState();
+  EXPECT_EQ(1024, state.size);
   EXPECT_EQ(0, state.get_offset);
   EXPECT_EQ(0, state.put_offset);
   EXPECT_EQ(0, state.token);
   EXPECT_EQ(error::kNoError, state.error);
 }
 
-namespace {
+TEST_F(CommandBufferServiceTest, InitializationSizeIsInEntriesNotBytes) {
+  EXPECT_TRUE(command_buffer_->Initialize(1024));
+  EXPECT_TRUE(NULL != command_buffer_->GetRingBuffer().ptr);
+  EXPECT_GE(1024 * sizeof(CommandBufferEntry),
+            command_buffer_->GetRingBuffer().size);
+}
 
-class CallbackTest {
+TEST_F(CommandBufferServiceTest, InitializationFailsIfSizeIsZero) {
+  EXPECT_FALSE(command_buffer_->Initialize(0));
+}
+
+TEST_F(CommandBufferServiceTest, InitializationFailsIfSizeOutOfRange) {
+  EXPECT_FALSE(command_buffer_->Initialize(
+      CommandBuffer::kMaxCommandBufferSize + 1));
+}
+
+TEST_F(CommandBufferServiceTest, InitializationFailsIfSizeIsNegative) {
+  EXPECT_FALSE(command_buffer_->Initialize(-1));
+}
+
+TEST_F(CommandBufferServiceTest, InitializeFailsSecondTime) {
+  EXPECT_TRUE(command_buffer_->Initialize(1024));
+  EXPECT_FALSE(command_buffer_->Initialize(1024));
+}
+
+class MockCallback : public CallbackRunner<Tuple0> {
  public:
-  virtual void PutOffsetChanged() = 0;
-  virtual bool GetBufferChanged(int32 id) = 0;
+  MOCK_METHOD1(RunWithParams, void(const Tuple0&));
 };
-
-class MockCallbackTest : public CallbackTest {
- public:
-   MOCK_METHOD0(PutOffsetChanged, void());
-   MOCK_METHOD1(GetBufferChanged, bool(int32));
-};
-
-}  // anonymous namespace
 
 TEST_F(CommandBufferServiceTest, CanSyncGetAndPutOffset) {
-  Initialize(1024);
+  command_buffer_->Initialize(1024);
 
-  scoped_ptr<StrictMock<MockCallbackTest> > change_callback(
-      new StrictMock<MockCallbackTest>);
-  command_buffer_->SetPutOffsetChangeCallback(
-      base::Bind(
-          &CallbackTest::PutOffsetChanged,
-          base::Unretained(change_callback.get())));
+  StrictMock<MockCallback>* put_offset_change_callback =
+      new StrictMock<MockCallback>;
+  command_buffer_->SetPutOffsetChangeCallback(put_offset_change_callback);
 
-  EXPECT_CALL(*change_callback, PutOffsetChanged());
-  command_buffer_->Flush(2);
-  EXPECT_EQ(0, GetGetOffset());
+  EXPECT_CALL(*put_offset_change_callback, RunWithParams(_));
+  EXPECT_EQ(0, command_buffer_->Flush(2).get_offset);
   EXPECT_EQ(2, GetPutOffset());
 
-  EXPECT_CALL(*change_callback, PutOffsetChanged());
-  command_buffer_->Flush(4);
-  EXPECT_EQ(0, GetGetOffset());
+  EXPECT_CALL(*put_offset_change_callback, RunWithParams(_));
+  EXPECT_EQ(0, command_buffer_->Flush(4).get_offset);
   EXPECT_EQ(4, GetPutOffset());
 
   command_buffer_->SetGetOffset(2);
   EXPECT_EQ(2, GetGetOffset());
-  EXPECT_CALL(*change_callback, PutOffsetChanged());
-  command_buffer_->Flush(6);
+  EXPECT_CALL(*put_offset_change_callback, RunWithParams(_));
+  EXPECT_EQ(2, command_buffer_->Flush(6).get_offset);
 
-  command_buffer_->Flush(-1);
-  EXPECT_NE(error::kNoError, GetError());
-  command_buffer_->Flush(1024);
-  EXPECT_NE(error::kNoError, GetError());
+  EXPECT_NE(error::kNoError, command_buffer_->Flush(-1).error);
+  EXPECT_NE(error::kNoError,
+      command_buffer_->Flush(1024).error);
 }
 
-TEST_F(CommandBufferServiceTest, SetGetBuffer) {
-  int32 ring_buffer_id;
-  command_buffer_->CreateTransferBuffer(1024, &ring_buffer_id);
-  EXPECT_GT(ring_buffer_id, 0);
+TEST_F(CommandBufferServiceTest, ZeroHandleMapsToNull) {
+  EXPECT_TRUE(NULL == command_buffer_->GetTransferBuffer(0).ptr);
+}
 
-  scoped_ptr<StrictMock<MockCallbackTest> > change_callback(
-      new StrictMock<MockCallbackTest>);
-  command_buffer_->SetGetBufferChangeCallback(
-      base::Bind(
-          &CallbackTest::GetBufferChanged,
-          base::Unretained(change_callback.get())));
+TEST_F(CommandBufferServiceTest, NegativeHandleMapsToNull) {
+  EXPECT_TRUE(NULL == command_buffer_->GetTransferBuffer(-1).ptr);
+}
 
-  EXPECT_CALL(*change_callback, GetBufferChanged(ring_buffer_id))
-      .WillOnce(Return(true));
+TEST_F(CommandBufferServiceTest, OutOfRangeHandleMapsToNull) {
+  EXPECT_TRUE(NULL == command_buffer_->GetTransferBuffer(1).ptr);
+}
 
-  command_buffer_->SetGetBuffer(ring_buffer_id);
-  EXPECT_EQ(0, GetGetOffset());
+TEST_F(CommandBufferServiceTest, CanCreateTransferBuffers) {
+  int32 handle = command_buffer_->CreateTransferBuffer(1024);
+  EXPECT_EQ(1, handle);
+  Buffer buffer = command_buffer_->GetTransferBuffer(handle);
+  ASSERT_TRUE(NULL != buffer.ptr);
+  EXPECT_EQ(1024u, buffer.size);
+}
+
+TEST_F(CommandBufferServiceTest, CreateTransferBufferReturnsDistinctHandles) {
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+}
+
+TEST_F(CommandBufferServiceTest,
+    CreateTransferBufferReusesUnregisteredHandles) {
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+  EXPECT_EQ(2, command_buffer_->CreateTransferBuffer(1024));
+  command_buffer_->DestroyTransferBuffer(1);
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+  EXPECT_EQ(3, command_buffer_->CreateTransferBuffer(1024));
+}
+
+TEST_F(CommandBufferServiceTest, CannotUnregisterHandleZero) {
+  command_buffer_->DestroyTransferBuffer(0);
+  EXPECT_TRUE(NULL == command_buffer_->GetTransferBuffer(0).ptr);
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+}
+
+TEST_F(CommandBufferServiceTest, CannotUnregisterNegativeHandles) {
+  command_buffer_->DestroyTransferBuffer(-1);
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+}
+
+TEST_F(CommandBufferServiceTest, CannotUnregisterUnregisteredHandles) {
+  command_buffer_->DestroyTransferBuffer(1);
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+}
+
+// Testing this case specifically because there is an optimization that takes
+// a different code path in this case.
+TEST_F(CommandBufferServiceTest, UnregistersLastRegisteredHandle) {
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+  command_buffer_->DestroyTransferBuffer(1);
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+}
+
+// Testing this case specifically because there is an optimization that takes
+// a different code path in this case.
+TEST_F(CommandBufferServiceTest, UnregistersTwoLastRegisteredHandles) {
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
+  EXPECT_EQ(2, command_buffer_->CreateTransferBuffer(1024));
+  command_buffer_->DestroyTransferBuffer(2);
+  command_buffer_->DestroyTransferBuffer(1);
+  EXPECT_EQ(1, command_buffer_->CreateTransferBuffer(1024));
 }
 
 TEST_F(CommandBufferServiceTest, DefaultTokenIsZero) {

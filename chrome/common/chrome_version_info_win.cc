@@ -5,20 +5,19 @@
 #include "chrome/common/chrome_version_info.h"
 
 #include "base/base_paths.h"
-#include "base/debug/profiler.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "chrome/installer/util/google_update_settings.h"
+#include "base/string_util.h"
 #include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/google_update_settings.h"
 
 namespace chrome {
 
 // static
 std::string VersionInfo::GetVersionStringModifier() {
 #if defined(GOOGLE_CHROME_BUILD)
-  base::FilePath module;
-  base::string16 channel;
+  FilePath module;
+  string16 channel;
   if (PathService::Get(base::FILE_MODULE, &module)) {
     bool is_system_install =
         !InstallUtil::IsPerUserInstall(module.value().c_str());
@@ -26,10 +25,6 @@ std::string VersionInfo::GetVersionStringModifier() {
     GoogleUpdateSettings::GetChromeChannelAndModifiers(is_system_install,
                                                        &channel);
   }
-#if defined(ADDRESS_SANITIZER)
-  if (base::debug::IsBinaryInstrumented())
-    channel += L" SyzyASan";
-#endif
   return UTF16ToASCII(channel);
 #else
   return std::string();
@@ -41,7 +36,7 @@ VersionInfo::Channel VersionInfo::GetChannel() {
 #if defined(GOOGLE_CHROME_BUILD)
   std::wstring channel(L"unknown");
 
-  base::FilePath module;
+  FilePath module;
   if (PathService::Get(base::FILE_MODULE, &module)) {
     bool is_system_install =
         !InstallUtil::IsPerUserInstall(module.value().c_str());

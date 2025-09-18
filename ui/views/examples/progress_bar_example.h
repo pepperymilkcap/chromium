@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_EXAMPLES_PROGRESS_BAR_EXAMPLE_H_
 #define UI_VIEWS_EXAMPLES_PROGRESS_BAR_EXAMPLE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -25,7 +26,7 @@ class ProgressBarExample : public ExampleBase, public ButtonListener {
 
  private:
   // Overridden from ButtonListener:
-  virtual void ButtonPressed(Button* button, const ui::Event& event) OVERRIDE;
+  virtual void ButtonPressed(Button* button, const Event& event) OVERRIDE;
 
   Button* minus_button_;
   Button* plus_button_;

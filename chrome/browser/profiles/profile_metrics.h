@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,8 @@
 
 #include "base/basictypes.h"
 
-class Profile;
-class ProfileManager;
-
-namespace base {
 class FilePath;
-}
+class ProfileManager;
 
 class ProfileMetrics {
  public:
@@ -23,7 +19,6 @@ class ProfileMetrics {
   enum ProfileAdd {
     ADD_NEW_USER_ICON = 0,    // User adds new user from icon menu
     ADD_NEW_USER_MENU,        // User adds new user from menu bar
-    ADD_NEW_USER_DIALOG,      // User adds new user from create-profile dialog
     NUM_PROFILE_ADD_METRICS
   };
 
@@ -33,7 +28,6 @@ class ProfileMetrics {
     ICON_AVATAR_BUBBLE,       // User opens avatar icon menu from icon
     SWITCH_PROFILE_ICON,      // User switches profiles from icon menu
     SWITCH_PROFILE_MENU,      // User switches profiles from menu bar
-    SWITCH_PROFILE_DOCK,      // User switches profiles from dock (Mac-only)
     NUM_PROFILE_OPEN_METRICS
   };
 
@@ -45,6 +39,7 @@ class ProfileMetrics {
   };
 
   // Sign in is logged once the user has entered their GAIA information.
+  // See sync_setup_flow.h.
   // The options for sync are logged after the user has submitted the options
   // form. See sync_setup_handler.h.
   enum ProfileSync {
@@ -67,9 +62,14 @@ class ProfileMetrics {
     NUM_PROFILE_GAIA_METRICS
   };
 
-  static void UpdateReportedProfilesStatistics(ProfileManager* manager);
+  enum ProfileEvent {
+    STARTUP_PROFILE_EVENT = 0,
+    ADD_PROFILE_EVENT,
+    DELETE_PROFILE_EVENT
+  };
 
-  static void LogNumberOfProfiles(ProfileManager* manager);
+  static void LogNumberOfProfiles(ProfileManager* manager,
+                                  ProfileEvent startup);
   static void LogProfileAddNewUser(ProfileAdd metric);
   static void LogProfileAvatarSelection(size_t icon_index);
   static void LogProfileDeleteUser(ProfileNetUserCounts metric);
@@ -80,9 +80,9 @@ class ProfileMetrics {
 
   // These functions should only be called on the UI thread because they hook
   // into g_browser_process through a helper function.
-  static void LogProfileLaunch(Profile* profile);
-  static void LogProfileSyncSignIn(const base::FilePath& profile_path);
-  static void LogProfileUpdate(const base::FilePath& profile_path);
+  static void LogProfileLaunch(const FilePath& profile_path);
+  static void LogProfileSyncSignIn(const FilePath& profile_path);
+  static void LogProfileUpdate(const FilePath& profile_path);
 };
 
 

@@ -4,11 +4,10 @@
 
 #include "content/public/browser/native_web_keyboard_event.h"
 
-#include "content/browser/renderer_host/input/web_input_event_builders_win.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/win/WebInputEventFactory.h"
 
-using blink::WebKeyboardEvent;
-
-namespace content {
+using WebKit::WebInputEventFactory;
+using WebKit::WebKeyboardEvent;
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent()
     : skip_in_browser(false) {
@@ -17,10 +16,10 @@ NativeWebKeyboardEvent::NativeWebKeyboardEvent()
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(gfx::NativeEvent native_event)
     : WebKeyboardEvent(
-          WebKeyboardEventBuilder::Build(native_event.hwnd,
-                                         native_event.message,
-                                         native_event.wParam,
-                                         native_event.lParam)),
+          WebInputEventFactory::keyboardEvent(native_event.hwnd,
+                                              native_event.message,
+                                              native_event.wParam,
+                                              native_event.lParam)),
       os_event(native_event),
       skip_in_browser(false) {
 }
@@ -45,5 +44,3 @@ NativeWebKeyboardEvent& NativeWebKeyboardEvent::operator=(
 NativeWebKeyboardEvent::~NativeWebKeyboardEvent() {
   // Noop under windows
 }
-
-}  // namespace content

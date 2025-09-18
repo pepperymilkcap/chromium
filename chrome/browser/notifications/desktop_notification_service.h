@@ -1,61 +1,47 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATION_SERVICE_H_
 #define CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATION_SERVICE_H_
+#pragma once
 
-#include <set>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_member.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
-#include "chrome/browser/notifications/welcome_notification.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/common/content_settings.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "third_party/WebKit/public/web/WebNotificationPresenter.h"
-#include "third_party/WebKit/public/web/WebTextDirection.h"
-#include "ui/message_center/notifier_settings.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 
 class ContentSettingsPattern;
 class Notification;
-class NotificationDelegate;
 class NotificationUIManager;
 class Profile;
+class TabContents;
 
 namespace content {
 class WebContents;
 struct ShowDesktopNotificationHostMsgParams;
 }
 
-namespace gfx {
-class Image;
-}
-
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
-
 // The DesktopNotificationService is an object, owned by the Profile,
 // which provides the creation of desktop "toasts" to web pages and workers.
-class DesktopNotificationService : public BrowserContextKeyedService,
-                                   public content::NotificationObserver {
+class DesktopNotificationService : public content::NotificationObserver,
+                                   public ProfileKeyedService {
  public:
   enum DesktopNotificationSource {
     PageNotification,
     WorkerNotification
   };
-
-  // Register profile-specific prefs of notifications.
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* prefs);
 
   DesktopNotificationService(Profile* profile,
                              NotificationUIManager* ui_manager);
@@ -63,7 +49,9 @@ class DesktopNotificationService : public BrowserContextKeyedService,
 
   // Requests permission (using an info-bar) for a given origin.
   // |callback_context| contains an opaque value to pass back to the
-  // requesting process when the info-bar finishes.
+  // requesting process when the info-bar finishes.  A NULL tab can be given if
+  // none exist (i.e. background tab), in which case the currently selected tab
+  // will be used.
   void RequestPermission(const GURL& origin,
                          int process_id,
                          int route_id,
@@ -76,9 +64,7 @@ class DesktopNotificationService : public BrowserContextKeyedService,
   // other parameters supplied by the worker or page.
   bool ShowDesktopNotification(
       const content::ShowDesktopNotificationHostMsgParams& params,
-      int process_id,
-      int route_id,
-      DesktopNotificationSource source);
+      int process_id, int route_id, DesktopNotificationSource source);
 
   // Cancels a notification.  If it has already been shown, it will be
   // removed from the screen.  If it hasn't been shown yet, it won't be
@@ -91,44 +77,24 @@ class DesktopNotificationService : public BrowserContextKeyedService,
   void GrantPermission(const GURL& origin);
   void DenyPermission(const GURL& origin);
 
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
   // Creates a data:xxxx URL which contains the full HTML for a notification
   // using supplied icon, title, and text, run through a template which contains
   // the standard formatting for notifications.
-  static base::string16 CreateDataUrl(const GURL& icon_url,
-                                      const base::string16& title,
-                                      const base::string16& body,
-                                      blink::WebTextDirection dir);
+  static string16 CreateDataUrl(const GURL& icon_url,
+                                const string16& title,
+                                const string16& body,
+                                WebKit::WebTextDirection dir);
 
   // Creates a data:xxxx URL which contains the full HTML for a notification
   // using resource template which contains the standard formatting for
   // notifications.
-  static base::string16 CreateDataUrl(int resource,
+  static string16 CreateDataUrl(int resource,
                                 const std::vector<std::string>& subst);
-
-  // Add a desktop notification. On non-Ash platforms this will generate a HTML
-  // notification from the input parameters. On Ash it will generate a normal
-  // ash notification. Returns the notification id.
-  // TODO(mukai): remove these methods. HTML notifications are no longer
-  // supported.
-  static std::string AddNotification(const GURL& origin_url,
-                                     const base::string16& title,
-                                     const base::string16& message,
-                                     const GURL& icon_url,
-                                     const base::string16& replace_id,
-                                     NotificationDelegate* delegate,
-                                     Profile* profile);
-
-  // Same as above, but takes a gfx::Image for the icon instead.
-  static std::string AddIconNotification(const GURL& origin_url,
-                                         const base::string16& title,
-                                         const base::string16& message,
-                                         const gfx::Image& icon,
-                                         const base::string16& replace_id,
-                                         NotificationDelegate* delegate,
-                                         Profile* profile);
-
-  // Remove any active notification corresponding to |notification_id|.
-  static void RemoveNotification(const std::string& notification_id);
 
   // The default content setting determines how to handle origins that haven't
   // been allowed or denied yet. If |provider_id| is not NULL, the id of the
@@ -151,54 +117,27 @@ class DesktopNotificationService : public BrowserContextKeyedService,
 
   ContentSetting GetContentSetting(const GURL& origin);
 
-  // Returns true if the notifier with |notifier_id| is allowed to send
+  // Checks to see if a given origin has permission to create desktop
   // notifications.
-  bool IsNotifierEnabled(const message_center::NotifierId& notifier_id);
-
-  // Updates the availability of the notifier.
-  void SetNotifierEnabled(const message_center::NotifierId& notifier_id,
-                          bool enabled);
-
-  // Adds in a the welcome notification if required for components built
-  // into Chrome that show notifications like Chrome Now.
-  void ShowWelcomeNotificationIfNecessary(const Notification& notification);
+  WebKit::WebNotificationPresenter::Permission
+      HasPermission(const GURL& origin);
 
  private:
+  void StartObserving();
+  void StopObserving();
+
   // Takes a notification object and shows it in the UI.
   void ShowNotification(const Notification& notification);
 
-  // Returns a display name for an origin in the process id, to be used in
-  // permission infobar or on the frame of the notification toast.  Different
-  // from the origin itself when dealing with extensions.
-  base::string16 DisplayNameForOriginInProcessId(const GURL& origin,
-                                                 int process_id);
+  // Returns a display name for an origin, to be used in permission infobar
+  // or on the frame of the notification toast.  Different from the origin
+  // itself when dealing with extensions.
+  string16 DisplayNameForOrigin(const GURL& origin);
 
   // Notifies the observers when permissions settings change.
   void NotifySettingsChange();
 
   NotificationUIManager* GetUIManager();
-
-  // Called when the string list pref has been changed.
-  void OnStringListPrefChanged(
-      const char* pref_name, std::set<std::string>* ids_field);
-
-  // Called when the disabled_extension_id pref has been changed.
-  void OnDisabledExtensionIdsChanged();
-
-  // Called when the disabled_system_component_id pref has been changed.
-  void OnDisabledSystemComponentIdsChanged();
-
-  // Called when the enabled_sync_notifier_id pref has been changed.
-  void OnEnabledSyncNotifierIdsChanged();
-
-  void FirePermissionLevelChangedEvent(
-      const message_center::NotifierId& notifier_id,
-      bool enabled);
-
-  // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
   // The profile which owns this object.
   Profile* profile_;
@@ -207,29 +146,7 @@ class DesktopNotificationService : public BrowserContextKeyedService,
   // UI for desktop toasts.
   NotificationUIManager* ui_manager_;
 
-  // Prefs listener for disabled_extension_id.
-  StringListPrefMember disabled_extension_id_pref_;
-
-  // Prefs listener for disabled_system_component_id.
-  StringListPrefMember disabled_system_component_id_pref_;
-
-  // Prefs listener for enabled_sync_notifier_id.
-  StringListPrefMember enabled_sync_notifier_id_pref_;
-
-  // On-memory data for the availability of extensions.
-  std::set<std::string> disabled_extension_ids_;
-
-  // On-memory data for the availability of system_component.
-  std::set<std::string> disabled_system_component_ids_;
-
-  // On-memory data for the availability of sync notifiers.
-  std::set<std::string> enabled_sync_notifier_ids_;
-
-  // Registrar for the other kind of notifications (event signaling).
-  content::NotificationRegistrar registrar_;
-
-  // Welcome Notification
-  scoped_ptr<WelcomeNotification> welcome_notification;
+  content::NotificationRegistrar notification_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopNotificationService);
 };

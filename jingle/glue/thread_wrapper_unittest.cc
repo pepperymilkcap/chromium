@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -81,12 +81,12 @@ class ThreadWrapperTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    JingleThreadWrapper::EnsureForCurrentMessageLoop();
+    JingleThreadWrapper::EnsureForCurrentThread();
     thread_ = talk_base::Thread::Current();
   }
 
   // ThreadWrapper destroyes itself when |message_loop_| is destroyed.
-  base::MessageLoop message_loop_;
+  MessageLoop message_loop_;
   talk_base::Thread* thread_;
   MockMessageHandler handler1_;
   MockMessageHandler handler2_;
@@ -118,7 +118,7 @@ TEST_F(ThreadWrapperTest, Post) {
       MatchMessage(&handler2_, kTestMessage1, data4)))
       .WillOnce(DeleteMessageData());
 
-  message_loop_.RunUntilIdle();
+  message_loop_.RunAllPending();
 }
 
 TEST_F(ThreadWrapperTest, PostDelayed) {
@@ -147,10 +147,8 @@ TEST_F(ThreadWrapperTest, PostDelayed) {
       MatchMessage(&handler2_, kTestMessage1, data4)))
       .WillOnce(DeleteMessageData());
 
-  message_loop_.PostDelayedTask(
-      FROM_HERE,
-      base::MessageLoop::QuitClosure(),
-      base::TimeDelta::FromMilliseconds(kMaxTestDelay));
+  message_loop_.PostDelayedTask(FROM_HERE, MessageLoop::QuitClosure(),
+                                kMaxTestDelay);
   message_loop_.Run();
 }
 
@@ -175,7 +173,7 @@ TEST_F(ThreadWrapperTest, Clear) {
       MatchMessage(&handler2_, kTestMessage2, null_data)))
       .WillOnce(DeleteMessageData());
 
-  message_loop_.RunUntilIdle();
+  message_loop_.RunAllPending();
 }
 
 TEST_F(ThreadWrapperTest, ClearDelayed) {
@@ -199,10 +197,8 @@ TEST_F(ThreadWrapperTest, ClearDelayed) {
       MatchMessage(&handler2_, kTestMessage1, null_data)))
       .WillOnce(DeleteMessageData());
 
-  message_loop_.PostDelayedTask(
-      FROM_HERE,
-      base::MessageLoop::QuitClosure(),
-      base::TimeDelta::FromMilliseconds(kMaxTestDelay));
+  message_loop_.PostDelayedTask(FROM_HERE, MessageLoop::QuitClosure(),
+                                kMaxTestDelay);
   message_loop_.Run();
 }
 
@@ -232,7 +228,7 @@ TEST_F(ThreadWrapperTest, SendSameThread) {
 
 void InitializeWrapperForNewThread(talk_base::Thread** thread,
                                    base::WaitableEvent* done_event) {
-  JingleThreadWrapper::EnsureForCurrentMessageLoop();
+  JingleThreadWrapper::EnsureForCurrentThread();
   JingleThreadWrapper::current()->set_send_allowed(true);
   *thread = JingleThreadWrapper::current();
   done_event->Signal();
@@ -301,7 +297,7 @@ TEST_F(ThreadWrapperTest, Dispose) {
   bool deleted_;
   thread_->Dispose(new DeletableObject(&deleted_));
   EXPECT_FALSE(deleted_);
-  message_loop_.RunUntilIdle();
+  message_loop_.RunAllPending();
   EXPECT_TRUE(deleted_);
 }
 

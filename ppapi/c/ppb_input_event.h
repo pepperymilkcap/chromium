@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_input_event.idl modified Tue Jul 23 19:23:51 2013. */
+/* From ppb_input_event.idl modified Mon Nov 14 10:36:01 2011. */
 
 #ifndef PPAPI_C_PPB_INPUT_EVENT_H_
 #define PPAPI_C_PPB_INPUT_EVENT_H_
@@ -15,7 +15,6 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_time.h"
-#include "ppapi/c/pp_touch_point.h"
 #include "ppapi/c/pp_var.h"
 
 #define PPB_INPUT_EVENT_INTERFACE_1_0 "PPB_InputEvent;1.0"
@@ -31,12 +30,6 @@
 #define PPB_KEYBOARD_INPUT_EVENT_INTERFACE_1_0 "PPB_KeyboardInputEvent;1.0"
 #define PPB_KEYBOARD_INPUT_EVENT_INTERFACE \
     PPB_KEYBOARD_INPUT_EVENT_INTERFACE_1_0
-
-#define PPB_TOUCH_INPUT_EVENT_INTERFACE_1_0 "PPB_TouchInputEvent;1.0"
-#define PPB_TOUCH_INPUT_EVENT_INTERFACE PPB_TOUCH_INPUT_EVENT_INTERFACE_1_0
-
-#define PPB_IME_INPUT_EVENT_INTERFACE_1_0 "PPB_IMEInputEvent;1.0"
-#define PPB_IME_INPUT_EVENT_INTERFACE PPB_IME_INPUT_EVENT_INTERFACE_1_0
 
 /**
  * @file
@@ -92,11 +85,9 @@ typedef enum {
   PP_INPUTEVENT_TYPE_WHEEL = 5,
   /**
    * Notification that a key transitioned from "up" to "down".
+   * TODO(brettw) differentiate from KEYDOWN.
    *
    * Register for this event using the PP_INPUTEVENT_CLASS_KEYBOARD class.
-   */
-  /*
-   * TODO(brettw) differentiate from KEYDOWN.
    */
   PP_INPUTEVENT_TYPE_RAWKEYDOWN = 6,
   /**
@@ -122,24 +113,7 @@ typedef enum {
    */
   PP_INPUTEVENT_TYPE_CHAR = 9,
   /**
-   * Notification that a context menu should be shown.
-   *
-   * This message will be sent when the user right-clicks or performs another
-   * OS-specific mouse command that should open a context menu. When this event
-   * is delivered depends on the system, on some systems (Mac) it will
-   * delivered after the mouse down event, and on others (Windows) it will be
-   * delivered after the mouse up event.
-   *
-   * You will always get the normal mouse events. For example, you may see
-   * MOUSEDOWN,CONTEXTMENU,MOUSEUP or MOUSEDOWN,MOUSEUP,CONTEXTMENU.
-   *
-   * The return value from the event handler determines if the context menu
-   * event will be passed to the page when you are using filtered input events
-   * (via RequestFilteringInputEvents()). In non-filtering mode the event will
-   * never be propagated and no context menu will be displayed. If you are
-   * handling mouse events in filtering mode, you may want to return true from
-   * this event even if you do not support a context menu to suppress the
-   * default one.
+   * TODO(brettw) when is this used?
    *
    * Register for this event using the PP_INPUTEVENT_CLASS_MOUSE class.
    */
@@ -167,31 +141,7 @@ typedef enum {
    *
    * Register for this event using the PP_INPUTEVENT_CLASS_IME class.
    */
-  PP_INPUTEVENT_TYPE_IME_TEXT = 14,
-  /**
-   * Notification that a finger was placed on a touch-enabled device.
-   *
-   * Register for this event using the PP_INPUTEVENT_CLASS_TOUCH class.
-   */
-  PP_INPUTEVENT_TYPE_TOUCHSTART = 15,
-  /**
-   * Notification that a finger was moved on a touch-enabled device.
-   *
-   * Register for this event using the PP_INPUTEVENT_CLASS_TOUCH class.
-   */
-  PP_INPUTEVENT_TYPE_TOUCHMOVE = 16,
-  /**
-   * Notification that a finger was released on a touch-enabled device.
-   *
-   * Register for this event using the PP_INPUTEVENT_CLASS_TOUCH class.
-   */
-  PP_INPUTEVENT_TYPE_TOUCHEND = 17,
-  /**
-   * Notification that a touch event was canceled.
-   *
-   * Register for this event using the PP_INPUTEVENT_CLASS_TOUCH class.
-   */
-  PP_INPUTEVENT_TYPE_TOUCHCANCEL = 18
+  PP_INPUTEVENT_TYPE_IME_TEXT = 14
 } PP_InputEvent_Type;
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_InputEvent_Type, 4);
 
@@ -211,9 +161,7 @@ typedef enum {
   PP_INPUTEVENT_MODIFIER_MIDDLEBUTTONDOWN = 1 << 7,
   PP_INPUTEVENT_MODIFIER_RIGHTBUTTONDOWN = 1 << 8,
   PP_INPUTEVENT_MODIFIER_CAPSLOCKKEY = 1 << 9,
-  PP_INPUTEVENT_MODIFIER_NUMLOCKKEY = 1 << 10,
-  PP_INPUTEVENT_MODIFIER_ISLEFT = 1 << 11,
-  PP_INPUTEVENT_MODIFIER_ISRIGHT = 1 << 12
+  PP_INPUTEVENT_MODIFIER_NUMLOCKKEY = 1 << 10
 } PP_InputEvent_Modifier;
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_InputEvent_Modifier, 4);
 
@@ -277,12 +225,7 @@ typedef enum {
    *
    * Request touch events only if you intend to handle them. If the browser
    * knows you do not need to handle touch events, it can handle them at a
-   * higher level and achieve higher performance. If the plugin does not
-   * register for touch-events, then it will receive synthetic mouse events that
-   * are generated from the touch events (e.g. mouse-down for touch-start,
-   * mouse-move for touch-move (with left-button down), and mouse-up for
-   * touch-end. If the plugin does register for touch events, then the synthetic
-   * mouse events are not created.
+   * higher level and achieve higher performance.
    */
   PP_INPUTEVENT_CLASS_TOUCH = 1 << 3,
   /**
@@ -329,20 +272,17 @@ struct PPB_InputEvent_1_0 {
    * processed very quickly, may have a noticeable effect on the performance of
    * the page.
    *
-   * Note that synthetic mouse events will be generated from touch events if
-   * (and only if) the you do not request touch events.
-   *
    * When requesting input events through this function, the events will be
    * delivered and <i>not</i> bubbled to the page. This means that even if you
    * aren't interested in the message, no other parts of the page will get
    * a crack at the message.
    *
    * <strong>Example:</strong>
-   * @code
+   * <code>
    *   RequestInputEvents(instance, PP_INPUTEVENT_CLASS_MOUSE);
    *   RequestFilteringInputEvents(instance,
    *       PP_INPUTEVENT_CLASS_WHEEL | PP_INPUTEVENT_CLASS_KEYBOARD);
-   * @endcode
+   * </code>
    *
    * @param instance The <code>PP_Instance</code> of the instance requesting
    * the given events.
@@ -379,11 +319,11 @@ struct PPB_InputEvent_1_0 {
    * can have significant overhead.
    *
    * <strong>Example:</strong>
-   * @code
+   * <code>
    *   RequestInputEvents(instance, PP_INPUTEVENT_CLASS_MOUSE);
    *   RequestFilteringInputEvents(instance,
    *       PP_INPUTEVENT_CLASS_WHEEL | PP_INPUTEVENT_CLASS_KEYBOARD);
-   * @endcode
+   * </code>
    *
    * @return <code>PP_OK</code> if the operation succeeded,
    * <code>PP_ERROR_BADARGUMENT</code> if instance is invalid, or
@@ -546,7 +486,7 @@ struct PPB_MouseInputEvent_1_1 {
    * mouse drags. The return value will be (0, 0) for non-mouse events.
    */
   struct PP_Point (*GetPosition)(PP_Resource mouse_event);
-  /*
+  /**
    * TODO(brettw) figure out exactly what this means.
    */
   int32_t (*GetClickCount)(PP_Resource mouse_event);
@@ -561,6 +501,10 @@ struct PPB_MouseInputEvent_1_1 {
    *
    * @return The change in position of the mouse, relative to the previous
    * position.
+   *
+   * TODO(yzshen): This feature hasn't been fully supported yet. For now,
+   * movement information is provided only if the mouse is locked. If the mouse
+   * is not locked, the returned value is (0, 0).
    */
   struct PP_Point (*GetMovement)(PP_Resource mouse_event);
 };
@@ -762,257 +706,6 @@ struct PPB_KeyboardInputEvent_1_0 {
 };
 
 typedef struct PPB_KeyboardInputEvent_1_0 PPB_KeyboardInputEvent;
-/**
- * @}
- */
-
-/**
- * @addtogroup Enums
- * @{
- */
-typedef enum {
-  /**
-   * The list of all TouchPoints which are currently down.
-   */
-  PP_TOUCHLIST_TYPE_TOUCHES = 0,
-  /**
-   * The list of all TouchPoints whose state has changed since the last
-   * TouchInputEvent.
-   */
-  PP_TOUCHLIST_TYPE_CHANGEDTOUCHES = 1,
-  /**
-   * The list of all TouchPoints which are targeting this plugin.  This is a
-   * subset of Touches.
-   */
-  PP_TOUCHLIST_TYPE_TARGETTOUCHES = 2
-} PP_TouchListType;
-PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_TouchListType, 4);
-/**
- * @}
- */
-
-/**
- * @addtogroup Interfaces
- * @{
- */
-/**
- * The <code>PPB_TouchInputEvent</code> interface contains pointers to several
- * functions related to touch events.
- */
-struct PPB_TouchInputEvent_1_0 {
-  /**
-   * Creates a touch input event with the given parameters. Normally you
-   * will get a touch event passed through the HandleInputEvent and will not
-   * need to create them, but some applications may want to create their own
-   * for internal use. The type must be one of the touch event types.
-   * This newly created touch input event does not have any touch point in any
-   * of the touch-point lists. <code>AddTouchPoint</code> should be called to
-   * add the touch-points.
-   *
-   * @param[in] instance The instance for which this event occurred.
-   *
-   * @param[in] type A <code>PP_InputEvent_Type</code> identifying the type of
-   * input event.
-   *
-   * @param[in] time_stamp A <code>PP_TimeTicks</code> indicating the time
-   * when the event occurred.
-   *
-   * @param[in]  modifiers A bit field combination of the
-   * <code>PP_InputEvent_Modifier</code> flags.
-   *
-   * @return A <code>PP_Resource</code> containing the new touch input event.
-   */
-  PP_Resource (*Create)(PP_Instance instance,
-                        PP_InputEvent_Type type,
-                        PP_TimeTicks time_stamp,
-                        uint32_t modifiers);
-  /**
-   * Adds a touch point to the touch event in the specified touch-list.
-   *
-   * @param[in] touch_event A <code>PP_Resource</code> corresponding to a touch
-   * event.
-   *
-   * @param[in] list The list to add the touch point to.
-   *
-   * @param[in] point The point to add to the list.
-   */
-  void (*AddTouchPoint)(PP_Resource touch_event,
-                        PP_TouchListType list,
-                        const struct PP_TouchPoint* point);
-  /**
-   * IsTouchInputEvent() determines if a resource is a touch event.
-   *
-   * @param[in] resource A <code>PP_Resource</code> corresponding to an event.
-   *
-   * @return <code>PP_TRUE</code> if the given resource is a valid touch input
-   * event, otherwise <code>PP_FALSE</code>.
-   */
-  PP_Bool (*IsTouchInputEvent)(PP_Resource resource);
-  /**
-   * Returns the number of touch-points in the specified list.
-   *
-   * @param[in] resource A <code>PP_Resource</code> corresponding to a touch
-   * event.
-   *
-   * @param[in] list The list.
-   *
-   * @return The number of touch-points in the specified list.
-   */
-  uint32_t (*GetTouchCount)(PP_Resource resource, PP_TouchListType list);
-  /**
-   * Returns the touch-point at the specified index from the specified list.
-   *
-   * @param[in] resource A <code>PP_Resource</code> corresponding to a touch
-   * event.
-   *
-   * @param[in] list The list.
-   *
-   * @param[in] index The index.
-   *
-   * @return A <code>PP_TouchPoint</code> representing the touch-point.
-   */
-  struct PP_TouchPoint (*GetTouchByIndex)(PP_Resource resource,
-                                          PP_TouchListType list,
-                                          uint32_t index);
-  /**
-   * Returns the touch-point with the specified touch-id in the specified list.
-   *
-   * @param[in] resource A <code>PP_Resource</code> corresponding to a touch
-   * event.
-   *
-   * @param[in] list The list.
-   *
-   * @param[in] touch_id The id of the touch-point.
-   *
-   * @return A <code>PP_TouchPoint</code> representing the touch-point.
-   */
-  struct PP_TouchPoint (*GetTouchById)(PP_Resource resource,
-                                       PP_TouchListType list,
-                                       uint32_t touch_id);
-};
-
-typedef struct PPB_TouchInputEvent_1_0 PPB_TouchInputEvent;
-
-struct PPB_IMEInputEvent_1_0 {
-  /**
-   * Create() creates an IME input event with the given parameters. Normally
-   * you will get an IME event passed through the <code>HandleInputEvent</code>
-   * and will not need to create them, but some applications may want to create
-   * their own for internal use.
-   *
-   * @param[in] instance The instance for which this event occurred.
-   *
-   * @param[in] type A <code>PP_InputEvent_Type</code> identifying the type of
-   * input event. The type must be one of the IME event types.
-   *
-   * @param[in] time_stamp A <code>PP_TimeTicks</code> indicating the time
-   * when the event occurred.
-   *
-   * @param[in] text The string returned by <code>GetText</code>.
-   *
-   * @param[in] segment_number The number returned by
-   * <code>GetSegmentNumber</code>.
-   *
-   * @param[in] segment_offsets The array of numbers returned by
-   * <code>GetSegmentOffset</code>. If <code>segment_number</code> is zero,
-   * the number of elements of the array should be zero. If
-   * <code>segment_number</code> is non-zero, the length of the array must be
-   * <code>segment_number</code> + 1.
-   *
-   * @param[in] target_segment The number returned by
-   * <code>GetTargetSegment</code>.
-   *
-   * @param[in] selection_start The start index returned by
-   * <code>GetSelection</code>.
-   *
-   * @param[in] selection_end The end index returned by
-   * <code>GetSelection</code>.
-   *
-   * @return A <code>PP_Resource</code> containing the new IME input event.
-   */
-  PP_Resource (*Create)(PP_Instance instance,
-                        PP_InputEvent_Type type,
-                        PP_TimeTicks time_stamp,
-                        struct PP_Var text,
-                        uint32_t segment_number,
-                        const uint32_t segment_offsets[],
-                        int32_t target_segment,
-                        uint32_t selection_start,
-                        uint32_t selection_end);
-  /**
-   * IsIMEInputEvent() determines if a resource is an IME event.
-   *
-   * @param[in] resource A <code>PP_Resource</code> corresponding to an event.
-   *
-   * @return <code>PP_TRUE</code> if the given resource is a valid input event.
-   */
-  PP_Bool (*IsIMEInputEvent)(PP_Resource resource);
-  /**
-   * GetText() returns the composition text as a UTF-8 string for the given IME
-   * event.
-   *
-   * @param[in] ime_event A <code>PP_Resource</code> corresponding to an IME
-   * event.
-   *
-   * @return A string var representing the composition text. For non-IME input
-   * events the return value will be an undefined var.
-   */
-  struct PP_Var (*GetText)(PP_Resource ime_event);
-  /**
-   * GetSegmentNumber() returns the number of segments in the composition text.
-   *
-   * @param[in] ime_event A <code>PP_Resource</code> corresponding to an IME
-   * event.
-   *
-   * @return The number of segments. For events other than COMPOSITION_UPDATE,
-   * returns 0.
-   */
-  uint32_t (*GetSegmentNumber)(PP_Resource ime_event);
-  /**
-   * GetSegmentOffset() returns the position of the index-th segmentation point
-   * in the composition text. The position is given by a byte-offset (not a
-   * character-offset) of the string returned by GetText(). It always satisfies
-   * 0=GetSegmentOffset(0) < ... < GetSegmentOffset(i) < GetSegmentOffset(i+1)
-   * < ... < GetSegmentOffset(GetSegmentNumber())=(byte-length of GetText()).
-   * Note that [GetSegmentOffset(i), GetSegmentOffset(i+1)) represents the range
-   * of the i-th segment, and hence GetSegmentNumber() can be a valid argument
-   * to this function instead of an off-by-1 error.
-   *
-   * @param[in] ime_event A <code>PP_Resource</code> corresponding to an IME
-   * event.
-   *
-   * @param[in] index An integer indicating a segment.
-   *
-   * @return The byte-offset of the segmentation point. If the event is not
-   * COMPOSITION_UPDATE or index is out of range, returns 0.
-   */
-  uint32_t (*GetSegmentOffset)(PP_Resource ime_event, uint32_t index);
-  /**
-   * GetTargetSegment() returns the index of the current target segment of
-   * composition.
-   *
-   * @param[in] ime_event A <code>PP_Resource</code> corresponding to an IME
-   * event.
-   *
-   * @return An integer indicating the index of the target segment. When there
-   * is no active target segment, or the event is not COMPOSITION_UPDATE,
-   * returns -1.
-   */
-  int32_t (*GetTargetSegment)(PP_Resource ime_event);
-  /**
-   * GetSelection() returns the range selected by caret in the composition text.
-   *
-   * @param[in] ime_event A <code>PP_Resource</code> corresponding to an IME
-   * event.
-   *
-   * @param[out] start The start position of the current selection.
-   *
-   * @param[out] end The end position of the current selection.
-   */
-  void (*GetSelection)(PP_Resource ime_event, uint32_t* start, uint32_t* end);
-};
-
-typedef struct PPB_IMEInputEvent_1_0 PPB_IMEInputEvent;
 /**
  * @}
  */

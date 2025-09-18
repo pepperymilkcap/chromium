@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_WINDOW_DIALOG_CLIENT_VIEW_H_
 #define UI_VIEWS_WINDOW_DIALOG_CLIENT_VIEW_H_
+#pragma once
 
-#include "ui/base/ui_base_types.h"
+#include "ui/gfx/font.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/window/client_view.h"
@@ -13,20 +14,24 @@
 namespace views {
 
 class DialogDelegate;
-class LabelButton;
+class NativeTextButton;
 class Widget;
+namespace internal {
+class RootView;
+}
 
-// DialogClientView provides adornments for a dialog's content view, including
-// custom-labeled [OK] and [Cancel] buttons with [Enter] and [Esc] accelerators.
-// The view also displays the delegate's extra view alongside the buttons and
-// the delegate's footnote view below the buttons. The view appears like below.
-// NOTE: The contents view is not inset on the top or side client view edges.
-//   +------------------------------+
-//   |        Contents View         |
-//   +------------------------------+
-//   | [Extra View]   [OK] [Cancel] |
-//   | [      Footnote View       ] |
-//   +------------------------------+
+///////////////////////////////////////////////////////////////////////////////
+// DialogClientView
+//
+//  This ClientView subclass provides the content of a typical dialog box,
+//  including a strip of buttons at the bottom right of the window, default
+//  accelerator handlers for accept and cancel, and the ability for the
+//  embedded contents view to provide extra UI to be shown in the row of
+//  buttons.
+//
+//  DialogClientView also provides the ability to set an arbitrary view that is
+//  positioned beneath the buttons.
+//
 class VIEWS_EXPORT DialogClientView : public ClientView,
                                       public ButtonListener,
                                       public FocusChangeListener {
@@ -34,19 +39,39 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
   DialogClientView(Widget* widget, View* contents_view);
   virtual ~DialogClientView();
 
-  // Accept or Cancel the dialog.
+  // Adds the dialog buttons required by the supplied DialogDelegate to the
+  // view.
+  void ShowDialogButtons();
+
+  // Updates the enabled state and label of the buttons required by the
+  // supplied DialogDelegate
+  void UpdateDialogButtons();
+
+  // Accept the changes made in the window that contains this ClientView.
   void AcceptWindow();
+
+  // Cancel the changes made in the window that contains this ClientView.
   void CancelWindow();
 
   // Accessors in case the user wishes to adjust these buttons.
-  LabelButton* ok_button() const { return ok_button_; }
-  LabelButton* cancel_button() const { return cancel_button_; }
+  NativeTextButton* ok_button() const { return ok_button_; }
+  NativeTextButton* cancel_button() const { return cancel_button_; }
 
-  // Update the dialog buttons to match the dialog's delegate.
-  void UpdateDialogButtons();
+  // Sets the view that is positioned along the bottom of the buttons. The
+  // bottom view is positioned beneath the buttons at the full width of the
+  // dialog. If there is an existing bottom view it is removed and deleted.
+  void SetBottomView(View* bottom_view);
 
-  // ClientView implementation:
+  // Overridden from View:
+  virtual void NativeViewHierarchyChanged(
+      bool attached,
+      gfx::NativeView native_view,
+      internal::RootView* root_view) OVERRIDE;
+
+  // Overridden from ClientView:
   virtual bool CanClose() OVERRIDE;
+  virtual void WidgetClosing() OVERRIDE;
+  virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
   virtual DialogClientView* AsDialogClientView() OVERRIDE;
   virtual const DialogClientView* AsDialogClientView() const OVERRIDE;
 
@@ -56,75 +81,86 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
   virtual void OnDidChangeFocus(View* focused_before,
                                 View* focused_now) OVERRIDE;
 
-  // View implementation:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+ protected:
+  // View overrides:
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
   virtual void Layout() OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add, View* parent,
+                                    View* child) OVERRIDE;
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
-  virtual void NativeViewHierarchyChanged() OVERRIDE;
 
   // ButtonListener implementation:
-  virtual void ButtonPressed(Button* sender, const ui::Event& event) OVERRIDE;
+  virtual void ButtonPressed(Button* sender,
+                             const views::Event& event) OVERRIDE;
 
- protected:
-  // For testing.
-  DialogClientView(View* contents_view);
+ private:
+  // Paint the size box in the bottom right corner of the window if it is
+  // resizable.
+  void PaintSizeBox(gfx::Canvas* canvas);
 
-  // Returns the DialogDelegate for the window. Virtual for testing.
-  virtual DialogDelegate* GetDialogDelegate() const;
+  // Returns the width of the specified dialog button using the correct font.
+  int GetButtonWidth(int button) const;
+  int GetButtonsHeight() const;
+
+  // Position and size various sub-views.
+  void LayoutDialogButtons();
+  void LayoutContentsView();
+
+  // Makes the specified button the default button.
+  void SetDefaultButton(NativeTextButton* button);
+
+  bool has_dialog_buttons() const { return ok_button_ || cancel_button_; }
 
   // Create and add the extra view, if supplied by the delegate.
   void CreateExtraView();
 
-  // Creates and adds the footnote view, if supplied by the delegate.
-  void CreateFootnoteView();
-
-  // View implementation.
-  virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;
-  virtual void ChildVisibilityChanged(View* child) OVERRIDE;
-
- private:
-  FRIEND_TEST_ALL_PREFIXES(DialogClientViewTest, FocusManager);
-
-  bool has_dialog_buttons() const { return ok_button_ || cancel_button_; }
-
-  // Create a dialog button of the appropriate type.
-  LabelButton* CreateDialogButton(ui::DialogButton type);
-
-  // Update |button|'s text and enabled state according to the delegate's state.
-  void UpdateButton(LabelButton* button, ui::DialogButton type);
-
-  // Returns the height of the row containing the buttons and the extra view.
-  int GetButtonsAndExtraViewRowHeight() const;
-
-  // Returns the insets for the buttons and extra view.
-  gfx::Insets GetButtonRowInsets() const;
+  // Returns the DialogDelegate for the window.
+  DialogDelegate* GetDialogDelegate() const;
 
   // Closes the widget.
   void Close();
 
+  // Updates focus listener.
+  void UpdateFocusListener();
+
+  static void InitClass();
+
   // The dialog buttons.
-  LabelButton* ok_button_;
-  LabelButton* cancel_button_;
+  NativeTextButton* ok_button_;
+  NativeTextButton* cancel_button_;
 
-  // The button that is currently default; may be NULL.
-  LabelButton* default_button_;
+  // The button that is currently the default button if any.
+  NativeTextButton* default_button_;
 
-  // Observe |focus_manager_| to update the default button with focus changes.
-  FocusManager* focus_manager_;
-
-  // The extra view shown in the row of buttons; may be NULL.
+  // The button-level extra view, NULL unless the dialog delegate supplies one.
   View* extra_view_;
 
-  // The footnote view shown below the buttons; may be NULL.
-  View* footnote_view_;
+  // See description of DialogDelegate::GetSizeExtraViewHeightToButtons for
+  // details on this.
+  bool size_extra_view_height_to_buttons_;
+
+  // The layout rect of the size box, when visible.
+  gfx::Rect size_box_bounds_;
 
   // True if we've notified the delegate the window is closing and the delegate
   // allosed the close. In some situations it's possible to get two closes (see
   // http://crbug.com/71940). This is used to avoid notifying the delegate
   // twice, which can have bad consequences.
   bool notified_delegate_;
+
+  // true if focus listener is added.
+  bool listening_to_focus_;
+
+  // When ancestor gets changed focus manager gets changed as well.
+  FocusManager* saved_focus_manager_;
+
+  // View positioned along the bottom, beneath the buttons.
+  View* bottom_view_;
+
+  // Static resource initialization
+  static gfx::Font* dialog_button_font_;
 
   DISALLOW_COPY_AND_ASSIGN(DialogClientView);
 };

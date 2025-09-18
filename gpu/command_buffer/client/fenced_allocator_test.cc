@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,13 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/aligned_memory.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/client/fenced_allocator.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
+#include "gpu/command_buffer/service/mocks.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
-#include "gpu/command_buffer/service/mocks.h"
-#include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_MACOSX)
@@ -34,7 +32,6 @@ using testing::_;
 class BaseFencedAllocatorTest : public testing::Test {
  protected:
   static const unsigned int kBufferSize = 1024;
-  static const int kAllocAlignment = 16;
 
   virtual void SetUp() {
     api_mock_.reset(new AsyncAPIMock);
@@ -47,14 +44,8 @@ class BaseFencedAllocatorTest : public testing::Test {
         .WillRepeatedly(DoAll(Invoke(api_mock_.get(), &AsyncAPIMock::SetToken),
                               Return(error::kNoError)));
 
-    {
-      TransferBufferManager* manager = new TransferBufferManager();
-      transfer_buffer_manager_.reset(manager);
-      EXPECT_TRUE(manager->Initialize());
-    }
-    command_buffer_.reset(
-        new CommandBufferService(transfer_buffer_manager_.get()));
-    EXPECT_TRUE(command_buffer_->Initialize());
+    command_buffer_.reset(new CommandBufferService);
+    command_buffer_->Initialize();
 
     gpu_scheduler_.reset(new GpuScheduler(
         command_buffer_.get(), api_mock_.get(), NULL));
@@ -76,9 +67,8 @@ class BaseFencedAllocatorTest : public testing::Test {
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool autorelease_pool_;
 #endif
-  base::MessageLoop message_loop_;
+  MessageLoop message_loop_;
   scoped_ptr<AsyncAPIMock> api_mock_;
-  scoped_ptr<TransferBufferManagerInterface> transfer_buffer_manager_;
   scoped_ptr<CommandBufferService> command_buffer_;
   scoped_ptr<GpuScheduler> gpu_scheduler_;
   scoped_ptr<CommandBufferHelper> helper_;
@@ -101,7 +91,7 @@ class FencedAllocatorTest : public BaseFencedAllocatorTest {
 
   virtual void TearDown() {
     // If the GpuScheduler posts any tasks, this forces them to run.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
 
     EXPECT_TRUE(allocator_->CheckConsistency());
 
@@ -124,14 +114,6 @@ TEST_F(FencedAllocatorTest, TestBasic) {
   EXPECT_TRUE(allocator_->CheckConsistency());
 
   allocator_->Free(offset);
-  EXPECT_FALSE(allocator_->InUse());
-  EXPECT_TRUE(allocator_->CheckConsistency());
-}
-
-// Test alloc 0 fails.
-TEST_F(FencedAllocatorTest, TestAllocZero) {
-  FencedAllocator::Offset offset = allocator_->Alloc(0);
-  EXPECT_EQ(FencedAllocator::kInvalidOffset, offset);
   EXPECT_FALSE(allocator_->InUse());
   EXPECT_TRUE(allocator_->CheckConsistency());
 }
@@ -404,15 +386,14 @@ class FencedAllocatorWrapperTest : public BaseFencedAllocatorTest {
     // Though allocating this buffer isn't strictly necessary, it makes
     // allocations point to valid addresses, so they could be used for
     // something.
-    buffer_.reset(static_cast<char*>(base::AlignedAlloc(
-        kBufferSize, kAllocAlignment)));
+    buffer_.reset(new char[kBufferSize]);
     allocator_.reset(new FencedAllocatorWrapper(kBufferSize, helper_.get(),
                                                 buffer_.get()));
   }
 
   virtual void TearDown() {
     // If the GpuScheduler posts any tasks, this forces them to run.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
 
     EXPECT_TRUE(allocator_->CheckConsistency());
 
@@ -420,7 +401,7 @@ class FencedAllocatorWrapperTest : public BaseFencedAllocatorTest {
   }
 
   scoped_ptr<FencedAllocatorWrapper> allocator_;
-  scoped_ptr_malloc<char, base::ScopedPtrAlignedFree> buffer_;
+  scoped_array<char> buffer_;
 };
 
 // Checks basic alloc and free.
@@ -455,38 +436,6 @@ TEST_F(FencedAllocatorWrapperTest, TestBasic) {
   EXPECT_EQ(kBufferSize - kSize * sizeof(*pointer_uint),
             allocator_->GetLargestFreeSize());
   allocator_->Free(pointer_uint);
-}
-
-// Test alloc 0 fails.
-TEST_F(FencedAllocatorWrapperTest, TestAllocZero) {
-  allocator_->CheckConsistency();
-
-  void *pointer = allocator_->Alloc(0);
-  ASSERT_FALSE(pointer);
-  EXPECT_TRUE(allocator_->CheckConsistency());
-}
-
-// Checks that allocation offsets are aligned to multiples of 16 bytes.
-TEST_F(FencedAllocatorWrapperTest, TestAlignment) {
-  allocator_->CheckConsistency();
-
-  const unsigned int kSize1 = 75;
-  void *pointer1 = allocator_->Alloc(kSize1);
-  ASSERT_TRUE(pointer1);
-  EXPECT_EQ(reinterpret_cast<intptr_t>(pointer1) & (kAllocAlignment - 1), 0);
-  EXPECT_TRUE(allocator_->CheckConsistency());
-
-  const unsigned int kSize2 = 43;
-  void *pointer2 = allocator_->Alloc(kSize2);
-  ASSERT_TRUE(pointer2);
-  EXPECT_EQ(reinterpret_cast<intptr_t>(pointer2) & (kAllocAlignment - 1), 0);
-  EXPECT_TRUE(allocator_->CheckConsistency());
-
-  allocator_->Free(pointer2);
-  EXPECT_TRUE(allocator_->CheckConsistency());
-
-  allocator_->Free(pointer1);
-  EXPECT_TRUE(allocator_->CheckConsistency());
 }
 
 // Checks out-of-memory condition.

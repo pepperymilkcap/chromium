@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/common/content_settings_types.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace content_settings {
 
@@ -57,7 +57,7 @@ class RuleIteratorImpl : public RuleIterator {
 
 OriginIdentifierValueMap::EntryMapKey::EntryMapKey(
     ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier)
+    ResourceIdentifier resource_identifier)
     : content_type(content_type),
       resource_identifier(resource_identifier) {
 }
@@ -70,8 +70,8 @@ bool OriginIdentifierValueMap::EntryMapKey::operator<(
 }
 
 OriginIdentifierValueMap::PatternPair::PatternPair(
-    const ContentSettingsPattern& primary_pattern,
-    const ContentSettingsPattern& secondary_pattern)
+    ContentSettingsPattern primary_pattern,
+    ContentSettingsPattern secondary_pattern)
     : primary_pattern(primary_pattern),
       secondary_pattern(secondary_pattern) {
 }
@@ -90,7 +90,7 @@ bool OriginIdentifierValueMap::PatternPair::operator<(
 
 RuleIterator* OriginIdentifierValueMap::GetRuleIterator(
     ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier,
+    ResourceIdentifier resource_identifier,
     base::Lock* lock) const {
   EntryMapKey key(content_type, resource_identifier);
   // We access |entries_| here, so we need to lock |lock_| first. The lock must
@@ -120,7 +120,7 @@ OriginIdentifierValueMap::OriginIdentifierValueMap() {}
 
 OriginIdentifierValueMap::~OriginIdentifierValueMap() {}
 
-base::Value* OriginIdentifierValueMap::GetValue(
+Value* OriginIdentifierValueMap::GetValue(
     const GURL& primary_url,
     const GURL& secondary_url,
     ContentSettingsType content_type,
@@ -148,10 +148,7 @@ void OriginIdentifierValueMap::SetValue(
     const ContentSettingsPattern& secondary_pattern,
     ContentSettingsType content_type,
     const ResourceIdentifier& resource_identifier,
-    base::Value* value) {
-  DCHECK(primary_pattern.IsValid());
-  DCHECK(secondary_pattern.IsValid());
-  DCHECK(value);
+    Value* value) {
   EntryMapKey key(content_type, resource_identifier);
   PatternPair patterns(primary_pattern, secondary_pattern);
   // This will create the entry and the linked_ptr if needed.

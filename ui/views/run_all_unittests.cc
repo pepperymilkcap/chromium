@@ -2,46 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/basictypes.h"
-#include "base/bind.h"
-#include "base/compiler_specific.h"
-#include "base/path_service.h"
-#include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/gfx/compositor/compositor_setup.h"
+#include "ui/gfx/compositor/test/compositor_test_support.h"
+#include "ui/views/view.h"
 
 class ViewTestSuite : public base::TestSuite {
  public:
   ViewTestSuite(int argc, char** argv) : base::TestSuite(argc, argv) {}
 
  protected:
-  virtual void Initialize() OVERRIDE {
+  virtual void Initialize() {
     base::TestSuite::Initialize();
+
     ui::RegisterPathProvider();
+    ui::ResourceBundle::InitSharedInstanceWithLocale("en-US");
 
-    base::FilePath pak_dir;
-    PathService::Get(base::DIR_MODULE, &pak_dir);
-
-    base::FilePath pak_file;
-    pak_file = pak_dir.Append(FILE_PATH_LITERAL("ui_test.pak"));
-
-    ui::ResourceBundle::InitSharedInstanceWithPakPath(pak_file);
+    ui::CompositorTestSupport::Initialize();
+    ui::SetupTestCompositor();
   }
 
-  virtual void Shutdown() OVERRIDE {
-    ui::ResourceBundle::CleanupSharedInstance();
-    base::TestSuite::Shutdown();
+  virtual void Shutdown() {
+    ui::CompositorTestSupport::Terminate();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ViewTestSuite);
 };
 
 int main(int argc, char** argv) {
-  ViewTestSuite test_suite(argc, argv);
-
-  return base::LaunchUnitTests(
-      argc, argv, base::Bind(&ViewTestSuite::Run,
-                             base::Unretained(&test_suite)));
+  return ViewTestSuite(argc, argv).Run();
 }

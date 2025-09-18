@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_BACKING_STORE_GTK_H_
 #define CONTENT_BROWSER_RENDERER_HOST_BACKING_STORE_GTK_H_
+#pragma once
 
 #include <vector>
 
@@ -12,16 +13,15 @@
 #include "build/build_config.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/common/content_export.h"
-#include "ui/gfx/x/x11_types.h"
+#include "ui/base/x/x11_util.h"
 
 namespace gfx {
 class Point;
 class Rect;
-}
+}  // namespace gfx
+
 
 typedef struct _GdkDrawable GdkDrawable;
-
-namespace content {
 
 class CONTENT_EXPORT BackingStoreGtk : public BackingStore {
  public:
@@ -39,7 +39,7 @@ class CONTENT_EXPORT BackingStoreGtk : public BackingStore {
 
   virtual ~BackingStoreGtk();
 
-  XDisplay* display() const { return display_; }
+  Display* display() const { return display_; }
   XID root_window() const { return root_window_; }
 
   // Copy from the server-side backing store to the target window
@@ -49,6 +49,9 @@ class CONTENT_EXPORT BackingStoreGtk : public BackingStore {
   void XShowRect(const gfx::Point &origin, const gfx::Rect& damage,
                  XID target);
 
+  // As above, but use Cairo instead of Xlib.
+  void CairoShowRect(const gfx::Rect& damage, GdkDrawable* drawable);
+
 #if defined(TOOLKIT_GTK)
   // Paint the backing store into the target's |dest_rect|.
   void PaintToRect(const gfx::Rect& dest_rect, GdkDrawable* target);
@@ -57,16 +60,15 @@ class CONTENT_EXPORT BackingStoreGtk : public BackingStore {
   // BackingStore implementation.
   virtual size_t MemorySize() OVERRIDE;
   virtual void PaintToBackingStore(
-      RenderProcessHost* process,
+      content::RenderProcessHost* process,
       TransportDIB::Id bitmap,
       const gfx::Rect& bitmap_rect,
       const std::vector<gfx::Rect>& copy_rects,
-      float scale_factor,
       const base::Closure& completion_callback,
       bool* scheduled_completion_callback) OVERRIDE;
   virtual bool CopyFromBackingStore(const gfx::Rect& rect,
-                                    skia::PlatformBitmap* output) OVERRIDE;
-  virtual void ScrollBackingStore(const gfx::Vector2d& delta,
+                                    skia::PlatformCanvas* output) OVERRIDE;
+  virtual void ScrollBackingStore(int dx, int dy,
                                   const gfx::Rect& clip_rect,
                                   const gfx::Size& view_size) OVERRIDE;
 
@@ -79,7 +81,7 @@ class CONTENT_EXPORT BackingStoreGtk : public BackingStore {
 
   // This is the connection to the X server where this backing store will be
   // displayed.
-  XDisplay* const display_;
+  Display* const display_;
   // What flavor, if any, MIT-SHM (X shared memory) support we have.
   const ui::SharedMemorySupport shared_memory_support_;
   // If this is true, then we can use Xrender to composite our pixmaps.
@@ -101,7 +103,5 @@ class CONTENT_EXPORT BackingStoreGtk : public BackingStore {
 
   DISALLOW_COPY_AND_ASSIGN(BackingStoreGtk);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_BACKING_STORE_GTK_H_

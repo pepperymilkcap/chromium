@@ -4,6 +4,7 @@
 
 #ifndef BASE_WIN_ENUM_VARIANT_H_
 #define BASE_WIN_ENUM_VARIANT_H_
+#pragma once
 
 #include <unknwn.h>
 
@@ -41,7 +42,7 @@ class BASE_EXPORT EnumVariant
  private:
   ~EnumVariant();
 
-  scoped_ptr<VARIANT[]> items_;
+  scoped_array<VARIANT> items_;
   unsigned long count_;
   unsigned long current_index_;
 };

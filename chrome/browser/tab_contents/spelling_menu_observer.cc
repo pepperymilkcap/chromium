@@ -4,57 +4,59 @@
 
 #include "chrome/browser/tab_contents/spelling_menu_observer.h"
 
-#include "base/bind.h"
+#include <string>
+
 #include "base/command_line.h"
-#include "base/i18n/case_conversion.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/json/json_reader.h"
+#include "base/json/string_escape.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
+#include "chrome/browser/spellchecker/spellcheck_host.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
 #include "chrome/browser/spellchecker/spellcheck_platform_mac.h"
-#include "chrome/browser/spellchecker/spellcheck_service.h"
-#include "chrome/browser/spellchecker/spelling_service_client.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
-#include "chrome/browser/tab_contents/spelling_bubble_model.h"
-#include "chrome/browser/ui/confirm_bubble.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/spellcheck_result.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host_view.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
-#include "content/public/common/context_menu_params.h"
-#include "extensions/browser/view_type_utils.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/common/url_fetcher.h"
+#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/rect.h"
+#include "unicode/uloc.h"
+#include "webkit/glue/context_menu.h"
+
+#if defined(GOOGLE_CHROME_BUILD)
+#include "chrome/browser/spellchecker/internal/spellcheck_internal.h"
+#endif
+
+// Use the public URL to the Spelling service on Chromium. Unfortunately, this
+// service is an experimental service and returns an error without a key.
+#ifndef SPELLING_SERVICE_KEY
+#define SPELLING_SERVICE_KEY
+#endif
+
+#ifndef SPELLING_SERVICE_URL
+#define SPELLING_SERVICE_URL "https://www.googleapis.com/rpc"
+#endif
 
 using content::BrowserThread;
 
 SpellingMenuObserver::SpellingMenuObserver(RenderViewContextMenuProxy* proxy)
     : proxy_(proxy),
       loading_frame_(0),
-      succeeded_(false),
-      misspelling_hash_(0),
-      client_(new SpellingServiceClient) {
-  if (proxy && proxy->GetProfile()) {
-    integrate_spelling_service_.Init(prefs::kSpellCheckUseSpellingService,
-                                     proxy->GetProfile()->GetPrefs());
-    autocorrect_spelling_.Init(prefs::kEnableAutoSpellCorrect,
-                               proxy->GetProfile()->GetPrefs());
-  }
+      succeeded_(false) {
 }
 
 SpellingMenuObserver::~SpellingMenuObserver() {
 }
 
-void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
+void SpellingMenuObserver::InitMenu(const ContextMenuParams& params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!params.misspelled_word.empty() ||
-      params.dictionary_suggestions.empty());
 
   // Exit if we are not in an editable element because we add a menu item only
   // for editable elements.
@@ -62,21 +64,8 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
   if (!params.is_editable || !profile)
     return;
 
-  // Exit if there is no misspelled word.
-  if (params.misspelled_word.empty())
-    return;
-
-  suggestions_ = params.dictionary_suggestions;
-  misspelled_word_ = params.misspelled_word;
-  misspelling_hash_ = params.misspelling_hash;
-
-  bool use_suggestions = SpellingServiceClient::IsAvailable(
-      profile, SpellingServiceClient::SUGGEST);
-
-  if (!suggestions_.empty() || use_suggestions)
-    proxy_->AddSeparator();
-
   // Append Dictionary spell check suggestions.
+  suggestions_ = params.dictionary_suggestions;
   for (size_t i = 0; i < params.dictionary_suggestions.size() &&
        IDC_SPELLCHECK_SUGGESTION_0 + i <= IDC_SPELLCHECK_SUGGESTION_LAST;
        ++i) {
@@ -84,118 +73,94 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
                         params.dictionary_suggestions[i]);
   }
 
-  // The service types |SpellingServiceClient::SPELLCHECK| and
-  // |SpellingServiceClient::SUGGEST| are mutually exclusive. Only one is
-  // available at at time.
-  //
-  // When |SpellingServiceClient::SPELLCHECK| is available, the contextual
-  // suggestions from |SpellingServiceClient| are already stored in
-  // |params.dictionary_suggestions|.  |SpellingMenuObserver| places these
-  // suggestions in the slots |IDC_SPELLCHECK_SUGGESTION_[0-LAST]|. If
-  // |SpellingMenuObserver| queried |SpellingServiceClient| again, then quality
-  // of suggestions would be reduced by lack of context around the misspelled
-  // word.
-  //
-  // When |SpellingServiceClient::SUGGEST| is available,
-  // |params.dictionary_suggestions| contains suggestions only from Hunspell
-  // dictionary. |SpellingMenuObserver| queries |SpellingServiceClient| with the
-  // misspelled word without the surrounding context. Spellcheck suggestions
-  // from |SpellingServiceClient::SUGGEST| are not available until
-  // |SpellingServiceClient| responds to the query. While |SpellingMenuObserver|
-  // waits for |SpellingServiceClient|, it shows a placeholder text "Loading
-  // suggestion..." in the |IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION| slot. After
-  // |SpellingServiceClient| responds to the query, |SpellingMenuObserver|
-  // replaces the placeholder text with either the spelling suggestion or the
-  // message "No more suggestions from Google." The "No more suggestions"
-  // message is there when |SpellingServiceClient| returned the same suggestion
-  // as Hunspell.
-  if (use_suggestions) {
-    // Append a placeholder item for the suggestion from the Spelling service
-    // and send a request to the service if we can retrieve suggestions from it.
-    // Also, see if we can use the spelling service to get an ideal suggestion.
-    // Otherwise, we'll fall back to the set of suggestions.  Initialize
-    // variables used in OnTextCheckComplete(). We copy the input text to the
-    // result text so we can replace its misspelled regions with suggestions.
-    succeeded_ = false;
-    result_ = params.misspelled_word;
-
-    // Add a placeholder item. This item will be updated when we receive a
-    // response from the Spelling service. (We do not have to disable this
-    // item now since Chrome will call IsCommandIdEnabled() and disable it.)
-    loading_message_ =
-        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_CHECKING);
-    proxy_->AddMenuItem(IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION,
-                        loading_message_);
-    // Invoke a JSON-RPC call to the Spelling service in the background so we
-    // can update the placeholder item when we receive its response. It also
-    // starts the animation timer so we can show animation until we receive
-    // it.
-    bool result = client_->RequestTextCheck(
-        profile, SpellingServiceClient::SUGGEST, params.misspelled_word,
-        base::Bind(&SpellingMenuObserver::OnTextCheckComplete,
-                   base::Unretained(this), SpellingServiceClient::SUGGEST));
-    if (result) {
+  // Append a placeholder item for the suggestion from the Spelling serivce and
+  // send a request to the service if we have enabled the spellchecking and
+  // integrated the Spelling service.
+  PrefService* pref = profile->GetPrefs();
+  if (params.spellcheck_enabled &&
+      pref->GetBoolean(prefs::kEnableSpellCheck) &&
+      pref->GetBoolean(prefs::kSpellCheckUseSpellingService)) {
+    // Retrieve the misspelled word to be sent to the Spelling service.
+    string16 text = params.misspelled_word;
+    if (!text.empty() && profile->GetRequestContext()) {
+      // Initialize variables used in OnURLFetchComplete(). We copy the input
+      // text to the result text so we can replace its misspelled regions with
+      // suggestions.
       loading_frame_ = 0;
-      animation_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(1),
-          this, &SpellingMenuObserver::OnAnimationTimerExpired);
+      succeeded_ = false;
+      result_ = text;
+
+      // Add a placeholder item. This item will be updated when we receive a
+      // response from the Spelling service. (We do not have to disable this
+      // item now since Chrome will call IsCommandIdEnabled() and disable it.)
+      loading_message_ =
+          l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_CHECKING);
+      proxy_->AddMenuItem(IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION,
+                          loading_message_);
+
+      // Invoke a JSON-RPC call to the Spelling service in the background so we
+      // can update the placeholder item when we receive its response. It also
+      // starts the animation timer so we can show animation until we receive
+      // it.
+      const PrefService* pref = profile->GetPrefs();
+      std::string language =
+          pref ? pref->GetString(prefs::kSpellCheckDictionary) : "en-US";
+      Invoke(text, language, profile->GetRequestContext());
     }
   }
 
-  if (params.dictionary_suggestions.empty()) {
-    proxy_->AddMenuItem(
-        IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS,
-        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS));
-    bool use_spelling_service = SpellingServiceClient::IsAvailable(
-        profile, SpellingServiceClient::SPELLCHECK);
-    if (use_suggestions || use_spelling_service)
-      proxy_->AddSeparator();
-  } else {
+  if (!params.dictionary_suggestions.empty()) {
     proxy_->AddSeparator();
 
-    // |spellcheck_service| can be null when the suggested word is
+    // |spellcheck_host| can be null when the suggested word is
     // provided by Web SpellCheck API.
-    SpellcheckService* spellcheck_service =
-        SpellcheckServiceFactory::GetForContext(profile);
-    if (spellcheck_service && spellcheck_service->GetMetrics())
-      spellcheck_service->GetMetrics()->RecordSuggestionStats(1);
+    SpellCheckHost* spellcheck_host =
+        SpellCheckFactory::GetHostForProfile(profile);
+    if (spellcheck_host && spellcheck_host->GetMetrics())
+      spellcheck_host->GetMetrics()->RecordSuggestionStats(1);
   }
 
-  // If word is misspelled, give option for "Add to dictionary" and a check item
-  // "Ask Google for suggestions".
-  proxy_->AddMenuItem(IDC_SPELLCHECK_ADD_TO_DICTIONARY,
-      l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_ADD_TO_DICTIONARY));
+  // If word is misspelled, give option for "Add to dictionary" and "Ask Google
+  // for suggestions". (The SpellCheckerSubMenuObserver class handles the "Ask
+  // Goole for suggestions" item so this class does not have to handle it.)
+  if (!params.misspelled_word.empty()) {
+    if (params.dictionary_suggestions.empty()) {
+      proxy_->AddMenuItem(IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS,
+          l10n_util::GetStringUTF16(
+              IDS_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS));
+    }
+    misspelled_word_ = params.misspelled_word;
+    proxy_->AddMenuItem(IDC_SPELLCHECK_ADD_TO_DICTIONARY,
+        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_ADD_TO_DICTIONARY));
 
-#if defined(TOOLKIT_GTK)
-  extensions::ViewType view_type =
-      extensions::GetViewType(proxy_->GetWebContents());
-  if (view_type != extensions::VIEW_TYPE_PANEL) {
+#if defined(OS_WIN)
+    const CommandLine* command_line = CommandLine::ForCurrentProcess();
+    bool experimental_spell_check_features =
+        command_line->HasSwitch(switches::kExperimentalSpellcheckerFeatures);
+    if (experimental_spell_check_features) {
+      bool integrate_spelling_service =
+          profile->GetPrefs()->GetBoolean(prefs::kSpellCheckUseSpellingService);
+      int spelling_message = integrate_spelling_service ?
+          IDS_CONTENT_CONTEXT_SPELLING_STOP_ASKING_GOOGLE :
+          IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE;
+      proxy_->AddMenuItem(IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
+                          l10n_util::GetStringUTF16(spelling_message));
+    }
 #endif
-    proxy_->AddCheckItem(IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
-        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE));
-#if defined(TOOLKIT_GTK)
-  }
-#endif
 
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableSpellingAutoCorrect)) {
-    proxy_->AddCheckItem(IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE,
-        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_AUTOCORRECT));
+    proxy_->AddSeparator();
   }
-
-  proxy_->AddSeparator();
 }
 
 bool SpellingMenuObserver::IsCommandIdSupported(int command_id) {
   if (command_id >= IDC_SPELLCHECK_SUGGESTION_0 &&
-      command_id <= IDC_SPELLCHECK_SUGGESTION_LAST)
+      command_id <= IDC_SPELLCHECK_SUGGESTION_4)
     return true;
 
   switch (command_id) {
     case IDC_SPELLCHECK_ADD_TO_DICTIONARY:
     case IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS:
     case IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION:
-    case IDC_CONTENT_CONTEXT_SPELLING_TOGGLE:
-    case IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE:
       return true;
 
     default:
@@ -204,42 +169,22 @@ bool SpellingMenuObserver::IsCommandIdSupported(int command_id) {
   return false;
 }
 
-bool SpellingMenuObserver::IsCommandIdChecked(int command_id) {
-  DCHECK(IsCommandIdSupported(command_id));
-
-  if (command_id == IDC_CONTENT_CONTEXT_SPELLING_TOGGLE)
-    return integrate_spelling_service_.GetValue() &&
-        !proxy_->GetProfile()->IsOffTheRecord();
-  else if (command_id == IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE)
-    return autocorrect_spelling_.GetValue() &&
-        !proxy_->GetProfile()->IsOffTheRecord();
-  return false;
-}
-
 bool SpellingMenuObserver::IsCommandIdEnabled(int command_id) {
   DCHECK(IsCommandIdSupported(command_id));
 
   if (command_id >= IDC_SPELLCHECK_SUGGESTION_0 &&
-      command_id <= IDC_SPELLCHECK_SUGGESTION_LAST)
+      command_id <= IDC_SPELLCHECK_SUGGESTION_4)
     return true;
 
   switch (command_id) {
     case IDC_SPELLCHECK_ADD_TO_DICTIONARY:
-      return !misspelled_word_.empty();
+      return !suggestions_.empty();
 
     case IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS:
       return false;
 
     case IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION:
       return succeeded_;
-
-    case IDC_CONTENT_CONTEXT_SPELLING_TOGGLE:
-      return integrate_spelling_service_.IsUserModifiable() &&
-          !proxy_->GetProfile()->IsOffTheRecord();
-
-    case IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE:
-      return integrate_spelling_service_.IsUserModifiable() &&
-          !proxy_->GetProfile()->IsOffTheRecord();
 
     default:
       return false;
@@ -251,22 +196,17 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
   DCHECK(IsCommandIdSupported(command_id));
 
   if (command_id >= IDC_SPELLCHECK_SUGGESTION_0 &&
-      command_id <= IDC_SPELLCHECK_SUGGESTION_LAST) {
-    int suggestion_index = command_id - IDC_SPELLCHECK_SUGGESTION_0;
-    proxy_->GetRenderViewHost()->ReplaceMisspelling(
-        suggestions_[suggestion_index]);
-    // GetSpellCheckHost() can return null when the suggested word is provided
-    // by Web SpellCheck API.
+      command_id <= IDC_SPELLCHECK_SUGGESTION_4) {
+    proxy_->GetRenderViewHost()->Replace(
+        suggestions_[command_id - IDC_SPELLCHECK_SUGGESTION_0]);
+    // GetSpellCheckHost() can return null when the suggested word is
+    // provided by Web SpellCheck API.
     Profile* profile = proxy_->GetProfile();
     if (profile) {
-      SpellcheckService* spellcheck =
-          SpellcheckServiceFactory::GetForContext(profile);
-      if (spellcheck) {
-        if (spellcheck->GetMetrics())
-          spellcheck->GetMetrics()->RecordReplacedWordStats(1);
-        spellcheck->GetFeedbackSender()->SelectedSuggestion(
-            misspelling_hash_, suggestion_index);
-      }
+      SpellCheckHost* spellcheck_host =
+          SpellCheckFactory::GetHostForProfile(profile);
+      if (spellcheck_host && spellcheck_host->GetMetrics())
+        spellcheck_host->GetMetrics()->RecordReplacedWordStats(1);
     }
     return;
   }
@@ -275,143 +215,203 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
   // the misspelled word with the suggestion and add it to our custom-word
   // dictionary so this word is not marked as misspelled any longer.
   if (command_id == IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION) {
-    proxy_->GetRenderViewHost()->ReplaceMisspelling(result_);
+    proxy_->GetRenderViewHost()->Replace(result_);
     misspelled_word_ = result_;
   }
 
   if (command_id == IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION ||
       command_id == IDC_SPELLCHECK_ADD_TO_DICTIONARY) {
-    // GetHostForProfile() can return null when the suggested word is provided
-    // by Web SpellCheck API.
+    // GetHostForProfile() can return null when the suggested word is
+    // provided by Web SpellCheck API.
     Profile* profile = proxy_->GetProfile();
     if (profile) {
-      SpellcheckService* spellcheck =
-          SpellcheckServiceFactory::GetForContext(profile);
-      if (spellcheck) {
-        spellcheck->GetCustomDictionary()->AddWord(base::UTF16ToUTF8(
-            misspelled_word_));
-        spellcheck->GetFeedbackSender()->AddedToDictionary(misspelling_hash_);
-      }
+      SpellCheckHost* host = SpellCheckFactory::GetHostForProfile(profile);
+      if (host)
+        host->AddWord(UTF16ToUTF8(misspelled_word_));
     }
 #if defined(OS_MACOSX)
     spellcheck_mac::AddWord(misspelled_word_);
 #endif
   }
-
-  // The spelling service can be toggled by the user only if it is not managed.
-  if (command_id == IDC_CONTENT_CONTEXT_SPELLING_TOGGLE &&
-      integrate_spelling_service_.IsUserModifiable()) {
-    // When a user enables the "Ask Google for spelling suggestions" item, we
-    // show a bubble to confirm it. On the other hand, when a user disables this
-    // item, we directly update/ the profile and stop integrating the spelling
-    // service immediately.
-    if (!integrate_spelling_service_.GetValue()) {
-      content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
-      gfx::Rect rect = rvh->GetView()->GetViewBounds();
-      chrome::ShowConfirmBubble(
-#if defined(TOOLKIT_VIEWS)
-          proxy_->GetWebContents()->GetView()->GetTopLevelNativeWindow(),
-#else
-          rvh->GetView()->GetNativeView(),
-#endif
-          gfx::Point(rect.CenterPoint().x(), rect.y()),
-          new SpellingBubbleModel(proxy_->GetProfile(),
-                                  proxy_->GetWebContents(),
-                                  false));
-    } else {
-      Profile* profile = proxy_->GetProfile();
-      if (profile)
-        profile->GetPrefs()->SetBoolean(prefs::kSpellCheckUseSpellingService,
-                                        false);
-        profile->GetPrefs()->SetBoolean(prefs::kEnableAutoSpellCorrect,
-                                        false);
-    }
-  }
-  // Autocorrect requires use of the spelling service and the spelling service
-  // can be toggled by the user only if it is not managed.
-  if (command_id == IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE &&
-      integrate_spelling_service_.IsUserModifiable()) {
-    // When the user enables autocorrect, we'll need to make sure that we can
-    // ask Google for suggestions since that service is required. So we show
-    // the bubble and just make sure to enable autocorrect as well.
-    if (!integrate_spelling_service_.GetValue()) {
-      content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
-      gfx::Rect rect = rvh->GetView()->GetViewBounds();
-      chrome::ShowConfirmBubble(rvh->GetView()->GetNativeView(),
-                                gfx::Point(rect.CenterPoint().x(), rect.y()),
-                                new SpellingBubbleModel(
-                                    proxy_->GetProfile(),
-                                    proxy_->GetWebContents(),
-                                    true));
-    } else {
-      Profile* profile = proxy_->GetProfile();
-      if (profile) {
-        bool current_value = autocorrect_spelling_.GetValue();
-        profile->GetPrefs()->SetBoolean(prefs::kEnableAutoSpellCorrect,
-                                        !current_value);
-      }
-    }
-  }
 }
 
-void SpellingMenuObserver::OnMenuCancel() {
-  Profile* profile = proxy_->GetProfile();
-  if (!profile)
-    return;
-  SpellcheckService* spellcheck =
-      SpellcheckServiceFactory::GetForContext(profile);
-  if (!spellcheck)
-    return;
-  spellcheck->GetFeedbackSender()->IgnoredSuggestions(misspelling_hash_);
+bool SpellingMenuObserver::Invoke(const string16& text,
+                                  const std::string& locale,
+                                  net::URLRequestContextGetter* context) {
+  // Create the parameters needed by Spelling API. Spelling API needs three
+  // parameters: ISO language code, ISO3 country code, and text to be checked by
+  // the service. On the other hand, Chrome uses an ISO locale ID and it may
+  // not include a country ID, e.g. "fr", "de", etc. To create the input
+  // parameters, we convert the UI locale to a full locale ID, and  convert the
+  // full locale ID to an ISO language code and and ISO3 country code. Also, we
+  // convert the given text to a JSON string, i.e. quote all its non-ASCII
+  // characters.
+  UErrorCode error = U_ZERO_ERROR;
+  char id[ULOC_LANG_CAPACITY + ULOC_SCRIPT_CAPACITY + ULOC_COUNTRY_CAPACITY];
+  uloc_addLikelySubtags(locale.c_str(), id, arraysize(id), &error);
+
+  error = U_ZERO_ERROR;
+  char language[ULOC_LANG_CAPACITY];
+  uloc_getLanguage(id, language, arraysize(language), &error);
+
+  const char* country = uloc_getISO3Country(id);
+
+  std::string encoded_text;
+  base::JsonDoubleQuote(text, false, &encoded_text);
+
+  // Format the JSON request to be sent to the Spelling service.
+  static const char kSpellingRequest[] =
+      "{"
+      "\"method\":\"spelling.check\","
+      "\"apiVersion\":\"v1\","
+      "\"params\":{"
+      "\"text\":\"%s\","
+      "\"language\":\"%s\","
+      "\"origin_country\":\"%s\","
+      "\"key\":\"" SPELLING_SERVICE_KEY "\""
+      "}"
+      "}";
+  std::string request = base::StringPrintf(kSpellingRequest,
+                                           encoded_text.c_str(),
+                                           language, country);
+
+  static const char kSpellingServiceURL[] = SPELLING_SERVICE_URL;
+  GURL url = GURL(kSpellingServiceURL);
+  fetcher_.reset(content::URLFetcher::Create(
+      url, content::URLFetcher::POST, this));
+  fetcher_->SetRequestContext(context);
+  fetcher_->SetUploadData("application/json", request);
+  fetcher_->Start();
+
+  animation_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(1),
+      this, &SpellingMenuObserver::OnAnimationTimerExpired);
+
+  return true;
 }
 
-void SpellingMenuObserver::OnTextCheckComplete(
-    SpellingServiceClient::ServiceType type,
-    bool success,
-    const base::string16& text,
-    const std::vector<SpellCheckResult>& results) {
+void SpellingMenuObserver::OnURLFetchComplete(
+    const content::URLFetcher* source) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  scoped_ptr<content::URLFetcher> clean_up_fetcher(fetcher_.release());
   animation_timer_.Stop();
 
-  // Scan the text-check results and replace the misspelled regions with
-  // suggested words. If the replaced text is included in the suggestion list
-  // provided by the local spellchecker, we show a "No suggestions from Google"
-  // message.
-  succeeded_ = success;
-  if (results.empty()) {
-    succeeded_ = false;
-  } else {
-    typedef std::vector<SpellCheckResult> SpellCheckResults;
-    for (SpellCheckResults::const_iterator it = results.begin();
-         it != results.end(); ++it) {
-      result_.replace(it->location, it->length, it->replacement);
-    }
-    base::string16 result = base::i18n::ToLower(result_);
-    for (std::vector<base::string16>::const_iterator it = suggestions_.begin();
-         it != suggestions_.end(); ++it) {
-      if (result == base::i18n::ToLower(*it)) {
-        succeeded_ = false;
-        break;
-      }
-    }
+  // Parse the response JSON and replace misspelled words in the |result_| text
+  // with their suggestions.
+  std::string data;
+  source->GetResponseAsString(&data);
+  succeeded_ = ParseResponse(source->GetResponseCode(), data);
+  if (!succeeded_) {
+    result_ = l10n_util::GetStringUTF16(
+        IDS_CONTENT_CONTEXT_SPELLING_NO_SUGGESTIONS_FROM_GOOGLE);
   }
-  if (type != SpellingServiceClient::SPELLCHECK) {
-    if (!succeeded_) {
-      result_ = l10n_util::GetStringUTF16(
-          IDS_CONTENT_CONTEXT_SPELLING_NO_SUGGESTIONS_FROM_GOOGLE);
+
+  // Update the menu item with the result text. We disable this item and hide it
+  // when the spelling service does not provide valid suggestions.
+  proxy_->UpdateMenuItem(IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION, succeeded_,
+                         false, result_);
+}
+
+bool SpellingMenuObserver::ParseResponse(int response,
+                                         const std::string& data) {
+  // When this JSON-RPC call finishes successfully, the Spelling service returns
+  // an JSON object listed below.
+  // * result - an envelope object representing the result from the APIARY
+  //   server, which is the JSON-API front-end for the Spelling service. This
+  //   object consists of the following variable:
+  //   - spellingCheckResponse (SpellingCheckResponse).
+  // * SpellingCheckResponse - an object representing the result from the
+  //   Spelling service. This object consists of the following variable:
+  //   - misspellings (optional array of Misspelling)
+  // * Misspelling - an object representing a misspelling region and its
+  //   suggestions. This object consists of the following variables:
+  //   - charStart (number) - the beginning of the misspelled region;
+  //   - charLength (number) - the length of the misspelled region;
+  //   - suggestions (array of string) - the suggestions for the misspelling
+  //     text, and;
+  //   - canAutoCorrect (optional boolean) - whether we can use the first
+  //     suggestion for auto-correction.
+  // For example, the Spelling service returns the following JSON when we send a
+  // spelling request for "duck goes quisk" as of 16 August, 2011.
+  // {
+  //   "result": {
+  //   "spellingCheckResponse": {
+  //     "misspellings": [{
+  //         "charStart": 10,
+  //         "charLength": 5,
+  //         "suggestions": [{ "suggestion": "quack" }],
+  //         "canAutoCorrect": false
+  //     }]
+  //   }
+  // }
+
+  // When a server error happened in the APIARY server (including when we cannot
+  // get any responses from the server), it returns an HTTP error.
+  if ((response / 100) != 2)
+    return false;
+
+  scoped_ptr<DictionaryValue> value(
+      static_cast<DictionaryValue*>(base::JSONReader::Read(data, true)));
+  if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY))
+    return false;
+
+  // Retrieve the array of Misspelling objects. When the APIARY service failed
+  // calling the Spelling service, it returns a JSON representing the service
+  // error. (In this case, its HTTP status is 200.) We just return false for
+  // this case.
+  ListValue* misspellings = NULL;
+  const char kMisspellings[] = "result.spellingCheckResponse.misspellings";
+  if (!value->GetList(kMisspellings, &misspellings))
+    return false;
+
+  // For each misspelled region, we replace it with its first suggestion.
+  for (size_t i = 0; i < misspellings->GetSize(); ++i) {
+    // Retrieve the i-th misspelling region, which represents misspelling text
+    // in the request text and its alternative.
+    DictionaryValue* misspelling = NULL;
+    if (!misspellings->GetDictionary(i, &misspelling))
+      return false;
+
+    int start = 0;
+    int length = 0;
+    ListValue* suggestions = NULL;
+    if (!misspelling->GetInteger("charStart", &start) ||
+        !misspelling->GetInteger("charLength", &length) ||
+        !misspelling->GetList("suggestions", &suggestions)) {
+      return false;
     }
 
-    // Update the menu item with the result text. We disable this item and hide
-    // it when the spelling service does not provide valid suggestions.
-    proxy_->UpdateMenuItem(IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION, succeeded_,
-                           false, result_);
+    // Retrieve the alternative text and replace the misspelling region with the
+    // alternative.
+    DictionaryValue* suggestion = NULL;
+    string16 text;
+    if (!suggestions->GetDictionary(0, &suggestion) ||
+        !suggestion->GetString("suggestion", &text)) {
+      return false;
+    }
+    result_.replace(start, length, text);
   }
+
+  // If the above result text is included in the suggestion list provided by the
+  // local spellchecker, we return false to hide this item.
+  for (std::vector<string16>::const_iterator it = suggestions_.begin();
+       it != suggestions_.end(); ++it) {
+    if (result_ == *it)
+      return false;
+  }
+
+  return true;
 }
 
 void SpellingMenuObserver::OnAnimationTimerExpired() {
+  if (!fetcher_.get())
+    return;
+
   // Append '.' characters to the end of "Checking".
   loading_frame_ = (loading_frame_ + 1) & 3;
-  base::string16 loading_message =
-      loading_message_ + base::string16(loading_frame_,'.');
+  string16 loading_message = loading_message_;
+  for (int i = 0; i < loading_frame_; ++i)
+    loading_message.push_back('.');
 
   // Update the menu item with the text. We disable this item to prevent users
   // from selecting it.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,10 @@
 #include <atlbase.h>
 
 #include "base/logging.h"
-#include "chrome/browser/hang_monitor/hang_crash_dump_win.h"
 #include "content/public/common/result_codes.h"
-
-namespace {
 
 // How long do we wait for the terminated thread or process to die (in ms)
 static const int kTerminateTimeout = 2000;
-
-}  // namespace
 
 const wchar_t HungWindowDetector::kHungChildWindowTimeout[] =
     L"Chrome_HungChildWindowTimeout";
@@ -103,7 +98,7 @@ bool HungWindowDetector::CheckChildWindow(HWND child_window) {
       child_window_message_timeout = message_response_timeout_;
     }
 
-    DWORD_PTR result = 0;
+    DWORD result = 0;
     if (0 == SendMessageTimeout(child_window,
                                 WM_NULL,
                                 0,
@@ -125,27 +120,50 @@ bool HungWindowDetector::CheckChildWindow(HWND child_window) {
         return continue_hang_detection;
       }
 
-      if (action == HungWindowNotification::HUNG_WINDOW_TERMINATE_PROCESS) {
-        RemoveProp(child_window, kHungChildWindowTimeout);
-        CHandle child_process(OpenProcess(PROCESS_ALL_ACCESS,
+      switch (action) {
+        case HungWindowNotification::HUNG_WINDOW_TERMINATE_THREAD: {
+          RemoveProp(child_window, kHungChildWindowTimeout);
+          CHandle child_thread(OpenThread(THREAD_TERMINATE,
                                           FALSE,
-                                          child_window_process_id));
-
-        if (NULL == child_process.m_h) {
-          return continue_hang_detection;
+                                          child_window_thread_id));
+          if (NULL == child_thread.m_h) {
+            break;
+          }
+          // Before swinging the axe, do some sanity checks to make
+          // sure this window still belongs to the same thread
+          if (GetWindowThreadProcessId(child_window, NULL) !=
+                  child_window_thread_id) {
+            break;
+          }
+          TerminateThread(child_thread, 0);
+          WaitForSingleObject(child_thread, kTerminateTimeout);
+          child_thread.Close();
+          break;
         }
-        // Before swinging the axe, do some sanity checks to make
-        // sure this window still belongs to the same process
-        DWORD process_id_check = 0;
-        GetWindowThreadProcessId(child_window, &process_id_check);
-        if (process_id_check !=  child_window_process_id) {
-          return continue_hang_detection;
-        }
+        case HungWindowNotification::HUNG_WINDOW_TERMINATE_PROCESS: {
+          RemoveProp(child_window, kHungChildWindowTimeout);
+          CHandle child_process(OpenProcess(PROCESS_TERMINATE,
+                                            FALSE,
+                                            child_window_process_id));
 
-        // Before terminating the process we try collecting a dump. Which
-        // a transient thread in the child process will do for us.
-        CrashDumpAndTerminateHungChildProcess(child_process);
-        child_process.Close();
+          if (NULL == child_process.m_h)  {
+            break;
+          }
+          // Before swinging the axe, do some sanity checks to make
+          // sure this window still belongs to the same process
+          DWORD process_id_check = 0;
+          GetWindowThreadProcessId(child_window, &process_id_check);
+          if (process_id_check !=  child_window_process_id) {
+            break;
+          }
+          TerminateProcess(child_process, content::RESULT_CODE_HUNG);
+          WaitForSingleObject(child_process, kTerminateTimeout);
+          child_process.Close();
+          break;
+        }
+        default: {
+          break;
+        }
       }
     } else {
       RemoveProp(child_window, kHungChildWindowTimeout);

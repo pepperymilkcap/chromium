@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,15 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/process_util.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_variant.h"
 #include "chrome/common/automation_messages.h"
@@ -26,7 +28,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome_frame/utils.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace {
 
@@ -70,11 +72,82 @@ class TopLevelWindowMapping {
   DISALLOW_COPY_AND_ASSIGN(TopLevelWindowMapping);
 };
 
+// Message pump hook function that monitors for WM_MOVE and WM_MOVING
+// messages on a top-level window, and passes notification to the appropriate
+// Chrome-Frame instances.
+LRESULT CALLBACK TopWindowProc(int code, WPARAM wparam, LPARAM lparam) {
+  CWPSTRUCT *info = reinterpret_cast<CWPSTRUCT*>(lparam);
+  const UINT &message = info->message;
+  const HWND &message_hwnd = info->hwnd;
+
+  switch (message) {
+    case WM_MOVE:
+    case WM_MOVING: {
+      TopLevelWindowMapping::WindowList cf_instances =
+          TopLevelWindowMapping::GetInstance()->GetInstances(message_hwnd);
+      TopLevelWindowMapping::WindowList::iterator
+          iter(cf_instances.begin()), end(cf_instances.end());
+      for (;iter != end; ++iter) {
+        PostMessage(*iter, WM_HOST_MOVED_NOTIFICATION, NULL, NULL);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+
+  return CallNextHookEx(0, code, wparam, lparam);
+}
+
+HHOOK InstallLocalWindowHook(HWND window) {
+  if (!window)
+    return NULL;
+
+  DWORD proc_thread = ::GetWindowThreadProcessId(window, NULL);
+  if (!proc_thread)
+    return NULL;
+
+  // Note that this hook is installed as a LOCAL hook.
+  return  ::SetWindowsHookEx(WH_CALLWNDPROC,
+                             TopWindowProc,
+                             NULL,
+                             proc_thread);
+}
+
 }  // unnamed namespace
 
+namespace chrome_frame {
+std::string ActiveXCreateUrl(const GURL& parsed_url,
+                             const AttachExternalTabParams& params) {
+  return base::StringPrintf(
+      "%hs?attach_external_tab&%I64u&%d&%d&%d&%d&%d&%hs",
+      parsed_url.GetOrigin().spec().c_str(),
+      params.cookie,
+      params.disposition,
+      params.dimensions.x(),
+      params.dimensions.y(),
+      params.dimensions.width(),
+      params.dimensions.height(),
+      params.profile_name.c_str());
+}
+
+int GetDisposition(const AttachExternalTabParams& params) {
+  return params.disposition;
+}
+
+void GetMiniContextMenuData(UINT cmd,
+                            const MiniContextMenuParams& params,
+                            GURL* referrer,
+                            GURL* url) {
+  *referrer = params.frame_url.is_empty() ? params.page_url : params.frame_url;
+  *url = (cmd == IDS_CONTENT_CONTEXT_SAVELINKAS ?
+      params.link_url : params.src_url);
+}
+
+}  // namespace chrome_frame
+
 ChromeFrameActivex::ChromeFrameActivex()
-    : chrome_wndproc_hook_(NULL),
-      attaching_to_existing_cf_tab_(false) {
+    : chrome_wndproc_hook_(NULL) {
   TRACE_EVENT_BEGIN_ETW("chromeframe.createactivex", this, "");
 }
 
@@ -118,6 +191,12 @@ LRESULT ChromeFrameActivex::OnCreate(UINT message, WPARAM wparam, LPARAM lparam,
   return 0;
 }
 
+LRESULT ChromeFrameActivex::OnHostMoved(UINT message, WPARAM wparam,
+                                        LPARAM lparam, BOOL& handled) {
+  Base::OnHostMoved();
+  return 0;
+}
+
 HRESULT ChromeFrameActivex::GetContainingDocument(IHTMLDocument2** doc) {
   base::win::ScopedComPtr<IOleContainer> container;
   HRESULT hr = m_spClientSite->GetContainer(container.Receive());
@@ -134,6 +213,16 @@ HRESULT ChromeFrameActivex::GetDocumentWindow(IHTMLWindow2** window) {
   return hr;
 }
 
+void ChromeFrameActivex::OnLoad(const GURL& gurl) {
+  base::win::ScopedComPtr<IDispatch> event;
+  std::string url = gurl.spec();
+  if (SUCCEEDED(CreateDomEvent("event", url, "", event.Receive())))
+    Fire_onload(event);
+
+  FireEvent(onload_, url);
+  Base::OnLoad(gurl);
+}
+
 void ChromeFrameActivex::OnLoadFailed(int error_code, const std::string& url) {
   base::win::ScopedComPtr<IDispatch> event;
   if (SUCCEEDED(CreateDomEvent("event", url, "", event.Receive())))
@@ -141,6 +230,50 @@ void ChromeFrameActivex::OnLoadFailed(int error_code, const std::string& url) {
 
   FireEvent(onloaderror_, url);
   Base::OnLoadFailed(error_code, url);
+}
+
+void ChromeFrameActivex::OnMessageFromChromeFrame(const std::string& message,
+                                                  const std::string& origin,
+                                                  const std::string& target) {
+  DVLOG(1) << __FUNCTION__;
+
+  if (target.compare("*") != 0) {
+    bool drop = true;
+
+    if (is_privileged()) {
+      // Forward messages if the control is in privileged mode.
+      base::win::ScopedComPtr<IDispatch> message_event;
+      if (SUCCEEDED(CreateDomEvent("message", message, origin,
+                                   message_event.Receive()))) {
+        base::win::ScopedBstr target_bstr(UTF8ToWide(target).c_str());
+        Fire_onprivatemessage(message_event, target_bstr);
+
+        FireEvent(onprivatemessage_, message_event, target_bstr);
+      }
+    } else {
+      if (HaveSameOrigin(target, document_url_)) {
+        drop = false;
+      } else {
+        DLOG(WARNING) << "Dropping posted message since target doesn't match "
+            "the current document's origin. target=" << target;
+      }
+    }
+
+    if (drop)
+      return;
+  }
+
+  base::win::ScopedComPtr<IDispatch> message_event;
+  if (SUCCEEDED(CreateDomEvent("message", message, origin,
+                               message_event.Receive()))) {
+    Fire_onmessage(message_event);
+
+    FireEvent(onmessage_, message_event);
+
+    base::win::ScopedVariant event_var;
+    event_var.Set(static_cast<IDispatch*>(message_event));
+    InvokeScriptFunction(onmessage_handler_, event_var.AsInput());
+  }
 }
 
 bool ChromeFrameActivex::ShouldShowVersionMismatchDialog(
@@ -277,16 +410,7 @@ STDMETHODIMP ChromeFrameActivex::put_src(BSTR src) {
       return E_ACCESSDENIED;
     }
   }
-  HRESULT hr = S_OK;
-  // If we are connecting to an existing ExternalTabContainer instance in
-  // Chrome then we should wait for Chrome to initiate the navigation.
-  if (!attaching_to_existing_cf_tab_) {
-    hr = Base::put_src(src);
-  } else {
-    url_.Reset(::SysAllocString(src));
-    attaching_to_existing_cf_tab_ = false;
-  }
-  return S_OK;
+  return Base::put_src(src);
 }
 
 HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
@@ -312,7 +436,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
     if (document) {
       base::win::ScopedBstr url;
       if (SUCCEEDED(document->get_URL(url.Receive())))
-        base::WideToUTF8(url, url.Length(), &document_url_);
+        WideToUTF8(url, url.Length(), &document_url_);
     }
 
     // Probe to see whether the host implements the privileged service.
@@ -341,12 +465,11 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
 
     std::string utf8_url;
     if (url_.Length()) {
-      base::WideToUTF8(url_, url_.Length(), &utf8_url);
+      WideToUTF8(url_, url_.Length(), &utf8_url);
     }
 
     InitializeAutomationSettings();
 
-   
     url_fetcher_->set_frame_busting(!is_privileged());
     automation_client_->SetUrlFetcher(url_fetcher_.get());
     if (!InitializeAutomation(profile_name, IsIEInPrivate(), true,
@@ -486,7 +609,24 @@ void ChromeFrameActivex::FireEvent(const EventHandlers& handlers,
 }
 
 HRESULT ChromeFrameActivex::InstallTopLevelHook(IOleClientSite* client_site) {
-  return E_FAIL;
+  // Get the parent window of the site, and install our hook on the topmost
+  // window of the parent.
+  base::win::ScopedComPtr<IOleWindow> ole_window;
+  HRESULT hr = ole_window.QueryFrom(client_site);
+  if (FAILED(hr))
+    return hr;
+
+  HWND parent_wnd;
+  hr = ole_window->GetWindow(&parent_wnd);
+  if (FAILED(hr))
+    return hr;
+
+  HWND top_window = ::GetAncestor(parent_wnd, GA_ROOT);
+  chrome_wndproc_hook_ = InstallLocalWindowHook(top_window);
+  if (chrome_wndproc_hook_)
+    TopLevelWindowMapping::GetInstance()->AddMapping(top_window, m_hWnd);
+
+  return chrome_wndproc_hook_ ? S_OK : E_FAIL;
 }
 
 HRESULT ChromeFrameActivex::registerBhoIfNeeded() {

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_FAST_RESIZE_VIEW_H_
 #define CHROME_BROWSER_UI_COCOA_FAST_RESIZE_VIEW_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -23,7 +24,6 @@
 // resizing subviews to fit; callers do not need to explictly call |setFrame:|
 // to trigger a resize.
 - (void)setFastResizeMode:(BOOL)fastResizeMode;
-
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_FAST_RESIZE_VIEW_H_

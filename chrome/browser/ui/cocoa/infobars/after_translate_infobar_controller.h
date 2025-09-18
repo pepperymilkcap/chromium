@@ -5,7 +5,6 @@
 #import "chrome/browser/ui/cocoa/infobars/translate_infobar_base.h"
 
 @interface AfterTranslateInfobarController : TranslateInfoBarControllerBase {
-  bool autodeterminedSourceLanguage_;
   bool swappedLanugageButtons_;
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,15 @@
 #include <string>
 #include <vector>
 
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "chrome/browser/ui/host_desktop.h"
 
 class Profile;
+class SessionStorageNamespace;
+class TabNavigation;
 
 namespace content {
 class NavigationController;
-class SessionStorageNamespace;
 class WebContents;
-}
-
-namespace sessions {
-class SerializedNavigationEntry;
 }
 
 // Objects implement this interface to provide necessary functionality for
@@ -41,48 +36,38 @@ class TabRestoreServiceDelegate {
   // see Browser::active_index()
   virtual int GetSelectedIndex() const = 0;
 
-  // see Browser::app_name()
-  virtual std::string GetAppName() const = 0;
-
   // see Browser methods with the same names
   virtual content::WebContents* GetWebContentsAt(int index) const = 0;
-  virtual content::WebContents* GetActiveWebContents() const = 0;
+  virtual content::WebContents* GetSelectedWebContents() const = 0;
   virtual bool IsTabPinned(int index) const = 0;
   virtual content::WebContents* AddRestoredTab(
-      const std::vector<sessions::SerializedNavigationEntry>& navigations,
+      const std::vector<TabNavigation>& navigations,
       int tab_index,
       int selected_navigation,
       const std::string& extension_app_id,
       bool select,
       bool pin,
       bool from_last_session,
-      content::SessionStorageNamespace* storage_namespace,
-      const std::string& user_agent_override) = 0;
-  virtual content::WebContents* ReplaceRestoredTab(
-      const std::vector<sessions::SerializedNavigationEntry>& navigations,
+      SessionStorageNamespace* storage_namespace) = 0;
+  virtual void ReplaceRestoredTab(
+      const std::vector<TabNavigation>& navigations,
       int selected_navigation,
       bool from_last_session,
       const std::string& extension_app_id,
-      content::SessionStorageNamespace* session_storage_namespace,
-      const std::string& user_agent_override) = 0;
+      SessionStorageNamespace* session_storage_namespace) = 0;
   virtual void CloseTab() = 0;
 
   // see Browser::Create
-  static TabRestoreServiceDelegate* Create(
-      Profile* profile,
-      chrome::HostDesktopType host_desktop_type,
-      const std::string& app_name);
+  static TabRestoreServiceDelegate* Create(Profile* profile);
 
-  // see browser::FindBrowserForWebContents
-  static TabRestoreServiceDelegate* FindDelegateForWebContents(
-      const content::WebContents* contents);
+  // see BrowserList::GetBrowserForController
+  static TabRestoreServiceDelegate* FindDelegateForController(
+      const content::NavigationController* controller,
+      int* index);
 
-  // see chrome::FindBrowserWithID
-  // Returns the TabRestoreServiceDelegate of the Browser with |desired_id| if
-  // such a Browser exists and is on the desktop defined by |host_desktop_type|.
+  // see BrowserList::FindBrowserWithID
   static TabRestoreServiceDelegate* FindDelegateWithID(
-      SessionID::id_type desired_id,
-      chrome::HostDesktopType host_desktop_type);
+      SessionID::id_type desired_id);
 
  protected:
   virtual ~TabRestoreServiceDelegate() {}

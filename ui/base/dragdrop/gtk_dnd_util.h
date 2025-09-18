@@ -4,12 +4,13 @@
 
 #ifndef UI_BASE_DRAGDROP_GTK_DND_UTIL_H_
 #define UI_BASE_DRAGDROP_GTK_DND_UTIL_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
 #include <vector>
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "ui/base/ui_export.h"
 
 class GURL;
@@ -68,7 +69,7 @@ UI_EXPORT void SetDestTargetList(GtkWidget* dest, const int* target_codes);
 // Write a URL to the selection in the given type.
 UI_EXPORT void WriteURLWithName(GtkSelectionData* selection_data,
                                 const GURL& url,
-                                base::string16 title,
+                                string16 title,
                                 int type);
 
 // Extracts data of type CHROME_NAMED_URL from |selection_data| into
@@ -76,7 +77,7 @@ UI_EXPORT void WriteURLWithName(GtkSelectionData* selection_data,
 // and the url is valid.
 UI_EXPORT bool ExtractNamedURL(GtkSelectionData* selection_data,
                                GURL* url,
-                               base::string16* title);
+                               string16* title);
 
 // Extracts data of type TEXT_URI_LIST from |selection_data| into |urls|.
 UI_EXPORT bool ExtractURIList(GtkSelectionData* selection_data,
@@ -85,7 +86,7 @@ UI_EXPORT bool ExtractURIList(GtkSelectionData* selection_data,
 // Extracts a Netscape URL (url\ntitle) from |selection_data|.
 UI_EXPORT bool ExtractNetscapeURL(GtkSelectionData* selection_data,
                                   GURL* url,
-                                  base::string16* title);
+                                  string16* title);
 
 }  // namespace ui
 

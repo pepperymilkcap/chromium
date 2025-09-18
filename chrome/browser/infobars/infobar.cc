@@ -6,56 +6,55 @@
 
 #include <cmath>
 
-#include "base/logging.h"
 #include "build/build_config.h"
+#include "base/logging.h"
 #include "chrome/browser/infobars/infobar_container.h"
-#include "chrome/browser/infobars/infobar_service.h"
-#include "ui/gfx/animation/slide_animation.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "ui/base/animation/slide_animation.h"
 
-InfoBar::InfoBar(scoped_ptr<InfoBarDelegate> delegate)
-    : owner_(NULL),
-      delegate_(delegate.Pass()),
+SkColor GetInfoBarTopColor(InfoBarDelegate::Type infobar_type) {
+  // Yellow
+  static const SkColor kWarningBackgroundColorTop =
+      SkColorSetRGB(255, 242, 183);
+  // Gray
+  static const SkColor kPageActionBackgroundColorTop =
+      SkColorSetRGB(237, 237, 237);
+
+  return (infobar_type == InfoBarDelegate::WARNING_TYPE) ?
+      kWarningBackgroundColorTop : kPageActionBackgroundColorTop;
+}
+
+SkColor GetInfoBarBottomColor(InfoBarDelegate::Type infobar_type) {
+  // Yellow
+  static const SkColor kWarningBackgroundColorBottom =
+      SkColorSetRGB(250, 230, 145);
+  // Gray
+  static const SkColor kPageActionBackgroundColorBottom =
+      SkColorSetRGB(217, 217, 217);
+
+  return (infobar_type == InfoBarDelegate::WARNING_TYPE) ?
+      kWarningBackgroundColorBottom : kPageActionBackgroundColorBottom;
+}
+
+// TODO(pkasting): Port Mac to use this.
+#if defined(TOOLKIT_VIEWS) || defined(TOOLKIT_GTK)
+
+InfoBar::InfoBar(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
+    : owner_(owner),
+      delegate_(delegate),
       container_(NULL),
-      animation_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(animation_(this)),
       arrow_height_(0),
       arrow_target_height_(kDefaultArrowTargetHeight),
       arrow_half_width_(0),
       bar_height_(0),
       bar_target_height_(kDefaultBarTargetHeight) {
+  DCHECK(owner_ != NULL);
   DCHECK(delegate_ != NULL);
-  animation_.SetTweenType(gfx::Tween::LINEAR);
-  delegate_->set_infobar(this);
+  animation_.SetTweenType(ui::Tween::LINEAR);
 }
 
 InfoBar::~InfoBar() {
-  DCHECK(!owner_);
-}
-
-// static
-SkColor InfoBar::GetTopColor(InfoBarDelegate::Type infobar_type) {
-  static const SkColor kWarningBackgroundColorTop =
-      SkColorSetRGB(255, 242, 183);  // Yellow
-  static const SkColor kPageActionBackgroundColorTop =
-      SkColorSetRGB(237, 237, 237);  // Gray
-  return (infobar_type == InfoBarDelegate::WARNING_TYPE) ?
-      kWarningBackgroundColorTop : kPageActionBackgroundColorTop;
-}
-
-// static
-SkColor InfoBar::GetBottomColor(InfoBarDelegate::Type infobar_type) {
-  static const SkColor kWarningBackgroundColorBottom =
-      SkColorSetRGB(250, 230, 145);  // Yellow
-  static const SkColor kPageActionBackgroundColorBottom =
-      SkColorSetRGB(217, 217, 217);  // Gray
-  return (infobar_type == InfoBarDelegate::WARNING_TYPE) ?
-      kWarningBackgroundColorBottom : kPageActionBackgroundColorBottom;
-}
-
-void InfoBar::SetOwner(InfoBarService* owner) {
-  DCHECK(!owner_);
-  owner_ = owner;
-  delegate_->StoreActiveEntryUniqueID();
-  PlatformSpecificSetOwner();
 }
 
 void InfoBar::Show(bool animate) {
@@ -98,9 +97,21 @@ void InfoBar::CloseSoon() {
   MaybeDelete();
 }
 
+void InfoBar::AnimationProgressed(const ui::Animation* animation) {
+  RecalculateHeights(false);
+}
+
 void InfoBar::RemoveSelf() {
+  // |owner_| should never be NULL here.  If it is, then someone violated what
+  // they were supposed to do -- e.g. a ConfirmInfoBarDelegate subclass returned
+  // true from Accept() or Cancel() even though the infobar was already closing.
+  // In the worst case, if we also switched tabs during that process, then
+  // |this| has already been destroyed.  But if that's the case, then we're
+  // going to deref a garbage |this| pointer here whether we check |owner_| or
+  // not, and in other cases (where we're still closing and |this| is valid),
+  // checking |owner_| here will avoid a NULL deref.
   if (owner_)
-    owner_->RemoveInfoBar(this);
+    owner_->RemoveInfoBar(delegate_);
 }
 
 void InfoBar::SetBarTargetHeight(int height) {
@@ -110,11 +121,13 @@ void InfoBar::SetBarTargetHeight(int height) {
   }
 }
 
-void InfoBar::AnimationProgressed(const gfx::Animation* animation) {
-  RecalculateHeights(false);
+int InfoBar::OffsetY(const gfx::Size& prefsize) const {
+  return arrow_height_ +
+      std::max((bar_target_height_ - prefsize.height()) / 2, 0) -
+      (bar_target_height_ - bar_height_);
 }
 
-void InfoBar::AnimationEnded(const gfx::Animation* animation) {
+void InfoBar::AnimationEnded(const ui::Animation* animation) {
   // When the animation ends, we must ensure the container is notified even if
   // the heights haven't changed, lest it never get an "animation finished"
   // notification.  (If the browser doesn't get this notification, it will not
@@ -167,9 +180,12 @@ void InfoBar::RecalculateHeights(bool force_notify) {
 }
 
 void InfoBar::MaybeDelete() {
-  if (!owner_ && (animation_.GetCurrentValue() == 0.0)) {
+  if (!owner_ && delegate_ && (animation_.GetCurrentValue() == 0.0)) {
     if (container_)
       container_->RemoveInfoBar(this);
-    delete this;
+    delegate_->InfoBarClosed();
+    delegate_ = NULL;
   }
 }
+
+#endif  // TOOLKIT_VIEWS || TOOLKIT_GTK

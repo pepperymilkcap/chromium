@@ -6,18 +6,14 @@
 
 #include "base/logging.h"
 
-namespace content {
-
 WorkerDocumentSet::WorkerDocumentSet() {
 }
 
 void WorkerDocumentSet::Add(WorkerMessageFilter* parent,
                             unsigned long long document_id,
                             int render_process_id,
-                            int render_view_id,
-                            int render_frame_id) {
-  DocumentInfo info(parent, document_id, render_process_id, render_view_id,
-                    render_frame_id);
+                            int render_view_id) {
+  DocumentInfo info(parent, document_id, render_process_id, render_view_id);
   document_set_.insert(info);
 }
 
@@ -62,15 +58,12 @@ void WorkerDocumentSet::RemoveAll(WorkerMessageFilter* parent) {
 
 WorkerDocumentSet::DocumentInfo::DocumentInfo(
     WorkerMessageFilter* filter, unsigned long long document_id,
-    int render_process_id, int render_view_id, int render_frame_id)
+    int render_process_id, int render_view_id)
     : filter_(filter),
       document_id_(document_id),
       render_process_id_(render_process_id),
-      render_view_id_(render_view_id),
-      render_frame_id_(render_frame_id) {
+      render_view_id_(render_view_id) {
 }
 
 WorkerDocumentSet::~WorkerDocumentSet() {
 }
-
-}  // namespace content

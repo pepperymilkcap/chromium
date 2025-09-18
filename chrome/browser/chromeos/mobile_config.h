@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_MOBILE_CONFIG_H_
 #define CHROME_BROWSER_CHROMEOS_MOBILE_CONFIG_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -12,12 +13,13 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "chrome/browser/chromeos/customization_document.h"
+
+class FilePath;
 
 namespace base {
 class DictionaryValue;
-class FilePath;
 }
 
 namespace chromeos {
@@ -39,7 +41,7 @@ class MobileConfig : public CustomizationDocument  {
   // Carrier deal.
   class CarrierDeal {
    public:
-    explicit CarrierDeal(const base::DictionaryValue* deal_dict);
+    explicit CarrierDeal(base::DictionaryValue* deal_dict);
     ~CarrierDeal();
 
     // Returns string with the specified |locale| and |id|.
@@ -60,7 +62,7 @@ class MobileConfig : public CustomizationDocument  {
     std::string info_url_;
     int notification_count_;
     base::Time expire_date_;
-    const base::DictionaryValue* localized_strings_;
+    base::DictionaryValue* localized_strings_;
 
     DISALLOW_COPY_AND_ASSIGN(CarrierDeal);
   };
@@ -68,7 +70,7 @@ class MobileConfig : public CustomizationDocument  {
   // Carrier config.
   class Carrier {
    public:
-    Carrier(const base::DictionaryValue* carrier_dict,
+    Carrier(base::DictionaryValue* carrier_dict,
             const std::string& initial_locale);
     ~Carrier();
 
@@ -85,7 +87,7 @@ class MobileConfig : public CustomizationDocument  {
 
     // Initializes carrier from supplied dictionary.
     // Multiple calls supported (i.e. second call for local config).
-    void InitFromDictionary(const base::DictionaryValue* carrier_dict,
+    void InitFromDictionary(base::DictionaryValue* carrier_dict,
                             const std::string& initial_locale);
 
     // Removes all carrier deals. Might be executed when local config is loaded.
@@ -114,27 +116,6 @@ class MobileConfig : public CustomizationDocument  {
     DISALLOW_COPY_AND_ASSIGN(Carrier);
   };
 
-  // Carrier config for a specific initial locale.
-  class LocaleConfig {
-   public:
-    explicit LocaleConfig(base::DictionaryValue* locale_dict);
-    ~LocaleConfig();
-
-    const std::string& setup_url() const { return setup_url_; }
-
-    // Initializes local config carrier from supplied dictionary.
-    // Multiple calls supported (i.e. second call for local config).
-    void InitFromDictionary(base::DictionaryValue* locale_dict);
-
-   private:
-    // Carrier setup URL. Used in network menu ("Set-up Mobile Data" link).
-    // Displayed when SIM card is not installed on the device with a
-    // particular initial locale.
-    std::string setup_url_;
-
-    DISALLOW_COPY_AND_ASSIGN(LocaleConfig);
-  };
-
   // External carrier ID (ex. "Verizon (us)") mapping to internal carrier ID.
   typedef std::map<std::string, std::string> CarrierIdMap;
 
@@ -143,12 +124,8 @@ class MobileConfig : public CustomizationDocument  {
 
   static MobileConfig* GetInstance();
 
-  // Returns carrier by external ID or NULL if there's no such carrier.
+  // Returns carrier by external ID.
   const MobileConfig::Carrier* GetCarrier(const std::string& carrier_id) const;
-
-  // Returns locale specific config by initial locale or NULL
-  // if there's no such config defined.
-  const MobileConfig::LocaleConfig* GetLocaleConfig() const;
 
  protected:
   virtual bool LoadManifestFromString(const std::string& manifest) OVERRIDE;
@@ -179,17 +156,14 @@ class MobileConfig : public CustomizationDocument  {
                      const std::string& local_config);
 
   // Executes on FILE thread and reads config files to string.
-  void ReadConfigInBackground(const base::FilePath& global_config_file,
-                              const base::FilePath& local_config_file);
+  void ReadConfigInBackground(const FilePath& global_config_file,
+                              const FilePath& local_config_file);
 
   // Maps external carrier ID to internal carrier ID.
   CarrierIdMap carrier_id_map_;
 
   // Carrier configuration (including carrier deals).
   Carriers carriers_;
-
-  // Initial locale specific config if defined.
-  scoped_ptr<LocaleConfig> locale_config_;
 
   // Initial locale value.
   std::string initial_locale_;

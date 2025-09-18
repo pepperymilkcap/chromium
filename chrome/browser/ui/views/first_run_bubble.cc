@@ -4,10 +4,10 @@
 
 #include "chrome/browser/ui/views/first_run_bubble.h"
 
-#include "chrome/browser/first_run/first_run.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/search_engines/util.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/views/window.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -15,7 +15,6 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
-#include "ui/views/widget/widget.h"
 
 namespace {
 const int kAnchorVerticalInset = 5;
@@ -25,36 +24,35 @@ const int kBottomInset = 7;
 const int kRightInset = 2;
 }  // namespace
 
-// static
-FirstRunBubble* FirstRunBubble::ShowBubble(Browser* browser,
-                                           views::View* anchor_view) {
-  first_run::LogFirstRunMetric(first_run::FIRST_RUN_BUBBLE_SHOWN);
+namespace first_run {
+  void ShowFirstRunDialog(Profile* profile) {}
+}  // namespace first_run
 
-  FirstRunBubble* delegate = new FirstRunBubble(browser, anchor_view);
-  views::BubbleDelegateView::CreateBubble(delegate);
+// static
+FirstRunBubble* FirstRunBubble::ShowBubble(Profile* profile,
+                                           views::View* anchor_view) {
+  FirstRunBubble* delegate = new FirstRunBubble(profile, anchor_view);
+  browser::CreateViewsBubble(delegate);
   delegate->StartFade(true);
   return delegate;
 }
 
 void FirstRunBubble::Init() {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  const gfx::FontList& original_font_list =
-      rb.GetFontList(ui::ResourceBundle::MediumFont);
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  const gfx::Font& original_font = rb.GetFont(ResourceBundle::MediumFont);
 
   views::Label* title = new views::Label(l10n_util::GetStringFUTF16(
-      IDS_FR_BUBBLE_TITLE, browser_ ?
-          GetDefaultSearchEngineName(browser_->profile()) : base::string16()));
-  title->SetFontList(original_font_list.DeriveFontListWithSizeDeltaAndStyle(
-      2, gfx::Font::BOLD));
+      IDS_FR_BUBBLE_TITLE, GetDefaultSearchEngineName(profile_)));
+  title->SetFont(original_font.DeriveFont(2, gfx::Font::BOLD));
 
   views::Link* change =
       new views::Link(l10n_util::GetStringUTF16(IDS_FR_BUBBLE_CHANGE));
-  change->SetFontList(original_font_list);
+  change->SetFont(original_font);
   change->set_listener(this);
 
   views::Label* subtext =
       new views::Label(l10n_util::GetStringUTF16(IDS_FR_BUBBLE_SUBTEXT));
-  subtext->SetFontList(original_font_list);
+  subtext->SetFont(original_font);
 
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
@@ -76,21 +74,25 @@ void FirstRunBubble::Init() {
   layout->AddView(subtext, columns->num_columns(), 1);
 }
 
-FirstRunBubble::FirstRunBubble(Browser* browser, views::View* anchor_view)
+gfx::Rect FirstRunBubble::GetAnchorRect() {
+  // Compensate for padding in anchor.
+  gfx::Rect rect(BubbleDelegateView::GetAnchorRect());
+  rect.Inset(0, anchor_view() ? kAnchorVerticalInset : 0);
+  return rect;
+}
+
+FirstRunBubble::FirstRunBubble(Profile* profile, views::View* anchor_view)
     : views::BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
-      browser_(browser) {
-  // Compensate for built-in vertical padding in the anchor view's image.
-  set_anchor_view_insets(
-      gfx::Insets(kAnchorVerticalInset, 0, kAnchorVerticalInset, 0));
+      profile_(profile) {
 }
 
 FirstRunBubble::~FirstRunBubble() {
 }
 
 void FirstRunBubble::LinkClicked(views::Link* source, int event_flags) {
-  first_run::LogFirstRunMetric(first_run::FIRST_RUN_BUBBLE_CHANGE_INVOKED);
-
+  // Get |profile_|'s browser before closing the bubble, which deletes |this|.
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
   GetWidget()->Close();
-  if (browser_)
-    chrome::ShowSearchEngineSettings(browser_);
+  if (browser)
+    browser->OpenSearchEngineOptionsDialog();
 }

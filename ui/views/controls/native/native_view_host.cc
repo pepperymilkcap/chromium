@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,20 +6,17 @@
 
 #include "base/logging.h"
 #include "ui/gfx/canvas.h"
-#include "ui/views/accessibility/native_view_accessibility.h"
 #include "ui/views/controls/native/native_view_host_wrapper.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
 
 // static
-const char NativeViewHost::kViewClassName[] = "NativeViewHost";
-const char kWidgetNativeViewHostKey[] = "WidgetNativeViewHost";
+const char NativeViewHost::kViewClassName[] = "views/NativeViewHost";
 
-#if defined(USE_AURA)
-// Views implementation draws the focus.
-// TODO(oshima): Eliminate this flag and consolidate
-// the focus border code.
+#if defined(OS_LINUX)
+// GTK renders the focus.
+// static
 const bool NativeViewHost::kRenderNativeControlFocus = false;
 #else
 // static
@@ -47,13 +44,7 @@ void NativeViewHost::Attach(gfx::NativeView native_view) {
   // be seen as focused when the native view receives focus.
   if (!focus_view_)
     focus_view_ = this;
-  native_wrapper_->NativeViewWillAttach();
-  Widget::ReparentNativeView(native_view_, GetWidget()->GetNativeView());
-  Layout();
-
-  Widget* widget = Widget::GetWidgetForNativeView(native_view);
-  if (widget)
-    widget->SetNativeWindowProperty(kWidgetNativeViewHostKey, this);
+  native_wrapper_->NativeViewAttached();
 }
 
 void NativeViewHost::Detach() {
@@ -134,7 +125,7 @@ void NativeViewHost::OnPaint(gfx::Canvas* canvas) {
   // It would be nice if this used some approximation of the page's
   // current background color.
   if (native_wrapper_->HasInstalledClip())
-    canvas->FillRect(GetLocalBounds(), SK_ColorWHITE);
+    canvas->FillRect(SK_ColorWHITE, GetLocalBounds());
 }
 
 void NativeViewHost::VisibilityChanged(View* starting_from, bool is_visible) {
@@ -152,37 +143,25 @@ void NativeViewHost::OnVisibleBoundsChanged() {
   Layout();
 }
 
-void NativeViewHost::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
-  views::Widget* this_widget = GetWidget();
-
-  // A non-NULL |details.move_view| indicates a move operation i.e. |this| is
-  // is being reparented.  If the previous and new parents belong to the same
-  // widget, don't remove |this| from the widget.  This saves resources from
-  // removing from widget and immediately followed by adding to widget; in
-  // particular, there wouldn't be spurious visibilitychange events for web
-  // contents of |WebView|.
-  if (details.move_view && this_widget &&
-      details.move_view->GetWidget() == this_widget) {
-    return;
-  }
-
-  if (details.is_add && this_widget) {
+void NativeViewHost::ViewHierarchyChanged(bool is_add, View* parent,
+                                          View* child) {
+  if (is_add && GetWidget()) {
     if (!native_wrapper_.get())
       native_wrapper_.reset(NativeViewHostWrapper::CreateWrapper(this));
     native_wrapper_->AddedToWidget();
-  } else if (!details.is_add) {
+  } else if (!is_add) {
     native_wrapper_->RemovedFromWidget();
   }
 }
 
-const char* NativeViewHost::GetClassName() const {
+std::string NativeViewHost::GetClassName() const {
   return kViewClassName;
 }
 
 void NativeViewHost::OnFocus() {
   native_wrapper_->SetFocus();
-  NotifyAccessibilityEvent(ui::AccessibilityTypes::EVENT_FOCUS, true);
+  GetWidget()->NotifyAccessibilityEvent(
+      this, ui::AccessibilityTypes::EVENT_FOCUS, true);
 }
 
 gfx::NativeViewAccessible NativeViewHost::GetNativeViewAccessible() {
@@ -201,30 +180,9 @@ gfx::NativeViewAccessible NativeViewHost::GetNativeViewAccessible() {
 
 void NativeViewHost::Detach(bool destroyed) {
   if (native_view_) {
-    if (!destroyed) {
-      Widget* widget = Widget::GetWidgetForNativeView(native_view_);
-      if (widget)
-        widget->SetNativeWindowProperty(kWidgetNativeViewHostKey, NULL);
-      ClearFocus();
-    }
     native_wrapper_->NativeViewDetaching(destroyed);
     native_view_ = NULL;
   }
 }
-
-void NativeViewHost::ClearFocus() {
-  FocusManager* focus_manager = GetFocusManager();
-  if (!focus_manager || !focus_manager->GetFocusedView())
-    return;
-
-  Widget::Widgets widgets;
-  Widget::GetAllChildWidgets(native_view(), &widgets);
-  for (Widget::Widgets::iterator i = widgets.begin(); i != widgets.end(); ++i) {
-    focus_manager->ViewRemoved((*i)->GetRootView());
-    if (!focus_manager->GetFocusedView())
-      return;
-  }
-}
-
 
 }  // namespace views

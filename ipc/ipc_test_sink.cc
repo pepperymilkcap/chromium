@@ -4,7 +4,6 @@
 
 #include "ipc/ipc_test_sink.h"
 
-#include "ipc/ipc_listener.h"
 #include "ipc/ipc_message.h"
 
 namespace IPC {
@@ -22,8 +21,8 @@ bool TestSink::Send(Message* message) {
 }
 
 bool TestSink::OnMessageReceived(const Message& msg) {
-  ObserverListBase<Listener>::Iterator it(filter_list_);
-  Listener* observer;
+  ObserverListBase<Channel::Listener>::Iterator it(filter_list_);
+  Channel::Listener* observer;
   while ((observer = it.GetNext()) != NULL) {
     if (observer->OnMessageReceived(msg))
       return true;
@@ -66,11 +65,11 @@ const Message* TestSink::GetUniqueMessageMatching(uint32 id) const {
   return &messages_[found_index];
 }
 
-void TestSink::AddFilter(Listener* filter) {
+void TestSink::AddFilter(Channel::Listener* filter) {
   filter_list_.AddObserver(filter);
 }
 
-void TestSink::RemoveFilter(Listener* filter) {
+void TestSink::RemoveFilter(Channel::Listener* filter) {
   filter_list_.RemoveObserver(filter);
 }
 

@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "base/timer/elapsed_timer.h"
+#include "base/perftimer.h"
+#include "base/threading/worker_pool.h"
 #include "net/base/net_errors.h"
 #include "net/proxy/dhcp_proxy_script_adapter_fetcher_win.h"
 
@@ -17,27 +17,6 @@
 #pragma comment(lib, "iphlpapi.lib")
 
 namespace {
-
-// How many threads to use at maximum to do DHCP lookups. This is
-// chosen based on the following UMA data:
-// - When OnWaitTimer fires, ~99.8% of users have 6 or fewer network
-//   adapters enabled for DHCP in total.
-// - At the same measurement point, ~99.7% of users have 3 or fewer pending
-//   DHCP adapter lookups.
-// - There is however a very long and thin tail of users who have
-//   systems reporting up to 100+ adapters (this must be some very weird
-//   OS bug (?), probably the cause of http://crbug.com/240034).
-//
-// The maximum number of threads is chosen such that even systems that
-// report a huge number of network adapters should not run out of
-// memory from this number of threads, while giving a good chance of
-// getting back results for any responsive adapters.
-//
-// The ~99.8% of systems that have 6 or fewer network adapters will
-// not grow the thread pool to its maximum size (rather, they will
-// grow it to 6 or fewer threads) so setting the limit lower would not
-// improve performance or memory usage on those systems.
-const int kMaxDhcpLookupThreads = 12;
 
 // How long to wait at maximum after we get results (a PAC file or
 // knowledge that no PAC file is configured) from whichever network
@@ -63,19 +42,19 @@ DhcpProxyScriptFetcherWin::DhcpProxyScriptFetcherWin(
       destination_string_(NULL),
       url_request_context_(url_request_context) {
   DCHECK(url_request_context_);
-
-  worker_pool_ = new base::SequencedWorkerPool(kMaxDhcpLookupThreads,
-                                               "PacDhcpLookup");
 }
 
 DhcpProxyScriptFetcherWin::~DhcpProxyScriptFetcherWin() {
   // Count as user-initiated if we are not yet in STATE_DONE.
   Cancel();
 
-  worker_pool_->Shutdown();
+  // The WeakPtr we passed to the worker thread may be destroyed on the
+  // worker thread.  This detaches any outstanding WeakPtr state from
+  // the current thread.
+  base::SupportsWeakPtr<DhcpProxyScriptFetcherWin>::DetachFromThread();
 }
 
-int DhcpProxyScriptFetcherWin::Fetch(base::string16* utf16_text,
+int DhcpProxyScriptFetcherWin::Fetch(string16* utf16_text,
                                      const CompletionCallback& callback) {
   DCHECK(CalledOnValidThread());
   if (state_ != STATE_START && state_ != STATE_DONE) {
@@ -90,7 +69,7 @@ int DhcpProxyScriptFetcherWin::Fetch(base::string16* utf16_text,
   destination_string_ = utf16_text;
 
   last_query_ = ImplCreateAdapterQuery();
-  GetTaskRunner()->PostTaskAndReply(
+  base::WorkerPool::PostTaskAndReply(
       FROM_HERE,
       base::Bind(
           &DhcpProxyScriptFetcherWin::AdapterQuery::GetCandidateAdapterNames,
@@ -98,7 +77,8 @@ int DhcpProxyScriptFetcherWin::Fetch(base::string16* utf16_text,
       base::Bind(
           &DhcpProxyScriptFetcherWin::OnGetCandidateAdapterNamesDone,
           AsWeakPtr(),
-          last_query_));
+          last_query_),
+      true);
 
   return ERR_IO_PENDING;
 }
@@ -130,7 +110,7 @@ void DhcpProxyScriptFetcherWin::CancelImpl() {
       (*it)->Cancel();
     }
 
-    fetchers_.clear();
+    fetchers_.reset();
   }
 }
 
@@ -214,7 +194,8 @@ void DhcpProxyScriptFetcherWin::OnFetcherDone(int result) {
   if (state_ == STATE_NO_RESULTS) {
     state_ = STATE_SOME_RESULTS;
     wait_timer_.Start(FROM_HERE,
-        ImplGetMaxWait(), this, &DhcpProxyScriptFetcherWin::OnWaitTimer);
+        base::TimeDelta::FromMilliseconds(ImplGetMaxWaitMs()),
+        this, &DhcpProxyScriptFetcherWin::OnWaitTimer);
   }
 }
 
@@ -292,15 +273,9 @@ URLRequestContext* DhcpProxyScriptFetcherWin::url_request_context() const {
   return url_request_context_;
 }
 
-scoped_refptr<base::TaskRunner> DhcpProxyScriptFetcherWin::GetTaskRunner() {
-  return worker_pool_->GetTaskRunnerWithShutdownBehavior(
-      base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
-}
-
 DhcpProxyScriptAdapterFetcher*
     DhcpProxyScriptFetcherWin::ImplCreateAdapterFetcher() {
-  return new DhcpProxyScriptAdapterFetcher(url_request_context_,
-                                           GetTaskRunner());
+  return new DhcpProxyScriptAdapterFetcher(url_request_context_);
 }
 
 DhcpProxyScriptFetcherWin::AdapterQuery*
@@ -308,8 +283,8 @@ DhcpProxyScriptFetcherWin::AdapterQuery*
   return new AdapterQuery();
 }
 
-base::TimeDelta DhcpProxyScriptFetcherWin::ImplGetMaxWait() {
-  return base::TimeDelta::FromMilliseconds(kMaxWaitAfterFirstResultMs);
+int DhcpProxyScriptFetcherWin::ImplGetMaxWaitMs() {
+  return kMaxWaitAfterFirstResultMs;
 }
 
 bool DhcpProxyScriptFetcherWin::GetCandidateAdapterNames(
@@ -324,7 +299,7 @@ bool DhcpProxyScriptFetcherWin::GetCandidateAdapterNames(
   ULONG error = ERROR_SUCCESS;
   int num_tries = 0;
 
-  base::ElapsedTimer time_api_access;
+  PerfTimer time_api_access;
   do {
     adapters.reset(
         reinterpret_cast<IP_ADAPTER_ADDRESSES*>(malloc(adapters_size)));

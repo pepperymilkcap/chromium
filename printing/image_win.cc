@@ -4,14 +4,10 @@
 
 #include "printing/image.h"
 
-#include "base/win/scoped_gdi_object.h"
-#include "base/win/scoped_hdc.h"
-#include "base/win/scoped_select_object.h"
 #include "printing/metafile.h"
 #include "skia/ext/platform_device.h"
 #include "ui/gfx/gdi_util.h"  // EMF support
 #include "ui/gfx/rect.h"
-
 
 namespace {
 
@@ -54,7 +50,7 @@ bool Image::LoadMetafile(const Metafile& metafile) {
   DisableFontSmoothing disable_in_this_scope;
 
   // Create a temporary HDC and bitmap to retrieve the rendered data.
-  base::win::ScopedCreateDC hdc(::CreateCompatibleDC(NULL));
+  HDC hdc = CreateCompatibleDC(NULL);
   BITMAPV4HEADER hdr;
   DCHECK_EQ(rect.x(), 0);
   DCHECK_EQ(rect.y(), 0);
@@ -66,12 +62,12 @@ bool Image::LoadMetafile(const Metafile& metafile) {
 
   size_ = rect.size();
   gfx::CreateBitmapV4Header(rect.width(), rect.height(), &hdr);
-  unsigned char* bits = NULL;
-  base::win::ScopedBitmap bitmap(
-      ::CreateDIBSection(hdc, reinterpret_cast<BITMAPINFO*>(&hdr), 0,
-                         reinterpret_cast<void**>(&bits), NULL, 0));
+  void* bits;
+  HBITMAP bitmap = CreateDIBSection(hdc,
+                                    reinterpret_cast<BITMAPINFO*>(&hdr), 0,
+                                    &bits, NULL, 0);
   DCHECK(bitmap);
-  base::win::ScopedSelectObject select_object(hdc, bitmap);
+  DCHECK(SelectObject(hdc, bitmap));
 
   skia::InitializeDC(hdc);
 
@@ -81,7 +77,11 @@ bool Image::LoadMetafile(const Metafile& metafile) {
   size_t bytes = row_length_ * size_.height();
   DCHECK(bytes);
 
-  data_.assign(bits, bits + bytes);
+  data_.resize(bytes);
+  memcpy(&*data_.begin(), bits, bytes);
+
+  DeleteDC(hdc);
+  DeleteObject(bitmap);
 
   return success;
 }

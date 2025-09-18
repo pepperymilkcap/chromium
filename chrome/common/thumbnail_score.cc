@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/thumbnail_score.h"
 
 #include "base/logging.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -13,7 +13,6 @@ using base::TimeDelta;
 const int64 ThumbnailScore::kUpdateThumbnailTimeDays = 1;
 const double ThumbnailScore::kThumbnailMaximumBoringness = 0.94;
 const double ThumbnailScore::kThumbnailDegradePerHour = 0.01;
-const double ThumbnailScore::kTooWideAspectRatio = 2.0;
 
 // Calculates a numeric score from traits about where a snapshot was
 // taken. The lower the better. We store the raw components in the
@@ -62,24 +61,26 @@ ThumbnailScore::~ThumbnailScore() {
 }
 
 bool ThumbnailScore::Equals(const ThumbnailScore& rhs) const {
+  // When testing equality we use ToTimeT() because that's the value
+  // stuck in the SQL database, so we need to test equivalence with
+  // that lower resolution.
   return boring_score == rhs.boring_score &&
       good_clipping == rhs.good_clipping &&
       at_top == rhs.at_top &&
-      time_at_snapshot == rhs.time_at_snapshot &&
+      time_at_snapshot.ToTimeT() == rhs.time_at_snapshot.ToTimeT() &&
       redirect_hops_from_dest == rhs.redirect_hops_from_dest;
 }
 
 std::string ThumbnailScore::ToString() const {
-  return base::StringPrintf(
-      "boring_score: %f, at_top %d, good_clipping %d, "
-      "load_completed: %d, "
-      "time_at_snapshot: %f, redirect_hops_from_dest: %d",
-      boring_score,
-      at_top,
-      good_clipping,
-      load_completed,
-      time_at_snapshot.ToDoubleT(),
-      redirect_hops_from_dest);
+  return StringPrintf("boring_score: %f, at_top %d, good_clipping %d, "
+                      "load_completed: %d, "
+                      "time_at_snapshot: %f, redirect_hops_from_dest: %d",
+                      boring_score,
+                      at_top,
+                      good_clipping,
+                      load_completed,
+                      time_at_snapshot.ToDoubleT(),
+                      redirect_hops_from_dest);
 }
 
 bool ShouldReplaceThumbnailWith(const ThumbnailScore& current,

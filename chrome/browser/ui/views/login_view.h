@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_LOGIN_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_LOGIN_VIEW_H_
+#pragma once
 
 #include "chrome/browser/ui/login/login_model.h"
 #include "ui/views/view.h"
@@ -21,18 +22,16 @@ class LoginView : public views::View, public LoginModelObserver {
   // |model| is observed for the entire lifetime of the LoginView.
   // Therefore |model| should not be destroyed before the LoginView
   // object.
-  LoginView(const base::string16& explanation,
-            LoginModel* model);
+  LoginView(const std::wstring& explanation, LoginModel* model);
   virtual ~LoginView();
 
   // Access the data in the username/password text fields.
-  base::string16 GetUsername();
-  base::string16 GetPassword();
+  std::wstring GetUsername();
+  std::wstring GetPassword();
 
   // LoginModelObserver implementation.
-  virtual void OnAutofillDataAvailable(const base::string16& username,
-                                       const base::string16& password) OVERRIDE;
-  virtual void OnLoginModelDestroying() OVERRIDE;
+  virtual void OnAutofillDataAvailable(const std::wstring& username,
+                                       const std::wstring& password) OVERRIDE;
 
   // Used by LoginHandlerWin to set the initial focus.
   views::View* GetInitiallyFocusedView();

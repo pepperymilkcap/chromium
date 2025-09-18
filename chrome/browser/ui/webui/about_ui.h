@@ -4,45 +4,39 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_ABOUT_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_ABOUT_UI_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "content/public/browser/url_data_source.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "content/public/browser/web_ui_controller.h"
 
 class Profile;
 
 // We expose this class because the OOBE flow may need to explicitly add the
 // chrome://terms source outside of the normal flow.
-class AboutUIHTMLSource : public content::URLDataSource {
+class AboutUIHTMLSource : public ChromeURLDataManager::DataSource {
  public:
   // Construct a data source for the specified |source_name|.
   AboutUIHTMLSource(const std::string& source_name, Profile* profile);
 
-  // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual void StartDataRequest(
-      const std::string& path,
-      int render_process_id,
-      int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
+  // Called when the network layer has requested a resource underneath
+  // the path we registered.
+  virtual void StartDataRequest(const std::string& path,
+                                bool is_incognito,
+                                int request_id) OVERRIDE;
+
   virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
-  virtual bool ShouldAddContentSecurityPolicy() const OVERRIDE;
-  virtual bool ShouldDenyXFrameOptions() const OVERRIDE;
 
   // Send the response data.
-  void FinishDataRequest(
-      const std::string& html,
-      const content::URLDataSource::GotDataCallback& callback);
+  void FinishDataRequest(const std::string& html, int request_id);
 
   Profile* profile() { return profile_; }
 
  private:
   virtual ~AboutUIHTMLSource();
 
-  std::string source_name_;
   Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(AboutUIHTMLSource);
@@ -56,15 +50,5 @@ class AboutUI : public content::WebUIController {
  private:
   DISALLOW_COPY_AND_ASSIGN(AboutUI);
 };
-
-namespace about_ui {
-
-// Helper functions
-void AppendHeader(std::string* output, int refresh,
-                  const std::string& unescaped_title);
-void AppendBody(std::string *output);
-void AppendFooter(std::string *output);
-
-}  // namespace about_ui
 
 #endif  // CHROME_BROWSER_UI_WEBUI_ABOUT_UI_H_

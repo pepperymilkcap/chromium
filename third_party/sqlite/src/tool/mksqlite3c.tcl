@@ -293,8 +293,6 @@ foreach file {
    main.c
    notify.c
 
-   recover.c
-
    fts3.c
    fts3_aux.c
    fts3_expr.c

@@ -4,12 +4,12 @@
 
 #ifndef BASE_I18N_ICU_STRING_CONVERSIONS_H_
 #define BASE_I18N_ICU_STRING_CONVERSIONS_H_
+#pragma once
 
 #include <string>
 
 #include "base/i18n/base_i18n_export.h"
-#include "base/i18n/i18n_constants.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 namespace base {
 
@@ -34,6 +34,12 @@ class OnStringConversionError {
  private:
   OnStringConversionError();
 };
+
+// Names of codepages (charsets) understood by icu.
+BASE_I18N_EXPORT extern const char kCodepageLatin1[];  // a.k.a. ISO 8859-1
+BASE_I18N_EXPORT extern const char kCodepageUTF8[];
+BASE_I18N_EXPORT extern const char kCodepageUTF16BE[];
+BASE_I18N_EXPORT extern const char kCodepageUTF16LE[];
 
 // Converts between UTF-16 strings and the encoding specified.  If the
 // encoding doesn't exist or the encoding fails (when on_error is FAIL),

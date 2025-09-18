@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 //
 // Each XXX_messages.h file must be registered with the IPC system.  This
 // requires adding two things:
-//   - An XXXMsgStart value to the IPCMessageStart enum in ipc_message_start.h
+//   - An XXXMsgStart value to the IPCMessageStart enum in ipc_message_utils.h
 //   - An inclusion of XXX_messages.h file in a message generator .h file
 //
 // The XXXMsgStart value is an enumeration that ensures uniqueness for
@@ -76,7 +76,7 @@
 // of inclusions of other headers (which are self-guarding) and IPC
 // macros (which are multiply evaluating).
 //
-// Note that #pragma once cannot be used here; doing so would mark the whole
+// Note that there is no #pragma once either; doing so would mark the whole
 // file as being singly-included.  Since your XXX_messages.h file is only
 // partially-guarded, care must be taken to ensure that it is only included
 // by other .cc files (and the YYY_message_generator.h file).  Including an
@@ -130,9 +130,7 @@
 // to proclaim equivalent struct declarations for use by callers, as well
 // as later registering the type with the message generation.  Note that
 // IPC_STRUCT_MEMBER() is only permitted inside matching calls to
-// IPC_STRUCT_BEGIN() / IPC_STRUCT_END(). There is also an
-// IPC_STRUCT_BEGIN_WITH_PARENT(), which behaves like IPC_STRUCT_BEGIN(),
-// but also accomodates structs that inherit from other structs.
+// IPC_STRUCT_BEGIN() / IPC_STRUCT_END().
 //
 // Externally-defined structs are registered with IPC_STRUCT_TRAITS_BEGIN(),
 // IPC_STRUCT_TRAITS_MEMBER(), and IPC_STRUCT_TRAITS_END() macros. These
@@ -143,16 +141,8 @@
 // inside matching calls to IPC_STRUCT_TRAITS_BEGIN() /
 // IPC_STRUCT_TRAITS_END().
 //
-// Enum types are registered with a single IPC_ENUM_TRAITS_VALIDATE() macro.
-// There is no need to enumerate each value to the IPC mechanism. Instead,
-// pass an expression in terms of the parameter |value| to provide
-// range-checking.  For convenience, the IPC_ENUM_TRAITS() is provided which
-// performs no checking, passing everything including out-of-range values.
-// Its use is discouraged. The IPC_ENUM_TRAITS_MAX_VALUE() macro can be used
-// for the typical case where the enum must be in the range 0..maxvalue
-// inclusive. The IPC_ENUM_TRAITS_MIN_MAX_VALUE() macro can be used for the
-// less typical case where the enum must be in the range minvalue..maxvalue
-// inclusive.
+// Enum types are registered with a single IPC_ENUM_TRAITS() macro.  There
+// is no need to enumerate each value to the IPC mechanism.
 //
 // Do not place semicolons following these IPC_ macro invocations.  There
 // is no reason to expect that their expansion corresponds one-to-one with
@@ -183,14 +173,6 @@
 //     ViewHostMsg_SyncMessageName::WriteReplyParams(reply_msg, out1, out2);
 //     Send(reply_msg);
 
-// Files that want to export their ipc messages should do
-//   #undef IPC_MESSAGE_EXPORT
-//   #define IPC_MESSAGE_EXPORT VISIBILITY_MACRO
-// after including this header, but before using any of the macros below.
-// (This needs to be before the include guard.)
-#undef IPC_MESSAGE_EXPORT
-#define IPC_MESSAGE_EXPORT
-
 #ifndef IPC_IPC_MESSAGE_MACROS_H_
 #define IPC_IPC_MESSAGE_MACROS_H_
 
@@ -202,12 +184,14 @@
 #include "ipc/ipc_message_utils_impl.h"
 #endif
 
-// Convenience macro for defining structs without inheritance. Should not need
-// to be subsequently redefined.
+// Override this to force message classes to be exported.
+#ifndef IPC_MESSAGE_EXPORT
+#define IPC_MESSAGE_EXPORT
+#endif
+
+// Macros for defining structs.  May be subsequently redefined.
 #define IPC_STRUCT_BEGIN(struct_name) \
   IPC_STRUCT_BEGIN_WITH_PARENT(struct_name, IPC::NoParams)
-
-// Macros for defining structs. Will be subsequently redefined.
 #define IPC_STRUCT_BEGIN_WITH_PARENT(struct_name, parent) \
   struct struct_name; \
   IPC_STRUCT_TRAITS_BEGIN(struct_name) \
@@ -215,9 +199,7 @@
   struct IPC_MESSAGE_EXPORT struct_name : parent { \
     struct_name(); \
     ~struct_name();
-// Optional variadic parameters specify the default value for this struct
-// member. They are passed through to the constructor for |type|.
-#define IPC_STRUCT_MEMBER(type, name, ...) type name;
+#define IPC_STRUCT_MEMBER(type, name) type name;
 #define IPC_STRUCT_END() };
 
 // Message macros collect specific numbers of arguments and funnel them into
@@ -345,6 +327,9 @@
 #define IPC_SYNC_MESSAGE_CONTROL5_3(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out, type3_out) \
   IPC_MESSAGE_DECL(SYNC, CONTROL, msg_class, 5, 3, (type1_in, type2_in, type3_in, type4_in, type5_in), (type1_out, type2_out, type3_out))
 
+#define IPC_SYNC_MESSAGE_CONTROL5_4(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out, type3_out, type4_out) \
+  IPC_MESSAGE_DECL(SYNC, CONTROL, msg_class, 5, 4, (type1_in, type2_in, type3_in, type4_in, type5_in), (type1_out, type2_out, type3_out, type4_out))
+
 #define IPC_SYNC_MESSAGE_ROUTED0_0(msg_class) \
   IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 0, 0, (), ())
 
@@ -406,7 +391,7 @@
   IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 3, 4, (type1_in, type2_in, type3_in), (type1_out, type2_out, type3_out, type4_out))
 
 #define IPC_SYNC_MESSAGE_ROUTED4_0(msg_class, type1_in, type2_in, type3_in, type4_in) \
-  IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 4, 0, (type1_in, type2_in, type3_in, type4_in), ())
+  IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 4, 1, (type1_in, type2_in, type3_in, type4_in), ())
 
 #define IPC_SYNC_MESSAGE_ROUTED4_1(msg_class, type1_in, type2_in, type3_in, type4_in, type1_out) \
   IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 4, 1, (type1_in, type2_in, type3_in, type4_in), (type1_out))
@@ -421,7 +406,7 @@
   IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 4, 4, (type1_in, type2_in, type3_in, type4_in), (type1_out, type2_out, type3_out, type4_out))
 
 #define IPC_SYNC_MESSAGE_ROUTED5_0(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in) \
-  IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 5, 0, (type1_in, type2_in, type3_in, type4_in, type5_in), ())
+  IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 5, 1, (type1_in, type2_in, type3_in, type4_in, type5_in), ())
 
 #define IPC_SYNC_MESSAGE_ROUTED5_1(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out) \
   IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 5, 1, (type1_in, type2_in, type3_in, type4_in, type5_in), (type1_out))
@@ -431,6 +416,9 @@
 
 #define IPC_SYNC_MESSAGE_ROUTED5_3(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out, type3_out) \
   IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 5, 3, (type1_in, type2_in, type3_in, type4_in, type5_in), (type1_out, type2_out, type3_out))
+
+#define IPC_SYNC_MESSAGE_ROUTED5_4(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out, type3_out, type4_out) \
+  IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 5, 4, (type1_in, type2_in, type3_in, type4_in, type5_in), (type1_out, type2_out, type3_out, type4_out))
 
 // The following macros define the common set of methods provided by ASYNC
 // message classes.
@@ -813,9 +801,19 @@
 
 #elif defined(IPC_MESSAGE_MACROS_LOG_ENABLED)
 
-#ifndef IPC_LOG_TABLE_ADD_ENTRY
-#error You need to define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger)
-#endif
+#ifndef IPC_LOG_TABLE_CREATED
+#define IPC_LOG_TABLE_CREATED
+
+#include "base/hash_tables.h"
+
+typedef void (*LogFunction)(std::string* name,
+                            const IPC::Message* msg,
+                            std::string* params);
+
+typedef base::hash_map<uint32, LogFunction > LogFunctionMap;
+LogFunctionMap g_log_function_mapping;
+
+#endif  // IPC_LOG_TABLE_CREATED
 
 // "Log table" inclusion produces extra logging registration code.
 #define IPC_MESSAGE_EXTRA(sync, kind, msg_class,                        \
@@ -824,7 +822,7 @@
  public:                                                                \
     LoggerRegisterHelper##msg_class() {                                 \
       const uint32 msg_id = static_cast<uint32>(msg_class::ID);         \
-      IPC_LOG_TABLE_ADD_ENTRY(msg_id, msg_class::Log);                  \
+      g_log_function_mapping[msg_id] = msg_class::Log;                  \
     }                                                                   \
   };                                                                    \
   LoggerRegisterHelper##msg_class g_LoggerRegisterHelper##msg_class;
@@ -996,8 +994,8 @@
                               ipc_message__.type())
 
 #define IPC_END_MESSAGE_MAP() \
+    DCHECK(msg_is_ok__); \
   } \
-  DCHECK(msg_is_ok__); \
 }
 
 #define IPC_END_MESSAGE_MAP_EX() \
@@ -1010,14 +1008,7 @@
 
 #endif  // IPC_IPC_MESSAGE_MACROS_H_
 
-// The following #ifdef cannot be removed.  Although the code is semantically
-// equivalent without the #ifdef, VS2013 contains a bug where it is
-// over-aggressive in optimizing out #includes.  Putting the #ifdef is a
-// workaround for this bug.  See http://goo.gl/eGt2Fb for more details.
-// This can be removed once VS2013 is fixed.
-#ifdef IPC_MESSAGE_START
 // Clean up IPC_MESSAGE_START in this unguarded section so that the
 // XXX_messages.h files need not do so themselves.  This makes the
 // XXX_messages.h files easier to write.
 #undef IPC_MESSAGE_START
-#endif

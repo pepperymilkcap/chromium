@@ -1,16 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
+#include "net/base/mock_host_resolver.h"
 #include "net/base/net_util.h"
-#include "net/dns/mock_host_resolver.h"
 
 namespace {
 class TemplateURLScraperTest : public InProcessBrowserTest {
@@ -22,19 +25,27 @@ class TemplateURLScraperTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(TemplateURLScraperTest);
 };
 
-class TemplateURLServiceLoader {
+class TemplateURLServiceLoader : public content::NotificationObserver {
  public:
   explicit TemplateURLServiceLoader(TemplateURLService* model) : model_(model) {
-    scoped_refptr<content::MessageLoopRunner> message_loop_runner =
-        new content::MessageLoopRunner;
-    scoped_ptr<TemplateURLService::Subscription> subscription =
-        model_->RegisterOnLoadedCallback(
-            message_loop_runner->QuitClosure());
+    registrar_.Add(this, chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
+                   content::Source<TemplateURLService>(model));
     model_->Load();
-    message_loop_runner->Run();
+    ui_test_utils::RunMessageLoop();
+  }
+
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
+    if (type == chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED &&
+        content::Source<TemplateURLService>(source).ptr() == model_) {
+      MessageLoop::current()->Quit();
+    }
   }
 
  private:
+  content::NotificationRegistrar registrar_;
+
   TemplateURLService* model_;
 
   DISALLOW_COPY_AND_ASSIGN(TemplateURLServiceLoader);
@@ -50,8 +61,7 @@ IN_PROC_BROWSER_TEST_F(TemplateURLScraperTest, ScrapeWithOnSubmit) {
       TemplateURLServiceFactory::GetInstance(browser()->profile());
   TemplateURLServiceLoader loader(template_urls);
 
-  TemplateURLService::TemplateURLVector all_urls =
-      template_urls->GetTemplateURLs();
+  std::vector<const TemplateURL*> all_urls = template_urls->GetTemplateURLs();
 
   // We need to substract the default pre-populated engines that the profile is
   // set up with.

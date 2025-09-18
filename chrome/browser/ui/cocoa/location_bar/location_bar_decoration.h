@@ -4,12 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_LOCATION_BAR_LOCATION_BAR_DECORATION_H_
 #define CHROME_BROWSER_UI_COCOA_LOCATION_BAR_LOCATION_BAR_DECORATION_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
 #import "base/basictypes.h"
-
-class ButtonDecoration;
 
 // Base class for decorations at the left and right of the location
 // bar.  For instance, the location icon.
@@ -40,15 +39,6 @@ class LocationBarDecoration {
   // Draw the decoration in the frame provided.  The frame will be
   // generated from an earlier call to |GetWidthForSpace()|.
   virtual void DrawInFrame(NSRect frame, NSView* control_view);
-
-  // Draw the decoration in the frame provided, possibly including a
-  // background that fills |background_frame|.  The frame will be
-  // generated from an earlier call to |GetWidthForSpace()|, and the
-  // |background_frame| will include the column of pixels exactly
-  // between two decorations.
-  virtual void DrawWithBackgroundInFrame(NSRect background_frame,
-                                         NSRect frame,
-                                         NSView* control_view);
 
   // Returns the tooltip for this decoration, return |nil| for no tooltip.
   virtual NSString* GetToolTip();
@@ -81,21 +71,6 @@ class LocationBarDecoration {
 
   // Called to get the right-click menu, return |nil| for no menu.
   virtual NSMenu* GetMenu();
-
-  // Gets the font used to draw text in the decoration.
-  virtual NSFont* GetFont() const;
-
-  static void DrawLabel(NSString* label,
-                        NSDictionary* attributes,
-                        const NSRect& frame);
-  static void DrawAttributedString(NSAttributedString* str,
-                                   const NSRect& frame);
-  static NSSize GetLabelSize(NSString* label,
-                             NSDictionary* attributes);
-
-  // Returns the current |LocationBarDecoration| as a |ButtonDecoration|, if it
-  // inherits from that class (i.e. if it needs to act as a button).
-  virtual ButtonDecoration* AsButtonDecoration();
 
   // Width returned by |GetWidthForSpace()| when the item should be
   // omitted for this width;

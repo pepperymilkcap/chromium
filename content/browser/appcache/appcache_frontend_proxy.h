@@ -1,22 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_APPCACHE_APPCACHE_FRONTEND_PROXY_H_
 #define CONTENT_BROWSER_APPCACHE_APPCACHE_FRONTEND_PROXY_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
-#include "ipc/ipc_sender.h"
-#include "webkit/common/appcache/appcache_interfaces.h"
-
-namespace content {
+#include "ipc/ipc_message.h"
+#include "webkit/appcache/appcache_interfaces.h"
 
 // Sends appcache related messages to a child process.
 class AppCacheFrontendProxy : public appcache::AppCacheFrontend {
  public:
-  explicit AppCacheFrontendProxy(IPC::Sender* sender);
+  explicit AppCacheFrontendProxy(IPC::Message::Sender* sender);
 
   // AppCacheFrontend methods
   virtual void OnCacheSelected(int host_id,
@@ -36,9 +35,7 @@ class AppCacheFrontendProxy : public appcache::AppCacheFrontend {
                                 const GURL& manifest_url) OVERRIDE;
 
  private:
-  IPC::Sender* sender_;
+  IPC::Message::Sender* sender_;
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_APPCACHE_APPCACHE_FRONTEND_PROXY_H_

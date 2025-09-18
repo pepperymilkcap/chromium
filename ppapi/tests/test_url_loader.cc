@@ -8,9 +8,11 @@
 #include <string.h>
 #include <string>
 
+#include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppb_file_io.h"
 #include "ppapi/c/ppb_url_loader.h"
+#include "ppapi/c/trusted/ppb_file_io_trusted.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
 #include "ppapi/cpp/dev/url_util_dev.h"
 #include "ppapi/cpp/file_io.h"
@@ -18,7 +20,6 @@
 #include "ppapi/cpp/file_system.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/module.h"
-#include "ppapi/cpp/private/file_io_private.h"
 #include "ppapi/cpp/url_loader.h"
 #include "ppapi/cpp/url_request_info.h"
 #include "ppapi/cpp/url_response_info.h"
@@ -32,23 +33,22 @@ namespace {
 int32_t WriteEntireBuffer(PP_Instance instance,
                           pp::FileIO* file_io,
                           int32_t offset,
-                          const std::string& data,
-                          CallbackType callback_type) {
-  TestCompletionCallback callback(instance, callback_type);
+                          const std::string& data) {
+  TestCompletionCallback callback(instance);
   int32_t write_offset = offset;
   const char* buf = data.c_str();
   int32_t size = data.size();
 
   while (write_offset < offset + size) {
-    callback.WaitForResult(file_io->Write(write_offset,
-                                          &buf[write_offset - offset],
-                                          size - write_offset + offset,
-                                          callback.GetCallback()));
-    if (callback.result() < 0)
-      return callback.result();
-    if (callback.result() == 0)
+    int32_t rv = file_io->Write(write_offset, &buf[write_offset - offset],
+                                size - write_offset + offset, callback);
+    if (rv == PP_OK_COMPLETIONPENDING)
+      rv = callback.WaitForResult();
+    if (rv < 0)
+      return rv;
+    if (rv == 0)
       return PP_ERROR_FAILED;
-    write_offset += callback.result();
+    write_offset += rv;
   }
 
   return PP_OK;
@@ -58,7 +58,7 @@ int32_t WriteEntireBuffer(PP_Instance instance,
 
 TestURLLoader::TestURLLoader(TestingInstance* instance)
     : TestCase(instance),
-      file_io_private_interface_(NULL),
+      file_io_trusted_interface_(NULL),
       url_loader_trusted_interface_(NULL) {
 }
 
@@ -73,18 +73,20 @@ bool TestURLLoader::Init() {
   if (!file_io_interface)
     instance_->AppendError("FileIO interface not available");
 
-  file_io_private_interface_ = static_cast<const PPB_FileIO_Private*>(
-      pp::Module::Get()->GetBrowserInterface(PPB_FILEIO_PRIVATE_INTERFACE));
-  if (!file_io_private_interface_)
-    instance_->AppendError("FileIO_Private interface not available");
+  file_io_trusted_interface_ = static_cast<const PPB_FileIOTrusted*>(
+      pp::Module::Get()->GetBrowserInterface(PPB_FILEIOTRUSTED_INTERFACE));
   url_loader_trusted_interface_ = static_cast<const PPB_URLLoaderTrusted*>(
       pp::Module::Get()->GetBrowserInterface(PPB_URLLOADERTRUSTED_INTERFACE));
   if (!testing_interface_->IsOutOfProcess()) {
     // Trusted interfaces are not supported under NaCl.
 #if !(defined __native_client__)
+    if (!file_io_trusted_interface_)
+      instance_->AppendError("FileIOTrusted interface not available");
     if (!url_loader_trusted_interface_)
       instance_->AppendError("URLLoaderTrusted interface not available");
 #else
+    if (file_io_trusted_interface_)
+      instance_->AppendError("FileIOTrusted interface is supported by NaCl");
     if (url_loader_trusted_interface_)
       instance_->AppendError("URLLoaderTrusted interface is supported by NaCl");
 #endif
@@ -92,79 +94,50 @@ bool TestURLLoader::Init() {
   return EnsureRunningOverHTTP();
 }
 
-/*
- * The test order is important here, as running tests out of order may cause
- * test timeout.
- *
- * Here is the environment:
- *
- * 1. TestServer.py only accepts one open connection at the time.
- * 2. HTTP socket pool keeps sockets open for several seconds after last use
- * (hoping that there will be another request that could reuse the connection).
- * 3. HTTP socket pool is separated by host/port and privacy mode (which is
- * based on cookies set/get permissions). So, connections to 127.0.0.1,
- * localhost and localhost in privacy mode cannot reuse existing socket and will
- * try to open another connection.
- *
- * Here is the problem:
- *
- * Original test order was repeatedly accessing 127.0.0.1, localhost and
- * localhost in privacy mode, causing new sockets to open and try to connect to
- * testserver, which they couldn't until previous connection is closed by socket
- * pool idle socket timeout (10 seconds).
- *
- * Because of this the test run was taking around 45 seconds, and test was
- * reported as 'timed out' by trybot.
- *
- * Re-ordering of tests provides more sequential access to 127.0.0.1, localhost
- * and localhost in privacy mode. It decreases the number of times when socket
- * pool doesn't have existing connection to host and has to wait, therefore
- * reducing total test time and ensuring its completion under 30 seconds.
- */
 void TestURLLoader::RunTests(const std::string& filter) {
-  // These tests connect to 127.0.0.1:
-  RUN_CALLBACK_TEST(TestURLLoader, BasicGET, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, BasicPOST, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, BasicFilePOST, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, BasicFileRangePOST, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, CompoundBodyPOST, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, EmptyDataPOST, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, BinaryDataPOST, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, CustomRequestHeader, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, FailsBogusContentLength, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, StreamToFile, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, UntrustedJavascriptURLRestriction, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, TrustedJavascriptURLRestriction, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, UntrustedHttpRequests, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, TrustedHttpRequests, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, FollowURLRedirect, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, AuditURLRedirect, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, AbortCalls, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, UntendedLoad, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, PrefetchBufferThreshold, filter);
-  // These tests connect to localhost with privacy mode enabled:
-  RUN_CALLBACK_TEST(TestURLLoader, UntrustedSameOriginRestriction, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, UntrustedCrossOriginRequest, filter);
-  // These tests connect to localhost with privacy mode disabled:
-  RUN_CALLBACK_TEST(TestURLLoader, TrustedSameOriginRestriction, filter);
-  RUN_CALLBACK_TEST(TestURLLoader, TrustedCrossOriginRequest, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(BasicGET, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(BasicPOST, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(BasicFilePOST, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(BasicFileRangePOST, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(CompoundBodyPOST, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(EmptyDataPOST, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(BinaryDataPOST, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(CustomRequestHeader, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(FailsBogusContentLength, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(StreamToFile, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntrustedSameOriginRestriction, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(TrustedSameOriginRestriction, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntrustedCrossOriginRequest, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(TrustedCrossOriginRequest, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntrustedJavascriptURLRestriction, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(TrustedJavascriptURLRestriction, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntrustedHttpRequests, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(TrustedHttpRequests, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(FollowURLRedirect, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(AuditURLRedirect, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(AbortCalls, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntendedLoad, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(PrefetchBufferThreshold, filter);
 }
 
 std::string TestURLLoader::ReadEntireFile(pp::FileIO* file_io,
                                           std::string* data) {
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
   char buf[256];
   int64_t offset = 0;
 
   for (;;) {
-    callback.WaitForResult(file_io->Read(offset, buf, sizeof(buf),
-                           callback.GetCallback()));
-    if (callback.result() < 0)
-      return ReportError("FileIO::Read", callback.result());
-    if (callback.result() == 0)
+    int32_t rv = file_io->Read(offset, buf, sizeof(buf), callback);
+    if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+      return ReportError("FileIO::Read force_async", rv);
+    if (rv == PP_OK_COMPLETIONPENDING)
+      rv = callback.WaitForResult();
+    if (rv < 0)
+      return ReportError("FileIO::Read", rv);
+    if (rv == 0)
       break;
-    offset += callback.result();
-    data->append(buf, callback.result());
+    offset += rv;
+    data->append(buf, rv);
   }
 
   PASS();
@@ -172,17 +145,20 @@ std::string TestURLLoader::ReadEntireFile(pp::FileIO* file_io,
 
 std::string TestURLLoader::ReadEntireResponseBody(pp::URLLoader* loader,
                                                   std::string* body) {
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
   char buf[2];  // Small so that multiple reads are needed.
 
   for (;;) {
-    callback.WaitForResult(
-        loader->ReadResponseBody(buf, sizeof(buf), callback.GetCallback()));
-    if (callback.result() < 0)
-      return ReportError("URLLoader::ReadResponseBody", callback.result());
-    if (callback.result() == 0)
+    int32_t rv = loader->ReadResponseBody(buf, sizeof(buf), callback);
+    if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+      return ReportError("URLLoader::ReadResponseBody force_async", rv);
+    if (rv == PP_OK_COMPLETIONPENDING)
+      rv = callback.WaitForResult();
+    if (rv < 0)
+      return ReportError("URLLoader::ReadResponseBody", rv);
+    if (rv == 0)
       break;
-    body->append(buf, callback.result());
+    body->append(buf, rv);
   }
 
   PASS();
@@ -191,12 +167,16 @@ std::string TestURLLoader::ReadEntireResponseBody(pp::URLLoader* loader,
 std::string TestURLLoader::LoadAndCompareBody(
     const pp::URLRequestInfo& request,
     const std::string& expected_body) {
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
 
-  pp::URLLoader loader(instance_);
-  callback.WaitForResult(loader.Open(request, callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  pp::URLLoader loader(*instance_);
+  int32_t rv = loader.Open(request, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("URLLoader::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("URLLoader::Open", rv);
 
   pp::URLResponseInfo response_info(loader.GetResponseInfo());
   if (response_info.is_null())
@@ -220,43 +200,46 @@ std::string TestURLLoader::LoadAndCompareBody(
 
 int32_t TestURLLoader::OpenFileSystem(pp::FileSystem* file_system,
                                       std::string* message) {
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
-  callback.WaitForResult(file_system->Open(1024, callback.GetCallback()));
-  if (callback.failed()) {
-    message->assign(callback.errors());
-    return callback.result();
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
+  int32_t rv = file_system->Open(1024, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING) {
+    message->assign("FileSystem::Open force_async");
+    return rv;
   }
-  if (callback.result() != PP_OK) {
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK) {
     message->assign("FileSystem::Open");
-    return callback.result();
+    return rv;
   }
-  return callback.result();
+  return rv;
 }
 
 int32_t TestURLLoader::PrepareFileForPost(
       const pp::FileRef& file_ref,
       const std::string& data,
       std::string* message) {
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
   pp::FileIO file_io(instance_);
-  callback.WaitForResult(file_io.Open(file_ref,
-                                      PP_FILEOPENFLAG_CREATE |
-                                      PP_FILEOPENFLAG_TRUNCATE |
-                                      PP_FILEOPENFLAG_WRITE,
-                                      callback.GetCallback()));
-  if (callback.failed()) {
-    message->assign(callback.errors());
-    return callback.result();
+  int32_t rv = file_io.Open(file_ref,
+                            PP_FILEOPENFLAG_CREATE |
+                            PP_FILEOPENFLAG_TRUNCATE |
+                            PP_FILEOPENFLAG_WRITE,
+                            callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING) {
+    message->assign("FileIO::Open force_async");
+    return rv;
   }
-  if (callback.result() != PP_OK) {
-    message->assign("FileIO::Open failed.");
-    return callback.result();
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK) {
+    message->assign("FileIO::Open");
+    return rv;
   }
 
-  int32_t rv = WriteEntireBuffer(instance_->pp_instance(), &file_io, 0, data,
-                                 callback_type());
+  rv = WriteEntireBuffer(instance_->pp_instance(), &file_io, 0, data);
   if (rv != PP_OK) {
-    message->assign("FileIO::Write failed.");
+    message->assign("FileIO::Write");
     return rv;
   }
 
@@ -268,7 +251,7 @@ std::string TestURLLoader::GetReachableAbsoluteURL(
   // Get the absolute page URL and replace the test case file name
   // with the given one.
   pp::Var document_url(
-      pp::PASS_REF,
+      pp::Var::PassRef(),
       testing_interface_->GetDocumentURL(instance_->pp_instance(),
                                          NULL));
   std::string url(document_url.AsString());
@@ -323,12 +306,18 @@ int32_t TestURLLoader::OpenTrusted(const pp::URLRequestInfo& request) {
 
 int32_t TestURLLoader::Open(const pp::URLRequestInfo& request,
                             bool trusted) {
-  pp::URLLoader loader(instance_);
+  pp::URLLoader loader(*instance_);
   if (trusted)
     url_loader_trusted_interface_->GrantUniversalAccess(loader.pp_resource());
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
-  callback.WaitForResult(loader.Open(request, callback.GetCallback()));
-  return callback.result();
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
+  int32_t rv = loader.Open(request, callback);
+
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  else if (force_async_)
+    ReportError("URLLoader::Open force_async", rv);
+
+  return rv;
 }
 
 std::string TestURLLoader::TestBasicGET() {
@@ -404,7 +393,7 @@ std::string TestURLLoader::TestEmptyDataPOST() {
   request.SetURL("/echo");
   request.SetMethod("POST");
   request.AppendDataToBody("", 0);
-  return LoadAndCompareBody(request, std::string());
+  return LoadAndCompareBody(request, "");
 }
 
 std::string TestURLLoader::TestBinaryDataPOST() {
@@ -448,12 +437,16 @@ std::string TestURLLoader::TestStreamToFile() {
   request.SetURL("test_url_loader_data/hello.txt");
   request.SetStreamToFile(true);
 
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
 
-  pp::URLLoader loader(instance_);
-  callback.WaitForResult(loader.Open(request, callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  pp::URLLoader loader(*instance_);
+  int32_t rv = loader.Open(request, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("URLLoader::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("URLLoader::Open", rv);
 
   pp::URLResponseInfo response_info(loader.GetResponseInfo());
   if (response_info.is_null())
@@ -466,15 +459,23 @@ std::string TestURLLoader::TestStreamToFile() {
   if (body.is_null())
     return "URLResponseInfo::GetBody returned null";
 
-  callback.WaitForResult(loader.FinishStreamingToFile(callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  rv = loader.FinishStreamingToFile(callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("URLLoader::FinishStreamingToFile force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("URLLoader::FinishStreamingToFile", rv);
 
+  // FileIO is not yet supported by ppapi/proxy.
   pp::FileIO reader(instance_);
-  callback.WaitForResult(reader.Open(body, PP_FILEOPENFLAG_READ,
-                                     callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  rv = reader.Open(body, PP_FILEOPENFLAG_READ, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileIO::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("FileIO::Open", rv);
 
   std::string data;
   std::string error = ReadEntireFile(&reader, &data);
@@ -487,6 +488,15 @@ std::string TestURLLoader::TestStreamToFile() {
   if (data != expected_body)
     return "ReadEntireFile returned unexpected content";
 
+  // FileIOTrusted is not supported by NaCl or ppapi/proxy.
+  if (!testing_interface_->IsOutOfProcess()) {
+#if !(defined __native_client__)
+    int32_t file_descriptor = file_io_trusted_interface_->GetOSFileDescriptor(
+        reader.pp_resource());
+    if (file_descriptor < 0)
+      return "FileIO::GetOSFileDescriptor() returned a bad file descriptor.";
+#endif
+  }
   PASS();
 }
 
@@ -578,12 +588,11 @@ std::string TestURLLoader::TestUntrustedHttpRequests() {
   // valid token (containing special characters like CR, LF).
   // http://www.w3.org/TR/XMLHttpRequest/
   {
-    ASSERT_EQ(OpenUntrusted("cOnNeCt", std::string()), PP_ERROR_NOACCESS);
-    ASSERT_EQ(OpenUntrusted("tRaCk", std::string()), PP_ERROR_NOACCESS);
-    ASSERT_EQ(OpenUntrusted("tRaCe", std::string()), PP_ERROR_NOACCESS);
-    ASSERT_EQ(
-        OpenUntrusted("POST\x0d\x0ax-csrf-token:\x20test1234", std::string()),
-        PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("cOnNeCt", ""), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("tRaCk", ""), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("tRaCe", ""), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("POST\x0d\x0ax-csrf-token:\x20test1234", ""),
+                            PP_ERROR_NOACCESS);
   }
   // HTTP methods are restricted only for untrusted loaders. Try all headers
   // that are forbidden by http://www.w3.org/TR/XMLHttpRequest/.
@@ -640,9 +649,9 @@ std::string TestURLLoader::TestUntrustedHttpRequests() {
 std::string TestURLLoader::TestTrustedHttpRequests() {
   // Trusted requests can use restricted methods.
   {
-    ASSERT_EQ(OpenTrusted("cOnNeCt", std::string()), PP_OK);
-    ASSERT_EQ(OpenTrusted("tRaCk", std::string()), PP_OK);
-    ASSERT_EQ(OpenTrusted("tRaCe", std::string()), PP_OK);
+    ASSERT_EQ(OpenTrusted("cOnNeCt", ""), PP_OK);
+    ASSERT_EQ(OpenTrusted("tRaCk", ""), PP_OK);
+    ASSERT_EQ(OpenTrusted("tRaCe", ""), PP_OK);
   }
   // Trusted requests can use restricted headers.
   {
@@ -717,12 +726,16 @@ std::string TestURLLoader::TestAuditURLRedirect() {
   request.SetURL(redirect_prefix.append(redirect_url));
   request.SetFollowRedirects(false);
 
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
 
-  pp::URLLoader loader(instance_);
-  callback.WaitForResult(loader.Open(request, callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  pp::URLLoader loader(*instance_);
+  int32_t rv = loader.Open(request, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("URLLoader::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("URLLoader::Open", rv);
 
   // Checks that the response indicates a redirect, and that the URL
   // is correct.
@@ -734,9 +747,15 @@ std::string TestURLLoader::TestAuditURLRedirect() {
     return "Response status should be 301";
 
   // Test that the paused loader can be resumed.
-  callback.WaitForResult(loader.FollowRedirect(callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  TestCompletionCallback redirect_callback(instance_->pp_instance(),
+                                           force_async_);
+  rv = loader.FollowRedirect(redirect_callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("URLLoader::FollowRedirect force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = redirect_callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("URLLoader::FollowRedirect", rv);
   std::string body;
   std::string error = ReadEntireResponseBody(&loader, &body);
   if (!error.empty())
@@ -752,34 +771,56 @@ std::string TestURLLoader::TestAbortCalls() {
   pp::URLRequestInfo request(instance_);
   request.SetURL("test_url_loader_data/hello.txt");
 
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
   int32_t rv;
 
   // Abort |Open()|.
   {
-    rv = pp::URLLoader(instance_).Open(request, callback.GetCallback());
+    callback.reset_run_count();
+    rv = pp::URLLoader(*instance_).Open(request, callback);
+    if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+      return ReportError("URLLoader::Open force_async", rv);
+    if (callback.run_count() > 0)
+      return "URLLoader::Open ran callback synchronously.";
+    if (rv == PP_OK_COMPLETIONPENDING) {
+      rv = callback.WaitForResult();
+      if (rv != PP_ERROR_ABORTED)
+        return "URLLoader::Open not aborted.";
+    } else if (rv != PP_OK) {
+      return ReportError("URLLoader::Open", rv);
+    }
   }
-  callback.WaitForAbortResult(rv);
-  CHECK_CALLBACK_BEHAVIOR(callback);
 
   // Abort |ReadResponseBody()|.
   {
     char buf[2] = { 0 };
     {
-      pp::URLLoader loader(instance_);
-      callback.WaitForResult(loader.Open(request, callback.GetCallback()));
-      CHECK_CALLBACK_BEHAVIOR(callback);
-      ASSERT_EQ(PP_OK, callback.result());
+      pp::URLLoader loader(*instance_);
+      rv = loader.Open(request, callback);
+      if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+        return ReportError("URLLoader::Open force_async", rv);
+      if (rv == PP_OK_COMPLETIONPENDING)
+        rv = callback.WaitForResult();
+      if (rv != PP_OK)
+        return ReportError("URLLoader::Open", rv);
 
-      rv = loader.ReadResponseBody(buf, sizeof(buf), callback.GetCallback());
+      callback.reset_run_count();
+      rv = loader.ReadResponseBody(buf, sizeof(buf), callback);
+      if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+        return ReportError("URLLoader::ReadResponseBody force_async", rv);
     }  // Destroy |loader|.
-    callback.WaitForAbortResult(rv);
-    CHECK_CALLBACK_BEHAVIOR(callback);
     if (rv == PP_OK_COMPLETIONPENDING) {
-      if (buf[0] || buf[1]) {
+      // Save a copy and make sure |buf| doesn't get written to.
+      char buf_copy[2];
+      memcpy(&buf_copy, &buf, sizeof(buf));
+      rv = callback.WaitForResult();
+      if (rv != PP_ERROR_ABORTED)
+        return "URLLoader::ReadResponseBody not aborted.";
+      if (memcmp(&buf_copy, &buf, sizeof(buf)) != 0)
         return "URLLoader::ReadResponseBody wrote data after resource "
                "destruction.";
-      }
+    } else if (rv != PP_OK) {
+      return ReportError("URLLoader::ReadResponseBody", rv);
     }
   }
 
@@ -793,12 +834,16 @@ std::string TestURLLoader::TestUntendedLoad() {
   pp::URLRequestInfo request(instance_);
   request.SetURL("test_url_loader_data/hello.txt");
   request.SetRecordDownloadProgress(true);
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
+  TestCompletionCallback callback(instance_->pp_instance(), force_async_);
 
-  pp::URLLoader loader(instance_);
-  callback.WaitForResult(loader.Open(request, callback.GetCallback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  pp::URLLoader loader(*instance_);
+  int32_t rv = loader.Open(request, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("URLLoader::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("URLLoader::Open", rv);
 
   // We received the response callback. Yield until the network code has called
   // the loader's didReceiveData and didFinishLoading methods before we give it
@@ -812,21 +857,17 @@ std::string TestURLLoader::TestUntendedLoad() {
           total_bytes_to_be_received);
     if (bytes_received == total_bytes_to_be_received)
       break;
-    // Yield if we're on the main thread, so that URLLoader can receive more
-    // data.
-    if (pp::Module::Get()->core()->IsMainThread()) {
-      NestedEvent event(instance_->pp_instance());
-      event.PostSignal(10);
-      event.Wait();
-    }
+    pp::Module::Get()->core()->CallOnMainThread(10, callback);
+    callback.WaitForResult();
   }
+
   // The loader should now have the data and have finished successfully.
   std::string body;
   std::string error = ReadEntireResponseBody(&loader, &body);
   if (!error.empty())
     return error;
   if (body != "hello\n")
-    return ReportError("Couldn't read data", callback.result());
+    return ReportError("Couldn't read data", rv);
 
   PASS();
 }

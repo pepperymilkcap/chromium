@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_PAGE_ZOOM_H_
 #define CONTENT_PUBLIC_COMMON_PAGE_ZOOM_H_
+#pragma once
 
 #include "content/common/content_export.h"
 
@@ -34,10 +35,6 @@ CONTENT_EXPORT extern const double kEpsilon;
 // Test if two zoom values (either zoom factors or zoom levels) should be
 // considered equal.
 CONTENT_EXPORT bool ZoomValuesEqual(double value_a, double value_b);
-
-// Converts between zoom factors and levels.
-CONTENT_EXPORT double ZoomLevelToZoomFactor(double zoom_level);
-CONTENT_EXPORT double ZoomFactorToZoomLevel(double factor);
 
 }  // namespace content
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 
 #include "chrome/browser/process_singleton.h"
 
+#include "base/eintr_wrapper.h"
+#include "base/file_util.h"
 #include "base/metrics/histogram.h"
-#include "base/posix/eintr_wrapper.h"
 #include "chrome/common/chrome_constants.h"
 
 namespace {
@@ -37,10 +38,10 @@ const int kMaxErrno = 102;
 // ourselves.  An exclusive lock is used to flush out anyone making incorrect
 // assumptions.
 
-ProcessSingleton::ProcessSingleton(
-    const base::FilePath& user_data_dir,
-    const NotificationCallback& /* notification_callback */)
-    : lock_path_(user_data_dir.Append(chrome::kSingletonLockFilename)),
+ProcessSingleton::ProcessSingleton(const FilePath& user_data_dir)
+    : locked_(false),
+      foreground_window_(NULL),
+      lock_path_(user_data_dir.Append(chrome::kSingletonLockFilename)),
       lock_fd_(-1) {
 }
 
@@ -63,8 +64,6 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessOrCreate() {
 // Attempt to acquire an exclusive lock on an empty file in the
 // profile directory.  Returns |true| if it gets the lock.  Returns
 // |false| if the lock is held, or if there is an error.
-// |notification_callback| is not actually used. See the comments at the top of
-// this file for details.
 // TODO(shess): Rather than logging failures, popup an alert.  Punting
 // that for now because it would require confidence that this code is
 // never called in a situation where an alert wouldn't work.
@@ -110,7 +109,7 @@ bool ProcessSingleton::Create() {
 void ProcessSingleton::Cleanup() {
   // Closing the file also releases the lock.
   if (lock_fd_ != -1) {
-    int rc = IGNORE_EINTR(close(lock_fd_));
+    int rc = HANDLE_EINTR(close(lock_fd_));
     DPCHECK(!rc) << "Closing lock_fd_:";
   }
   lock_fd_ = -1;

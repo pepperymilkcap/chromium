@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,33 +6,22 @@
 
 #import "chrome/browser/ui/cocoa/location_bar/page_action_decoration.h"
 
-#include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_action.h"
+#include "base/sys_string_conversions.h"
+#include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/location_bar_controller.h"
-#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/session_id.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_window.h"
-#import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu_controller.h"
+#import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
-#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
-#include "chrome/browser/ui/omnibox/location_bar_util.h"
-#include "chrome/browser/ui/webui/extensions/extension_info_ui.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "skia/ext/skia_utils_mac.h"
-#include "ui/gfx/canvas_skia_paint.h"
-#include "ui/gfx/image/image.h"
 
 using content::WebContents;
-using extensions::Extension;
-using extensions::LocationBarController;
 
 namespace {
 
@@ -46,30 +35,35 @@ const CGFloat kBubblePointYOffset = 2.0;
 
 PageActionDecoration::PageActionDecoration(
     LocationBarViewMac* owner,
-    Browser* browser,
+    Profile* profile,
     ExtensionAction* page_action)
     : owner_(NULL),
-      browser_(browser),
+      profile_(profile),
       page_action_(page_action),
+      tracker_(this),
       current_tab_id_(-1),
-      preview_enabled_(false),
-      scoped_icon_animation_observer_(
-          page_action->GetIconAnimation(
-              SessionID::IdForTab(owner->GetWebContents())),
-          this) {
-  const Extension* extension = browser->profile()->GetExtensionService()->
+      preview_enabled_(false) {
+  DCHECK(profile);
+  const Extension* extension = profile->GetExtensionService()->
       GetExtensionById(page_action->extension_id(), false);
   DCHECK(extension);
 
-  icon_factory_.reset(new ExtensionActionIconFactory(
-      browser_->profile(), extension, page_action, this));
+  // Load all the icons declared in the manifest. This is the contents of the
+  // icons array, plus the default_icon property, if any.
+  std::vector<std::string> icon_paths(*page_action->icon_paths());
+  if (!page_action_->default_icon_path().empty())
+    icon_paths.push_back(page_action_->default_icon_path());
+
+  for (std::vector<std::string>::iterator iter = icon_paths.begin();
+       iter != icon_paths.end(); ++iter) {
+    tracker_.LoadImage(extension, extension->GetResource(*iter),
+                       gfx::Size(Extension::kPageActionIconMaxSize,
+                                 Extension::kPageActionIconMaxSize),
+                       ImageLoadingTracker::DONT_CACHE);
+  }
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-      content::Source<Profile>(browser_->profile()));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_COMMAND_PAGE_ACTION_MAC,
-      content::Source<Profile>(browser_->profile()));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_COMMAND_SCRIPT_BADGE_MAC,
-      content::Source<Profile>(browser_->profile()));
+      content::Source<Profile>(profile_));
 
   // We set the owner last of all so that we can determine whether we are in
   // the process of initializing this class or not.
@@ -81,27 +75,7 @@ PageActionDecoration::~PageActionDecoration() {}
 // Always |kPageActionIconMaxSize| wide.  |ImageDecoration| draws the
 // image centered.
 CGFloat PageActionDecoration::GetWidthForSpace(CGFloat width) {
-  return extensions::IconsInfo::kPageActionIconMaxSize;
-}
-
-void PageActionDecoration::DrawWithBackgroundInFrame(NSRect background_frame,
-                                                     NSRect frame,
-                                                     NSView* control_view) {
-  {
-    gfx::Rect bounds(NSRectToCGRect(background_frame));
-    gfx::CanvasSkiaPaint canvas(background_frame, /*opaque=*/false);
-    // set_composite_alpha(true) makes the extension action paint on top of the
-    // location bar instead of whatever's behind the Chrome window.
-    canvas.set_composite_alpha(true);
-    location_bar_util::PaintExtensionActionBackground(
-        *page_action_, current_tab_id_,
-        &canvas, bounds,
-        SK_ColorBLACK, SK_ColorWHITE);
-    // Destroying |canvas| draws the background.
-  }
-
-  ImageDecoration::DrawWithBackgroundInFrame(
-      background_frame, frame, control_view);
+  return Extension::kPageActionIconMaxSize;
 }
 
 bool PageActionDecoration::AcceptsMousePress() {
@@ -111,63 +85,65 @@ bool PageActionDecoration::AcceptsMousePress() {
 // Either notify listeners or show a popup depending on the Page
 // Action.
 bool PageActionDecoration::OnMousePressed(NSRect frame) {
-  return ActivatePageAction(frame);
-}
-
-bool PageActionDecoration::ActivatePageAction(NSRect frame) {
-  WebContents* web_contents = owner_->GetWebContents();
-  if (!web_contents) {
-    // We don't want other code to try and handle this click. Returning true
+  if (current_tab_id_ < 0) {
+    NOTREACHED() << "No current tab.";
+    // We don't want other code to try and handle this click.  Returning true
     // prevents this by indicating that we handled it.
     return true;
   }
 
-  LocationBarController* controller =
-      extensions::TabHelper::FromWebContents(web_contents)->
-          location_bar_controller();
+  if (page_action_->HasPopup(current_tab_id_)) {
+    // Anchor popup at the bottom center of the page action icon.
+    AutocompleteTextField* field = owner_->GetAutocompleteTextField();
+    NSPoint anchor = GetBubblePointInFrame(frame);
+    anchor = [field convertPoint:anchor toView:nil];
 
-  // 1 is left click.
-  switch (controller->OnClicked(page_action_->extension_id(), 1)) {
-    case LocationBarController::ACTION_NONE:
-      break;
-
-    case LocationBarController::ACTION_SHOW_POPUP:
-      ShowPopup(frame, page_action_->GetPopupUrl(current_tab_id_));
-      break;
-
-    case LocationBarController::ACTION_SHOW_CONTEXT_MENU:
-      // We are never passing OnClicked a right-click button, so assume that
-      // we're never going to be asked to show a context menu.
-      // TODO(kalman): if this changes, update this class to pass the real
-      // mouse button through to the LocationBarController.
-      NOTREACHED();
-      break;
-
-    case LocationBarController::ACTION_SHOW_SCRIPT_POPUP:
-      ShowPopup(
-          frame,
-          extensions::ExtensionInfoUI::GetURL(page_action_->extension_id()));
-      break;
+    const GURL popup_url(page_action_->GetPopupUrl(current_tab_id_));
+    [ExtensionPopupController showURL:popup_url
+                            inBrowser:BrowserList::GetLastActive()
+                           anchoredAt:anchor
+                        arrowLocation:info_bubble::kTopRight
+                              devMode:NO];
+  } else {
+    ExtensionService* service = profile_->GetExtensionService();
+    service->browser_event_router()->PageActionExecuted(
+        profile_, page_action_->extension_id(), page_action_->id(),
+        current_tab_id_, current_url_.spec(),
+        1);
   }
-
   return true;
 }
 
-void PageActionDecoration::OnIconUpdated() {
-  // If we have no owner, that means this class is still being constructed.
-  WebContents* web_contents = owner_ ? owner_->GetWebContents() : NULL;
-  if (web_contents) {
-    UpdateVisibility(web_contents, current_url_);
-    owner_->RedrawDecoration(this);
+void PageActionDecoration::OnImageLoaded(
+    SkBitmap* image, const ExtensionResource& resource, int index) {
+  // We loaded icons()->size() icons, plus one extra if the Page Action had
+  // a default icon.
+  int total_icons = static_cast<int>(page_action_->icon_paths()->size());
+  if (!page_action_->default_icon_path().empty())
+    total_icons++;
+  DCHECK(index < total_icons);
+
+  // Map the index of the loaded image back to its name. If we ever get an
+  // index greater than the number of icons, it must be the default icon.
+  if (image) {
+    if (index < static_cast<int>(page_action_->icon_paths()->size()))
+      page_action_icons_[page_action_->icon_paths()->at(index)] = *image;
+    else
+      page_action_icons_[page_action_->default_icon_path()] = *image;
   }
+
+  // If we have no owner, that means this class is still being constructed and
+  // we should not UpdatePageActions, since it leads to the PageActions being
+  // destroyed again and new ones recreated (causing an infinite loop).
+  if (owner_)
+    owner_->UpdatePageActions();
 }
 
 void PageActionDecoration::UpdateVisibility(WebContents* contents,
                                             const GURL& url) {
   // Save this off so we can pass it back to the extension when the action gets
   // executed. See PageActionDecoration::OnMousePressed.
-  current_tab_id_ =
-      contents ? extensions::ExtensionTabUtil::GetTabId(contents) : -1;
+  current_tab_id_ = contents ? ExtensionTabUtil::GetTabId(contents) : -1;
   current_url_ = url;
 
   bool visible = contents &&
@@ -176,14 +152,37 @@ void PageActionDecoration::UpdateVisibility(WebContents* contents,
     SetToolTip(page_action_->GetTitle(current_tab_id_));
 
     // Set the image.
-    gfx::Image icon = icon_factory_->GetIcon(current_tab_id_);
-    if (!icon.IsEmpty()) {
-      SetImage(icon.ToNSImage());
+    // It can come from three places. In descending order of priority:
+    // - The developer can set it dynamically by path or bitmap. It will be in
+    //   page_action_->GetIcon().
+    // - The developer can set it dynamically by index. It will be in
+    //   page_action_->GetIconIndex().
+    // - It can be set in the manifest by path. It will be in page_action_->
+    //   default_icon_path().
+
+    // First look for a dynamically set bitmap.
+    SkBitmap skia_icon = page_action_->GetIcon(current_tab_id_);
+    if (skia_icon.isNull()) {
+      int icon_index = page_action_->GetIconIndex(current_tab_id_);
+      std::string icon_path = (icon_index < 0) ?
+          page_action_->default_icon_path() :
+          page_action_->icon_paths()->at(icon_index);
+      if (!icon_path.empty()) {
+        PageActionMap::iterator iter = page_action_icons_.find(icon_path);
+        if (iter != page_action_icons_.end())
+          skia_icon = iter->second;
+      }
+    }
+    if (!skia_icon.isNull()) {
+      SetImage(gfx::SkBitmapToNSImage(skia_icon));
     } else if (!GetImage()) {
-      const NSSize default_size = NSMakeSize(
-          extensions::IconsInfo::kPageActionIconMaxSize,
-          extensions::IconsInfo::kPageActionIconMaxSize);
-      SetImage([[[NSImage alloc] initWithSize:default_size] autorelease]);
+      // During install the action can be displayed before the icons
+      // have come in.  Rather than deal with this in multiple places,
+      // provide a placeholder image.  This will be replaced when an
+      // icon comes in.
+      const NSSize default_size = NSMakeSize(Extension::kPageActionIconMaxSize,
+                                             Extension::kPageActionIconMaxSize);
+      SetImage([[NSImage alloc] initWithSize:default_size]);
     }
   }
 
@@ -216,7 +215,7 @@ NSPoint PageActionDecoration::GetBubblePointInFrame(NSRect frame) {
   // easier (the middle of the centered image is the middle of the
   // frame).
   const CGFloat delta_height =
-      NSHeight(frame) - extensions::IconsInfo::kPageActionIconMaxSize;
+      NSHeight(frame) - Extension::kPageActionIconMaxSize;
   const CGFloat bottom_inset = std::ceil(delta_height / 2.0);
 
   // Return a point just below the bottom of the maximal drawing area.
@@ -225,7 +224,9 @@ NSPoint PageActionDecoration::GetBubblePointInFrame(NSRect frame) {
 }
 
 NSMenu* PageActionDecoration::GetMenu() {
-  ExtensionService* service = browser_->profile()->GetExtensionService();
+  if (!profile_)
+    return nil;
+  ExtensionService* service = profile_->GetExtensionService();
   if (!service)
     return nil;
   const Extension* extension = service->GetExtensionById(
@@ -233,34 +234,12 @@ NSMenu* PageActionDecoration::GetMenu() {
   DCHECK(extension);
   if (!extension)
     return nil;
-
-  contextMenuController_.reset([[ExtensionActionContextMenuController alloc]
+  menu_.reset([[ExtensionActionContextMenu alloc]
       initWithExtension:extension
-                browser:browser_
+                profile:profile_
         extensionAction:page_action_]);
 
-  base::scoped_nsobject<NSMenu> contextMenu([[NSMenu alloc] initWithTitle:@""]);
-  [contextMenuController_ populateMenu:contextMenu];
-  return contextMenu.autorelease();
-}
-
-void PageActionDecoration::ShowPopup(const NSRect& frame,
-                                     const GURL& popup_url) {
-  // Anchor popup at the bottom center of the page action icon.
-  AutocompleteTextField* field = owner_->GetAutocompleteTextField();
-  NSPoint anchor = GetBubblePointInFrame(frame);
-  anchor = [field convertPoint:anchor toView:nil];
-
-  [ExtensionPopupController showURL:popup_url
-                          inBrowser:chrome::GetLastActiveBrowser()
-                         anchoredAt:anchor
-                      arrowLocation:info_bubble::kTopRight
-                            devMode:NO];
-}
-
-void PageActionDecoration::OnIconChanged() {
-  UpdateVisibility(owner_->GetWebContents(), current_url_);
-  owner_->RedrawDecoration(this);
+  return menu_.get();
 }
 
 void PageActionDecoration::Observe(
@@ -275,22 +254,6 @@ void PageActionDecoration::Observe(
 
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_COMMAND_PAGE_ACTION_MAC:
-    case chrome::NOTIFICATION_EXTENSION_COMMAND_SCRIPT_BADGE_MAC: {
-      std::pair<const std::string, gfx::NativeWindow>* payload =
-      content::Details<std::pair<const std::string, gfx::NativeWindow> >(
-          details).ptr();
-      std::string extension_id = payload->first;
-      gfx::NativeWindow window = payload->second;
-      if (window != browser_->window()->GetNativeWindow())
-        break;
-      if (extension_id != page_action_->extension_id())
-        break;
-      if (IsVisible())
-        ActivatePageAction(owner_->GetPageActionFrame(page_action_));
-      break;
-    }
-
     default:
       NOTREACHED() << "Unexpected notification";
       break;

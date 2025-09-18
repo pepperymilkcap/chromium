@@ -26,7 +26,7 @@
  */
 
 #ifdef HAVE_CONFIG_H
-#include <config.h>
+#include "config.h"
 #endif
 
 #include "xdgmime.h"
@@ -64,8 +64,6 @@ XdgMimeCache **_caches = NULL;
 static int n_caches = 0;
 
 const char xdg_mime_type_unknown[] = "application/octet-stream";
-const char xdg_mime_type_empty[] = "application/x-zerosize";
-const char xdg_mime_type_textplain[] = "text/plain";
 
 
 enum
@@ -167,7 +165,7 @@ xdg_mime_init_from_directory (const char *directory)
   strcpy (file_name, directory); strcat (file_name, "/mime/globs2");
   if (stat (file_name, &st) == 0)
     {
-      _xdg_mime_glob_read_from_file (global_hash, file_name, TRUE);
+      _xdg_mime_glob_read_from_file (global_hash, file_name);
       xdg_dir_time_list_add (file_name, st.st_mtime);
     }
   else
@@ -177,7 +175,7 @@ xdg_mime_init_from_directory (const char *directory)
       strcpy (file_name, directory); strcat (file_name, "/mime/globs");
       if (stat (file_name, &st) == 0)
         {
-          _xdg_mime_glob_read_from_file (global_hash, file_name, FALSE);
+          _xdg_mime_glob_read_from_file (global_hash, file_name);
           xdg_dir_time_list_add (file_name, st.st_mtime);
         }
       else
@@ -469,23 +467,17 @@ xdg_mime_get_mime_type_for_data (const void *data,
 {
   const char *mime_type;
 
-  if (len == 0)
-    {
-      *result_prio = 100;
-      return XDG_MIME_TYPE_EMPTY;
-    }
-
   xdg_mime_init ();
 
   if (_caches)
-    mime_type = _xdg_mime_cache_get_mime_type_for_data (data, len, result_prio);
-  else
-    mime_type = _xdg_mime_magic_lookup_data (global_magic, data, len, result_prio, NULL, 0);
+    return _xdg_mime_cache_get_mime_type_for_data (data, len, result_prio);
+
+  mime_type = _xdg_mime_magic_lookup_data (global_magic, data, len, result_prio, NULL, 0);
 
   if (mime_type)
     return mime_type;
 
-  return _xdg_binary_or_text_fallback(data, len);
+  return XDG_MIME_TYPE_UNKNOWN;
 }
 
 const char *
@@ -564,7 +556,7 @@ xdg_mime_get_mime_type_for_file (const char  *file_name,
   if (mime_type)
     return mime_type;
 
-  return _xdg_binary_or_text_fallback(data, bytes_read);
+  return XDG_MIME_TYPE_UNKNOWN;
 }
 
 const char *

@@ -1,13 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // Program to test the SafeBrowsing protocol parsing v2.1.
 
-#include <map>
-#include <string>
-
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,13 +16,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunk) {
 
   // Run the parse.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kMalwareList,
       add_chunk.data(),
       static_cast<int>(add_chunk.length()),
-      &chunks);
+      "", "",  &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
   EXPECT_EQ(chunks[0].hosts.size(), 3U);
@@ -70,13 +69,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddFullChunk) {
 
   // Run the parse.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kMalwareList,
       add_chunk.data(),
       static_cast<int>(add_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
   EXPECT_EQ(chunks[0].hosts.size(), 1U);
@@ -99,13 +100,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddChunks) {
 
   // Run the parse.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kMalwareList,
       add_chunk.data(),
       static_cast<int>(add_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 2U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
   EXPECT_EQ(chunks[0].hosts.size(), 3U);
@@ -159,13 +162,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddBigChunk) {
     add_chunk.append(base::StringPrintf("001%d", i));
 
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kMalwareList,
       add_chunk.data(),
       static_cast<int>(add_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
 
@@ -185,12 +190,14 @@ TEST(SafeBrowsingProtocolParsingTest, TestTruncatedBinHashChunk) {
   // This chunk delares there are 4 prefixes but actually only contains 2.
   const char add_chunk[] = "a:1:4:16\n11112222";
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(safe_browsing_util::kBinHashList,
                                   add_chunk,
                                   static_cast<int>(sizeof(add_chunk)),
-                                  &chunks);
+                                  "", "", &re_key, &chunks);
   EXPECT_FALSE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 0U);
 }
 
@@ -199,46 +206,35 @@ TEST(SafeBrowsingProtocolParsingTest, TestTruncatedUrlHashChunk) {
   // This chunk delares there are 4 prefixes but actually only contains 2.
   const char add_chunk[] = "a:1:4:21\naaaa\00411112222";
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
 
   // For safe_browsing_util::kMalwareList.
   bool result = parser.ParseChunk(safe_browsing_util::kMalwareList,
                                   add_chunk,
                                   static_cast<int>(sizeof(add_chunk)),
-                                  &chunks);
+                                  "", "", &re_key, &chunks);
   EXPECT_FALSE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 0U);
 
   // For safe_browsing_util::kPhishingList.
   result = parser.ParseChunk(safe_browsing_util::kPhishingList,
                              add_chunk,
                              static_cast<int>(sizeof(add_chunk)),
-                             &chunks);
+                             "", "", &re_key, &chunks);
   EXPECT_FALSE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 0U);
 
   // For safe_browsing_util::kBinUrlList.
   result = parser.ParseChunk(safe_browsing_util::kBinUrlList,
                              add_chunk,
                              static_cast<int>(sizeof(add_chunk)),
-                             &chunks);
+                             "", "", &re_key, &chunks);
   EXPECT_FALSE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 0U);
-}
-
-// Test to verify handling of a truncated chunk header.
-TEST(SafeBrowsingProtocolParsingTest, TestTruncatedHeader) {
-  std::string truncated_chunks("a:1:4:0\na:");
-
-  // Run the parser.
-  SafeBrowsingProtocolParser parser;
-  SBChunkList chunks;
-  bool result = parser.ParseChunk(
-      safe_browsing_util::kMalwareList,
-      truncated_chunks.data(),
-      static_cast<int>(truncated_chunks.length()),
-      &chunks);
-  EXPECT_FALSE(result);
 }
 
 // Test parsing one sub chunk.
@@ -250,13 +246,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubChunk) {
 
   // Run the parse.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kMalwareList,
       sub_chunk.data(),
       static_cast<int>(sub_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 9);
   EXPECT_EQ(chunks[0].hosts.size(), 3U);
@@ -309,13 +307,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubFullChunk) {
 
   // Run the parse.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kMalwareList,
       sub_chunk.data(),
       static_cast<int>(sub_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
   EXPECT_EQ(chunks[0].hosts.size(), 1U);
@@ -338,14 +338,17 @@ TEST(SafeBrowsingProtocolParsingTest, TestChunkDelete) {
 
   SafeBrowsingProtocolParser parser;
   int next_query_sec = 0;
+  bool re_key = false;
   bool reset = false;
   std::vector<SBChunkDelete> deletes;
   std::vector<ChunkUrl> urls;
   EXPECT_TRUE(parser.ParseUpdate(add_del.data(),
-                                 static_cast<int>(add_del.length()),
-                                 &next_query_sec, &reset, &deletes, &urls));
+                                 static_cast<int>(add_del.length()), "",
+                                 &next_query_sec, &re_key,
+                                 &reset, &deletes, &urls));
 
   EXPECT_TRUE(urls.empty());
+  EXPECT_FALSE(re_key);
   EXPECT_FALSE(reset);
   EXPECT_EQ(next_query_sec, 1700);
   EXPECT_EQ(deletes.size(), 2U);
@@ -368,8 +371,9 @@ TEST(SafeBrowsingProtocolParsingTest, TestChunkDelete) {
   urls.clear();
   add_del = "n:1700\nad:1-7,43-597,44444,99999\ni:malware\nsd:4,21-27171717\n";
   EXPECT_FALSE(parser.ParseUpdate(add_del.data(),
-                                  static_cast<int>(add_del.length()),
-                                  &next_query_sec, &reset, &deletes, &urls));
+                                  static_cast<int>(add_del.length()), "",
+                                  &next_query_sec, &re_key,
+                                  &reset, &deletes, &urls));
 }
 
 // Test parsing the SafeBrowsing update response.
@@ -383,13 +387,16 @@ TEST(SafeBrowsingProtocolParsingTest, TestRedirects) {
 
   SafeBrowsingProtocolParser parser;
   int next_query_sec = 0;
+  bool re_key = false;
   bool reset = false;
   std::vector<SBChunkDelete> deletes;
   std::vector<ChunkUrl> urls;
   EXPECT_TRUE(parser.ParseUpdate(redirects.data(),
-                                 static_cast<int>(redirects.length()),
-                                 &next_query_sec, &reset, &deletes, &urls));
+                                 static_cast<int>(redirects.length()), "",
+                                 &next_query_sec, &re_key,
+                                 &reset, &deletes, &urls));
 
+  EXPECT_FALSE(re_key);
   EXPECT_FALSE(reset);
   EXPECT_EQ(urls.size(), 4U);
   EXPECT_EQ(urls[0].url,
@@ -405,19 +412,54 @@ TEST(SafeBrowsingProtocolParsingTest, TestRedirects) {
   EXPECT_TRUE(deletes.empty());
 }
 
+TEST(SafeBrowsingProtocolParsingTest, TestRedirectsWithMac) {
+  std::string redirects("i:goog-phish-shavar\n"
+    "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6501-6505:6501-6505,"
+    "pcY6iVeT9-CBQ3fdAF0rpnKjR1Y=\n"
+    "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8001-8160:8001-8024,"
+    "8026-8045,8048-8049,8051-8134,8136-8152,8155-8160,"
+    "j6XXAEWnjYk9tVVLBSdQvIEq2Wg=\n");
+
+  SafeBrowsingProtocolParser parser;
+  int next_query_sec = 0;
+  bool re_key = false;
+  bool reset = false;
+  const std::string key("58Lqn5WIP961x3zuLGo5Uw==");
+  std::vector<SBChunkDelete> deletes;
+  std::vector<ChunkUrl> urls;
+  EXPECT_TRUE(parser.ParseUpdate(redirects.data(),
+                                 static_cast<int>(redirects.length()), key,
+                                 &next_query_sec, &re_key,
+                                 &reset, &deletes, &urls));
+
+  EXPECT_FALSE(re_key);
+  EXPECT_FALSE(reset);
+  EXPECT_EQ(urls.size(), 2U);
+  EXPECT_EQ(urls[0].url,
+      "s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6501-6505:6501-6505");
+  EXPECT_EQ(urls[0].mac, "pcY6iVeT9-CBQ3fdAF0rpnKjR1Y=");
+  EXPECT_EQ(urls[1].url,
+      "s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8001-8160:8001-8024,"
+      "8026-8045,8048-8049,8051-8134,8136-8152,8155-8160");
+  EXPECT_EQ(urls[1].mac, "j6XXAEWnjYk9tVVLBSdQvIEq2Wg=");
+}
+
 // Test parsing various SafeBrowsing protocol headers.
 TEST(SafeBrowsingProtocolParsingTest, TestNextQueryTime) {
   std::string headers("n:1800\ni:goog-white-shavar\n");
   SafeBrowsingProtocolParser parser;
   int next_query_sec = 0;
+  bool re_key = false;
   bool reset = false;
   std::vector<SBChunkDelete> deletes;
   std::vector<ChunkUrl> urls;
   EXPECT_TRUE(parser.ParseUpdate(headers.data(),
-                                 static_cast<int>(headers.length()),
-                                 &next_query_sec, &reset, &deletes, &urls));
+                                 static_cast<int>(headers.length()), "",
+                                 &next_query_sec, &re_key,
+                                 &reset, &deletes, &urls));
 
   EXPECT_EQ(next_query_sec, 1800);
+  EXPECT_FALSE(re_key);
   EXPECT_FALSE(reset);
   EXPECT_TRUE(deletes.empty());
   EXPECT_TRUE(urls.empty());
@@ -430,11 +472,14 @@ TEST(SafeBrowsingProtocolParsingTest, TestGetHash) {
                        "00001111222233334444555566667777"
                        "ffffeeeeddddccccbbbbaaaa99998888");
   std::vector<SBFullHashResult> full_hashes;
+  bool re_key = false;
   SafeBrowsingProtocolParser parser;
   EXPECT_TRUE(parser.ParseGetHash(get_hash.data(),
-                                  static_cast<int>(get_hash.length()),
+                                  static_cast<int>(get_hash.length()), "",
+                                  &re_key,
                                   &full_hashes));
 
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(full_hashes.size(), 3U);
   EXPECT_EQ(memcmp(&full_hashes[0].hash,
                    "00112233445566778899aabbccddeeff",
@@ -456,9 +501,11 @@ TEST(SafeBrowsingProtocolParsingTest, TestGetHash) {
                         "cafebeefcafebeefdeaddeaddeaddead"
                         "zzzzyyyyxxxxwwwwvvvvuuuuttttssss");
   EXPECT_TRUE(parser.ParseGetHash(get_hash2.data(),
-                                  static_cast<int>(get_hash2.length()),
+                                  static_cast<int>(get_hash2.length()), "",
+                                  &re_key,
                                   &full_hashes));
 
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(full_hashes.size(), 3U);
   EXPECT_EQ(memcmp(&full_hashes[0].hash,
                    "00112233445566778899aabbccddeeff",
@@ -474,15 +521,55 @@ TEST(SafeBrowsingProtocolParsingTest, TestGetHash) {
   EXPECT_EQ(full_hashes[2].list_name, "goog-malware-shavar");
 }
 
+TEST(SafeBrowsingProtocolParsingTest, TestGetHashWithMac) {
+  const unsigned char get_hash[] = {
+    0x32, 0x56, 0x74, 0x6f, 0x6b, 0x36, 0x64, 0x41,
+    0x51, 0x72, 0x65, 0x51, 0x62, 0x38, 0x51, 0x68,
+    0x59, 0x45, 0x57, 0x51, 0x57, 0x4d, 0x52, 0x65,
+    0x42, 0x63, 0x41, 0x3d, 0x0a, 0x67, 0x6f, 0x6f,
+    0x67, 0x2d, 0x70, 0x68, 0x69, 0x73, 0x68, 0x2d,
+    0x73, 0x68, 0x61, 0x76, 0x61, 0x72, 0x3a, 0x36,
+    0x31, 0x36, 0x39, 0x3a, 0x33, 0x32, 0x0a, 0x17,
+    0x7f, 0x03, 0x42, 0x28, 0x1c, 0x31, 0xb9, 0x0b,
+    0x1c, 0x7b, 0x9d, 0xaf, 0x7b, 0x43, 0x99, 0x10,
+    0xc1, 0xab, 0xe3, 0x1b, 0x35, 0x80, 0x38, 0x96,
+    0xf9, 0x44, 0x4f, 0x28, 0xb4, 0xeb, 0x45
+  };
+
+  const unsigned char hash_result[] = {
+    0x17, 0x7f, 0x03, 0x42, 0x28, 0x1c, 0x31, 0xb9,
+    0x0b, 0x1c, 0x7b, 0x9d, 0xaf, 0x7b, 0x43, 0x99,
+    0x10, 0xc1, 0xab, 0xe3, 0x1b, 0x35, 0x80, 0x38,
+    0x96, 0xf9, 0x44, 0x4f, 0x28, 0xb4, 0xeb, 0x45
+  };
+
+  const std::string key = "58Lqn5WIP961x3zuLGo5Uw==";
+  std::vector<SBFullHashResult> full_hashes;
+  bool re_key = false;
+  SafeBrowsingProtocolParser parser;
+  EXPECT_TRUE(parser.ParseGetHash(reinterpret_cast<const char*>(get_hash),
+                                  sizeof(get_hash),
+                                  key,
+                                  &re_key,
+                                  &full_hashes));
+  EXPECT_FALSE(re_key);
+  EXPECT_EQ(full_hashes.size(), 1U);
+  EXPECT_EQ(memcmp(hash_result, &full_hashes[0].hash, sizeof(SBFullHash)), 0);
+}
+
 TEST(SafeBrowsingProtocolParsingTest, TestGetHashWithUnknownList) {
   std::string hash_response = "goog-phish-shavar:1:32\n"
                               "12345678901234567890123456789012"
                               "googpub-phish-shavar:19:32\n"
                               "09876543210987654321098765432109";
+  bool re_key = false;
+  std::string key = "";
   std::vector<SBFullHashResult> full_hashes;
   SafeBrowsingProtocolParser parser;
   EXPECT_TRUE(parser.ParseGetHash(hash_response.data(),
                                   hash_response.size(),
+                                  key,
+                                  &re_key,
                                   &full_hashes));
 
   EXPECT_EQ(full_hashes.size(), 1U);
@@ -496,6 +583,8 @@ TEST(SafeBrowsingProtocolParsingTest, TestGetHashWithUnknownList) {
   full_hashes.clear();
   EXPECT_TRUE(parser.ParseGetHash(hash_response.data(),
                                   hash_response.size(),
+                                  key,
+                                  &re_key,
                                   &full_hashes));
 
   EXPECT_EQ(full_hashes.size(), 2U);
@@ -522,17 +611,50 @@ TEST(SafeBrowsingProtocolParsingTest, TestFormatHash) {
   EXPECT_EQ(get_hash, "4:12\n1234abcdpqrs");
 }
 
-TEST(SafeBrowsingProtocolParsingTest, TestReset) {
+TEST(SafeBrowsingProtocolParsingTest, TestGetKey) {
   SafeBrowsingProtocolParser parser;
-  std::string update("n:1800\ni:phishy\nr:pleasereset\n");
+  std::string key_response("clientkey:10:0123456789\n"
+                           "wrappedkey:20:abcdefghijklmnopqrst\n");
 
+  std::string client_key, wrapped_key;
+  EXPECT_TRUE(parser.ParseNewKey(key_response.data(),
+                                 static_cast<int>(key_response.length()),
+                                 &client_key,
+                                 &wrapped_key));
+
+  EXPECT_EQ(client_key, "0123456789");
+  EXPECT_EQ(wrapped_key, "abcdefghijklmnopqrst");
+}
+
+TEST(SafeBrowsingProtocolParsingTest, TestReKey) {
+  SafeBrowsingProtocolParser parser;
+  std::string update("n:1800\ni:phishy\ne:pleaserekey\n");
+
+  bool re_key = false;
   bool reset = false;
   int next_update = -1;
   std::vector<SBChunkDelete> deletes;
   std::vector<ChunkUrl> urls;
   EXPECT_TRUE(parser.ParseUpdate(update.data(),
-                                 static_cast<int>(update.size()),
-                                 &next_update, &reset, &deletes, &urls));
+                                 static_cast<int>(update.size()), "",
+                                 &next_update, &re_key,
+                                 &reset, &deletes, &urls));
+  EXPECT_TRUE(re_key);
+}
+
+TEST(SafeBrowsingProtocolParsingTest, TestReset) {
+  SafeBrowsingProtocolParser parser;
+  std::string update("n:1800\ni:phishy\nr:pleasereset\n");
+
+  bool re_key = false;
+  bool reset = false;
+  int next_update = -1;
+  std::vector<SBChunkDelete> deletes;
+  std::vector<ChunkUrl> urls;
+  EXPECT_TRUE(parser.ParseUpdate(update.data(),
+                                 static_cast<int>(update.size()), "",
+                                 &next_update, &re_key,
+                                 &reset, &deletes, &urls));
   EXPECT_TRUE(reset);
 }
 
@@ -542,13 +664,14 @@ TEST(SafeBrowsingProtocolParsingTest, TestReset) {
 TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeAddChunk) {
   std::string add_chunk("a:1:4:0\n");
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
 
   bool result = parser.ParseChunk(
       safe_browsing_util::kMalwareList,
       add_chunk.data(),
       static_cast<int>(add_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
@@ -563,7 +686,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeAddChunk) {
       safe_browsing_util::kMalwareList,
       add_chunks.data(),
       static_cast<int>(add_chunks.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
   EXPECT_EQ(chunks.size(), 3U);
 
@@ -588,13 +711,14 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeAddChunk) {
 TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeSubChunk) {
   std::string sub_chunk("s:9:4:0\n");
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
 
   bool result = parser.ParseChunk(
       safe_browsing_util::kMalwareList,
       sub_chunk.data(),
       static_cast<int>(sub_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 9);
@@ -611,7 +735,7 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeSubChunk) {
       safe_browsing_util::kMalwareList,
       sub_chunks.data(),
       static_cast<int>(sub_chunks.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
 
   EXPECT_EQ(chunks[0].chunk_number, 1);
@@ -634,18 +758,95 @@ TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeSubChunk) {
   EXPECT_EQ(chunks[2].hosts[1].entry->ChunkIdAtPrefix(0), 0x35363738);
 }
 
+TEST(SafeBrowsingProtocolParsingTest, TestVerifyUpdateMac) {
+  SafeBrowsingProtocolParser parser;
+
+  const std::string update =
+      "m:XIU0LiQhAPJq6dynXwHbygjS5tw=\n"
+      "n:1895\n"
+      "i:goog-phish-shavar\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6501-6505:6501-6505,"
+        "pcY6iVeT9-CBQ3fdAF0rpnKjR1Y=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6506-6510:6506-6510,"
+        "SDBrYC3rX3KEPe72LOypnP6QYac=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6511-6520:6511-6520,"
+        "9UQo-e7OkcsXT2wFWTAhOuWOsUs=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6521-6560:6521-6560,"
+        "qVNw6JIpR1q6PIXST7J4LJ9n3Zg=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6561-6720:6561-6720,"
+        "7OiJvCbiwvpzPITW-hQohY5NHuc=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6721-6880:6721-6880,"
+        "oBS3svhoi9deIa0sWZ_gnD0ujj8=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6881-7040:6881-7040,"
+        "a0r8Xit4VvH39xgyQHZTPczKBIE=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_7041-7200:7041-7163,"
+        "q538LChutGknBw55s6kcE2wTcvU=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8001-8160:8001-8024,"
+        "8026-8045,8048-8049,8051-8134,8136-8152,8155-8160,"
+        "j6XXAEWnjYk9tVVLBSdQvIEq2Wg=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8161-8320:8161-8215,"
+        "8217-8222,8224-8320,YaNfiqdQOt-uLCLWVLj46AZpAjQ=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8321-8480:8321-8391,"
+        "8393-8399,8402,8404-8419,8421-8425,8427,8431-8433,8435-8439,8441-8443,"
+        "8445-8446,8448-8480,ALj31GQMwGiIeU3bM2ZYKITfU-U=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8481-8640:8481-8500,"
+        "8502-8508,8510-8511,8513-8517,8519-8525,8527-8531,8533,8536-8539,"
+        "8541-8576,8578-8638,8640,TlQYRmS_kZ5PBAUIUyNQDq0Jprs=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8641-8800:8641-8689,"
+        "8691-8731,8733-8786,x1Qf7hdNrO8b6yym03ZzNydDS1o=\n";
+
+  bool re_key = false;
+  bool reset = false;
+  int next_update = -1;
+  std::vector<SBChunkDelete> deletes;
+  std::vector<ChunkUrl> urls;
+  const std::string key("58Lqn5WIP961x3zuLGo5Uw==");
+  EXPECT_TRUE(parser.ParseUpdate(update.data(),
+                                 static_cast<int>(update.size()), key,
+                                 &next_update, &re_key,
+                                 &reset, &deletes, &urls));
+  EXPECT_FALSE(re_key);
+  EXPECT_EQ(next_update, 1895);
+}
+
+TEST(SafeBrowsingProtocolParsingTest, TestVerifyChunkMac) {
+  SafeBrowsingProtocolParser parser;
+
+  const unsigned char chunk[] = {
+    0x73, 0x3a, 0x32, 0x30, 0x30, 0x32, 0x3a, 0x34,
+    0x3a, 0x32, 0x32, 0x0a, 0x2f, 0x4f, 0x89, 0x7a,
+    0x01, 0x00, 0x00, 0x0a, 0x59, 0xc8, 0x71, 0xdf,
+    0x9d, 0x29, 0x0c, 0xba, 0xd7, 0x00, 0x00, 0x00,
+    0x0a, 0x59
+  };
+
+  bool re_key = false;
+  SBChunkList chunks;
+  const std::string key("v_aDSz6jI92WeHCOoZ07QA==");
+  const std::string mac("W9Xp2fUcQ9V66If6Cvsrstpa4Kk=");
+
+  EXPECT_TRUE(parser.ParseChunk(
+      safe_browsing_util::kMalwareList,
+      reinterpret_cast<const char*>(chunk),
+      sizeof(chunk), key, mac,
+      &re_key, &chunks));
+  EXPECT_FALSE(re_key);
+}
+
 TEST(SafeBrowsingProtocolParsingTest, TestAddBinHashChunks) {
   std::string add_chunk("a:1:4:16\naaaabbbbccccdddd"
                         "a:2:4:8\n11112222");
   // Run the parse.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kBinHashList,
       add_chunk.data(),
       static_cast<int>(add_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 2U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
   EXPECT_EQ(chunks[0].hosts.size(), 1U);
@@ -675,13 +876,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddBigBinHashChunk) {
     add_chunk.append(base::StringPrintf("%04d", i));
 
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kBinHashList,
       add_chunk.data(),
       static_cast<int>(add_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
 
@@ -698,13 +901,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubBinHashChunk) {
 
   // Run the parser.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kBinHashList,
       sub_chunk.data(),
       static_cast<int>(sub_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 9);
   EXPECT_EQ(chunks[0].hosts.size(), 1U);
@@ -726,13 +931,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestAddDownloadWhitelistChunk) {
                         "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz");
   // Run the parse.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kDownloadWhiteList,
       add_chunk.data(),
       static_cast<int>(add_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   EXPECT_TRUE(result);
+  EXPECT_FALSE(re_key);
   EXPECT_EQ(chunks.size(), 2U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
   EXPECT_EQ(chunks[0].hosts.size(), 1U);
@@ -764,13 +971,15 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubDownloadWhitelistChunk) {
 
   // Run the parser.
   SafeBrowsingProtocolParser parser;
+  bool re_key = false;
   SBChunkList chunks;
   bool result = parser.ParseChunk(
       safe_browsing_util::kDownloadWhiteList,
       sub_chunk.data(),
       static_cast<int>(sub_chunk.length()),
-      &chunks);
+      "", "", &re_key, &chunks);
   ASSERT_TRUE(result);
+  EXPECT_FALSE(re_key);
   ASSERT_EQ(chunks.size(), 1U);
   EXPECT_EQ(chunks[0].chunk_number, 1);
   EXPECT_EQ(chunks[0].hosts.size(), 1U);
@@ -784,110 +993,4 @@ TEST(SafeBrowsingProtocolParsingTest, TestSubDownloadWhitelistChunk) {
   SBFullHash full;
   memcpy(full.full_hash, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", 32);
   EXPECT_TRUE(entry->FullHashAt(0) == full);
-}
-
-// There should be one test case for every list added here.  Each list
-// chunk data should contain exactly one add chunk and one sub chunk.
-TEST(SafeBrowsingProtocolParsingTest, TestAllLists) {
-  std::map<std::string, std::string> add_testdata;
-  // goog-*-shavar lists have a host-key followed by one or more prefixes.
-  add_testdata[safe_browsing_util::kMalwareList] = std::string(
-      "a:129057:4:34\n\xd9\xb8\xb2\x14\x00\xe4""B7P\x00\xaf\x91"
-      "{\xd7\x01\xad\xa6\xb5""X\xbb\xcf""F\xcf\x00\xf7""A\xbd"
-      "p\x00\xab\xd7\x89\xd3\x00", 48);
-  add_testdata[safe_browsing_util::kPhishingList] = std::string(
-      "a:301377:4:9\n\xdb\xe0\xaa\x8e\x01\x85\xba\xb2\x9e", 22);
-  add_testdata[safe_browsing_util::kBinUrlList] = std::string(
-      "a:19420:4:18\n_\x92\x9e\xcd\x01\x03""}I\xa2\\3\xe6""h\x01\xee"
-      "H\xf6\xe4", 31);
-  add_testdata[safe_browsing_util::kSideEffectFreeWhitelist] = std::string(
-      "a:1818:4:9\n\x85\xd0\xfe""i\x01""}\x98\xb1\xe5", 20);
-  // goog-*-digestvar lists have no host-key data.
-  add_testdata[safe_browsing_util::kBinHashList] = std::string(
-      "a:5:4:4\nBBBB", 12);
-  add_testdata[safe_browsing_util::kExtensionBlacklist] = std::string(
-      "a:81:4:8\nhleedfcc", 17);
-  // goog-*-sha256 lists have host-keys but they only contains
-  // full-length entires.
-  add_testdata[safe_browsing_util::kCsdWhiteList] = std::string(
-      "a:35:32:37\n\x06\xf9\xb1\xaf\x01\x06\xf9\xb1\xaf""5\xc""9!\x17\x1e"
-      "*-\xc9"",*>YSl6\xf9""B\xb8\x96""O\x98""r\xf2\xd5\x8d\xe3""T\x99", 48);
-  // goog-*-digest256 has no host-keys and contains only full-length
-  // hashes.
-  add_testdata[safe_browsing_util::kDownloadWhiteList] = std::string(
-      "a:42:32:32\n\xc8\xec\x9f\x9c\x9b\x9a"",\x82""G:F(\xe9\xad\x9c""b$\x8a"
-      "\xba""%\x19\xae""c\x03\x87""~\xd1\xd3""bvC\xfd", 43);
-  add_testdata[safe_browsing_util::kIPBlacklist] = std::string(
-      "a:12:32:32\n8\x99\x17\xda\xec""+i`\x1a\xb3""8pVh\n$\x01\xd1\x12"
-      ":\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 43);
-
-  std::map<std::string, std::string> sub_testdata;
-  // goog-*-shavar lists have a host-key, add number followed by zero or more
-  // prefixes.
-  sub_testdata[safe_browsing_util::kMalwareList] = std::string(
-      "s:122930:4:9\n\x85""!_\x13\x00\x00\x01\xf1\xa2", 22);
-  sub_testdata[safe_browsing_util::kPhishingList] = std::string(
-      "s:150181:4:9\nr\x90""zt\x00\x00\x04\x9f""@", 22);
-  sub_testdata[safe_browsing_util::kBinUrlList] = std::string(
-      "s:3:4:13\nHOST\x01""####BBBB", 22);
-  sub_testdata[safe_browsing_util::kSideEffectFreeWhitelist] = std::string(
-      "s:4:4:9\nHOST\x00""####", 17);
-  // goog-*-digestvar lists have no host-key data.
-  sub_testdata[safe_browsing_util::kBinHashList] = std::string(
-      "s:5:4:8\n####BBBB", 16);
-  sub_testdata[safe_browsing_util::kExtensionBlacklist] = std::string(
-      "s:3:4:8\n\x00\x00\x00""%pgkc", 16);
-  // goog-*-sha256 lists have host-keys but they only contains
-  // full-length entires.
-  sub_testdata[safe_browsing_util::kCsdWhiteList] = std::string(
-      "s:1:32:41\n\x1a""\"[\n\x01\x00\x00\x00\x15\x1""a\"[\n\xe9\x81""P\x11"
-      "LR\xcb""3\x00""B\x90\xb3\x15""K\xf5\xdc\xd0""V\xc2""aI\x1e""-\xc8"
-      "\xce"":\t\x01", 51);
-  // goog-*-digest256 has no host-keys and contains only full-length
-  // hashes.
-  sub_testdata[safe_browsing_util::kDownloadWhiteList] = std::string(
-      "s:15:32:36\n\x00\x00\x00""-\x12""!\xa2\x8d""z\x80""a\xfb\x14\xff"
-      "f\x13\x18\xcc\xdb\xbd\xc0\xb1""~\xd6\x82""[\xf6\xdc\xa1\x81"
-      "TI%\xef""C\xab", 47);
-  sub_testdata[safe_browsing_util::kIPBlacklist] = std::string(
-      "s:13:32:108\n\x00\x00\x00\rL2\x1e\xc6""P3\x94\x1f\xf1""Cv\x18\x9d\xdf"
-      "ih4M.c\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\r_"
-      "\xfd\xbe""v\x87\xba""'\x1d\x12\r\xc0\xde""B\xc8""{a\xe7\x07""u\x11\x80"
-      "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\tz\xfe\xdb"
-      "h\t\x08\xc5""dd\x9""ag\xee\xf5\x83\x91""@\xd9\xa4""i*\x80\x00\x00\x00"
-      "\x00\x00\x00\x00\x00\x00\x00\x00", 120);
-
-  SafeBrowsingProtocolParser parser;
-  for (size_t i = 0; i < arraysize(safe_browsing_util::kAllLists); ++i) {
-    std::string listname = safe_browsing_util::kAllLists[i];
-
-    {
-      ASSERT_EQ(add_testdata.count(listname), 1U)
-          << "Missing add chunk test case for Safe Browsing list: " << listname;
-      const std::string& chunk_data = add_testdata[listname];
-      SBChunkList chunks;
-      EXPECT_TRUE(parser.ParseChunk(listname,
-                                    chunk_data.data(),
-                                    static_cast<int>(chunk_data.length()),
-                                    &chunks))
-          << "Unable to parse add chunk data for listname: "
-          << listname;
-      ASSERT_EQ(chunks.size(), 1U);
-      EXPECT_TRUE(chunks[0].is_add);
-    }
-    {
-      ASSERT_EQ(sub_testdata.count(listname), 1U)
-          << "Missing sub chunk test case for Safe Browsing list: " << listname;
-      const std::string& chunk_data = sub_testdata[listname];
-      SBChunkList chunks;
-      EXPECT_TRUE(parser.ParseChunk(listname,
-                                    chunk_data.data(),
-                                    static_cast<int>(chunk_data.length()),
-                                    &chunks))
-          << "Unable to parse sub chunk data for listname: "
-          << listname;
-      ASSERT_EQ(chunks.size(), 1U);
-      EXPECT_FALSE(chunks[0].is_add);
-    }
-  }
 }

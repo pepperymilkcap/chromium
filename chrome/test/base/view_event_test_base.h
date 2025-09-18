@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_BASE_VIEW_EVENT_TEST_BASE_H_
 #define CHROME_TEST_BASE_VIEW_EVENT_TEST_BASE_H_
+#pragma once
 
 // We only want to use ViewEventTestBase in test targets which properly
 // isolate each test case by running each test in a separate process.
@@ -13,31 +14,14 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/ui/views/chrome_views_delegate.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/widget/widget_delegate.h"
 
-#if defined(OS_WIN)
-#include "ui/base/win/scoped_ole_initializer.h"
-#endif
-
-namespace aura {
-namespace test {
-class AuraTestHelper;
-}
-}
-
 namespace gfx {
 class Size;
-}
-
-namespace views {
-namespace corewm {
-class WMState;
-}
 }
 
 // Base class for Views based tests that dispatch events.
@@ -101,6 +85,7 @@ class ViewEventTestBase : public views::WidgetDelegate,
   // Overridden to do nothing so that this class can be used in runnable tasks.
   void AddRef() {}
   void Release() {}
+  static bool ImplementsThreadSafeReferenceCounting() { return false; }
 
  protected:
   virtual ~ViewEventTestBase();
@@ -148,18 +133,9 @@ class ViewEventTestBase : public views::WidgetDelegate,
   // Thread for posting background MouseMoves.
   scoped_ptr<base::Thread> dnd_thread_;
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  MessageLoopForUI message_loop_;
 
-#if defined(OS_WIN)
-  ui::ScopedOleInitializer ole_initializer_;
-#endif
-
-#if defined(USE_AURA)
-  scoped_ptr<aura::test::AuraTestHelper> aura_test_helper_;
-  scoped_ptr<views::corewm::WMState> wm_state_;
-#endif
-
-  ChromeViewsDelegate views_delegate_;
+  content::TestBrowserThread ui_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(ViewEventTestBase);
 };

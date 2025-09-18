@@ -110,7 +110,7 @@ var MainView = (function() {
   var SNAPSHOT_FILE_LOADER_ID = 'snapshot-file-loader';
   var LOAD_ERROR_ID = 'file-load-error';
 
-  var DOWNLOAD_ANCHOR_ID = 'download-anchor';
+  var DOWNLOAD_IFRAME_ID = 'download-iframe';
 
   // --------------------------------------------------------------------------
   // Row keys
@@ -172,7 +172,7 @@ var MainView = (function() {
       },
 
       getValueAsText: function() {
-        return getDictionaryKeys(this.valuesSet_).length + ' unique';
+        return getDictionaryKeys(this.valuesSet_).length + ' unique'
       },
     };
 
@@ -243,7 +243,7 @@ var MainView = (function() {
           create: function(key) {
             return new Aggregator(numeratorKey, divisorKey);
           },
-        };
+        }
       }
     };
   })();
@@ -367,20 +367,20 @@ var MainView = (function() {
 
   KEY_PROPERTIES[KEY_FUNCTION_NAME] = {
     name: 'Function name',
-    inputJsonKey: 'birth_location.function_name',
+    inputJsonKey: 'location.function_name',
     aggregator: UniquifyAggregator,
   };
 
   KEY_PROPERTIES[KEY_FILE_NAME] = {
     name: 'File name',
-    inputJsonKey: 'birth_location.file_name',
+    inputJsonKey: 'location.file_name',
     aggregator: UniquifyAggregator,
   };
 
   KEY_PROPERTIES[KEY_LINE_NUMBER] = {
     name: 'Line number',
     cellAlignment: 'right',
-    inputJsonKey: 'birth_location.line_number',
+    inputJsonKey: 'location.line_number',
     aggregator: UniquifyAggregator,
   };
 
@@ -617,7 +617,7 @@ var MainView = (function() {
     var parts = [];
     for (var end = orig.length; end > 0; ) {
       var chunk = Math.min(end, 3);
-      parts.push(orig.substr(end - chunk, chunk));
+      parts.push(orig.substr(end-chunk, chunk));
       end -= chunk;
     }
     return parts.reverse().join(',');
@@ -1007,7 +1007,7 @@ var MainView = (function() {
           var a = row1[aggregateKey];
           var b = row2[aggregateKey];
 
-          var diffFunc = KEY_PROPERTIES[aggregateKey].diff;
+          var diffFunc =  KEY_PROPERTIES[aggregateKey].diff;
           newRow[aggregateKey] = diffFunc(a, b);
         }
       } else {
@@ -1486,7 +1486,7 @@ var MainView = (function() {
 
         // The grouped properties are going to be the same for each row in our,
         // table, so avoid drawing them in our table!
-        var keysToExclude = [];
+        var keysToExclude = []
 
         for (var i = 0; i < randomGroupKey.length; ++i)
           keysToExclude.push(randomGroupKey[i].key);
@@ -1535,7 +1535,7 @@ var MainView = (function() {
      * Draws a title into |parent| that describes |groupKey|.
      */
     drawGroupTitle_: function(parent, groupKey) {
-      if (groupKey.length == 0) {
+      if (groupKey.length  == 0) {
         // Empty group key means there was no grouping.
         return;
       }
@@ -1796,18 +1796,18 @@ var MainView = (function() {
         'userAgent': navigator.userAgent,
         'version': 1,
         'snapshots': snapshots
-      };
+      }
 
       var dumpText = JSON.stringify(dump, null, ' ');
-      var textBlob = new Blob([dumpText],
-                              { type: 'octet/stream', endings: 'native' });
+      var blobBuilder = new WebKitBlobBuilder();
+      blobBuilder.append(dumpText, 'native');
+      var textBlob = blobBuilder.getBlob('octet/stream');
       var blobUrl = window.webkitURL.createObjectURL(textBlob);
-      $(DOWNLOAD_ANCHOR_ID).href = blobUrl;
-      $(DOWNLOAD_ANCHOR_ID).click();
+      $(DOWNLOAD_IFRAME_ID).src = blobUrl;
     },
 
     loadFileChanged_: function() {
-      this.loadSnapshots_($(SNAPSHOT_FILE_LOADER_ID).files[0]);
+      this.loadSnapshots_($(SNAPSHOT_FILE_LOADER_ID).files[0])
     },
 
     loadSnapshots_: function(file) {
@@ -1824,7 +1824,7 @@ var MainView = (function() {
     onLoadSnapshotsFile_: function(file, event) {
       try {
         var parsed = null;
-        parsed = JSON.parse(event.target.result);
+        parsed = JSON.parse(event.target.result)
 
         if (parsed.version != 1) {
           throw new Error('Unrecognized version: ' + parsed.version);
@@ -1848,7 +1848,7 @@ var MainView = (function() {
       this.updateMergedDataSoon_();
     },
 
-    displayLoadedFile_: function(file, content) {
+    displayLoadedFile_: function (file, content) {
       this.clearExistingSnapshots_();
       $(TAKE_SNAPSHOT_BUTTON_ID).disabled = true;
       $(SAVE_SNAPSHOTS_BUTTON_ID).disabled = true;
@@ -1863,7 +1863,7 @@ var MainView = (function() {
                               time: snapshot.timestamp * 1000});
         this.addSnapshotToList_(this.snapshots_.length - 1);
         var snapshotData = snapshot.data;
-        for (var j = 0; j < snapshotData.length; ++j) {
+        for (var j = 0; j < snapshotData.length; ++j){
           this.addDataToSnapshot(snapshotData[j]);
         }
       }
@@ -2088,25 +2088,25 @@ var MainView = (function() {
 
       // Scan through our sort order and see if we are already sorted on this
       // key. If so, reverse that sort ordering.
-      var foundIndex = -1;
+      var found_i = -1;
       for (var i = 0; i < this.currentSortKeys_.length; ++i) {
         var curKey = this.currentSortKeys_[i];
         if (sortKeysMatch(curKey, key)) {
           this.currentSortKeys_[i] = reverseSortKey(curKey);
-          foundIndex = i;
+          found_i = i;
           break;
         }
       }
 
       if (event.altKey) {
-        if (foundIndex == -1) {
+        if (found_i == -1) {
           // If we weren't already sorted on the column that was alt-clicked,
           // then add it to our sort.
           this.currentSortKeys_.push(key);
         }
       } else {
-        if (foundIndex != 0 ||
-            !sortKeysMatch(this.currentSortKeys_[foundIndex], key)) {
+        if (found_i != 0 ||
+            !sortKeysMatch(this.currentSortKeys_[found_i], key)) {
           // If the column we left-clicked wasn't already our primary column,
           // make it so.
           this.currentSortKeys_ = [key];

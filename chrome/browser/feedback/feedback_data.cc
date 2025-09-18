@@ -4,275 +4,118 @@
 
 #include "chrome/browser/feedback/feedback_data.h"
 
-#include "base/file_util.h"
-#include "base/json/json_string_value_serializer.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/values.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/feedback/feedback_util.h"
-#include "chrome/browser/feedback/tracing_manager.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_thread.h"
 
-#if defined(USE_ASH)
-#include "ash/shell.h"
-#include "ash/shell_delegate.h"
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/notifications/system_notification.h"
 #endif
 
 using content::BrowserThread;
 
-namespace {
-
-const char kMultilineIndicatorString[] = "<multiline>\n";
-const char kMultilineStartString[] = "---------- START ----------\n";
-const char kMultilineEndString[] = "---------- END ----------\n\n";
-
-const size_t kFeedbackMaxLength = 4 * 1024;
-const size_t kFeedbackMaxLineCount = 40;
-
-const char kTraceFilename[] = "tracing.zip\n";
-const char kPerformanceCategoryTag[] = "Performance";
-
-const char kZipExt[] = ".zip";
-
-const base::FilePath::CharType kLogsFilename[] =
-    FILE_PATH_LITERAL("system_logs.txt");
-const base::FilePath::CharType kHistogramsFilename[] =
-    FILE_PATH_LITERAL("histograms.txt");
-
-// Converts the system logs into a string that we can compress and send
-// with the report. This method only converts those logs that we want in
-// the compressed zip file sent with the report, hence it ignores any logs
-// below the size threshold of what we want compressed.
-std::string LogsToString(const FeedbackData::SystemLogsMap& sys_info) {
-  std::string syslogs_string;
-  for (FeedbackData::SystemLogsMap::const_iterator it = sys_info.begin();
-      it != sys_info.end(); ++it) {
-    std::string key = it->first;
-    std::string value = it->second;
-
-    if (FeedbackData::BelowCompressionThreshold(value))
-      continue;
-
-    base::TrimString(key, "\n ", &key);
-    base::TrimString(value, "\n ", &value);
-
-    if (value.find("\n") != std::string::npos) {
-      syslogs_string.append(
-          key + "=" + kMultilineIndicatorString +
-          kMultilineStartString +
-          value + "\n" +
-          kMultilineEndString);
-    } else {
-      syslogs_string.append(key + "=" + value + "\n");
-    }
-  }
-  return syslogs_string;
-}
-
-void ZipFile(const base::FilePath& filename,
-             const std::string& data, std::string* compressed_data) {
-  if (!feedback_util::ZipString(filename, data, compressed_data))
-    compressed_data->clear();
-}
-
-void ZipLogs(const FeedbackData::SystemLogsMap& sys_info,
-             std::string* compressed_logs) {
-  DCHECK(compressed_logs);
-  std::string logs_string = LogsToString(sys_info);
-  if (logs_string.empty() ||
-      !feedback_util::ZipString(
-          base::FilePath(kLogsFilename), logs_string, compressed_logs)) {
-    compressed_logs->clear();
-  }
-}
-
-void ZipHistograms(const std::string& histograms,
-                   std::string* compressed_histograms) {
-  DCHECK(compressed_histograms);
-  if (histograms.empty() ||
-      !feedback_util::ZipString(
-          base::FilePath(kHistogramsFilename),
-          histograms,
-          compressed_histograms)) {
-    compressed_histograms->clear();
-  }
-}
-
-}  // namespace
-
-// static
-bool FeedbackData::BelowCompressionThreshold(const std::string& content) {
-  if (content.length() > kFeedbackMaxLength)
-    return false;
-  const size_t line_count = std::count(content.begin(), content.end(), '\n');
-  if (line_count > kFeedbackMaxLineCount)
-    return false;
-  return true;
-}
-
-FeedbackData::FeedbackData() : profile_(NULL),
-                               trace_id_(0),
-                               feedback_page_data_complete_(false),
-                               syslogs_compression_complete_(false),
-                               histograms_compression_complete_(false),
-                               attached_file_compression_complete_(false),
-                               report_sent_(false) {
-}
-
-FeedbackData::~FeedbackData() {
-}
-
-void FeedbackData::OnFeedbackPageDataComplete() {
-  feedback_page_data_complete_ = true;
-  SendReport();
-}
-
-void FeedbackData::SetAndCompressSystemInfo(
-    scoped_ptr<FeedbackData::SystemLogsMap> sys_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (trace_id_ != 0) {
-    TracingManager* manager = TracingManager::Get();
-    if (!manager ||
-        !manager->GetTraceData(
-            trace_id_,
-            base::Bind(&FeedbackData::OnGetTraceData, this, trace_id_))) {
-      trace_id_ = 0;
-    }
-  }
-
-  sys_info_ = sys_info.Pass();
-  if (sys_info_.get()) {
-    std::string* compressed_logs_ptr = new std::string;
-    scoped_ptr<std::string> compressed_logs(compressed_logs_ptr);
-    BrowserThread::PostBlockingPoolTaskAndReply(
-        FROM_HERE,
-        base::Bind(&ZipLogs,
-                   *sys_info_,
-                   compressed_logs_ptr),
-        base::Bind(&FeedbackData::OnCompressLogsComplete,
-                   this,
-                   base::Passed(&compressed_logs)));
-  }
-}
-
-void FeedbackData::SetAndCompressHistograms(
-    scoped_ptr<std::string> histograms) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  histograms_ = histograms.Pass();
-  if (histograms_.get()) {
-    std::string* compressed_histograms_ptr = new std::string;
-    scoped_ptr<std::string> compressed_histograms(compressed_histograms_ptr);
-    BrowserThread::PostBlockingPoolTaskAndReply(
-        FROM_HERE,
-        base::Bind(&ZipHistograms,
-                   *histograms_,
-                   compressed_histograms_ptr),
-        base::Bind(&FeedbackData::OnCompressHistogramsComplete,
-                   this,
-                   base::Passed(&compressed_histograms)));
-  }
-}
-
-void FeedbackData::AttachAndCompressFileData(
-    scoped_ptr<std::string> attached_filedata) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  attached_filedata_ = attached_filedata.Pass();
-
-  if (!attached_filename_.empty() && attached_filedata_.get()) {
-    std::string* compressed_file_ptr = new std::string;
-    scoped_ptr<std::string> compressed_file(compressed_file_ptr);
-#if defined(OS_WIN)
-    base::FilePath attached_file(base::UTF8ToWide(attached_filename_));
-#else
-    base::FilePath attached_file(attached_filename_);
+FeedbackData::FeedbackData()
+    : profile_(NULL)
+#if defined(OS_CHROMEOS)
+    , sys_info_(NULL)
+    , zip_content_(NULL)
+    , sent_report_(false)
+    , send_sys_info_(false)
 #endif
-    BrowserThread::PostBlockingPoolTaskAndReply(
-        FROM_HERE,
-        base::Bind(&ZipFile,
-                   attached_file,
-                   *(attached_filedata_.get()),
-                   compressed_file_ptr),
-        base::Bind(&FeedbackData::OnCompressFileComplete,
-                   this,
-                   base::Passed(&compressed_file)));
-  }
+{
 }
 
-void FeedbackData::OnGetTraceData(
-    int trace_id,
-    scoped_refptr<base::RefCountedString> trace_data) {
+FeedbackData::~FeedbackData() {}
+
+void FeedbackData::UpdateData(Profile* profile,
+                               const std::string& target_tab_url,
+                               const std::string& category_tag,
+                               const std::string& page_url,
+                               const std::string& description,
+                               ScreenshotDataPtr image
+#if defined(OS_CHROMEOS)
+                               , const std::string& user_email
+                               , const bool send_sys_info
+                               , const bool sent_report
+                               , const std::string& timestamp
+#endif
+                               ) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  TracingManager* manager = TracingManager::Get();
-  if (manager)
-    manager->DiscardTraceData(trace_id);
-
-  scoped_ptr<std::string> data(new std::string);
-  data->swap(trace_data->data());
-
-  attached_filename_ = kTraceFilename;
-  attached_filedata_ = data.Pass();
-  attached_file_compression_complete_ = true;
-  trace_id_ = 0;
-
-  set_category_tag(kPerformanceCategoryTag);
-
-  SendReport();
-}
-
-void FeedbackData::OnCompressLogsComplete(
-    scoped_ptr<std::string> compressed_logs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  compressed_logs_ = compressed_logs.Pass();
-  syslogs_compression_complete_ = true;
-
-  SendReport();
-}
-
-void FeedbackData::OnCompressHistogramsComplete(
-    scoped_ptr<std::string> compressed_histograms) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  compressed_histograms_ = compressed_histograms.Pass();
-  histograms_compression_complete_ = true;
-
-  SendReport();
-}
-
-void FeedbackData::OnCompressFileComplete(
-    scoped_ptr<std::string> compressed_file) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (compressed_file.get()) {
-    attached_filedata_ = compressed_file.Pass();
-    attached_filename_.append(kZipExt);
-    attached_file_compression_complete_ = true;
-  } else {
-    attached_filename_.clear();
-    attached_filedata_.reset(NULL);
-  }
-
-  SendReport();
-}
-
-bool FeedbackData::IsDataComplete() {
-  return (!sys_info_.get() || syslogs_compression_complete_) &&
-      (!histograms_.get() || histograms_compression_complete_) &&
-      (!attached_filedata_.get() || attached_file_compression_complete_) &&
-      !trace_id_ &&
-      feedback_page_data_complete_;
+  profile_ = profile;
+  target_tab_url_ = target_tab_url;
+  category_tag_ = category_tag;
+  page_url_ = page_url;
+  description_ = description;
+  image_ = image;
+#if defined(OS_CHROMEOS)
+  user_email_ = user_email;
+  send_sys_info_ = send_sys_info;
+  sent_report_ = sent_report;
+  timestamp_ = timestamp;
+#endif
 }
 
 void FeedbackData::SendReport() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (IsDataComplete() && !report_sent_) {
-    report_sent_ = true;
-    feedback_util::SendReport(this);
+#if defined(OS_CHROMEOS)
+  if (sent_report_)
+    return;  // We already received the syslogs and sent the report.
+
+  // Set send_report_ to ensure that we only send one report.
+  sent_report_ = true;
+#endif
+
+  gfx::Rect& screen_size = FeedbackUtil::GetScreenshotSize();
+  FeedbackUtil::SendReport(profile_
+                            , category_tag_
+                            , page_url_
+                            , description_
+                            , image_
+                            , screen_size.width()
+                            , screen_size.height()
+#if defined(OS_CHROMEOS)
+                            , user_email_
+                            , zip_content_ ? zip_content_->c_str() : NULL
+                            , zip_content_ ? zip_content_->length() : 0
+                            , send_sys_info_ ? sys_info_ : NULL
+                            , timestamp_
+#endif
+                          );
+
+#if defined(OS_CHROMEOS)
+  if (sys_info_) {
+    delete sys_info_;
+    sys_info_ = NULL;
+  }
+  if (zip_content_) {
+    delete zip_content_;
+    zip_content_ = NULL;
+  }
+#endif
+
+  // Delete this object once the report has been sent.
+  delete this;
+}
+
+#if defined(OS_CHROMEOS)
+// SyslogsComplete may be called before UpdateData, in which case, we do not
+// want to delete the logs that were gathered, and we do not want to send the
+// report either. Instead simply populate |sys_info_| and |zip_content_|.
+void FeedbackData::SyslogsComplete(chromeos::system::LogDictionaryType* logs,
+                                    std::string* zip_content) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (sent_report_) {
+    // We already sent the report, just delete the data.
+    if (logs)
+      delete logs;
+    if (zip_content)
+      delete zip_content;
+  } else {
+    zip_content_ = zip_content;
+    sys_info_ = logs;  // Will get deleted when SendReport() is called.
+    if (send_sys_info_) {
+      // We already prepared the report, send it now.
+      this->SendReport();
+    }
   }
 }
+#endif

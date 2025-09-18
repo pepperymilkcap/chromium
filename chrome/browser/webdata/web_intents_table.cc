@@ -1,88 +1,68 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/webdata/web_intents_table.h"
 
-#include <string>
-
-#include "base/i18n/case_conversion.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "components/webdata/common/web_database.h"
-#include "net/base/mime_util.h"
+#include "base/utf_string_conversions.h"
+#include "googleurl/src/gurl.h"
 #include "sql/statement.h"
-#include "third_party/sqlite/sqlite3.h"
-#include "url/gurl.h"
+
+using webkit_glue::WebIntentServiceData;
 
 namespace {
 
-WebDatabaseTable::TypeKey GetKey() {
-  // We just need a unique constant. Use the address of a static that
-  // COMDAT folding won't touch in an optimizing linker.
-  static int table_key = 0;
-  return reinterpret_cast<void*>(&table_key);
+bool ExtractIntents(sql::Statement* s,
+                    std::vector<WebIntentServiceData>* services) {
+  DCHECK(s);
+  if (!s->is_valid())
+    return false;
+
+  while (s->Step()) {
+    WebIntentServiceData service;
+    string16 tmp = s->ColumnString16(0);
+    service.service_url = GURL(tmp);
+
+    service.action = s->ColumnString16(1);
+    service.type = s->ColumnString16(2);
+    service.title = s->ColumnString16(3);
+    tmp = s->ColumnString16(4);
+     // Default to window disposition.
+    service.disposition = WebIntentServiceData::DISPOSITION_WINDOW;
+    if (tmp == ASCIIToUTF16("inline"))
+      service.disposition = WebIntentServiceData::DISPOSITION_INLINE;
+    services->push_back(service);
+  }
+  return s->Succeeded();
 }
 
 }  // namespace
 
-WebIntentsTable::WebIntentsTable() {
+WebIntentsTable::WebIntentsTable(sql::Connection* db,
+                                 sql::MetaTable* meta_table)
+    : WebDatabaseTable(db, meta_table) {
 }
 
 WebIntentsTable::~WebIntentsTable() {
 }
 
-WebIntentsTable* WebIntentsTable::FromWebDatabase(WebDatabase* db) {
-  return static_cast<WebIntentsTable*>(db->GetTable(GetKey()));
-}
+bool WebIntentsTable::Init() {
+  if (db_->DoesTableExist("web_intents"))
+    return true;
 
-WebDatabaseTable::TypeKey WebIntentsTable::GetTypeKey() const {
-  return GetKey();
-}
-
-bool WebIntentsTable::Init(sql::Connection* db, sql::MetaTable* meta_table) {
-  WebDatabaseTable::Init(db, meta_table);
-
-  if (!db_->DoesTableExist("web_intents")) {
-    if (!db_->Execute("CREATE TABLE web_intents ("
-                      " service_url LONGVARCHAR,"
-                      " action VARCHAR,"
-                      " type VARCHAR,"
-                      " title LONGVARCHAR,"
-                      " disposition VARCHAR,"
-                      " scheme VARCHAR,"
-                      " UNIQUE (service_url, action, scheme, type))")) {
-      return false;
-    }
-    if (!db_->Execute("CREATE INDEX IF NOT EXISTS web_intents_index"
-                      " ON web_intents (action)"))
-      return false;
-    if (!db_->Execute("CREATE INDEX IF NOT EXISTS web_intents_index"
-                      " ON web_intents (scheme)"))
-      return false;
+  if (!db_->Execute("CREATE TABLE web_intents ("
+                    "service_url LONGVARCHAR,"
+                    "action VARCHAR,"
+                    "type VARCHAR,"
+                    "title VARCHAR,"
+                    "disposition VARCHAR,"
+                    "UNIQUE (service_url, action, type))")) {
+    return false;
   }
 
-  if (!db_->DoesTableExist("web_intents_defaults")) {
-    if (!db_->Execute("CREATE TABLE web_intents_defaults ("
-                      " action VARCHAR,"
-                      " type VARCHAR,"
-                      " url_pattern LONGVARCHAR,"
-                      " user_date INTEGER,"
-                      " suppression INTEGER,"
-                      " service_url LONGVARCHAR,"
-                      " scheme VARCHAR,"
-                      " UNIQUE (action, scheme, type, url_pattern))")) {
-      return false;
-    }
-    if (!db_->Execute("CREATE INDEX IF NOT EXISTS web_intents_default_index"
-                      " ON web_intents_defaults (action)"))
-      return false;
-
-    if (!db_->Execute("CREATE INDEX IF NOT EXISTS web_intents_default_index"
-                      " ON web_intents_defaults (scheme)"))
-      return false;
-  }
+  if (!db_->Execute("CREATE INDEX web_intents_index ON web_intents (action)"))
+    return false;
 
   return true;
 }
@@ -92,67 +72,72 @@ bool WebIntentsTable::IsSyncable() {
   return false;
 }
 
-bool WebIntentsTable::MigrateToVersion(int version,
-                                       bool* update_compatible_version) {
-  if (version == 46) {
-    *update_compatible_version = true;
-    return MigrateToVersion46AddSchemeColumn();
-  }
+bool WebIntentsTable::GetWebIntentServices(
+    const string16& action,
+    std::vector<WebIntentServiceData>* services) {
+  DCHECK(services);
+  sql::Statement s(db_->GetUniqueStatement(
+      "SELECT service_url, action, type, title, disposition FROM web_intents "
+      "WHERE action=?"));
+  s.BindString16(0, action);
 
-  return true;
+  return ExtractIntents(&s, services);
 }
 
-// Updates the table by way of renaming the old tables, rerunning
-// the Init method, then selecting old values into the new tables.
-bool WebIntentsTable::MigrateToVersion46AddSchemeColumn() {
+// TODO(gbillock): This currently does a full-table scan. Eventually we will
+// store registrations by domain, and so have an indexed origin. At that time,
+// this should just change to do lookup by origin instead of URL.
+bool WebIntentsTable::GetWebIntentServicesForURL(
+    const string16& service_url,
+    std::vector<WebIntentServiceData>* services) {
+  DCHECK(services);
+  sql::Statement s(db_->GetUniqueStatement(
+      "SELECT service_url, action, type, title, disposition FROM web_intents "
+      "WHERE service_url=?"));
+  s.BindString16(0, service_url);
 
-  if (!db_->Execute("ALTER TABLE web_intents RENAME TO old_web_intents")) {
-    DLOG(WARNING) << "Could not backup web_intents table.";
-    return false;
-  }
+  return ExtractIntents(&s, services);
+}
 
-  if (!db_->Execute("ALTER TABLE web_intents_defaults"
-                    " RENAME TO old_web_intents_defaults")) {
-    DLOG(WARNING) << "Could not backup web_intents_defaults table.";
-    return false;
-  }
+bool WebIntentsTable::GetAllWebIntentServices(
+    std::vector<WebIntentServiceData>* services) {
+  DCHECK(services);
+  sql::Statement s(db_->GetUniqueStatement(
+      "SELECT service_url, action, type, title, disposition FROM web_intents"));
 
-  if (!Init(db_, meta_table_)) return false;
+  return ExtractIntents(&s, services);
+}
 
-  int error = db_->ExecuteAndReturnErrorCode(
-      "INSERT INTO web_intents"
-      " (service_url, action, type, title, disposition)"
-      " SELECT "
-      " service_url, action, type, title, disposition"
-      " FROM old_web_intents");
+bool WebIntentsTable::SetWebIntentService(const WebIntentServiceData& service) {
+  sql::Statement s(db_->GetUniqueStatement(
+      "INSERT OR REPLACE INTO web_intents "
+      "(service_url, type, action, title, disposition) "
+      "VALUES (?, ?, ?, ?, ?)"));
 
-  if (error != SQLITE_OK) {
-    DLOG(WARNING) << "Could not copy old intent data to upgraded table."
-        << db_->GetErrorMessage();
-  }
+  // Default to window disposition.
+  string16 disposition = ASCIIToUTF16("window");
+  if (service.disposition == WebIntentServiceData::DISPOSITION_INLINE)
+    disposition = ASCIIToUTF16("inline");
+  s.BindString(0, service.service_url.spec());
+  s.BindString16(1, service.type);
+  s.BindString16(2, service.action);
+  s.BindString16(3, service.title);
+  s.BindString16(4, disposition);
 
+  return s.Run();
+}
 
-  error = db_->ExecuteAndReturnErrorCode(
-      "INSERT INTO web_intents_defaults"
-      " (service_url, action, type, url_pattern, user_date, suppression)"
-      " SELECT "
-      " service_url, action, type, url_pattern, user_date, suppression"
-      " FROM old_web_intents_defaults");
+// TODO(jhawkins): Investigate the need to remove rows matching only
+// |service.service_url|. It's unlikely the user will be given the ability to
+// remove at the granularity of actions or types.
+bool WebIntentsTable::RemoveWebIntentService(
+    const WebIntentServiceData& service) {
+  sql::Statement s(db_->GetUniqueStatement(
+      "DELETE FROM web_intents "
+      "WHERE service_url = ? AND action = ? AND type = ?"));
+  s.BindString(0, service.service_url.spec());
+  s.BindString16(1, service.action);
+  s.BindString16(2, service.type);
 
-  if (error != SQLITE_OK) {
-    DLOG(WARNING) << "Could not copy old intent defaults to upgraded table."
-        << db_->GetErrorMessage();
-  }
-
-  if (!db_->Execute("DROP table old_web_intents")) {
-    LOG(WARNING) << "Could not drop backup web_intents table.";
-    return false;
-  }
-
-  if (!db_->Execute("DROP table old_web_intents_defaults")) {
-    DLOG(WARNING) << "Could not drop backup web_intents_defaults table.";
-    return false;
-  }
-
-  return true;
+  return s.Run();
 }

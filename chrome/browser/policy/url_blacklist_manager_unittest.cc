@@ -1,51 +1,34 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/policy/core/common/url_blacklist_manager.h"
+#include "chrome/browser/policy/url_blacklist_manager.h"
 
 #include <ostream>
 
 #include "base/basictypes.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/testing_pref_service.h"
-#include "chrome/browser/policy/policy_helpers.h"
-#include "chrome/common/net/url_fixer_upper.h"
-#include "components/policy/core/common/policy_pref_names.h"
-#include "google_apis/gaia/gaia_urls.h"
-#include "net/base/request_priority.h"
-#include "net/url_request/url_request.h"
-#include "net/url_request/url_request_test_util.h"
+#include "base/message_loop.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/test/base/testing_pref_service.h"
+#include "content/test/test_browser_thread.h"
+#include "googleurl/src/gurl.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/gurl.h"
-
-// TODO(joaodasilva): this file should be moved next to
-// components/policy/core/common/url_blacklist_manager.(cc|h).
-// However, url_fixer_upper.h can't be included from the component. Rather
-// than having it mocked out, the actual URLFixerUpper::SegmentURL call is used
-// to make sure that the parsing of URL filters is correct.
 
 namespace policy {
 
 namespace {
 
-// Helper to get the disambiguated SegmentURL() function.
-URLBlacklist::SegmentURLCallback GetSegmentURLCallback() {
-  return URLFixerUpper::SegmentURL;
-}
+using ::testing::_;
+using ::testing::Invoke;
+using ::testing::Mock;
+using content::BrowserThread;
 
 class TestingURLBlacklistManager : public URLBlacklistManager {
  public:
   explicit TestingURLBlacklistManager(PrefService* pref_service)
-      : URLBlacklistManager(pref_service,
-                            base::MessageLoopProxy::current(),
-                            base::MessageLoopProxy::current(),
-                            GetSegmentURLCallback(),
-                            SkipBlacklistForURL),
-        update_called_(0),
-        set_blacklist_called_(false) {}
+      : URLBlacklistManager(pref_service) {
+  }
 
   virtual ~TestingURLBlacklistManager() {
   }
@@ -54,78 +37,84 @@ class TestingURLBlacklistManager : public URLBlacklistManager {
   using URLBlacklistManager::ScheduleUpdate;
 
   // Makes a direct call to UpdateOnIO during tests.
-  void UpdateOnIOForTesting() {
-    scoped_ptr<base::ListValue> block(new base::ListValue);
-    block->Append(new base::StringValue("example.com"));
-    scoped_ptr<base::ListValue> allow(new base::ListValue);
-    URLBlacklistManager::UpdateOnIO(block.Pass(), allow.Pass());
+  void UpdateOnIO() {
+    StringVector* block = new StringVector;
+    block->push_back("example.com");
+    StringVector* allow = new StringVector;
+    URLBlacklistManager::UpdateOnIO(block, allow);
   }
 
-  // URLBlacklistManager overrides:
-  virtual void SetBlacklist(scoped_ptr<URLBlacklist> blacklist) OVERRIDE {
-    set_blacklist_called_ = true;
-    URLBlacklistManager::SetBlacklist(blacklist.Pass());
-  }
-
-  virtual void Update() OVERRIDE {
-    update_called_++;
+  void UpdateNotMocked() {
     URLBlacklistManager::Update();
   }
 
-  int update_called() const { return update_called_; }
-  bool set_blacklist_called() const { return set_blacklist_called_; }
+  MOCK_METHOD0(Update, void());
+  MOCK_METHOD1(SetBlacklist, void(URLBlacklist*));
 
  private:
-  int update_called_;
-  bool set_blacklist_called_;
-
   DISALLOW_COPY_AND_ASSIGN(TestingURLBlacklistManager);
 };
 
 class URLBlacklistManagerTest : public testing::Test {
  protected:
-  URLBlacklistManagerTest() : loop_(base::MessageLoop::TYPE_IO) {}
+  URLBlacklistManagerTest()
+      : ui_thread_(BrowserThread::UI, &loop_),
+        file_thread_(BrowserThread::FILE, &loop_),
+        io_thread_(BrowserThread::IO, &loop_) {
+  }
 
   virtual void SetUp() OVERRIDE {
-    pref_service_.registry()->RegisterListPref(policy_prefs::kUrlBlacklist);
-    pref_service_.registry()->RegisterListPref(policy_prefs::kUrlWhitelist);
-    blacklist_manager_.reset(new TestingURLBlacklistManager(&pref_service_));
-    loop_.RunUntilIdle();
+    pref_service_.RegisterListPref(prefs::kUrlBlacklist);
+    pref_service_.RegisterListPref(prefs::kUrlWhitelist);
+    blacklist_manager_.reset(
+        new TestingURLBlacklistManager(&pref_service_));
+    loop_.RunAllPending();
   }
 
   virtual void TearDown() OVERRIDE {
     if (blacklist_manager_.get())
       blacklist_manager_->ShutdownOnUIThread();
-    loop_.RunUntilIdle();
+    loop_.RunAllPending();
     // Delete |blacklist_manager_| while |io_thread_| is mapping IO to
     // |loop_|.
     blacklist_manager_.reset();
   }
 
-  base::MessageLoop loop_;
-  TestingPrefServiceSimple pref_service_;
+  void ExpectUpdate() {
+    EXPECT_CALL(*blacklist_manager_, Update())
+        .WillOnce(Invoke(blacklist_manager_.get(),
+                         &TestingURLBlacklistManager::UpdateNotMocked));
+  }
+
+  MessageLoop loop_;
+  TestingPrefService pref_service_;
   scoped_ptr<TestingURLBlacklistManager> blacklist_manager_;
+
+ private:
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
+  content::TestBrowserThread io_thread_;
+
+  DISALLOW_COPY_AND_ASSIGN(URLBlacklistManagerTest);
 };
 
 // Parameters for the FilterToComponents test.
 struct FilterTestParams {
  public:
   FilterTestParams(const std::string& filter, const std::string& scheme,
-                   const std::string& host, bool match_subdomains, uint16 port,
+                   const std::string& host, uint16 port,
                    const std::string& path)
-      : filter_(filter), scheme_(scheme), host_(host),
-        match_subdomains_(match_subdomains), port_(port), path_(path) {}
+      : filter_(filter), scheme_(scheme), host_(host), port_(port),
+        path_(path) {}
 
   FilterTestParams(const FilterTestParams& params)
       : filter_(params.filter_), scheme_(params.scheme_), host_(params.host_),
-        match_subdomains_(params.match_subdomains_), port_(params.port_),
-        path_(params.path_) {}
+        port_(params.port_), path_(params.path_) {}
 
   const FilterTestParams& operator=(const FilterTestParams& params) {
     filter_ = params.filter_;
     scheme_ = params.scheme_;
     host_ = params.host_;
-    match_subdomains_ = params.match_subdomains_;
     port_ = params.port_;
     path_ = params.path_;
     return *this;
@@ -134,7 +123,6 @@ struct FilterTestParams {
   const std::string& filter() const { return filter_; }
   const std::string& scheme() const { return scheme_; }
   const std::string& host() const { return host_; }
-  bool match_subdomains() const { return match_subdomains_; }
   uint16 port() const { return port_; }
   const std::string& path() const { return path_; }
 
@@ -142,7 +130,6 @@ struct FilterTestParams {
   std::string filter_;
   std::string scheme_;
   std::string host_;
-  bool match_subdomains_;
   uint16 port_;
   std::string path_;
 };
@@ -163,35 +150,32 @@ class URLBlacklistFilterToComponentsTest
   DISALLOW_COPY_AND_ASSIGN(URLBlacklistFilterToComponentsTest);
 };
 
-}  // namespace
-
 TEST_P(URLBlacklistFilterToComponentsTest, FilterToComponents) {
   std::string scheme;
   std::string host;
-  bool match_subdomains = true;
-  uint16 port = 42;
+  uint16 port;
   std::string path;
 
-  URLBlacklist::FilterToComponents(GetSegmentURLCallback(), GetParam().filter(),
-                                   &scheme, &host, &match_subdomains, &port,
+  URLBlacklist::FilterToComponents(GetParam().filter(), &scheme, &host, &port,
                                    &path);
   EXPECT_EQ(GetParam().scheme(), scheme);
   EXPECT_EQ(GetParam().host(), host);
-  EXPECT_EQ(GetParam().match_subdomains(), match_subdomains);
   EXPECT_EQ(GetParam().port(), port);
   EXPECT_EQ(GetParam().path(), path);
 }
 
 TEST_F(URLBlacklistManagerTest, SingleUpdateForTwoPrefChanges) {
-  base::ListValue* blacklist = new base::ListValue;
-  blacklist->Append(new base::StringValue("*.google.com"));
-  base::ListValue* whitelist = new base::ListValue;
-  whitelist->Append(new base::StringValue("mail.google.com"));
-  pref_service_.SetManagedPref(policy_prefs::kUrlBlacklist, blacklist);
-  pref_service_.SetManagedPref(policy_prefs::kUrlBlacklist, whitelist);
-  loop_.RunUntilIdle();
+  ExpectUpdate();
 
-  EXPECT_EQ(1, blacklist_manager_->update_called());
+  ListValue* blacklist = new ListValue;
+  blacklist->Append(new StringValue("*.google.com"));
+  ListValue* whitelist = new ListValue;
+  whitelist->Append(new StringValue("mail.google.com"));
+  pref_service_.SetManagedPref(prefs::kUrlBlacklist, blacklist);
+  pref_service_.SetManagedPref(prefs::kUrlBlacklist, whitelist);
+  loop_.RunAllPending();
+
+  Mock::VerifyAndClearExpectations(blacklist_manager_.get());
 }
 
 TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask0) {
@@ -201,31 +185,74 @@ TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask0) {
   blacklist_manager_->ShutdownOnUIThread();
   blacklist_manager_.reset();
   // Run the task after shutdown and deletion.
-  loop_.RunUntilIdle();
+  loop_.RunAllPending();
 }
 
 TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask1) {
+  EXPECT_CALL(*blacklist_manager_, Update()).Times(0);
   // Post an update task.
   blacklist_manager_->ScheduleUpdate();
   // Shutdown comes before the task is executed.
   blacklist_manager_->ShutdownOnUIThread();
   // Run the task after shutdown, but before deletion.
-  loop_.RunUntilIdle();
-
-  EXPECT_EQ(0, blacklist_manager_->update_called());
+  loop_.RunAllPending();
+  Mock::VerifyAndClearExpectations(blacklist_manager_.get());
   blacklist_manager_.reset();
-  loop_.RunUntilIdle();
+  loop_.RunAllPending();
 }
 
 TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask2) {
+  EXPECT_CALL(*blacklist_manager_, SetBlacklist(_)).Times(0);
+  // Update posts a BuildBlacklistTask to the FILE thread.
+  blacklist_manager_->UpdateNotMocked();
+  // Shutdown comes before the task is executed.
+  blacklist_manager_->ShutdownOnUIThread();
+  // Run the task after shutdown, but before deletion.
+  loop_.RunAllPending();
+  Mock::VerifyAndClearExpectations(blacklist_manager_.get());
+  blacklist_manager_.reset();
+  loop_.RunAllPending();
+}
+
+TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask3) {
+  EXPECT_CALL(*blacklist_manager_, SetBlacklist(_)).Times(0);
+
   // This posts a task to the FILE thread.
-  blacklist_manager_->UpdateOnIOForTesting();
+  blacklist_manager_->UpdateOnIO();
   // But shutdown happens before it is done.
   blacklist_manager_->ShutdownOnUIThread();
-
-  EXPECT_FALSE(blacklist_manager_->set_blacklist_called());
   blacklist_manager_.reset();
-  loop_.RunUntilIdle();
+  loop_.RunAllPending();
+
+  Mock::VerifyAndClearExpectations(blacklist_manager_.get());
+}
+
+TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask4) {
+  EXPECT_CALL(*blacklist_manager_, SetBlacklist(_)).Times(0);
+
+  // This posts a task to the FILE thread.
+  blacklist_manager_->UpdateOnIO();
+  // But shutdown happens before it is done.
+  blacklist_manager_->ShutdownOnUIThread();
+  // This time, shutdown on UI is done but the object is still alive.
+  loop_.RunAllPending();
+  blacklist_manager_.reset();
+  loop_.RunAllPending();
+
+  Mock::VerifyAndClearExpectations(blacklist_manager_.get());
+}
+
+TEST_F(URLBlacklistManagerTest, SchemeToFlag) {
+  URLBlacklist::SchemeFlag flag;
+  EXPECT_TRUE(URLBlacklist::SchemeToFlag("http", &flag));
+  EXPECT_EQ(URLBlacklist::SCHEME_HTTP, flag);
+  EXPECT_TRUE(URLBlacklist::SchemeToFlag("https", &flag));
+  EXPECT_EQ(URLBlacklist::SCHEME_HTTPS, flag);
+  EXPECT_TRUE(URLBlacklist::SchemeToFlag("ftp", &flag));
+  EXPECT_EQ(URLBlacklist::SCHEME_FTP, flag);
+  EXPECT_TRUE(URLBlacklist::SchemeToFlag("", &flag));
+  EXPECT_EQ(URLBlacklist::SCHEME_ALL, flag);
+  EXPECT_FALSE(URLBlacklist::SchemeToFlag("wtf", &flag));
 }
 
 INSTANTIATE_TEST_CASE_P(
@@ -233,123 +260,58 @@ INSTANTIATE_TEST_CASE_P(
     URLBlacklistFilterToComponentsTest,
     testing::Values(
         FilterTestParams("google.com",
-                         std::string(),
-                         ".google.com",
-                         true,
-                         0u,
-                         std::string()),
-        FilterTestParams(".google.com",
-                         std::string(),
-                         "google.com",
-                         false,
-                         0u,
-                         std::string()),
+                         "", "google.com", 0u, ""),
         FilterTestParams("http://google.com",
-                         "http",
-                         ".google.com",
-                         true,
-                         0u,
-                         std::string()),
+                         "http", "google.com", 0u, ""),
         FilterTestParams("google.com/",
-                         std::string(),
-                         ".google.com",
-                         true,
-                         0u,
-                         "/"),
+                         "", "google.com", 0u, "/"),
         FilterTestParams("http://google.com:8080/whatever",
-                         "http",
-                         ".google.com",
-                         true,
-                         8080u,
-                         "/whatever"),
+                         "http", "google.com", 8080u, "/whatever"),
         FilterTestParams("http://user:pass@google.com:8080/whatever",
-                         "http",
-                         ".google.com",
-                         true,
-                         8080u,
-                         "/whatever"),
+                         "http", "google.com", 8080u, "/whatever"),
         FilterTestParams("123.123.123.123",
-                         std::string(),
-                         "123.123.123.123",
-                         false,
-                         0u,
-                         std::string()),
+                         "", "123.123.123.123", 0u, ""),
         FilterTestParams("https://123.123.123.123",
-                         "https",
-                         "123.123.123.123",
-                         false,
-                         0u,
-                         std::string()),
+                         "https", "123.123.123.123", 0u, ""),
         FilterTestParams("123.123.123.123/",
-                         std::string(),
-                         "123.123.123.123",
-                         false,
-                         0u,
-                         "/"),
+                         "", "123.123.123.123", 0u, "/"),
         FilterTestParams("http://123.123.123.123:123/whatever",
-                         "http",
-                         "123.123.123.123",
-                         false,
-                         123u,
-                         "/whatever"),
+                         "http", "123.123.123.123", 123u, "/whatever"),
         FilterTestParams("*",
-                         std::string(),
-                         std::string(),
-                         true,
-                         0u,
-                         std::string()),
+                         "", "", 0u, ""),
         FilterTestParams("ftp://*",
-                         "ftp",
-                         std::string(),
-                         true,
-                         0u,
-                         std::string()),
+                         "ftp", "", 0u, ""),
         FilterTestParams("http://*/whatever",
-                         "http",
-                         std::string(),
-                         true,
-                         0u,
-                         "/whatever")));
+                         "http", "", 0u, "/whatever")));
 
 TEST_F(URLBlacklistManagerTest, Filtering) {
-  URLBlacklist blacklist(GetSegmentURLCallback());
+  URLBlacklist blacklist;
 
   // Block domain and all subdomains, for any filtered scheme.
-  scoped_ptr<base::ListValue> blocked(new base::ListValue);
-  blocked->Append(new base::StringValue("google.com"));
-  blacklist.Block(blocked.get());
+  blacklist.Block("google.com");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://google.com")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://google.com/")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://google.com/whatever")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("https://google.com/")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("bogus://google.com/")));
-  EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://notgoogle.com/")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://mail.google.com")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://x.mail.google.com")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("https://x.mail.google.com/")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://x.y.google.com/a/b")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://youtube.com/")));
 
-  // Filter only http, ftp and ws schemes.
-  blocked.reset(new base::ListValue);
-  blocked->Append(new base::StringValue("http://secure.com"));
-  blocked->Append(new base::StringValue("ftp://secure.com"));
-  blocked->Append(new base::StringValue("ws://secure.com"));
-  blacklist.Block(blocked.get());
+  // Filter only http and ftp schemes.
+  blacklist.Block("http://secure.com");
+  blacklist.Block("ftp://secure.com");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://secure.com")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://secure.com/whatever")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("ftp://secure.com/")));
-  EXPECT_TRUE(blacklist.IsURLBlocked(GURL("ws://secure.com")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("https://secure.com/")));
-  EXPECT_FALSE(blacklist.IsURLBlocked(GURL("wss://secure.com")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://www.secure.com")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("https://www.secure.com")));
-  EXPECT_FALSE(blacklist.IsURLBlocked(GURL("wss://www.secure.com")));
 
   // Filter only a certain path prefix.
-  blocked.reset(new base::ListValue);
-  blocked->Append(new base::StringValue("path.to/ruin"));
-  blacklist.Block(blocked.get());
+  blacklist.Block("path.to/ruin");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://path.to/ruin")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("https://path.to/ruin")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://path.to/ruins")));
@@ -358,9 +320,7 @@ TEST_F(URLBlacklistManagerTest, Filtering) {
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://path.to/fortune")));
 
   // Filter only a certain path prefix and scheme.
-  blocked.reset(new base::ListValue);
-  blocked->Append(new base::StringValue("https://s.aaa.com/path"));
-  blacklist.Block(blocked.get());
+  blacklist.Block("https://s.aaa.com/path");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("https://s.aaa.com/path")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("https://s.aaa.com/path/bbb")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://s.aaa.com/path")));
@@ -369,26 +329,11 @@ TEST_F(URLBlacklistManagerTest, Filtering) {
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("https://s.aaa.com/bbb")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("https://s.aaa.com/")));
 
-  // Filter only ws and wss schemes.
-  blocked.reset(new base::ListValue);
-  blocked->Append(new base::StringValue("ws://ws.aaa.com"));
-  blocked->Append(new base::StringValue("wss://ws.aaa.com"));
-  blacklist.Block(blocked.get());
-  EXPECT_TRUE(blacklist.IsURLBlocked(GURL("ws://ws.aaa.com")));
-  EXPECT_TRUE(blacklist.IsURLBlocked(GURL("wss://ws.aaa.com")));
-  EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://ws.aaa.com")));
-  EXPECT_FALSE(blacklist.IsURLBlocked(GURL("https://ws.aaa.com")));
-  EXPECT_FALSE(blacklist.IsURLBlocked(GURL("ftp://ws.aaa.com")));
-
   // Test exceptions to path prefixes, and most specific matches.
-  blocked.reset(new base::ListValue);
-  scoped_ptr<base::ListValue> allowed(new base::ListValue);
-  blocked->Append(new base::StringValue("s.xxx.com/a"));
-  allowed->Append(new base::StringValue("s.xxx.com/a/b"));
-  blocked->Append(new base::StringValue("https://s.xxx.com/a/b/c"));
-  allowed->Append(new base::StringValue("https://s.xxx.com/a/b/c/d"));
-  blacklist.Block(blocked.get());
-  blacklist.Allow(allowed.get());
+  blacklist.Block("s.xxx.com/a");
+  blacklist.Allow("s.xxx.com/a/b");
+  blacklist.Block("https://s.xxx.com/a/b/c");
+  blacklist.Allow("https://s.xxx.com/a/b/c/d");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://s.xxx.com/a")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://s.xxx.com/a/x")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("https://s.xxx.com/a/x")));
@@ -406,24 +351,18 @@ TEST_F(URLBlacklistManagerTest, Filtering) {
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://xxx.com/a/b")));
 
   // Block an ip address.
-  blocked.reset(new base::ListValue);
-  blocked->Append(new base::StringValue("123.123.123.123"));
-  blacklist.Block(blocked.get());
+  blacklist.Block("123.123.123.123");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://123.123.123.123/")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://123.123.123.124/")));
 
   // Open an exception.
-  allowed.reset(new base::ListValue);
-  allowed->Append(new base::StringValue("plus.google.com"));
-  blacklist.Allow(allowed.get());
+  blacklist.Allow("plus.google.com");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://google.com/")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://www.google.com/")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://plus.google.com/")));
 
   // Open an exception only when using https for mail.
-  allowed.reset(new base::ListValue);
-  allowed->Append(new base::StringValue("https://mail.google.com"));
-  blacklist.Allow(allowed.get());
+  blacklist.Allow("https://mail.google.com");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://google.com/")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://mail.google.com/")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://www.google.com/")));
@@ -432,50 +371,31 @@ TEST_F(URLBlacklistManagerTest, Filtering) {
 
   // Match exactly "google.com", only for http. Subdomains without exceptions
   // are still blocked.
-  allowed.reset(new base::ListValue);
-  allowed->Append(new base::StringValue("http://.google.com"));
-  blacklist.Allow(allowed.get());
+  blacklist.Allow("http://.google.com");
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://google.com/")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("https://google.com/")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://www.google.com/")));
 
   // A smaller path match in an exact host overrides a longer path for hosts
   // that also match subdomains.
-  blocked.reset(new base::ListValue);
-  blocked->Append(new base::StringValue("yyy.com/aaa"));
-  blacklist.Block(blocked.get());
-  allowed.reset(new base::ListValue);
-  allowed->Append(new base::StringValue(".yyy.com/a"));
-  blacklist.Allow(allowed.get());
+  blacklist.Block("yyy.com/aaa");
+  blacklist.Allow(".yyy.com/a");
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://yyy.com")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://yyy.com/aaa")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://yyy.com/aaa2")));
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://www.yyy.com")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://www.yyy.com/aaa")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://www.yyy.com/aaa2")));
-
-  // If the exact entry is both allowed and blocked, allowing takes precedence.
-  blocked.reset(new base::ListValue);
-  blocked->Append(new base::StringValue("example.com"));
-  blacklist.Block(blocked.get());
-  allowed.reset(new base::ListValue);
-  allowed->Append(new base::StringValue("example.com"));
-  blacklist.Allow(allowed.get());
-  EXPECT_FALSE(blacklist.IsURLBlocked(GURL("http://example.com")));
 }
 
 TEST_F(URLBlacklistManagerTest, BlockAllWithExceptions) {
-  URLBlacklist blacklist(GetSegmentURLCallback());
+  URLBlacklist blacklist;
 
-  scoped_ptr<base::ListValue> blocked(new base::ListValue);
-  scoped_ptr<base::ListValue> allowed(new base::ListValue);
-  blocked->Append(new base::StringValue("*"));
-  allowed->Append(new base::StringValue(".www.google.com"));
-  allowed->Append(new base::StringValue("plus.google.com"));
-  allowed->Append(new base::StringValue("https://mail.google.com"));
-  allowed->Append(new base::StringValue("https://very.safe/path"));
-  blacklist.Block(blocked.get());
-  blacklist.Allow(allowed.get());
+  blacklist.Block("*");
+  blacklist.Allow(".www.google.com");
+  blacklist.Allow("plus.google.com");
+  blacklist.Allow("https://mail.google.com");
+  blacklist.Allow("https://very.safe/path");
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://random.com")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://google.com")));
   EXPECT_TRUE(blacklist.IsURLBlocked(GURL("http://s.www.google.com")));
@@ -490,39 +410,6 @@ TEST_F(URLBlacklistManagerTest, BlockAllWithExceptions) {
   EXPECT_FALSE(blacklist.IsURLBlocked(GURL("https://very.safe/path")));
 }
 
-TEST_F(URLBlacklistManagerTest, DontBlockResources) {
-  scoped_ptr<URLBlacklist> blacklist(new URLBlacklist(GetSegmentURLCallback()));
-  scoped_ptr<base::ListValue> blocked(new base::ListValue);
-  blocked->Append(new base::StringValue("google.com"));
-  blacklist->Block(blocked.get());
-  blacklist_manager_->SetBlacklist(blacklist.Pass());
-  EXPECT_TRUE(blacklist_manager_->IsURLBlocked(GURL("http://google.com")));
-
-  net::TestURLRequestContext context;
-  net::URLRequest request(
-      GURL("http://google.com"), net::DEFAULT_PRIORITY, NULL, &context);
-
-  // Background requests aren't filtered.
-  EXPECT_FALSE(blacklist_manager_->IsRequestBlocked(request));
-
-  // Main frames are filtered.
-  request.SetLoadFlags(net::LOAD_MAIN_FRAME);
-  EXPECT_TRUE(blacklist_manager_->IsRequestBlocked(request));
-
-  // On most platforms, sync gets a free pass due to signin flows.
-  bool block_signin_urls = false;
-#if defined(OS_CHROMEOS)
-  // There are no sync specific signin flows on Chrome OS, so no special
-  // treatment.
-  block_signin_urls = true;
-#endif
-
-  GURL sync_url(GaiaUrls::GetInstance()->service_login_url().Resolve(
-      "?service=chromiumsync"));
-  net::URLRequest sync_request(sync_url, net::DEFAULT_PRIORITY, NULL, &context);
-  sync_request.SetLoadFlags(net::LOAD_MAIN_FRAME);
-  EXPECT_EQ(block_signin_urls,
-            blacklist_manager_->IsRequestBlocked(sync_request));
-}
+}  // namespace
 
 }  // namespace policy

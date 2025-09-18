@@ -1,30 +1,29 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_DATABASE_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_DATABASE_MESSAGE_FILTER_H_
+#pragma once
 
-#include "base/containers/hash_tables.h"
-#include "base/strings/string16.h"
+#include "base/hash_tables.h"
+#include "base/string16.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "webkit/browser/database/database_tracker.h"
-#include "webkit/common/database/database_connections.h"
-#include "webkit/common/quota/quota_types.h"
-
-namespace content {
+#include "webkit/database/database_connections.h"
+#include "webkit/database/database_tracker.h"
+#include "webkit/quota/quota_types.h"
 
 class DatabaseMessageFilter
-    : public BrowserMessageFilter,
+    : public content::BrowserMessageFilter,
       public webkit_database::DatabaseTracker::Observer {
  public:
   explicit DatabaseMessageFilter(webkit_database::DatabaseTracker* db_tracker);
 
-  // BrowserMessageFilter implementation.
+  // content::BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
-      BrowserThread::ID* thread) OVERRIDE;
+      content::BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
@@ -41,19 +40,19 @@ class DatabaseMessageFilter
   void RemoveObserver();
 
   // VFS message handlers (file thread)
-  void OnDatabaseOpenFile(const base::string16& vfs_file_name,
+  void OnDatabaseOpenFile(const string16& vfs_file_name,
                           int desired_flags,
                           IPC::Message* reply_msg);
-  void OnDatabaseDeleteFile(const base::string16& vfs_file_name,
+  void OnDatabaseDeleteFile(const string16& vfs_file_name,
                             const bool& sync_dir,
                             IPC::Message* reply_msg);
-  void OnDatabaseGetFileAttributes(const base::string16& vfs_file_name,
+  void OnDatabaseGetFileAttributes(const string16& vfs_file_name,
                                    IPC::Message* reply_msg);
-  void OnDatabaseGetFileSize(const base::string16& vfs_file_name,
+  void OnDatabaseGetFileSize(const string16& vfs_file_name,
                              IPC::Message* reply_msg);
 
   // Quota message handler (io thread)
-  void OnDatabaseGetSpaceAvailable(const std::string& origin_identifier,
+  void OnDatabaseGetSpaceAvailable(const string16& origin_identifier,
                                    IPC::Message* reply_msg);
   void OnDatabaseGetUsageAndQuota(IPC::Message* reply_msg,
                                   quota::QuotaStatusCode status,
@@ -61,27 +60,24 @@ class DatabaseMessageFilter
                                   int64 quota);
 
   // Database tracker message handlers (file thread)
-  void OnDatabaseOpened(const std::string& origin_identifier,
-                        const base::string16& database_name,
-                        const base::string16& description,
+  void OnDatabaseOpened(const string16& origin_identifier,
+                        const string16& database_name,
+                        const string16& description,
                         int64 estimated_size);
-  void OnDatabaseModified(const std::string& origin_identifier,
-                          const base::string16& database_name);
-  void OnDatabaseClosed(const std::string& origin_identifier,
-                        const base::string16& database_name);
-  void OnHandleSqliteError(const std::string& origin_identifier,
-                           const base::string16& database_name,
-                           int error);
+  void OnDatabaseModified(const string16& origin_identifier,
+                          const string16& database_name);
+  void OnDatabaseClosed(const string16& origin_identifier,
+                        const string16& database_name);
 
   // DatabaseTracker::Observer callbacks (file thread)
-  virtual void OnDatabaseSizeChanged(const std::string& origin_identifier,
-                                     const base::string16& database_name,
+  virtual void OnDatabaseSizeChanged(const string16& origin_identifier,
+                                     const string16& database_name,
                                      int64 database_size) OVERRIDE;
   virtual void OnDatabaseScheduledForDeletion(
-      const std::string& origin_identifier,
-      const base::string16& database_name) OVERRIDE;
+      const string16& origin_identifier,
+      const string16& database_name) OVERRIDE;
 
-  void DatabaseDeleteFile(const base::string16& vfs_file_name,
+  void DatabaseDeleteFile(const string16& vfs_file_name,
                           bool sync_dir,
                           IPC::Message* reply_msg,
                           int reschedule_count);
@@ -96,7 +92,5 @@ class DatabaseMessageFilter
   // Keeps track of all DB connections opened by this renderer
   webkit_database::DatabaseConnections database_connections_;
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_DATABASE_MESSAGE_FILTER_H_

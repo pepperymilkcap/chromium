@@ -4,18 +4,18 @@
 
 #include "base/test/test_file_util.h"
 
-#include <windows.h>
 #include <aclapi.h>
 #include <shlwapi.h>
+#include <windows.h>
 
 #include <vector>
 
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/strings/string_split.h"
-#include "base/threading/platform_thread.h"
+#include "base/string_split.h"
 #include "base/win/scoped_handle.h"
+#include "base/threading/platform_thread.h"
 
 namespace file_util {
 
@@ -23,13 +23,8 @@ static const ptrdiff_t kOneMB = 1024 * 1024;
 
 namespace {
 
-struct PermissionInfo {
-  PSECURITY_DESCRIPTOR security_descriptor;
-  ACL dacl;
-};
-
 // Deny |permission| on the file |path|, for the current user.
-bool DenyFilePermission(const base::FilePath& path, DWORD permission) {
+bool DenyFilePermission(const FilePath& path, DWORD permission) {
   PACL old_dacl;
   PSECURITY_DESCRIPTOR security_descriptor;
   if (GetNamedSecurityInfo(const_cast<wchar_t*>(path.value().c_str()),
@@ -64,76 +59,29 @@ bool DenyFilePermission(const base::FilePath& path, DWORD permission) {
   return rc == ERROR_SUCCESS;
 }
 
-// Gets a blob indicating the permission information for |path|.
-// |length| is the length of the blob.  Zero on failure.
-// Returns the blob pointer, or NULL on failure.
-void* GetPermissionInfo(const base::FilePath& path, size_t* length) {
-  DCHECK(length != NULL);
-  *length = 0;
-  PACL dacl = NULL;
-  PSECURITY_DESCRIPTOR security_descriptor;
-  if (GetNamedSecurityInfo(const_cast<wchar_t*>(path.value().c_str()),
-                           SE_FILE_OBJECT,
-                           DACL_SECURITY_INFORMATION, NULL, NULL, &dacl,
-                           NULL, &security_descriptor) != ERROR_SUCCESS) {
-    return NULL;
-  }
-  DCHECK(dacl != NULL);
-
-  *length = sizeof(PSECURITY_DESCRIPTOR) + dacl->AclSize;
-  PermissionInfo* info = reinterpret_cast<PermissionInfo*>(new char[*length]);
-  info->security_descriptor = security_descriptor;
-  memcpy(&info->dacl, dacl, dacl->AclSize);
-
-  return info;
-}
-
-// Restores the permission information for |path|, given the blob retrieved
-// using |GetPermissionInfo()|.
-// |info| is the pointer to the blob.
-// |length| is the length of the blob.
-// Either |info| or |length| may be NULL/0, in which case nothing happens.
-bool RestorePermissionInfo(const base::FilePath& path,
-                           void* info, size_t length) {
-  if (!info || !length)
-    return false;
-
-  PermissionInfo* perm = reinterpret_cast<PermissionInfo*>(info);
-
-  DWORD rc = SetNamedSecurityInfo(const_cast<wchar_t*>(path.value().c_str()),
-                                  SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                                  NULL, NULL, &perm->dacl, NULL);
-  LocalFree(perm->security_descriptor);
-
-  char* char_array = reinterpret_cast<char*>(info);
-  delete [] char_array;
-
-  return rc == ERROR_SUCCESS;
-}
-
 }  // namespace
 
-bool DieFileDie(const base::FilePath& file, bool recurse) {
+bool DieFileDie(const FilePath& file, bool recurse) {
   // It turns out that to not induce flakiness a long timeout is needed.
   const int kIterations = 25;
   const base::TimeDelta kTimeout = base::TimeDelta::FromSeconds(10) /
                                    kIterations;
 
-  if (!base::PathExists(file))
+  if (!file_util::PathExists(file))
     return true;
 
   // Sometimes Delete fails, so try a few more times. Divide the timeout
   // into short chunks, so that if a try succeeds, we won't delay the test
   // for too long.
   for (int i = 0; i < kIterations; ++i) {
-    if (base::DeleteFile(file, recurse))
+    if (file_util::Delete(file, recurse))
       return true;
     base::PlatformThread::Sleep(kTimeout);
   }
   return false;
 }
 
-bool EvictFileFromSystemCache(const base::FilePath& file) {
+bool EvictFileFromSystemCache(const FilePath& file) {
   // Request exclusive access to the file and overwrite it with no buffering.
   base::win::ScopedHandle file_handle(
       CreateFile(file.value().c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL,
@@ -216,9 +164,63 @@ bool EvictFileFromSystemCache(const base::FilePath& file) {
   return true;
 }
 
+// Like CopyFileNoCache but recursively copies all files and subdirectories
+// in the given input directory to the output directory.
+bool CopyRecursiveDirNoCache(const FilePath& source_dir,
+                             const FilePath& dest_dir) {
+  // Try to create the directory if it doesn't already exist.
+  if (!CreateDirectory(dest_dir)) {
+    if (GetLastError() != ERROR_ALREADY_EXISTS)
+      return false;
+  }
+
+  std::vector<std::wstring> files_copied;
+
+  std::wstring src(source_dir.value());
+  file_util::AppendToPath(&src, L"*");
+
+  WIN32_FIND_DATA fd;
+  HANDLE fh = FindFirstFile(src.c_str(), &fd);
+  if (fh == INVALID_HANDLE_VALUE)
+    return false;
+
+  do {
+    std::wstring cur_file(fd.cFileName);
+    if (cur_file == L"." || cur_file == L"..")
+      continue;  // Skip these special entries.
+
+    FilePath cur_source_path = source_dir.Append(cur_file);
+    FilePath cur_dest_path = dest_dir.Append(cur_file);
+
+    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+      // Recursively copy a subdirectory. We stripped "." and ".." already.
+      if (!CopyRecursiveDirNoCache(cur_source_path, cur_dest_path)) {
+        FindClose(fh);
+        return false;
+      }
+    } else {
+      // Copy the file.
+      if (!::CopyFile(cur_source_path.value().c_str(),
+                      cur_dest_path.value().c_str(), false)) {
+        FindClose(fh);
+        return false;
+      }
+
+      // We don't check for errors from this function, often, we are copying
+      // files that are in the repository, and they will have read-only set.
+      // This will prevent us from evicting from the cache, but these don't
+      // matter anyway.
+      EvictFileFromSystemCache(cur_dest_path);
+    }
+  } while (FindNextFile(fh, &fd));
+
+  FindClose(fh);
+  return true;
+}
+
 // Checks if the volume supports Alternate Data Streams. This is required for
 // the Zone Identifier implementation.
-bool VolumeSupportsADS(const base::FilePath& path) {
+bool VolumeSupportsADS(const FilePath& path) {
   wchar_t drive[MAX_PATH] = {0};
   wcscpy_s(drive, MAX_PATH, path.value().c_str());
 
@@ -238,10 +240,10 @@ bool VolumeSupportsADS(const base::FilePath& path) {
 // Return whether the ZoneIdentifier is correctly set to "Internet" (3)
 // Only returns a valid result when called from same process as the
 // one that (was supposed to have) set the zone identifier.
-bool HasInternetZoneIdentifier(const base::FilePath& full_path) {
-  base::FilePath zone_path(full_path.value() + L":Zone.Identifier");
+bool HasInternetZoneIdentifier(const FilePath& full_path) {
+  FilePath zone_path(full_path.value() + L":Zone.Identifier");
   std::string zone_path_contents;
-  if (!base::ReadFileToString(zone_path, &zone_path_contents))
+  if (!file_util::ReadFileToString(zone_path, &zone_path_contents))
     return false;
 
   std::vector<std::string> lines;
@@ -261,31 +263,19 @@ bool HasInternetZoneIdentifier(const base::FilePath& full_path) {
   }
 }
 
-std::wstring FilePathAsWString(const base::FilePath& path) {
+std::wstring FilePathAsWString(const FilePath& path) {
   return path.value();
 }
-base::FilePath WStringAsFilePath(const std::wstring& path) {
-  return base::FilePath(path);
+FilePath WStringAsFilePath(const std::wstring& path) {
+  return FilePath(path);
 }
 
-bool MakeFileUnreadable(const base::FilePath& path) {
+bool MakeFileUnreadable(const FilePath& path) {
   return DenyFilePermission(path, GENERIC_READ);
 }
 
-bool MakeFileUnwritable(const base::FilePath& path) {
+bool MakeFileUnwritable(const FilePath& path) {
   return DenyFilePermission(path, GENERIC_WRITE);
-}
-
-PermissionRestorer::PermissionRestorer(const base::FilePath& path)
-    : path_(path), info_(NULL), length_(0) {
-  info_ = GetPermissionInfo(path_, &length_);
-  DCHECK(info_ != NULL);
-  DCHECK_NE(0u, length_);
-}
-
-PermissionRestorer::~PermissionRestorer() {
-  if (!RestorePermissionInfo(path_, info_, length_))
-    NOTREACHED();
 }
 
 }  // namespace file_util

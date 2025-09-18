@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 #include <vector>
 
 #include "base/format_macros.h"
-#include "base/strings/string_split.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
+#include "base/string_split.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/renderer/spellchecker/spellcheck_worditerator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,8 +30,8 @@ TEST(SpellcheckWordIteratorTest, SplitWord) {
   // should extract only the words used by the specified language from this text
   // and normalize them so our spell-checker can check their spellings.
   const wchar_t kTestText[] =
-      // Graphic characters
-      L"!@#$%^&*()"
+      // Numbers
+      L"0123456789"
       // Latin (including a contraction character and a ligature).
       L"hello:hello a\xFB03x"
       // Greek
@@ -119,17 +119,17 @@ TEST(SpellcheckWordIteratorTest, SplitWord) {
     SpellcheckCharAttribute attributes;
     attributes.SetDefaultLanguage(kTestCases[i].language);
 
-    base::string16 input(base::WideToUTF16(kTestText));
+    string16 input(WideToUTF16(kTestText));
     SpellcheckWordIterator iterator;
     EXPECT_TRUE(iterator.Initialize(&attributes,
                                     kTestCases[i].allow_contraction));
     EXPECT_TRUE(iterator.SetText(input.c_str(), input.length()));
 
-    std::vector<base::string16> expected_words;
+    std::vector<string16> expected_words;
     base::SplitString(
-        base::WideToUTF16(kTestCases[i].expected_words), ' ', &expected_words);
+        WideToUTF16(kTestCases[i].expected_words), ' ', &expected_words);
 
-    base::string16 actual_word;
+    string16 actual_word;
     int actual_start, actual_end;
     size_t index = 0;
     while (iterator.GetNextWord(&actual_word, &actual_start, &actual_end)) {
@@ -149,7 +149,7 @@ TEST(SpellcheckWordIteratorTest, RuleSetConsistency) {
   attributes.SetDefaultLanguage("en-US");
 
   const wchar_t kTestText[] = L"\x1791\x17c1\x002e";
-  base::string16 input(base::WideToUTF16(kTestText));
+  string16 input(WideToUTF16(kTestText));
 
   SpellcheckWordIterator iterator;
   EXPECT_TRUE(iterator.Initialize(&attributes, true));
@@ -158,92 +158,9 @@ TEST(SpellcheckWordIteratorTest, RuleSetConsistency) {
   // When SpellcheckWordIterator uses an inconsistent ICU ruleset, the following
   // iterator.GetNextWord() call gets stuck in an infinite loop. Therefore, this
   // test succeeds if this call returns without timeouts.
-  base::string16 actual_word;
+  string16 actual_word;
   int actual_start, actual_end;
   EXPECT_FALSE(iterator.GetNextWord(&actual_word, &actual_start, &actual_end));
   EXPECT_EQ(0, actual_start);
   EXPECT_EQ(0, actual_end);
-}
-
-// Vertify our SpellcheckWordIterator can treat ASCII numbers as word characters
-// on LTR languages. On the other hand, it should not treat ASCII numbers as
-// word characters on RTL languages because they change the text direction from
-// RTL to LTR.
-TEST(SpellcheckWordIteratorTest, TreatNumbersAsWordCharacters) {
-  // A set of a language, a dummy word, and a text direction used in this test.
-  // For each language, this test splits a dummy word, which consists of ASCII
-  // numbers and an alphabet of the language, into words. When ASCII numbers are
-  // treated as word characters, the split word becomes equal to the dummy word.
-  // Otherwise, the split word does not include ASCII numbers.
-  static const struct {
-    const char* language;
-    const wchar_t* text;
-    bool left_to_right;
-  } kTestCases[] = {
-    {
-      // English
-      "en-US", L"0123456789" L"a", true,
-    }, {
-      // Greek
-      "el-GR", L"0123456789" L"\x03B1", true,
-    }, {
-      // Russian
-      "ru-RU", L"0123456789" L"\x0430", true,
-    }, {
-      // Hebrew
-      "he-IL", L"0123456789" L"\x05D0", false,
-    }, {
-      // Arabic
-      "ar",  L"0123456789" L"\x0627", false,
-    }, {
-      // Hindi
-      "hi-IN", L"0123456789" L"\x0905", true,
-    }, {
-      // Thai
-      "th-TH", L"0123456789" L"\x0e01", true,
-    }, {
-      // Korean
-      "ko-KR", L"0123456789" L"\x1100\x1161", true,
-    },
-  };
-
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
-    SCOPED_TRACE(base::StringPrintf("kTestCases[%" PRIuS "]: language=%s", i,
-                                    kTestCases[i].language));
-
-    SpellcheckCharAttribute attributes;
-    attributes.SetDefaultLanguage(kTestCases[i].language);
-
-    base::string16 input_word(base::WideToUTF16(kTestCases[i].text));
-    SpellcheckWordIterator iterator;
-    EXPECT_TRUE(iterator.Initialize(&attributes, true));
-    EXPECT_TRUE(iterator.SetText(input_word.c_str(), input_word.length()));
-
-    base::string16 actual_word;
-    int actual_start, actual_end;
-    EXPECT_TRUE(iterator.GetNextWord(&actual_word, &actual_start, &actual_end));
-    if (kTestCases[i].left_to_right)
-      EXPECT_EQ(input_word, actual_word);
-    else
-      EXPECT_NE(input_word, actual_word);
-  }
-}
-
-TEST(SpellcheckWordIteratorTest, Initialization) {
-  // Test initialization works when a default language is set.
-  {
-    SpellcheckCharAttribute attributes;
-    attributes.SetDefaultLanguage("en-US");
-
-    SpellcheckWordIterator iterator;
-    EXPECT_TRUE(iterator.Initialize(&attributes, true));
-  }
-
-  // Test initialization fails when no default language is set.
-  {
-    SpellcheckCharAttribute attributes;
-
-    SpellcheckWordIterator iterator;
-    EXPECT_FALSE(iterator.Initialize(&attributes, true));
-  }
 }

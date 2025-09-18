@@ -2,184 +2,127 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
-/* From ppb_graphics_3d.idl modified Fri Aug 30 08:36:16 2013. */
-
 #ifndef PPAPI_C_PPB_GRAPHICS_3D_H_
 #define PPAPI_C_PPB_GRAPHICS_3D_H_
 
-#include "ppapi/c/pp_bool.h"
-#include "ppapi/c/pp_completion_callback.h"
-#include "ppapi/c/pp_instance.h"
-#include "ppapi/c/pp_macros.h"
-#include "ppapi/c/pp_resource.h"
-#include "ppapi/c/pp_stdint.h"
-
-#define PPB_GRAPHICS_3D_INTERFACE_1_0 "PPB_Graphics3D;1.0"
-#define PPB_GRAPHICS_3D_INTERFACE PPB_GRAPHICS_3D_INTERFACE_1_0
-
-/**
- * @file
- * Defines the <code>PPB_Graphics3D</code> struct representing a 3D graphics
- * context within the browser.
- */
-
-
-/* Add 3D graphics enums */
 #include "ppapi/c/pp_graphics_3d.h"
 
-/**
- * @addtogroup Interfaces
- * @{
- */
-/**
- * <code>PPB_Graphics3D</code> defines the interface for a 3D graphics context.
- * <strong>Example usage from plugin code:</strong>
+#include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_instance.h"
+#include "ppapi/c/pp_resource.h"
+
+/* Example usage from plugin code:
  *
- * <strong>Setup:</strong>
- * @code
+ * // Setup.
  * PP_Resource context;
  * int32_t attribs[] = {PP_GRAPHICS3DATTRIB_WIDTH, 800,
  *                      PP_GRAPHICS3DATTRIB_HEIGHT, 800,
  *                      PP_GRAPHICS3DATTRIB_NONE};
- * context = g3d->Create(instance, 0, attribs);
+ * context = g3d->Create(instance, attribs, &context);
  * inst->BindGraphics(instance, context);
- * @endcode
  *
- * <strong>Present one frame:</strong>
- * @code
- * PP_CompletionCallback callback = {
- *   DidFinishSwappingBuffers, 0, PP_COMPLETIONCALLBACK_FLAG_NONE,
- * };
- * gles2->Clear(context, GL_COLOR_BUFFER_BIT);
- * g3d->SwapBuffers(context, callback);
- * @endcode
+ * // Present one frame.
+ * gles2->Clear(context, GL_COLOR_BUFFER);
+ * g3d->SwapBuffers(context);
  *
- * <strong>Shutdown:</strong>
- * @code
+ * // Shutdown.
  * core->ReleaseResource(context);
- * @endcode
  */
+
+#define PPB_GRAPHICS_3D_INTERFACE_1_0 "PPB_Graphics3D;1.0"
+#define PPB_GRAPHICS_3D_INTERFACE PPB_GRAPHICS_3D_INTERFACE_1_0
+
 struct PPB_Graphics3D_1_0 {
   /**
-   * GetAttribMaxValue() retrieves the maximum supported value for the
-   * given attribute. This function may be used to check if a particular
-   * attribute value is supported before attempting to create a context.
+   * Retrieves the maximum supported value for the given attribute.
    *
-   * @param[in] instance The module instance.
-   * @param[in] attribute The attribute for which maximum value is queried.
+   * This function may be used to check if a particular attribute value is
+   * supported before attempting to create a context.
    * Attributes that can be queried for include:
-   * - <code>PP_GRAPHICS3DATTRIB_ALPHA_SIZE</code>
-   * - <code>PP_GRAPHICS3DATTRIB_BLUE_SIZE</code>
-   * - <code>PP_GRAPHICS3DATTRIB_GREEN_SIZE</code>
-   * - <code>PP_GRAPHICS3DATTRIB_RED_SIZE</code>
-   * - <code>PP_GRAPHICS3DATTRIB_DEPTH_SIZE</code>
-   * - <code>PP_GRAPHICS3DATTRIB_STENCIL_SIZE</code>
-   * - <code>PP_GRAPHICS3DATTRIB_SAMPLES</code>
-   * - <code>PP_GRAPHICS3DATTRIB_SAMPLE_BUFFERS</code>
-   * - <code>PP_GRAPHICS3DATTRIB_WIDTH</code>
-   * - <code>PP_GRAPHICS3DATTRIB_HEIGHT</code>
-   * @param[out] value The maximum supported value for <code>attribute</code>
+   * - PP_GRAPHICS3DATTRIB_ALPHA_SIZE
+   * - PP_GRAPHICS3DATTRIB_BLUE_SIZE
+   * - PP_GRAPHICS3DATTRIB_GREEN_SIZE
+   * - PP_GRAPHICS3DATTRIB_RED_SIZE
+   * - PP_GRAPHICS3DATTRIB_DEPTH_SIZE
+   * - PP_GRAPHICS3DATTRIB_STENCIL_SIZE
+   * - PP_GRAPHICS3DATTRIB_SAMPLES
+   * - PP_GRAPHICS3DATTRIB_SAMPLE_BUFFERS
+   * - PP_GRAPHICS3DATTRIB_WIDTH
+   * - PP_GRAPHICS3DATTRIB_HEIGHT
    *
-   * @return Returns <code>PP_TRUE</code> on success or the following on error:
-   * - <code>PP_ERROR_BADRESOURCE</code> if <code>instance</code> is invalid
-   * - <code>PP_ERROR_BADARGUMENT</code> if <code>attribute</code> is invalid
-   *   or <code>value</code> is 0
+   * On failure the following error codes may be returned:
+   * - PP_ERROR_BADRESOURCE if instance is invalid.
+   * - PP_ERROR_BADARGUMENT if attribute is invalid or value is NULL
    */
   int32_t (*GetAttribMaxValue)(PP_Resource instance,
-                               int32_t attribute,
-                               int32_t* value);
+                               int32_t attribute, int32_t* value);
+
   /**
-   * Create() creates and initializes a 3D rendering context.
+   * Creates and initializes a rendering context and returns a handle to it.
    * The returned context is off-screen to start with. It must be attached to
-   * a plugin instance using <code>PPB_Instance::BindGraphics</code> to draw
-   * on the web page.
+   * a plugin instance using PPB_Instance::BindGraphics to draw on the web page.
    *
-   * @param[in] instance The module instance.
+   * If share_context is not NULL, then all shareable data, as defined
+   * by the client API (note that for OpenGL and OpenGL ES, shareable data
+   * excludes texture objects named 0) will be shared by share_context, all
+   * other contexts share_context already shares with, and the newly created
+   * context. An arbitrary number of PPB_Graphics3D can share data in
+   * this fashion.
    *
-   * @param[in] share_context The 3D context with which the created context
-   * would share resources. If <code>share_context</code> is not 0, then all
-   * shareable data, as defined by the client API (note that for OpenGL and
-   * OpenGL ES, shareable data excludes texture objects named 0) will be shared
-   * by <code>share_context<code>, all other contexts <code>share_context</code>
-   * already shares with, and the newly created context. An arbitrary number of
-   * <code>PPB_Graphics3D</code> can share data in this fashion.
+   * attrib_list specifies a list of attributes for the context. It is a list
+   * of attribute name-value pairs in which each attribute is immediately
+   * followed by the corresponding desired value. The list is terminated with
+   * PP_GRAPHICS3DATTRIB_NONE. The attrib_list may be NULL or empty
+   * (first attribute is PP_GRAPHICS3DATTRIB_NONE). If an attribute is not
+   * specified in attrib_list, then the default value is used (it is said to
+   * be specified implicitly).
    *
-   * @param[in] attrib_list specifies a list of attributes for the context.
-   * It is a list of attribute name-value pairs in which each attribute is
-   * immediately followed by the corresponding desired value. The list is
-   * terminated with <code>PP_GRAPHICS3DATTRIB_NONE</code>.
-   * The <code>attrib_list<code> may be 0 or empty (first attribute is
-   * <code>PP_GRAPHICS3DATTRIB_NONE</code>). If an attribute is not
-   * specified in <code>attrib_list</code>, then the default value is used
-   * (it is said to be specified implicitly).
    * Attributes for the context are chosen according to an attribute-specific
    * criteria. Attributes can be classified into two categories:
    * - AtLeast: The attribute value in the returned context meets or exceeds
-   *            the value specified in <code>attrib_list</code>.
+   *            the value specified in attrib_list.
    * - Exact: The attribute value in the returned context is equal to
-   *          the value specified in <code>attrib_list</code>.
+   *          the value specified in attrib_list.
    *
-   * Attributes that can be specified in <code>attrib_list</code> include:
-   * - <code>PP_GRAPHICS3DATTRIB_ALPHA_SIZE</code>:
-   *   Category: AtLeast Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_BLUE_SIZE</code>:
-   *   Category: AtLeast Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_GREEN_SIZE</code>:
-   *   Category: AtLeast Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_RED_SIZE</code>:
-   *   Category: AtLeast Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_DEPTH_SIZE</code>:
-   *   Category: AtLeast Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_STENCIL_SIZE</code>:
-   *   Category: AtLeast Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_SAMPLES</code>:
-   *   Category: AtLeast Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_SAMPLE_BUFFERS</code>:
-   *   Category: AtLeast Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_WIDTH</code>:
-   *   Category: Exact Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_HEIGHT</code>:
-   *   Category: Exact Default: 0.
-   * - <code>PP_GRAPHICS3DATTRIB_SWAP_BEHAVIOR</code>:
+   * Attributes that can be specified in attrib_list include:
+   * - PP_GRAPHICS3DATTRIB_ALPHA_SIZE: Category: AtLeast Default: 0.
+   * - PP_GRAPHICS3DATTRIB_BLUE_SIZE: Category: AtLeast Default: 0.
+   * - PP_GRAPHICS3DATTRIB_GREEN_SIZE: Category: AtLeast Default: 0.
+   * - PP_GRAPHICS3DATTRIB_RED_SIZE: Category: AtLeast Default: 0.
+   * - PP_GRAPHICS3DATTRIB_DEPTH_SIZE: Category: AtLeast Default: 0.
+   * - PP_GRAPHICS3DATTRIB_STENCIL_SIZE: Category: AtLeast Default: 0.
+   * - PP_GRAPHICS3DATTRIB_SAMPLES: Category: AtLeast Default: 0.
+   * - PP_GRAPHICS3DATTRIB_SAMPLE_BUFFERS: Category: AtLeast Default: 0.
+   * - PP_GRAPHICS3DATTRIB_WIDTH: Category: Exact Default: 0.
+   * - PP_GRAPHICS3DATTRIB_HEIGHT: Category: Exact Default: 0.
+   * - PP_GRAPHICS3DATTRIB_SWAP_BEHAVIOR:
    *   Category: Exact Default: Implementation defined.
    *
-   * @return A <code>PP_Resource</code> containing the 3D graphics context if
-   * successful or 0 if unsuccessful.
+   * On failure NULL resource is returned.
    */
   PP_Resource (*Create)(PP_Instance instance,
                         PP_Resource share_context,
-                        const int32_t attrib_list[]);
+                        const int32_t* attrib_list);
+
   /**
-   * IsGraphics3D() determines if the given resource is a valid
-   * <code>Graphics3D</code> context.
-   *
-   * @param[in] resource A <code>Graphics3D</code> context resource.
-   *
-   * @return PP_TRUE if the given resource is a valid <code>Graphics3D</code>,
-   * <code>PP_FALSE</code> if it is an invalid resource or is a resource of
-   * another type.
+   * Returns PP_TRUE if the given resource is a valid PPB_Graphics3D,
+   * PP_FALSE if it is an invalid resource or is a resource of another type.
    */
   PP_Bool (*IsGraphics3D)(PP_Resource resource);
+
   /**
-   * GetAttribs() retrieves the value for each attribute in
-   * <code>attrib_list</code>.
+   * Retrieves the value for each attribute in attrib_list. The list
+   * has the same structure as described for PPB_Graphics3D::Create.
+   * It is both input and output structure for this function.
    *
-   * @param[in] context The 3D graphics context.
-   * @param[in,out] attrib_list The list of attributes that are queried.
-   * <code>attrib_list</code> has the same structure as described for
-   * <code>PPB_Graphics3D::Create</code>. It is both input and output
-   * structure for this function. All attributes specified in
-   * <code>PPB_Graphics3D::Create</code> can be queried for.
+   * All attributes specified in PPB_Graphics3D.Create can be queried for.
+   * On failure the following error codes may be returned:
+   * - PP_ERROR_BADRESOURCE if context is invalid.
+   * - PP_ERROR_BADARGUMENT if attrib_list is NULL or any attribute in the
+   *   attrib_list is not a valid attribute.
    *
-   * @return Returns <code>PP_OK</code> on success or:
-   * - <code>PP_ERROR_BADRESOURCE</code> if context is invalid
-   * - <code>PP_ERROR_BADARGUMENT</code> if attrib_list is 0 or any attribute
-   *   in the <code>attrib_list</code> is not a valid attribute.
-   *
-   * <strong>Example usage:</strong> To get the values for rgb bits in the
-   * color buffer, this function must be called as following:
-   * @code
+   * Example usage: To get the values for rgb bits in the color buffer,
+   * this function must be called as following:
    * int attrib_list[] = {PP_GRAPHICS3DATTRIB_RED_SIZE, 0,
    *                      PP_GRAPHICS3DATTRIB_GREEN_SIZE, 0,
    *                      PP_GRAPHICS3DATTRIB_BLUE_SIZE, 0,
@@ -188,33 +131,28 @@ struct PPB_Graphics3D_1_0 {
    * int red_bits = attrib_list[1];
    * int green_bits = attrib_list[3];
    * int blue_bits = attrib_list[5];
-   * @endcode
    */
-  int32_t (*GetAttribs)(PP_Resource context, int32_t attrib_list[]);
+  int32_t (*GetAttribs)(PP_Resource context, int32_t* attrib_list);
+
   /**
-   * SetAttribs() sets the values for each attribute in
-   * <code>attrib_list</code>.
+   * Sets the values for each attribute in attrib_list. The list
+   * has the same structure as described for PPB_Graphics3D.Create.
    *
-   * @param[in] context The 3D graphics context.
-   * @param[in] attrib_list The list of attributes whose values need to be set.
-   * <code>attrib_list</code> has the same structure as described for
-   * <code>PPB_Graphics3D::Create</code>.
    * Attributes that can be specified are:
-   * - <code>PP_GRAPHICS3DATTRIB_SWAP_BEHAVIOR</code>
+   * - PP_GRAPHICS3DATTRIB_SWAP_BEHAVIOR
    *
-   * @return Returns <code>PP_OK</code> on success or:
-   * - <code>PP_ERROR_BADRESOURCE</code> if <code>context</code> is invalid.
-   * - <code>PP_ERROR_BADARGUMENT</code> if <code>attrib_list</code> is 0 or
-   *   any attribute in the <code>attrib_list</code> is not a valid attribute.
+   * On failure the following error codes may be returned:
+   * - PP_ERROR_BADRESOURCE if context is invalid.
+   * - PP_ERROR_BADARGUMENT if attrib_list is NULL or any attribute in the
+   *   attrib_list is not a valid attribute.
    */
-  int32_t (*SetAttribs)(PP_Resource context, const int32_t attrib_list[]);
+  int32_t (*SetAttribs)(PP_Resource context, int32_t* attrib_list);
+
   /**
-   * GetError() returns the current state of the given 3D context.
-   *
    * The recoverable error conditions that have no side effect are
    * detected and returned immediately by all functions in this interface.
    * In addition the implementation may get into a fatal state while
-   * processing a command. In this case the application must destroy the
+   * processing a command. In this case the application must detroy the
    * context and reinitialize client API state and objects to continue
    * rendering.
    *
@@ -222,45 +160,41 @@ struct PPB_Graphics3D_1_0 {
    * It is recommended to handle error in the SwapBuffers callback because
    * GetError is synchronous. This function may be useful in rare cases where
    * drawing a frame is expensive and you want to verify the result of
-   * ResizeBuffers before attempting to draw a frame.
+   * ResizeBuffers before attemptimg to draw a frame.
    *
-   * @param[in] The 3D graphics context.
-   * @return Returns:
-   * - <code>PP_OK</code> if no error
-   * - <code>PP_ERROR_NOMEMORY</code>
-   * - <code>PP_ERROR_CONTEXT_LOST</code>
+   * The following error codes may be returned:
+   * - PP_ERROR_NOMEMORY
+   * - PP_ERROR_CONTEXT_LOST
    */
   int32_t (*GetError)(PP_Resource context);
+
   /**
-   * ResizeBuffers() resizes the backing surface for context.
+   * Resizes the backing surface for context.
+   *
+   * On failure the following error codes may be returned:
+   * - PP_ERROR_BADRESOURCE if context is invalid.
+   * - PP_ERROR_BADARGUMENT if the value specified for width or height
+   *   is less than zero.
    *
    * If the surface could not be resized due to insufficient resources,
-   * <code>PP_ERROR_NOMEMORY</code> error is returned on the next
-   * <code>SwapBuffers</code> callback.
-   *
-   * @param[in] context The 3D graphics context.
-   * @param[in] width The width of the backing surface.
-   * @param[in] height The height of the backing surface.
-   * @return Returns <code>PP_OK</code> on success or:
-   * - <code>PP_ERROR_BADRESOURCE</code> if context is invalid.
-   * - <code>PP_ERROR_BADARGUMENT</code> if the value specified for
-   *   <code>width</code> or <code>height</code> is less than zero.
+   * PP_ERROR_NOMEMORY error is returned on the next SwapBuffers callback.
    */
-  int32_t (*ResizeBuffers)(PP_Resource context, int32_t width, int32_t height);
+  int32_t (*ResizeBuffers)(PP_Resource context,
+                           int32_t width, int32_t height);
+
   /**
-   * SwapBuffers() makes the contents of the color buffer available for
-   * compositing. This function has no effect on off-screen surfaces - ones not
-   * bound to any plugin instance. The contents of ancillary buffers are always
-   * undefined after calling <code>SwapBuffers</code>. The contents of the color
-   * buffer are undefined if the value of the
-   * <code>PP_GRAPHICS3DATTRIB_SWAP_BEHAVIOR</code> attribute of context is not
-   * <code>PP_GRAPHICS3DATTRIB_BUFFER_PRESERVED</code>.
+   * Makes the contents of the color buffer available for compositing.
+   * This function has no effect on off-screen surfaces - ones not bound
+   * to any plugin instance. The contents of ancillary buffers are always
+   * undefined after calling SwapBuffers. The contents of the color buffer are
+   * undefined if the value of the PP_GRAPHICS3DATTRIB_SWAP_BEHAVIOR attribute
+   * of context is not PP_GRAPHICS3DATTRIB_BUFFER_PRESERVED.
    *
-   * <code>SwapBuffers</code> runs in asynchronous mode. Specify a callback
-   * function and the argument for that callback function. The callback function
-   * will be executed on the calling thread after the color buffer has been
-   * composited with rest of the html page. While you are waiting for a
-   * SwapBuffers callback, additional calls to SwapBuffers will fail.
+   * SwapBuffers runs in asynchronous mode. Specify a callback function and the
+   * argument for that callback function. The callback function will be executed
+   * on the calling thread after the color buffer has been composited with
+   * rest of the html page. While you are waiting for a SwapBuffers callback,
+   * additional calls to SwapBuffers will fail.
    *
    * Because the callback is executed (or thread unblocked) only when the
    * plugin's current state is actually on the screen, this function provides a
@@ -272,27 +206,18 @@ struct PPB_Graphics3D_1_0 {
    * If the context gets into an unrecoverable error condition while
    * processing a command, the error code will be returned as the argument
    * for the callback. The callback may return the following error codes:
-   * - <code>PP_ERROR_NOMEMORY</code>
-   * - <code>PP_ERROR_CONTEXT_LOST</code>
+   * - PP_ERROR_NOMEMORY
+   * - PP_ERROR_CONTEXT_LOST
    * Note that the same error code may also be obtained by calling GetError.
    *
-   * @param[in] context The 3D graphics context.
-   * @param[in] callback The callback that will executed when
-   * <code>SwapBuffers</code> completes.
-   *
-   * @return Returns PP_OK on success or:
-   * - <code>PP_ERROR_BADRESOURCE</code> if context is invalid.
-   * - <code>PP_ERROR_BADARGUMENT</code> if callback is invalid.
-   *
+   * On failure SwapBuffers may return the following error codes:
+   * - PP_ERROR_BADRESOURCE if context is invalid.
+   * - PP_ERROR_BADARGUMENT if callback is invalid.
    */
   int32_t (*SwapBuffers)(PP_Resource context,
                          struct PP_CompletionCallback callback);
 };
 
 typedef struct PPB_Graphics3D_1_0 PPB_Graphics3D;
-/**
- * @}
- */
 
 #endif  /* PPAPI_C_PPB_GRAPHICS_3D_H_ */
-

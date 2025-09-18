@@ -1,11 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "crypto/secure_hash.h"
 
-#include <openssl/crypto.h>
-#include <openssl/sha.h>
+#include <openssl/ssl.h>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
@@ -30,18 +29,18 @@ class SecureHashSHA256OpenSSL : public SecureHash {
     OPENSSL_cleanse(&ctx_, sizeof(ctx_));
   }
 
-  virtual void Update(const void* input, size_t len) OVERRIDE {
+  virtual void Update(const void* input, size_t len) {
     SHA256_Update(&ctx_, static_cast<const unsigned char*>(input), len);
   }
 
-  virtual void Finish(void* output, size_t len) OVERRIDE {
+  virtual void Finish(void* output, size_t len) {
     ScopedOpenSSLSafeSizeBuffer<SHA256_DIGEST_LENGTH> result(
         static_cast<unsigned char*>(output), len);
     SHA256_Final(result.safe_buffer(), &ctx_);
   }
 
-  virtual bool Serialize(Pickle* pickle) OVERRIDE;
-  virtual bool Deserialize(PickleIterator* data_iterator) OVERRIDE;
+  virtual bool Serialize(Pickle* pickle);
+  virtual bool Deserialize(void** data_iterator, Pickle* pickle);
 
  private:
   SHA256_CTX ctx_;
@@ -60,26 +59,27 @@ bool SecureHashSHA256OpenSSL::Serialize(Pickle* pickle) {
   return true;
 }
 
-bool SecureHashSHA256OpenSSL::Deserialize(PickleIterator* data_iterator) {
-  if (!data_iterator)
+bool SecureHashSHA256OpenSSL::Deserialize(void** data_iterator,
+                                          Pickle* pickle) {
+  if (!pickle)
     return false;
 
   int version;
-  if (!data_iterator->ReadInt(&version))
+  if (!pickle->ReadInt(data_iterator, &version))
     return false;
 
   if (version > kSecureHashVersion)
     return false;  // We don't know how to deal with this.
 
   std::string type;
-  if (!data_iterator->ReadString(&type))
+  if (!pickle->ReadString(data_iterator, &type))
     return false;
 
   if (type != kSHA256Descriptor)
     return false;  // It's the wrong kind.
 
   const char* data = NULL;
-  if (!data_iterator->ReadBytes(&data, sizeof(ctx_)))
+  if (!pickle->ReadBytes(data_iterator, &data, sizeof(ctx_)))
     return false;
 
   memcpy(&ctx_, data, sizeof(ctx_));

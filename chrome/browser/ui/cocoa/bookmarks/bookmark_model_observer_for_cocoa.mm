@@ -1,15 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_model_observer_for_cocoa.h"
 
 BookmarkModelObserverForCocoa::BookmarkModelObserverForCocoa(
+    const BookmarkNode* node,
     BookmarkModel* model,
-    ChangeCallback callback) {
+    NSObject* object,
+    SEL selector) {
   DCHECK(model);
-  callback_.reset(Block_copy(callback));
+  node_ = node;
   model_ = model;
+  object_ = object;
+  selector_ = selector;
   model_->AddObserver(this);
 }
 
@@ -17,19 +21,9 @@ BookmarkModelObserverForCocoa::~BookmarkModelObserverForCocoa() {
   model_->RemoveObserver(this);
 }
 
-void BookmarkModelObserverForCocoa::StartObservingNode(
-    const BookmarkNode* node) {
-  nodes_.insert(node);
-}
-
-void BookmarkModelObserverForCocoa::StopObservingNode(
-    const BookmarkNode* node) {
-  nodes_.erase(node);
-}
-
 void BookmarkModelObserverForCocoa::BookmarkModelBeingDeleted(
     BookmarkModel* model) {
-  Notify(YES);
+  Notify();
 }
 
 void BookmarkModelObserverForCocoa::BookmarkNodeMoved(
@@ -40,7 +34,7 @@ void BookmarkModelObserverForCocoa::BookmarkNodeMoved(
     int new_index) {
   // Editors often have a tree of parents, so movement of folders
   // must cause a cancel.
-  Notify(NO);
+  Notify();
 }
 
 void BookmarkModelObserverForCocoa::BookmarkNodeRemoved(
@@ -49,21 +43,22 @@ void BookmarkModelObserverForCocoa::BookmarkNodeRemoved(
     int old_index,
     const BookmarkNode* node) {
   // See comment in BookmarkNodeMoved.
-  Notify(YES);
-}
-
-void BookmarkModelObserverForCocoa::BookmarkAllNodesRemoved(
-    BookmarkModel* model) {
-  Notify(YES);
+  Notify();
 }
 
 void BookmarkModelObserverForCocoa::BookmarkNodeChanged(
     BookmarkModel* model,
     const BookmarkNode* node) {
-  if (!nodes_.size() || nodes_.find(node) != nodes_.end())
-    Notify(NO);
+  if ((node_ == node) || (!node_))
+    Notify();
 }
 
-void BookmarkModelObserverForCocoa::Notify(BOOL deleted) {
-  callback_.get()(deleted);
+void BookmarkModelObserverForCocoa::BookmarkImportBeginning(
+    BookmarkModel* model) {
+  // Be conservative.
+  Notify();
+}
+
+void BookmarkModelObserverForCocoa::Notify() {
+  [object_ performSelector:selector_ withObject:nil];
 }

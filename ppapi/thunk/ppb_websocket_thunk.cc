@@ -2,17 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// From ppb_websocket.idl modified Thu Feb 28 11:58:17 2013.
-
-#include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/c/ppb_websocket.h"
-#include "ppapi/shared_impl/tracked_callback.h"
+#include "ppapi/c/pp_var.h"
+#include "ppapi/thunk/common.h"
+#include "ppapi/thunk/thunk.h"
 #include "ppapi/thunk/enter.h"
-#include "ppapi/thunk/ppb_instance_api.h"
 #include "ppapi/thunk/ppb_websocket_api.h"
 #include "ppapi/thunk/resource_creation_api.h"
-#include "ppapi/thunk/thunk.h"
 
 namespace ppapi {
 namespace thunk {
@@ -20,129 +16,115 @@ namespace thunk {
 namespace {
 
 PP_Resource Create(PP_Instance instance) {
-  VLOG(4) << "PPB_WebSocket::Create()";
-  EnterResourceCreation enter(instance);
+  EnterFunction<ResourceCreationAPI> enter(instance, true);
   if (enter.failed())
     return 0;
   return enter.functions()->CreateWebSocket(instance);
 }
 
 PP_Bool IsWebSocket(PP_Resource resource) {
-  VLOG(4) << "PPB_WebSocket::IsWebSocket()";
   EnterResource<PPB_WebSocket_API> enter(resource, false);
   return PP_FromBool(enter.succeeded());
 }
 
-int32_t Connect(PP_Resource web_socket,
-                struct PP_Var url,
-                const struct PP_Var protocols[],
+int32_t Connect(PP_Resource resource,
+                PP_Var url,
+                const PP_Var protocols[],
                 uint32_t protocol_count,
-                struct PP_CompletionCallback callback) {
-  VLOG(4) << "PPB_WebSocket::Connect()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, callback, false);
+                PP_CompletionCallback callback) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
-    return enter.retval();
-  return enter.SetResult(enter.object()->Connect(url,
-                                                 protocols,
-                                                 protocol_count,
-                                                 enter.callback()));
+    return MayForceCallback(callback, PP_ERROR_BADRESOURCE);
+  int32_t result =
+      enter.object()->Connect(url, protocols, protocol_count, callback);
+  return MayForceCallback(callback, result);
 }
 
-int32_t Close(PP_Resource web_socket,
+int32_t Close(PP_Resource resource,
               uint16_t code,
-              struct PP_Var reason,
-              struct PP_CompletionCallback callback) {
-  VLOG(4) << "PPB_WebSocket::Close()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, callback, false);
+              PP_Var reason,
+              PP_CompletionCallback callback) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
-    return enter.retval();
-  return enter.SetResult(enter.object()->Close(code, reason, enter.callback()));
+    return MayForceCallback(callback, PP_ERROR_BADRESOURCE);
+  int32_t result = enter.object()->Close(code, reason, callback);
+  return MayForceCallback(callback, result);
 }
 
-int32_t ReceiveMessage(PP_Resource web_socket,
-                       struct PP_Var* message,
-                       struct PP_CompletionCallback callback) {
-  VLOG(4) << "PPB_WebSocket::ReceiveMessage()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, callback, false);
+int32_t ReceiveMessage(PP_Resource resource,
+                       PP_Var* message,
+                       PP_CompletionCallback callback) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
-    return enter.retval();
-  return enter.SetResult(enter.object()->ReceiveMessage(message,
-                                                        enter.callback()));
+    return MayForceCallback(callback, PP_ERROR_BADRESOURCE);
+  int32_t result = enter.object()->ReceiveMessage(message, callback);
+  return MayForceCallback(callback, result);
 }
 
-int32_t SendMessage(PP_Resource web_socket, struct PP_Var message) {
-  VLOG(4) << "PPB_WebSocket::SendMessage()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+int32_t SendMessage(PP_Resource resource, PP_Var message) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
-    return enter.retval();
+    return PP_ERROR_BADRESOURCE;
   return enter.object()->SendMessage(message);
 }
 
-uint64_t GetBufferedAmount(PP_Resource web_socket) {
-  VLOG(4) << "PPB_WebSocket::GetBufferedAmount()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+uint64_t GetBufferedAmount(PP_Resource resource) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
     return 0;
   return enter.object()->GetBufferedAmount();
 }
 
-uint16_t GetCloseCode(PP_Resource web_socket) {
-  VLOG(4) << "PPB_WebSocket::GetCloseCode()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+uint16_t GetCloseCode(PP_Resource resource) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
     return 0;
   return enter.object()->GetCloseCode();
 }
 
-struct PP_Var GetCloseReason(PP_Resource web_socket) {
-  VLOG(4) << "PPB_WebSocket::GetCloseReason()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+PP_Var GetCloseReason(PP_Resource resource) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
     return PP_MakeUndefined();
   return enter.object()->GetCloseReason();
 }
 
-PP_Bool GetCloseWasClean(PP_Resource web_socket) {
-  VLOG(4) << "PPB_WebSocket::GetCloseWasClean()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+PP_Bool GetCloseWasClean(PP_Resource resource) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
     return PP_FALSE;
   return enter.object()->GetCloseWasClean();
 }
 
-struct PP_Var GetExtensions(PP_Resource web_socket) {
-  VLOG(4) << "PPB_WebSocket::GetExtensions()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+PP_Var GetExtensions(PP_Resource resource) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
     return PP_MakeUndefined();
   return enter.object()->GetExtensions();
 }
 
-struct PP_Var GetProtocol(PP_Resource web_socket) {
-  VLOG(4) << "PPB_WebSocket::GetProtocol()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+PP_Var GetProtocol(PP_Resource resource) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
     return PP_MakeUndefined();
   return enter.object()->GetProtocol();
 }
 
-PP_WebSocketReadyState GetReadyState(PP_Resource web_socket) {
-  VLOG(4) << "PPB_WebSocket::GetReadyState()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+PP_WebSocketReadyState GetReadyState(PP_Resource resource) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
     return PP_WEBSOCKETREADYSTATE_INVALID;
   return enter.object()->GetReadyState();
 }
 
-struct PP_Var GetURL(PP_Resource web_socket) {
-  VLOG(4) << "PPB_WebSocket::GetURL()";
-  EnterResource<PPB_WebSocket_API> enter(web_socket, false);
+PP_Var GetURL(PP_Resource resource) {
+  EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
     return PP_MakeUndefined();
   return enter.object()->GetURL();
 }
 
-const PPB_WebSocket_1_0 g_ppb_websocket_thunk_1_0 = {
+const PPB_WebSocket_1_0 g_ppb_websocket_1_0_thunk = {
   &Create,
   &IsWebSocket,
   &Connect,
@@ -162,7 +144,7 @@ const PPB_WebSocket_1_0 g_ppb_websocket_thunk_1_0 = {
 }  // namespace
 
 const PPB_WebSocket_1_0* GetPPB_WebSocket_1_0_Thunk() {
-  return &g_ppb_websocket_thunk_1_0;
+  return &g_ppb_websocket_1_0_thunk;
 }
 
 }  // namespace thunk

@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_MENU_SUBMENU_VIEW_H_
 #define UI_VIEWS_CONTROLS_MENU_SUBMENU_VIEW_H_
+#pragma once
 
 #include <string>
 
@@ -67,24 +68,25 @@ class VIEWS_EXPORT SubmenuView : public View,
       std::set<OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
   virtual bool AreDropTypesRequired() OVERRIDE;
   virtual bool CanDrop(const OSExchangeData& data) OVERRIDE;
-  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual void OnDragEntered(const DropTargetEvent& event) OVERRIDE;
+  virtual int OnDragUpdated(const DropTargetEvent& event) OVERRIDE;
   virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual int OnPerformDrop(const DropTargetEvent& event) OVERRIDE;
 
   // Scrolls on menu item boundaries.
-  virtual bool OnMouseWheel(const ui::MouseWheelEvent& e) OVERRIDE;
+  virtual bool OnMouseWheel(const MouseWheelEvent& e) OVERRIDE;
 
-  // Overridden from ui::EventHandler.
   // Scrolls on menu item boundaries.
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& e) OVERRIDE;
 
   // Returns true if the menu is showing.
   bool IsShowing();
 
   // Shows the menu at the specified location. Coordinates are in screen
   // coordinates. max_width gives the max width the view should be.
-  void ShowAt(Widget* parent, const gfx::Rect& bounds, bool do_capture);
+  void ShowAt(Widget* parent,
+              const gfx::Rect& bounds,
+              bool do_capture);
 
   // Resets the bounds of the submenu to |bounds|.
   void Reposition(const gfx::Rect& bounds);
@@ -108,7 +110,7 @@ class VIEWS_EXPORT SubmenuView : public View,
   void ReleaseCapture();
 
   // Overriden from View to prevent tab from doing anything.
-  virtual bool SkipDefaultKeyEventProcessing(const ui::KeyEvent& e) OVERRIDE;
+  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e) OVERRIDE;
 
   // Returns the parent menu item we're showing children for.
   MenuItemView* GetMenuItem() const;
@@ -130,9 +132,9 @@ class VIEWS_EXPORT SubmenuView : public View,
   // references to the MenuHost as the MenuHost is about to be deleted.
   void MenuHostDestroyed();
 
-  // Max width of minor text (accelerator or subtitle) in child menu items. This
-  // doesn't include children's children, only direct children.
-  int max_minor_text_width() const { return max_minor_text_width_; }
+  // Max width of accelerators in child menu items. This doesn't include
+  // children's children, only direct children.
+  int max_accelerator_width() const { return max_accelerator_width_; }
 
   // Minimum width of menu in pixels (default 0).  This becomes the smallest
   // width returned by GetPreferredSize().
@@ -146,9 +148,12 @@ class VIEWS_EXPORT SubmenuView : public View,
     resize_open_menu_ = resize_open_menu;
   }
 
+  // Padding around the edges of the submenu.
+  static const int kSubmenuBorderSize;
+
  protected:
-  // Overridden from View:
-  virtual const char* GetClassName() const OVERRIDE;
+  // View override.
+  virtual std::string GetClassName() const OVERRIDE;
 
   // View method. Overridden to schedule a paint. We do this so that when
   // scrolling occurs, everything is repainted correctly.
@@ -171,7 +176,7 @@ class VIEWS_EXPORT SubmenuView : public View,
                                          MenuDelegate::DropPosition position);
 
   // Implementation of ScrollDelegate
-  virtual bool OnScroll(float dx, float dy) OVERRIDE;
+  virtual void OnScroll(float dx, float dy) OVERRIDE;
 
   // Parent menu item.
   MenuItemView* parent_menu_item_;
@@ -191,7 +196,7 @@ class VIEWS_EXPORT SubmenuView : public View,
   MenuScrollViewContainer* scroll_view_container_;
 
   // See description above getter.
-  int max_minor_text_width_;
+  int max_accelerator_width_;
 
   // Minimum width returned in GetPreferredSize().
   int minimum_preferred_width_;

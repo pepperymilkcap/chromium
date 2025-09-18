@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,7 +62,7 @@ void PrintingContextGtk::AskUserForSettings(
     int max_pages,
     bool has_selection,
     const PrintSettingsCallback& callback) {
-  print_dialog_->ShowDialog(parent_view, has_selection, callback);
+  print_dialog_->ShowDialog(callback);
 }
 
 PrintingContext::Result PrintingContextGtk::UseDefaultSettings() {
@@ -78,31 +78,16 @@ PrintingContext::Result PrintingContextGtk::UseDefaultSettings() {
   return OK;
 }
 
-gfx::Size PrintingContextGtk::GetPdfPaperSizeDeviceUnits() {
-  GtkPageSetup* page_setup = gtk_page_setup_new();
-
-  gfx::SizeF paper_size(
-      gtk_page_setup_get_paper_width(page_setup, GTK_UNIT_INCH),
-      gtk_page_setup_get_paper_height(page_setup, GTK_UNIT_INCH));
-
-  g_object_unref(page_setup);
-
-  return gfx::Size(
-      paper_size.width() * settings_.device_units_per_inch(),
-      paper_size.height() * settings_.device_units_per_inch());
-}
-
 PrintingContext::Result PrintingContextGtk::UpdatePrinterSettings(
-    bool external_preview) {
+    const DictionaryValue& job_settings, const PageRanges& ranges) {
   DCHECK(!in_print_job_);
-  DCHECK(!external_preview) << "Not implemented";
 
   if (!print_dialog_) {
     print_dialog_ = create_dialog_func_(this);
     print_dialog_->AddRefToDialog();
   }
 
-  if (!print_dialog_->UpdateSettings(&settings_))
+  if (!print_dialog_->UpdateSettings(job_settings, ranges, &settings_))
     return OnError();
 
   return OK;
@@ -118,7 +103,7 @@ PrintingContext::Result PrintingContextGtk::InitWithSettings(
 }
 
 PrintingContext::Result PrintingContextGtk::NewDocument(
-    const base::string16& document_name) {
+    const string16& document_name) {
   DCHECK(!in_print_job_);
   in_print_job_ = true;
 

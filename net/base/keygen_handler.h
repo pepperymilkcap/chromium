@@ -4,18 +4,18 @@
 
 #ifndef NET_BASE_KEYGEN_HANDLER_H_
 #define NET_BASE_KEYGEN_HANDLER_H_
+#pragma once
 
 #include <string>
 
-#include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/net_export.h"
-#include "url/gurl.h"
 
-namespace crypto {
-class NSSCryptoModuleDelegate;
-}
+#if defined(USE_NSS)
+#include "crypto/crypto_module_blocking_password_delegate.h"
+#endif  // defined(USE_NSS)
 
 namespace net {
 
@@ -42,12 +42,12 @@ class NET_EXPORT KeygenHandler {
   void set_stores_key(bool store) { stores_key_ = store;}
 
 #if defined(USE_NSS)
-  // Register the delegate to be used to get the token to store the key in, and
-  // to get the password if the token is unauthenticated.
-  // GenKeyAndSignChallenge runs on a worker thread, so using a blocking
+  // Register the password delegate to be used if the token is unauthenticated.
+  // GenKeyAndSignChallenge runs on a worker thread, so using the blocking
   // password callback is okay here.
-  void set_crypto_module_delegate(
-      scoped_ptr<crypto::NSSCryptoModuleDelegate> delegate);
+  // Takes ownership of the delegate.
+  void set_crypto_module_password_delegate(
+      crypto::CryptoModuleBlockingPasswordDelegate* delegate);
 #endif  // defined(USE_NSS)
 
  private:
@@ -57,7 +57,8 @@ class NET_EXPORT KeygenHandler {
   bool stores_key_;  // should the generated key-pair be stored persistently?
 #if defined(USE_NSS)
   // The callback for requesting a password to the PKCS#11 token.
-  scoped_ptr<crypto::NSSCryptoModuleDelegate> crypto_module_delegate_;
+  scoped_ptr<crypto::CryptoModuleBlockingPasswordDelegate>
+      crypto_module_password_delegate_;
 #endif  // defined(USE_NSS)
 };
 

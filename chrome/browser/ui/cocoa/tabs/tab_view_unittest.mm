@@ -4,7 +4,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,7 +19,7 @@ class TabViewTest : public CocoaTest {
  public:
   TabViewTest() {
     NSRect frame = NSMakeRect(0, 0, kTabWidth, kTabHeight);
-    base::scoped_nsobject<TabView> view([[TabView alloc] initWithFrame:frame]);
+    scoped_nsobject<TabView> view([[TabView alloc] initWithFrame:frame]);
     view_ = view.get();
     [[test_window() contentView] addSubview:view_];
   }
@@ -62,7 +62,7 @@ TEST_F(TabViewTest, Glow) {
 
 // Test that clicks outside of the visible boundaries are ignored.
 TEST_F(TabViewTest, ClickOnlyInVisibleBounds) {
-  NSPoint bottomLeftCorner = NSMakePoint(5, 0);
+  NSPoint bottomLeftCorner = NSMakePoint(0, 0);
   EXPECT_TRUE([view_ hitTest:bottomLeftCorner]);
 
   NSPoint topLeftCorner = NSMakePoint(0, kTabHeight);

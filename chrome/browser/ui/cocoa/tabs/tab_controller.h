@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_TABS_TAB_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_TABS_TAB_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
-#include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/hover_close_button.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 // The loading/waiting state of the tab.
 enum TabLoadingState {
@@ -20,8 +20,6 @@ enum TabLoadingState {
   kTabCrashed,
 };
 
-@class GTMFadeTruncatingTextFieldCell;
-@class MediaIndicatorView;
 @class MenuController;
 namespace TabControllerInternal {
 class MenuDelegate;
@@ -42,11 +40,9 @@ class MenuDelegate;
 
 @interface TabController : NSViewController<TabDraggingEventTarget> {
  @private
-  base::scoped_nsobject<NSView> iconView_;
-  base::scoped_nsobject<NSTextField> titleView_;
-  GTMFadeTruncatingTextFieldCell* titleViewCell_;  // weak
-  base::scoped_nsobject<MediaIndicatorView> mediaIndicatorView_;
-  base::scoped_nsobject<HoverCloseButton> closeButton_;
+  IBOutlet NSView* iconView_;
+  IBOutlet NSTextField* titleView_;
+  IBOutlet HoverCloseButton* closeButton_;
 
   NSRect originalIconFrame_;  // frame of iconView_ as loaded from nib
   BOOL isIconShowing_;  // last state of iconView_ in updateVisibility
@@ -58,11 +54,12 @@ class MenuDelegate;
   BOOL selected_;
   GURL url_;
   TabLoadingState loadingState_;
+  CGFloat iconTitleXOffset_;  // between left edges of icon and title
   id<TabControllerTarget> target_;  // weak, where actions are sent
   SEL action_;  // selector sent when tab is selected by clicking
   scoped_ptr<ui::SimpleMenuModel> contextMenuModel_;
   scoped_ptr<TabControllerInternal::MenuDelegate> contextMenuDelegate_;
-  base::scoped_nsobject<MenuController> contextMenuController_;
+  scoped_nsobject<MenuController> contextMenuController_;
 }
 
 @property(assign, nonatomic) TabLoadingState loadingState;
@@ -71,7 +68,6 @@ class MenuDelegate;
 @property(assign, nonatomic) BOOL app;
 @property(assign, nonatomic) BOOL mini;
 @property(assign, nonatomic) BOOL pinned;
-@property(assign, nonatomic) NSString* toolTip;
 // Note that |-selected| will return YES if the controller is |-active|, too.
 // |-setSelected:| affects the selection, while |-setActive:| affects the key
 // status/focus of the content.
@@ -80,9 +76,8 @@ class MenuDelegate;
 @property(assign, nonatomic) id target;
 @property(assign, nonatomic) GURL url;
 @property(assign, nonatomic) NSView* iconView;
-@property(readonly, nonatomic) NSTextField* titleView;
-@property(assign, nonatomic) MediaIndicatorView* mediaIndicatorView;
-@property(readonly, nonatomic) HoverCloseButton* closeButton;
+@property(assign, nonatomic) NSTextField* titleView;
+@property(assign, nonatomic) HoverCloseButton* closeButton;
 
 // Minimum and maximum allowable tab width. The minimum width does not show
 // the icon or the close button. The selected tab always has at least a close
@@ -98,10 +93,12 @@ class MenuDelegate;
 
 // Closes the associated TabView by relaying the message to |target_| to
 // perform the close.
-- (void)closeTab:(id)sender;
+- (IBAction)closeTab:(id)sender;
 
-// Selects the associated TabView by sending |action_| to |target_|.
-- (void)selectTab:(id)sender;
+// Replace the current icon view with the given view. |iconView| will be
+// resized to the size of the current icon view.
+- (void)setIconView:(NSView*)iconView;
+- (NSView*)iconView;
 
 // Called by the tabs to determine whether we are in rapid (tab) closure mode.
 // In this mode, we handle clicks slightly differently due to animation.
@@ -118,9 +115,9 @@ class MenuDelegate;
 @end
 
 @interface TabController(TestingAPI)
+- (NSString*)toolTip;
 - (int)iconCapacity;
 - (BOOL)shouldShowIcon;
-- (BOOL)shouldShowMediaIndicator;
 - (BOOL)shouldShowCloseButton;
 @end  // TabController(TestingAPI)
 

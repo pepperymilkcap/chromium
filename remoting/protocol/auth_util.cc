@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/base64.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "crypto/hmac.h"
 #include "crypto/sha2.h"
 #include "net/base/net_errors.h"
@@ -26,7 +26,9 @@ std::string GenerateSupportAuthToken(const std::string& jid,
                                      const std::string& access_code) {
   std::string sha256 = crypto::SHA256HashString(jid + " " + access_code);
   std::string sha256_base64;
-  base::Base64Encode(sha256, &sha256_base64);
+  if (!base::Base64Encode(sha256, &sha256_base64)) {
+    LOG(FATAL) << "Failed to encode auth token";
+  }
   return sha256_base64;
 }
 
@@ -45,7 +47,7 @@ std::string GetAuthBytes(net::SSLSocket* socket,
   // Get keying material from SSL.
   unsigned char key_material[kAuthDigestLength];
   int export_result = socket->ExportKeyingMaterial(
-      label, false, "", key_material, kAuthDigestLength);
+      label, "", key_material, kAuthDigestLength);
   if (export_result != net::OK) {
     LOG(ERROR) << "Error fetching keying material: " << export_result;
     return std::string();

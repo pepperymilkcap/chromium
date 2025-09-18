@@ -11,14 +11,10 @@
 #include <map>
 #include <string>
 
+#include "base/threading/thread.h"
 #include "chrome_frame/plugin_url_request.h"
 #include "chrome_frame/urlmon_moniker.h"
 #include "chrome_frame/utils.h"
-
-namespace base {
-class MessageLoop;
-class Thread;
-}
 
 class UrlmonUrlRequest;
 
@@ -26,6 +22,16 @@ class UrlmonUrlRequestManager
     : public PluginUrlRequestManager,
       public PluginUrlRequestDelegate {
  public:
+  // Sub resources on the pages in chrome frame are fetched on this thread.
+  class ResourceFetcherThread : public base::Thread {
+   public:
+    explicit ResourceFetcherThread(const char* name);
+    virtual ~ResourceFetcherThread();
+
+    virtual void Init();
+    virtual void CleanUp();
+  };
+
   // Contains the privacy information for all requests issued by this instance.
   struct PrivacyInfo {
    public:
@@ -76,16 +82,41 @@ class UrlmonUrlRequestManager
   }
 
  private:
-  friend class base::MessageLoop;
+  friend class MessageLoop;
 
   // PluginUrlRequestManager implementation.
   virtual PluginUrlRequestManager::ThreadSafeFlags GetThreadSafeFlags();
+  virtual void StartRequest(int request_id,
+                            const AutomationURLRequest& request_info);
+  virtual void ReadRequest(int request_id, int bytes_to_read);
+  virtual void EndRequest(int request_id);
+  virtual void DownloadRequestInHost(int request_id);
+  virtual void StopAll();
+  virtual void GetCookiesForUrl(const GURL& url, int cookie_id);
+  virtual void SetCookiesForUrl(const GURL& url, const std::string& cookie);
+
+  // PluginUrlRequestDelegate implementation
+  virtual void OnResponseStarted(int request_id, const char* mime_type,
+                                 const char* headers, int size,
+                                 base::Time last_modified,
+                                 const std::string& redirect_url,
+                                 int redirect_status,
+                                 const net::HostPortPair& socket_address);
+  virtual void OnReadComplete(int request_id, const std::string& data);
+  virtual void OnResponseEnd(int request_id,
+                             const net::URLRequestStatus& status);
+  virtual void OnCookiesRetrieved(bool success, const GURL& url,
+                                  const std::string& cookie_string,
+                                  int cookie_id);
 
   // This method is passed as a callback to UrlmonUrlRequest::TerminateBind.
   // We simply forward moniker and bind_ctx to host ActiveX/ActiveDocument,
   // so it may start NavigateWithBindContext.
   void BindTerminated(IMoniker* moniker, IBindCtx* bind_ctx,
                       IStream* post_data, const char* request_headers);
+
+  // Helper function to initiate a download request in the host.
+  void DownloadRequestInHostHelper(UrlmonUrlRequest* request);
 
   // Map for (request_id <-> UrlmonUrlRequest)
   typedef std::map<int, scoped_refptr<UrlmonUrlRequest> > RequestMap;
@@ -100,8 +131,17 @@ class UrlmonUrlRequestManager
   // synchronize access.
   base::Lock background_resource_map_lock_;
 
+  // Helper function to stop all requests in the request map.
+  void StopAllRequestsHelper(RequestMap* request_map,
+                             base::Lock* request_map_lock);
+  // Helper function for initiating a new IE request.
+  void StartRequestHelper(int request_id,
+                          const AutomationURLRequest& request_info,
+                          RequestMap* request_map,
+                          base::Lock* request_map_lock);
+
   scoped_refptr<UrlmonUrlRequest> pending_request_;
-  scoped_ptr<base::Thread> background_thread_;
+  scoped_ptr<ResourceFetcherThread> background_thread_;
 
   bool stopping_;
 

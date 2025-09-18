@@ -4,9 +4,10 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_INFOBARS_CONFIRM_INFOBAR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_INFOBARS_CONFIRM_INFOBAR_GTK_H_
+#pragma once
 
 #include "base/basictypes.h"
-#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
 #include "ui/base/gtk/gtk_signal.h"
 
@@ -18,15 +19,11 @@ typedef struct _GtkWidget GtkWidget;
 // "Would you like to do X? [Yes] [No]                         _Learn More_ [x]"
 class ConfirmInfoBarGtk : public InfoBarGtk {
  public:
-  explicit ConfirmInfoBarGtk(scoped_ptr<ConfirmInfoBarDelegate> delegate);
+  ConfirmInfoBarGtk(InfoBarTabHelper* owner,
+                    ConfirmInfoBarDelegate* delegate);
 
  private:
   virtual ~ConfirmInfoBarGtk();
-
-  // InfoBarGtk:
-  virtual void PlatformSpecificSetOwner() OVERRIDE;
-
-  ConfirmInfoBarDelegate* GetDelegate();
 
   // Adds a button to the info bar by type. It will do nothing if the delegate
   // doesn't specify a button of the given type.

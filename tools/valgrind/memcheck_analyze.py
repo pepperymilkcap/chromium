@@ -60,7 +60,7 @@ def getCDATAOf(top_node, name):
 def shortenFilePath(source_dir, directory):
   '''Returns a string with the string prefix |source_dir| removed from
   |directory|.'''
-  prefixes_to_cut = ["build/src/", "valgrind/coregrind/", "out/Release/../../"]
+  prefixes_to_cut = ["build/src/", "valgrind/coregrind/"]
 
   if source_dir:
     prefixes_to_cut.append(source_dir)
@@ -492,8 +492,8 @@ class MemcheckAnalyzer:
         found = log_is_finished(f, False)
         if not running and not found:
           logging.warn("Valgrind process PID = %s is not running but its "
-                       "XML log has not been finished correctly.\n"
-                       "Make it up by adding some closing tags manually." % pid)
+                       "XML log has not been finished correctly.\nMake it up"
+                       "by adding some closing tags manually." % pid)
           found = log_is_finished(f, not running)
         if running and not found:
           time.sleep(1)
@@ -617,7 +617,7 @@ class MemcheckAnalyzer:
 def _main():
   '''For testing only. The MemcheckAnalyzer class should be imported instead.'''
   parser = optparse.OptionParser("usage: %prog [options] <files to analyze>")
-  parser.add_option("", "--source-dir",
+  parser.add_option("", "--source_dir",
                     help="path to top of source tree for this build"
                     "(used to normalize source paths in baseline)")
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,14 @@ namespace views {
 
 Menu2::Menu2(ui::MenuModel* model)
     : model_(model),
-      wrapper_(MenuWrapper::CreateWrapper(model)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          wrapper_(MenuWrapper::CreateWrapper(this))) {
   Rebuild();
 }
 
 Menu2::~Menu2() {}
 
-HMENU Menu2::GetNativeMenu() const {
+gfx::NativeMenu Menu2::GetNativeMenu() const {
   return wrapper_->GetNativeMenu();
 }
 
@@ -34,7 +35,7 @@ void Menu2::CancelMenu() {
 }
 
 void Menu2::Rebuild() {
-  wrapper_->Rebuild(NULL);
+  wrapper_->Rebuild();
 }
 
 void Menu2::UpdateStates() {

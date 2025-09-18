@@ -4,6 +4,7 @@
 
 #ifndef GPU_COMMAND_BUFFER_SERVICE_STREAM_TEXTURE_MOCK_H_
 #define GPU_COMMAND_BUFFER_SERVICE_STREAM_TEXTURE_MOCK_H_
+#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "gpu/command_buffer/service/stream_texture.h"
@@ -17,7 +18,6 @@ class MockStreamTexture : public StreamTexture {
   virtual ~MockStreamTexture();
 
   MOCK_METHOD0(Update, void());
-  MOCK_METHOD0(GetSize, gfx::Size(void));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockStreamTexture);

@@ -8,159 +8,143 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/memory/weak_ptr.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/cros/network_ui_data.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
-#include "chromeos/login/login_state.h"
-#include "chromeos/network/network_state_handler_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/native_widget_types.h"
 
-class Browser;
-
-namespace chromeos {
-class DeviceState;
-class NetworkState;
-class NetworkStateHandlerObserver;
-}
-
-namespace gfx {
-class ImageSkia;
-}
-
+class SkBitmap;
 namespace views {
 class WidgetDelegate;
 }
 
-namespace chromeos {
-namespace options {
-
 // ChromeOS internet options page UI handler.
 class InternetOptionsHandler
-    : public ::options::OptionsPageUIHandler,
-      public chromeos::NetworkStateHandlerObserver,
-      public chromeos::LoginState::Observer {
+  : public OptionsPageUIHandler,
+    public chromeos::NetworkLibrary::NetworkManagerObserver,
+    public chromeos::NetworkLibrary::NetworkObserver,
+    public chromeos::NetworkLibrary::CellularDataPlanObserver {
  public:
   InternetOptionsHandler();
   virtual ~InternetOptionsHandler();
 
- private:
-  // OptionsPageUIHandler
+  // OptionsPageUIHandler implementation.
   virtual void GetLocalizedValues(
       base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
+  virtual void Initialize() OVERRIDE;
 
-  // WebUIMessageHandler (from OptionsPageUIHandler)
+  // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  // Callbacks to set network state properties.
-  void EnableWifiCallback(const base::ListValue* args);
-  void DisableWifiCallback(const base::ListValue* args);
-  void EnableCellularCallback(const base::ListValue* args);
-  void DisableCellularCallback(const base::ListValue* args);
-  void EnableWimaxCallback(const base::ListValue* args);
-  void DisableWimaxCallback(const base::ListValue* args);
-  void ShowMorePlanInfoCallback(const base::ListValue* args);
-  void BuyDataPlanCallback(const base::ListValue* args);
-  void SetApnCallback(const base::ListValue* args);
-  void SetApnProperties(const base::ListValue* args,
-                        const std::string& service_path,
-                        const base::DictionaryValue& shill_properties);
-  void CarrierStatusCallback();
-  void SetCarrierCallback(const base::ListValue* args);
-  void SetSimCardLockCallback(const base::ListValue* args);
-  void ChangePinCallback(const base::ListValue* args);
-  void RefreshNetworksCallback(const base::ListValue* args);
+  // NetworkLibrary::NetworkManagerObserver implementation.
+  virtual void OnNetworkManagerChanged(
+      chromeos::NetworkLibrary* network_lib) OVERRIDE;
+  // NetworkLibrary::NetworkObserver implementation.
+  virtual void OnNetworkChanged(chromeos::NetworkLibrary* network_lib,
+                                const chromeos::Network* network) OVERRIDE;
+  // NetworkLibrary::CellularDataPlanObserver implementation.
+  virtual void OnCellularDataPlanChanged(
+      chromeos::NetworkLibrary* network_lib) OVERRIDE;
 
-  // Retrieves a data url for a resource.
-  std::string GetIconDataUrl(int resource_id) const;
-
-  // Refreshes the display of network information.
-  void RefreshNetworkData();
-
-  // Updates the display of network connection information for the details page
-  // if visible.
-  void UpdateConnectionData(const std::string& service_path);
-  void UpdateConnectionDataCallback(
-      const std::string& service_path,
-      const base::DictionaryValue& shill_properties);
-  // Called when carrier data has been updated to informs the JS.
-  void UpdateCarrier();
-
-  // NetworkStateHandlerObserver
-  virtual void DeviceListChanged() OVERRIDE;
-  virtual void NetworkListChanged() OVERRIDE;
-  virtual void NetworkConnectionStateChanged(
-      const chromeos::NetworkState* network) OVERRIDE;
-  virtual void NetworkPropertiesUpdated(
-      const chromeos::NetworkState* network) OVERRIDE;
-
-  // chromeos::LoginState::Observer
-  virtual void LoggedInStateChanged() OVERRIDE;
-
-  // Updates the logged in user type.
-  void UpdateLoggedInUserType();
-
-  // content::NotificationObserver (from OptionsPageUIHandler)
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Additional callbacks to set network state properties.
-  void SetServerHostnameCallback(const base::ListValue* args);
-  void SetPreferNetworkCallback(const base::ListValue* args);
-  void SetAutoConnectCallback(const base::ListValue* args);
-  void SetIPConfigCallback(const base::ListValue* args);
-  void SetIPConfigProperties(const base::ListValue* args,
-                             const std::string& service_path,
-                             const base::DictionaryValue& shill_properties);
-
-  // Retrieves the properties for |service_path| and calls showDetailedInfo
-  // with the results.
-  void PopulateDictionaryDetailsCallback(
-      const std::string& service_path,
-      const base::DictionaryValue& shill_properties);
-
-  // Gets the native window for hosting dialogs, etc.
+ private:
+  // Opens a modal popup dialog.
+  void CreateModalPopup(views::WidgetDelegate* view);
   gfx::NativeWindow GetNativeWindow() const;
 
-  // Handle various network commands and clicks on a network item
-  // in the network list.
-  // |args| must be { network_type, service_path, command } with 'command'
-  // one of: [ add, forget, options, connect disconnect, activate ]
-  void NetworkCommandCallback(const base::ListValue* args);
+  // Passes data needed to show details overlay for network.
+  // |args| will be [ network_type, service_path, command ]
+  // And command is one of 'options', 'connect', disconnect', 'activate' or
+  // 'forget'
+  // Handle{Wifi,Cellular}ButtonClick handles button click on a wireless
+  // network item and a cellular network item respectively.
+  void ButtonClickCallback(const base::ListValue* args);
+  void HandleWifiButtonClick(const std::string& service_path,
+                             const std::string& command);
+  void HandleCellularButtonClick(const std::string& service_path,
+                                 const std::string& command);
+  void HandleVPNButtonClick(const std::string& service_path,
+                            const std::string& command);
 
-  // Helper functions called by NetworkCommandCallback(...)
-  void AddConnection(const std::string& type);
+  // Initiates cellular plan data refresh. The results from libcros will be
+  // passed through CellularDataPlanChanged() callback method.
+  // |args| will be [ service_path ]
+  void RefreshCellularPlanCallback(const base::ListValue* args);
+  void SetActivationButtonVisibility(
+      const chromeos::CellularNetwork* cellular,
+      base::DictionaryValue* dictionary,
+      const std::string& carrier_id);
+
+  void SetPreferNetworkCallback(const base::ListValue* args);
+  void SetAutoConnectCallback(const base::ListValue* args);
+  void SetSharedCallback(const base::ListValue* args);
+  void SetIPConfigCallback(const base::ListValue* args);
+  void EnableWifiCallback(const base::ListValue* args);
+  void DisableWifiCallback(const base::ListValue* args);
+  void EnableCellularCallback(const base::ListValue* args);
+  void DisableCellularCallback(const base::ListValue* args);
+  void BuyDataPlanCallback(const base::ListValue* args);
+  void SetApnCallback(const base::ListValue* args);
+  void SetSimCardLockCallback(const base::ListValue* args);
+  void ChangePinCallback(const base::ListValue* args);
+  void ShareNetworkCallback(const base::ListValue* args);
+  void ShowMorePlanInfoCallback(const ListValue* args);
+
+  // Populates the ui with the details of the given device path. This forces
+  // an overlay to be displayed in the UI.
+  void PopulateDictionaryDetails(const chromeos::Network* network);
+  void PopulateWifiDetails(const chromeos::WifiNetwork* wifi,
+                           base::DictionaryValue* dictionary);
+  void PopulateCellularDetails(const chromeos::CellularNetwork* cellular,
+                               base::DictionaryValue* dictionary);
+  void PopulateVPNDetails(const chromeos::VirtualNetwork* vpn,
+                          base::DictionaryValue* dictionary);
+
+  // Converts CellularDataPlan structure into dictionary for JS. Formats plan
+  // settings into human readable texts.
+  base::DictionaryValue* CellularDataPlanToDictionary(
+      const chromeos::CellularDataPlan* plan);
+
+  // Converts CellularApn stuct into dictionary for JS.
+  base::DictionaryValue* CreateDictionaryFromCellularApn(
+      const chromeos::CellularApn& apn);
 
   // Creates the map of wired networks.
   base::ListValue* GetWiredList();
-
   // Creates the map of wireless networks.
   base::ListValue* GetWirelessList();
-
   // Creates the map of virtual networks.
   base::ListValue* GetVPNList();
-
   // Creates the map of remembered networks.
   base::ListValue* GetRememberedList();
-
   // Fills network information into JS dictionary for displaying network lists.
   void FillNetworkInfo(base::DictionaryValue* dictionary);
+  // Refreshes the display of network information.
+  void RefreshNetworkData();
+  // Adds observers for wireless networks, if any, so that we can dynamically
+  // display the correct icon for that network's signal strength and, in the
+  // case of cellular networks, network technology and roaming status.
+  void MonitorNetworks();
+
+  // Stores a dictionary under |key| in |settings| that is suitable to be sent
+  // to the webui that contains the actual value of a setting and whether it's
+  // controlled by policy. Takes ownership of |value|.
+  void SetValueDictionary(DictionaryValue* settings,
+                          const char* key,
+                          base::Value* value,
+                          const chromeos::NetworkPropertyUIData& ui_data);
+
+  // Convenience pointer to netwrok library (will not change).
+  chromeos::NetworkLibrary* cros_;
 
   content::NotificationRegistrar registrar_;
 
-  // Keep track of the service path for the network shown in the Details view.
-  std::string details_path_;
-
-  // Weak pointer factory so we can start connections at a later time
-  // without worrying that they will actually try to happen after the lifetime
-  // of this object.
-  base::WeakPtrFactory<InternetOptionsHandler> weak_factory_;
-
   DISALLOW_COPY_AND_ASSIGN(InternetOptionsHandler);
 };
-
-}  // namespace options
-}  // namespace chromeos
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_INTERNET_OPTIONS_HANDLER_H_

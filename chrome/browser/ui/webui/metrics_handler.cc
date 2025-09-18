@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,11 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/metrics/metric_event_duration_details.h"
-#include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/webui/ntp/ntp_user_data_logger.h"
-#include "chrome/common/ntp_logging_events.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -38,17 +36,14 @@ void MetricsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "metricsHandler:logEventTime",
       base::Bind(&MetricsHandler::HandleLogEventTime, base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(
-      "metricsHandler:logMouseover",
-      base::Bind(&MetricsHandler::HandleLogMouseover, base::Unretained(this)));
 }
 
-void MetricsHandler::HandleRecordAction(const base::ListValue* args) {
-  std::string string_action = base::UTF16ToUTF8(ExtractStringValue(args));
+void MetricsHandler::HandleRecordAction(const ListValue* args) {
+  std::string string_action = UTF16ToUTF8(ExtractStringValue(args));
   content::RecordComputedAction(string_action);
 }
 
-void MetricsHandler::HandleRecordInHistogram(const base::ListValue* args) {
+void MetricsHandler::HandleRecordInHistogram(const ListValue* args) {
   std::string histogram_name;
   double value;
   double boundary_value;
@@ -75,25 +70,23 @@ void MetricsHandler::HandleRecordInHistogram(const base::ListValue* args) {
 
   // As |histogram_name| may change between calls, the UMA_HISTOGRAM_ENUMERATION
   // macro cannot be used here.
-  base::HistogramBase* counter =
+  base::Histogram* counter =
       base::LinearHistogram::FactoryGet(
           histogram_name, 1, int_boundary_value, bucket_count + 1,
-          base::HistogramBase::kUmaTargetedHistogramFlag);
+          base::Histogram::kUmaTargetedHistogramFlag);
   counter->Add(int_value);
 }
 
-void MetricsHandler::HandleLogEventTime(const base::ListValue* args) {
-  std::string event_name = base::UTF16ToUTF8(ExtractStringValue(args));
+void MetricsHandler::HandleLogEventTime(const ListValue* args) {
+  std::string event_name = UTF16ToUTF8(ExtractStringValue(args));
   WebContents* tab = web_ui()->GetWebContents();
 
   // Not all new tab pages get timed. In those cases, we don't have a
   // new_tab_start_time_.
-  CoreTabHelper* core_tab_helper = CoreTabHelper::FromWebContents(tab);
-  if (core_tab_helper->new_tab_start_time().is_null())
+  if (tab->GetNewTabStartTime().is_null())
     return;
 
-  base::TimeDelta duration =
-      base::TimeTicks::Now() - core_tab_helper->new_tab_start_time();
+  base::TimeDelta duration = base::TimeTicks::Now() - tab->GetNewTabStartTime();
   MetricEventDurationDetails details(event_name,
       static_cast<int>(duration.InMilliseconds()));
 
@@ -104,8 +97,7 @@ void MetricsHandler::HandleLogEventTime(const base::ListValue* args) {
   } else if (event_name == "Tab.NewTabOnload") {
     UMA_HISTOGRAM_TIMES("Tab.NewTabOnload", duration);
     // The new tab page has finished loading; reset it.
-    CoreTabHelper* core_tab_helper = CoreTabHelper::FromWebContents(tab);
-    core_tab_helper->set_new_tab_start_time(base::TimeTicks());
+    tab->SetNewTabStartTime(base::TimeTicks());
   } else {
     NOTREACHED();
   }
@@ -113,9 +105,4 @@ void MetricsHandler::HandleLogEventTime(const base::ListValue* args) {
       chrome::NOTIFICATION_METRIC_EVENT_DURATION,
       content::Source<WebContents>(tab),
       content::Details<MetricEventDurationDetails>(&details));
-}
-
-void MetricsHandler::HandleLogMouseover(const base::ListValue* args) {
-  NTPUserDataLogger::GetOrCreateFromWebContents(
-      web_ui()->GetWebContents())->LogEvent(NTP_MOUSEOVER);
 }

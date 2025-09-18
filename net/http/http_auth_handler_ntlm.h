@@ -4,6 +4,7 @@
 
 #ifndef NET_HTTP_HTTP_AUTH_HANDLER_NTLM_H_
 #define NET_HTTP_HTTP_AUTH_HANDLER_NTLM_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -25,7 +26,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "net/http/http_auth_handler.h"
 #include "net/http/http_auth_handler_factory.h"
 
@@ -145,7 +146,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
                    uint32* out_token_len);
 
   // Create an NTLM SPN to identify the |origin| server.
-  static std::string CreateSPN(const GURL& origin);
+  static std::wstring CreateSPN(const GURL& origin);
 
 #if defined(NTLM_SSPI)
   HttpAuthSSPI auth_sspi_;
@@ -156,7 +157,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
   static HostNameProc get_host_name_proc_;
 #endif
 
-  base::string16 domain_;
+  string16 domain_;
   AuthCredentials credentials_;
 
   // The base64-encoded string following "NTLM" in the "WWW-Authenticate" or

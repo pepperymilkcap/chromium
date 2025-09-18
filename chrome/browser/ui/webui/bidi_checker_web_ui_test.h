@@ -1,16 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_BIDI_CHECKER_WEB_UI_TEST_H_
 #define CHROME_BROWSER_UI_WEBUI_BIDI_CHECKER_WEB_UI_TEST_H_
+#pragma once
 
-#include "base/command_line.h"
-#include "chrome/test/base/web_ui_browsertest.h"
-
-namespace base {
-class WaitableEvent;
-}
+#include "chrome/browser/ui/webui/web_ui_browsertest.h"
+#include "chrome/test/base/in_process_browser_test.h"
 
 // Base class for BidiChecker-based tests. Preloads the BidiChecker JS library
 // for each test.
@@ -18,35 +15,27 @@ class WebUIBidiCheckerBrowserTest : public WebUIBrowserTest {
  public:
   virtual ~WebUIBidiCheckerBrowserTest();
 
-  // testing::Test implementation.
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
-
  protected:
   WebUIBidiCheckerBrowserTest();
 
-  // Runs the Bidi Checker on the given page URL. |is_rtl| should be true when
+  // Runs the Bidi Checker on the given page URL. |isRTL| should be true when
   // the active page locale is RTL.
-  void RunBidiCheckerOnPage(const std::string& page_url, bool is_rtl);
+  void RunBidiCheckerOnPage(const char pageURL[], bool isRTL);
 
   // Setup test path.
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
-
- private:
-  // The command line args used to run the test before being changed in SetUp().
-  CommandLine::StringVector argv_;
 };
 
 // Base class for BidiChecker-based tests that run with an LTR UI.
 class WebUIBidiCheckerBrowserTestLTR : public WebUIBidiCheckerBrowserTest {
  public:
-  void RunBidiCheckerOnPage(const std::string& page_url);
+  void RunBidiCheckerOnPage(const char pageURL[]);
 };
 
 // Base class for BidiChecker-based tests that run with an RTL UI.
 class WebUIBidiCheckerBrowserTestRTL : public WebUIBidiCheckerBrowserTest {
  public:
-  void RunBidiCheckerOnPage(const std::string& page_url);
+  void RunBidiCheckerOnPage(const char pageURL[]);
 
  protected:
   virtual void SetUpOnMainThread() OVERRIDE;

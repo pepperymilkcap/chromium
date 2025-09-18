@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,7 @@
 #include <oleacc.h>
 
 #include "base/logging.h"
-#include "ui/base/win/hidden_window.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/win/dpi.h"
-#include "ui/gfx/win/window_impl.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/native_widget.h"
@@ -32,18 +29,22 @@ NativeViewHostWin::~NativeViewHostWin() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeViewHostWin, NativeViewHostWrapper implementation:
-void NativeViewHostWin::NativeViewWillAttach() {
+void NativeViewHostWin::NativeViewAttached() {
+  DCHECK(host_->native_view())
+      << "Impossible detatched tab case; See crbug.com/6316";
+
   // First hide the new window. We don't want anything to draw (like sub-hwnd
-  // borders), when NativeViewHost changes the parent.
+  // borders), when we change the parent below.
   ShowWindow(host_->native_view(), SW_HIDE);
+
+  Widget::ReparentNativeView(host_->native_view(),
+                             host_->GetWidget()->GetNativeView());
+  host_->Layout();
 }
 
 void NativeViewHostWin::NativeViewDetaching(bool destroyed) {
-  if (!destroyed) {
-    if (installed_clip_)
-      UninstallClip();
-    Widget::ReparentNativeView(host_->native_view(), ui::GetHiddenWindow());
-  }
+  if (!destroyed && installed_clip_)
+    UninstallClip();
   installed_clip_ = false;
 }
 
@@ -91,8 +92,6 @@ void NativeViewHostWin::ShowWidget(int x, int y, int w, int h) {
                    SWP_NOCOPYBITS |
                    SWP_NOOWNERZORDER |
                    SWP_NOZORDER;
-  gfx::Rect bounds = gfx::win::DIPToScreenRect(gfx::Rect(x,y,w,h));
-
   // Only send the SHOWWINDOW flag if we're invisible, to avoid flashing.
   if (!IsWindowVisible(host_->native_view()))
     swp_flags = (swp_flags | SWP_SHOWWINDOW) & ~SWP_NOREDRAW;
@@ -102,14 +101,12 @@ void NativeViewHostWin::ShowWidget(int x, int y, int w, int h) {
     RECT win_rect;
     GetWindowRect(host_->native_view(), &win_rect);
     gfx::Rect rect(win_rect);
-    SetWindowPos(host_->native_view(), 0, bounds.x(), bounds.y(),
-                 rect.width(), rect.height(),
+    SetWindowPos(host_->native_view(), 0, x, y, rect.width(), rect.height(),
                  swp_flags);
 
-    InstallClip(0, 0, bounds.width(), bounds.height());
+    InstallClip(0, 0, w, h);
   } else {
-    SetWindowPos(host_->native_view(), 0, bounds.x(), bounds.y(),
-                 bounds.width(), bounds.height(), swp_flags);
+    SetWindowPos(host_->native_view(), 0, x, y, w, h, swp_flags);
   }
 }
 

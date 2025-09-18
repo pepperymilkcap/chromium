@@ -17,21 +17,21 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/containers/hash_tables.h"
-#include "base/debug/trace_event.h"
+#include "base/eintr_wrapper.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
+#include "base/hash_tables.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/posix/eintr_wrapper.h"
+#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 
 namespace base {
+namespace files {
 
 namespace {
 
@@ -56,7 +56,7 @@ class InotifyReader {
   void OnInotifyEvent(const inotify_event* event);
 
  private:
-  friend struct DefaultLazyInstanceTraits<InotifyReader>;
+  friend struct ::base::DefaultLazyInstanceTraits<InotifyReader>;
 
   typedef std::set<FilePathWatcherImpl*> WatcherSet;
 
@@ -64,13 +64,13 @@ class InotifyReader {
   ~InotifyReader();
 
   // We keep track of which delegates want to be notified on which watches.
-  hash_map<Watch, WatcherSet> watchers_;
+  base::hash_map<Watch, WatcherSet> watchers_;
 
   // Lock to protect watchers_.
-  Lock lock_;
+  base::Lock lock_;
 
   // Separate thread on which we run blocking read for inotify events.
-  Thread thread_;
+  base::Thread thread_;
 
   // File descriptor returned by inotify_init.
   const int inotify_fd_;
@@ -92,16 +92,17 @@ class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate,
   // Called for each event coming from the watch. |fired_watch| identifies the
   // watch that fired, |child| indicates what has changed, and is relative to
   // the currently watched path for |fired_watch|. The flag |created| is true if
-  // the object appears.
+  // the object appears, and |is_directory| is set when the event refers to a
+  // directory.
   void OnFilePathChanged(InotifyReader::Watch fired_watch,
                          const FilePath::StringType& child,
-                         bool created);
+                         bool created,
+                         bool is_directory);
 
   // Start watching |path| for changes and notify |delegate| on each change.
   // Returns true if watch for |path| has been added successfully.
   virtual bool Watch(const FilePath& path,
-                     bool recursive,
-                     const FilePathWatcher::Callback& callback) OVERRIDE;
+                     FilePathWatcher::Delegate* delegate) OVERRIDE;
 
   // Cancel the watch. This unregisters the instance with InotifyReader.
   virtual void Cancel() OVERRIDE;
@@ -111,12 +112,11 @@ class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate,
   // cleanup thread, in case it quits before Cancel() is called.
   virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
 
- protected:
+ private:
   virtual ~FilePathWatcherImpl() {}
 
- private:
   // Cleans up and stops observing the |message_loop_| thread.
-  virtual void CancelOnMessageLoopThread() OVERRIDE;
+  void CancelOnMessageLoopThread() OVERRIDE;
 
   // Inotify watches are installed for all directory components of |target_|. A
   // WatchEntry instance holds the watch descriptor for a component and the
@@ -137,8 +137,8 @@ class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate,
   // that exists. Updates |watched_path_|. Returns true on success.
   bool UpdateWatches() WARN_UNUSED_RESULT;
 
-  // Callback to notify upon changes.
-  FilePathWatcher::Callback callback_;
+  // Delegate to notify upon changes.
+  scoped_refptr<FilePathWatcher::Delegate> delegate_;
 
   // The file or directory we're supposed to watch.
   FilePath target_;
@@ -158,8 +158,6 @@ void InotifyReaderCallback(InotifyReader* reader, int inotify_fd,
   CHECK_GT(FD_SETSIZE, inotify_fd);
   CHECK_LE(0, shutdown_fd);
   CHECK_GT(FD_SETSIZE, shutdown_fd);
-
-  debug::TraceLog::GetInstance()->SetCurrentThreadBlocksMessageLoop();
 
   while (true) {
     fd_set rfds;
@@ -210,21 +208,18 @@ void InotifyReaderCallback(InotifyReader* reader, int inotify_fd,
   }
 }
 
-static LazyInstance<InotifyReader>::Leaky g_inotify_reader =
+static base::LazyInstance<InotifyReader> g_inotify_reader =
     LAZY_INSTANCE_INITIALIZER;
 
 InotifyReader::InotifyReader()
     : thread_("inotify_reader"),
       inotify_fd_(inotify_init()),
       valid_(false) {
-  if (inotify_fd_ < 0)
-    PLOG(ERROR) << "inotify_init() failed";
-
   shutdown_pipe_[0] = -1;
   shutdown_pipe_[1] = -1;
   if (inotify_fd_ >= 0 && pipe(shutdown_pipe_) == 0 && thread_.Start()) {
     thread_.message_loop()->PostTask(
-        FROM_HERE, Bind(&InotifyReaderCallback, this, inotify_fd_,
+        FROM_HERE, base::Bind(&InotifyReaderCallback, this, inotify_fd_,
                               shutdown_pipe_[0]));
     valid_ = true;
   }
@@ -252,7 +247,7 @@ InotifyReader::Watch InotifyReader::AddWatch(
   if (!valid_)
     return kInvalidWatch;
 
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
 
   Watch watch = inotify_add_watch(inotify_fd_, path.value().c_str(),
                                   IN_CREATE | IN_DELETE |
@@ -272,7 +267,7 @@ bool InotifyReader::RemoveWatch(Watch watch,
   if (!valid_)
     return false;
 
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
 
   watchers_[watch].erase(watcher);
 
@@ -289,31 +284,37 @@ void InotifyReader::OnInotifyEvent(const inotify_event* event) {
     return;
 
   FilePath::StringType child(event->len ? event->name : FILE_PATH_LITERAL(""));
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
 
   for (WatcherSet::iterator watcher = watchers_[event->wd].begin();
        watcher != watchers_[event->wd].end();
        ++watcher) {
     (*watcher)->OnFilePathChanged(event->wd,
                                   child,
-                                  event->mask & (IN_CREATE | IN_MOVED_TO));
+                                  event->mask & (IN_CREATE | IN_MOVED_TO),
+                                  event->mask & IN_ISDIR);
   }
 }
 
-FilePathWatcherImpl::FilePathWatcherImpl() {
+FilePathWatcherImpl::FilePathWatcherImpl()
+    : delegate_(NULL) {
 }
 
-void FilePathWatcherImpl::OnFilePathChanged(InotifyReader::Watch fired_watch,
-                                            const FilePath::StringType& child,
-                                            bool created) {
+void FilePathWatcherImpl::OnFilePathChanged(
+    InotifyReader::Watch fired_watch,
+    const FilePath::StringType& child,
+    bool created,
+    bool is_directory) {
+
   if (!message_loop()->BelongsToCurrentThread()) {
     // Switch to message_loop_ to access watches_ safely.
     message_loop()->PostTask(FROM_HERE,
-        Bind(&FilePathWatcherImpl::OnFilePathChanged,
+        base::Bind(&FilePathWatcherImpl::OnFilePathChanged,
                    this,
                    fired_watch,
                    child,
-                   created));
+                   created,
+                   is_directory));
     return;
   }
 
@@ -338,12 +339,11 @@ void FilePathWatcherImpl::OnFilePathChanged(InotifyReader::Watch fired_watch,
 
       // Update watches if a directory component of the |target_| path
       // (dis)appears. Note that we don't add the additional restriction
-      // of checking the event mask to see if it is for a directory here
-      // as changes to symlinks on the target path will not have
-      // IN_ISDIR set in the event masks. As a result we may sometimes
-      // call UpdateWatches() unnecessarily.
+      // of checking is_directory here as changes to symlinks on the
+      // target path will not have is_directory set but as a result we
+      // may sometimes call UpdateWatches unnecessarily.
       if (change_on_target_path && !UpdateWatches()) {
-        callback_.Run(target_, true /* error */);
+        delegate_->OnFilePathError(target_);
         return;
       }
 
@@ -357,44 +357,39 @@ void FilePathWatcherImpl::OnFilePathChanged(InotifyReader::Watch fired_watch,
       //    recheck.
       if (target_changed ||
           (change_on_target_path && !created) ||
-          (change_on_target_path && PathExists(target_))) {
-        callback_.Run(target_, false);
+          (change_on_target_path && file_util::PathExists(target_))) {
+        delegate_->OnFilePathChanged(target_);
         return;
       }
     }
   }
+
 }
 
 bool FilePathWatcherImpl::Watch(const FilePath& path,
-                                bool recursive,
-                                const FilePathWatcher::Callback& callback) {
+                                FilePathWatcher::Delegate* delegate) {
   DCHECK(target_.empty());
   DCHECK(MessageLoopForIO::current());
-  if (recursive) {
-    // Recursive watch is not supported on this platform.
-    NOTIMPLEMENTED();
-    return false;
-  }
 
-  set_message_loop(MessageLoopProxy::current().get());
-  callback_ = callback;
+  set_message_loop(base::MessageLoopProxy::current());
+  delegate_ = delegate;
   target_ = path;
   MessageLoop::current()->AddDestructionObserver(this);
 
   std::vector<FilePath::StringType> comps;
   target_.GetComponents(&comps);
   DCHECK(!comps.empty());
-  std::vector<FilePath::StringType>::const_iterator comp = comps.begin();
-  for (++comp; comp != comps.end(); ++comp)
+  for (std::vector<FilePath::StringType>::const_iterator comp(++comps.begin());
+       comp != comps.end(); ++comp) {
     watches_.push_back(WatchEntry(InotifyReader::kInvalidWatch, *comp));
-
+  }
   watches_.push_back(WatchEntry(InotifyReader::kInvalidWatch,
                                 FilePath::StringType()));
   return UpdateWatches();
 }
 
 void FilePathWatcherImpl::Cancel() {
-  if (callback_.is_null()) {
+  if (!delegate_) {
     // Watch was never called, or the |message_loop_| thread is already gone.
     set_cancelled();
     return;
@@ -403,7 +398,7 @@ void FilePathWatcherImpl::Cancel() {
   // Switch to the message_loop_ if necessary so we can access |watches_|.
   if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(FROM_HERE,
-                             Bind(&FilePathWatcher::CancelWatch,
+                             base::Bind(&FilePathWatcher::CancelWatch,
                                         make_scoped_refptr(this)));
   } else {
     CancelOnMessageLoopThread();
@@ -414,9 +409,9 @@ void FilePathWatcherImpl::CancelOnMessageLoopThread() {
   if (!is_cancelled())
     set_cancelled();
 
-  if (!callback_.is_null()) {
+  if (delegate_) {
     MessageLoop::current()->RemoveDestructionObserver(this);
-    callback_.Reset();
+    delegate_ = NULL;
   }
 
   for (WatchVector::iterator watch_entry(watches_.begin());
@@ -433,7 +428,7 @@ void FilePathWatcherImpl::WillDestroyCurrentMessageLoop() {
 }
 
 bool FilePathWatcherImpl::UpdateWatches() {
-  // Ensure this runs on the |message_loop_| exclusively in order to avoid
+  // Ensure this runs on the message_loop_ exclusively in order to avoid
   // concurrency issues.
   DCHECK(message_loop()->BelongsToCurrentThread());
 
@@ -446,26 +441,25 @@ bool FilePathWatcherImpl::UpdateWatches() {
     if (path_valid) {
       watch_entry->watch_ = g_inotify_reader.Get().AddWatch(path, this);
       if ((watch_entry->watch_ == InotifyReader::kInvalidWatch) &&
-          base::IsLink(path)) {
+          file_util::IsLink(path)) {
         FilePath link;
-        if (ReadSymbolicLink(path, &link)) {
-          if (!link.IsAbsolute())
-            link = path.DirName().Append(link);
-          // Try watching symlink target directory. If the link target is "/",
-          // then we shouldn't get here in normal situations and if we do, we'd
-          // watch "/" for changes to a component "/" which is harmless so no
-          // special treatment of this case is required.
-          watch_entry->watch_ =
-              g_inotify_reader.Get().AddWatch(link.DirName(), this);
-          if (watch_entry->watch_ != InotifyReader::kInvalidWatch) {
-            watch_entry->linkname_ = link.BaseName().value();
-          } else {
-            DPLOG(WARNING) << "Watch failed for "  << link.DirName().value();
-            // TODO(craig) Symlinks only work if the parent directory
-            // for the target exist. Ideally we should make sure we've
-            // watched all the components of the symlink path for
-            // changes. See crbug.com/91561 for details.
-          }
+        file_util::ReadSymbolicLink(path, &link);
+        if (!link.IsAbsolute())
+          link = path.DirName().Append(link);
+        // Try watching symlink target directory. If the link target is "/",
+        // then we shouldn't get here in normal situations and if we do, we'd
+        // watch "/" for changes to a component "/" which is harmless so no
+        // special treatment of this case is required.
+        watch_entry->watch_ =
+            g_inotify_reader.Get().AddWatch(link.DirName(), this);
+        if (watch_entry->watch_ != InotifyReader::kInvalidWatch) {
+          watch_entry->linkname_ = link.BaseName().value();
+        } else {
+          DPLOG(WARNING) << "Watch failed for "  << link.DirName().value();
+          // TODO(craig) Symlinks only work if the parent directory
+          // for the target exist. Ideally we should make sure we've
+          // watched all the components of the symlink path for
+          // changes. See crbug.com/91561 for details.
         }
       }
       if (watch_entry->watch_ == InotifyReader::kInvalidWatch) {
@@ -490,4 +484,5 @@ FilePathWatcher::FilePathWatcher() {
   impl_ = new FilePathWatcherImpl();
 }
 
+}  // namespace files
 }  // namespace base

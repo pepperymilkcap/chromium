@@ -6,34 +6,16 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
-#include "ipc/ipc_message.h"
-#include "ppapi/c/dev/ppp_class_deprecated.h"
 #include "ppapi/c/ppb_var.h"
-#include "ppapi/proxy/file_system_resource.h"
 #include "ppapi/proxy/plugin_array_buffer_var.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_globals.h"
-#include "ppapi/proxy/plugin_resource_var.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/proxy_object_var.h"
 #include "ppapi/shared_impl/api_id.h"
-#include "ppapi/shared_impl/ppapi_globals.h"
-#include "ppapi/shared_impl/proxy_lock.h"
-#include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/shared_impl/var.h"
 
 namespace ppapi {
 namespace proxy {
-
-namespace {
-
-Connection GetConnectionForInstance(PP_Instance instance) {
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
-  DCHECK(dispatcher);
-  return Connection(PluginGlobals::Get()->GetBrowserSender(), dispatcher);
-}
-
-}  // namespace
 
 PluginVarTracker::HostVar::HostVar(PluginDispatcher* d, int32 i)
     : dispatcher(d),
@@ -48,7 +30,7 @@ bool PluginVarTracker::HostVar::operator<(const HostVar& other) const {
   return host_object_id < other.host_object_id;
 }
 
-PluginVarTracker::PluginVarTracker() : VarTracker(THREAD_SAFE) {
+PluginVarTracker::PluginVarTracker() {
 }
 
 PluginVarTracker::~PluginVarTracker() {
@@ -56,7 +38,6 @@ PluginVarTracker::~PluginVarTracker() {
 
 PP_Var PluginVarTracker::ReceiveObjectPassRef(const PP_Var& host_var,
                                               PluginDispatcher* dispatcher) {
-  CheckThreadingPreconditions();
   DCHECK(host_var.type == PP_VARTYPE_OBJECT);
 
   // Get the object.
@@ -73,7 +54,7 @@ PP_Var PluginVarTracker::ReceiveObjectPassRef(const PP_Var& host_var,
     // two references on our behalf. We want to transfer that extra reference
     // to our list. This means we addref in the plugin, and release the extra
     // one in the renderer.
-    SendReleaseObjectMsg(*object.get());
+    SendReleaseObjectMsg(*object);
   }
   info.ref_count++;
   return ret;
@@ -82,7 +63,6 @@ PP_Var PluginVarTracker::ReceiveObjectPassRef(const PP_Var& host_var,
 PP_Var PluginVarTracker::TrackObjectWithNoReference(
     const PP_Var& host_var,
     PluginDispatcher* dispatcher) {
-  CheckThreadingPreconditions();
   DCHECK(host_var.type == PP_VARTYPE_OBJECT);
 
   // Get the object.
@@ -100,9 +80,7 @@ PP_Var PluginVarTracker::TrackObjectWithNoReference(
 
 void PluginVarTracker::StopTrackingObjectWithNoReference(
     const PP_Var& plugin_var) {
-  CheckThreadingPreconditions();
   DCHECK(plugin_var.type == PP_VARTYPE_OBJECT);
-
   VarMap::iterator found = GetLiveVar(plugin_var);
   if (found == live_vars_.end()) {
     NOTREACHED();
@@ -115,7 +93,6 @@ void PluginVarTracker::StopTrackingObjectWithNoReference(
 }
 
 PP_Var PluginVarTracker::GetHostObject(const PP_Var& plugin_object) const {
-  CheckThreadingPreconditions();
   if (plugin_object.type != PP_VARTYPE_OBJECT) {
     NOTREACHED();
     return PP_MakeUndefined();
@@ -136,7 +113,6 @@ PP_Var PluginVarTracker::GetHostObject(const PP_Var& plugin_object) const {
 
 PluginDispatcher* PluginVarTracker::DispatcherForPluginObject(
     const PP_Var& plugin_object) const {
-  CheckThreadingPreconditions();
   if (plugin_object.type != PP_VARTYPE_OBJECT)
     return NULL;
 
@@ -152,10 +128,8 @@ PluginDispatcher* PluginVarTracker::DispatcherForPluginObject(
 
 void PluginVarTracker::ReleaseHostObject(PluginDispatcher* dispatcher,
                                          const PP_Var& host_object) {
-  CheckThreadingPreconditions();
-  DCHECK(host_object.type == PP_VARTYPE_OBJECT);
-
   // Convert the host object to a normal var valid in the plugin.
+  DCHECK(host_object.type == PP_VARTYPE_OBJECT);
   HostVarToPluginVarMap::iterator found = host_var_to_plugin_var_.find(
       HostVar(dispatcher, static_cast<int32>(host_object.value.as_id)));
   if (found == host_var_to_plugin_var_.end()) {
@@ -167,152 +141,8 @@ void PluginVarTracker::ReleaseHostObject(PluginDispatcher* dispatcher,
   ReleaseVar(found->second);
 }
 
-PP_Var PluginVarTracker::MakeResourcePPVarFromMessage(
-    PP_Instance instance,
-    const IPC::Message& creation_message,
-    int pending_renderer_id,
-    int pending_browser_id) {
-  DCHECK(pending_renderer_id);
-  DCHECK(pending_browser_id);
-  switch (creation_message.type()) {
-    case PpapiPluginMsg_FileSystem_CreateFromPendingHost::ID: {
-      PP_FileSystemType file_system_type;
-      if (!UnpackMessage<PpapiPluginMsg_FileSystem_CreateFromPendingHost>(
-               creation_message, &file_system_type)) {
-        NOTREACHED() << "Invalid message of type "
-                        "PpapiPluginMsg_FileSystem_CreateFromPendingHost";
-        return PP_MakeNull();
-      }
-      // Create a plugin-side resource and attach it to the host resource.
-      // Note: This only makes sense when the plugin is out of process (which
-      // should always be true when passing resource vars).
-      PP_Resource pp_resource =
-          (new FileSystemResource(GetConnectionForInstance(instance),
-                                  instance,
-                                  pending_renderer_id,
-                                  pending_browser_id,
-                                  file_system_type))->GetReference();
-      return MakeResourcePPVar(pp_resource);
-    }
-    default: {
-      NOTREACHED() << "Creation message has unexpected type "
-                   << creation_message.type();
-      return PP_MakeNull();
-    }
-  }
-}
-
-ResourceVar* PluginVarTracker::MakeResourceVar(PP_Resource pp_resource) {
-  // The resource 0 returns a null resource var.
-  if (!pp_resource)
-    return new PluginResourceVar();
-
-  ResourceTracker* resource_tracker = PpapiGlobals::Get()->GetResourceTracker();
-  ppapi::Resource* resource = resource_tracker->GetResource(pp_resource);
-  // A non-existant resource other than 0 returns NULL.
-  if (!resource)
-    return NULL;
-  return new PluginResourceVar(resource);
-}
-
-void PluginVarTracker::DidDeleteInstance(PP_Instance instance) {
-  // Calling the destructors on plugin objects may in turn release other
-  // objects which will mutate the map out from under us. So do a two-step
-  // process of identifying the ones to delete, and then delete them.
-  //
-  // See the comment above user_data_to_plugin_ in the header file. We assume
-  // there aren't that many objects so a brute-force search is reasonable.
-  std::vector<void*> user_data_to_delete;
-  for (UserDataToPluginImplementedVarMap::const_iterator i =
-           user_data_to_plugin_.begin();
-       i != user_data_to_plugin_.end();
-       ++i) {
-    if (i->second.instance == instance)
-      user_data_to_delete.push_back(i->first);
-  }
-
-  for (size_t i = 0; i < user_data_to_delete.size(); i++) {
-    UserDataToPluginImplementedVarMap::iterator found =
-        user_data_to_plugin_.find(user_data_to_delete[i]);
-    if (found == user_data_to_plugin_.end())
-      continue;  // Object removed from list while we were iterating.
-
-    if (!found->second.plugin_object_id) {
-      // This object is for the freed instance and the plugin is not holding
-      // any references to it. Deallocate immediately.
-      CallWhileUnlocked(found->second.ppp_class->Deallocate, found->first);
-      user_data_to_plugin_.erase(found);
-    } else {
-      // The plugin is holding refs to this object. We don't want to call
-      // Deallocate since the plugin may be depending on those refs to keep
-      // its data alive. To avoid crashes in this case, just clear out the
-      // instance to mark it and continue. When the plugin refs go to 0,
-      // we'll notice there is no instance and call Deallocate.
-      found->second.instance = 0;
-    }
-  }
-}
-
-void PluginVarTracker::DidDeleteDispatcher(PluginDispatcher* dispatcher) {
-  for (VarMap::iterator it = live_vars_.begin();
-       it != live_vars_.end();
-       ++it) {
-    if (it->second.var.get() == NULL)
-      continue;
-    ProxyObjectVar* object = it->second.var->AsProxyObjectVar();
-    if (object && object->dispatcher() == dispatcher)
-      object->clear_dispatcher();
-  }
-}
-
 ArrayBufferVar* PluginVarTracker::CreateArrayBuffer(uint32 size_in_bytes) {
   return new PluginArrayBufferVar(size_in_bytes);
-}
-
-ArrayBufferVar* PluginVarTracker::CreateShmArrayBuffer(
-    uint32 size_in_bytes,
-    base::SharedMemoryHandle handle) {
-  return new PluginArrayBufferVar(size_in_bytes, handle);
-}
-
-void PluginVarTracker::PluginImplementedObjectCreated(
-    PP_Instance instance,
-    const PP_Var& created_var,
-    const PPP_Class_Deprecated* ppp_class,
-    void* ppp_class_data) {
-  PluginImplementedVar p;
-  p.ppp_class = ppp_class;
-  p.instance = instance;
-  p.plugin_object_id = created_var.value.as_id;
-  user_data_to_plugin_[ppp_class_data] = p;
-
-  // Link the user data to the object.
-  ProxyObjectVar* object = GetVar(created_var)->AsProxyObjectVar();
-  object->set_user_data(ppp_class_data);
-}
-
-void PluginVarTracker::PluginImplementedObjectDestroyed(void* user_data) {
-  UserDataToPluginImplementedVarMap::iterator found =
-      user_data_to_plugin_.find(user_data);
-  if (found == user_data_to_plugin_.end()) {
-    NOTREACHED();
-    return;
-  }
-  user_data_to_plugin_.erase(found);
-}
-
-bool PluginVarTracker::IsPluginImplementedObjectAlive(void* user_data) {
-  return user_data_to_plugin_.find(user_data) != user_data_to_plugin_.end();
-}
-
-bool PluginVarTracker::ValidatePluginObjectCall(
-    const PPP_Class_Deprecated* ppp_class,
-    void* user_data) {
-  UserDataToPluginImplementedVarMap::iterator found =
-      user_data_to_plugin_.find(user_data);
-  if (found == user_data_to_plugin_.end())
-    return false;
-  return found->second.ppp_class == ppp_class;
 }
 
 int32 PluginVarTracker::AddVarInternal(Var* var, AddVarRefMode mode) {
@@ -323,11 +153,9 @@ int32 PluginVarTracker::AddVarInternal(Var* var, AddVarRefMode mode) {
   ProxyObjectVar* proxy_object = var->AsProxyObjectVar();
   if (proxy_object) {
     HostVar host_var(proxy_object->dispatcher(), proxy_object->host_var_id());
-    // TODO(teravest): Change to DCHECK when http://crbug.com/276347 is
-    // resolved.
-    CHECK(host_var_to_plugin_var_.find(host_var) ==
-          host_var_to_plugin_var_.end());  // Adding an object twice, use
-                                           // FindOrMakePluginVarFromHostVar.
+    DCHECK(host_var_to_plugin_var_.find(host_var) ==
+           host_var_to_plugin_var_.end());  // Adding an object twice, use
+                                            // FindOrMakePluginVarFromHostVar.
     host_var_to_plugin_var_[host_var] = new_id;
   }
   return new_id;
@@ -361,26 +189,6 @@ void PluginVarTracker::ObjectGettingZeroRef(VarMap::iterator iter) {
   // Notify the host we're no longer holding our ref.
   DCHECK(iter->second.ref_count == 0);
   SendReleaseObjectMsg(*object);
-
-  UserDataToPluginImplementedVarMap::iterator found =
-      user_data_to_plugin_.find(object->user_data());
-  if (found != user_data_to_plugin_.end()) {
-    // This object is implemented in the plugin.
-    if (found->second.instance == 0) {
-      // Instance is destroyed. This means that we'll never get a Deallocate
-      // call from the renderer and we should do so now.
-      found->second.ppp_class->Deallocate(found->first);
-      user_data_to_plugin_.erase(found);
-    } else {
-      // The plugin is releasing its last reference to an object it implements.
-      // Clear the tracking data that links our "plugin implemented object" to
-      // the var. If the instance is destroyed and there is no ID, we know that
-      // we should just call Deallocate on the object data.
-      //
-      // See the plugin_object_id declaration for more info.
-      found->second.plugin_object_id = 0;
-    }
-  }
 
   // This will optionally delete the info from live_vars_.
   VarTracker::ObjectGettingZeroRef(iter);
@@ -419,18 +227,14 @@ PP_Var PluginVarTracker::GetOrCreateObjectVarID(ProxyObjectVar* object) {
 void PluginVarTracker::SendAddRefObjectMsg(
     const ProxyObjectVar& proxy_object) {
   int unused;
-  if (proxy_object.dispatcher()) {
-    proxy_object.dispatcher()->Send(new PpapiHostMsg_PPBVar_AddRefObject(
-        API_ID_PPB_VAR_DEPRECATED, proxy_object.host_var_id(), &unused));
-  }
+  proxy_object.dispatcher()->Send(new PpapiHostMsg_PPBVar_AddRefObject(
+      API_ID_PPB_VAR_DEPRECATED, proxy_object.host_var_id(), &unused));
 }
 
 void PluginVarTracker::SendReleaseObjectMsg(
     const ProxyObjectVar& proxy_object) {
-  if (proxy_object.dispatcher()) {
-    proxy_object.dispatcher()->Send(new PpapiHostMsg_PPBVar_ReleaseObject(
-        API_ID_PPB_VAR_DEPRECATED, proxy_object.host_var_id()));
-  }
+  proxy_object.dispatcher()->Send(new PpapiHostMsg_PPBVar_ReleaseObject(
+      API_ID_PPB_VAR_DEPRECATED, proxy_object.host_var_id()));
 }
 
 scoped_refptr<ProxyObjectVar> PluginVarTracker::FindOrMakePluginVarFromHostVar(
@@ -449,30 +253,11 @@ scoped_refptr<ProxyObjectVar> PluginVarTracker::FindOrMakePluginVarFromHostVar(
 
   // Have this host var, look up the object.
   VarMap::iterator ret = live_vars_.find(found->second);
-
-  // We CHECK here because we currently don't fall back sanely.
-  // This may be involved in a NULL dereference. http://crbug.com/276347
-  CHECK(ret != live_vars_.end());
+  DCHECK(ret != live_vars_.end());
 
   // All objects should be proxy objects.
   DCHECK(ret->second.var->AsProxyObjectVar());
   return scoped_refptr<ProxyObjectVar>(ret->second.var->AsProxyObjectVar());
-}
-
-int PluginVarTracker::TrackSharedMemoryHandle(PP_Instance instance,
-                                              base::SharedMemoryHandle handle,
-                                              uint32 size_in_bytes) {
-  NOTREACHED();
-  return -1;
-}
-
-bool PluginVarTracker::StopTrackingSharedMemoryHandle(
-    int id,
-    PP_Instance instance,
-    base::SharedMemoryHandle* handle,
-    uint32* size_in_bytes) {
-  NOTREACHED();
-  return false;
 }
 
 }  // namesace proxy

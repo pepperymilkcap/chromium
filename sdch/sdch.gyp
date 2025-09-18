@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,13 +10,9 @@
     {
       'target_name': 'sdch',
       'type': 'static_library',
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../third_party/zlib/zlib.gyp:zlib',
-      ],
       'sources': [
-        'logging_forward.h',
         'open-vcdiff/src/addrcache.cc',
+        'open-vcdiff/src/adler32.c',
         'open-vcdiff/src/blockhash.cc',
         'open-vcdiff/src/blockhash.h',
         'open-vcdiff/src/checksum.h',
@@ -33,6 +29,8 @@
         'open-vcdiff/src/headerparser.h',
         'open-vcdiff/src/instruction_map.cc',
         'open-vcdiff/src/instruction_map.h',
+        'open-vcdiff/src/logging.cc',
+        'open-vcdiff/src/logging.h',
         'open-vcdiff/src/rolling_hash.h',
         'open-vcdiff/src/testing.h',
         'open-vcdiff/src/varint_bigendian.cc',
@@ -41,6 +39,8 @@
         'open-vcdiff/src/vcdiff_defs.h',
         'open-vcdiff/src/vcdiffengine.cc',
         'open-vcdiff/src/vcdiffengine.h',
+        'open-vcdiff/src/zconf.h',
+        'open-vcdiff/src/zlib.h',
         'open-vcdiff/vsprojects/config.h',
         'open-vcdiff/vsprojects/stdint.h',
       ],
@@ -55,40 +55,9 @@
       'conditions': [
         [ 'OS == "linux" or OS == "android"', { 'include_dirs': [ 'linux' ] } ],
         [ 'os_bsd==1 or OS=="solaris"', { 'include_dirs': [ 'bsd' ] } ],
-        [ 'OS == "ios"', { 'include_dirs': [ 'ios' ] } ],
         [ 'OS == "mac"', { 'include_dirs': [ 'mac' ] } ],
         [ 'OS == "win"', { 'include_dirs': [ 'open-vcdiff/vsprojects' ] } ],
-        # TODO(mark): Remove usage of the deprecated auto_ptr.
-        [ 'clang == 1', { 'cflags': [ '-Wno-deprecated-declarations' ] } ],
       ],
-      # open-vcdiff's logging.h introduces static initializers. This was
-      # reported upstream years ago (
-      # https://code.google.com/p/open-vcdiff/issues/detail?id=33 ). Since
-      # upstream won't fix this, work around it on the chromium side:
-      # Inject a header that forwards to base/logging.h instead (which doesn't
-      # introduce static initializers, and which prevents open-vcdiff's
-      # logging.h from being used).
-      'variables': {
-        'logging_path': 'logging_forward.h',
-        'conditions': [
-          # gyp leaves unspecified what the cwd is when running the compiler,
-          # and gyp/linux doesn't have a built-in way for forcing an include.
-          # So hardcode the base directory. If this spreads, provide native
-          # support in gyp, like we have for gyp/mac and gyp/windows.
-          # path.
-          ['"<(GENERATOR)"=="ninja"', { 'logging_dir': '../..' },
-                                      { 'logging_dir': '.' }
-          ],
-        ],
-      },
-      # GCC_PREFIX_HEADER is relative to the current directory,
-      # ForcedIncludeFiles is relative to include_dirs, cflags relative to the
-      # build directory.
-      'xcode_settings': { 'GCC_PREFIX_HEADER': '<(logging_path)' },
-      'msvs_settings': {
-        'VCCLCompilerTool': { 'ForcedIncludeFiles': [ 'sdch/<(logging_path)' ] }
-      },
-      'cflags': [ '-include', '<(logging_dir)/sdch/<(logging_path)' ],
     },
   ],
 }

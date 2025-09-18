@@ -1,9 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file intentionally does not have header guards, it's included
-// inside a macro to generate enum values.
+// inside a macro to generate enum.
 
 // This file contains the list of network errors.
 
@@ -83,16 +83,6 @@ NET_ERROR(FILE_VIRUS_INFECTED, -19)
 
 // The client chose to block the request.
 NET_ERROR(BLOCKED_BY_CLIENT, -20)
-
-// The network changed.
-NET_ERROR(NETWORK_CHANGED, -21)
-
-// The request was blocked by the URL blacklist configured by the domain
-// administrator.
-NET_ERROR(BLOCKED_BY_ADMINISTRATOR, -22)
-
-// The socket is already connected.
-NET_ERROR(SOCKET_IS_CONNECTED, -23)
 
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
@@ -209,7 +199,11 @@ NET_ERROR(PROXY_CONNECTION_FAILED, -130)
 // that a mandatory PAC script could not be fetched, parsed or executed.
 NET_ERROR(MANDATORY_PROXY_CONFIGURATION_FAILED, -131)
 
-// -132 was formerly ERR_ESET_ANTI_VIRUS_SSL_INTERCEPTION
+// We detected an ESET product intercepting our HTTPS connections. Since these
+// products are False Start intolerant, we return this error so that we can
+// give the user a helpful error message rather than have the connection hang.
+// See also: KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION
+NET_ERROR(ESET_ANTI_VIRUS_SSL_INTERCEPTION, -132)
 
 // We've hit the max socket limit for the socket pool while preconnecting.  We
 // don't bother trying to preconnect more sockets.
@@ -253,13 +247,17 @@ NET_ERROR(SSL_CLIENT_AUTH_SIGNATURE_FAILED, -141)
 // which exceeds size threshold).
 NET_ERROR(MSG_TOO_BIG, -142)
 
-// A SPDY session already exists, and should be used instead of this connection.
-NET_ERROR(SPDY_SESSION_ALREADY_EXISTS, -143)
+// We detected a Kaspersky product intercepting our HTTPS connections. This
+// interacts badly with our SSL stack for unknown reasons (disabling False
+// Start doesn't help). We return this error so that we can give the user a
+// helpful error message rather than have the connection hang.
+// See also: ESET_ANTI_VIRUS_SSL_INTERCEPTION
+NET_ERROR(KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION, -143)
 
-// Error -144 was removed (LIMIT_VIOLATION).
+// Violation of limits (e.g. imposed to prevent DoS).
+NET_ERROR(LIMIT_VIOLATION, -144)
 
-// Websocket protocol error. Indicates that we are terminating the connection
-// due to a malformed frame or other protocol violation.
+// WebSocket protocol error occurred.
 NET_ERROR(WS_PROTOCOL_ERROR, -145)
 
 // Connection was aborted for switching to another ptotocol.
@@ -276,7 +274,7 @@ NET_ERROR(SSL_HANDSHAKE_NOT_COMPLETED, -148)
 NET_ERROR(SSL_BAD_PEER_PUBLIC_KEY, -149)
 
 // The certificate didn't match the built-in public key pins for the host name.
-// The pins are set in net/http/transport_security_state.cc and require that
+// The pins are set in net/base/transport_security_state.cc and require that
 // one of a set of public keys exist on the path from the leaf to the root.
 NET_ERROR(SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, -150)
 
@@ -286,29 +284,6 @@ NET_ERROR(CLIENT_AUTH_CERT_TYPE_UNSUPPORTED, -151)
 // Server requested one type of cert, then requested a different type while the
 // first was still being generated.
 NET_ERROR(ORIGIN_BOUND_CERT_GENERATION_TYPE_MISMATCH, -152)
-
-// An SSL peer sent us a fatal decrypt_error alert. This typically occurs when
-// a peer could not correctly verify a signature (in CertificateVerify or
-// ServerKeyExchange) or validate a Finished message.
-NET_ERROR(SSL_DECRYPT_ERROR_ALERT, -153)
-
-// There are too many pending WebSocketJob instances, so the new job was not
-// pushed to the queue.
-NET_ERROR(WS_THROTTLE_QUEUE_TOO_LARGE, -154)
-
-// There are too many active SocketStream instances, so the new connect request
-// was rejected.
-NET_ERROR(TOO_MANY_SOCKET_STREAMS, -155)
-
-// The SSL server certificate changed in a renegotiation.
-NET_ERROR(SSL_SERVER_CERT_CHANGED, -156)
-
-// The SSL server indicated that an unnecessary TLS version fallback was
-// performed.
-NET_ERROR(SSL_INAPPROPRIATE_FALLBACK, -157)
-
-// Certificate Transparency: All Signed Certificate Timestamps failed to verify.
-NET_ERROR(CT_NO_SCTS_VERIFIED_OK, -158)
 
 // Certificate error codes
 //
@@ -398,7 +373,9 @@ NET_ERROR(CERT_INVALID, -207)
 // signature algorithm.
 NET_ERROR(CERT_WEAK_SIGNATURE_ALGORITHM, -208)
 
-// -209 is availible: was CERT_NOT_IN_DNS.
+// The domain has CERT records which are tagged as being an exclusive list of
+// valid fingerprints. But the certificate presented was not in this list.
+NET_ERROR(CERT_NOT_IN_DNS, -209)
 
 // The host name specified in the certificate is not unique.
 NET_ERROR(CERT_NON_UNIQUE_NAME, -210)
@@ -407,16 +384,13 @@ NET_ERROR(CERT_NON_UNIQUE_NAME, -210)
 // a too-small RSA key).
 NET_ERROR(CERT_WEAK_KEY, -211)
 
-// The certificate claimed DNS names that are in violation of name constraints.
-NET_ERROR(CERT_NAME_CONSTRAINT_VIOLATION, -212)
-
 // Add new certificate error codes here.
 //
 // Update the value of CERT_END whenever you add a new certificate error
 // code.
 
 // The value immediately past the last certificate error code.
-NET_ERROR(CERT_END, -213)
+NET_ERROR(CERT_END, -212)
 
 // The URL is invalid.
 NET_ERROR(INVALID_URL, -300)
@@ -494,7 +468,7 @@ NET_ERROR(INVALID_SPDY_STREAM, -335)
 // There are no supported proxies in the provided list.
 NET_ERROR(NO_SUPPORTED_PROXIES, -336)
 
-// There is a SPDY protocol error.
+// There is a SPDY protocol framing error.
 NET_ERROR(SPDY_PROTOCOL_ERROR, -337)
 
 // Credentials could not be established during HTTP Authentication.
@@ -548,27 +522,6 @@ NET_ERROR(SPDY_SERVER_REFUSED_STREAM, -351)
 // SPDY server didn't respond to the PING message.
 NET_ERROR(SPDY_PING_FAILED, -352)
 
-// The request couldn't be completed on an HTTP pipeline. Client should retry.
-NET_ERROR(PIPELINE_EVICTION, -353)
-
-// The HTTP response body transferred fewer bytes than were advertised by the
-// Content-Length header when the connection is closed.
-NET_ERROR(CONTENT_LENGTH_MISMATCH, -354)
-
-// The HTTP response body is transferred with Chunked-Encoding, but the
-// terminating zero-length chunk was never sent when the connection is closed.
-NET_ERROR(INCOMPLETE_CHUNKED_ENCODING, -355)
-
-// There is a QUIC protocol error.
-NET_ERROR(QUIC_PROTOCOL_ERROR, -356)
-
-// The HTTP headers were truncated by an EOF.
-NET_ERROR(RESPONSE_HEADERS_TRUNCATED, -357)
-
-// The QUIC crytpo handshake failed.  This means that the server was unable
-// to read any requests sent, so they may be resent.
-NET_ERROR(QUIC_HANDSHAKE_FAILED, -358)
-
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -592,17 +545,6 @@ NET_ERROR(CACHE_CREATE_FAILURE, -405)
 // tells the transaction to restart the entry-creation logic because the state
 // of the cache has changed.
 NET_ERROR(CACHE_RACE, -406)
-
-// The cache was unable to read a checksum record on an entry. This can be
-// returned from attempts to read from the cache. It is an internal error,
-// returned by the SimpleCache backend, but not by any URLRequest methods
-// or members.
-NET_ERROR(CACHE_CHECKSUM_READ_FAILURE, -407)
-
-// The cache found an entry with an invalid checksum. This can be returned from
-// attempts to read from the cache. It is an internal error, returned by the
-// SimpleCache backend, but not by any URLRequest methods or members.
-NET_ERROR(CACHE_CHECKSUM_MISMATCH, -408)
 
 // The server's response was insecure (e.g. there was a cert error).
 NET_ERROR(INSECURE_RESPONSE, -501)
@@ -679,17 +621,11 @@ NET_ERROR(PKCS12_IMPORT_UNSUPPORTED, -709)
 // Key generation failed.
 NET_ERROR(KEY_GENERATION_FAILED, -710)
 
-// Server-bound certificate generation failed.
+// Origin-bound certificate generation failed.
 NET_ERROR(ORIGIN_BOUND_CERT_GENERATION_FAILED, -711)
 
 // Failure to export private key.
 NET_ERROR(PRIVATE_KEY_EXPORT_FAILED, -712)
-
-// Self-signed certificate generation failed.
-NET_ERROR(SELF_SIGNED_CERT_GENERATION_FAILED, -713)
-
-// The certificate database changed in some way.
-NET_ERROR(CERT_DATABASE_CHANGED, -714)
 
 // DNS error codes.
 
@@ -716,8 +652,5 @@ NET_ERROR(DNS_TIMED_OUT, -803)
 // The entry was not found in cache, for cache-only lookups.
 NET_ERROR(DNS_CACHE_MISS, -804)
 
-// Suffix search list rules prevent resolution of the given host name.
-NET_ERROR(DNS_SEARCH_EMPTY, -805)
-
-// Failed to sort addresses according to RFC3484.
-NET_ERROR(DNS_SORT_ERROR, -806)
+// FIXME: Take the next number.
+NET_ERROR(PIPELINE_EVICTION, -900)

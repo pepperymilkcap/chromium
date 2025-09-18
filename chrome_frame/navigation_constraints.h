@@ -9,7 +9,7 @@
 #include <windows.h>
 
 #include "base/win/scoped_comptr.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 // Provides an interface which controls navigation within ChromeFrame.
 class NavigationConstraints {

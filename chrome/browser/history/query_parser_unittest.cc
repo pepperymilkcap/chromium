@@ -4,7 +4,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_vector.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/history/query_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -24,9 +24,9 @@ class QueryParserTest : public testing::Test {
 // Test helper: Convert a user query string in 8-bit (for hardcoding
 // convenience) to a SQLite query string.
 std::string QueryParserTest::QueryToString(const std::string& query) {
-  base::string16 sqlite_query;
-  query_parser_.ParseQuery(base::UTF8ToUTF16(query), &sqlite_query);
-  return base::UTF16ToUTF8(sqlite_query);
+  string16 sqlite_query;
+  query_parser_.ParseQuery(UTF8ToUTF16(query), &sqlite_query);
+  return UTF16ToUTF8(sqlite_query);
 }
 
 // Basic multi-word queries, including prefix matching.
@@ -39,12 +39,12 @@ TEST_F(QueryParserTest, SimpleQueries) {
   // the minimum is 2 while for other scripts, it's 3.
   EXPECT_EQ("f b", QueryToString(" f b"));
   // KA JANG
-  EXPECT_EQ(base::WideToUTF8(L"\xAC00 \xC7A5"),
-            QueryToString(base::WideToUTF8(L" \xAC00 \xC7A5")));
+  EXPECT_EQ(WideToUTF8(L"\xAC00 \xC7A5"),
+            QueryToString(WideToUTF8(L" \xAC00 \xC7A5")));
   EXPECT_EQ("foo* bar*", QueryToString(" foo   bar "));
   // KA-JANG BICH-GO
-  EXPECT_EQ(base::WideToUTF8(L"\xAC00\xC7A5* \xBE5B\xACE0*"),
-            QueryToString(base::WideToUTF8(L"\xAC00\xC7A5 \xBE5B\xACE0")));
+  EXPECT_EQ(WideToUTF8(L"\xAC00\xC7A5* \xBE5B\xACE0*"),
+            QueryToString(WideToUTF8(L"\xAC00\xC7A5 \xBE5B\xACE0")));
 }
 
 // Quoted substring parsing.
@@ -80,9 +80,9 @@ TEST_F(QueryParserTest, NumWords) {
   };
 
   for (size_t i = 0; i < arraysize(data); ++i) {
-    base::string16 query_string;
+    string16 query_string;
     EXPECT_EQ(data[i].expected_word_count,
-              query_parser_.ParseQuery(base::UTF8ToUTF16(data[i].input),
+              query_parser_.ParseQuery(UTF8ToUTF16(data[i].input),
                                        &query_string));
   }
 }
@@ -97,10 +97,8 @@ TEST_F(QueryParserTest, ParseQueryNodesAndMatch) {
     const size_t m2_start;
     const size_t m2_end;
   } data[] = {
-    { "foo",           "fooey foo",        true,  0, 3, 6, 9 },
     { "foo foo",       "foo",              true,  0, 3, 0, 0 },
     { "foo fooey",     "fooey",            true,  0, 5, 0, 0 },
-    { "fooey foo",     "fooey",            true,  0, 5, 0, 0 },
     { "foo fooey bar", "bar fooey",        true,  0, 3, 4, 9 },
     { "blah",          "blah",             true,  0, 4, 0, 0 },
     { "blah",          "foo",              false, 0, 0, 0, 0 },
@@ -117,11 +115,10 @@ TEST_F(QueryParserTest, ParseQueryNodesAndMatch) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
     QueryParser parser;
     ScopedVector<QueryNode> query_nodes;
-    parser.ParseQueryNodes(base::UTF8ToUTF16(data[i].query),
-                           &query_nodes.get());
+    parser.ParseQueryNodes(UTF8ToUTF16(data[i].query), &query_nodes.get());
     Snippet::MatchPositions match_positions;
     ASSERT_EQ(data[i].matches,
-              parser.DoesQueryMatch(base::UTF8ToUTF16(data[i].text),
+              parser.DoesQueryMatch(UTF8ToUTF16(data[i].text),
                                     query_nodes.get(),
                                     &match_positions));
     size_t offset = 0;
@@ -153,14 +150,14 @@ TEST_F(QueryParserTest, ParseQueryWords) {
     { "\"foo bar\" a", "foo", "bar", "a", 3 },
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
-    std::vector<base::string16> results;
+    std::vector<string16> results;
     QueryParser parser;
-    parser.ParseQueryWords(base::UTF8ToUTF16(data[i].text), &results);
+    parser.ParseQueryWords(UTF8ToUTF16(data[i].text), &results);
     ASSERT_EQ(data[i].word_count, results.size());
-    EXPECT_EQ(data[i].w1, base::UTF16ToUTF8(results[0]));
+    EXPECT_EQ(data[i].w1, UTF16ToUTF8(results[0]));
     if (results.size() == 2)
-      EXPECT_EQ(data[i].w2, base::UTF16ToUTF8(results[1]));
+      EXPECT_EQ(data[i].w2, UTF16ToUTF8(results[1]));
     if (results.size() == 3)
-      EXPECT_EQ(data[i].w3, base::UTF16ToUTF8(results[2]));
+      EXPECT_EQ(data[i].w3, UTF16ToUTF8(results[2]));
   }
 }

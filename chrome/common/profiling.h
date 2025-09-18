@@ -4,6 +4,7 @@
 
 #ifndef CHROME_COMMON_PROFILING_H_
 #define CHROME_COMMON_PROFILING_H_
+#pragma once
 
 #include "build/build_config.h"
 

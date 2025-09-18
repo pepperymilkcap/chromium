@@ -5,15 +5,13 @@
 #include "chrome/browser/download/download_service_factory.h"
 
 #include "chrome/browser/download/download_service.h"
-#include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/profiles/incognito_helpers.h"
-#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
+#include "chrome/browser/profiles/profile_dependency_manager.h"
 
 // static
-DownloadService* DownloadServiceFactory::GetForBrowserContext(
-    content::BrowserContext* context) {
+DownloadService* DownloadServiceFactory::GetForProfile(
+    Profile* profile) {
   return static_cast<DownloadService*>(
-      GetInstance()->GetServiceForBrowserContext(context, true));
+      GetInstance()->GetServiceForProfile(profile, true));
 }
 
 // static
@@ -22,19 +20,18 @@ DownloadServiceFactory* DownloadServiceFactory::GetInstance() {
 }
 
 DownloadServiceFactory::DownloadServiceFactory()
-    : BrowserContextKeyedServiceFactory(
-        "DownloadService",
-        BrowserContextDependencyManager::GetInstance()) {
-  DependsOn(HistoryServiceFactory::GetInstance());
+    : ProfileKeyedServiceFactory("DownloadService",
+                                 ProfileDependencyManager::GetInstance()) {
+  // TODO(rdsmith): For Shutdown() order we need to:
+  //    DependsOn(HistoryServiceDataFactory::GetInstance());
 }
 
 DownloadServiceFactory::~DownloadServiceFactory() {
 }
 
-BrowserContextKeyedService* DownloadServiceFactory::BuildServiceInstanceFor(
-    content::BrowserContext* profile) const {
-  DownloadService* service =
-      new DownloadService(static_cast<Profile*>(profile));
+ProfileKeyedService* DownloadServiceFactory::BuildServiceInstanceFor(
+    Profile* profile) const {
+  DownloadService* service = new DownloadService(profile);
 
   // No need for initialization; initialization can be done on first
   // use of service.
@@ -42,7 +39,6 @@ BrowserContextKeyedService* DownloadServiceFactory::BuildServiceInstanceFor(
   return service;
 }
 
-content::BrowserContext* DownloadServiceFactory::GetBrowserContextToUse(
-    content::BrowserContext* context) const {
-  return chrome::GetBrowserContextOwnInstanceInIncognito(context);
+bool DownloadServiceFactory::ServiceHasOwnInstanceInIncognito() {
+  return true;
 }

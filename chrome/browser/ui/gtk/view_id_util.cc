@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,17 +80,17 @@ const char* GetNameFromID(ViewID id) {
     case VIEW_ID_STAR_BUTTON:
       return "chrome-toolbar-star-button";
 
-    case VIEW_ID_ACTION_BOX_BUTTON:
-      return "chrome-action-box-button";
+    case VIEW_ID_LOCATION_BAR:
+      return "chrome-location-bar";
 
     case VIEW_ID_BROWSER_ACTION_TOOLBAR:
       return "chrome-toolbar-browser-actions-container";
 
-    case VIEW_ID_OMNIBOX:
-      return "chrome-omnibox";
-
     case VIEW_ID_APP_MENU:
       return "chrome-app-menu";
+
+    case VIEW_ID_AUTOCOMPLETE:
+      return "chrome-autocomplete-edit";
 
     case VIEW_ID_BOOKMARK_BAR:
       return "chrome-bookmark-bar";
@@ -107,18 +107,10 @@ const char* GetNameFromID(ViewID id) {
     case VIEW_ID_DEV_TOOLS_DOCKED:
       return "chrome-dev-tools-docked";
 
-    case VIEW_ID_ZOOM_BUTTON:
-      return "chrome-zoom-button";
-
-    case VIEW_ID_MANAGE_PASSWORDS_ICON_BUTTON:
-      return "chrome-manage-passwords-icon-button";
-
-    case VIEW_ID_SCRIPT_BUBBLE:
-      return "chrome-script-bubble-button";
-
     // These are never hit because the tab container uses the delegate to
     // set its ID.
     case VIEW_ID_TAB_CONTAINER:
+    case VIEW_ID_TAB_CONTAINER_FOCUS_VIEW:
     default:
       NOTREACHED() << "If you added a new VIEW_ID, please provide "
                       "a name for the widget.";

@@ -1,27 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_WRENCH_MENU_WRENCH_MENU_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_WRENCH_MENU_WRENCH_MENU_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_ptr.h"
-#import "ui/base/cocoa/menu_controller.h"
+#import "chrome/browser/ui/cocoa/menu_controller.h"
 
 class BookmarkMenuBridge;
 class Browser;
 @class MenuTrackedRootView;
-class RecentTabsMenuModelDelegate;
 @class ToolbarController;
 @class WrenchMenuButtonViewController;
 class WrenchMenuModel;
-
-namespace wrench_menu_controller {
-// The vertical offset of the wrench bubbles from the wrench menu button.
-extern const CGFloat kWrenchBubblePointOffsetY;
-}
 
 namespace WrenchMenuControllerInternal {
 class AcceleratorDelegate;
@@ -45,13 +41,9 @@ class ZoomLevelObserver;
   // The model, rebuilt each time the |-menuNeedsUpdate:|.
   scoped_ptr<WrenchMenuModel> wrenchMenuModel_;
 
-  // Used to update icons in the recent tabs menu. This must be declared after
-  // |wrenchMenuModel_| so that it gets deleted first.
-  scoped_ptr<RecentTabsMenuModelDelegate> recentTabsMenuModelDelegate_;
-
   // A shim NSViewController that loads the buttons from the NIB because ObjC
   // doesn't have multiple inheritance as this class is a MenuController.
-  base::scoped_nsobject<WrenchMenuButtonViewController> buttonViewController_;
+  scoped_nsobject<WrenchMenuButtonViewController> buttonViewController_;
 
   // The browser for which this controller exists.
   Browser* browser_;  // weak
@@ -74,10 +66,6 @@ class ZoomLevelObserver;
 
 // Returns the weak reference to the WrenchMenuModel.
 - (WrenchMenuModel*)wrenchMenuModel;
-
-// Creates a RecentTabsMenuModelDelegate instance which will take care of
-// updating the recent tabs submenu.
-- (void)updateRecentTabsSubmenu;
 
 @end
 

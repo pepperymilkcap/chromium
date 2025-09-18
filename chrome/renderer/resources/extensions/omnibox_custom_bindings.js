@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom binding for the omnibox API. Only injected into the v8 contexts
+// Custom bindings for the omnibox API. Only injected into the v8 contexts
 // for extensions which have permission for the omnibox API.
 
-var binding = require('binding').Binding.create('omnibox');
+(function() {
 
-var eventBindings = require('event_bindings');
-var sendRequest = require('sendRequest').sendRequest;
+native function GetChromeHidden();
 
 // Remove invalid characters from |text| so that it is suitable to use
 // for |AutocompleteMatch::contents|.
@@ -48,7 +47,7 @@ function parseOmniboxDescription(input) {
   };
 
   // Recursively walk the tree.
-  function walk(node) {
+  (function(node) {
     for (var i = 0, child; child = node.childNodes[i]; i++) {
       // Append text nodes to our description.
       if (child.nodeType == Node.TEXT_NODE) {
@@ -65,60 +64,50 @@ function parseOmniboxDescription(input) {
           'type': child.nodeName,
           'offset': result.description.length
         };
-        $Array.push(result.descriptionStyles, style);
-        walk(child);
+        result.descriptionStyles.push(style);
+        arguments.callee(child);
         style.length = result.description.length - style.offset;
         continue;
       }
 
       // Descend into all other nodes, even if they are unrecognized, for
       // forward compat.
-      walk(child);
+      arguments.callee(child);
     }
-  };
-  walk(root);
+  })(root);
 
   return result;
 }
 
-binding.registerCustomHook(function(bindingsAPI) {
+GetChromeHidden().registerCustomHook('omnibox', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
+  var sendRequest = bindingsAPI.sendRequest;
 
-  apiFunctions.setUpdateArgumentsPreValidate('setDefaultSuggestion',
-                                             function(suggestResult) {
-    if (suggestResult.content != undefined) {  // null, etc.
-      throw new Error(
-          'setDefaultSuggestion cannot contain the "content" field');
-    }
-    return [suggestResult];
-  });
-
-  apiFunctions.setHandleRequest('setDefaultSuggestion', function(details) {
+  apiFunctions.setHandleRequest("omnibox.setDefaultSuggestion",
+      function(details) {
     var parseResult = parseOmniboxDescription(details.description);
     sendRequest(this.name, [parseResult], this.definition.parameters);
   });
 
-  apiFunctions.setUpdateArgumentsPostValidate(
-      'sendSuggestions', function(requestId, userSuggestions) {
+  apiFunctions.setUpdateArgumentsPostValidate("omnibox.sendSuggestions",
+      function(requestId, userSuggestions) {
     var suggestions = [];
     for (var i = 0; i < userSuggestions.length; i++) {
       var parseResult = parseOmniboxDescription(
           userSuggestions[i].description);
       parseResult.content = userSuggestions[i].content;
-      $Array.push(suggestions, parseResult);
+      suggestions.push(parseResult);
     }
     return [requestId, suggestions];
   });
-});
 
-eventBindings.registerArgumentMassager('omnibox.onInputChanged',
-    function(args, dispatch) {
-  var text = args[0];
-  var requestId = args[1];
-  var suggestCallback = function(suggestions) {
-    chrome.omnibox.sendSuggestions(requestId, suggestions);
+  chrome.omnibox.onInputChanged.dispatch =
+      function(text, requestId) {
+    var suggestCallback = function(suggestions) {
+      chrome.omnibox.sendSuggestions(requestId, suggestions);
+    };
+    chrome.Event.prototype.dispatch.apply(this, [text, suggestCallback]);
   };
-  dispatch([text, suggestCallback]);
 });
 
-exports.binding = binding.generate();
+})();

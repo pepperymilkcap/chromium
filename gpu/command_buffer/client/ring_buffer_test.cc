@@ -1,20 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file contains the tests for the RingBuffer class.
 
 #include "gpu/command_buffer/client/ring_buffer.h"
-
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
+#include "gpu/command_buffer/service/mocks.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
-#include "gpu/command_buffer/service/mocks.h"
-#include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_MACOSX)
@@ -36,29 +34,26 @@ class BaseRingBufferTest : public testing::Test {
   static const unsigned int kBaseOffset = 128;
   static const unsigned int kBufferSize = 1024;
 
-  void RunPendingSetToken() {
-    for (std::vector<const void*>::iterator it = set_token_arguments_.begin();
-         it != set_token_arguments_.end();
-         ++it) {
-      api_mock_->SetToken(cmd::kSetToken, 1, *it);
+  class DoJumpCommand {
+   public:
+    explicit DoJumpCommand(GpuScheduler* gpu_scheduler)
+        : gpu_scheduler_(gpu_scheduler) {
     }
-    set_token_arguments_.clear();
-    delay_set_token_ = false;
-  }
 
-  void SetToken(unsigned int command,
-                unsigned int arg_count,
-                const void* _args) {
-    EXPECT_EQ(static_cast<unsigned int>(cmd::kSetToken), command);
-    EXPECT_EQ(1u, arg_count);
-    if (delay_set_token_)
-      set_token_arguments_.push_back(_args);
-    else
-      api_mock_->SetToken(cmd::kSetToken, 1, _args);
-  }
+    error::Error DoCommand(
+        unsigned int command,
+        unsigned int arg_count,
+        const void* cmd_data) {
+      const cmd::Jump* jump_cmd = static_cast<const cmd::Jump*>(cmd_data);
+      gpu_scheduler_->parser()->set_get(jump_cmd->offset);
+      return error::kNoError;
+    };
+
+   private:
+    GpuScheduler* gpu_scheduler_;
+  };
 
   virtual void SetUp() {
-    delay_set_token_ = false;
     api_mock_.reset(new AsyncAPIMock);
     // ignore noops in the mock - we don't want to inspect the internals of the
     // helper.
@@ -66,17 +61,11 @@ class BaseRingBufferTest : public testing::Test {
         .WillRepeatedly(Return(error::kNoError));
     // Forward the SetToken calls to the engine
     EXPECT_CALL(*api_mock_.get(), DoCommand(cmd::kSetToken, 1, _))
-        .WillRepeatedly(DoAll(Invoke(this, &BaseRingBufferTest::SetToken),
+        .WillRepeatedly(DoAll(Invoke(api_mock_.get(), &AsyncAPIMock::SetToken),
                               Return(error::kNoError)));
 
-    {
-      TransferBufferManager* manager = new TransferBufferManager();
-      transfer_buffer_manager_.reset(manager);
-      EXPECT_TRUE(manager->Initialize());
-    }
-    command_buffer_.reset(
-        new CommandBufferService(transfer_buffer_manager_.get()));
-    EXPECT_TRUE(command_buffer_->Initialize());
+    command_buffer_.reset(new CommandBufferService);
+    command_buffer_->Initialize();
 
     gpu_scheduler_.reset(new GpuScheduler(
         command_buffer_.get(), api_mock_.get(), NULL));
@@ -86,6 +75,10 @@ class BaseRingBufferTest : public testing::Test {
         &GpuScheduler::SetGetBuffer, base::Unretained(gpu_scheduler_.get())));
 
     api_mock_->set_engine(gpu_scheduler_.get());
+    do_jump_command_.reset(new DoJumpCommand(gpu_scheduler_.get()));
+    EXPECT_CALL(*api_mock_, DoCommand(cmd::kJump, _, _))
+        .WillRepeatedly(
+            Invoke(do_jump_command_.get(), &DoJumpCommand::DoCommand));
 
     helper_.reset(new CommandBufferHelper(command_buffer_.get()));
     helper_->Initialize(kBufferSize);
@@ -98,15 +91,12 @@ class BaseRingBufferTest : public testing::Test {
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool autorelease_pool_;
 #endif
-  base::MessageLoop message_loop_;
+  MessageLoop message_loop_;
   scoped_ptr<AsyncAPIMock> api_mock_;
-  scoped_ptr<TransferBufferManagerInterface> transfer_buffer_manager_;
   scoped_ptr<CommandBufferService> command_buffer_;
   scoped_ptr<GpuScheduler> gpu_scheduler_;
   scoped_ptr<CommandBufferHelper> helper_;
-  std::vector<const void*> set_token_arguments_;
-  bool delay_set_token_;
-
+  scoped_ptr<DoJumpCommand> do_jump_command_;
 };
 
 #ifndef _MSC_VER
@@ -127,7 +117,7 @@ class RingBufferTest : public BaseRingBufferTest {
 
   virtual void TearDown() {
     // If the GpuScheduler posts any tasks, this forces them to run.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
 
     BaseRingBufferTest::TearDown();
   }
@@ -154,7 +144,6 @@ TEST_F(RingBufferTest, TestFreePendingToken) {
   const unsigned int kAllocCount = kBufferSize / kSize;
   CHECK(kAllocCount * kSize == kBufferSize);
 
-  delay_set_token_ = true;
   // Allocate several buffers to fill in the memory.
   int32 tokens[kAllocCount];
   for (unsigned int ii = 0; ii < kAllocCount; ++ii) {
@@ -166,8 +155,6 @@ TEST_F(RingBufferTest, TestFreePendingToken) {
 
   EXPECT_EQ(kBufferSize - (kSize * kAllocCount),
             allocator_->GetLargestFreeSizeNoWaiting());
-
-  RunPendingSetToken();
 
   // This allocation will need to reclaim the space freed above, so that should
   // process the commands until a token is passed.
@@ -226,13 +213,13 @@ class RingBufferWrapperTest : public BaseRingBufferTest {
 
   virtual void TearDown() {
     // If the GpuScheduler posts any tasks, this forces them to run.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
 
     BaseRingBufferTest::TearDown();
   }
 
   scoped_ptr<RingBufferWrapper> allocator_;
-  scoped_ptr<int8[]> buffer_;
+  scoped_array<int8> buffer_;
   int8* buffer_start_;
 };
 
@@ -271,7 +258,6 @@ TEST_F(RingBufferWrapperTest, TestFreePendingToken) {
   const unsigned int kAllocCount = kBufferSize / kSize;
   CHECK(kAllocCount * kSize == kBufferSize);
 
-  delay_set_token_ = true;
   // Allocate several buffers to fill in the memory.
   int32 tokens[kAllocCount];
   for (unsigned int ii = 0; ii < kAllocCount; ++ii) {
@@ -283,8 +269,6 @@ TEST_F(RingBufferWrapperTest, TestFreePendingToken) {
 
   EXPECT_EQ(kBufferSize - (kSize * kAllocCount),
             allocator_->GetLargestFreeSizeNoWaiting());
-
-  RunPendingSetToken();
 
   // This allocation will need to reclaim the space freed above, so that should
   // process the commands until the token is passed.

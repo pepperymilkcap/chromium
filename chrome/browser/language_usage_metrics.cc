@@ -6,21 +6,25 @@
 
 #include <algorithm>
 
-#include "base/metrics/sparse_histogram.h"
-#include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
+#include "base/metrics/histogram.h"
+#include "base/string_tokenizer.h"
+#include "base/string_util.h"
 
 namespace {
-void RecordAcceptLanguage(int language_code) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("LanguageUsage.AcceptLanguage",
-                              language_code);
+void RecordAcceptLanguage(Language language) {
+  UMA_HISTOGRAM_ENUMERATION("LanguageUsageMetrics.AcceptLanguage",
+                            language, NUM_LANGUAGES);
 }
 }  // namespace
 
 // static
 void LanguageUsageMetrics::RecordAcceptLanguages(
     const std::string& accept_languages) {
-  std::set<int> languages;
+  // Rethink about the histogram memory costs when the number of languages
+  // becomes too large.
+  DCHECK_LE(NUM_LANGUAGES, 300);
+
+  std::set<Language> languages;
   ParseAcceptLanguages(accept_languages, &languages);
   std::for_each(languages.begin(), languages.end(), RecordAcceptLanguage);
 }
@@ -28,44 +32,36 @@ void LanguageUsageMetrics::RecordAcceptLanguages(
 // static
 void LanguageUsageMetrics::RecordApplicationLanguage(
     const std::string& application_locale) {
-  const int language_code = ToLanguageCode(application_locale);
-  if (language_code != 0)
-    UMA_HISTOGRAM_SPARSE_SLOWLY("LanguageUsage.ApplicationLanguage",
-                                language_code);
-}
-
-// static
-int LanguageUsageMetrics::ToLanguageCode(const std::string& locale) {
-  base::StringTokenizer parts(locale, "-_");
-  if (!parts.GetNext())
-    return 0;
-
-  std::string language_part = parts.token();
-  StringToLowerASCII(&language_part);
-
-  int language_code = 0;
-  for (std::string::iterator it = language_part.begin();
-       it != language_part.end(); ++it) {
-    char ch = *it;
-    if (ch < 'a' || 'z' < ch)
-      return 0;
-
-    language_code <<= 8;
-    language_code += ch;
+  const Language language = ToLanguage(application_locale);
+  if (language != UNKNOWN_LANGUAGE) {
+    UMA_HISTOGRAM_ENUMERATION("LanguageUsageMetrics.ApplicationLanguage",
+                              language, NUM_LANGUAGES);
   }
-
-  return language_code;
 }
 
 // static
 void LanguageUsageMetrics::ParseAcceptLanguages(
-    const std::string& accept_languages,
-    std::set<int>* languages) {
+    const std::string& accept_languages, std::set<Language>* languages) {
   languages->clear();
-  base::StringTokenizer locales(accept_languages, ",");
+  StringTokenizer locales(accept_languages, ",");
   while (locales.GetNext()) {
-    const int language_code = ToLanguageCode(locales.token());
-    if (language_code != 0)
-      languages->insert(language_code);
+    const Language language = ToLanguage(locales.token());
+    if (language != UNKNOWN_LANGUAGE) {
+      languages->insert(language);
+    }
   }
+}
+
+// static
+Language LanguageUsageMetrics::ToLanguage(const std::string& locale) {
+  StringTokenizer parts(locale, "-_");
+  if (!parts.GetNext()) {
+    return UNKNOWN_LANGUAGE;
+  }
+  const std::string language_part = parts.token();
+  Language language;
+  if (!LanguageFromCode(language_part.c_str(), &language)) {
+    return UNKNOWN_LANGUAGE;
+  }
+  return language;
 }

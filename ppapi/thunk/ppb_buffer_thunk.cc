@@ -14,7 +14,7 @@ namespace thunk {
 namespace {
 
 PP_Resource Create(PP_Instance instance, uint32_t size) {
-  EnterResourceCreation enter(instance);
+  EnterFunction<ResourceCreationAPI> enter(instance, true);
   if (enter.failed())
     return 0;
   return enter.functions()->CreateBuffer(instance, size);

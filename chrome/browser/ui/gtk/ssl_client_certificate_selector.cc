@@ -1,8 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ssl/ssl_client_certificate_selector.h"
+#include "chrome/browser/ssl_client_certificate_selector.h"
 
 #include <gtk/gtk.h>
 
@@ -12,28 +12,25 @@
 #include "base/bind.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/ssl/ssl_client_auth_observer.h"
-#include "chrome/browser/ui/crypto_module_password_dialog_nss.h"
+#include "chrome/browser/ui/crypto_module_password_dialog.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/net/x509_certificate_model.h"
-#include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
-#include "net/cert/x509_certificate.h"
-#include "net/ssl/ssl_cert_request_info.h"
+#include "net/base/x509_certificate.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/gtk_compat.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/scoped_gobject.h"
 
 using content::BrowserThread;
-using content::WebContents;
-using web_modal::WebContentsModalDialogManager;
 
 namespace {
 
@@ -44,19 +41,24 @@ enum {
 ///////////////////////////////////////////////////////////////////////////////
 // SSLClientCertificateSelector
 
-class SSLClientCertificateSelector : public SSLClientAuthObserver {
+class SSLClientCertificateSelector : public SSLClientAuthObserver,
+                                     public ConstrainedWindowGtkDelegate {
  public:
   explicit SSLClientCertificateSelector(
-      WebContents* parent,
-      const net::HttpNetworkSession* network_session,
+      TabContentsWrapper* parent,
       net::SSLCertRequestInfo* cert_request_info,
-      const base::Callback<void(net::X509Certificate*)>& callback);
-  virtual ~SSLClientCertificateSelector();
+      SSLClientAuthHandler* delegate);
+  ~SSLClientCertificateSelector();
 
   void Show();
 
   // SSLClientAuthObserver implementation:
-  virtual void OnCertSelectedByNotification() OVERRIDE;
+  virtual void OnCertSelectedByNotification();
+
+  // ConstrainedWindowGtkDelegate implementation:
+  virtual GtkWidget* GetWidgetRoot() { return root_widget_.get(); }
+  virtual GtkWidget* GetFocusWidget();
+  virtual void DeleteDelegate();
 
  private:
   void PopulateCerts();
@@ -78,37 +80,36 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver {
   CHROMEGTK_CALLBACK_0(SSLClientCertificateSelector, void, OnOkClicked);
   CHROMEGTK_CALLBACK_1(SSLClientCertificateSelector, void, OnPromptShown,
                        GtkWidget*);
-  CHROMEGTK_CALLBACK_0(SSLClientCertificateSelector, void, OnDestroy);
+
+  scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
 
   std::vector<std::string> details_strings_;
 
   GtkWidget* cert_combo_box_;
   GtkTextBuffer* cert_details_buffer_;
 
-  ui::ScopedGObject<GtkWidget>::Type root_widget_;
+  scoped_refptr<SSLClientAuthHandler> delegate_;
+
+  ui::OwnedWidgetGtk root_widget_;
   // Hold on to the select button to focus it.
   GtkWidget* select_button_;
 
-  WebContents* web_contents_;
-  GtkWidget* window_;
+  TabContentsWrapper* wrapper_;
+  ConstrainedWindow* window_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLClientCertificateSelector);
 };
 
 SSLClientCertificateSelector::SSLClientCertificateSelector(
-    WebContents* web_contents,
-    const net::HttpNetworkSession* network_session,
+    TabContentsWrapper* wrapper,
     net::SSLCertRequestInfo* cert_request_info,
-    const base::Callback<void(net::X509Certificate*)>& callback)
-    : SSLClientAuthObserver(network_session, cert_request_info, callback),
-      web_contents_(web_contents),
+    SSLClientAuthHandler* delegate)
+    : SSLClientAuthObserver(cert_request_info, delegate),
+      cert_request_info_(cert_request_info),
+      delegate_(delegate),
+      wrapper_(wrapper),
       window_(NULL) {
-  root_widget_.reset(gtk_vbox_new(FALSE, ui::kControlSpacing));
-  g_object_ref_sink(root_widget_.get());
-  g_signal_connect(root_widget_.get(),
-                   "destroy",
-                   G_CALLBACK(OnDestroyThunk),
-                   this);
+  root_widget_.Own(gtk_vbox_new(FALSE, ui::kControlSpacing));
 
   GtkWidget* site_vbox = gtk_vbox_new(FALSE, ui::kControlSpacing);
   gtk_box_pack_start(GTK_BOX(root_widget_.get()), site_vbox,
@@ -120,7 +121,7 @@ SSLClientCertificateSelector::SSLClientCertificateSelector(
                      FALSE, FALSE, 0);
 
   GtkWidget* site_label = gtk_label_new(
-      cert_request_info->host_and_port.ToString().c_str());
+      cert_request_info->host_and_port.c_str());
   gtk_util::LeftAlignMisc(site_label);
   gtk_box_pack_start(GTK_BOX(site_vbox), site_label, FALSE, FALSE, 0);
 
@@ -194,36 +195,47 @@ SSLClientCertificateSelector::SSLClientCertificateSelector(
 }
 
 SSLClientCertificateSelector::~SSLClientCertificateSelector() {
+  root_widget_.Destroy();
 }
 
 void SSLClientCertificateSelector::Show() {
   DCHECK(!window_);
-  window_ = CreateWebContentsModalDialogGtk(root_widget_.get(), select_button_);
-
-  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents_);
-  web_contents_modal_dialog_manager->ShowDialog(window_);
+  window_ = new ConstrainedWindowGtk(wrapper_, this);
 }
 
 void SSLClientCertificateSelector::OnCertSelectedByNotification() {
+  delegate_ = NULL;
   DCHECK(window_);
-  gtk_widget_destroy(window_);
+  window_->CloseConstrainedWindow();
+}
+
+GtkWidget* SSLClientCertificateSelector::GetFocusWidget() {
+  return select_button_;
+}
+
+void SSLClientCertificateSelector::DeleteDelegate() {
+  if (delegate_) {
+    // The dialog was closed by escape key.
+    StopObserving();
+    delegate_->CertificateSelected(NULL);
+  }
+  delete this;
 }
 
 void SSLClientCertificateSelector::PopulateCerts() {
   std::vector<std::string> nicknames;
   x509_certificate_model::GetNicknameStringsFromCertList(
-      cert_request_info()->client_certs,
+      cert_request_info_->client_certs,
       l10n_util::GetStringUTF8(IDS_CERT_SELECTOR_CERT_EXPIRED),
       l10n_util::GetStringUTF8(IDS_CERT_SELECTOR_CERT_NOT_YET_VALID),
       &nicknames);
 
   DCHECK_EQ(nicknames.size(),
-            cert_request_info()->client_certs.size());
+            cert_request_info_->client_certs.size());
 
-  for (size_t i = 0; i < cert_request_info()->client_certs.size(); ++i) {
+  for (size_t i = 0; i < cert_request_info_->client_certs.size(); ++i) {
     net::X509Certificate::OSCertHandle cert =
-        cert_request_info()->client_certs[i]->os_cert_handle();
+        cert_request_info_->client_certs[i]->os_cert_handle();
 
     details_strings_.push_back(FormatDetailsText(cert));
 
@@ -240,8 +252,8 @@ net::X509Certificate* SSLClientCertificateSelector::GetSelectedCert() {
   int selected = gtk_combo_box_get_active(GTK_COMBO_BOX(cert_combo_box_));
   if (selected >= 0 &&
       selected < static_cast<int>(
-          cert_request_info()->client_certs.size()))
-    return cert_request_info()->client_certs[selected].get();
+          cert_request_info_->client_certs.size()))
+    return cert_request_info_->client_certs[selected];
   return NULL;
 }
 
@@ -250,7 +262,7 @@ std::string SSLClientCertificateSelector::FormatComboBoxText(
     net::X509Certificate::OSCertHandle cert, const std::string& nickname) {
   std::string rv(nickname);
   rv += " [";
-  rv += x509_certificate_model::GetSerialNumberHexified(cert, std::string());
+  rv += x509_certificate_model::GetSerialNumberHexified(cert, "");
   rv += ']';
   return rv;
 }
@@ -262,18 +274,18 @@ std::string SSLClientCertificateSelector::FormatDetailsText(
 
   rv += l10n_util::GetStringFUTF8(
       IDS_CERT_SUBJECTNAME_FORMAT,
-      base::UTF8ToUTF16(x509_certificate_model::GetSubjectName(cert)));
+      UTF8ToUTF16(x509_certificate_model::GetSubjectName(cert)));
 
   rv += "\n  ";
   rv += l10n_util::GetStringFUTF8(
       IDS_CERT_SERIAL_NUMBER_FORMAT,
-      base::UTF8ToUTF16(x509_certificate_model::GetSerialNumberHexified(
-          cert, std::string())));
+      UTF8ToUTF16(
+          x509_certificate_model::GetSerialNumberHexified(cert, "")));
 
   base::Time issued, expires;
   if (x509_certificate_model::GetTimes(cert, &issued, &expires)) {
-    base::string16 issued_str = base::TimeFormatShortDateAndTime(issued);
-    base::string16 expires_str = base::TimeFormatShortDateAndTime(expires);
+    string16 issued_str = base::TimeFormatShortDateAndTime(issued);
+    string16 expires_str = base::TimeFormatShortDateAndTime(expires);
     rv += "\n  ";
     rv += l10n_util::GetStringFUTF8(IDS_CERT_VALIDITY_RANGE_FORMAT,
                                     issued_str, expires_str);
@@ -284,14 +296,14 @@ std::string SSLClientCertificateSelector::FormatDetailsText(
   if (usages.size()) {
     rv += "\n  ";
     rv += l10n_util::GetStringFUTF8(IDS_CERT_X509_EXTENDED_KEY_USAGE_FORMAT,
-                                    base::UTF8ToUTF16(JoinString(usages, ',')));
+                                    UTF8ToUTF16(JoinString(usages, ',')));
   }
 
   std::string key_usage_str = x509_certificate_model::GetKeyUsageString(cert);
   if (!key_usage_str.empty()) {
     rv += "\n  ";
     rv += l10n_util::GetStringFUTF8(IDS_CERT_X509_KEY_USAGE_FORMAT,
-                                    base::UTF8ToUTF16(key_usage_str));
+                                    UTF8ToUTF16(key_usage_str));
   }
 
   std::vector<std::string> email_addresses;
@@ -300,16 +312,15 @@ std::string SSLClientCertificateSelector::FormatDetailsText(
     rv += "\n  ";
     rv += l10n_util::GetStringFUTF8(
         IDS_CERT_EMAIL_ADDRESSES_FORMAT,
-        base::UTF8ToUTF16(JoinString(email_addresses, ',')));
+        UTF8ToUTF16(JoinString(email_addresses, ',')));
   }
 
   rv += '\n';
   rv += l10n_util::GetStringFUTF8(
       IDS_CERT_ISSUERNAME_FORMAT,
-      base::UTF8ToUTF16(x509_certificate_model::GetIssuerName(cert)));
+      UTF8ToUTF16(x509_certificate_model::GetIssuerName(cert)));
 
-  base::string16 token(
-      base::UTF8ToUTF16(x509_certificate_model::GetTokenName(cert)));
+  string16 token(UTF8ToUTF16(x509_certificate_model::GetTokenName(cert)));
   if (!token.empty()) {
     rv += '\n';
     rv += l10n_util::GetStringFUTF8(IDS_CERT_TOKEN_FORMAT, token);
@@ -321,9 +332,10 @@ std::string SSLClientCertificateSelector::FormatDetailsText(
 void SSLClientCertificateSelector::Unlocked() {
   // TODO(mattm): refactor so we don't need to call GetSelectedCert again.
   net::X509Certificate* cert = GetSelectedCert();
-  CertificateSelected(cert);
+  delegate_->CertificateSelected(cert);
+  delegate_ = NULL;
   DCHECK(window_);
-  gtk_widget_destroy(window_);
+  window_->CloseConstrainedWindow();
 }
 
 void SSLClientCertificateSelector::OnComboBoxChanged(GtkWidget* combo_box) {
@@ -340,36 +352,32 @@ void SSLClientCertificateSelector::OnViewClicked(GtkWidget* button) {
   net::X509Certificate* cert = GetSelectedCert();
   if (cert) {
     GtkWidget* toplevel = gtk_widget_get_toplevel(root_widget_.get());
-    ShowCertificateViewer(web_contents_, GTK_WINDOW(toplevel), cert);
+    ShowCertificateViewer(GTK_WINDOW(toplevel), cert);
   }
 }
 
 void SSLClientCertificateSelector::OnCancelClicked(GtkWidget* button) {
-  CertificateSelected(NULL);
+  StopObserving();
+  delegate_->CertificateSelected(NULL);
+  delegate_ = NULL;
   DCHECK(window_);
-  gtk_widget_destroy(window_);
+  window_->CloseConstrainedWindow();
 }
 
 void SSLClientCertificateSelector::OnOkClicked(GtkWidget* button) {
+  net::X509Certificate* cert = GetSelectedCert();
+
   // Remove the observer before we try unlocking, otherwise we might act on a
   // notification while waiting for the unlock dialog, causing us to delete
   // ourself before the Unlocked callback gets called.
   StopObserving();
 
-#if defined(USE_NSS)
-  GtkWidget* toplevel = gtk_widget_get_toplevel(root_widget_.get());
-  net::X509Certificate* cert = GetSelectedCert();
-
-  chrome::UnlockCertSlotIfNecessary(
+  browser::UnlockCertSlotIfNecessary(
       cert,
-      chrome::kCryptoModulePasswordClientAuth,
-      cert_request_info()->host_and_port,
-      GTK_WINDOW(toplevel),
+      browser::kCryptoModulePasswordClientAuth,
+      cert_request_info_->host_and_port,
       base::Bind(&SSLClientCertificateSelector::Unlocked,
                  base::Unretained(this)));
-#else
-  Unlocked();
-#endif
 }
 
 void SSLClientCertificateSelector::OnPromptShown(GtkWidget* widget,
@@ -381,25 +389,21 @@ void SSLClientCertificateSelector::OnPromptShown(GtkWidget* widget,
   gtk_widget_grab_default(select_button_);
 }
 
-void SSLClientCertificateSelector::OnDestroy(GtkWidget* widget) {
-  // The dialog was closed by escape key.
-  StopObserving();
-  CertificateSelected(NULL);
-  delete this;
-}
-
 }  // namespace
 
-namespace chrome {
+///////////////////////////////////////////////////////////////////////////////
+// SSLClientAuthHandler platform specific implementation:
 
-void ShowSSLClientCertificateSelector(
-    content::WebContents* contents,
-    const net::HttpNetworkSession* network_session,
+namespace browser {
+
+void ShowNativeSSLClientCertificateSelector(
+    TabContentsWrapper* wrapper,
     net::SSLCertRequestInfo* cert_request_info,
-    const base::Callback<void(net::X509Certificate*)>& callback) {
+    SSLClientAuthHandler* delegate) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  (new SSLClientCertificateSelector(
-      contents, network_session, cert_request_info, callback))->Show();
+  (new SSLClientCertificateSelector(wrapper,
+                                    cert_request_info,
+                                    delegate))->Show();
 }
 
-}  // namespace chrome
+}  // namespace browser

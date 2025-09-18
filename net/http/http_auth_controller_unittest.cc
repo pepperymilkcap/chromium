@@ -4,7 +4,7 @@
 
 #include "net/http/http_auth_controller.h"
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/test_completion_callback.h"
@@ -224,8 +224,7 @@ TEST(HttpAuthControllerTest, NoExplicitCredentialsAllowed) {
   ASSERT_EQ(OK,
             controller->HandleAuthChallenge(headers, false, false, dummy_log));
   ASSERT_TRUE(controller->HaveAuthHandler());
-  controller->ResetAuth(AuthCredentials(base::ASCIIToUTF16("Hello"),
-                        base::string16()));
+  controller->ResetAuth(AuthCredentials(ASCIIToUTF16("Hello"), string16()));
   EXPECT_TRUE(controller->HaveAuth());
   EXPECT_TRUE(controller->IsAuthSchemeDisabled(HttpAuth::AUTH_SCHEME_MOCK));
   EXPECT_FALSE(controller->IsAuthSchemeDisabled(HttpAuth::AUTH_SCHEME_BASIC));

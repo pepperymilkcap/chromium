@@ -48,6 +48,10 @@ remoting.ServerLogEntry.getValueForSessionState = function(state) {
       return 'unknown';
     case remoting.ClientSession.State.CREATED:
       return 'created';
+    case remoting.ClientSession.State.BAD_PLUGIN_VERSION:
+      return 'bad-plugin-version';
+    case remoting.ClientSession.State.UNKNOWN_PLUGIN_ERROR:
+      return 'unknown-plugin-error';
     case remoting.ClientSession.State.CONNECTING:
       return 'connecting';
     case remoting.ClientSession.State.INITIALIZING:
@@ -56,12 +60,8 @@ remoting.ServerLogEntry.getValueForSessionState = function(state) {
       return 'connected';
     case remoting.ClientSession.State.CLOSED:
       return 'closed';
-    case remoting.ClientSession.State.FAILED:
+    case remoting.ClientSession.State.CONNECTION_FAILED:
       return 'connection-failed';
-    case remoting.ClientSession.State.CONNECTION_DROPPED:
-      return 'connection-dropped';
-    case remoting.ClientSession.State.CONNECTION_CANCELED:
-      return 'connection-canceled';
     default:
       return 'undefined-' + state;
   }
@@ -72,34 +72,22 @@ remoting.ServerLogEntry.KEY_CONNECTION_ERROR_ = 'connection-error';
 
 /**
  * @private
- * @param {remoting.Error} connectionError
+ * @param {remoting.ClientSession.ConnectionError} connectionError
  * @return {string}
  */
-remoting.ServerLogEntry.getValueForError =
+remoting.ServerLogEntry.getValueForConnectionError =
     function(connectionError) {
   switch(connectionError) {
-    case remoting.Error.NONE:
+    case remoting.ClientSession.ConnectionError.NONE:
       return 'none';
-    case remoting.Error.INVALID_ACCESS_CODE:
-      return 'invalid-access-code';
-    case remoting.Error.MISSING_PLUGIN:
-      return 'missing_plugin';
-    case remoting.Error.AUTHENTICATION_FAILED:
-      return 'authentication-failed';
-    case remoting.Error.HOST_IS_OFFLINE:
+    case remoting.ClientSession.ConnectionError.HOST_IS_OFFLINE:
       return 'host-is-offline';
-    case remoting.Error.INCOMPATIBLE_PROTOCOL:
+    case remoting.ClientSession.ConnectionError.SESSION_REJECTED:
+      return 'session-rejected';
+    case remoting.ClientSession.ConnectionError.INCOMPATIBLE_PROTOCOL:
       return 'incompatible-protocol';
-    case remoting.Error.BAD_PLUGIN_VERSION:
-      return 'bad-plugin-version';
-    case remoting.Error.NETWORK_FAILURE:
+    case remoting.ClientSession.ConnectionError.NETWORK_FAILURE:
       return 'network-failure';
-    case remoting.Error.HOST_OVERLOAD:
-      return 'host-overload';
-    case remoting.Error.P2P_FAILURE:
-      return 'p2p-failure';
-    case remoting.Error.UNEXPECTED:
-      return 'unexpected';
     default:
       return 'unknown-' + connectionError;
   }
@@ -197,14 +185,14 @@ remoting.ServerLogEntry.prototype.toDebugLog = function(indentLevel) {
   for (var key in this.dict) {
     fields.push(key + ': ' + this.dict[key]);
   }
-  console.log(Array(indentLevel+1).join("  ") + fields.join(', '));
+  remoting.debug.logIndent(indentLevel, fields.join(', '));
 };
 
 /**
  * Makes a log entry for a change of client session state.
  *
  * @param {remoting.ClientSession.State} state
- * @param {remoting.Error} connectionError
+ * @param {remoting.ClientSession.ConnectionError} connectionError
  * @param {remoting.ClientSession.Mode} mode
  * @return {remoting.ServerLogEntry}
  */
@@ -217,9 +205,10 @@ remoting.ServerLogEntry.makeClientSessionStateChange = function(state,
             remoting.ServerLogEntry.VALUE_EVENT_NAME_SESSION_STATE_);
   entry.set(remoting.ServerLogEntry.KEY_SESSION_STATE_,
             remoting.ServerLogEntry.getValueForSessionState(state));
-  if (connectionError != remoting.Error.NONE) {
+  if (connectionError != remoting.ClientSession.ConnectionError.NONE) {
     entry.set(remoting.ServerLogEntry.KEY_CONNECTION_ERROR_,
-              remoting.ServerLogEntry.getValueForError(connectionError));
+              remoting.ServerLogEntry.getValueForConnectionError(
+                  connectionError));
   }
   entry.addModeField(mode);
   return entry;
@@ -288,7 +277,7 @@ remoting.ServerLogEntry.makeStats = function(statsAccumulator, mode) {
 remoting.ServerLogEntry.prototype.addStatsField = function(
     entryKey, statsKey, statsAccumulator) {
   var val = statsAccumulator.calcMean(statsKey);
-  this.set(entryKey, val.toFixed(2));
+  this.set(entryKey, val.toString());
   return (val != 0);
 };
 
@@ -456,10 +445,8 @@ remoting.ServerLogEntry.extractChromeVersionFrom = function(s) {
  * Adds a field specifying the webapp version to this log entry.
  */
 remoting.ServerLogEntry.prototype.addWebappVersionField = function() {
-  var manifest = chrome.runtime.getManifest();
-  if (manifest && manifest.version) {
-    this.set(remoting.ServerLogEntry.KEY_WEBAPP_VERSION_, manifest.version);
-  }
+  this.set(remoting.ServerLogEntry.KEY_WEBAPP_VERSION_,
+      chrome.app.getDetails().version);
 };
 
 /**

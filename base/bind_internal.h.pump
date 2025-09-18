@@ -15,6 +15,7 @@ $range ARITY 0..MAX_ARITY
 
 #ifndef BASE_BIND_INTERNAL_H_
 #define BASE_BIND_INTERNAL_H_
+#pragma once
 
 #include "base/bind_helpers.h"
 #include "base/callback_internal.h"
@@ -30,9 +31,6 @@ $range ARITY 0..MAX_ARITY
 namespace base {
 namespace internal {
 
-// See base/callback.h for user documentation.
-//
-//
 // CONCEPTS:
 //  Runnable -- A type (really a type class) that has a single Run() method
 //              and a RunType typedef that corresponds to the type of Run().
@@ -258,7 +256,6 @@ MakeRunnable(const IgnoreResultHelper<T>& t) {
 template <typename T>
 const typename FunctorTraits<Callback<T> >::RunnableType&
 MakeRunnable(const Callback<T>& t) {
-  DCHECK(!t.is_null());
   return t;
 }
 
@@ -286,7 +283,6 @@ struct InvokeHelper;
 
 $for ARITY [[
 $range ARG 1..ARITY
-$range WEAKCALL_ARG 2..ARITY
 
 template <typename ReturnType, typename Runnable[[]]
 $if ARITY > 0 [[,]] $for ARG , [[typename A$(ARG)]]>
@@ -310,18 +306,16 @@ $if ARITY > 0[[, ]] $for ARG , [[A$(ARG) a$(ARG)]]) {
 
 $if ARITY > 0 [[
 
-template <typename Runnable[[]], typename BoundWeakPtr
-$if ARITY > 1[[, ]] $for WEAKCALL_ARG , [[typename A$(WEAKCALL_ARG)]]>
+template <typename Runnable[[]], $for ARG , [[typename A$(ARG)]]>
 struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr
-$if ARITY > 1[[, ]] $for WEAKCALL_ARG , [[A$(WEAKCALL_ARG)]])>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr
-$if ARITY > 1[[, ]] $for WEAKCALL_ARG , [[A$(WEAKCALL_ARG) a$(WEAKCALL_ARG)]]) {
-    if (!weak_ptr.get()) {
+    void($for ARG , [[A$(ARG)]])>  {
+  static void MakeItSo(Runnable runnable[[]]
+$if ARITY > 0[[, ]] $for ARG , [[A$(ARG) a$(ARG)]]) {
+    if (!a1.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get()
-$if ARITY > 1[[, ]] $for WEAKCALL_ARG , [[CallbackForward(a$(WEAKCALL_ARG))]]);
+
+    runnable.Run($for ARG , [[CallbackForward(a$(ARG))]]);
   }
 };
 

@@ -5,23 +5,75 @@
 #import "chrome/browser/ui/cocoa/styled_text_field_cell.h"
 
 #include "base/logging.h"
-#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #include "grit/theme_resources.h"
-#import "ui/base/cocoa/nsgraphics_context_additions.h"
+#import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
-@implementation StyledTextFieldCell
+namespace {
 
-- (CGFloat)topTextFrameOffset {
-  return 0.0;
+NSBezierPath* RectPathWithInset(StyledTextFieldCellRoundedFlags roundedFlags,
+                                const NSRect frame,
+                                const CGFloat inset,
+                                const CGFloat outerRadius) {
+  NSRect insetFrame = NSInsetRect(frame, inset, inset);
+
+  if (outerRadius > 0.0) {
+    CGFloat leftRadius = outerRadius - inset;
+    CGFloat rightRadius =
+        (roundedFlags == StyledTextFieldCellRoundedLeft) ? 0 : leftRadius;
+
+    return [NSBezierPath gtm_bezierPathWithRoundRect:insetFrame
+                                 topLeftCornerRadius:leftRadius
+                                topRightCornerRadius:rightRadius
+                              bottomLeftCornerRadius:leftRadius
+                             bottomRightCornerRadius:rightRadius];
+  } else {
+    return [NSBezierPath bezierPathWithRect:insetFrame];
+  }
 }
 
-- (CGFloat)bottomTextFrameOffset {
+// Similar to |NSRectFill()|, additionally sets |color| as the fill
+// color.  |outerRadius| greater than 0.0 uses rounded corners, with
+// inset backed out of the radius.
+void FillRectWithInset(StyledTextFieldCellRoundedFlags roundedFlags,
+                       const NSRect frame,
+                       const CGFloat inset,
+                       const CGFloat outerRadius,
+                       NSColor* color) {
+  NSBezierPath* path =
+      RectPathWithInset(roundedFlags, frame, inset, outerRadius);
+  [color setFill];
+  [path fill];
+}
+
+// Similar to |NSFrameRectWithWidth()|, additionally sets |color| as
+// the stroke color (as opposed to the fill color).  |outerRadius|
+// greater than 0.0 uses rounded corners, with inset backed out of the
+// radius.
+void FrameRectWithInset(StyledTextFieldCellRoundedFlags roundedFlags,
+                        const NSRect frame,
+                        const CGFloat inset,
+                        const CGFloat outerRadius,
+                        const CGFloat lineWidth,
+                        NSColor* color) {
+  const CGFloat finalInset = inset + (lineWidth / 2.0);
+  NSBezierPath* path =
+      RectPathWithInset(roundedFlags, frame, finalInset, outerRadius);
+  [color setStroke];
+  [path setLineWidth:lineWidth];
+  [path stroke];
+}
+
+}  // namespace
+
+@implementation StyledTextFieldCell
+
+- (CGFloat)baselineAdjust {
   return 0.0;
 }
 
@@ -29,32 +81,24 @@
   return 0.0;
 }
 
-- (rect_path_utils::RoundedCornerFlags)roundedCornerFlags {
-  return rect_path_utils::RoundedCornerAll;
+- (StyledTextFieldCellRoundedFlags)roundedFlags {
+  return StyledTextFieldCellRoundedAll;
 }
 
 - (BOOL)shouldDrawBezel {
   return NO;
 }
 
-- (NSRect)textFrameForFrameInternal:(NSRect)cellFrame {
-  CGFloat topOffset = [self topTextFrameOffset];
-  NSRect textFrame = cellFrame;
-  textFrame.origin.y += topOffset;
-  textFrame.size.height -= topOffset + [self bottomTextFrameOffset];
-  return textFrame;
-}
-
 // Returns the same value as textCursorFrameForFrame, but does not call it
 // directly to avoid potential infinite loops.
 - (NSRect)textFrameForFrame:(NSRect)cellFrame {
-  return [self textFrameForFrameInternal:cellFrame];
+  return NSInsetRect(cellFrame, 0, [self baselineAdjust]);
 }
 
 // Returns the same value as textFrameForFrame, but does not call it directly to
 // avoid potential infinite loops.
 - (NSRect)textCursorFrameForFrame:(NSRect)cellFrame {
-  return [self textFrameForFrameInternal:cellFrame];
+  return NSInsetRect(cellFrame, 0, [self baselineAdjust]);
 }
 
 // Override to show the I-beam cursor only in the area given by
@@ -80,8 +124,7 @@
   const CGFloat halfLineWidth = lineWidth / 2.0;
 
   DCHECK([controlView isFlipped]);
-  rect_path_utils::RoundedCornerFlags roundedCornerFlags =
-      [self roundedCornerFlags];
+  StyledTextFieldCellRoundedFlags roundedFlags = [self roundedFlags];
 
   // TODO(shess): This inset is also reflected by |kFieldVisualInset|
   // in omnibox_popup_view_mac.mm.
@@ -93,39 +136,34 @@
   ThemeService* themeProvider =
       static_cast<ThemeService*>([[controlView window] themeProvider]);
   if (themeProvider) {
-    NSColor* backgroundImageColor = nil;
-    if (themeProvider->HasCustomImage(IDR_THEME_BUTTON_BACKGROUND)) {
-      backgroundImageColor =
-          themeProvider->GetNSImageColorNamed(IDR_THEME_BUTTON_BACKGROUND);
-    }
+    NSColor* backgroundImageColor =
+        themeProvider->GetNSImageColorNamed(IDR_THEME_BUTTON_BACKGROUND, false);
     if (backgroundImageColor) {
       // Set the phase to match window.
       NSRect trueRect = [controlView convertRect:cellFrame toView:nil];
       NSPoint midPoint = NSMakePoint(NSMinX(trueRect), NSMaxY(trueRect));
-      [[NSGraphicsContext currentContext] cr_setPatternPhase:midPoint
-                                                     forView:controlView];
+      [[NSGraphicsContext currentContext] setPatternPhase:midPoint];
 
       // NOTE(shess): This seems like it should be using a 0.0 inset,
       // but AFAICT using a halfLineWidth inset is important in mixing the
       // toolbar background and the omnibox background.
-      rect_path_utils::FillRectWithInset(roundedCornerFlags, frame,
-                                         halfLineWidth, halfLineWidth, radius,
-                                         backgroundImageColor);
+      FillRectWithInset(roundedFlags, frame, halfLineWidth, radius,
+                        backgroundImageColor);
     }
 
     // Draw the outer stroke (over the background).
     BOOL active = [[controlView window] isMainWindow];
     NSColor* strokeColor = themeProvider->GetNSColor(
-        active ? ThemeProperties::COLOR_TOOLBAR_BUTTON_STROKE :
-                 ThemeProperties::COLOR_TOOLBAR_BUTTON_STROKE_INACTIVE);
-    rect_path_utils::FrameRectWithInset(roundedCornerFlags, frame, 0.0, 0.0,
-                                        radius, lineWidth, strokeColor);
+        active ? ThemeService::COLOR_TOOLBAR_BUTTON_STROKE :
+                 ThemeService::COLOR_TOOLBAR_BUTTON_STROKE_INACTIVE,
+        true);
+    FrameRectWithInset(roundedFlags, frame, 0.0, radius, lineWidth,
+                       strokeColor);
   }
 
   // Fill interior with background color.
-  rect_path_utils::FillRectWithInset(roundedCornerFlags, frame, lineWidth,
-                                     lineWidth, radius,
-                                     [self backgroundColor]);
+  FillRectWithInset(roundedFlags, frame, lineWidth, radius,
+                    [self backgroundColor]);
 
   // Draw the shadow.  For the rounded-rect case, the shadow needs to
   // slightly turn in at the corners.  |shadowFrame| is at the same
@@ -134,16 +172,12 @@
   // will clip the bottom and right edges (and corner).
   {
     gfx::ScopedNSGraphicsContextSaveGState state;
-    [rect_path_utils::RectPathWithInset(roundedCornerFlags, frame, lineWidth,
-                                        lineWidth, radius) addClip];
+    [RectPathWithInset(roundedFlags, frame, lineWidth, radius) addClip];
     const NSRect shadowFrame =
         NSOffsetRect(frame, halfLineWidth, halfLineWidth);
-    NSColor* shadowShade = [NSColor colorWithCalibratedWhite:0.0
-                                                       alpha:0.05 / lineWidth];
-    rect_path_utils::FrameRectWithInset(roundedCornerFlags, shadowFrame,
-                                        halfLineWidth, halfLineWidth,
-                                        radius - halfLineWidth, lineWidth,
-                                        shadowShade);
+    NSColor* shadowShade = [NSColor colorWithCalibratedWhite:0.0 alpha:0.05];
+    FrameRectWithInset(roundedFlags, shadowFrame, halfLineWidth,
+                       radius - halfLineWidth, lineWidth, shadowShade);
   }
 
   // Draw optional bezel below bottom stroke.
@@ -151,8 +185,8 @@
       themeProvider->UsingDefaultTheme()) {
 
     NSColor* bezelColor = themeProvider->GetNSColor(
-        ThemeProperties::COLOR_TOOLBAR_BEZEL);
-    [[bezelColor colorWithAlphaComponent:0.5 / lineWidth] set];
+        ThemeService::COLOR_TOOLBAR_BEZEL, true);
+    [[bezelColor colorWithAlphaComponent:0.5] set];
     NSRect bezelRect = NSMakeRect(cellFrame.origin.x,
                                   NSMaxY(cellFrame) - lineWidth,
                                   NSWidth(cellFrame),
@@ -161,16 +195,14 @@
     NSRectFillUsingOperation(bezelRect, NSCompositeSourceOver);
   }
 
-  // Draw the interior before the focus ring, to make sure nothing overlaps it.
-  [self drawInteriorWithFrame:cellFrame inView:controlView];
-
   // Draw the focus ring if needed.
   if ([self showsFirstResponder]) {
-    NSColor* color = [[NSColor keyboardFocusIndicatorColor]
-        colorWithAlphaComponent:0.5 / lineWidth];
-    rect_path_utils::FrameRectWithInset(roundedCornerFlags, frame, 0.0, 0.0,
-                                        radius, lineWidth * 2, color);
+    NSColor* color =
+        [[NSColor keyboardFocusIndicatorColor] colorWithAlphaComponent:0.5];
+    FrameRectWithInset(roundedFlags, frame, 0.0, radius, lineWidth * 2, color);
   }
+
+  [self drawInteriorWithFrame:cellFrame inView:controlView];
 }
 
 @end

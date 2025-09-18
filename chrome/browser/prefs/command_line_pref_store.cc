@@ -8,17 +8,13 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "ui/base/ui_base_switches.h"
-
-#if defined(OS_CHROMEOS)
-#include "chromeos/chromeos_switches.h"
-#endif
 
 const CommandLinePrefStore::StringSwitchToPreferenceMapEntry
     CommandLinePrefStore::string_switch_map_[] = {
@@ -28,10 +24,7 @@ const CommandLinePrefStore::StringSwitchToPreferenceMapEntry
       { switches::kAuthNegotiateDelegateWhitelist,
           prefs::kAuthNegotiateDelegateWhitelist },
       { switches::kGSSAPILibraryName, prefs::kGSSAPILibraryName },
-      { switches::kSpdyProxyAuthOrigin, prefs::kSpdyProxyAuthOrigin },
       { switches::kDiskCacheDir, prefs::kDiskCacheDir },
-      { switches::kSSLVersionMin, prefs::kSSLVersionMin },
-      { switches::kSSLVersionMax, prefs::kSSLVersionMax },
 };
 
 const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
@@ -54,33 +47,24 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         prefs::kWebKitAllowDisplayingInsecureContent, false },
       { switches::kAllowCrossOriginAuthPrompt,
         prefs::kAllowCrossOriginAuthPrompt, true },
-      { switches::kDisableTLSChannelID, prefs::kEnableOriginBoundCerts, false },
+      { switches::kDisableSSL3, prefs::kSSL3Enabled, false },
+      { switches::kDisableTLS1, prefs::kTLS1Enabled, false },
+      { switches::kEnableOriginBoundCerts, prefs::kEnableOriginBoundCerts,
+          true },
       { switches::kDisableSSLFalseStart, prefs::kDisableSSLRecordSplitting,
           true },
-      { switches::kEnableUnrestrictedSSL3Fallback,
-          prefs::kEnableUnrestrictedSSL3Fallback, true },
       { switches::kEnableMemoryInfo, prefs::kEnableMemoryInfo, true },
 #if defined(GOOGLE_CHROME_BUILD)
       { switches::kDisablePrintPreview, prefs::kPrintPreviewDisabled, true },
 #else
       { switches::kEnablePrintPreview, prefs::kPrintPreviewDisabled, false },
 #endif
-#if defined(OS_CHROMEOS)
-      { chromeos::switches::kDisableDrive, prefs::kDisableDrive, true },
-      { chromeos::switches::kEnableTouchpadThreeFingerClick,
-          prefs::kEnableTouchpadThreeFingerClick, true },
-#endif
-      { switches::kDisableAsyncDns, prefs::kBuiltInDnsClientEnabled, false },
-      { switches::kEnableAsyncDns, prefs::kBuiltInDnsClientEnabled, true },
 };
 
 const CommandLinePrefStore::IntegerSwitchToPreferenceMapEntry
     CommandLinePrefStore::integer_switch_map_[] = {
       { switches::kDiskCacheSize, prefs::kDiskCacheSize },
       { switches::kMediaCacheSize, prefs::kMediaCacheSize },
-#if defined(OS_CHROMEOS)
-      { chromeos::switches::kDeviceRegistered, prefs::kDeviceRegistered },
-#endif
     };
 
 CommandLinePrefStore::CommandLinePrefStore(const CommandLine* command_line)
@@ -89,29 +73,15 @@ CommandLinePrefStore::CommandLinePrefStore(const CommandLine* command_line)
   ApplyProxyMode();
   ValidateProxySwitches();
   ApplySSLSwitches();
-  ApplyBackgroundModeSwitches();
 }
 
 CommandLinePrefStore::~CommandLinePrefStore() {}
-
-bool CommandLinePrefStore::ValidateProxySwitches() {
-  if (command_line_->HasSwitch(switches::kNoProxyServer) &&
-      (command_line_->HasSwitch(switches::kProxyAutoDetect) ||
-       command_line_->HasSwitch(switches::kProxyServer) ||
-       command_line_->HasSwitch(switches::kProxyPacUrl) ||
-       command_line_->HasSwitch(switches::kProxyBypassList))) {
-    LOG(WARNING) << "Additional command-line proxy switches specified when --"
-                 << switches::kNoProxyServer << " was also specified.";
-    return false;
-  }
-  return true;
-}
 
 void CommandLinePrefStore::ApplySimpleSwitches() {
   // Look for each switch we know about and set its preference accordingly.
   for (size_t i = 0; i < arraysize(string_switch_map_); ++i) {
     if (command_line_->HasSwitch(string_switch_map_[i].switch_name)) {
-      base::Value* value = base::Value::CreateStringValue(command_line_->
+      Value* value = Value::CreateStringValue(command_line_->
           GetSwitchValueASCII(string_switch_map_[i].switch_name));
       SetValue(string_switch_map_[i].preference_path, value);
     }
@@ -128,18 +98,31 @@ void CommandLinePrefStore::ApplySimpleSwitches() {
                    << " can not be converted to integer, ignoring!";
         continue;
       }
-      base::Value* value = base::Value::CreateIntegerValue(int_value);
+      Value* value = Value::CreateIntegerValue(int_value);
       SetValue(integer_switch_map_[i].preference_path, value);
     }
   }
 
   for (size_t i = 0; i < arraysize(boolean_switch_map_); ++i) {
     if (command_line_->HasSwitch(boolean_switch_map_[i].switch_name)) {
-      base::Value* value = base::Value::CreateBooleanValue(
+      Value* value = Value::CreateBooleanValue(
           boolean_switch_map_[i].set_value);
       SetValue(boolean_switch_map_[i].preference_path, value);
     }
   }
+}
+
+bool CommandLinePrefStore::ValidateProxySwitches() {
+  if (command_line_->HasSwitch(switches::kNoProxyServer) &&
+      (command_line_->HasSwitch(switches::kProxyAutoDetect) ||
+       command_line_->HasSwitch(switches::kProxyServer) ||
+       command_line_->HasSwitch(switches::kProxyPacUrl) ||
+       command_line_->HasSwitch(switches::kProxyBypassList))) {
+    LOG(WARNING) << "Additional command-line proxy switches specified when --"
+                 << switches::kNoProxyServer << " was also specified.";
+    return false;
+  }
+  return true;
 }
 
 void CommandLinePrefStore::ApplyProxyMode() {
@@ -177,13 +160,5 @@ void CommandLinePrefStore::ApplySSLSwitches() {
       list_value->Append(base::Value::CreateStringValue(*it));
     }
     SetValue(prefs::kCipherSuiteBlacklist, list_value);
-  }
-}
-
-void CommandLinePrefStore::ApplyBackgroundModeSwitches() {
-  if (command_line_->HasSwitch(switches::kDisableBackgroundMode) ||
-      command_line_->HasSwitch(switches::kDisableExtensions)) {
-    base::Value* value = base::Value::CreateBooleanValue(false);
-    SetValue(prefs::kBackgroundModeEnabled, value);
   }
 }

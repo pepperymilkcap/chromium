@@ -9,19 +9,19 @@
 #include <htiframe.h>
 #include <mshtml.h>
 #include <shlobj.h>
-#include <limits>
 
+#include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_number_conversions.h"
+#include "base/string_piece.h"
+#include "base/string_tokenizer.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread_local.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
@@ -35,42 +35,37 @@
 #include "chrome_frame/html_utils.h"
 #include "chrome_frame/navigation_constraints.h"
 #include "chrome_frame/policy_settings.h"
-#include "chrome_frame/registry_list_preferences_holder.h"
 #include "chrome_frame/simple_resource_loader.h"
-#include "extensions/common/constants.h"
+#include "googleurl/src/gurl.h"
+#include "googleurl/src/url_canon.h"
 #include "grit/chromium_strings.h"
 #include "net/base/escape.h"
 #include "net/http/http_util.h"
 #include "ui/base/models/menu_model.h"
-#include "url/gurl.h"
-#include "url/url_canon.h"
 
 using base::win::RegKey;
 
 // Note that these values are all lower case and are compared to
 // lower-case-transformed values.
-const char kGCFProtocol[] = "gcf";
-const wchar_t kBodyTag[] = L"body";
-const wchar_t kContentAttribName[] = L"content";
-const wchar_t kChromeContentPrefix[] = L"chrome=";
-const wchar_t kChromeMimeType[] = L"application/chromepage";
-const wchar_t kChromeProtocolPrefix[] = L"gcf:";
-const wchar_t kHttpEquivAttribName[] = L"http-equiv";
-const wchar_t kIexploreProfileName[] = L"iexplore";
 const wchar_t kMetaTag[] = L"meta";
-const wchar_t kRundllProfileName[] = L"rundll32";
+const wchar_t kHttpEquivAttribName[] = L"http-equiv";
+const wchar_t kContentAttribName[] = L"content";
 const wchar_t kXUACompatValue[] = L"x-ua-compatible";
-
-// Registry key and value names related to Chrome Frame configuration options.
-const wchar_t kAllowUnsafeURLs[] = L"AllowUnsafeURLs";
-const wchar_t kChromeFrameConfigKey[] = L"Software\\Google\\ChromeFrame";
-const wchar_t kEnableBuggyBhoIntercept[] = L"EnableBuggyBhoIntercept";
-const wchar_t kEnableGCFRendererByDefault[] = L"IsDefaultRenderer";
-const wchar_t kSkipGCFMetadataCheck[] = L"SkipGCFMetadataCheck";
-const wchar_t kExcludeUAFromDomainList[] = L"ExcludeUAFromDomain";
+const wchar_t kBodyTag[] = L"body";
+const wchar_t kChromeContentPrefix[] = L"chrome=";
+const char kGCFProtocol[] = "gcf";
+const wchar_t kChromeProtocolPrefix[] = L"gcf:";
+const wchar_t kChromeMimeType[] = L"application/chromepage";
 const wchar_t kPatchProtocols[] = L"PatchProtocols";
+const wchar_t kChromeFrameConfigKey[] = L"Software\\Google\\ChromeFrame";
 const wchar_t kRenderInGCFUrlList[] = L"RenderInGcfUrls";
 const wchar_t kRenderInHostUrlList[] = L"RenderInHostUrls";
+const wchar_t kEnableGCFRendererByDefault[] = L"IsDefaultRenderer";
+const wchar_t kIexploreProfileName[] = L"iexplore";
+const wchar_t kRundllProfileName[] = L"rundll32";
+
+const wchar_t kAllowUnsafeURLs[] = L"AllowUnsafeURLs";
+const wchar_t kEnableBuggyBhoIntercept[] = L"EnableBuggyBhoIntercept";
 
 static const wchar_t kChromeFramePersistNPAPIReg[] = L"PersistNPAPIReg";
 
@@ -117,14 +112,6 @@ namespace {
 // living instance only.
 base::LazyInstance<base::ThreadLocalPointer<IBrowserService> >
     g_tls_browser_for_cf_navigation = LAZY_INSTANCE_INITIALIZER;
-
-// Holds the cached preferences for the per-url render type settings.
-base::LazyInstance<RegistryListPreferencesHolder>::Leaky
-    g_render_type_for_url_holder;
-
-// Holds the cached preferences for the per-url user agent filter.
-base::LazyInstance<RegistryListPreferencesHolder>::Leaky
-    g_user_agent_filter_holder;
 
 }  // end anonymous namespace
 
@@ -187,7 +174,7 @@ HRESULT UtilRegisterTypeLib(ITypeLib* typelib,
                                                     OLECHAR FAR* full_path,
                                                     OLECHAR FAR* help_dir);
   LPCSTR function_name =
-      for_current_user_only ? "RegisterTypeLibForUser" : "RegisterTypeLib";
+    for_current_user_only ? "RegisterTypeLibForUser" : "RegisterTypeLib";
   RegisterTypeLibPrototype reg_tlb =
       reinterpret_cast<RegisterTypeLibPrototype>(
           GetProcAddress(GetModuleHandle(_T("oleaut32.dll")),
@@ -297,14 +284,15 @@ HRESULT UtilGetXUACompatContentValue(const std::wstring& html_string,
 void DisplayVersionMismatchWarning(HWND parent,
                                    const std::string& server_version) {
   // Obtain the current module version.
-  scoped_ptr<FileVersionInfo> module_version_info(
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
-  base::string16 version_string(module_version_info->file_version());
+  FileVersionInfo* file_version_info =
+      FileVersionInfo::CreateFileVersionInfoForCurrentModule();
+  DCHECK(file_version_info);
+  std::wstring version_string(file_version_info->file_version());
   std::wstring wide_server_version;
   if (server_version.empty()) {
     wide_server_version = SimpleResourceLoader::Get(IDS_VERSIONUNKNOWN);
   } else {
-    wide_server_version = base::ASCIIToWide(server_version);
+    wide_server_version = ASCIIToWide(server_version);
   }
   std::wstring title = SimpleResourceLoader::Get(IDS_VERSIONMISMATCH_HEADER);
   std::wstring message;
@@ -354,7 +342,7 @@ const char kIEImageName[] = "iexplore.exe";
 }  // namespace
 
 std::wstring GetHostProcessName(bool include_extension) {
-  base::FilePath exe;
+  FilePath exe;
   if (PathService::Get(base::FILE_EXE, &exe))
     exe = exe.BaseName();
   if (!include_extension) {
@@ -391,7 +379,7 @@ uint32 GetIEMajorVersion() {
     wchar_t exe_path[MAX_PATH];
     HMODULE mod = GetModuleHandle(NULL);
     GetModuleFileName(mod, exe_path, arraysize(exe_path) - 1);
-    std::wstring exe_name = base::FilePath(exe_path).BaseName().value();
+    std::wstring exe_name = FilePath(exe_path).BaseName().value();
     if (!LowerCaseEqualsASCII(exe_name, kIEImageName)) {
       ie_major_version = 0;
     } else {
@@ -429,11 +417,8 @@ IEVersion GetIEVersion() {
       case 9:
         ie_version = IE_9;
         break;
-      case 10:
-        ie_version = IE_10;
-        break;
       default:
-        ie_version = (major_version >= 11) ? IE_11 : IE_UNSUPPORTED;
+        ie_version = (major_version >= 10) ? IE_10 : IE_UNSUPPORTED;
         break;
     }
   }
@@ -441,7 +426,7 @@ IEVersion GetIEVersion() {
   return ie_version;
 }
 
-base::FilePath GetIETemporaryFilesFolder() {
+FilePath GetIETemporaryFilesFolder() {
   LPITEMIDLIST tif_pidl = NULL;
   HRESULT hr = SHGetFolderLocation(NULL, CSIDL_INTERNET_CACHE, NULL,
                                    SHGFP_TYPE_CURRENT, &tif_pidl);
@@ -459,8 +444,7 @@ base::FilePath GetIETemporaryFilesFolder() {
       DCHECK(SUCCEEDED(hr));
       base::win::ScopedBstr temp_internet_files_bstr;
       StrRetToBSTR(&path, relative_pidl, temp_internet_files_bstr.Receive());
-      base::FilePath temp_internet_files(
-          static_cast<BSTR>(temp_internet_files_bstr));
+      FilePath temp_internet_files(static_cast<BSTR>(temp_internet_files_bstr));
       ILFree(tif_pidl);
       return temp_internet_files;
     } else {
@@ -477,12 +461,12 @@ base::FilePath GetIETemporaryFilesFolder() {
   hr = SHGetFolderPath(NULL, CSIDL_INTERNET_CACHE, NULL, SHGFP_TYPE_CURRENT,
                        path);
   if (SUCCEEDED(hr)) {
-    return base::FilePath(path);
+    return FilePath(path);
   } else {
     NOTREACHED() << "SHGetFolderPath for internet cache failed. Error:"
                  << hr;
   }
-  return base::FilePath();
+  return FilePath();
 }
 
 bool IsIEInPrivate() {
@@ -536,7 +520,7 @@ bool GetModuleVersion(HMODULE module, uint32* high, uint32* low) {
     if (readonly_resource_data && version_resource_size) {
       // Copy data as VerQueryValue tries to modify the data. This causes
       // exceptions and heap corruption errors if debugger is attached.
-      scoped_ptr<char[]> data(new char[version_resource_size]);
+      scoped_array<char> data(new char[version_resource_size]);
       if (data.get()) {
         memcpy(data.get(), readonly_resource_data, version_resource_size);
         VS_FIXEDFILEINFO* ver_info = NULL;
@@ -556,6 +540,78 @@ bool GetModuleVersion(HMODULE module, uint32* high, uint32* low) {
   }
 
   return ok;
+}
+
+HMODULE GetModuleFromAddress(void* address) {
+  MEMORY_BASIC_INFORMATION info = {0};
+  ::VirtualQuery(address, &info, sizeof(info));
+  return reinterpret_cast<HMODULE>(info.AllocationBase);
+}
+
+namespace {
+
+const int kMaxSubmenuDepth = 10;
+
+// Builds a Windows menu from the menu model sent from Chrome.  The
+// caller is responsible for closing the returned HMENU.  This does
+// not currently handle bitmaps (e.g. hbmpChecked, hbmpUnchecked or
+// hbmpItem), so checkmarks, radio buttons, and custom icons won't work.
+// It also copies over submenus up to a maximum depth of kMaxSubMenuDepth.
+HMENU BuildContextMenuImpl(const ContextMenuModel* menu_model, int depth) {
+  if (depth >= kMaxSubmenuDepth)
+    return NULL;
+
+  HMENU menu = CreatePopupMenu();
+  for (size_t i = 0; i < menu_model->items.size(); i++) {
+    const ContextMenuModel::Item& item = menu_model->items[i];
+
+    MENUITEMINFO item_info = { 0 };
+    item_info.cbSize = sizeof(MENUITEMINFO);
+    switch (item.type) {
+      case ui::MenuModel::TYPE_COMMAND:
+      case ui::MenuModel::TYPE_CHECK:
+        item_info.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING;
+        item_info.fType = MFT_STRING;
+        item_info.wID = item.item_id;
+        item_info.dwTypeData = const_cast<LPWSTR>(item.label.c_str());
+        break;
+      case ui::MenuModel::TYPE_RADIO:
+        item_info.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING;
+        item_info.fType = MFT_STRING | MFT_RADIOCHECK;
+        item_info.wID = item.item_id;
+        item_info.dwTypeData = const_cast<LPWSTR>(item.label.c_str());
+        break;
+      case ui::MenuModel::TYPE_SEPARATOR:
+        item_info.fMask = MIIM_FTYPE;
+        item_info.fType = MFT_SEPARATOR;
+        break;
+      case ui::MenuModel::TYPE_SUBMENU:
+        item_info.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_SUBMENU;
+        item_info.fType = MFT_STRING;
+        item_info.wID = item.item_id;
+        item_info.dwTypeData = const_cast<LPWSTR>(item.label.c_str());
+        item_info.hSubMenu = BuildContextMenuImpl(item.submenu, depth + 1);
+        break;
+      default:
+        NOTREACHED() << "Unsupported MenuModel::ItemType " << item.type;
+        break;
+    }
+
+    item_info.fMask |= MIIM_STATE;
+    item_info.fState =
+        (item.checked ? MFS_CHECKED : MFS_UNCHECKED) |
+        (item.enabled ? MFS_ENABLED : (MFS_DISABLED | MFS_GRAYED));
+
+    InsertMenuItem(menu, i, TRUE, &item_info);
+  }
+
+  return menu;
+}
+
+}  // namespace
+
+HMENU BuildContextMenu(const ContextMenuModel& menu_model) {
+  return BuildContextMenuImpl(&menu_model, 0);
 }
 
 std::string ResolveURL(const std::string& document,
@@ -599,17 +655,6 @@ int GetConfigInt(int default_value, const wchar_t* value_name) {
   return ret;
 }
 
-int64 GetConfigInt64(int64 default_value, const wchar_t* value_name) {
-  int64 ret = default_value;
-  RegKey config_key;
-  if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey,
-                      KEY_QUERY_VALUE) == ERROR_SUCCESS) {
-    config_key.ReadInt64(value_name, &ret);
-  }
-
-  return ret;
-}
-
 bool GetConfigBool(bool default_value, const wchar_t* value_name) {
   DWORD value = GetConfigInt(default_value, value_name);
   return (value != FALSE);
@@ -629,19 +674,6 @@ bool SetConfigInt(const wchar_t* value_name, int value) {
 
 bool SetConfigBool(const wchar_t* value_name, bool value) {
   return SetConfigInt(value_name, value);
-}
-
-bool SetConfigInt64(const wchar_t* value_name, int64 value) {
-  RegKey config_key;
-  if (config_key.Create(HKEY_CURRENT_USER, kChromeFrameConfigKey,
-                        KEY_SET_VALUE) == ERROR_SUCCESS) {
-    if (config_key.WriteValue(value_name, &value, sizeof(value),
-                              REG_QWORD) == ERROR_SUCCESS) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 bool DeleteConfigValue(const wchar_t* value_name) {
@@ -676,24 +708,6 @@ bool IsGcfDefaultRenderer() {
   return is_default != 0;
 }
 
-// Check for the registry key 'SkipGCFMetadataCheck' and if true, then
-// ignore presence of <meta http-equiv="X-UA-Compatible" content="chrome=1">
-bool SkipMetadataCheck() {
-  // Check policy settings
-  PolicySettings::SkipMetadataCheck metadataCheck =
-      PolicySettings::GetInstance()->skip_metadata_check();
-  if (metadataCheck != PolicySettings::SKIP_METADATA_CHECK_NOT_SPECIFIED)
-    return (metadataCheck == PolicySettings::SKIP_METADATA_CHECK_YES);
-
-  DWORD skip = 0;
-  RegKey config_key;
-  if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey,
-                      KEY_READ) == ERROR_SUCCESS) {
-    config_key.ReadValueDW(kSkipGCFMetadataCheck, &skip);
-  }
-  return skip != 0;
-}
-
 RendererType RendererTypeForUrl(const std::wstring& url) {
   // First check if the default renderer settings are specified by policy.
   // If so, then that overrides the user settings.
@@ -708,63 +722,42 @@ RendererType RendererTypeForUrl(const std::wstring& url) {
         RENDERER_TYPE_CHROME_OPT_IN_URL : RENDERER_TYPE_UNDETERMINED;
   }
 
-  // TODO(robertshield): Move this into a holder-type class that listens
-  // for reg change events as well.
-  static int render_in_cf_by_default = FALSE;
-
-  RegistryListPreferencesHolder& render_type_for_url_holder =
-      g_render_type_for_url_holder.Get();
-  if (!render_type_for_url_holder.Valid()) {
-    const wchar_t* url_list_name = kRenderInGCFUrlList;
-    if (IsGcfDefaultRenderer()) {
-      url_list_name = kRenderInHostUrlList;
-      render_in_cf_by_default = TRUE;
-    } else {
-      render_in_cf_by_default = FALSE;
-    }
-
-    render_type_for_url_holder.Init(HKEY_CURRENT_USER,
-                                    kChromeFrameConfigKey,
-                                    url_list_name);
+  RegKey config_key;
+  if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey,
+                      KEY_READ) != ERROR_SUCCESS) {
+    return RENDERER_TYPE_UNDETERMINED;
   }
-  DCHECK(render_type_for_url_holder.Valid());
 
-  RendererType renderer_type =
-      render_in_cf_by_default ? RENDERER_TYPE_CHROME_DEFAULT_RENDERER :
-                                RENDERER_TYPE_UNDETERMINED;
+  RendererType renderer_type = RENDERER_TYPE_UNDETERMINED;
 
-  if (render_type_for_url_holder.ListMatches(url)) {
+  const wchar_t* url_list_name = NULL;
+  int render_in_cf_by_default = FALSE;
+  config_key.ReadValueDW(kEnableGCFRendererByDefault,
+                         reinterpret_cast<DWORD*>(&render_in_cf_by_default));
+  if (render_in_cf_by_default) {
+    url_list_name = kRenderInHostUrlList;
+    renderer_type = RENDERER_TYPE_CHROME_DEFAULT_RENDERER;
+  } else {
+    url_list_name = kRenderInGCFUrlList;
+  }
+
+  bool match_found = false;
+  base::win::RegistryValueIterator url_list(config_key.Handle(), url_list_name);
+  while (!match_found && url_list.Valid()) {
+    if (MatchPattern(url, url_list.Name())) {
+      match_found = true;
+    } else {
+      ++url_list;
+    }
+  }
+
+  if (match_found) {
     renderer_type = render_in_cf_by_default ?
       RENDERER_TYPE_UNDETERMINED :
       RENDERER_TYPE_CHROME_OPT_IN_URL;
   }
 
   return renderer_type;
-}
-
-bool ShouldRemoveUAForUrl(const base::string16& url) {
-  // TODO(robertshield): Wire up the stuff in PolicySettings here so the value
-  // can be specified via group policy.
-  // TODO(robertshield): Add a default list of exclusions here for site with
-  // known bad UA parsing.
-  RegistryListPreferencesHolder& user_agent_filter_holder =
-      g_user_agent_filter_holder.Get();
-  if (!user_agent_filter_holder.Valid()) {
-    user_agent_filter_holder.Init(HKEY_CURRENT_USER,
-                                  kChromeFrameConfigKey,
-                                  kExcludeUAFromDomainList);
-  }
-  DCHECK(user_agent_filter_holder.Valid());
-
-  return user_agent_filter_holder.ListMatches(url);
-}
-
-RegistryListPreferencesHolder& GetRendererTypePreferencesHolderForTesting() {
-  return g_render_type_for_url_holder.Get();
-}
-
-RegistryListPreferencesHolder& GetUserAgentPreferencesHolderForTesting() {
-  return g_user_agent_filter_holder.Get();
 }
 
 HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
@@ -900,8 +893,7 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
           fragment = NULL;
         }
 
-        base::win::ScopedVariant var_url(
-            base::UTF8ToWide(target_url.spec()).c_str());
+        base::win::ScopedVariant var_url(UTF8ToWide(target_url.spec()).c_str());
         hr = browser_priv->NavigateWithBindCtx(var_url.AsInput(), flags, NULL,
                                                post_data_variant.AsInput(),
                                                headers_var.AsInput(), bind_ctx,
@@ -939,17 +931,17 @@ bool IsValidUrlScheme(const GURL& url, bool is_privileged) {
   if (url.is_empty())
     return false;
 
-  if (url.SchemeIs(content::kHttpScheme) ||
-      url.SchemeIs(content::kHttpsScheme) ||
+  if (url.SchemeIs(chrome::kHttpScheme) ||
+      url.SchemeIs(chrome::kHttpsScheme) ||
       url.SchemeIs(chrome::kAboutScheme))
     return true;
 
   // Additional checking for view-source. Allow only http and https
   // URLs in view source.
-  if (url.SchemeIs(content::kViewSourceScheme)) {
-    GURL sub_url(url.GetContent());
-    if (sub_url.SchemeIs(content::kHttpScheme) ||
-        sub_url.SchemeIs(content::kHttpsScheme))
+  if (url.SchemeIs(chrome::kViewSourceScheme)) {
+    GURL sub_url(url.path());
+    if (sub_url.SchemeIs(chrome::kHttpScheme) ||
+        sub_url.SchemeIs(chrome::kHttpsScheme))
       return true;
     else
       return false;
@@ -957,7 +949,7 @@ bool IsValidUrlScheme(const GURL& url, bool is_privileged) {
 
   if (is_privileged &&
       (url.SchemeIs(chrome::kDataScheme) ||
-       url.SchemeIs(extensions::kExtensionScheme)))
+       url.SchemeIs(chrome::kExtensionScheme)))
     return true;
 
   return false;
@@ -1042,7 +1034,7 @@ std::wstring GetActualUrlFromMoniker(IMoniker* moniker,
   moniker->GetDisplayName(bind_context, NULL, &display_name);
   std::wstring moniker_url = display_name;
 
-  GURL parsed_url(base::WideToUTF8(bho_url));
+  GURL parsed_url(WideToUTF8(bho_url));
   if (!parsed_url.has_ref())
     return moniker_url;
 
@@ -1132,7 +1124,7 @@ std::string FindReferrerFromHeaders(const wchar_t* headers,
   for (int i = 0; referrer.empty() && i < arraysize(both_headers); ++i) {
     if (!both_headers[i])
       continue;
-    std::string raw_headers_utf8 = base::WideToUTF8(both_headers[i]);
+    std::string raw_headers_utf8 = WideToUTF8(both_headers[i]);
     net::HttpUtil::HeadersIterator it(raw_headers_utf8.begin(),
                                       raw_headers_utf8.end(), "\r\n");
     while (it.GetNext()) {
@@ -1383,7 +1375,7 @@ bool ChromeFrameUrl::ParseAttachExternalTabUrl() {
   }
 
   attach_to_external_tab_ = true;
-  base::StringTokenizer tokenizer(query, "&");
+  StringTokenizer tokenizer(query, "&");
   // Skip over kChromeAttachExternalTabPrefix
   tokenizer.GetNext();
   // Read the following items in order.
@@ -1478,6 +1470,27 @@ bool CanNavigate(const GURL& url,
     return false;
   }
   return true;
+}
+
+void PinModule() {
+  static bool s_pinned = false;
+  if (!s_pinned && !IsUnpinnedMode()) {
+    wchar_t system_buffer[MAX_PATH];
+    HMODULE this_module = reinterpret_cast<HMODULE>(&__ImageBase);
+    system_buffer[0] = 0;
+    if (GetModuleFileName(this_module, system_buffer,
+                          arraysize(system_buffer)) != 0) {
+      HMODULE unused;
+      if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_PIN, system_buffer,
+                             &unused)) {
+        DPLOG(FATAL) << "Failed to pin module " << system_buffer;
+      } else {
+        s_pinned = true;
+      }
+    } else {
+      DPLOG(FATAL) << "Could not get module path.";
+    }
+  }
 }
 
 void WaitWithMessageLoop(HANDLE* handles, int count, DWORD timeout) {
@@ -1631,11 +1644,4 @@ bool IncreaseWinInetConnections(DWORD connections) {
   }
   wininet_connection_count_updated = true;
   return true;
-}
-
-void GetChromeFrameProfilePath(const base::string16& profile_name,
-                               base::FilePath* profile_path) {
-  chrome::GetChromeFrameUserDataDirectory(profile_path);
-  *profile_path = profile_path->Append(profile_name);
-  DVLOG(1) << __FUNCTION__ << ": " << profile_path->value();
 }

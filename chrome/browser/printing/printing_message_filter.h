@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PRINTING_PRINTING_MESSAGE_FILTER_H_
 #define CHROME_BROWSER_PRINTING_PRINTING_MESSAGE_FILTER_H_
+#pragma once
 
 #include <string>
 
@@ -11,33 +12,25 @@
 #include "content/public/browser/browser_message_filter.h"
 
 #if defined(OS_WIN)
-#include "base/memory/shared_memory.h"
+#include "base/shared_memory.h"
 #endif
 
 struct PrintHostMsg_ScriptedPrint_Params;
-class Profile;
-class ProfileIOData;
 
 namespace base {
 class DictionaryValue;
-class FilePath;
-}
-
-namespace content {
-class WebContents;
 }
 
 namespace printing {
 class PrinterQuery;
 class PrintJobManager;
-class PrintQueriesQueue;
 }
 
 // This class filters out incoming printing related IPC messages for the
 // renderer process on the IPC thread.
 class PrintingMessageFilter : public content::BrowserMessageFilter {
  public:
-  PrintingMessageFilter(int render_process_id, Profile* profile);
+  PrintingMessageFilter();
 
   // content::BrowserMessageFilter methods.
   virtual void OverrideThreadForMessage(
@@ -55,51 +48,16 @@ class PrintingMessageFilter : public content::BrowserMessageFilter {
                           base::SharedMemoryHandle* browser_handle);
 #endif
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(OS_CHROMEOS)
   // Used to ask the browser allocate a temporary file for the renderer
   // to fill in resulting PDF in renderer.
-  void OnAllocateTempFileForPrinting(int render_view_id,
-                                     base::FileDescriptor* temp_file_fd,
+  void OnAllocateTempFileForPrinting(base::FileDescriptor* temp_file_fd,
                                      int* sequence_number);
-  void OnTempFileForPrintingWritten(int render_view_id, int sequence_number);
+  void OnTempFileForPrintingWritten(int sequence_number);
 #endif
 
-#if defined(OS_CHROMEOS)
-  void CreatePrintDialogForFile(int render_view_id, const base::FilePath& path);
-#endif
-
-#if defined(OS_ANDROID)
-  // Updates the file descriptor for the PrintViewManagerBasic of a given
-  // render_view_id.
-  void UpdateFileDescriptor(int render_view_id, int fd);
-#endif
-
-  // Given a render_view_id get the corresponding WebContents.
-  // Must be called on the UI thread.
-  content::WebContents* GetWebContentsForRenderView(int render_view_id);
-
-  // GetPrintSettingsForRenderView must be called via PostTask and
-  // base::Bind.  Collapse the settings-specific params into a
-  // struct to avoid running into issues with too many params
-  // to base::Bind.
-  struct GetPrintSettingsForRenderViewParams;
-
-  // Retrieve print settings.  Uses |render_view_id| to get a parent
-  // for any UI created if needed.
-  void GetPrintSettingsForRenderView(
-      int render_view_id,
-      GetPrintSettingsForRenderViewParams params,
-      const base::Closure& callback,
-      scoped_refptr<printing::PrinterQuery> printer_query);
-
-  void OnGetPrintSettingsFailed(
-      const base::Closure& callback,
-      scoped_refptr<printing::PrinterQuery> printer_query);
-
-  // Checks if printing is enabled.
-  void OnIsPrintingEnabled(bool* is_enabled);
-
-  // Get the default print setting.
+  // Get the default print setting. The task is handled by the print
+  // worker thread and the UI thread. The reply occurs on the IO thread.
   void OnGetDefaultPrintSettings(IPC::Message* reply_msg);
   void OnGetDefaultPrintSettingsReply(
       scoped_refptr<printing::PrinterQuery> printer_query,
@@ -124,18 +82,12 @@ class PrintingMessageFilter : public content::BrowserMessageFilter {
       scoped_refptr<printing::PrinterQuery> printer_query,
       IPC::Message* reply_msg);
 
-#if defined(ENABLE_FULL_PRINTING)
   // Check to see if print preview has been cancelled.
-  void OnCheckForCancel(int32 preview_ui_id,
+  void OnCheckForCancel(const std::string& preview_ui_addr,
                         int preview_request_id,
                         bool* cancel);
-#endif
 
-  ProfileIOData* profile_io_data_;
-
-  const int render_process_id_;
-
-  scoped_refptr<printing::PrintQueriesQueue> queue_;
+  printing::PrintJobManager* print_job_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintingMessageFilter);
 };

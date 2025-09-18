@@ -1,28 +1,27 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/views/animation/bounds_animator.h"
-
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/animation/slide_animation.h"
-#include "ui/gfx/animation/test_animation_delegate.h"
+#include "ui/base/animation/slide_animation.h"
+#include "ui/base/animation/test_animation_delegate.h"
+#include "ui/views/animation/bounds_animator.h"
 #include "ui/views/view.h"
 
-using gfx::Animation;
-using gfx::SlideAnimation;
-using gfx::TestAnimationDelegate;
+using views::BoundsAnimator;
+using ui::Animation;
+using ui::SlideAnimation;
+using ui::TestAnimationDelegate;
 
-namespace views {
 namespace {
 
 class TestBoundsAnimator : public BoundsAnimator {
  public:
-  explicit TestBoundsAnimator(View* view) : BoundsAnimator(view) {
+  explicit TestBoundsAnimator(views::View* view) : BoundsAnimator(view) {
   }
 
  protected:
-  virtual SlideAnimation* CreateAnimation() OVERRIDE {
+  SlideAnimation* CreateAnimation() {
     SlideAnimation* animation = BoundsAnimator::CreateAnimation();
     animation->SetSlideDuration(10);
     return animation;
@@ -34,26 +33,29 @@ class TestBoundsAnimator : public BoundsAnimator {
 
 class OwnedDelegate : public BoundsAnimator::OwnedAnimationDelegate {
  public:
-  OwnedDelegate() {}
+  OwnedDelegate() {
+    deleted_ = false;
+    canceled_ = false;
+  }
 
-  virtual ~OwnedDelegate() {
+  ~OwnedDelegate() {
     deleted_ = true;
   }
 
-  static bool GetAndClearDeleted() {
+  static bool get_and_clear_deleted() {
     bool value = deleted_;
     deleted_ = false;
     return value;
   }
 
-  static bool GetAndClearCanceled() {
+  static bool get_and_clear_canceled() {
     bool value = canceled_;
     canceled_ = false;
     return value;
   }
 
-  // Overridden from gfx::AnimationDelegate:
-  virtual void AnimationCanceled(const Animation* animation) OVERRIDE {
+  // AnimationDelegate:
+  virtual void AnimationCanceled(const Animation* animation) {
     canceled_ = true;
   }
 
@@ -66,17 +68,18 @@ class OwnedDelegate : public BoundsAnimator::OwnedAnimationDelegate {
 
 // static
 bool OwnedDelegate::deleted_ = false;
+
+// static
 bool OwnedDelegate::canceled_ = false;
 
-class TestView : public View {
+class TestView : public views::View {
  public:
   TestView() {}
-
-  virtual void SchedulePaintInRect(const gfx::Rect& r) OVERRIDE {
+  virtual void SchedulePaintInRect(const gfx::Rect& r) {
     if (dirty_rect_.IsEmpty())
       dirty_rect_ = r;
     else
-      dirty_rect_.Union(r);
+      dirty_rect_ = dirty_rect_.Union(r);
   }
 
   const gfx::Rect& dirty_rect() const { return dirty_rect_; }
@@ -100,7 +103,7 @@ class BoundsAnimatorTest : public testing::Test {
   TestBoundsAnimator* animator() { return &animator_; }
 
  private:
-  base::MessageLoopForUI message_loop_;
+  MessageLoopForUI message_loop_;
   TestView parent_;
   TestView* child_;  // Owned by |parent_|.
   TestBoundsAnimator animator_;
@@ -122,15 +125,14 @@ TEST_F(BoundsAnimatorTest, AnimateViewTo) {
 
   // Run the message loop; the delegate exits the loop when the animation is
   // done.
-  base::MessageLoop::current()->Run();
+  MessageLoop::current()->Run();
 
   // Make sure the bounds match of the view that was animated match.
   EXPECT_EQ(target_bounds, child()->bounds());
 
   // The parent should have been told to repaint as the animation progressed.
   // The resulting rect is the union of the original and target bounds.
-  EXPECT_EQ(gfx::UnionRects(target_bounds, initial_bounds),
-            parent()->dirty_rect());
+  EXPECT_EQ(target_bounds.Union(initial_bounds), parent()->dirty_rect());
 }
 
 // Make sure an AnimationDelegate is deleted when canceled.
@@ -144,8 +146,8 @@ TEST_F(BoundsAnimatorTest, DeleteDelegateOnCancel) {
   EXPECT_FALSE(animator()->IsAnimating());
 
   // The cancel should both cancel the delegate and delete it.
-  EXPECT_TRUE(OwnedDelegate::GetAndClearCanceled());
-  EXPECT_TRUE(OwnedDelegate::GetAndClearDeleted());
+  EXPECT_TRUE(OwnedDelegate::get_and_clear_canceled());
+  EXPECT_TRUE(OwnedDelegate::get_and_clear_deleted());
 }
 
 // Make sure an AnimationDelegate is deleted when another animation is
@@ -157,8 +159,8 @@ TEST_F(BoundsAnimatorTest, DeleteDelegateOnNewAnimate) {
   animator()->AnimateViewTo(child(), gfx::Rect(0, 0, 10, 10));
 
   // Starting a new animation should both cancel the delegate and delete it.
-  EXPECT_TRUE(OwnedDelegate::GetAndClearDeleted());
-  EXPECT_TRUE(OwnedDelegate::GetAndClearCanceled());
+  EXPECT_TRUE(OwnedDelegate::get_and_clear_deleted());
+  EXPECT_TRUE(OwnedDelegate::get_and_clear_canceled());
 }
 
 // Makes sure StopAnimating works.
@@ -174,8 +176,6 @@ TEST_F(BoundsAnimatorTest, StopAnimating) {
   EXPECT_FALSE(animator()->IsAnimating());
 
   // Stopping should both cancel the delegate and delete it.
-  EXPECT_TRUE(OwnedDelegate::GetAndClearDeleted());
-  EXPECT_TRUE(OwnedDelegate::GetAndClearCanceled());
+  EXPECT_TRUE(OwnedDelegate::get_and_clear_deleted());
+  EXPECT_TRUE(OwnedDelegate::get_and_clear_canceled());
 }
-
-}  // namespace views

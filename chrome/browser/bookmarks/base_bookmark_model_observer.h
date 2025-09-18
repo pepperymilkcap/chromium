@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BASE_BOOKMARK_MODEL_OBSERVER_H_
 #define CHROME_BROWSER_BOOKMARKS_BASE_BOOKMARK_MODEL_OBSERVER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -14,12 +15,12 @@
 class BaseBookmarkModelObserver : public BookmarkModelObserver {
  public:
   BaseBookmarkModelObserver() {}
+  virtual ~BaseBookmarkModelObserver() {}
 
   virtual void BookmarkModelChanged() = 0;
 
   // BookmarkModelObserver:
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
   virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,
@@ -33,16 +34,12 @@ class BaseBookmarkModelObserver : public BookmarkModelObserver {
                                    const BookmarkNode* parent,
                                    int old_index,
                                    const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkAllNodesRemoved(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    const BookmarkNode* node) OVERRIDE;
   virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
                                           const BookmarkNode* node) OVERRIDE;
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
                                              const BookmarkNode* node) OVERRIDE;
-
- protected:
-  virtual ~BaseBookmarkModelObserver() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BaseBookmarkModelObserver);

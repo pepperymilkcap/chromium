@@ -28,6 +28,7 @@
 
 #ifndef NET_BASE_FILTER_H__
 #define NET_BASE_FILTER_H__
+#pragma once
 
 #include <string>
 #include <vector>
@@ -36,7 +37,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/net_export.h"
 
 class GURL;

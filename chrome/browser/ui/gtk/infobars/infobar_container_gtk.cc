@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "base/message_loop.h"
 #include "chrome/browser/infobars/infobar_delegate.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -15,9 +16,9 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/gtk_compat.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_utils_gtk.h"
 
@@ -79,6 +80,8 @@ void InfoBarContainerGtk::PlatformSpecificRemoveInfoBar(InfoBar* infobar) {
       std::find(infobars_gtk_.begin(), infobars_gtk_.end(), infobar);
   if (it != infobars_gtk_.end())
     infobars_gtk_.erase(it);
+
+  MessageLoop::current()->DeleteSoon(FROM_HERE, infobar);
 }
 
 void InfoBarContainerGtk::PlatformSpecificInfoBarStateChanged(
@@ -174,14 +177,12 @@ void InfoBarContainerGtk::PaintArrowOn(GtkWidget* widget,
   grad_colors[0] = source->ConvertGetColor(&InfoBarGtk::GetTopColor);
   grad_colors[1] = source->ConvertGetColor(&InfoBarGtk::GetBottomColor);
 
-  skia::RefPtr<SkShader> gradient_shader = skia::AdoptRef(
-      SkGradientShader::CreateLinear(
-          grad_points, grad_colors, NULL, 2, SkShader::kMirror_TileMode));
-  paint.setShader(gradient_shader.get());
+  SkShader* gradient_shader = SkGradientShader::CreateLinear(
+      grad_points, grad_colors, NULL, 2, SkShader::kMirror_TileMode);
+  paint.setShader(gradient_shader);
+  gradient_shader->unref();
 
-  gfx::CanvasSkiaPaint canvas_paint(expose, false);
-  SkCanvas& canvas = *canvas_paint.sk_canvas();
-
+  skia::PlatformCanvasPaint canvas(expose, false);
   canvas.drawPath(path, paint);
 
   paint.setShader(NULL);

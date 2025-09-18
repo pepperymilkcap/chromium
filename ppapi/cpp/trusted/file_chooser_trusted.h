@@ -16,9 +16,9 @@ class FileChooser_Trusted : public FileChooser_Dev {
   /// Creates an is_null() FileChooser_Trusted object.
   FileChooser_Trusted();
 
-  FileChooser_Trusted(const InstanceHandle& instance,
+  FileChooser_Trusted(const Instance* instance,
                       PP_FileChooserMode_Dev mode,
-                      const Var& accept_types,
+                      const Var& accept_mime_types,
                       bool save_as,
                       const std::string& suggested_file_name);
 
@@ -28,8 +28,7 @@ class FileChooser_Trusted : public FileChooser_Dev {
 
   // Overrides of method in superclass. This shows without requiring a user
   // gesture (and can also show save dialogs).
-  virtual int32_t Show(
-      const CompletionCallbackWithOutput< std::vector<FileRef> >& callback);
+  virtual int32_t Show(const CompletionCallback& cc);
 
  private:
   bool save_as_;

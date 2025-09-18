@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "skia/ext/vector_canvas.h"
 #include "skia/ext/vector_platform_device_emf_win.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -84,9 +84,9 @@ class Bitmap {
 class Image {
  public:
   // Creates the image from the given filename on disk.
-  explicit Image(const base::FilePath& filename) : ignore_alpha_(true) {
+  explicit Image(const FilePath& filename) : ignore_alpha_(true) {
     std::string compressed;
-    base::ReadFileToString(filename, &compressed);
+    file_util::ReadFileToString(filename, &compressed);
     EXPECT_TRUE(compressed.size());
 
     SkBitmap bitmap;
@@ -125,7 +125,7 @@ class Image {
   int row_length() const { return row_length_; }
 
   // Save the image to a png file. Used to create the initial test files.
-  void SaveToFile(const base::FilePath& filename) {
+  void SaveToFile(const FilePath& filename) {
     std::vector<unsigned char> compressed;
     ASSERT_TRUE(gfx::PNGCodec::Encode(&*data_.begin(),
                                       gfx::PNGCodec::FORMAT_BGRA,
@@ -135,11 +135,11 @@ class Image {
                                       std::vector<gfx::PNGCodec::Comment>(),
                                       &compressed));
     ASSERT_TRUE(compressed.size());
-    FILE* f = base::OpenFile(filename, "wb");
+    FILE* f = file_util::OpenFile(filename, "wb");
     ASSERT_TRUE(f);
     ASSERT_EQ(fwrite(&*compressed.begin(), 1, compressed.size(), f),
               compressed.size());
-    base::CloseFile(f);
+    file_util::CloseFile(f);
   }
 
   // Returns the percentage of the image that is different from the other,
@@ -238,19 +238,19 @@ class ImageTest : public testing::Test {
                           AppendASCII(test_info.name());
 
     // Hack for a quick lowercase. We assume all the tests names are ASCII.
-    base::FilePath::StringType tmp(test_dir_.value());
+    FilePath::StringType tmp(test_dir_.value());
     for (size_t i = 0; i < tmp.size(); ++i)
       tmp[i] = base::ToLowerASCII(tmp[i]);
-    test_dir_ = base::FilePath(tmp);
+    test_dir_ = FilePath(tmp);
 
     if (action_ == GENERATE) {
       // Make sure the directory exist.
-      base::CreateDirectory(test_dir_);
+      file_util::CreateDirectory(test_dir_);
     }
   }
 
   // Returns the fully qualified path of a data file.
-  base::FilePath test_file(const base::FilePath::StringType& filename) const {
+  FilePath test_file(const FilePath::StringType& filename) const {
     // Hack for a quick lowercase. We assume all the test data file names are
     // ASCII.
 #if defined(OS_WIN)
@@ -269,7 +269,7 @@ class ImageTest : public testing::Test {
   // 100] on failure. The return value is the percentage of difference between
   // the image in the file and the image in the canvas.
   double ProcessCanvas(skia::PlatformCanvas& canvas,
-                       base::FilePath::StringType filename) const {
+                       FilePath::StringType filename) const {
     filename = filename + FILE_PATH_LITERAL(".png");
     switch (action_) {
       case GENERATE:
@@ -288,7 +288,7 @@ class ImageTest : public testing::Test {
   // Compares the bitmap currently loaded in the context with the file. Returns
   // the percentage of pixel difference between both images, between 0 and 100.
   double CompareImage(skia::PlatformCanvas& canvas,
-                      const base::FilePath::StringType& filename) const {
+                      const FilePath::StringType& filename) const {
     Image image1(canvas);
     Image image2(test_file(filename));
     double diff = image1.PercentageDifferent(image2);
@@ -297,14 +297,14 @@ class ImageTest : public testing::Test {
 
   // Saves the bitmap currently loaded in the context into the file.
   void SaveImage(skia::PlatformCanvas& canvas,
-                 const base::FilePath::StringType& filename) const {
+                 const FilePath::StringType& filename) const {
     Image(canvas).SaveToFile(test_file(filename));
   }
 
   ProcessAction action_;
 
   // Path to directory used to contain the test data.
-  base::FilePath test_dir_;
+  FilePath test_dir_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageTest);
 };
@@ -331,11 +331,11 @@ void Premultiply(SkBitmap bitmap) {
   }
 }
 
-void LoadPngFileToSkBitmap(const base::FilePath& filename,
+void LoadPngFileToSkBitmap(const FilePath& filename,
                            SkBitmap* bitmap,
                            bool is_opaque) {
   std::string compressed;
-  base::ReadFileToString(base::MakeAbsoluteFilePath(filename), &compressed);
+  file_util::ReadFileToString(filename, &compressed);
   ASSERT_TRUE(compressed.size());
 
   ASSERT_TRUE(gfx::PNGCodec::Decode(
@@ -390,10 +390,9 @@ class VectorCanvasTest : public ImageTest {
     size_ = size;
     context_ = new Context();
     bitmap_ = new Bitmap(*context_, size_, size_);
-    vcanvas_ = new VectorCanvas(
-        VectorPlatformDeviceEmf::CreateDevice(
-            size_, size_, true, context_->context()));
-    pcanvas_ = CreatePlatformCanvas(size_, size_, false);
+    vcanvas_ = new VectorCanvas(VectorPlatformDeviceEmf::CreateDevice(
+        size_, size_, true, context_->context()));
+    pcanvas_ = new PlatformCanvas(size_, size_, false);
 
     // Clear white.
     vcanvas_->drawARGB(255, 255, 255, 255, SkXfermode::kSrc_Mode);
@@ -402,7 +401,7 @@ class VectorCanvasTest : public ImageTest {
 
   // Compares both canvas and returns the pixel difference in percentage between
   // both images. 0 on success and ]0, 100] on failure.
-  double ProcessImage(const base::FilePath::StringType& filename) {
+  double ProcessImage(const FilePath::StringType& filename) {
     std::wstring number(base::StringPrintf(L"%02d_", number_++));
     double diff1 = parent::ProcessCanvas(*vcanvas_, number + L"vc_" + filename);
     double diff2 = parent::ProcessCanvas(*pcanvas_, number + L"pc_" + filename);
@@ -449,7 +448,25 @@ class VectorCanvasTest : public ImageTest {
 ////////////////////////////////////////////////////////////////////////////////
 // Actual tests
 
-#if !defined(USE_AURA)  // http://crbug.com/154358
+TEST_F(VectorCanvasTest, Uninitialized) {
+  // Do a little mubadumba do get uninitialized stuff.
+  VectorCanvasTest::TearDown();
+
+  // The goal is not to verify that have the same uninitialized data.
+  compare_canvas_ = false;
+
+  context_ = new Context();
+  bitmap_ = new Bitmap(*context_, size_, size_);
+  vcanvas_ = new VectorCanvas(VectorPlatformDeviceEmf::CreateDevice(
+      size_, size_, true, context_->context()));
+  pcanvas_ = new PlatformCanvas(size_, size_, false);
+
+  // VectorCanvas default initialization is black.
+  // PlatformCanvas default initialization is almost white 0x01FFFEFD (invalid
+  // Skia color) in both Debug and Release. See magicTransparencyColor in
+  // platform_device.cc
+  EXPECT_EQ(0., ProcessImage(FILE_PATH_LITERAL("empty")));
+}
 
 TEST_F(VectorCanvasTest, BasicDrawing) {
   EXPECT_EQ(Image(*vcanvas_).PercentageDifferent(Image(*pcanvas_)), 0.)
@@ -721,18 +738,13 @@ TEST_F(VectorCanvasTest, DiagonalLines) {
   EXPECT_EQ(0., ProcessImage(FILE_PATH_LITERAL("se-nw")));
 }
 
-#if defined(OS_WIN)
-#define MAYBE_PathEffects DISABLED_PathEffects
-#else
-#define MAYBE_PathEffects PathEffects
-#endif
-TEST_F(VectorCanvasTest, MAYBE_PathEffects) {
+TEST_F(VectorCanvasTest, PathEffects) {
   {
     SkPaint paint;
     SkScalar intervals[] = { 1, 1 };
-    skia::RefPtr<SkPathEffect> effect = skia::AdoptRef(
-        new SkDashPathEffect(intervals, arraysize(intervals), 0));
-    paint.setPathEffect(effect.get());
+    SkPathEffect* effect = new SkDashPathEffect(intervals, arraysize(intervals),
+                                                0);
+    paint.setPathEffect(effect)->unref();
     paint.setColor(SK_ColorMAGENTA);
     paint.setStyle(SkPaint::kStroke_Style);
 
@@ -750,9 +762,9 @@ TEST_F(VectorCanvasTest, MAYBE_PathEffects) {
   {
     SkPaint paint;
     SkScalar intervals[] = { 3, 5 };
-    skia::RefPtr<SkPathEffect> effect = skia::AdoptRef(
-        new SkDashPathEffect(intervals, arraysize(intervals), 0));
-    paint.setPathEffect(effect.get());
+    SkPathEffect* effect = new SkDashPathEffect(intervals, arraysize(intervals),
+                                                0);
+    paint.setPathEffect(effect)->unref();
     paint.setColor(SK_ColorMAGENTA);
     paint.setStyle(SkPaint::kStroke_Style);
 
@@ -768,9 +780,9 @@ TEST_F(VectorCanvasTest, MAYBE_PathEffects) {
   {
     SkPaint paint;
     SkScalar intervals[] = { 2, 1 };
-    skia::RefPtr<SkPathEffect> effect = skia::AdoptRef(
-        new SkDashPathEffect(intervals, arraysize(intervals), 0));
-    paint.setPathEffect(effect.get());
+    SkPathEffect* effect = new SkDashPathEffect(intervals, arraysize(intervals),
+                                                0);
+    paint.setPathEffect(effect)->unref();
     paint.setColor(SK_ColorMAGENTA);
     paint.setStyle(SkPaint::kStroke_Style);
 
@@ -784,9 +796,9 @@ TEST_F(VectorCanvasTest, MAYBE_PathEffects) {
   {
     SkPaint paint;
     SkScalar intervals[] = { 1, 1 };
-    skia::RefPtr<SkPathEffect> effect = skia::AdoptRef(
-        new SkDashPathEffect(intervals, arraysize(intervals), 0));
-    paint.setPathEffect(effect.get());
+    SkPathEffect* effect = new SkDashPathEffect(intervals, arraysize(intervals),
+                                                0);
+    paint.setPathEffect(effect)->unref();
     paint.setColor(SK_ColorMAGENTA);
     paint.setStyle(SkPaint::kStroke_Style);
 
@@ -896,8 +908,7 @@ TEST_F(VectorCanvasTest, ClippingClean) {
   LoadPngFileToSkBitmap(test_file(L"..\\bitmaps\\bitmap_opaque.png"), &bitmap,
                         true);
   {
-    SkAutoCanvasRestore acrv(vcanvas_, true);
-    SkAutoCanvasRestore acrp(pcanvas_, true);
+    SkRegion old_region(pcanvas_->getTotalClip());
     SkRect rect;
     rect.fLeft = 2;
     rect.fTop = 2;
@@ -909,6 +920,8 @@ TEST_F(VectorCanvasTest, ClippingClean) {
     vcanvas_->drawBitmap(bitmap, 15, 3, NULL);
     pcanvas_->drawBitmap(bitmap, 15, 3, NULL);
     EXPECT_EQ(0., ProcessImage(FILE_PATH_LITERAL("clipped")));
+    vcanvas_->clipRegion(old_region, SkRegion::kReplace_Op);
+    pcanvas_->clipRegion(old_region, SkRegion::kReplace_Op);
   }
   {
     // Verify that the clipping region has been fixed back.
@@ -963,7 +976,5 @@ TEST_F(VectorCanvasTest, DISABLED_Matrix) {
     EXPECT_EQ(0., ProcessImage(FILE_PATH_LITERAL("rotate")));
   }
 }
-
-#endif  // !defined(USE_AURA)
 
 }  // namespace skia

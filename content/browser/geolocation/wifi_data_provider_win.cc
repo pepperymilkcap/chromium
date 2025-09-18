@@ -27,8 +27,7 @@
 #include <winioctl.h>
 #include <wlanapi.h>
 
-#include "base/metrics/histogram.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "content/browser/geolocation/wifi_data_provider_common.h"
 #include "content/browser/geolocation/wifi_data_provider_common_win.h"
@@ -37,7 +36,6 @@
 #define NDIS_STATUS_INVALID_LENGTH   ((NDIS_STATUS)0xC0010014L)
 #define NDIS_STATUS_BUFFER_TOO_SHORT ((NDIS_STATUS)0xC0010016L)
 
-namespace content {
 namespace {
 // The limits on the size of the buffer used for the OID query.
 const int kInitialBufferSize = 2 << 12;  // Good for about 50 APs.
@@ -103,9 +101,6 @@ class WindowsWlanApi : public WifiDataProviderCommon::WlanApiInterface {
                            const GUID& interface_id,
                            WifiData::AccessPointDataSet* data);
 
-  // Logs number of detected wlan interfaces.
-  static void LogWlanInterfaceCount(int count);
-
   // Handle to the wlanapi.dll library.
   HINSTANCE library_;
 
@@ -127,15 +122,15 @@ class WindowsNdisApi : public WifiDataProviderCommon::WlanApiInterface {
 
  private:
   static bool GetInterfacesNDIS(
-      std::vector<base::string16>* interface_service_names_out);
+      std::vector<string16>* interface_service_names_out);
 
   // Swaps in content of the vector passed
-  explicit WindowsNdisApi(std::vector<base::string16>* interface_service_names);
+  explicit WindowsNdisApi(std::vector<string16>* interface_service_names);
 
   bool GetInterfaceDataNDIS(HANDLE adapter_handle,
                             WifiData::AccessPointDataSet* data);
   // NDIS variables.
-  std::vector<base::string16> interface_service_names_;
+  std::vector<string16> interface_service_names_;
 
   // Remembers scan result buffer size across calls.
   int oid_buffer_size_;
@@ -144,9 +139,9 @@ class WindowsNdisApi : public WifiDataProviderCommon::WlanApiInterface {
 // Extracts data for an access point and converts to Gears format.
 bool GetNetworkData(const WLAN_BSS_ENTRY& bss_entry,
                     AccessPointData* access_point_data);
-bool UndefineDosDevice(const base::string16& device_name);
-bool DefineDosDeviceIfNotExists(const base::string16& device_name);
-HANDLE GetFileHandle(const base::string16& device_name);
+bool UndefineDosDevice(const string16& device_name);
+bool DefineDosDeviceIfNotExists(const string16& device_name);
+HANDLE GetFileHandle(const string16& device_name);
 // Makes the OID query and returns a Win32 error code.
 int PerformQuery(HANDLE adapter_handle,
                  BYTE* buffer,
@@ -155,9 +150,10 @@ int PerformQuery(HANDLE adapter_handle,
 bool ResizeBuffer(int requested_size, scoped_ptr_malloc<BYTE>* buffer);
 // Gets the system directory and appends a trailing slash if not already
 // present.
-bool GetSystemDirectory(base::string16* path);
+bool GetSystemDirectory(string16* path);
 }  // namespace
 
+template<>
 WifiDataProviderImplBase* WifiDataProvider::DefaultFactoryFunction() {
   return new Win32WifiDataProvider();
 }
@@ -178,11 +174,11 @@ WifiDataProviderCommon::WlanApiInterface* Win32WifiDataProvider::NewWlanApi() {
   return WindowsNdisApi::Create();
 }
 
-WifiPollingPolicy* Win32WifiDataProvider::NewPollingPolicy() {
-  return new GenericWifiPollingPolicy<kDefaultPollingInterval,
-                                      kNoChangePollingInterval,
-                                      kTwoNoChangePollingInterval,
-                                      kNoWifiPollingIntervalMilliseconds>;
+PollingPolicyInterface* Win32WifiDataProvider::NewPollingPolicy() {
+  return new GenericPollingPolicy<kDefaultPollingInterval,
+                                  kNoChangePollingInterval,
+                                  kTwoNoChangePollingInterval,
+                                  kNoWifiPollingIntervalMilliseconds>;
 }
 
 // Local classes and functions
@@ -202,12 +198,12 @@ WindowsWlanApi* WindowsWlanApi::Create() {
   if (base::win::GetVersion() < base::win::VERSION_VISTA)
     return NULL;
   // We use an absolute path to load the DLL to avoid DLL preloading attacks.
-  base::string16 system_directory;
+  string16 system_directory;
   if (!GetSystemDirectory(&system_directory)) {
     return NULL;
   }
   DCHECK(!system_directory.empty());
-  base::string16 dll_path = system_directory + L"wlanapi.dll";
+  string16 dll_path = system_directory + L"wlanapi.dll";
   HINSTANCE library = LoadLibraryEx(dll_path.c_str(),
                                     NULL,
                                     LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -237,15 +233,6 @@ void WindowsWlanApi::GetWLANFunctions(HINSTANCE wlan_library) {
          WlanCloseHandle_function_);
 }
 
-void WindowsWlanApi::LogWlanInterfaceCount(int count) {
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "Net.Wifi.InterfaceCount",
-      count,
-      1,
-      5,
-      5);
-}
-
 bool WindowsWlanApi::GetAccessPointData(
     WifiData::AccessPointDataSet* data) {
   DCHECK(data);
@@ -261,7 +248,6 @@ bool WindowsWlanApi::GetAccessPointData(
                                   NULL,
                                   &negotiated_version,
                                   &wlan_handle) != ERROR_SUCCESS) {
-    LogWlanInterfaceCount(0);
     return false;
   }
   DCHECK(wlan_handle);
@@ -270,12 +256,9 @@ bool WindowsWlanApi::GetAccessPointData(
   WLAN_INTERFACE_INFO_LIST* interface_list = NULL;
   if ((*WlanEnumInterfaces_function_)(wlan_handle, NULL, &interface_list) !=
       ERROR_SUCCESS) {
-    LogWlanInterfaceCount(0);
     return false;
   }
   DCHECK(interface_list);
-
-  LogWlanInterfaceCount(interface_list->dwNumberOfItems);
 
   // Go through the list of interfaces and get the data for each.
   for (int i = 0; i < static_cast<int>(interface_list->dwNumberOfItems); ++i) {
@@ -313,9 +296,6 @@ int WindowsWlanApi::GetInterfaceDataWLAN(
     const GUID& interface_id,
     WifiData::AccessPointDataSet* data) {
   DCHECK(data);
-
-  const base::TimeTicks start_time = base::TimeTicks::Now();
-
   // WlanGetNetworkBssList allocates bss_list.
   WLAN_BSS_LIST* bss_list = NULL;
   if ((*WlanGetNetworkBssList_function_)(wlan_handle,
@@ -333,16 +313,6 @@ int WindowsWlanApi::GetInterfaceDataWLAN(
   if (!bss_list)
     return -1;
 
-  const base::TimeDelta duration = base::TimeTicks::Now() - start_time;
-
-  UMA_HISTOGRAM_CUSTOM_TIMES(
-      "Net.Wifi.ScanLatency",
-      duration,
-      base::TimeDelta::FromMilliseconds(1),
-      base::TimeDelta::FromMinutes(1),
-      100);
-
-
   int found = 0;
   for (int i = 0; i < static_cast<int>(bss_list->dwNumberOfItems); ++i) {
     AccessPointData access_point_data;
@@ -359,7 +329,7 @@ int WindowsWlanApi::GetInterfaceDataWLAN(
 
 // WindowsNdisApi
 WindowsNdisApi::WindowsNdisApi(
-    std::vector<base::string16>* interface_service_names)
+    std::vector<string16>* interface_service_names)
     : oid_buffer_size_(kInitialBufferSize) {
   DCHECK(!interface_service_names->empty());
   interface_service_names_.swap(*interface_service_names);
@@ -369,7 +339,7 @@ WindowsNdisApi::~WindowsNdisApi() {
 }
 
 WindowsNdisApi* WindowsNdisApi::Create() {
-  std::vector<base::string16> interface_service_names;
+  std::vector<string16> interface_service_names;
   if (GetInterfacesNDIS(&interface_service_names)) {
     return new WindowsNdisApi(&interface_service_names);
   }
@@ -412,7 +382,7 @@ bool WindowsNdisApi::GetAccessPointData(WifiData::AccessPointDataSet* data) {
 }
 
 bool WindowsNdisApi::GetInterfacesNDIS(
-    std::vector<base::string16>* interface_service_names_out) {
+    std::vector<string16>* interface_service_names_out) {
   HKEY network_cards_key = NULL;
   if (RegOpenKeyEx(
       HKEY_LOCAL_MACHINE,
@@ -520,9 +490,9 @@ bool GetNetworkData(const WLAN_BSS_ENTRY& bss_entry,
   access_point_data->mac_address = MacAddressAsString16(bss_entry.dot11Bssid);
   access_point_data->radio_signal_strength = bss_entry.lRssi;
   // bss_entry.dot11Ssid.ucSSID is not null-terminated.
-  base::UTF8ToUTF16(reinterpret_cast<const char*>(bss_entry.dot11Ssid.ucSSID),
-                    static_cast<ULONG>(bss_entry.dot11Ssid.uSSIDLength),
-                    &access_point_data->ssid);
+  UTF8ToUTF16(reinterpret_cast<const char*>(bss_entry.dot11Ssid.ucSSID),
+              static_cast<ULONG>(bss_entry.dot11Ssid.uSSIDLength),
+              &access_point_data->ssid);
   // TODO(steveblock): Is it possible to get the following?
   // access_point_data->signal_to_noise
   // access_point_data->age
@@ -530,18 +500,18 @@ bool GetNetworkData(const WLAN_BSS_ENTRY& bss_entry,
   return true;
 }
 
-bool UndefineDosDevice(const base::string16& device_name) {
+bool UndefineDosDevice(const string16& device_name) {
   // We remove only the mapping we use, that is \Device\<device_name>.
-  base::string16 target_path = L"\\Device\\" + device_name;
+  string16 target_path = L"\\Device\\" + device_name;
   return DefineDosDevice(
       DDD_RAW_TARGET_PATH | DDD_REMOVE_DEFINITION | DDD_EXACT_MATCH_ON_REMOVE,
       device_name.c_str(),
       target_path.c_str()) == TRUE;
 }
 
-bool DefineDosDeviceIfNotExists(const base::string16& device_name) {
+bool DefineDosDeviceIfNotExists(const string16& device_name) {
   // We create a DOS device name for the device at \Device\<device_name>.
-  base::string16 target_path = L"\\Device\\" + device_name;
+  string16 target_path = L"\\Device\\" + device_name;
 
   TCHAR target[kStringLength];
   if (QueryDosDevice(device_name.c_str(), target, kStringLength) > 0 &&
@@ -565,10 +535,10 @@ bool DefineDosDeviceIfNotExists(const base::string16& device_name) {
       target_path.compare(target) == 0;
 }
 
-HANDLE GetFileHandle(const base::string16& device_name) {
+HANDLE GetFileHandle(const string16& device_name) {
   // We access a device with DOS path \Device\<device_name> at
   // \\.\<device_name>.
-  base::string16 formatted_device_name = L"\\\\.\\" + device_name;
+  string16 formatted_device_name = L"\\\\.\\" + device_name;
 
   return CreateFile(formatted_device_name.c_str(),
                     GENERIC_READ,
@@ -610,14 +580,14 @@ bool ResizeBuffer(int requested_size, scoped_ptr_malloc<BYTE>* buffer) {
   return buffer != NULL;
 }
 
-bool GetSystemDirectory(base::string16* path) {
+bool GetSystemDirectory(string16* path) {
   DCHECK(path);
   // Return value includes terminating NULL.
   int buffer_size = ::GetSystemDirectory(NULL, 0);
   if (buffer_size == 0) {
     return false;
   }
-  scoped_ptr<base::char16[]> buffer(new base::char16[buffer_size]);
+  scoped_array<char16> buffer(new char16[buffer_size]);
 
   // Return value excludes terminating NULL.
   int characters_written = ::GetSystemDirectory(buffer.get(), buffer_size);
@@ -635,5 +605,3 @@ bool GetSystemDirectory(base::string16* path) {
   return true;
 }
 }  // namespace
-
-}  // namespace content

@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_BROWSER_ACTIONS_TOOLBAR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_BROWSER_ACTIONS_TOOLBAR_GTK_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -17,27 +18,24 @@
 #include "chrome/browser/ui/gtk/overflow_button.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/base/animation/animation_delegate.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "ui/gfx/animation/animation_delegate.h"
-#include "ui/gfx/animation/slide_animation.h"
 
 class Browser;
 class BrowserActionButton;
+class Extension;
 class GtkThemeService;
 class Profile;
-
-namespace extensions {
-class Extension;
-}
 
 typedef struct _GdkDragContext GdkDragContext;
 typedef struct _GtkWidget GtkWidget;
 
 class BrowserActionsToolbarGtk : public ExtensionToolbarModel::Observer,
-                                 public gfx::AnimationDelegate,
+                                 public ui::AnimationDelegate,
                                  public MenuGtk::Delegate,
                                  public ui::SimpleMenuModel::Delegate,
                                  public content::NotificationObserver {
@@ -51,18 +49,14 @@ class BrowserActionsToolbarGtk : public ExtensionToolbarModel::Observer,
   // Returns the widget in use by the BrowserActionButton corresponding to
   // |extension|. Used in positioning the ExtensionInstalledBubble for
   // BrowserActions.
-  GtkWidget* GetBrowserActionWidget(const extensions::Extension* extension);
-  BrowserActionButton* GetBrowserActionButton(
-      const extensions::Extension* extension);
+  GtkWidget* GetBrowserActionWidget(const Extension* extension);
 
   int button_count() { return extension_button_map_.size(); }
 
   Browser* browser() { return browser_; }
 
-  ExtensionToolbarModel* model() { return model_; }
-
   // Returns the currently selected tab ID, or -1 if there is none.
-  int GetCurrentTabId() const;
+  int GetCurrentTabId();
 
   // Update the display of all buttons.
   void Update();
@@ -91,11 +85,10 @@ class BrowserActionsToolbarGtk : public ExtensionToolbarModel::Observer,
 
   // Create the UI for a single browser action. This will stick the button
   // at the end of the toolbar.
-  void CreateButtonForExtension(const extensions::Extension* extension,
-                                int index);
+  void CreateButtonForExtension(const Extension* extension, int index);
 
   // Delete resources associated with UI for a browser action.
-  void RemoveButtonForExtension(const extensions::Extension* extension);
+  void RemoveButtonForExtension(const Extension* extension);
 
   // Change the visibility of widget() based on whether we have any buttons
   // to show.
@@ -111,22 +104,19 @@ class BrowserActionsToolbarGtk : public ExtensionToolbarModel::Observer,
   // Returns true if this extension should be shown in this toolbar. This can
   // return false if we are in an incognito window and the extension is disabled
   // for incognito.
-  bool ShouldDisplayBrowserAction(const extensions::Extension* extension);
+  bool ShouldDisplayBrowserAction(const Extension* extension);
 
   // ExtensionToolbarModel::Observer implementation.
-  virtual void BrowserActionAdded(const extensions::Extension* extension,
+  virtual void BrowserActionAdded(const Extension* extension,
                                   int index) OVERRIDE;
-  virtual void BrowserActionRemoved(
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void BrowserActionMoved(const extensions::Extension* extension,
+  virtual void BrowserActionRemoved(const Extension* extension) OVERRIDE;
+  virtual void BrowserActionMoved(const Extension* extension,
                                   int index) OVERRIDE;
-  virtual bool BrowserActionShowPopup(
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void VisibleCountChanged() OVERRIDE;
+  virtual void ModelLoaded() OVERRIDE;
 
-  // gfx::AnimationDelegate implementation.
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
+  // ui::AnimationDelegate implementation.
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
 
   // SimpleMenuModel::Delegate implementation.
   // In our case, |command_id| is be the index into the model's extension list.
@@ -135,7 +125,7 @@ class BrowserActionsToolbarGtk : public ExtensionToolbarModel::Observer,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
 
   // MenuGtk::Delegate implementation.
   virtual void StoppedShowing() OVERRIDE;
@@ -197,12 +187,12 @@ class BrowserActionsToolbarGtk : public ExtensionToolbarModel::Observer,
   scoped_ptr<CustomDrawButton> overflow_button_;
   // The separator just next to the overflow button. Only shown in GTK+ theme
   // mode. In Chrome theme mode, the overflow button has a separator built in.
-  ui::OwnedWidgetGtk separator_;
+  GtkWidget* separator_;
   scoped_ptr<MenuGtk> overflow_menu_;
   scoped_ptr<ui::SimpleMenuModel> overflow_menu_model_;
-  ui::OwnedWidgetGtk overflow_area_;
+  GtkWidget* overflow_area_;
   // A widget for adding extra padding to the left of the overflow button.
-  ui::OwnedWidgetGtk overflow_alignment_;
+  GtkWidget* overflow_alignment_;
 
   // The button that is currently being dragged, or NULL.
   BrowserActionButton* drag_button_;
@@ -218,7 +208,7 @@ class BrowserActionsToolbarGtk : public ExtensionToolbarModel::Observer,
   ExtensionButtonMap extension_button_map_;
 
   // We use this animation for the smart resizing of the toolbar.
-  gfx::SlideAnimation resize_animation_;
+  ui::SlideAnimation resize_animation_;
   // This is the final width we are animating towards.
   int desired_width_;
   // This is the width we were at when we started animating.

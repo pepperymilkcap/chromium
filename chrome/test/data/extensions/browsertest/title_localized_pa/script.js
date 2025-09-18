@@ -3,5 +3,5 @@
 // found in the LICENSE file.
 
 if (window == top) {
-  chrome.runtime.connect().postMessage(true);
+  chrome.extension.connect().postMessage(true);
 }

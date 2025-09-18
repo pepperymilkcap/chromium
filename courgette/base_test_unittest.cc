@@ -4,7 +4,6 @@
 
 #include "courgette/base_test_unittest.h"
 
-#include "base/file_util.h"
 #include "base/path_service.h"
 
 void BaseTest::SetUp() {
@@ -18,16 +17,17 @@ void BaseTest::TearDown() {
 
 //  Reads a test file into a string.
 std::string BaseTest::FileContents(const char* file_name) const {
-  base::FilePath file_path = test_dir_;
+  FilePath file_path = test_dir_;
   file_path = file_path.AppendASCII(file_name);
   std::string file_bytes;
 
-  EXPECT_TRUE(base::ReadFileToString(file_path, &file_bytes));
+  EXPECT_TRUE(file_util::ReadFileToString(file_path, &file_bytes));
 
   return file_bytes;
 }
 
 std::string BaseTest::FilesContents(std::list<std::string> file_names) const {
+
   std::string result;
 
   std::list<std::string>::iterator file_name = file_names.begin();

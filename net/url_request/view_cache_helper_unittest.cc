@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@ namespace {
 class TestURLRequestContext : public URLRequestContext {
  public:
   TestURLRequestContext();
-  virtual ~TestURLRequestContext() {}
 
   // Gets a pointer to the cache backend.
   disk_cache::Backend* GetBackend();
@@ -34,8 +33,7 @@ TestURLRequestContext::TestURLRequestContext()
   set_http_transaction_factory(&cache_);
 }
 
-void WriteHeaders(disk_cache::Entry* entry, int flags,
-                  const std::string& data) {
+void WriteHeaders(disk_cache::Entry* entry, int flags, const std::string data) {
   if (data.empty())
     return;
 
@@ -50,11 +48,11 @@ void WriteHeaders(disk_cache::Entry* entry, int flags,
   int len = static_cast<int>(pickle.size());
 
   net::TestCompletionCallback cb;
-  int rv = entry->WriteData(0, 0, buf.get(), len, cb.callback(), true);
+  int rv = entry->WriteData(0, 0, buf, len, cb.callback(), true);
   ASSERT_EQ(len, cb.GetResult(rv));
 }
 
-void WriteData(disk_cache::Entry* entry, int index, const std::string& data) {
+void WriteData(disk_cache::Entry* entry, int index, const std::string data) {
   if (data.empty())
     return;
 
@@ -63,13 +61,13 @@ void WriteData(disk_cache::Entry* entry, int index, const std::string& data) {
   memcpy(buf->data(), data.data(), data.length());
 
   net::TestCompletionCallback cb;
-  int rv = entry->WriteData(index, 0, buf.get(), len, cb.callback(), true);
+  int rv = entry->WriteData(index, 0, buf, len, cb.callback(), true);
   ASSERT_EQ(len, cb.GetResult(rv));
 }
 
-void WriteToEntry(disk_cache::Backend* cache, const std::string& key,
-                  const std::string& data0, const std::string& data1,
-                  const std::string& data2) {
+void WriteToEntry(disk_cache::Backend* cache, const std::string key,
+                  const std::string data0, const std::string data1,
+                  const std::string data2) {
   net::TestCompletionCallback cb;
   disk_cache::Entry* entry;
   int rv = cache->CreateEntry(key, &entry, cb.callback());
@@ -103,25 +101,25 @@ void FillCache(URLRequestContext* context) {
 }  // namespace.
 
 TEST(ViewCacheHelper, EmptyCache) {
-  TestURLRequestContext context;
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
   ViewCacheHelper helper;
 
   TestCompletionCallback cb;
   std::string prefix, data;
-  int rv = helper.GetContentsHTML(&context, prefix, &data, cb.callback());
+  int rv = helper.GetContentsHTML(context, prefix, &data, cb.callback());
   EXPECT_EQ(OK, cb.GetResult(rv));
   EXPECT_FALSE(data.empty());
 }
 
 TEST(ViewCacheHelper, ListContents) {
-  TestURLRequestContext context;
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
   ViewCacheHelper helper;
 
-  FillCache(&context);
+  FillCache(context);
 
   std::string prefix, data;
   TestCompletionCallback cb;
-  int rv = helper.GetContentsHTML(&context, prefix, &data, cb.callback());
+  int rv = helper.GetContentsHTML(context, prefix, &data, cb.callback());
   EXPECT_EQ(OK, cb.GetResult(rv));
 
   EXPECT_EQ(0U, data.find("<html>"));
@@ -136,14 +134,14 @@ TEST(ViewCacheHelper, ListContents) {
 }
 
 TEST(ViewCacheHelper, DumpEntry) {
-  TestURLRequestContext context;
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
   ViewCacheHelper helper;
 
-  FillCache(&context);
+  FillCache(context);
 
   std::string data;
   TestCompletionCallback cb;
-  int rv = helper.GetEntryInfoHTML("second", &context, &data, cb.callback());
+  int rv = helper.GetEntryInfoHTML("second", context, &data, cb.callback());
   EXPECT_EQ(OK, cb.GetResult(rv));
 
   EXPECT_EQ(0U, data.find("<html>"));
@@ -161,15 +159,15 @@ TEST(ViewCacheHelper, DumpEntry) {
 
 // Makes sure the links are correct.
 TEST(ViewCacheHelper, Prefix) {
-  TestURLRequestContext context;
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
   ViewCacheHelper helper;
 
-  FillCache(&context);
+  FillCache(context);
 
   std::string key, data;
   std::string prefix("prefix:");
   TestCompletionCallback cb;
-  int rv = helper.GetContentsHTML(&context, prefix, &data, cb.callback());
+  int rv = helper.GetContentsHTML(context, prefix, &data, cb.callback());
   EXPECT_EQ(OK, cb.GetResult(rv));
 
   EXPECT_EQ(0U, data.find("<html>"));
@@ -180,13 +178,13 @@ TEST(ViewCacheHelper, Prefix) {
 }
 
 TEST(ViewCacheHelper, TruncatedFlag) {
-  TestURLRequestContext context;
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
   ViewCacheHelper helper;
 
   net::TestCompletionCallback cb;
   disk_cache::Backend* cache;
   int rv =
-      context.http_transaction_factory()->GetCache()->GetBackend(
+      context->http_transaction_factory()->GetCache()->GetBackend(
           &cache, cb.callback());
   ASSERT_EQ(OK, cb.GetResult(rv));
 
@@ -202,7 +200,7 @@ TEST(ViewCacheHelper, TruncatedFlag) {
 
   std::string data;
   TestCompletionCallback cb1;
-  rv = helper.GetEntryInfoHTML(key, &context, &data, cb1.callback());
+  rv = helper.GetEntryInfoHTML(key, context, &data, cb1.callback());
   EXPECT_EQ(OK, cb1.GetResult(rv));
 
   EXPECT_NE(std::string::npos, data.find("RESPONSE_INFO_TRUNCATED"));

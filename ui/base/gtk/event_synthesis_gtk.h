@@ -8,13 +8,14 @@
 
 #ifndef UI_BASE_GTK_EVENT_SYNTHESIS_GTK_
 #define UI_BASE_GTK_EVENT_SYNTHESIS_GTK_
+#pragma once
 
 #include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
 #include <vector>
 
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/ui_export.h"
-#include "ui/events/keycodes/keyboard_codes.h"
 
 namespace ui {
 

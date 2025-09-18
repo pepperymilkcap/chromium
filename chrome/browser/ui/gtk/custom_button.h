@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_CUSTOM_BUTTON_H_
 #define CHROME_BROWSER_UI_GTK_CUSTOM_BUTTON_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -12,10 +13,10 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/animation/animation_delegate.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
-#include "ui/gfx/animation/animation_delegate.h"
-#include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/rect.h"
 
 class GtkThemeService;
@@ -57,9 +58,7 @@ class CustomDrawButtonBase : public content::NotificationObserver {
   int paint_override() const { return paint_override_; }
 
   // Set the background details.
-  void SetBackground(SkColor color,
-                     const SkBitmap& image,
-                     const SkBitmap& mask);
+  void SetBackground(SkColor color, SkBitmap* image, SkBitmap* mask);
 
   // Provide content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -103,7 +102,7 @@ class CustomDrawButtonBase : public content::NotificationObserver {
 // of controlling the hover state of a button. The "hover state" refers to the
 // percent opacity of a button's PRELIGHT. The PRELIGHT is animated such that
 // when a user moves a mouse over a button the PRELIGHT fades in.
-class CustomDrawHoverController : public gfx::AnimationDelegate {
+class CustomDrawHoverController : public ui::AnimationDelegate {
  public:
   explicit CustomDrawHoverController(GtkWidget* widget);
   CustomDrawHoverController();
@@ -117,14 +116,14 @@ class CustomDrawHoverController : public gfx::AnimationDelegate {
   }
 
  private:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
   CHROMEGTK_CALLBACK_1(CustomDrawHoverController, gboolean, OnEnter,
                        GdkEventCrossing*);
   CHROMEGTK_CALLBACK_1(CustomDrawHoverController, gboolean, OnLeave,
                        GdkEventCrossing*);
 
-  gfx::SlideAnimation slide_animation_;
+  ui::SlideAnimation slide_animation_;
   GtkWidget* widget_;
 };
 
@@ -188,23 +187,16 @@ class CustomDrawButton : public content::NotificationObserver {
   void UnsetPaintOverride();
 
   // Set the background details.
-  void SetBackground(SkColor color,
-                     const SkBitmap& image,
-                     const SkBitmap& mask);
+  void SetBackground(SkColor color, SkBitmap* image, SkBitmap* mask);
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Returns a standard close button used for infobars and shelves (smaller
-  // with red hover).
-  // Pass a |theme_provider| to use Gtk icons in Gtk rendering mode.
-  static CustomDrawButton* CloseButtonBar(GtkThemeService* theme_provider);
-
-  // Returns a standard close button used for bubbles (larger).
-  // Pass a |theme_provider| to use Gtk icons in Gtk rendering mode.
-  static CustomDrawButton* CloseButtonBubble(GtkThemeService* theme_provider);
+  // Returns a standard close button. Pass a |theme_provider| to use Gtk icons
+  // in Gtk rendering mode.
+  static CustomDrawButton* CloseButton(GtkThemeService* theme_provider);
 
  private:
   // Sets the button to themed or not.

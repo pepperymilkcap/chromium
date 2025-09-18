@@ -4,25 +4,26 @@
 
 #include "ui/gfx/platform_font_pango.h"
 
-#include <fontconfig/fontconfig.h>
-#include <pango/pango.h>
-
 #include <algorithm>
+#include <fontconfig/fontconfig.h>
+#include <map>
+#include <pango/pango.h>
 #include <string>
 
 #include "base/logging.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_split.h"
-#include "base/strings/utf_string_conversions.h"
-#include "third_party/skia/include/core/SkPaint.h"
-#include "third_party/skia/include/core/SkString.h"
+#include "base/string_piece.h"
+#include "base/string_split.h"
+#include "base/utf_string_conversions.h"
+#include "grit/app_locale_settings.h"
 #include "third_party/skia/include/core/SkTypeface.h"
-#include "ui/gfx/canvas.h"
+#include "third_party/skia/include/core/SkPaint.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/linux_font_delegate.h"
+#include "ui/gfx/linux_util.h"
 #include "ui/gfx/pango_util.h"
 
-#if defined(TOOLKIT_GTK)
+#if !defined(USE_WAYLAND) && defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #endif
@@ -33,6 +34,35 @@ namespace {
 // GNOME/KDE is a non-scalable one. The name should be listed in the
 // IsFallbackFontAllowed function in skia/ext/SkFontHost_fontconfig_direct.cpp.
 const char* kFallbackFontFamilyName = "sans";
+
+// Retrieves the pango metrics for a pango font description. Caches the metrics
+// and never frees them. The metrics objects are relatively small and
+// very expensive to look up.
+PangoFontMetrics* GetPangoFontMetrics(PangoFontDescription* desc) {
+  static std::map<int, PangoFontMetrics*>* desc_to_metrics = NULL;
+  static PangoContext* context = NULL;
+
+  if (!context) {
+    context = gfx::GetPangoContext();
+    pango_context_set_language(context, pango_language_get_default());
+  }
+
+  if (!desc_to_metrics) {
+    desc_to_metrics = new std::map<int, PangoFontMetrics*>();
+  }
+
+  int desc_hash = pango_font_description_hash(desc);
+  std::map<int, PangoFontMetrics*>::iterator i =
+      desc_to_metrics->find(desc_hash);
+
+  if (i == desc_to_metrics->end()) {
+    PangoFontMetrics* metrics = pango_context_get_metrics(context, desc, NULL);
+    (*desc_to_metrics)[desc_hash] = metrics;
+    return metrics;
+  } else {
+    return i->second;
+  }
+}
 
 // Returns the available font family that best (in FontConfig's eyes) matches
 // the supplied list of family names.
@@ -60,17 +90,36 @@ std::string FindBestMatchFontFamilyName(
   return font_family;
 }
 
+// Returns a Pango font description (suitable for parsing by
+// pango_font_description_from_string()) for the default UI font.
+std::string GetDefaultFont() {
+#if defined(USE_WAYLAND) || !defined(TOOLKIT_USES_GTK)
+#if defined(OS_CHROMEOS)
+  return l10n_util::GetStringUTF8(IDS_UI_FONT_FAMILY_CROS);
+#else
+  return "sans 10";
+#endif    // defined(OS_CHROMEOS)
+#else
+  GtkSettings* settings = gtk_settings_get_default();
+
+  gchar* font_name = NULL;
+  g_object_get(settings, "gtk-font-name", &font_name, NULL);
+
+  // Temporary CHECK for helping track down
+  // http://code.google.com/p/chromium/issues/detail?id=12530
+  CHECK(font_name) << " Unable to get gtk-font-name for default font.";
+
+  std::string default_font = std::string(font_name);
+  g_free(font_name);
+  return default_font;
+#endif  // defined(USE_WAYLAND) || !defined(TOOLKIT_USES_GTK)
+}
+
 }  // namespace
 
 namespace gfx {
 
-// static
 Font* PlatformFontPango::default_font_ = NULL;
-
-#if defined(OS_CHROMEOS)
-// static
-std::string* PlatformFontPango::default_font_description_ = NULL;
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // PlatformFontPango, public:
@@ -79,15 +128,21 @@ PlatformFontPango::PlatformFontPango() {
   if (default_font_ == NULL) {
     std::string font_name = GetDefaultFont();
 
-    ScopedPangoFontDescription desc(
-        pango_font_description_from_string(font_name.c_str()));
-    default_font_ = new Font(desc.get());
+    PangoFontDescription* desc =
+        pango_font_description_from_string(font_name.c_str());
+    default_font_ = new Font(desc);
+    pango_font_description_free(desc);
 
     DCHECK(default_font_);
   }
 
   InitFromPlatformFont(
       static_cast<PlatformFontPango*>(default_font_->platform_font()));
+}
+
+PlatformFontPango::PlatformFontPango(const Font& other) {
+  InitFromPlatformFont(
+      static_cast<PlatformFontPango*>(other.platform_font()));
 }
 
 PlatformFontPango::PlatformFontPango(NativeFont native_font) {
@@ -135,16 +190,6 @@ void PlatformFontPango::ReloadDefaultFont() {
   default_font_ = NULL;
 }
 
-#if defined(OS_CHROMEOS)
-// static
-void PlatformFontPango::SetDefaultFontDescription(
-    const std::string& font_description) {
-  delete default_font_description_;
-  default_font_description_ = new std::string(font_description);
-}
-
-#endif
-
 Font PlatformFontPango::DeriveFont(int size_delta, int style) const {
   // If the delta is negative, if must not push the size below 1
   if (size_delta < 0)
@@ -165,10 +210,10 @@ Font PlatformFontPango::DeriveFont(int size_delta, int style) const {
   if (gfx::Font::ITALIC & style)
     skstyle |= SkTypeface::kItalic;
 
-  skia::RefPtr<SkTypeface> typeface = skia::AdoptRef(
-      SkTypeface::CreateFromName(
-          font_family_.c_str(),
-          static_cast<SkTypeface::Style>(skstyle)));
+  SkTypeface* typeface = SkTypeface::CreateFromName(
+      font_family_.c_str(),
+      static_cast<SkTypeface::Style>(skstyle));
+  SkAutoUnref tf_helper(typeface);
 
   return Font(new PlatformFontPango(typeface,
                                     font_family_,
@@ -184,18 +229,9 @@ int PlatformFontPango::GetBaseline() const {
   return ascent_pixels_;
 }
 
-int PlatformFontPango::GetCapHeight() const {
-  return cap_height_pixels_;
-}
-
 int PlatformFontPango::GetAverageCharacterWidth() const {
   const_cast<PlatformFontPango*>(this)->InitPangoMetrics();
   return SkScalarRound(average_width_pixels_);
-}
-
-int PlatformFontPango::GetStringWidth(const base::string16& text) const {
-  return Canvas::GetStringWidth(text,
-                                Font(const_cast<PlatformFontPango*>(this)));
 }
 
 int PlatformFontPango::GetExpectedTextWidth(int length) const {
@@ -209,12 +245,6 @@ int PlatformFontPango::GetStyle() const {
 
 std::string PlatformFontPango::GetFontName() const {
   return font_family_;
-}
-
-std::string PlatformFontPango::GetActualFontNameForTesting() const {
-  SkString family_name;
-  typeface_->getFamilyName(&family_name);
-  return family_name.c_str();
 }
 
 int PlatformFontPango::GetFontSize() const {
@@ -241,8 +271,8 @@ NativeFont PlatformFontPango::GetNativeFont() const {
     case gfx::Font::ITALIC:
       pango_font_description_set_style(pfd, PANGO_STYLE_ITALIC);
       break;
-    case gfx::Font::UNDERLINE:
-      // TODO(deanm): How to do underline?  Where do we use it?  Probably have
+    case gfx::Font::UNDERLINED:
+      // TODO(deanm): How to do underlined?  Where do we use it?  Probably have
       // to paint it ourselves, see pango_font_metrics_get_underline_position.
       break;
   }
@@ -253,7 +283,7 @@ NativeFont PlatformFontPango::GetNativeFont() const {
 ////////////////////////////////////////////////////////////////////////////////
 // PlatformFontPango, private:
 
-PlatformFontPango::PlatformFontPango(const skia::RefPtr<SkTypeface>& typeface,
+PlatformFontPango::PlatformFontPango(SkTypeface* typeface,
                                      const std::string& name,
                                      int size,
                                      int style) {
@@ -262,55 +292,24 @@ PlatformFontPango::PlatformFontPango(const skia::RefPtr<SkTypeface>& typeface,
 
 PlatformFontPango::~PlatformFontPango() {}
 
-// static
-std::string PlatformFontPango::GetDefaultFont() {
-#if !defined(TOOLKIT_GTK)
-#if defined(OS_CHROMEOS)
-  // Font name must have been provided by way of SetDefaultFontDescription().
-  CHECK(default_font_description_);
-  return *default_font_description_;
-#else
-  const gfx::LinuxFontDelegate* delegate = gfx::LinuxFontDelegate::instance();
-  if (delegate)
-    return delegate->GetDefaultFontName();
-
-  return "sans 10";
-#endif    // defined(OS_CHROMEOS)
-#else
-  GtkSettings* settings = gtk_settings_get_default();
-
-  gchar* font_name = NULL;
-  g_object_get(settings, "gtk-font-name", &font_name, NULL);
-
-  // Temporary CHECK for helping track down
-  // http://code.google.com/p/chromium/issues/detail?id=12530
-  CHECK(font_name) << " Unable to get gtk-font-name for default font.";
-
-  std::string default_font = std::string(font_name);
-  g_free(font_name);
-  return default_font;
-#endif  // !defined(TOOLKIT_GTK)
-}
-
-
 void PlatformFontPango::InitWithNameAndSize(const std::string& font_name,
                                             int font_size) {
   DCHECK_GT(font_size, 0);
   std::string fallback;
 
-  skia::RefPtr<SkTypeface> typeface = skia::AdoptRef(
-      SkTypeface::CreateFromName(font_name.c_str(), SkTypeface::kNormal));
+  SkTypeface* typeface = SkTypeface::CreateFromName(
+      font_name.c_str(), SkTypeface::kNormal);
   if (!typeface) {
     // A non-scalable font such as .pcf is specified. Falls back to a default
     // scalable font.
-    typeface = skia::AdoptRef(
-        SkTypeface::CreateFromName(
-            kFallbackFontFamilyName, SkTypeface::kNormal));
+    typeface = SkTypeface::CreateFromName(
+        kFallbackFontFamilyName, SkTypeface::kNormal);
     CHECK(typeface) << "Could not find any font: "
                     << font_name
                     << ", " << kFallbackFontFamilyName;
     fallback = kFallbackFontFamilyName;
   }
+  SkAutoUnref typeface_helper(typeface);
 
   InitWithTypefaceNameSizeAndStyle(typeface,
                                    fallback.empty() ? font_name : fallback,
@@ -319,11 +318,13 @@ void PlatformFontPango::InitWithNameAndSize(const std::string& font_name,
 }
 
 void PlatformFontPango::InitWithTypefaceNameSizeAndStyle(
-    const skia::RefPtr<SkTypeface>& typeface,
+    SkTypeface* typeface,
     const std::string& font_family,
     int font_size,
     int style) {
+  typeface_helper_.reset(new SkAutoUnref(typeface));
   typeface_ = typeface;
+  typeface_->ref();
   font_family_ = font_family;
   font_size_pixels_ = font_size;
   style_ = style;
@@ -339,17 +340,17 @@ void PlatformFontPango::InitWithTypefaceNameSizeAndStyle(
 
   ascent_pixels_ = SkScalarCeil(-metrics.fAscent);
   height_pixels_ = ascent_pixels_ + SkScalarCeil(metrics.fDescent);
-  cap_height_pixels_ = SkScalarCeil(metrics.fCapHeight);
 }
 
 void PlatformFontPango::InitFromPlatformFont(const PlatformFontPango* other) {
+  typeface_helper_.reset(new SkAutoUnref(other->typeface_));
   typeface_ = other->typeface_;
+  typeface_->ref();
   font_family_ = other->font_family_;
   font_size_pixels_ = other->font_size_pixels_;
   style_ = other->style_;
   height_pixels_ = other->height_pixels_;
   ascent_pixels_ = other->ascent_pixels_;
-  cap_height_pixels_ = other->cap_height_pixels_;
   pango_metrics_inited_ = other->pango_metrics_inited_;
   average_width_pixels_ = other->average_width_pixels_;
   underline_position_pixels_ = other->underline_position_pixels_;
@@ -360,7 +361,7 @@ void PlatformFontPango::PaintSetup(SkPaint* paint) const {
   paint->setAntiAlias(false);
   paint->setSubpixelText(false);
   paint->setTextSize(font_size_pixels_);
-  paint->setTypeface(typeface_.get());
+  paint->setTypeface(typeface_);
   paint->setFakeBoldText((gfx::Font::BOLD & style_) && !typeface_->isBold());
   paint->setTextSkewX((gfx::Font::ITALIC & style_) && !typeface_->isItalic() ?
                       -SK_Scalar1/4 : 0);
@@ -369,8 +370,8 @@ void PlatformFontPango::PaintSetup(SkPaint* paint) const {
 void PlatformFontPango::InitPangoMetrics() {
   if (!pango_metrics_inited_) {
     pango_metrics_inited_ = true;
-    ScopedPangoFontDescription pango_desc(GetNativeFont());
-    PangoFontMetrics* pango_metrics = GetPangoFontMetrics(pango_desc.get());
+    PangoFontDescription* pango_desc = GetNativeFont();
+    PangoFontMetrics* pango_metrics = GetPangoFontMetrics(pango_desc);
 
     underline_position_pixels_ =
         pango_font_metrics_get_underline_position(pango_metrics) /
@@ -392,12 +393,15 @@ void PlatformFontPango::InitPangoMetrics() {
 
     // Yes, this is how Microsoft recommends calculating the dialog unit
     // conversions.
-    const int text_width_pixels = GetStringWidth(base::ASCIIToUTF16(
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"));
+    const int text_width_pixels = CanvasSkia::GetStringWidth(
+        ASCIIToUTF16("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"),
+        Font(this));
     const double dialog_units_pixels = (text_width_pixels / 26 + 1) / 2;
     average_width_pixels_ = std::min(pango_width_pixels, dialog_units_pixels);
+    pango_font_description_free(pango_desc);
   }
 }
+
 
 double PlatformFontPango::GetAverageWidth() const {
   const_cast<PlatformFontPango*>(this)->InitPangoMetrics();
@@ -410,6 +414,11 @@ double PlatformFontPango::GetAverageWidth() const {
 // static
 PlatformFont* PlatformFont::CreateDefault() {
   return new PlatformFontPango;
+}
+
+// static
+PlatformFont* PlatformFont::CreateFromFont(const Font& other) {
+  return new PlatformFontPango(other);
 }
 
 // static

@@ -8,6 +8,7 @@
 
 #ifndef BASE_DEBUG_DEBUGGER_H
 #define BASE_DEBUG_DEBUGGER_H
+#pragma once
 
 #include "base/base_export.h"
 

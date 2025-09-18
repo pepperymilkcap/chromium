@@ -5,13 +5,35 @@
 #include "content/renderer/render_widget_fullscreen.h"
 
 #include "content/common/view_messages.h"
-#include "third_party/WebKit/public/web/WebWidget.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
 
-using blink::WebWidget;
+using WebKit::WebWidget;
 
-namespace content {
+// static
+RenderWidgetFullscreen* RenderWidgetFullscreen::Create(int32 opener_id) {
+  DCHECK_NE(MSG_ROUTING_NONE, opener_id);
+  scoped_refptr<RenderWidgetFullscreen> widget(
+      new RenderWidgetFullscreen());
+  widget->Init(opener_id);
+  return widget.release();
+}
 
-void RenderWidgetFullscreen::show(blink::WebNavigationPolicy) {
+WebWidget* RenderWidgetFullscreen::CreateWebWidget() {
+  // TODO(boliu): Handle full screen render widgets here.
+  return RenderWidget::CreateWebWidget(this);
+}
+
+void RenderWidgetFullscreen::Init(int32 opener_id) {
+  DCHECK(!webwidget_);
+
+  RenderWidget::DoInit(
+      opener_id,
+      CreateWebWidget(),
+      new ViewHostMsg_CreateFullscreenWidget(
+          opener_id, &routing_id_, &surface_id_));
+}
+
+void RenderWidgetFullscreen::show(WebKit::WebNavigationPolicy) {
   DCHECK(!did_show_) << "received extraneous Show call";
   DCHECK_NE(MSG_ROUTING_NONE, routing_id_);
   DCHECK_NE(MSG_ROUTING_NONE, opener_id_);
@@ -23,26 +45,6 @@ void RenderWidgetFullscreen::show(blink::WebNavigationPolicy) {
   }
 }
 
-RenderWidgetFullscreen::RenderWidgetFullscreen(
-    const blink::WebScreenInfo& screen_info)
-    : RenderWidget(blink::WebPopupTypeNone, screen_info, false, false) {
+RenderWidgetFullscreen::RenderWidgetFullscreen()
+    : RenderWidget(WebKit::WebPopupTypeNone) {
 }
-
-RenderWidgetFullscreen::~RenderWidgetFullscreen() {}
-
-WebWidget* RenderWidgetFullscreen::CreateWebWidget() {
-  // TODO(boliu): Handle full screen render widgets here.
-  return RenderWidget::CreateWebWidget(this);
-}
-
-bool RenderWidgetFullscreen::Init(int32 opener_id) {
-  DCHECK(!webwidget_);
-
-  return RenderWidget::DoInit(
-      opener_id,
-      CreateWebWidget(),
-      new ViewHostMsg_CreateFullscreenWidget(
-          opener_id, &routing_id_, &surface_id_));
-}
-
-}  // namespace content

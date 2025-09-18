@@ -48,7 +48,6 @@
 #include <google/protobuf/wire_format.h>
 #include <google/protobuf/descriptor.pb.h>
 
-
 namespace google {
 namespace protobuf {
 namespace compiler {
@@ -104,13 +103,6 @@ struct ExtensionRangeSorter {
   }
 };
 
-// Returns true if the "required" restriction check should be ignored for the
-// given field.
-inline static bool ShouldIgnoreRequiredFieldCheck(
-    const FieldDescriptor* field) {
-  return false;
-}
-
 // Returns true if the message type has any required fields.  If it doesn't,
 // we can optimize out calls to its IsInitialized() method.
 //
@@ -137,8 +129,7 @@ static bool HasRequiredFields(
     if (field->is_required()) {
       return true;
     }
-    if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE &&
-        !ShouldIgnoreRequiredFieldCheck(field)) {
+    if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
       if (HasRequiredFields(field->message_type(), already_seen)) {
         return true;
       }
@@ -289,11 +280,11 @@ void OptimizePadding(vector<const FieldDescriptor*>* fields) {
 // ===================================================================
 
 MessageGenerator::MessageGenerator(const Descriptor* descriptor,
-                                   const Options& options)
+                                   const string& dllexport_decl)
   : descriptor_(descriptor),
     classname_(ClassName(descriptor, false)),
-    options_(options),
-    field_generators_(descriptor, options),
+    dllexport_decl_(dllexport_decl),
+    field_generators_(descriptor),
     nested_generators_(new scoped_ptr<MessageGenerator>[
       descriptor->nested_type_count()]),
     enum_generators_(new scoped_ptr<EnumGenerator>[
@@ -303,17 +294,17 @@ MessageGenerator::MessageGenerator(const Descriptor* descriptor,
 
   for (int i = 0; i < descriptor->nested_type_count(); i++) {
     nested_generators_[i].reset(
-      new MessageGenerator(descriptor->nested_type(i), options));
+      new MessageGenerator(descriptor->nested_type(i), dllexport_decl));
   }
 
   for (int i = 0; i < descriptor->enum_type_count(); i++) {
     enum_generators_[i].reset(
-      new EnumGenerator(descriptor->enum_type(i), options));
+      new EnumGenerator(descriptor->enum_type(i), dllexport_decl));
   }
 
   for (int i = 0; i < descriptor->extension_count(); i++) {
     extension_generators_[i].reset(
-      new ExtensionGenerator(descriptor->extension(i), options));
+      new ExtensionGenerator(descriptor->extension(i), dllexport_decl));
   }
 }
 
@@ -358,7 +349,7 @@ GenerateFieldAccessorDeclarations(io::Printer* printer) {
     PrintFieldComment(printer, field);
 
     map<string, string> vars;
-    SetCommonFieldVariables(field, &vars, options_);
+    SetCommonFieldVariables(field, &vars);
     vars["constant_name"] = FieldConstantName(field);
 
     if (field->is_repeated()) {
@@ -395,7 +386,7 @@ GenerateFieldAccessorDefinitions(io::Printer* printer) {
     PrintFieldComment(printer, field);
 
     map<string, string> vars;
-    SetCommonFieldVariables(field, &vars, options_);
+    SetCommonFieldVariables(field, &vars);
 
     // Generate has_$name$() or $name$_size().
     if (field->is_repeated()) {
@@ -455,10 +446,10 @@ GenerateClassDefinition(io::Printer* printer) {
   map<string, string> vars;
   vars["classname"] = classname_;
   vars["field_count"] = SimpleItoa(descriptor_->field_count());
-  if (options_.dllexport_decl.empty()) {
+  if (dllexport_decl_.empty()) {
     vars["dllexport"] = "";
   } else {
-    vars["dllexport"] = options_.dllexport_decl + " ";
+    vars["dllexport"] = dllexport_decl_ + " ";
   }
   vars["superclass"] = SuperClassName(descriptor_);
 
@@ -501,20 +492,6 @@ GenerateClassDefinition(io::Printer* printer) {
   printer->Print(vars,
     "static const $classname$& default_instance();\n"
     "\n");
-
-  if (!StaticInitializersForced(descriptor_->file())) {
-    printer->Print(vars,
-      "#ifdef GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER\n"
-      "// Returns the internal default instance pointer. This function can\n"
-      "// return NULL thus should not be used by the user. This is intended\n"
-      "// for Protobuf internal code. Please use default_instance() declared\n"
-      "// above instead.\n"
-      "static inline const $classname$* internal_default_instance() {\n"
-      "  return default_instance_;\n"
-      "}\n"
-      "#endif\n"
-      "\n");
-  }
 
 
   printer->Print(vars,
@@ -615,7 +592,6 @@ GenerateClassDefinition(io::Printer* printer) {
   printer->Print(" private:\n");
   printer->Indent();
 
-
   for (int i = 0; i < descriptor_->field_count(); i++) {
     if (!descriptor_->field(i)->is_repeated()) {
       printer->Print(
@@ -684,17 +660,11 @@ GenerateClassDefinition(io::Printer* printer) {
   // Declare AddDescriptors(), BuildDescriptors(), and ShutdownFile() as
   // friends so that they can access private static variables like
   // default_instance_ and reflection_.
-  PrintHandlingOptionalStaticInitializers(
-    descriptor_->file(), printer,
-    // With static initializers.
+  printer->Print(
     "friend void $dllexport_decl$ $adddescriptorsname$();\n",
-    // Without.
-    "friend void $dllexport_decl$ $adddescriptorsname$_impl();\n",
-    // Vars.
-    "dllexport_decl", options_.dllexport_decl,
+    "dllexport_decl", dllexport_decl_,
     "adddescriptorsname",
-    GlobalAddDescriptorsName(descriptor_->file()->name()));
-
+      GlobalAddDescriptorsName(descriptor_->file()->name()));
   printer->Print(
     "friend void $assigndescriptorsname$();\n"
     "friend void $shutdownfilename$();\n"
@@ -783,11 +753,9 @@ GenerateDescriptorInitializer(io::Printer* printer, int index) {
     printer->Print(vars,
       "    -1,\n");
   }
-  printer->Print(
-    "    ::google::protobuf::DescriptorPool::generated_pool(),\n");
   printer->Print(vars,
-    "    ::google::protobuf::MessageFactory::generated_factory(),\n");
-  printer->Print(vars,
+    "    ::google::protobuf::DescriptorPool::generated_pool(),\n"
+    "    ::google::protobuf::MessageFactory::generated_factory(),\n"
     "    sizeof($classname$));\n");
 
   // Handle nested types.
@@ -816,13 +784,6 @@ GenerateTypeRegistrations(io::Printer* printer) {
 
 void MessageGenerator::
 GenerateDefaultInstanceAllocator(io::Printer* printer) {
-  // Construct the default instances of all fields, as they will be used
-  // when creating the default instance of the entire message.
-  for (int i = 0; i < descriptor_->field_count(); i++) {
-    field_generators_.get(descriptor_->field(i))
-                     .GenerateDefaultInstanceAllocator(printer);
-  }
-
   // Construct the default instance.  We can't call InitAsDefaultInstance() yet
   // because we need to make sure all default instances that this one might
   // depend on are constructed first.
@@ -864,12 +825,6 @@ GenerateShutdownCode(io::Printer* printer) {
     printer->Print(
       "delete $classname$_reflection_;\n",
       "classname", classname_);
-  }
-
-  // Handle default instances of fields.
-  for (int i = 0; i < descriptor_->field_count(); i++) {
-    field_generators_.get(descriptor_->field(i))
-                     .GenerateShutdownCode(printer);
   }
 
   // Handle nested types.
@@ -1026,12 +981,8 @@ GenerateSharedDestructorCode(io::Printer* printer) {
                      .GenerateDestructorCode(printer);
   }
 
-  PrintHandlingOptionalStaticInitializers(
-    descriptor_->file(), printer,
-    // With static initializers.
-    "if (this != default_instance_) {\n",
-    // Without.
-    "if (this != &default_instance()) {\n");
+  printer->Print(
+    "if (this != default_instance_) {\n");
 
   // We need to delete all embedded messages.
   // TODO(kenton):  If we make unset messages point at default instances
@@ -1083,16 +1034,10 @@ GenerateStructors(io::Printer* printer) {
 
     if (!field->is_repeated() &&
         field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
-      PrintHandlingOptionalStaticInitializers(
-        descriptor_->file(), printer,
-        // With static initializers.
-        "  $name$_ = const_cast< $type$*>(&$type$::default_instance());\n",
-        // Without.
-        "  $name$_ = const_cast< $type$*>(\n"
-        "      $type$::internal_default_instance());\n",
-        // Vars.
-        "name", FieldName(field),
-        "type", FieldMessageTypeName(field));
+      printer->Print(
+          "  $name$_ = const_cast< $type$*>(&$type$::default_instance());\n",
+          "name", FieldName(field),
+          "type", FieldMessageTypeName(field));
     }
   }
   printer->Print(
@@ -1148,20 +1093,8 @@ GenerateStructors(io::Printer* printer) {
   }
 
   printer->Print(
-    "const $classname$& $classname$::default_instance() {\n",
-    "classname", classname_);
-
-  PrintHandlingOptionalStaticInitializers(
-    descriptor_->file(), printer,
-    // With static initializers.
-    "  if (default_instance_ == NULL) $adddescriptorsname$();\n",
-    // Without.
-    "  $adddescriptorsname$();\n",
-    // Vars.
-    "adddescriptorsname",
-    GlobalAddDescriptorsName(descriptor_->file()->name()));
-
-  printer->Print(
+    "const $classname$& $classname$::default_instance() {\n"
+    "  if (default_instance_ == NULL) $adddescriptorsname$();"
     "  return *default_instance_;\n"
     "}\n"
     "\n"
@@ -1173,6 +1106,7 @@ GenerateStructors(io::Printer* printer) {
     "classname", classname_,
     "adddescriptorsname",
     GlobalAddDescriptorsName(descriptor_->file()->name()));
+
 }
 
 void MessageGenerator::
@@ -1443,22 +1377,11 @@ GenerateMergeFromCodedStream(io::Printer* printer) {
     // Special-case MessageSet.
     printer->Print(
       "bool $classname$::MergePartialFromCodedStream(\n"
-      "    ::google::protobuf::io::CodedInputStream* input) {\n",
-      "classname", classname_);
-
-    PrintHandlingOptionalStaticInitializers(
-      descriptor_->file(), printer,
-      // With static initializers.
+      "    ::google::protobuf::io::CodedInputStream* input) {\n"
       "  return _extensions_.ParseMessageSet(input, default_instance_,\n"
-      "                                      mutable_unknown_fields());\n",
-      // Without.
-      "  return _extensions_.ParseMessageSet(input, &default_instance(),\n"
-      "                                      mutable_unknown_fields());\n",
-      // Vars.
+      "                                      mutable_unknown_fields());\n"
+      "}\n",
       "classname", classname_);
-
-    printer->Print(
-      "}\n");
     return;
   }
 
@@ -1618,21 +1541,12 @@ GenerateMergeFromCodedStream(io::Printer* printer) {
     }
     printer->Print(") {\n");
     if (HasUnknownFields(descriptor_->file())) {
-      PrintHandlingOptionalStaticInitializers(
-        descriptor_->file(), printer,
-        // With static initializers.
+      printer->Print(
         "  DO_(_extensions_.ParseField(tag, input, default_instance_,\n"
-        "                              mutable_unknown_fields()));\n",
-        // Without.
-        "  DO_(_extensions_.ParseField(tag, input, &default_instance(),\n"
         "                              mutable_unknown_fields()));\n");
     } else {
-      PrintHandlingOptionalStaticInitializers(
-        descriptor_->file(), printer,
-        // With static initializers.
-        "  DO_(_extensions_.ParseField(tag, input, default_instance_, NULL));\n",
-        // Without.
-        "  DO_(_extensions_.ParseField(tag, input, &default_instance(), NULL));\n");
+      printer->Print(
+        "  DO_(_extensions_.ParseField(tag, input, default_instance_, NULL));\n");
     }
     printer->Print(
       "  continue;\n"
@@ -1982,7 +1896,6 @@ GenerateIsInitialized(io::Printer* printer) {
   for (int i = 0; i < descriptor_->field_count(); i++) {
     const FieldDescriptor* field = descriptor_->field(i);
     if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE &&
-        !ShouldIgnoreRequiredFieldCheck(field) &&
         HasRequiredFields(field->message_type())) {
       if (field->is_repeated()) {
         printer->Print(

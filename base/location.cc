@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@ extern "C" {
 #endif
 
 #include "base/location.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 
 namespace tracked_objects {
 
@@ -71,30 +71,28 @@ void Location::WriteFunctionName(std::string* output) const {
   }
 }
 
-//------------------------------------------------------------------------------
-LocationSnapshot::LocationSnapshot() : line_number(-1) {
+base::DictionaryValue* Location::ToValue() const {
+  base::DictionaryValue* dictionary = new base::DictionaryValue;
+  dictionary->Set("file_name", base::Value::CreateStringValue(file_name_));
+  // Note: This function name is not escaped, and templates have less than
+  // characters, which means this is not suitable for display as HTML unless
+  // properly escaped.
+  dictionary->Set("function_name",
+                  base::Value::CreateStringValue(function_name_));
+  dictionary->Set("line_number", base::Value::CreateIntegerValue(line_number_));
+  return dictionary;
 }
 
-LocationSnapshot::LocationSnapshot(
-    const tracked_objects::Location& location)
-    : file_name(location.file_name()),
-      function_name(location.function_name()),
-      line_number(location.line_number()) {
-}
-
-LocationSnapshot::~LocationSnapshot() {
-}
-
-//------------------------------------------------------------------------------
 #if defined(COMPILER_MSVC)
 __declspec(noinline)
 #endif
 BASE_EXPORT const void* GetProgramCounter() {
 #if defined(COMPILER_MSVC)
   return _ReturnAddress();
-#elif defined(COMPILER_GCC) && !defined(OS_NACL)
+#elif defined(COMPILER_GCC)
   return __builtin_extract_return_addr(__builtin_return_address(0));
 #endif  // COMPILER_GCC
+
   return NULL;
 }
 

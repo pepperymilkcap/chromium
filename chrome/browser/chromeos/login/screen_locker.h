@@ -4,34 +4,23 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_SCREEN_LOCKER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_SCREEN_LOCKER_H_
+#pragma once
 
 #include <string>
 
-#include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner_helpers.h"
-#include "base/time/time.h"
-#include "chrome/browser/chromeos/login/help_app_launcher.h"
+#include "base/message_loop_helpers.h"
+#include "base/time.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/screen_locker_delegate.h"
-#include "chrome/browser/chromeos/login/user.h"
 #include "ui/base/accelerators/accelerator.h"
-
-namespace content {
-class WebUI;
-}
-
-namespace gfx {
-class Image;
-}
 
 namespace chromeos {
 
 class Authenticator;
 class LoginFailure;
-class ScreenlockIconProvider;
+class User;
 
 namespace test {
 class ScreenLockerTester;
@@ -44,7 +33,7 @@ class WebUIScreenLockerTester;
 // instance of itself which will be deleted when the system is unlocked.
 class ScreenLocker : public LoginStatusConsumer {
  public:
-  explicit ScreenLocker(const UserList& users);
+  explicit ScreenLocker(const User& user);
 
   // Returns the default instance if it has been created.
   static ScreenLocker* default_screen_locker() {
@@ -58,19 +47,14 @@ class ScreenLocker : public LoginStatusConsumer {
 
   // LoginStatusConsumer implements:
   virtual void OnLoginFailure(const chromeos::LoginFailure& error) OVERRIDE;
-  virtual void OnLoginSuccess(const UserContext& user_context) OVERRIDE;
+  virtual void OnLoginSuccess(const std::string& username,
+                              const std::string& password,
+                              const GaiaAuthConsumer::ClientLoginResult& result,
+                              bool pending_requests,
+                              bool using_oauth) OVERRIDE;
 
-  // Does actual unlocking once authentication is successful and all blocking
-  // animations are done.
-  void UnlockOnLoginSuccess();
-
-  // Authenticates the user with given |user_context|.
-  void Authenticate(const UserContext& user_context);
-
-  // Authenticates the only user with given |password|.
-  // Works only if there is only one logged in user in system.
-  // DEPRECATED: used only by tests.
-  void AuthenticateByPassword(const std::string& password);
+  // Authenticates the user with given |password| and authenticator.
+  void Authenticate(const string16& password);
 
   // Close message bubble to clear error messages.
   void ClearErrors();
@@ -81,34 +65,25 @@ class ScreenLocker : public LoginStatusConsumer {
   // Exit the chrome, which will sign out the current session.
   void Signout();
 
-  // Displays |message| in a banner on the lock screen.
-  void ShowBannerMessage(const std::string& message);
-
-  // Shows a button inside the user pod on the lock screen with an icon.
-  void ShowUserPodButton(const std::string& username,
-                         const gfx::Image& icon,
-                         const base::Closure& click_callback);
+  // Present user a CAPTCHA challenge with image from |captcha_url|,
+  // After that shows error bubble with |message|.
+  void ShowCaptchaAndErrorMessage(const GURL& captcha_url,
+                                  const string16& message);
 
   // Disables all UI needed and shows error bubble with |message|.
   // If |sign_out_only| is true then all other input except "Sign Out"
   // button is blocked.
-  void ShowErrorMessage(int error_msg_id,
-                        HelpAppLauncher::HelpTopic help_topic_id,
-                        bool sign_out_only);
+  void ShowErrorMessage(const string16& message, bool sign_out_only);
 
   // Returns the screen locker's delegate.
   ScreenLockerDelegate* delegate() const { return delegate_.get(); }
 
-  // Returns the users to authenticate.
-  const UserList& users() const { return users_; }
+  // Returns the user to authenticate.
+  const User& user() const { return user_; }
 
   // Allow a LoginStatusConsumer to listen for
   // the same login events that ScreenLocker does.
   void SetLoginStatusConsumer(chromeos::LoginStatusConsumer* consumer);
-
-  // Returns WebUI associated with screen locker implementation or NULL if
-  // there isn't one.
-  content::WebUI* GetAssociatedWebUI();
 
   // Initialize ScreenLocker class. It will listen to
   // LOGIN_USER_CHANGED notification so that the screen locker accepts
@@ -121,6 +96,9 @@ class ScreenLocker : public LoginStatusConsumer {
   // Hide the screen locker.
   static void Hide();
 
+  // Notifies that PowerManager rejected UnlockScreen request.
+  static void UnlockScreenFailed();
+
   // Returns the tester
   static test::ScreenLockerTester* GetTester();
 
@@ -131,10 +109,6 @@ class ScreenLocker : public LoginStatusConsumer {
   friend class test::WebUIScreenLockerTester;
   friend class ScreenLockerDelegate;
 
-  struct AuthenticationParametersCapture {
-    UserContext user_context;
-  };
-
   virtual ~ScreenLocker();
 
   // Sets the authenticator.
@@ -143,20 +117,18 @@ class ScreenLocker : public LoginStatusConsumer {
   // Called when the screen lock is ready.
   void ScreenLockReady();
 
-  // Called when screen locker is safe to delete.
-  static void ScheduleDeletion();
-
-  // Returns true if |username| is found among logged in users.
-  bool IsUserLoggedIn(const std::string& username);
-
   // ScreenLockerDelegate instance in use.
   scoped_ptr<ScreenLockerDelegate> delegate_;
 
-  // Users that can unlock the device.
-  UserList users_;
+  // Logged in user.
+  const User& user_;
 
   // Used to authenticate the user to unlock.
   scoped_refptr<Authenticator> authenticator_;
+
+  // Unlock the screen when it detects key/mouse event without asking
+  // password. True when chrome is in BWSI or auto login mode.
+  bool unlock_on_input_;
 
   // True if the screen is locked, or false otherwise.  This changes
   // from false to true, but will never change from true to
@@ -175,18 +147,6 @@ class ScreenLocker : public LoginStatusConsumer {
   // Delegate to forward all login status events to.
   // Tests can use this to receive login status events.
   LoginStatusConsumer* login_status_consumer_;
-
-  // Number of bad login attempts in a row.
-  int incorrect_passwords_count_;
-
-  // Copy of parameters passed to last call of OnLoginSuccess for usage in
-  // UnlockOnLoginSuccess().
-  scoped_ptr<AuthenticationParametersCapture> authentication_capture_;
-
-  // Provider for button icon set by the screenlockPrivate API.
-  scoped_ptr<ScreenlockIconProvider> screenlock_icon_provider_;
-
-  base::WeakPtrFactory<ScreenLocker> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenLocker);
 };

@@ -1,20 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
-#include "chrome/test/base/testing_profile.h"
-#include "grit/ui_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 // Simple class to remember how many mouseEntered: and mouseExited:
 // calls it gets.  Only used by BookmarkMouseForwarding but placed
@@ -44,8 +42,8 @@ class BookmarkButtonCellTest : public CocoaProfileTest {
 // Make sure it's not totally bogus
 TEST_F(BookmarkButtonCellTest, SizeForBounds) {
   NSRect frame = NSMakeRect(0, 0, 50, 30);
-  base::scoped_nsobject<NSButton> view([[NSButton alloc] initWithFrame:frame]);
-  base::scoped_nsobject<BookmarkButtonCell> cell(
+  scoped_nsobject<NSButton> view([[NSButton alloc] initWithFrame:frame]);
+  scoped_nsobject<BookmarkButtonCell> cell(
       [[BookmarkButtonCell alloc] initTextCell:@"Testing"]);
   [view setCell:cell.get()];
   [[test_window() contentView] addSubview:view];
@@ -59,15 +57,14 @@ TEST_F(BookmarkButtonCellTest, SizeForBounds) {
 // Make sure icon-only buttons are squeezed tightly.
 TEST_F(BookmarkButtonCellTest, IconOnlySqueeze) {
   NSRect frame = NSMakeRect(0, 0, 50, 30);
-  base::scoped_nsobject<NSButton> view([[NSButton alloc] initWithFrame:frame]);
-  base::scoped_nsobject<BookmarkButtonCell> cell(
+  scoped_nsobject<NSButton> view([[NSButton alloc] initWithFrame:frame]);
+  scoped_nsobject<BookmarkButtonCell> cell(
       [[BookmarkButtonCell alloc] initTextCell:@"Testing"]);
   [view setCell:cell.get()];
   [[test_window() contentView] addSubview:view];
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  base::scoped_nsobject<NSImage> image(
-      rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).CopyNSImage());
+  scoped_nsobject<NSImage> image(
+      [gfx::GetCachedImageWithName(@"nav.pdf") retain]);
   EXPECT_TRUE(image.get());
 
   NSRect r = NSMakeRect(0, 0, 100, 100);
@@ -88,43 +85,45 @@ TEST_F(BookmarkButtonCellTest, IconOnlySqueeze) {
 
 // Make sure the default from the base class is overridden.
 TEST_F(BookmarkButtonCellTest, MouseEnterStuff) {
-  base::scoped_nsobject<BookmarkButtonCell> cell(
+  scoped_nsobject<BookmarkButtonCell> cell(
       [[BookmarkButtonCell alloc] initTextCell:@"Testing"]);
   // Setting the menu should have no affect since we either share or
   // dynamically compose the menu given a node.
-  [cell setMenu:[[[NSMenu alloc] initWithTitle:@"foo"] autorelease]];
+  [cell setMenu:[[[BookmarkMenu alloc] initWithTitle:@"foo"] autorelease]];
   EXPECT_FALSE([cell menu]);
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  BookmarkModel* model = profile()->GetBookmarkModel();
   const BookmarkNode* node = model->bookmark_bar_node();
   [cell setEmpty:NO];
   [cell setBookmarkNode:node];
   EXPECT_TRUE([cell showsBorderOnlyWhileMouseInside]);
+  EXPECT_TRUE([cell menu]);
 
   [cell setEmpty:YES];
   EXPECT_FALSE([cell.get() showsBorderOnlyWhileMouseInside]);
+  EXPECT_FALSE([cell menu]);
 }
 
 TEST_F(BookmarkButtonCellTest, BookmarkNode) {
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-  base::scoped_nsobject<BookmarkButtonCell> cell(
+  BookmarkModel& model(*(profile()->GetBookmarkModel()));
+  scoped_nsobject<BookmarkButtonCell> cell(
       [[BookmarkButtonCell alloc] initTextCell:@"Testing"]);
 
-  const BookmarkNode* node = model->bookmark_bar_node();
+  const BookmarkNode* node = model.bookmark_bar_node();
   [cell setBookmarkNode:node];
   EXPECT_EQ(node, [cell bookmarkNode]);
 
-  node = model->other_node();
+  node = model.other_node();
   [cell setBookmarkNode:node];
   EXPECT_EQ(node, [cell bookmarkNode]);
 }
 
 TEST_F(BookmarkButtonCellTest, BookmarkMouseForwarding) {
-  base::scoped_nsobject<BookmarkButtonCell> cell(
+  scoped_nsobject<BookmarkButtonCell> cell(
       [[BookmarkButtonCell alloc] initTextCell:@"Testing"]);
-  base::scoped_nsobject<ButtonRemembersMouseEnterExit> button(
-      [[ButtonRemembersMouseEnterExit alloc]
-          initWithFrame:NSMakeRect(0, 0, 50, 50)]);
+  scoped_nsobject<ButtonRemembersMouseEnterExit>
+    button([[ButtonRemembersMouseEnterExit alloc]
+             initWithFrame:NSMakeRect(0,0,50,50)]);
   [button setCell:cell.get()];
   EXPECT_EQ(0, button.get()->enters_);
   EXPECT_EQ(0, button.get()->exits_);
@@ -148,24 +147,23 @@ TEST_F(BookmarkButtonCellTest, BookmarkMouseForwarding) {
 
 // Confirms a cell created in a nib is initialized properly
 TEST_F(BookmarkButtonCellTest, Awake) {
-  base::scoped_nsobject<BookmarkButtonCell> cell(
-      [[BookmarkButtonCell alloc] init]);
+  scoped_nsobject<BookmarkButtonCell> cell([[BookmarkButtonCell alloc] init]);
   [cell awakeFromNib];
   EXPECT_EQ(NSLeftTextAlignment, [cell alignment]);
 }
 
 // Subfolder arrow details.
 TEST_F(BookmarkButtonCellTest, FolderArrow) {
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  BookmarkModel* model = profile()->GetBookmarkModel();
   const BookmarkNode* bar = model->bookmark_bar_node();
   const BookmarkNode* node = model->AddURL(bar, bar->child_count(),
-                                           base::ASCIIToUTF16("title"),
+                                           ASCIIToUTF16("title"),
                                            GURL("http://www.google.com"));
-  base::scoped_nsobject<BookmarkButtonCell> cell(
-      [[BookmarkButtonCell alloc] initForNode:node
-                                         text:@"small"
-                                        image:nil
-                               menuController:nil]);
+  scoped_nsobject<BookmarkButtonCell> cell(
+    [[BookmarkButtonCell alloc] initForNode:node
+                                contextMenu:nil
+                                   cellText:@"small"
+                                  cellImage:nil]);
   EXPECT_TRUE(cell.get());
 
   NSSize size = [cell cellSize];
@@ -180,19 +178,19 @@ TEST_F(BookmarkButtonCellTest, FolderArrow) {
 }
 
 TEST_F(BookmarkButtonCellTest, VerticalTextOffset) {
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  BookmarkModel* model = profile()->GetBookmarkModel();
   const BookmarkNode* bar = model->bookmark_bar_node();
   const BookmarkNode* node = model->AddURL(bar, bar->child_count(),
-                                           base::ASCIIToUTF16("title"),
+                                           ASCIIToUTF16("title"),
                                            GURL("http://www.google.com"));
 
-  base::scoped_nsobject<GradientButtonCell> gradient_cell(
+  scoped_nsobject<GradientButtonCell> gradient_cell(
       [[GradientButtonCell alloc] initTextCell:@"Testing"]);
-  base::scoped_nsobject<BookmarkButtonCell> bookmark_cell(
+  scoped_nsobject<BookmarkButtonCell> bookmark_cell(
       [[BookmarkButtonCell alloc] initForNode:node
-                                         text:@"small"
-                                        image:nil
-                               menuController:nil]);
+                                  contextMenu:nil
+                                     cellText:@"small"
+                                    cellImage:nil]);
 
   ASSERT_TRUE(gradient_cell.get());
   ASSERT_TRUE(bookmark_cell.get());

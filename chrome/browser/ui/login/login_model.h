@@ -4,8 +4,9 @@
 
 #ifndef CHROME_BROWSER_UI_LOGIN_LOGIN_MODEL_H_
 #define CHROME_BROWSER_UI_LOGIN_LOGIN_MODEL_H_
+#pragma once
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 // Simple Model & Observer interfaces for a LoginView to facilitate exchanging
 // information.
@@ -13,10 +14,8 @@ class LoginModelObserver {
  public:
   // Called by the model when a username,password pair has been identified
   // as a match for the pending login prompt.
-  virtual void OnAutofillDataAvailable(const base::string16& username,
-                                       const base::string16& password) = 0;
-
-  virtual void OnLoginModelDestroying() = 0;
+  virtual void OnAutofillDataAvailable(const string16& username,
+                                       const string16& password) = 0;
 
  protected:
   virtual ~LoginModelObserver() {}
@@ -24,10 +23,10 @@ class LoginModelObserver {
 
 class LoginModel {
  public:
-  // Add an observer interested in the data from the model.
-  virtual void AddObserver(LoginModelObserver* observer) = 0;
-  // Remove an observer from the model.
-  virtual void RemoveObserver(LoginModelObserver* observer) = 0;
+  // Set the observer interested in the data from the model.
+  // observer can be null, signifying there is no longer any observer
+  // interested in the data.
+  virtual void SetObserver(LoginModelObserver* observer) = 0;
 
  protected:
   virtual ~LoginModel() {}

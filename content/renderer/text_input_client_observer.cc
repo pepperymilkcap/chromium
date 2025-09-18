@@ -6,20 +6,18 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "content/common/text_input_client_messages.h"
-#include "content/renderer/pepper/pepper_plugin_instance_impl.h"
 #include "content/renderer/render_view_impl.h"
-#include "third_party/WebKit/public/platform/WebPoint.h"
-#include "third_party/WebKit/public/platform/WebRect.h"
-#include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/web/mac/WebSubstringUtil.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebView.h"
+#include "ipc/ipc_message_macros.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebSubstringUtil.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/rect.h"
 
-namespace content {
-
 TextInputClientObserver::TextInputClientObserver(RenderViewImpl* render_view)
-    : RenderViewObserver(render_view),
+    : content::RenderViewObserver(render_view),
       render_view_impl_(render_view) {
 }
 
@@ -39,44 +37,33 @@ bool TextInputClientObserver::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-blink::WebView* TextInputClientObserver::webview() {
+WebKit::WebView* TextInputClientObserver::webview() {
   return render_view()->GetWebView();
 }
 
 void TextInputClientObserver::OnCharacterIndexForPoint(gfx::Point point) {
-  blink::WebPoint web_point(point);
+  WebKit::WebPoint web_point(point);
   size_t index = webview()->focusedFrame()->characterIndexForPoint(web_point);
   Send(new TextInputClientReplyMsg_GotCharacterIndexForPoint(routing_id(),
       index));
 }
 
-void TextInputClientObserver::OnFirstRectForCharacterRange(gfx::Range range) {
+void TextInputClientObserver::OnFirstRectForCharacterRange(ui::Range range) {
   gfx::Rect rect;
-#if defined(ENABLE_PLUGINS)
-  if (render_view_impl_->focused_pepper_plugin()) {
-    rect = render_view_impl_->focused_pepper_plugin()->GetCaretBounds();
-  } else
-#endif
-  {
-    blink::WebFrame* frame = webview()->focusedFrame();
-    if (frame) {
-      blink::WebRect web_rect;
-      frame->firstRectForCharacterRange(range.start(), range.length(),
-                                        web_rect);
-      rect = web_rect;
-    }
+  if (!render_view_impl_->GetPpapiPluginCaretBounds(&rect)) {
+    WebKit::WebFrame* frame = webview()->focusedFrame();
+    WebKit::WebRect web_rect;
+    frame->firstRectForCharacterRange(range.start(), range.length(), web_rect);
+    rect = web_rect;
   }
   Send(new TextInputClientReplyMsg_GotFirstRectForRange(routing_id(), rect));
 }
 
-void TextInputClientObserver::OnStringForRange(gfx::Range range) {
+void TextInputClientObserver::OnStringForRange(ui::Range range) {
 #if defined(OS_MACOSX)
-  NSAttributedString* string = nil;
-  blink::WebFrame* frame = webview()->focusedFrame();
-  if (frame) {
-    string = blink::WebSubstringUtil::attributedSubstringInRange(
-        frame, range.start(), range.length());
-  }
+  NSAttributedString* string =
+      WebKit::WebSubstringUtil::attributedSubstringInRange(
+          webview()->focusedFrame(), range.start(), range.length());
   scoped_ptr<const mac::AttributedStringCoder::EncodedString> encoded(
       mac::AttributedStringCoder::Encode(string));
   Send(new TextInputClientReplyMsg_GotStringForRange(routing_id(),
@@ -85,5 +72,3 @@ void TextInputClientObserver::OnStringForRange(gfx::Range range) {
   NOTIMPLEMENTED();
 #endif
 }
-
-}  // namespace content

@@ -35,24 +35,14 @@ FirstRunBubbleTest::~FirstRunBubbleTest() {}
 
 void FirstRunBubbleTest::SetUp() {
   ViewsTestBase::SetUp();
-  TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-      &profile_, &TemplateURLServiceFactory::BuildInstanceFor);
+  profile_.CreateTemplateURLService();
   TemplateURLService* turl_model =
       TemplateURLServiceFactory::GetForProfile(&profile_);
   turl_model->Load();
 }
 
 TEST_F(FirstRunBubbleTest, CreateAndClose) {
-  // Create the anchor and parent widgets.
-  views::Widget::InitParams params =
-      CreateParams(views::Widget::InitParams::TYPE_WINDOW);
-  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  scoped_ptr<views::Widget> anchor_widget(new views::Widget);
-  anchor_widget->Init(params);
-  anchor_widget->Show();
-
-  FirstRunBubble* delegate =
-      FirstRunBubble::ShowBubble(NULL, anchor_widget->GetContentsView());
+  FirstRunBubble* delegate = FirstRunBubble::ShowBubble(profile(), NULL);
   EXPECT_TRUE(delegate != NULL);
   delegate->GetWidget()->CloseNow();
 }

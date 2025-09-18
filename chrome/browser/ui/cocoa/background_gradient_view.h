@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BACKGROUND_GRADIENT_VIEW_H_
 #define CHROME_BROWSER_UI_COCOA_BACKGROUND_GRADIENT_VIEW_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -13,9 +14,6 @@
  @private
   BOOL showsDivider_;
 }
-
-// Controls whether the bar draws a dividing line at the bottom.
-@property(nonatomic, assign) BOOL showsDivider;
 
 // The color used for the bottom stroke. Public so subclasses can use.
 - (NSColor*)strokeColor;
@@ -29,6 +27,8 @@
 // example of this.
 - (void)drawBackgroundWithOpaque:(BOOL)opaque;
 
+// Controls whether the bar draws a dividing line at the bottom.
+@property(nonatomic, assign) BOOL showsDivider;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_BACKGROUND_GRADIENT_VIEW_H_

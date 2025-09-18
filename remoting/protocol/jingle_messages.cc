@@ -5,10 +5,10 @@
 #include "remoting/protocol/jingle_messages.h"
 
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/content_description.h"
-#include "remoting/protocol/name_value_map.h"
+#include "third_party/libjingle/source/talk/p2p/base/candidate.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
 
 using buzz::QName;
@@ -29,6 +29,32 @@ const char kXmlNamespace[] = "http://www.w3.org/XML/1998/namespace";
 const int kPortMin = 1000;
 const int kPortMax = 65535;
 
+template <typename T>
+struct NameMapElement {
+  const T value;
+  const char* const name;
+};
+
+template <typename T>
+const char* ValueToName(const NameMapElement<T> map[], size_t map_size,
+                              T value) {
+  for (size_t i = 0; i < map_size; ++i) {
+    if (map[i].value == value)
+      return map[i].name;
+  }
+  return NULL;
+}
+
+template <typename T>
+T NameToValue(const NameMapElement<T> map[], size_t map_size,
+                    const std::string& name, T default_value) {
+  for (size_t i = 0; i < map_size; ++i) {
+    if (map[i].name == name)
+      return map[i].value;
+  }
+  return default_value;
+}
+
 const NameMapElement<JingleMessage::ActionType> kActionTypes[] = {
   { JingleMessage::SESSION_INITIATE, "session-initiate" },
   { JingleMessage::SESSION_ACCEPT, "session-accept" },
@@ -40,13 +66,12 @@ const NameMapElement<JingleMessage::ActionType> kActionTypes[] = {
 const NameMapElement<JingleMessage::Reason> kReasons[] = {
   { JingleMessage::SUCCESS, "success" },
   { JingleMessage::DECLINE, "decline" },
-  { JingleMessage::CANCEL, "cancel" },
   { JingleMessage::GENERAL_ERROR, "general-error" },
   { JingleMessage::INCOMPATIBLE_PARAMETERS, "incompatible-parameters" },
 };
 
 bool ParseCandidate(const buzz::XmlElement* element,
-                    JingleMessage::NamedCandidate* candidate) {
+                    cricket::Candidate* candidate) {
   DCHECK(element->Name() == QName(kP2PTransportNamespace, "candidate"));
 
   const std::string& name = element->Attr(QName(kEmptyNamespace, "name"));
@@ -75,63 +100,45 @@ bool ParseCandidate(const buzz::XmlElement* element,
     return false;
   }
 
-  candidate->name = name;
-
-  candidate->candidate.set_address(talk_base::SocketAddress(address, port));
-  candidate->candidate.set_type(type);
-  candidate->candidate.set_protocol(protocol);
-  candidate->candidate.set_username(username);
-  candidate->candidate.set_password(password);
-  candidate->candidate.set_preference(static_cast<float>(preference));
-  candidate->candidate.set_generation(generation);
+  candidate->set_name(name);
+  candidate->set_address(talk_base::SocketAddress(address, port));
+  candidate->set_type(type);
+  candidate->set_protocol(protocol);
+  candidate->set_username(username);
+  candidate->set_password(password);
+  candidate->set_preference(static_cast<float>(preference));
+  candidate->set_generation(generation);
 
   return true;
 }
 
-XmlElement* FormatCandidate(const JingleMessage::NamedCandidate& candidate) {
+XmlElement* FormatCandidate(const cricket::Candidate& candidate) {
   XmlElement* result =
       new XmlElement(QName(kP2PTransportNamespace, "candidate"));
-  result->SetAttr(QName(kEmptyNamespace, "name"), candidate.name);
+  result->SetAttr(QName(kEmptyNamespace, "name"), candidate.name());
   result->SetAttr(QName(kEmptyNamespace, "address"),
-                  candidate.candidate.address().ipaddr().ToString());
+                  candidate.address().IPAsString());
   result->SetAttr(QName(kEmptyNamespace, "port"),
-                  base::IntToString(candidate.candidate.address().port()));
-  result->SetAttr(QName(kEmptyNamespace, "type"), candidate.candidate.type());
-  result->SetAttr(QName(kEmptyNamespace, "protocol"),
-                  candidate.candidate.protocol());
-  result->SetAttr(QName(kEmptyNamespace, "username"),
-                  candidate.candidate.username());
-  result->SetAttr(QName(kEmptyNamespace, "password"),
-                  candidate.candidate.password());
+                  base::IntToString(candidate.address().port()));
+  result->SetAttr(QName(kEmptyNamespace, "type"), candidate.type());
+  result->SetAttr(QName(kEmptyNamespace, "protocol"), candidate.protocol());
+  result->SetAttr(QName(kEmptyNamespace, "username"), candidate.username());
+  result->SetAttr(QName(kEmptyNamespace, "password"), candidate.password());
   result->SetAttr(QName(kEmptyNamespace, "preference"),
-                  base::DoubleToString(candidate.candidate.preference()));
+                  base::DoubleToString(candidate.preference()));
   result->SetAttr(QName(kEmptyNamespace, "generation"),
-                  base::IntToString(candidate.candidate.generation()));
+                  base::IntToString(candidate.generation()));
   return result;
 }
 
 }  // namespace
 
-JingleMessage::NamedCandidate::NamedCandidate() {
-}
-
-JingleMessage::NamedCandidate::NamedCandidate(
-    const std::string& name,
-    const cricket::Candidate& candidate)
-    : name(name),
-      candidate(candidate) {
-}
-
 // static
 bool JingleMessage::IsJingleMessage(const buzz::XmlElement* stanza) {
-  return stanza->Name() == QName(kJabberNamespace, "iq") &&
-         stanza->Attr(QName(std::string(), "type")) == "set" &&
-         stanza->FirstNamed(QName(kJingleNamespace, "jingle")) != NULL;
-}
-
-// static
-std::string JingleMessage::GetActionName(ActionType action) {
-  return ValueToName(kActionTypes, action);
+  return
+      stanza->Name() == QName(kJabberNamespace, "iq") &&
+      stanza->Attr(QName("", "type")) == "set" &&
+      stanza->FirstNamed(QName(kJingleNamespace, "jingle")) != NULL;
 }
 
 JingleMessage::JingleMessage()
@@ -161,21 +168,22 @@ bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
 
   const XmlElement* jingle_tag =
       stanza->FirstNamed(QName(kJingleNamespace, "jingle"));
-  if (!jingle_tag) {
+  if (jingle_tag == NULL) {
     *error = "Not a jingle message";
     return false;
   }
 
   from = stanza->Attr(QName(kEmptyNamespace, "from"));
   to = stanza->Attr(QName(kEmptyNamespace, "to"));
-  initiator = jingle_tag->Attr(QName(kEmptyNamespace, "initiator"));
 
   std::string action_str = jingle_tag->Attr(QName(kEmptyNamespace, "action"));
   if (action_str.empty()) {
     *error = "action attribute is missing";
     return false;
   }
-  if (!NameToValue(kActionTypes, action_str, &action)) {
+  action = NameToValue(
+      kActionTypes, arraysize(kActionTypes), action_str, UNKNOWN_ACTION);
+  if (action == UNKNOWN_ACTION) {
     *error = "Unknown action " + action_str;
     return false;
   }
@@ -202,10 +210,9 @@ bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
   const XmlElement* reason_tag =
       jingle_tag->FirstNamed(QName(kJingleNamespace, "reason"));
   if (reason_tag && reason_tag->FirstElement()) {
-    if (!NameToValue(kReasons, reason_tag->FirstElement()->Name().LocalPart(),
-                     &reason)) {
-      reason = UNKNOWN_REASON;
-    }
+    reason = NameToValue(
+        kReasons, arraysize(kReasons),
+        reason_tag->FirstElement()->Name().LocalPart(), UNKNOWN_REASON);
   }
 
   if (action == SESSION_TERMINATE)
@@ -233,7 +240,7 @@ bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
       return false;
     }
 
-    description = ContentDescription::ParseXml(description_tag);
+    description.reset(ContentDescription::ParseXml(description_tag));
     if (!description.get()) {
       *error = "Failed to parse content description";
       return false;
@@ -249,7 +256,7 @@ bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
              transport_tag->FirstNamed(qn_candidate);
          candidate_tag != NULL;
          candidate_tag = candidate_tag->NextNamed(qn_candidate)) {
-      NamedCandidate candidate;
+      cricket::Candidate candidate;
       if (!ParseCandidate(candidate_tag, &candidate)) {
         *error = "Failed to parse candidates";
         return false;
@@ -261,7 +268,7 @@ bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
   return true;
 }
 
-scoped_ptr<buzz::XmlElement> JingleMessage::ToXml() const {
+buzz::XmlElement* JingleMessage::ToXml() {
   scoped_ptr<XmlElement> root(
       new XmlElement(QName("jabber:client", "iq"), true));
 
@@ -276,7 +283,8 @@ scoped_ptr<buzz::XmlElement> JingleMessage::ToXml() const {
   root->AddElement(jingle_tag);
   jingle_tag->AddAttr(QName(kEmptyNamespace, "sid"), sid);
 
-  const char* action_attr = ValueToName(kActionTypes, action);
+  const char* action_attr = ValueToName(
+      kActionTypes, arraysize(kActionTypes), action);
   if (!action_attr)
     LOG(FATAL) << "Invalid action value " << action;
   jingle_tag->AddAttr(QName(kEmptyNamespace, "action"), action_attr);
@@ -284,18 +292,18 @@ scoped_ptr<buzz::XmlElement> JingleMessage::ToXml() const {
   if (action == SESSION_INFO) {
     if (info.get())
       jingle_tag->AddElement(new XmlElement(*info.get()));
-    return root.Pass();
+    return root.release();
   }
 
   if (action == SESSION_INITIATE)
-    jingle_tag->AddAttr(QName(kEmptyNamespace, "initiator"), initiator);
+    jingle_tag->AddAttr(QName(kEmptyNamespace, "initiator"), from);
 
   if (reason != UNKNOWN_REASON) {
     XmlElement* reason_tag = new XmlElement(QName(kJingleNamespace, "reason"));
     jingle_tag->AddElement(reason_tag);
     const char* reason_string =
-        ValueToName(kReasons, reason);
-    if (!reason_string)
+        ValueToName(kReasons, arraysize(kReasons), reason);
+    if (reason_string == NULL)
       LOG(FATAL) << "Invalid reason: " << reason;
     reason_tag->AddElement(new XmlElement(
         QName(kJingleNamespace, reason_string)));
@@ -316,13 +324,13 @@ scoped_ptr<buzz::XmlElement> JingleMessage::ToXml() const {
     XmlElement* transport_tag =
         new XmlElement(QName(kP2PTransportNamespace, "transport"), true);
     content_tag->AddElement(transport_tag);
-    for (std::list<NamedCandidate>::const_iterator it = candidates.begin();
+    for (std::list<cricket::Candidate>::const_iterator it = candidates.begin();
          it != candidates.end(); ++it) {
       transport_tag->AddElement(FormatCandidate(*it));
     }
   }
 
-  return root.Pass();
+  return root.release();
 }
 
 JingleMessageReply::JingleMessageReply()
@@ -331,7 +339,7 @@ JingleMessageReply::JingleMessageReply()
 }
 
 JingleMessageReply::JingleMessageReply(ErrorType error)
-    : type(error != NONE ? REPLY_ERROR : REPLY_RESULT),
+    : type(REPLY_ERROR),
       error_type(error) {
 }
 
@@ -344,10 +352,9 @@ JingleMessageReply::JingleMessageReply(ErrorType error,
 
 JingleMessageReply::~JingleMessageReply() { }
 
-scoped_ptr<buzz::XmlElement> JingleMessageReply::ToXml(
+buzz::XmlElement* JingleMessageReply::ToXml(
     const buzz::XmlElement* request_stanza) const {
-  scoped_ptr<XmlElement> iq(
-      new XmlElement(QName(kJabberNamespace, "iq"), true));
+  XmlElement* iq = new XmlElement(QName(kJabberNamespace, "iq"), true);
   iq->SetAttr(QName(kEmptyNamespace, "to"),
               request_stanza->Attr(QName(kEmptyNamespace, "from")));
   iq->SetAttr(QName(kEmptyNamespace, "id"),
@@ -355,7 +362,7 @@ scoped_ptr<buzz::XmlElement> JingleMessageReply::ToXml(
 
   if (type == REPLY_RESULT) {
     iq->SetAttr(QName(kEmptyNamespace, "type"), "result");
-    return iq.Pass();
+    return iq;
   }
 
   DCHECK_EQ(type, REPLY_ERROR);
@@ -373,7 +380,7 @@ scoped_ptr<buzz::XmlElement> JingleMessageReply::ToXml(
 
   std::string type;
   std::string error_text;
-  QName name;
+  QName name("");
   switch (error_type) {
     case BAD_REQUEST:
       type = "modify";
@@ -423,7 +430,7 @@ scoped_ptr<buzz::XmlElement> JingleMessageReply::ToXml(
     error->AddElement(text_elem);
   }
 
-  return iq.Pass();
+  return iq;
 }
 
 }  // namespace protocol

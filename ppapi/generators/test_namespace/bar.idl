@@ -5,10 +5,6 @@
 
 /* This file tests the namespace functions in the parser. */
 
-label Chrome {
-  M14 = 1.0
-};
-
 /* PPAPI ID */
 typedef int32_t PP_Instance;
 

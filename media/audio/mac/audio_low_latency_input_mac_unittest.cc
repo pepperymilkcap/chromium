@@ -4,7 +4,6 @@
 
 #include "base/basictypes.h"
 #include "base/environment.h"
-#include "base/message_loop/message_loop.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "media/audio/audio_io.h"
@@ -16,24 +15,17 @@
 
 using ::testing::_;
 using ::testing::AnyNumber;
-using ::testing::AtLeast;
+using ::testing::Between;
 using ::testing::Ge;
 using ::testing::NotNull;
 
-namespace media {
-
-ACTION_P3(CheckCountAndPostQuitTask, count, limit, loop) {
-  if (++*count >= limit) {
-    loop->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
-  }
-}
-
 class MockAudioInputCallback : public AudioInputStream::AudioInputCallback {
  public:
-  MOCK_METHOD5(OnData, void(AudioInputStream* stream,
+  MOCK_METHOD4(OnData, void(AudioInputStream* stream,
                             const uint8* src, uint32 size,
-                            uint32 hardware_delay_bytes, double volume));
-  MOCK_METHOD1(OnError, void(AudioInputStream* stream));
+                            uint32 hardware_delay_bytes));
+  MOCK_METHOD1(OnClose, void(AudioInputStream* stream));
+  MOCK_METHOD2(OnError, void(AudioInputStream* stream, int code));
 };
 
 // This audio sink implementation should be used for manual tests only since
@@ -45,7 +37,7 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
  public:
   // Allocate space for ~10 seconds of data @ 48kHz in stereo:
   // 2 bytes per sample, 2 channels, 10ms @ 48kHz, 10 seconds <=> 1920000 bytes.
-  static const int kMaxBufferSize = 2 * 2 * 480 * 100 * 10;
+  static const size_t kMaxBufferSize = 2 * 2 * 480 * 100 * 10;
 
   explicit WriteToFileAudioSink(const char* file_name)
       : buffer_(0, kMaxBufferSize),
@@ -54,10 +46,10 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
   }
 
   virtual ~WriteToFileAudioSink() {
-    int bytes_written = 0;
+    size_t bytes_written = 0;
     while (bytes_written < bytes_to_write_) {
       const uint8* chunk;
-      int chunk_size;
+      size_t chunk_size;
 
       // Stop writing if no more data is available.
       if (!buffer_.GetCurrentChunk(&chunk, &chunk_size))
@@ -74,7 +66,7 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
   // AudioInputStream::AudioInputCallback implementation.
   virtual void OnData(AudioInputStream* stream,
                       const uint8* src, uint32 size,
-                      uint32 hardware_delay_bytes, double volume) OVERRIDE {
+                      uint32 hardware_delay_bytes) {
     // Store data data in a temporary buffer to avoid making blocking
     // fwrite() calls in the audio callback. The complete buffer will be
     // written to file in the destructor.
@@ -83,17 +75,18 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
     }
   }
 
-  virtual void OnError(AudioInputStream* stream) OVERRIDE {}
+  virtual void OnClose(AudioInputStream* stream) {}
+  virtual void OnError(AudioInputStream* stream, int code) {}
 
  private:
   media::SeekableBuffer buffer_;
   FILE* file_;
-  int bytes_to_write_;
+  size_t bytes_to_write_;
 };
 
 class MacAudioInputTest : public testing::Test {
  protected:
-  MacAudioInputTest() : audio_manager_(AudioManager::CreateForTesting()) {}
+  MacAudioInputTest() : audio_manager_(AudioManager::Create()) {}
   virtual ~MacAudioInputTest() {}
 
   // Convenience method which ensures that we are not running on the build
@@ -132,7 +125,7 @@ class MacAudioInputTest : public testing::Test {
     return ais;
   }
 
-  scoped_ptr<AudioManager> audio_manager_;
+  scoped_refptr<AudioManager> audio_manager_;
 };
 
 // Test Create(), Close().
@@ -160,6 +153,8 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamOpenStartAndClose) {
   EXPECT_TRUE(ais->Open());
   MockAudioInputCallback sink;
   ais->Start(&sink);
+  EXPECT_CALL(sink, OnClose(ais))
+      .Times(1);
   ais->Close();
 }
 
@@ -172,6 +167,8 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamOpenStartStopAndClose) {
   MockAudioInputCallback sink;
   ais->Start(&sink);
   ais->Stop();
+  EXPECT_CALL(sink, OnClose(ais))
+      .Times(1);
   ais->Close();
 }
 
@@ -200,6 +197,8 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamMiscCallingSequences) {
   ais->Stop();
   EXPECT_FALSE(auais->started());
 
+  EXPECT_CALL(sink, OnClose(ais))
+      .Times(1);
   ais->Close();
 }
 
@@ -207,9 +206,6 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamMiscCallingSequences) {
 TEST_F(MacAudioInputTest, AUAudioInputStreamVerifyMonoRecording) {
   if (!CanRunAudioTests())
     return;
-
-  int count = 0;
-  base::MessageLoopForUI loop;
 
   // Create an audio input stream which records in mono.
   AudioInputStream* ais = CreateAudioInputStream(CHANNEL_LAYOUT_MONO);
@@ -222,15 +218,21 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamVerifyMonoRecording) {
 
   MockAudioInputCallback sink;
 
-  // We use 10ms packets and will run the test until ten packets are received.
-  // All should contain valid packets of the same size and a valid delay
-  // estimate.
-  EXPECT_CALL(sink, OnData(ais, NotNull(), bytes_per_packet, _, _))
-      .Times(AtLeast(10))
-      .WillRepeatedly(CheckCountAndPostQuitTask(&count, 10, &loop));
+  // We use 10ms packets and will run the test for ~100ms. Given that the
+  // startup sequence takes some time, it is reasonable to expect 5-10
+  // callbacks in this time period. All should contain valid packets of
+  // the same size.
+  EXPECT_CALL(sink, OnData(ais, NotNull(), bytes_per_packet,
+                           Ge(bytes_per_packet)))
+      .Times(Between(5, 10));
+
   ais->Start(&sink);
-  loop.Run();
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
   ais->Stop();
+
+  // Verify that the sink receieves OnClose() call when calling Close().
+  EXPECT_CALL(sink, OnClose(ais))
+      .Times(1);
   ais->Close();
 }
 
@@ -238,9 +240,6 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamVerifyMonoRecording) {
 TEST_F(MacAudioInputTest, AUAudioInputStreamVerifyStereoRecording) {
   if (!CanRunAudioTests())
     return;
-
-  int count = 0;
-  base::MessageLoopForUI loop;
 
   // Create an audio input stream which records in stereo.
   AudioInputStream* ais = CreateAudioInputStream(CHANNEL_LAYOUT_STEREO);
@@ -253,22 +252,21 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamVerifyStereoRecording) {
 
   MockAudioInputCallback sink;
 
-  // We use 10ms packets and will run the test until ten packets are received.
-  // All should contain valid packets of the same size and a valid delay
-  // estimate.
-  // TODO(henrika): http://crbug.com/154352 forced us to run the capture side
-  // using a native buffer size of 128 audio frames and combine it with a FIFO
-  // to match the requested size by the client. This change might also have
-  // modified the delay estimates since the existing Ge(bytes_per_packet) for
-  // parameter #4 does no longer pass. I am removing this restriction here to
-  // ensure that we can land the patch but will revisit this test again when
-  // more analysis of the delay estimates are done.
-  EXPECT_CALL(sink, OnData(ais, NotNull(), bytes_per_packet, _, _))
-      .Times(AtLeast(10))
-      .WillRepeatedly(CheckCountAndPostQuitTask(&count, 10, &loop));
+  // We use 10ms packets and will run the test for ~100ms. Given that the
+  // startup sequence takes some time, it is reasonable to expect 5-10
+  // callbacks in this time period. All should contain valid packets of
+  // the same size.
+  EXPECT_CALL(sink, OnData(ais, NotNull(), bytes_per_packet,
+                           Ge(bytes_per_packet)))
+      .Times(Between(5, 10));
+
   ais->Start(&sink);
-  loop.Run();
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
   ais->Stop();
+
+  // Verify that the sink receieves OnClose() call when calling Close().
+  EXPECT_CALL(sink, OnClose(ais))
+      .Times(1);
   ais->Close();
 }
 
@@ -298,4 +296,3 @@ TEST_F(MacAudioInputTest, DISABLED_AUAudioInputStreamRecordToFile) {
   ais->Close();
 }
 
-}  // namespace media

@@ -190,7 +190,7 @@ function addOutlineStyleListeners() {
 
 function load() {
   try {
-    port = chrome.runtime.connect();
+    port = chrome.extension.connect();
     port.onMessage.addListener(function(msg) {
       if (msg.cmd == 'anim') {
         displayAlarmAnimation();

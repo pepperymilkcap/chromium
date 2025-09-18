@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,38 +59,6 @@ int UDPServerSocket::GetLocalAddress(IPEndPoint* address) const {
 
 const BoundNetLog& UDPServerSocket::NetLog() const {
   return socket_.NetLog();
-}
-
-void UDPServerSocket::AllowAddressReuse() {
-  socket_.AllowAddressReuse();
-}
-
-void UDPServerSocket::AllowBroadcast() {
-  socket_.AllowBroadcast();
-}
-
-int UDPServerSocket::JoinGroup(const IPAddressNumber& group_address) const {
-  return socket_.JoinGroup(group_address);
-}
-
-int UDPServerSocket::LeaveGroup(const IPAddressNumber& group_address) const {
-  return socket_.LeaveGroup(group_address);
-}
-
-int UDPServerSocket::SetMulticastInterface(uint32 interface_index) {
-  return socket_.SetMulticastInterface(interface_index);
-}
-
-int UDPServerSocket::SetMulticastTimeToLive(int time_to_live) {
-  return socket_.SetMulticastTimeToLive(time_to_live);
-}
-
-int UDPServerSocket::SetMulticastLoopbackMode(bool loopback) {
-  return socket_.SetMulticastLoopbackMode(loopback);
-}
-
-int UDPServerSocket::SetDiffServCodePoint(DiffServCodePoint dscp) {
-  return socket_.SetDiffServCodePoint(dscp);
 }
 
 }  // namespace net

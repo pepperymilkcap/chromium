@@ -4,33 +4,32 @@
 
 #include "ui/views/controls/glow_hover_controller.h"
 
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
-#include "ui/gfx/canvas.h"
-#include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/view.h"
 
 namespace views {
 
 // Amount to scale the opacity.
-static const double kTrackOpacityScale = 0.5;
-static const double kHighlightOpacityScale = 1.0;
+static const double kOpacityScale = 0.5;
 
 // How long the hover state takes.
-static const int kTrackHoverDurationMs = 400;
+static const int kHoverDurationMs = 400;
 
 GlowHoverController::GlowHoverController(views::View* view)
     : view_(view),
-      animation_(this),
-      opacity_scale_(kTrackOpacityScale) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(animation_(this)) {
   animation_.set_delegate(this);
+  animation_.SetSlideDuration(kHoverDurationMs);
 }
 
 GlowHoverController::~GlowHoverController() {
 }
 
 void GlowHoverController::SetAnimationContainer(
-    gfx::AnimationContainer* container) {
+    ui::AnimationContainer* container) {
   animation_.SetContainer(container);
 }
 
@@ -40,25 +39,13 @@ void GlowHoverController::SetLocation(const gfx::Point& location) {
     view_->SchedulePaint();
 }
 
-void GlowHoverController::Show(Style style) {
-  switch (style) {
-    case SUBTLE:
-      opacity_scale_ = kTrackOpacityScale;
-      animation_.SetSlideDuration(kTrackHoverDurationMs);
-      animation_.SetTweenType(gfx::Tween::EASE_OUT);
-      animation_.Show();
-      break;
-    case PRONOUNCED:
-      opacity_scale_ = kHighlightOpacityScale;
-      // Force the end state to show immediately.
-      animation_.Show();
-      animation_.End();
-      break;
-  }
+void GlowHoverController::Show() {
+  animation_.SetTweenType(ui::Tween::EASE_OUT);
+  animation_.Show();
 }
 
 void GlowHoverController::Hide() {
-  animation_.SetTweenType(gfx::Tween::EASE_IN);
+  animation_.SetTweenType(ui::Tween::EASE_IN);
   animation_.Hide();
 }
 
@@ -77,51 +64,53 @@ bool GlowHoverController::ShouldDraw() const {
 }
 
 void GlowHoverController::Draw(gfx::Canvas* canvas,
-                               const gfx::ImageSkia& mask_image) const {
+                               const SkBitmap& mask_image) const {
   if (!ShouldDraw())
     return;
 
   // Draw a radial gradient to hover_canvas.
-  gfx::Canvas hover_canvas(gfx::Size(mask_image.width(), mask_image.height()),
-                           canvas->image_scale(),
-                           false);
+  gfx::CanvasSkia hover_canvas(
+      gfx::Size(mask_image.width(), mask_image.height()), false);
 
   // Draw a radial gradient to hover_canvas.
   int radius = view_->width() / 3;
 
-  SkPoint center_point;
-  center_point.iset(location_.x(), location_.y());
+  SkPaint paint;
+  paint.setStyle(SkPaint::kFill_Style);
+  paint.setFlags(SkPaint::kAntiAlias_Flag);
+  SkPoint loc = { SkIntToScalar(location_.x()), SkIntToScalar(location_.y()) };
   SkColor colors[2];
   int hover_alpha =
-      static_cast<int>(255 * opacity_scale_ * animation_.GetCurrentValue());
+      static_cast<int>(255 * kOpacityScale * animation_.GetCurrentValue());
   colors[0] = SkColorSetARGB(hover_alpha, 255, 255, 255);
   colors[1] = SkColorSetARGB(0, 255, 255, 255);
-  skia::RefPtr<SkShader> shader = skia::AdoptRef(
-      SkGradientShader::CreateRadial(
-          center_point, SkIntToScalar(radius), colors, NULL, 2,
-          SkShader::kClamp_TileMode));
+  SkShader* shader = SkGradientShader::CreateRadial(
+      loc,
+      SkIntToScalar(radius),
+      colors,
+      NULL,
+      2,
+      SkShader::kClamp_TileMode);
   // Shader can end up null when radius = 0.
   // If so, this results in default full tab glow behavior.
   if (shader) {
-    SkPaint paint;
-    paint.setStyle(SkPaint::kFill_Style);
-    paint.setAntiAlias(true);
-    paint.setShader(shader.get());
+    paint.setShader(shader);
+    shader->unref();
     hover_canvas.DrawRect(gfx::Rect(location_.x() - radius,
                                     location_.y() - radius,
                                     radius * 2, radius * 2), paint);
   }
-  gfx::ImageSkia result = gfx::ImageSkiaOperations::CreateMaskedImage(
-      gfx::ImageSkia(hover_canvas.ExtractImageRep()), mask_image);
-  canvas->DrawImageInt(result, (view_->width() - mask_image.width()) / 2,
-                       (view_->height() - mask_image.height()) / 2);
+  SkBitmap result = SkBitmapOperations::CreateMaskedBitmap(
+      hover_canvas.ExtractBitmap(), mask_image);
+  canvas->DrawBitmapInt(result, (view_->width() - mask_image.width()) / 2,
+                        (view_->height() - mask_image.height()) / 2);
 }
 
-void GlowHoverController::AnimationEnded(const gfx::Animation* animation) {
+void GlowHoverController::AnimationEnded(const ui::Animation* animation) {
   view_->SchedulePaint();
 }
 
-void GlowHoverController::AnimationProgressed(const gfx::Animation* animation) {
+void GlowHoverController::AnimationProgressed(const ui::Animation* animation) {
   view_->SchedulePaint();
 }
 

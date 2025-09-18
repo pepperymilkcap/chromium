@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_WIN_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_WIN_H_
+#pragma once
 
 #include <windows.h>
 
@@ -48,17 +49,17 @@ class MenuWin : public Menu {
   // Overridden from Menu:
   virtual void AddMenuItemWithIcon(int index,
                                    int item_id,
-                                   const base::string16& label,
-                                   const gfx::ImageSkia& icon) OVERRIDE;
+                                   const string16& label,
+                                   const SkBitmap& icon) OVERRIDE;
   virtual Menu* AddSubMenuWithIcon(int index,
                                    int item_id,
-                                   const base::string16& label,
-                                   const gfx::ImageSkia& icon) OVERRIDE;
+                                   const string16& label,
+                                   const SkBitmap& icon) OVERRIDE;
   virtual void AddSeparator(int index) OVERRIDE;
   virtual void EnableMenuItemByID(int item_id, bool enabled) OVERRIDE;
   virtual void EnableMenuItemAt(int index, bool enabled) OVERRIDE;
-  virtual void SetMenuLabel(int item_id, const base::string16& label) OVERRIDE;
-  virtual bool SetIcon(const gfx::ImageSkia& icon, int item_id) OVERRIDE;
+  virtual void SetMenuLabel(int item_id, const string16& label) OVERRIDE;
+  virtual bool SetIcon(const SkBitmap& icon, int item_id) OVERRIDE;
   virtual void RunMenuAt(int x, int y) OVERRIDE;
   virtual void Cancel() OVERRIDE;
   virtual int ItemCount() OVERRIDE;
@@ -73,8 +74,8 @@ class MenuWin : public Menu {
  protected:
   virtual void AddMenuItemInternal(int index,
                                    int item_id,
-                                   const base::string16& label,
-                                   const gfx::ImageSkia& icon,
+                                   const string16& label,
+                                   const SkBitmap& icon,
                                    MenuItemType type) OVERRIDE;
 
  private:
@@ -85,8 +86,8 @@ class MenuWin : public Menu {
 
   void AddMenuItemInternal(int index,
                            int item_id,
-                           const base::string16& label,
-                           const gfx::ImageSkia& icon,
+                           const string16& label,
+                           const SkBitmap& icon,
                            HMENU submenu,
                            MenuItemType type);
 
@@ -110,7 +111,7 @@ class MenuWin : public Menu {
   // This list is used to store the default labels for the menu items.
   // We may use contextual labels when RunMenu is called, so we must save
   // a copy of default ones here.
-  std::vector<base::string16> labels_;
+  std::vector<string16> labels_;
 
   // A flag to indicate whether this menu will be drawn by the Menu class.
   // If it's true, all the menu items will be owner drawn. Otherwise,

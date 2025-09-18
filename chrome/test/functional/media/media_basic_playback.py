@@ -22,56 +22,35 @@ _TEST_HTML_PATH = os.path.join('media', 'html', 'media_basic_playback.html')
 # have more test videos in the matrix.  Code already written, see patch here:
 # https://chromiumcodereview.appspot.com/9290008/#ps12
 _TEST_VIDEOS = [
-    pyauto.PyUITest.GetFileURLForContentDataPath('media', name)
-    for name in ['bear.mp4', 'bear.ogv', 'bear.webm', 'bear_silent.mp4',
-                 'bear_silent.ogv', 'bear_silent.webm']]
-
-# Expected events for the first iteration and every iteration thereafter.
-_EXPECTED_EVENTS_0 = [('ended', 2), ('playing', 2), ('seeked', 1),
-                      ('suspend', 1)]
-_EXPECTED_EVENTS_n = [('abort', 1), ('emptied', 1)] + _EXPECTED_EVENTS_0
+    'bear.mp4', 'bear.ogv', 'bear.webm', 'bear_silent.mp4', 'bear_silent.ogv',
+    'bear_silent.webm']
 
 
-class MediaBasicPlaybackTest(pyauto.PyUITest):
+class MediaConstrainedNetworkPerfTest(pyauto.PyUITest):
   """PyAuto test container.  See file doc string for more information."""
 
   def testBasicPlaybackMatrix(self):
-    """Launches HTML test which plays each video until end, seeks, and replays.
+    """Launches HTML test which plays a video until end, seeks, and replays.
 
     Specifically ensures that after the above sequence of events, the following
-    are true:
+    is true:
 
-        1. The first video has only 2x playing, 2x ended, and 1x seeked events.
-        2. Each subsequent video additionally has 1x abort and 1x emptied due to
-           switching of the src attribute.
-        3. video.currentTime == video.duration for each video.
-
-    See the HTML file at _TEST_HTML_PATH for more information.
+        1. 2x playing, 2x ended, 1x seeked, 0x error, and 0x abort events.
+        2. video.currentTime == video.duration.
     """
-    self.NavigateToURL(self.GetFileURLForDataPath(_TEST_HTML_PATH))
-
-    for i, media in enumerate(_TEST_VIDEOS):
+    for media in _TEST_VIDEOS:
       logging.debug('Running basic playback test for %s', media)
+
+      self.NavigateToURL('%s?media=%s' % (
+          self.GetFileURLForDataPath(_TEST_HTML_PATH), media))
 
       # Block until the test finishes and notifies us.  Upon return the value of
       # video.currentTime == video.duration is provided.
-      try:
-        self.assertTrue(self.ExecuteJavascript("startTest('%s');" % media))
+      self.assertTrue(self.ExecuteJavascript('true;'))
 
-        # PyAuto has trouble with arrays, so convert to string prior to request.
-        events = self.GetDOMValue("events.join(',')").split(',')
-        counts = [(item, events.count(item)) for item in sorted(set(events))]
-
-        # The first loop will not have the abort and emptied events triggered by
-        # changing the video src.
-        if (i == 0):
-          self.assertEqual(counts, _EXPECTED_EVENTS_0)
-        else:
-          self.assertEqual(counts, _EXPECTED_EVENTS_n)
-      except:
-        logging.debug(
-            'Test failed with events: %s', self.GetDOMValue("events.join(',')"))
-        raise
+      events = self.GetDOMValue('events').split(',')
+      counts = [(item, events.count(item)) for item in sorted(set(events))]
+      self.assertEqual(counts, [('ended', 2), ('playing', 2), ('seeked', 1)])
 
 
 if __name__ == '__main__':

@@ -4,21 +4,19 @@
 
 #import <AppKit/AppKit.h>
 
-#include "base/strings/string16.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#import "base/memory/scoped_nsobject.h"
+#include "base/string16.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
-#include "chrome/test/base/testing_profile.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 #include "ui/base/l10n/l10n_util.h"
-
-using base::ASCIIToUTF16;
 
 class TestBookmarkMenuBridge : public BookmarkMenuBridge {
  public:
@@ -34,7 +32,7 @@ class TestBookmarkMenuBridge : public BookmarkMenuBridge {
 
  protected:
   // Overridden from BookmarkMenuBridge.
-  virtual NSMenu* BookmarkMenu() OVERRIDE {
+  virtual NSMenu* BookmarkMenu() {
     return menu_;
   }
 };
@@ -96,7 +94,7 @@ class BookmarkMenuBridgeTest : public CocoaProfileTest {
 
 TEST_F(BookmarkMenuBridgeTest, TestBookmarkMenuAutoSeparator) {
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  bridge_->BookmarkModelLoaded(model, false);
+  bridge_->Loaded(model, false);
   NSMenu* menu = bridge_->menu_;
   bridge_->UpdateMenu(menu);
   // The bare menu after loading used to have a separator and an
@@ -143,7 +141,7 @@ TEST_F(BookmarkMenuBridgeTest, TestClearBookmarkMenu) {
 // Test invalidation
 TEST_F(BookmarkMenuBridgeTest, TestInvalidation) {
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  bridge_->BookmarkModelLoaded(model, false);
+  bridge_->Loaded(model, false);
 
   EXPECT_FALSE(menu_is_valid());
   bridge_->UpdateMenu(bridge_->menu_);
@@ -170,7 +168,7 @@ TEST_F(BookmarkMenuBridgeTest, TestInvalidation) {
 // Test that AddNodeToMenu() properly adds bookmark nodes as menus,
 // including the recursive case.
 TEST_F(BookmarkMenuBridgeTest, TestAddNodeToMenu) {
-  base::string16 empty;
+  string16 empty;
   NSMenu* menu = bridge_->menu_;
 
   BookmarkModel* model = bridge_->GetBookmarkModel();
@@ -313,7 +311,7 @@ TEST_F(BookmarkMenuBridgeTest, TestAddItemToMenu) {
 
 // Makes sure our internal map of BookmarkNode to NSMenuItem works.
 TEST_F(BookmarkMenuBridgeTest, TestGetMenuItemForNode) {
-  base::string16 empty;
+  string16 empty;
   NSMenu* menu = bridge_->menu_;
 
   BookmarkModel* model = bridge_->GetBookmarkModel();

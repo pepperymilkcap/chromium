@@ -9,8 +9,9 @@
 
 #include "chrome/installer/util/chrome_frame_distribution.h"
 
-#include "base/strings/string_util.h"
-#include "chrome/common/net/test_server_locations.h"
+#include <string>
+
+#include "base/string_util.h"
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
@@ -28,51 +29,41 @@ ChromeFrameDistribution::ChromeFrameDistribution()
     : BrowserDistribution(CHROME_FRAME) {
 }
 
-base::string16 ChromeFrameDistribution::GetAppGuid() {
+std::wstring ChromeFrameDistribution::GetAppGuid() {
   return kChromeFrameGuid;
 }
 
-base::string16 ChromeFrameDistribution::GetBaseAppName() {
+std::wstring ChromeFrameDistribution::GetApplicationName() {
   return L"Google Chrome Frame";
 }
 
-base::string16 ChromeFrameDistribution::GetBrowserProgIdPrefix() {
-  NOTREACHED();
-  return base::string16();
+std::wstring ChromeFrameDistribution::GetAppShortCutName() {
+  const std::wstring& product_name =
+      installer::GetLocalizedString(IDS_PRODUCT_FRAME_NAME_BASE);
+  return product_name;
 }
 
-base::string16 ChromeFrameDistribution::GetBrowserProgIdDesc() {
-  NOTREACHED();
-  return base::string16();
+std::wstring ChromeFrameDistribution::GetAlternateApplicationName() {
+  const std::wstring& product_name =
+      installer::GetLocalizedString(IDS_PRODUCT_FRAME_NAME_BASE);
+  return product_name;
 }
 
-base::string16 ChromeFrameDistribution::GetShortcutName(
-    ShortcutType shortcut_type) {
-  switch (shortcut_type) {
-    case SHORTCUT_CHROME:
-    case SHORTCUT_CHROME_ALTERNATE:
-      return installer::GetLocalizedString(IDS_PRODUCT_FRAME_NAME_BASE);
-    default:
-      NOTREACHED();
-      return base::string16();
-  }
-}
-
-base::string16 ChromeFrameDistribution::GetInstallSubDir() {
+std::wstring ChromeFrameDistribution::GetInstallSubDir() {
   return L"Google\\Chrome Frame";
 }
 
-base::string16 ChromeFrameDistribution::GetPublisherName() {
-  const base::string16& publisher_name =
+std::wstring ChromeFrameDistribution::GetPublisherName() {
+  const std::wstring& publisher_name =
       installer::GetLocalizedString(IDS_ABOUT_VERSION_COMPANY_NAME_BASE);
   return publisher_name;
 }
 
-base::string16 ChromeFrameDistribution::GetAppDescription() {
+std::wstring ChromeFrameDistribution::GetAppDescription() {
   return L"Chrome in a Frame.";
 }
 
-base::string16 ChromeFrameDistribution::GetLongAppDescription() {
+std::wstring ChromeFrameDistribution::GetLongAppDescription() {
   return L"Chrome in a Frame.";
 }
 
@@ -80,69 +71,49 @@ std::string ChromeFrameDistribution::GetSafeBrowsingName() {
   return "googlechromeframe";
 }
 
-base::string16 ChromeFrameDistribution::GetStateKey() {
-  base::string16 key(google_update::kRegPathClientState);
+std::wstring ChromeFrameDistribution::GetStateKey() {
+  std::wstring key(google_update::kRegPathClientState);
   key.append(L"\\");
   key.append(kChromeFrameGuid);
   return key;
 }
 
-base::string16 ChromeFrameDistribution::GetStateMediumKey() {
-  base::string16 key(google_update::kRegPathClientStateMedium);
+std::wstring ChromeFrameDistribution::GetStateMediumKey() {
+  std::wstring key(google_update::kRegPathClientStateMedium);
   key.append(L"\\");
   key.append(kChromeFrameGuid);
   return key;
+}
+
+std::wstring ChromeFrameDistribution::GetStatsServerURL() {
+  return L"https://clients4.google.com/firefox/metrics/collect";
 }
 
 std::string ChromeFrameDistribution::GetNetworkStatsServer() const {
-  return chrome_common_net::kEchoTestServerLocation;
+  return "chrome.googleechotest.com";
 }
 
-std::string ChromeFrameDistribution::GetHttpPipeliningTestServer() const {
-  return chrome_common_net::kPipelineTestServerBaseUrl;
-}
-
-base::string16 ChromeFrameDistribution::GetUninstallLinkName() {
+std::wstring ChromeFrameDistribution::GetUninstallLinkName() {
   return L"Uninstall Chrome Frame";
 }
 
-base::string16 ChromeFrameDistribution::GetUninstallRegPath() {
+std::wstring ChromeFrameDistribution::GetUninstallRegPath() {
   return L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
          L"Google Chrome Frame";
 }
 
-base::string16 ChromeFrameDistribution::GetVersionKey() {
-  base::string16 key(google_update::kRegPathClients);
+std::wstring ChromeFrameDistribution::GetVersionKey() {
+  std::wstring key(google_update::kRegPathClients);
   key.append(L"\\");
   key.append(kChromeFrameGuid);
   return key;
 }
 
-base::string16 ChromeFrameDistribution::GetIconFilename() {
-  return installer::kChromeExe;
-}
-
-int ChromeFrameDistribution::GetIconIndex(ShortcutType shortcut_type) {
-  switch (shortcut_type) {
-    case SHORTCUT_CHROME:
-      return 0;
-    default:
-      NOTREACHED();
-      return 0;
-  }
-}
-
-BrowserDistribution::DefaultBrowserControlPolicy
-    ChromeFrameDistribution::GetDefaultBrowserControlPolicy() {
-  return DEFAULT_BROWSER_UNSUPPORTED;
-}
-
-bool ChromeFrameDistribution::CanCreateDesktopShortcuts() {
+bool ChromeFrameDistribution::CanSetAsDefault() {
   return false;
 }
 
-bool ChromeFrameDistribution::GetCommandExecuteImplClsid(
-    base::string16* handler_class_uuid) {
+bool ChromeFrameDistribution::CanCreateDesktopShortcuts() {
   return false;
 }
 

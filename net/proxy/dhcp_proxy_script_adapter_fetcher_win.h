@@ -1,25 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_PROXY_DHCP_PROXY_SCRIPT_ADAPTER_FETCHER_WIN_H_
 #define NET_PROXY_DHCP_PROXY_SCRIPT_ADAPTER_FETCHER_WIN_H_
+#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
-#include "url/gurl.h"
-
-namespace base {
-class TaskRunner;
-}
+#include "googleurl/src/gurl.h"
 
 namespace net {
 
@@ -33,9 +30,8 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptAdapterFetcher
       NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   // |url_request_context| must outlive DhcpProxyScriptAdapterFetcher.
-  // |task_runner| will be used to post tasks to a thread.
-  DhcpProxyScriptAdapterFetcher(URLRequestContext* url_request_context,
-                                scoped_refptr<base::TaskRunner> task_runner);
+  explicit DhcpProxyScriptAdapterFetcher(
+      URLRequestContext* url_request_context);
   virtual ~DhcpProxyScriptAdapterFetcher();
 
   // Starts a fetch.  On completion (but not cancellation), |callback|
@@ -63,7 +59,7 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptAdapterFetcher
   // Returns the contents of the PAC file retrieved.  Only valid if
   // |IsComplete()| is true.  Returns the empty string if |GetResult()|
   // returns anything other than OK.
-  virtual base::string16 GetPacScript() const;
+  virtual string16 GetPacScript() const;
 
   // Returns the PAC URL retrieved from DHCP.  Only guaranteed to be
   // valid if |IsComplete()| is true.  Returns an empty URL if no URL was
@@ -78,10 +74,6 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptAdapterFetcher
   // This function executes synchronously due to limitations of the Windows
   // DHCP client API.
   static std::string GetPacURLFromDhcp(const std::string& adapter_name);
-
-  // Sanitizes a string returned via the DHCP API.
-  static std::string SanitizeDhcpApiString(const char* data,
-                                           size_t count_bytes);
 
  protected:
   // This is the state machine for fetching from a given adapter.
@@ -153,9 +145,6 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptAdapterFetcher
   void OnFetcherDone(int result);
   void TransitionToFinish();
 
-  // TaskRunner for posting tasks to a worker thread.
-  scoped_refptr<base::TaskRunner> task_runner_;
-
   // Current state of this state machine.
   State state_;
 
@@ -163,7 +152,7 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptAdapterFetcher
   int result_;
 
   // Empty string or the PAC script downloaded.
-  base::string16 pac_script_;
+  string16 pac_script_;
 
   // Empty URL or the PAC URL configured in DHCP.
   GURL pac_url_;
@@ -178,7 +167,7 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptAdapterFetcher
   // Implements a timeout on the call to the Win32 DHCP API.
   base::OneShotTimer<DhcpProxyScriptAdapterFetcher> wait_timer_;
 
-  URLRequestContext* const url_request_context_;
+  scoped_refptr<URLRequestContext> url_request_context_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(DhcpProxyScriptAdapterFetcher);
 };

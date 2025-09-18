@@ -6,6 +6,10 @@
 
 namespace media {
 
+StreamParserHost::StreamParserHost() {}
+
+StreamParserHost::~StreamParserHost() {}
+
 StreamParser::StreamParser() {}
 
 StreamParser::~StreamParser() {}

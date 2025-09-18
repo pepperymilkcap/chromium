@@ -5,9 +5,9 @@
 #include "content/browser/renderer_host/render_view_host_factory.h"
 
 #include "base/logging.h"
-#include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/render_view_host.h"
 
-namespace content {
+using content::SiteInstance;
 
 // static
 RenderViewHostFactory* RenderViewHostFactory::factory_ = NULL;
@@ -15,19 +15,15 @@ RenderViewHostFactory* RenderViewHostFactory::factory_ = NULL;
 // static
 RenderViewHost* RenderViewHostFactory::Create(
     SiteInstance* instance,
-    RenderViewHostDelegate* delegate,
-    RenderWidgetHostDelegate* widget_delegate,
+    content::RenderViewHostDelegate* delegate,
     int routing_id,
-    int main_frame_routing_id,
-    bool swapped_out,
-    bool hidden) {
+    SessionStorageNamespace* session_storage_namespace) {
   if (factory_) {
-    return factory_->CreateRenderViewHost(instance, delegate, widget_delegate,
-                                          routing_id, main_frame_routing_id,
-                                          swapped_out);
+    return factory_->CreateRenderViewHost(instance, delegate, routing_id,
+                                          session_storage_namespace);
   }
-  return new RenderViewHostImpl(instance, delegate, widget_delegate, routing_id,
-                                main_frame_routing_id, swapped_out, hidden);
+  return new RenderViewHost(instance, delegate, routing_id,
+                            session_storage_namespace);
 }
 
 // static
@@ -41,5 +37,3 @@ void RenderViewHostFactory::UnregisterFactory() {
   DCHECK(factory_) << "No factory to unregister.";
   factory_ = NULL;
 }
-
-}  // namespace content

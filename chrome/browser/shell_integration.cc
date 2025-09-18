@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,99 +8,51 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
-#include "chrome/browser/policy/policy_path_parser.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/chromeos_switches.h"
-#endif
-
-#if !defined(OS_WIN)
-#include "chrome/common/chrome_version_info.h"
-#include "grit/chromium_strings.h"
-#include "ui/base/l10n/l10n_util.h"
-#endif
-
 using content::BrowserThread;
 
-ShellIntegration::DefaultWebClientSetPermission
-    ShellIntegration::CanSetAsDefaultProtocolClient() {
+bool ShellIntegration::CanSetAsDefaultProtocolClient() {
   // Allowed as long as the browser can become the operating system default
   // browser.
   return CanSetAsDefaultBrowser();
 }
 
 ShellIntegration::ShortcutInfo::ShortcutInfo()
-    : is_platform_app(false) {
+    : create_on_desktop(false),
+      create_in_applications_menu(false),
+      create_in_quick_launch_bar(false) {
 }
 
 ShellIntegration::ShortcutInfo::~ShortcutInfo() {}
 
-ShellIntegration::ShortcutLocations::ShortcutLocations()
-    : on_desktop(false),
-      applications_menu_location(APP_MENU_LOCATION_NONE),
-      in_quick_launch_bar(false)
-#if defined(OS_POSIX)
-      , hidden(false)
-#endif
-      {
-}
-
-static const struct ShellIntegration::AppModeInfo* gAppModeInfo = NULL;
-
-// static
-void ShellIntegration::SetAppModeInfo(const struct AppModeInfo* info) {
-  gAppModeInfo = info;
-}
-
-// static
-const struct ShellIntegration::AppModeInfo* ShellIntegration::AppModeInfo() {
-  return gAppModeInfo;
-}
-
-// static
-bool ShellIntegration::IsRunningInAppMode() {
-  return gAppModeInfo != NULL;
-}
-
 // static
 CommandLine ShellIntegration::CommandLineArgsForLauncher(
     const GURL& url,
-    const std::string& extension_app_id,
-    const base::FilePath& profile_path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+    const std::string& extension_app_id) {
   const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
   CommandLine new_cmd_line(CommandLine::NO_PROGRAM);
 
   // Use the same UserDataDir for new launches that we currently have set.
-  base::FilePath user_data_dir =
-      cmd_line.GetSwitchValuePath(switches::kUserDataDir);
-#if defined(OS_MACOSX) || defined(OS_WIN)
-  policy::path_parser::CheckUserDataDirPolicy(&user_data_dir);
-#endif
+  FilePath user_data_dir = cmd_line.GetSwitchValuePath(switches::kUserDataDir);
   if (!user_data_dir.empty()) {
     // Make sure user_data_dir is an absolute path.
-    user_data_dir = base::MakeAbsoluteFilePath(user_data_dir);
-    if (!user_data_dir.empty() && base::PathExists(user_data_dir))
+    if (file_util::AbsolutePath(&user_data_dir) &&
+        file_util::PathExists(user_data_dir)) {
       new_cmd_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
+    }
   }
 
 #if defined(OS_CHROMEOS)
-  base::FilePath profile = cmd_line.GetSwitchValuePath(
-      chromeos::switches::kLoginProfile);
+  FilePath profile = cmd_line.GetSwitchValuePath(switches::kLoginProfile);
   if (!profile.empty())
-    new_cmd_line.AppendSwitchPath(chromeos::switches::kLoginProfile, profile);
-#else
-  if (!profile_path.empty() && !extension_app_id.empty())
-    new_cmd_line.AppendSwitchPath(switches::kProfileDirectory,
-                                  profile_path.BaseName());
+    new_cmd_line.AppendSwitchPath(switches::kLoginProfile, profile);
 #endif
 
   // If |extension_app_id| is present, we use the kAppId switch rather than
@@ -115,35 +67,6 @@ CommandLine ShellIntegration::CommandLineArgsForLauncher(
     new_cmd_line.AppendSwitchASCII(switches::kApp, url.spec());
   }
   return new_cmd_line;
-}
-
-#if !defined(OS_WIN)
-
-base::string16 ShellIntegration::GetAppShortcutsSubdirName() {
-  if (chrome::VersionInfo::GetChannel() == chrome::VersionInfo::CHANNEL_CANARY)
-    return l10n_util::GetStringUTF16(IDS_APP_SHORTCUTS_SUBDIR_NAME_CANARY);
-  return l10n_util::GetStringUTF16(IDS_APP_SHORTCUTS_SUBDIR_NAME);
-}
-
-// static
-bool ShellIntegration::SetAsDefaultBrowserInteractive() {
-  return false;
-}
-
-// static
-bool ShellIntegration::SetAsDefaultProtocolClientInteractive(
-    const std::string& protocol) {
-  return false;
-}
-#endif
-
-bool ShellIntegration::DefaultWebClientObserver::IsOwnedByWorker() {
-  return false;
-}
-
-bool ShellIntegration::DefaultWebClientObserver::
-    IsInteractiveSetDefaultPermitted() {
-  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -166,15 +89,13 @@ void ShellIntegration::DefaultWebClientWorker::StartCheckIsDefault() {
 }
 
 void ShellIntegration::DefaultWebClientWorker::StartSetAsDefault() {
-  bool interactive_permitted = false;
   if (observer_) {
     observer_->SetDefaultWebClientUIState(STATE_PROCESSING);
-    interactive_permitted = observer_->IsInteractiveSetDefaultPermitted();
   }
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&DefaultWebClientWorker::ExecuteSetAsDefault, this,
-                 interactive_permitted));
+      base::Bind(
+          &DefaultWebClientWorker::ExecuteSetAsDefault, this));
 }
 
 void ShellIntegration::DefaultWebClientWorker::ObserverDestroyed() {
@@ -208,22 +129,17 @@ void ShellIntegration::DefaultWebClientWorker::CompleteCheckIsDefault(
   }
 }
 
-void ShellIntegration::DefaultWebClientWorker::ExecuteSetAsDefault(
-    bool interactive_permitted) {
+void ShellIntegration::DefaultWebClientWorker::ExecuteSetAsDefault() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-
-  bool result = SetAsDefault(interactive_permitted);
+  SetAsDefault();
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&DefaultWebClientWorker::CompleteSetAsDefault, this, result));
+      base::Bind(
+          &DefaultWebClientWorker::CompleteSetAsDefault, this));
 }
 
-void ShellIntegration::DefaultWebClientWorker::CompleteSetAsDefault(
-    bool succeeded) {
+void ShellIntegration::DefaultWebClientWorker::CompleteSetAsDefault() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // First tell the observer what the SetAsDefault call has returned.
-  if (observer_)
-    observer_->OnSetAsDefaultConcluded(succeeded);
   // Set as default completed, check again to make sure it stuck...
   StartCheckIsDefault();
 }
@@ -232,13 +148,13 @@ void ShellIntegration::DefaultWebClientWorker::UpdateUI(
     DefaultWebClientState state) {
   if (observer_) {
     switch (state) {
-      case NOT_DEFAULT:
+      case NOT_DEFAULT_WEB_CLIENT:
         observer_->SetDefaultWebClientUIState(STATE_NOT_DEFAULT);
         break;
-      case IS_DEFAULT:
+      case IS_DEFAULT_WEB_CLIENT:
         observer_->SetDefaultWebClientUIState(STATE_IS_DEFAULT);
         break;
-      case UNKNOWN_DEFAULT:
+      case UNKNOWN_DEFAULT_WEB_CLIENT:
         observer_->SetDefaultWebClientUIState(STATE_UNKNOWN);
         break;
       default:
@@ -261,25 +177,11 @@ ShellIntegration::DefaultBrowserWorker::DefaultBrowserWorker(
 
 ShellIntegration::DefaultWebClientState
 ShellIntegration::DefaultBrowserWorker::CheckIsDefault() {
-  return ShellIntegration::GetDefaultBrowser();
+  return ShellIntegration::IsDefaultBrowser();
 }
 
-bool ShellIntegration::DefaultBrowserWorker::SetAsDefault(
-    bool interactive_permitted) {
-  bool result = false;
-  switch (ShellIntegration::CanSetAsDefaultBrowser()) {
-    case ShellIntegration::SET_DEFAULT_UNATTENDED:
-      result = ShellIntegration::SetAsDefaultBrowser();
-      break;
-    case ShellIntegration::SET_DEFAULT_INTERACTIVE:
-      if (interactive_permitted)
-        result = ShellIntegration::SetAsDefaultBrowserInteractive();
-      break;
-    default:
-      NOTREACHED();
-  }
-
-  return result;
+void ShellIntegration::DefaultBrowserWorker::SetAsDefault() {
+  ShellIntegration::SetAsDefaultBrowser();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -300,23 +202,6 @@ ShellIntegration::DefaultProtocolClientWorker::CheckIsDefault() {
   return ShellIntegration::IsDefaultProtocolClient(protocol_);
 }
 
-bool ShellIntegration::DefaultProtocolClientWorker::SetAsDefault(
-    bool interactive_permitted) {
-  bool result = false;
-  switch (ShellIntegration::CanSetAsDefaultProtocolClient()) {
-    case ShellIntegration::SET_DEFAULT_NOT_ALLOWED:
-      result = false;
-      break;
-    case ShellIntegration::SET_DEFAULT_UNATTENDED:
-      result = ShellIntegration::SetAsDefaultProtocolClient(protocol_);
-      break;
-    case ShellIntegration::SET_DEFAULT_INTERACTIVE:
-      if (interactive_permitted) {
-        result = ShellIntegration::SetAsDefaultProtocolClientInteractive(
-            protocol_);
-      }
-      break;
-  }
-
-  return result;
+void ShellIntegration::DefaultProtocolClientWorker::SetAsDefault() {
+  ShellIntegration::SetAsDefaultProtocolClient(protocol_);
 }

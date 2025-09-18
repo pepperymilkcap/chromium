@@ -4,16 +4,13 @@
 
 #include "chrome/browser/translate/translate_tab_helper.h"
 
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/translate/page_translated_details.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/translate/language_detection_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 
 using content::WebContents;
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(TranslateTabHelper);
 
 TranslateTabHelper::TranslateTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
@@ -42,28 +39,24 @@ void TranslateTabHelper::DidNavigateAnyFrame(
   language_state_.DidNavigate(details);
 }
 
-void TranslateTabHelper::OnLanguageDetermined(
-    const LanguageDetectionDetails& details,
-    bool page_needs_translation) {
-  language_state_.LanguageDetermined(details.adopted_language,
-                                     page_needs_translation);
+void TranslateTabHelper::OnLanguageDetermined(const std::string& language,
+                                              bool page_translatable) {
+  language_state_.LanguageDetermined(language, page_translatable);
 
+  std::string lang = language;
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
       content::Source<WebContents>(web_contents()),
-      content::Details<const LanguageDetectionDetails>(&details));
+      content::Details<std::string>(&lang));
 }
 
 void TranslateTabHelper::OnPageTranslated(int32 page_id,
                                           const std::string& original_lang,
                                           const std::string& translated_lang,
                                           TranslateErrors::Type error_type) {
-  language_state_.SetCurrentLanguage(translated_lang);
+  language_state_.set_current_language(translated_lang);
   language_state_.set_translation_pending(false);
-  PageTranslatedDetails details;
-  details.source_language = original_lang;
-  details.target_language = translated_lang;
-  details.error_type = error_type;
+  PageTranslatedDetails details(original_lang, translated_lang, error_type);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PAGE_TRANSLATED,
       content::Source<WebContents>(web_contents()),

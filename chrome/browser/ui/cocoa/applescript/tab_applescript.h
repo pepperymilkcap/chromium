@@ -9,14 +9,12 @@
 
 #import "chrome/browser/ui/cocoa/applescript/element_applescript.h"
 
-namespace content {
-class WebContents;
-}
+class TabContentsWrapper;
 
 // Represents a tab scriptable item in applescript.
 @interface TabAppleScript : ElementAppleScript {
  @private
-  content::WebContents* webContents_;  // weak.
+  TabContentsWrapper* tabContents_;  // weak.
   // Contains the temporary URL when a user creates a new folder/item with
   // url specified like
   // |make new tab with properties {url:"http://google.com"}|.
@@ -29,10 +27,10 @@ class WebContents;
 - (id)init;
 
 // Does not create a new tab but uses an existing one.
-- (id)initWithWebContents:(content::WebContents*)webContents;
+- (id)initWithTabContent:(TabContentsWrapper*)aTabContent;
 
 // Assigns a tab, sets its unique ID and also copies temporary values.
-- (void)setWebContents:(content::WebContents*)webContents;
+- (void)setTabContent:(TabContentsWrapper*)aTabContent;
 
 // Return the URL currently visible to the user in the location bar.
 - (NSString*)URL;
@@ -81,4 +79,4 @@ class WebContents;
 
 @end
 
-#endif  // CHROME_BROWSER_UI_COCOA_APPLESCRIPT_TAB_APPLESCRIPT_H_
+#endif// CHROME_BROWSER_UI_COCOA_APPLESCRIPT_TAB_APPLESCRIPT_H_

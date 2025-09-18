@@ -6,12 +6,11 @@
 
 #include <math.h>
 
-#include <algorithm>
 #include <limits>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 
 namespace base {
 

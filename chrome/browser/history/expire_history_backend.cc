@@ -5,21 +5,20 @@
 #include "chrome/browser/history/expire_history_backend.h"
 
 #include <algorithm>
-#include <functional>
 #include <limits>
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
-#include "base/files/file_enumerator.h"
-#include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/text_database.h"
+#include "chrome/browser/history/text_database_manager.h"
 #include "chrome/browser/history/thumbnail_database.h"
+#include "chrome/common/chrome_notification_types.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -47,7 +46,7 @@ const int kEarlyExpirationAdvanceDays = 3;
 class AllVisitsReader : public ExpiringVisitsReader {
  public:
   virtual bool Read(Time end_time, HistoryDatabase* db,
-                    VisitVector* visits, int max_visits) const OVERRIDE {
+                    VisitVector* visits, int max_visits) const {
     DCHECK(db) << "must have a database to operate upon";
     DCHECK(visits) << "visit vector has to exist in order to populate it";
 
@@ -67,7 +66,7 @@ class AllVisitsReader : public ExpiringVisitsReader {
 class AutoSubframeVisitsReader : public ExpiringVisitsReader {
  public:
   virtual bool Read(Time end_time, HistoryDatabase* db,
-                    VisitVector* visits, int max_visits) const OVERRIDE {
+                    VisitVector* visits, int max_visits) const {
     DCHECK(db) << "must have a database to operate upon";
     DCHECK(visits) << "visit vector has to exist in order to populate it";
 
@@ -104,7 +103,7 @@ bool ShouldArchiveVisit(const VisitRow& visit) {
   // to see them.
   if (no_qualifier == content::PAGE_TRANSITION_TYPED ||
       no_qualifier == content::PAGE_TRANSITION_AUTO_BOOKMARK ||
-      no_qualifier == content::PAGE_TRANSITION_AUTO_TOPLEVEL)
+      no_qualifier == content::PAGE_TRANSITION_START_PAGE)
     return true;
 
   // Only archive these "less important" transitions when they were the final
@@ -136,6 +135,14 @@ const int kExpirationDelaySec = 30;
 // iteration, so we want to wait longer before checking to avoid wasting CPU.
 const int kExpirationEmptyDelayMin = 5;
 
+// The number of minutes that we wait for before scheduling a task to
+// delete old history index files.
+const int kIndexExpirationDelayMin = 2;
+
+// The number of the most recent months for which we do not want to delete
+// the history index files.
+const int kStoreHistoryIndexesForMonths = 3;
+
 }  // namespace
 
 struct ExpireHistoryBackend::DeleteDependencies {
@@ -152,16 +159,16 @@ struct ExpireHistoryBackend::DeleteDependencies {
   // ----- Filled by DeleteOneURL -----
 
   // The URLs deleted during this operation.
-  URLRows deleted_urls;
+  std::vector<URLRow> deleted_urls;
 
   // The list of all favicon IDs that the affected URLs had. Favicons will be
   // shared between all URLs with the same favicon, so this is the set of IDs
   // that we will need to check when the delete operations are complete.
-  std::set<chrome::FaviconID> affected_favicons;
+  std::set<FaviconID> affected_favicons;
 
-  // The list of all favicon urls that were actually deleted from the thumbnail
-  // db.
-  std::set<GURL> expired_favicons;
+  // Tracks the set of databases that have changed so we can optimize when
+  // when we're done.
+  TextDatabaseManager::ChangeSet text_db_changes;
 };
 
 ExpireHistoryBackend::ExpireHistoryBackend(
@@ -171,7 +178,8 @@ ExpireHistoryBackend::ExpireHistoryBackend(
       main_db_(NULL),
       archived_db_(NULL),
       thumb_db_(NULL),
-      weak_factory_(this),
+      text_db_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       bookmark_service_(bookmark_service) {
 }
 
@@ -180,10 +188,12 @@ ExpireHistoryBackend::~ExpireHistoryBackend() {
 
 void ExpireHistoryBackend::SetDatabases(HistoryDatabase* main_db,
                                         ArchivedDatabase* archived_db,
-                                        ThumbnailDatabase* thumb_db) {
+                                        ThumbnailDatabase* thumb_db,
+                                        TextDatabaseManager* text_db) {
   main_db_ = main_db;
   archived_db_ = archived_db;
   thumb_db_ = thumb_db;
+  text_db_ = text_db;
 }
 
 void ExpireHistoryBackend::DeleteURL(const GURL& url) {
@@ -222,16 +232,22 @@ void ExpireHistoryBackend::DeleteURLs(const std::vector<GURL>& urls) {
     DeleteOneURL(url_row, is_bookmarked, &dependencies);
   }
 
-  DeleteFaviconsIfPossible(dependencies.affected_favicons,
-                           &dependencies.expired_favicons);
+  DeleteFaviconsIfPossible(dependencies.affected_favicons);
 
-  BroadcastDeleteNotifications(&dependencies, DELETION_USER_INITIATED);
+  if (text_db_)
+    text_db_->OptimizeChangedDatabases(dependencies.text_db_changes);
+
+  BroadcastDeleteNotifications(&dependencies);
 }
 
 void ExpireHistoryBackend::ExpireHistoryBetween(
     const std::set<GURL>& restrict_urls, Time begin_time, Time end_time) {
   if (!main_db_)
     return;
+
+  // There may be stuff in the text database manager's temporary cache.
+  if (text_db_)
+    text_db_->DeleteFromUncommitted(restrict_urls, begin_time, end_time);
 
   // Find the affected visits and delete them.
   // TODO(brettw): bug 1171164: We should query the archived database here, too.
@@ -253,26 +269,6 @@ void ExpireHistoryBackend::ExpireHistoryBetween(
   ExpireVisits(visits);
 }
 
-void ExpireHistoryBackend::ExpireHistoryForTimes(
-    const std::vector<base::Time>& times) {
-  // |times| must be in reverse chronological order and have no
-  // duplicates, i.e. each member must be earlier than the one before
-  // it.
-  DCHECK(
-      std::adjacent_find(
-          times.begin(), times.end(), std::less_equal<base::Time>()) ==
-      times.end());
-
-  if (!main_db_)
-    return;
-
-  // Find the affected visits and delete them.
-  // TODO(brettw): bug 1171164: We should query the archived database here, too.
-  VisitVector visits;
-  main_db_->GetVisitsForTimes(times, &visits);
-  ExpireVisits(visits);
-}
-
 void ExpireHistoryBackend::ExpireVisits(const VisitVector& visits) {
   if (visits.empty())
     return;
@@ -284,11 +280,10 @@ void ExpireHistoryBackend::ExpireVisits(const VisitVector& visits) {
   // since this is called by the user who wants to delete their recent history,
   // and we don't want to leave any evidence.
   ExpireURLsForVisits(visits, &dependencies);
-  DeleteFaviconsIfPossible(dependencies.affected_favicons,
-                           &dependencies.expired_favicons);
+  DeleteFaviconsIfPossible(dependencies.affected_favicons);
 
   // An is_null begin time means that all history should be deleted.
-  BroadcastDeleteNotifications(&dependencies, DELETION_USER_INITIATED);
+  BroadcastDeleteNotifications(&dependencies);
 
   // Pick up any bits possibly left over.
   ParanoidExpireHistory();
@@ -300,7 +295,7 @@ void ExpireHistoryBackend::ArchiveHistoryBefore(Time end_time) {
 
   // Archive as much history as possible before the given date.
   ArchiveSomeOldHistory(end_time, GetAllVisitsReader(),
-                        std::numeric_limits<int>::max());
+                        std::numeric_limits<size_t>::max());
   ParanoidExpireHistory();
 }
 
@@ -312,14 +307,14 @@ void ExpireHistoryBackend::InitWorkQueue() {
 }
 
 const ExpiringVisitsReader* ExpireHistoryBackend::GetAllVisitsReader() {
-  if (!all_visits_reader_)
+  if (!all_visits_reader_.get())
     all_visits_reader_.reset(new AllVisitsReader());
   return all_visits_reader_.get();
 }
 
 const ExpiringVisitsReader*
     ExpireHistoryBackend::GetAutoSubframeVisitsReader() {
-  if (!auto_subframe_visits_reader_)
+  if (!auto_subframe_visits_reader_.get())
     auto_subframe_visits_reader_.reset(new AutoSubframeVisitsReader());
   return auto_subframe_visits_reader_.get();
 }
@@ -340,31 +335,23 @@ void ExpireHistoryBackend::StartArchivingOldStuff(
   // Initialize the queue with all tasks for the first set of iterations.
   InitWorkQueue();
   ScheduleArchive();
+  ScheduleExpireHistoryIndexFiles();
 }
 
 void ExpireHistoryBackend::DeleteFaviconsIfPossible(
-    const std::set<chrome::FaviconID>& favicon_set,
-    std::set<GURL>* expired_favicons) {
+    const std::set<FaviconID>& favicon_set) {
   if (!thumb_db_)
     return;
 
-  for (std::set<chrome::FaviconID>::const_iterator i = favicon_set.begin();
+  for (std::set<FaviconID>::const_iterator i = favicon_set.begin();
        i != favicon_set.end(); ++i) {
-    if (!thumb_db_->HasMappingFor(*i)) {
-      GURL icon_url;
-      chrome::IconType icon_type;
-      if (thumb_db_->GetFaviconHeader(*i,
-                                      &icon_url,
-                                      &icon_type) &&
-          thumb_db_->DeleteFavicon(*i)) {
-        expired_favicons->insert(icon_url);
-      }
-    }
+    if (!thumb_db_->HasMappingFor(*i))
+      thumb_db_->DeleteFavicon(*i);
   }
 }
 
 void ExpireHistoryBackend::BroadcastDeleteNotifications(
-    DeleteDependencies* dependencies, DeletionType type) {
+    DeleteDependencies* dependencies) {
   if (!dependencies->deleted_urls.empty()) {
     // Broadcast the URL deleted notification. Note that we also broadcast when
     // we were requested to delete everything even if that was a NOP, since
@@ -372,12 +359,8 @@ void ExpireHistoryBackend::BroadcastDeleteNotifications(
     // determine if they care whether anything was deleted).
     URLsDeletedDetails* deleted_details = new URLsDeletedDetails;
     deleted_details->all_history = false;
-    deleted_details->archived = (type == DELETION_ARCHIVED);
-    deleted_details->rows = dependencies->deleted_urls;
-    deleted_details->favicon_urls = dependencies->expired_favicons;
-    delegate_->NotifySyncURLsDeleted(false,
-                                     deleted_details->archived,
-                                     &deleted_details->rows);
+    for (size_t i = 0; i < dependencies->deleted_urls.size(); i++)
+      deleted_details->urls.insert(dependencies->deleted_urls[i].url());
     delegate_->BroadcastNotifications(
         chrome::NOTIFICATION_HISTORY_URLS_DELETED, deleted_details);
   }
@@ -393,11 +376,21 @@ void ExpireHistoryBackend::DeleteVisitRelatedInfo(
     // Add the URL row to the affected URL list.
     std::map<URLID, URLRow>::const_iterator found =
         dependencies->affected_urls.find(visits[i].url_id);
+    const URLRow* cur_row = NULL;
     if (found == dependencies->affected_urls.end()) {
       URLRow row;
       if (!main_db_->GetURLRow(visits[i].url_id, &row))
         continue;
       dependencies->affected_urls[visits[i].url_id] = row;
+      cur_row = &dependencies->affected_urls[visits[i].url_id];
+    } else {
+      cur_row = &found->second;
+    }
+
+    // Delete any associated full-text indexed data.
+    if (visits[i].is_indexed && text_db_) {
+      text_db_->DeletePageData(visits[i].visit_time, cur_row->url(),
+                               &dependencies->text_db_changes);
     }
   }
 }
@@ -408,11 +401,20 @@ void ExpireHistoryBackend::DeleteOneURL(
     DeleteDependencies* dependencies) {
   main_db_->DeleteSegmentForURL(url_row.id());
 
+  // The URL may be in the text database manager's temporary cache.
+  if (text_db_) {
+    std::set<GURL> restrict_urls;
+    restrict_urls.insert(url_row.url());
+    text_db_->DeleteFromUncommitted(restrict_urls, base::Time(), base::Time());
+  }
+
   if (!is_bookmarked) {
     dependencies->deleted_urls.push_back(url_row);
 
     // Delete stuff that references this URL.
     if (thumb_db_) {
+      thumb_db_->DeleteThumbnail(url_row.id());
+
       // Collect shared information.
       std::vector<IconMapping> icon_mappings;
       if (thumb_db_->GetIconMappingsForPageURL(url_row.url(), &icon_mappings)) {
@@ -586,7 +588,7 @@ void ExpireHistoryBackend::ScheduleArchive() {
     delay = TimeDelta::FromSeconds(kExpirationDelaySec);
   }
 
-  base::MessageLoop::current()->PostDelayedTask(
+  MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ExpireHistoryBackend::DoArchiveIteration,
                  weak_factory_.GetWeakPtr()),
@@ -651,27 +653,62 @@ bool ExpireHistoryBackend::ArchiveSomeOldHistory(
 
   // Create a union of all affected favicons (we don't store favicons for
   // archived URLs) and delete them.
-  std::set<chrome::FaviconID> affected_favicons(
+  std::set<FaviconID> affected_favicons(
       archived_dependencies.affected_favicons);
-  for (std::set<chrome::FaviconID>::const_iterator i =
+  for (std::set<FaviconID>::const_iterator i =
            deleted_dependencies.affected_favicons.begin();
        i != deleted_dependencies.affected_favicons.end(); ++i) {
     affected_favicons.insert(*i);
   }
-  DeleteFaviconsIfPossible(affected_favicons,
-                           &deleted_dependencies.expired_favicons);
+  DeleteFaviconsIfPossible(affected_favicons);
 
   // Send notifications for the stuff that was deleted. These won't normally be
   // in history views since they were subframes, but they will be in the visited
   // link system, which needs to be updated now. This function is smart enough
   // to not do anything if nothing was deleted.
-  BroadcastDeleteNotifications(&deleted_dependencies, DELETION_ARCHIVED);
+  BroadcastDeleteNotifications(&deleted_dependencies);
 
   return more_to_expire;
 }
 
 void ExpireHistoryBackend::ParanoidExpireHistory() {
   // TODO(brettw): Bug 1067331: write this to clean up any errors.
+}
+
+void ExpireHistoryBackend::ScheduleExpireHistoryIndexFiles() {
+  if (!text_db_) {
+    // Can't expire old history index files because we
+    // don't know where they're located.
+    return;
+  }
+
+  TimeDelta delay = TimeDelta::FromMinutes(kIndexExpirationDelayMin);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&ExpireHistoryBackend::DoExpireHistoryIndexFiles,
+                 weak_factory_.GetWeakPtr()),
+      delay);
+}
+
+void ExpireHistoryBackend::DoExpireHistoryIndexFiles() {
+  Time::Exploded exploded;
+  Time::Now().LocalExplode(&exploded);
+  int cutoff_month =
+      exploded.year * 12 + exploded.month - kStoreHistoryIndexesForMonths;
+  TextDatabase::DBIdent cutoff_id =
+      (cutoff_month / 12) * 100 + (cutoff_month % 12);
+
+  FilePath::StringType history_index_files_pattern = TextDatabase::file_base();
+  history_index_files_pattern.append(FILE_PATH_LITERAL("*"));
+  file_util::FileEnumerator file_enumerator(
+      text_db_->GetDir(), false, file_util::FileEnumerator::FILES,
+      history_index_files_pattern);
+  for (FilePath file = file_enumerator.Next(); !file.empty();
+       file = file_enumerator.Next()) {
+    TextDatabase::DBIdent file_id = TextDatabase::FileNameToID(file);
+    if (file_id < cutoff_id)
+      file_util::Delete(file, false);
+  }
 }
 
 BookmarkService* ExpireHistoryBackend::GetBookmarkService() {

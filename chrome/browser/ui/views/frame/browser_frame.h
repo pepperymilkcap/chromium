@@ -1,24 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "build/build_config.h"
-#include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
-#include "ui/views/context_menu_controller.h"
+#include "chrome/browser/ui/views/frame/native_browser_frame_delegate.h"
 #include "ui/views/widget/widget.h"
 
 class AvatarMenuButton;
+class BrowserNonClientFrameView;
 class BrowserRootView;
 class BrowserView;
 class NativeBrowserFrame;
-class NewAvatarButton;
 class NonClientFrameView;
-class SystemMenuModelBuilder;
 
 namespace gfx {
 class Font;
@@ -26,19 +25,15 @@ class Rect;
 }
 
 namespace ui {
-class MenuModel;
 class ThemeProvider;
 }
 
 namespace views {
-class MenuRunner;
 class View;
 }
 
 // This is a virtual interface that allows system specific browser frames.
-class BrowserFrame
-    : public views::Widget,
-      public views::ContextMenuController {
+class BrowserFrame : public views::Widget {
  public:
   explicit BrowserFrame(BrowserView* browser_view);
   virtual ~BrowserFrame();
@@ -48,9 +43,6 @@ class BrowserFrame
   // Initialize the frame (creates the underlying native window).
   void InitBrowserFrame();
 
-  // Sets the ThemeProvider returned from GetThemeProvider().
-  void SetThemeProvider(scoped_ptr<ui::ThemeProvider> provider);
-
   // Determine the distance of the left edge of the minimize button from the
   // left edge of the window. Used in our Non-Client View's Layout.
   int GetMinimizeButtonOffset() const;
@@ -59,14 +51,10 @@ class BrowserFrame
   // TabStrip view.
   gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const;
 
-  // Returns the inset of the topmost view in the client view from the top of
-  // the non-client view. The topmost view depends on the window type. The
-  // topmost view is the tab strip for tabbed browser windows, the toolbar for
-  // popups, the web contents for app windows and varies for fullscreen windows
-  int GetTopInset() const;
-
-  // Returns the amount that the theme background should be inset.
-  int GetThemeBackgroundXInset() const;
+  // Returns the y coordinate within the window at which the horizontal TabStrip
+  // begins (or would begin).  If |restored| is true, this is calculated as if
+  // we were in restored mode regardless of the current mode.
+  int GetHorizontalTabStripVerticalOffset(bool restored) const;
 
   // Tells the frame to update the throbber.
   void UpdateThrobber(bool running);
@@ -74,32 +62,25 @@ class BrowserFrame
   // Returns the NonClientFrameView of this frame.
   views::View* GetFrameView() const;
 
+  // Notifies the frame that the tab strip display mode changed so it can update
+  // its frame treatment if necessary.
+  void TabStripDisplayModeChanged();
+
+  // Returns true for single window mode.  ChromeOS and Aura laptop mode use a
+  // single window filling the work area, which does not have a close, maximize,
+  // minimize or restore button and does not draw frame edges.
+  bool IsSingleWindowMode() const;
+
   // Overridden from views::Widget:
+  virtual bool IsMaximized() const OVERRIDE;
   virtual views::internal::RootView* CreateRootView() OVERRIDE;
   virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
   virtual bool GetAccelerator(int command_id,
                               ui::Accelerator* accelerator) OVERRIDE;
   virtual ui::ThemeProvider* GetThemeProvider() const OVERRIDE;
-  virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void OnNativeWidgetActivationChanged(bool active) OVERRIDE;
 
-  // Overridden from views::ContextMenuController:
-  virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& p,
-                                      ui::MenuSourceType source_type) OVERRIDE;
-
-  // Returns true if we should leave any offset at the frame caption. Typically
-  // when the frame is maximized/full screen we want to leave no offset at the
-  // top.
-  bool ShouldLeaveOffsetNearTopBorder();
-
   AvatarMenuButton* GetAvatarMenuButton();
-
-  NewAvatarButton* GetNewAvatarMenuButton();
-
-  // Returns the menu model. BrowserFrame owns the returned model.
-  // Note that in multi user mode this will upon each call create a new model.
-  ui::MenuModel* GetSystemMenuModel();
 
  private:
   NativeBrowserFrame* native_browser_frame_;
@@ -114,19 +95,6 @@ class BrowserFrame
 
   // The BrowserView is our ClientView. This is a pointer to it.
   BrowserView* browser_view_;
-
-  scoped_ptr<SystemMenuModelBuilder> menu_model_builder_;
-
-  // Used to show the system menu. Only used if
-  // NativeBrowserFrame::UsesNativeSystemMenu() returns false.
-  scoped_ptr<views::MenuRunner> menu_runner_;
-
-  // SetThemeProvider() triggers setting both |owned_theme_provider_| and
-  // |theme_provider_|. Initially |theme_provider_| is set to the ThemeService
-  // and |owned_theme_provider_| is NULL (as ThemeServices lifetime is managed
-  // externally).
-  scoped_ptr<ui::ThemeProvider> owned_theme_provider_;
-  ui::ThemeProvider* theme_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserFrame);
 };

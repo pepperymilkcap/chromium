@@ -14,10 +14,8 @@
 extern "C" {
 #if defined(USE_SYSTEM_LIBJPEG)
 #include <jpeglib.h>
-#elif defined(USE_LIBJPEG_TURBO)
-#include "third_party/libjpeg_turbo/jpeglib.h"
 #else
-#include "third_party/libjpeg/jpeglib.h"
+#include "jpeglib.h"
 #endif
 }
 
@@ -41,17 +39,6 @@ void ErrorExit(jpeg_common_struct* cinfo) {
 }
 
 }  // namespace
-
-// This method helps identify at run time which library chromium is using.
-JPEGCodec::LibraryVariant JPEGCodec::JpegLibraryVariant() {
-#if defined(USE_SYSTEM_LIBJPEG)
-  return SYSTEM_LIBJPEG;
-#elif defined(USE_LIBJPEG_TURBO)
-  return LIBJPEG_TURBO;
-#else
-  return IJG_LIBJPEG;
-#endif
-}
 
 // Encoder ---------------------------------------------------------------------
 //
@@ -143,7 +130,6 @@ void TermDestination(jpeg_compress_struct* cinfo) {
   state->out->resize(state->image_buffer_used);
 }
 
-#if !defined(JCS_EXTENSIONS)
 // Converts RGBA to RGB (removing the alpha values) to prepare to send data to
 // libjpeg. This converts one row of data in rgba with the given width in
 // pixels the the given rgb destination buffer (which should have enough space
@@ -173,7 +159,6 @@ void BGRAtoRGB(const unsigned char* bgra, int pixel_width, unsigned char* rgb)
     pixel_out[2] = pixel_in[0];
   }
 }
-#endif  // !defined(JCS_EXTENSIONS)
 
 // This class destroys the given jpeg_compress object when it goes out of
 // scope. It simplifies the error handling in Encode (and even applies to the
@@ -208,16 +193,12 @@ bool JPEGCodec::Encode(const unsigned char* input, ColorFormat format,
   CompressDestroyer destroyer;
   destroyer.SetManagedObject(&cinfo);
   output->clear();
-#if !defined(JCS_EXTENSIONS)
-  unsigned char* row_buffer = NULL;
-#endif
 
   // We set up the normal JPEG error routines, then override error_exit.
   // This must be done before the call to create_compress.
   CoderErrorMgr errmgr;
   cinfo.err = jpeg_std_error(&errmgr.pub);
   errmgr.pub.error_exit = ErrorExit;
-
   // Establish the setjmp return context for ErrorExit to use.
   if (setjmp(errmgr.setjmp_buffer)) {
     // If we get here, the JPEG code has signaled an error.
@@ -226,9 +207,6 @@ bool JPEGCodec::Encode(const unsigned char* input, ColorFormat format,
     // goto using a call to longjmp."  So we delete the CompressDestroyer's
     // object manually instead.
     destroyer.DestroyManagedObject();
-#if !defined(JCS_EXTENSIONS)
-    delete[] row_buffer;
-#endif
     return false;
   }
 
@@ -311,13 +289,13 @@ bool JPEGCodec::Encode(const unsigned char* input, ColorFormat format,
     }
 
     // output row after converting
-    row_buffer = new unsigned char[w * 3];
+    unsigned char* row = new unsigned char[w * 3];
 
     while (cinfo.next_scanline < cinfo.image_height) {
-      converter(&input[cinfo.next_scanline * row_byte_width], w, row_buffer);
-      jpeg_write_scanlines(&cinfo, &row_buffer, 1);
+      converter(&input[cinfo.next_scanline * row_byte_width], w, row);
+      jpeg_write_scanlines(&cinfo, &row, 1);
     }
-    delete[] row_buffer;
+    delete[] row;
   }
 #endif
 
@@ -402,7 +380,6 @@ void SkipInputData(j_decompress_ptr cinfo, long num_bytes) {
 void TermSource(j_decompress_ptr cinfo) {
 }
 
-#if !defined(JCS_EXTENSIONS)
 // Converts one row of rgb data to rgba data by adding a fully-opaque alpha
 // value.
 void AddAlpha(const unsigned char* rgb, int pixel_width, unsigned char* rgba) {
@@ -429,7 +406,6 @@ void RGBtoBGRA(const unsigned char* bgra, int pixel_width, unsigned char* rgb)
     pixel_out[3] = 0xff;
   }
 }
-#endif  // !defined(JCS_EXTENSIONS)
 
 // This class destroys the given jpeg_decompress object when it goes out of
 // scope. It simplifies the error handling in Decode (and even applies to the
@@ -596,7 +572,7 @@ bool JPEGCodec::Decode(const unsigned char* input, size_t input_size,
 
     output->resize(row_write_stride * cinfo.output_height);
 
-    scoped_ptr<unsigned char[]> row_data(new unsigned char[row_read_stride]);
+    scoped_array<unsigned char> row_data(new unsigned char[row_read_stride]);
     unsigned char* rowptr = row_data.get();
     for (int row = 0; row < static_cast<int>(cinfo.output_height); row++) {
       if (!jpeg_read_scanlines(&cinfo, &rowptr, 1))

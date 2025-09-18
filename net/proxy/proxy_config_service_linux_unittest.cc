@@ -10,12 +10,12 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "net/proxy/proxy_config.h"
@@ -175,8 +175,8 @@ class MockSettingGetter
     values = zero_values;
   }
 
-  virtual bool Init(base::SingleThreadTaskRunner* glib_thread_task_runner,
-                    base::MessageLoopForIO* file_loop) OVERRIDE {
+  virtual bool Init(MessageLoop* glib_default_loop,
+                    MessageLoopForIO* file_loop) OVERRIDE {
     return true;
   }
 
@@ -187,12 +187,12 @@ class MockSettingGetter
     return true;
   }
 
-  virtual base::SingleThreadTaskRunner* GetNotificationTaskRunner() OVERRIDE {
+  virtual MessageLoop* GetNotificationLoop() OVERRIDE {
     return NULL;
   }
 
-  virtual ProxyConfigSource GetConfigSource() OVERRIDE {
-    return PROXY_CONFIG_SOURCE_TEST;
+  virtual const char* GetDataSource() OVERRIDE {
+    return "test";
   }
 
   virtual bool GetString(StringSetting key, std::string* result) OVERRIDE {
@@ -265,7 +265,7 @@ class SynchConfigGetter {
         config_service_(config_service) {
     // Start an IO thread.
     base::Thread::Options options;
-    options.message_loop_type = base::MessageLoop::TYPE_IO;
+    options.message_loop_type = MessageLoop::TYPE_IO;
     io_thread_.StartWithOptions(options);
 
     // Make sure the thread started.
@@ -288,13 +288,12 @@ class SynchConfigGetter {
   // all on the calling thread (meant to be the thread with the
   // default glib main loop, which is the UI thread).
   void SetupAndInitialFetch() {
-    base::MessageLoop* file_loop = io_thread_.message_loop();
-    DCHECK_EQ(base::MessageLoop::TYPE_IO, file_loop->type());
+    MessageLoop* file_loop = io_thread_.message_loop();
+    DCHECK_EQ(MessageLoop::TYPE_IO, file_loop->type());
     // We pass the mock IO thread as both the IO and file threads.
     config_service_->SetupAndFetchInitialConfig(
-        base::MessageLoopProxy::current().get(),
-        io_thread_.message_loop_proxy().get(),
-        static_cast<base::MessageLoopForIO*>(file_loop));
+        MessageLoop::current(), io_thread_.message_loop(),
+        static_cast<MessageLoopForIO*>(file_loop));
   }
   // Synchronously gets the proxy config.
   net::ProxyConfigService::ConfigAvailability SyncGetLatestProxyConfig(
@@ -323,7 +322,7 @@ class SynchConfigGetter {
 
   // [Runs on |io_thread_|] Signals |event_| on cleanup completion.
   void CleanUp() {
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
     event_.Signal();
   }
 
@@ -356,11 +355,11 @@ class ProxyConfigServiceLinuxTest : public PlatformTest {
     PlatformTest::SetUp();
     // Set up a temporary KDE home directory.
     std::string prefix("ProxyConfigServiceLinuxTest_user_home");
-    base::CreateNewTempDirectory(prefix, &user_home_);
+    file_util::CreateNewTempDirectory(prefix, &user_home_);
     kde_home_ = user_home_.Append(FILE_PATH_LITERAL(".kde"));
-    base::FilePath path = kde_home_.Append(FILE_PATH_LITERAL("share"));
+    FilePath path = kde_home_.Append(FILE_PATH_LITERAL("share"));
     path = path.Append(FILE_PATH_LITERAL("config"));
-    base::CreateDirectory(path);
+    file_util::CreateDirectory(path);
     kioslaverc_ = path.Append(FILE_PATH_LITERAL("kioslaverc"));
     // Set up paths but do not create the directory for .kde4.
     kde4_home_ = user_home_.Append(FILE_PATH_LITERAL(".kde4"));
@@ -371,18 +370,18 @@ class ProxyConfigServiceLinuxTest : public PlatformTest {
 
   virtual void TearDown() OVERRIDE {
     // Delete the temporary KDE home directory.
-    base::DeleteFile(user_home_, true);
+    file_util::Delete(user_home_, true);
     PlatformTest::TearDown();
   }
 
-  base::FilePath user_home_;
+  FilePath user_home_;
   // KDE3 paths.
-  base::FilePath kde_home_;
-  base::FilePath kioslaverc_;
+  FilePath kde_home_;
+  FilePath kioslaverc_;
   // KDE4 paths.
-  base::FilePath kde4_home_;
-  base::FilePath kde4_config_;
-  base::FilePath kioslaverc4_;
+  FilePath kde4_home_;
+  FilePath kde4_config_;
+  FilePath kioslaverc4_;
 };
 
 // Builds an identifier for each test in an array.
@@ -1099,21 +1098,6 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
     },
 
     {
-      TEST_DESC("Valid PAC file without file://"),
-
-      // Input.
-      "[Proxy Settings]\nProxyType=2\n"
-          "Proxy Config Script=/wpad/wpad.dat\n",
-      {},                                      // env_values
-
-      // Expected result.
-      ProxyConfigService::CONFIG_VALID,
-      false,                         // auto_detect
-      GURL("file:///wpad/wpad.dat"),  // pac_url
-      ProxyRulesExpectation::Empty(),
-    },
-
-    {
       TEST_DESC("Per-scheme proxy rules"),
 
       // Input.
@@ -1157,25 +1141,6 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
       // Input.
       "[Proxy Settings]\nProxyType=1\n"
           "httpProxy=www.google.com:88\n",
-      {},                                      // env_values
-
-      // Expected result.
-      ProxyConfigService::CONFIG_VALID,
-      false,                                   // auto_detect
-      GURL(),                                  // pac_url
-      ProxyRulesExpectation::PerScheme(
-          "www.google.com:88",  // http
-          "",                   // https
-          "",                   // ftp
-          ""),                  // bypass rules
-    },
-
-    {
-      TEST_DESC("Only HTTP proxy specified, different port, space-delimited"),
-
-      // Input.
-      "[Proxy Settings]\nProxyType=1\n"
-          "httpProxy=www.google.com 88\n",
       {},                                      // env_values
 
       // Expected result.
@@ -1244,38 +1209,6 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
           "",                   // https
           "",                   // ftp
           "*.google.com"),      // bypass rules
-    },
-
-    {
-      TEST_DESC("socks"),
-
-      // Input.
-      "[Proxy Settings]\nProxyType=1\nsocksProxy=socks.com 888\n",
-      {},                                      // env_values
-
-      // Expected result.
-      ProxyConfigService::CONFIG_VALID,
-      false,                                   // auto_detect
-      GURL(),                                  // pac_url
-      ProxyRulesExpectation::Single(
-          "socks5://socks.com:888",  // single proxy
-          ""),                       // bypass rules
-    },
-
-    {
-      TEST_DESC("socks4"),
-
-      // Input.
-      "[Proxy Settings]\nProxyType=1\nsocksProxy=socks4://socks.com 888\n",
-      {},                                      // env_values
-
-      // Expected result.
-      ProxyConfigService::CONFIG_VALID,
-      false,                                   // auto_detect
-      GURL(),                                  // pac_url
-      ProxyRulesExpectation::Single(
-          "socks4://socks.com:888",  // single proxy
-          ""),                       // bypass rules
     },
 
     {
@@ -1530,7 +1463,7 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEHomePicker) {
 
   // If .kde4 exists it will mess up the first test. It should not, as
   // we created the directory for $HOME in the test setup.
-  CHECK(!base::DirectoryExists(kde4_home_));
+  CHECK(!file_util::DirectoryExists(kde4_home_));
 
   { SCOPED_TRACE("KDE4, no .kde4 directory, verify fallback");
     MockEnvironment* env = new MockEnvironment;
@@ -1548,9 +1481,9 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEHomePicker) {
 
   // Now create .kde4 and put a kioslaverc in the config directory.
   // Note that its timestamp will be at least as new as the .kde one.
-  base::CreateDirectory(kde4_config_);
+  file_util::CreateDirectory(kde4_config_);
   file_util::WriteFile(kioslaverc4_, slaverc4.c_str(), slaverc4.length());
-  CHECK(base::PathExists(kioslaverc4_));
+  CHECK(file_util::PathExists(kioslaverc4_));
 
   { SCOPED_TRACE("KDE4, .kde4 directory present, use it");
     MockEnvironment* env = new MockEnvironment;
@@ -1597,7 +1530,7 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEHomePicker) {
 
   // Finally, make the .kde4 config directory older than the .kde directory
   // and make sure we then use .kde instead of .kde4 since it's newer.
-  base::TouchFile(kde4_config_, base::Time(), base::Time());
+  file_util::SetLastModifiedTime(kde4_config_, base::Time());
 
   { SCOPED_TRACE("KDE4, very old .kde4 directory present, use .kde");
     MockEnvironment* env = new MockEnvironment;

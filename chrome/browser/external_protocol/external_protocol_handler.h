@@ -4,13 +4,14 @@
 
 #ifndef CHROME_BROWSER_EXTERNAL_PROTOCOL_EXTERNAL_PROTOCOL_HANDLER_H_
 #define CHROME_BROWSER_EXTERNAL_PROTOCOL_EXTERNAL_PROTOCOL_HANDLER_H_
+#pragma once
 
 #include <string>
 
 #include "chrome/browser/shell_integration.h"
 
 class GURL;
-class PrefRegistrySimple;
+class PrefService;
 
 namespace base {
 class DictionaryValue;
@@ -66,7 +67,7 @@ class ExternalProtocolHandler {
   // Creates and runs a External Protocol dialog box.
   // |url| - The url of the request.
   // |render_process_host_id| and |routing_id| are used by
-  // tab_util::GetWebContentsByID to aquire the tab contents associated with
+  // tab_util::GetTabContentsByID to aquire the tab contents associated with
   // this dialog.
   // NOTE: There is a race between the Time of Check and the Time Of Use for
   //       the command line. Since the caller (web page) does not have access
@@ -78,7 +79,7 @@ class ExternalProtocolHandler {
                                         int routing_id);
 
   // Register the ExcludedSchemes preference.
-  static void RegisterPrefs(PrefRegistrySimple* registry);
+  static void RegisterPrefs(PrefService* prefs);
 
   // Starts a url using the external protocol handler with the help
   // of shellexecute. Should only be called if the protocol is whitelisted
@@ -88,9 +89,8 @@ class ExternalProtocolHandler {
   // NOTE: You should Not call this function directly unless you are sure the
   // url you have has been checked against the blacklist, and has been escaped.
   // All calls to this function should originate in some way from LaunchUrl.
-  static void LaunchUrlWithoutSecurityCheck(const GURL& url,
-                                            int render_process_host_id,
-                                            int tab_contents_id);
+  // This will execute on the file thread.
+  static void LaunchUrlWithoutSecurityCheck(const GURL& url);
 
   // Prepopulates the dictionary with known protocols to deny or allow, if
   // preferences for them do not already exist.

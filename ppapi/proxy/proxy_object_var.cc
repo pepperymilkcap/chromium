@@ -14,9 +14,9 @@ namespace ppapi {
 ProxyObjectVar::ProxyObjectVar(PluginDispatcher* dispatcher,
                                int32 host_var_id)
     : dispatcher_(dispatcher),
-      host_var_id_(host_var_id),
-      user_data_(NULL) {
+      host_var_id_(host_var_id) {
   // Should be given valid objects or we'll crash later.
+  DCHECK(dispatcher_);
   DCHECK(host_var_id_);
 }
 

@@ -1,44 +1,32 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/infobars/infobar_gradient_view.h"
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "chrome/browser/infobars/infobar.h"
-#import "chrome/browser/themes/theme_properties.h"
+#import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #include "skia/ext/skia_utils_mac.h"
-#include "ui/base/theme_provider.h"
+
+namespace {
+
+const CGFloat kTipWidth = 23;
+
+}  // namespace
 
 @implementation InfoBarGradientView
 
-@synthesize arrowHeight = arrowHeight_;
-@synthesize arrowHalfWidth = arrowHalfWidth_;
-@synthesize arrowX = arrowX_;
-@synthesize hasTip = hasTip_;
-
-- (id)initWithFrame:(NSRect)frame {
-  if ((self = [super initWithFrame:frame])) {
-    hasTip_ = YES;
-  }
-  return self;
-}
-
-- (id)initWithCoder:(NSCoder*)decoder {
-  if ((self = [super initWithCoder:decoder])) {
-    hasTip_ = YES;
-  }
-  return self;
-}
+@synthesize tipApex = tipApex_;
 
 - (void)setInfobarType:(InfoBarDelegate::Type)infobarType {
-  SkColor topColor = InfoBar::GetTopColor(infobarType);
-  SkColor bottomColor = InfoBar::GetBottomColor(infobarType);
-  base::scoped_nsobject<NSGradient> gradient([[NSGradient alloc]
+  SkColor topColor = GetInfoBarTopColor(infobarType);
+  SkColor bottomColor = GetInfoBarBottomColor(infobarType);
+  scoped_nsobject<NSGradient> gradient([[NSGradient alloc]
       initWithStartingColor:gfx::SkColorToCalibratedNSColor(topColor)
                 endingColor:gfx::SkColorToCalibratedNSColor(bottomColor)]);
   [self setGradient:gradient];
@@ -51,15 +39,17 @@
 
   BOOL active = [[self window] isMainWindow];
   return themeProvider->GetNSColor(
-      active ? ThemeProperties::COLOR_TOOLBAR_STROKE :
-               ThemeProperties::COLOR_TOOLBAR_STROKE_INACTIVE);
+      active ? ThemeService::COLOR_TOOLBAR_STROKE :
+               ThemeService::COLOR_TOOLBAR_STROKE_INACTIVE,
+      true);
 }
 
 - (void)drawRect:(NSRect)rect {
   NSRect bounds = [self bounds];
-  bounds.size.height = InfoBar::kDefaultBarTargetHeight;
+  bounds.size.height = infobars::kBaseHeight;
 
-  CGFloat tipXOffset = arrowX_ - arrowHalfWidth_;
+  const CGFloat kHalfWidth = kTipWidth / 2.0;
+  const CGFloat kTipXOffset = self.tipApex.x - kHalfWidth;
 
   // Around the bounds of the infobar, continue drawing the path into which the
   // gradient will be drawn.
@@ -67,17 +57,15 @@
   [infoBarPath moveToPoint:NSMakePoint(NSMinX(bounds), NSMaxY(bounds))];
 
   // Draw the tip.
-  if (hasTip_) {
-    [infoBarPath lineToPoint:NSMakePoint(tipXOffset, NSMaxY(bounds))];
-    [infoBarPath relativeLineToPoint:NSMakePoint(arrowHalfWidth_,
-                                                 arrowHeight_)];
-    [infoBarPath relativeLineToPoint:NSMakePoint(arrowHalfWidth_,
-                                                 -arrowHeight_)];
-  }
+  [infoBarPath lineToPoint:NSMakePoint(kTipXOffset, NSMaxY(bounds))];
+  [infoBarPath relativeLineToPoint:NSMakePoint(kHalfWidth,
+                                               infobars::kTipHeight)];
+  [infoBarPath relativeLineToPoint:NSMakePoint(kHalfWidth,
+                                               -infobars::kTipHeight)];
   [infoBarPath lineToPoint:NSMakePoint(NSMaxX(bounds), NSMaxY(bounds))];
 
   // Save off the top path of the infobar.
-  base::scoped_nsobject<NSBezierPath> topPath([infoBarPath copy]);
+  scoped_nsobject<NSBezierPath> topPath([infoBarPath copy]);
 
   [infoBarPath lineToPoint:NSMakePoint(NSMaxX(bounds), NSMinY(bounds))];
   [infoBarPath lineToPoint:NSMakePoint(NSMinX(bounds), NSMinY(bounds))];
@@ -101,16 +89,14 @@
   }
 
   // Add an inner stroke.
-  const CGFloat kHighlightTipHeight = arrowHeight_ - 1;
+  const CGFloat kHighlightTipHeight = infobars::kTipHeight - 1;
   NSBezierPath* highlightPath = [NSBezierPath bezierPath];
   [highlightPath moveToPoint:NSMakePoint(NSMinX(bounds), NSMaxY(bounds) - 1)];
-  if (hasTip_) {
-    [highlightPath relativeLineToPoint:NSMakePoint(tipXOffset + 1, 0)];
-    [highlightPath relativeLineToPoint:NSMakePoint(arrowHalfWidth_ - 1,
-                                                   kHighlightTipHeight)];
-    [highlightPath relativeLineToPoint:NSMakePoint(arrowHalfWidth_ - 1,
-                                                   -kHighlightTipHeight)];
-  }
+  [highlightPath relativeLineToPoint:NSMakePoint(kTipXOffset + 1, 0)];
+  [highlightPath relativeLineToPoint:NSMakePoint(kHalfWidth - 1,
+                                                 kHighlightTipHeight)];
+  [highlightPath relativeLineToPoint:NSMakePoint(kHalfWidth - 1,
+                                                 -kHighlightTipHeight)];
   [highlightPath lineToPoint:NSMakePoint(NSMaxX(bounds), NSMaxY(bounds) - 1)];
 
   [[NSColor colorWithDeviceWhite:1.0 alpha:1.0] setStroke];
@@ -132,13 +118,6 @@
     return NSAccessibilityGroupRole;
 
   return [super accessibilityAttributeValue:attribute];
-}
-
-- (void)setHasTip:(BOOL)hasTip {
-  if (hasTip_ == hasTip)
-    return;
-  hasTip_ = hasTip;
-  [self setNeedsDisplay:YES];
 }
 
 @end

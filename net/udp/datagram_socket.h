@@ -4,6 +4,7 @@
 
 #ifndef NET_UDP_DATAGRAM_SOCKET_H_
 #define NET_UDP_DATAGRAM_SOCKET_H_
+#pragma once
 
 #include "net/base/net_export.h"
 

@@ -6,12 +6,11 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/i18n/rtl.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/api/commands/command_service.h"
-#include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/gtk/browser_actions_toolbar_gtk.h"
@@ -20,22 +19,17 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
-#include "chrome/browser/ui/singleton_tabs.h"
-#include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
-#include "chrome/common/url_constants.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "extensions/common/extension.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
-
-using extensions::Extension;
-using extensions::ExtensionActionManager;
 
 namespace {
 
@@ -45,17 +39,28 @@ const int kIconSize = 43;
 const int kTextColumnVerticalSpacing = 7;
 const int kTextColumnWidth = 350;
 
+// When showing the bubble for a new browser action, we may have to wait for
+// the toolbar to finish animating to know where the item's final position
+// will be.
+const int kAnimationWaitRetries = 10;
+const int kAnimationWaitMS = 50;
+
+// Padding between content and edge of bubble.
+const int kContentBorder = 7;
+
 }  // namespace
 
-namespace chrome {
+namespace browser {
 
-void ShowExtensionInstalledBubble(const Extension* extension,
-                                  Browser* browser,
-                                  const SkBitmap& icon) {
+void ShowExtensionInstalledBubble(
+    const Extension* extension,
+    Browser* browser,
+    const SkBitmap& icon,
+    Profile* profile) {
   ExtensionInstalledBubbleGtk::Show(extension, browser, icon);
 }
 
-}  // namespace chrome
+} // namespace browser
 
 void ExtensionInstalledBubbleGtk::Show(const Extension* extension,
                                        Browser* browser,
@@ -65,30 +70,79 @@ void ExtensionInstalledBubbleGtk::Show(const Extension* extension,
 
 ExtensionInstalledBubbleGtk::ExtensionInstalledBubbleGtk(
     const Extension* extension, Browser *browser, const SkBitmap& icon)
-    : bubble_(this, extension, browser, icon) {
+    : extension_(extension),
+      browser_(browser),
+      icon_(icon),
+      animation_wait_retries_(kAnimationWaitRetries) {
+  AddRef();  // Balanced in Close().
+
+  if (!extension_->omnibox_keyword().empty()) {
+    type_ = OMNIBOX_KEYWORD;
+  } else if (extension_->browser_action()) {
+    type_ = BROWSER_ACTION;
+  } else if (extension->page_action() &&
+             !extension->page_action()->default_icon_path().empty()) {
+    type_ = PAGE_ACTION;
+  } else {
+    type_ = GENERIC;
+  }
+
+  // |extension| has been initialized but not loaded at this point. We need
+  // to wait on showing the Bubble until not only the EXTENSION_LOADED gets
+  // fired, but all of the EXTENSION_LOADED Observers have run. Only then can we
+  // be sure that a browser action or page action has had views created which we
+  // can inspect for the purpose of pointing to them.
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+      content::Source<Profile>(browser->profile()));
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+      content::Source<Profile>(browser->profile()));
 }
 
 ExtensionInstalledBubbleGtk::~ExtensionInstalledBubbleGtk() {}
 
-void ExtensionInstalledBubbleGtk::OnDestroy(GtkWidget* widget) {
-  gtk_bubble_ = NULL;
-  delete this;
+void ExtensionInstalledBubbleGtk::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  if (type == chrome::NOTIFICATION_EXTENSION_LOADED) {
+    const Extension* extension =
+        content::Details<const Extension>(details).ptr();
+    if (extension == extension_) {
+      // PostTask to ourself to allow all EXTENSION_LOADED Observers to run.
+      MessageLoopForUI::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&ExtensionInstalledBubbleGtk::ShowInternal, this));
+    }
+  } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
+    const Extension* extension =
+        content::Details<UnloadedExtensionInfo>(details)->extension;
+    if (extension == extension_)
+      extension_ = NULL;
+  } else {
+    NOTREACHED() << L"Received unexpected notification";
+  }
 }
 
-bool ExtensionInstalledBubbleGtk::MaybeShowNow() {
+void ExtensionInstalledBubbleGtk::ShowInternal() {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(
-          bubble_.browser()->window()->GetNativeWindow());
+          browser_->window()->GetNativeHandle());
 
   GtkWidget* reference_widget = NULL;
 
-  if (bubble_.type() == bubble_.BROWSER_ACTION) {
+  if (type_ == BROWSER_ACTION) {
     BrowserActionsToolbarGtk* toolbar =
         browser_window->GetToolbar()->GetBrowserActionsToolbar();
-    if (toolbar->animating())
-      return false;
 
-    reference_widget = toolbar->GetBrowserActionWidget(bubble_.extension());
+    if (toolbar->animating() && animation_wait_retries_-- > 0) {
+      MessageLoopForUI::current()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&ExtensionInstalledBubbleGtk::ShowInternal, this),
+          base::TimeDelta::FromMilliseconds(kAnimationWaitMS));
+      return;
+    }
+
+    reference_widget = toolbar->GetBrowserActionWidget(extension_);
     // glib delays recalculating layout, but we need reference_widget to know
     // its coordinates, so we force a check_resize here.
     gtk_container_check_resize(GTK_CONTAINER(
@@ -100,21 +154,19 @@ bool ExtensionInstalledBubbleGtk::MaybeShowNow() {
       reference_widget = gtk_widget_get_visible(toolbar->chevron()) ?
           toolbar->chevron() : NULL;
     }
-  } else if (bubble_.type() == bubble_.PAGE_ACTION) {
+  } else if (type_ == PAGE_ACTION) {
     LocationBarViewGtk* location_bar_view =
         browser_window->GetToolbar()->GetLocationBarView();
-    ExtensionAction* page_action =
-        ExtensionActionManager::Get(bubble_.browser()->profile())->
-        GetPageAction(*bubble_.extension());
-    location_bar_view->SetPreviewEnabledPageAction(page_action,
+    location_bar_view->SetPreviewEnabledPageAction(extension_->page_action(),
                                                    true);  // preview_enabled
-    reference_widget = location_bar_view->GetPageActionWidget(page_action);
+    reference_widget = location_bar_view->GetPageActionWidget(
+        extension_->page_action());
     // glib delays recalculating layout, but we need reference_widget to know
-    // its coordinates, so we force a check_resize here.
+    // it's coordinates, so we force a check_resize here.
     gtk_container_check_resize(GTK_CONTAINER(
         browser_window->GetToolbar()->widget()));
     DCHECK(reference_widget);
-  } else if (bubble_.type() == bubble_.OMNIBOX_KEYWORD) {
+  } else if (type_ == OMNIBOX_KEYWORD) {
     LocationBarViewGtk* location_bar_view =
         browser_window->GetToolbar()->GetLocationBarView();
     reference_widget = location_bar_view->location_entry_widget();
@@ -126,17 +178,16 @@ bool ExtensionInstalledBubbleGtk::MaybeShowNow() {
     reference_widget = browser_window->GetToolbar()->GetAppMenuButton();
 
   GtkThemeService* theme_provider = GtkThemeService::GetFrom(
-      bubble_.browser()->profile());
+      browser_->profile());
 
   // Setup the BubbleGtk content.
   GtkWidget* bubble_content = gtk_hbox_new(FALSE, kHorizontalColumnSpacing);
-  gtk_container_set_border_width(GTK_CONTAINER(bubble_content),
-                                 ui::kContentAreaBorder);
+  gtk_container_set_border_width(GTK_CONTAINER(bubble_content), kContentBorder);
 
-  if (!bubble_.icon().isNull()) {
+  if (!icon_.isNull()) {
     // Scale icon down to 43x43, but allow smaller icons (don't scale up).
-    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(bubble_.icon());
-    gfx::Size size(bubble_.icon().width(), bubble_.icon().height());
+    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon_);
+    gfx::Size size(icon_.width(), icon_.height());
     if (size.width() > kIconSize || size.height() > kIconSize) {
       if (size.width() > size.height()) {
         size.set_height(size.height() * kIconSize / size.width());
@@ -167,10 +218,9 @@ bool ExtensionInstalledBubbleGtk::MaybeShowNow() {
   GtkWidget* text_column = gtk_vbox_new(FALSE, kTextColumnVerticalSpacing);
   gtk_box_pack_start(GTK_BOX(bubble_content), text_column, FALSE, FALSE, 0);
 
-  // Heading label.
+  // Heading label
   GtkWidget* heading_label = gtk_label_new(NULL);
-  base::string16 extension_name =
-      base::UTF8ToUTF16(bubble_.extension()->name());
+  string16 extension_name = UTF8ToUTF16(extension_->name());
   base::i18n::AdjustStringForLocaleDirection(&extension_name);
   std::string heading_text = l10n_util::GetStringFUTF8(
       IDS_EXTENSION_INSTALLED_HEADING, extension_name);
@@ -182,154 +232,98 @@ bool ExtensionInstalledBubbleGtk::MaybeShowNow() {
   gtk_util::SetLabelWidth(heading_label, kTextColumnWidth);
   gtk_box_pack_start(GTK_BOX(text_column), heading_label, FALSE, FALSE, 0);
 
-  bool has_keybinding = false;
-
-  // Browser action label.
-  if (bubble_.type() == bubble_.BROWSER_ACTION) {
-    extensions::CommandService* command_service =
-        extensions::CommandService::Get(bubble_.browser()->profile());
-    extensions::Command browser_action_command;
-    GtkWidget* info_label;
-    if (!command_service->GetBrowserActionCommand(
-            bubble_.extension()->id(),
-            extensions::CommandService::ACTIVE_ONLY,
-            &browser_action_command,
-            NULL)) {
-      info_label = gtk_label_new(l10n_util::GetStringUTF8(
-          IDS_EXTENSION_INSTALLED_BROWSER_ACTION_INFO).c_str());
-    } else {
-      info_label = gtk_label_new(l10n_util::GetStringFUTF8(
-          IDS_EXTENSION_INSTALLED_BROWSER_ACTION_INFO_WITH_SHORTCUT,
-          browser_action_command.accelerator().GetShortcutText()).c_str());
-      has_keybinding = true;
-    }
+  // Page action label
+  if (type_ == PAGE_ACTION) {
+    GtkWidget* info_label = gtk_label_new(l10n_util::GetStringUTF8(
+        IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO).c_str());
     gtk_util::SetLabelWidth(info_label, kTextColumnWidth);
     gtk_box_pack_start(GTK_BOX(text_column), info_label, FALSE, FALSE, 0);
   }
 
-  // Page action label.
-  if (bubble_.type() == bubble_.PAGE_ACTION) {
-    extensions::CommandService* command_service =
-        extensions::CommandService::Get(bubble_.browser()->profile());
-    extensions::Command page_action_command;
-    GtkWidget* info_label;
-    if (!command_service->GetPageActionCommand(
-            bubble_.extension()->id(),
-            extensions::CommandService::ACTIVE_ONLY,
-            &page_action_command,
-            NULL)) {
-      info_label = gtk_label_new(l10n_util::GetStringUTF8(
-          IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO).c_str());
-    } else {
-      info_label = gtk_label_new(l10n_util::GetStringFUTF8(
-          IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO_WITH_SHORTCUT,
-          page_action_command.accelerator().GetShortcutText()).c_str());
-      has_keybinding = true;
-    }
-    gtk_util::SetLabelWidth(info_label, kTextColumnWidth);
-    gtk_box_pack_start(GTK_BOX(text_column), info_label, FALSE, FALSE, 0);
-  }
-
-  // Omnibox keyword label.
-  if (bubble_.type() == bubble_.OMNIBOX_KEYWORD) {
+  // Omnibox keyword label
+  if (type_ == OMNIBOX_KEYWORD) {
     GtkWidget* info_label = gtk_label_new(l10n_util::GetStringFUTF8(
         IDS_EXTENSION_INSTALLED_OMNIBOX_KEYWORD_INFO,
-        base::UTF8ToUTF16(extensions::OmniboxInfo::GetKeyword(
-            bubble_.extension()))).c_str());
+        UTF8ToUTF16(extension_->omnibox_keyword())).c_str());
     gtk_util::SetLabelWidth(info_label, kTextColumnWidth);
     gtk_box_pack_start(GTK_BOX(text_column), info_label, FALSE, FALSE, 0);
   }
 
-  if (has_keybinding) {
-    GtkWidget* manage_link = theme_provider->BuildChromeLinkButton(
-        l10n_util::GetStringUTF8(IDS_EXTENSION_INSTALLED_MANAGE_SHORTCUTS));
-    GtkWidget* link_hbox = gtk_hbox_new(FALSE, 0);
-    // Stick it in an hbox so it doesn't expand to the whole width.
-    gtk_box_pack_end(GTK_BOX(link_hbox), manage_link, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(text_column), link_hbox, FALSE, FALSE, 0);
-    g_signal_connect(manage_link, "clicked",
-                     G_CALLBACK(OnLinkClickedThunk), this);
-  } else {
-    // Manage label.
-    GtkWidget* manage_label = gtk_label_new(
-        l10n_util::GetStringUTF8(IDS_EXTENSION_INSTALLED_MANAGE_INFO).c_str());
-    gtk_util::SetLabelWidth(manage_label, kTextColumnWidth);
-    gtk_box_pack_start(GTK_BOX(text_column), manage_label, FALSE, FALSE, 0);
-  }
+  // Manage label
+  GtkWidget* manage_label = gtk_label_new(
+      l10n_util::GetStringUTF8(IDS_EXTENSION_INSTALLED_MANAGE_INFO).c_str());
+  gtk_util::SetLabelWidth(manage_label, kTextColumnWidth);
+  gtk_box_pack_start(GTK_BOX(text_column), manage_label, FALSE, FALSE, 0);
 
   // Create and pack the close button.
   GtkWidget* close_column = gtk_vbox_new(FALSE, 0);
   gtk_box_pack_start(GTK_BOX(bubble_content), close_column, FALSE, FALSE, 0);
-  close_button_.reset(CustomDrawButton::CloseButtonBubble(theme_provider));
+  close_button_.reset(CustomDrawButton::CloseButton(theme_provider));
   g_signal_connect(close_button_->widget(), "clicked",
                    G_CALLBACK(OnButtonClick), this);
   gtk_box_pack_start(GTK_BOX(close_column), close_button_->widget(),
       FALSE, FALSE, 0);
 
-  BubbleGtk::FrameStyle frame_style = BubbleGtk::ANCHOR_TOP_RIGHT;
+  BubbleGtk::ArrowLocationGtk arrow_location =
+      !base::i18n::IsRTL() ?
+      BubbleGtk::ARROW_LOCATION_TOP_RIGHT :
+      BubbleGtk::ARROW_LOCATION_TOP_LEFT;
 
   gfx::Rect bounds = gtk_util::WidgetBounds(reference_widget);
-  if (bubble_.type() == bubble_.OMNIBOX_KEYWORD) {
+  if (type_ == OMNIBOX_KEYWORD) {
     // Reverse the arrow for omnibox keywords, since the bubble will be on the
     // other side of the window. We also clear the width to avoid centering
     // the popup on the URL bar.
-    frame_style = BubbleGtk::ANCHOR_TOP_LEFT;
+    arrow_location =
+        !base::i18n::IsRTL() ?
+        BubbleGtk::ARROW_LOCATION_TOP_LEFT :
+        BubbleGtk::ARROW_LOCATION_TOP_RIGHT;
     if (base::i18n::IsRTL())
       bounds.Offset(bounds.width(), 0);
     bounds.set_width(0);
   }
 
-  gtk_bubble_ = BubbleGtk::Show(reference_widget,
-                                &bounds,
-                                bubble_content,
-                                frame_style,
-                                BubbleGtk::MATCH_SYSTEM_THEME |
-                                BubbleGtk::POPUP_WINDOW |
-                                BubbleGtk::GRAB_INPUT,
-                                theme_provider,
-                                this);
-  g_signal_connect(bubble_content, "destroy",
-                   G_CALLBACK(&OnDestroyThunk), this);
-
-  // gtk_bubble_ is now the owner of |this| and deletes it when the bubble
-  // goes away.
-  bubble_.IgnoreBrowserClosing();
-  return true;
+  bubble_ = BubbleGtk::Show(reference_widget,
+                            &bounds,
+                            bubble_content,
+                            arrow_location,
+                            true,  // match_system_theme
+                            true,  // grab_input
+                            theme_provider,
+                            this);
 }
 
 // static
 void ExtensionInstalledBubbleGtk::OnButtonClick(GtkWidget* button,
     ExtensionInstalledBubbleGtk* bubble) {
   if (button == bubble->close_button_->widget()) {
-    bubble->gtk_bubble_->Close();
+    bubble->bubble_->Close();
   } else {
     NOTREACHED();
   }
 }
-
-void ExtensionInstalledBubbleGtk::OnLinkClicked(GtkWidget* widget) {
-  gtk_bubble_->Close();
-
-  std::string configure_url = chrome::kChromeUIExtensionsURL;
-  configure_url += chrome::kExtensionConfigureCommandsSubPage;
-  chrome::NavigateParams params(
-      chrome::GetSingletonTabNavigateParams(
-          bubble_.browser(), GURL(configure_url.c_str())));
-  chrome::Navigate(&params);
-}
-
 void ExtensionInstalledBubbleGtk::BubbleClosing(BubbleGtk* bubble,
                                                 bool closed_by_escape) {
-  if (bubble_.extension() && bubble_.type() == bubble_.PAGE_ACTION) {
+  if (extension_ && type_ == PAGE_ACTION) {
     // Turn the page action preview off.
     BrowserWindowGtk* browser_window =
           BrowserWindowGtk::GetBrowserWindowForNativeWindow(
-              bubble_.browser()->window()->GetNativeWindow());
+              browser_->window()->GetNativeHandle());
     LocationBarViewGtk* location_bar_view =
         browser_window->GetToolbar()->GetLocationBarView();
-    location_bar_view->SetPreviewEnabledPageAction(
-        ExtensionActionManager::Get(bubble_.browser()->profile())->
-        GetPageAction(*bubble_.extension()),
-        false);  // preview_enabled
+    location_bar_view->SetPreviewEnabledPageAction(extension_->page_action(),
+                                                   false);  // preview_enabled
   }
+
+  // We need to allow the bubble to close and remove the widgets from
+  // the window before we call Release() because close_button_ depends
+  // on all references being cleared before it is destroyed.
+  MessageLoopForUI::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&ExtensionInstalledBubbleGtk::Close, this));
+}
+
+void ExtensionInstalledBubbleGtk::Close() {
+  Release();  // Balanced in ctor.
+  bubble_ = NULL;
 }

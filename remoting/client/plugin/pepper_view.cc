@@ -4,13 +4,10 @@
 
 #include "remoting/client/plugin/pepper_view.h"
 
-#include <functional>
-
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_util.h"
-#include "base/synchronization/waitable_event.h"
-#include "base/time/time.h"
+#include "base/message_loop.h"
+#include "base/string_util.h"
 #include "ppapi/cpp/completion_callback.h"
+#include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/point.h"
 #include "ppapi/cpp/rect.h"
@@ -18,316 +15,324 @@
 #include "remoting/base/util.h"
 #include "remoting/client/chromoting_stats.h"
 #include "remoting/client/client_context.h"
-#include "remoting/client/frame_producer.h"
 #include "remoting/client/plugin/chromoting_instance.h"
-#include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
-
-using base::Passed;
-
-namespace {
-
-// DesktopFrame that wraps a supplied pp::ImageData
-class PepperDesktopFrame : public webrtc::DesktopFrame {
- public:
-  // Wraps the supplied ImageData.
-  explicit PepperDesktopFrame(const pp::ImageData& buffer);
-
-  // Access to underlying pepper representation.
-  const pp::ImageData& buffer() const {
-    return buffer_;
-  }
-
- private:
-  pp::ImageData buffer_;
-};
-
-PepperDesktopFrame::PepperDesktopFrame(const pp::ImageData& buffer)
-  : DesktopFrame(webrtc::DesktopSize(buffer.size().width(),
-                                     buffer.size().height()),
-                 buffer.stride(),
-                 reinterpret_cast<uint8_t*>(buffer.data()),
-                 NULL),
-    buffer_(buffer) {}
-
-}  // namespace
+#include "remoting/client/plugin/pepper_util.h"
 
 namespace remoting {
 
 namespace {
 
-// The maximum number of image buffers to be allocated at any point of time.
-const size_t kMaxPendingBuffersCount = 2;
+ChromotingScriptableObject::ConnectionError ConvertConnectionError(
+    protocol::ConnectionToHost::Error error) {
+  switch (error) {
+    case protocol::ConnectionToHost::OK:
+      return ChromotingScriptableObject::ERROR_NONE;
+    case protocol::ConnectionToHost::HOST_IS_OFFLINE:
+      return ChromotingScriptableObject::ERROR_HOST_IS_OFFLINE;
+    case protocol::ConnectionToHost::SESSION_REJECTED:
+      return ChromotingScriptableObject::ERROR_SESSION_REJECTED;
+    case protocol::ConnectionToHost::INCOMPATIBLE_PROTOCOL:
+      return ChromotingScriptableObject::ERROR_INCOMPATIBLE_PROTOCOL;
+    case protocol::ConnectionToHost::NETWORK_FAILURE:
+      return ChromotingScriptableObject::ERROR_NETWORK_FAILURE;
+  }
+  DLOG(FATAL) << "Unknown error code" << error;
+  return  ChromotingScriptableObject::ERROR_NONE;
+}
 
 }  // namespace
 
-PepperView::PepperView(ChromotingInstance* instance,
-                       ClientContext* context)
+PepperView::PepperView(ChromotingInstance* instance, ClientContext* context)
   : instance_(instance),
     context_(context),
-    producer_(NULL),
-    merge_buffer_(NULL),
-    dips_to_device_scale_(1.0f),
-    dips_to_view_scale_(1.0f),
-    flush_pending_(false),
-    is_initialized_(false),
-    frame_received_(false),
-    callback_factory_(this) {
+    flush_blocked_(false),
+    is_static_fill_(false),
+    static_fill_color_(0),
+    ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 PepperView::~PepperView() {
-  // The producer should now return any pending buffers. At this point, however,
-  // ReturnBuffer() tasks scheduled by the producer will not be delivered,
-  // so we free all the buffers once the producer's queue is empty.
-  base::WaitableEvent done_event(true, false);
-  producer_->RequestReturnBuffers(
-      base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done_event)));
-  done_event.Wait();
-
-  merge_buffer_ = NULL;
-  while (!buffers_.empty()) {
-    FreeBuffer(buffers_.front());
-  }
 }
 
-void PepperView::Initialize(FrameProducer* producer) {
-  producer_ = producer;
-  webrtc::DesktopFrame* buffer = AllocateBuffer();
-  while (buffer) {
-    producer_->DrawBuffer(buffer);
-    buffer = AllocateBuffer();
-  }
+bool PepperView::Initialize() {
+  return true;
 }
 
-void PepperView::SetView(const pp::View& view) {
-  bool view_changed = false;
+void PepperView::TearDown() {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-  pp::Rect pp_size = view.GetRect();
-  webrtc::DesktopSize new_dips_size(pp_size.width(), pp_size.height());
-  float new_dips_to_device_scale = view.GetDeviceScale();
+  weak_factory_.InvalidateWeakPtrs();
+}
 
-  if (!dips_size_.equals(new_dips_size) ||
-      dips_to_device_scale_ != new_dips_to_device_scale) {
-    view_changed = true;
-    dips_to_device_scale_ = new_dips_to_device_scale;
-    dips_size_ = new_dips_size;
+void PepperView::Paint() {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-    // If |dips_to_device_scale_| is > 1.0 then the device is high-DPI, and
-    // there are actually |view_device_scale_| physical pixels for every one
-    // Density Independent Pixel (DIP).  If we specify a scale of 1.0 to
-    // Graphics2D then we can render at DIP resolution and let PPAPI up-scale
-    // for high-DPI devices.
-    dips_to_view_scale_ = 1.0f;
-    view_size_ = dips_size_;
-
-    // If the view's DIP dimensions don't match the source then let the frame
-    // producer do the scaling, and render at device resolution.
-    if (!dips_size_.equals(source_size_)) {
-      dips_to_view_scale_ = dips_to_device_scale_;
-      view_size_.set(ceilf(dips_size_.width() * dips_to_view_scale_),
-                     ceilf(dips_size_.height() * dips_to_view_scale_));
+  if (is_static_fill_) {
+    VLOG(1) << "Static filling " << static_fill_color_;
+    pp::ImageData image(instance_, pp::ImageData::GetNativeImageDataFormat(),
+                        pp::Size(graphics2d_.size().width(),
+                                 graphics2d_.size().height()),
+                        false);
+    if (image.is_null()) {
+      LOG(ERROR) << "Unable to allocate image of size: "
+                 << graphics2d_.size().width() << " x "
+                 << graphics2d_.size().height();
+      return;
     }
 
-    // Create a 2D rendering context at the chosen frame dimensions.
-    pp::Size pp_size = pp::Size(view_size_.width(), view_size_.height());
-    graphics2d_ = pp::Graphics2D(instance_, pp_size, false);
+    for (int y = 0; y < image.size().height(); y++) {
+      for (int x = 0; x < image.size().width(); x++) {
+        *image.GetAddr32(pp::Point(x, y)) = static_fill_color_;
+      }
+    }
 
-    // Specify the scale from our coordinates to DIPs.
-    graphics2d_.SetScale(1.0f / dips_to_view_scale_);
-
-    bool result = instance_->BindGraphics(graphics2d_);
-
-    // There is no good way to handle this error currently.
-    DCHECK(result) << "Couldn't bind the device context.";
-  }
-
-  pp::Rect pp_clip = view.GetClipRect();
-  webrtc::DesktopRect new_clip = webrtc::DesktopRect::MakeLTRB(
-      floorf(pp_clip.x() * dips_to_view_scale_),
-      floorf(pp_clip.y() * dips_to_view_scale_),
-      ceilf(pp_clip.right() * dips_to_view_scale_),
-      ceilf(pp_clip.bottom() * dips_to_view_scale_));
-  if (!clip_area_.equals(new_clip)) {
-    view_changed = true;
-
-    // YUV to RGB conversion may require even X and Y coordinates for
-    // the top left corner of the clipping area.
-    clip_area_ = AlignRect(new_clip);
-    clip_area_.IntersectWith(webrtc::DesktopRect::MakeSize(view_size_));
-  }
-
-  if (view_changed) {
-    producer_->SetOutputSizeAndClip(view_size_, clip_area_);
-    Initialize(producer_);
-  }
-}
-
-void PepperView::ApplyBuffer(const webrtc::DesktopSize& view_size,
-                             const webrtc::DesktopRect& clip_area,
-                             webrtc::DesktopFrame* buffer,
-                             const webrtc::DesktopRegion& region) {
-  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
-
-  if (!frame_received_) {
-    instance_->OnFirstFrameReceived();
-    frame_received_ = true;
-  }
-  // We cannot use the data in the buffer if its dimensions don't match the
-  // current view size.
-  // TODO(alexeypa): We could rescale and draw it (or even draw it without
-  // rescaling) to reduce the perceived lag while we are waiting for
-  // the properly scaled data.
-  if (!view_size_.equals(view_size)) {
-    FreeBuffer(buffer);
-    Initialize(producer_);
+    // For ReplaceContents, make sure the image size matches the device context
+    // size!  Otherwise, this will just silently do nothing.
+    graphics2d_.ReplaceContents(&image);
+    FlushGraphics(base::Time::Now());
   } else {
-    FlushBuffer(clip_area, buffer, region);
+    // TODO(ajwong): We need to keep a backing store image of the host screen
+    // that has the data here which can be redrawn.
+    return;
   }
 }
 
-void PepperView::ReturnBuffer(webrtc::DesktopFrame* buffer) {
-  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
+void PepperView::SetHostSize(const SkISize& host_size) {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-  // Reuse the buffer if it is large enough, otherwise drop it on the floor
-  // and allocate a new one.
-  if (buffer->size().width() >= clip_area_.width() &&
-      buffer->size().height() >= clip_area_.height()) {
-    producer_->DrawBuffer(buffer);
-  } else {
-    FreeBuffer(buffer);
-    Initialize(producer_);
-  }
-}
-
-void PepperView::SetSourceSize(const webrtc::DesktopSize& source_size,
-                               const webrtc::DesktopVector& source_dpi) {
-  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
-
-  if (source_size_.equals(source_size) && source_dpi_.equals(source_dpi))
+  if (host_size_ == host_size)
     return;
 
-  source_size_ = source_size;
-  source_dpi_ = source_dpi;
+  host_size_ = host_size;
 
-  // Notify JavaScript of the change in source size.
-  instance_->SetDesktopSize(source_size, source_dpi);
+  // Submit an update of desktop size to Javascript.
+  instance_->GetScriptableObject()->SetDesktopSize(
+      host_size.width(), host_size.height());
 }
 
-FrameConsumer::PixelFormat PepperView::GetPixelFormat() {
-  return FORMAT_BGRA;
-}
+void PepperView::PaintFrame(media::VideoFrame* frame, const SkRegion& region) {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-webrtc::DesktopFrame* PepperView::AllocateBuffer() {
-  if (buffers_.size() >= kMaxPendingBuffersCount)
-    return NULL;
+  SetHostSize(SkISize::Make(frame->width(), frame->height()));
 
-  if (clip_area_.width()==0 || clip_area_.height()==0)
-    return NULL;
-
-  // Create an image buffer of the required size, but don't zero it.
-  pp::ImageData buffer_data(instance_,
-                    PP_IMAGEDATAFORMAT_BGRA_PREMUL,
-                    pp::Size(clip_area_.width(),
-                             clip_area_.height()),
-                    false);
-  if (buffer_data.is_null()) {
-    LOG(WARNING) << "Not enough memory for frame buffers.";
-    return NULL;
-  }
-
-  webrtc::DesktopFrame* buffer = new PepperDesktopFrame(buffer_data);
-  buffers_.push_back(buffer);
-  return buffer;
-}
-
-void PepperView::FreeBuffer(webrtc::DesktopFrame* buffer) {
-  DCHECK(std::find(buffers_.begin(), buffers_.end(), buffer) != buffers_.end());
-
-  buffers_.remove(buffer);
-  delete buffer;
-}
-
-void PepperView::FlushBuffer(const webrtc::DesktopRect& clip_area,
-                             webrtc::DesktopFrame* buffer,
-                             const webrtc::DesktopRegion& region) {
-  // Defer drawing if the flush is already in progress.
-  if (flush_pending_) {
-    // |merge_buffer_| is guaranteed to be free here because we allocate only
-    // two buffers simultaneously. If more buffers are allowed this code should
-    // apply all pending changes to the screen.
-    DCHECK(merge_buffer_ == NULL);
-
-    merge_clip_area_ = clip_area;
-    merge_buffer_ = buffer;
-    merge_region_ = region;
+  if (!backing_store_.get() || backing_store_->is_null()) {
+    LOG(ERROR) << "Backing store is not available.";
     return;
   }
 
-  // Notify Pepper API about the updated areas and flush pixels to the screen.
   base::Time start_time = base::Time::Now();
 
-  for (webrtc::DesktopRegion::Iterator i(region); !i.IsAtEnd(); i.Advance()) {
-    webrtc::DesktopRect rect = i.rect();
+  // Copy updated regions to the backing store and then paint the regions.
+  bool changes_made = false;
+  for (SkRegion::Iterator i(region); !i.done(); i.next())
+    changes_made |= PaintRect(frame, i.rect());
 
-    // Re-clip |region| with the current clipping area |clip_area_| because
-    // the latter could change from the time the buffer was drawn.
-    rect.IntersectWith(clip_area_);
-    if (rect.is_empty())
-      continue;
-
-    // Specify the rectangle coordinates relative to the clipping area.
-    rect.Translate(-clip_area.left(), -clip_area.top());
-
-    // Pepper Graphics 2D has a strange and badly documented API that the
-    // point here is the offset from the source rect. Why?
-    graphics2d_.PaintImageData(
-        static_cast<PepperDesktopFrame*>(buffer)->buffer(),
-        pp::Point(clip_area.left(), clip_area.top()),
-        pp::Rect(rect.left(), rect.top(), rect.width(), rect.height()));
-  }
-
-  // Notify the producer that some parts of the region weren't painted because
-  // the clipping area has changed already.
-  if (!clip_area.equals(clip_area_)) {
-    webrtc::DesktopRegion not_painted = region;
-    not_painted.Subtract(clip_area_);
-    if (!not_painted.is_empty()) {
-      producer_->InvalidateRegion(not_painted);
-    }
-  }
-
-  // Flush the updated areas to the screen.
-  pp::CompletionCallback callback =
-      callback_factory_.NewCallback(&PepperView::OnFlushDone,
-                                    start_time,
-                                    buffer);
-  int error = graphics2d_.Flush(callback);
-  CHECK(error == PP_OK_COMPLETIONPENDING);
-  flush_pending_ = true;
-
-  // If the buffer we just rendered has a shape then pass that to JavaScript.
-  const webrtc::DesktopRegion* buffer_shape = producer_->GetBufferShape();
-  if (buffer_shape)
-    instance_->SetDesktopShape(*buffer_shape);
+  if (changes_made)
+    FlushGraphics(start_time);
 }
 
-void PepperView::OnFlushDone(int result,
-                             const base::Time& paint_start,
-                             webrtc::DesktopFrame* buffer) {
-  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
-  DCHECK(flush_pending_);
+bool PepperView::PaintRect(media::VideoFrame* frame, const SkIRect& r) {
+  const uint8* frame_data = frame->data(media::VideoFrame::kRGBPlane);
+  const int kFrameStride = frame->stride(media::VideoFrame::kRGBPlane);
+  const int kBytesPerPixel = GetBytesPerPixel(media::VideoFrame::RGB32);
 
+  pp::Size backing_store_size = backing_store_->size();
+  SkIRect rect(r);
+  if (!rect.intersect(SkIRect::MakeWH(backing_store_size.width(),
+                                      backing_store_size.height()))) {
+    return false;
+  }
+
+  const uint8* in =
+      frame_data +
+      kFrameStride * rect.fTop +   // Y offset.
+      kBytesPerPixel * rect.fLeft;  // X offset.
+  uint8* out =
+      reinterpret_cast<uint8*>(backing_store_->data()) +
+      backing_store_->stride() * rect.fTop +  // Y offset.
+      kBytesPerPixel * rect.fLeft;  // X offset.
+
+  // TODO(hclam): We really should eliminate this memory copy.
+  for (int j = 0; j < rect.height(); ++j) {
+    memcpy(out, in, rect.width() * kBytesPerPixel);
+    in += kFrameStride;
+    out += backing_store_->stride();
+  }
+
+  // Pepper Graphics 2D has a strange and badly documented API that the
+  // point here is the offset from the source rect. Why?
+  graphics2d_.PaintImageData(
+      *backing_store_.get(),
+      pp::Point(0, 0),
+      pp::Rect(rect.fLeft, rect.fTop, rect.width(), rect.height()));
+  return true;
+}
+
+void PepperView::BlankRect(pp::ImageData& image_data, const pp::Rect& rect) {
+  const int kBytesPerPixel = GetBytesPerPixel(media::VideoFrame::RGB32);
+  for (int y = rect.y(); y < rect.bottom(); y++) {
+    uint8* to = reinterpret_cast<uint8*>(image_data.data()) +
+        (y * image_data.stride()) + (rect.x() * kBytesPerPixel);
+    memset(to, 0xff, rect.width() * kBytesPerPixel);
+  }
+}
+
+void PepperView::FlushGraphics(base::Time paint_start) {
+  scoped_ptr<base::Closure> task(
+      new base::Closure(
+          base::Bind(&PepperView::OnPaintDone, weak_factory_.GetWeakPtr(),
+                     paint_start)));
+
+  // Flag needs to be set here in order to get a proper error code for Flush().
+  // Otherwise Flush() will always return PP_OK_COMPLETIONPENDING and the error
+  // would be hidden.
+  //
+  // Note that we can also handle this by providing an actual callback which
+  // takes the result code. Right now everything goes to the task that doesn't
+  // result value.
+  pp::CompletionCallback pp_callback(&CompletionCallbackClosureAdapter,
+                                     task.get(),
+                                     PP_COMPLETIONCALLBACK_FLAG_OPTIONAL);
+  int error = graphics2d_.Flush(pp_callback);
+
+  // There is already a flush in progress so set this flag to true so that we
+  // can flush again later.
+  // |paint_start| is then discarded but this is fine because we're not aiming
+  // for precise measurement of timing, otherwise we need to keep a list of
+  // queued start time(s).
+  if (error == PP_ERROR_INPROGRESS)
+    flush_blocked_ = true;
+  else
+    flush_blocked_ = false;
+
+  // If Flush() returns asynchronously then release the task.
+  if (error == PP_OK_COMPLETIONPENDING)
+    ignore_result(task.release());
+}
+
+void PepperView::SetSolidFill(uint32 color) {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+
+  is_static_fill_ = true;
+  static_fill_color_ = color;
+
+  Paint();
+}
+
+void PepperView::UnsetSolidFill() {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+
+  is_static_fill_ = false;
+}
+
+void PepperView::SetConnectionState(protocol::ConnectionToHost::State state,
+                                    protocol::ConnectionToHost::Error error) {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+
+  // TODO(hclam): Re-consider the way we communicate with Javascript.
+  ChromotingScriptableObject* scriptable_obj = instance_->GetScriptableObject();
+  switch (state) {
+    case protocol::ConnectionToHost::CONNECTING:
+      SetSolidFill(kCreatedColor);
+      scriptable_obj->SetConnectionStatus(
+          ChromotingScriptableObject::STATUS_CONNECTING,
+          ConvertConnectionError(error));
+      break;
+
+    case protocol::ConnectionToHost::CONNECTED:
+      UnsetSolidFill();
+      scriptable_obj->SetConnectionStatus(
+          ChromotingScriptableObject::STATUS_CONNECTED,
+          ConvertConnectionError(error));
+      break;
+
+    case protocol::ConnectionToHost::CLOSED:
+      SetSolidFill(kDisconnectedColor);
+      scriptable_obj->SetConnectionStatus(
+          ChromotingScriptableObject::STATUS_CLOSED,
+          ConvertConnectionError(error));
+      break;
+
+    case protocol::ConnectionToHost::FAILED:
+      SetSolidFill(kFailedColor);
+      scriptable_obj->SetConnectionStatus(
+          ChromotingScriptableObject::STATUS_FAILED,
+          ConvertConnectionError(error));
+      break;
+  }
+}
+
+bool PepperView::SetViewSize(const SkISize& view_size) {
+  if (view_size_ == view_size)
+    return false;
+  view_size_ = view_size;
+
+  pp::Size pp_size = pp::Size(view_size.width(), view_size.height());
+
+  graphics2d_ = pp::Graphics2D(instance_, pp_size, true);
+  if (!instance_->BindGraphics(graphics2d_)) {
+    LOG(ERROR) << "Couldn't bind the device context.";
+    return false;
+  }
+
+  if (view_size.isEmpty())
+    return false;
+
+  // Allocate the backing store to save the desktop image.
+  if ((backing_store_.get() == NULL) ||
+      (backing_store_->size() != pp_size)) {
+    VLOG(1) << "Allocate backing store: "
+            << view_size.width() << " x " << view_size.height();
+    backing_store_.reset(
+        new pp::ImageData(instance_, pp::ImageData::GetNativeImageDataFormat(),
+                          pp_size, false));
+    DCHECK(backing_store_.get() && !backing_store_->is_null())
+        << "Not enough memory for backing store.";
+  }
+  return true;
+}
+
+void PepperView::AllocateFrame(media::VideoFrame::Format format,
+                               const SkISize& size,
+                               scoped_refptr<media::VideoFrame>* frame_out,
+                               const base::Closure& done) {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+
+  *frame_out = media::VideoFrame::CreateFrame(
+      media::VideoFrame::RGB32, size.width(), size.height(),
+      base::TimeDelta(), base::TimeDelta());
+  (*frame_out)->AddRef();
+  done.Run();
+}
+
+void PepperView::ReleaseFrame(media::VideoFrame* frame) {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+
+  if (frame)
+    frame->Release();
+}
+
+void PepperView::OnPartialFrameOutput(media::VideoFrame* frame,
+                                      SkRegion* region,
+                                      const base::Closure& done) {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+
+  // TODO(ajwong): Clean up this API to be async so we don't need to use a
+  // member variable as a hack.
+  PaintFrame(frame, *region);
+  done.Run();
+}
+
+void PepperView::OnPaintDone(base::Time paint_start) {
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
   instance_->GetStats()->video_paint_ms()->Record(
       (base::Time::Now() - paint_start).InMilliseconds());
 
-  flush_pending_ = false;
-  ReturnBuffer(buffer);
-
-  // If there is a buffer queued for rendering then render it now.
-  if (merge_buffer_ != NULL) {
-    buffer = merge_buffer_;
-    merge_buffer_ = NULL;
-    FlushBuffer(merge_clip_area_, buffer, merge_region_);
-  }
+  // If the last flush failed because there was already another one in progress
+  // then we perform the flush now.
+  if (flush_blocked_)
+    FlushGraphics(base::Time::Now());
+  return;
 }
 
 }  // namespace remoting

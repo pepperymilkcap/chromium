@@ -4,9 +4,10 @@
 
 #ifndef BASE_SYNC_SOCKET_H_
 #define BASE_SYNC_SOCKET_H_
+#pragma once
 
 // A socket abstraction used for sending and receiving plain
-// data.  Because the receiving is blocking, they can be used to perform
+// data.  Because they are blocking, they can be used to perform
 // rudimentary cross-process synchronization with low latency.
 
 #include "base/basictypes.h"
@@ -18,7 +19,6 @@
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/time/time.h"
 
 namespace base {
 
@@ -59,13 +59,6 @@ class BASE_EXPORT SyncSocket {
   // Returns the number of bytes received, or 0 upon failure.
   virtual size_t Receive(void* buffer, size_t length);
 
-  // Same as Receive() but only blocks for data until |timeout| has elapsed or
-  // |buffer| |length| is exhausted.  Currently only timeouts less than one
-  // second are allowed.  Return the amount of data read.
-  virtual size_t ReceiveWithTimeout(void* buffer,
-                                    size_t length,
-                                    TimeDelta timeout);
-
   // Returns the number of bytes available. If non-zero, Receive() will not
   // not block when called. NOTE: Some implementations cannot reliably
   // determine the number of bytes available so avoid using the returned
@@ -84,8 +77,8 @@ class BASE_EXPORT SyncSocket {
 };
 
 // Derives from SyncSocket and adds support for shutting down the socket from
-// another thread while a blocking Receive or Send is being done from the
-// thread that owns the socket.
+// another thread while a blocking Receive or Send is being done from the thread
+// that owns the socket.
 class BASE_EXPORT CancelableSyncSocket : public SyncSocket {
  public:
   CancelableSyncSocket();
@@ -109,18 +102,9 @@ class BASE_EXPORT CancelableSyncSocket : public SyncSocket {
   // supported on <Vista. So, for Windows only, we override these
   // SyncSocket methods in order to support shutting down the 'socket'.
   virtual bool Close() OVERRIDE;
-  virtual size_t Receive(void* buffer, size_t length) OVERRIDE;
-  virtual size_t ReceiveWithTimeout(void* buffer,
-                                    size_t length,
-                                    TimeDelta timeout) OVERRIDE;
-#endif
-
-  // Send() is overridden to catch cases where the remote end is not responding
-  // and we fill the local socket buffer. When the buffer is full, this
-  // implementation of Send() will not block indefinitely as
-  // SyncSocket::Send will, but instead return 0, as no bytes could be sent.
-  // Note that the socket will not be closed in this case.
   virtual size_t Send(const void* buffer, size_t length) OVERRIDE;
+  virtual size_t Receive(void* buffer, size_t length) OVERRIDE;
+#endif
 
  private:
 #if defined(OS_WIN)
@@ -129,12 +113,6 @@ class BASE_EXPORT CancelableSyncSocket : public SyncSocket {
 #endif
   DISALLOW_COPY_AND_ASSIGN(CancelableSyncSocket);
 };
-
-#if defined(OS_WIN) && !defined(COMPONENT_BUILD)
-// TODO(cpu): remove this once chrome is split in two dlls.
-__declspec(selectany)
-    const SyncSocket::Handle SyncSocket::kInvalidHandle = INVALID_HANDLE_VALUE;
-#endif
 
 }  // namespace base
 

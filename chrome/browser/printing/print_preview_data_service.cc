@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
-#include "base/stl_util.h"
 #include "printing/print_job_constants.h"
 
 // PrintPreviewDataStore stores data for preview workflow and preview printing
@@ -29,10 +28,11 @@ class PrintPreviewDataStore : public base::RefCounted<PrintPreviewDataStore> {
   PrintPreviewDataStore() {}
 
   // Get the preview page for the specified |index|.
-  void GetPreviewDataForIndex(int index,
-                              scoped_refptr<base::RefCountedBytes>* data) {
-    if (IsInvalidIndex(index))
+  void GetPreviewDataForIndex(int index, scoped_refptr<RefCountedBytes>* data) {
+    if (index != printing::COMPLETE_PREVIEW_DOCUMENT_INDEX &&
+        index < printing::FIRST_PAGE_INDEX) {
       return;
+    }
 
     PreviewPageDataMap::iterator it = page_data_map_.find(index);
     if (it != page_data_map_.end())
@@ -40,18 +40,22 @@ class PrintPreviewDataStore : public base::RefCounted<PrintPreviewDataStore> {
   }
 
   // Set/Update the preview data entry for the specified |index|.
-  void SetPreviewDataForIndex(int index, const base::RefCountedBytes* data) {
-    if (IsInvalidIndex(index))
+  void SetPreviewDataForIndex(int index, const RefCountedBytes* data) {
+    if (index != printing::COMPLETE_PREVIEW_DOCUMENT_INDEX &&
+        index < printing::FIRST_PAGE_INDEX) {
       return;
+    }
 
-    page_data_map_[index] = const_cast<base::RefCountedBytes*>(data);
+    page_data_map_[index] = const_cast<RefCountedBytes*>(data);
   }
 
   // Returns the available draft page count.
   int GetAvailableDraftPageCount() {
     int page_data_map_size = page_data_map_.size();
-    if (ContainsKey(page_data_map_, printing::COMPLETE_PREVIEW_DOCUMENT_INDEX))
+    if (page_data_map_.find(printing::COMPLETE_PREVIEW_DOCUMENT_INDEX) !=
+        page_data_map_.end()) {
       page_data_map_size--;
+    }
     return page_data_map_size;
   }
 
@@ -63,15 +67,9 @@ class PrintPreviewDataStore : public base::RefCounted<PrintPreviewDataStore> {
   // |printing::COMPLETE_PREVIEW_DOCUMENT_INDEX| to represent complete preview
   // document.
   // Value: Preview data.
-  typedef std::map<int, scoped_refptr<base::RefCountedBytes> >
-      PreviewPageDataMap;
+  typedef std::map<int, scoped_refptr<RefCountedBytes> > PreviewPageDataMap;
 
   ~PrintPreviewDataStore() {}
-
-  static bool IsInvalidIndex(int index) {
-    return (index != printing::COMPLETE_PREVIEW_DOCUMENT_INDEX &&
-            index < printing::FIRST_PAGE_INDEX);
-  }
 
   PreviewPageDataMap page_data_map_;
 
@@ -90,31 +88,37 @@ PrintPreviewDataService::~PrintPreviewDataService() {
 }
 
 void PrintPreviewDataService::GetDataEntry(
-    int32 preview_ui_id,
+    const std::string& preview_ui_addr_str,
     int index,
-    scoped_refptr<base::RefCountedBytes>* data_bytes) {
+    scoped_refptr<RefCountedBytes>* data_bytes) {
   *data_bytes = NULL;
-  PreviewDataStoreMap::const_iterator it = data_store_map_.find(preview_ui_id);
+  PreviewDataStoreMap::iterator it = data_store_map_.find(preview_ui_addr_str);
   if (it != data_store_map_.end())
     it->second->GetPreviewDataForIndex(index, data_bytes);
 }
 
 void PrintPreviewDataService::SetDataEntry(
-    int32 preview_ui_id,
+    const std::string& preview_ui_addr_str,
     int index,
-    const base::RefCountedBytes* data_bytes) {
-  if (!ContainsKey(data_store_map_, preview_ui_id))
-    data_store_map_[preview_ui_id] = new PrintPreviewDataStore();
+    const RefCountedBytes* data_bytes) {
+  PreviewDataStoreMap::iterator it = data_store_map_.find(preview_ui_addr_str);
+  if (it == data_store_map_.end())
+    data_store_map_[preview_ui_addr_str] = new PrintPreviewDataStore();
 
-  data_store_map_[preview_ui_id]->SetPreviewDataForIndex(index, data_bytes);
+  data_store_map_[preview_ui_addr_str]->SetPreviewDataForIndex(index,
+                                                               data_bytes);
 }
 
-void PrintPreviewDataService::RemoveEntry(int32 preview_ui_id) {
-  data_store_map_.erase(preview_ui_id);
+void PrintPreviewDataService::RemoveEntry(
+    const std::string& preview_ui_addr_str) {
+  PreviewDataStoreMap::iterator it = data_store_map_.find(preview_ui_addr_str);
+  if (it != data_store_map_.end())
+    data_store_map_.erase(it);
 }
 
-int PrintPreviewDataService::GetAvailableDraftPageCount(int32 preview_ui_id) {
-  PreviewDataStoreMap::const_iterator it = data_store_map_.find(preview_ui_id);
-  return (it == data_store_map_.end()) ?
-      0 : it->second->GetAvailableDraftPageCount();
+int PrintPreviewDataService::GetAvailableDraftPageCount(
+    const std::string& preview_ui_addr_str) {
+  if (data_store_map_.find(preview_ui_addr_str) != data_store_map_.end())
+    return data_store_map_[preview_ui_addr_str]->GetAvailableDraftPageCount();
+  return 0;
 }

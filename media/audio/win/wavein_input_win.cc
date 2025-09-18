@@ -1,17 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/audio/win/wavein_input_win.h"
 
+#include <windows.h>
+#include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
 
 #include "base/logging.h"
 #include "media/audio/audio_io.h"
+#include "media/audio/audio_util.h"
 #include "media/audio/win/audio_manager_win.h"
 #include "media/audio/win/device_enumeration_win.h"
 
-namespace media {
+namespace {
+const int kStopInputStreamCallbackTimeout = 3000; // Three seconds.
+}
+
+using media::AudioDeviceNames;
 
 // Our sound buffers are allocated once and kept in a linked list using the
 // the WAVEHDR::dwUser variable. The last buffer points to the first buffer.
@@ -29,16 +36,15 @@ PCMWaveInAudioInputStream::PCMWaveInAudioInputStream(
       callback_(NULL),
       num_buffers_(num_buffers),
       buffer_(NULL),
-      channels_(params.channels()) {
-  DCHECK_GT(num_buffers_, 0);
+      channels_(params.channels) {
   format_.wFormatTag = WAVE_FORMAT_PCM;
-  format_.nChannels = params.channels() > 2 ? 2 : params.channels();
-  format_.nSamplesPerSec = params.sample_rate();
-  format_.wBitsPerSample = params.bits_per_sample();
+  format_.nChannels = params.channels > 2 ? 2 : params.channels;
+  format_.nSamplesPerSec = params.sample_rate;
+  format_.wBitsPerSample = params.bits_per_sample;
   format_.cbSize = 0;
   format_.nBlockAlign = (format_.nChannels * format_.wBitsPerSample) / 8;
   format_.nAvgBytesPerSec = format_.nBlockAlign * format_.nSamplesPerSec;
-  buffer_size_ = params.frames_per_buffer() * format_.nBlockAlign;
+  buffer_size_ = params.samples_per_packet * format_.nBlockAlign;
   // If we don't have a packet size we use 100ms.
   if (!buffer_size_)
     buffer_size_ = format_.nAvgBytesPerSec / 10;
@@ -51,7 +57,6 @@ PCMWaveInAudioInputStream::~PCMWaveInAudioInputStream() {
 }
 
 bool PCMWaveInAudioInputStream::Open() {
-  DCHECK(thread_checker_.CalledOnValidThread());
   if (state_ != kStateEmpty)
     return false;
   if (num_buffers_ < 2 || num_buffers_ > 10)
@@ -112,11 +117,9 @@ void PCMWaveInAudioInputStream::FreeBuffers() {
 }
 
 void PCMWaveInAudioInputStream::Start(AudioInputCallback* callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
   if (state_ != kStateReady)
     return;
 
-  DCHECK(!callback_);
   callback_ = callback;
   state_ = kStateRecording;
 
@@ -131,7 +134,8 @@ void PCMWaveInAudioInputStream::Start(AudioInputCallback* callback) {
   if (result != MMSYSERR_NOERROR) {
     HandleError(result);
     state_ = kStateReady;
-    callback_ = NULL;
+  } else {
+    manager_->IncreaseActiveInputStreamCount();
   }
 }
 
@@ -140,91 +144,52 @@ void PCMWaveInAudioInputStream::Start(AudioInputCallback* callback) {
 // not be inside the AudioInputCallback's OnData because waveInReset()
 // forcefully kills the callback thread.
 void PCMWaveInAudioInputStream::Stop() {
-  DVLOG(1) << "PCMWaveInAudioInputStream::Stop()";
-  DCHECK(thread_checker_.CalledOnValidThread());
   if (state_ != kStateRecording)
     return;
-
-  bool already_stopped = false;
-  {
-    // Tell the callback that we're stopping.
-    // As a result, |stopped_event_| will be signaled in callback method.
-    base::AutoLock auto_lock(lock_);
-    already_stopped = (callback_ == NULL);
-    callback_ = NULL;
-  }
-
-  if (already_stopped)
-    return;
-
+  state_ = kStateStopping;
   // Wait for the callback to finish, it will signal us when ready to be reset.
-  DWORD wait = ::WaitForSingleObject(stopped_event_, INFINITE);
-  DCHECK_EQ(wait, WAIT_OBJECT_0);
+  if (WAIT_OBJECT_0 !=
+      ::WaitForSingleObject(stopped_event_, kStopInputStreamCallbackTimeout)) {
+    HandleError(::GetLastError());
+    return;
+  }
+  // Stop is always called before Close. In case of error, this will be
+  // also called when closing the input controller.
+  manager_->DecreaseActiveInputStreamCount();
 
-  // Stop input and reset the current position to zero for |wavein_|.
-  // All pending buffers are marked as done and returned to the application.
+  state_ = kStateStopped;
   MMRESULT res = ::waveInReset(wavein_);
-  DCHECK_EQ(res, static_cast<MMRESULT>(MMSYSERR_NOERROR));
-
+  if (res != MMSYSERR_NOERROR) {
+    state_ = kStateRecording;
+    HandleError(res);
+    return;
+  }
   state_ = kStateReady;
 }
 
+// We can Close in any state except that when trying to close a stream that is
+// recording Windows generates an error, which we propagate to the source.
 void PCMWaveInAudioInputStream::Close() {
-  DVLOG(1) << "PCMWaveInAudioInputStream::Close()";
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  // We should not call Close() while recording. Catch it with DCHECK and
-  // implement auto-stop just in case.
-  DCHECK_NE(state_, kStateRecording);
-  Stop();
-
   if (wavein_) {
-    FreeBuffers();
-
-    // waveInClose() generates a WIM_CLOSE callback.  In case Start() was never
-    // called, force a reset to ensure close succeeds.
-    MMRESULT res = ::waveInReset(wavein_);
-    DCHECK_EQ(res, static_cast<MMRESULT>(MMSYSERR_NOERROR));
-    res = ::waveInClose(wavein_);
-    DCHECK_EQ(res, static_cast<MMRESULT>(MMSYSERR_NOERROR));
+    // waveInClose generates a callback with WIM_CLOSE id in the same thread.
+    MMRESULT res = ::waveInClose(wavein_);
+    if (res != MMSYSERR_NOERROR) {
+      HandleError(res);
+      return;
+    }
     state_ = kStateClosed;
     wavein_ = NULL;
+    FreeBuffers();
   }
-
   // Tell the audio manager that we have been released. This can result in
   // the manager destroying us in-place so this needs to be the last thing
   // we do on this function.
   manager_->ReleaseInputStream(this);
 }
 
-double PCMWaveInAudioInputStream::GetMaxVolume() {
-  // TODO(henrika): Add volume support using the Audio Mixer API.
-  return 0.0;
-}
-
-void PCMWaveInAudioInputStream::SetVolume(double volume) {
-  // TODO(henrika): Add volume support using the Audio Mixer API.
-}
-
-double PCMWaveInAudioInputStream::GetVolume() {
-  // TODO(henrika): Add volume support using the Audio Mixer API.
-  return 0.0;
-}
-
-void PCMWaveInAudioInputStream::SetAutomaticGainControl(bool enabled) {
-  // TODO(henrika): Add AGC support when volume control has been added.
-  NOTIMPLEMENTED();
-}
-
-bool PCMWaveInAudioInputStream::GetAutomaticGainControl() {
-  // TODO(henrika): Add AGC support when volume control has been added.
-  NOTIMPLEMENTED();
-  return false;
-}
-
 void PCMWaveInAudioInputStream::HandleError(MMRESULT error) {
   DLOG(WARNING) << "PCMWaveInAudio error " << error;
-  callback_->OnError(this);
+  callback_->OnError(this, error);
 }
 
 void PCMWaveInAudioInputStream::QueueNextPacket(WAVEHDR *buffer) {
@@ -243,7 +208,7 @@ bool PCMWaveInAudioInputStream::GetDeviceId(UINT* device_index) {
 
   // Get list of all available and active devices.
   AudioDeviceNames device_names;
-  if (!media::GetInputDeviceNamesWinXP(&device_names))
+  if (!GetInputDeviceNamesWinXP(&device_names))
     return false;
 
   if (device_names.empty())
@@ -276,40 +241,33 @@ void PCMWaveInAudioInputStream::WaveCallback(HWAVEIN hwi, UINT msg,
   PCMWaveInAudioInputStream* obj =
       reinterpret_cast<PCMWaveInAudioInputStream*>(instance);
 
-  // The lock ensures that Stop() can't be called during a callback.
-  base::AutoLock auto_lock(obj->lock_);
-
   if (msg == WIM_DATA) {
-    // The WIM_DATA message is sent when waveform-audio data is present in
-    // the input buffer and the buffer is being returned to the application.
-    // The message can be sent when the buffer is full or after the
-    // waveInReset function is called.
-    if (obj->callback_) {
-      // TODO(henrika): the |volume| parameter is always set to zero since
-      // there is currently no support for controlling the microphone volume
-      // level.
-      WAVEHDR* buffer = reinterpret_cast<WAVEHDR*>(param1);
-      obj->callback_->OnData(obj,
-                             reinterpret_cast<const uint8*>(buffer->lpData),
-                             buffer->dwBytesRecorded,
-                             buffer->dwBytesRecorded,
-                             0.0);
+    // WIM_DONE indicates that the driver is done with our buffer. We pass it
+    // to the callback and check if we need to stop playing.
+    // It should be OK to assume the data in the buffer is what has been
+    // recorded in the soundcard.
+    WAVEHDR* buffer = reinterpret_cast<WAVEHDR*>(param1);
+    obj->callback_->OnData(obj, reinterpret_cast<const uint8*>(buffer->lpData),
+                           buffer->dwBytesRecorded,
+                           buffer->dwBytesRecorded);
 
+    if (obj->state_ == kStateStopping) {
+      // The main thread has called Stop() and is waiting to issue waveOutReset
+      // which will kill this thread. We should not enter AudioSourceCallback
+      // code anymore.
+      ::SetEvent(obj->stopped_event_);
+    } else if (obj->state_ == kStateStopped) {
+      // Not sure if ever hit this but just in case.
+    } else {
       // Queue the finished buffer back with the audio driver. Since we are
       // reusing the same buffers we can get away without calling
       // waveInPrepareHeader.
       obj->QueueNextPacket(buffer);
-    } else {
-      // Main thread has called Stop() and set |callback_| to NULL and is
-      // now waiting to issue waveInReset which will kill this thread.
-      // We should not call AudioSourceCallback code anymore.
-      ::SetEvent(obj->stopped_event_);
     }
   } else if (msg == WIM_CLOSE) {
-    // Intentionaly no-op for now.
-  } else if (msg == WIM_OPEN) {
-    // Intentionaly no-op for now.
+    // We can be closed before calling Start, so it is possible to have a
+    // null callback at this point.
+    if (obj->callback_)
+      obj->callback_->OnClose(obj);
   }
 }
-
-}  // namespace media

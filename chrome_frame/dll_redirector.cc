@@ -9,13 +9,13 @@
 #include <atlsecurity.h>
 #include <sddl.h>
 
+#include "base/file_path.h"
 #include "base/file_version_info.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/memory/shared_memory.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/shared_memory.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/version.h"
 #include "base/win/windows_version.h"
 #include "chrome_frame/utils.h"
@@ -30,13 +30,12 @@ DllRedirector::DllRedirector() : first_module_handle_(NULL) {
   std::wstring beacon_name(kSharedMemoryName);
   beacon_name += GetHostProcessName(false);
   shared_memory_.reset(new base::SharedMemory(beacon_name));
-  shared_memory_name_ = base::WideToUTF8(beacon_name);
+  shared_memory_name_ = WideToUTF8(beacon_name);
 }
 
 DllRedirector::DllRedirector(const char* shared_memory_name)
     : shared_memory_name_(shared_memory_name), first_module_handle_(NULL) {
-  shared_memory_.reset(
-      new base::SharedMemory(base::ASCIIToWide(shared_memory_name)));
+  shared_memory_.reset(new base::SharedMemory(ASCIIToWide(shared_memory_name)));
 }
 
 DllRedirector::~DllRedirector() {
@@ -188,10 +187,9 @@ bool DllRedirector::RegisterAsFirstCFModule() {
       } else {
         char buffer[kSharedMemorySize] = {0};
         memcpy(buffer, shared_memory_->memory(), kSharedMemorySize - 1);
-        dll_version_.reset(new Version(buffer));
+        dll_version_.reset(Version::GetVersionFromString(buffer));
 
-        if (!dll_version_->IsValid() ||
-            dll_version_->Equals(*our_version.get())) {
+        if (!dll_version_.get() || dll_version_->Equals(*our_version.get())) {
           // If we either couldn't parse a valid version out of the shared
           // memory or we did parse a version and it is the same as our own,
           // then pretend we're first in to avoid trying to load any other DLLs.
@@ -244,14 +242,14 @@ Version* DllRedirector::GetCurrentModuleVersion() {
       FileVersionInfo::CreateFileVersionInfoForCurrentModule());
   DCHECK(file_version_info.get());
 
-  scoped_ptr<Version> current_version;
+  Version* current_version = NULL;
   if (file_version_info.get()) {
-     current_version.reset(
-         new Version(WideToASCII(file_version_info->file_version())));
-    DCHECK(current_version->IsValid());
+     current_version = Version::GetVersionFromString(
+         WideToASCII(file_version_info->file_version()));
+    DCHECK(current_version);
   }
 
-  return current_version.release();
+  return current_version;
 }
 
 HMODULE DllRedirector::GetFirstModule() {
@@ -279,15 +277,15 @@ HMODULE DllRedirector::LoadVersionedModule(Version* version) {
   system_buffer[0] = 0;
   if (GetModuleFileName(this_module, system_buffer,
                         arraysize(system_buffer)) != 0) {
-    base::FilePath module_path(system_buffer);
+    FilePath module_path(system_buffer);
 
     // For a module located in
     // Foo\XXXXXXXXX\<module>.dll, load
     // Foo\<version>\<module>.dll:
-    base::FilePath module_name = module_path.BaseName();
+    FilePath module_name = module_path.BaseName();
     module_path = module_path.DirName()
                              .DirName()
-                             .Append(base::ASCIIToWide(version->GetString()))
+                             .Append(ASCIIToWide(version->GetString()))
                              .Append(module_name);
 
     hmodule = LoadLibrary(module_path.value().c_str());

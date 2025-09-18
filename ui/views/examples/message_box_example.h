@@ -4,12 +4,13 @@
 
 #ifndef UI_VIEWS_EXAMPLES_MESSAGE_BOX_EXAMPLE_H_
 #define UI_VIEWS_EXAMPLES_MESSAGE_BOX_EXAMPLE_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/button/text_button.h"
 #include "ui/views/examples/example_base.h"
 
 namespace views {
@@ -28,7 +29,7 @@ class MessageBoxExample : public ExampleBase, public ButtonListener {
 
  private:
   // Overridden from ButtonListener:
-  virtual void ButtonPressed(Button* sender, const ui::Event& event) OVERRIDE;
+  virtual void ButtonPressed(Button* sender, const Event& event) OVERRIDE;
 
   // The MessageBoxView to be tested.
   MessageBoxView* message_box_view_;

@@ -24,17 +24,17 @@ import pyauto
 
 
 class ExtensionsPage(object):
-  """Access options in extensions page (chrome://extensions-frame)."""
+  """Access options in extensions page (chrome://settings/extensions)."""
 
-  _URL = 'chrome://extensions-frame'
+  _URL = 'chrome://settings/extensions'
 
   def __init__(self, driver):
     self._driver = driver
     self._driver.get(ExtensionsPage._URL)
 
   def CheckExtensionVisible(self, ext_id):
-    """Returns True if |ext_id| exists on page."""
-    return len(self._driver.find_elements_by_id(ext_id)) == 1
+    """Returns True if |ext_id| Enabled checkbox exists on page."""
+    return len(self._driver.find_elements_by_id('toggle-%s' % ext_id)) == 1
 
   def SetEnabled(self, ext_id, enabled):
     """Clicks on 'Enabled' checkbox for specified extension.
@@ -43,9 +43,7 @@ class ExtensionsPage(object):
       ext_id: Extension ID to be enabled or disabled.
       enabled: Boolean indicating whether |ext_id| is to be enabled or disabled.
     """
-    checkbox = self._driver.find_element_by_xpath(
-        '//*[@id="%s"]//*[@class="enable-controls"]//*[@type="checkbox"]' %
-        ext_id)
+    checkbox = self._driver.find_element_by_id('toggle-%s' % ext_id)
     if checkbox != enabled:
       checkbox.click()
     # Reload page to ensure that the UI is recreated.
@@ -60,8 +58,10 @@ class ExtensionsPage(object):
           disallowed in incognito.
     """
     checkbox = self._driver.find_element_by_xpath(
-        '//*[@id="%s"]//*[@class="incognito-control"]//*[@type="checkbox"]' %
-        ext_id)
+        '//*[@id="%s"][@type="checkbox"]' % ext_id)
+    # Expand extension and click on 'Allow in incognito'.
+    if not checkbox.is_displayed():
+      self._driver.find_element_by_id('%s_zippy' % ext_id).click()
     if checkbox.is_selected() != allowed:
       checkbox.click()
     # Reload page to ensure that the UI is recreated.
@@ -76,8 +76,10 @@ class ExtensionsPage(object):
           file URLs.
     """
     checkbox = self._driver.find_element_by_xpath(
-        '//*[@id="%s"]//*[@class="file-access-control"]//*[@type="checkbox"]' %
-        ext_id)
+        '(//*[@id="%s"][@type="checkbox"])[2]' % ext_id)
+    # Expand extension and click on 'Allow access to file URLs'.
+    if not checkbox.is_displayed():
+      self._driver.find_element_by_id('%s_zippy' % ext_id).click()
     if checkbox.is_selected() != allowed:
       checkbox.click()
 
@@ -254,13 +256,134 @@ class ExtensionsTest(pyauto.PyUITest):
 
     permissions_api = ext['api_permissions']
     print permissions_api
-    self.assertTrue(len(permissions_api) == 5 and
+    self.assertTrue(len(permissions_api) == 4 and
                     'bookmarks' in permissions_api and
-                    'bookmarkManagerPrivate' in permissions_api and
-                    'metricsPrivate' in permissions_api and
+                    'experimental' in permissions_api and
                     'systemPrivate' in permissions_api and
                     'tabs' in permissions_api,
-                    msg='Unexpected API permissions information.')
+                    msg='Unexpected host permissions information.')
+
+  def testSetExtensionStates(self):
+    """Test setting different extension states."""
+    ext_id = self._InstallExtensionCheckDefaults('google_talk.crx')
+
+    # Disable the extension and verify.
+    self.SetExtensionStateById(ext_id, enable=False, allow_in_incognito=False)
+    extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
+    self.assertFalse(extension['is_enabled'])
+
+    # Enable extension and verify.
+    self.SetExtensionStateById(ext_id, enable=True, allow_in_incognito=False)
+    extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
+    self.assertTrue(extension['is_enabled'])
+
+    # Allow extension in incognito mode and verify.
+    self.SetExtensionStateById(ext_id, enable=True, allow_in_incognito=True)
+    extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
+    self.assertTrue(extension['allowed_in_incognito'])
+
+    # Disallow extension in incognito mode and verify.
+    self.SetExtensionStateById(ext_id, enable=True, allow_in_incognito=False)
+    extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
+    self.assertFalse(extension['allowed_in_incognito'])
+
+  def testTriggerBrowserAction(self):
+    """Test triggering browser action."""
+    dir_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'trigger_actions',
+                     'browser_action'))
+    ext_id = self.InstallExtension(dir_path)
+
+    self.NavigateToURL(self.GetFileURLForDataPath('simple.html'))
+
+    self.TriggerBrowserActionById(ext_id)
+
+    # Verify that the browser action turned the background red.
+    self.assertTrue(self.WaitUntil(
+        lambda: self.GetDOMValue('document.body.style.backgroundColor'),
+        expect_retval='red'),
+        msg='Browser action was not triggered.')
+
+  def testTriggerBrowserActionWithPopup(self):
+    """Test triggering browser action that shows a popup."""
+    # Fails on Vista Chromium bot only.  crbug.com/106620
+    if (self.IsWinVista() and
+        self.GetBrowserInfo()['properties']['branding'] == 'Chromium'):
+      return
+    dir_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'trigger_actions',
+                     'browser_action_popup'))
+    ext_id = self.InstallExtension(dir_path)
+
+    self.TriggerBrowserActionById(ext_id)
+
+    # Verify that the extension popup is displayed.
+    popup = self.WaitUntilExtensionViewLoaded(
+        view_type='EXTENSION_POPUP')
+    self.assertTrue(popup,
+        msg='Browser action failed to display the popup (views=%s).' %
+        self.GetBrowserInfo()['extension_views'])
+
+  def testTriggerPageAction(self):
+    """Test triggering page action."""
+    dir_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'trigger_actions',
+                     'page_action'))
+    ext_id = self.InstallExtension(dir_path)
+
+    # Page action icon is displayed when a tab is created.
+    self.NavigateToURL(self.GetFileURLForDataPath('simple.html'))
+    self.AppendTab(pyauto.GURL('chrome://newtab'))
+    self.ActivateTab(0)
+    self.assertTrue(self.WaitUntil(
+        lambda: ext_id in
+        self.GetBrowserInfo()['windows'][0]['visible_page_actions']),
+        msg='Page action icon is not visible.')
+
+    self.TriggerPageActionById(ext_id)
+
+    # Verify that page action turned the background red.
+    self.assertTrue(self.WaitUntil(
+        lambda: self.GetDOMValue('document.body.style.backgroundColor'),
+        expect_retval='red'),
+        msg='Page action was not triggered.')
+
+  def testTriggerPageActionWithPopup(self):
+    """Test triggering page action that shows a popup."""
+    # Fails on Vista Chromium bot only.  crbug.com/106620
+    if (self.IsWinVista() and
+        self.GetBrowserInfo()['properties']['branding'] == 'Chromium'):
+      return
+    dir_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'trigger_actions',
+                     'page_action_popup'))
+    ext_id = self.InstallExtension(dir_path)
+
+    # Page action icon is displayed when a tab is created.
+    self.AppendTab(pyauto.GURL('chrome://newtab'))
+    self.ActivateTab(0)
+    self.assertTrue(self.WaitUntil(
+        lambda: ext_id in
+        self.GetBrowserInfo()['windows'][0]['visible_page_actions']),
+        msg='Page action icon is not visible.')
+
+    self.TriggerPageActionById(ext_id)
+
+    # Verify that the extension popup is displayed.
+    popup = self.WaitUntilExtensionViewLoaded(
+        view_type='EXTENSION_POPUP')
+    self.assertTrue(popup,
+        msg='Page action failed to display the popup (views=%s).' %
+        self.GetBrowserInfo()['extension_views'])
+
+  def testAdblockExtensionCrash(self):
+    """Test AdBlock extension does not cause a browser crash."""
+    ext_id = self._InstallExtensionCheckDefaults('adblock.crx')
+
+    self.RestartBrowser(clear_profile=False)
+    extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
+    self.assertTrue(extension['is_enabled'])
+    self.assertFalse(extension['allowed_in_incognito'])
 
   def testDisableEnableExtension(self):
     """Tests that an extension can be disabled and enabled with the UI."""

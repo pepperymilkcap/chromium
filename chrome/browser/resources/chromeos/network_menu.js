@@ -300,13 +300,13 @@ NetworkMenuItem.prototype = {
     if (attrs.font) {
       this.label_.style.font = attrs.font;
 
-      var baseFont = attrs.font.replace(/bold/, '').replace(/italic/, '');
-      this.status_.style.font = baseFont;
-      this.action_.style.font = baseFont;
+      var base_font = attrs.font.replace(/bold/, '').replace(/italic/, '');
+      this.status_.style.font = base_font;
+      this.action_.style.font = base_font;
     }
   },
 
-  /** @override */
+  /** @inheritDoc */
   activate: function() {
     // Close action area and connect if it is visible.
     if (this.isActionVisible_()) {
@@ -334,7 +334,7 @@ var NetworkMenu = cr.ui.define('div');
 NetworkMenu.prototype = {
   __proto__: Menu.prototype,
 
-  /** @override */
+  /** @inheritDoc */
   createMenuItem: function(attrs) {
     if (attrs.type == 'command') {
       return new NetworkMenuItem();
@@ -343,7 +343,7 @@ NetworkMenu.prototype = {
     }
   },
 
-  /** @override */
+  /** @inheritDoc */
   onClick_: function(event, item) {
     // If item is a NetworkMenuItem, it must have at least one of the following.
     if (item.autoConnectCheckbox || item.ssidEdit || item.passwordEdit) {

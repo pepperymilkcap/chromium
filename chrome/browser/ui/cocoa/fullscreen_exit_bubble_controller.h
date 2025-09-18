@@ -1,12 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_exit_bubble_type.h"
-#include "url/gurl.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
+#include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
+#include "googleurl/src/gurl.h"
 
 @class BrowserWindowController;
 class Browser;
@@ -21,6 +22,7 @@ class Browser;
   BrowserWindowController* owner_;  // weak
   Browser* browser_; // weak
   GURL url_;
+  BOOL showButtons_;
   FullscreenExitBubbleType bubbleType_;
 
  @protected
@@ -34,10 +36,10 @@ class Browser;
   // text views cannot conveniently be created in IB. The xib file contains
   // a text field |exitLabelPlaceholder_| that's replaced by this text view
   // |exitLabel_| in -awakeFromNib.
-  base::scoped_nsobject<NSTextView> exitLabel_;
+  scoped_nsobject<NSTextView> exitLabel_;
 
-  base::scoped_nsobject<NSTimer> hideTimer_;
-  base::scoped_nsobject<NSAnimation> hideAnimation_;
+  scoped_nsobject<NSTimer> hideTimer_;
+  scoped_nsobject<NSAnimation> hideAnimation_;
 };
 
 // Initializes a new InfoBarController.
@@ -54,5 +56,9 @@ class Browser;
 
 // Positions the fullscreen exit bubble in the top-center of the window.
 - (void)positionInWindowAtTop:(CGFloat)maxY width:(CGFloat)maxWidth;
+
+// Updates the bubble contents with |url| and |bubbleType|.
+- (void)updateURL:(const GURL&)url
+       bubbleType:(FullscreenExitBubbleType)bubbleType;
 
 @end

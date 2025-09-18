@@ -37,11 +37,12 @@ class PRINTING_EXPORT PrintingContextGtk : public PrintingContext {
       int max_pages,
       bool has_selection,
       const PrintSettingsCallback& callback) OVERRIDE;
-  virtual gfx::Size GetPdfPaperSizeDeviceUnits() OVERRIDE;
   virtual Result UseDefaultSettings() OVERRIDE;
-  virtual Result UpdatePrinterSettings(bool external_preview) OVERRIDE;
+  virtual Result UpdatePrinterSettings(
+      const base::DictionaryValue& job_settings,
+      const PageRanges& ranges) OVERRIDE;
   virtual Result InitWithSettings(const PrintSettings& settings) OVERRIDE;
-  virtual Result NewDocument(const base::string16& document_name) OVERRIDE;
+  virtual Result NewDocument(const string16& document_name) OVERRIDE;
   virtual Result NewPage() OVERRIDE;
   virtual Result PageDone() OVERRIDE;
   virtual Result DocumentDone() OVERRIDE;
@@ -50,7 +51,7 @@ class PRINTING_EXPORT PrintingContextGtk : public PrintingContext {
   virtual gfx::NativeDrawingContext context() const OVERRIDE;
 
  private:
-  base::string16 document_name_;
+  string16 document_name_;
   PrintDialogGtkInterface* print_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintingContextGtk);

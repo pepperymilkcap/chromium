@@ -4,9 +4,10 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_TREE_MODEL_H_
 #define CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_TREE_MODEL_H_
+#pragma once
 
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 class BookmarkModel;
 class BookmarkNode;
@@ -18,6 +19,8 @@ typedef struct _GtkTreeStore GtkTreeStore;
 typedef struct _GtkTreeView GtkTreeView;
 typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GtkWidget GtkWidget;
+
+namespace bookmark_utils {
 
 enum FolderTreeStoreColumns {
   FOLDER_ICON,
@@ -67,6 +70,8 @@ const BookmarkNode* CommitTreeStoreDifferencesBetween(
 int64 GetIdFromTreeIter(GtkTreeModel* model, GtkTreeIter* iter);
 
 // Returns the title field in utf8 of the row pointed to by |iter|.
-base::string16 GetTitleFromTreeIter(GtkTreeModel* model, GtkTreeIter* iter);
+string16 GetTitleFromTreeIter(GtkTreeModel* model, GtkTreeIter* iter);
+
+}  // namespace bookmark_utils
 
 #endif  // CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_TREE_MODEL_H_

@@ -4,9 +4,9 @@
 
 #ifndef UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_WRAPPER_H_
 #define UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_WRAPPER_H_
+#pragma once
 
 #include "ui/gfx/native_widget_types.h"
-#include "ui/views/views_export.h"
 
 namespace views {
 
@@ -15,14 +15,14 @@ class NativeViewHost;
 // An interface that implemented by an object that wraps a gfx::NativeView on
 // a specific platform, used to perform platform specific operations on that
 // native view when attached, detached, moved and sized.
-class VIEWS_EXPORT NativeViewHostWrapper {
+class NativeViewHostWrapper {
  public:
   virtual ~NativeViewHostWrapper() {}
 
-  // Called right before a gfx::NativeView is attached to the associated
+  // Called when a gfx::NativeView has been attached to the associated
   // NativeViewHost, allowing the wrapper to perform platform-specific
   // initialization.
-  virtual void NativeViewWillAttach() = 0;
+  virtual void NativeViewAttached() = 0;
 
   // Called before the attached gfx::NativeView is detached from the
   // NativeViewHost, allowing the wrapper to perform platform-specific

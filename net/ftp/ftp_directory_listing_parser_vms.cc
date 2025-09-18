@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 
 #include <vector>
 
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "net/ftp/ftp_directory_listing_parser.h"
 #include "net/ftp/ftp_util.h"
 
@@ -20,12 +20,11 @@ namespace {
 
 // Converts the filename component in listing to the filename we can display.
 // Returns true on success.
-bool ParseVmsFilename(const base::string16& raw_filename,
-                      base::string16* parsed_filename,
+bool ParseVmsFilename(const string16& raw_filename, string16* parsed_filename,
                       FtpDirectoryListingEntry::Type* type) {
   // On VMS, the files and directories are versioned. The version number is
   // separated from the file name by a semicolon. Example: ANNOUNCE.TXT;2.
-  std::vector<base::string16> listing_parts;
+  std::vector<string16> listing_parts;
   base::SplitString(raw_filename, ';', &listing_parts);
   if (listing_parts.size() != 2)
     return false;
@@ -39,7 +38,7 @@ bool ParseVmsFilename(const base::string16& raw_filename,
   // for directories; it's awkward for non-VMS users. Also, VMS is
   // case-insensitive, but generally uses uppercase characters. This may look
   // awkward, so we convert them to lower case.
-  std::vector<base::string16> filename_parts;
+  std::vector<string16> filename_parts;
   base::SplitString(listing_parts[0], '.', &filename_parts);
   if (filename_parts.size() != 2)
     return false;
@@ -53,26 +52,18 @@ bool ParseVmsFilename(const base::string16& raw_filename,
   return true;
 }
 
-bool ParseVmsFilesize(const base::string16& input, int64* size) {
-  if (ContainsOnlyChars(input, base::ASCIIToUTF16("*"))) {
-    // Response consisting of asterisks means unknown size.
-    *size = -1;
-    return true;
-  }
-
+bool ParseVmsFilesize(const string16& input, int64* size) {
   // VMS's directory listing gives us file size in blocks. We assume that
   // the block size is 512 bytes. It doesn't give accurate file size, but is the
   // best information we have.
   const int kBlockSize = 512;
 
   if (base::StringToInt64(input, size)) {
-    if (*size < 0)
-      return false;
     *size *= kBlockSize;
     return true;
   }
 
-  std::vector<base::string16> parts;
+  std::vector<string16> parts;
   base::SplitString(input, '/', &parts);
   if (parts.size() != 2)
     return false;
@@ -84,21 +75,19 @@ bool ParseVmsFilesize(const base::string16& input, int64* size) {
     return false;
   if (blocks_used > blocks_allocated)
     return false;
-  if (blocks_used < 0 || blocks_allocated < 0)
-    return false;
 
   *size = blocks_used * kBlockSize;
   return true;
 }
 
-bool LooksLikeVmsFileProtectionListingPart(const base::string16& input) {
+bool LooksLikeVmsFileProtectionListingPart(const string16& input) {
   if (input.length() > 4)
     return false;
 
   // On VMS there are four different permission bits: Read, Write, Execute,
   // and Delete. They appear in that order in the permission listing.
   std::string pattern("RWED");
-  base::string16 match(input);
+  string16 match(input);
   while (!match.empty() && !pattern.empty()) {
     if (match[0] == pattern[0])
       match = match.substr(1);
@@ -107,7 +96,7 @@ bool LooksLikeVmsFileProtectionListingPart(const base::string16& input) {
   return match.empty();
 }
 
-bool LooksLikeVmsFileProtectionListing(const base::string16& input) {
+bool LooksLikeVmsFileProtectionListing(const string16& input) {
   if (input.length() < 2)
     return false;
   if (input[0] != '(' || input[input.length() - 1] != ')')
@@ -115,7 +104,7 @@ bool LooksLikeVmsFileProtectionListing(const base::string16& input) {
 
   // We expect four parts of the file protection listing: for System, Owner,
   // Group, and World.
-  std::vector<base::string16> parts;
+  std::vector<string16> parts;
   base::SplitString(input.substr(1, input.length() - 2), ',', &parts);
   if (parts.size() != 4)
     return false;
@@ -126,37 +115,34 @@ bool LooksLikeVmsFileProtectionListing(const base::string16& input) {
       LooksLikeVmsFileProtectionListingPart(parts[3]);
 }
 
-bool LooksLikeVmsUserIdentificationCode(const base::string16& input) {
+bool LooksLikeVmsUserIdentificationCode(const string16& input) {
   if (input.length() < 2)
     return false;
   return input[0] == '[' && input[input.length() - 1] == ']';
 }
 
-bool LooksLikeVMSError(const base::string16& text) {
+bool LooksLikePermissionDeniedError(const string16& text) {
   static const char* kPermissionDeniedMessages[] = {
-    "%RMS-E-FNF",  // File not found.
-    "%RMS-E-PRV",  // Access denied.
-    "%SYSTEM-F-NOPRIV",
+    "%RMS-E-PRV",
     "privilege",
   };
 
   for (size_t i = 0; i < arraysize(kPermissionDeniedMessages); i++) {
-    if (text.find(base::ASCIIToUTF16(kPermissionDeniedMessages[i])) !=
-        base::string16::npos)
+    if (text.find(ASCIIToUTF16(kPermissionDeniedMessages[i])) != string16::npos)
       return true;
   }
 
   return false;
 }
 
-bool VmsDateListingToTime(const std::vector<base::string16>& columns,
+bool VmsDateListingToTime(const std::vector<string16>& columns,
                           base::Time* time) {
   DCHECK_EQ(4U, columns.size());
 
   base::Time::Exploded time_exploded = { 0 };
 
   // Date should be in format DD-MMM-YYYY.
-  std::vector<base::string16> date_parts;
+  std::vector<string16> date_parts;
   base::SplitString(columns[2], '-', &date_parts);
   if (date_parts.size() != 3)
     return false;
@@ -170,14 +156,14 @@ bool VmsDateListingToTime(const std::vector<base::string16>& columns,
 
   // Time can be in format HH:MM, HH:MM:SS, or HH:MM:SS.mm. Try to recognize the
   // last type first. Do not parse the seconds, they will be ignored anyway.
-  base::string16 time_column(columns[3]);
+  string16 time_column(columns[3]);
   if (time_column.length() == 11 && time_column[8] == '.')
     time_column = time_column.substr(0, 8);
   if (time_column.length() == 8 && time_column[5] == ':')
     time_column = time_column.substr(0, 5);
   if (time_column.length() != 5)
     return false;
-  std::vector<base::string16> time_parts;
+  std::vector<string16> time_parts;
   base::SplitString(time_column, ':', &time_parts);
   if (time_parts.size() != 2)
     return false;
@@ -194,23 +180,18 @@ bool VmsDateListingToTime(const std::vector<base::string16>& columns,
 }  // namespace
 
 bool ParseFtpDirectoryListingVms(
-    const std::vector<base::string16>& lines,
+    const std::vector<string16>& lines,
     std::vector<FtpDirectoryListingEntry>* entries) {
   // The first non-empty line is the listing header. It often
   // starts with "Directory ", but not always. We set a flag after
   // seing the header.
   bool seen_header = false;
 
-  // Sometimes the listing doesn't end with a "Total" line, but
-  // it's only okay when it contains some errors (it's needed
-  // to distinguish it from "ls -l" format).
-  bool seen_error = false;
-
   for (size_t i = 0; i < lines.size(); i++) {
     if (lines[i].empty())
       continue;
 
-    if (StartsWith(lines[i], base::ASCIIToUTF16("Total of "), true)) {
+    if (StartsWith(lines[i], ASCIIToUTF16("Total of "), true)) {
       // After the "total" line, all following lines must be empty.
       for (size_t j = i + 1; j < lines.size(); j++)
         if (!lines[j].empty())
@@ -224,12 +205,10 @@ bool ParseFtpDirectoryListingVms(
       continue;
     }
 
-    if (LooksLikeVMSError(lines[i])) {
-      seen_error = true;
+    if (LooksLikePermissionDeniedError(lines[i]))
       continue;
-    }
 
-    std::vector<base::string16> columns;
+    std::vector<string16> columns;
     base::SplitString(CollapseWhitespace(lines[i], false), ' ', &columns);
 
     if (columns.size() == 1) {
@@ -237,21 +216,14 @@ bool ParseFtpDirectoryListingVms(
       if (i == lines.size() - 1)
         return false;
 
-      // Skip the next line.
-      i++;
-
-      // This refers to the continuation line.
-      if (LooksLikeVMSError(lines[i])) {
-        seen_error = true;
-        continue;
-      }
-
       // Join the current and next line and split them into columns.
+      columns.clear();
       base::SplitString(
-          CollapseWhitespace(lines[i - 1] + base::ASCIIToUTF16(" ") + lines[i],
+          CollapseWhitespace(lines[i] + ASCIIToUTF16(" ") + lines[i + 1],
                              false),
           ' ',
           &columns);
+      i++;
     }
 
     FtpDirectoryListingEntry entry;
@@ -276,6 +248,8 @@ bool ParseFtpDirectoryListingVms(
 
     if (!ParseVmsFilesize(columns[1], &entry.size))
       return false;
+    if (entry.size < 0)
+      return false;
     if (entry.type != FtpDirectoryListingEntry::FILE)
       entry.size = -1;
     if (!VmsDateListingToTime(columns, &entry.last_modified))
@@ -285,9 +259,8 @@ bool ParseFtpDirectoryListingVms(
   }
 
   // The only place where we return true is after receiving the "Total" line,
-  // that should be present in every VMS listing. Alternatively, if the listing
-  // contains error messages, it's OK not to have the "Total" line.
-  return seen_error;
+  // that should be present in every VMS listing.
+  return false;
 }
 
 }  // namespace net

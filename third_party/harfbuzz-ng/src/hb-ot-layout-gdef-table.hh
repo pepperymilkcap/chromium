@@ -1,6 +1,6 @@
 /*
  * Copyright © 2007,2008,2009  Red Hat, Inc.
- * Copyright © 2010,2011,2012  Google, Inc.
+ * Copyright © 2010,2011  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -34,8 +34,6 @@
 #include "hb-font-private.hh"
 
 
-namespace OT {
-
 
 /*
  * Attachment List Table
@@ -51,7 +49,7 @@ struct AttachList
 					 unsigned int *point_count /* IN/OUT */,
 					 unsigned int *point_array /* OUT */) const
   {
-    unsigned int index = (this+coverage).get_coverage (glyph_id);
+    unsigned int index = (this+coverage) (glyph_id);
     if (index == NOT_COVERED)
     {
       if (point_count)
@@ -72,11 +70,12 @@ struct AttachList
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (coverage.sanitize (c, this) && attachPoint.sanitize (c, this));
+    TRACE_SANITIZE ();
+    return coverage.sanitize (c, this)
+	&& attachPoint.sanitize (c, this);
   }
 
-  protected:
+  private:
   OffsetTo<Coverage>
 		coverage;		/* Offset to Coverage table -- from
 					 * beginning of AttachList table */
@@ -102,11 +101,11 @@ struct CaretValueFormat1
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (c->check_struct (this));
+    TRACE_SANITIZE ();
+    return c->check_struct (this);
   }
 
-  protected:
+  private:
   USHORT	caretValueFormat;	/* Format identifier--format = 1 */
   SHORT		coordinate;		/* X or Y value, in design units */
   public:
@@ -121,18 +120,18 @@ struct CaretValueFormat2
   inline hb_position_t get_caret_value (hb_font_t *font, hb_direction_t direction, hb_codepoint_t glyph_id) const
   {
     hb_position_t x, y;
-    if (font->get_glyph_contour_point_for_origin (glyph_id, caretValuePoint, direction, &x, &y))
+    if (hb_font_get_glyph_contour_point_for_origin (font, glyph_id, caretValuePoint, direction, &x, &y))
       return HB_DIRECTION_IS_HORIZONTAL (direction) ? x : y;
     else
       return 0;
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (c->check_struct (this));
+    TRACE_SANITIZE ();
+    return c->check_struct (this);
   }
 
-  protected:
+  private:
   USHORT	caretValueFormat;	/* Format identifier--format = 2 */
   USHORT	caretValuePoint;	/* Contour point index on glyph */
   public:
@@ -151,11 +150,12 @@ struct CaretValueFormat3
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (c->check_struct (this) && deviceTable.sanitize (c, this));
+    TRACE_SANITIZE ();
+    return c->check_struct (this)
+	&& deviceTable.sanitize (c, this);
   }
 
-  protected:
+  private:
   USHORT	caretValueFormat;	/* Format identifier--format = 3 */
   SHORT		coordinate;		/* X or Y value, in design units */
   OffsetTo<Device>
@@ -179,17 +179,17 @@ struct CaretValue
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    if (!u.format.sanitize (c)) return TRACE_RETURN (false);
+    TRACE_SANITIZE ();
+    if (!u.format.sanitize (c)) return false;
     switch (u.format) {
-    case 1: return TRACE_RETURN (u.format1.sanitize (c));
-    case 2: return TRACE_RETURN (u.format2.sanitize (c));
-    case 3: return TRACE_RETURN (u.format3.sanitize (c));
-    default:return TRACE_RETURN (true);
+    case 1: return u.format1.sanitize (c);
+    case 2: return u.format2.sanitize (c);
+    case 3: return u.format3.sanitize (c);
+    default:return true;
     }
   }
 
-  protected:
+  private:
   union {
   USHORT		format;		/* Format identifier */
   CaretValueFormat1	format1;
@@ -220,11 +220,11 @@ struct LigGlyph
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (carets.sanitize (c, this));
+    TRACE_SANITIZE ();
+    return carets.sanitize (c, this);
   }
 
-  protected:
+  private:
   OffsetArrayOf<CaretValue>
 		carets;			/* Offset array of CaretValue tables
 					 * --from beginning of LigGlyph table
@@ -242,7 +242,7 @@ struct LigCaretList
 				      unsigned int *caret_count /* IN/OUT */,
 				      hb_position_t *caret_array /* OUT */) const
   {
-    unsigned int index = (this+coverage).get_coverage (glyph_id);
+    unsigned int index = (this+coverage) (glyph_id);
     if (index == NOT_COVERED)
     {
       if (caret_count)
@@ -254,11 +254,12 @@ struct LigCaretList
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (coverage.sanitize (c, this) && ligGlyph.sanitize (c, this));
+    TRACE_SANITIZE ();
+    return coverage.sanitize (c, this)
+	&& ligGlyph.sanitize (c, this);
   }
 
-  protected:
+  private:
   OffsetTo<Coverage>
 		coverage;		/* Offset to Coverage table--from
 					 * beginning of LigCaretList table */
@@ -276,11 +277,11 @@ struct MarkGlyphSetsFormat1
   { return (this+coverage[set_index]).get_coverage (glyph_id) != NOT_COVERED; }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (coverage.sanitize (c, this));
+    TRACE_SANITIZE ();
+    return coverage.sanitize (c, this);
   }
 
-  protected:
+  private:
   USHORT	format;			/* Format identifier--format = 1 */
   LongOffsetArrayOf<Coverage>
 		coverage;		/* Array of long offsets to mark set
@@ -300,15 +301,15 @@ struct MarkGlyphSets
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    if (!u.format.sanitize (c)) return TRACE_RETURN (false);
+    TRACE_SANITIZE ();
+    if (!u.format.sanitize (c)) return false;
     switch (u.format) {
-    case 1: return TRACE_RETURN (u.format1.sanitize (c));
-    default:return TRACE_RETURN (true);
+    case 1: return u.format1.sanitize (c);
+    default:return true;
     }
   }
 
-  protected:
+  private:
   union {
   USHORT		format;		/* Format identifier */
   MarkGlyphSetsFormat1	format1;
@@ -324,9 +325,9 @@ struct MarkGlyphSets
 
 struct GDEF
 {
-  static const hb_tag_t tableTag	= HB_OT_TAG_GDEF;
+  static const hb_tag_t Tag	= HB_OT_TAG_GDEF;
 
-  enum GlyphClasses {
+  enum {
     UnclassifiedGlyph	= 0,
     BaseGlyph		= 1,
     LigatureGlyph	= 2,
@@ -337,8 +338,6 @@ struct GDEF
   inline bool has_glyph_classes (void) const { return glyphClassDef != 0; }
   inline unsigned int get_glyph_class (hb_codepoint_t glyph) const
   { return (this+glyphClassDef).get_class (glyph); }
-  inline void get_glyphs_in_class (unsigned int klass, hb_set_t *glyphs) const
-  { (this+glyphClassDef).add_class (glyphs, klass); }
 
   inline bool has_mark_attachment_types (void) const { return markAttachClassDef != 0; }
   inline unsigned int get_mark_attachment_type (hb_codepoint_t glyph) const
@@ -365,14 +364,13 @@ struct GDEF
   { return version.to_int () >= 0x00010002 && (this+markGlyphSetsDef[0]).covers (set_index, glyph_id); }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (version.sanitize (c) &&
-			 likely (version.major == 1) &&
-			 glyphClassDef.sanitize (c, this) &&
-			 attachList.sanitize (c, this) &&
-			 ligCaretList.sanitize (c, this) &&
-			 markAttachClassDef.sanitize (c, this) &&
-			 (version.to_int () < 0x00010002 || markGlyphSetsDef[0].sanitize (c, this)));
+    TRACE_SANITIZE ();
+    return version.sanitize (c) && likely (version.major == 1)
+	&& glyphClassDef.sanitize (c, this)
+	&& attachList.sanitize (c, this)
+	&& ligCaretList.sanitize (c, this)
+	&& markAttachClassDef.sanitize (c, this)
+	&& (version.to_int () < 0x00010002 || markGlyphSetsDef[0].sanitize (c, this));
   }
 
 
@@ -383,22 +381,20 @@ struct GDEF
   {
     unsigned int klass = get_glyph_class (glyph);
 
-    ASSERT_STATIC ((unsigned int) HB_OT_LAYOUT_GLYPH_PROPS_BASE_GLYPH == (unsigned int) LookupFlag::IgnoreBaseGlyphs);
-    ASSERT_STATIC ((unsigned int) HB_OT_LAYOUT_GLYPH_PROPS_LIGATURE == (unsigned int) LookupFlag::IgnoreLigatures);
-    ASSERT_STATIC ((unsigned int) HB_OT_LAYOUT_GLYPH_PROPS_MARK == (unsigned int) LookupFlag::IgnoreMarks);
-
     switch (klass) {
-    default:			return 0;
-    case BaseGlyph:		return HB_OT_LAYOUT_GLYPH_PROPS_BASE_GLYPH;
-    case LigatureGlyph:		return HB_OT_LAYOUT_GLYPH_PROPS_LIGATURE;
+    default:
+    case UnclassifiedGlyph:	return HB_OT_LAYOUT_GLYPH_CLASS_UNCLASSIFIED;
+    case BaseGlyph:		return HB_OT_LAYOUT_GLYPH_CLASS_BASE_GLYPH;
+    case LigatureGlyph:		return HB_OT_LAYOUT_GLYPH_CLASS_LIGATURE;
+    case ComponentGlyph:	return HB_OT_LAYOUT_GLYPH_CLASS_COMPONENT;
     case MarkGlyph:
 	  klass = get_mark_attachment_type (glyph);
-	  return HB_OT_LAYOUT_GLYPH_PROPS_MARK | (klass << 8);
+	  return HB_OT_LAYOUT_GLYPH_CLASS_MARK | (klass << 8);
     }
   }
 
 
-  protected:
+  private:
   FixedVersion	version;		/* Version of the GDEF table--currently
 					 * 0x00010002 */
   OffsetTo<ClassDef>
@@ -426,8 +422,6 @@ struct GDEF
   DEFINE_SIZE_ARRAY (12, markGlyphSetsDef);
 };
 
-
-} /* namespace OT */
 
 
 #endif /* HB_OT_LAYOUT_GDEF_TABLE_HH */

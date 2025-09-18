@@ -1,15 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/applescript/bookmark_node_applescript.h"
 
 #include "base/logging.h"
-#import "base/mac/scoped_nsobject.h"
-#include "base/strings/sys_string_conversions.h"
+#import "base/memory/scoped_nsobject.h"
+#include "base/sys_string_conversions.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/applescript/bookmark_item_applescript.h"
@@ -31,7 +30,7 @@
       return nil;
     }
 
-    base::scoped_nsobject<NSNumber> numID(
+    scoped_nsobject<NSNumber> numID(
         [[NSNumber alloc] initWithLongLong:model->next_node_id()]);
     [self setUniqueID:numID];
     [self setTempTitle:@""];
@@ -58,7 +57,7 @@
     // and this particular bookmark item/folder is never returned.
     bookmarkNode_ = aBookmarkNode;
 
-    base::scoped_nsobject<NSNumber> numID(
+    scoped_nsobject<NSNumber>  numID(
         [[NSNumber alloc] initWithLongLong:aBookmarkNode->id()]);
     [self setUniqueID:numID];
   }
@@ -73,7 +72,7 @@
   // and this particular bookmark item/folder is never returned.
   bookmarkNode_ = aBookmarkNode;
 
-  base::scoped_nsobject<NSNumber> numID(
+  scoped_nsobject<NSNumber> numID(
       [[NSNumber alloc] initWithLongLong:aBookmarkNode->id()]);
   [self setUniqueID:numID];
 
@@ -119,8 +118,8 @@
     return NULL;
   }
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(lastProfile);
-  if (!model->loaded()) {
+  BookmarkModel* model = lastProfile->GetBookmarkModel();
+  if (!model->IsLoaded()) {
     AppleScript::SetError(AppleScript::errBookmarkModelLoad);
     return NULL;
   }

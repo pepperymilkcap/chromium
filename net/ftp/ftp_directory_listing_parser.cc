@@ -4,14 +4,11 @@
 
 #include "net/ftp/ftp_directory_listing_parser.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/i18n/icu_encoding_detection.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/stl_util.h"
-#include "base/strings/string_util.h"
-#include "base/strings/string_split.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
 #include "net/base/net_errors.h"
 #include "net/ftp/ftp_directory_listing_parser_ls.h"
 #include "net/ftp/ftp_directory_listing_parser_netware.h"
@@ -41,48 +38,44 @@ int FillInRawName(const std::string& encoding,
 
 // Parses |text| as an FTP directory listing. Fills in |entries|
 // and |server_type| and returns network error code.
-int ParseListing(const base::string16& text,
-                 const base::string16& newline_separator,
+int ParseListing(const string16& text,
                  const std::string& encoding,
                  const base::Time& current_time,
                  std::vector<FtpDirectoryListingEntry>* entries,
                  FtpServerType* server_type) {
-  std::vector<base::string16> lines;
-  base::SplitStringUsingSubstr(text, newline_separator, &lines);
+  std::vector<string16> lines;
+  base::SplitString(text, '\n', &lines);
 
-  struct {
-    base::Callback<bool(void)> callback;
-    FtpServerType server_type;
-  } parsers[] = {
-    {
-      base::Bind(&ParseFtpDirectoryListingLs, lines, current_time, entries),
-      SERVER_LS
-    },
-    {
-      base::Bind(&ParseFtpDirectoryListingWindows, lines, entries),
-      SERVER_WINDOWS
-    },
-    {
-      base::Bind(&ParseFtpDirectoryListingVms, lines, entries),
-      SERVER_VMS
-    },
-    {
-      base::Bind(&ParseFtpDirectoryListingNetware,
-                 lines, current_time, entries),
-      SERVER_NETWARE
-    },
-    {
-      base::Bind(&ParseFtpDirectoryListingOS2, lines, entries),
-      SERVER_OS2
-    }
-  };
+  // TODO(phajdan.jr): Use a table of callbacks instead of repeating code.
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(parsers); i++) {
-    entries->clear();
-    if (parsers[i].callback.Run()) {
-      *server_type = parsers[i].server_type;
-      return FillInRawName(encoding, entries);
-    }
+  entries->clear();
+  if (ParseFtpDirectoryListingLs(lines, current_time, entries)) {
+    *server_type = SERVER_LS;
+    return FillInRawName(encoding, entries);
+  }
+
+  entries->clear();
+  if (ParseFtpDirectoryListingWindows(lines, entries)) {
+    *server_type = SERVER_WINDOWS;
+    return FillInRawName(encoding, entries);
+  }
+
+  entries->clear();
+  if (ParseFtpDirectoryListingVms(lines, entries)) {
+    *server_type = SERVER_VMS;
+    return FillInRawName(encoding, entries);
+  }
+
+  entries->clear();
+  if (ParseFtpDirectoryListingNetware(lines, current_time, entries)) {
+    *server_type = SERVER_NETWARE;
+    return FillInRawName(encoding, entries);
+  }
+
+  entries->clear();
+  if (ParseFtpDirectoryListingOS2(lines, entries)) {
+    *server_type = SERVER_OS2;
+    return FillInRawName(encoding, entries);
   }
 
   entries->clear();
@@ -95,29 +88,24 @@ int DecodeAndParse(const std::string& text,
                    const base::Time& current_time,
                    std::vector<FtpDirectoryListingEntry>* entries,
                    FtpServerType* server_type) {
-  const char* kNewlineSeparators[] = { "\n", "\r\n" };
-
   std::vector<std::string> encodings;
   if (!base::DetectAllEncodings(text, &encodings))
     return ERR_ENCODING_DETECTION_FAILED;
 
   // Use first encoding that can be used to decode the text.
   for (size_t i = 0; i < encodings.size(); i++) {
-    base::string16 converted_text;
+    string16 converted_text;
     if (base::CodepageToUTF16(text,
                               encodings[i].c_str(),
                               base::OnStringConversionError::FAIL,
                               &converted_text)) {
-      for (size_t j = 0; j < arraysize(kNewlineSeparators); j++) {
-        int rv = ParseListing(converted_text,
-                              base::ASCIIToUTF16(kNewlineSeparators[j]),
-                              encodings[i],
-                              current_time,
-                              entries,
-                              server_type);
-        if (rv == OK)
-          return rv;
-      }
+      int rv = ParseListing(converted_text,
+                            encodings[i],
+                            current_time,
+                            entries,
+                            server_type);
+      if (rv == OK)
+        return rv;
     }
   }
 

@@ -21,21 +21,19 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/process/kill.h"
-#include "base/process/launch.h"
-#include "base/process/process_handle.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/process_util.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
-#include "net/base/io_buffer.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
+#include "net/base/io_buffer.h"
 #include "net/disk_cache/backend_impl.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/disk_cache_test_util.h"
@@ -53,7 +51,7 @@ const int kExpectedCrash = 100;
 
 // Starts a new process.
 int RunSlave(int iteration) {
-  base::FilePath exe;
+  FilePath exe;
   PathService::Get(base::FILE_EXE, &exe);
 
   CommandLine cmdline(exe);
@@ -103,19 +101,15 @@ std::string GenerateStressKey() {
 void StressTheCache(int iteration) {
   int cache_size = 0x2000000;  // 32MB.
   uint32 mask = 0xfff;  // 4096 entries.
-
-  base::FilePath path;
-  PathService::Get(base::DIR_TEMP, &path);
-  path = path.AppendASCII("cache_test_stress");
+  FilePath path = GetCacheFilePath().InsertBeforeExtensionASCII("_stress");
 
   base::Thread cache_thread("CacheThread");
   if (!cache_thread.StartWithOptions(
-          base::Thread::Options(base::MessageLoop::TYPE_IO, 0)))
+          base::Thread::Options(MessageLoop::TYPE_IO, 0)))
     return;
 
   disk_cache::BackendImpl* cache =
-      new disk_cache::BackendImpl(path, mask,
-                                  cache_thread.message_loop_proxy().get(),
+      new disk_cache::BackendImpl(path, mask, cache_thread.message_loop_proxy(),
                                   NULL);
   cache->SetMaxSize(cache_size);
   cache->SetFlags(disk_cache::kNoLoadProtection);
@@ -155,7 +149,7 @@ void StressTheCache(int iteration) {
   for (int i = 0;; i++) {
     int slot = rand() % kNumEntries;
     int key = rand() % kNumKeys;
-    bool truncate = (rand() % 2 == 0);
+    bool truncate = rand() % 2 ? false : true;
     int size = kSize - (rand() % 20) * kSize / 20;
 
     if (entries[slot])
@@ -171,8 +165,7 @@ void StressTheCache(int iteration) {
     base::snprintf(buffer->data(), kSize,
                    "i: %d iter: %d, size: %d, truncate: %d     ", i, iteration,
                    size, truncate ? 1 : 0);
-    rv = entries[slot]->WriteData(0, 0, buffer.get(), size, cb.callback(),
-                                  truncate);
+    rv = entries[slot]->WriteData(0, 0, buffer, size, cb.callback(), truncate);
     CHECK_EQ(size, cb.GetResult(rv));
 
     if (rand() % 100 > 80) {
@@ -192,11 +185,11 @@ void StressTheCache(int iteration) {
 bool g_crashing = false;
 
 // RunSoon() and CrashCallback() reference each other, unfortunately.
-void RunSoon(base::MessageLoop* target_loop);
+void RunSoon(MessageLoop* target_loop);
 
 void CrashCallback() {
   // Keep trying to run.
-  RunSoon(base::MessageLoop::current());
+  RunSoon(MessageLoop::current());
 
   if (g_crashing)
     return;
@@ -214,8 +207,8 @@ void CrashCallback() {
   }
 }
 
-void RunSoon(base::MessageLoop* target_loop) {
-  const base::TimeDelta kTaskDelay = base::TimeDelta::FromSeconds(10);
+void RunSoon(MessageLoop* target_loop) {
+  const int kTaskDelay = 10000;  // 10 seconds
   target_loop->PostDelayedTask(
       FROM_HERE, base::Bind(&CrashCallback), kTaskDelay);
 }
@@ -272,14 +265,14 @@ int main(int argc, const char* argv[]) {
   logging::LogEventProvider::Initialize(kStressCacheTraceProviderName);
 #else
   CommandLine::Init(argc, argv);
-  logging::LoggingSettings settings;
-  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
-  logging::InitLogging(settings);
+  logging::InitLogging(NULL, logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
+                       logging::LOCK_LOG_FILE, logging::DELETE_OLD_LOG_FILE,
+                       logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 #endif
 
   // Some time for the memory manager to flush stuff.
   base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(3));
-  base::MessageLoop message_loop(base::MessageLoop::TYPE_IO);
+  MessageLoop message_loop(MessageLoop::TYPE_IO);
 
   char* end;
   long int iteration = strtol(argv[1], &end, 0);

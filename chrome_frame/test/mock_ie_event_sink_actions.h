@@ -6,18 +6,15 @@
 #define CHROME_FRAME_TEST_MOCK_IE_EVENT_SINK_ACTIONS_H_
 
 #include <windows.h>
-#include <algorithm>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_util.h"
-#include "base/test/test_process_killer_win.h"
 #include "base/threading/platform_thread.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
+#include "chrome_frame/test/chrome_frame_ui_test_utils.h"
 #include "chrome_frame/test/ie_event_sink.h"
 #include "chrome_frame/test/mock_ie_event_sink_test.h"
 #include "chrome_frame/test/simulate_input.h"
@@ -33,43 +30,6 @@ MATCHER_P(UrlPathEq, url, "equals the path and query portion of the url") {
 
 MATCHER_P(AccSatisfies, matcher, "satisfies the given AccObjectMatcher") {
   return matcher.DoesMatch(arg);
-}
-
-// Returns true if the title of the page rendered in the window |arg| equals
-// |the_url| or |the_title|. For pages rendered in Chrome, the title of the
-// parent of |arg| is the page url or title. For pages rendered in IE, the title
-// of the grandparent of |arg| begins with the page url or title. To handle both
-// cases, attempt a prefix match on each window starting with the parent of
-// |arg|. Both url and title are matched to account for a race between the test
-// and Chrome when the window title is transitioned from the url to the title.
-MATCHER_P2(TabContentsTitleEq, the_url, the_title, "") {
-  const base::string16 url(the_url);
-  DCHECK(!url.empty());
-  const base::string16 title(the_title);
-  DCHECK(!title.empty());
-  HWND parent = GetParent(arg);
-  if (parent != NULL) {
-    base::string16 parent_title(255, L'\0');
-    std::ostringstream titles_found(std::string("titles found: "));
-    base::string16 first_title;
-    do {
-      parent_title.resize(255, L'\0');
-      parent_title.resize(GetWindowText(parent, &parent_title[0],
-                                        parent_title.size()));
-      if (parent_title.size() >= title.size() &&
-          std::equal(title.begin(), title.end(), parent_title.begin()) ||
-          parent_title.size() >= url.size() &&
-          std::equal(url.begin(), url.end(), parent_title.begin())) {
-        return true;
-      }
-      titles_found << "\"" << UTF16ToASCII(parent_title) << "\" ";
-      parent = GetParent(parent);
-    } while(parent != NULL);
-    *result_listener << titles_found.str();
-  } else {
-    *result_listener << "the window has no parent";
-  }
-  return false;
 }
 
 // IWebBrowser2 actions
@@ -263,19 +223,20 @@ ACTION(OpenContextMenuAsync) {
   ::PostMessage(hwnd, WM_RBUTTONUP, 0, coordinates);
 }
 
-// Posts a WM_KEYDOWN and WM_KEYUP message to the renderer window. Modifiers are
-// not supported, so |character_code| is limited to the regular expression
-// [0-9a-z].
-ACTION_P2(PostKeyMessageToRenderer, mock, character_code) {
-  char character_codes[] = { character_code, '\0' };
-  mock->event_sink()->SendKeys(character_codes);
+ACTION_P(PostCharMessage, character_code) {
+  ::PostMessage(arg0, WM_CHAR, character_code, 0);
 }
 
-// Posts WM_KEYDOWN and WM_KEYUP messages to the renderer window. Modifiers are
-// not supported, so |character_codes| is limited to the regular expression
-// [0-9a-z]*.
-ACTION_P2(PostKeyMessagesToRenderer, mock, character_codes) {
-  mock->event_sink()->SendKeys(std::string(character_codes).c_str());
+ACTION_P2(PostCharMessageToRenderer, mock, character_code) {
+  AccInWindow<void>(PostCharMessage(character_code),
+                    mock->event_sink()->GetRendererWindow());
+}
+
+ACTION_P2(PostCharMessagesToRenderer, mock, character_codes) {
+  HWND window = mock->event_sink()->GetRendererWindow();
+  std::string codes = character_codes;
+  for (size_t i = 0; i < codes.length(); i++)
+    ::PostMessage(window, WM_CHAR, codes[i], 0);
 }
 
 ACTION_P3(WatchWindow, mock, caption, window_class) {
@@ -313,16 +274,15 @@ ACTION(DoCloseWindow) {
 }
 
 ACTION_P(DelayDoCloseWindow, delay) {
-  DCHECK(base::MessageLoop::current());
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, base::Bind(DoCloseWindowNow, arg0),
-      base::TimeDelta::FromMilliseconds(delay));
+  DCHECK(MessageLoop::current());
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, base::Bind(DoCloseWindowNow, arg0), delay);
 }
 
 ACTION(KillChromeFrameProcesses) {
-  base::KillAllNamedProcessesWithArgument(
-      base::UTF8ToWide(chrome_frame_test::kChromeImageName),
-      base::UTF8ToWide(switches::kChromeFrame));
+  KillAllNamedProcessesWithArgument(
+      UTF8ToWide(chrome_frame_test::kChromeImageName),
+      UTF8ToWide(switches::kChromeFrame));
 }
 
 // Verifying actions
@@ -391,10 +351,9 @@ ACTION_P(VerifySelectedText, expected_text) {
 
 ACTION_P3(CloseWhenFileSaved, mock, file, timeout_ms) {
   base::Time start = base::Time::Now();
-  while (!base::PathExists(file)) {
+  while (!file_util::PathExists(file)) {
     if ((base::Time::Now() - start).InMilliseconds() > timeout_ms) {
       ADD_FAILURE() << "File was not saved within timeout";
-      TakeSnapshotAndLog();
       break;
     }
     base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
@@ -404,11 +363,10 @@ ACTION_P3(CloseWhenFileSaved, mock, file, timeout_ms) {
 
 ACTION_P2(WaitForFileSave, file, timeout_ms) {
   base::Time start = base::Time::Now();
-  while (!base::PathExists(file)) {
+  while (!file_util::PathExists(file)) {
     base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
     if ((base::Time::Now() - start).InMilliseconds() > timeout_ms) {
       ADD_FAILURE() << "File was not saved within timeout";
-      TakeSnapshotAndLog();
       break;
     }
   }
@@ -437,8 +395,8 @@ ACTION_P3(TypeUrlInAddressBar, loop, url, delay) {
       FROM_HERE,
       base::Bind(simulate_input::SendCharA, 'd', simulate_input::ALT), delay);
 
-  const base::TimeDelta kInterval = base::TimeDelta::FromMilliseconds(500);
-  base::TimeDelta next_delay = delay + kInterval;
+  const unsigned int kInterval = 500;
+  int next_delay = delay + kInterval;
 
   loop->PostDelayedTask(
       FROM_HERE, base::Bind(simulate_input::SendStringW, url), next_delay);

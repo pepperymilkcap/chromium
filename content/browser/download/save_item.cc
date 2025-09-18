@@ -1,20 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/download/save_item.h"
 
+#include "base/file_util.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "content/browser/download/save_file.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/download/save_package.h"
 
-namespace content {
-
 // Constructor for SaveItem when creating each saving job.
 SaveItem::SaveItem(const GURL& url,
-                   const Referrer& referrer,
+                   const GURL& referrer,
                    SavePackage* package,
                    SaveFileCreateInfo::SaveFileSource save_source)
   : save_id_(-1),
@@ -113,7 +112,7 @@ int SaveItem::PercentComplete() const {
 }
 
 // Rename the save item with new path.
-void SaveItem::Rename(const base::FilePath& full_path) {
+void SaveItem::Rename(const FilePath& full_path) {
   DCHECK(!full_path.empty() && !has_final_name());
   full_path_ = full_path;
   file_name_ = full_path_.BaseName();
@@ -121,13 +120,11 @@ void SaveItem::Rename(const base::FilePath& full_path) {
 }
 
 void SaveItem::SetSaveId(int32 save_id) {
-  DCHECK_EQ(-1, save_id_);
+  DCHECK(save_id_ == -1);
   save_id_ = save_id;
 }
 
 void SaveItem::SetTotalBytes(int64 total_bytes) {
-  DCHECK_EQ(0, total_bytes_);
+  DCHECK(total_bytes_ == 0);
   total_bytes_ = total_bytes;
 }
-
-}  // namespace content

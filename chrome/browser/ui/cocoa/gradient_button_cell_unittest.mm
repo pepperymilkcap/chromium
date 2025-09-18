@@ -4,9 +4,9 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/gradient_button_cell.h"
+#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -20,11 +20,10 @@ class GradientButtonCellTest : public CocoaTest {
  public:
   GradientButtonCellTest() {
     NSRect frame = NSMakeRect(0, 0, 50, 30);
-    base::scoped_nsobject<NSButton> view(
-        [[NSButton alloc] initWithFrame:frame]);
+    scoped_nsobject<NSButton>view([[NSButton alloc] initWithFrame:frame]);
     view_ = view.get();
-    base::scoped_nsobject<GradientButtonCell> cell(
-        [[GradientButtonCell alloc] initTextCell:@"Testing"]);
+    scoped_nsobject<GradientButtonCell> cell([[GradientButtonCell alloc]
+                                              initTextCell:@"Testing"]);
     [view_ setCell:cell.get()];
     [[test_window() contentView] addSubview:view_];
   }
@@ -108,13 +107,6 @@ TEST_F(GradientButtonCellTest, PulseState) {
   // Allow for immediate state changes to keep test unflaky
   EXPECT_TRUE(([cell pulseState] == gradient_button_cell::kPulsingOff) ||
               ([cell pulseState] == gradient_button_cell::kPulsedOff));
-}
-
-// Test drawing when first responder, mostly to ensure nothing leaks or
-// crashes.
-TEST_F(GradientButtonCellTest, FirstResponder) {
-  [test_window() makePretendKeyWindowAndSetFirstResponder:view_];
-  [view_ display];
 }
 
 }  // namespace

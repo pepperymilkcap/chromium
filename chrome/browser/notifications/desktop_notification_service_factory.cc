@@ -6,9 +6,8 @@
 
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
+#include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -18,7 +17,7 @@ DesktopNotificationService* DesktopNotificationServiceFactory::GetForProfile(
     Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return static_cast<DesktopNotificationService*>(
-      GetInstance()->GetServiceForBrowserContext(profile, true));
+      GetInstance()->GetServiceForProfile(profile, true));
 }
 
 // static
@@ -28,24 +27,20 @@ DesktopNotificationServiceFactory* DesktopNotificationServiceFactory::
 }
 
 DesktopNotificationServiceFactory::DesktopNotificationServiceFactory()
-    : BrowserContextKeyedServiceFactory(
-        "DesktopNotificationService",
-        BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("DesktopNotificationService",
+                                 ProfileDependencyManager::GetInstance()) {
 }
 
 DesktopNotificationServiceFactory::~DesktopNotificationServiceFactory() {
 }
 
-BrowserContextKeyedService*
-DesktopNotificationServiceFactory::BuildServiceInstanceFor(
-    content::BrowserContext* profile) const {
+ProfileKeyedService* DesktopNotificationServiceFactory::BuildServiceInstanceFor(
+    Profile* profile) const {
   DesktopNotificationService* service =
-      new DesktopNotificationService(static_cast<Profile*>(profile), NULL);
+      new DesktopNotificationService(profile, NULL);
   return service;
 }
 
-content::BrowserContext*
-DesktopNotificationServiceFactory::GetBrowserContextToUse(
-    content::BrowserContext* context) const {
-  return chrome::GetBrowserContextOwnInstanceInIncognito(context);
+bool DesktopNotificationServiceFactory::ServiceHasOwnInstanceInIncognito() {
+  return true;
 }

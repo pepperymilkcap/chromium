@@ -11,11 +11,10 @@
 #define REMOTING_CLIENT_FRAME_CONSUMER_PROXY_H_
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
 #include "remoting/client/frame_consumer.h"
 
 namespace base {
-class SingleThreadTaskRunner;
+class MessageLoopProxy;
 }  // namespace base
 
 namespace remoting {
@@ -26,27 +25,28 @@ class FrameConsumerProxy
  public:
   // Constructs a proxy for |frame_consumer| which will trampoline invocations
   // to |frame_consumer_message_loop|.
-  FrameConsumerProxy(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-                     const base::WeakPtr<FrameConsumer>& frame_consumer);
-
-  // FrameConsumer implementation.
-  virtual void ApplyBuffer(const webrtc::DesktopSize& view_size,
-                           const webrtc::DesktopRect& clip_area,
-                           webrtc::DesktopFrame* buffer,
-                           const webrtc::DesktopRegion& region) OVERRIDE;
-  virtual void ReturnBuffer(webrtc::DesktopFrame* buffer) OVERRIDE;
-  virtual void SetSourceSize(const webrtc::DesktopSize& source_size,
-                             const webrtc::DesktopVector& dpi) OVERRIDE;
-  virtual PixelFormat GetPixelFormat() OVERRIDE;
-
- private:
-  friend class base::RefCountedThreadSafe<FrameConsumerProxy>;
+  FrameConsumerProxy(FrameConsumer* frame_consumer,
+                     base::MessageLoopProxy* frame_consumer_message_loop);
   virtual ~FrameConsumerProxy();
 
-  base::WeakPtr<FrameConsumer> frame_consumer_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  // FrameConsumer implementation.
+  virtual void AllocateFrame(media::VideoFrame::Format format,
+                             const SkISize& size,
+                             scoped_refptr<media::VideoFrame>* frame_out,
+                             const base::Closure& done) OVERRIDE;
+  virtual void ReleaseFrame(media::VideoFrame* frame) OVERRIDE;
+  virtual void OnPartialFrameOutput(media::VideoFrame* frame,
+                                    SkRegion* region,
+                                    const base::Closure& done) OVERRIDE;
 
-  PixelFormat pixel_format_;
+  // Detaches from |frame_consumer_|, ensuring no further calls reach it.
+  // This must only be called from |frame_consumer_message_loop_|.
+  void Detach();
+
+ private:
+  FrameConsumer* frame_consumer_;
+
+  scoped_refptr<base::MessageLoopProxy> frame_consumer_message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameConsumerProxy);
 };

@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_RESIZE_AREA_DELEGATE_H_
 #define UI_VIEWS_CONTROLS_RESIZE_AREA_DELEGATE_H_
+#pragma once
 
 namespace views {
 

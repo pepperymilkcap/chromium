@@ -6,9 +6,9 @@
 
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_samples.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "net/disk_cache/backend_impl.h"
 
 namespace {
 
@@ -60,8 +60,7 @@ static const char* kCounterNames[] = {
   "Fatal error",
   "Last report",
   "Last report timer",
-  "Doom recent entries",
-  "unused"
+  "Doom recent entries"
 };
 COMPILE_ASSERT(arraysize(kCounterNames) == disk_cache::Stats::MAX_COUNTER,
                update_the_names);
@@ -70,7 +69,17 @@ COMPILE_ASSERT(arraysize(kCounterNames) == disk_cache::Stats::MAX_COUNTER,
 
 namespace disk_cache {
 
-bool VerifyStats(OnDiskStats* stats) {
+bool LoadStats(BackendImpl* backend, Addr address, OnDiskStats* stats) {
+  MappedFile* file = backend->File(address);
+  if (!file)
+    return false;
+
+  size_t offset = address.start_block() * address.BlockSize() +
+                  kBlockHeaderSize;
+  memset(stats, 0, sizeof(*stats));
+  if (!file->Read(stats, sizeof(*stats), offset))
+    return false;
+
   if (stats->signature != kDiskSignature)
     return false;
 
@@ -78,69 +87,76 @@ bool VerifyStats(OnDiskStats* stats) {
   // counter; we keep old data if we can.
   if (static_cast<unsigned int>(stats->size) > sizeof(*stats)) {
     memset(stats, 0, sizeof(*stats));
-    stats->signature = kDiskSignature;
-  } else if (static_cast<unsigned int>(stats->size) != sizeof(*stats)) {
-    size_t delta = sizeof(*stats) - static_cast<unsigned int>(stats->size);
-    memset(reinterpret_cast<char*>(stats) + stats->size, 0, delta);
-    stats->size = sizeof(*stats);
   }
 
   return true;
 }
 
-Stats::Stats() : size_histogram_(NULL) {
+bool StoreStats(BackendImpl* backend, Addr address, OnDiskStats* stats) {
+  MappedFile* file = backend->File(address);
+  if (!file)
+    return false;
+
+  size_t offset = address.start_block() * address.BlockSize() +
+                  kBlockHeaderSize;
+  return file->Write(stats, sizeof(*stats), offset);
+}
+
+bool CreateStats(BackendImpl* backend, Addr* address, OnDiskStats* stats) {
+  if (!backend->CreateBlock(BLOCK_256, 2, address))
+    return false;
+
+  // If we have more than 512 bytes of counters, change kDiskSignature so we
+  // don't overwrite something else (LoadStats must fail).
+  COMPILE_ASSERT(sizeof(*stats) <= 256 * 2, use_more_blocks);
+  memset(stats, 0, sizeof(*stats));
+  stats->signature = kDiskSignature;
+  stats->size = sizeof(*stats);
+
+  return StoreStats(backend, *address, stats);
+}
+
+Stats::Stats() : backend_(NULL), size_histogram_(NULL) {
 }
 
 Stats::~Stats() {
-  if (size_histogram_) {
-    size_histogram_->Disable();
-  }
 }
 
-bool Stats::Init(void* data, int num_bytes, Addr address) {
-  OnDiskStats local_stats;
-  OnDiskStats* stats = &local_stats;
-  if (!num_bytes) {
-    memset(stats, 0, sizeof(local_stats));
-    local_stats.signature = kDiskSignature;
-    local_stats.size = sizeof(local_stats);
-  } else if (num_bytes >= static_cast<int>(sizeof(*stats))) {
-    stats = reinterpret_cast<OnDiskStats*>(data);
-    if (!VerifyStats(stats))
+bool Stats::Init(BackendImpl* backend, uint32* storage_addr) {
+  OnDiskStats stats;
+  Addr address(*storage_addr);
+  if (address.is_initialized()) {
+    if (!LoadStats(backend, address, &stats))
       return false;
   } else {
-    return false;
+    if (!CreateStats(backend, &address, &stats))
+      return false;
+    *storage_addr = address.value();
   }
 
-  storage_addr_ = address;
+  storage_addr_ = address.value();
+  backend_ = backend;
 
-  memcpy(data_sizes_, stats->data_sizes, sizeof(data_sizes_));
-  memcpy(counters_, stats->counters, sizeof(counters_));
+  memcpy(data_sizes_, stats.data_sizes, sizeof(data_sizes_));
+  memcpy(counters_, stats.counters, sizeof(counters_));
 
-  // Clean up old value.
-  SetCounter(UNUSED, 0);
-  return true;
-}
-
-void Stats::InitSizeHistogram() {
   // It seems impossible to support this histogram for more than one
   // simultaneous objects with the current infrastructure.
   static bool first_time = true;
   if (first_time) {
     first_time = false;
-    if (!size_histogram_) {
+    // ShouldReportAgain() will re-enter this object.
+    if (!size_histogram_ && backend->cache_type() == net::DISK_CACHE &&
+        backend->ShouldReportAgain()) {
       // Stats may be reused when the cache is re-created, but we want only one
       // histogram at any given time.
-      size_histogram_ = StatsHistogram::FactoryGet("DiskCache.SizeStats", this);
+      size_histogram_ =
+          StatsHistogram::FactoryGet("DiskCache.SizeStats");
+      size_histogram_->Init(this);
     }
   }
-}
 
-int Stats::StorageSize() {
-  // If we have more than 512 bytes of counters, change kDiskSignature so we
-  // don't overwrite something else (LoadStats must fail).
-  COMPILE_ASSERT(sizeof(OnDiskStats) <= 256 * 2, use_more_blocks);
-  return 256 * 2;
+  return true;
 }
 
 void Stats::ModifyStorageStats(int32 old_size, int32 new_size) {
@@ -213,18 +229,18 @@ int Stats::GetLargeEntriesSize() {
   return total;
 }
 
-int Stats::SerializeStats(void* data, int num_bytes, Addr* address) {
-  OnDiskStats* stats = reinterpret_cast<OnDiskStats*>(data);
-  if (num_bytes < static_cast<int>(sizeof(*stats)))
-    return 0;
+void Stats::Store() {
+  if (!backend_)
+    return;
 
-  stats->signature = kDiskSignature;
-  stats->size = sizeof(*stats);
-  memcpy(stats->data_sizes, data_sizes_, sizeof(data_sizes_));
-  memcpy(stats->counters, counters_, sizeof(counters_));
+  OnDiskStats stats;
+  stats.signature = kDiskSignature;
+  stats.size = sizeof(stats);
+  memcpy(stats.data_sizes, data_sizes_, sizeof(data_sizes_));
+  memcpy(stats.counters, counters_, sizeof(counters_));
 
-  *address = storage_addr_;
-  return sizeof(*stats);
+  Addr address(storage_addr_);
+  StoreStats(backend_, address, &stats);
 }
 
 int Stats::GetBucketRange(size_t i) const {
@@ -248,12 +264,13 @@ int Stats::GetBucketRange(size_t i) const {
   return n;
 }
 
-void Stats::Snapshot(base::HistogramSamples* samples) const {
+void Stats::Snapshot(StatsHistogram::StatsSamples* samples) const {
+  samples->GetCounts()->resize(kDataSizesLength);
   for (int i = 0; i < kDataSizesLength; i++) {
     int count = data_sizes_[i];
     if (count < 0)
       count = 0;
-    samples->Accumulate(GetBucketRange(i), count);
+    samples->GetCounts()->at(i) = count;
   }
 }
 

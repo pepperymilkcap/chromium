@@ -4,14 +4,14 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
-#include "chrome/browser/browsing_data/cookies_tree_model.h"
+#include "base/memory/scoped_nsobject.h"
+#include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/ui/cocoa/content_settings/cookie_details.h"
 
 @interface CocoaCookieTreeNode : NSObject {
-  base::scoped_nsobject<NSString> title_;
-  base::scoped_nsobject<NSMutableArray> children_;
-  base::scoped_nsobject<CocoaCookieDetails> details_;
+  scoped_nsobject<NSString> title_;
+  scoped_nsobject<NSMutableArray> children_;
+  scoped_nsobject<CocoaCookieDetails> details_;
   CookieTreeNode* treeNode_;  // weak
 }
 

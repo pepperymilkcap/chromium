@@ -1,7 +1,18 @@
-diff -pu a/nss/lib/ssl/sslsecur.c b/nss/lib/ssl/sslsecur.c
---- a/nss/lib/ssl/sslsecur.c	2013-07-31 12:07:10.974699609 -0700
-+++ b/nss/lib/ssl/sslsecur.c	2013-07-31 12:27:24.322323927 -0700
-@@ -1311,6 +1311,10 @@ SSL_SetURL(PRFileDesc *fd, const char *u
+From 9a71b466147bcd334243d62996558a609657c07c Mon Sep 17 00:00:00 2001
+From: Adam Langley <agl@chromium.org>
+Date: Mon, 3 Oct 2011 12:19:48 -0400
+Subject: [PATCH] versionskew.patch
+
+---
+ mozilla/security/nss/lib/ssl/sslsecur.c |    5 +++++
+ mozilla/security/nss/lib/ssl/sslsock.c  |    6 ++++++
+ 2 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/mozilla/security/nss/lib/ssl/sslsecur.c b/mozilla/security/nss/lib/ssl/sslsecur.c
+index a0cae54..816b8f6 100644
+--- a/mozilla/security/nss/lib/ssl/sslsecur.c
++++ b/mozilla/security/nss/lib/ssl/sslsecur.c
+@@ -1316,6 +1316,10 @@ SSL_SetURL(PRFileDesc *fd, const char *url)
  SECStatus
  SSL_SetTrustAnchors(PRFileDesc *fd, CERTCertList *certList)
  {
@@ -12,7 +23,7 @@ diff -pu a/nss/lib/ssl/sslsecur.c b/nss/lib/ssl/sslsecur.c
      sslSocket *   ss = ssl_FindSocket(fd);
      CERTDistNames *names = NULL;
  
-@@ -1338,6 +1342,7 @@ SSL_SetTrustAnchors(PRFileDesc *fd, CERT
+@@ -1343,6 +1347,7 @@ SSL_SetTrustAnchors(PRFileDesc *fd, CERTCertList *certList)
      ssl_Release1stHandshakeLock(ss);
  
      return SECSuccess;
@@ -20,10 +31,11 @@ diff -pu a/nss/lib/ssl/sslsecur.c b/nss/lib/ssl/sslsecur.c
  }
  
  /*
-diff -pu a/nss/lib/ssl/sslsock.c b/nss/lib/ssl/sslsock.c
---- a/nss/lib/ssl/sslsock.c	2013-07-31 12:07:10.974699609 -0700
-+++ b/nss/lib/ssl/sslsock.c	2013-07-31 12:27:24.322323927 -0700
-@@ -1625,6 +1625,11 @@ SSL_GetSRTPCipher(PRFileDesc *fd, PRUint
+diff --git a/mozilla/security/nss/lib/ssl/sslsock.c b/mozilla/security/nss/lib/ssl/sslsock.c
+index 4c8fbfd..b7e32a2 100644
+--- a/mozilla/security/nss/lib/ssl/sslsock.c
++++ b/mozilla/security/nss/lib/ssl/sslsock.c
+@@ -1343,6 +1343,11 @@ SSL_GetNextProto(PRFileDesc *fd, int *state, unsigned char *buf,
  PRFileDesc *
  SSL_ReconfigFD(PRFileDesc *model, PRFileDesc *fd)
  {
@@ -34,12 +46,12 @@ diff -pu a/nss/lib/ssl/sslsock.c b/nss/lib/ssl/sslsock.c
 +#if 0
      sslSocket * sm = NULL, *ss = NULL;
      int i;
-     sslServerCerts * mc = NULL;
-@@ -1742,6 +1747,7 @@ SSL_ReconfigFD(PRFileDesc *model, PRFile
+     sslServerCerts * mc = sm->serverCerts;
+@@ -1445,6 +1450,7 @@ SSL_ReconfigFD(PRFileDesc *model, PRFileDesc *fd)
      return fd;
  loser:
      return NULL;
 +#endif
  }
  
- PRBool
+ /************************************************************************/

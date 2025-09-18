@@ -9,29 +9,20 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
-#include "base/pickle.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/bookmarks/bookmark_stats.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/ntp_background_util.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
-#include "chrome/browser/ui/bookmarks/bookmark_drag_drop.h"
-#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/gtk/bookmarks/bookmark_bar_instructions_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_menu_controller_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
-#include "chrome/browser/ui/gtk/event_utils.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -40,12 +31,9 @@
 #include "chrome/browser/ui/gtk/rounded_window.h"
 #include "chrome/browser/ui/gtk/tabstrip_origin_provider.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
-#include "chrome/browser/ui/ntp_background_util.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
@@ -56,10 +44,10 @@
 #include "grit/ui_resources.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia_paint.h"
-#include "ui/gfx/gtk_compat.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
@@ -69,6 +57,9 @@ using content::UserMetricsAction;
 using content::WebContents;
 
 namespace {
+
+// The showing height of the bar.
+const int kBookmarkBarHeight = 29;
 
 // Padding for when the bookmark bar is detached.
 const int kTopBottomNTPPadding = 12;
@@ -125,17 +116,17 @@ void SetToolBarStyle() {
 
 void RecordAppLaunch(Profile* profile, const GURL& url) {
   DCHECK(profile->GetExtensionService());
-  const extensions::Extension* extension =
-      profile->GetExtensionService()->GetInstalledApp(url);
-  if (!extension)
+  if (!profile->GetExtensionService()->IsInstalledApp(url))
     return;
 
-  CoreAppLauncherHandler::RecordAppLaunchType(
-      extension_misc::APP_LAUNCH_BOOKMARK_BAR,
-      extension->GetType());
+  UMA_HISTOGRAM_ENUMERATION(extension_misc::kAppLaunchHistogram,
+                            extension_misc::APP_LAUNCH_BOOKMARK_BAR,
+                            extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
 }
 
 }  // namespace
+
+const int BookmarkBarGtk::kBookmarkBarNTPHeight = 57;
 
 BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
                                Browser* browser,
@@ -155,9 +146,9 @@ BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
       slide_animation_(this),
       last_allocation_width_(-1),
       throbbing_widget_(NULL),
+      weak_factory_(this),
       bookmark_bar_state_(BookmarkBar::DETACHED),
-      max_height_(0),
-      weak_factory_(this) {
+      max_height_(0) {
   Init();
   // Force an update by simulating being in the wrong state.
   // BrowserWindowGtk sets our true state after we're created.
@@ -167,20 +158,8 @@ BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(theme_service_));
 
-  apps_shortcut_visible_.Init(
-      prefs::kShowAppsShortcutInBookmarkBar,
-      browser_->profile()->GetPrefs(),
-      base::Bind(&BookmarkBarGtk::OnAppsPageShortcutVisibilityChanged,
-                 base::Unretained(this)));
-
-  OnAppsPageShortcutVisibilityChanged();
-
-  edit_bookmarks_enabled_.Init(
-      prefs::kEditBookmarksEnabled,
-      browser_->profile()->GetPrefs(),
-      base::Bind(&BookmarkBarGtk::OnEditBookmarksEnabledChanged,
-                 base::Unretained(this)));
-
+  edit_bookmarks_enabled_.Init(prefs::kEditBookmarksEnabled,
+                               browser_->profile()->GetPrefs(), this);
   OnEditBookmarksEnabledChanged();
 }
 
@@ -207,23 +186,13 @@ void BookmarkBarGtk::Init() {
   paint_box_ = gtk_event_box_new();
   gtk_container_add(GTK_CONTAINER(ntp_padding_box_), paint_box_);
   GdkColor paint_box_color =
-      theme_service_->GetGdkColor(ThemeProperties::COLOR_TOOLBAR);
+      theme_service_->GetGdkColor(ThemeService::COLOR_TOOLBAR);
   gtk_widget_modify_bg(paint_box_, GTK_STATE_NORMAL, &paint_box_color);
   gtk_widget_add_events(paint_box_, GDK_POINTER_MOTION_MASK |
                                     GDK_BUTTON_PRESS_MASK);
 
   bookmark_hbox_ = gtk_hbox_new(FALSE, 0);
   gtk_container_add(GTK_CONTAINER(paint_box_), bookmark_hbox_);
-
-  apps_shortcut_button_ = theme_service_->BuildChromeButton();
-  ConfigureAppsShortcutButton(apps_shortcut_button_, theme_service_);
-  g_signal_connect(apps_shortcut_button_, "clicked",
-                   G_CALLBACK(OnAppsButtonClickedThunk), this);
-  // Accept middle mouse clicking.
-  gtk_util::SetButtonClickableByMouseButtons(
-      apps_shortcut_button_, true, true, false);
-  gtk_box_pack_start(GTK_BOX(bookmark_hbox_), apps_shortcut_button_,
-                     FALSE, FALSE, 0);
 
   instructions_ = gtk_alignment_new(0, 0, 1, 1);
   gtk_alignment_set_padding(GTK_ALIGNMENT(instructions_), 0, 0,
@@ -276,6 +245,11 @@ void BookmarkBarGtk::Init() {
   gtk_box_pack_start(GTK_BOX(bookmark_hbox_), other_bookmarks_separator_,
                      FALSE, FALSE, 0);
 
+  // Newer versions of Gtk default to not showing images on buttons if a label
+  // is set. Override that here.
+  GtkSettings* default_settings = gtk_settings_get_default();
+  g_object_set(default_settings, "gtk-button-images", TRUE, NULL);
+
   // We pack the button manually (rather than using gtk_button_set_*) so that
   // we can have finer control over its label.
   other_bookmarks_button_ = theme_service_->BuildChromeButton();
@@ -302,10 +276,10 @@ void BookmarkBarGtk::Init() {
 
   AddCoreButtons();
   // TODO(erg): Handle extensions
-  model_ = BookmarkModelFactory::GetForProfile(profile);
+  model_ = profile->GetBookmarkModel();
   model_->AddObserver(this);
-  if (model_->loaded())
-    BookmarkModelLoaded(model_, false);
+  if (model_->IsLoaded())
+    Loaded(model_, false);
   // else case: we'll receive notification back from the BookmarkModel when done
   // loading, then we'll populate the bar.
 }
@@ -348,11 +322,11 @@ void BookmarkBarGtk::CalculateMaxHeight() {
     max_height_ = req.height;
   } else {
     max_height_ = (bookmark_bar_state_ == BookmarkBar::DETACHED) ?
-        chrome::kNTPBookmarkBarHeight : chrome::kBookmarkBarHeight;
+                  kBookmarkBarNTPHeight : kBookmarkBarHeight;
   }
 }
 
-void BookmarkBarGtk::AnimationProgressed(const gfx::Animation* animation) {
+void BookmarkBarGtk::AnimationProgressed(const ui::Animation* animation) {
   DCHECK_EQ(animation, &slide_animation_);
 
   gint height =
@@ -362,7 +336,7 @@ void BookmarkBarGtk::AnimationProgressed(const gfx::Animation* animation) {
   gtk_widget_set_size_request(event_box_.get(), -1, height);
 }
 
-void BookmarkBarGtk::AnimationEnded(const gfx::Animation* animation) {
+void BookmarkBarGtk::AnimationEnded(const ui::Animation* animation) {
   DCHECK_EQ(animation, &slide_animation_);
 
   if (!slide_animation_.IsShowing()) {
@@ -399,7 +373,7 @@ void BookmarkBarGtk::PopupForButton(GtkWidget* button) {
   }
 
   current_menu_.reset(
-      new BookmarkMenuController(browser_, page_navigator_,
+      new BookmarkMenuController(browser_->profile(), page_navigator_,
           GTK_WINDOW(gtk_widget_get_toplevel(button)),
           node,
           button == overflow_button_ ? first_hidden : 0));
@@ -419,9 +393,7 @@ void BookmarkBarGtk::PopupForButtonNextTo(GtkWidget* button,
   const int first_hidden = GetFirstHiddenBookmark(0, &folder_list);
   if (first_hidden != -1)
     folder_list.push_back(overflow_button_);
-
-  if (!model_->other_node()->empty())
-    folder_list.push_back(other_bookmarks_button_);
+  folder_list.push_back(other_bookmarks_button_);
 
   // Find the position of |button|.
   int button_idx = -1;
@@ -455,7 +427,7 @@ void BookmarkBarGtk::Show(BookmarkBar::State old_state,
     AnimationProgressed(&slide_animation_);
   }
 
-  if (model_ && model_->loaded())
+  if (model_ && model_->IsLoaded())
     UpdateOtherBookmarksVisibility();
 
   // Hide out behind the findbar. This is rather fragile code, it could
@@ -572,8 +544,8 @@ void BookmarkBarGtk::ResetButtons() {
       menu_bar_helper_.Add(gtk_bin_get_child(GTK_BIN(item)));
   }
 
-  ConfigureButtonForNode(
-      model_->other_node(), model_, other_bookmarks_button_, theme_service_);
+  bookmark_utils::ConfigureButtonForNode(model_->other_node(),
+      model_, other_bookmarks_button_, theme_service_);
 
   SetInstructionState();
   SetChevronState();
@@ -587,26 +559,15 @@ int BookmarkBarGtk::GetBookmarkButtonCount() {
   return count;
 }
 
-BookmarkLaunchLocation BookmarkBarGtk::GetBookmarkLaunchLocation() const {
-  return bookmark_bar_state_ == BookmarkBar::DETACHED ?
-      BOOKMARK_LAUNCH_LOCATION_DETACHED_BAR :
-      BOOKMARK_LAUNCH_LOCATION_ATTACHED_BAR;
-}
-
 void BookmarkBarGtk::SetOverflowButtonAppearance() {
   GtkWidget* former_child = gtk_bin_get_child(GTK_BIN(overflow_button_));
   if (former_child)
     gtk_widget_destroy(former_child);
 
-  GtkWidget* new_child;
-  if (theme_service_->UsingNativeTheme()) {
-    new_child = gtk_arrow_new(GTK_ARROW_DOWN, GTK_SHADOW_NONE);
-  } else {
-    const gfx::Image& image = ui::ResourceBundle::GetSharedInstance().
-        GetNativeImageNamed(IDR_BOOKMARK_BAR_CHEVRONS,
-                            ui::ResourceBundle::RTL_ENABLED);
-    new_child = gtk_image_new_from_pixbuf(image.ToGdkPixbuf());
-  }
+  GtkWidget* new_child = theme_service_->UsingNativeTheme() ?
+      gtk_arrow_new(GTK_ARROW_DOWN, GTK_SHADOW_NONE) :
+      gtk_image_new_from_pixbuf(ui::ResourceBundle::GetSharedInstance().
+          GetRTLEnabledPixbufNamed(IDR_BOOKMARK_BAR_CHEVRONS));
 
   gtk_container_add(GTK_CONTAINER(overflow_button_), new_child);
   SetChevronState();
@@ -665,7 +626,7 @@ void BookmarkBarGtk::UpdateDetachedState(BookmarkBar::State old_state) {
     gtk_event_box_set_visible_window(GTK_EVENT_BOX(paint_box_), TRUE);
     GdkColor stroke_color = theme_service_->UsingNativeTheme() ?
         theme_service_->GetBorderColor() :
-        theme_service_->GetGdkColor(ThemeProperties::COLOR_NTP_HEADER);
+        theme_service_->GetGdkColor(ThemeService::COLOR_NTP_HEADER);
     gtk_util::ActAsRoundedWindow(paint_box_, stroke_color, kNTPRoundedness,
                                  gtk_util::ROUNDED_ALL, gtk_util::BORDER_ALL);
 
@@ -683,15 +644,12 @@ void BookmarkBarGtk::UpdateDetachedState(BookmarkBar::State old_state) {
   UpdateEventBoxPaintability();
   // |window_| can be NULL during testing.
   // Listen for parent size allocations. Only connect once.
-  if (window_ && detached) {
-    GtkWidget* parent = gtk_widget_get_parent(widget());
-    if (parent &&
-        g_signal_handler_find(parent, G_SIGNAL_MATCH_FUNC,
-            0, 0, NULL, reinterpret_cast<gpointer>(OnParentSizeAllocateThunk),
-            NULL) == 0) {
-      g_signal_connect(parent, "size-allocate",
-                       G_CALLBACK(OnParentSizeAllocateThunk), this);
-    }
+  if (window_ && detached && widget()->parent &&
+      g_signal_handler_find(widget()->parent, G_SIGNAL_MATCH_FUNC,
+          0, 0, NULL, reinterpret_cast<gpointer>(OnParentSizeAllocateThunk),
+          NULL) == 0) {
+    g_signal_connect(widget()->parent, "size-allocate",
+                     G_CALLBACK(OnParentSizeAllocateThunk), this);
   }
 }
 
@@ -709,24 +667,23 @@ void BookmarkBarGtk::UpdateEventBoxPaintability() {
 }
 
 void BookmarkBarGtk::PaintEventBox() {
-  gfx::Size web_contents_size;
-  if (GetWebContentsSize(&web_contents_size) &&
-      web_contents_size != last_web_contents_size_) {
-    last_web_contents_size_ = web_contents_size;
+  gfx::Size tab_contents_size;
+  if (GetTabContentsSize(&tab_contents_size) &&
+      tab_contents_size != last_tab_contents_size_) {
+    last_tab_contents_size_ = tab_contents_size;
     gtk_widget_queue_draw(event_box_.get());
   }
 }
 
-bool BookmarkBarGtk::GetWebContentsSize(gfx::Size* size) {
+bool BookmarkBarGtk::GetTabContentsSize(gfx::Size* size) {
   Browser* browser = browser_;
   if (!browser) {
     NOTREACHED();
     return false;
   }
-  WebContents* web_contents =
-      browser->tab_strip_model()->GetActiveWebContents();
+  WebContents* web_contents = browser->GetSelectedWebContents();
   if (!web_contents) {
-    // It is possible to have a browser but no WebContents while under testing,
+    // It is possible to have a browser but no TabContents while under testing,
     // so don't NOTREACHED() and error the program.
     return false;
   }
@@ -861,9 +818,8 @@ int BookmarkBarGtk::GetToolbarIndexForDragOverFolder(GtkWidget* button,
   if (x > margin && x < (allocation.width - margin))
     return -1;
 
-  GtkWidget* parent = gtk_widget_get_parent(button);
   gint index = gtk_toolbar_get_item_index(GTK_TOOLBAR(bookmark_toolbar_.get()),
-                                          GTK_TOOL_ITEM(parent));
+                                          GTK_TOOL_ITEM(button->parent));
   if (x > margin)
     index++;
   return index;
@@ -879,8 +835,7 @@ void BookmarkBarGtk::ClearToolbarDropHighlighting() {
                                       NULL, 0);
 }
 
-void BookmarkBarGtk::BookmarkModelLoaded(BookmarkModel* model,
-                                         bool ids_reassigned) {
+void BookmarkBarGtk::Loaded(BookmarkModel* model, bool ids_reassigned) {
   // If |instructions_| has been nulled, we are in the middle of browser
   // shutdown. Do nothing.
   if (!instructions_)
@@ -958,11 +913,6 @@ void BookmarkBarGtk::BookmarkNodeRemoved(BookmarkModel* model,
   SetChevronState();
 }
 
-void BookmarkBarGtk::BookmarkAllNodesRemoved(BookmarkModel* model) {
-  UpdateOtherBookmarksVisibility();
-  ResetButtons();
-}
-
 void BookmarkBarGtk::BookmarkNodeChanged(BookmarkModel* model,
                                          const BookmarkNode* node) {
   if (node->parent() != model_->bookmark_bar_node()) {
@@ -975,7 +925,7 @@ void BookmarkBarGtk::BookmarkNodeChanged(BookmarkModel* model,
   GtkToolItem* item = gtk_toolbar_get_nth_item(
       GTK_TOOLBAR(bookmark_toolbar_.get()), index);
   GtkWidget* button = gtk_bin_get_child(GTK_BIN(item));
-  ConfigureButtonForNode(node, model, button, theme_service_);
+  bookmark_utils::ConfigureButtonForNode(node, model, button, theme_service_);
   SetChevronState();
 }
 
@@ -996,7 +946,7 @@ void BookmarkBarGtk::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
-    if (model_ && model_->loaded()) {
+    if (model_ && model_->IsLoaded()) {
       // Regenerate the bookmark bar with all new objects with their theme
       // properties set correctly for the new theme.
       ResetButtons();
@@ -1009,28 +959,33 @@ void BookmarkBarGtk::Observe(int type,
     UpdateEventBoxPaintability();
 
     GdkColor paint_box_color =
-        theme_service_->GetGdkColor(ThemeProperties::COLOR_TOOLBAR);
+        theme_service_->GetGdkColor(ThemeService::COLOR_TOOLBAR);
     gtk_widget_modify_bg(paint_box_, GTK_STATE_NORMAL, &paint_box_color);
 
     if (bookmark_bar_state_ == BookmarkBar::DETACHED) {
       GdkColor stroke_color = theme_service_->UsingNativeTheme() ?
           theme_service_->GetBorderColor() :
-          theme_service_->GetGdkColor(ThemeProperties::COLOR_NTP_HEADER);
+          theme_service_->GetGdkColor(ThemeService::COLOR_NTP_HEADER);
       gtk_util::SetRoundedWindowBorderColor(paint_box_, stroke_color);
     }
 
     SetOverflowButtonAppearance();
+  } else if (type == chrome::NOTIFICATION_PREF_CHANGED) {
+    const std::string& pref_name =
+        *content::Details<std::string>(details).ptr();
+    if (pref_name == prefs::kEditBookmarksEnabled)
+      OnEditBookmarksEnabledChanged();
   }
 }
 
 GtkWidget* BookmarkBarGtk::CreateBookmarkButton(const BookmarkNode* node) {
   GtkWidget* button = theme_service_->BuildChromeButton();
-  ConfigureButtonForNode(node, model_, button, theme_service_);
+  bookmark_utils::ConfigureButtonForNode(node, model_, button, theme_service_);
 
   // The tool item is also a source for dragging
   gtk_drag_source_set(button, GDK_BUTTON1_MASK, NULL, 0,
       static_cast<GdkDragAction>(GDK_ACTION_MOVE | GDK_ACTION_COPY));
-  int target_mask = GetCodeMask(node->is_folder());
+  int target_mask = bookmark_utils::GetCodeMask(node->is_folder());
   ui::SetSourceTargetListFromCodeMask(button, target_mask);
   g_signal_connect(button, "drag-begin",
                    G_CALLBACK(&OnButtonDragBeginThunk), this);
@@ -1132,7 +1087,7 @@ const BookmarkNode* BookmarkBarGtk::GetNodeForToolButton(GtkWidget* widget) {
 void BookmarkBarGtk::PopupMenuForNode(GtkWidget* sender,
                                       const BookmarkNode* node,
                                       GdkEventButton* event) {
-  if (!model_->loaded()) {
+  if (!model_->IsLoaded()) {
     // Don't do anything if the model isn't loaded.
     return;
   }
@@ -1153,8 +1108,7 @@ void BookmarkBarGtk::PopupMenuForNode(GtkWidget* sender,
   GtkWindow* window = GTK_WINDOW(gtk_widget_get_toplevel(sender));
   current_context_menu_controller_.reset(
       new BookmarkContextMenuController(
-          window, this, browser_, browser_->profile(), page_navigator_, parent,
-          nodes));
+          window, this, browser_->profile(), page_navigator_, parent, nodes));
   current_context_menu_.reset(
       new MenuGtk(NULL, current_context_menu_controller_->menu_model()));
   current_context_menu_->PopupAsContext(
@@ -1182,28 +1136,27 @@ void BookmarkBarGtk::OnClicked(GtkWidget* sender) {
   DCHECK(node->is_url());
   DCHECK(page_navigator_);
 
-  RecordAppLaunch(browser_->profile(), node->url());
-  chrome::OpenAll(window_->GetNativeWindow(), page_navigator_, node,
-                  event_utils::DispositionForCurrentButtonPressEvent(),
-                  browser_->profile());
+  Profile* profile = browser_->profile();
+  RecordAppLaunch(profile, node->url());
+  bookmark_utils::OpenAll(window_->GetNativeHandle(), profile, page_navigator_,
+      node, gtk_util::DispositionForCurrentButtonPressEvent());
 
-  RecordBookmarkLaunch(node, GetBookmarkLaunchLocation());
+  content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
 }
 
 void BookmarkBarGtk::OnButtonDragBegin(GtkWidget* button,
                                        GdkDragContext* drag_context) {
-  GtkWidget* button_parent = gtk_widget_get_parent(button);
-
   // The parent tool item might be removed during the drag. Ref it so |button|
   // won't get destroyed.
-  g_object_ref(button_parent);
+  g_object_ref(button->parent);
 
   const BookmarkNode* node = GetNodeForToolButton(button);
   DCHECK(!dragged_node_);
   dragged_node_ = node;
   DCHECK(dragged_node_);
 
-  drag_icon_ = GetDragRepresentationForNode(node, model_, theme_service_);
+  drag_icon_ = bookmark_utils::GetDragRepresentationForNode(
+      node, model_, theme_service_);
 
   // We have to jump through some hoops to get the drag icon to line up because
   // it is a different size than the button.
@@ -1211,15 +1164,15 @@ void BookmarkBarGtk::OnButtonDragBegin(GtkWidget* button,
   gtk_widget_size_request(drag_icon_, &req);
   gfx::Rect button_rect = gtk_util::WidgetBounds(button);
   gfx::Point drag_icon_relative =
-      gfx::Rect(req.width, req.height).CenterPoint() +
-      (last_pressed_coordinates_ - button_rect.CenterPoint());
+      gfx::Rect(req.width, req.height).CenterPoint().Add(
+          (last_pressed_coordinates_.Subtract(button_rect.CenterPoint())));
   gtk_drag_set_icon_widget(drag_context, drag_icon_,
                            drag_icon_relative.x(),
                            drag_icon_relative.y());
 
   // Hide our node, but reserve space for it on the toolbar.
   int index = gtk_toolbar_get_item_index(GTK_TOOLBAR(bookmark_toolbar_.get()),
-                                         GTK_TOOL_ITEM(button_parent));
+                                         GTK_TOOL_ITEM(button->parent));
   gtk_widget_hide(button);
   toolbar_drop_item_ = CreateBookmarkToolItem(dragged_node_);
   g_object_ref_sink(GTK_OBJECT(toolbar_drop_item_));
@@ -1243,7 +1196,7 @@ void BookmarkBarGtk::OnButtonDragEnd(GtkWidget* button,
   gtk_widget_destroy(drag_icon_);
   drag_icon_ = NULL;
 
-  g_object_unref(gtk_widget_get_parent(button));
+  g_object_unref(button->parent);
 }
 
 void BookmarkBarGtk::OnButtonDragGet(GtkWidget* widget,
@@ -1251,20 +1204,9 @@ void BookmarkBarGtk::OnButtonDragGet(GtkWidget* widget,
                                      GtkSelectionData* selection_data,
                                      guint target_type,
                                      guint time) {
-  const BookmarkNode* node = BookmarkNodeForWidget(widget);
-  WriteBookmarkToSelection(
-      node, selection_data, target_type, browser_->profile());
-}
-
-void BookmarkBarGtk::OnAppsButtonClicked(GtkWidget* sender) {
-  content::OpenURLParams params(
-      GURL(chrome::kChromeUIAppsURL),
-      content::Referrer(),
-      event_utils::DispositionForCurrentButtonPressEvent(),
-      content::PAGE_TRANSITION_AUTO_BOOKMARK,
-      false);
-  browser_->OpenURL(params);
-  RecordBookmarkAppsPageOpen(GetBookmarkLaunchLocation());
+  const BookmarkNode* node = bookmark_utils::BookmarkNodeForWidget(widget);
+  bookmark_utils::WriteBookmarkToSelection(node, selection_data, target_type,
+                                           browser_->profile());
 }
 
 void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
@@ -1275,16 +1217,13 @@ void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
     hover_controller->StartThrobbing(0);
 
   GdkEvent* event = gtk_get_current_event();
-  if (event->button.button == 1 ||
-      (event->button.button == 2 && sender == overflow_button_)) {
-    RecordBookmarkFolderOpen(GetBookmarkLaunchLocation());
+  if (event->button.button == 1) {
     PopupForButton(sender);
   } else if (event->button.button == 2) {
     const BookmarkNode* node = GetNodeForToolButton(sender);
-    chrome::OpenAll(window_->GetNativeWindow(), page_navigator_, node,
-                    NEW_BACKGROUND_TAB, browser_->profile());
+    bookmark_utils::OpenAll(window_->GetNativeHandle(), browser_->profile(),
+                            page_navigator_, node, NEW_BACKGROUND_TAB);
   }
-  gdk_event_free(event);
 }
 
 gboolean BookmarkBarGtk::OnToolbarDragMotion(GtkWidget* toolbar,
@@ -1341,31 +1280,33 @@ void BookmarkBarGtk::OnDragReceived(GtkWidget* widget,
 
   switch (target_type) {
     case ui::CHROME_BOOKMARK_ITEM: {
-      gint length = gtk_selection_data_get_length(selection_data);
-      Pickle pickle(reinterpret_cast<const char*>(
-          gtk_selection_data_get_data(selection_data)), length);
+      Pickle pickle(reinterpret_cast<char*>(selection_data->data),
+                    selection_data->length);
       BookmarkNodeData drag_data;
       if (drag_data.ReadFromPickle(&pickle)) {
-        dnd_success = chrome::DropBookmarks(browser_->profile(),
-            drag_data, dest_node, index) != ui::DragDropTypes::DRAG_NONE;
+        dnd_success = bookmark_utils::PerformBookmarkDrop(
+            browser_->profile(),
+            drag_data,
+            dest_node,
+            index) != ui::DragDropTypes::DRAG_NONE;
       }
       break;
     }
 
     case ui::CHROME_NAMED_URL: {
-      dnd_success = CreateNewBookmarkFromNamedUrl(
+      dnd_success = bookmark_utils::CreateNewBookmarkFromNamedUrl(
           selection_data, model_, dest_node, index);
       break;
     }
 
     case ui::TEXT_URI_LIST: {
-      dnd_success = CreateNewBookmarksFromURIList(
+      dnd_success = bookmark_utils::CreateNewBookmarksFromURIList(
           selection_data, model_, dest_node, index);
       break;
     }
 
     case ui::NETSCAPE_URL: {
-      dnd_success = CreateNewBookmarkFromNetscapeURL(
+      dnd_success = bookmark_utils::CreateNewBookmarkFromNetscapeURL(
           selection_data, model_, dest_node, index);
       break;
     }
@@ -1380,7 +1321,7 @@ void BookmarkBarGtk::OnDragReceived(GtkWidget* widget,
       // so that it doesn't look like we can drag onto the bookmark bar.
       if (!url.is_valid())
         break;
-      base::string16 title = GetNameForURL(url);
+      string16 title = bookmark_utils::GetNameForURL(url);
       model_->AddURL(dest_node, index, title, url);
       dnd_success = TRUE;
       break;
@@ -1442,7 +1383,7 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
     return FALSE;
 
   if (bookmark_bar_state_ != BookmarkBar::DETACHED) {
-    cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(widget));
+    cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(widget->window));
     gdk_cairo_rectangle(cr, &event->area);
     cairo_clip(cr);
 
@@ -1454,8 +1395,8 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
 
     cairo_destroy(cr);
   } else {
-    gfx::Size web_contents_size;
-    if (!GetWebContentsSize(&web_contents_size))
+    gfx::Size tab_contents_size;
+    if (!GetTabContentsSize(&tab_contents_size))
       return FALSE;
     gfx::CanvasSkiaPaint canvas(event, true);
 
@@ -1466,7 +1407,7 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
                      gfx::Rect(0, 0, allocation.width, allocation.height) :
                      gfx::Rect(allocation);
     NtpBackgroundUtil::PaintBackgroundDetachedMode(theme_provider, &canvas,
-        area, web_contents_size.height());
+        area, tab_contents_size.height());
   }
 
   return FALSE;  // Propagate expose to children.
@@ -1485,7 +1426,7 @@ void BookmarkBarGtk::OnParentSizeAllocate(GtkWidget* widget,
   // gtk_widget_queue_draw by itself does not work, despite that it claims to
   // be asynchronous.
   if (bookmark_bar_state_ == BookmarkBar::DETACHED) {
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&BookmarkBarGtk::PaintEventBox, weak_factory_.GetWeakPtr()));
   }
@@ -1496,15 +1437,7 @@ void BookmarkBarGtk::OnThrobbingWidgetDestroy(GtkWidget* widget) {
 }
 
 void BookmarkBarGtk::ShowImportDialog() {
-  chrome::ShowImportDialog(browser_);
-}
-
-void BookmarkBarGtk::OnAppsPageShortcutVisibilityChanged() {
-  const bool visible =
-      chrome::ShouldShowAppsShortcutInBookmarkBar(
-          browser_->profile(), browser_->host_desktop_type());
-  gtk_widget_set_visible(apps_shortcut_button_, visible);
-  gtk_widget_set_no_show_all(apps_shortcut_button_, !visible);
+  browser_->OpenImportSettingsDialog();
 }
 
 void BookmarkBarGtk::OnEditBookmarksEnabledChanged() {

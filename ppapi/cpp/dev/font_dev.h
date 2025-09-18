@@ -16,7 +16,7 @@ struct PP_FontDescription_Dev;
 namespace pp {
 
 class ImageData;
-class InstanceHandle;
+class Instance;
 class Point;
 class Rect;
 
@@ -103,14 +103,13 @@ class Font_Dev : public Resource {
   Font_Dev();
 
   explicit Font_Dev(PP_Resource resource);
-  Font_Dev(const InstanceHandle& instance,
-           const FontDescription_Dev& description);
+  Font_Dev(Instance* instance, const FontDescription_Dev& description);
   Font_Dev(const Font_Dev& other);
 
   Font_Dev& operator=(const Font_Dev& other);
 
   // PPB_Font methods:
-  static Var GetFontFamilies(const InstanceHandle& instance);
+  static Var GetFontFamilies(Instance* instance);
   bool Describe(FontDescription_Dev* description,
                 PP_FontMetrics_Dev* metrics) const;
   bool DrawTextAt(ImageData* dest,

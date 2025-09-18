@@ -4,18 +4,14 @@
 
 #include "ash/wm/video_detector.h"
 
-#include "ash/shell.h"
-#include "ash/wm/window_state.h"
-#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/rect.h"
-#include "ui/views/corewm/window_util.h"
 
 namespace ash {
 
-const int VideoDetector::kMinUpdateWidth = 333;
-const int VideoDetector::kMinUpdateHeight = 250;
+const int VideoDetector::kMinUpdateWidth = 300;
+const int VideoDetector::kMinUpdateHeight = 225;
 const int VideoDetector::kMinFramesPerSecond = 15;
 const double VideoDetector::kNotifyIntervalSec = 1.0;
 
@@ -23,52 +19,47 @@ const double VideoDetector::kNotifyIntervalSec = 1.0;
 // likely that a video is playing in it.
 class VideoDetector::WindowInfo {
  public:
-  WindowInfo() : buffer_start_(0), buffer_size_(0) {}
+  WindowInfo() : num_video_updates_in_second_(0) {}
 
-  // Handles an update within a window, returning true if it appears that
-  // video is currently playing in the window.
+  // Handles an update within a window, returning true if this update made us
+  // believe that a video is playing in the window.  true is returned at most
+  // once per second.
   bool RecordUpdateAndCheckForVideo(const gfx::Rect& region,
                                     base::TimeTicks now) {
     if (region.width() < kMinUpdateWidth || region.height() < kMinUpdateHeight)
       return false;
 
-    // If the buffer is full, drop the first timestamp.
-    if (buffer_size_ == static_cast<size_t>(kMinFramesPerSecond)) {
-      buffer_start_ = (buffer_start_ + 1) % kMinFramesPerSecond;
-      buffer_size_--;
+    if (second_start_time_.is_null() ||
+        (now - second_start_time_).InSecondsF() >= 1.0) {
+      second_start_time_ = now;
+      num_video_updates_in_second_ = 0;
     }
+    num_video_updates_in_second_++;
 
-    update_times_[(buffer_start_ + buffer_size_) % kMinFramesPerSecond] = now;
-    buffer_size_++;
-
-    return buffer_size_ == static_cast<size_t>(kMinFramesPerSecond) &&
-        (now - update_times_[buffer_start_]).InSecondsF() <= 1.0;
+    return num_video_updates_in_second_ == kMinFramesPerSecond;
   }
 
  private:
-  // Circular buffer containing update times of the last (up to
-  // |kMinFramesPerSecond|) video-sized updates to this window.
-  base::TimeTicks update_times_[kMinFramesPerSecond];
+  // Number of video-sized updates that we've seen in the second starting at
+  // |second_start_time_|.  (Keeping a rolling window is overkill here.)
+  int num_video_updates_in_second_;
 
-  // Index into |update_times_| of the oldest update.
-  size_t buffer_start_;
-
-  // Number of updates stored in |update_times_|.
-  size_t buffer_size_;
+  base::TimeTicks second_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowInfo);
 };
 
-VideoDetector::VideoDetector()
-    : observer_manager_(this),
-      is_shutting_down_(false) {
-  aura::Env::GetInstance()->AddObserver(this);
-  Shell::GetInstance()->AddShellObserver(this);
+VideoDetector::VideoDetector() {
+  aura::RootWindow::GetInstance()->AddRootWindowObserver(this);
 }
 
 VideoDetector::~VideoDetector() {
-  Shell::GetInstance()->RemoveShellObserver(this);
-  aura::Env::GetInstance()->RemoveObserver(this);
+  aura::RootWindow::GetInstance()->RemoveRootWindowObserver(this);
+  for (WindowInfoMap::const_iterator it = window_infos_.begin();
+       it != window_infos_.end(); ++it) {
+    aura::Window* window = it->first;
+    window->RemoveObserver(this);
+  }
 }
 
 void VideoDetector::AddObserver(VideoDetectorObserver* observer) {
@@ -80,13 +71,11 @@ void VideoDetector::RemoveObserver(VideoDetectorObserver* observer) {
 }
 
 void VideoDetector::OnWindowInitialized(aura::Window* window) {
-  observer_manager_.Add(window);
+  window->AddObserver(this);
 }
 
 void VideoDetector::OnWindowPaintScheduled(aura::Window* window,
                                            const gfx::Rect& region) {
-  if (is_shutting_down_)
-    return;
   linked_ptr<WindowInfo>& info = window_infos_[window];
   if (!info.get())
     info.reset(new WindowInfo);
@@ -99,13 +88,6 @@ void VideoDetector::OnWindowPaintScheduled(aura::Window* window,
 
 void VideoDetector::OnWindowDestroyed(aura::Window* window) {
   window_infos_.erase(window);
-  observer_manager_.Remove(window);
-}
-
-void VideoDetector::OnAppTerminating() {
-  // Stop checking video activity once the shutdown
-  // process starts. crbug.com/231696.
-  is_shutting_down_ = true;
 }
 
 void VideoDetector::MaybeNotifyObservers(aura::Window* window,
@@ -118,17 +100,11 @@ void VideoDetector::MaybeNotifyObservers(aura::Window* window,
   if (!window->IsVisible())
     return;
 
-  gfx::Rect root_bounds = window->GetRootWindow()->bounds();
-  if (!window->GetBoundsInRootWindow().Intersects(root_bounds))
+  gfx::Rect root_bounds = aura::RootWindow::GetInstance()->bounds();
+  if (!window->GetScreenBounds().Intersects(root_bounds))
     return;
 
-  aura::Window* toplevel_window = views::corewm::GetToplevelWindow(window);
-  bool is_fullscreen = toplevel_window ?
-      wm::GetWindowState(toplevel_window)->IsFullscreen() : false;
-
-  FOR_EACH_OBSERVER(VideoDetectorObserver,
-                    observers_,
-                    OnVideoDetected(is_fullscreen));
+  FOR_EACH_OBSERVER(VideoDetectorObserver, observers_, OnVideoDetected());
   last_observer_notification_time_ = now;
 }
 

@@ -8,50 +8,33 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/strings/string_number_conversions.h"
-#include "content/child/npapi/plugin_instance.h"
-#include "content/child/npapi/webplugin_delegate_impl.h"
-#include "content/child/npapi/webplugin_resource_client.h"
-#include "content/child/plugin_messages.h"
+#include "base/string_number_conversions.h"
+#include "content/common/npobject_stub.h"
+#include "content/common/plugin_messages.h"
 #include "content/plugin/plugin_channel.h"
 #include "content/plugin/plugin_thread.h"
 #include "content/plugin/webplugin_proxy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
-#include "skia/ext/platform_device.h"
-#include "third_party/WebKit/public/platform/WebCursorInfo.h"
-#include "third_party/WebKit/public/web/WebBindings.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
-#include "webkit/common/cursors/webcursor.h"
+#include "skia/ext/platform_device.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
+#include "webkit/plugins/npapi/webplugin_delegate_impl.h"
+#include "webkit/glue/webcursor.h"
 
-using blink::WebBindings;
-using blink::WebCursorInfo;
+using WebKit::WebBindings;
+using WebKit::WebCursorInfo;
+using webkit::npapi::WebPlugin;
+using webkit::npapi::WebPluginResourceClient;
 
-namespace content {
-
-static void DestroyWebPluginAndDelegate(
-    base::WeakPtr<NPObjectStub> scriptable_object,
-    WebPluginDelegateImpl* delegate,
-    WebPlugin* webplugin) {
-  // The plugin may not expect us to try to release the scriptable object
-  // after calling NPP_Destroy on the instance, so delete the stub now.
-  if (scriptable_object.get())
-    scriptable_object->DeleteSoon();
-
-  if (delegate) {
-    // Save the object owner Id so we can unregister it as a valid owner
-    // after the instance has been destroyed.
-    NPP owner = delegate->GetPluginNPP();
-
-    // WebPlugin must outlive WebPluginDelegate.
+void FinishDestructionCallback(webkit::npapi::WebPluginDelegateImpl* delegate,
+                               WebPlugin* webplugin) {
+  // WebPlugin must outlive WebPluginDelegate.
+  if (delegate)
     delegate->PluginDestroyed();
-
-    // PluginDestroyed can call into script, so only unregister as an object
-    // owner after that has completed.
-    WebBindings::unregisterObjectOwner(owner);
-  }
 
   delete webplugin;
 }
@@ -69,30 +52,24 @@ WebPluginDelegateStub::WebPluginDelegateStub(
 
 WebPluginDelegateStub::~WebPluginDelegateStub() {
   in_destructor_ = true;
-  GetContentClient()->SetActiveURL(page_url_);
+  content::GetContentClient()->SetActiveURL(page_url_);
 
   if (channel_->in_send()) {
     // The delegate or an npobject is in the callstack, so don't delete it
     // right away.
-    base::MessageLoop::current()->PostNonNestableTask(
-        FROM_HERE,
-        base::Bind(&DestroyWebPluginAndDelegate,
-                   plugin_scriptable_object_,
-                   delegate_,
-                   webplugin_));
+    MessageLoop::current()->PostNonNestableTask(FROM_HERE,
+        base::Bind(&FinishDestructionCallback, delegate_, webplugin_));
   } else {
     // Safe to delete right away.
-    DestroyWebPluginAndDelegate(
-        plugin_scriptable_object_, delegate_, webplugin_);
-  }
+    if (delegate_)
+      delegate_->PluginDestroyed();
 
-  // Remove the NPObject owner mapping for this instance.
-  if (delegate_)
-    channel_->RemoveMappingForNPObjectOwner(instance_id_);
+    delete webplugin_;
+  }
 }
 
 bool WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
-  GetContentClient()->SetActiveURL(page_url_);
+  content::GetContentClient()->SetActiveURL(page_url_);
 
   // A plugin can execute a script to delete itself in any of its NPP methods.
   // Hold an extra reference to ourself so that if this does occur and we're
@@ -147,7 +124,10 @@ bool WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
                         OnHandleURLRequestReply)
     IPC_MESSAGE_HANDLER(PluginMsg_HTTPRangeRequestReply,
                         OnHTTPRangeRequestReply)
-    IPC_MESSAGE_HANDLER(PluginMsg_FetchURL, OnFetchURL)
+#if defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(PluginMsg_SetFakeAcceleratedSurfaceWindowHandle,
+                        OnSetFakeAcceleratedSurfaceWindowHandle)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -163,12 +143,10 @@ bool WebPluginDelegateStub::Send(IPC::Message* msg) {
 }
 
 void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
-                                   bool* transparent,
                                    bool* result) {
   page_url_ = params.page_url;
-  GetContentClient()->SetActiveURL(page_url_);
+  content::GetContentClient()->SetActiveURL(page_url_);
 
-  *transparent = false;
   *result = false;
   if (params.arg_names.size() != params.arg_values.size()) {
     NOTREACHED();
@@ -176,37 +154,38 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
   }
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  base::FilePath path =
+  FilePath path =
       command_line.GetSwitchValuePath(switches::kPluginPath);
 
-  webplugin_ = new WebPluginProxy(channel_.get(),
-                                  instance_id_,
-                                  page_url_,
-                                  params.host_render_view_routing_id);
-  delegate_ = WebPluginDelegateImpl::Create(webplugin_, path, mime_type_);
-  if (delegate_) {
-    if (delegate_->GetQuirks() &
-        WebPluginDelegateImpl::PLUGIN_QUIRK_DIE_AFTER_UNLOAD) {
-      PluginThread::current()->SetForcefullyTerminatePluginProcess();
-    }
+  gfx::PluginWindowHandle parent = gfx::kNullPluginWindow;
+#if defined(USE_AURA)
+  // Nothing.
+#elif defined(OS_WIN)
+  parent = gfx::NativeViewFromId(params.containing_window);
+#elif defined(OS_LINUX)
+  // This code is disabled, See issue 17110.
+  // The problem is that the XID can change at arbitrary times (e.g. when the
+  // tab is detached then reattached), so we need to be able to track these
+  // changes, and let the PluginInstance know.
+  // PluginThread::current()->Send(new PluginProcessHostMsg_MapNativeViewId(
+  //    params.containing_window, &parent));
+#endif
 
+  webplugin_ = new WebPluginProxy(
+      channel_, instance_id_, page_url_, params.containing_window,
+      params.host_render_view_routing_id);
+  delegate_ = webkit::npapi::WebPluginDelegateImpl::Create(
+      path, mime_type_, parent);
+  if (delegate_) {
     webplugin_->set_delegate(delegate_);
     std::vector<std::string> arg_names = params.arg_names;
     std::vector<std::string> arg_values = params.arg_values;
 
-    // Register the plugin as a valid object owner.
-    WebBindings::registerObjectOwner(delegate_->GetPluginNPP());
-
-    // Add an NPObject owner mapping for this instance, to support ownership
-    // tracking in the renderer.
-    channel_->AddMappingForNPObjectOwner(instance_id_,
-                                         delegate_->GetPluginNPP());
-
     *result = delegate_->Initialize(params.url,
                                     arg_names,
                                     arg_values,
+                                    webplugin_,
                                     params.load_manually);
-    *transparent = delegate_->instance()->transparent();
   }
 }
 
@@ -248,7 +227,7 @@ void WebPluginDelegateStub::OnDidFinishLoading(int id) {
   if (!client)
     return;
 
-  client->DidFinishLoading(id);
+  client->DidFinishLoading();
 }
 
 void WebPluginDelegateStub::OnDidFail(int id) {
@@ -256,7 +235,7 @@ void WebPluginDelegateStub::OnDidFail(int id) {
   if (!client)
     return;
 
-  client->DidFail(id);
+  client->DidFail();
 }
 
 void WebPluginDelegateStub::OnDidFinishLoadWithReason(
@@ -266,17 +245,13 @@ void WebPluginDelegateStub::OnDidFinishLoadWithReason(
 
 void WebPluginDelegateStub::OnSetFocus(bool focused) {
   delegate_->SetFocus(focused);
-#if defined(OS_WIN) && !defined(USE_AURA)
-  if (focused)
-    webplugin_->UpdateIMEStatus();
-#endif
 }
 
 void WebPluginDelegateStub::OnHandleInputEvent(
-    const blink::WebInputEvent *event,
+    const WebKit::WebInputEvent *event,
     bool* handled,
     WebCursor* cursor) {
-  WebCursor::CursorInfo cursor_info;
+  WebCursorInfo cursor_info;
   *handled = delegate_->HandleInputEvent(*event, &cursor_info);
   cursor->InitFromCursorInfo(cursor_info);
 }
@@ -294,7 +269,8 @@ void WebPluginDelegateStub::OnUpdateGeometry(
   webplugin_->UpdateGeometry(
       param.window_rect, param.clip_rect,
       param.windowless_buffer0, param.windowless_buffer1,
-      param.windowless_buffer_index);
+      param.windowless_buffer_index, param.background_buffer,
+      param.transparent);
 }
 
 void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id) {
@@ -305,20 +281,17 @@ void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id) {
   }
 
   *route_id = channel_->GenerateRouteID();
-  // We will delete the stub immediately before calling PluginDestroyed on the
-  // delegate. It will delete itself sooner if the proxy tells it that it has
-  // been released, or if the channel to the proxy is closed.
-  NPObjectStub* scriptable_stub = new NPObjectStub(
-      object, channel_.get(), *route_id,
-      webplugin_->host_render_view_routing_id(), page_url_);
-  plugin_scriptable_object_ = scriptable_stub->AsWeakPtr();
+  // The stub will delete itself when the proxy tells it that it's released, or
+  // otherwise when the channel is closed.
+  new NPObjectStub(
+      object, channel_.get(), *route_id, webplugin_->containing_window(),
+      page_url_);
 
   // Release ref added by GetPluginScriptableObject (our stub holds its own).
   WebBindings::releaseObject(object);
 }
 
-void WebPluginDelegateStub::OnGetFormValue(base::string16* value,
-                                           bool* success) {
+void WebPluginDelegateStub::OnGetFormValue(string16* value, bool* success) {
   *success = false;
   if (!delegate_)
     return;
@@ -339,7 +312,7 @@ void WebPluginDelegateStub::OnSetContentAreaFocus(bool has_focus) {
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 void WebPluginDelegateStub::OnImeCompositionUpdated(
-    const base::string16& text,
+    const string16& text,
     const std::vector<int>& clauses,
     const std::vector<int>& target,
     int cursor_position) {
@@ -350,8 +323,7 @@ void WebPluginDelegateStub::OnImeCompositionUpdated(
 #endif
 }
 
-void WebPluginDelegateStub::OnImeCompositionCompleted(
-    const base::string16& text) {
+void WebPluginDelegateStub::OnImeCompositionCompleted(const string16& text) {
   if (delegate_)
     delegate_->ImeCompositionCompleted(text);
 }
@@ -384,8 +356,7 @@ void WebPluginDelegateStub::OnWindowFrameChanged(const gfx::Rect& window_frame,
     delegate_->WindowFrameChanged(window_frame, view_frame);
 }
 
-void WebPluginDelegateStub::OnImeCompositionCompleted(
-    const base::string16& text) {
+void WebPluginDelegateStub::OnImeCompositionCompleted(const string16& text) {
   if (delegate_)
     delegate_->ImeCompositionCompleted(text);
 }
@@ -427,24 +398,9 @@ void WebPluginDelegateStub::OnHTTPRangeRequestReply(
   webplugin_->OnResourceCreated(resource_id, resource_client);
 }
 
-void WebPluginDelegateStub::OnFetchURL(
-    const PluginMsg_FetchURL_Params& params) {
-  const char* data = NULL;
-  if (params.post_data.size())
-    data = &params.post_data[0];
-
-  delegate_->FetchURL(params.resource_id,
-                      params.notify_id,
-                      params.url,
-                      params.first_party_for_cookies,
-                      params.method,
-                      data,
-                      static_cast<unsigned int>(params.post_data.size()),
-                      params.referrer,
-                      params.notify_redirect,
-                      params.is_plugin_src_load,
-                      channel_->renderer_id(),
-                      params.render_frame_id);
+#if defined(OS_MACOSX)
+void WebPluginDelegateStub::OnSetFakeAcceleratedSurfaceWindowHandle(
+    gfx::PluginWindowHandle window) {
+  delegate_->set_windowed_handle(window);
 }
-
-}  // namespace content
+#endif

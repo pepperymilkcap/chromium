@@ -1,23 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_TASK_MANAGER_MAC_H_
 #define CHROME_BROWSER_UI_COCOA_TASK_MANAGER_MAC_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 #include <vector>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/cocoa/table_row_nsimage_cache.h"
 
 @class WindowSizeAutosaver;
+class SkBitmap;
 class TaskManagerMac;
-
-namespace gfx {
-class ImageSkia;
-}
 
 // This class is responsible for loading the task manager window and for
 // managing it.
@@ -30,8 +29,9 @@ class ImageSkia;
   TaskManagerMac* taskManagerObserver_;  // weak
   TaskManager* taskManager_;  // weak
   TaskManagerModel* model_;  // weak
+  bool highlightBackgroundResources_;
 
-  base::scoped_nsobject<WindowSizeAutosaver> size_saver_;
+  scoped_nsobject<WindowSizeAutosaver> size_saver_;
 
   // These contain a permutation of [0..|model_->ResourceCount() - 1|]. Used to
   // implement sorting.
@@ -39,11 +39,15 @@ class ImageSkia;
   std::vector<int> modelToViewMap_;
 
   // Descriptor of the current sort column.
-  base::scoped_nsobject<NSSortDescriptor> currentSortDescriptor_;
+  scoped_nsobject<NSSortDescriptor> currentSortDescriptor_;
+
+  // Color we use for background resources.
+  scoped_nsobject<NSColor> backgroundResourceColor_;
 }
 
 // Creates and shows the task manager's window.
-- (id)initWithTaskManagerObserver:(TaskManagerMac*)taskManagerObserver;
+- (id)initWithTaskManagerObserver:(TaskManagerMac*)taskManagerObserver
+     highlightBackgroundResources:(bool)highlightBackgroundResources;
 
 // Refreshes all data in the task manager table.
 - (void)reloadData;
@@ -66,7 +70,7 @@ class ImageSkia;
 class TaskManagerMac : public TaskManagerModelObserver,
                        public TableRowNSImageCache::Table {
  public:
-  explicit TaskManagerMac(TaskManager* task_manager);
+  TaskManagerMac(TaskManager* task_manager, bool highlight_background);
   virtual ~TaskManagerMac();
 
   // TaskManagerModelObserver
@@ -81,11 +85,12 @@ class TaskManagerMac : public TaskManagerModelObserver,
 
   // TableRowNSImageCache::Table
   virtual int RowCount() const OVERRIDE;
-  virtual gfx::ImageSkia GetIcon(int r) const OVERRIDE;
+  virtual SkBitmap GetIcon(int r) const OVERRIDE;
 
   // Creates the task manager if it doesn't exist; otherwise, it activates the
-  // existing task manager window.
-  static void Show();
+  // existing task manager window. Highlights background resources if
+  // |highlight_background_resources| is true.
+  static void Show(bool highlight_background_resources);
 
   // Returns the TaskManager observed by |this|.
   TaskManager* task_manager() { return task_manager_; }
@@ -96,6 +101,8 @@ class TaskManagerMac : public TaskManagerModelObserver,
   // Returns the cocoa object. Used for testing.
   TaskManagerWindowController* cocoa_controller() { return window_controller_; }
 
+  // Returns true if the resource at this location is a background resource.
+  bool IsBackgroundRow(int row) const;
  private:
   // The task manager.
   TaskManager* const task_manager_;  // weak
@@ -109,6 +116,9 @@ class TaskManagerMac : public TaskManagerModelObserver,
 
   // Caches favicons for all rows. Needs to be initalized after |model_|.
   TableRowNSImageCache icon_cache_;
+
+  // If true, highlight background resources.
+  bool highlight_background_resources_;
 
   // An open task manager window. There can only be one open at a time. This
   // is reset to NULL when the window is closed.

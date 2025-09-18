@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,47 +8,21 @@
 #include <map>
 #include <string>
 #include "base/basictypes.h"
-#include "base/memory/weak_ptr.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
 #include "net/http/http_pipelined_host_capability.h"
-#include "net/socket/next_proto.h"
 #include "net/spdy/spdy_framer.h"  // TODO(willchan): Reconsider this.
 
 namespace net {
 
 enum AlternateProtocol {
-  DEPRECATED_NPN_SPDY_2 = 0,
-  ALTERNATE_PROTOCOL_MINIMUM_VALID_VERSION = DEPRECATED_NPN_SPDY_2,
-  NPN_SPDY_MINIMUM_VERSION = DEPRECATED_NPN_SPDY_2,
-  NPN_SPDY_3,
-  NPN_SPDY_3_1,
-  NPN_SPDY_4A2,
-  // We lump in HTTP/2 with the SPDY protocols for now.
-  NPN_HTTP2_DRAFT_04,
-  NPN_SPDY_MAXIMUM_VERSION = NPN_HTTP2_DRAFT_04,
-  QUIC,
-  ALTERNATE_PROTOCOL_MAXIMUM_VALID_VERSION = QUIC,
+  NPN_SPDY_1 = 0,
+  NPN_SPDY_2,
+  NPN_SPDY_21,
+  NUM_ALTERNATE_PROTOCOLS,
   ALTERNATE_PROTOCOL_BROKEN,  // The alternate protocol is known to be broken.
   UNINITIALIZED_ALTERNATE_PROTOCOL,
 };
-
-// Simply returns whether |protocol| is between
-// ALTERNATE_PROTOCOL_MINIMUM_VALID_VERSION and
-// ALTERNATE_PROTOCOL_MAXIMUM_VALID_VERSION (inclusive).
-NET_EXPORT bool IsAlternateProtocolValid(AlternateProtocol protocol);
-
-enum AlternateProtocolSize {
-  NUM_VALID_ALTERNATE_PROTOCOLS =
-    ALTERNATE_PROTOCOL_MAXIMUM_VALID_VERSION -
-    ALTERNATE_PROTOCOL_MINIMUM_VALID_VERSION + 1,
-};
-
-NET_EXPORT const char* AlternateProtocolToString(AlternateProtocol protocol);
-NET_EXPORT AlternateProtocol AlternateProtocolFromString(
-    const std::string& str);
-NET_EXPORT_PRIVATE AlternateProtocol AlternateProtocolFromNextProto(
-    NextProto next_proto);
 
 struct NET_EXPORT PortAlternateProtocolPair {
   bool Equals(const PortAlternateProtocolPair& other) const {
@@ -62,11 +36,12 @@ struct NET_EXPORT PortAlternateProtocolPair {
 };
 
 typedef std::map<HostPortPair, PortAlternateProtocolPair> AlternateProtocolMap;
-typedef std::map<HostPortPair, SettingsMap> SpdySettingsMap;
+typedef std::map<HostPortPair, spdy::SpdySettings> SpdySettingsMap;
 typedef std::map<HostPortPair,
         HttpPipelinedHostCapability> PipelineCapabilityMap;
 
 extern const char kAlternateProtocolHeader[];
+extern const char* const kAlternateProtocolStrings[NUM_ALTERNATE_PROTOCOLS];
 
 // The interface for setting/retrieving the HTTP server properties.
 // Currently, this class manages servers':
@@ -77,9 +52,6 @@ class NET_EXPORT HttpServerProperties {
  public:
   HttpServerProperties() {}
   virtual ~HttpServerProperties() {}
-
-  // Gets a weak pointer for this object.
-  virtual base::WeakPtr<HttpServerProperties> GetWeakPtr() = 0;
 
   // Deletes all data.
   virtual void Clear() = 0;
@@ -111,25 +83,20 @@ class NET_EXPORT HttpServerProperties {
   // Returns all Alternate-Protocol mappings.
   virtual const AlternateProtocolMap& alternate_protocol_map() const = 0;
 
-  // Gets a reference to the SettingsMap stored for a host.
-  // If no settings are stored, returns an empty SettingsMap.
-  virtual const SettingsMap& GetSpdySettings(
+  // Gets a reference to the SpdySettings stored for a host.
+  // If no settings are stored, returns an empty set of settings.
+  virtual const spdy::SpdySettings& GetSpdySettings(
       const HostPortPair& host_port_pair) const = 0;
 
-  // Saves an individual SPDY setting for a host. Returns true if SPDY setting
-  // is to be persisted.
-  virtual bool SetSpdySetting(const HostPortPair& host_port_pair,
-                              SpdySettingsIds id,
-                              SpdySettingsFlags flags,
-                              uint32 value) = 0;
+  // Saves settings for a host. Returns true if SpdySettings are to be
+  // persisted.
+  virtual bool SetSpdySettings(const HostPortPair& host_port_pair,
+                               const spdy::SpdySettings& settings) = 0;
 
-  // Clears all SPDY settings for a host.
-  virtual void ClearSpdySettings(const HostPortPair& host_port_pair) = 0;
+  // Clears all spdy_settings.
+  virtual void ClearSpdySettings() = 0;
 
-  // Clears all SPDY settings for all hosts.
-  virtual void ClearAllSpdySettings() = 0;
-
-  // Returns all persistent SPDY settings.
+  // Returns all persistent SpdySettings.
   virtual const SpdySettingsMap& spdy_settings_map() const = 0;
 
   virtual HttpPipelinedHostCapability GetPipelineCapability(

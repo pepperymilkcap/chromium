@@ -4,19 +4,17 @@
 
 #ifndef UI_VIEWS_EXAMPLES_SCROLL_VIEW_EXAMPLE_H_
 #define UI_VIEWS_EXAMPLES_SCROLL_VIEW_EXAMPLE_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/examples/example_base.h"
 
 namespace views {
-
-class LabelButton;
-
 namespace examples {
 
 class ScrollViewExample : public ExampleBase, public ButtonListener {
@@ -29,15 +27,15 @@ class ScrollViewExample : public ExampleBase, public ButtonListener {
 
  private:
   // Overridden from ButtonListener:
-  virtual void ButtonPressed(Button* sender, const ui::Event& event) OVERRIDE;
+  virtual void ButtonPressed(Button* sender, const Event& event) OVERRIDE;
 
   // Control buttons to change the size of scrollable and jump to
   // predefined position.
-  LabelButton* wide_;
-  LabelButton* tall_;
-  LabelButton* big_square_;
-  LabelButton* small_square_;
-  LabelButton* scroll_to_;
+  TextButton* wide_;
+  TextButton* tall_;
+  TextButton* big_square_;
+  TextButton* small_square_;
+  TextButton* scroll_to_;
 
   class ScrollableView;
   // The content of the scroll view.

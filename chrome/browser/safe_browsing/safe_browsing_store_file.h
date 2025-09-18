@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_STORE_FILE_H_
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_STORE_FILE_H_
+#pragma once
 
 #include <set>
 #include <vector>
@@ -108,7 +109,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   SafeBrowsingStoreFile();
   virtual ~SafeBrowsingStoreFile();
 
-  virtual void Init(const base::FilePath& filename,
+  virtual void Init(const FilePath& filename,
                     const base::Closure& corruption_callback) OVERRIDE;
 
   // Delete any on-disk files, including the permanent storage.
@@ -137,6 +138,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   // return |add_prefixes_result| and |add_full_hashes_result|.
   virtual bool FinishUpdate(
       const std::vector<SBAddFullHash>& pending_adds,
+      const std::set<SBPrefix>& prefix_misses,
       SBAddPrefixes* add_prefixes_result,
       std::vector<SBAddFullHash>* add_full_hashes_result) OVERRIDE;
   virtual bool CancelUpdate() OVERRIDE;
@@ -151,23 +153,16 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   virtual void DeleteAddChunk(int32 chunk_id) OVERRIDE;
   virtual void DeleteSubChunk(int32 chunk_id) OVERRIDE;
 
-  // Verify |file_|'s checksum, calling the corruption callback if it
-  // does not check out.  Empty input is considered valid.
-  virtual bool CheckValidity() OVERRIDE;
-
   // Returns the name of the temporary file used to buffer data for
   // |filename|.  Exported for unit tests.
-  static const base::FilePath TemporaryFileForFilename(
-      const base::FilePath& filename) {
-    return base::FilePath(filename.value() + FILE_PATH_LITERAL("_new"));
+  static const FilePath TemporaryFileForFilename(const FilePath& filename) {
+    return FilePath(filename.value() + FILE_PATH_LITERAL("_new"));
   }
-
-  // Delete any on-disk files, including the permanent storage.
-  static bool DeleteStore(const base::FilePath& basename);
 
  private:
   // Update store file with pending full hashes.
   virtual bool DoUpdate(const std::vector<SBAddFullHash>& pending_adds,
+                        const std::set<SBPrefix>& prefix_misses,
                         SBAddPrefixes* add_prefixes_result,
                         std::vector<SBAddFullHash>* add_full_hashes_result);
 
@@ -195,12 +190,6 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
     FORMAT_EVENT_DELETED_ORIGINAL,
     FORMAT_EVENT_DELETED_ORIGINAL_FAILED,
 
-    // The checksum did not check out in CheckValidity() or in
-    // FinishUpdate().  This most likely indicates that the machine
-    // crashed before the file was fully sync'ed to disk.
-    FORMAT_EVENT_VALIDITY_CHECKSUM_FAILURE,
-    FORMAT_EVENT_UPDATE_CHECKSUM_FAILURE,
-
     // Memory space for histograms is determined by the max.  ALWAYS
     // ADD NEW VALUES BEFORE THIS ONE.
     FORMAT_EVENT_MAX
@@ -215,7 +204,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   // result (no histogram for not-found).  Logically this
   // would make more sense at the SafeBrowsingDatabase level, but
   // practically speaking that code doesn't touch files directly.
-  static void CheckForOriginalAndDelete(const base::FilePath& filename);
+  static void CheckForOriginalAndDelete(const FilePath& filename);
 
   // Close all files and clear all buffers.
   bool Close();
@@ -235,7 +224,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
     // pre-reserved space is probably reasonable between each chunk
     // collected.
     SBAddPrefixes().swap(add_prefixes_);
-    SBSubPrefixes().swap(sub_prefixes_);
+    std::vector<SBSubPrefix>().swap(sub_prefixes_);
     std::vector<SBAddFullHash>().swap(add_hashes_);
     std::vector<SBSubFullHash>().swap(sub_hashes_);
     return true;
@@ -254,7 +243,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   // Buffers for collecting data between BeginChunk() and
   // FinishChunk().
   SBAddPrefixes add_prefixes_;
-  SBSubPrefixes sub_prefixes_;
+  std::vector<SBSubPrefix> sub_prefixes_;
   std::vector<SBAddFullHash> add_hashes_;
   std::vector<SBSubFullHash> sub_hashes_;
 
@@ -262,7 +251,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   int chunks_written_;
 
   // Name of the main database file.
-  base::FilePath filename_;
+  FilePath filename_;
 
   // Handles to the main and scratch files.  |empty_| is true if the
   // main file didn't exist when the update was started.

@@ -5,73 +5,41 @@
 #include "chrome/browser/google/google_util.h"
 
 #include <string>
-#include <vector>
 
 #include "base/command_line.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string16.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/net/browser_url_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
-#include "net/base/url_util.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
+#include "net/base/registry_controlled_domain.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/mac/keystone_glue.h"
-#elif defined(OS_CHROMEOS)
-#include "chrome/browser/google/google_util_chromeos.h"
 #endif
-
-#if defined(GOOGLE_CHROME_BUILD)
-#include "chrome/browser/google/linkdoctor_internal/linkdoctor_internal.h"
-#endif
-
-#ifndef LINKDOCTOR_SERVER_REQUEST_URL
-#define LINKDOCTOR_SERVER_REQUEST_URL std::string()
-#endif
-
-
-// Helpers --------------------------------------------------------------------
 
 namespace {
 
 const char* brand_for_testing = NULL;
-bool gUseMockLinkDoctorBaseURLForTesting = false;
 
-bool IsPathHomePageBase(const std::string& path) {
-  return (path == "/") || (path == "/webhp");
-}
-
-}  // namespace
-
+}  // anonymous namespace
 
 namespace google_util {
 
-// Global functions -----------------------------------------------------------
+const char kLinkDoctorBaseURL[] =
+    "http://linkhelp.clients.google.com/tbproxy/lh/fixurl";
 
-bool HasGoogleSearchQueryParam(const std::string& str) {
-  url_parse::Component query(0, str.length()), key, value;
-  while (url_parse::ExtractQueryKeyValue(str.c_str(), &query, &key,
-                                         &value)) {
-    if ((key.len == 1) && (str[key.begin] == 'q') && value.is_nonempty())
-      return true;
-  }
-  return false;
+BrandForTesting::BrandForTesting(const std::string& brand) : brand_(brand) {
+  DCHECK(brand_for_testing == NULL);
+  brand_for_testing = brand_.c_str();
 }
 
-GURL LinkDoctorBaseURL() {
-  if (gUseMockLinkDoctorBaseURLForTesting)
-    return GURL("http://mock.linkdoctor.url/for?testing");
-  return GURL(LINKDOCTOR_SERVER_REQUEST_URL);
-}
-
-void SetMockLinkDoctorBaseURLForTesting() {
-  gUseMockLinkDoctorBaseURLForTesting = true;
+BrandForTesting::~BrandForTesting() {
+  brand_for_testing = NULL;
 }
 
 GURL AppendGoogleLocaleParam(const GURL& url) {
@@ -80,7 +48,7 @@ GURL AppendGoogleLocaleParam(const GURL& url) {
   std::string locale = g_browser_process->GetApplicationLocale();
   if (locale == "nb")
     locale = "no";
-  return net::AppendQueryParameter(url, "hl", locale);
+  return chrome_browser_net::AppendQueryParameter(url, "hl", locale);
 }
 
 std::string StringAppendGoogleLocaleParam(const std::string& url) {
@@ -90,18 +58,17 @@ std::string StringAppendGoogleLocaleParam(const std::string& url) {
   return localized_url.spec();
 }
 
-GURL AppendGoogleTLDParam(Profile* profile, const GURL& url) {
+GURL AppendGoogleTLDParam(const GURL& url) {
   const std::string google_domain(
-      net::registry_controlled_domains::GetDomainAndRegistry(
-          GoogleURLTracker::GoogleURL(profile),
-          net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES));
+      net::RegistryControlledDomainService::GetDomainAndRegistry(
+          GoogleURLTracker::GoogleURL()));
   const size_t first_dot = google_domain.find('.');
   if (first_dot == std::string::npos) {
     NOTREACHED();
     return url;
   }
-  return net::AppendQueryParameter(url, "sd",
-                                   google_domain.substr(first_dot + 1));
+  return chrome_browser_net::AppendQueryParameter(
+      url, "sd", google_domain.substr(first_dot + 1));
 }
 
 #if defined(OS_WIN)
@@ -112,7 +79,7 @@ bool GetBrand(std::string* brand) {
     return true;
   }
 
-  base::string16 brand16;
+  string16 brand16;
   bool ret = GoogleUpdateSettings::GetBrand(&brand16);
   if (ret)
     brand->assign(WideToASCII(brand16));
@@ -120,7 +87,7 @@ bool GetBrand(std::string* brand) {
 }
 
 bool GetReactivationBrand(std::string* brand) {
-  base::string16 brand16;
+  string16 brand16;
   bool ret = GoogleUpdateSettings::GetReactivationBrand(&brand16);
   if (ret)
     brand->assign(WideToASCII(brand16));
@@ -137,8 +104,6 @@ bool GetBrand(std::string* brand) {
 
 #if defined(OS_MACOSX)
   brand->assign(keystone_glue::BrandCode());
-#elif defined(OS_CHROMEOS)
-  brand->assign(google_util::chromeos::GetBrand());
 #else
   brand->clear();
 #endif
@@ -152,70 +117,41 @@ bool GetReactivationBrand(std::string* brand) {
 
 #endif
 
-bool StartsWithCommandLineGoogleBaseURL(const GURL& url) {
-  const std::string base_url(CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kGoogleBaseURL));
-  return !base_url.empty() &&
-      StartsWithASCII(url.possibly_invalid_spec(), base_url, true);
-}
-
-bool IsGoogleHostname(const std::string& host,
-                      SubdomainPermission subdomain_permission) {
-  const std::string base_url(CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kGoogleBaseURL));
-  if (!base_url.empty()) {
-    GURL base_gurl(base_url);
-    if (base_gurl.is_valid() && (host == base_gurl.host()))
-      return true;
-  }
-
-  size_t tld_length = net::registry_controlled_domains::GetRegistryLength(
-      host,
-      net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
-      net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
-  if ((tld_length == 0) || (tld_length == std::string::npos))
+bool IsGoogleHomePageUrl(const std::string& url) {
+  GURL original_url(url);
+  if (!original_url.is_valid())
     return false;
-  std::string host_minus_tld(host, 0, host.length() - tld_length);
-  if (LowerCaseEqualsASCII(host_minus_tld, "google."))
-    return true;
-  if (subdomain_permission == ALLOW_SUBDOMAIN)
-    return EndsWith(host_minus_tld, ".google.", false);
-  return LowerCaseEqualsASCII(host_minus_tld, "www.google.");
-}
 
-bool IsGoogleDomainUrl(const GURL& url,
-                       SubdomainPermission subdomain_permission,
-                       PortPermission port_permission) {
-  return url.is_valid() && url.SchemeIsHTTPOrHTTPS() &&
-      (url.port().empty() || (port_permission == ALLOW_NON_STANDARD_PORTS)) &&
-      google_util::IsGoogleHostname(url.host(), subdomain_permission);
-}
+  // Make sure the scheme is valid.
+  if (!original_url.SchemeIs("http") && !original_url.SchemeIs("https"))
+    return false;
 
-bool IsGoogleHomePageUrl(const GURL& url) {
-  // First check to see if this has a Google domain.
-  if (!IsGoogleDomainUrl(url, DISALLOW_SUBDOMAIN, DISALLOW_NON_STANDARD_PORTS))
+  // Make sure port is default for the respective scheme.
+  if (!original_url.port().empty())
+    return false;
+
+  // Accept only valid TLD.
+  size_t tld_length = net::RegistryControlledDomainService::GetRegistryLength(
+      original_url, false);
+  if (tld_length == 0 || tld_length == std::string::npos)
+    return false;
+
+  // We only accept "www.google." in front of the TLD.
+  std::string host = original_url.host();
+  host = host.substr(0, host.length() - tld_length);
+  if (!LowerCaseEqualsASCII(host, "www.google.") &&
+      !LowerCaseEqualsASCII(host, "google."))
     return false;
 
   // Make sure the path is a known home page path.
-  std::string path(url.path());
-  return IsPathHomePageBase(path) || StartsWithASCII(path, "/ig", false);
-}
-
-bool IsGoogleSearchUrl(const GURL& url) {
-  // First check to see if this has a Google domain.
-  if (!IsGoogleDomainUrl(url, DISALLOW_SUBDOMAIN, DISALLOW_NON_STANDARD_PORTS))
+  std::string path(original_url.path());
+  if (!LowerCaseEqualsASCII(path, "/") &&
+      !LowerCaseEqualsASCII(path, "/webhp") &&
+      !StartsWithASCII(path, "/ig", false)) {
     return false;
+  }
 
-  // Make sure the path is a known search path.
-  std::string path(url.path());
-  bool is_home_page_base = IsPathHomePageBase(path);
-  if (!is_home_page_base && (path != "/search"))
-    return false;
-
-  // Check for query parameter in URL parameter and hash fragment, depending on
-  // the path type.
-  return HasGoogleSearchQueryParam(url.ref()) ||
-      (!is_home_page_base && HasGoogleSearchQueryParam(url.query()));
+  return true;
 }
 
 bool IsOrganic(const std::string& brand) {
@@ -278,18 +214,5 @@ bool IsInternetCafeBrandCode(const std::string& brand) {
   const char* const* found = std::find(&kBrands[0], end, brand);
   return found != end;
 }
-
-
-// BrandForTesting ------------------------------------------------------------
-
-BrandForTesting::BrandForTesting(const std::string& brand) : brand_(brand) {
-  DCHECK(brand_for_testing == NULL);
-  brand_for_testing = brand_.c_str();
-}
-
-BrandForTesting::~BrandForTesting() {
-  brand_for_testing = NULL;
-}
-
 
 }  // namespace google_util

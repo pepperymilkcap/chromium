@@ -2,6 +2,11 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta http-equiv="X-WebKit-CSP"
+      content="object-src 'none';
+               script-src
+                   chrome-extension://mndnfokpggljbaajbnioimlmbfngpief
+                   'self'">
 <title>Credits</title>
 <style>
 body {
@@ -32,7 +37,7 @@ body {
   float:right;
   margin:3px;
 }
-.product .homepage::after {
+.product .homepage:after {
   content:" - ";
 }
 .product .show {
@@ -49,9 +54,6 @@ body {
 }
 .licence h3 {
   margin-top:0px;
-}
-.licence pre {
-  white-space: pre-wrap;
 }
 </style>
 </head>

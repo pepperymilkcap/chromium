@@ -9,11 +9,10 @@
 #include <sstream>
 
 #include "base/command_line.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/process/launch.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
+#include "base/mac/mac_util.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/threading/thread.h"
 
 // Default constructor.
@@ -128,7 +127,7 @@ static bool ConvertByteUnitToScale(char unit, uint64_t* out_scale) {
 static bool GetProcessMemoryInfoUsingPS(
     const std::vector<base::ProcessId>& pid_list,
     std::map<int,ProcessInfoSnapshot::ProcInfoEntry>& proc_info_entries) {
-  const base::FilePath kProgram("/bin/ps");
+  const FilePath kProgram("/bin/ps");
   CommandLine command_line(kProgram);
 
   // Get resident set size, virtual memory size.
@@ -149,6 +148,7 @@ static bool GetProcessMemoryInfoUsingPS(
   }
 
   std::istringstream in(output, std::istringstream::in);
+  std::string line;
 
   // Process lines until done.
   while (true) {
@@ -188,7 +188,7 @@ static bool GetProcessMemoryInfoUsingPS(
 
 static bool GetProcessMemoryInfoUsingTop(
     std::map<int,ProcessInfoSnapshot::ProcInfoEntry>& proc_info_entries) {
-  const base::FilePath kProgram("/usr/bin/top");
+  const FilePath kProgram("/usr/bin/top");
   CommandLine command_line(kProgram);
 
   // -stats tells top to print just the given fields as ordered.
@@ -268,6 +268,75 @@ static bool GetProcessMemoryInfoUsingTop(
   return true;
 }
 
+static bool GetProcessMemoryInfoUsingTop_10_5(
+    std::map<int,ProcessInfoSnapshot::ProcInfoEntry>& proc_info_entries) {
+  const FilePath kProgram("/usr/bin/top");
+  CommandLine command_line(kProgram);
+
+  // -p tells top to print just the given fields as ordered.
+  command_line.AppendArg("-p");
+  command_line.AppendArg(
+      "^aaaaaaaaaaaaaaaaaaaa "  // Process ID (PID)
+      "^jjjjjjjjjjjjjjjjjjjj "  // Resident memory (RSIZE)
+      "^iiiiiiiiiiiiiiiiiiii "  // Resident shared memory (RSHRD)
+      "^hhhhhhhhhhhhhhhhhhhh "  // Resident private memory (RPRVT)
+      "^llllllllllllllllllll"); // Total virtual memory (VSIZE)
+  // Run top in logging (non-interactive) mode.
+  command_line.AppendArg("-l");
+  command_line.AppendArg("1");
+  // Set the delay between updates to 0.
+  command_line.AppendArg("-s");
+  command_line.AppendArg("0");
+
+  std::string output;
+  // Limit output read to a megabyte for safety.
+  if (!base::GetAppOutputRestricted(command_line, &output, 1024 * 1024)) {
+    LOG(ERROR) << "Failure running " << kProgram.value() << " to acquire data.";
+    return false;
+  }
+
+  // Process lines until done. Lines should look something like this:
+  // PID      RSIZE     RSHRD     RPRVT     VSIZE
+  // 16943    815104    262144    290816    18489344
+  // 16922    954368    720896    278528    18976768
+  std::istringstream top_in(output, std::istringstream::in);
+  std::string line;
+  while (std::getline(top_in, line)) {
+    std::istringstream in(line, std::istringstream::in);
+
+    // Try to read the PID.
+    pid_t pid;
+    in >> pid;
+    if (in.fail())
+      continue;
+
+    // Make sure that caller is interested in this process.
+    if (proc_info_entries.find(pid) == proc_info_entries.end())
+      continue;
+
+    uint64_t values[4];
+    size_t i;
+    for (i = 0; i < arraysize(values); i++) {
+      in >> values[i];
+      if (in.fail())
+        break;
+    }
+    if (i != arraysize(values))
+      continue;
+
+    ProcessInfoSnapshot::ProcInfoEntry proc_info = proc_info_entries[pid];
+    proc_info.rss = values[0];
+    proc_info.rshrd = values[1];
+    proc_info.rprvt = values[2];
+    proc_info.vsize = values[3];
+    // Record the process information.
+    proc_info_entries[proc_info.pid] = proc_info;
+  }
+
+  return true;
+}
+
+
 bool ProcessInfoSnapshot::Sample(std::vector<base::ProcessId> pid_list) {
   Reset();
 
@@ -310,7 +379,11 @@ bool ProcessInfoSnapshot::Sample(std::vector<base::ProcessId> pid_list) {
   }
 
   // Get memory information using top.
-  bool memory_info_success = GetProcessMemoryInfoUsingTop(proc_info_entries_);
+  bool memory_info_success = false;
+  if (base::mac::IsOSLeopardOrEarlier())
+    memory_info_success = GetProcessMemoryInfoUsingTop_10_5(proc_info_entries_);
+  else
+    memory_info_success = GetProcessMemoryInfoUsingTop(proc_info_entries_);
 
   // If top didn't work then fall back to ps.
   if (!memory_info_success) {
@@ -324,17 +397,6 @@ bool ProcessInfoSnapshot::Sample(std::vector<base::ProcessId> pid_list) {
 // Clear all the stored information.
 void ProcessInfoSnapshot::Reset() {
   proc_info_entries_.clear();
-}
-
-ProcessInfoSnapshot::ProcInfoEntry::ProcInfoEntry()
-    : pid(0),
-      ppid(0),
-      uid(0),
-      euid(0),
-      rss(0),
-      rshrd(0),
-      rprvt(0),
-      vsize(0) {
 }
 
 bool ProcessInfoSnapshot::GetProcInfo(int pid,

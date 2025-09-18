@@ -7,11 +7,8 @@
 
 #include <string>
 
+#include "base/message_loop_proxy.h"
 #include "base/threading/thread.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
 
 namespace remoting {
 
@@ -19,26 +16,21 @@ namespace remoting {
 // process.
 class ClientContext {
  public:
-  // |main_task_runner| is the task runner for the main plugin thread
-  // that is used for all PPAPI calls, e.g. network and graphics.
-  ClientContext(base::SingleThreadTaskRunner* main_task_runner);
+  ClientContext(base::MessageLoopProxy* main_message_loop_proxy);
   virtual ~ClientContext();
 
   void Start();
   void Stop();
 
-  base::SingleThreadTaskRunner* main_task_runner();
-  base::SingleThreadTaskRunner* decode_task_runner();
-  base::SingleThreadTaskRunner* audio_decode_task_runner();
+  base::MessageLoopProxy* main_message_loop();
+  base::MessageLoopProxy* decode_message_loop();
+  base::MessageLoopProxy* network_message_loop();
 
  private:
-  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
+  scoped_refptr<base::MessageLoopProxy> main_message_loop_proxy_;
 
-  // A thread that handles all video decode operations.
+  // A thread that handles all decode operations.
   base::Thread decode_thread_;
-
-  // A thread that handles all audio decode operations.
-  base::Thread audio_decode_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientContext);
 };

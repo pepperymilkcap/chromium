@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "media/base/media.h"
@@ -43,7 +43,7 @@ static bool InitFFmpeg() {
   if (initialized) {
     return true;
   }
-  base::FilePath path;
+  FilePath path;
   PathService::Get(base::DIR_MODULE, &path);
   return media::InitializeMediaLibrary(path);
 }
@@ -58,7 +58,7 @@ FFmpegCommonTest::FFmpegCommonTest() {
 
 FFmpegCommonTest::~FFmpegCommonTest() {}
 
-TEST_F(FFmpegCommonTest, TimeBaseConversions) {
+TEST_F(FFmpegCommonTest, TestTimeBaseConversions) {
   int64 test_data[][5] = {
     {1, 2, 1, 500000, 1 },
     {1, 3, 1, 333333, 1 },
@@ -76,24 +76,6 @@ TEST_F(FFmpegCommonTest, TimeBaseConversions) {
 
     EXPECT_EQ(time_delta.InMicroseconds(), test_data[i][3]);
     EXPECT_EQ(ConvertToTimeBase(time_base, time_delta), test_data[i][4]);
-  }
-}
-
-TEST_F(FFmpegCommonTest, VerifyFormatSizes) {
-  for (AVSampleFormat format = AV_SAMPLE_FMT_NONE;
-       format < AV_SAMPLE_FMT_NB;
-       format = static_cast<AVSampleFormat>(format + 1)) {
-    SampleFormat sample_format = AVSampleFormatToSampleFormat(format);
-    if (sample_format == kUnknownSampleFormat) {
-      // This format not supported, so skip it.
-      continue;
-    }
-
-    // Have FFMpeg compute the size of a buffer of 1 channel / 1 frame
-    // with 1 byte alignment to make sure the sizes match.
-    int single_buffer_size = av_samples_get_buffer_size(NULL, 1, 1, format, 1);
-    int bytes_per_channel = SampleFormatToBytesPerChannel(sample_format);
-    EXPECT_EQ(bytes_per_channel, single_buffer_size);
   }
 }
 

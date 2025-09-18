@@ -4,13 +4,12 @@
 
 #ifndef NET_WEBSOCKETS_WEBSOCKET_THROTTLE_H_
 #define NET_WEBSOCKETS_WEBSOCKET_THROTTLE_H_
+#pragma once
 
 #include <deque>
-#include <map>
-#include <set>
 #include <string>
 
-#include "net/base/ip_endpoint.h"
+#include "base/hash_tables.h"
 #include "net/base/net_export.h"
 
 template <typename T> struct DefaultSingletonTraits;
@@ -36,38 +35,31 @@ class NET_EXPORT_PRIVATE WebSocketThrottle {
   // Puts |job| in |queue_| and queues for the destination addresses
   // of |job|.
   // If other job is using the same destination address, set |job| waiting.
-  //
-  // Returns true if successful. If the number of pending jobs will exceed
-  // the limit, does nothing and returns false.
-  bool PutInQueue(WebSocketJob* job);
+  void PutInQueue(WebSocketJob* job);
 
   // Removes |job| from |queue_| and queues for the destination addresses
-  // of |job|, and then wakes up jobs that can now resume establishing a
-  // connection.
+  // of |job|.
   void RemoveFromQueue(WebSocketJob* job);
+
+  // Checks sockets waiting in |queue_| and check the socket is the front of
+  // every queue for the destination addresses of |socket|.
+  // If so, the socket can resume estabilshing connection, so wake up
+  // the socket.
+  void WakeupSocketIfNecessary();
 
  private:
   typedef std::deque<WebSocketJob*> ConnectingQueue;
-  typedef std::map<IPEndPoint, ConnectingQueue> ConnectingAddressMap;
+  typedef base::hash_map<std::string, ConnectingQueue*> ConnectingAddressMap;
 
   WebSocketThrottle();
-  ~WebSocketThrottle();
+  virtual ~WebSocketThrottle();
   friend struct DefaultSingletonTraits<WebSocketThrottle>;
-
-  // Examines if any of the given jobs can resume establishing a connection. If
-  // for all per-address queues for each resolved addresses
-  // (job->address_list()) of a job, the job is at the front of the queues, the
-  // job can resume establishing a connection, so wakes up the job.
-  void WakeupSocketIfNecessary(
-      const std::set<WebSocketJob*>& wakeup_candidates);
 
   // Key: string of host's address.  Value: queue of sockets for the address.
   ConnectingAddressMap addr_map_;
 
   // Queue of sockets for websockets in opening state.
   ConnectingQueue queue_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebSocketThrottle);
 };
 
 }  // namespace net

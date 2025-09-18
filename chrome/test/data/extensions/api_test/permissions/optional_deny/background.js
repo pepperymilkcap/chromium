@@ -4,17 +4,16 @@
 
 var assertFalse = chrome.test.assertFalse;
 var assertTrue = chrome.test.assertTrue;
-var assertEq = chrome.test.assertEq;
 var pass = chrome.test.callbackPass;
 
-var NO_BOOKMARKS_PERMISSION =
-    "You do not have permission to use 'bookmarks.getTree'.";
+var NO_TABS_PERMISSION =
+    "You do not have permission to use 'windows.getAll'.";
 
 chrome.test.getConfig(function(config) {
 
   function doReq(domain, callback) {
     var req = new XMLHttpRequest();
-    var url = domain + ":PORT/extensions/test_file.txt";
+    var url = domain + ":PORT/files/extensions/test_file.txt";
     url = url.replace(/PORT/, config.testServer.port);
 
     chrome.test.log("Requesting url: " + url);
@@ -38,18 +37,25 @@ chrome.test.getConfig(function(config) {
   chrome.test.runTests([
     function denyRequest() {
       chrome.permissions.request(
-          {permissions: ['bookmarks'], origins: ['http://*.c.com/*']},
+          {permissions: ['tabs'], origins: ['http://*.c.com/*']},
           pass(function(granted) {
             // They were not granted, and there should be no error.
             assertFalse(granted);
-            assertTrue(chrome.runtime.lastError === undefined);
+            assertTrue(chrome.extension.lastError === undefined);
 
             // Make sure they weren't granted...
             chrome.permissions.contains(
-                {permissions: ['bookmarks'], origins:['http://*.c.com/*']},
+                {permissions: ['tabs'], origins:['http://*.c.com/*']},
                 pass(function(result) { assertFalse(result); }));
 
-            assertEq(undefined, chrome.bookmarks);
+            try {
+              chrome.windows.getAll({populate: true}, function() {
+                chrome.test.fail("Should not have tabs API permission.");
+              });
+            } catch (e) {
+              assertTrue(e.message.indexOf(NO_TABS_PERMISSION) == 0);
+            }
+
             doReq('http://b.c.com/', pass(function(result) {
               assertFalse(result);
             }));

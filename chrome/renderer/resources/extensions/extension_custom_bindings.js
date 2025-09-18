@@ -2,21 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom binding for the extension API.
+// Custom bindings for the extension API.
 
-var binding = require('binding').Binding.create('extension');
+(function() {
 
-var messaging = require('messaging');
-var runtimeNatives = requireNative('runtime');
-var GetExtensionViews = runtimeNatives.GetExtensionViews;
-var OpenChannelToExtension = runtimeNatives.OpenChannelToExtension;
-var OpenChannelToNativeApp = runtimeNatives.OpenChannelToNativeApp;
-var chrome = requireNative('chrome').GetChrome();
-
-var inIncognitoContext = requireNative('process').InIncognitoContext();
-var sendRequestIsDisabled = requireNative('process').IsSendRequestDisabled();
-var contextType = requireNative('process').GetContextType();
-var manifestVersion = requireNative('process').GetManifestVersion();
+native function GetChromeHidden();
+native function GetExtensionViews();
 
 // This should match chrome.windows.WINDOW_ID_NONE.
 //
@@ -25,89 +16,38 @@ var manifestVersion = requireNative('process').GetManifestVersion();
 // which may not be the case.
 var WINDOW_ID_NONE = -1;
 
-binding.registerCustomHook(function(bindingsAPI, extensionId) {
-  var extension = bindingsAPI.compiledApi;
-  if (manifestVersion < 2) {
-    chrome.self = extension;
-    extension.inIncognitoTab = inIncognitoContext;
-  }
-  extension.inIncognitoContext = inIncognitoContext;
+GetChromeHidden().registerCustomHook('extension', function(bindingsAPI) {
+  // getTabContentses is retained for backwards compatibility.
+  // See http://crbug.com/21433
+  if (chrome.extension.getExtensionTabs)
+    chrome.extension.getTabContentses = chrome.extension.getExtensionTabs;
 
   var apiFunctions = bindingsAPI.apiFunctions;
 
-  apiFunctions.setHandleRequest('getViews', function(properties) {
+  apiFunctions.setHandleRequest("extension.getViews", function(properties) {
     var windowId = WINDOW_ID_NONE;
-    var type = 'ALL';
-    if (properties) {
-      if (properties.type != null) {
+    var type = "ALL";
+    if (typeof(properties) != "undefined") {
+      if (typeof(properties.type) != "undefined") {
         type = properties.type;
       }
-      if (properties.windowId != null) {
+      if (typeof(properties.windowId) != "undefined") {
         windowId = properties.windowId;
       }
     }
-    return GetExtensionViews(windowId, type);
+    return GetExtensionViews(windowId, type) || null;
   });
 
-  apiFunctions.setHandleRequest('getBackgroundPage', function() {
-    return GetExtensionViews(-1, 'BACKGROUND')[0] || null;
+  apiFunctions.setHandleRequest("extension.getBackgroundPage", function() {
+    return GetExtensionViews(-1, "BACKGROUND")[0] || null;
   });
 
-  apiFunctions.setHandleRequest('getExtensionTabs', function(windowId) {
-    if (windowId == null)
+  apiFunctions.setHandleRequest("extension.getExtensionTabs",
+      function(windowId) {
+    if (typeof(windowId) == "undefined")
       windowId = WINDOW_ID_NONE;
-    return GetExtensionViews(windowId, 'TAB');
+    return GetExtensionViews(windowId, "TAB");
   });
-
-  apiFunctions.setHandleRequest('getURL', function(path) {
-    path = String(path);
-    if (!path.length || path[0] != '/')
-      path = '/' + path;
-    return 'chrome-extension://' + extensionId + path;
-  });
-
-  // Alias several messaging deprecated APIs to their runtime counterparts.
-  var mayNeedAlias = [
-    // Types
-    'Port',
-    // Functions
-    'connect', 'sendMessage', 'connectNative', 'sendNativeMessage',
-    // Events
-    'onConnect', 'onConnectExternal', 'onMessage', 'onMessageExternal'
-  ];
-  $Array.forEach(mayNeedAlias, function(alias) {
-    // Checking existence isn't enough since some functions are disabled via
-    // getters that throw exceptions. Assume that any getter is such a function.
-    if (chrome.runtime &&
-        $Object.hasOwnProperty(chrome.runtime, alias) &&
-        chrome.runtime.__lookupGetter__(alias) === undefined) {
-      extension[alias] = chrome.runtime[alias];
-    }
-  });
-
-  apiFunctions.setUpdateArgumentsPreValidate('sendRequest',
-      $Function.bind(messaging.sendMessageUpdateArguments,
-                     null, 'sendRequest', false /* hasOptionsArgument */));
-
-  apiFunctions.setHandleRequest('sendRequest',
-                                function(targetId, request, responseCallback) {
-    if (sendRequestIsDisabled)
-      throw new Error(sendRequestIsDisabled);
-    var port = chrome.runtime.connect(targetId || extensionId,
-                                      {name: messaging.kRequestChannel});
-    messaging.sendMessageImpl(port, request, responseCallback);
-  });
-
-  if (sendRequestIsDisabled) {
-    extension.onRequest.addListener = function() {
-      throw new Error(sendRequestIsDisabled);
-    };
-    if (contextType == 'BLESSED_EXTENSION') {
-      extension.onRequestExternal.addListener = function() {
-        throw new Error(sendRequestIsDisabled);
-      };
-    }
-  }
 });
 
-exports.binding = binding.generate();
+})();

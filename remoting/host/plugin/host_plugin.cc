@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,23 +10,16 @@
 
 #include "base/at_exit.h"
 #include "base/basictypes.h"
-#include "base/command_line.h"
 #include "base/logging.h"
-#include "base/strings/stringize_macros.h"
-#include "net/socket/ssl_server_socket.h"
-#include "remoting/base/plugin_thread_task_runner.h"
-#include "remoting/base/resources.h"
-#include "remoting/base/string_resources.h"
+#include "base/stringize_macros.h"
+#include "remoting/base/plugin_message_loop_proxy.h"
+#include "remoting/host/plugin/constants.h"
 #include "remoting/host/plugin/host_log_handler.h"
 #include "remoting/host/plugin/host_plugin_utils.h"
 #include "remoting/host/plugin/host_script_object.h"
-#if defined(OS_WIN)
-#include "ui/gfx/win/dpi.h"
-#endif
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npfunctions.h"
 #include "third_party/npapi/bindings/npruntime.h"
-#include "ui/base/l10n/l10n_util.h"
 
 // Symbol export is handled with a separate def file on Windows.
 #if defined (__GNUC__) && __GNUC__ >= 4
@@ -58,18 +51,12 @@ using remoting::StringFromNPIdentifier;
 
 namespace {
 
-bool g_initialized = false;
-
 base::AtExitManager* g_at_exit_manager = NULL;
-
-// The plugin name and description returned by GetValue().
-std::string* g_ui_name = NULL;
-std::string* g_ui_description = NULL;
 
 // NPAPI plugin implementation for remoting host.
 // Documentation for most of the calls in this class can be found here:
 // https://developer.mozilla.org/en/Gecko_Plugin_API_Reference/Scripting_plugins
-class HostNPPlugin : public remoting::PluginThreadTaskRunner::Delegate {
+class HostNPPlugin : public remoting::PluginMessageLoopProxy::Delegate {
  public:
   // |mode| is the display mode of plug-in. Values:
   // NP_EMBED: (1) Instance was created by an EMBED tag and shares the browser
@@ -79,26 +66,13 @@ class HostNPPlugin : public remoting::PluginThreadTaskRunner::Delegate {
   HostNPPlugin(NPP instance, uint16 mode)
       : instance_(instance),
         scriptable_object_(NULL) {
-    plugin_task_runner_ = new remoting::PluginThreadTaskRunner(this);
-    plugin_auto_task_runner_ =
-        new remoting::AutoThreadTaskRunner(
-            plugin_task_runner_,
-            base::Bind(&remoting::PluginThreadTaskRunner::Quit,
-                       plugin_task_runner_));
   }
 
-  virtual ~HostNPPlugin() {
+  ~HostNPPlugin() {
     if (scriptable_object_) {
-      DCHECK_EQ(scriptable_object_->referenceCount, 1UL);
       g_npnetscape_funcs->releaseobject(scriptable_object_);
       scriptable_object_ = NULL;
     }
-
-    // Process tasks on |plugin_task_runner_| until all references to
-    // |plugin_auto_task_runner_| have been dropped. This requires that the
-    // browser has dropped any script object references - see above.
-    plugin_auto_task_runner_ = NULL;
-    plugin_task_runner_->DetachAndRunShutdownLoop();
   }
 
   bool Init(int16 argc, char** argn, char** argv, NPSavedData* saved) {
@@ -140,7 +114,6 @@ class HostNPPlugin : public remoting::PluginThreadTaskRunner::Delegate {
       return false;
     }
 #endif  // OS_MACOSX
-    net::EnableSSLServerSockets();
     return true;
   }
 
@@ -173,25 +146,19 @@ class HostNPPlugin : public remoting::PluginThreadTaskRunner::Delegate {
     return scriptable_object_;
   }
 
-  // PluginThreadTaskRunner::Delegate implementation.
+  // PluginMessageLoopProxy::Delegate implementation.
   virtual bool RunOnPluginThread(
-      base::TimeDelta delay, void(function)(void*), void* data) OVERRIDE {
-    if (delay == base::TimeDelta()) {
+      int delay_ms, void(function)(void*), void* data) OVERRIDE {
+    if (delay_ms == 0) {
       g_npnetscape_funcs->pluginthreadasynccall(instance_, function, data);
     } else {
       base::AutoLock auto_lock(timers_lock_);
       uint32_t timer_id = g_npnetscape_funcs->scheduletimer(
-          instance_, delay.InMilliseconds(), false, &NPDelayedTaskSpringboard);
+          instance_, delay_ms, false, &NPDelayedTaskSpringboard);
       DelayedTask task = {function, data};
       timers_[timer_id] = task;
     }
     return true;
-  }
-
-  void SetWindow(NPWindow* np_window) {
-    if (scriptable_object_) {
-      ScriptableFromObject(scriptable_object_)->SetWindow(np_window);
-    }
   }
 
   static void NPDelayedTaskSpringboard(NPP npp, uint32_t timer_id) {
@@ -231,8 +198,11 @@ class HostNPPlugin : public remoting::PluginThreadTaskRunner::Delegate {
 
     object->_class = aClass;
     object->referenceCount = 1;
-    object->scriptable_object =
-        new HostNPScriptObject(npp, object, plugin->plugin_auto_task_runner_);
+    object->scriptable_object = new HostNPScriptObject(npp, object, plugin);
+    if (!object->scriptable_object->Init()) {
+      Deallocate(object);
+      object = NULL;
+    }
     return object;
   }
 
@@ -356,42 +326,9 @@ class HostNPPlugin : public remoting::PluginThreadTaskRunner::Delegate {
   NPP instance_;
   NPObject* scriptable_object_;
 
-  scoped_refptr<remoting::PluginThreadTaskRunner> plugin_task_runner_;
-  scoped_refptr<remoting::AutoThreadTaskRunner> plugin_auto_task_runner_;
-
   std::map<uint32_t, DelayedTask> timers_;
   base::Lock timers_lock_;
 };
-
-void InitializePlugin() {
-  if (g_initialized)
-    return;
-
-  g_initialized = true;
-  g_at_exit_manager = new base::AtExitManager;
-
-  // Init an empty command line for common objects that use it.
-  CommandLine::Init(0, NULL);
-
-  if (remoting::LoadResources("")) {
-    g_ui_name = new std::string(
-        l10n_util::GetStringUTF8(IDR_REMOTING_HOST_PLUGIN_NAME));
-    g_ui_description = new std::string(
-        l10n_util::GetStringUTF8(IDR_REMOTING_HOST_PLUGIN_DESCRIPTION));
-  } else {
-    g_ui_name = new std::string();
-    g_ui_description = new std::string();
-  }
-}
-
-void ShutdownPlugin() {
-  delete g_ui_name;
-  delete g_ui_description;
-
-  remoting::UnloadResources();
-
-  delete g_at_exit_manager;
-}
 
 // Utility functions to map NPAPI Entry Points to C++ Objects.
 HostNPPlugin* PluginFromInstance(NPP instance) {
@@ -446,20 +383,17 @@ NPError DestroyPlugin(NPP instance,
 }
 
 NPError GetValue(NPP instance, NPPVariable variable, void* value) {
-  // NP_GetValue() can be called before NP_Initialize().
-  InitializePlugin();
-
   switch(variable) {
   default:
     VLOG(2) << "GetValue - default " << variable;
     return NPERR_GENERIC_ERROR;
   case NPPVpluginNameString:
     VLOG(2) << "GetValue - name string";
-    *reinterpret_cast<const char**>(value) = g_ui_name->c_str();
+    *reinterpret_cast<const char**>(value) = HOST_PLUGIN_NAME;
     break;
   case NPPVpluginDescriptionString:
     VLOG(2) << "GetValue - description string";
-    *reinterpret_cast<const char**>(value) = g_ui_description->c_str();
+    *reinterpret_cast<const char**>(value) = HOST_PLUGIN_DESCRIPTION;
     break;
   case NPPVpluginNeedsXEmbed:
     VLOG(2) << "GetValue - NeedsXEmbed";
@@ -485,19 +419,18 @@ NPError HandleEvent(NPP instance, void* ev) {
 
 NPError SetWindow(NPP instance, NPWindow* pNPWindow) {
   VLOG(2) << "SetWindow";
-  HostNPPlugin* plugin = PluginFromInstance(instance);
-  if (plugin) {
-    plugin->SetWindow(pNPWindow);
-  }
   return NPERR_NO_ERROR;
 }
 
 }  // namespace
 
 #if defined(OS_WIN)
+HMODULE g_hModule = NULL;
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved) {
   switch (dwReason) {
     case DLL_PROCESS_ATTACH:
+      g_hModule = hModule;
       DisableThreadLibraryCalls(hModule);
       break;
     case DLL_PROCESS_DETACH:
@@ -531,7 +464,8 @@ EXPORT NPError API_CALL NP_Initialize(NPNetscapeFuncs* npnetscape_funcs
 #endif
                             ) {
   VLOG(2) << "NP_Initialize";
-  InitializePlugin();
+  if (g_at_exit_manager)
+    return NPERR_MODULE_LOAD_FAILED_ERROR;
 
   if(npnetscape_funcs == NULL)
     return NPERR_INVALID_FUNCTABLE_ERROR;
@@ -539,29 +473,27 @@ EXPORT NPError API_CALL NP_Initialize(NPNetscapeFuncs* npnetscape_funcs
   if(((npnetscape_funcs->version & 0xff00) >> 8) > NP_VERSION_MAJOR)
     return NPERR_INCOMPATIBLE_VERSION_ERROR;
 
+  g_at_exit_manager = new base::AtExitManager;
   g_npnetscape_funcs = npnetscape_funcs;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   NP_GetEntryPoints(nppfuncs);
 #endif
-
-#if defined(OS_WIN)
-  gfx::EnableHighDPISupport();
-#endif
-
   return NPERR_NO_ERROR;
 }
 
 EXPORT NPError API_CALL NP_Shutdown() {
   VLOG(2) << "NP_Shutdown";
-  ShutdownPlugin();
-
+  delete g_at_exit_manager;
+  g_at_exit_manager = NULL;
   return NPERR_NO_ERROR;
 }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 EXPORT const char* API_CALL NP_GetMIMEDescription(void) {
   VLOG(2) << "NP_GetMIMEDescription";
-  return STRINGIZE(HOST_PLUGIN_MIME_TYPE) "::";
+  return HOST_PLUGIN_MIME_TYPE ":"
+      HOST_PLUGIN_NAME ":"
+      HOST_PLUGIN_DESCRIPTION;
 }
 
 EXPORT NPError API_CALL NP_GetValue(void* npp,

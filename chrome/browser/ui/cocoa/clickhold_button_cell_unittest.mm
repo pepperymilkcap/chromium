@@ -4,7 +4,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/clickhold_button_cell.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -16,10 +16,9 @@ class ClickHoldButtonCellTest : public CocoaTest {
  public:
   ClickHoldButtonCellTest() {
     NSRect frame = NSMakeRect(0, 0, 50, 30);
-    base::scoped_nsobject<NSButton> view(
-        [[NSButton alloc] initWithFrame:frame]);
+    scoped_nsobject<NSButton> view([[NSButton alloc] initWithFrame:frame]);
     view_ = view.get();
-    base::scoped_nsobject<ClickHoldButtonCell> cell(
+    scoped_nsobject<ClickHoldButtonCell> cell(
         [[ClickHoldButtonCell alloc] initTextCell:@"Testing"]);
     [view_ setCell:cell.get()];
     [[test_window() contentView] addSubview:view_];

@@ -4,9 +4,9 @@
 
 #include "net/disk_cache/disk_cache_test_util.h"
 
-#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/file_util.h"
+#include "base/message_loop_proxy.h"
 #include "base/path_service.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/backend_impl.h"
@@ -15,6 +15,20 @@
 
 using base::Time;
 using base::TimeDelta;
+
+namespace {
+
+FilePath BuildCachePath(const std::string& name) {
+  FilePath path;
+  PathService::Get(base::DIR_TEMP, &path);  // Ignore return value;
+  path = path.AppendASCII(name);
+  if (!file_util::PathExists(path))
+    file_util::CreateDirectory(path);
+
+  return path;
+}
+
+}  // namespace.
 
 std::string GenerateKey(bool same_length) {
   char key[200];
@@ -41,7 +55,11 @@ void CacheTestFillBuffer(char* buffer, size_t len, bool no_nulls) {
     buffer[0] = 'g';
 }
 
-bool CreateCacheTestFile(const base::FilePath& name) {
+FilePath GetCacheFilePath() {
+  return BuildCachePath("cache_test");
+}
+
+bool CreateCacheTestFile(const FilePath& name) {
   int flags = base::PLATFORM_FILE_CREATE_ALWAYS |
               base::PLATFORM_FILE_READ |
               base::PLATFORM_FILE_WRITE;
@@ -55,15 +73,14 @@ bool CreateCacheTestFile(const base::FilePath& name) {
   return true;
 }
 
-bool DeleteCache(const base::FilePath& path) {
+bool DeleteCache(const FilePath& path) {
   disk_cache::DeleteCache(path, false);
   return true;
 }
 
-bool CheckCacheIntegrity(const base::FilePath& path, bool new_eviction,
-                         uint32 mask) {
+bool CheckCacheIntegrity(const FilePath& path, bool new_eviction, uint32 mask) {
   scoped_ptr<disk_cache::BackendImpl> cache(new disk_cache::BackendImpl(
-      path, mask, base::MessageLoopProxy::current().get(), NULL));
+      path, mask, base::MessageLoopProxy::current(), NULL));
   if (!cache.get())
     return false;
   if (new_eviction)
@@ -72,6 +89,21 @@ bool CheckCacheIntegrity(const base::FilePath& path, bool new_eviction,
   if (cache->SyncInit() != net::OK)
     return false;
   return cache->SelfCheck() >= 0;
+}
+
+ScopedTestCache::ScopedTestCache(const FilePath& path) : path_(path) {
+  bool result = DeleteCache(path_);
+  DCHECK(result);
+}
+
+ScopedTestCache::ScopedTestCache(const std::string& name)
+    : path_(BuildCachePath(name)) {
+  bool result = DeleteCache(path_);
+  DCHECK(result);
+}
+
+ScopedTestCache::~ScopedTestCache() {
+  file_util::Delete(path(), true);
 }
 
 // -----------------------------------------------------------------------
@@ -97,7 +129,7 @@ bool MessageLoopHelper::WaitUntilCacheIoFinished(int num_callbacks) {
   if (!timer_.IsRunning())
     timer_.Start(FROM_HERE, TimeDelta::FromMilliseconds(50), this,
                  &MessageLoopHelper::TimerExpired);
-  base::MessageLoop::current()->Run();
+  MessageLoop::current()->Run();
   return completed_;
 }
 
@@ -107,7 +139,7 @@ void MessageLoopHelper::TimerExpired() {
   CHECK_LE(callbacks_called_, num_callbacks_);
   if (callbacks_called_ == num_callbacks_) {
     completed_ = true;
-    base::MessageLoop::current()->Quit();
+    MessageLoop::current()->Quit();
   } else {
     // Not finished yet. See if we have to abort.
     if (last_ == callbacks_called_)
@@ -115,7 +147,7 @@ void MessageLoopHelper::TimerExpired() {
     else
       last_ = callbacks_called_;
     if (40 == num_iterations_)
-      base::MessageLoop::current()->Quit();
+      MessageLoop::current()->Quit();
   }
 }
 
@@ -132,9 +164,7 @@ CallbackTest::~CallbackTest() {
 
 // On the actual callback, increase the number of tests received and check for
 // errors (an unexpected test received)
-void CallbackTest::Run(int result) {
-  last_result_ = result;
-
+void CallbackTest::Run(int params) {
   if (reuse_) {
     DCHECK_EQ(1, reuse_);
     if (2 == reuse_)

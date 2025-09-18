@@ -2,7 +2,7 @@
 ; Use of this source code is governed by a BSD-style license that can be
 ; found in the LICENSE file.
 
-%include "third_party/x86inc/x86inc.asm"
+%include "x86inc.asm"
 
 ;
 ; This file uses MMX instructions.
@@ -17,7 +17,7 @@
 ;                                   const uint8* u_buf,
 ;                                   const uint8* v_buf,
 ;                                   uint8* rgb_buf,
-;                                   ptrdiff_t width,
-;                                   ptrdiff_t source_dx);
+;                                   int width,
+;                                   int source_dx);
 %define SYMBOL LinearScaleYUVToRGB32Row_MMX
 %include "linear_scale_yuv_to_rgb_mmx.inc"

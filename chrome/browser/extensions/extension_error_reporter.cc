@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/simple_message_box.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/simple_message_box.h"
 
 ExtensionErrorReporter* ExtensionErrorReporter::instance_ = NULL;
 
@@ -29,16 +29,16 @@ ExtensionErrorReporter* ExtensionErrorReporter::GetInstance() {
 }
 
 ExtensionErrorReporter::ExtensionErrorReporter(bool enable_noisy_errors)
-    : ui_loop_(base::MessageLoop::current()),
+    : ui_loop_(MessageLoop::current()),
       enable_noisy_errors_(enable_noisy_errors) {
 }
 
 ExtensionErrorReporter::~ExtensionErrorReporter() {}
 
-void ExtensionErrorReporter::ReportError(const base::string16& message,
+void ExtensionErrorReporter::ReportError(const string16& message,
                                          bool be_noisy) {
   // NOTE: There won't be a ui_loop_ in the unit test environment.
-  if (ui_loop_ && base::MessageLoop::current() != ui_loop_) {
+  if (ui_loop_ && MessageLoop::current() != ui_loop_) {
     // base::Unretained is okay since the ExtensionErrorReporter is a singleton
     // that lives until the end of the process.
     ui_loop_->PostTask(FROM_HERE,
@@ -53,15 +53,16 @@ void ExtensionErrorReporter::ReportError(const base::string16& message,
 
   // TODO(aa): Print the error message out somewhere better. I think we are
   // going to need some sort of 'extension inspector'.
-  LOG(WARNING) << "Extension error: " << message;
+  LOG(ERROR) << "Extension error: " << message;
 
   if (enable_noisy_errors_ && be_noisy) {
-    chrome::ShowMessageBox(NULL, base::ASCIIToUTF16("Extension error"), message,
-                           chrome::MESSAGE_BOX_TYPE_WARNING);
+    browser::ShowErrorBox(NULL,
+                          UTF8ToUTF16("Extension error"),
+                          message);
   }
 }
 
-const std::vector<base::string16>* ExtensionErrorReporter::GetErrors() {
+const std::vector<string16>* ExtensionErrorReporter::GetErrors() {
   return &errors_;
 }
 

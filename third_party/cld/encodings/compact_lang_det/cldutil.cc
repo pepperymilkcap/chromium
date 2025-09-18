@@ -815,10 +815,9 @@ double cld::GetNormalizedScore(Language lang, UnicodeLScript lscript,
   if (lscript == ULScript_Common) {
     // We don't know the script (only happens with second-chance score)
     // Look for first non-zero mean value
-    for (int i = 2; i >= 0; --i) {
+    for (int i = 0; i < 3; ++i) {
       if (kMeanScore[lang * 4 + i] > 0) {
         expected_score = kMeanScore[lang * 4 + i];
-        break;
       }
     }
   }
@@ -844,10 +843,9 @@ int cld::GetReliability(int len, UnicodeLScript lscript,
   if (lscript == ULScript_Common) {
     // We don't know the script (only happens with second-chance score)
     // Look for first non-zero mean value
-    for (int i = 2; i >= 0; --i) {
+    for (int i = 0; i < 3; ++i) {
       if (kMeanScore[cur_lang * 4 + i] > 0) {
         mean_score = kMeanScore[cur_lang * 4 + i];
-        break;
       }
     }
   }

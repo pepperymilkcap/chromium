@@ -4,12 +4,13 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_TABPOSE_WINDOW_H_
 #define CHROME_BROWSER_UI_COCOA_TABPOSE_WINDOW_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/mac/scoped_cftyperef.h"
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 
@@ -54,17 +55,17 @@ class TabStripModelObserverBridge;
   CALayer* selectionHighlight_;  // weak
 
   // Colors used by the layers.
-  base::ScopedCFTypeRef<CGColorRef> gray_;
-  base::ScopedCFTypeRef<CGColorRef> darkBlue_;
+  base::mac::ScopedCFTypeRef<CGColorRef> gray_;
+  base::mac::ScopedCFTypeRef<CGColorRef> darkBlue_;
 
   TabStripModel* tabStripModel_;  // weak
 
   // Stores all preview layers. The order in here matches the order in
   // the tabstrip model.
-  base::scoped_nsobject<NSMutableArray> allThumbnailLayers_;
+  scoped_nsobject<NSMutableArray> allThumbnailLayers_;
 
-  base::scoped_nsobject<NSMutableArray> allFaviconLayers_;
-  base::scoped_nsobject<NSMutableArray> allTitleLayers_;
+  scoped_nsobject<NSMutableArray> allFaviconLayers_;
+  scoped_nsobject<NSMutableArray> allTitleLayers_;
 
   // Manages the state of all layers.
   scoped_ptr<tabpose::TileSet> tileSet_;
@@ -77,7 +78,7 @@ class TabStripModelObserverBridge;
   scoped_ptr<TabStripModelObserverBridge> tabStripModelObserverBridge_;
 
   // The icon used for the closebutton layers.
-  base::scoped_nsobject<NSImage> closeIcon_;
+  base::mac::ScopedCFTypeRef<CGImageRef> closeIcon_;
 
   // True if all close layers should be shown (as opposed to just the close
   // layer of the currently selected thumbnail).

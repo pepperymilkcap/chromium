@@ -1,15 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 [
   {
     "namespace":"management",
-    "description": "The <code>chrome.management</code> API provides ways to manage the list of extensions/apps that are installed and running. It is particularly useful for extensions that <a href='override.html'>override</a> the built-in New Tab page.",
     "types": [
       {
         "id": "IconInfo",
-        "description": "Information about an icon belonging to an extension, app, or theme.",
+        "description": "Information about an icon belonging to an extension or app.",
         "type": "object",
         "properties": {
           "size": { "type": "integer", "description": "A number representing the width and height of the icon. Likely values include (but are not limited to) 128, 48, 24, and 16."  },
@@ -18,7 +13,7 @@
       },
       {
         "id": "ExtensionInfo",
-        "description": "Information about an installed extension, app, or theme.",
+        "description": "Information about an installed extension or app.",
         "type": "object",
         "properties": {
           "id": {
@@ -26,19 +21,15 @@
             "type": "string"
           },
           "name": {
-            "description": "The name of this extension, app, or theme.",
-            "type": "string"
-          },
-          "shortName": {
-            "description": "A short version of the name of this extension, app, or theme.",
+            "description": "The name of this extension or app.",
             "type": "string"
           },
           "description": {
-            "description": "The description of this extension, app, or theme.",
+            "description": "The description of this extension or app.",
             "type": "string"
           },
           "version": {
-            "description": "The <a href='manifest/version.html'>version</a> of this extension, app, or theme.",
+            "description": "The <a href='manifest.html#version'>version</a> of this extension or app.",
             "type": "string"
           },
           "mayDisable": {
@@ -57,13 +48,7 @@
           },
           "isApp": {
             "description": "True if this is an app.",
-            "type": "boolean",
-            "deprecated": "Please use $ref:ExtensionInfo.type."
-          },
-          "type": {
-            "description": "The type of this extension, app, or theme.",
-            "type": "string",
-            "enum": ["extension", "hosted_app", "packaged_app", "legacy_packaged_app", "theme"]
+            "type": "boolean"
           },
           "appLaunchUrl": {
             "description": "The launch url (only present for apps).",
@@ -71,17 +56,17 @@
             "optional": true
           },
           "homepageUrl": {
-            "description": "The URL of the homepage of this extension, app, or theme.",
+            "description": "The URL of the homepage of this extension or app.",
             "type": "string",
             "optional": true
           },
           "updateUrl": {
-            "description": "The update URL of this extension, app, or theme.",
+            "description": "The update URL of this extension or app.",
             "type": "string",
             "optional": true
           },
           "offlineEnabled": {
-            "description": "Whether the extension, app, or theme declares that it supports offline.",
+            "description": "Whether the extension or app declares that it supports offline.",
             "type": "boolean"
           },
           "optionsUrl": {
@@ -89,7 +74,7 @@
             "type": "string"
           },
           "icons": {
-            "description": "A list of icon information. Note that this just reflects what was declared in the manifest, and the actual image at that url may be larger or smaller than what was declared, so you might consider using explicit width and height attributes on img tags referencing these images. See the <a href='manifest/icons.html'>manifest documentation on icons</a> for more details.",
+            "description": "A list of icon information. Note that this just reflects what was declared in the manifest, and the actual image at that url may be larger or smaller than what was declared, so you might consider using explicit width and height attributes on img tags referencing these images. See the <a href='manifest.html#icons'>manifest documentation on icons</a> for more details.",
             "type": "array",
             "optional": true,
             "items": {
@@ -109,11 +94,6 @@
             "items" : {
               "type": "string"
             }
-          },
-          "installType": {
-            "description": "How the extension was installed. One of<br><var>admin</var>: The extension was installed because of an administrative policy,<br><var>development</var>: The extension was loaded unpacked in developer mode,<br><var>normal</var>: The extension was installed normally via a .crx file,<br><var>sideload</var>: The extension was installed by other software on the machine,<br><var>other</var>: The extension was installed by other means.",
-            "type": "string",
-            "enum": ["admin", "development", "normal", "sideload", "other"]
           }
         }
       }
@@ -141,7 +121,7 @@
       },
       {
         "name": "get",
-        "description": "Returns information about the installed extension, app, or theme that has the given ID.",
+        "description": "Returns information about the installed extension or app that has the given ID.",
         "parameters": [
           {
             "name": "id",
@@ -238,42 +218,6 @@
             "description": "This should be the id from an item of $ref:ExtensionInfo."
           },
           {
-            "type": "object",
-            "name": "options",
-            "optional": "true",
-            "properties": {
-              "showConfirmDialog": {
-                "type": "boolean",
-                "optional": true,
-                "description": "Whether or not a confirm-uninstall dialog should prompt the user. Defaults to false."
-              }
-            }
-          },
-          {
-            "name": "callback",
-            "type": "function",
-            "optional": "true",
-            "parameters": []
-          }
-        ]
-      },
-      {
-        "name": "uninstallSelf",
-        "description": "Uninstalls the calling extension. Note: This function can be used without requesting the 'management' permission in the manifest.",
-        "parameters": [
-          {
-            "type": "object",
-            "name": "options",
-            "optional": "true",
-            "properties": {
-              "showConfirmDialog": {
-                "type": "boolean",
-                "optional": true,
-                "description": "Whether or not a confirm-uninstall dialog should prompt the user. Defaults to false."
-              }
-            }
-          },
-          {
             "name": "callback",
             "type": "function",
             "optional": "true",
@@ -314,7 +258,7 @@
           {
            "name": "id",
            "type": "string",
-           "description": "The id of the extension, app, or theme that was uninstalled."
+           "description": "The id of the extension or app that was uninstalled."
           }
         ]
       },
@@ -326,7 +270,7 @@
       },
       {
         "name": "onDisabled",
-        "description": "Fired when an app or extension has been disabled.",
+        "description": "Fired when an app or extension has been disabled",
         "type": "function",
         "parameters": [{"name": "info", "$ref":"ExtensionInfo"}]
       }

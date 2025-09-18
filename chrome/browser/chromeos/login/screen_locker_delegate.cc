@@ -18,8 +18,4 @@ void ScreenLockerDelegate::ScreenLockReady() {
   screen_locker_->ScreenLockReady();
 }
 
-content::WebUI* ScreenLockerDelegate::GetAssociatedWebUI() {
-  return NULL;
-}
-
 }  // namespace chromeos

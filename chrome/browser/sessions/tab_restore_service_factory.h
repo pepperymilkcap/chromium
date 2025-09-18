@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_SESSIONS_TAB_RESTORE_SERVICE_FACTORY_H_
 
 #include "base/memory/singleton.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class TabRestoreService;
 class Profile;
@@ -14,13 +14,9 @@ class Profile;
 // Singleton that owns all TabRestoreServices and associates them with
 // Profiles. Listens for the Profile's destruction notification and cleans up
 // the associated TabRestoreService.
-class TabRestoreServiceFactory : public BrowserContextKeyedServiceFactory {
+class TabRestoreServiceFactory : public ProfileKeyedServiceFactory {
  public:
   static TabRestoreService* GetForProfile(Profile* profile);
-
-  // Variant of GetForProfile() that returns NULL if TabRestoreService does not
-  // exist.
-  static TabRestoreService* GetForProfileIfExisting(Profile* profile);
 
   static void ResetForProfile(Profile* profile);
 
@@ -32,10 +28,10 @@ class TabRestoreServiceFactory : public BrowserContextKeyedServiceFactory {
   TabRestoreServiceFactory();
   virtual ~TabRestoreServiceFactory();
 
-  // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  // ProfileKeyedServiceFactory:
+  virtual ProfileKeyedService* BuildServiceInstanceFor(
+      Profile* profile) const OVERRIDE;
+  virtual bool ServiceIsNULLWhileTesting() OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_SESSIONS_TAB_RESTORE_SERVICE_FACTORY_H_

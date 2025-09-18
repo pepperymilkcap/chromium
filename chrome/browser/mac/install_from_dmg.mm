@@ -4,8 +4,8 @@
 
 #include "chrome/browser/mac/install_from_dmg.h"
 
-#import <AppKit/AppKit.h>
 #include <ApplicationServices/ApplicationServices.h>
+#import <AppKit/AppKit.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreServices/CoreServices.h>
 #include <DiskArbitration/DiskArbitration.h>
@@ -19,19 +19,19 @@
 #include "base/auto_reset.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/mac/authorization_util.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_logging.h"
 #import "base/mac/mac_util.h"
-#include "base/mac/scoped_authorizationref.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/mac/scoped_ioobject.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
+#include "chrome/browser/mac/authorization_util.h"
 #include "chrome/browser/mac/dock.h"
+#include "chrome/browser/mac/scoped_authorizationref.h"
+#include "chrome/browser/mac/scoped_ioobject.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/mac/relauncher.h"
 #include "chrome/common/chrome_constants.h"
@@ -82,18 +82,17 @@ io_service_t CopyHDIXDriveServiceForMedia(io_service_t media) {
                                     &iterator_ref);
   if (kr != KERN_SUCCESS) {
     LOG(ERROR) << "IORegistryEntryCreateIterator: " << kr;
-    return IO_OBJECT_NULL;
+    return NULL;
   }
-  base::mac::ScopedIOObject<io_iterator_t> iterator(iterator_ref);
-  iterator_ref = IO_OBJECT_NULL;
+  ScopedIOObject<io_iterator_t> iterator(iterator_ref);
+  iterator_ref = NULL;
 
   // Look at each of the ancestor services, beginning with the parent,
   // iterating all the way up to the device tree's root. If any ancestor
   // service matches the class used for disk images, the media resides on a
   // disk image, and the disk image file's path can be determined by examining
   // the image-path property.
-  for (base::mac::ScopedIOObject<io_service_t> ancestor(
-           IOIteratorNext(iterator));
+  for (ScopedIOObject<io_service_t> ancestor(IOIteratorNext(iterator));
        ancestor;
        ancestor.reset(IOIteratorNext(iterator))) {
     if (IOObjectConformsTo(ancestor, disk_image_class)) {
@@ -102,7 +101,7 @@ io_service_t CopyHDIXDriveServiceForMedia(io_service_t media) {
   }
 
   // The media does not reside on a disk image.
-  return IO_OBJECT_NULL;
+  return NULL;
 }
 
 // Given an io_service_t (expected to be of class IOMedia), determines whether
@@ -114,22 +113,23 @@ bool MediaResidesOnDiskImage(io_service_t media, std::string* image_path) {
     image_path->clear();
   }
 
-  base::mac::ScopedIOObject<io_service_t> hdix_drive(
-      CopyHDIXDriveServiceForMedia(media));
+  ScopedIOObject<io_service_t> hdix_drive(CopyHDIXDriveServiceForMedia(media));
   if (!hdix_drive) {
     return false;
   }
 
   if (image_path) {
-    base::ScopedCFTypeRef<CFTypeRef> image_path_cftyperef(
-        IORegistryEntryCreateCFProperty(
-            hdix_drive, CFSTR("image-path"), NULL, 0));
+    base::mac::ScopedCFTypeRef<CFTypeRef> image_path_cftyperef(
+        IORegistryEntryCreateCFProperty(hdix_drive,
+                                        CFSTR("image-path"),
+                                        NULL,
+                                        0));
     if (!image_path_cftyperef) {
       LOG(ERROR) << "IORegistryEntryCreateCFProperty";
       return true;
     }
     if (CFGetTypeID(image_path_cftyperef) != CFDataGetTypeID()) {
-      base::ScopedCFTypeRef<CFStringRef> observed_type_cf(
+      base::mac::ScopedCFTypeRef<CFStringRef> observed_type_cf(
           CFCopyTypeIDDescription(CFGetTypeID(image_path_cftyperef)));
       std::string observed_type;
       if (observed_type_cf) {
@@ -210,17 +210,16 @@ bool IsPathOnReadOnlyDiskImage(const char path[],
     LOG(ERROR) << "IOServiceGetMatchingServices: " << kr;
     return false;
   }
-  base::mac::ScopedIOObject<io_iterator_t> iterator(iterator_ref);
-  iterator_ref = IO_OBJECT_NULL;
+  ScopedIOObject<io_iterator_t> iterator(iterator_ref);
+  iterator_ref = NULL;
 
   // There needs to be exactly one matching service.
-  base::mac::ScopedIOObject<io_service_t> media(IOIteratorNext(iterator));
+  ScopedIOObject<io_service_t> media(IOIteratorNext(iterator));
   if (!media) {
     LOG(ERROR) << "IOIteratorNext: no service";
     return false;
   }
-  base::mac::ScopedIOObject<io_service_t> unexpected_service(
-      IOIteratorNext(iterator));
+  ScopedIOObject<io_service_t> unexpected_service(IOIteratorNext(iterator));
   if (unexpected_service) {
     LOG(ERROR) << "IOIteratorNext: too many services";
     return false;
@@ -280,7 +279,7 @@ AuthorizationRef MaybeShowAuthorizationDialog(NSString* application_directory) {
   NSString* prompt = l10n_util::GetNSStringFWithFixup(
       IDS_INSTALL_FROM_DMG_AUTHENTICATION_PROMPT,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
-  return base::mac::AuthorizationCreateToRunAsRoot(
+  return authorization_util::AuthorizationCreateToRunAsRoot(
       base::mac::NSToCFCast(prompt));
 }
 
@@ -293,7 +292,7 @@ bool InstallFromDiskImage(AuthorizationRef authorization_arg,
                           NSString* installer_path,
                           NSString* source_path,
                           NSString* target_path) {
-  base::mac::ScopedAuthorizationRef authorization(authorization_arg);
+  ScopedAuthorizationRef authorization(authorization_arg);
   authorization_arg = NULL;
   int exit_status;
   if (authorization) {
@@ -302,7 +301,7 @@ bool InstallFromDiskImage(AuthorizationRef authorization_arg,
     const char* target_path_c = [target_path fileSystemRepresentation];
     const char* arguments[] = {source_path_c, target_path_c, NULL};
 
-    OSStatus status = base::mac::ExecuteWithPrivilegesAndWait(
+    OSStatus status = authorization_util::ExecuteWithPrivilegesAndWait(
         authorization,
         installer_path_c,
         kAuthorizationFlagDefaults,
@@ -357,9 +356,9 @@ bool InstallFromDiskImage(AuthorizationRef authorization_arg,
 // call EjectAndTrashDiskImage on dmg_bsd_device_name.
 bool LaunchInstalledApp(NSString* installed_path,
                         const std::string& dmg_bsd_device_name) {
-  base::FilePath browser_path([installed_path fileSystemRepresentation]);
+  FilePath browser_path([installed_path fileSystemRepresentation]);
 
-  base::FilePath helper_path = browser_path.Append("Contents/Versions");
+  FilePath helper_path = browser_path.Append("Contents/Versions");
   helper_path = helper_path.Append(chrome::kChromeVersion);
   helper_path = helper_path.Append(chrome::kHelperProcessExecutablePath);
 
@@ -449,7 +448,7 @@ bool MaybeInstallFromDiskImage() {
     return false;
   }
 
-  base::mac::ScopedAuthorizationRef authorization(
+  ScopedAuthorizationRef authorization(
       MaybeShowAuthorizationDialog(application_directory));
   // authorization will be NULL if it's deemed unnecessary or if
   // authentication fails.  In either case, try to install without privilege
@@ -514,7 +513,7 @@ struct SynchronousDACallbackData {
         run_loop_running(false) {
   }
 
-  base::ScopedCFTypeRef<DADissenterRef> dissenter;
+  base::mac::ScopedCFTypeRef<DADissenterRef> dissenter;
   bool callback_called;
   bool run_loop_running;
 
@@ -562,7 +561,7 @@ bool SynchronousDAOperation(const char* name,
   // avoid spinning the run loop at all.
   if (!callback_data->callback_called) {
     const CFTimeInterval kOperationTimeoutSeconds = 15;
-    base::AutoReset<bool> running_reset(&callback_data->run_loop_running, true);
+    AutoReset<bool> running_reset(&callback_data->run_loop_running, true);
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, kOperationTimeoutSeconds, FALSE);
   }
 
@@ -603,13 +602,13 @@ bool SynchronousDADiskEject(DADiskRef disk, DADiskEjectOptions options) {
 }  // namespace
 
 void EjectAndTrashDiskImage(const std::string& dmg_bsd_device_name) {
-  base::ScopedCFTypeRef<DASessionRef> session(DASessionCreate(NULL));
+  base::mac::ScopedCFTypeRef<DASessionRef> session(DASessionCreate(NULL));
   if (!session.get()) {
     LOG(ERROR) << "DASessionCreate";
     return;
   }
 
-  base::ScopedCFTypeRef<DADiskRef> disk(
+  base::mac::ScopedCFTypeRef<DADiskRef> disk(
       DADiskCreateFromBSDName(NULL, session, dmg_bsd_device_name.c_str()));
   if (!disk.get()) {
     LOG(ERROR) << "DADiskCreateFromBSDName";
@@ -627,7 +626,7 @@ void EjectAndTrashDiskImage(const std::string& dmg_bsd_device_name) {
     return;
   }
 
-  base::mac::ScopedIOObject<io_service_t> media(DADiskCopyIOMedia(disk));
+  ScopedIOObject<io_service_t> media(DADiskCopyIOMedia(disk));
   if (!media.get()) {
     LOG(ERROR) << "DADiskCopyIOMedia";
     return;
@@ -670,10 +669,10 @@ void EjectAndTrashDiskImage(const std::string& dmg_bsd_device_name) {
   // Dock indicating that any garbage has been placed within it. Using the
   // trash path that FSPathMoveObjectToTrashSync claims to have used, call
   // FNNotifyByPath to fatten up the icon.
-  base::FilePath disk_image_path_in_trash(disk_image_path_in_trash_c);
+  FilePath disk_image_path_in_trash(disk_image_path_in_trash_c);
   free(disk_image_path_in_trash_c);
 
-  base::FilePath trash_path = disk_image_path_in_trash.DirName();
+  FilePath trash_path = disk_image_path_in_trash.DirName();
   const UInt8* trash_path_u8 = reinterpret_cast<const UInt8*>(
       trash_path.value().c_str());
   status = FNNotifyByPath(trash_path_u8,

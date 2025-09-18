@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/idle.h"
+#import "chrome/browser/idle.h"
 
-#include <ApplicationServices/ApplicationServices.h>
 #import <Cocoa/Cocoa.h>
+#import <CoreGraphics/CGEventSource.h>
 
 @interface MacScreenMonitor : NSObject {
  @private
@@ -50,7 +50,7 @@
 }
 
 - (void)dealloc {
-  [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
+  [[NSDistributedNotificationCenter defaultCenter] removeObject:self];
   [super dealloc];
 }
 
@@ -79,11 +79,24 @@ void InitIdleMonitor() {
     g_screenMonitor = [[MacScreenMonitor alloc] init];
 }
 
-void CalculateIdleTime(IdleTimeCallback notify) {
+void StopIdleMonitor() {
+  [g_screenMonitor release];
+  g_screenMonitor = nil;
+}
+
+void CalculateIdleState(unsigned int idle_threshold, IdleCallback notify) {
+  if (CheckIdleStateIsLocked()) {
+    notify.Run(IDLE_STATE_LOCKED);
+    return;
+  }
+
   CFTimeInterval idle_time = CGEventSourceSecondsSinceLastEventType(
       kCGEventSourceStateCombinedSessionState,
       kCGAnyInputEventType);
-  notify.Run(static_cast<int>(idle_time));
+  if (idle_time >= idle_threshold)
+    notify.Run(IDLE_STATE_IDLE);
+  else
+    notify.Run(IDLE_STATE_ACTIVE);
 }
 
 bool CheckIdleStateIsLocked() {

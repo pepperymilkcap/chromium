@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From dev/pp_video_dev.idl modified Tue Apr 30 14:58:38 2013. */
+/* From dev/pp_video_dev.idl modified Wed Dec 14 18:08:00 2011. */
 
 #ifndef PPAPI_C_DEV_PP_VIDEO_DEV_H_
 #define PPAPI_C_DEV_PP_VIDEO_DEV_H_
@@ -45,7 +45,7 @@ typedef enum {
   PP_VIDEODECODER_H264PROFILE_SCALABLEHIGH = 9,
   PP_VIDEODECODER_H264PROFILE_STEREOHIGH = 10,
   PP_VIDEODECODER_H264PROFILE_MULTIVIEWHIGH = 11,
-  PP_VIDEODECODER_VP8PROFILE_MAIN = 12
+  PP_VIDEODECODER_PROFILE_MAX = PP_VIDEODECODER_H264PROFILE_MULTIVIEWHIGH
 } PP_VideoDecoder_Profile;
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_VideoDecoder_Profile, 4);
 /**
@@ -61,8 +61,7 @@ PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_VideoDecoder_Profile, 4);
  */
 struct PP_VideoBitstreamBuffer_Dev {
   /**
-   * Client-specified identifier for the bitstream buffer. Valid values are
-   * non-negative.
+   * Client-specified identifier for the bitstream buffer.
    */
   int32_t id;
   /**
@@ -73,7 +72,7 @@ struct PP_VideoBitstreamBuffer_Dev {
   /**
    * Size of the bitstream contained in buffer (in bytes).
    */
-  uint32_t size;
+  int32_t size;
 };
 PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_VideoBitstreamBuffer_Dev, 12);
 
@@ -84,7 +83,7 @@ struct PP_PictureBuffer_Dev {
   /**
    * Client-specified id for the picture buffer. By using this value client can
    * keep track of the buffers it has assigned to the video decoder and how they
-   * are passed back to it. Valid values are non-negative.
+   * are passed back to it.
    */
   int32_t id;
   /**
@@ -121,8 +120,9 @@ PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_Picture_Dev, 8);
  * @{
  */
 /**
- * Decoder error codes reported to the plugin. A reasonable naive
+ * Decoder error codes reported to the plugin.  A reasonable naive
  * error handling policy is for the plugin to Destroy() the decoder on error.
+ * Note: Keep these in sync with media::VideoDecodeAccelerator::Error.
  */
 typedef enum {
   /**

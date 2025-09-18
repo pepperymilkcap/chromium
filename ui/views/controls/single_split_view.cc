@@ -1,8 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/single_split_view.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include <gdk/gdk.h>
+#endif
 
 #include "skia/ext/skia_utils_win.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -10,14 +14,19 @@
 #include "ui/views/background.h"
 #include "ui/views/controls/single_split_view_listener.h"
 
+#if defined(TOOLKIT_USES_GTK)
+#include "ui/gfx/gtk_util.h"
+#endif
+
 #if defined(USE_AURA)
-#include "ui/base/cursor/cursor.h"
+#include "ui/aura/cursor.h"
 #endif
 
 namespace views {
 
 // static
-const char SingleSplitView::kViewClassName[] = "SingleSplitView";
+const char SingleSplitView::kViewClassName[] =
+    "ui/views/controls/SingleSplitView";
 
 // Size of the divider in pixels.
 static const int kDividerSize = 4;
@@ -29,7 +38,6 @@ SingleSplitView::SingleSplitView(View* leading,
     : is_horizontal_(orientation == HORIZONTAL_SPLIT),
       divider_offset_(-1),
       resize_leading_on_bounds_change_(true),
-      resize_disabled_(false),
       listener_(listener) {
   AddChildView(leading);
   AddChildView(trailing);
@@ -54,11 +62,13 @@ void SingleSplitView::Layout() {
     }
   }
 
+  SchedulePaint();
+
   // Invoke super's implementation so that the children are layed out.
   View::Layout();
 }
 
-const char* SingleSplitView::GetClassName() const {
+std::string SingleSplitView::GetClassName() const {
   return kViewClassName;
 }
 
@@ -82,29 +92,26 @@ gfx::Size SingleSplitView::GetPreferredSize() {
     }
   }
   if (is_horizontal_)
-    width += GetDividerSize();
+    width += kDividerSize;
   else
-    height += GetDividerSize();
+    height += kDividerSize;
   return gfx::Size(width, height);
 }
 
-gfx::NativeCursor SingleSplitView::GetCursor(const ui::MouseEvent& event) {
+gfx::NativeCursor SingleSplitView::GetCursor(const MouseEvent& event) {
   if (!IsPointInDivider(event.location()))
     return gfx::kNullCursor;
 #if defined(USE_AURA)
   return is_horizontal_ ?
-      ui::kCursorEastWestResize : ui::kCursorNorthSouthResize;
+      aura::kCursorEastWestResize : aura::kCursorNorthSouthResize;
 #elif defined(OS_WIN)
   static HCURSOR we_resize_cursor = LoadCursor(NULL, IDC_SIZEWE);
   static HCURSOR ns_resize_cursor = LoadCursor(NULL, IDC_SIZENS);
   return is_horizontal_ ? we_resize_cursor : ns_resize_cursor;
+#elif defined(TOOLKIT_USES_GTK)
+  return gfx::GetCursor(is_horizontal_ ? GDK_SB_H_DOUBLE_ARROW :
+                                         GDK_SB_V_DOUBLE_ARROW);
 #endif
-}
-
-int SingleSplitView::GetDividerSize() const {
-  bool both_visible = child_count() > 1 && child_at(0)->visible() &&
-      child_at(1)->visible();
-  return both_visible && !resize_disabled_ ? kDividerSize : 0;
 }
 
 void SingleSplitView::CalculateChildrenBounds(
@@ -132,7 +139,8 @@ void SingleSplitView::CalculateChildrenBounds(
     divider_at = NormalizeDividerOffset(divider_at, bounds);
   }
 
-  int divider_size = GetDividerSize();
+  int divider_size =
+      !is_leading_visible || !is_trailing_visible ? 0 : kDividerSize;
 
   if (is_horizontal_) {
     *leading_bounds = gfx::Rect(0, 0, divider_at, bounds.height());
@@ -148,11 +156,11 @@ void SingleSplitView::CalculateChildrenBounds(
   }
 }
 
-void SingleSplitView::SetAccessibleName(const base::string16& name) {
+void SingleSplitView::SetAccessibleName(const string16& name) {
   accessible_name_ = name;
 }
 
-bool SingleSplitView::OnMousePressed(const ui::MouseEvent& event) {
+bool SingleSplitView::OnMousePressed(const MouseEvent& event) {
   if (!IsPointInDivider(event.location()))
     return false;
   drag_info_.initial_mouse_offset = GetPrimaryAxisSize(event.x(), event.y());
@@ -161,7 +169,7 @@ bool SingleSplitView::OnMousePressed(const ui::MouseEvent& event) {
   return true;
 }
 
-bool SingleSplitView::OnMouseDragged(const ui::MouseEvent& event) {
+bool SingleSplitView::OnMouseDragged(const MouseEvent& event) {
   if (child_count() < 2)
     return false;
 
@@ -169,16 +177,13 @@ bool SingleSplitView::OnMouseDragged(const ui::MouseEvent& event) {
       drag_info_.initial_mouse_offset;
   if (is_horizontal_ && base::i18n::IsRTL())
     delta_offset *= -1;
-  // Honor the first child's minimum size when resizing.
+  // Honor the minimum size when resizing.
   gfx::Size min = child_at(0)->GetMinimumSize();
   int new_size = std::max(GetPrimaryAxisSize(min.width(), min.height()),
                           drag_info_.initial_divider_offset + delta_offset);
 
-  // Honor the second child's minimum size, and don't let the view
-  // get bigger than our width.
-  min = child_at(1)->GetMinimumSize();
-  new_size = std::min(GetPrimaryAxisSize() - kDividerSize -
-      GetPrimaryAxisSize(min.width(), min.height()), new_size);
+  // And don't let the view get bigger than our width.
+  new_size = std::min(GetPrimaryAxisSize() - kDividerSize, new_size);
 
   if (new_size != divider_offset_) {
     set_divider_offset(new_size);
@@ -205,9 +210,6 @@ void SingleSplitView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
 }
 
 bool SingleSplitView::IsPointInDivider(const gfx::Point& p) {
-  if (resize_disabled_)
-    return false;
-
   if (child_count() < 2)
     return false;
 
@@ -222,7 +224,7 @@ bool SingleSplitView::IsPointInDivider(const gfx::Point& p) {
     divider_relative_offset = p.y() - child_at(0)->height();
   }
   return (divider_relative_offset >= 0 &&
-      divider_relative_offset < GetDividerSize());
+      divider_relative_offset < kDividerSize);
 }
 
 int SingleSplitView::CalculateDividerOffset(
@@ -242,7 +244,7 @@ int SingleSplitView::CalculateDividerOffset(
         divider_offset += new_bounds.height() - previous_bounds.height();
 
       if (divider_offset < 0)
-        divider_offset = GetDividerSize();
+        divider_offset = kDividerSize;
     }
   }
   return divider_offset;
@@ -252,10 +254,10 @@ int SingleSplitView::NormalizeDividerOffset(int divider_offset,
                                             const gfx::Rect& bounds) const {
   int primary_axis_size = GetPrimaryAxisSize(bounds.width(), bounds.height());
   if (divider_offset < 0)
-    // primary_axis_size may < GetDividerSize during initial layout.
-    return std::max(0, (primary_axis_size - GetDividerSize()) / 2);
+    // primary_axis_size may < kDividerSize during initial layout.
+    return std::max(0, (primary_axis_size - kDividerSize) / 2);
   return std::min(divider_offset,
-                  std::max(primary_axis_size - GetDividerSize(), 0));
+                  std::max(primary_axis_size - kDividerSize, 0));
 }
 
 }  // namespace views

@@ -4,9 +4,9 @@
 
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_unittest_helper.h"
@@ -15,8 +15,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
 #include "testing/platform_test.h"
-#import "third_party/ocmock/OCMock/OCMock.h"
 #include "third_party/ocmock/gtest_support.h"
+#import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/ocmock_extensions.h"
 #import "ui/base/test/cocoa_test_event_utils.h"
 
@@ -35,7 +35,7 @@ class AutocompleteTextFieldEditorTest : public CocoaTest {
   virtual void SetUp() {
     CocoaTest::SetUp();
     NSRect frame = NSMakeRect(0, 0, 50, 30);
-    base::scoped_nsobject<AutocompleteTextField> field(
+    scoped_nsobject<AutocompleteTextField> field(
         [[AutocompleteTextField alloc] initWithFrame:frame]);
     field_ = field.get();
     [field_ setStringValue:@"Testing"];
@@ -56,8 +56,7 @@ class AutocompleteTextFieldEditorTest : public CocoaTest {
 
   AutocompleteTextFieldEditor* editor_;
   AutocompleteTextField* field_;
-  base::scoped_nsobject<AutocompleteTextFieldWindowTestDelegate>
-      window_delegate_;
+  scoped_nsobject<AutocompleteTextFieldWindowTestDelegate> window_delegate_;
 };
 
 // Disabled because it crashes sometimes. http://crbug.com/49522
@@ -108,7 +107,7 @@ TEST_F(AutocompleteTextFieldEditorTest, PageActionMenus) {
 
   // Trivial menu which we can recognize and which doesn't look like
   // the default editor context menu.
-  base::scoped_nsobject<id> menu([[NSMenu alloc] initWithTitle:@"Menu"]);
+  scoped_nsobject<id> menu([[NSMenu alloc] initWithTitle:@"Menu"]);
   [menu addItemWithTitle:@"Go Fish"
                   action:@selector(goFish:)
            keyEquivalent:@""];
@@ -188,15 +187,6 @@ TEST_F(AutocompleteTextFieldEditorTest, Display) {
   [editor_ display];
 }
 
-// Test setting gray text, mostly to ensure nothing leaks or crashes.
-TEST_F(AutocompleteTextFieldEditorTest, GrayText) {
-  [editor_ display];
-  EXPECT_FALSE([editor_ needsDisplay]);
-  [field_ setGrayTextAutocompletion:@"foo" textColor:[NSColor redColor]];
-  EXPECT_TRUE([editor_ needsDisplay]);
-  [editor_ display];
-}
-
 // Test that -paste: is correctly delegated to the observer.
 TEST_F(AutocompleteTextFieldEditorObserverTest, Paste) {
   EXPECT_CALL(field_observer_, OnPaste());
@@ -210,12 +200,6 @@ TEST_F(AutocompleteTextFieldEditorObserverTest, Copy) {
   EXPECT_CALL(field_observer_, CopyToPasteboard(A<NSPasteboard*>()))
       .Times(1);
   [editor_ copy:nil];
-}
-
-// Test that -showURL: is correctly delegated to the observer.
-TEST_F(AutocompleteTextFieldEditorObserverTest, ShowURL) {
-  EXPECT_CALL(field_observer_, ShowURL()).Times(1);
-  [editor_ showURL:nil];
 }
 
 // Test that -cut: is correctly delegated to the observer and clears
@@ -248,16 +232,16 @@ TEST_F(AutocompleteTextFieldEditorObserverTest, PasteAndGo) {
   [editor_ pasteAndGo:nil];
 }
 
-// Test that the menu is constructed correctly.
-TEST_F(AutocompleteTextFieldEditorObserverTest, Menu) {
-  EXPECT_CALL(field_observer_, GetPasteActionStringId()).
-      WillOnce(Return(IDS_PASTE_AND_GO));
-  EXPECT_CALL(field_observer_, ShouldEnableShowURL()).
-      WillOnce(Return(true));
+// Test that the menu is constructed correctly when CanPasteAndGo().
+TEST_F(AutocompleteTextFieldEditorObserverTest, CanPasteAndGoMenu) {
+  EXPECT_CALL(field_observer_, CanPasteAndGo())
+      .WillOnce(Return(true));
+  EXPECT_CALL(field_observer_, GetPasteActionStringId())
+      .WillOnce(Return(IDS_PASTE_AND_GO));
 
   NSMenu* menu = [editor_ menuForEvent:nil];
   NSArray* items = [menu itemArray];
-  ASSERT_EQ([items count], 7U);
+  ASSERT_EQ([items count], 6U);
   // TODO(shess): Check the titles, too?
   NSUInteger i = 0;  // Use an index to make future changes easier.
   EXPECT_EQ([[items objectAtIndex:i++] action], @selector(cut:));
@@ -265,9 +249,30 @@ TEST_F(AutocompleteTextFieldEditorObserverTest, Menu) {
   EXPECT_EQ([[items objectAtIndex:i++] action], @selector(paste:));
   EXPECT_EQ([[items objectAtIndex:i++] action], @selector(pasteAndGo:));
   EXPECT_TRUE([[items objectAtIndex:i++] isSeparatorItem]);
-  EXPECT_EQ([[items objectAtIndex:i++] action], @selector(showURL:));
+
+  EXPECT_EQ([[items objectAtIndex:i] action], @selector(commandDispatch:));
   EXPECT_EQ([[items objectAtIndex:i] tag], IDC_EDIT_SEARCH_ENGINES);
-  EXPECT_EQ([[items objectAtIndex:i++] action], @selector(commandDispatch:));
+  i++;
+}
+
+// Test that the menu is constructed correctly when !CanPasteAndGo().
+TEST_F(AutocompleteTextFieldEditorObserverTest, CannotPasteAndGoMenu) {
+  EXPECT_CALL(field_observer_, CanPasteAndGo())
+      .WillOnce(Return(false));
+
+  NSMenu* menu = [editor_ menuForEvent:nil];
+  NSArray* items = [menu itemArray];
+  ASSERT_EQ([items count], 5U);
+  // TODO(shess): Check the titles, too?
+  NSUInteger i = 0;  // Use an index to make future changes easier.
+  EXPECT_EQ([[items objectAtIndex:i++] action], @selector(cut:));
+  EXPECT_EQ([[items objectAtIndex:i++] action], @selector(copy:));
+  EXPECT_EQ([[items objectAtIndex:i++] action], @selector(paste:));
+  EXPECT_TRUE([[items objectAtIndex:i++] isSeparatorItem]);
+
+  EXPECT_EQ([[items objectAtIndex:i] action], @selector(commandDispatch:));
+  EXPECT_EQ([[items objectAtIndex:i] tag], IDC_EDIT_SEARCH_ENGINES);
+  i++;
 }
 
 // Test that the menu is constructed correctly when field isn't
@@ -276,8 +281,11 @@ TEST_F(AutocompleteTextFieldEditorObserverTest, CanPasteAndGoMenuNotEditable) {
   [field_ setEditable:NO];
   [editor_ setEditable:NO];
 
-  // Never call this when not editable.
-  EXPECT_CALL(field_observer_, GetPasteActionStringId()).Times(0);
+  // Never call these when not editable.
+  EXPECT_CALL(field_observer_, CanPasteAndGo())
+      .Times(0);
+  EXPECT_CALL(field_observer_, GetPasteActionStringId())
+      .Times(0);
 
   NSMenu* menu = [editor_ menuForEvent:nil];
   NSArray* items = [menu itemArray];
@@ -287,65 +295,6 @@ TEST_F(AutocompleteTextFieldEditorObserverTest, CanPasteAndGoMenuNotEditable) {
   EXPECT_EQ([[items objectAtIndex:i++] action], @selector(cut:));
   EXPECT_EQ([[items objectAtIndex:i++] action], @selector(copy:));
   EXPECT_EQ([[items objectAtIndex:i++] action], @selector(paste:));
-}
-
-// Test that the menu validation works as expected when CanPasteAndGo().
-TEST_F(AutocompleteTextFieldEditorObserverTest, CanPasteAndGoValidate) {
-  EXPECT_CALL(field_observer_, GetPasteActionStringId())
-      .WillOnce(Return(IDS_PASTE_AND_GO));
-  EXPECT_CALL(field_observer_, CanPasteAndGo()).WillOnce(Return(true));
-  EXPECT_CALL(field_observer_, ShouldEnableShowURL())
-      .WillOnce(Return(false));
-
-  NSMenu* menu = [editor_ menuForEvent:nil];
-  NSArray* items = [menu itemArray];
-  ASSERT_EQ([items count], 6U);
-  for (NSUInteger i = 0; i < [items count]; ++i) {
-    NSMenuItem* item = [items objectAtIndex:i];
-    if ([item action] == @selector(pasteAndGo:)) {
-      EXPECT_TRUE([editor_ validateMenuItem:item]);
-      break;
-    }
-  }
-}
-
-// Test that the menu validation works as expected when !CanPasteAndGo().
-TEST_F(AutocompleteTextFieldEditorObserverTest, CannotPasteAndGoValidate) {
-  EXPECT_CALL(field_observer_, GetPasteActionStringId())
-      .WillOnce(Return(IDS_PASTE_AND_GO));
-  EXPECT_CALL(field_observer_, CanPasteAndGo()).WillOnce(Return(false));
-  EXPECT_CALL(field_observer_, ShouldEnableShowURL())
-      .WillOnce(Return(false));
-
-  NSMenu* menu = [editor_ menuForEvent:nil];
-  NSArray* items = [menu itemArray];
-  ASSERT_EQ([items count], 6U);
-  for (NSUInteger i = 0; i < [items count]; ++i) {
-    NSMenuItem* item = [items objectAtIndex:i];
-    if ([item action] == @selector(pasteAndGo:)) {
-      EXPECT_FALSE([editor_ validateMenuItem:item]);
-      break;
-    }
-  }
-}
-
-// Test that the menu validation works as expected when ShouldEnableShowURL().
-TEST_F(AutocompleteTextFieldEditorObserverTest, ShouldEnableShowURLValidate) {
-  EXPECT_CALL(field_observer_, GetPasteActionStringId())
-      .WillOnce(Return(IDS_PASTE_AND_GO));
-  EXPECT_CALL(field_observer_, ShouldEnableShowURL())
-      .WillRepeatedly(Return(true));
-
-  NSMenu* menu = [editor_ menuForEvent:nil];
-  NSArray* items = [menu itemArray];
-  ASSERT_EQ([items count], 7U);
-  for (NSUInteger i = 0; i < [items count]; ++i) {
-    NSMenuItem* item = [items objectAtIndex:i];
-    if ([item action] == @selector(showURL:)) {
-      EXPECT_TRUE([editor_ validateMenuItem:item]);
-      break;
-    }
-  }
 }
 
 }  // namespace

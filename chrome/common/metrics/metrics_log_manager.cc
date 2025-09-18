@@ -4,214 +4,159 @@
 
 #include "chrome/common/metrics/metrics_log_manager.h"
 
-#include <algorithm>
+#if defined(USE_SYSTEM_LIBBZ2)
+#include <bzlib.h>
+#else
+#include "third_party/bzip2/bzlib.h"
+#endif
 
 #include "base/metrics/histogram.h"
-#include "base/sha1.h"
-#include "base/strings/string_util.h"
-#include "base/timer/elapsed_timer.h"
+#include "base/string_util.h"
 #include "chrome/common/metrics/metrics_log_base.h"
 
-MetricsLogManager::SerializedLog::SerializedLog() {}
-MetricsLogManager::SerializedLog::~SerializedLog() {}
-
-bool MetricsLogManager::SerializedLog::IsEmpty() const {
-  return log_text_.empty();
-}
-
-void MetricsLogManager::SerializedLog::SwapLogText(std::string* log_text) {
-  log_text_.swap(*log_text);
-  if (log_text_.empty())
-    log_hash_.clear();
-  else
-    log_hash_ = base::SHA1HashString(log_text_);
-}
-
-void MetricsLogManager::SerializedLog::Clear() {
-  log_text_.clear();
-  log_hash_.clear();
-}
-
-void MetricsLogManager::SerializedLog::Swap(
-    MetricsLogManager::SerializedLog* other) {
-  log_text_.swap(other->log_text_);
-  log_hash_.swap(other->log_hash_);
-}
-
-MetricsLogManager::MetricsLogManager()
-    : unsent_logs_loaded_(false),
-      current_log_type_(MetricsLogBase::NO_LOG),
-      paused_log_type_(MetricsLogBase::NO_LOG),
-      staged_log_type_(MetricsLogBase::NO_LOG),
-      max_ongoing_log_store_size_(0),
-      last_provisional_store_index_(-1),
-      last_provisional_store_type_(MetricsLogBase::INITIAL_LOG) {}
+MetricsLogManager::MetricsLogManager() : max_ongoing_log_store_size_(0) {}
 
 MetricsLogManager::~MetricsLogManager() {}
 
-void MetricsLogManager::BeginLoggingWithLog(MetricsLogBase* log,
-                                            LogType log_type) {
-  DCHECK_NE(MetricsLogBase::NO_LOG, log_type);
+void MetricsLogManager::BeginLoggingWithLog(MetricsLogBase* log) {
   DCHECK(!current_log_.get());
   current_log_.reset(log);
-  current_log_type_ = log_type;
 }
 
-void MetricsLogManager::FinishCurrentLog() {
+void MetricsLogManager::StageCurrentLogForUpload() {
   DCHECK(current_log_.get());
-  DCHECK_NE(MetricsLogBase::NO_LOG, current_log_type_);
   current_log_->CloseLog();
-  SerializedLog compressed_log;
-  CompressCurrentLog(&compressed_log);
-  if (!compressed_log.IsEmpty())
-    StoreLog(&compressed_log, current_log_type_, NORMAL_STORE);
-  current_log_.reset();
-  current_log_type_ = MetricsLogBase::NO_LOG;
-}
-
-void MetricsLogManager::StageNextLogForUpload() {
-  // Prioritize initial logs for uploading.
-  std::vector<SerializedLog>* source_list =
-      unsent_initial_logs_.empty() ? &unsent_ongoing_logs_
-                                   : &unsent_initial_logs_;
-  LogType source_type = (source_list == &unsent_ongoing_logs_) ?
-      MetricsLogBase::ONGOING_LOG : MetricsLogBase::INITIAL_LOG;
-  // CHECK, rather than DCHECK, because swap()ing with an empty list causes
-  // hard-to-identify crashes much later.
-  CHECK(!source_list->empty());
-  DCHECK(staged_log_.IsEmpty());
-  DCHECK_EQ(MetricsLogBase::NO_LOG, staged_log_type_);
-  staged_log_.Swap(&source_list->back());
-  staged_log_type_ = source_type;
-  source_list->pop_back();
-
-  // If the staged log was the last provisional store, clear that.
-  if (last_provisional_store_index_ != -1) {
-    if (source_type == last_provisional_store_type_ &&
-        static_cast<unsigned int>(last_provisional_store_index_) ==
-            source_list->size()) {
-      last_provisional_store_index_ = -1;
-    }
-  }
+  staged_log_.reset(current_log_.release());
+  CompressStagedLog();
 }
 
 bool MetricsLogManager::has_staged_log() const {
-  return !staged_log_.IsEmpty();
+  return staged_log_.get() || !compressed_staged_log_text_.empty();
 }
 
 void MetricsLogManager::DiscardStagedLog() {
-  staged_log_.Clear();
-  staged_log_type_ = MetricsLogBase::NO_LOG;
+  staged_log_.reset();
+  compressed_staged_log_text_.clear();
 }
 
 void MetricsLogManager::DiscardCurrentLog() {
   current_log_->CloseLog();
   current_log_.reset();
-  current_log_type_ = MetricsLogBase::NO_LOG;
 }
 
 void MetricsLogManager::PauseCurrentLog() {
   DCHECK(!paused_log_.get());
-  DCHECK_EQ(MetricsLogBase::NO_LOG, paused_log_type_);
   paused_log_.reset(current_log_.release());
-  paused_log_type_ = current_log_type_;
-  current_log_type_ = MetricsLogBase::NO_LOG;
 }
 
 void MetricsLogManager::ResumePausedLog() {
   DCHECK(!current_log_.get());
-  DCHECK_EQ(MetricsLogBase::NO_LOG, current_log_type_);
   current_log_.reset(paused_log_.release());
-  current_log_type_ = paused_log_type_;
-  paused_log_type_ = MetricsLogBase::NO_LOG;
 }
 
-void MetricsLogManager::StoreStagedLogAsUnsent(StoreType store_type) {
+void MetricsLogManager::StoreStagedLogAsUnsent(LogType log_type) {
   DCHECK(has_staged_log());
-
   // If compressing the log failed, there's nothing to store.
-  if (staged_log_.IsEmpty())
+  if (compressed_staged_log_text_.empty())
     return;
 
-  StoreLog(&staged_log_, staged_log_type_, store_type);
+  if (log_type == INITIAL_LOG) {
+    unsent_initial_logs_.push_back(compressed_staged_log_text_);
+  } else {
+    // If it's too large, just note that and discard it.
+    if (max_ongoing_log_store_size_ &&
+        compressed_staged_log_text_.length() > max_ongoing_log_store_size_) {
+      UMA_HISTOGRAM_COUNTS(
+          "UMA.Large Accumulated Log Not Persisted",
+          static_cast<int>(compressed_staged_log_text_.length()));
+    } else {
+      unsent_ongoing_logs_.push_back(compressed_staged_log_text_);
+    }
+  }
   DiscardStagedLog();
 }
 
-void MetricsLogManager::StoreLog(SerializedLog* log,
-                                 LogType log_type,
-                                 StoreType store_type) {
-  DCHECK_NE(MetricsLogBase::NO_LOG, log_type);
-  std::vector<SerializedLog>* destination_list =
-      (log_type == MetricsLogBase::INITIAL_LOG) ? &unsent_initial_logs_
-                                                : &unsent_ongoing_logs_;
-  destination_list->push_back(SerializedLog());
-  destination_list->back().Swap(log);
-
-  if (store_type == PROVISIONAL_STORE) {
-    last_provisional_store_index_ = destination_list->size() - 1;
-    last_provisional_store_type_ = log_type;
-  }
-}
-
-void MetricsLogManager::DiscardLastProvisionalStore() {
-  if (last_provisional_store_index_ == -1)
-    return;
-  std::vector<SerializedLog>* source_list =
-      (last_provisional_store_type_ == MetricsLogBase::ONGOING_LOG) ?
-          &unsent_ongoing_logs_ : &unsent_initial_logs_;
-  DCHECK_LT(static_cast<unsigned int>(last_provisional_store_index_),
-            source_list->size());
-  source_list->erase(source_list->begin() + last_provisional_store_index_);
-  last_provisional_store_index_ = -1;
+void MetricsLogManager::StageNextStoredLogForUpload() {
+  // Prioritize initial logs for uploading.
+  std::vector<std::string>* source_list = unsent_initial_logs_.empty() ?
+      &unsent_ongoing_logs_ : &unsent_initial_logs_;
+  DCHECK(!source_list->empty());
+  DCHECK(compressed_staged_log_text_.empty());
+  compressed_staged_log_text_ = source_list->back();
+  source_list->pop_back();
 }
 
 void MetricsLogManager::PersistUnsentLogs() {
   DCHECK(log_serializer_.get());
   if (!log_serializer_.get())
     return;
-  DCHECK(unsent_logs_loaded_);
-  if (!unsent_logs_loaded_)
-    return;
-
-  base::ElapsedTimer timer;
-  // Remove any ongoing logs that are over the serialization size limit.
-  if (max_ongoing_log_store_size_) {
-    for (std::vector<SerializedLog>::iterator it = unsent_ongoing_logs_.begin();
-         it != unsent_ongoing_logs_.end();) {
-      size_t log_size = it->log_text().length();
-      if (log_size > max_ongoing_log_store_size_) {
-        UMA_HISTOGRAM_COUNTS("UMA.Large Accumulated Log Not Persisted",
-                             static_cast<int>(log_size));
-        it = unsent_ongoing_logs_.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-  log_serializer_->SerializeLogs(unsent_initial_logs_,
-                                 MetricsLogBase::INITIAL_LOG);
-  log_serializer_->SerializeLogs(unsent_ongoing_logs_,
-                                 MetricsLogBase::ONGOING_LOG);
-  UMA_HISTOGRAM_TIMES("UMA.StoreLogsTime", timer.Elapsed());
+  log_serializer_->SerializeLogs(unsent_initial_logs_, INITIAL_LOG);
+  log_serializer_->SerializeLogs(unsent_ongoing_logs_, ONGOING_LOG);
 }
 
 void MetricsLogManager::LoadPersistedUnsentLogs() {
   DCHECK(log_serializer_.get());
   if (!log_serializer_.get())
     return;
-
-  base::ElapsedTimer timer;
-  log_serializer_->DeserializeLogs(MetricsLogBase::INITIAL_LOG,
-                                   &unsent_initial_logs_);
-  log_serializer_->DeserializeLogs(MetricsLogBase::ONGOING_LOG,
-                                   &unsent_ongoing_logs_);
-  UMA_HISTOGRAM_TIMES("UMA.LoadLogsTime", timer.Elapsed());
-
-  unsent_logs_loaded_ = true;
+  log_serializer_->DeserializeLogs(INITIAL_LOG, &unsent_initial_logs_);
+  log_serializer_->DeserializeLogs(ONGOING_LOG, &unsent_ongoing_logs_);
 }
 
-void MetricsLogManager::CompressCurrentLog(SerializedLog* compressed_log) {
-  std::string log_text;
-  current_log_->GetEncodedLog(&log_text);
-  compressed_log->SwapLogText(&log_text);
+void MetricsLogManager::CompressStagedLog() {
+  int text_size = staged_log_->GetEncodedLogSize();
+  std::string staged_log_text;
+  DCHECK_GT(text_size, 0);
+  staged_log_->GetEncodedLog(WriteInto(&staged_log_text, text_size + 1),
+                             text_size);
+
+  bool success = Bzip2Compress(staged_log_text, &compressed_staged_log_text_);
+  if (success) {
+    // Allow security-conscious users to see all metrics logs that we send.
+    DVLOG(1) << "METRICS LOG: " << staged_log_text;
+  } else {
+    NOTREACHED() << "Failed to compress log for transmission.";
+  }
+}
+
+// static
+// This implementation is based on the Firefox MetricsService implementation.
+bool MetricsLogManager::Bzip2Compress(const std::string& input,
+                                      std::string* output) {
+  bz_stream stream = {0};
+  // As long as our input is smaller than the bzip2 block size, we should get
+  // the best compression.  For example, if your input was 250k, using a block
+  // size of 300k or 500k should result in the same compression ratio.  Since
+  // our data should be under 100k, using the minimum block size of 100k should
+  // allocate less temporary memory, but result in the same compression ratio.
+  int result = BZ2_bzCompressInit(&stream,
+                                  1,   // 100k (min) block size
+                                  0,   // quiet
+                                  0);  // default "work factor"
+  if (result != BZ_OK) {  // out of memory?
+    return false;
+  }
+
+  output->clear();
+
+  stream.next_in = const_cast<char*>(input.data());
+  stream.avail_in = static_cast<int>(input.size());
+  // NOTE: we don't need a BZ_RUN phase since our input buffer contains
+  //       the entire input
+  do {
+    output->resize(output->size() + 1024);
+    stream.next_out = &((*output)[stream.total_out_lo32]);
+    stream.avail_out = static_cast<int>(output->size()) - stream.total_out_lo32;
+    result = BZ2_bzCompress(&stream, BZ_FINISH);
+  } while (result == BZ_FINISH_OK);
+  if (result != BZ_STREAM_END) {  // unknown failure?
+    output->clear();
+    // TODO(jar): See if it would be better to do a CHECK() here.
+    return false;
+  }
+  result = BZ2_bzCompressEnd(&stream);
+  DCHECK(result == BZ_OK);
+
+  output->resize(stream.total_out_lo32);
+
+  return true;
 }

@@ -1,8 +1,7 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/speech/audio_buffer.h"
 #include "content/browser/speech/endpointer/endpointer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -16,7 +15,7 @@ const int kFrameSize = kSampleRate / kFrameRate;  // 160 samples.
 COMPILE_ASSERT(kFrameSize == 160, invalid_frame_size);
 }
 
-namespace content {
+namespace speech_input {
 
 class FrameProcessor {
  public:
@@ -73,9 +72,7 @@ class EnergyEndpointerFrameProcessor : public FrameProcessor {
   explicit EnergyEndpointerFrameProcessor(EnergyEndpointer* endpointer)
       : endpointer_(endpointer) {}
 
-  virtual EpStatus ProcessFrame(int64 time,
-                                int16* samples,
-                                int frame_size) OVERRIDE {
+  EpStatus ProcessFrame(int64 time, int16* samples, int frame_size) {
     endpointer_->ProcessAudioFrame(time, samples, kFrameSize, NULL);
     int64 ep_time;
     return endpointer_->Status(&ep_time);
@@ -118,12 +115,8 @@ class EndpointerFrameProcessor : public FrameProcessor {
   explicit EndpointerFrameProcessor(Endpointer* endpointer)
       : endpointer_(endpointer) {}
 
-  virtual EpStatus ProcessFrame(int64 time,
-                                int16* samples,
-                                int frame_size) OVERRIDE {
-    scoped_refptr<AudioChunk> frame(
-        new AudioChunk(reinterpret_cast<uint8*>(samples), kFrameSize * 2, 2));
-    endpointer_->ProcessAudio(*frame.get(), NULL);
+  EpStatus ProcessFrame(int64 time, int16* samples, int frame_size) {
+    endpointer_->ProcessAudio(samples, kFrameSize, NULL);
     int64 ep_time;
     return endpointer_->Status(&ep_time);
   }
@@ -149,4 +142,4 @@ TEST(EndpointerTest, TestEmbeddedEndpointerEvents) {
   endpointer.EndSession();
 }
 
-}  // namespace content
+}  // namespace speech_input

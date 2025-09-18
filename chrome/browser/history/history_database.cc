@@ -12,8 +12,9 @@
 #include "base/file_util.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
-#include "base/strings/string_util.h"
-#include "base/time/time.h"
+#include "base/string_util.h"
+#include "chrome/browser/diagnostics/sqlite_diagnostics.h"
+#include "chrome/browser/history/starred_url_database.h"
 #include "sql/transaction.h"
 
 #if defined(OS_MACOSX)
@@ -27,9 +28,36 @@ namespace {
 // Current version number. We write databases at the "current" version number,
 // but any previous version that can read the "compatible" one can make do with
 // or database without *too* many bad effects.
-const int kCurrentVersionNumber = 28;
-const int kCompatibleVersionNumber = 16;
-const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
+static const int kCurrentVersionNumber = 20;
+static const int kCompatibleVersionNumber = 16;
+static const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
+
+// Key in the meta table used to determine if we need to migrate thumbnails out
+// of history.
+static const char kNeedsThumbnailMigrationKey[] = "needs_thumbnail_migration";
+
+void ComputeDatabaseMetrics(const FilePath& history_name,
+                            sql::Connection& db) {
+  if (base::RandInt(1, 100) != 50)
+    return;  // Only do this computation sometimes since it can be expensive.
+
+  int64 file_size = 0;
+  if (!file_util::GetFileSize(history_name, &file_size))
+    return;
+  int file_mb = static_cast<int>(file_size / (1024 * 1024));
+  UMA_HISTOGRAM_MEMORY_MB("History.DatabaseFileMB", file_mb);
+
+  sql::Statement url_count(db.GetUniqueStatement("SELECT count(*) FROM urls"));
+  if (!url_count.Step())
+    return;
+  UMA_HISTOGRAM_COUNTS("History.URLTableCount", url_count.ColumnInt(0));
+
+  sql::Statement visit_count(db.GetUniqueStatement(
+      "SELECT count(*) FROM visits"));
+  if (!visit_count.Step())
+    return;
+  UMA_HISTOGRAM_COUNTS("History.VisitTableCount", visit_count.ColumnInt(0));
+}
 
 }  // namespace
 
@@ -40,11 +68,10 @@ HistoryDatabase::HistoryDatabase()
 HistoryDatabase::~HistoryDatabase() {
 }
 
-sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
-  db_.set_histogram_tag("History");
-
+sql::InitStatus HistoryDatabase::Init(const FilePath& history_name,
+                                      const FilePath& bookmarks_path) {
   // Set the exceptional sqlite error handler.
-  db_.set_error_callback(error_callback_);
+  db_.set_error_delegate(GetErrorHandlerForHistoryDb());
 
   // Set the database page size to something a little larger to give us
   // better performance (we're typically seek rather than bandwidth limited).
@@ -52,11 +79,11 @@ sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
   // this is a NOP. Must be a power of 2 and a max of 8192.
   db_.set_page_size(4096);
 
-  // Set the cache size. The page size, plus a little extra, times this
+  // Increase the cache size. The page size, plus a little extra, times this
   // value, tells us how much memory the cache will use maximum.
-  // 1000 * 4kB = 4MB
+  // 6000 * 4MB = 24MB
   // TODO(brettw) scale this value to the amount of available memory.
-  db_.set_cache_size(1000);
+  db_.set_cache_size(6000);
 
   // Note that we don't set exclusive locking here. That's done by
   // BeginExclusiveMode below which is called later (we have to be in shared
@@ -91,94 +118,13 @@ sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
   CreateMainURLIndex();
   CreateKeywordSearchTermsIndices();
 
-  // TODO(benjhayden) Remove at some point.
-  meta_table_.DeleteKey("next_download_id");
-
   // Version check.
-  sql::InitStatus version_status = EnsureCurrentVersion();
+  sql::InitStatus version_status = EnsureCurrentVersion(bookmarks_path);
   if (version_status != sql::INIT_OK)
     return version_status;
 
+  ComputeDatabaseMetrics(history_name, db_);
   return committer.Commit() ? sql::INIT_OK : sql::INIT_FAILURE;
-}
-
-void HistoryDatabase::ComputeDatabaseMetrics(
-    const base::FilePath& history_name) {
-    base::TimeTicks start_time = base::TimeTicks::Now();
-  int64 file_size = 0;
-  if (!base::GetFileSize(history_name, &file_size))
-    return;
-  int file_mb = static_cast<int>(file_size / (1024 * 1024));
-  UMA_HISTOGRAM_MEMORY_MB("History.DatabaseFileMB", file_mb);
-
-  sql::Statement url_count(db_.GetUniqueStatement("SELECT count(*) FROM urls"));
-  if (!url_count.Step())
-    return;
-  UMA_HISTOGRAM_COUNTS("History.URLTableCount", url_count.ColumnInt(0));
-
-  sql::Statement visit_count(db_.GetUniqueStatement(
-      "SELECT count(*) FROM visits"));
-  if (!visit_count.Step())
-    return;
-  UMA_HISTOGRAM_COUNTS("History.VisitTableCount", visit_count.ColumnInt(0));
-
-  base::Time one_week_ago = base::Time::Now() - base::TimeDelta::FromDays(7);
-  sql::Statement weekly_visit_sql(db_.GetUniqueStatement(
-      "SELECT count(*) FROM visits WHERE visit_time > ?"));
-  weekly_visit_sql.BindInt64(0, one_week_ago.ToInternalValue());
-  int weekly_visit_count = 0;
-  if (weekly_visit_sql.Step())
-    weekly_visit_count = weekly_visit_sql.ColumnInt(0);
-  UMA_HISTOGRAM_COUNTS("History.WeeklyVisitCount", weekly_visit_count);
-
-  base::Time one_month_ago = base::Time::Now() - base::TimeDelta::FromDays(30);
-  sql::Statement monthly_visit_sql(db_.GetUniqueStatement(
-      "SELECT count(*) FROM visits WHERE visit_time > ? AND visit_time <= ?"));
-  monthly_visit_sql.BindInt64(0, one_month_ago.ToInternalValue());
-  monthly_visit_sql.BindInt64(1, one_week_ago.ToInternalValue());
-  int older_visit_count = 0;
-  if (monthly_visit_sql.Step())
-    older_visit_count = monthly_visit_sql.ColumnInt(0);
-  UMA_HISTOGRAM_COUNTS("History.MonthlyVisitCount",
-                       older_visit_count + weekly_visit_count);
-
-  UMA_HISTOGRAM_TIMES("History.DatabaseBasicMetricsTime",
-                      base::TimeTicks::Now() - start_time);
-
-  // Compute the advanced metrics even less often, pending timing data showing
-  // that's not necessary.
-  if (base::RandInt(1, 3) == 3) {
-    start_time = base::TimeTicks::Now();
-
-    // Collect all URLs visited within the last month.
-    sql::Statement url_sql(db_.GetUniqueStatement(
-        "SELECT url, last_visit_time FROM urls WHERE last_visit_time > ?"));
-    url_sql.BindInt64(0, one_month_ago.ToInternalValue());
-
-    // Count URLs (which will always be unique) and unique hosts within the last
-    // week and last month.
-    int week_url_count = 0;
-    int month_url_count = 0;
-    std::set<std::string> week_hosts;
-    std::set<std::string> month_hosts;
-    while (url_sql.Step()) {
-      GURL url(url_sql.ColumnString(0));
-      base::Time visit_time =
-          base::Time::FromInternalValue(url_sql.ColumnInt64(1));
-      ++month_url_count;
-      month_hosts.insert(url.host());
-      if (visit_time > one_week_ago) {
-        ++week_url_count;
-        week_hosts.insert(url.host());
-      }
-    }
-    UMA_HISTOGRAM_COUNTS("History.WeeklyURLCount", week_url_count);
-    UMA_HISTOGRAM_COUNTS_10000("History.WeeklyHostCount", week_hosts.size());
-    UMA_HISTOGRAM_COUNTS("History.MonthlyURLCount", month_url_count);
-    UMA_HISTOGRAM_COUNTS_10000("History.MonthlyHostCount", month_hosts.size());
-    UMA_HISTOGRAM_TIMES("History.DatabaseAdvancedMetricsTime",
-                        base::TimeTicks::Now() - start_time);
-  }
 }
 
 void HistoryDatabase::BeginExclusiveMode() {
@@ -198,10 +144,6 @@ void HistoryDatabase::BeginTransaction() {
 
 void HistoryDatabase::CommitTransaction() {
   db_.CommitTransaction();
-}
-
-void HistoryDatabase::RollbackTransaction() {
-  db_.RollbackTransaction();
 }
 
 bool HistoryDatabase::RecreateAllTablesButURL() {
@@ -233,12 +175,14 @@ void HistoryDatabase::Vacuum() {
   ignore_result(db_.Execute("VACUUM"));
 }
 
-void HistoryDatabase::TrimMemory(bool aggressively) {
-  db_.TrimMemory(aggressively);
+void HistoryDatabase::ThumbnailMigrationDone() {
+  meta_table_.SetValue(kNeedsThumbnailMigrationKey, 0);
 }
 
-bool HistoryDatabase::Raze() {
-  return db_.Raze();
+bool HistoryDatabase::GetNeedsThumbnailMigration() {
+  int value = 0;
+  return (meta_table_.GetValue(kNeedsThumbnailMigrationKey, &value) &&
+          value != 0);
 }
 
 bool HistoryDatabase::SetSegmentID(VisitID visit_id, SegmentID segment_id) {
@@ -292,7 +236,8 @@ sql::Connection& HistoryDatabase::GetDB() {
 
 // Migration -------------------------------------------------------------------
 
-sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
+sql::InitStatus HistoryDatabase::EnsureCurrentVersion(
+    const FilePath& tmp_bookmarks_path) {
   // We can't read databases newer than we were designed for.
   if (meta_table_.GetCompatibleVersionNumber() > kCurrentVersionNumber) {
     LOG(WARNING) << "History database is too new.";
@@ -310,7 +255,9 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
   // Put migration code here
 
   if (cur_version == 15) {
-    if (!db_.Execute("DROP TABLE starred") || !DropStarredIDFromURLs()) {
+    StarredURLDatabase starred_url_database(&db_);
+    if (!starred_url_database.MigrateBookmarksToFile(tmp_bookmarks_path) ||
+        !DropStarredIDFromURLs()) {
       LOG(WARNING) << "Unable to update history database to version 16.";
       return sql::INIT_FAILURE;
     }
@@ -351,85 +298,9 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
   if (cur_version == 19) {
     cur_version++;
     meta_table_.SetVersionNumber(cur_version);
-    // This was the thumbnail migration.  Obsolete.
-  }
-
-  if (cur_version == 20) {
-    // This is the version prior to adding the visit_duration field in visits
-    // database. We need to migrate the database.
-    if (!MigrateVisitsWithoutDuration()) {
-      LOG(WARNING) << "Unable to update history database to version 21.";
-      return sql::INIT_FAILURE;
-    }
-    ++cur_version;
-    meta_table_.SetVersionNumber(cur_version);
-  }
-
-  if (cur_version == 21) {
-    // The android_urls table's data schemal was changed in version 21.
-#if defined(OS_ANDROID)
-    if (!MigrateToVersion22()) {
-      LOG(WARNING) << "Unable to migrate the android_urls table to version 22";
-    }
-#endif
-    ++cur_version;
-    meta_table_.SetVersionNumber(cur_version);
-  }
-
-  if (cur_version == 22) {
-    if (!MigrateDownloadsState()) {
-      LOG(WARNING) << "Unable to fix invalid downloads state values";
-      // Invalid state values may cause crashes.
-      return sql::INIT_FAILURE;
-    }
-    cur_version++;
-    meta_table_.SetVersionNumber(cur_version);
-  }
-
-  if (cur_version == 23) {
-    if (!MigrateDownloadsReasonPathsAndDangerType()) {
-      LOG(WARNING) << "Unable to upgrade download interrupt reason and paths";
-      // Invalid state values may cause crashes.
-      return sql::INIT_FAILURE;
-    }
-    cur_version++;
-    meta_table_.SetVersionNumber(cur_version);
-  }
-
-  if (cur_version == 24) {
-    if (!MigratePresentationIndex()) {
-      LOG(WARNING) << "Unable to migrate history to version 25";
-      return sql::INIT_FAILURE;
-    }
-    cur_version++;
-    meta_table_.SetVersionNumber(cur_version);
-  }
-
-  if (cur_version == 25) {
-    if (!MigrateReferrer()) {
-      LOG(WARNING) << "Unable to migrate history to version 26";
-      return sql::INIT_FAILURE;
-    }
-    cur_version++;
-    meta_table_.SetVersionNumber(cur_version);
-  }
-
-  if (cur_version == 26) {
-    if (!MigrateDownloadedByExtension()) {
-      LOG(WARNING) << "Unable to migrate history to version 27";
-      return sql::INIT_FAILURE;
-    }
-    cur_version++;
-    meta_table_.SetVersionNumber(cur_version);
-  }
-
-  if (cur_version == 27) {
-    if (!MigrateDownloadValidators()) {
-      LOG(WARNING) << "Unable to migrate history to version 28";
-      return sql::INIT_FAILURE;
-    }
-    cur_version++;
-    meta_table_.SetVersionNumber(cur_version);
+    // Set a key indicating we need to migrate thumbnails. When successfull the
+    // key is removed (ThumbnailMigrationDone).
+    meta_table_.SetValue(kNeedsThumbnailMigrationKey, 1);
   }
 
   // When the version is too old, we just try to continue anyway, there should
@@ -443,13 +314,15 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
 #if !defined(OS_WIN)
 void HistoryDatabase::MigrateTimeEpoch() {
   // Update all the times in the URLs and visits table in the main database.
+  // For visits, clear the indexed flag since we'll delete the FTS databases in
+  // the next step.
   ignore_result(db_.Execute(
       "UPDATE urls "
       "SET last_visit_time = last_visit_time + 11644473600000000 "
       "WHERE id IN (SELECT id FROM urls WHERE last_visit_time > 0);"));
   ignore_result(db_.Execute(
       "UPDATE visits "
-      "SET visit_time = visit_time + 11644473600000000 "
+      "SET visit_time = visit_time + 11644473600000000, is_indexed = 0 "
       "WHERE id IN (SELECT id FROM visits WHERE visit_time > 0);"));
   ignore_result(db_.Execute(
       "UPDATE segment_usage "

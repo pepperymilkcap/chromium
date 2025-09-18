@@ -19,13 +19,11 @@ bool TestImageData::Init() {
 }
 
 void TestImageData::RunTests(const std::string& filter) {
-  RUN_TEST(InvalidFormat, filter);
-  RUN_TEST(GetNativeFormat, filter);
-  RUN_TEST(FormatSupported, filter);
-  RUN_TEST(InvalidSize, filter);
-  RUN_TEST(HugeSize, filter);
-  RUN_TEST(InitToZero, filter);
-  RUN_TEST(IsImageData, filter);
+  instance_->LogTest("InvalidFormat", TestInvalidFormat());
+  instance_->LogTest("InvalidSize", TestInvalidSize());
+  instance_->LogTest("HugeSize", TestHugeSize());
+  instance_->LogTest("InitToZero", TestInitToZero());
+  instance_->LogTest("IsImageData", TestIsImageData());
 }
 
 std::string TestImageData::TestInvalidFormat() {
@@ -38,40 +36,23 @@ std::string TestImageData::TestInvalidFormat() {
                   pp::Size(16, 16), true);
   if (!b.is_null())
     return "Negative image data format accepted";
+
   PASS();
 }
 
-std::string TestImageData::SubTestFormatSupported(PP_ImageDataFormat format) {
-  if (!pp::ImageData::IsImageDataFormatSupported(format))
-    return "ImageData::IsImageDataFormatSupported(format) returned false";
-  PASS();
-}
-
-std::string TestImageData::TestFormatSupported() {
-  ASSERT_SUBTEST_SUCCESS(SubTestFormatSupported(
-      PP_IMAGEDATAFORMAT_BGRA_PREMUL));
-  ASSERT_SUBTEST_SUCCESS(SubTestFormatSupported(
-      PP_IMAGEDATAFORMAT_RGBA_PREMUL));
-  PASS();
-}
-
-std::string TestImageData::TestGetNativeFormat() {
-  PP_ImageDataFormat format = pp::ImageData::GetNativeImageDataFormat();
-  if (!pp::ImageData::IsImageDataFormatSupported(format))
-    return "ImageData::GetNativeImageDataFormat() returned unsupported format";
-  PASS();
-}
-
-std::string TestImageData::SubTestInvalidSize(PP_ImageDataFormat format) {
-  pp::ImageData zero_size(instance_, format, pp::Size(0, 0), true);
+std::string TestImageData::TestInvalidSize() {
+  pp::ImageData zero_size(instance_, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+                          pp::Size(0, 0), true);
   if (!zero_size.is_null())
     return "Zero width and height accepted";
 
-  pp::ImageData zero_height(instance_, format, pp::Size(16, 0), true);
+  pp::ImageData zero_height(instance_, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+                            pp::Size(16, 0), true);
   if (!zero_height.is_null())
     return "Zero height accepted";
 
-  pp::ImageData zero_width(instance_, format, pp::Size(0, 16), true);
+  pp::ImageData zero_width(instance_, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+                           pp::Size(0, 16), true);
   if (!zero_width.is_null())
     return "Zero width accepted";
 
@@ -80,7 +61,7 @@ std::string TestImageData::SubTestInvalidSize(PP_ImageDataFormat format) {
   negative_height.height = -2;
   PP_Resource rsrc = image_data_interface_->Create(
       instance_->pp_instance(),
-      format,
+      PP_IMAGEDATAFORMAT_BGRA_PREMUL,
       &negative_height, PP_TRUE);
   if (rsrc)
     return "Negative height accepted";
@@ -90,7 +71,7 @@ std::string TestImageData::SubTestInvalidSize(PP_ImageDataFormat format) {
   negative_width.height = 16;
   rsrc = image_data_interface_->Create(
       instance_->pp_instance(),
-      format,
+      PP_IMAGEDATAFORMAT_BGRA_PREMUL,
       &negative_width, PP_TRUE);
   if (rsrc)
     return "Negative width accepted";
@@ -98,38 +79,27 @@ std::string TestImageData::SubTestInvalidSize(PP_ImageDataFormat format) {
   PASS();
 }
 
-std::string TestImageData::TestInvalidSize() {
-  ASSERT_SUBTEST_SUCCESS(SubTestInvalidSize(PP_IMAGEDATAFORMAT_BGRA_PREMUL));
-  ASSERT_SUBTEST_SUCCESS(SubTestInvalidSize(PP_IMAGEDATAFORMAT_RGBA_PREMUL));
-  PASS();
-}
-
-std::string TestImageData::SubTestHugeSize(PP_ImageDataFormat format) {
-  pp::ImageData huge_size(instance_, format,
+std::string TestImageData::TestHugeSize() {
+  pp::ImageData huge_size(instance_, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
                           pp::Size(100000000, 100000000), true);
   if (!huge_size.is_null())
     return "31-bit overflow size accepted";
   PASS();
 }
 
-std::string TestImageData::TestHugeSize() {
-  ASSERT_SUBTEST_SUCCESS(SubTestHugeSize(PP_IMAGEDATAFORMAT_BGRA_PREMUL));
-  ASSERT_SUBTEST_SUCCESS(SubTestHugeSize(PP_IMAGEDATAFORMAT_RGBA_PREMUL));
-  PASS();
-}
-
-std::string TestImageData::SubTestInitToZero(PP_ImageDataFormat format) {
+std::string TestImageData::TestInitToZero() {
   const int w = 5;
   const int h = 6;
-  pp::ImageData img(instance_, format, pp::Size(w, h), true);
+  pp::ImageData img(instance_, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+                    pp::Size(w, h), true);
   if (img.is_null())
     return "Could not create bitmap";
 
   // Basic validity checking of the bitmap. This also tests "describe" since
-  // that's where the image data object got its info from.
+  // that's where the image data object got its imfo from.
   if (img.size().width() != w || img.size().height() != h)
     return "Wrong size";
-  if (img.format() != format)
+  if (img.format() != PP_IMAGEDATAFORMAT_BGRA_PREMUL)
     return "Wrong format";
   if (img.stride() < w * 4)
     return "Stride too small";
@@ -143,23 +113,6 @@ std::string TestImageData::SubTestInitToZero(PP_ImageDataFormat format) {
     }
   }
 
-  PASS();
-}
-
-std::string TestImageData::TestInitToZero() {
-  ASSERT_SUBTEST_SUCCESS(SubTestInitToZero(PP_IMAGEDATAFORMAT_BGRA_PREMUL));
-  ASSERT_SUBTEST_SUCCESS(SubTestInitToZero(PP_IMAGEDATAFORMAT_RGBA_PREMUL));
-  PASS();
-}
-
-std::string TestImageData::SubTestIsImageData(PP_ImageDataFormat format) {
-  // Make a valid image resource.
-  const int w = 16, h = 16;
-  pp::ImageData img(instance_, format, pp::Size(w, h), true);
-  if (img.is_null())
-    return "Couldn't create image data";
-  if (!image_data_interface_->IsImageData(img.pp_resource()))
-    return "Image data should be identified as an image";
   PASS();
 }
 
@@ -177,7 +130,13 @@ std::string TestImageData::TestIsImageData() {
   if (image_data_interface_->IsImageData(device.pp_resource()))
     return "Device context was reported as an image";
 
-  ASSERT_SUBTEST_SUCCESS(SubTestIsImageData(PP_IMAGEDATAFORMAT_BGRA_PREMUL));
-  ASSERT_SUBTEST_SUCCESS(SubTestIsImageData(PP_IMAGEDATAFORMAT_RGBA_PREMUL));
+  // Make a valid image resource.
+  pp::ImageData img(instance_, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+                    pp::Size(w, h), true);
+  if (img.is_null())
+    return "Couldn't create image data";
+  if (!image_data_interface_->IsImageData(img.pp_resource()))
+    return "Image data should be identified as an image";
+
   PASS();
 }

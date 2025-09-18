@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,95 +7,75 @@
 
 #include <list>
 
-#include "base/callback.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
-#include "media/base/audio_decoder.h"
-#include "media/base/demuxer_stream.h"
-#include "media/base/sample_format.h"
+#include "base/message_loop.h"
+#include "media/base/filters.h"
 
 struct AVCodecContext;
-struct AVFrame;
-
-namespace base {
-class SingleThreadTaskRunner;
-}
 
 namespace media {
 
-class AudioTimestampHelper;
-class DecoderBuffer;
-struct QueuedAudioBuffer;
-class ScopedPtrAVFreeContext;
-class ScopedPtrAVFreeFrame;
+class DataBuffer;
 
 class MEDIA_EXPORT FFmpegAudioDecoder : public AudioDecoder {
  public:
-  explicit FFmpegAudioDecoder(
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
+  explicit FFmpegAudioDecoder(MessageLoop* message_loop);
   virtual ~FFmpegAudioDecoder();
 
+  // Filter implementation.
+  virtual void Flush(const base::Closure& callback) OVERRIDE;
+
   // AudioDecoder implementation.
-  virtual void Initialize(DemuxerStream* stream,
-                          const PipelineStatusCB& status_cb,
-                          const StatisticsCB& statistics_cb) OVERRIDE;
-  virtual void Read(const ReadCB& read_cb) OVERRIDE;
+  virtual void Initialize(DemuxerStream* stream, const base::Closure& callback,
+                          const StatisticsCallback& stats_callback) OVERRIDE;
+  virtual void Read(const ReadCB& callback) OVERRIDE;
   virtual int bits_per_channel() OVERRIDE;
   virtual ChannelLayout channel_layout() OVERRIDE;
   virtual int samples_per_second() OVERRIDE;
-  virtual void Reset(const base::Closure& closure) OVERRIDE;
-
-  // Callback called from within FFmpeg to allocate a buffer based on
-  // the dimensions of |codec_context|. See AVCodecContext.get_buffer2
-  // documentation inside FFmpeg.
-  int GetAudioBuffer(AVCodecContext* codec, AVFrame* frame, int flags);
 
  private:
+  // Methods running on decoder thread.
+  void DoInitialize(const scoped_refptr<DemuxerStream>& stream,
+                    const base::Closure& callback,
+                    const StatisticsCallback& stats_callback);
+  void DoFlush(const base::Closure& callback);
+  void DoRead(const ReadCB& callback);
+  void DoDecodeBuffer(const scoped_refptr<Buffer>& input);
+
   // Reads from the demuxer stream with corresponding callback method.
   void ReadFromDemuxerStream();
-  void BufferReady(DemuxerStream::Status status,
-                   const scoped_refptr<DecoderBuffer>& input);
+  void DecodeBuffer(const scoped_refptr<Buffer>& buffer);
 
-  bool ConfigureDecoder();
-  void ReleaseFFmpegResources();
-  void ResetTimestampState();
-  void RunDecodeLoop(const scoped_refptr<DecoderBuffer>& input,
-                     bool skip_eos_append);
+  // Updates the output buffer's duration and timestamp based on the input
+  // buffer. Will fall back to an estimated timestamp if the input lacks a
+  // valid timestamp.
+  void UpdateDurationAndTimestamp(const Buffer* input, DataBuffer* output);
 
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  base::WeakPtrFactory<FFmpegAudioDecoder> weak_factory_;
-  base::WeakPtr<FFmpegAudioDecoder> weak_this_;
+  // Calculates duration based on size of decoded audio bytes.
+  base::TimeDelta CalculateDuration(int size);
 
-  DemuxerStream* demuxer_stream_;
-  StatisticsCB statistics_cb_;
-  scoped_ptr_malloc<AVCodecContext, ScopedPtrAVFreeContext> codec_context_;
+  // Delivers decoded samples to |read_cb_| and resets the callback.
+  void DeliverSamples(const scoped_refptr<Buffer>& samples);
+
+  MessageLoop* message_loop_;
+
+  scoped_refptr<DemuxerStream> demuxer_stream_;
+  StatisticsCallback stats_callback_;
+  AVCodecContext* codec_context_;
 
   // Decoded audio format.
-  int bytes_per_channel_;
+  int bits_per_channel_;
   ChannelLayout channel_layout_;
-  int channels_;
   int samples_per_second_;
 
-  // AVSampleFormat initially requested; not Chrome's SampleFormat.
-  int av_sample_format_;
-  SampleFormat sample_format_;
+  base::TimeDelta estimated_next_timestamp_;
 
-  // Used for computing output timestamps.
-  scoped_ptr<AudioTimestampHelper> output_timestamp_helper_;
-  base::TimeDelta last_input_timestamp_;
-
-  // Number of frames to drop before generating output buffers.
-  int output_frames_to_drop_;
-
-  // Holds decoded audio.
-  scoped_ptr_malloc<AVFrame, ScopedPtrAVFreeFrame> av_frame_;
+  // Holds decoded audio. As required by FFmpeg, input/output buffers should
+  // be allocated with suitable padding and alignment. av_malloc() provides
+  // us that guarantee.
+  const int decoded_audio_size_;
+  uint8* decoded_audio_;  // Allocated via av_malloc().
 
   ReadCB read_cb_;
-
-  // Since multiple frames may be decoded from the same packet we need to queue
-  // them up and hand them out as we receive Read() calls.
-  std::list<QueuedAudioBuffer> queued_audio_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FFmpegAudioDecoder);
 };

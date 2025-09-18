@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/i18n/file_util_icu.h"
 
 #include "base/file_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -73,35 +73,12 @@ TEST_F(FileUtilICUTest, ReplaceIllegalCharactersInPathTest) {
     file_util::ReplaceIllegalCharactersInPath(&bad_name, '-');
     EXPECT_EQ(kIllegalCharacterCases[i].good_name, bad_name);
 #elif defined(OS_MACOSX)
-    std::string bad_name(base::WideToUTF8(kIllegalCharacterCases[i].bad_name));
+    std::string bad_name(WideToUTF8(kIllegalCharacterCases[i].bad_name));
     file_util::ReplaceIllegalCharactersInPath(&bad_name, '-');
-    EXPECT_EQ(base::WideToUTF8(kIllegalCharacterCases[i].good_name), bad_name);
+    EXPECT_EQ(WideToUTF8(kIllegalCharacterCases[i].good_name), bad_name);
 #endif
   }
 }
 
 #endif
 
-#if defined(OS_CHROMEOS)
-static const struct normalize_name_encoding_test_cases {
-  const char* original_path;
-  const char* normalized_path;
-} kNormalizeFileNameEncodingTestCases[] = {
-  { "foo_na\xcc\x88me.foo", "foo_n\xc3\xa4me.foo"},
-  { "foo_dir_na\xcc\x88me/foo_na\xcc\x88me.foo",
-    "foo_dir_na\xcc\x88me/foo_n\xc3\xa4me.foo"},
-  { "", ""},
-  { "foo_dir_na\xcc\x88me/", "foo_dir_n\xc3\xa4me"}
-};
-
-TEST_F(FileUtilICUTest, NormalizeFileNameEncoding) {
-  for (size_t i = 0; i < arraysize(kNormalizeFileNameEncodingTestCases); i++) {
-    base::FilePath path(kNormalizeFileNameEncodingTestCases[i].original_path);
-    file_util::NormalizeFileNameEncoding(&path);
-    EXPECT_EQ(
-        base::FilePath(kNormalizeFileNameEncodingTestCases[i].normalized_path),
-        path);
-  }
-}
-
-#endif

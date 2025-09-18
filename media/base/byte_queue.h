@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "media/base/media_export.h"
 
 namespace media {
 
@@ -16,7 +15,7 @@ namespace media {
 // Pop(). The contents of the queue can be observed via the Peek() method.
 // This class manages the underlying storage of the queue and tries to minimize
 // the number of buffer copies when data is appended and removed.
-class MEDIA_EXPORT ByteQueue {
+class ByteQueue {
  public:
   ByteQueue();
   ~ByteQueue();
@@ -39,7 +38,7 @@ class MEDIA_EXPORT ByteQueue {
   // Returns a pointer to the front of the queue.
   uint8* front() const;
 
-  scoped_ptr<uint8[]> buffer_;
+  scoped_array<uint8> buffer_;
 
   // Size of |buffer_|.
   size_t size_;

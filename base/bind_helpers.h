@@ -139,9 +139,14 @@
 //                        pointer when invoked. Only use this when necessary.
 //                        In most cases MessageLoop::DeleteSoon() is a better
 //                        fit.
+//   ScopedClosureRunner - Scoper object that runs the wrapped closure when it
+//                         goes out of scope. It's conceptually similar to
+//                         scoped_ptr<> but calls Run() instead of deleting
+//                         the pointer.
 
 #ifndef BASE_BIND_HELPERS_H_
 #define BASE_BIND_HELPERS_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/callback.h"
@@ -233,13 +238,12 @@ class SupportsAddRefAndRelease {
 // common pattern for refcounted types. It does this even though no attempt to
 // instantiate Base is made.  We disable the warning for this definition.
 #if defined(OS_WIN)
-#pragma warning(push)
 #pragma warning(disable:4624)
 #endif
   struct Base : public T, public BaseMixin {
   };
 #if defined(OS_WIN)
-#pragma warning(pop)
+#pragma warning(default:4624)
 #endif
 
   template <void(BaseMixin::*)(void)> struct Helper {};
@@ -538,6 +542,21 @@ template<typename T>
 void DeletePointer(T* obj) {
   delete obj;
 }
+
+// ScopedClosureRunner is akin to scoped_ptr for Closures. It ensures that the
+// Closure is executed and deleted no matter how the current scope exits.
+class BASE_EXPORT ScopedClosureRunner {
+ public:
+  explicit ScopedClosureRunner(const Closure& closure);
+  ~ScopedClosureRunner();
+
+  Closure Release();
+
+ private:
+  Closure closure_;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedClosureRunner);
+};
 
 }  // namespace base
 

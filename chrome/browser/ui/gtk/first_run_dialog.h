@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_FIRST_RUN_DIALOG_H_
 #define CHROME_BROWSER_UI_GTK_FIRST_RUN_DIALOG_H_
+#pragma once
 
 typedef struct _GtkButton GtkButton;
 typedef struct _GtkWidget GtkWidget;
@@ -15,11 +16,10 @@ typedef struct _GtkWidget GtkWidget;
 class FirstRunDialog {
  public:
   // Displays the first run UI for reporting opt-in, import data etc.
-  // Returns true if the dialog was shown.
-  static bool Show(Profile* profile);
+  static bool Show();
 
  private:
-  explicit FirstRunDialog(Profile* profile);
+  FirstRunDialog(bool show_reporting_dialog, int* response);
   virtual ~FirstRunDialog();
 
   CHROMEGTK_CALLBACK_1(FirstRunDialog, void, OnResponseDialog, int);
@@ -31,8 +31,6 @@ class FirstRunDialog {
   // the Chrome startup can continue. This should be called when all the
   // first run tasks are done.
   void FirstRunDone();
-
-  Profile* profile_;
 
   // Dialog that holds the bug reporting and default browser checkboxes.
   GtkWidget* dialog_;

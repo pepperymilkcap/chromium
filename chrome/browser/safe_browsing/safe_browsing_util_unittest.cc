@@ -4,11 +4,11 @@
 
 #include <algorithm>
 
-#include "base/strings/stringprintf.h"
-#include "chrome/browser/safe_browsing/safe_browsing_util.h"
+#include "base/stringprintf.h"
 #include "crypto/sha2.h"
+#include "chrome/browser/safe_browsing/safe_browsing_util.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/gurl.h"
 
 namespace {
 
@@ -338,7 +338,8 @@ TEST(SafeBrowsingUtilTest, ListIdVerification) {
 TEST(SafeBrowsingUtilTest, StringToSBFullHashAndSBFullHashToString) {
   // 31 chars plus the last \0 as full_hash.
   const std::string hash_in = "12345678902234567890323456789012";
-  SBFullHash hash_out = safe_browsing_util::StringToSBFullHash(hash_in);
+  SBFullHash hash_out;
+  safe_browsing_util::StringToSBFullHash(hash_in, &hash_out);
   EXPECT_EQ(0x34333231, hash_out.prefix);
   EXPECT_EQ(0, memcmp(hash_in.data(), hash_out.full_hash, sizeof(SBFullHash)));
 

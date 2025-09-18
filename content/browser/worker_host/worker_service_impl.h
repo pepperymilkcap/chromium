@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_WORKER_HOST_WORKER_SERVICE_H_
 #define CONTENT_BROWSER_WORKER_HOST_WORKER_SERVICE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -11,7 +12,6 @@
 #include "base/observer_list.h"
 #include "base/threading/non_thread_safe.h"
 #include "content/browser/worker_host/worker_process_host.h"
-#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/worker_service.h"
 
@@ -21,8 +21,6 @@ struct ViewHostMsg_CreateWorker_Params;
 namespace content {
 class ResourceContext;
 class WorkerServiceObserver;
-class WorkerStoragePartition;
-class WorkerPrioritySetter;
 
 class CONTENT_EXPORT WorkerServiceImpl
     : public NON_EXPORTED_BASE(WorkerService) {
@@ -30,12 +28,7 @@ class CONTENT_EXPORT WorkerServiceImpl
   // Returns the WorkerServiceImpl singleton.
   static WorkerServiceImpl* GetInstance();
 
-  // Releases the priority setter to avoid memory leak error.
-  void PerformTeardownForTesting();
-
   // WorkerService implementation:
-  virtual bool TerminateWorker(int process_id, int route_id) OVERRIDE;
-  virtual std::vector<WorkerInfo> GetWorkers() OVERRIDE;
   virtual void AddObserver(WorkerServiceObserver* observer) OVERRIDE;
   virtual void RemoveObserver(WorkerServiceObserver* observer) OVERRIDE;
 
@@ -43,15 +36,14 @@ class CONTENT_EXPORT WorkerServiceImpl
   void CreateWorker(const ViewHostMsg_CreateWorker_Params& params,
                     int route_id,
                     WorkerMessageFilter* filter,
-                    ResourceContext* resource_context,
-                    const WorkerStoragePartition& worker_partition);
+                    const ResourceContext& resource_context);
   void LookupSharedWorker(const ViewHostMsg_CreateWorker_Params& params,
                           int route_id,
                           WorkerMessageFilter* filter,
-                          ResourceContext* resource_context,
-                          const WorkerStoragePartition& worker_partition,
+                          const ResourceContext* resource_context,
                           bool* exists,
                           bool* url_error);
+  void CancelCreateDedicatedWorker(int route_id, WorkerMessageFilter* filter);
   void ForwardToWorker(const IPC::Message& message,
                        WorkerMessageFilter* filter);
   void DocumentDetached(unsigned long long document_id,
@@ -68,20 +60,23 @@ class CONTENT_EXPORT WorkerServiceImpl
   // is how it is today until V8 can run in separate threads.
   bool GetRendererForWorker(int worker_process_id,
                             int* render_process_id,
-                            int* render_view_id,
-                            int* render_frame_id) const;
+                            int* render_view_id) const;
   const WorkerProcessHost::WorkerInstance* FindWorkerInstance(
       int worker_process_id);
 
   void NotifyWorkerDestroyed(
       WorkerProcessHost* process,
       int worker_route_id);
+  void NotifyWorkerContextStarted(
+      WorkerProcessHost* process,
+      int worker_route_id);
 
-  void NotifyWorkerProcessCreated();
+  // Used when multiple workers can run in the same process.
+  static const int kMaxWorkerProcessesWhenSharing;
 
   // Used when we run each worker in a separate process.
   static const int kMaxWorkersWhenSeparate;
-  static const int kMaxWorkersPerFrameWhenSeparate;
+  static const int kMaxWorkersPerTabWhenSeparate;
 
  private:
   friend struct DefaultSingletonTraits<WorkerServiceImpl>;
@@ -92,16 +87,28 @@ class CONTENT_EXPORT WorkerServiceImpl
   // Given a WorkerInstance, create an associated worker process.
   bool CreateWorkerFromInstance(WorkerProcessHost::WorkerInstance instance);
 
+  // Returns a WorkerProcessHost object if one exists for the given domain, or
+  // NULL if there are no such workers yet.
+  WorkerProcessHost* GetProcessForDomain(const GURL& url);
+
+  // Returns a WorkerProcessHost based on a strategy of creating one worker per
+  // core.
+  WorkerProcessHost* GetProcessToFillUpCores();
+
+  // Returns the WorkerProcessHost from the existing set that has the least
+  // number of worker instance running.
+  WorkerProcessHost* GetLeastLoadedWorker();
+
   // Checks if we can create a worker process based on the process limit when
   // we're using a strategy of one process per core.
   bool CanCreateWorkerProcess(
       const WorkerProcessHost::WorkerInstance& instance);
 
-  // Checks if the frame associated with the passed RenderFrame can create a
+  // Checks if the tab associated with the passed RenderView can create a
   // worker process based on the process limit when we're using a strategy of
   // one worker per process.
-  bool FrameCanCreateWorkerProcess(
-      int render_process_id, int render_frame_id, bool* hit_total_worker_limit);
+  bool TabCanCreateWorkerProcess(
+      int render_process_id, int render_route_id, bool* hit_total_worker_limit);
 
   // Tries to see if any of the queued workers can be created.
   void TryStartingQueuedWorker();
@@ -109,28 +116,23 @@ class CONTENT_EXPORT WorkerServiceImpl
   // APIs for manipulating our set of pending shared worker instances.
   WorkerProcessHost::WorkerInstance* CreatePendingInstance(
       const GURL& url,
-      const base::string16& name,
-      ResourceContext* resource_context,
-      const WorkerStoragePartition& worker_partition);
+      const string16& name,
+      const ResourceContext* resource_context);
   WorkerProcessHost::WorkerInstance* FindPendingInstance(
       const GURL& url,
-      const base::string16& name,
-      const WorkerStoragePartition& worker_partition,
-      ResourceContext* resource_context);
+      const string16& name,
+      const ResourceContext* resource_context);
   void RemovePendingInstances(
       const GURL& url,
-      const base::string16& name,
-      const WorkerStoragePartition& worker_partition,
-      ResourceContext* resource_context);
+      const string16& name,
+      const ResourceContext* resource_context);
 
   WorkerProcessHost::WorkerInstance* FindSharedWorkerInstance(
       const GURL& url,
-      const base::string16& name,
-      const WorkerStoragePartition& worker_partition,
-      ResourceContext* resource_context);
+      const string16& name,
+      const ResourceContext* resource_context);
 
-  scoped_refptr<WorkerPrioritySetter> priority_setter_;
-
+  NotificationRegistrar registrar_;
   int next_worker_route_id_;
 
   WorkerProcessHost::Instances queued_workers_;

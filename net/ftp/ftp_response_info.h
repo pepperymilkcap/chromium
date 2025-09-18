@@ -4,8 +4,9 @@
 
 #ifndef NET_FTP_FTP_RESPONSE_INFO_H_
 #define NET_FTP_FTP_RESPONSE_INFO_H_
+#pragma once
 
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/host_port_pair.h"
 
 namespace net {

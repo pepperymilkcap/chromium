@@ -1,11 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_WIN_WINDOWS_VERSION_H_
 #define BASE_WIN_WINDOWS_VERSION_H_
-
-#include <string>
+#pragma once
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
@@ -20,24 +19,14 @@ namespace win {
 // NOTE: Keep these in order so callers can do things like
 // "if (base::win::GetVersion() >= base::win::VERSION_VISTA) ...".
 enum Version {
-  VERSION_PRE_XP = 0,  // Not supported.
+  VERSION_PRE_XP = 0,   // Not supported.
   VERSION_XP,
-  VERSION_SERVER_2003, // Also includes XP Pro x64 and Server 2003 R2.
-  VERSION_VISTA,       // Also includes Windows Server 2008.
-  VERSION_WIN7,        // Also includes Windows Server 2008 R2.
-  VERSION_WIN8,        // Also includes Windows Server 2012.
-  VERSION_WIN8_1,      // Code named Windows Blue
-  VERSION_WIN_LAST,    // Indicates error condition.
-};
-
-// A rough bucketing of the available types of versions of Windows. This is used
-// to distinguish enterprise enabled versions from home versions and potentially
-// server versions.
-enum VersionType {
-  SUITE_HOME,
-  SUITE_PROFESSIONAL,
-  SUITE_SERVER,
-  SUITE_LAST,
+  VERSION_SERVER_2003,  // Also includes Windows XP Professional x64.
+  VERSION_VISTA,
+  VERSION_SERVER_2008,
+  VERSION_WIN7,
+  VERSION_WIN8,
+  VERSION_WIN_LAST,  // Indicates error condition.
 };
 
 // A singleton that can be used to query various pieces of information about the
@@ -84,13 +73,11 @@ class BASE_EXPORT OSInfo {
   Version version() const { return version_; }
   // The next two functions return arrays of values, [major, minor(, build)].
   VersionNumber version_number() const { return version_number_; }
-  VersionType version_type() const { return version_type_; }
   ServicePack service_pack() const { return service_pack_; }
   WindowsArchitecture architecture() const { return architecture_; }
   int processors() const { return processors_; }
   size_t allocation_granularity() const { return allocation_granularity_; }
   WOW64Status wow64_status() const { return wow64_status_; }
-  std::string processor_model_name();
 
   // Like wow64_status(), but for the supplied handle instead of the current
   // process.  This doesn't touch member state, so you can bypass the singleton.
@@ -102,13 +89,11 @@ class BASE_EXPORT OSInfo {
 
   Version version_;
   VersionNumber version_number_;
-  VersionType version_type_;
   ServicePack service_pack_;
   WindowsArchitecture architecture_;
   int processors_;
   size_t allocation_granularity_;
   WOW64Status wow64_status_;
-  std::string processor_model_name_;
 
   DISALLOW_COPY_AND_ASSIGN(OSInfo);
 };

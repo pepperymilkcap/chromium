@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H_
 #define CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -11,27 +12,31 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/process_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 #include "chrome/test/automation/browser_proxy.h"
+#include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel_proxy.h"
-#include "ipc/ipc_sender.h"
+#include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/native_widget_types.h"
-#include "url/gurl.h"
 
 class BrowserProxy;
+class ExtensionProxy;
 class TabProxy;
+class WindowProxy;
+struct ExternalTabSettings;
 
 // This is an interface that AutomationProxy-related objects can use to
 // access the message-sending abilities of the Proxy.
-class AutomationMessageSender : public IPC::Sender {
+class AutomationMessageSender : public IPC::Message::Sender {
  public:
   // Sends a message synchronously; it doesn't return until a response has been
   // received or a timeout has expired.
@@ -49,9 +54,10 @@ class AutomationMessageSender : public IPC::Sender {
 
 // This is the interface that external processes can use to interact with
 // a running instance of the app.
-class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
+class AutomationProxy : public IPC::Channel::Listener,
+                        public AutomationMessageSender {
  public:
-  AutomationProxy(base::TimeDelta action_timeout, bool disconnect_on_failure);
+  AutomationProxy(int action_timeout_ms, bool disconnect_on_failure);
   virtual ~AutomationProxy();
 
   // Creates a previously unused channel id.
@@ -113,6 +119,23 @@ class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
   // False likely indicates an IPC error.
   bool GetNormalBrowserWindowCount(int* num_windows) WARN_UNUSED_RESULT;
 
+  // Gets the locale of the chrome browser, currently all browsers forked from
+  // the main chrome share the same UI locale, returning true on success.
+  // False likely indicates an IPC error.
+  bool GetBrowserLocale(string16* locale) WARN_UNUSED_RESULT;
+
+  // Returns whether an app modal dialog window is showing right now (i.e., a
+  // javascript alert), and what buttons it contains.
+  bool GetShowingAppModalDialog(bool* showing_app_modal_dialog,
+                                ui::DialogButton* button) WARN_UNUSED_RESULT;
+
+  // Simulates a click on a dialog button. Synchronous.
+  bool ClickAppModalDialogButton(ui::DialogButton button) WARN_UNUSED_RESULT;
+
+  // Block the thread until a modal dialog is displayed. Returns true on
+  // success.
+  bool WaitForAppModalDialog() WARN_UNUSED_RESULT;
+
   // Returns true if one of the tabs in any window displays given url.
   bool IsURLDisplayed(GURL url) WARN_UNUSED_RESULT;
 
@@ -129,6 +152,37 @@ class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
   // Window numbers are 0-based.
   scoped_refptr<BrowserProxy> GetBrowserWindow(int window_index);
 
+  // Finds the first browser window that is not incognito mode and of type
+  // TYPE_TABBED, and returns its corresponding BrowserProxy, transferring
+  // ownership of the pointer to the caller.
+  // On failure, returns NULL.
+  scoped_refptr<BrowserProxy> FindTabbedBrowserWindow();
+
+  // Returns the BrowserProxy for the browser window which was last active,
+  // transferring ownership of the pointer to the caller.
+  // TODO: If there was no last active browser window, or the last active
+  // browser window no longer exists (for example, if it was closed),
+  // returns GetBrowserWindow(0). See crbug.com/10501. As for now this
+  // function is flakey.
+  scoped_refptr<BrowserProxy> GetLastActiveBrowserWindow();
+
+  // Returns the WindowProxy for the currently active window, transferring
+  // ownership of the pointer to the caller.
+  // On failure, returns NULL.
+  scoped_refptr<WindowProxy> GetActiveWindow();
+
+  // Tells the browser to enable or disable network request filtering.  Returns
+  // false if the message fails to send to the browser.
+  bool SetFilteredInet(bool enabled) WARN_UNUSED_RESULT;
+
+  // Returns the number of times a network request filter was used to service a
+  // network request.  Returns -1 on error.
+  int GetFilteredInetHitCount();
+
+  // Sends the browser a new proxy configuration to start using. Returns true
+  // if the proxy config was successfully sent, false otherwise.
+  bool SendProxyConfig(const std::string& new_proxy_config) WARN_UNUSED_RESULT;
+
   // These methods are intended to be called by the background thread
   // to signal that the given event has occurred, and that any corresponding
   // Wait... function can return.
@@ -137,30 +191,50 @@ class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
   // load_time is how long, in ms, the tab contents took to load.
   void SignalNewTabUITab(int load_time);
 
+  // Set whether or not running the save page as... command show prompt the
+  // user for a download path.  Returns true if the message is successfully
+  // sent.
+  bool SavePackageShouldPromptUser(bool should_prompt) WARN_UNUSED_RESULT;
+
+  // Installs the extension. If |with_ui| is true an install confirmation
+  // and notification UI is shown, otherwise the install is silent. Returns the
+  // ExtensionProxy for the installed extension, or NULL on failure.
+  // Note: Overinstalls and downgrades will return NULL.
+  scoped_refptr<ExtensionProxy> InstallExtension(const FilePath& extension_path,
+                                                 bool with_ui);
+
   // Gets the next extension test result in |result|. Returns false if there
   // was a problem sending the result querying RPC.
   bool GetExtensionTestResult(bool* result, std::string* message);
+
+  // Resets to the default theme. Returns true on success.
+  bool ResetToDefaultTheme();
 
   // Generic pattern for sending automation requests.
   bool SendJSONRequest(const std::string& request,
                        int timeout_ms,
                        std::string* response) WARN_UNUSED_RESULT;
 
-  // Begin tracing specified category_patterns on the browser instance. Blocks
-  // until browser acknowledges that tracing has begun (or failed if false is
-  // returned). |category_patterns| is a comma-delimited list of category
-  // wildcards.
-  // A category pattern can have an optional '-' prefix to exclude category
-  // groups that contain matching category.
-  // Either all category_patterns must be included or all must be excluded.
+#if defined(OS_CHROMEOS)
+  // Logs in through the Chrome OS login wizard with given |username|
+  // and |password|.  Returns true on success.
+  bool LoginWithUserAndPass(const std::string& username,
+                            const std::string& password) WARN_UNUSED_RESULT;
+#endif
+
+  // Begin tracing specified categories on the browser instance. Blocks until
+  // browser acknowledges that tracing has begun (or failed if false is
+  // returned). |categories| is a comma-delimited list of category wildcards.
+  // A category can have an optional '-' prefix to make it an excluded category.
+  // Either all categories must be included or all must be excluded.
   //
   // Example: BeginTracing("test_MyTest*");
   // Example: BeginTracing("test_MyTest*,test_OtherStuff");
   // Example: BeginTracing("-excluded_category1,-excluded_category2");
   //
   // See base/event_trace.h for documentation of included and excluded
-  // category_patterns.
-  bool BeginTracing(const std::string& category_patterns) WARN_UNUSED_RESULT;
+  // categories.
+  bool BeginTracing(const std::string& categories) WARN_UNUSED_RESULT;
 
   // End trace and collect the trace output as a json string.
   bool EndTracing(std::string* json_trace_output) WARN_UNUSED_RESULT;
@@ -176,16 +250,23 @@ class AutomationProxy : public IPC::Listener, public AutomationMessageSender {
   // the tracker.
   virtual void InvalidateHandle(const IPC::Message& message);
 
-  base::TimeDelta action_timeout() const {
-    return action_timeout_;
+  // Creates a tab that can hosted in an external process. The function
+  // returns a TabProxy representing the tab as well as a window handle
+  // that can be reparented in another process.
+  scoped_refptr<TabProxy> CreateExternalTab(
+      const ExternalTabSettings& settings,
+      gfx::NativeWindow* external_tab_container,
+      gfx::NativeWindow* tab);
+
+  int action_timeout_ms() const {
+    return static_cast<int>(action_timeout_.InMilliseconds());
   }
 
   // Sets the timeout for subsequent automation calls.
-  void set_action_timeout(base::TimeDelta timeout) {
-    DCHECK(timeout <= base::TimeDelta::FromMinutes(10))
-        << "10+ min of automation timeout "
-           "can make the test hang and be killed by buildbot";
-    action_timeout_ = timeout;
+  void set_action_timeout_ms(int timeout_ms) {
+    DCHECK(timeout_ms <= 10 * 60 * 1000 ) << "10+ min of automation timeout "
+        "can make the test hang and be killed by buildbot";
+    action_timeout_ = base::TimeDelta::FromMilliseconds(timeout_ms);
   }
 
   // Returns the server version of the server connected. You may only call this

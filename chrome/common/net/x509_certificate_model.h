@@ -4,9 +4,11 @@
 
 #ifndef CHROME_COMMON_NET_X509_CERTIFICATE_MODEL_H_
 #define CHROME_COMMON_NET_X509_CERTIFICATE_MODEL_H_
+#pragma once
 
-#include "net/cert/cert_type.h"
-#include "net/cert/x509_certificate.h"
+#include "net/base/cert_database.h"
+#include "net/base/cert_type.h"
+#include "net/base/x509_certificate.h"
 
 // This namespace defines a set of functions to be used in UI-related bits of
 // X509 certificates. It decouples the UI from the underlying crypto library

@@ -1,10 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
-#include "base/file_util.h"
 #include "base/test/test_file_util.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
@@ -109,7 +108,7 @@ TEST_P(FullTabNavigationTest, Refresh) {
 
   ie_mock_.ExpectNavigation(IN_IE, GetSimplePageUrl());
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(GetSimplePageUrl())))
-      .WillOnce(DelayRefresh(&ie_mock_, &loop_, base::TimeDelta()));
+      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 0));
 
   if (in_cf) {
     EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(GetSimplePageUrl())))
@@ -126,7 +125,7 @@ TEST_P(FullTabNavigationTest, Refresh) {
 
 // Test that multiple back and forward requests work.
 // TODO(tsepez): http://crbug.com/83133
-TEST_P(FullTabNavigationTest, DISABLED_MultipleBackForward) {
+TEST_P(FullTabNavigationTest, FLAKY_MultipleBackForward) {
   std::wstring page1 = GetSimplePageUrl();
   std::wstring page2 = GetLinkPageUrl();
   std::wstring page3 = GetAnchorPageUrl(0);
@@ -154,7 +153,7 @@ TEST_P(FullTabNavigationTest, DISABLED_MultipleBackForward) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(page3)))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoBack(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoBack(&ie_mock_, &loop_, 0)));
 
   // We have reached url 2 and have 1 back & 1 forward entries for url 1 & 3.
   // Go back to url 1 now.
@@ -162,7 +161,7 @@ TEST_P(FullTabNavigationTest, DISABLED_MultipleBackForward) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(page2)))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoBack(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoBack(&ie_mock_, &loop_, 0)));
 
   // We have reached url 1 and have 0 back & 2 forward entries for url 2 & 3.
   // Go forward to url 2 now.
@@ -170,7 +169,7 @@ TEST_P(FullTabNavigationTest, DISABLED_MultipleBackForward) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(page1)))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoForward(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoForward(&ie_mock_, &loop_, 0)));
 
   // We have reached url 2 and have 1 back & 1 forward entries for url 1 & 3.
   // Go forward to url 3 now.
@@ -178,7 +177,7 @@ TEST_P(FullTabNavigationTest, DISABLED_MultipleBackForward) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(page2)))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoForward(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoForward(&ie_mock_, &loop_, 0)));
 
   // We have reached url 2 and have 1 back & 1 forward entries for url 1 & 3.
   ie_mock_.ExpectNavigation(in_cf, page3);
@@ -187,17 +186,16 @@ TEST_P(FullTabNavigationTest, DISABLED_MultipleBackForward) {
           VerifyAddressBarUrl(&ie_mock_),
           CloseBrowserMock(&ie_mock_)));
 
-  LaunchIENavigateAndLoop(page1, kChromeFrameLongNavigationTimeout * 2);
+  LaunchIENavigateAndLoop(page1,
+                          kChromeFrameLongNavigationTimeoutInSeconds * 2);
 }
 
 // Test multiple back and forward operations among urls with anchors.
 TEST_P(FullTabNavigationTest, BackForwardAnchor) {
-  std::wstring title(GetAnchorPageTitle());
   bool in_cf = GetParam().invokes_cf();
   ie_mock_.ExpectAnyNavigations();
   server_mock_.ExpectAndServeAnyRequests(GetParam());
   MockAccEventObserver acc_observer;
-  EXPECT_CALL(acc_observer, OnAccDocLoad(_)).Times(testing::AnyNumber());
 
   // Navigate to anchor 1.
   // Back/Forward state at this point:
@@ -205,10 +203,9 @@ TEST_P(FullTabNavigationTest, BackForwardAnchor) {
   // Forward: 0
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(GetAnchorPageUrl(0))))
       .Times(testing::AtMost(1));
-  EXPECT_CALL(acc_observer, OnAccDocLoad(TabContentsTitleEq(GetAnchorPageUrl(0),
-                                                            title)))
+  EXPECT_CALL(acc_observer, OnAccDocLoad(_))
       .WillOnce(AccDoDefaultAction(AccObjectMatcher(L"*1", L"link")))
-      .RetiresOnSaturation();
+      .WillRepeatedly(testing::Return());
 
   InSequence expect_in_sequence_for_scope;
   // Navigate to anchor 2 after the previous navigation is complete
@@ -239,7 +236,7 @@ TEST_P(FullTabNavigationTest, BackForwardAnchor) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(GetAnchorPageUrl(3))))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoBack(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoBack(&ie_mock_, &loop_, 0)));
 
   // We will reach anchor 2 once the navigation is complete,
   // then go back to anchor 1
@@ -249,7 +246,7 @@ TEST_P(FullTabNavigationTest, BackForwardAnchor) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(GetAnchorPageUrl(2))))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoBack(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoBack(&ie_mock_, &loop_, 0)));
 
   // We will reach anchor 1 once the navigation is complete,
   // now go forward to anchor 2
@@ -259,7 +256,7 @@ TEST_P(FullTabNavigationTest, BackForwardAnchor) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(GetAnchorPageUrl(1))))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoForward(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoForward(&ie_mock_, &loop_, 0)));
 
   // We have reached anchor 2, go forward to anchor 3 again
   // Back/Forward state at this point:
@@ -268,7 +265,7 @@ TEST_P(FullTabNavigationTest, BackForwardAnchor) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(GetAnchorPageUrl(2))))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoForward(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoForward(&ie_mock_, &loop_, 0)));
 
   // We have gone a few steps back and forward, this should be enough for now.
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(GetAnchorPageUrl(3))))
@@ -338,19 +335,18 @@ TEST_P(FullTabNavigationTest, DISABLED_JavascriptWindowOpenDifferentDomain) {
     LOG(ERROR) << "Test disabled for this configuration.";
     return;
   }
-  std::wstring parent_url = GetWindowOpenUrl(L"http://www.nonexistent.com");
+  std::wstring parent_url =
+      GetTestUrl(L"window_open.html?http://www.nonexistent.com");
   MockAccEventObserver acc_observer;
   MockIEEventSink new_window_mock;
   ie_mock_.ExpectAnyNavigations();
   new_window_mock.ExpectAnyNavigations();
   server_mock_.ExpectAndServeAnyRequests(GetParam());
-  EXPECT_CALL(acc_observer, OnAccDocLoad(_)).Times(testing::AnyNumber());
 
   EXPECT_CALL(ie_mock_, OnLoad(GetParam().invokes_cf(), StrEq(parent_url)));
-  EXPECT_CALL(acc_observer,
-              OnAccDocLoad(TabContentsTitleEq(parent_url,
-                                              GetWindowOpenTitle())))
-      .WillOnce(AccLeftClick(AccObjectMatcher()));
+  EXPECT_CALL(acc_observer, OnAccDocLoad(_))
+      .WillOnce(AccLeftClick(AccObjectMatcher()))
+      .WillRepeatedly(testing::Return());
 
   ie_mock_.ExpectNewWindow(&new_window_mock);
   EXPECT_CALL(new_window_mock, OnNavigateError(_, _, _, _, _))
@@ -365,7 +361,8 @@ TEST_P(FullTabNavigationTest, DISABLED_JavascriptWindowOpenDifferentDomain) {
       .WillOnce(CloseBrowserMock(&ie_mock_));
 
   // OnNavigateError can take a long time to fire.
-  LaunchIENavigateAndLoop(parent_url, kChromeFrameLongNavigationTimeout * 4);
+  LaunchIENavigateAndLoop(parent_url,
+                          kChromeFrameLongNavigationTimeoutInSeconds * 4);
   ASSERT_TRUE(new_window_mock.event_sink()->web_browser2() != NULL);
 }
 
@@ -380,32 +377,31 @@ TEST_P(FullTabNavigationTest, JavascriptWindowOpenCanClose) {
     return;
   }
 
-  std::wstring parent_url = GetWindowOpenUrl(L"simple.html");
+  std::wstring parent_url = GetTestUrl(L"window_open.html?simple.html");
   MockAccEventObserver acc_observer;
   MockIEEventSink new_window_mock;
   ie_mock_.ExpectAnyNavigations();
   new_window_mock.ExpectAnyNavigations();
   server_mock_.ExpectAndServeAnyRequests(GetParam());
-  EXPECT_CALL(acc_observer, OnAccDocLoad(_)).Times(testing::AnyNumber());
 
   // Tell the page to open the popup. Some versions of IE will prevent a popup
   // unless a click is involved.
   EXPECT_CALL(ie_mock_, OnLoad(GetParam().invokes_cf(), StrEq(parent_url)));
-  EXPECT_CALL(acc_observer,
-              OnAccDocLoad(TabContentsTitleEq(parent_url,
-                                              GetWindowOpenTitle())))
-      .WillOnce(AccLeftClick(AccObjectMatcher()));
+  EXPECT_CALL(acc_observer, OnAccDocLoad(_))
+      .WillOnce(AccLeftClick(AccObjectMatcher()))
+      .WillRepeatedly(testing::Return());
 
   ie_mock_.ExpectNewWindow(&new_window_mock);
   EXPECT_CALL(new_window_mock, OnLoad(_, StrEq(GetSimplePageUrl())))
       .Times(testing::AtMost(2))
-      .WillOnce(PostKeyMessageToRenderer(&ie_mock_, 'c'))  // close the popup
+      .WillOnce(PostCharMessageToRenderer(&ie_mock_, 'C'))  // close the popup
       .WillOnce(testing::Return());
 
   EXPECT_CALL(new_window_mock, OnQuit())
       .WillOnce(CloseBrowserMock(&ie_mock_));
 
-  LaunchIENavigateAndLoop(parent_url, kChromeFrameLongNavigationTimeout * 2);
+  LaunchIENavigateAndLoop(parent_url,
+                          kChromeFrameLongNavigationTimeoutInSeconds * 2);
 }
 
 // Parameter for tests using the NavigationTransitionTest fixture. Includes two
@@ -476,21 +472,19 @@ TEST_P(NavigationTransitionTest, JavascriptWindowOpen) {
     return;
   }
 
-  std::wstring parent_url = GetWindowOpenUrl(L"simple.html");
+  std::wstring parent_url = GetTestUrl(L"window_open.html?simple.html");
   std::wstring new_window_url = GetSimplePageUrl();
   MockAccEventObserver acc_observer;
   testing::StrictMock<MockIEEventSink> new_window_mock;
 
-  EXPECT_CALL(acc_observer, OnAccDocLoad(_)).Times(testing::AnyNumber());
   ie_mock_.ExpectNavigation(page1_.invokes_cf(), parent_url);
   server_mock_.ExpectAndServeRequest(page1_, parent_url);
   EXPECT_CALL(ie_mock_, OnLoad(page1_.invokes_cf(), StrEq(parent_url)));
   // Tell the page to open the popup. Some versions of IE will prevent a popup
   // unless a click is involved.
-  EXPECT_CALL(acc_observer,
-              OnAccDocLoad(TabContentsTitleEq(parent_url,
-                                              GetWindowOpenTitle())))
-      .WillOnce(AccLeftClick(AccObjectMatcher()));
+  EXPECT_CALL(acc_observer, OnAccDocLoad(_))
+      .WillOnce(AccLeftClick(AccObjectMatcher()))
+      .WillRepeatedly(testing::Return());
 
   // If the parent window is in CF, the child should always load in CF since
   // the domain is the same.
@@ -508,7 +502,8 @@ TEST_P(NavigationTransitionTest, JavascriptWindowOpen) {
   EXPECT_CALL(new_window_mock, OnQuit())
       .WillOnce(CloseBrowserMock(&ie_mock_));
 
-  LaunchIENavigateAndLoop(parent_url, kChromeFrameLongNavigationTimeout * 2);
+  LaunchIENavigateAndLoop(parent_url,
+                          kChromeFrameLongNavigationTimeoutInSeconds * 2);
 }
 
 // Test redirection with window.location in Javascript.
@@ -549,9 +544,7 @@ TEST_P(NavigationTransitionTest, FollowLink) {
       .Times(testing::Between(1, 2))
       .WillRepeatedly(SendResponse(&server_mock_, page1_));
   EXPECT_CALL(ie_mock_, OnLoad(page1_.invokes_cf(), StrEq(GetLinkPageUrl())));
-  EXPECT_CALL(acc_observer,
-              OnAccDocLoad(TabContentsTitleEq(GetLinkPageUrl(),
-                                              GetLinkPageTitle())))
+  EXPECT_CALL(acc_observer, OnAccDocLoad(_))
       .WillOnce(AccDoDefaultAction(AccObjectMatcher(L"", L"link")))
       .RetiresOnSaturation();
 
@@ -605,8 +598,7 @@ class NavigationTest : public MockIEEventSinkTest, public testing::Test {
 };
 
 // Test navigation to a disallowed gcf: url with file scheme.
-// Times out sporadically; http://crbug.com/119718.
-TEST_F(NavigationTest, DISABLED_GcfProtocol1) {
+TEST_F(NavigationTest, GcfProtocol1) {
   // Make sure that we are not accidently enabling gcf protocol.
   SetConfigBool(kAllowUnsafeURLs, false);
   TestDisAllowedUrl(L"gcf:file:///C:/");
@@ -655,8 +647,7 @@ TEST_F(NavigationTest, DISABLED_DownloadInNewWindow) {
   LaunchIEAndNavigate(kDownloadFromNewWin);
 }
 
-// Flaky on ie6, http://crbug.com/255098.
-TEST_P(FullTabNavigationTest, DISABLED_FormPostBackForward) {
+TEST_P(FullTabNavigationTest, FormPostBackForward) {
   bool in_cf = GetParam().invokes_cf();
   // Navigate to the form-get.html page:
   // - First set focus to chrome renderer window
@@ -668,16 +659,14 @@ TEST_P(FullTabNavigationTest, DISABLED_FormPostBackForward) {
   std::wstring kFormPostUrl = GetTestUrl(L"form-get.html");
   std::wstring kFormPostActionUrl =
       GetTestUrl(L"action.html?field1=a&field2=b&submit=Submit");
-  std::wstring kFormPostTitle(L"ChromeFrame form submit test(GET method)");
 
   MockAccEventObserver acc_observer;
   server_mock_.ExpectAndServeAnyRequests(GetParam());
-  EXPECT_CALL(acc_observer, OnAccDocLoad(_)).Times(testing::AnyNumber());
 
-  EXPECT_CALL(acc_observer, OnAccDocLoad(TabContentsTitleEq(kFormPostUrl,
-                                                            kFormPostTitle)))
+  EXPECT_CALL(acc_observer, OnAccDocLoad(_))
+      .Times(testing::AtLeast(1))
       .WillOnce(AccDoDefaultAction(AccObjectMatcher(L"Submit")))
-      .RetiresOnSaturation();
+      .WillRepeatedly(testing::Return());
 
   InSequence expect_in_sequence_for_scope;
 
@@ -688,13 +677,13 @@ TEST_P(FullTabNavigationTest, DISABLED_FormPostBackForward) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(kFormPostActionUrl)))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoBack(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoBack(&ie_mock_, &loop_, 0)));
 
   ie_mock_.ExpectNavigation(in_cf, kFormPostUrl);
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(kFormPostUrl)))
       .WillOnce(testing::DoAll(
           VerifyAddressBarUrl(&ie_mock_),
-          DelayGoForward(&ie_mock_, &loop_, base::TimeDelta())));
+          DelayGoForward(&ie_mock_, &loop_, 0)));
 
   ie_mock_.ExpectNavigationOptionalBefore(in_cf, kFormPostActionUrl);
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(kFormPostActionUrl)))
@@ -843,8 +832,8 @@ TEST_F(FullTabDownloadTest, CF_DownloadFileFromPost) {
   EXPECT_CALL(download_window_mock, OnLoad(false, _));
   EXPECT_CALL(download_window_mock, OnQuit()).Times(testing::AtMost(1));
 
-  base::FilePath temp_file_path;
-  ASSERT_TRUE(base::CreateTemporaryFile(&temp_file_path));
+  FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
   file_util::DieFileDie(temp_file_path, false);
 
   temp_file_path = temp_file_path.ReplaceExtension(L"txt");
@@ -864,14 +853,15 @@ TEST_F(FullTabDownloadTest, CF_DownloadFileFromPost) {
 
   EXPECT_CALL(save_dialog_watcher, OnWindowClose(_))
         .WillOnce(testing::DoAll(
-            WaitForFileSave(temp_file_path, 3000),
+            WaitForFileSave(temp_file_path, 2000),
             testing::InvokeWithoutArgs(
                 testing::CreateFunctor(CloseWindow, &owner_window)),
             CloseBrowserMock(&ie_mock_)));
-  LaunchIENavigateAndLoop(src_url, kChromeFrameVeryLongNavigationTimeout);
+  LaunchIENavigateAndLoop(src_url,
+                          kChromeFrameVeryLongNavigationTimeoutInSeconds);
 
   std::string data;
-  EXPECT_TRUE(base::ReadFileToString(temp_file_path, &data));
+  EXPECT_TRUE(file_util::ReadFileToString(temp_file_path, &data));
   EXPECT_EQ("hello", data);
   file_util::DieFileDie(temp_file_path, false);
 }
@@ -888,7 +878,7 @@ class HttpHeaderTest : public MockIEEventSinkTest, public testing::Test {
         "Connection: close\r\n"
         "Content-Type: %s\r\n"
         "X-UA-Compatible: chrome=1\r\n";
-    std::string header = base::StringPrintf(kHeaderFormat, content_type);
+    std::string header = StringPrintf(kHeaderFormat, content_type);
     std::wstring url = server_mock_.Resolve(relative_url);
     EXPECT_CALL(server_mock_, Get(_, StrEq(relative_url), _))
         .WillRepeatedly(SendFast(header, data));
@@ -947,9 +937,8 @@ TEST_P(FullTabNavigationTest, RefreshContents) {
     return;
   }
 
-  const char kHeaders[] =
-      "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-      "X-UA-Compatible: chrome=1\r\nCache-control: no-cache\r\n";
+  const char kHeaders[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                          "X-UA-Compatible: chrome=1\r\n";
 
   const char kBody[] =  "<html><body>Hi there. Got new content?"
                         "</body></html>";
@@ -958,7 +947,10 @@ TEST_P(FullTabNavigationTest, RefreshContents) {
 
   EXPECT_CALL(server_mock_, Get(_, StrEq(L"/refresh_src.html"), _))
       .Times(2)
-      .WillRepeatedly(SendFast(kHeaders, kBody));
+      .WillOnce(SendFast(kHeaders, kBody))
+      .WillOnce(testing::DoAll(
+          SendFast(kHeaders, kBody),
+          DelayCloseBrowserMock(&loop_, 4000, &ie_mock_)));
 
   EXPECT_CALL(ie_mock_, OnFileDownload(_, _)).Times(testing::AnyNumber());
 
@@ -971,11 +963,11 @@ TEST_P(FullTabNavigationTest, RefreshContents) {
                                                     StrEq(src_url))));
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(src_url)))
       .Times(2)
-      .WillOnce(DelayRefresh(
-          &ie_mock_, &loop_, base::TimeDelta::FromMilliseconds(50)))
-      .WillOnce(CloseBrowserMock(&ie_mock_));
+      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 50))
+      .WillOnce(testing::Return());
 
-  LaunchIENavigateAndLoop(src_url, kChromeFrameVeryLongNavigationTimeout);
+  LaunchIENavigateAndLoop(src_url,
+                          kChromeFrameVeryLongNavigationTimeoutInSeconds);
 }
 
 class FullTabSeleniumTest
@@ -1046,7 +1038,7 @@ TEST_F(FullTabSeleniumTest, DISABLED_Core) {
                                CloseBrowserMock(&ie_mock_)));
 
   // Selenium tests take longer to finish, lets give it 2 mins.
-  const base::TimeDelta kSeleniumTestTimeout = base::TimeDelta::FromMinutes(2);
+  const int kSeleniumTestTimeout = 120;
   LaunchIENavigateAndLoop(url, kSeleniumTestTimeout);
 }
 
@@ -1110,10 +1102,9 @@ TEST_F(FullTabDownloadTest, TopLevelPostReissueFromChromeFramePage) {
   EXPECT_CALL(ie_mock_, OnLoad(false, StrEq(src_url)));
 
   EXPECT_CALL(ie_mock_, OnLoad(true, StrEq(tgt_url)))
-      .Times(2)
-      .WillOnce(DelayRefresh(
-          &ie_mock_, &loop_, base::TimeDelta::FromMilliseconds(50)))
-      .WillOnce(CloseBrowserMock(&ie_mock_));
+      .Times(testing::Between(1,2))
+      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 50))
+      .WillOnce(testing::Return());
 
   EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_,
                               testing::Field(&VARIANT::bstrVal,
@@ -1123,9 +1114,12 @@ TEST_F(FullTabDownloadTest, TopLevelPostReissueFromChromeFramePage) {
   EXPECT_CALL(ie_mock_, OnNavigateComplete2(_,
                               testing::Field(&VARIANT::bstrVal,
                               StrEq(tgt_url))))
-      .Times(2);
+      .Times(2)
+      .WillOnce(DelayCloseBrowserMock(&loop_, 4000, &ie_mock_))
+      .WillOnce(testing::Return());
 
-  LaunchIENavigateAndLoop(src_url, kChromeFrameVeryLongNavigationTimeout);
+  LaunchIENavigateAndLoop(src_url,
+                          kChromeFrameVeryLongNavigationTimeoutInSeconds);
 }
 
 MATCHER_P(UserAgentHeaderMatcher, ua_string, "") {
@@ -1153,8 +1147,7 @@ TEST_P(FullTabNavigationTest, RefreshContentsUATest) {
                        "<body>Hi there. Got new content?"
                        "</body></html>";
 
-  std::string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                        "Cache-control: no-cache\r\n";
+  std::string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n";
   bool in_cf = GetParam().invokes_cf();
   if (in_cf) {
     headers.append("X-UA-Compatible: chrome=1\r\n");
@@ -1165,26 +1158,19 @@ TEST_P(FullTabNavigationTest, RefreshContentsUATest) {
     }
   }
 
+  EXPECT_CALL(server_mock_, Get(_, testing::StrCaseEq(L"/favicon.ico"), _))
+      .Times(testing::AtMost(2))
+      .WillRepeatedly(SendFast("HTTP/1.1 404 Not Found", ""));
+
   std::wstring src_url = server_mock_.Resolve(L"/refresh_src.html");
 
-  if (in_cf) {
-    // In the case of Chrome Frame, end the test when the second OnLoad is
-    // fired.
-    EXPECT_CALL(server_mock_, Get(_, StrEq(L"/refresh_src.html"),
-                                  UserAgentHeaderMatcher("chromeframe")))
-        .Times(2)
-        .WillRepeatedly(SendFast(headers, kBody));
-  } else {
-    // In the case of IE, we never receive a second OnLoad event, so end the
-    // test when the second request is made on the server.
-    EXPECT_CALL(server_mock_, Get(_, StrEq(L"/refresh_src.html"),
-                                  UserAgentHeaderMatcher("chromeframe")))
-        .Times(2)
-        .WillOnce(SendFast(headers, kBody))
-        .WillOnce(testing::DoAll(
-            SendFast(headers, kBody),
-            CloseBrowserMock(&ie_mock_)));
-  }
+  EXPECT_CALL(server_mock_, Get(_, StrEq(L"/refresh_src.html"),
+                                UserAgentHeaderMatcher("chromeframe")))
+      .Times(2)
+      .WillOnce(SendFast(headers, kBody))
+      .WillOnce(testing::DoAll(
+          SendFast(headers, kBody),
+          DelayCloseBrowserMock(&loop_, 4000, &ie_mock_)));
 
   EXPECT_CALL(ie_mock_, OnFileDownload(_, _)).Times(testing::AnyNumber());
 
@@ -1195,22 +1181,13 @@ TEST_P(FullTabNavigationTest, RefreshContentsUATest) {
   EXPECT_CALL(ie_mock_,
               OnNavigateComplete2(_, testing::Field(&VARIANT::bstrVal,
                                                     StrEq(src_url))));
-  if (in_cf) {
-    // As mentioned above, end the test once the refreshed document is loaded.
-    EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(src_url)))
-        .Times(2)
-      .WillOnce(DelayRefresh(
-          &ie_mock_, &loop_, base::TimeDelta::FromMilliseconds(50)))
-        .WillOnce(CloseBrowserMock(&ie_mock_));
-  } else {
-    // As mentioned above, we only receive an OnLoad for the intial load, not
-    // for the refresh.
-    EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(src_url)))
-      .WillOnce(DelayRefresh(
-          &ie_mock_, &loop_, base::TimeDelta::FromMilliseconds(50)));
-  }
+  EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(src_url)))
+      .Times(testing::Between(1, 2))
+      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 50))
+      .WillOnce(testing::Return());
 
-  LaunchIENavigateAndLoop(src_url, kChromeFrameVeryLongNavigationTimeout);
+  LaunchIENavigateAndLoop(src_url,
+                          kChromeFrameVeryLongNavigationTimeoutInSeconds);
 }
 
 // Link navigations in the same domain specified with the noreferrer flag
@@ -1225,14 +1202,13 @@ TEST_F(FullTabNavigationTest, JavascriptWindowOpenNoReferrerOpensInHost) {
   }
 
   MockAccEventObserver acc_observer;
-  EXPECT_CALL(acc_observer, OnAccDocLoad(_)).Times(testing::AnyNumber());
 
   testing::StrictMock<MockIEEventSink> new_window_mock;
   testing::StrictMock<MockIEEventSink>
       no_referrer_target_opener_window_mock;
 
   std::wstring initial_url =
-      GetWindowOpenUrl(L"open_href_target_no_referrer.html");
+      GetTestUrl(L"window_open.html?open_href_target_no_referrer.html");
 
   std::wstring parent_url = GetTestUrl(
       L"open_href_target_no_referrer.html");
@@ -1242,11 +1218,9 @@ TEST_F(FullTabNavigationTest, JavascriptWindowOpenNoReferrerOpensInHost) {
   ie_mock_.ExpectNavigation(false, initial_url);
   EXPECT_CALL(ie_mock_, OnLoad(false, StrEq(initial_url)));
 
-  EXPECT_CALL(acc_observer,
-              OnAccDocLoad(TabContentsTitleEq(initial_url,
-                                              GetWindowOpenTitle())))
+  EXPECT_CALL(acc_observer, OnAccDocLoad(_))
       .WillOnce(AccLeftClick(AccObjectMatcher()))
-      .RetiresOnSaturation();
+      .WillRepeatedly(testing::Return());
 
   ie_mock_.ExpectNewWindow(&no_referrer_target_opener_window_mock);
 
@@ -1293,7 +1267,8 @@ TEST_F(FullTabNavigationTest, JavascriptWindowOpenNoReferrerOpensInHost) {
   EXPECT_CALL(no_referrer_target_opener_window_mock, OnQuit())
       .WillOnce(CloseBrowserMock(&ie_mock_));
 
-  LaunchIENavigateAndLoop(initial_url, kChromeFrameVeryLongNavigationTimeout);
+  LaunchIENavigateAndLoop(initial_url,
+                          kChromeFrameVeryLongNavigationTimeoutInSeconds);
 }
 
 }  // namespace chrome_frame_test

@@ -1,48 +1,46 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/environment.h"
+#include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_output_controller.h"
-#include "media/audio/audio_parameters.h"
-#include "media/base/audio_bus.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::DoAll;
-using ::testing::Invoke;
+using ::testing::Exactly;
+using ::testing::InvokeWithoutArgs;
 using ::testing::NotNull;
 using ::testing::Return;
-
-namespace media {
 
 static const int kSampleRate = AudioParameters::kAudioCDSampleRate;
 static const int kBitsPerSample = 16;
 static const ChannelLayout kChannelLayout = CHANNEL_LAYOUT_STEREO;
-static const int kSamplesPerPacket = kSampleRate / 100;
-static const double kTestVolume = 0.25;
+static const int kSamplesPerPacket = kSampleRate / 10;
+static const int kHardwareBufferSize = kSamplesPerPacket *
+    ChannelLayoutToChannelCount(kChannelLayout) * kBitsPerSample / 8;
+static const int kBufferCapacity = 3 * kHardwareBufferSize;
+
+namespace media {
 
 class MockAudioOutputControllerEventHandler
     : public AudioOutputController::EventHandler {
  public:
   MockAudioOutputControllerEventHandler() {}
 
-  MOCK_METHOD0(OnCreated, void());
-  MOCK_METHOD0(OnPlaying, void());
-  MOCK_METHOD2(OnPowerMeasured, void(float power_dbfs, bool clipped));
-  MOCK_METHOD0(OnPaused, void());
-  MOCK_METHOD0(OnError, void());
-  MOCK_METHOD2(OnDeviceChange, void(int new_buffer_size, int new_sample_rate));
+  MOCK_METHOD1(OnCreated, void(AudioOutputController* controller));
+  MOCK_METHOD1(OnPlaying, void(AudioOutputController* controller));
+  MOCK_METHOD1(OnPaused, void(AudioOutputController* controller));
+  MOCK_METHOD2(OnError, void(AudioOutputController* controller,
+                             int error_code));
+  MOCK_METHOD2(OnMoreData, void(AudioOutputController* controller,
+                                AudioBuffersState buffers_state));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioOutputControllerEventHandler);
@@ -54,367 +52,382 @@ class MockAudioOutputControllerSyncReader
   MockAudioOutputControllerSyncReader() {}
 
   MOCK_METHOD1(UpdatePendingBytes, void(uint32 bytes));
-  MOCK_METHOD2(Read, void(const AudioBus* source, AudioBus* dest));
+  MOCK_METHOD2(Read, uint32(void* data, uint32 size));
   MOCK_METHOD0(Close, void());
+  MOCK_METHOD0(DataReady, bool());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioOutputControllerSyncReader);
-};
-
-class MockAudioOutputStream : public AudioOutputStream {
- public:
-  MOCK_METHOD0(Open, bool());
-  MOCK_METHOD1(Start, void(AudioSourceCallback* callback));
-  MOCK_METHOD0(Stop, void());
-  MOCK_METHOD1(SetVolume, void(double volume));
-  MOCK_METHOD1(GetVolume, void(double* volume));
-  MOCK_METHOD0(Close, void());
-
-  // Set/get the callback passed to Start().
-  AudioSourceCallback* callback() const { return callback_; }
-  void SetCallback(AudioSourceCallback* asc) { callback_ = asc; }
-
- private:
-  AudioSourceCallback* callback_;
 };
 
 ACTION_P(SignalEvent, event) {
   event->Signal();
 }
 
-static const float kBufferNonZeroData = 1.0f;
-ACTION(PopulateBuffer) {
-  arg1->Zero();
-  // Note: To confirm the buffer will be populated in these tests, it's
-  // sufficient that only the first float in channel 0 is set to the value.
-  arg1->channel(0)[0] = kBufferNonZeroData;
+// Helper functions used to close audio controller.
+static void SignalClosedEvent(base::WaitableEvent* event) {
+  event->Signal();
 }
 
-class AudioOutputControllerTest : public testing::Test {
- public:
-  AudioOutputControllerTest()
-      : audio_manager_(AudioManager::CreateForTesting()),
-        create_event_(false, false),
-        play_event_(false, false),
-        read_event_(false, false),
-        pause_event_(false, false) {
-  }
-
-  virtual ~AudioOutputControllerTest() {
-  }
-
- protected:
-  void Create(int samples_per_packet) {
-    EXPECT_FALSE(create_event_.IsSignaled());
-    EXPECT_FALSE(play_event_.IsSignaled());
-    EXPECT_FALSE(read_event_.IsSignaled());
-    EXPECT_FALSE(pause_event_.IsSignaled());
-
-    params_ = AudioParameters(
-        AudioParameters::AUDIO_FAKE, kChannelLayout,
-        kSampleRate, kBitsPerSample, samples_per_packet);
-
-    if (params_.IsValid()) {
-      EXPECT_CALL(mock_event_handler_, OnCreated())
-          .WillOnce(SignalEvent(&create_event_));
-    }
-
-    controller_ = AudioOutputController::Create(
-        audio_manager_.get(), &mock_event_handler_, params_, std::string(),
-        std::string(), &mock_sync_reader_);
-    if (controller_.get())
-      controller_->SetVolume(kTestVolume);
-
-    EXPECT_EQ(params_.IsValid(), controller_.get() != NULL);
-  }
-
-  void Play() {
-    // Expect the event handler to receive one OnPlaying() call and one or more
-    // OnPowerMeasured() calls.
-    EXPECT_CALL(mock_event_handler_, OnPlaying())
-        .WillOnce(SignalEvent(&play_event_));
-#if defined(AUDIO_POWER_MONITORING)
-    EXPECT_CALL(mock_event_handler_, OnPowerMeasured(_, false))
-        .Times(AtLeast(1));
-#endif
-
-    // During playback, the mock pretends to provide audio data rendered and
-    // sent from the render process.
-    EXPECT_CALL(mock_sync_reader_, UpdatePendingBytes(_))
-        .Times(AtLeast(1));
-    EXPECT_CALL(mock_sync_reader_, Read(_, _))
-        .WillRepeatedly(DoAll(PopulateBuffer(),
-                              SignalEvent(&read_event_)));
-    controller_->Play();
-  }
-
-  void Pause() {
-    // Expect the event handler to receive one OnPaused() call.
-    EXPECT_CALL(mock_event_handler_, OnPaused())
-        .WillOnce(SignalEvent(&pause_event_));
-
-    controller_->Pause();
-  }
-
-  void ChangeDevice() {
-    // Expect the event handler to receive one OnPaying() call and no OnPaused()
-    // call.
-    EXPECT_CALL(mock_event_handler_, OnPlaying())
-        .WillOnce(SignalEvent(&play_event_));
-    EXPECT_CALL(mock_event_handler_, OnPaused())
-        .Times(0);
-
-    // Simulate a device change event to AudioOutputController from the
-    // AudioManager.
-    audio_manager_->GetMessageLoop()->PostTask(
-        FROM_HERE,
-        base::Bind(&AudioOutputController::OnDeviceChange, controller_));
-  }
-
-  void Divert(bool was_playing, int num_times_to_be_started) {
-    if (was_playing) {
-      // Expect the handler to receive one OnPlaying() call as a result of the
-      // stream switching.
-      EXPECT_CALL(mock_event_handler_, OnPlaying())
-          .WillOnce(SignalEvent(&play_event_));
-    }
-
-    EXPECT_CALL(mock_stream_, Open())
-        .WillOnce(Return(true));
-    EXPECT_CALL(mock_stream_, SetVolume(kTestVolume));
-    if (num_times_to_be_started > 0) {
-      EXPECT_CALL(mock_stream_, Start(NotNull()))
-          .Times(num_times_to_be_started)
-          .WillRepeatedly(
-              Invoke(&mock_stream_, &MockAudioOutputStream::SetCallback));
-      EXPECT_CALL(mock_stream_, Stop())
-          .Times(num_times_to_be_started);
-    }
-
-    controller_->StartDiverting(&mock_stream_);
-  }
-
-  void ReadDivertedAudioData() {
-    scoped_ptr<AudioBus> dest = AudioBus::Create(params_);
-    ASSERT_TRUE(!!mock_stream_.callback());
-    const int frames_read =
-        mock_stream_.callback()->OnMoreData(dest.get(), AudioBuffersState());
-    EXPECT_LT(0, frames_read);
-    EXPECT_EQ(kBufferNonZeroData, dest->channel(0)[0]);
-  }
-
-  void Revert(bool was_playing) {
-    if (was_playing) {
-      // Expect the handler to receive one OnPlaying() call as a result of the
-      // stream switching back.
-      EXPECT_CALL(mock_event_handler_, OnPlaying())
-          .WillOnce(SignalEvent(&play_event_));
-    }
-
-    EXPECT_CALL(mock_stream_, Close());
-
-    controller_->StopDiverting();
-  }
-
-  void SwitchDevice(bool diverting) {
-    if (!diverting) {
-      // Expect the current stream to close and a new stream to start
-      // playing if not diverting. When diverting, nothing happens
-      // until diverting is stopped.
-      EXPECT_CALL(mock_event_handler_, OnPlaying())
-          .WillOnce(SignalEvent(&play_event_));
-    }
-
-    controller_->SwitchOutputDevice(AudioManagerBase::kDefaultDeviceName,
-                                    base::Bind(&base::DoNothing));
-  }
-
-  void Close() {
-    EXPECT_CALL(mock_sync_reader_, Close());
-
-    controller_->Close(base::MessageLoop::QuitClosure());
-    base::MessageLoop::current()->Run();
-  }
-
-  // These help make test sequences more readable.
-  void DivertNeverPlaying() { Divert(false, 0); }
-  void DivertWillEventuallyBeTwicePlayed() { Divert(false, 2); }
-  void DivertWhilePlaying() { Divert(true, 1); }
-  void RevertWasNotPlaying() { Revert(false); }
-  void RevertWhilePlaying() { Revert(true); }
-
-  // These synchronize the main thread with key events taking place on other
-  // threads.
-  void WaitForCreate() { create_event_.Wait(); }
-  void WaitForPlay() { play_event_.Wait(); }
-  void WaitForReads() {
-    // Note: Arbitrarily chosen, but more iterations causes tests to take
-    // significantly more time.
-    static const int kNumIterations = 3;
-    for (int i = 0; i < kNumIterations; ++i) {
-      read_event_.Wait();
-    }
-  }
-  void WaitForPause() { pause_event_.Wait(); }
-
- private:
-  base::MessageLoopForIO message_loop_;
-  scoped_ptr<AudioManager> audio_manager_;
-  MockAudioOutputControllerEventHandler mock_event_handler_;
-  MockAudioOutputControllerSyncReader mock_sync_reader_;
-  MockAudioOutputStream mock_stream_;
-  base::WaitableEvent create_event_;
-  base::WaitableEvent play_event_;
-  base::WaitableEvent read_event_;
-  base::WaitableEvent pause_event_;
-  AudioParameters params_;
-  scoped_refptr<AudioOutputController> controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioOutputControllerTest);
-};
-
-TEST_F(AudioOutputControllerTest, CreateAndClose) {
-  Create(kSamplesPerPacket);
-  Close();
+// Closes AudioOutputController synchronously.
+static void CloseAudioController(AudioOutputController* controller) {
+  base::WaitableEvent closed_event(true, false);
+  controller->Close(base::Bind(&SignalClosedEvent, &closed_event));
+  closed_event.Wait();
 }
 
-TEST_F(AudioOutputControllerTest, HardwareBufferTooLarge) {
-  Create(kSamplesPerPacket * 1000);
+TEST(AudioOutputControllerTest, CreateAndClose) {
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!audio_manager->HasAudioOutputDevices())
+    return;
+
+  MockAudioOutputControllerEventHandler event_handler;
+
+  EXPECT_CALL(event_handler, OnCreated(NotNull()))
+      .Times(1);
+  EXPECT_CALL(event_handler, OnMoreData(NotNull(), _));
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
+                         kSampleRate, kBitsPerSample, kSamplesPerPacket);
+  scoped_refptr<AudioOutputController> controller =
+      AudioOutputController::Create(audio_manager, &event_handler, params,
+                                    kBufferCapacity);
+  ASSERT_TRUE(controller.get());
+
+  // Close the controller immediately.
+  CloseAudioController(controller);
 }
 
-TEST_F(AudioOutputControllerTest, PlayAndClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  Play();
-  WaitForPlay();
-  WaitForReads();
-  Close();
+TEST(AudioOutputControllerTest, PlayAndClose) {
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!audio_manager->HasAudioOutputDevices())
+    return;
+
+  MockAudioOutputControllerEventHandler event_handler;
+  base::WaitableEvent event(false, false);
+
+  // If OnCreated is called then signal the event.
+  EXPECT_CALL(event_handler, OnCreated(NotNull()))
+      .WillOnce(SignalEvent(&event));
+
+  // OnPlaying() will be called only once.
+  EXPECT_CALL(event_handler, OnPlaying(NotNull()))
+      .Times(Exactly(1));
+
+  // If OnMoreData is called enough then signal the event.
+  EXPECT_CALL(event_handler, OnMoreData(NotNull(), _))
+      .Times(AtLeast(10))
+      .WillRepeatedly(SignalEvent(&event));
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
+                         kSampleRate, kBitsPerSample, kSamplesPerPacket);
+  scoped_refptr<AudioOutputController> controller =
+      AudioOutputController::Create(audio_manager, &event_handler, params,
+                                    kBufferCapacity);
+  ASSERT_TRUE(controller.get());
+
+  // Wait for OnCreated() to be called.
+  event.Wait();
+
+  controller->Play();
+
+  // Wait until the date is requested at least 10 times.
+  for (int i = 0; i < 10; i++) {
+    event.Wait();
+    uint8 buf[1];
+    controller->EnqueueData(buf, 0);
+  }
+
+  // Now stop the controller.
+  CloseAudioController(controller);
 }
 
-TEST_F(AudioOutputControllerTest, PlayPauseClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  Play();
-  WaitForPlay();
-  WaitForReads();
-  Pause();
-  WaitForPause();
-  Close();
+TEST(AudioOutputControllerTest, PlayAndCloseLowLatency) {
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!audio_manager->HasAudioOutputDevices())
+    return;
+
+  MockAudioOutputControllerEventHandler event_handler;
+  base::WaitableEvent event(false, false);
+
+  // If OnCreated is called then signal the event.
+  EXPECT_CALL(event_handler, OnCreated(NotNull()))
+      .WillOnce(SignalEvent(&event));
+
+  // OnPlaying() will be called only once.
+  EXPECT_CALL(event_handler, OnPlaying(NotNull()))
+      .Times(Exactly(1));
+
+  MockAudioOutputControllerSyncReader sync_reader;
+  EXPECT_CALL(sync_reader, UpdatePendingBytes(_))
+      .Times(AtLeast(10));
+  EXPECT_CALL(sync_reader, DataReady())
+      .WillOnce(Return(false))
+      .WillOnce(Return(false))
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(sync_reader, Read(_, kHardwareBufferSize))
+      .Times(AtLeast(10))
+      .WillRepeatedly(DoAll(SignalEvent(&event),
+                            Return(4)));
+  EXPECT_CALL(sync_reader, Close());
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
+                         kSampleRate, kBitsPerSample, kSamplesPerPacket);
+  scoped_refptr<AudioOutputController> controller =
+      AudioOutputController::CreateLowLatency(audio_manager,
+                                              &event_handler,
+                                              params,
+                                              &sync_reader);
+  ASSERT_TRUE(controller.get());
+
+  // Wait for OnCreated() to be called.
+  event.Wait();
+
+  controller->Play();
+
+  // Wait until the date is requested at least 10 times.
+  for (int i = 0; i < 10; i++) {
+    event.Wait();
+    uint8 buf[1];
+    controller->EnqueueData(buf, 0);
+  }
+
+  // Now stop the controller.
+  CloseAudioController(controller);
 }
 
-TEST_F(AudioOutputControllerTest, PlayPausePlayClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  Play();
-  WaitForPlay();
-  WaitForReads();
-  Pause();
-  WaitForPause();
-  Play();
-  WaitForPlay();
-  Close();
+TEST(AudioOutputControllerTest, PlayPauseClose) {
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!audio_manager->HasAudioOutputDevices())
+    return;
+
+  MockAudioOutputControllerEventHandler event_handler;
+  base::WaitableEvent event(false, false);
+  base::WaitableEvent pause_event(false, false);
+
+  // If OnCreated is called then signal the event.
+  EXPECT_CALL(event_handler, OnCreated(NotNull()))
+      .Times(Exactly(1))
+      .WillOnce(InvokeWithoutArgs(&event, &base::WaitableEvent::Signal));
+
+  // OnPlaying() will be called only once.
+  EXPECT_CALL(event_handler, OnPlaying(NotNull()))
+      .Times(Exactly(1));
+
+  // If OnMoreData is called enough then signal the event.
+  EXPECT_CALL(event_handler, OnMoreData(NotNull(), _))
+      .Times(AtLeast(10))
+      .WillRepeatedly(SignalEvent(&event));
+
+  // And then OnPaused() will be called.
+  EXPECT_CALL(event_handler, OnPaused(NotNull()))
+      .Times(Exactly(1))
+      .WillOnce(InvokeWithoutArgs(&pause_event, &base::WaitableEvent::Signal));
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
+                         kSampleRate, kBitsPerSample, kSamplesPerPacket);
+  scoped_refptr<AudioOutputController> controller =
+      AudioOutputController::Create(audio_manager, &event_handler, params,
+                                    kBufferCapacity);
+  ASSERT_TRUE(controller.get());
+
+  // Wait for OnCreated() to be called.
+  event.Wait();
+
+  controller->Play();
+
+  // Wait until the date is requested at least 10 times.
+  for (int i = 0; i < 10; i++) {
+    event.Wait();
+    uint8 buf[1];
+    controller->EnqueueData(buf, 0);
+  }
+
+  // And then wait for pause to complete.
+  ASSERT_FALSE(pause_event.IsSignaled());
+  controller->Pause();
+  pause_event.Wait();
+
+  // Now stop the controller.
+  CloseAudioController(controller);
 }
 
-TEST_F(AudioOutputControllerTest, PlayDeviceChangeClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  Play();
-  WaitForPlay();
-  WaitForReads();
-  ChangeDevice();
-  WaitForPlay();
-  WaitForReads();
-  Close();
+TEST(AudioOutputControllerTest, PlayPauseCloseLowLatency) {
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!audio_manager->HasAudioOutputDevices())
+    return;
+
+  MockAudioOutputControllerEventHandler event_handler;
+  base::WaitableEvent event(false, false);
+  base::WaitableEvent pause_event(false, false);
+
+  // If OnCreated is called then signal the event.
+  EXPECT_CALL(event_handler, OnCreated(NotNull()))
+      .WillOnce(InvokeWithoutArgs(&event, &base::WaitableEvent::Signal));
+
+  // OnPlaying() will be called only once.
+  EXPECT_CALL(event_handler, OnPlaying(NotNull()));
+
+  MockAudioOutputControllerSyncReader sync_reader;
+  EXPECT_CALL(sync_reader, UpdatePendingBytes(_))
+      .Times(AtLeast(2));
+  EXPECT_CALL(sync_reader, Read(_, kHardwareBufferSize))
+      .WillRepeatedly(DoAll(SignalEvent(&event),
+                            Return(4)));
+  EXPECT_CALL(event_handler, OnPaused(NotNull()))
+      .WillOnce(InvokeWithoutArgs(&pause_event, &base::WaitableEvent::Signal));
+  EXPECT_CALL(sync_reader, Close());
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
+                         kSampleRate, kBitsPerSample, kSamplesPerPacket);
+  scoped_refptr<AudioOutputController> controller =
+      AudioOutputController::CreateLowLatency(audio_manager,
+                                              &event_handler,
+                                              params,
+                                              &sync_reader);
+  ASSERT_TRUE(controller.get());
+
+  // Wait for OnCreated() to be called.
+  event.Wait();
+
+  ASSERT_FALSE(pause_event.IsSignaled());
+  controller->Play();
+  controller->Pause();
+  pause_event.Wait();
+
+  // Now stop the controller.
+  CloseAudioController(controller);
 }
 
-TEST_F(AudioOutputControllerTest, PlaySwitchDeviceClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  Play();
-  WaitForPlay();
-  WaitForReads();
-  SwitchDevice(false);
-  WaitForPlay();
-  WaitForReads();
-  Close();
+TEST(AudioOutputControllerTest, PlayPausePlay) {
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!audio_manager->HasAudioOutputDevices())
+    return;
+
+  MockAudioOutputControllerEventHandler event_handler;
+  base::WaitableEvent event(false, false);
+  base::WaitableEvent pause_event(false, false);
+
+  // If OnCreated is called then signal the event.
+  EXPECT_CALL(event_handler, OnCreated(NotNull()))
+      .Times(Exactly(1))
+      .WillOnce(InvokeWithoutArgs(&event, &base::WaitableEvent::Signal));
+
+  // OnPlaying() will be called only once.
+  EXPECT_CALL(event_handler, OnPlaying(NotNull()))
+      .Times(Exactly(1))
+      .RetiresOnSaturation();
+
+  // If OnMoreData() is called enough then signal the event.
+  EXPECT_CALL(event_handler, OnMoreData(NotNull(), _))
+      .Times(AtLeast(1))
+      .WillRepeatedly(SignalEvent(&event));
+
+  // And then OnPaused() will be called.
+  EXPECT_CALL(event_handler, OnPaused(NotNull()))
+      .Times(Exactly(1))
+      .WillOnce(InvokeWithoutArgs(&pause_event, &base::WaitableEvent::Signal));
+
+  // OnPlaying() will be called only once.
+  EXPECT_CALL(event_handler, OnPlaying(NotNull()))
+    .Times(Exactly(1))
+    .RetiresOnSaturation();
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
+                         kSampleRate, kBitsPerSample, kSamplesPerPacket);
+  scoped_refptr<AudioOutputController> controller =
+      AudioOutputController::Create(audio_manager, &event_handler, params,
+                                    kBufferCapacity);
+  ASSERT_TRUE(controller.get());
+
+  // Wait for OnCreated() to be called.
+  event.Wait();
+
+  controller->Play();
+
+  // Wait until the date is requested at least 10 times.
+  for (int i = 0; i < 10; i++) {
+    event.Wait();
+    uint8 buf[1];
+    controller->EnqueueData(buf, 0);
+  }
+
+  // And then wait for pause to complete.
+  ASSERT_FALSE(pause_event.IsSignaled());
+  controller->Pause();
+  pause_event.Wait();
+
+  // Then we play again.
+  controller->Play();
+
+  // Wait until the date is requested at least 10 times.
+  for (int i = 0; i < 10; i++) {
+    event.Wait();
+    uint8 buf[1];
+    controller->EnqueueData(buf, 0);
+  }
+
+  // Now stop the controller.
+  CloseAudioController(controller);
 }
 
-TEST_F(AudioOutputControllerTest, PlayDivertRevertClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  Play();
-  WaitForPlay();
-  WaitForReads();
-  DivertWhilePlaying();
-  WaitForPlay();
-  ReadDivertedAudioData();
-  RevertWhilePlaying();
-  WaitForPlay();
-  WaitForReads();
-  Close();
+TEST(AudioOutputControllerTest, HardwareBufferTooLarge) {
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!audio_manager->HasAudioOutputDevices())
+    return;
+
+  // Create an audio device with a very large hardware buffer size.
+  MockAudioOutputControllerEventHandler event_handler;
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
+                         kSampleRate, kBitsPerSample,
+                         kSamplesPerPacket * 1000);
+  scoped_refptr<AudioOutputController> controller =
+      AudioOutputController::Create(audio_manager, &event_handler, params,
+                                    kBufferCapacity);
+
+  // Use assert because we don't stop the device and assume we can't
+  // create one.
+  ASSERT_FALSE(controller);
 }
 
-TEST_F(AudioOutputControllerTest, PlayDivertSwitchDeviceRevertClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  Play();
-  WaitForPlay();
-  WaitForReads();
-  DivertWhilePlaying();
-  WaitForPlay();
-  SwitchDevice(true);
-  ReadDivertedAudioData();
-  RevertWhilePlaying();
-  WaitForPlay();
-  WaitForReads();
-  Close();
-}
+TEST(AudioOutputControllerTest, CloseTwice) {
+  scoped_refptr<AudioManager> audio_manager(AudioManager::Create());
+  if (!audio_manager->HasAudioOutputDevices())
+    return;
 
-TEST_F(AudioOutputControllerTest, PlayDivertRevertDivertRevertClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  Play();
-  WaitForPlay();
-  WaitForReads();
-  DivertWhilePlaying();
-  WaitForPlay();
-  ReadDivertedAudioData();
-  RevertWhilePlaying();
-  WaitForPlay();
-  WaitForReads();
-  DivertWhilePlaying();
-  WaitForPlay();
-  ReadDivertedAudioData();
-  RevertWhilePlaying();
-  WaitForPlay();
-  WaitForReads();
-  Close();
-}
+  MockAudioOutputControllerEventHandler event_handler;
+  base::WaitableEvent event(false, false);
 
-TEST_F(AudioOutputControllerTest, DivertPlayPausePlayRevertClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  DivertWillEventuallyBeTwicePlayed();
-  Play();
-  WaitForPlay();
-  ReadDivertedAudioData();
-  Pause();
-  WaitForPause();
-  Play();
-  WaitForPlay();
-  ReadDivertedAudioData();
-  RevertWhilePlaying();
-  WaitForPlay();
-  WaitForReads();
-  Close();
-}
+  // If OnCreated is called then signal the event.
+  EXPECT_CALL(event_handler, OnCreated(NotNull()))
+      .WillOnce(SignalEvent(&event));
 
-TEST_F(AudioOutputControllerTest, DivertRevertClose) {
-  Create(kSamplesPerPacket);
-  WaitForCreate();
-  DivertNeverPlaying();
-  RevertWasNotPlaying();
-  Close();
+  // One OnMoreData() is expected.
+  EXPECT_CALL(event_handler, OnMoreData(NotNull(), _))
+      .Times(AtLeast(1))
+      .WillRepeatedly(SignalEvent(&event));
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
+                         kSampleRate, kBitsPerSample, kSamplesPerPacket);
+  scoped_refptr<AudioOutputController> controller =
+      AudioOutputController::Create(audio_manager, &event_handler, params,
+                                    kBufferCapacity);
+  ASSERT_TRUE(controller.get());
+
+  // Wait for OnCreated() to be called.
+  event.Wait();
+
+  // Wait for OnMoreData() to be called.
+  event.Wait();
+
+  base::WaitableEvent closed_event_1(true, false);
+  controller->Close(base::Bind(&SignalClosedEvent, &closed_event_1));
+
+  base::WaitableEvent closed_event_2(true, false);
+  controller->Close(base::Bind(&SignalClosedEvent, &closed_event_2));
+
+  closed_event_1.Wait();
+  closed_event_2.Wait();
 }
 
 }  // namespace media

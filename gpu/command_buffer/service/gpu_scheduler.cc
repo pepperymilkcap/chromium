@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,44 +8,38 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug/trace_event.h"
-#include "base/message_loop/message_loop.h"
-#include "base/time/time.h"
-#include "ui/gl/gl_bindings.h"
-#include "ui/gl/gl_fence.h"
-#include "ui/gl/gl_switches.h"
-
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
+#include "base/message_loop.h"
+#include "base/time.h"
+#include "ui/gfx/gl/gl_bindings.h"
+#include "ui/gfx/gl/gl_fence.h"
+#include "ui/gfx/gl/gl_switches.h"
 
 using ::base::SharedMemory;
 
 namespace gpu {
 
-const int64 kUnscheduleFenceTimeOutDelay = 10000;
+namespace {
+const int64 kRescheduleTimeOutDelay = 100;
+}
 
-#if defined(OS_WIN)
-const int64 kRescheduleTimeOutDelay = 1000;
-#endif
-
-GpuScheduler::GpuScheduler(CommandBuffer* command_buffer,
-                           AsyncAPIInterface* handler,
-                           gles2::GLES2Decoder* decoder)
+GpuScheduler::GpuScheduler(
+    CommandBuffer* command_buffer,
+    AsyncAPIInterface* handler,
+    gles2::GLES2Decoder* decoder)
     : command_buffer_(command_buffer),
       handler_(handler),
       decoder_(decoder),
+      parser_(NULL),
       unscheduled_count_(0),
       rescheduled_count_(0),
-      reschedule_task_factory_(this),
-      was_preempted_(false) {}
+      reschedule_task_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+}
 
 GpuScheduler::~GpuScheduler() {
 }
 
 void GpuScheduler::PutChanged() {
-  TRACE_EVENT1(
-     "gpu", "GpuScheduler:PutChanged",
-     "decoder", decoder_ ? decoder_->GetLogger()->GetLogPrefix() : "None");
+  TRACE_EVENT1("gpu", "GpuScheduler:PutChanged", "this", this);
 
   CommandBuffer::State state = command_buffer_->GetState();
 
@@ -67,21 +61,12 @@ void GpuScheduler::PutChanged() {
   if (!IsScheduled())
     return;
 
-  base::TimeTicks begin_time(base::TimeTicks::HighResNow());
   error::Error error = error::kNoError;
   while (!parser_->IsEmpty()) {
-    if (IsPreempted())
-      break;
-
     DCHECK(IsScheduled());
     DCHECK(unschedule_fences_.empty());
 
     error = parser_->ProcessCommand();
-
-    if (error == error::kDeferCommandUntilLater) {
-      DCHECK_GT(unscheduled_count_, 0);
-      break;
-    }
 
     // TODO(piman): various classes duplicate various pieces of state, leading
     // to needlessly complex update logic. It should be possible to simply
@@ -89,27 +74,16 @@ void GpuScheduler::PutChanged() {
     command_buffer_->SetGetOffset(static_cast<int32>(parser_->get()));
 
     if (error::IsError(error)) {
-      LOG(ERROR) << "[" << decoder_ << "] "
-                 << "GPU PARSE ERROR: " << error;
       command_buffer_->SetContextLostReason(decoder_->GetContextLostReason());
       command_buffer_->SetParseError(error);
-      break;
+      return;
     }
 
     if (!command_processed_callback_.is_null())
       command_processed_callback_.Run();
 
     if (unscheduled_count_ > 0)
-      break;
-  }
-
-  if (decoder_) {
-    if (!error::IsError(error) && decoder_->WasContextLost()) {
-      command_buffer_->SetContextLostReason(decoder_->GetContextLostReason());
-      command_buffer_->SetParseError(error::kLostContext);
-    }
-    decoder_->AddProcessingCommandsTime(
-        base::TimeTicks::HighResNow() - begin_time);
+      return;
   }
 }
 
@@ -131,35 +105,28 @@ void GpuScheduler::SetScheduled(bool scheduled) {
     DCHECK_GE(unscheduled_count_, 0);
 
     if (unscheduled_count_ == 0) {
-      TRACE_EVENT_ASYNC_END1("gpu", "ProcessingSwap", this,
-                             "GpuScheduler", this);
       // When the scheduler transitions from the unscheduled to the scheduled
       // state, cancel the task that would reschedule it after a timeout.
       reschedule_task_factory_.InvalidateWeakPtrs();
 
-      if (!scheduling_changed_callback_.is_null())
-        scheduling_changed_callback_.Run(true);
+      if (!scheduled_callback_.is_null())
+        scheduled_callback_.Run();
     }
   } else {
-    ++unscheduled_count_;
-    if (unscheduled_count_ == 1) {
-      TRACE_EVENT_ASYNC_BEGIN1("gpu", "ProcessingSwap", this,
-                               "GpuScheduler", this);
+    if (unscheduled_count_ == 0) {
 #if defined(OS_WIN)
-      if (base::win::GetVersion() < base::win::VERSION_VISTA) {
-        // When the scheduler transitions from scheduled to unscheduled, post a
-        // delayed task that it will force it back into a scheduled state after
-        // a timeout. This should only be necessary on pre-Vista.
-        base::MessageLoop::current()->PostDelayedTask(
-            FROM_HERE,
-            base::Bind(&GpuScheduler::RescheduleTimeOut,
-                       reschedule_task_factory_.GetWeakPtr()),
-            base::TimeDelta::FromMilliseconds(kRescheduleTimeOutDelay));
-      }
+      // When the scheduler transitions from scheduled to unscheduled, post a
+      // delayed task that it will force it back into a scheduled state after a
+      // timeout.
+      MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&GpuScheduler::RescheduleTimeOut,
+                     reschedule_task_factory_.GetWeakPtr()),
+          base::TimeDelta::FromMilliseconds(kRescheduleTimeOutDelay));
 #endif
-      if (!scheduling_changed_callback_.is_null())
-        scheduling_changed_callback_.Run(false);
     }
+
+    ++unscheduled_count_;
   }
 }
 
@@ -168,14 +135,12 @@ bool GpuScheduler::IsScheduled() {
 }
 
 bool GpuScheduler::HasMoreWork() {
-  return !unschedule_fences_.empty() ||
-         (decoder_ && decoder_->ProcessPendingQueries()) ||
-         HasMoreIdleWork();
+  return !unschedule_fences_.empty();
 }
 
-void GpuScheduler::SetSchedulingChangedCallback(
-    const SchedulingChangedCallback& callback) {
-  scheduling_changed_callback_ = callback;
+void GpuScheduler::SetScheduledCallback(
+    const base::Closure& scheduled_callback) {
+  scheduled_callback_ = scheduled_callback;
 }
 
 Buffer GpuScheduler::GetSharedMemoryBuffer(int32 shm_id) {
@@ -226,7 +191,6 @@ void GpuScheduler::SetCommandProcessedCallback(
 void GpuScheduler::DeferToFence(base::Closure task) {
   unschedule_fences_.push(make_linked_ptr(
        new UnscheduleFence(gfx::GLFence::Create(), task)));
-  SetScheduled(false);
 }
 
 bool GpuScheduler::PollUnscheduleFences() {
@@ -234,17 +198,10 @@ bool GpuScheduler::PollUnscheduleFences() {
     return true;
 
   if (unschedule_fences_.front()->fence.get()) {
-    base::Time now = base::Time::Now();
-    base::TimeDelta timeout =
-        base::TimeDelta::FromMilliseconds(kUnscheduleFenceTimeOutDelay);
-
     while (!unschedule_fences_.empty()) {
-      const UnscheduleFence& fence = *unschedule_fences_.front();
-      if (fence.fence->HasCompleted() ||
-          now - fence.issue_time > timeout) {
+      if (unschedule_fences_.front()->fence->HasCompleted()) {
         unschedule_fences_.front()->task.Run();
         unschedule_fences_.pop();
-        SetScheduled(true);
       } else {
         return false;
       }
@@ -255,36 +212,10 @@ bool GpuScheduler::PollUnscheduleFences() {
     while (!unschedule_fences_.empty()) {
       unschedule_fences_.front()->task.Run();
       unschedule_fences_.pop();
-      SetScheduled(true);
     }
   }
 
   return true;
-}
-
-bool GpuScheduler::IsPreempted() {
-  if (!preemption_flag_.get())
-    return false;
-
-  if (!was_preempted_ && preemption_flag_->IsSet()) {
-    TRACE_COUNTER_ID1("gpu", "GpuScheduler::Preempted", this, 1);
-    was_preempted_ = true;
-  } else if (was_preempted_ && !preemption_flag_->IsSet()) {
-    TRACE_COUNTER_ID1("gpu", "GpuScheduler::Preempted", this, 0);
-    was_preempted_ = false;
-  }
-
-  return preemption_flag_->IsSet();
-}
-
-bool GpuScheduler::HasMoreIdleWork() {
-  return (decoder_ && decoder_->HasMoreIdleWork());
-}
-
-void GpuScheduler::PerformIdleWork() {
-  if (!decoder_)
-    return;
-  decoder_->PerformIdleWork();
 }
 
 void GpuScheduler::RescheduleTimeOut() {
@@ -298,11 +229,8 @@ void GpuScheduler::RescheduleTimeOut() {
   rescheduled_count_ = new_count;
 }
 
-GpuScheduler::UnscheduleFence::UnscheduleFence(gfx::GLFence* fence_,
-                                               base::Closure task_)
-  : fence(fence_),
-    issue_time(base::Time::Now()),
-    task(task_) {
+GpuScheduler::UnscheduleFence::UnscheduleFence(
+    gfx::GLFence* fence_, base::Closure task_): fence(fence_), task(task_) {
 }
 
 GpuScheduler::UnscheduleFence::~UnscheduleFence() {

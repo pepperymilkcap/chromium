@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <map>
 
 #include "base/file_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 
-#if defined(OS_WIN)
+#ifdef OS_WIN
 
 namespace courgette {
 
@@ -31,8 +31,8 @@ void TempFile::Close() {
 
 bool TempFile::Create() {
   DCHECK(file_ == base::kInvalidPlatformFileValue);
-  base::FilePath path;
-  if (!base::CreateTemporaryFile(&path))
+  FilePath path;
+  if (!file_util::CreateTemporaryFile(&path))
     return false;
 
   bool created = false;
@@ -135,8 +135,6 @@ bool TempMapping::Initialize(size_t size) {
 
 void* TempMapping::memory() const {
   uint8* mem = reinterpret_cast<uint8*>(mapping_.view());
-  // The 'this' pointer is written at the start of mapping_.view(), so
-  // go past it. (See Initialize()).
   if (mem)
     mem += sizeof(this);
   DCHECK(mem);

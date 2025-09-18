@@ -20,7 +20,7 @@ class PPP_InputEvent_Proxy : public InterfaceProxy {
   PPP_InputEvent_Proxy(Dispatcher* dispatcher);
   virtual ~PPP_InputEvent_Proxy();
 
-  static const PPP_InputEvent* GetProxyInterface();
+  static const Info* GetInfo();
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);

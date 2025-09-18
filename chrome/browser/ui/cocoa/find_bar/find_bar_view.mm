@@ -8,7 +8,6 @@
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
-#import "ui/base/cocoa/nsgraphics_context_additions.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 namespace {
@@ -70,10 +69,9 @@ CGFloat kCurveSize = 8;
     [path addClip];
 
     // Set the pattern phase
-    NSPoint position = [[self window]
-        themeImagePositionForAlignment:THEME_IMAGE_ALIGN_WITH_TAB_STRIP];
-    [context cr_setPatternPhase:position forView:self];
+    NSPoint phase = [[self window] themePatternPhase];
 
+    [context setPatternPhase:phase];
     [super drawBackgroundWithOpaque:YES];
   }
 

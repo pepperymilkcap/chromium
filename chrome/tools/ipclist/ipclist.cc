@@ -7,11 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
-
 // Include once to get the type definitions
 #include "chrome/common/all_messages.h"
-#include "content/common/all_messages.h"
 
 struct msginfo {
   const char* name;
@@ -19,7 +16,7 @@ struct msginfo {
   int in_count;
   int out_count;
 
-  bool operator< (const msginfo& other) const {
+  bool operator< (const msginfo other) const {
     return id < other.id;
   }
 };
@@ -32,10 +29,8 @@ struct msginfo {
 
 static msginfo msgtable[] = {
 #include "chrome/common/all_messages.h"
-#include "content/common/all_messages.h"
 };
 #define MSGTABLE_SIZE (sizeof(msgtable)/sizeof(msgtable[0]))
-COMPILE_ASSERT(MSGTABLE_SIZE, CHECK_YOUR_HEADERS_FOR_AN_EXTRA_SEMICOLON);
 
 static bool check_msgtable() {
   bool result = true;
@@ -43,11 +38,10 @@ static bool check_msgtable() {
   int highest_class_id = 0;
   std::vector<int> exemptions;
 
-  // Exclude test and other non-browser files from consideration.  Do not
-  // include message files used inside the actual chrome browser in this list.
+  // Exclude test files from consideration.  Do not include message
+  // files used inside the actual chrome browser in this list.
   exemptions.push_back(TestMsgStart);
   exemptions.push_back(FirefoxImporterUnittestMsgStart);
-  exemptions.push_back(ShellMsgStart);
 
   for (size_t i = 0; i < MSGTABLE_SIZE; ++i) {
     int class_id = IPC_MESSAGE_ID_CLASS(msgtable[i].id);
@@ -70,19 +64,13 @@ static bool check_msgtable() {
       highest_class_id = class_id;
   }
 
-  while (LastIPCMsgStart > highest_class_id + 1) {
-    std::vector<int>::iterator iter;
-    iter = find(exemptions.begin(), exemptions.end(), highest_class_id+1);
-    if (iter == exemptions.end()) {
+  if (LastIPCMsgStart > highest_class_id + 1) {
       std::cout << "Missing message file: gap before LastIPCMsgStart\n";
       result = false;
-      break;
-    }
-    ++highest_class_id;
   }
 
   if (!result)
-    std::cout << "Please check {chrome,content}/common/all_messages.h.\n";
+    std::cout << "Please check chrome/common/all_messages.h.\n";
 
   return result;
 }

@@ -104,7 +104,6 @@ struct InstanceInfo* FindInstance(PP_Instance instance) {
   while (cur) {
     if (cur->pp_instance == instance)
       return cur;
-    cur = cur->next;
   }
   return NULL;
 }
@@ -138,7 +137,6 @@ void Instance_DidDestroy(PP_Instance instance) {
       return;
     }
     prev_ptr = &cur->next;
-    cur = cur->next;
   }
 }
 

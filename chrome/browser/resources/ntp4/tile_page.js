@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('ntp', function() {
+cr.define('ntp4', function() {
   'use strict';
 
   // We can't pass the currently dragging tile via dataTransfer because of
@@ -14,9 +14,9 @@ cr.define('ntp', function() {
   function setCurrentlyDraggingTile(tile) {
     currentlyDraggingTile = tile;
     if (tile)
-      ntp.enterRearrangeMode();
+      ntp4.enterRearrangeMode();
     else
-      ntp.leaveRearrangeMode();
+      ntp4.leaveRearrangeMode();
   }
 
   /**
@@ -66,7 +66,7 @@ cr.define('ntp', function() {
     },
 
     get index() {
-      return Array.prototype.indexOf.call(this.tilePage.tileElements_, this);
+      return Array.prototype.indexOf.call(this.parentNode.children, this);
     },
 
     get tilePage() {
@@ -92,9 +92,9 @@ cr.define('ntp', function() {
      */
     moveTo: function(x, y) {
       // left overrides right in LTR, and right takes precedence in RTL.
-      this.style.left = toCssPx(x);
-      this.style.right = toCssPx(x);
-      this.style.top = toCssPx(y);
+      this.style.left = x + 'px';
+      this.style.right = x + 'px';
+      this.style.top = y + 'px';
     },
 
     /**
@@ -148,8 +148,8 @@ cr.define('ntp', function() {
       }
 
       this.dragClone.hidden = false;
-      this.dragClone.style.left = toCssPx(e.x - this.dragOffsetX);
-      this.dragClone.style.top = toCssPx(e.y - this.dragOffsetY);
+      this.dragClone.style.left = (e.x - this.dragOffsetX) + 'px';
+      this.dragClone.style.top = (e.y - this.dragOffsetY) + 'px';
     },
 
     /**
@@ -184,13 +184,11 @@ cr.define('ntp', function() {
               this.firstChild.offsetLeft;
           var contentDiffY = this.dragClone.firstChild.offsetTop -
               this.firstChild.offsetTop;
-          this.dragClone.style.left =
-              toCssPx(this.gridX + this.parentNode.offsetLeft -
-                         contentDiffX);
+          this.dragClone.style.left = (this.gridX + this.parentNode.offsetLeft -
+              contentDiffX) + 'px';
           this.dragClone.style.top =
-              toCssPx(this.gridY +
-                         this.parentNode.getBoundingClientRect().top -
-                         contentDiffY);
+              (this.gridY + this.parentNode.getBoundingClientRect().top -
+              contentDiffY) + 'px';
         } else if (this.dragClone.hidden) {
           this.finalizeDrag_();
         } else {
@@ -300,7 +298,7 @@ cr.define('ntp', function() {
       if (opt_animate)
         this.firstChild.classList.add('removing-tile-contents');
       else
-        this.tilePage.removeTile(this, false);
+        this.parentNode.removeChild(this);
     },
 
     /**
@@ -429,11 +427,6 @@ cr.define('ntp', function() {
       this.tileGrid_ = this.ownerDocument.createElement('div');
       this.tileGrid_.className = 'tile-grid';
       this.tileGrid_.style.minWidth = this.gridValues_.narrowWidth + 'px';
-      this.tileGrid_.setAttribute('role', 'menu');
-      this.tileGrid_.setAttribute('aria-label',
-          loadTimeData.getString(
-              'tile_grid_screenreader_accessible_description'));
-
       this.content_.appendChild(this.tileGrid_);
 
       // Ordered list of our tiles.
@@ -455,6 +448,7 @@ cr.define('ntp', function() {
       this.addEventListener('DOMNodeInsertedIntoDocument',
                             this.onNodeInsertedIntoDocument_);
 
+      this.addEventListener('mousewheel', this.onMouseWheel_);
       this.content_.addEventListener('scroll', this.onScroll_.bind(this));
 
       this.dragWrapper_ = new cr.ui.DragWrapper(this.tileGrid_, this);
@@ -478,7 +472,7 @@ cr.define('ntp', function() {
 
     get selected() {
       return Array.prototype.indexOf.call(this.parentNode.children, this) ==
-          ntp.getCardSlider().currentCard;
+          ntp4.getCardSlider().currentCard;
     },
 
     /**
@@ -509,37 +503,6 @@ cr.define('ntp', function() {
     },
 
     /**
-     * The notification content of this tile (if any, otherwise null).
-     * @type {!HTMLElement}
-     */
-    get notification() {
-      return this.topMargin_.nextElementSibling.id == 'notification-container' ?
-          this.topMargin_.nextElementSibling : null;
-    },
-    /**
-     * The notification content of this tile (if any, otherwise null).
-     * @type {!HTMLElement}
-     */
-    set notification(node) {
-      assert(node instanceof HTMLElement, '|node| isn\'t an HTMLElement!');
-      // NOTE: Implicitly removes from DOM if |node| is inside it.
-      this.content_.insertBefore(node, this.topMargin_.nextElementSibling);
-      this.positionNotification_();
-    },
-
-    /**
-     * Fetches the size, in pixels, of the padding-top of the tile contents.
-     * @type {number}
-     */
-    get contentPadding() {
-      if (typeof this.contentPadding_ == 'undefined') {
-        this.contentPadding_ =
-            parseInt(getComputedStyle(this.content_).paddingTop, 10);
-      }
-      return this.contentPadding_;
-    },
-
-    /**
      * Removes the tilePage from the DOM and cleans up event handlers.
      */
     remove: function() {
@@ -565,7 +528,7 @@ cr.define('ntp', function() {
     /**
      * Appends a tile to the end of the tile grid.
      * @param {HTMLElement} tileElement The contents of the tile.
-     * @param {boolean} animate If true, the append will be animated.
+     * @param {?boolean} animate If true, the append will be animated.
      * @protected
      */
     appendTile: function(tileElement, animate) {
@@ -576,13 +539,13 @@ cr.define('ntp', function() {
      * Adds the given element to the tile grid.
      * @param {Node} tileElement The tile object/node to insert.
      * @param {number} index The location in the tile grid to insert it at.
-     * @param {boolean} animate If true, the tile in question will be
+     * @param {boolean=} opt_animate If true, the tile in question will be
      *     animated (other tiles, if they must reposition, do not animate).
      * @protected
      */
-    addTileAt: function(tileElement, index, animate) {
+    addTileAt: function(tileElement, index, opt_animate) {
       this.classList.remove('animating-tile-page');
-      if (animate)
+      if (opt_animate)
         tileElement.classList.add('new-tile-contents');
 
       // Make sure the index is positive and either in the the bounds of
@@ -596,12 +559,8 @@ cr.define('ntp', function() {
       this.calculateLayoutValues_();
       this.heightChanged_();
 
-      this.repositionTiles_();
-
-      // If this is the first tile being added, make it focusable after add.
-      if (this.focusableElements_.length == 1)
-        this.updateFocusableElement();
-      this.fireAddedEvent(wrapperDiv, index, animate);
+      this.positionTile_(index);
+      this.fireAddedEvent(wrapperDiv, index, !!opt_animate);
     },
 
     /**
@@ -629,12 +588,10 @@ cr.define('ntp', function() {
     removeTile: function(tile, opt_animate, opt_dontNotify) {
       if (opt_animate)
         this.classList.add('animating-tile-page');
-
       var index = tile.index;
       tile.parentNode.removeChild(tile);
       this.calculateLayoutValues_();
       this.cleanupDrag();
-      this.updateFocusableElement();
 
       if (!opt_dontNotify)
         this.fireRemovedEvent(tile, index, !!opt_animate);
@@ -669,7 +626,7 @@ cr.define('ntp', function() {
      * @private
      */
     handleCardSelection_: function(e) {
-      this.updateFocusableElement();
+      this.tabIndex = 1;
 
       // When we are selected, we re-calculate the layout values. (See comment
       // in doDrop.)
@@ -682,6 +639,7 @@ cr.define('ntp', function() {
      * @private
      */
     handleCardDeselection_: function(e) {
+      this.tabIndex = -1;
       if (this.currentFocusElement_)
         this.currentFocusElement_.tabIndex = -1;
     },
@@ -748,7 +706,7 @@ cr.define('ntp', function() {
           var currentIndex =
               Array.prototype.indexOf.call(this.focusableElements_,
                                            this.currentFocusElement_);
-          var newFocusIdx = wrap(currentIndex + direction);
+          var newFocusIdx = wrap(currentIndex + direction)
           var tile = this.currentFocusElement_.parentNode;
           for (;; newFocusIdx = wrap(newFocusIdx + direction)) {
             var newTile = this.focusableElements_[newFocusIdx].parentNode;
@@ -771,17 +729,11 @@ cr.define('ntp', function() {
     },
 
     /**
-     * Ensure 0 <= this.focusElementIndex_ < this.focusableElements_.length,
-     * make the focusable element at this.focusElementIndex_ (if any) eligible
-     * for tab focus, and the previously-focused element not eligible.
-     * @protected
+     * Focuses the element for |this.focusElementIndex_|. Makes the current
+     * focus element, if any, no longer eligible for focus.
+     * @private
      */
-    updateFocusableElement: function() {
-      if (this.focusableElements_.length == 0 || !this.selected) {
-        this.focusElementIndex_ = -1;
-        return;
-      }
-
+    updateFocusElement_: function() {
       this.focusElementIndex_ = Math.min(this.focusableElements_.length - 1,
                                          this.focusElementIndex_);
       this.focusElementIndex_ = Math.max(0, this.focusElementIndex_);
@@ -792,17 +744,8 @@ cr.define('ntp', function() {
         lastFocusElement.tabIndex = -1;
 
       newFocusElement.tabIndex = 1;
-    },
-
-    /**
-     * Focuses the element at |this.focusElementIndex_|. Makes the previous
-     * focus element, if any, no longer eligible for tab focus.
-     * @private
-     */
-    updateFocusElement_: function() {
-      this.updateFocusableElement();
-      if (this.focusElementIndex_ >= 0)
-        this.focusableElements_[this.focusElementIndex_].focus();
+      newFocusElement.focus();
+      this.tabIndex = -1;
     },
 
     /**
@@ -844,10 +787,9 @@ cr.define('ntp', function() {
           realTileValues.interTileSpacing;
 
       this.layoutValues_ = {
-        colWidth: realTileValues.offsetX,
-        gridWidth: effectiveGridWidth,
-        leftMargin: leftMargin,
         numRowTiles: numRowTiles,
+        leftMargin: leftMargin,
+        colWidth: realTileValues.offsetX,
         rowHeight: rowHeight,
         tileWidth: realTileValues.tileWidth,
         wide: wide,
@@ -865,18 +807,6 @@ cr.define('ntp', function() {
      */
     firePageLayoutEvent_: function() {
       cr.dispatchSimpleEvent(this, 'pagelayout', true, true);
-    },
-
-    /**
-     * @return {number} The amount of margin that should be animated (in pixels)
-     *     for the current grid layout.
-     */
-    getAnimatedLeftMargin_: function() {
-      if (this.layoutValues_.wide)
-        return 0;
-
-      var grid = this.gridValues_;
-      return (grid.minWideWidth - MIN_WIDE_MARGIN - grid.narrowWidth) / 2;
     },
 
     /**
@@ -904,7 +834,8 @@ cr.define('ntp', function() {
       var animatedTileValues = layout.wide ?
           grid.wideTileValues : grid.narrowTileValues;
       // Animate the difference between three-wide and six-wide.
-      var animatedLeftMargin = this.getAnimatedLeftMargin_();
+      var animatedLeftMargin = layout.wide ?
+          0 : (grid.minWideWidth - MIN_WIDE_MARGIN - grid.narrowWidth) / 2;
       var animatedX = col * animatedTileValues.offsetX + animatedLeftMargin;
       var animatedY = row * (this.heightForWidth(animatedTileValues.tileWidth) +
                              animatedTileValues.interTileSpacing);
@@ -979,7 +910,6 @@ cr.define('ntp', function() {
       this.classList.add('animating-tile-page');
       this.heightChanged_();
 
-      this.positionNotification_();
       this.repositionTiles_();
     },
 
@@ -1023,14 +953,12 @@ cr.define('ntp', function() {
       // be 1/3 down the page.
       var numTiles = this.tileCount +
           (this.isCurrentDragTarget && !this.withinPageDrag_ ? 1 : 0);
-      var numRows = Math.max(1, Math.ceil(numTiles / layout.numRowTiles));
+      var numRows = Math.ceil(numTiles / layout.numRowTiles);
       var usedHeight = layout.rowHeight * numRows;
+      // 60 matches the top padding of tile-page (which acts as the minimum).
       var newMargin = document.documentElement.clientHeight / 3 -
-          usedHeight / 3 - this.contentPadding;
-      // The 'height' style attribute of topMargin is non-zero to work around
-      // webkit's collapsing margin behavior, so we have to factor that into
-      // our calculations here.
-      newMargin = Math.max(newMargin, 0) - this.topMargin_.offsetHeight;
+          usedHeight / 3 - 60;
+      newMargin = Math.max(newMargin, 0);
 
       // |newMargin| is the final margin we actually want to show. However,
       // part of that should be animated and part should not (for the same
@@ -1045,42 +973,14 @@ cr.define('ntp', function() {
         this.topMarginIsForWide_ = layout.wide;
       if (this.topMarginIsForWide_ != layout.wide) {
         this.animatedTopMarginPx_ += newMargin - this.topMarginPx_;
-        this.topMargin_.style.marginBottom = toCssPx(this.animatedTopMarginPx_);
+        this.topMargin_.style.marginBottom =
+            this.animatedTopMarginPx_ + 'px';
       }
 
       this.topMarginIsForWide_ = layout.wide;
       this.topMarginPx_ = newMargin;
       this.topMargin_.style.marginTop =
-          toCssPx(this.topMarginPx_ - this.animatedTopMarginPx_);
-    },
-
-    /**
-     * Position the notification if there's one showing.
-     */
-    positionNotification_: function() {
-      var notification = this.notification;
-      if (!notification || notification.hidden)
-        return;
-
-      // Update the horizontal position.
-      var animatedLeftMargin = this.getAnimatedLeftMargin_();
-      notification.style.WebkitMarginStart = animatedLeftMargin + 'px';
-      var leftOffset = (this.layoutValues_.leftMargin - animatedLeftMargin) *
-                       (isRTL() ? -1 : 1);
-      notification.style.WebkitTransform = 'translateX(' + leftOffset + 'px)';
-
-      // Update the allowable widths of the text.
-      var buttonWidth = notification.querySelector('button').offsetWidth + 8;
-      notification.querySelector('span').style.maxWidth =
-          this.layoutValues_.gridWidth - buttonWidth + 'px';
-
-      // This makes sure the text doesn't condense smaller than the narrow size
-      // of the grid (e.g. when a user makes the window really small).
-      notification.style.minWidth =
-          this.gridValues_.narrowWidth - buttonWidth + 'px';
-
-      // Update the top position.
-      notification.style.marginTop = -notification.offsetHeight + 'px';
+          (this.topMarginPx_ - this.animatedTopMarginPx_) + 'px';
     },
 
     /**
@@ -1105,36 +1005,32 @@ cr.define('ntp', function() {
       // bug where repositioning tiles will cause the scroll position to reset.
       this.tileGrid_.style.minHeight = (this.clientHeight -
           this.tileGrid_.offsetTop - this.content_.offsetTop -
-          this.extraBottomPadding -
-          (this.footerNode_ ? this.footerNode_.clientHeight : 0)) + 'px';
-    },
-
-     /**
-      * Places an element at the bottom of the content div. Used in bare-minimum
-      * mode to hold #footer.
-      * @param {HTMLElement} footerNode The node to append to content.
-      */
-    appendFooter: function(footerNode) {
-      this.footerNode_ = footerNode;
-      this.content_.appendChild(footerNode);
+          this.extraBottomPadding) + 'px';
     },
 
     /**
-     * Scrolls the page in response to an mousewheel event, although the event
-     * may have been triggered on a different element. Return true if the
-     * event triggered scrolling, and false otherwise.
-     * This is called explicitly, which allows a consistent experience whether
-     * the user scrolls on the page or on the page switcher, because this
-     * function provides a common conversion factor between wheel delta and
-     * scroll delta.
+     * Scrolls the page in response to a mousewheel event.
      * @param {Event} e The mousewheel event.
      */
     handleMouseWheel: function(e) {
-      if (e.wheelDeltaY == 0)
-        return false;
-
       this.content_.scrollTop -= e.wheelDeltaY / 3;
-      return true;
+    },
+
+    /**
+     * Handles mouse wheels on |this|. We handle this explicitly because we want
+     * a consistent experience whether the user scrolls on the page or on the
+     * page switcher (handleMouseWheel provides a common conversion factor
+     * between wheel delta and scroll delta).
+     * @param {Event} e The mousewheel event.
+     * @private
+     */
+    onMouseWheel_: function(e) {
+      if (e.wheelDeltaY == 0)
+        return;
+
+      this.handleMouseWheel(e);
+      e.preventDefault();
+      e.stopPropagation();
     },
 
     /**
@@ -1226,6 +1122,7 @@ cr.define('ntp', function() {
      * @param {Event} e A mouseover event for the drag enter.
      */
     doDragEnter: function(e) {
+
       // Applies the mask so doppleganger tiles disappear into the fog.
       this.updateMask_();
 
@@ -1264,7 +1161,6 @@ cr.define('ntp', function() {
      */
     doDrop: function(e) {
       e.stopPropagation();
-      e.preventDefault();
 
       var index = this.currentDropIndex_;
       // Only change data if this was not a 'null drag'.

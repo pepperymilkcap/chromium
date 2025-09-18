@@ -1,31 +1,38 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_DELEGATE_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_DELEGATE_H_
+#pragma once
 
 #include <set>
 #include <string>
 
 #include "base/logging.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/events/event.h"
 
 using ui::OSExchangeData;
 
 namespace gfx {
+
 class Font;
-}
+
+}  // namespace gfx
 
 namespace ui {
+
 class Accelerator;
-}
+
+}  // namespace ui
 
 namespace views {
 
+class DropTargetEvent;
 class MenuButton;
 
 // MenuDelegate --------------------------------------------------------------
@@ -61,29 +68,14 @@ class VIEWS_EXPORT MenuDelegate {
 
   // The string shown for the menu item. This is only invoked when an item is
   // added with an empty label.
-  virtual base::string16 GetLabel(int id) const;
+  virtual string16 GetLabel(int id) const;
 
   // The font for the menu item label.
-  virtual const gfx::Font* GetLabelFont(int id) const;
-
-  // Override the text color of a given menu item dependent on the
-  // |command_id| and its |is_hovered| state. Returns true if it chooses to
-  // override the color.
-  virtual bool GetForegroundColor(int command_id,
-                                  bool is_hovered,
-                                  SkColor* override_color) const;
-
-  // Override the background color of a given menu item dependent on the
-  // |command_id| and its |is_hovered| state. Returns true if it chooses to
-  // override the color.
-  virtual bool GetBackgroundColor(int command_id,
-                                  bool is_hovered,
-                                  SkColor* override_color) const;
+  virtual const gfx::Font& GetLabelFont(int id) const;
 
   // The tooltip shown for the menu item. This is invoked when the user
   // hovers over the item, and no tooltip text has been set for that item.
-  virtual base::string16 GetTooltipText(int id,
-                                        const gfx::Point& screen_loc) const;
+  virtual string16 GetTooltipText(int id, const gfx::Point& screen_loc) const;
 
   // If there is an accelerator for the menu item with id |id| it is set in
   // |accelerator| and true is returned.
@@ -100,12 +92,12 @@ class VIEWS_EXPORT MenuDelegate {
   virtual bool ShowContextMenu(MenuItemView* source,
                                int id,
                                const gfx::Point& p,
-                               ui::MenuSourceType source_type);
+                               bool is_mouse_gesture);
 
   // Controller
   virtual bool SupportsCommand(int id) const;
   virtual bool IsCommandEnabled(int id) const;
-  virtual bool GetContextualLabel(int id, base::string16* out) const;
+  virtual bool GetContextualLabel(int id, string16* out) const;
   virtual void ExecuteCommand(int id) {
   }
 
@@ -117,19 +109,14 @@ class VIEWS_EXPORT MenuDelegate {
   virtual bool ShouldCloseAllMenusOnExecute(int id);
 
   // Executes the specified command. mouse_event_flags give the flags of the
-  // mouse event that triggered this to be invoked (ui::MouseEvent
+  // mouse event that triggered this to be invoked (views::MouseEvent
   // flags). mouse_event_flags is 0 if this is triggered by a user gesture
   // other than a mouse event.
   virtual void ExecuteCommand(int id, int mouse_event_flags);
 
-  // Returns true if ExecuteCommand() should be invoked while leaving the
-  // menu open. Default implementation returns true.
-  virtual bool ShouldExecuteCommandWithoutClosingMenu(int id,
-                                                      const ui::Event& e);
-
-  // Returns true if the specified event is one the user can use to trigger, or
-  // accept, the item. Defaults to left or right mouse buttons or tap.
-  virtual bool IsTriggerableEvent(MenuItemView* view, const ui::Event& e);
+  // Returns true if the specified mouse event is one the user can use
+  // to trigger, or accept, the mouse. Defaults to left or right mouse buttons.
+  virtual bool IsTriggerableEvent(MenuItemView* view, const MouseEvent& e);
 
   // Invoked to determine if drops can be accepted for a submenu. This is
   // ONLY invoked for menus that have submenus and indicates whether or not
@@ -163,17 +150,17 @@ class VIEWS_EXPORT MenuDelegate {
   //
   // If a drop should not be allowed, returned ui::DragDropTypes::DRAG_NONE.
   virtual int GetDropOperation(MenuItemView* item,
-                               const ui::DropTargetEvent& event,
+                               const DropTargetEvent& event,
                                DropPosition* position);
 
-  // Invoked to perform the drop operation. This is ONLY invoked if CanDrop()
-  // returned true for the parent menu item, and GetDropOperation() returned an
-  // operation other than ui::DragDropTypes::DRAG_NONE.
+  // Invoked to perform the drop operation. This is ONLY invoked if
+  // canDrop returned true for the parent menu item, and GetDropOperation
+  // returned an operation other than ui::DragDropTypes::DRAG_NONE.
   //
-  // |menu| is the menu the drop occurred on.
+  // menu indicates the menu the drop occurred on.
   virtual int OnPerformDrop(MenuItemView* menu,
                             DropPosition position,
-                            const ui::DropTargetEvent& event);
+                            const DropTargetEvent& event);
 
   // Invoked to determine if it is possible for the user to drag the specified
   // menu item.
@@ -215,18 +202,6 @@ class VIEWS_EXPORT MenuDelegate {
 
   // Invoked prior to a menu being hidden.
   virtual void WillHideMenu(MenuItemView* menu);
-
-  // Returns additional horizontal spacing for the icon of the given item.
-  // The |command_id| specifies the item of interest, the |icon_size| tells the
-  // function the size of the icon and it will then return |left_margin|
-  // and |right_margin| accordingly. Note: Negative values can be returned.
-  virtual void GetHorizontalIconMargins(int command_id,
-                                        int icon_size,
-                                        int* left_margin,
-                                        int* right_margin) const;
-  // Returns true if the labels should reserve additional spacing for e.g.
-  // submenu indicators at the end of the line.
-  virtual bool ShouldReserveSpaceForSubmenuIndicator() const;
 };
 
 }  // namespace views

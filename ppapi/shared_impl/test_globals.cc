@@ -8,13 +8,11 @@ namespace ppapi {
 
 TestGlobals::TestGlobals()
     : ppapi::PpapiGlobals(),
-      resource_tracker_(ResourceTracker::THREAD_SAFE),
       callback_tracker_(new CallbackTracker) {
 }
 
-TestGlobals::TestGlobals(PpapiGlobals::PerThreadForTest per_thread_for_test)
-    : ppapi::PpapiGlobals(per_thread_for_test),
-      resource_tracker_(ResourceTracker::THREAD_SAFE),
+TestGlobals::TestGlobals(PpapiGlobals::ForTest for_test)
+    : ppapi::PpapiGlobals(for_test),
       callback_tracker_(new CallbackTracker) {
 }
 
@@ -34,13 +32,7 @@ CallbackTracker* TestGlobals::GetCallbackTrackerForInstance(
   return callback_tracker_.get();
 }
 
-thunk::PPB_Instance_API* TestGlobals::GetInstanceAPI(
-    PP_Instance instance) {
-  return NULL;
-}
-
-thunk::ResourceCreationAPI* TestGlobals::GetResourceCreationAPI(
-    PP_Instance instance) {
+FunctionGroupBase* TestGlobals::GetFunctionAPI(PP_Instance inst, ApiID id) {
   return NULL;
 }
 
@@ -48,37 +40,20 @@ PP_Module TestGlobals::GetModuleForInstance(PP_Instance instance) {
   return 0;
 }
 
-std::string TestGlobals::GetCmdLine() {
-  return std::string();
-}
-
-void TestGlobals::PreCacheFontForFlash(const void* /* logfontw */) {
+base::Lock* TestGlobals::GetProxyLock() {
+  return NULL;
 }
 
 void TestGlobals::LogWithSource(PP_Instance instance,
-                                PP_LogLevel level,
+                                PP_LogLevel_Dev level,
                                 const std::string& source,
                                 const std::string& value) {
 }
 
 void TestGlobals::BroadcastLogWithSource(PP_Module module,
-                                         PP_LogLevel level,
+                                         PP_LogLevel_Dev level,
                                          const std::string& source,
                                          const std::string& value) {
-}
-
-MessageLoopShared* TestGlobals::GetCurrentMessageLoop() {
-  return NULL;
-}
-
-base::TaskRunner* TestGlobals::GetFileTaskRunner() {
-  return NULL;
-}
-
-bool TestGlobals::IsHostGlobals() const {
-  // Pretend to be the host-side, for code that expects one or the other.
-  // TODO(dmichael): just make it settable which one we're pretending to be?
-  return true;
 }
 
 }  // namespace ppapi

@@ -6,18 +6,17 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
-#include "net/url_request/url_fetcher.h"
+#include "net/base/registry_controlled_domain.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
@@ -26,7 +25,7 @@ const size_t IntranetRedirectDetector::kNumCharsInHostnames = 10;
 IntranetRedirectDetector::IntranetRedirectDetector()
     : redirect_origin_(g_browser_process->local_state()->GetString(
           prefs::kLastKnownIntranetRedirectOrigin)),
-      weak_factory_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       in_sleep_(true) {
   // Because this function can be called during startup, when kicking off a URL
   // fetch can eat up 20 ms of time, we delay seven seconds, which is hopefully
@@ -35,7 +34,7 @@ IntranetRedirectDetector::IntranetRedirectDetector()
   // browser is starting up, and if so, come back later", but there is currently
   // no function to do this.
   static const int kStartFetchDelaySeconds = 7;
-  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&IntranetRedirectDetector::FinishSleep,
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(kStartFetchDelaySeconds));
@@ -56,9 +55,9 @@ GURL IntranetRedirectDetector::RedirectOrigin() {
 }
 
 // static
-void IntranetRedirectDetector::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterStringPref(prefs::kLastKnownIntranetRedirectOrigin,
-                               std::string());
+void IntranetRedirectDetector::RegisterPrefs(PrefService* prefs) {
+  prefs->RegisterStringPref(prefs::kLastKnownIntranetRedirectOrigin,
+                            std::string());
 }
 
 void IntranetRedirectDetector::FinishSleep() {
@@ -68,8 +67,10 @@ void IntranetRedirectDetector::FinishSleep() {
   STLDeleteElements(&fetchers_);
   resulting_origins_.clear();
 
+  // The detector is not needed in Chrome Frame since we have no omnibox there.
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
-  if (cmd_line->HasSwitch(switches::kDisableBackgroundNetworking))
+  if (cmd_line->HasSwitch(switches::kDisableBackgroundNetworking) ||
+      cmd_line->HasSwitch(switches::kChromeFrame))
     return;
 
   DCHECK(fetchers_.empty() && resulting_origins_.empty());
@@ -80,12 +81,11 @@ void IntranetRedirectDetector::FinishSleep() {
     for (size_t j = 0; j < kNumCharsInHostnames; ++j)
       url_string += ('a' + base::RandInt(0, 'z' - 'a'));
     GURL random_url(url_string + '/');
-    net::URLFetcher* fetcher = net::URLFetcher::Create(
-        random_url, net::URLFetcher::HEAD, this);
+    content::URLFetcher* fetcher = content::URLFetcher::Create(
+        random_url, content::URLFetcher::HEAD, this);
     // We don't want these fetches to affect existing state in the profile.
     fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE |
-                          net::LOAD_DO_NOT_SAVE_COOKIES |
-                          net::LOAD_DO_NOT_SEND_COOKIES);
+                          net::LOAD_DO_NOT_SAVE_COOKIES);
     fetcher->SetRequestContext(g_browser_process->system_request_context());
     fetcher->Start();
     fetchers_.insert(fetcher);
@@ -93,12 +93,12 @@ void IntranetRedirectDetector::FinishSleep() {
 }
 
 void IntranetRedirectDetector::OnURLFetchComplete(
-    const net::URLFetcher* source) {
+    const content::URLFetcher* source) {
   // Delete the fetcher on this function's exit.
   Fetchers::iterator fetcher = fetchers_.find(
-      const_cast<net::URLFetcher*>(source));
+      const_cast<content::URLFetcher*>(source));
   DCHECK(fetcher != fetchers_.end());
-  scoped_ptr<net::URLFetcher> clean_up_fetcher(*fetcher);
+  scoped_ptr<content::URLFetcher> clean_up_fetcher(*fetcher);
   fetchers_.erase(fetcher);
 
   // If any two fetches result in the same domain/host, we set the redirect
@@ -118,10 +118,8 @@ void IntranetRedirectDetector::OnURLFetchComplete(
       resulting_origins_.push_back(origin);
       return;
     }
-    if (net::registry_controlled_domains::SameDomainOrHost(
-        resulting_origins_.front(),
-        origin,
-        net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES)) {
+    if (net::RegistryControlledDomainService::SameDomainOrHost(
+        resulting_origins_.front(), origin)) {
       redirect_origin_ = origin;
       if (!fetchers_.empty()) {
         // Cancel remaining fetch, we don't need it.
@@ -135,12 +133,8 @@ void IntranetRedirectDetector::OnURLFetchComplete(
       return;
     }
     DCHECK(resulting_origins_.size() == 2);
-    const bool same_domain_or_host =
-        net::registry_controlled_domains::SameDomainOrHost(
-            resulting_origins_.back(),
-            origin,
-            net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
-    redirect_origin_ = same_domain_or_host ? origin : GURL();
+    redirect_origin_ = net::RegistryControlledDomainService::SameDomainOrHost(
+        resulting_origins_.back(), origin) ? origin : GURL();
   }
 
   g_browser_process->local_state()->SetString(
@@ -157,7 +151,7 @@ void IntranetRedirectDetector::OnIPAddressChanged() {
   // delay this a little bit.
   in_sleep_ = true;
   static const int kNetworkSwitchDelayMS = 1000;
-  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&IntranetRedirectDetector::FinishSleep,
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kNetworkSwitchDelayMS));

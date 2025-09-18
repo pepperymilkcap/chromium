@@ -4,16 +4,14 @@
 
 #ifndef CHROME_BROWSER_PARSERS_METADATA_PARSER_MANAGER_H_
 #define CHROME_BROWSER_PARSERS_METADATA_PARSER_MANAGER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_vector.h"
 
 class MetadataParserFactory;
-class MetadataParser;
-
-namespace base {
 class FilePath;
-}
+class MetadataParser;
 
 // Metadata Parser manager is used to find the correct parser for a
 // given file.  Allows parsers to register themselves.
@@ -31,7 +29,7 @@ class MetadataParserManager {
   bool RegisterParserFactory(MetadataParserFactory* parser);
 
   // Returns a new metadata parser for a given file.
-  MetadataParser* GetParserForFile(const base::FilePath& path);
+  MetadataParser* GetParserForFile(const FilePath& path);
 
  private:
   ScopedVector<MetadataParserFactory> factories_;

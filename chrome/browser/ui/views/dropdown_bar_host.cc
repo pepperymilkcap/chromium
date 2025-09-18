@@ -10,8 +10,8 @@
 #include "chrome/browser/ui/views/dropdown_bar_host_delegate.h"
 #include "chrome/browser/ui/views/dropdown_bar_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/animation/slide_animation.h"
+#include "ui/base/animation/slide_animation.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/scrollbar_size.h"
 #include "ui/views/focus/external_focus_tracker.h"
@@ -22,6 +22,8 @@
 #include "ui/gfx/scoped_sk_region.h"
 #elif defined(OS_WIN)
 #include "base/win/scoped_gdi_object.h"
+#elif defined(TOOLKIT_USES_GTK)
+#include "ui/base/gtk/scoped_handle_gtk.h"
 #endif
 
 namespace {
@@ -30,6 +32,8 @@ namespace {
 typedef gfx::ScopedSkRegion ScopedPlatformRegion;
 #elif defined(OS_WIN)
 typedef base::win::ScopedRegion ScopedPlatformRegion;
+#elif defined(TOOLKIT_USES_GTK)
+typedef ui::ScopedRegion ScopedPlatformRegion;
 #endif
 
 }  // namespace
@@ -52,8 +56,7 @@ DropdownBarHost::DropdownBarHost(BrowserView* browser_view)
       is_visible_(false) {
 }
 
-void DropdownBarHost::Init(views::View* host_view,
-                           views::View* view,
+void DropdownBarHost::Init(views::View* view,
                            DropdownBarHostDelegate* delegate) {
   DCHECK(view);
   DCHECK(delegate);
@@ -65,14 +68,12 @@ void DropdownBarHost::Init(views::View* host_view,
   host_.reset(new views::Widget);
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.parent = browser_view_->GetWidget()->GetNativeView();
+  params.parent_widget = browser_view_->GetWidget();
 #if defined(USE_AURA)
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.transparent = true;
 #endif
   host_->Init(params);
   host_->SetContentsView(view_);
-
-  SetHostViewNative(host_view);
 
   // Start listening to focus changes, so we can register and unregister our
   // own handler for Escape.
@@ -86,7 +87,7 @@ void DropdownBarHost::Init(views::View* host_view,
   }
 
   // Start the process of animating the opening of the widget.
-  animation_.reset(new gfx::SlideAnimation(this));
+  animation_.reset(new ui::SlideAnimation(this));
 }
 
 DropdownBarHost::~DropdownBarHost() {
@@ -99,19 +100,18 @@ void DropdownBarHost::Show(bool animate) {
   // restore focus when the dropdown widget is closed.
   focus_tracker_.reset(new views::ExternalFocusTracker(view_, focus_manager_));
 
-  bool was_visible = is_visible_;
-  is_visible_ = true;
   if (!animate || disable_animations_during_testing_) {
+    is_visible_ = true;
     animation_->Reset(1);
     AnimationProgressed(animation_.get());
-  } else if (!was_visible) {
-    // Don't re-start the animation.
-    animation_->Reset();
-    animation_->Show();
+  } else {
+    if (!is_visible_) {
+      // Don't re-start the animation.
+      is_visible_ = true;
+      animation_->Reset();
+      animation_->Show();
+    }
   }
-
-  if (!was_visible)
-    OnVisibilityChanged();
 }
 
 void DropdownBarHost::SetFocusAndSelection() {
@@ -183,9 +183,9 @@ void DropdownBarHost::OnDidChangeFocus(views::View* focused_before,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DropdownBarHost, gfx::AnimationDelegate implementation:
+// DropdownBarHost, ui::AnimationDelegate implementation:
 
-void DropdownBarHost::AnimationProgressed(const gfx::Animation* animation) {
+void DropdownBarHost::AnimationProgressed(const ui::Animation* animation) {
   // First, we calculate how many pixels to slide the widget.
   gfx::Size pref_size = view_->GetPreferredSize();
   animation_offset_ = static_cast<int>((1.0 - animation_->GetCurrentValue()) *
@@ -202,7 +202,7 @@ void DropdownBarHost::AnimationProgressed(const gfx::Animation* animation) {
   view_->SchedulePaint();
 }
 
-void DropdownBarHost::AnimationEnded(const gfx::Animation* animation) {
+void DropdownBarHost::AnimationEnded(const ui::Animation* animation) {
   // Place the dropdown widget in its fully opened state.
   animation_offset_ = 0;
 
@@ -210,7 +210,6 @@ void DropdownBarHost::AnimationEnded(const gfx::Animation* animation) {
     // Animation has finished closing.
     host_->Hide();
     is_visible_ = false;
-    OnVisibilityChanged();
   } else {
     // Animation has finished opening.
   }
@@ -221,9 +220,6 @@ void DropdownBarHost::AnimationEnded(const gfx::Animation* animation) {
 
 void DropdownBarHost::ResetFocusTracker() {
   focus_tracker_.reset(NULL);
-}
-
-void DropdownBarHost::OnVisibilityChanged() {
 }
 
 void DropdownBarHost::GetWidgetBounds(gfx::Rect* bounds) {
@@ -245,9 +241,9 @@ void DropdownBarHost::UpdateWindowEdges(const gfx::Rect& new_pos) {
   // window. Basically, it encompasses only the visible pixels of the
   // concatenated find_dlg_LMR_bg images (where LMR = [left | middle | right]).
   const Path::Point polygon[] = {
-      {2, 0}, {3, 1}, {3, h - 2}, {4, h - 1},
+      {0, 0}, {0, 1}, {2, 3}, {2, h - 3}, {4, h - 1},
         {4, h}, {w+0, h},
-      {w+2, h - 1}, {w+3, h - 2}, {w+3, 1}, {w+4, 0}
+      {w+0, h - 1}, {w+1, h - 1}, {w+3, h - 3}, {w+3, 3}, {w+6, 0}
   };
 
   // Find the largest x and y value in the polygon.
@@ -286,10 +282,10 @@ void DropdownBarHost::UpdateWindowEdges(const gfx::Rect& new_pos) {
     // curved edges that the view will draw to make it look like grows out of
     // the toolbar.
     Path::Point left_curve[] = {
-      {2, y+0}, {3, y+1}, {3, y+0}, {2, y+0}
+      {0, y+0}, {0, y+1}, {2, y+3}, {2, y+0}, {0, y+0}
     };
     Path::Point right_curve[] = {
-      {w+3, y+1}, {w+4, y+0}, {w+3, y+0}, {w+3, y+1}
+      {w+3, y+3}, {w+6, y+0}, {w+3, y+0}, {w+3, y+3}
     };
 
     // Combine the region for the curve on the left with our main region.
@@ -342,15 +338,14 @@ void DropdownBarHost::UpdateWindowEdges(const gfx::Rect& new_pos) {
 
 void DropdownBarHost::RegisterAccelerators() {
   DCHECK(!esc_accel_target_registered_);
-  ui::Accelerator escape(ui::VKEY_ESCAPE, ui::EF_NONE);
-  focus_manager_->RegisterAccelerator(
-      escape, ui::AcceleratorManager::kNormalPriority, this);
+  ui::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
+  focus_manager_->RegisterAccelerator(escape, this);
   esc_accel_target_registered_ = true;
 }
 
 void DropdownBarHost::UnregisterAccelerators() {
   DCHECK(esc_accel_target_registered_);
-  ui::Accelerator escape(ui::VKEY_ESCAPE, ui::EF_NONE);
+  ui::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
   focus_manager_->UnregisterAccelerator(escape, this);
   esc_accel_target_registered_ = false;
 }

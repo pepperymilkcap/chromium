@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #endif
 
 namespace tracked_objects {
+
+#if defined(USE_FAST_TIME_CLASS_FOR_DURATION_CALCULATIONS)
 
 Duration::Duration() : ms_(0) {}
 Duration::Duration(int32 duration) : ms_(duration) {}
@@ -55,7 +57,8 @@ TrackedTime TrackedTime::Now() {
   // Use lock-free accessor to 32 bit time.
   // Note that TimeTicks::Now() is built on this, so we have "compatible"
   // times when we down-convert a TimeTicks sample.
-  return TrackedTime(base::TimeTicks::UnprotectedNow());
+  // TODO(jar): Surface this interface via something in base/time.h.
+  return TrackedTime(static_cast<int32>(timeGetTime()));
 #else
   // Posix has nice cheap 64 bit times, so we just down-convert it.
   return TrackedTime(base::TimeTicks::Now());
@@ -71,5 +74,7 @@ TrackedTime TrackedTime::operator+(const Duration& other) const {
 }
 
 bool TrackedTime::is_null() const { return ms_ == 0; }
+
+#endif  // USE_FAST_TIME_CLASS_FOR_DURATION_CALCULATIONS
 
 }  // namespace tracked_objects

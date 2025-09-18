@@ -1,73 +1,53 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var AssertTrue = requireNative('assert').AssertTrue;
-var JSONSchemaValidator = require('json_schema').JSONSchemaValidator;
-var LOG = requireNative('logging').LOG;
+function assert(truth) {
+  if (!truth)
+    throw new Error("Assertion failed.");
+}
 
 function assertValid(type, instance, schema, types) {
-  var validator = new JSONSchemaValidator();
+  var validator = new chromeHidden.JSONSchemaValidator();
   if (types)
     validator.addTypes(types);
   validator["validate" + type](instance, schema, "");
-  var success = true;
   if (validator.errors.length != 0) {
-    LOG("Got unexpected errors");
+    log("Got unexpected errors");
     for (var i = 0; i < validator.errors.length; i++) {
-      LOG(validator.errors[i].message + "  path: " + validator.errors[i].path);
+      log(validator.errors[i].message + "  path: " + validator.errors[i].path);
     }
-    success = false;
+    assert(false);
   }
-  AssertTrue(success);
 }
 
 function assertNotValid(type, instance, schema, errors, types) {
-  var validator = new JSONSchemaValidator();
+  var validator = new chromeHidden.JSONSchemaValidator();
   if (types)
     validator.addTypes(types);
   validator["validate" + type](instance, schema, "");
-  AssertTrue(validator.errors.length === errors.length);
-  var success = true;
+  assert(validator.errors.length === errors.length);
   for (var i = 0; i < errors.length; i++) {
     if (validator.errors[i].message == errors[i]) {
-      LOG("Got expected error: " + validator.errors[i].message +
-          " for path: " + validator.errors[i].path);
+      log("Got expected error: " + validator.errors[i].message + " for path: " +
+          validator.errors[i].path);
     } else {
-      LOG("Missed expected error: " + errors[i] + ". Got: " +
+      log("Missed expected error: " + errors[i] + ". Got: " +
           validator.errors[i].message + " instead.");
-      success = false;
+      assert(false);
     }
   }
-  AssertTrue(success);
-}
-
-function assertListConsistsOfElements(list, elements) {
-  var success = true;
-  for (var li = 0; li < list.length; li++) {
-    for (var ei = 0; ei < elements.length && list[li] != elements[ei]; ei++) { }
-    if (ei == elements.length) {
-      LOG("Expected type not found: " + list[li]);
-      success = false;
-    }
-  }
-  AssertTrue(success);
-}
-
-function assertEqualSets(set1, set2) {
-  assertListConsistsOfElements(set1, set2);
-  assertListConsistsOfElements(set2, set1);
 }
 
 function formatError(key, replacements) {
-  return JSONSchemaValidator.formatError(key, replacements);
+  return chromeHidden.JSONSchemaValidator.formatError(key, replacements);
 }
 
 function testFormatError() {
-  AssertTrue(formatError("propertyRequired") == "Property is required.");
-  AssertTrue(formatError("invalidEnum", ["foo, bar"]) ==
+  assert(formatError("propertyRequired") == "Property is required.");
+  assert(formatError("invalidEnum", ["foo, bar"]) ==
          "Value must be one of: [foo, bar].");
-  AssertTrue(formatError("invalidType", ["foo", "bar"]) ==
+  assert(formatError("invalidType", ["foo", "bar"]) ==
          "Expected 'foo' but got 'bar'.");
 }
 
@@ -187,6 +167,16 @@ function testExtends() {
   assertValid("", 43, schema);
 }
 
+function ClassA() {
+  this.a = "a";
+}
+function ClassB() {
+}
+ClassB.prototype = new ClassA();
+function ClassC() {
+  this.a = "a";
+}
+
 function testObject() {
   var schema = {
     properties: {
@@ -219,10 +209,33 @@ function testObject() {
   schema.properties.bar.optional = true;
   assertValid("Object", {foo:"foo", bar:42}, schema);
   assertValid("Object", {foo:"foo"}, schema);
-  assertValid("Object", {foo:"foo", bar:null}, schema);
+  assertNotValid("Object", {foo:"foo", bar:null}, schema,
+                 [formatError("invalidType", ["integer", "null"])]);
   assertValid("Object", {foo:"foo", bar:undefined}, schema);
   assertNotValid("Object", {foo:"foo", bar:"42"}, schema,
                  [formatError("invalidType", ["integer", "string"])]);
+
+  var classASchema = {
+    properties: {
+      "a": { type: "string" }
+    },
+    isInstanceOf: "ClassA"
+  };
+
+  var classBSchema = {
+    properties: {},
+    isInstanceOf: "ClassB"
+  };
+
+  var a = new ClassA();
+  var b = new ClassB();
+  var c = new ClassC();
+
+  assertValid("Object", a, classASchema);
+  assertValid("Object", b, classBSchema);
+  assertValid("Object", b, classASchema);
+  assertNotValid("Object", c, classASchema,
+                 [formatError("notInstance", [classASchema.isInstanceOf])]);
 }
 
 function testTypeReference() {
@@ -393,7 +406,7 @@ function testNumber() {
                   formatError("numberMaxDecimal", [schema.maxDecimal])]);
 
   var nan = 0/0;
-  AssertTrue(isNaN(nan));
+  assert(isNaN(nan));
   assertNotValid("Number", nan, schema,
                  [formatError("numberFiniteNotNan", ["NaN"])]);
 
@@ -458,7 +471,7 @@ function testType() {
   assertNotValid("Type", "42", {type: "number"},
                  [formatError("invalidType", ["number", "string"])]);
   assertNotValid("Type", 88.8, {type: "integer"},
-                 [formatError("invalidTypeIntegerNumber")]);
+                 [formatError("invalidType", ["integer", "number"])]);
   assertNotValid("Type", 1, {type: "boolean"},
                  [formatError("invalidType", ["boolean", "integer"])]);
   assertNotValid("Type", false, {type: "null"},
@@ -468,201 +481,3 @@ function testType() {
   assertNotValid("Type", {}, {type: "function"},
                  [formatError("invalidType", ["function", "object"])]);
 }
-
-function testGetAllTypesForSchema() {
-  var referencedTypes = [
-    {
-      id: "ChoicesRef",
-      choices: [
-        { type: "integer" },
-        { type: "string" }
-      ]
-    },
-    {
-      id: "ObjectRef",
-      type: "object",
-    }
-  ];
-
-  var arraySchema = {
-    type: "array"
-  };
-
-  var choicesSchema = {
-    choices: [
-      { type: "object" },
-      { type: "function" }
-    ]
-  };
-
-  var objectRefSchema = {
-    $ref: "ObjectRef"
-  };
-
-  var complexSchema = {
-    choices: [
-      { $ref: "ChoicesRef" },
-      { type: "function" },
-      { $ref: "ObjectRef" }
-    ]
-  };
-
-  var validator = new JSONSchemaValidator();
-  validator.addTypes(referencedTypes);
-
-  var arraySchemaTypes = validator.getAllTypesForSchema(arraySchema);
-  assertEqualSets(arraySchemaTypes, ["array"]);
-
-  var choicesSchemaTypes = validator.getAllTypesForSchema(choicesSchema);
-  assertEqualSets(choicesSchemaTypes, ["object", "function"]);
-
-  var objectRefSchemaTypes = validator.getAllTypesForSchema(objectRefSchema);
-  assertEqualSets(objectRefSchemaTypes, ["object"]);
-
-  var complexSchemaTypes = validator.getAllTypesForSchema(complexSchema);
-  assertEqualSets(complexSchemaTypes,
-      ["integer", "string", "function", "object"]);
-}
-
-function testIsValidSchemaType() {
-  var referencedTypes = [
-    {
-      id: "ChoicesRef",
-      choices: [
-        { type: "integer" },
-        { type: "string" }
-      ]
-    }
-  ];
-
-  var objectSchema = {
-    type: "object",
-    optional: true
-  };
-
-  var complexSchema = {
-    choices: [
-      { $ref: "ChoicesRef" },
-      { type: "function" },
-    ]
-  };
-
-  var validator = new JSONSchemaValidator();
-  validator.addTypes(referencedTypes);
-
-  AssertTrue(validator.isValidSchemaType("object", objectSchema));
-  AssertTrue(!validator.isValidSchemaType("integer", objectSchema));
-  AssertTrue(!validator.isValidSchemaType("array", objectSchema));
-  AssertTrue(validator.isValidSchemaType("null", objectSchema));
-  AssertTrue(validator.isValidSchemaType("undefined", objectSchema));
-
-  AssertTrue(validator.isValidSchemaType("integer", complexSchema));
-  AssertTrue(validator.isValidSchemaType("function", complexSchema));
-  AssertTrue(validator.isValidSchemaType("string", complexSchema));
-  AssertTrue(!validator.isValidSchemaType("object", complexSchema));
-  AssertTrue(!validator.isValidSchemaType("null", complexSchema));
-  AssertTrue(!validator.isValidSchemaType("undefined", complexSchema));
-}
-
-function testCheckSchemaOverlap() {
-  var referencedTypes = [
-    {
-      id: "ChoicesRef",
-      choices: [
-        { type: "integer" },
-        { type: "string" }
-      ]
-    },
-    {
-      id: "ObjectRef",
-      type: "object",
-    }
-  ];
-
-  var arraySchema = {
-    type: "array"
-  };
-
-  var choicesSchema = {
-    choices: [
-      { type: "object" },
-      { type: "function" }
-    ]
-  };
-
-  var objectRefSchema = {
-    $ref: "ObjectRef"
-  };
-
-  var complexSchema = {
-    choices: [
-      { $ref: "ChoicesRef" },
-      { type: "function" },
-      { $ref: "ObjectRef" }
-    ]
-  };
-
-  var validator = new JSONSchemaValidator();
-  validator.addTypes(referencedTypes);
-
-  AssertTrue(!validator.checkSchemaOverlap(arraySchema, choicesSchema));
-  AssertTrue(!validator.checkSchemaOverlap(arraySchema, objectRefSchema));
-  AssertTrue(!validator.checkSchemaOverlap(arraySchema, complexSchema));
-  AssertTrue(validator.checkSchemaOverlap(choicesSchema, objectRefSchema));
-  AssertTrue(validator.checkSchemaOverlap(choicesSchema, complexSchema));
-  AssertTrue(validator.checkSchemaOverlap(objectRefSchema, complexSchema));
-}
-
-function testInstanceOf() {
-  function Animal() {};
-  function Cat() {};
-  function Dog() {};
-  Cat.prototype = new Animal;
-  Cat.prototype.constructor = Cat;
-  Dog.prototype = new Animal;
-  Dog.prototype.constructor = Dog;
-  var cat = new Cat();
-  var dog = new Dog();
-  var num = new Number(1);
-
-  // instanceOf should check type by walking up prototype chain.
-  assertValid("", cat, {type:"object", isInstanceOf:"Cat"});
-  assertValid("", cat, {type:"object", isInstanceOf:"Animal"});
-  assertValid("", cat, {type:"object", isInstanceOf:"Object"});
-  assertValid("", dog, {type:"object", isInstanceOf:"Dog"});
-  assertValid("", dog, {type:"object", isInstanceOf:"Animal"});
-  assertValid("", dog, {type:"object", isInstanceOf:"Object"});
-  assertValid("", num, {type:"object", isInstanceOf:"Number"});
-  assertValid("", num, {type:"object", isInstanceOf:"Object"});
-
-  assertNotValid("", cat, {type:"object", isInstanceOf:"Dog"},
-                 [formatError("notInstance", ["Dog"])]);
-  assertNotValid("", dog, {type:"object", isInstanceOf:"Cat"},
-                 [formatError("notInstance", ["Cat"])]);
-  assertNotValid("", cat, {type:"object", isInstanceOf:"String"},
-                 [formatError("notInstance", ["String"])]);
-  assertNotValid("", dog, {type:"object", isInstanceOf:"String"},
-                 [formatError("notInstance", ["String"])]);
-  assertNotValid("", num, {type:"object", isInstanceOf:"Array"},
-                [formatError("notInstance", ["Array"])]);
-  assertNotValid("", num, {type:"object", isInstanceOf:"String"},
-                [formatError("notInstance", ["String"])]);
-}
-
-// Tests exposed to schema_unittest.cc.
-exports.testFormatError = testFormatError;
-exports.testComplex = testComplex;
-exports.testEnum = testEnum;
-exports.testExtends = testExtends;
-exports.testObject = testObject;
-exports.testArrayTuple = testArrayTuple;
-exports.testArrayNonTuple = testArrayNonTuple;
-exports.testString = testString;
-exports.testNumber = testNumber;
-exports.testIntegerBounds = testIntegerBounds;
-exports.testType = testType;
-exports.testTypeReference = testTypeReference;
-exports.testGetAllTypesForSchema = testGetAllTypesForSchema;
-exports.testIsValidSchemaType = testIsValidSchemaType;
-exports.testCheckSchemaOverlap = testCheckSchemaOverlap;
-exports.testInstanceOf = testInstanceOf;

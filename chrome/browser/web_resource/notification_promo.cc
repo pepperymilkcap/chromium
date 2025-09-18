@@ -1,469 +1,426 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/web_resource/notification_promo.h"
 
-#include <cmath>
 #include <vector>
 
 #include "base/bind.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/sys_info.h"
-#include "base/threading/thread_restrictions.h"
-#include "base/time/time.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/time.h"
 #include "base/values.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
-#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/user_metrics.h"
-#include "net/base/url_util.h"
-#include "ui/base/device_form_factor.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
+#include "net/base/cookie_store.h"
+#include "net/url_request/url_request_context.h"
 
 using content::UserMetricsAction;
 
 namespace {
 
-const int kDefaultGroupSize = 100;
+// Maximum number of views.
+static const int kMaxViews = 1000;
 
-const char promo_server_url[] = "https://clients3.google.com/crsignal/client";
+// Maximum number of hours for each time slice (4 weeks).
+static const int kMaxTimeSliceHours = 24 * 7 * 4;
 
-// The name of the preference that stores the promotion object.
-const char kPrefPromoObject[] = "promo";
-
-// Keys in the kPrefPromoObject dictionary; used only here.
-const char kPrefPromoText[] = "text";
-const char kPrefPromoPayload[] = "payload";
-const char kPrefPromoStart[] = "start";
-const char kPrefPromoEnd[] = "end";
-const char kPrefPromoNumGroups[] = "num_groups";
-const char kPrefPromoSegment[] = "segment";
-const char kPrefPromoIncrement[] = "increment";
-const char kPrefPromoIncrementFrequency[] = "increment_frequency";
-const char kPrefPromoIncrementMax[] = "increment_max";
-const char kPrefPromoMaxViews[] = "max_views";
-const char kPrefPromoGroup[] = "group";
-const char kPrefPromoViews[] = "views";
-const char kPrefPromoClosed[] = "closed";
-
-// Returns a string suitable for the Promo Server URL 'osname' value.
-std::string PlatformString() {
-#if defined(OS_WIN)
-  return "win";
-#elif defined(OS_ANDROID)
-  ui::DeviceFormFactor form_factor = ui::GetDeviceFormFactor();
-  return std::string("android-") +
-      (form_factor == ui::DEVICE_FORM_FACTOR_TABLET ? "tablet" : "phone");
-#elif defined(OS_IOS)
-  ui::DeviceFormFactor form_factor = ui::GetDeviceFormFactor();
-  return std::string("ios-") +
-      (form_factor == ui::DEVICE_FORM_FACTOR_TABLET ? "tablet" : "phone");
-#elif defined(OS_MACOSX)
-  return "mac";
-#elif defined(OS_CHROMEOS)
-  return "chromeos";
-#elif defined(OS_LINUX)
-  return "linux";
-#else
-  return "none";
-#endif
+bool OutOfBounds(int var, int min, int max) {
+  return var < min || var > max;
 }
 
-// Returns a string suitable for the Promo Server URL 'dist' value.
-const char* ChannelString() {
-#if defined (OS_WIN)
-  // GetChannel hits the registry on Windows. See http://crbug.com/70898.
-  // TODO(achuith): Move NotificationPromo::PromoServerURL to the blocking pool.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-#endif
-  const chrome::VersionInfo::Channel channel =
-      chrome::VersionInfo::GetChannel();
-  switch (channel) {
-    case chrome::VersionInfo::CHANNEL_CANARY:
-      return "canary";
-    case chrome::VersionInfo::CHANNEL_DEV:
-      return "dev";
-    case chrome::VersionInfo::CHANNEL_BETA:
-      return "beta";
-    case chrome::VersionInfo::CHANNEL_STABLE:
-      return "stable";
-    default:
-      return "none";
-  }
+static const char kHeaderProperty[] = "topic";
+static const char kArrayProperty[] = "answers";
+static const char kIdentifierProperty[] = "name";
+static const char kStartPropertyValue[] = "promo_start";
+static const char kEndPropertyValue[] = "promo_end";
+static const char kTextProperty[] = "tooltip";
+static const char kTimeProperty[] = "inproduct";
+static const char kParamsProperty[] = "question";
+
+static const char kGPlusDomainUrl[] = "http://plus.google.com/";
+static const char kGPlusDomainSecureCookieId[] = "SID=";
+static const char kSplitStringToken = ';';
+
+// Time getters.
+double GetTimeFromDict(const DictionaryValue* dict) {
+  std::string time_str;
+  if (!dict->GetString(kTimeProperty, &time_str))
+    return 0.0;
+
+  base::Time time;
+  if (time_str.empty() || !base::Time::FromString(time_str.c_str(), &time))
+    return 0.0;
+
+  return time.ToDoubleT();
 }
 
-struct PromoMapEntry {
-  NotificationPromo::PromoType promo_type;
-  const char* promo_type_str;
-};
-
-const PromoMapEntry kPromoMap[] = {
-    { NotificationPromo::NO_PROMO, "" },
-    { NotificationPromo::NTP_NOTIFICATION_PROMO, "ntp_notification_promo" },
-    { NotificationPromo::NTP_BUBBLE_PROMO, "ntp_bubble_promo" },
-    { NotificationPromo::MOBILE_NTP_SYNC_PROMO, "mobile_ntp_sync_promo" },
-};
-
-// Convert PromoType to appropriate string.
-const char* PromoTypeToString(NotificationPromo::PromoType promo_type) {
-  for (size_t i = 0; i < arraysize(kPromoMap); ++i) {
-    if (kPromoMap[i].promo_type == promo_type)
-      return kPromoMap[i].promo_type_str;
-  }
-  NOTREACHED();
-  return "";
-}
-
-// Deep-copies a node, replacing any "value" that is a key
-// into "strings" dictionary with its value from "strings".
-// E.g. for
-//   {promo_action_args:['MSG_SHORT']} + strings:{MSG_SHORT:'yes'}
-// it will return
-//   {promo_action_args:['yes']}
-// |node| - a value to be deep copied and resolved.
-// |strings| - a dictionary of strings to be used for resolution.
-// Returns a _new_ object that is a deep copy with replacements.
-// TODO(aruslan): http://crbug.com/144320 Consider moving it to values.cc/h.
-base::Value* DeepCopyAndResolveStrings(
-    const base::Value* node,
-    const base::DictionaryValue* strings) {
-  switch (node->GetType()) {
-    case base::Value::TYPE_LIST: {
-      const base::ListValue* list = static_cast<const base::ListValue*>(node);
-      base::ListValue* copy = new base::ListValue;
-      for (base::ListValue::const_iterator it = list->begin();
-           it != list->end();
-           ++it) {
-        base::Value* child_copy = DeepCopyAndResolveStrings(*it, strings);
-        copy->Append(child_copy);
-      }
-      return copy;
-    }
-
-    case base::Value::TYPE_DICTIONARY: {
-      const base::DictionaryValue* dict =
-          static_cast<const base::DictionaryValue*>(node);
-      base::DictionaryValue* copy = new base::DictionaryValue;
-      for (base::DictionaryValue::Iterator it(*dict);
-           !it.IsAtEnd();
-           it.Advance()) {
-        base::Value* child_copy = DeepCopyAndResolveStrings(&it.value(),
-                                                            strings);
-        copy->SetWithoutPathExpansion(it.key(), child_copy);
-      }
-      return copy;
-    }
-
-    case base::Value::TYPE_STRING: {
-      std::string value;
-      bool rv = node->GetAsString(&value);
-      DCHECK(rv);
-      std::string actual_value;
-      if (!strings || !strings->GetString(value, &actual_value))
-        actual_value = value;
-      return new base::StringValue(actual_value);
-    }
-
-    default:
-      // For everything else, just make a copy.
-      return node->DeepCopy();
-  }
-}
-
-void AppendQueryParameter(GURL* url,
-                          const std::string& param,
-                          const std::string& value) {
-  *url = net::AppendQueryParameter(*url, param, value);
+double GetTimeFromPrefs(PrefService* prefs, const char* pref) {
+  return prefs->HasPrefPath(pref) ? prefs->GetDouble(pref) : 0.0;
 }
 
 }  // namespace
 
-NotificationPromo::NotificationPromo()
-    : prefs_(g_browser_process->local_state()),
-      promo_type_(NO_PROMO),
-      promo_payload_(new base::DictionaryValue()),
+NotificationPromo::NotificationPromo(Profile* profile, Delegate* delegate)
+    : profile_(profile),
+      delegate_(delegate),
+      prefs_(profile_->GetPrefs()),
       start_(0.0),
       end_(0.0),
-      num_groups_(kDefaultGroupSize),
-      initial_segment_(0),
-      increment_(1),
+      build_(PromoResourceService::NO_BUILD),
       time_slice_(0),
       max_group_(0),
       max_views_(0),
+      platform_(PLATFORM_NONE),
+      feature_mask_(NO_FEATURE),
       group_(0),
       views_(0),
+      text_(),
       closed_(false),
-      new_notification_(false) {
+      gplus_(false) {
+  DCHECK(profile);
   DCHECK(prefs_);
 }
 
 NotificationPromo::~NotificationPromo() {}
 
-void NotificationPromo::InitFromJson(const base::DictionaryValue& json,
-                                     PromoType promo_type) {
-  promo_type_ = promo_type;
-  const base::ListValue* promo_list = NULL;
-  DVLOG(1) << "InitFromJson " << PromoTypeToString(promo_type_);
-  if (!json.GetList(PromoTypeToString(promo_type_), &promo_list))
-    return;
-
-  // No support for multiple promos yet. Only consider the first one.
-  const base::DictionaryValue* promo = NULL;
-  if (!promo_list->GetDictionary(0, &promo))
-    return;
-
-  // Date.
-  const base::ListValue* date_list = NULL;
-  if (promo->GetList("date", &date_list)) {
-    const base::DictionaryValue* date;
-    if (date_list->GetDictionary(0, &date)) {
-      std::string time_str;
-      base::Time time;
-      if (date->GetString("start", &time_str) &&
-          base::Time::FromString(time_str.c_str(), &time)) {
-        start_ = time.ToDoubleT();
-        DVLOG(1) << "start str=" << time_str
-                 << ", start_="<< base::DoubleToString(start_);
-      }
-      if (date->GetString("end", &time_str) &&
-          base::Time::FromString(time_str.c_str(), &time)) {
-        end_ = time.ToDoubleT();
-        DVLOG(1) << "end str =" << time_str
-                 << ", end_=" << base::DoubleToString(end_);
+void NotificationPromo::InitFromJson(const DictionaryValue& json,
+                                     bool do_cookie_check) {
+  DictionaryValue* dict;
+  if (json.GetDictionary(kHeaderProperty, &dict)) {
+    ListValue* answers;
+    if (dict->GetList(kArrayProperty, &answers)) {
+      for (ListValue::const_iterator it = answers->begin();
+           it != answers->end();
+           ++it) {
+        if ((*it)->IsType(Value::TYPE_DICTIONARY))
+          Parse(static_cast<DictionaryValue*>(*it));
       }
     }
   }
-
-  // Grouping.
-  const base::DictionaryValue* grouping = NULL;
-  if (promo->GetDictionary("grouping", &grouping)) {
-    grouping->GetInteger("buckets", &num_groups_);
-    grouping->GetInteger("segment", &initial_segment_);
-    grouping->GetInteger("increment", &increment_);
-    grouping->GetInteger("increment_frequency", &time_slice_);
-    grouping->GetInteger("increment_max", &max_group_);
-
-    DVLOG(1) << "num_groups_ = " << num_groups_
-             << ", initial_segment_ = " << initial_segment_
-             << ", increment_ = " << increment_
-             << ", time_slice_ = " << time_slice_
-             << ", max_group_ = " << max_group_;
+  if (do_cookie_check) {
+    scoped_refptr<net::URLRequestContextGetter> getter(
+        profile_->GetRequestContext());
+    content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
+          base::Bind(&NotificationPromo::GetCookies, this, getter));
+  } else {
+    CheckForNewNotification(false);
   }
-
-  // Strings.
-  const base::DictionaryValue* strings = NULL;
-  promo->GetDictionary("strings", &strings);
-
-  // Payload.
-  const base::DictionaryValue* payload = NULL;
-  if (promo->GetDictionary("payload", &payload)) {
-    base::Value* ppcopy = DeepCopyAndResolveStrings(payload, strings);
-    DCHECK(ppcopy && ppcopy->IsType(base::Value::TYPE_DICTIONARY));
-    promo_payload_.reset(static_cast<base::DictionaryValue*>(ppcopy));
-  }
-
-  if (!promo_payload_->GetString("promo_message_short", &promo_text_) &&
-      strings) {
-    // For compatibility with the legacy desktop version,
-    // if no |payload.promo_message_short| is specified,
-    // the first string in |strings| is used.
-    base::DictionaryValue::Iterator iter(*strings);
-    iter.value().GetAsString(&promo_text_);
-  }
-  DVLOG(1) << "promo_text_=" << promo_text_;
-
-  promo->GetInteger("max_views", &max_views_);
-  DVLOG(1) << "max_views_ " << max_views_;
-
-  CheckForNewNotification();
 }
 
-void NotificationPromo::CheckForNewNotification() {
-  NotificationPromo old_promo;
-  old_promo.InitFromPrefs(promo_type_);
-  const double old_start = old_promo.start_;
-  const double old_end = old_promo.end_;
-  const std::string old_promo_text = old_promo.promo_text_;
+// static
+bool NotificationPromo::CheckForGPlusCookie(const std::string& cookies) {
+  std::vector<std::string> cookie_list;
+  base::SplitString(cookies, kSplitStringToken, &cookie_list);
+  for (std::vector<std::string>::const_iterator current = cookie_list.begin();
+       current != cookie_list.end();
+       ++current) {
+    if ((*current).find(kGPlusDomainSecureCookieId) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
 
-  new_notification_ =
-      old_start != start_ || old_end != end_ || old_promo_text != promo_text_;
-  if (new_notification_)
+void NotificationPromo::GetCookiesCallback(const std::string& cookies) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  bool found_cookie = NotificationPromo::CheckForGPlusCookie(cookies);
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&NotificationPromo::CheckForNewNotification, this,
+                 found_cookie));
+}
+
+void NotificationPromo::GetCookies(
+    scoped_refptr<net::URLRequestContextGetter> getter) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  getter->GetURLRequestContext()->cookie_store()->
+      GetCookiesWithOptionsAsync(
+          GURL(kGPlusDomainUrl), net::CookieOptions(),
+          base::Bind(&NotificationPromo::GetCookiesCallback, this));
+}
+
+void NotificationPromo::Parse(const DictionaryValue* dict) {
+  std::string key;
+  if (dict->GetString(kIdentifierProperty, &key)) {
+    if (key == kStartPropertyValue) {
+      ParseParams(dict);
+      dict->GetString(kTextProperty, &text_);
+      start_ = GetTimeFromDict(dict);
+    } else if (key == kEndPropertyValue) {
+      end_ = GetTimeFromDict(dict);
+    }
+  }
+}
+
+void NotificationPromo::ParseParams(const DictionaryValue* dict) {
+  std::string question;
+  if (!dict->GetString(kParamsProperty, &question))
+    return;
+
+  size_t index = 0;
+  bool err = false;
+
+  build_ = GetNextQuestionValue(question, &index, &err);
+  time_slice_ = GetNextQuestionValue(question, &index, &err);
+  max_group_ = GetNextQuestionValue(question, &index, &err);
+  max_views_ = GetNextQuestionValue(question, &index, &err);
+  platform_ = GetNextQuestionValue(question, &index, &err);
+  feature_mask_ = GetNextQuestionValue(question, &index, &err);
+
+  if (err ||
+      OutOfBounds(build_, PromoResourceService::NO_BUILD,
+          PromoResourceService::ALL_BUILDS) ||
+      OutOfBounds(time_slice_, 0, kMaxTimeSliceHours) ||
+      OutOfBounds(max_group_, 0, kMaxGroupSize) ||
+      OutOfBounds(max_views_, 0, kMaxViews) ||
+      OutOfBounds(platform_, PLATFORM_NONE, PLATFORM_ALL)) {
+    // If values are not valid, do not show promo notification.
+    DLOG(ERROR) << "Invalid server data, question=" << question <<
+        ", build=" << build_ <<
+        ", time_slice=" << time_slice_ <<
+        ", max_group=" << max_group_ <<
+        ", max_views=" << max_views_ <<
+        ", platform_=" << platform_ <<
+        ", feature_mask=" << feature_mask_;
+    build_ = PromoResourceService::NO_BUILD;
+    time_slice_ = 0;
+    max_group_ = 0;
+    max_views_ = 0;
+    platform_ = PLATFORM_NONE;
+    feature_mask_ = 0;
+  }
+}
+
+void NotificationPromo::CheckForNewNotification(bool found_cookie) {
+  double start = 0.0;
+  double end = 0.0;
+  bool new_notification = false;
+
+  gplus_ = found_cookie;
+  const double old_start = GetTimeFromPrefs(prefs_, prefs::kNTPPromoStart);
+  const double old_end = GetTimeFromPrefs(prefs_, prefs::kNTPPromoEnd);
+  const bool old_gplus = prefs_->GetBoolean(prefs::kNTPPromoIsLoggedInToPlus);
+  const bool has_feature_mask =
+      prefs_->HasPrefPath(prefs::kNTPPromoFeatureMask);
+  // Trigger a new notification if the times have changed, or if
+  // we previously never wrote out a feature_mask, or if the user's gplus
+  // cookies have changed.
+  if (old_start != start_ || old_end != end_ || old_gplus != gplus_ ||
+      !has_feature_mask) {
     OnNewNotification();
+    start = StartTimeWithOffset();
+    end = end_;
+    new_notification = true;
+  }
+  if (delegate_) {
+    // If no change needed, call delegate with default values (this
+    // is for testing purposes).
+    delegate_->OnNotificationParsed(start, end, new_notification);
+  }
 }
 
 void NotificationPromo::OnNewNotification() {
-  DVLOG(1) << "OnNewNotification";
-  // Create a new promo group.
-  group_ = base::RandInt(0, num_groups_ - 1);
+  group_ = NewGroup();
   WritePrefs();
 }
 
 // static
-void NotificationPromo::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterDictionaryPref(kPrefPromoObject);
+int NotificationPromo::NewGroup() {
+  return base::RandInt(0, kMaxGroupSize);
 }
 
 // static
-void NotificationPromo::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  // TODO(dbeam): Registered only for migration. Remove in M28 when
-  // we're reasonably sure all prefs are gone.
-  // http://crbug.com/168887
-  registry->RegisterDictionaryPref(
-      kPrefPromoObject, user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+void NotificationPromo::RegisterUserPrefs(PrefService* prefs) {
+  prefs->RegisterDoublePref(prefs::kNTPPromoStart,
+                            0,
+                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterDoublePref(prefs::kNTPPromoEnd,
+                            0,
+                            PrefService::UNSYNCABLE_PREF);
+
+  prefs->RegisterIntegerPref(prefs::kNTPPromoBuild,
+                             PromoResourceService::NO_BUILD,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kNTPPromoGroupTimeSlice,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kNTPPromoGroupMax,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kNTPPromoViewsMax,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kNTPPromoPlatform,
+                             PLATFORM_NONE,
+                             PrefService::UNSYNCABLE_PREF);
+
+  prefs->RegisterStringPref(prefs::kNTPPromoLine,
+                            std::string(),
+                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kNTPPromoGroup,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kNTPPromoViews,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kNTPPromoClosed,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kNTPPromoIsLoggedInToPlus,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kNTPPromoFeatureMask,
+                             0,
+                             PrefService::UNSYNCABLE_PREF);
 }
 
 // static
-void NotificationPromo::MigrateUserPrefs(PrefService* user_prefs) {
-  user_prefs->ClearPref(kPrefPromoObject);
+NotificationPromo* NotificationPromo::Create(Profile *profile,
+    NotificationPromo::Delegate * delegate) {
+  return new NotificationPromo(profile, delegate);
 }
 
 void NotificationPromo::WritePrefs() {
-  base::DictionaryValue* ntp_promo = new base::DictionaryValue;
-  ntp_promo->SetString(kPrefPromoText, promo_text_);
-  ntp_promo->Set(kPrefPromoPayload, promo_payload_->DeepCopy());
-  ntp_promo->SetDouble(kPrefPromoStart, start_);
-  ntp_promo->SetDouble(kPrefPromoEnd, end_);
+  prefs_->SetDouble(prefs::kNTPPromoStart, start_);
+  prefs_->SetDouble(prefs::kNTPPromoEnd, end_);
 
-  ntp_promo->SetInteger(kPrefPromoNumGroups, num_groups_);
-  ntp_promo->SetInteger(kPrefPromoSegment, initial_segment_);
-  ntp_promo->SetInteger(kPrefPromoIncrement, increment_);
-  ntp_promo->SetInteger(kPrefPromoIncrementFrequency, time_slice_);
-  ntp_promo->SetInteger(kPrefPromoIncrementMax, max_group_);
+  prefs_->SetInteger(prefs::kNTPPromoBuild, build_);
+  prefs_->SetInteger(prefs::kNTPPromoGroupTimeSlice, time_slice_);
+  prefs_->SetInteger(prefs::kNTPPromoGroupMax, max_group_);
+  prefs_->SetInteger(prefs::kNTPPromoViewsMax, max_views_);
+  prefs_->SetInteger(prefs::kNTPPromoPlatform, platform_);
 
-  ntp_promo->SetInteger(kPrefPromoMaxViews, max_views_);
-
-  ntp_promo->SetInteger(kPrefPromoGroup, group_);
-  ntp_promo->SetInteger(kPrefPromoViews, views_);
-  ntp_promo->SetBoolean(kPrefPromoClosed, closed_);
-
-  base::ListValue* promo_list = new base::ListValue;
-  promo_list->Set(0, ntp_promo);  // Only support 1 promo for now.
-
-  base::DictionaryValue promo_dict;
-  promo_dict.MergeDictionary(prefs_->GetDictionary(kPrefPromoObject));
-  promo_dict.Set(PromoTypeToString(promo_type_), promo_list);
-  prefs_->Set(kPrefPromoObject, promo_dict);
-  DVLOG(1) << "WritePrefs " << promo_dict;
+  prefs_->SetString(prefs::kNTPPromoLine, text_);
+  prefs_->SetInteger(prefs::kNTPPromoGroup, group_);
+  prefs_->SetInteger(prefs::kNTPPromoViews, views_);
+  prefs_->SetBoolean(prefs::kNTPPromoClosed, closed_);
+  prefs_->SetBoolean(prefs::kNTPPromoIsLoggedInToPlus, gplus_);
+  prefs_->SetInteger(prefs::kNTPPromoFeatureMask, feature_mask_);
 }
 
-void NotificationPromo::InitFromPrefs(PromoType promo_type) {
-  promo_type_ = promo_type;
-  const base::DictionaryValue* promo_dict =
-      prefs_->GetDictionary(kPrefPromoObject);
-  if (!promo_dict)
-    return;
+void NotificationPromo::InitFromPrefs() {
+  start_ = prefs_->GetDouble(prefs::kNTPPromoStart);
+  end_ = prefs_->GetDouble(prefs::kNTPPromoEnd);
+  build_ = prefs_->GetInteger(prefs::kNTPPromoBuild);
+  time_slice_ = prefs_->GetInteger(prefs::kNTPPromoGroupTimeSlice);
+  max_group_ = prefs_->GetInteger(prefs::kNTPPromoGroupMax);
+  max_views_ = prefs_->GetInteger(prefs::kNTPPromoViewsMax);
+  platform_ = prefs_->GetInteger(prefs::kNTPPromoPlatform);
+  text_ = prefs_->GetString(prefs::kNTPPromoLine);
+  group_ = prefs_->GetInteger(prefs::kNTPPromoGroup);
+  views_ = prefs_->GetInteger(prefs::kNTPPromoViews);
+  closed_ = prefs_->GetBoolean(prefs::kNTPPromoClosed);
 
-  const base::ListValue* promo_list = NULL;
-  promo_dict->GetList(PromoTypeToString(promo_type_), &promo_list);
-  if (!promo_list)
-    return;
+  if (prefs_->HasPrefPath(prefs::kNTPPromoIsLoggedInToPlus))
+    gplus_ = prefs_->GetBoolean(prefs::kNTPPromoIsLoggedInToPlus);
 
-  const base::DictionaryValue* ntp_promo = NULL;
-  promo_list->GetDictionary(0, &ntp_promo);
-  if (!ntp_promo)
-    return;
-
-  ntp_promo->GetString(kPrefPromoText, &promo_text_);
-  const base::DictionaryValue* promo_payload = NULL;
-  if (ntp_promo->GetDictionary(kPrefPromoPayload, &promo_payload))
-    promo_payload_.reset(promo_payload->DeepCopy());
-
-  ntp_promo->GetDouble(kPrefPromoStart, &start_);
-  ntp_promo->GetDouble(kPrefPromoEnd, &end_);
-
-  ntp_promo->GetInteger(kPrefPromoNumGroups, &num_groups_);
-  ntp_promo->GetInteger(kPrefPromoSegment, &initial_segment_);
-  ntp_promo->GetInteger(kPrefPromoIncrement, &increment_);
-  ntp_promo->GetInteger(kPrefPromoIncrementFrequency, &time_slice_);
-  ntp_promo->GetInteger(kPrefPromoIncrementMax, &max_group_);
-
-  ntp_promo->GetInteger(kPrefPromoMaxViews, &max_views_);
-
-  ntp_promo->GetInteger(kPrefPromoGroup, &group_);
-  ntp_promo->GetInteger(kPrefPromoViews, &views_);
-  ntp_promo->GetBoolean(kPrefPromoClosed, &closed_);
-}
-
-bool NotificationPromo::CheckAppLauncher() const {
-#if !defined(ENABLE_APP_LIST)
-  return true;
-#else
-  bool is_app_launcher_promo = false;
-  if (!promo_payload_->GetBoolean("is_app_launcher_promo",
-                                  &is_app_launcher_promo))
-    return true;
-  return !is_app_launcher_promo ||
-         !prefs_->GetBoolean(prefs::kAppLauncherIsEnabled);
-#endif  // !defined(ENABLE_APP_LIST)
+  if (prefs_->HasPrefPath(prefs::kNTPPromoFeatureMask))
+    feature_mask_ = prefs_->GetInteger(prefs::kNTPPromoFeatureMask);
 }
 
 bool NotificationPromo::CanShow() const {
   return !closed_ &&
-         !promo_text_.empty() &&
-         !ExceedsMaxGroup() &&
-         !ExceedsMaxViews() &&
-         CheckAppLauncher() &&
-         base::Time::FromDoubleT(StartTimeForGroup()) < base::Time::Now() &&
-         base::Time::FromDoubleT(EndTime()) > base::Time::Now();
+      !text_.empty() &&
+      group_ < max_group_ &&
+      views_ < max_views_ &&
+      IsPlatformAllowed(platform_) &&
+      IsBuildAllowed(build_) &&
+      base::Time::FromDoubleT(StartTimeWithOffset()) < base::Time::Now() &&
+      base::Time::FromDoubleT(end_) > base::Time::Now() &&
+      (!(feature_mask_ & NotificationPromo::FEATURE_GPLUS) || gplus_);
 }
 
-// static
-void NotificationPromo::HandleClosed(PromoType promo_type) {
+void NotificationPromo::HandleClosed() {
   content::RecordAction(UserMetricsAction("NTPPromoClosed"));
-  NotificationPromo promo;
-  promo.InitFromPrefs(promo_type);
-  if (!promo.closed_) {
-    promo.closed_ = true;
-    promo.WritePrefs();
-  }
+  prefs_->SetBoolean(prefs::kNTPPromoClosed, true);
 }
 
-// static
-bool NotificationPromo::HandleViewed(PromoType promo_type) {
+bool NotificationPromo::HandleViewed() {
   content::RecordAction(UserMetricsAction("NTPPromoShown"));
-  NotificationPromo promo;
-  promo.InitFromPrefs(promo_type);
-  ++promo.views_;
-  promo.WritePrefs();
-  return promo.ExceedsMaxViews();
+  if (prefs_->HasPrefPath(prefs::kNTPPromoViewsMax))
+    max_views_ = prefs_->GetInteger(prefs::kNTPPromoViewsMax);
+
+  if (prefs_->HasPrefPath(prefs::kNTPPromoViews))
+    views_ = prefs_->GetInteger(prefs::kNTPPromoViews);
+
+  prefs_->SetInteger(prefs::kNTPPromoViews, ++views_);
+  return views_ >= max_views_;
 }
 
-bool NotificationPromo::ExceedsMaxGroup() const {
-  return (max_group_ == 0) ? false : group_ >= max_group_;
+bool NotificationPromo::IsBuildAllowed(int builds_allowed) const {
+  if (delegate_)  // For testing.
+    return delegate_->IsBuildAllowed(builds_allowed);
+  else
+    return PromoResourceService::IsBuildTargeted(
+        PromoResourceService::GetChannel(), builds_allowed);
 }
 
-bool NotificationPromo::ExceedsMaxViews() const {
-  return (max_views_ == 0) ? false : views_ >= max_views_;
+bool NotificationPromo::IsPlatformAllowed(int target_platform) const {
+  const int current_platform = delegate_? delegate_->CurrentPlatform()
+                                        : CurrentPlatform();
+  return (target_platform & current_platform) != 0;
 }
 
 // static
-GURL NotificationPromo::PromoServerURL() {
-  GURL url(promo_server_url);
-  AppendQueryParameter(&url, "dist", ChannelString());
-  AppendQueryParameter(&url, "osname", PlatformString());
-  AppendQueryParameter(&url, "branding", chrome::VersionInfo().Version());
-  AppendQueryParameter(&url, "osver", base::SysInfo::OperatingSystemVersion());
-  DVLOG(1) << "PromoServerURL=" << url.spec();
-  // Note that locale param is added by WebResourceService.
-  return url;
+int NotificationPromo::CurrentPlatform() {
+  // Ignore OS_ANDROID, OS_FREEBSD, OS_OPENBSD, OS_SOLARIS, OS_NACL for now.
+  // Order is important - OS_LINUX and OS_CHROMEOS can both be defined.
+#if defined(OS_WIN)
+  return PLATFORM_WIN;
+#elif defined(OS_MACOSX)
+  return PLATFORM_MAC;
+#elif defined(OS_CHROMEOS)
+  return PLATFORM_CHROMEOS;
+#elif defined(OS_LINUX)
+  return PLATFORM_LINUX;
+#else
+  return PLATFORM_NONE;
+#endif
 }
 
-double NotificationPromo::StartTimeForGroup() const {
-  if (group_ < initial_segment_)
-    return start_;
-  return start_ +
-      std::ceil(static_cast<float>(group_ - initial_segment_ + 1) / increment_)
-      * time_slice_;
+double NotificationPromo::StartTimeWithOffset() const {
+  // Adjust start using group and time slice, adjusted from hours to seconds.
+  static const double kSecondsInHour = 60.0 * 60.0;
+  return start_ + group_ * time_slice_ * kSecondsInHour;
 }
 
-double NotificationPromo::EndTime() const {
-  return end_;
+// static
+int NotificationPromo::GetNextQuestionValue(const std::string& question,
+                                            size_t* index,
+                                            bool* err) {
+  if (*err)
+    return 0;
+
+  size_t new_index = question.find(':', *index);
+  // Note that substr correctly handles npos.
+  std::string fragment(question.substr(*index, new_index - *index));
+  *index = new_index + 1;
+
+  int value;
+  *err = !base::StringToInt(fragment, &value);
+  return *err ? 0 : value;
+}
+
+bool NotificationPromo::operator==(const NotificationPromo& other) const {
+  return prefs_ == other.prefs_ &&
+         delegate_ == other.delegate_ &&
+         start_ == other.start_ &&
+         end_ == other.end_ &&
+         build_ == other.build_ &&
+         time_slice_ == other.time_slice_ &&
+         max_group_ == other.max_group_ &&
+         max_views_ == other.max_views_ &&
+         platform_ == other.platform_ &&
+         group_ == other.group_ &&
+         views_ == other.views_ &&
+         text_ == other.text_ &&
+         closed_ == other.closed_ &&
+         gplus_ == other.gplus_ &&
+         feature_mask_ == other.feature_mask_;
 }

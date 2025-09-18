@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_SHOW_DESKTOP_NOTIFICATION_PARAMS_H_
 #define CONTENT_PUBLIC_COMMON_SHOW_DESKTOP_NOTIFICATION_PARAMS_H_
+#pragma once
 
 #include "content/common/content_export.h"
-#include "third_party/WebKit/public/web/WebTextDirection.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 
 namespace content {
 
@@ -19,17 +20,23 @@ struct CONTENT_EXPORT ShowDesktopNotificationHostMsgParams {
   // URL which is the origin that created this notification.
   GURL origin;
 
+  // True if this is HTML
+  bool is_html;
+
+  // URL which contains the HTML contents (if is_html is true), otherwise empty.
+  GURL contents_url;
+
   // Contents of the notification if is_html is false.
   GURL icon_url;
-  base::string16 title;
-  base::string16 body;
+  string16 title;
+  string16 body;
 
   // Directionality of the notification.
-  blink::WebTextDirection direction;
+  WebKit::WebTextDirection direction;
 
   // ReplaceID if this notification should replace an existing one; may be
   // empty if no replacement is called for.
-  base::string16 replace_id;
+  string16 replace_id;
 
   // Notification ID for sending events back for this notification.
   int notification_id;

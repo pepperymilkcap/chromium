@@ -6,12 +6,13 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/time/time.h"
+#include "base/message_loop.h"
+#include "base/string_number_conversions.h"
+#include "base/time.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/host_config.h"
 #include "remoting/jingle_glue/iq_sender.h"
+#include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/signal_strategy.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
 #include "third_party/libjingle/source/talk/xmpp/constants.h"
@@ -36,15 +37,13 @@ const char kSupportIdLifetimeTag[] = "support-id-lifetime";
 
 RegisterSupportHostRequest::RegisterSupportHostRequest(
     SignalStrategy* signal_strategy,
-    scoped_refptr<RsaKeyPair> key_pair,
-    const std::string& directory_bot_jid,
+    HostKeyPair* key_pair,
     const RegisterCallback& callback)
     : signal_strategy_(signal_strategy),
       key_pair_(key_pair),
-      directory_bot_jid_(directory_bot_jid),
       callback_(callback) {
   DCHECK(signal_strategy_);
-  DCHECK(key_pair_.get());
+  DCHECK(key_pair_);
   signal_strategy_->AddListener(this);
   iq_sender_.reset(new IqSender(signal_strategy_));
 }
@@ -59,11 +58,11 @@ void RegisterSupportHostRequest::OnSignalStrategyStateChange(
   if (state == SignalStrategy::CONNECTED) {
     DCHECK(!callback_.is_null());
 
-    request_ = iq_sender_->SendIq(
-        buzz::STR_SET, directory_bot_jid_,
-        CreateRegistrationRequest(signal_strategy_->GetLocalJid()).Pass(),
+    request_.reset(iq_sender_->SendIq(
+        buzz::STR_SET, kChromotingBotJid,
+        CreateRegistrationRequest(signal_strategy_->GetLocalJid()),
         base::Bind(&RegisterSupportHostRequest::ProcessResponse,
-                   base::Unretained(this)));
+                   base::Unretained(this))));
   } else if (state == SignalStrategy::DISCONNECTED) {
     // We will reach here if signaling fails to connect.
     CallCallback(false, std::string(), base::TimeDelta());
@@ -75,22 +74,22 @@ bool RegisterSupportHostRequest::OnSignalStrategyIncomingStanza(
   return false;
 }
 
-scoped_ptr<XmlElement> RegisterSupportHostRequest::CreateRegistrationRequest(
+XmlElement* RegisterSupportHostRequest::CreateRegistrationRequest(
     const std::string& jid) {
-  scoped_ptr<XmlElement> query(new XmlElement(
-      QName(kChromotingXmlNamespace, kRegisterQueryTag)));
+  XmlElement* query = new XmlElement(
+      QName(kChromotingXmlNamespace, kRegisterQueryTag));
   XmlElement* public_key = new XmlElement(
       QName(kChromotingXmlNamespace, kPublicKeyTag));
   public_key->AddText(key_pair_->GetPublicKey());
   query->AddElement(public_key);
-  query->AddElement(CreateSignature(jid).release());
-  return query.Pass();
+  query->AddElement(CreateSignature(jid));
+  return query;
 }
 
-scoped_ptr<XmlElement> RegisterSupportHostRequest::CreateSignature(
+XmlElement* RegisterSupportHostRequest::CreateSignature(
     const std::string& jid) {
-  scoped_ptr<XmlElement> signature_tag(new XmlElement(
-      QName(kChromotingXmlNamespace, kSignatureTag)));
+  XmlElement* signature_tag = new XmlElement(
+      QName(kChromotingXmlNamespace, kSignatureTag));
 
   int64 time = static_cast<int64>(base::Time::Now().ToDoubleT());
   std::string time_str(base::Int64ToString(time));
@@ -98,10 +97,10 @@ scoped_ptr<XmlElement> RegisterSupportHostRequest::CreateSignature(
       QName(kChromotingXmlNamespace, kSignatureTimeAttr), time_str);
 
   std::string message = jid + ' ' + time_str;
-  std::string signature(key_pair_->SignMessage(message));
+  std::string signature(key_pair_->GetSignature(message));
   signature_tag->AddText(signature);
 
-  return signature_tag.Pass();
+  return signature_tag;
 }
 
 bool RegisterSupportHostRequest::ParseResponse(const XmlElement* response,
@@ -162,8 +161,7 @@ bool RegisterSupportHostRequest::ParseResponse(const XmlElement* response,
   return true;
 }
 
-void RegisterSupportHostRequest::ProcessResponse(IqRequest* request,
-                                                 const XmlElement* response) {
+void RegisterSupportHostRequest::ProcessResponse(const XmlElement* response) {
   std::string support_id;
   base::TimeDelta lifetime;
   bool success = ParseResponse(response, &support_id, &lifetime);

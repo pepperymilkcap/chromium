@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@ var extensionId = "enfkhcelefdadlmkffamgdlgplcionje";
 var appId = "iladmdjkfniedhfhcfoefgojhgaiaccc";
 
 var assertEq = chrome.test.assertEq;
-var assertFalse = chrome.test.assertFalse;
 var assertNoLastError = chrome.test.assertNoLastError;
 var assertTrue = chrome.test.assertTrue;
 var callbackFail = chrome.test.callbackFail;
@@ -41,7 +40,6 @@ var img = null;
 function getIconData(callback) {
   if (cachedIcon) {
     callback(cachedIcon);
-    return;
   }
   var canvas = document.createElement("canvas");
   canvas.style.display = "none";
@@ -60,8 +58,13 @@ function getIconData(callback) {
   img.src = "extension/icon.png";
 }
 
+var cachedManifest = null;
+
 // This returns the string contents of the extension's manifest file.
 function getManifest(alternativePath) {
+  if (cachedManifest)
+    return cachedManifest;
+
   // Do a synchronous XHR to get the manifest.
   var xhr = new XMLHttpRequest();
   xhr.open("GET",
@@ -69,28 +72,4 @@ function getManifest(alternativePath) {
            false);
   xhr.send(null);
   return xhr.responseText;
-}
-
-// Installs the extension with the given |installOptions|, calls
-// |whileInstalled| and then uninstalls the extension.
-function installAndCleanUp(installOptions, whileInstalled) {
-  // Begin installing.
-  chrome.webstorePrivate.beginInstallWithManifest3(
-      installOptions,
-      callbackPass(function(result) {
-        assertNoLastError();
-        assertEq("", result);
-
-        // Now complete the installation.
-        chrome.webstorePrivate.completeInstall(
-            extensionId,
-            callbackPass(function(result) {
-              assertNoLastError();
-              assertEq(undefined, result);
-
-              whileInstalled();
-
-              chrome.management.uninstall(extensionId, {}, callbackPass());
-            }));
-      }));
 }

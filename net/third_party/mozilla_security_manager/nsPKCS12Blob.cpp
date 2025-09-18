@@ -44,10 +44,10 @@
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "crypto/nss_util_internal.h"
 #include "net/base/net_errors.h"
-#include "net/cert/x509_certificate.h"
+#include "net/base/x509_certificate.h"
 
 namespace mozilla_security_manager {
 
@@ -148,7 +148,7 @@ pip_ucs2_ascii_conversion_fn(PRBool toUnicode,
 int
 nsPKCS12Blob_ImportHelper(const char* pkcs12_data,
                           size_t pkcs12_len,
-                          const base::string16& password,
+                          const string16& password,
                           bool is_extractable,
                           bool try_zero_length_secitem,
                           PK11SlotInfo *slot,
@@ -340,9 +340,7 @@ class PKCS12InitSingleton {
   }
 };
 
-// Leaky so it can be initialized on worker threads and because there is no
-// cleanup necessary.
-static base::LazyInstance<PKCS12InitSingleton>::Leaky g_pkcs12_init_singleton =
+static base::LazyInstance<PKCS12InitSingleton> g_pkcs12_init_singleton =
     LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -355,7 +353,7 @@ void EnsurePKCS12Init() {
 int nsPKCS12Blob_Import(PK11SlotInfo* slot,
                         const char* pkcs12_data,
                         size_t pkcs12_len,
-                        const base::string16& password,
+                        const string16& password,
                         bool is_extractable,
                         net::CertificateList* imported_certs) {
 
@@ -390,7 +388,7 @@ int nsPKCS12Blob_Import(PK11SlotInfo* slot,
 int
 nsPKCS12Blob_Export(std::string* output,
                     const net::CertificateList& certs,
-                    const base::string16& password)
+                    const string16& password)
 {
   int return_count = 0;
   SECStatus srv = SECSuccess;
@@ -418,7 +416,7 @@ nsPKCS12Blob_Export(std::string* output,
   if (srv) goto finish;
 
   for (size_t i=0; i<certs.size(); i++) {
-    DCHECK(certs[i].get());
+    DCHECK(certs[i]);
     CERTCertificate* nssCert = certs[i]->os_cert_handle();
     DCHECK(nssCert);
 

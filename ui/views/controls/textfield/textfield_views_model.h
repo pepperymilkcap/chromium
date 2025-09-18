@@ -4,24 +4,27 @@
 
 #ifndef UI_VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_VIEWS_MODEL_H_
 #define UI_VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_VIEWS_MODEL_H_
+#pragma once
 
 #include <list>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ime/composition_text.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/render_text.h"
-#include "ui/gfx/text_constants.h"
 #include "ui/views/views_export.h"
 
 namespace gfx {
-class Range;
 class RenderText;
 }  // namespace gfx
+
+namespace ui {
+class Range;
+}  // namespace ui
 
 namespace views {
 
@@ -64,42 +67,42 @@ class VIEWS_EXPORT TextfieldViewsModel {
 
   // Edit related methods.
 
-  const base::string16& GetText() const;
+  const string16& GetText() const;
   // Sets the text. Returns true if the text has been modified.  The
   // current composition text will be confirmed first.  Setting
   // the same text will not add edit history because it's not user
   // visible change nor user-initiated change. This allow a client
   // code to set the same text multiple times without worrying about
   // messing edit history.
-  bool SetText(const base::string16& text);
+  bool SetText(const string16& text);
 
   gfx::RenderText* render_text() { return render_text_.get(); }
 
   // Inserts given |text| at the current cursor position.
   // The current composition text will be cleared.
-  void InsertText(const base::string16& text) {
+  void InsertText(const string16& text) {
     InsertTextInternal(text, false);
   }
 
   // Inserts a character at the current cursor position.
-  void InsertChar(base::char16 c) {
-    InsertTextInternal(base::string16(&c, 1), true);
+  void InsertChar(char16 c) {
+    InsertTextInternal(string16(&c, 1), true);
   }
 
   // Replaces characters at the current position with characters in given text.
   // The current composition text will be cleared.
-  void ReplaceText(const base::string16& text) {
+  void ReplaceText(const string16& text) {
     ReplaceTextInternal(text, false);
   }
 
   // Replaces the char at the current position with given character.
-  void ReplaceChar(base::char16 c) {
-    ReplaceTextInternal(base::string16(&c, 1), true);
+  void ReplaceChar(char16 c) {
+    ReplaceTextInternal(string16(&c, 1), true);
   }
 
   // Appends the text.
   // The current composition text will be confirmed.
-  void Append(const base::string16& text);
+  void Append(const string16& text);
 
   // Deletes the first character after the current cursor position (as if, the
   // the user has pressed delete key in the textfield). Returns true if
@@ -136,26 +139,27 @@ class VIEWS_EXPORT TextfieldViewsModel {
   // Selection related method
 
   // Returns the selected text.
-  base::string16 GetSelectedText() const;
+  string16 GetSelectedText() const;
+
+  // Gets the selected range.
+  void GetSelectedRange(ui::Range* range) const;
 
   // The current composition text will be confirmed. The selection starts with
   // the range's start position, and ends with the range's end position,
   // therefore the cursor position becomes the end position.
-  void SelectRange(const gfx::Range& range);
+  void SelectRange(const ui::Range& range);
+
+  void GetSelectionModel(gfx::SelectionModel* sel) const;
 
   // The current composition text will be confirmed.
   // render_text_'s selection model is set to |sel|.
   void SelectSelectionModel(const gfx::SelectionModel& sel);
 
-  // Select the entire text range. If |reversed| is true, the range will end at
-  // the logical beginning of the text; this generally shows the leading portion
-  // of text that overflows its display area.
+  // Selects all text.
   // The current composition text will be confirmed.
-  void SelectAll(bool reversed);
+  void SelectAll();
 
-  // Selects the word at which the cursor is currently positioned. If there is a
-  // non-empty selection, the selection bounds are extended to their nearest
-  // word boundaries.
+  // Selects the word at which the cursor is currently positioned.
   // The current composition text will be confirmed.
   void SelectWord();
 
@@ -184,7 +188,7 @@ class VIEWS_EXPORT TextfieldViewsModel {
   bool Copy();
 
   // Pastes text from the clipboard at current cursor position. Returns true
-  // if any text is pasted.
+  // if text has changed after pasting.
   bool Paste();
 
   // Tells if any text is selected, even if the selection is in composition
@@ -198,16 +202,16 @@ class VIEWS_EXPORT TextfieldViewsModel {
   // Deletes the selected text (if any) and insert text at given
   // position.
   void DeleteSelectionAndInsertTextAt(
-      const base::string16& text, size_t position);
+      const string16& text, size_t position);
 
   // Retrieves the text content in a given range.
-  base::string16 GetTextFromRange(const gfx::Range& range) const;
+  string16 GetTextFromRange(const ui::Range& range) const;
 
   // Retrieves the range containing all text in the model.
-  void GetTextRange(gfx::Range* range) const;
+  void GetTextRange(ui::Range* range) const;
 
   // Sets composition text and attributes. If there is composition text already,
-  // it'll be replaced by the new one. Otherwise, current selection will be
+  // it’ll be replaced by the new one. Otherwise, current selection will be
   // replaced. If there is no selection, the composition text will be inserted
   // at the insertion point.
   // Any changes to the model except text insertion will confirm the current
@@ -221,7 +225,7 @@ class VIEWS_EXPORT TextfieldViewsModel {
   void CancelCompositionText();
 
   // Retrieves the range of current composition text.
-  void GetCompositionTextRange(gfx::Range* range) const;
+  void GetCompositionTextRange(ui::Range* range) const;
 
   // Returns true if there is composition text.
   bool HasCompositionText() const;
@@ -241,12 +245,12 @@ class VIEWS_EXPORT TextfieldViewsModel {
 
   // Insert the given |text|. |mergeable| indicates if this insert
   // operation can be merged to previous edit in the edit history.
-  void InsertTextInternal(const base::string16& text, bool mergeable);
+  void InsertTextInternal(const string16& text, bool mergeable);
 
   // Replace the current text with the given |text|. |mergeable|
   // indicates if this replace operation can be merged to previous
   // edit in the edit history.
-  void ReplaceTextInternal(const base::string16& text, bool mergeable);
+  void ReplaceTextInternal(const string16& text, bool mergeable);
 
   // Clears all edit history.
   void ClearEditHistory();
@@ -255,15 +259,15 @@ class VIEWS_EXPORT TextfieldViewsModel {
   void ClearRedoHistory();
 
   // Executes and records edit operations.
-  void ExecuteAndRecordDelete(gfx::Range range, bool mergeable);
+  void ExecuteAndRecordDelete(size_t from, size_t to, bool mergeable);
   void ExecuteAndRecordReplaceSelection(internal::MergeType merge_type,
-                                        const base::string16& text);
+                                        const string16& text);
   void ExecuteAndRecordReplace(internal::MergeType merge_type,
                                size_t old_cursor_pos,
                                size_t new_cursor_pos,
-                               const base::string16& text,
+                               const string16& text,
                                size_t new_text_start);
-  void ExecuteAndRecordInsert(const base::string16& text, bool mergeable);
+  void ExecuteAndRecordInsert(const string16& text, bool mergeable);
 
   // Adds or merge |edit| into edit history. Return true if the edit
   // has been merged and must be deleted after redo.
@@ -276,7 +280,7 @@ class VIEWS_EXPORT TextfieldViewsModel {
   // 3) Move the cursor to |new_cursor_pos|.
   void ModifyText(size_t delete_from,
                   size_t delete_to,
-                  const base::string16& new_text,
+                  const string16& new_text,
                   size_t new_text_insert_at,
                   size_t new_cursor_pos);
 

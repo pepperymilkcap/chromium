@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_INSTALLER_UTIL_INSTALLER_STATE_H_
 #define CHROME_INSTALLER_UTIL_INSTALLER_STATE_H_
+#pragma once
 
-#include <set>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
@@ -24,6 +24,7 @@
 #endif
 
 class CommandLine;
+class Version;
 
 namespace installer {
 
@@ -37,12 +38,6 @@ typedef std::vector<Product*> Products;
 
 // Encapsulates the state of the current installation operation.  Only valid
 // for installs and upgrades (not for uninstalls or non-install commands).
-// This class interprets the command-line arguments and master preferences and
-// determines the operations to be performed. For example, the Chrome Binaries
-// are automatically added if required in multi-install mode.
-// TODO(erikwright): This is now used a fair bit during uninstall, and
-// InstallerState::Initialize() contains a lot of code for uninstall. The class
-// comment should probably be updated.
 // TODO(grt): Rename to InstallerEngine/Conductor or somesuch?
 class InstallerState {
  public:
@@ -111,14 +106,8 @@ class InstallerState {
   // TODO(grt): Eradicate the bool in favor of the enum.
   bool is_multi_install() const;
 
-  // A convenient method returning the presence of the
-  // --ensure-google-update-present switch.
-  bool ensure_google_update_present() const {
-    return ensure_google_update_present_;
-  }
-
   // The full path to the place where the operand resides.
-  const base::FilePath& target_path() const { return target_path_; }
+  const FilePath& target_path() const { return target_path_; }
 
   // True if the "msi" preference is set or if a product with the "msi" state
   // flag is set is to be operated on.
@@ -154,41 +143,35 @@ class InstallerState {
 
   // Returns the currently installed version in |target_path|, or NULL if no
   // products are installed.  Ownership is passed to the caller.
-  base::Version* GetCurrentVersion(
-      const InstallationState& machine_state) const;
+  Version* GetCurrentVersion(const InstallationState& machine_state) const;
 
   // Returns the critical update version if all of the following are true:
   // * --critical-update-version=CUV was specified on the command-line.
   // * current_version == NULL or current_version < CUV.
   // * new_version >= CUV.
   // Otherwise, returns an invalid version.
-  base::Version DetermineCriticalVersion(
-      const base::Version* current_version,
-      const base::Version& new_version) const;
+  Version DetermineCriticalVersion(const Version* current_version,
+                                   const Version& new_version) const;
 
   // Returns whether or not there is currently a Chrome Frame instance running.
   // Note that there isn't a mechanism to lock Chrome Frame in place, so Chrome
   // Frame may either exit or start up after this is called.
   bool IsChromeFrameRunning(const InstallationState& machine_state) const;
 
-  // Returns true if any of the binaries from a multi-install Chrome Frame that
-  // has been migrated to single-install are still in use.
-  bool AreBinariesInUse(const InstallationState& machine_state) const;
-
   // Returns the path to the installer under Chrome version folder
   // (for example <target_path>\Google\Chrome\Application\<Version>\Installer)
-  base::FilePath GetInstallerDirectory(const base::Version& version) const;
+  FilePath GetInstallerDirectory(const Version& version) const;
 
   // Try to delete all directories under |temp_path| whose versions are less
   // than |new_version| and not equal to |existing_version|. |existing_version|
   // may be NULL.
-  void RemoveOldVersionDirectories(const base::Version& new_version,
-                                   base::Version* existing_version,
-                                   const base::FilePath& temp_path) const;
+  void RemoveOldVersionDirectories(const Version& new_version,
+                                   Version* existing_version,
+                                   const FilePath& temp_path) const;
 
   // Adds to |com_dll_list| the list of COM DLLs that are to be registered
   // and/or unregistered. The list may be empty.
-  void AddComDllList(std::vector<base::FilePath>* com_dll_list) const;
+  void AddComDllList(std::vector<FilePath>* com_dll_list) const;
 
   bool SetChannelFlags(bool set, ChannelInfo* channel_info) const;
 
@@ -210,34 +193,12 @@ class InstallerState {
                             int string_resource_id,
                             const std::wstring* launch_cmd) const;
 
-  // Returns true if this install needs to register an Active Setup command.
-  bool RequiresActiveSetup() const;
-
  protected:
-  // Bits for the |file_bits| argument of AnyExistsAndIsInUse.
-  enum {
-    CHROME_DLL              = 1 << 0,
-    CHROME_FRAME_DLL        = 1 << 1,
-    CHROME_FRAME_HELPER_DLL = 1 << 2,
-    CHROME_FRAME_HELPER_EXE = 1 << 3,
-    NUM_BINARIES            = 4
-  };
+  static bool IsFileInUse(const FilePath& file);
 
-  // Returns true if |file| exists and cannot be opened for exclusive write
-  // access.
-  static bool IsFileInUse(const base::FilePath& file);
-
-  // Clears the instance to an uninitialized state.
-  void Clear();
-
-  // Returns true if any file corresponding to a bit in |file_bits| (from the
-  // enum above) for the currently installed version exists and is in use.
-  bool AnyExistsAndIsInUse(const InstallationState& machine_state,
-                           uint32 file_bits) const;
-  base::FilePath GetDefaultProductInstallPath(BrowserDistribution* dist) const;
-  bool CanAddProduct(const Product& product,
-                     const base::FilePath* product_dir) const;
-  Product* AddProductInDirectory(const base::FilePath* product_dir,
+  FilePath GetDefaultProductInstallPath(BrowserDistribution* dist) const;
+  bool CanAddProduct(const Product& product, const FilePath* product_dir) const;
+  Product* AddProductInDirectory(const FilePath* product_dir,
                                  scoped_ptr<Product>* product);
   Product* AddProductFromPreferences(
       BrowserDistribution::Type distribution_type,
@@ -245,11 +206,6 @@ class InstallerState {
       const InstallationState& machine_state);
   bool IsMultiInstallUpdate(const MasterPreferences& prefs,
                             const InstallationState& machine_state);
-
-  // Enumerates all files named one of
-  // [chrome.exe, old_chrome.exe, new_chrome.exe] in target_path_ and
-  // returns their version numbers in a set.
-  void GetExistingExeVersions(std::set<std::string>* existing_versions) const;
 
   // Sets this object's level and updates the root_key_ accordingly.
   void set_level(Level level);
@@ -259,12 +215,12 @@ class InstallerState {
   void set_package_type(PackageType type);
 
   Operation operation_;
-  base::FilePath target_path_;
+  FilePath target_path_;
   std::wstring state_key_;
   BrowserDistribution::Type state_type_;
   ScopedVector<Product> products_;
   BrowserDistribution* multi_package_distribution_;
-  base::Version critical_update_version_;
+  Version critical_update_version_;
   Level level_;
   PackageType package_type_;
 #if defined(OS_WIN)
@@ -272,7 +228,6 @@ class InstallerState {
 #endif
   bool msi_;
   bool verbose_logging_;
-  bool ensure_google_update_present_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InstallerState);

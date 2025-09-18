@@ -4,6 +4,7 @@
 
 #ifndef BASE_SYNCHRONIZATION_LOCK_H_
 #define BASE_SYNCHRONIZATION_LOCK_H_
+#pragma once
 
 #include "base/base_export.h"
 #include "base/synchronization/lock_impl.h"
@@ -32,7 +33,7 @@ class BASE_EXPORT Lock {
   void AssertAcquired() const {}
 #else
   Lock();
-  ~Lock();
+  ~Lock() {}
 
   // NOTE: Although windows critical sections support recursive locks, we do not
   // allow this, and we will commonly fire a DCHECK() if a thread attempts to
@@ -96,14 +97,8 @@ class BASE_EXPORT Lock {
 // A helper class that acquires the given Lock while the AutoLock is in scope.
 class AutoLock {
  public:
-  struct AlreadyAcquired {};
-
   explicit AutoLock(Lock& lock) : lock_(lock) {
     lock_.Acquire();
-  }
-
-  AutoLock(Lock& lock, const AlreadyAcquired&) : lock_(lock) {
-    lock_.AssertAcquired();
   }
 
   ~AutoLock() {

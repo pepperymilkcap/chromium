@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 
 #ifndef NET_DISK_CACHE_MEM_BACKEND_IMPL_H__
 #define NET_DISK_CACHE_MEM_BACKEND_IMPL_H__
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "base/containers/hash_tables.h"
+#include "base/hash_tables.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/mem_rankings.h"
 
@@ -32,7 +33,7 @@ class NET_EXPORT_PRIVATE MemBackendImpl : public Backend {
   // size the cache can grow to. If zero is passed in as max_bytes, the cache
   // will determine the value to use based on the available memory. The returned
   // pointer can be NULL if a fatal error is found.
-  static scoped_ptr<Backend> CreateBackend(int max_bytes, net::NetLog* net_log);
+  static Backend* CreateBackend(int max_bytes, net::NetLog* net_log);
 
   // Performs general initialization for this current instance of the cache.
   bool Init();
@@ -62,22 +63,23 @@ class NET_EXPORT_PRIVATE MemBackendImpl : public Backend {
   void RemoveFromRankingList(MemEntryImpl* entry);
 
   // Backend interface.
-  virtual net::CacheType GetCacheType() const OVERRIDE;
   virtual int32 GetEntryCount() const OVERRIDE;
   virtual int OpenEntry(const std::string& key, Entry** entry,
-                        const CompletionCallback& callback) OVERRIDE;
+                        const net::CompletionCallback& callback) OVERRIDE;
   virtual int CreateEntry(const std::string& key, Entry** entry,
-                          const CompletionCallback& callback) OVERRIDE;
+                          const net::CompletionCallback& callback) OVERRIDE;
   virtual int DoomEntry(const std::string& key,
-                        const CompletionCallback& callback) OVERRIDE;
-  virtual int DoomAllEntries(const CompletionCallback& callback) OVERRIDE;
-  virtual int DoomEntriesBetween(base::Time initial_time,
-                                 base::Time end_time,
-                                 const CompletionCallback& callback) OVERRIDE;
-  virtual int DoomEntriesSince(base::Time initial_time,
-                               const CompletionCallback& callback) OVERRIDE;
+                        const net::CompletionCallback& callback) OVERRIDE;
+  virtual int DoomAllEntries(const net::CompletionCallback& callback) OVERRIDE;
+  virtual int DoomEntriesBetween(
+      const base::Time initial_time,
+      const base::Time end_time,
+      const net::CompletionCallback& callback) OVERRIDE;
+  virtual int DoomEntriesSince(
+      const base::Time initial_time,
+      const net::CompletionCallback& callback) OVERRIDE;
   virtual int OpenNextEntry(void** iter, Entry** next_entry,
-                            const CompletionCallback& callback) OVERRIDE;
+                            const net::CompletionCallback& callback) OVERRIDE;
   virtual void EndEnumeration(void** iter) OVERRIDE;
   virtual void GetStats(
       std::vector<std::pair<std::string, std::string> >* stats) OVERRIDE {}

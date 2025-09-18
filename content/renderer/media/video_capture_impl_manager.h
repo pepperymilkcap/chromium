@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,11 @@
 #include <list>
 #include <map>
 
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/threading/thread.h"
+#include "base/message_loop_proxy.h"
 #include "base/synchronization/lock.h"
 #include "content/common/content_export.h"
 #include "media/video/capture/video_capture.h"
-
-namespace content {
 
 class VideoCaptureImpl;
 class VideoCaptureMessageFilter;
@@ -28,6 +26,7 @@ class CONTENT_EXPORT VideoCaptureImplManager
     : public base::RefCountedThreadSafe<VideoCaptureImplManager> {
  public:
   VideoCaptureImplManager();
+  virtual ~VideoCaptureImplManager();
 
   // Called by video capture client |handler| to add device referenced
   // by |id| to VideoCaptureImplManager's list of opened device list.
@@ -42,20 +41,11 @@ class CONTENT_EXPORT VideoCaptureImplManager
   virtual void RemoveDevice(media::VideoCaptureSessionId id,
                             media::VideoCapture::EventHandler* handler);
 
-  // Make all existing VideoCaptureImpl instances stop/resume delivering
-  // video frames to their clients, depends on flag |suspend|.
-  virtual void SuspendDevices(bool suspend);
-
   VideoCaptureMessageFilter* video_capture_message_filter() const {
-    return filter_.get();
+    return filter_;
   }
 
- protected:
-  virtual ~VideoCaptureImplManager();
-
  private:
-  friend class base::RefCountedThreadSafe<VideoCaptureImplManager>;
-
   struct Device {
     Device(VideoCaptureImpl* device,
            media::VideoCapture::EventHandler* handler);
@@ -76,7 +66,5 @@ class CONTENT_EXPORT VideoCaptureImplManager
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureImplManager);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_RENDERER_MEDIA_VIDEO_CAPTURE_IMPL_MANAGER_H_

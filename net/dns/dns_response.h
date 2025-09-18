@@ -4,19 +4,18 @@
 
 #ifndef NET_DNS_DNS_RESPONSE_H_
 #define NET_DNS_DNS_RESPONSE_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string_piece.h"
-#include "base/time/time.h"
+#include "base/string_piece.h"
 #include "net/base/net_export.h"
 #include "net/base/net_util.h"
 
 namespace net {
 
-class AddressList;
 class DnsQuery;
 class IOBufferWithSize;
 
@@ -62,13 +61,10 @@ class NET_EXPORT_PRIVATE DnsRecordParser {
   // This is exposed to allow parsing compressed names within RRDATA for TYPEs
   // such as NS, CNAME, PTR, MX, SOA.
   // See RFC 1035 section 4.1.4.
-  unsigned ReadName(const void* pos, std::string* out) const;
+  int ParseName(const void* pos, std::string* out) const;
 
-  // Parses the next resource record into |record|. Returns true if succeeded.
-  bool ReadRecord(DnsResourceRecord* record);
-
-  // Skip a question section, returns true if succeeded.
-  bool SkipQuestion();
+  // Parses the next resource record. Returns true if succeeded.
+  bool ParseRecord(DnsResourceRecord* record);
 
  private:
   const char* packet_;
@@ -82,45 +78,21 @@ class NET_EXPORT_PRIVATE DnsRecordParser {
 // position the RR parser.
 class NET_EXPORT_PRIVATE DnsResponse {
  public:
-  // Possible results from ParseToAddressList.
-  enum Result {
-    DNS_PARSE_OK = 0,
-    DNS_MALFORMED_RESPONSE,    // DnsRecordParser failed before the end of
-                               // packet.
-    DNS_MALFORMED_CNAME,       // Could not parse CNAME out of RRDATA.
-    DNS_NAME_MISMATCH,         // Got an address but no ordered chain of CNAMEs
-                               // leads there.
-    DNS_SIZE_MISMATCH,         // Got an address but size does not match.
-    DNS_CNAME_AFTER_ADDRESS,   // Found CNAME after an address record.
-    DNS_ADDRESS_TTL_MISMATCH,  // OBSOLETE. No longer used.
-    DNS_NO_ADDRESSES,          // OBSOLETE. No longer used.
-    // Only add new values here.
-    DNS_PARSE_RESULT_MAX,      // Bounding value for histograms.
-  };
-
-  // Constructs a response buffer large enough to store one byte more than
-  // largest possible response, to detect malformed responses.
+  // Constructs an object with an IOBuffer large enough to read
+  // one byte more than largest possible response, to detect malformed
+  // responses.
   DnsResponse();
-
-  // Constructs a response buffer of given length. Used for TCP transactions.
-  explicit DnsResponse(size_t length);
-
-  // Constructs a response from |data|. Used for testing purposes only!
+  // Constructs response from |data|. Used for testing purposes only!
   DnsResponse(const void* data, size_t length, size_t answer_offset);
-
   ~DnsResponse();
 
   // Internal buffer accessor into which actual bytes of response will be
   // read.
   IOBufferWithSize* io_buffer() { return io_buffer_.get(); }
 
-  // Assuming the internal buffer holds |nbytes| bytes, returns true iff the
-  // packet matches the |query| id and question.
+  // Returns false if the packet is shorter than the header or does not match
+  // |query| id or question.
   bool InitParse(int nbytes, const DnsQuery& query);
-
-  // Assuming the internal buffer holds |nbytes| bytes, initialize the parser
-  // without matching it against an existing query.
-  bool InitParseWithoutQuery(int nbytes);
 
   // Returns true if response is valid, that is, after successful InitParse.
   bool IsValid() const;
@@ -130,9 +102,7 @@ class NET_EXPORT_PRIVATE DnsResponse {
   // Accessors for the header.
   uint16 flags() const;  // excluding rcode
   uint8 rcode() const;
-
-  unsigned answer_count() const;
-  unsigned additional_answer_count() const;
+  int answer_count() const;
 
   // Accessors to the question. The qname is unparsed.
   base::StringPiece qname() const;
@@ -145,10 +115,6 @@ class NET_EXPORT_PRIVATE DnsResponse {
   // The iterator is valid only in the scope of the DnsResponse.
   // This operation is idempotent.
   DnsRecordParser Parser() const;
-
-  // Extracts an AddressList from this response. Returns SUCCESS if succeeded.
-  // Otherwise returns a detailed error number.
-  Result ParseToAddressList(AddressList* addr_list, base::TimeDelta* ttl) const;
 
  private:
   // Convenience for header access.

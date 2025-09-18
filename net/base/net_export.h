@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_NET_EXPORT_H_
 #define NET_BASE_NET_EXPORT_H_
+#pragma once
 
 // Defines NET_EXPORT so that functionality implemented by the net module can
 // be exported to consumers, and NET_EXPORT_PRIVATE that allows unit tests to
@@ -21,13 +22,8 @@
 #endif  // defined(NET_IMPLEMENTATION)
 
 #else  // defined(WIN32)
-#if defined(NET_IMPLEMENTATION)
 #define NET_EXPORT __attribute__((visibility("default")))
 #define NET_EXPORT_PRIVATE __attribute__((visibility("default")))
-#else
-#define NET_EXPORT
-#define NET_EXPORT_PRIVATE
-#endif
 #endif
 
 #else  /// defined(COMPONENT_BUILD)

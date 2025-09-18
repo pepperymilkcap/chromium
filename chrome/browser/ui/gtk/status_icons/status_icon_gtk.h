@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_STATUS_ICONS_STATUS_ICON_GTK_H_
 #define CHROME_BROWSER_UI_GTK_STATUS_ICONS_STATUS_ICON_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -13,6 +14,7 @@
 #include "ui/base/gtk/gtk_signal.h"
 
 class MenuGtk;
+class SkBitmap;
 
 class StatusIconGtk : public StatusIcon {
  public:
@@ -20,20 +22,19 @@ class StatusIconGtk : public StatusIcon {
   virtual ~StatusIconGtk();
 
   // Overridden from StatusIcon:
-  virtual void SetImage(const gfx::ImageSkia& image) OVERRIDE;
-  virtual void SetPressedImage(const gfx::ImageSkia& image) OVERRIDE;
-  virtual void SetToolTip(const base::string16& tool_tip) OVERRIDE;
-  virtual void DisplayBalloon(const gfx::ImageSkia& icon,
-                              const base::string16& title,
-                              const base::string16& contents) OVERRIDE;
+  virtual void SetImage(const SkBitmap& image) OVERRIDE;
+  virtual void SetPressedImage(const SkBitmap& image) OVERRIDE;
+  virtual void SetToolTip(const string16& tool_tip) OVERRIDE;
+  virtual void DisplayBalloon(const SkBitmap& icon,
+                              const string16& title,
+                              const string16& contents) OVERRIDE;
 
   // Exposed for testing.
   CHROMEGTK_CALLBACK_0(StatusIconGtk, void, OnClick);
 
  protected:
   // Overridden from StatusIcon.
-  virtual void UpdatePlatformContextMenu(
-      StatusIconMenuModel* menu) OVERRIDE;
+  virtual void UpdatePlatformContextMenu(ui::MenuModel* menu) OVERRIDE;
 
  private:
   // Callback invoked when user right-clicks on the status icon.

@@ -1,23 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/search_engines/edit_search_engine_controller.h"
 
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/common/net/url_fixer_upper.h"
 #include "content/public/browser/user_metrics.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 using content::UserMetricsAction;
 
 EditSearchEngineController::EditSearchEngineController(
-    TemplateURL* template_url,
+    const TemplateURL* template_url,
     EditSearchEngineControllerDelegate* edit_keyword_delegate,
     Profile* profile)
     : template_url_(template_url),
@@ -27,7 +27,7 @@ EditSearchEngineController::EditSearchEngineController(
 }
 
 bool EditSearchEngineController::IsTitleValid(
-    const base::string16& title_input) const {
+    const string16& title_input) const {
   return !CollapseWhitespace(title_input, true).empty();
 }
 
@@ -37,33 +37,31 @@ bool EditSearchEngineController::IsURLValid(
   if (url.empty())
     return false;
 
-  // Convert |url| to a TemplateURLRef so we can check its validity even if it
-  // contains replacement strings.  We do this by constructing a dummy
-  // TemplateURL owner because |template_url_| might be NULL and we can't call
-  // TemplateURLRef::IsValid() when its owner is NULL.
-  TemplateURLData data;
-  data.SetURL(url);
-  TemplateURL t_url(profile_, data);
-  const TemplateURLRef& template_ref = t_url.url_ref();
+  // Use TemplateURLRef to extract the search placeholder.
+  TemplateURLRef template_ref(url, 0, 0);
   if (!template_ref.IsValid())
     return false;
 
-  // If this is going to be the default search engine, it must support
-  // replacement.
-  if (!template_ref.SupportsReplacement() &&
-      (template_url_ == TemplateURLServiceFactory::GetForProfile(profile_)->
-          GetDefaultSearchProvider()))
-    return false;
+  if (!template_ref.SupportsReplacement()) {
+    // If this is the default search engine, there must be a search term
+    // placeholder.
+    if (template_url_ ==
+        TemplateURLServiceFactory::GetForProfile(profile_)->
+        GetDefaultSearchProvider())
+      return false;
+    return GURL(url).is_valid();
+  }
 
-  // Replace any search term with a placeholder string and make sure the
-  // resulting URL is valid.
-  return GURL(template_ref.ReplaceSearchTerms(
-      TemplateURLRef::SearchTermsArgs(base::ASCIIToUTF16("x")))).is_valid();
+  // If the url has a search term, replace it with a random string and make
+  // sure the resulting URL is valid. We don't check the validity of the url
+  // with the search term as that is not necessarily valid.
+  return GURL(template_ref.ReplaceSearchTerms(TemplateURL(), ASCIIToUTF16("a"),
+      TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())).is_valid();
 }
 
 bool EditSearchEngineController::IsKeywordValid(
-    const base::string16& keyword_input) const {
-  base::string16 keyword_input_trimmed(CollapseWhitespace(keyword_input, true));
+    const string16& keyword_input) const {
+  string16 keyword_input_trimmed(CollapseWhitespace(keyword_input, true));
   if (keyword_input_trimmed.empty())
     return false;  // Do not allow empty keyword.
   const TemplateURL* turl_with_keyword =
@@ -73,18 +71,18 @@ bool EditSearchEngineController::IsKeywordValid(
 }
 
 void EditSearchEngineController::AcceptAddOrEdit(
-    const base::string16& title_input,
-    const base::string16& keyword_input,
+    const string16& title_input,
+    const string16& keyword_input,
     const std::string& url_input) {
-  DCHECK(!keyword_input.empty());
   std::string url_string = GetFixedUpURL(url_input);
   DCHECK(!url_string.empty());
 
   TemplateURLService* template_url_service =
       TemplateURLServiceFactory::GetForProfile(profile_);
-  TemplateURL* existing =
-      template_url_service->GetTemplateURLForKeyword(keyword_input);
-  if (existing && (!edit_keyword_delegate_ || existing != template_url_)) {
+  const TemplateURL* existing = template_url_service->GetTemplateURLForKeyword(
+      keyword_input);
+  if (existing &&
+      (!edit_keyword_delegate_ || existing != template_url_)) {
     // An entry may have been added with the same keyword string while the
     // user edited the dialog, either automatically or by the user (if we're
     // confirming a JS addition, they could have the Options dialog open at the
@@ -99,14 +97,22 @@ void EditSearchEngineController::AcceptAddOrEdit(
     // Confiming an entry we got from JS. We have a template_url_, but it
     // hasn't yet been added to the model.
     DCHECK(template_url_);
+    // const_cast is ugly, but this is the same thing the TemplateURLService
+    // does in a similar situation (updating an existing TemplateURL with
+    // data from a new one).
+    TemplateURL* modifiable_url = const_cast<TemplateURL*>(template_url_);
+    modifiable_url->set_short_name(title_input);
+    modifiable_url->set_keyword(keyword_input);
+    modifiable_url->SetURL(url_string, 0, 0);
     // TemplateURLService takes ownership of template_url_.
-    template_url_service->AddWithOverrides(template_url_, title_input,
-                                           keyword_input, url_string);
+    template_url_service->Add(modifiable_url);
     content::RecordAction(UserMetricsAction("KeywordEditor_AddKeywordJS"));
   } else {
     // Adding or modifying an entry via the Delegate.
-    edit_keyword_delegate_->OnEditedKeyword(template_url_, title_input,
-                                            keyword_input, url_string);
+    edit_keyword_delegate_->OnEditedKeyword(template_url_,
+                                            title_input,
+                                            keyword_input,
+                                            url_string);
   }
 }
 
@@ -122,8 +128,7 @@ void EditSearchEngineController::CleanUpCancelledAdd() {
 std::string EditSearchEngineController::GetFixedUpURL(
     const std::string& url_input) const {
   std::string url;
-  TrimWhitespace(TemplateURLRef::DisplayURLToURLRef(
-                     base::UTF8ToUTF16(url_input)),
+  TrimWhitespace(TemplateURLRef::DisplayURLToURLRef(UTF8ToUTF16(url_input)),
                  TRIM_ALL, &url);
   if (url.empty())
     return url;
@@ -131,15 +136,18 @@ std::string EditSearchEngineController::GetFixedUpURL(
   // Parse the string as a URL to determine the scheme. If we need to, add the
   // scheme. As the scheme may be expanded (as happens with {google:baseURL})
   // we need to replace the search terms before testing for the scheme.
-  TemplateURLData data;
-  data.SetURL(url);
-  TemplateURL t_url(profile_, data);
-  std::string expanded_url(t_url.url_ref().ReplaceSearchTerms(
-      TemplateURLRef::SearchTermsArgs(base::ASCIIToUTF16("x"))));
+  TemplateURL t_url;
+  t_url.SetURL(url, 0, 0);
+  std::string expanded_url =
+      t_url.url()->ReplaceSearchTerms(t_url, ASCIIToUTF16("x"), 0, string16());
   url_parse::Parsed parts;
-  std::string scheme(URLFixerUpper::SegmentURL(expanded_url, &parts));
-  if (!parts.scheme.is_valid())
-    url.insert(0, scheme + "://");
+  std::string scheme(
+      URLFixerUpper::SegmentURL(expanded_url, &parts));
+  if (!parts.scheme.is_valid()) {
+    scheme.append("://");
+    url.insert(0, scheme);
+  }
 
   return url;
 }
+

@@ -4,36 +4,34 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_COLLECTED_COOKIES_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_COLLECTED_COOKIES_VIEWS_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/common/content_settings.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane_listener.h"
 #include "ui/views/controls/tree/tree_view_controller.h"
 #include "ui/views/window/dialog_delegate.h"
 
+class ConstrainedWindow;
 class CookieInfoView;
 class CookiesTreeModel;
 class InfobarView;
-
-namespace content {
-class WebContents;
-}
+class TabContents;
+class TabContentsWrapper;
 
 namespace views {
 class Label;
-class LabelButton;
+class TextButton;
 class TreeView;
-class Widget;
 }
 
 // This is the Views implementation of the collected cookies dialog.
 //
 // CollectedCookiesViews is a dialog that displays the allowed and blocked
 // cookies of the current tab contents. To display the dialog, invoke
-// ShowCollectedCookiesDialog() on the delegate of the WebContents's
+// ShowCollectedCookiesDialog() on the delegate of the tab contents wrapper's
 // content settings tab helper.
 class CollectedCookiesViews : public views::DialogDelegateView,
                               public content::NotificationObserver,
@@ -42,33 +40,30 @@ class CollectedCookiesViews : public views::DialogDelegateView,
                               public views::TreeViewController {
  public:
   // Use BrowserWindow::ShowCollectedCookiesDialog to show.
-  explicit CollectedCookiesViews(content::WebContents* web_contents);
+  explicit CollectedCookiesViews(TabContentsWrapper* wrapper);
 
   // views::DialogDelegate:
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
-  virtual views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
 
   // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   // views::TabbedPaneListener:
-  virtual void TabSelectedAt(int index) OVERRIDE;
+  virtual void TabSelectedAt(int index);
 
   // views::TreeViewController:
-  virtual void OnTreeViewSelectionChanged(views::TreeView* tree_view) OVERRIDE;
+  virtual void OnTreeViewSelectionChanged(views::TreeView* tree_view);
 
   // views::View:
-  virtual gfx::Size GetMinimumSize() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    views::View* parent,
+                                    views::View* child) OVERRIDE;
 
  private:
   virtual ~CollectedCookiesViews();
@@ -78,9 +73,6 @@ class CollectedCookiesViews : public views::DialogDelegateView,
   views::View* CreateAllowedPane();
 
   views::View* CreateBlockedPane();
-
-  // Creates and returns a containing ScrollView around the given tree view.
-  views::View* CreateScrollView(views::TreeView* pane);
 
   void EnableControls();
 
@@ -95,10 +87,10 @@ class CollectedCookiesViews : public views::DialogDelegateView,
 
   content::NotificationRegistrar registrar_;
 
-  views::Widget* window_;
+  ConstrainedWindow* window_;
 
-  // The web contents.
-  content::WebContents* web_contents_;
+  // The tab contents.
+  TabContentsWrapper* wrapper_;
 
   // Assorted views.
   views::Label* allowed_label_;
@@ -107,9 +99,9 @@ class CollectedCookiesViews : public views::DialogDelegateView,
   views::TreeView* allowed_cookies_tree_;
   views::TreeView* blocked_cookies_tree_;
 
-  views::LabelButton* block_allowed_button_;
-  views::LabelButton* allow_blocked_button_;
-  views::LabelButton* for_session_blocked_button_;
+  views::TextButton* block_allowed_button_;
+  views::TextButton* allow_blocked_button_;
+  views::TextButton* for_session_blocked_button_;
 
   scoped_ptr<CookiesTreeModel> allowed_cookies_tree_model_;
   scoped_ptr<CookiesTreeModel> blocked_cookies_tree_model_;

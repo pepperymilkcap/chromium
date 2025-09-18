@@ -6,12 +6,13 @@
 
 #ifndef CHROME_INSTALLER_UTIL_BROWSER_DISTRIBUTION_H_
 #define CHROME_INSTALLER_UTIL_BROWSER_DISTRIBUTION_H_
+#pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
-#include "base/strings/string16.h"
+#include "base/file_path.h"
 #include "base/version.h"
 #include "chrome/installer/util/util_constants.h"
 
@@ -19,32 +20,38 @@
 #include <windows.h>  // NOLINT
 #endif
 
+namespace installer {
+class Product;
+}
+
 class BrowserDistribution {
  public:
   enum Type {
     CHROME_BROWSER,
     CHROME_FRAME,
     CHROME_BINARIES,
-    CHROME_APP_HOST,
     NUM_TYPES
   };
 
-  enum ShortcutType {
-    SHORTCUT_CHROME,
-    SHORTCUT_CHROME_ALTERNATE,
-    SHORTCUT_APP_LAUNCHER
+  // A struct for communicating what a UserExperiment contains. In these
+  // experiments we show toasts to the user if they are inactive for a certain
+  // amount of time.
+  struct UserExperiment {
+    std::wstring prefix;  // The experiment code prefix for this experiment,
+                          // also known as the 'TV' part in 'TV80'.
+    int flavor;           // The flavor index for this experiment.
+    int heading;          // The heading resource ID to use for this experiment.
+    bool compact_bubble;  // Whether to show the compact heading or not.
+    int control_group;    // Size of the control group (in percentages). Control
+                          // group is the group that qualifies for the
+                          // experiment but does not participate.
   };
 
-  enum Subfolder {
-    SUBFOLDER_CHROME,
-    SUBFOLDER_APPS,
-  };
+  // An array of the Types representing products;
+  static const Type kProductTypes[];
 
-  enum DefaultBrowserControlPolicy {
-    DEFAULT_BROWSER_UNSUPPORTED,
-    DEFAULT_BROWSER_OS_CONTROL_ONLY,
-    DEFAULT_BROWSER_FULL_CONTROL
-  };
+  // The number of elements in the array |kProductTypes|.
+  static const size_t kNumProductTypes;
 
   virtual ~BrowserDistribution() {}
 
@@ -54,114 +61,84 @@ class BrowserDistribution {
 
   Type GetType() const { return type_; }
 
-  virtual void DoPostUninstallOperations(
-      const Version& version,
-      const base::FilePath& local_data_path,
-      const base::string16& distribution_data);
+  virtual void DoPostUninstallOperations(const Version& version,
+                                         const FilePath& local_data_path,
+                                         const std::wstring& distribution_data);
 
-  // Returns the GUID to be used when registering for Active Setup.
-  virtual base::string16 GetActiveSetupGuid();
+  virtual std::wstring GetAppGuid();
 
-  virtual base::string16 GetAppGuid();
+  // Returns the name by which the program is registered with Default Programs.
+  // This is not a localized string suitable for presenting to a user.
+  virtual std::wstring GetApplicationName();
 
-  // Returns the unsuffixed application name of this program.
-  // This is the base of the name registered with Default Programs on Windows.
-  // IMPORTANT: This should only be called by the installer which needs to make
-  // decisions on the suffixing of the upcoming install, not by external callers
-  // at run-time.
-  virtual base::string16 GetBaseAppName();
+  // Returns the localized name of the program.
+  virtual std::wstring GetAppShortCutName();
 
-  // Returns the localized display name of this distribution.
-  virtual base::string16 GetDisplayName();
+  virtual std::wstring GetAlternateApplicationName();
 
-  // Returns the localized name of the shortcut identified by |shortcut_type|
-  // for this distribution.
-  virtual base::string16 GetShortcutName(ShortcutType shortcut_type);
+  virtual std::wstring GetBrowserAppId();
 
-  // Returns the index of the icon for the product identified by
-  // |shortcut_type|, inside the file specified by GetIconFilename().
-  virtual int GetIconIndex(ShortcutType shortcut_type);
+  virtual std::wstring GetInstallSubDir();
 
-  // Returns the executable filename (not path) that contains the product icon.
-  virtual base::string16 GetIconFilename();
+  virtual std::wstring GetPublisherName();
 
-  // Returns the localized name of the subfolder in the Start Menu identified by
-  // |subfolder_type| that this distribution should create shortcuts in. For
-  // SUBFOLDER_CHROME this returns GetShortcutName(SHORTCUT_CHROME).
-  virtual base::string16 GetStartMenuShortcutSubfolder(
-      Subfolder subfolder_type);
+  virtual std::wstring GetAppDescription();
 
-  // Returns the unsuffixed appid of this program.
-  // The AppUserModelId is a property of Windows programs.
-  // IMPORTANT: This should only be called by ShellUtil::GetAppId as the appid
-  // should be suffixed in all scenarios.
-  virtual base::string16 GetBaseAppId();
-
-  // Returns the Browser ProgId prefix (e.g. ChromeHTML, ChromiumHTM, etc...).
-  // The full id is of the form |prefix|.|suffix| and is limited to a maximum
-  // length of 39 characters including null-terminator.  See
-  // http://msdn.microsoft.com/library/aa911706.aspx for details.  We define
-  // |suffix| as a fixed-length 26-character alphanumeric identifier, therefore
-  // the return value of this function must have a maximum length of
-  // 39 - 1(null-term) - 26(|suffix|) - 1(dot separator) = 11 characters.
-  virtual base::string16 GetBrowserProgIdPrefix();
-
-  // Returns the Browser ProgId description.
-  virtual base::string16 GetBrowserProgIdDesc();
-
-  virtual base::string16 GetInstallSubDir();
-
-  virtual base::string16 GetPublisherName();
-
-  virtual base::string16 GetAppDescription();
-
-  virtual base::string16 GetLongAppDescription();
+  virtual std::wstring GetLongAppDescription();
 
   virtual std::string GetSafeBrowsingName();
 
-  virtual base::string16 GetStateKey();
+  virtual std::wstring GetStateKey();
 
-  virtual base::string16 GetStateMediumKey();
+  virtual std::wstring GetStateMediumKey();
+
+  virtual std::wstring GetStatsServerURL();
 
   virtual std::string GetNetworkStatsServer() const;
 
-  virtual std::string GetHttpPipeliningTestServer() const;
-
 #if defined(OS_WIN)
-  virtual base::string16 GetDistributionData(HKEY root_key);
+  virtual std::wstring GetDistributionData(HKEY root_key);
 #endif
 
-  virtual base::string16 GetUninstallLinkName();
+  virtual std::wstring GetUninstallLinkName();
 
-  virtual base::string16 GetUninstallRegPath();
+  virtual std::wstring GetUninstallRegPath();
 
-  virtual base::string16 GetVersionKey();
+  virtual std::wstring GetVersionKey();
 
-  // Returns an enum specifying the different ways in which this distribution
-  // is allowed to be set as default.
-  virtual DefaultBrowserControlPolicy GetDefaultBrowserControlPolicy();
+  virtual bool CanSetAsDefault();
 
   virtual bool CanCreateDesktopShortcuts();
 
-  virtual bool GetChromeChannel(base::string16* channel);
+  virtual int GetIconIndex();
 
-  // Returns true if this distribution includes a DelegateExecute verb handler,
-  // and provides the CommandExecuteImpl class UUID if |handler_class_uuid| is
-  // non-NULL.
-  virtual bool GetCommandExecuteImplClsid(base::string16* handler_class_uuid);
-
-  // Returns true if this distribution uses app_host.exe to run platform apps.
-  virtual bool AppHostIsSupported();
+  virtual bool GetChromeChannel(std::wstring* channel);
 
   virtual void UpdateInstallStatus(bool system_install,
       installer::ArchiveType archive_type,
       installer::InstallStatus install_status);
 
-  // Returns true if this distribution should set the Omaha experiment_labels
-  // registry value.
-  virtual bool ShouldSetExperimentLabels();
+  // Gets the experiment details for a given language-brand combo. If |flavor|
+  // is -1, then a flavor will be selected at random. |experiment| is the struct
+  // you want to write the experiment information to. Returns false if no
+  // experiment details could be gathered.
+  virtual bool GetExperimentDetails(UserExperiment* experiment, int flavor);
 
-  virtual bool HasUserExperiments();
+  // After an install or upgrade the user might qualify to participate in an
+  // experiment. This function determines if the user qualifies and if so it
+  // sets the wheels in motion or in simple cases does the experiment itself.
+  virtual void LaunchUserExperiment(const FilePath& setup_path,
+                                    installer::InstallStatus status,
+                                    const Version& version,
+                                    const installer::Product& installation,
+                                    bool system_level);
+
+  // The user has qualified for the inactive user toast experiment and this
+  // function just performs it.
+  virtual void InactiveUserToastExperiment(int flavor,
+      const std::wstring& experiment_group,
+      const installer::Product& installation,
+      const FilePath& application_path);
 
  protected:
   explicit BrowserDistribution(Type type);

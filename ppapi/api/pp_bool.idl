@@ -42,3 +42,4 @@ inline bool PP_ToBool(PP_Bool b) {
   return (b != PP_FALSE);
 }
 #endinl
+

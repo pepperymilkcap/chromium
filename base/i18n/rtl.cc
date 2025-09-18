@@ -4,17 +4,17 @@
 
 #include "base/i18n/rtl.h"
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "third_party/icu/source/common/unicode/locid.h"
-#include "third_party/icu/source/common/unicode/uchar.h"
-#include "third_party/icu/source/common/unicode/uscript.h"
-#include "third_party/icu/source/i18n/unicode/coll.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "base/sys_string_conversions.h"
+#include "unicode/coll.h"
+#include "unicode/locid.h"
+#include "unicode/uchar.h"
+#include "unicode/uscript.h"
 
-#if defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_USES_GTK)
 #include <gtk/gtk.h>
 #endif
 
@@ -42,26 +42,6 @@ std::string GetLocaleString(const icu::Locale& locale) {
   }
 
   return result;
-}
-
-// Returns LEFT_TO_RIGHT or RIGHT_TO_LEFT if |character| has strong
-// directionality, returns UNKNOWN_DIRECTION if it doesn't. Please refer to
-// http://unicode.org/reports/tr9/ for more information.
-base::i18n::TextDirection GetCharacterDirection(UChar32 character) {
-  // Now that we have the character, we use ICU in order to query for the
-  // appropriate Unicode BiDi character type.
-  int32_t property = u_getIntPropertyValue(character, UCHAR_BIDI_CLASS);
-  if ((property == U_RIGHT_TO_LEFT) ||
-      (property == U_RIGHT_TO_LEFT_ARABIC) ||
-      (property == U_RIGHT_TO_LEFT_EMBEDDING) ||
-      (property == U_RIGHT_TO_LEFT_OVERRIDE)) {
-    return base::i18n::RIGHT_TO_LEFT;
-  } else if ((property == U_LEFT_TO_RIGHT) ||
-             (property == U_LEFT_TO_RIGHT_EMBEDDING) ||
-             (property == U_LEFT_TO_RIGHT_OVERRIDE)) {
-    return base::i18n::LEFT_TO_RIGHT;
-  }
-  return base::i18n::UNKNOWN_DIRECTION;
 }
 
 }  // namespace
@@ -120,6 +100,15 @@ void SetICUDefaultLocale(const std::string& locale_string) {
   // it does not hurt to have it as a sanity check.
   DCHECK(U_SUCCESS(error_code));
   g_icu_text_direction = UNKNOWN_DIRECTION;
+
+  // If we use Views toolkit on top of GtkWidget, then we need to keep
+  // GtkWidget's default text direction consistent with ICU's text direction.
+  // Because in this case ICU's text direction will be used instead.
+  // See IsRTL() function below.
+#if defined(TOOLKIT_USES_GTK) && !defined(TOOLKIT_GTK)
+  gtk_widget_set_default_direction(
+      ICUIsRTL() ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_LTR);
+#endif
 }
 
 bool IsRTL() {
@@ -155,54 +144,25 @@ TextDirection GetFirstStrongCharacterDirection(const string16& text) {
     UChar32 character;
     size_t next_position = position;
     U16_NEXT(string, next_position, length, character);
-    TextDirection direction = GetCharacterDirection(character);
-    if (direction != UNKNOWN_DIRECTION)
-      return direction;
-    position = next_position;
-  }
-  return LEFT_TO_RIGHT;
-}
 
-TextDirection GetLastStrongCharacterDirection(const string16& text) {
-  const UChar* string = text.c_str();
-  size_t position = text.length();
-  while (position > 0) {
-    UChar32 character;
-    size_t prev_position = position;
-    U16_PREV(string, 0, prev_position, character);
-    TextDirection direction = GetCharacterDirection(character);
-    if (direction != UNKNOWN_DIRECTION)
-      return direction;
-    position = prev_position;
-  }
-  return LEFT_TO_RIGHT;
-}
-
-TextDirection GetStringDirection(const string16& text) {
-  const UChar* string = text.c_str();
-  size_t length = text.length();
-  size_t position = 0;
-
-  TextDirection result(UNKNOWN_DIRECTION);
-  while (position < length) {
-    UChar32 character;
-    size_t next_position = position;
-    U16_NEXT(string, next_position, length, character);
-    TextDirection direction = GetCharacterDirection(character);
-    if (direction != UNKNOWN_DIRECTION) {
-      if (result != UNKNOWN_DIRECTION && result != direction)
-        return UNKNOWN_DIRECTION;
-      result = direction;
+    // Now that we have the character, we use ICU in order to query for the
+    // appropriate Unicode BiDi character type.
+    int32_t property = u_getIntPropertyValue(character, UCHAR_BIDI_CLASS);
+    if ((property == U_RIGHT_TO_LEFT) ||
+        (property == U_RIGHT_TO_LEFT_ARABIC) ||
+        (property == U_RIGHT_TO_LEFT_EMBEDDING) ||
+        (property == U_RIGHT_TO_LEFT_OVERRIDE)) {
+      return RIGHT_TO_LEFT;
+    } else if ((property == U_LEFT_TO_RIGHT) ||
+               (property == U_LEFT_TO_RIGHT_EMBEDDING) ||
+               (property == U_LEFT_TO_RIGHT_OVERRIDE)) {
+      return LEFT_TO_RIGHT;
     }
+
     position = next_position;
   }
 
-  // Handle the case of a string not containing any strong directionality
-  // characters defaulting to LEFT_TO_RIGHT.
-  if (result == UNKNOWN_DIRECTION)
-    return LEFT_TO_RIGHT;
-
-  return result;
+  return LEFT_TO_RIGHT;
 }
 
 #if defined(OS_WIN)
@@ -368,14 +328,11 @@ void WrapPathWithLTRFormatting(const FilePath& path,
 }
 
 string16 GetDisplayStringInLTRDirectionality(const string16& text) {
-  // Always wrap the string in RTL UI (it may be appended to RTL string).
-  // Also wrap strings with an RTL first strong character direction in LTR UI.
-  if (IsRTL() || GetFirstStrongCharacterDirection(text) == RIGHT_TO_LEFT) {
-    string16 text_mutable(text);
-    WrapStringWithLTRFormatting(&text_mutable);
-    return text_mutable;
-  }
-  return text;
+  if (!IsRTL())
+    return text;
+  string16 text_mutable(text);
+  WrapStringWithLTRFormatting(&text_mutable);
+  return text_mutable;
 }
 
 string16 StripWrappingBidiControlCharacters(const string16& text) {

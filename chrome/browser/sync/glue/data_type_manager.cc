@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,10 @@
 namespace browser_sync {
 
 DataTypeManager::ConfigureResult::ConfigureResult()
-    : status(UNKNOWN) {
-}
+    : status(UNKNOWN) {}
 
 DataTypeManager::ConfigureResult::ConfigureResult(ConfigureStatus status,
-                                                  syncer::ModelTypeSet
-                                                      requested_types)
+                                                  TypeSet requested_types)
     : status(status),
       requested_types(requested_types) {
   DCHECK_EQ(OK, status);
@@ -20,16 +18,12 @@ DataTypeManager::ConfigureResult::ConfigureResult(ConfigureStatus status,
 
 DataTypeManager::ConfigureResult::ConfigureResult(
     ConfigureStatus status,
-    syncer::ModelTypeSet requested_types,
-    std::map<syncer::ModelType, syncer::SyncError> failed_data_types,
-    syncer::ModelTypeSet unfinished_data_types,
-    syncer::ModelTypeSet needs_crypto)
+    TypeSet requested_types,
+    const std::list<SyncError>& error)
     : status(status),
       requested_types(requested_types),
-      failed_data_types(failed_data_types),
-      unfinished_data_types(unfinished_data_types),
-      needs_crypto(needs_crypto) {
-  if (!failed_data_types.empty() || !needs_crypto.Empty()) {
+      errors(error) {
+  if (!error.empty()) {
     DCHECK_NE(OK, status);
   }
 }

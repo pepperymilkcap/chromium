@@ -9,37 +9,31 @@
 #include <set>
 #include <sstream>
 
-#include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/containers/mru_cache.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/stl_util.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/threading/thread_restrictions.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/preconnect.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_settings.h"
-#include "chrome/browser/net/spdyproxy/proxy_advisor.h"
+#include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
-#include "net/dns/host_resolver.h"
-#include "net/dns/single_request_host_resolver.h"
+#include "net/base/single_request_host_resolver.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using base::TimeDelta;
@@ -67,7 +61,6 @@ const int64 Predictor::kDurationBetweenTrimmingsHours = 1;
 const int64 Predictor::kDurationBetweenTrimmingIncrementsSeconds = 15;
 const size_t Predictor::kUrlsTrimmedPerIncrement = 5u;
 const size_t Predictor::kMaxSpeculativeParallelResolves = 3;
-const int Predictor::kMaxUnusedSocketLifetimeSecondsWithoutAGet = 10;
 // To control our congestion avoidance system, which discards a queue when
 // resolutions are "taking too long," we need an expected resolution time.
 // Common average is in the range of 300-500ms.
@@ -77,10 +70,8 @@ const int Predictor::kMaxSpeculativeResolveQueueDelayMs =
     (kExpectedResolutionTimeMs * Predictor::kTypicalSpeculativeGroupSize) /
     Predictor::kMaxSpeculativeParallelResolves;
 
-static int g_max_queueing_delay_ms =
-    Predictor::kMaxSpeculativeResolveQueueDelayMs;
-static size_t g_max_parallel_resolves =
-    Predictor::kMaxSpeculativeParallelResolves;
+static int g_max_queueing_delay_ms = 0;
+static size_t g_max_parallel_resolves = 0u;
 
 // A version number for prefs that are saved. This should be incremented when
 // we change the format so that we discard old data.
@@ -109,9 +100,7 @@ class Predictor::LookupRequest {
     // lets the HostResolver know it can de-prioritize it.
     resolve_info.set_is_speculative(true);
     return resolver_.Resolve(
-        resolve_info,
-        net::DEFAULT_PRIORITY,
-        &addresses_,
+        resolve_info, &addresses_,
         base::Bind(&LookupRequest::OnLookupFinished, base::Unretained(this)),
         net::BoundNetLog());
   }
@@ -130,138 +119,9 @@ class Predictor::LookupRequest {
   DISALLOW_COPY_AND_ASSIGN(LookupRequest);
 };
 
-// This records UMAs for preconnect usage based on navigation URLs to
-// gather precision/recall for user-event based preconnect triggers.
-// Stats are gathered via a LRU cache that remembers all preconnect within the
-// last N seconds.
-// A preconnect trigger is considered as used iff a navigation including
-// access to the preconnected host occurs within a time period specified by
-// kMaxUnusedSocketLifetimeSecondsWithoutAGet.
-class Predictor::PreconnectUsage {
- public:
-  PreconnectUsage();
-  ~PreconnectUsage();
-
-  // Record a preconnect trigger to |url|.
-  void ObservePreconnect(const GURL& url);
-
-  // Record a user navigation with its redirect history, |url_chain|.
-  // We are uncertain if this is actually a link navigation.
-  void ObserveNavigationChain(const std::vector<GURL>& url_chain,
-                              bool is_subresource);
-
-  // Record a user link navigation to |final_url|.
-  // We are certain that this is a user-triggered link navigation.
-  void ObserveLinkNavigation(const GURL& final_url);
-
- private:
-  // This tracks whether a preconnect was used in some navigation or not
-  class PreconnectPrecisionStat {
-   public:
-    PreconnectPrecisionStat()
-        : timestamp_(base::TimeTicks::Now()),
-          was_used_(false) {
-    }
-
-    const base::TimeTicks& timestamp() { return timestamp_; }
-
-    void set_was_used() { was_used_ = true; }
-    bool was_used() const { return was_used_; }
-
-   private:
-    base::TimeTicks timestamp_;
-    bool was_used_;
-  };
-
-  typedef base::MRUCache<GURL, PreconnectPrecisionStat> MRUPreconnects;
-  MRUPreconnects mru_preconnects_;
-
-  // The longest time an entry can persist in mru_preconnect_
-  const base::TimeDelta max_duration_;
-
-  std::vector<GURL> recent_navigation_chain_;
-
-  DISALLOW_COPY_AND_ASSIGN(PreconnectUsage);
-};
-
-Predictor::PreconnectUsage::PreconnectUsage()
-    : mru_preconnects_(MRUPreconnects::NO_AUTO_EVICT),
-      max_duration_(base::TimeDelta::FromSeconds(
-          Predictor::kMaxUnusedSocketLifetimeSecondsWithoutAGet)) {
-}
-
-Predictor::PreconnectUsage::~PreconnectUsage() {}
-
-void Predictor::PreconnectUsage::ObservePreconnect(const GURL& url) {
-  // Evict any overly old entries and record stats.
-  base::TimeTicks now = base::TimeTicks::Now();
-
-  MRUPreconnects::reverse_iterator eldest_preconnect =
-      mru_preconnects_.rbegin();
-  while (!mru_preconnects_.empty()) {
-    DCHECK(eldest_preconnect == mru_preconnects_.rbegin());
-    if (now - eldest_preconnect->second.timestamp() < max_duration_)
-      break;
-
-    UMA_HISTOGRAM_BOOLEAN("Net.PreconnectTriggerUsed",
-                          eldest_preconnect->second.was_used());
-    eldest_preconnect = mru_preconnects_.Erase(eldest_preconnect);
-  }
-
-  // Add new entry.
-  GURL canonical_url(Predictor::CanonicalizeUrl(url));
-  mru_preconnects_.Put(canonical_url, PreconnectPrecisionStat());
-}
-
-void Predictor::PreconnectUsage::ObserveNavigationChain(
-    const std::vector<GURL>& url_chain,
-    bool is_subresource) {
-  if (url_chain.empty())
-    return;
-
-  if (!is_subresource)
-    recent_navigation_chain_ = url_chain;
-
-  GURL canonical_url(Predictor::CanonicalizeUrl(url_chain.back()));
-
-  MRUPreconnects::iterator itPreconnect = mru_preconnects_.Peek(canonical_url);
-  bool was_preconnected = (itPreconnect != mru_preconnects_.end());
-
-  // This is an UMA which was named incorrectly. This actually measures the
-  // ratio of URLRequests which have used a preconnected session.
-  UMA_HISTOGRAM_BOOLEAN("Net.PreconnectedNavigation", was_preconnected);
-}
-
-void Predictor::PreconnectUsage::ObserveLinkNavigation(const GURL& url) {
-  if (recent_navigation_chain_.empty() ||
-      url != recent_navigation_chain_.back()) {
-    // The navigation chain is not available for this navigation.
-    recent_navigation_chain_.clear();
-    recent_navigation_chain_.push_back(url);
-  }
-
-  // See if the link navigation involved preconnected session.
-  bool did_use_preconnect = false;
-  for (std::vector<GURL>::const_iterator it = recent_navigation_chain_.begin();
-       it != recent_navigation_chain_.end();
-       ++it) {
-    GURL canonical_url(Predictor::CanonicalizeUrl(*it));
-
-    // Record the preconnect trigger for the url as used if exist
-    MRUPreconnects::iterator itPreconnect =
-        mru_preconnects_.Peek(canonical_url);
-    bool was_preconnected = (itPreconnect != mru_preconnects_.end());
-    if (was_preconnected) {
-      itPreconnect->second.set_was_used();
-      did_use_preconnect = true;
-    }
-  }
-
-  UMA_HISTOGRAM_BOOLEAN("Net.PreconnectedLinkNavigations", did_use_preconnect);
-}
-
 Predictor::Predictor(bool preconnect_enabled)
-    : url_request_context_getter_(NULL),
+    : initial_observer_(NULL),
+      url_request_context_getter_(NULL),
       predictor_enabled_(true),
       peak_pending_lookups_(0),
       shutdown_(false),
@@ -290,12 +150,11 @@ Predictor* Predictor::CreatePredictor(bool preconnect_enabled,
   return new Predictor(preconnect_enabled);
 }
 
-void Predictor::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterListPref(prefs::kDnsPrefetchingStartupList,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(prefs::kDnsPrefetchingHostReferralList,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+void Predictor::RegisterUserPrefs(PrefService* user_prefs) {
+  user_prefs->RegisterListPref(prefs::kDnsPrefetchingStartupList,
+                               PrefService::UNSYNCABLE_PREF);
+  user_prefs->RegisterListPref(prefs::kDnsPrefetchingHostReferralList,
+                               PrefService::UNSYNCABLE_PREF);
 }
 
 // --------------------- Start UI methods. ------------------------------------
@@ -318,23 +177,19 @@ void Predictor::InitNetworkPredictor(PrefService* user_prefs,
       static_cast<base::ListValue*>(user_prefs->GetList(
           prefs::kDnsPrefetchingHostReferralList)->DeepCopy());
 
-  // Now that we have the statistics in memory, wipe them from the Preferences
-  // file. They will be serialized back on a clean shutdown. This way we only
-  // have to worry about clearing our in-memory state when Clearing Browsing
-  // Data.
-  user_prefs->ClearPref(prefs::kDnsPrefetchingStartupList);
-  user_prefs->ClearPref(prefs::kDnsPrefetchingHostReferralList);
-
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  // TODO(marq): Once https://codereview.chromium.org/30883003/ lands, also
-  // condition this on DataReductionProxySettings::IsDataReductionProxyAllowed()
-  // Until then, we may create a proxy advisor when the proxy feature itself
-  // isn't available, and the advisor instance will never send advisory
-  // requests, which is slightly wasteful but not harmful.
-  if (DataReductionProxySettings::IsPreconnectHintingAllowed()) {
-    proxy_advisor_.reset(new ProxyAdvisor(user_prefs, getter));
+  // Remove obsolete preferences from local state if necessary.
+  int current_version =
+      local_state->GetInteger(prefs::kMultipleProfilePrefMigration);
+  if ((current_version & browser::DNS_PREFS) == 0) {
+    local_state->RegisterListPref(prefs::kDnsStartupPrefetchList,
+                                  PrefService::UNSYNCABLE_PREF);
+    local_state->RegisterListPref(prefs::kDnsHostReferralList,
+                                  PrefService::UNSYNCABLE_PREF);
+    local_state->ClearPref(prefs::kDnsStartupPrefetchList);
+    local_state->ClearPref(prefs::kDnsHostReferralList);
+    local_state->SetInteger(prefs::kMultipleProfilePrefMigration,
+        current_version | browser::DNS_PREFS);
   }
-#endif
 
   BrowserThread::PostTask(
       BrowserThread::IO,
@@ -390,8 +245,9 @@ void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
           return;  // We've done a preconnect recently.
         last_omnibox_preconnect_ = now;
         const int kConnectionsNeeded = 1;
-        PreconnectUrl(CanonicalizeUrl(url), GURL(), motivation,
-                      kConnectionsNeeded);
+        PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
+                             kConnectionsNeeded,
+                             url_request_context_getter_);
         return;  // Skip pre-resolution, since we'll open a connection.
       }
     } else {
@@ -411,6 +267,7 @@ void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
   }
   last_omnibox_preresolve_ = now;
 
+  // Perform at least DNS pre-resolution.
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
@@ -418,19 +275,21 @@ void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
                  CanonicalizeUrl(url), motivation));
 }
 
-void Predictor::PreconnectUrlAndSubresources(const GURL& url,
-    const GURL& first_party_for_cookies) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
-         BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (!predictor_enabled_ || !preconnect_enabled() ||
-      !url.is_valid() || !url.has_host())
+void Predictor::PreconnectUrlAndSubresources(const GURL& url) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!predictor_enabled_)
     return;
-
-  UrlInfo::ResolutionMotivation motivation(UrlInfo::EARLY_LOAD_MOTIVATED);
-  const int kConnectionsNeeded = 1;
-  PreconnectUrl(CanonicalizeUrl(url), first_party_for_cookies,
-                motivation, kConnectionsNeeded);
-  PredictFrameSubresources(url.GetWithEmptyPath(), first_party_for_cookies);
+  if (!url.is_valid() || !url.has_host())
+    return;
+  if (preconnect_enabled()) {
+    std::string host = url.HostNoBrackets();
+    UrlInfo::ResolutionMotivation motivation(UrlInfo::EARLY_LOAD_MOTIVATED);
+    const int kConnectionsNeeded = 1;
+    PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
+                         kConnectionsNeeded,
+                         url_request_context_getter_);
+    PredictFrameSubresources(url.GetWithEmptyPath());
+  }
 }
 
 UrlList Predictor::GetPredictedUrlListAtStartup(
@@ -442,7 +301,7 @@ UrlList Predictor::GetPredictedUrlListAtStartup(
   // This may catch secondary hostnames, pulled in by the homepages.  It will
   // also catch more of the "primary" home pages, since that was (presumably)
   // rendered first (and will be rendered first this time too).
-  const base::ListValue* startup_list =
+  const ListValue* startup_list =
       user_prefs->GetList(prefs::kDnsPrefetchingStartupList);
 
   if (startup_list) {
@@ -478,7 +337,7 @@ UrlList Predictor::GetPredictedUrlListAtStartup(
       GURL gurl = tab_start_pref.urls[i];
       if (!gurl.is_valid() || gurl.SchemeIsFile() || gurl.host().empty())
         continue;
-      if (gurl.SchemeIsHTTPOrHTTPS())
+      if (gurl.SchemeIs("http") || gurl.SchemeIs("https"))
         urls.push_back(gurl.GetWithEmptyPath());
     }
   }
@@ -499,8 +358,11 @@ void Predictor::set_max_parallel_resolves(size_t max_parallel_resolves) {
   g_max_parallel_resolves = max_parallel_resolves;
 }
 
-void Predictor::ShutdownOnUIThread() {
+void Predictor::ShutdownOnUIThread(PrefService* user_prefs) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  SaveStateForNextStartupAndTrim(user_prefs);
+
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
@@ -614,24 +476,58 @@ void Predictor::PredictorGetHtmlInfo(Predictor* predictor,
 
 // Provide sort order so all .com's are together, etc.
 struct RightToLeftStringSorter {
-  bool operator()(const GURL& left, const GURL& right) const {
-    return ReverseComponents(left) < ReverseComponents(right);
+  bool operator()(const GURL& left,
+                  const GURL& right) const {
+    return string_compare(left.host(), right.host());
   }
 
- private:
-  // Transforms something like "http://www.google.com/xyz" to
-  // "http://com.google.www/xyz".
-  static std::string ReverseComponents(const GURL& url) {
-    // Reverse the components in the hostname.
-    std::vector<std::string> parts;
-    base::SplitString(url.host(), '.', &parts);
-    std::reverse(parts.begin(), parts.end());
-    std::string reversed_host = JoinString(parts, '.');
+  static bool string_compare(const std::string& left_host,
+                             const std::string& right_host) {
+    if (left_host == right_host) return true;
+    size_t left_already_matched = left_host.size();
+    size_t right_already_matched = right_host.size();
 
-    // Return the new URL.
-    GURL::Replacements url_components;
-    url_components.SetHostStr(reversed_host);
-    return url.ReplaceComponents(url_components).spec();
+    // Ensure both strings have characters.
+    if (!left_already_matched) return true;
+    if (!right_already_matched) return false;
+
+    // Watch for trailing dot, so we'll always be safe to go one beyond dot.
+    if ('.' == left_host[left_already_matched - 1]) {
+      if ('.' != right_host[right_already_matched - 1])
+        return true;
+      // Both have dots at end of string.
+      --left_already_matched;
+      --right_already_matched;
+    } else {
+      if ('.' == right_host[right_already_matched - 1])
+        return false;
+    }
+
+    while (1) {
+      if (!left_already_matched) return true;
+      if (!right_already_matched) return false;
+
+      size_t left_start = left_host.find_last_of('.', left_already_matched - 1);
+      if (std::string::npos == left_start) {
+        left_already_matched = left_start = 0;
+      } else {
+        left_already_matched = left_start;
+        ++left_start;  // Don't compare the dot.
+      }
+      size_t right_start = right_host.find_last_of('.',
+                                                   right_already_matched - 1);
+      if (std::string::npos == right_start) {
+        right_already_matched = right_start = 0;
+      } else {
+        right_already_matched = right_start;
+        ++right_start;  // Don't compare the dot.
+      }
+
+      int diff = left_host.compare(left_start, left_host.size(),
+                                   right_host, right_start, right_host.size());
+      if (diff > 0) return false;
+      if (diff < 0) return true;
+    }
   }
 };
 
@@ -745,11 +641,11 @@ void Predictor::SerializeReferrers(base::ListValue* referral_list) {
   for (Referrers::const_iterator it = referrers_.begin();
        it != referrers_.end(); ++it) {
     // Serialize the list of subresource names.
-    base::Value* subresource_list(it->second.Serialize());
+    Value* subresource_list(it->second.Serialize());
 
     // Create a list for each referer.
-    base::ListValue* motivator(new base::ListValue);
-    motivator->Append(new base::StringValue(it->first.spec()));
+    ListValue* motivator(new ListValue);
+    motivator->Append(new StringValue(it->first.spec()));
     motivator->Append(subresource_list);
 
     referral_list->Append(motivator);
@@ -763,7 +659,7 @@ void Predictor::DeserializeReferrers(const base::ListValue& referral_list) {
       referral_list.GetInteger(0, &format_version) &&
       format_version == kPredictorReferrerVersion) {
     for (size_t i = 1; i < referral_list.GetSize(); ++i) {
-      const base::ListValue* motivator;
+      base::ListValue* motivator;
       if (!referral_list.GetList(i, &motivator)) {
         NOTREACHED();
         return;
@@ -774,7 +670,7 @@ void Predictor::DeserializeReferrers(const base::ListValue& referral_list) {
         return;
       }
 
-      const base::Value* subresource_list;
+      Value* subresource_list;
       if (!motivator->Get(1, &subresource_list)) {
         NOTREACHED();
         return;
@@ -807,7 +703,6 @@ void Predictor::FinalizeInitializationOnIOThread(
   predictor_enabled_ = predictor_enabled;
   initial_observer_.reset(new InitialObserver());
   host_resolver_ = io_thread->globals()->host_resolver.get();
-  preconnect_usage_.reset(new PreconnectUsage());
 
   // base::WeakPtrFactory instances need to be created and destroyed
   // on the same thread. The predictor lives on the IO thread and will die
@@ -920,11 +815,8 @@ void Predictor::SaveStateForNextStartupAndTrim(PrefService* prefs) {
     // TODO(jar): Synchronous waiting for the IO thread is a potential source
     // to deadlocks and should be investigated. See http://crbug.com/78451.
     DCHECK(posted);
-    if (posted) {
-      // http://crbug.com/124954
-      base::ThreadRestrictions::ScopedAllowWait allow_wait;
+    if (posted)
       completion.Wait();
-    }
   }
 }
 
@@ -964,65 +856,7 @@ void Predictor::EnablePredictorOnIOThread(bool enable) {
   predictor_enabled_ = enable;
 }
 
-void Predictor::PreconnectUrl(const GURL& url,
-                              const GURL& first_party_for_cookies,
-                              UrlInfo::ResolutionMotivation motivation,
-                              int count) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
-         BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  if (BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    PreconnectUrlOnIOThread(url, first_party_for_cookies, motivation, count);
-  } else {
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&Predictor::PreconnectUrlOnIOThread,
-                   base::Unretained(this), url, first_party_for_cookies,
-                   motivation, count));
-  }
-}
-
-void Predictor::PreconnectUrlOnIOThread(
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    UrlInfo::ResolutionMotivation motivation,
-    int count) {
-  if (motivation == UrlInfo::MOUSE_OVER_MOTIVATED)
-    RecordPreconnectTrigger(url);
-
-  AdviseProxy(url, motivation, true /* is_preconnect */);
-
-  PreconnectOnIOThread(url,
-                       first_party_for_cookies,
-                       motivation,
-                       count,
-                       url_request_context_getter_.get());
-}
-
-void Predictor::RecordPreconnectTrigger(const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (preconnect_usage_)
-    preconnect_usage_->ObservePreconnect(url);
-}
-
-void Predictor::RecordPreconnectNavigationStat(
-    const std::vector<GURL>& url_chain,
-    bool is_subresource) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  if (preconnect_usage_)
-    preconnect_usage_->ObserveNavigationChain(url_chain, is_subresource);
-}
-
-void Predictor::RecordLinkNavigation(const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (preconnect_usage_)
-    preconnect_usage_->ObserveLinkNavigation(url);
-}
-
-void Predictor::PredictFrameSubresources(const GURL& url,
-                                         const GURL& first_party_for_cookies) {
+void Predictor::PredictFrameSubresources(const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!predictor_enabled_)
@@ -1031,33 +865,13 @@ void Predictor::PredictFrameSubresources(const GURL& url,
   // Add one pass through the message loop to allow current navigation to
   // proceed.
   if (BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    PrepareFrameSubresources(url, first_party_for_cookies);
+    PrepareFrameSubresources(url);
   } else {
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
         base::Bind(&Predictor::PrepareFrameSubresources,
-                   base::Unretained(this), url, first_party_for_cookies));
-  }
-}
-
-void Predictor::AdviseProxy(const GURL& url,
-                            UrlInfo::ResolutionMotivation motivation,
-                            bool is_preconnect) {
-  if (!proxy_advisor_)
-    return;
-
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
-         BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  if (BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    AdviseProxyOnIOThread(url, motivation, is_preconnect);
-  } else {
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&Predictor::AdviseProxyOnIOThread,
-                   base::Unretained(this), url, motivation, is_preconnect));
+                   base::Unretained(this), url));
   }
 }
 
@@ -1068,8 +882,7 @@ enum SubresourceValue {
   SUBRESOURCE_VALUE_MAX
 };
 
-void Predictor::PrepareFrameSubresources(const GURL& url,
-                                         const GURL& first_party_for_cookies) {
+void Predictor::PrepareFrameSubresources(const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK_EQ(url.GetWithEmptyPath(), url);
   Referrers::iterator it = referrers_.find(url);
@@ -1081,8 +894,8 @@ void Predictor::PrepareFrameSubresources(const GURL& url,
     // load any subresources).  If we learn about this resource, we will instead
     // provide a more carefully estimated preconnection count.
     if (preconnect_enabled_) {
-      PreconnectUrlOnIOThread(url, first_party_for_cookies,
-                              UrlInfo::SELF_REFERAL_MOTIVATED, 2);
+      PreconnectOnIOThread(url, UrlInfo::SELF_REFERAL_MOTIVATED, 2,
+                           url_request_context_getter_);
     }
     return;
   }
@@ -1106,8 +919,8 @@ void Predictor::PrepareFrameSubresources(const GURL& url,
       int count = static_cast<int>(std::ceil(connection_expectation));
       if (url.host() == future_url->first.host())
         ++count;
-      PreconnectUrlOnIOThread(future_url->first, first_party_for_cookies,
-                              motivation, count);
+      PreconnectOnIOThread(future_url->first, motivation, count,
+                           url_request_context_getter_);
     } else if (connection_expectation > kDNSPreresolutionWorthyExpectedValue) {
       evalution = PRERESOLUTION;
       future_url->second.preresolution_increment();
@@ -1165,12 +978,6 @@ UrlInfo* Predictor::AppendToResolutionQueue(
 
   if (!info->NeedsDnsUpdate()) {
     info->DLogResultsStats("DNS PrefetchNotUpdated");
-    return NULL;
-  }
-
-  AdviseProxy(url, motivation, false /* is_preconnect */);
-  if (proxy_advisor_ && proxy_advisor_->WouldProxyURL(url)) {
-    info->DLogResultsStats("DNS PrefetchForProxiedRequest");
     return NULL;
   }
 
@@ -1258,7 +1065,7 @@ void Predictor::PostIncrementalTrimTask() {
     return;
   const TimeDelta kDurationBetweenTrimmingIncrements =
       TimeDelta::FromSeconds(kDurationBetweenTrimmingIncrementsSeconds);
-  base::MessageLoop::current()->PostDelayedTask(
+  MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&Predictor::IncrementalTrimReferrers,
                  weak_factory_->GetWeakPtr(), false),
@@ -1278,15 +1085,6 @@ void Predictor::IncrementalTrimReferrers(bool trim_all_now) {
       referrers_.erase(it);
   }
   PostIncrementalTrimTask();
-}
-
-void Predictor::AdviseProxyOnIOThread(const GURL& url,
-                                      UrlInfo::ResolutionMotivation motivation,
-                                      bool is_preconnect) {
-  if (!proxy_advisor_)
-    return;
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  proxy_advisor_->Advise(url, motivation, is_preconnect);
 }
 
 // ---------------------- End IO methods. -------------------------------------
@@ -1346,7 +1144,7 @@ void Predictor::InitialObserver::Append(const GURL& url,
   if (kStartupResolutionCount <= first_navigations_.size())
     return;
 
-  DCHECK(url.SchemeIsHTTPOrHTTPS());
+  DCHECK(url.SchemeIs("http") || url.SchemeIs("https"));
   DCHECK_EQ(url, Predictor::CanonicalizeUrl(url));
   if (first_navigations_.find(url) == first_navigations_.end())
     first_navigations_[url] = base::TimeTicks::Now();
@@ -1364,7 +1162,7 @@ void Predictor::InitialObserver::GetInitialDnsResolutionList(
        it != first_navigations_.end();
        ++it) {
     DCHECK(it->first == Predictor::CanonicalizeUrl(it->first));
-    startup_list->Append(new base::StringValue(it->first.spec()));
+    startup_list->Append(new StringValue(it->first.spec()));
   }
 }
 
@@ -1423,7 +1221,7 @@ void SimplePredictor::InitNetworkPredictor(
   // Empty function for unittests.
 }
 
-void SimplePredictor::ShutdownOnUIThread() {
+void SimplePredictor::ShutdownOnUIThread(PrefService* user_prefs) {
   SetShutdown(true);
 }
 

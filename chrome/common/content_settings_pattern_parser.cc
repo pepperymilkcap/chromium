@@ -4,12 +4,11 @@
 
 #include "chrome/common/content_settings_pattern_parser.h"
 
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "chrome/common/url_constants.h"
-#include "extensions/common/constants.h"
 #include "net/base/net_util.h"
-#include "url/gurl.h"
-#include "url/url_canon.h"
+#include "googleurl/src/gurl.h"
+#include "googleurl/src/url_canon.h"
 
 namespace {
 
@@ -70,10 +69,10 @@ void PatternParser::Parse(const std::string& pattern_spec,
 
   // Test if a scheme pattern is in the spec.
   current_pos = pattern_spec.find(
-      std::string(content::kStandardSchemeSeparator), start);
+      std::string(chrome::kStandardSchemeSeparator), start);
   if (current_pos != std::string::npos) {
     scheme_component = Component(start, current_pos);
-    start = current_pos + strlen(content::kStandardSchemeSeparator);
+    start = current_pos + strlen(chrome::kStandardSchemeSeparator);
     current_pos = start;
   } else {
     current_pos = start;
@@ -172,8 +171,8 @@ void PatternParser::Parse(const std::string& pattern_spec,
       builder->WithPort(port);
     }
   } else {
-    if (scheme != std::string(extensions::kExtensionScheme) &&
-        scheme != std::string(content::kFileScheme))
+    if (scheme != std::string(chrome::kExtensionScheme) &&
+        scheme != std::string(chrome::kFileScheme))
       builder->WithPortWildcard();
   }
 
@@ -198,11 +197,11 @@ std::string PatternParser::ToString(
       parts.is_port_wildcard)
     return "*";
 
-  std::string str;
+  std::string str = "";
   if (!parts.is_scheme_wildcard)
-    str += parts.scheme + content::kStandardSchemeSeparator;
+    str += parts.scheme + chrome::kStandardSchemeSeparator;
 
-  if (parts.scheme == content::kFileScheme) {
+  if (parts.scheme == chrome::kFileScheme) {
     if (parts.is_path_wildcard)
       return str + kUrlPathSeparator + kPathWildcard;
     else
@@ -217,7 +216,7 @@ std::string PatternParser::ToString(
   }
   str += parts.host;
 
-  if (parts.scheme == std::string(extensions::kExtensionScheme)) {
+  if (parts.scheme == std::string(chrome::kExtensionScheme)) {
     str += parts.path.empty() ? std::string(kUrlPathSeparator) : parts.path;
     return str;
   }

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_STORE_UNITTEST_HELPER_H_
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_STORE_UNITTEST_HELPER_H_
+#pragma once
 
 #include "chrome/browser/safe_browsing/safe_browsing_store.h"
 
@@ -41,7 +42,7 @@ void SafeBrowsingStoreTestDeleteChunks(SafeBrowsingStore* store);
 
 // Test that deleting the store deletes the store.
 void SafeBrowsingStoreTestDelete(SafeBrowsingStore* store,
-                                 const base::FilePath& filename);
+                                 const FilePath& filename);
 
 // Wrap all the tests up for implementation subclasses.
 // |test_fixture| is the class that would be passed to TEST_F(),

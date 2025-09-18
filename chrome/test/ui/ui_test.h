@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_UI_UI_TEST_H_
 #define CHROME_TEST_UI_UI_TEST_H_
+#pragma once
 
 // This file provides a common base for running UI unit tests, which operate
 // the entire browser application in a separate process for holistic
@@ -21,21 +22,21 @@
 
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/process/process.h"
-#include "base/time/time.h"
+#include "base/message_loop.h"
+#include "base/process.h"
+#include "base/time.h"
 #include "chrome/test/automation/proxy_launcher.h"
+#include "googleurl/src/gurl.h"
 #include "testing/platform_test.h"
-#include "url/gurl.h"
 
 class AutomationProxy;
 class BrowserProxy;
+class FilePath;
 class GURL;
 class TabProxy;
 
 namespace base {
 class DictionaryValue;
-class FilePath;
 }
 
 // Base class for UI Tests. This implements the core of the functions.
@@ -45,6 +46,15 @@ class FilePath;
 // rather than UITestBase.
 class UITestBase {
  public:
+  // Profile theme type choices.
+  enum ProfileType {
+    DEFAULT_THEME = 0,
+    COMPLEX_THEME = 1,
+    NATIVE_THEME = 2,
+    CUSTOM_FRAME = 3,
+    CUSTOM_FRAME_NATIVE_THEME = 4,
+  };
+
   // ********* Utility functions *********
 
   // Launches the browser only.
@@ -58,9 +68,7 @@ class UITestBase {
   void ConnectToRunningBrowser();
 
   // Only for pyauto.
-  base::TimeDelta action_timeout();
   int action_timeout_ms();
-  void set_action_timeout(base::TimeDelta timeout);
   void set_action_timeout_ms(int timeout);
 
   // Overridable so that derived classes can provide their own ProxyLauncher.
@@ -70,8 +78,20 @@ class UITestBase {
   void CloseBrowserAndServer();
 
   // Launches the browser with the given command line.
-  // TODO(phajdan.jr): Make LaunchBrowser private.
+  // TODO(phajdan.jr): Make LaunchBrowser private. Tests should use
+  // LaunchAnotherBrowserBlockUntilClosed.
   void LaunchBrowser(const CommandLine& cmdline, bool clear_profile);
+
+#if !defined(OS_MACOSX)
+  // This function is deliberately not defined on the Mac because re-using an
+  // existing browser process when launching from the command line isn't a
+  // concept that we support on the Mac; AppleEvents are the Mac solution for
+  // the same need. Any test based on this function doesn't apply to the Mac.
+
+  // Launches an another browser process and waits for it to finish. Returns
+  // true on success.
+  bool LaunchAnotherBrowserBlockUntilClosed(const CommandLine& cmdline);
+#endif
 
   // Exits out browser instance.
   void QuitBrowser();
@@ -132,6 +152,17 @@ class UITestBase {
   // assert that the tab count is valid at the end of the wait.
   void WaitUntilTabCount(int tab_count);
 
+  // Waits until the Bookmark bar has stopped animating and become fully visible
+  // (if |wait_for_open| is true) or fully hidden (if |wait_for_open| is false).
+  // This function can time out (in which case it returns false).
+  bool WaitForBookmarkBarVisibilityChange(BrowserProxy* browser,
+                                          bool wait_for_open);
+
+  // Sends the request to close the browser without blocking.
+  // This is so we can interact with dialogs opened on browser close,
+  // e.g. the beforeunload confirm dialog.
+  void CloseBrowserAsync(BrowserProxy* browser) const;
+
   // Closes the specified browser.  Returns true if the browser was closed.
   // This call is blocking.  |application_closed| is set to true if this was
   // the last browser window (and therefore as a result of it closing the
@@ -139,12 +170,19 @@ class UITestBase {
   // after the browser process has terminated.
   bool CloseBrowser(BrowserProxy* browser, bool* application_closed) const;
 
+  // Gets the directory for the currently active profile in the browser.
+  FilePath GetDownloadDirectory();
+
   // Gets the executable file path of the Chrome browser process.
-  const base::FilePath::CharType* GetExecutablePath();
+  const FilePath::CharType* GetExecutablePath();
+
+  // Returns the directory name where the "typical" user data is that we use
+  // for testing.
+  static FilePath ComputeTypicalUserDataSource(ProfileType profile_type);
 
   // Return the user data directory being used by the browser instance in
   // UITest::SetUp().
-  base::FilePath user_data_dir() const {
+  FilePath user_data_dir() const {
     return launcher_->user_data_dir();
   }
 
@@ -153,8 +191,8 @@ class UITestBase {
   // copied into the user data directory for the test and the files will be
   // evicted from the OS cache. To start with a blank profile, supply an empty
   // string (the default).
-  const base::FilePath& template_user_data() const { return template_user_data_; }
-  void set_template_user_data(const base::FilePath& template_user_data) {
+  const FilePath& template_user_data() const { return template_user_data_; }
+  void set_template_user_data(const FilePath& template_user_data) {
     template_user_data_ = template_user_data;
   }
 
@@ -208,15 +246,10 @@ class UITestBase {
   }
 
   // Get the number of crash dumps we've logged since the test started.
-  int GetCrashCount() const;
-
-  // Returns empty string if there were no unexpected Chrome asserts or crashes,
-  // a string describing the failures otherwise. As a side effect, it will fail
-  // with EXPECT_EQ macros if this code runs within a gtest harness.
-  std::string CheckErrorsAndCrashes() const;
+  int GetCrashCount();
 
   // Use Chromium binaries from the given directory.
-  void SetBrowserDirectory(const base::FilePath& dir);
+  void SetBrowserDirectory(const FilePath& dir);
 
   // Appends a command-line switch (no associated value) to be passed to the
   // browser when launched.
@@ -226,19 +259,13 @@ class UITestBase {
   // browser when launched.
   void AppendBrowserLaunchSwitch(const char* name, const char* value);
 
-  // Pass-through to AutomationProxy::BeginTracing.
-  bool BeginTracing(const std::string& category_patterns);
-
-  // Pass-through to AutomationProxy::EndTracing.
-  std::string EndTracing();
-
  protected:
   // String to display when a test fails because the crash service isn't
   // running.
   static const wchar_t kFailedNoCrashService[];
 
   UITestBase();
-  explicit UITestBase(base::MessageLoop::Type msg_loop_type);
+  explicit UITestBase(MessageLoop::Type msg_loop_type);
 
   virtual ~UITestBase();
 
@@ -249,13 +276,17 @@ class UITestBase {
   // Closes the browser window.
   virtual void TearDown();
 
-  virtual AutomationProxy* automation() const;
+  AutomationProxy* automation() const {
+    return launcher_->automation();
+  }
 
   ProxyLauncher::LaunchState DefaultLaunchState();
 
+  virtual bool ShouldFilterInet();
+
   // Extra command-line switches that need to be passed to the browser are
   // added in this function. Add new command-line switches here.
-  virtual void SetLaunchSwitches();
+  void SetLaunchSwitches();
 
   // Called by the ProxyLauncher just before the browser is launched, allowing
   // setup of the profile for the runtime environment..
@@ -273,10 +304,10 @@ class UITestBase {
   // ********* Member variables *********
 
   // Path to the browser executable.
-  base::FilePath browser_directory_;
+  FilePath browser_directory_;
 
   // Path to the unit test data.
-  base::FilePath test_data_directory_;
+  FilePath test_data_directory_;
 
   // Command to launch the browser
   CommandLine launch_arguments_;
@@ -299,12 +330,8 @@ class UITestBase {
   // This can be set to true to have the test run the dom automation case.
   bool dom_automation_enabled_;
 
-  // This can be set to true to enable the stats collection controller JS
-  // bindings.
-  bool stats_collection_controller_enabled_;
-
   // See set_template_user_data().
-  base::FilePath template_user_data_;
+  FilePath template_user_data_;
 
   // Determines if the window is shown or hidden. Defaults to hidden.
   bool show_window_;
@@ -322,8 +349,11 @@ class UITestBase {
   // Launches browser and AutomationProxy.
   scoped_ptr<ProxyLauncher> launcher_;
 
+  // Are we using a profile with a complex theme?
+  ProfileType profile_type_;
+
   // PID file for websocket server.
-  base::FilePath websocket_pid_file_;
+  FilePath websocket_pid_file_;
 
  private:
   // Time the test was started (so we can check for new crash dumps)
@@ -333,8 +363,9 @@ class UITestBase {
 class UITest : public UITestBase, public PlatformTest {
  protected:
   UITest() {}
-  explicit UITest(base::MessageLoop::Type msg_loop_type)
-      : UITestBase(), PlatformTest(), message_loop_(msg_loop_type) {}
+  explicit UITest(MessageLoop::Type msg_loop_type)
+    : UITestBase(), PlatformTest(), message_loop_(msg_loop_type) {
+  }
 
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
@@ -360,7 +391,25 @@ class UITest : public UITestBase, public PlatformTest {
                      const std::string &id, const GURL &url,
                      const std::string& test_complete_cookie,
                      const std::string& expected_cookie_value,
-                     const base::TimeDelta wait_time);
+                     const int wait_time);
+
+  // Wrapper around EvictFileFromSystemCache to retry 10 times in case of
+  // error.
+  // Apparently needed for Windows buildbots (to workaround an error when
+  // file is in use).
+  // TODO(phajdan.jr): Move to test_file_util if we need it in more places.
+  bool EvictFileFromSystemCacheWrapper(const FilePath& path);
+
+  // Wait for |generated_file| to be ready and then compare it with
+  // |original_file| to see if they're identical or not if |compare_file| is
+  // true. If |need_equal| is true, they need to be identical. Otherwise,
+  // they should be different. This function will delete the generated file if
+  // the parameter |delete_generated_file| is true.
+  void WaitForGeneratedFileAndCheck(const FilePath& generated_file,
+                                    const FilePath& original_file,
+                                    bool compare_files,
+                                    bool need_equal,
+                                    bool delete_generated_file);
 
   // Polls the tab for a JavaScript condition and returns once one of the
   // following conditions hold true:
@@ -373,7 +422,7 @@ class UITest : public UITestBase, public PlatformTest {
   bool WaitUntilJavaScriptCondition(TabProxy* tab,
                                     const std::wstring& frame_xpath,
                                     const std::wstring& jscript,
-                                    base::TimeDelta timeout);
+                                    int timeout_ms);
 
   // Polls the tab for the cookie_name cookie and returns once one of the
   // following conditions hold true:
@@ -382,7 +431,7 @@ class UITest : public UITestBase, public PlatformTest {
   // - The timeout value has been exceeded.
   bool WaitUntilCookieValue(TabProxy* tab, const GURL& url,
                             const char* cookie_name,
-                            base::TimeDelta timeout,
+                            int timeout_ms,
                             const char* expected_value);
 
   // Polls the tab for the cookie_name cookie and returns once one of the
@@ -393,7 +442,17 @@ class UITest : public UITestBase, public PlatformTest {
   std::string WaitUntilCookieNonEmpty(TabProxy* tab,
                                       const GURL& url,
                                       const char* cookie_name,
-                                      base::TimeDelta timeout);
+                                      int timeout_ms);
+
+  // Checks whether the download shelf is visible in the current browser, giving
+  // it a chance to appear (we don't know the exact timing) while finishing as
+  // soon as possible.
+  bool WaitForDownloadShelfVisible(BrowserProxy* browser);
+
+  // Checks whether the download shelf is invisible in the current browser,
+  // giving it a chance to appear (we don't know the exact timing) while
+  // finishing as soon as possible.
+  bool WaitForDownloadShelfInvisible(BrowserProxy* browser);
 
   // Waits until the Find window has become fully visible (if |wait_for_open| is
   // true) or fully hidden (if |wait_for_open| is false). This function can time
@@ -412,7 +471,11 @@ class UITest : public UITestBase, public PlatformTest {
   void NavigateToURLAsync(const GURL& url);
 
  private:
-  base::MessageLoop message_loop_;  // Enables PostTask to main thread.
+  // Waits for download shelf visibility or invisibility.
+  bool WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
+                                            bool wait_for_open);
+
+  MessageLoop message_loop_;  // Enables PostTask to main thread.
 };
 
 // These exist only to support the gTest assertion macros, and

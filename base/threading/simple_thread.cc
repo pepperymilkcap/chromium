@@ -5,9 +5,8 @@
 #include "base/threading/simple_thread.h"
 
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/string_number_conversions.h"
 
 namespace base {
 
@@ -31,7 +30,6 @@ void SimpleThread::Start() {
   DCHECK(!HasBeenStarted()) << "Tried to Start a thread multiple times.";
   bool success = PlatformThread::Create(options_.stack_size(), this, &thread_);
   DCHECK(success);
-  base::ThreadRestrictions::ScopedAllowWait allow_wait;
   event_.Wait();  // Wait for the thread to complete initialization.
 }
 
@@ -40,11 +38,6 @@ void SimpleThread::Join() {
   DCHECK(!HasBeenJoined()) << "Tried to Join a thread multiple times.";
   PlatformThread::Join(thread_);
   joined_ = true;
-}
-
-bool SimpleThread::HasBeenStarted() {
-  base::ThreadRestrictions::ScopedAllowWait allow_wait;
-  return event_.IsSignaled();
 }
 
 void SimpleThread::ThreadMain() {

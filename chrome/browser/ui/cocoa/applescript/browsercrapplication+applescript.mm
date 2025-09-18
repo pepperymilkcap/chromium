@@ -1,18 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/applescript/browsercrapplication+applescript.h"
 
 #include "base/logging.h"
-#import "base/mac/scoped_nsobject.h"
+#import "base/memory/scoped_nsobject.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_iterator.h"
+#include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/applescript/bookmark_folder_applescript.h"
 #import "chrome/browser/ui/cocoa/applescript/constants_applescript.h"
 #import "chrome/browser/ui/cocoa/applescript/error_applescript.h"
@@ -22,15 +19,15 @@
 
 - (NSArray*)appleScriptWindows {
   NSMutableArray* appleScriptWindows = [NSMutableArray
-      arrayWithCapacity:chrome::GetTotalBrowserCount()];
+      arrayWithCapacity:BrowserList::size()];
   // Iterate through all browsers and check if it closing,
   // if not add it to list.
-  for (chrome::BrowserIterator browserIterator; !browserIterator.done();
-       browserIterator.Next()) {
+  for (BrowserList::const_iterator browserIterator = BrowserList::begin();
+       browserIterator != BrowserList::end(); ++browserIterator) {
     if ((*browserIterator)->IsAttemptingToCloseBrowser())
       continue;
 
-    base::scoped_nsobject<WindowAppleScript> window(
+    scoped_nsobject<WindowAppleScript> window(
         [[WindowAppleScript alloc] initWithBrowser:*browserIterator]);
     [window setContainer:NSApp
                 property:AppleScript::kWindowsProperty];
@@ -78,8 +75,8 @@
     return nil;
   }
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(lastProfile);
-  if (!model->loaded()) {
+  BookmarkModel* model = lastProfile->GetBookmarkModel();
+  if (!model->IsLoaded()) {
     AppleScript::SetError(AppleScript::errBookmarkModelLoad);
     return nil;
   }
@@ -101,8 +98,8 @@
     return nil;
   }
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(lastProfile);
-  if (!model->loaded()) {
+  BookmarkModel* model = lastProfile->GetBookmarkModel();
+  if (!model->IsLoaded()) {
     AppleScript::SetError(AppleScript::errBookmarkModelLoad);
     return NULL;
   }

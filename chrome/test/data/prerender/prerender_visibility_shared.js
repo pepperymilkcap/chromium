@@ -7,18 +7,18 @@
 // New states are added on each visibility change event.
 
 // Array of previously observed visibility states.
-var visibilityStates = [document.visibilityState];
+var visibilityStates = [document.webkitVisibilityState];
 
 // Array of previously observed hidden values.
-var hiddenValues = [document.hidden];
+var hiddenValues = [document.webkitHidden];
 
 // Record all visibility changes in corresponding arrays.
 function onVisibilityChange(event) {
-  visibilityStates.push(document.visibilityState);
-  hiddenValues.push(document.hidden);
+  visibilityStates.push(document.webkitVisibilityState);
+  hiddenValues.push(document.webkitHidden);
 }
 
-document.addEventListener("visibilitychange",
+document.addEventListener("webkitvisibilitychange",
                           onVisibilityChange,
                           false);
 

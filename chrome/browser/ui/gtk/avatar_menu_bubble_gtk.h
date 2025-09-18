@@ -1,34 +1,39 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_AVATAR_MENU_BUBBLE_GTK_H_
 #define CHROME_BROWSER_UI_GTK_AVATAR_MENU_BUBBLE_GTK_H_
+#pragma once
+
+#include <vector>
 
 #include <gtk/gtk.h>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
-#include "chrome/browser/profiles/avatar_menu_observer.h"
+#include "chrome/browser/profiles/avatar_menu_model_observer.h"
 #include "chrome/browser/ui/gtk/avatar_menu_item_gtk.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 
-class AvatarMenu;
+class AvatarMenuModel;
 class Browser;
 class GtkThemeService;
 
 // This bubble is displayed when the user clicks on the avatar button.
 // It displays a list of profiles and allows users to switch between profiles.
 class AvatarMenuBubbleGtk : public BubbleDelegateGtk,
-                            public AvatarMenuObserver,
-                            public AvatarMenuItemGtk::Delegate {
+                            public AvatarMenuModelObserver,
+                            public AvatarMenuItemGtk::Delegate,
+                            public content::NotificationObserver {
  public:
   AvatarMenuBubbleGtk(Browser* browser,
                       GtkWidget* anchor,
-                      BubbleGtk::FrameStyle arrow,
+                      BubbleGtk::ArrowLocationGtk arrow,
                       const gfx::Rect* rect);
   virtual ~AvatarMenuBubbleGtk();
 
@@ -36,13 +41,18 @@ class AvatarMenuBubbleGtk : public BubbleDelegateGtk,
   virtual void BubbleClosing(BubbleGtk* bubble,
                              bool closed_by_escape) OVERRIDE;
 
-  // AvatarMenuObserver implementation.
-  virtual void OnAvatarMenuChanged(
-      AvatarMenu* avatar_menu) OVERRIDE;
+  // AvatarMenuModelObserver implementation.
+  virtual void OnAvatarMenuModelChanged(
+      AvatarMenuModel* avatar_menu_model) OVERRIDE;
 
   // AvatarMenuItemGtk::Delegate implementation.
   virtual void OpenProfile(size_t profile_index) OVERRIDE;
   virtual void EditProfile(size_t profile_index) OVERRIDE;
+
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Notified when |contents_| is destroyed so we can delete our instance.
@@ -50,29 +60,15 @@ class AvatarMenuBubbleGtk : public BubbleDelegateGtk,
   CHROMEGTK_CALLBACK_1(AvatarMenuBubbleGtk, void, OnSizeRequest,
                        GtkRequisition*);
   CHROMEGTK_CALLBACK_0(AvatarMenuBubbleGtk, void, OnNewProfileLinkClicked);
-  CHROMEGTK_CALLBACK_0(AvatarMenuBubbleGtk, void, OnSwitchProfileLinkClicked);
 
   // Create all widgets in this bubble.
   void InitContents();
 
-  // Create the menu contents for a normal profile.
-  void InitMenuContents();
-
-  // Create the managed user specific contents of the menu.
-  void InitManagedUserContents();
-
-  // Close the bubble and set bubble_ to NULL.
-  void CloseBubble();
-
   // A model of all the profile information to be displayed in the menu.
-  scoped_ptr<AvatarMenu> avatar_menu_;
+  scoped_ptr<AvatarMenuModel> avatar_menu_model_;
 
   // A weak pointer to the parent widget of all widgets in the bubble.
   GtkWidget* contents_;
-
-  // A weak pointer to the only child widget of |contents_| which contains all
-  // widgets in the bubble.
-  GtkWidget* inner_contents_;
 
   // A weak pointer to the bubble window.
   BubbleGtk* bubble_;
@@ -80,19 +76,18 @@ class AvatarMenuBubbleGtk : public BubbleDelegateGtk,
   // A weak pointer to the theme service.
   GtkThemeService* theme_service_;
 
-  // A weak pointer to the new profile link to keep its theme information
+  // A weak pointer to the new proifle link to keep its theme information
   // updated.
   GtkWidget* new_profile_link_;
 
   // A vector of all profile items in the menu.
-  ScopedVector<AvatarMenuItemGtk> items_;
+  std::vector<AvatarMenuItemGtk*> items_;
 
   // The minimum width to display the bubble. This is used to prevent the bubble
   // from automatically reducing its size when hovering over a profile item.
   int minimum_width_;
 
-  // Is set to true if the managed user has clicked on Switch Users.
-  bool switching_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(AvatarMenuBubbleGtk);
 };

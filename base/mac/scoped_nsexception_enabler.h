@@ -4,6 +4,7 @@
 
 #ifndef BASE_MAC_SCOPED_NSEXCEPTION_ENABLER_H_
 #define BASE_MAC_SCOPED_NSEXCEPTION_ENABLER_H_
+#pragma once
 
 #import <Foundation/Foundation.h>
 
@@ -42,11 +43,10 @@ class BASE_EXPORT ScopedNSExceptionEnabler {
 BASE_EXPORT bool GetNSExceptionsAllowed();
 BASE_EXPORT void SetNSExceptionsAllowed(bool allowed);
 
-// Executes |block| with fatal-exceptions turned off, and returns the
-// result.  If an exception is thrown during the perform, nil is
-// returned.
-typedef id (^BlockReturningId)();
-BASE_EXPORT id RunBlockIgnoringExceptions(BlockReturningId block);
+// Executes [target performSelector:sel] with fatal-exceptions turned
+// off, and returns the result.  If an exception is thrown during the
+// perform, nil is returned.
+BASE_EXPORT id PerformSelectorIgnoringExceptions(NSObject* target, SEL sel);
 
 }  // namespace mac
 }  // namespace base

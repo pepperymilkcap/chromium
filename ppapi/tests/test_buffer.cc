@@ -20,10 +20,10 @@ bool TestBuffer::Init() {
 }
 
 void TestBuffer::RunTests(const std::string& filter) {
-  RUN_TEST(InvalidSize, filter);
-  RUN_TEST(InitToZero, filter);
-  RUN_TEST(IsBuffer, filter);
-  RUN_TEST(BasicLifeCycle, filter);
+  instance_->LogTest("InvalidSize", TestInvalidSize());
+  instance_->LogTest("InitToZero", TestInitToZero());
+  instance_->LogTest("IsBuffer", TestIsBuffer());
+  instance_->LogTest("BasicLifecyle", TestBasicLifeCycle());
 }
 
 std::string TestBuffer::TestInvalidSize() {

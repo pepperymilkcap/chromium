@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,20 @@
 
 #include <string>
 
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/scoped_temp_dir.h"
+#include "base/string_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
-using extensions::URLPatternSet;
 
 namespace {
 
@@ -31,15 +30,15 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
 
 }
 
-namespace extensions {
-
 // Test bringing up a master on a specific directory, putting a script
 // in there, etc.
 
 class UserScriptMasterTest : public testing::Test,
                              public content::NotificationObserver {
  public:
-  UserScriptMasterTest() : shared_memory_(NULL) {
+  UserScriptMasterTest()
+      : message_loop_(MessageLoop::TYPE_UI),
+        shared_memory_(NULL) {
   }
 
   virtual void SetUp() {
@@ -52,9 +51,9 @@ class UserScriptMasterTest : public testing::Test,
     // UserScriptMaster posts tasks to the file thread so make the current
     // thread look like one.
     file_thread_.reset(new content::TestBrowserThread(
-        BrowserThread::FILE, base::MessageLoop::current()));
+        BrowserThread::FILE, MessageLoop::current()));
     ui_thread_.reset(new content::TestBrowserThread(
-        BrowserThread::UI, base::MessageLoop::current()));
+        BrowserThread::UI, MessageLoop::current()));
   }
 
   virtual void TearDown() {
@@ -64,21 +63,21 @@ class UserScriptMasterTest : public testing::Test,
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+                       const content::NotificationDetails& details) {
     DCHECK(type == chrome::NOTIFICATION_USER_SCRIPTS_UPDATED);
 
     shared_memory_ = content::Details<base::SharedMemory>(details).ptr();
-    if (base::MessageLoop::current() == &message_loop_)
-      base::MessageLoop::current()->Quit();
+    if (MessageLoop::current() == &message_loop_)
+      MessageLoop::current()->Quit();
   }
 
   // Directory containing user scripts.
-  base::ScopedTempDir temp_dir_;
+  ScopedTempDir temp_dir_;
 
   content::NotificationRegistrar registrar_;
 
   // MessageLoop used in tests.
-  base::MessageLoopForUI message_loop_;
+  MessageLoop message_loop_;
 
   scoped_ptr<content::TestBrowserThread> file_thread_;
   scoped_ptr<content::TestBrowserThread> ui_thread_;
@@ -92,7 +91,7 @@ TEST_F(UserScriptMasterTest, NoScripts) {
   TestingProfile profile;
   scoped_refptr<UserScriptMaster> master(new UserScriptMaster(&profile));
   master->StartLoad();
-  message_loop_.PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  message_loop_.PostTask(FROM_HERE, MessageLoop::QuitClosure());
   message_loop_.Run();
 
   ASSERT_TRUE(shared_memory_ != NULL);
@@ -230,7 +229,7 @@ TEST_F(UserScriptMasterTest, Parse8) {
 }
 
 TEST_F(UserScriptMasterTest, SkipBOMAtTheBeginning) {
-  base::FilePath path = temp_dir_.path().AppendASCII("script.user.js");
+  FilePath path = temp_dir_.path().AppendASCII("script.user.js");
   const std::string content("\xEF\xBB\xBF alert('hello');");
   size_t written = file_util::WriteFile(path, content.c_str(), content.size());
   ASSERT_EQ(written, content.size());
@@ -253,7 +252,7 @@ TEST_F(UserScriptMasterTest, SkipBOMAtTheBeginning) {
 }
 
 TEST_F(UserScriptMasterTest, LeaveBOMNotAtTheBeginning) {
-  base::FilePath path = temp_dir_.path().AppendASCII("script.user.js");
+  FilePath path = temp_dir_.path().AppendASCII("script.user.js");
   const std::string content("alert('here's a BOOM: \xEF\xBB\xBF');");
   size_t written = file_util::WriteFile(path, content.c_str(), content.size());
   ASSERT_EQ(written, content.size());
@@ -273,5 +272,3 @@ TEST_F(UserScriptMasterTest, LeaveBOMNotAtTheBeginning) {
 
   EXPECT_EQ(content, user_scripts[0].js_scripts()[0].GetContent().as_string());
 }
-
-}  // namespace extensions

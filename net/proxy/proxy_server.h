@@ -4,6 +4,7 @@
 
 #ifndef NET_PROXY_PROXY_SERVER_H_
 #define NET_PROXY_PROXY_SERVER_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -145,14 +146,6 @@ class NET_EXPORT ProxyServer {
       return scheme_ < other.scheme_;
     return host_port_pair_ < other.host_port_pair_;
   }
-
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-  // Returns true if this proxy server is the data reduction proxy or its
-  // fallback, respectively, as configured in gyp. These functions will return
-  // false for data reduction proxy servers specified on the command line.
-  bool isDataReductionProxy() const;
-  bool isDataReductionProxyFallback() const;
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
 
  private:
   // Creates a ProxyServer given a scheme, and host/port string. If parsing the

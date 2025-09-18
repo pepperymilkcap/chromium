@@ -4,29 +4,35 @@
 
 #include "chrome/renderer/extensions/context_menus_custom_bindings.h"
 
-#include "base/bind.h"
-#include "chrome/common/extensions/extension_messages.h"
-#include "content/public/renderer/render_thread.h"
 #include "grit/renderer_resources.h"
 #include "v8/include/v8.h"
-
-namespace {
-
-void GetNextContextMenuId(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  int context_menu_id = -1;
-  content::RenderThread::Get()->Send(
-      new ExtensionHostMsg_GenerateUniqueID(&context_menu_id));
-  args.GetReturnValue().Set(static_cast<int32_t>(context_menu_id));
-}
-
-}  // namespace
 
 namespace extensions {
 
 ContextMenusCustomBindings::ContextMenusCustomBindings(
-    Dispatcher* dispatcher, ChromeV8Context* context)
-    : ChromeV8Extension(dispatcher, context) {
-  RouteFunction("GetNextContextMenuId", base::Bind(&GetNextContextMenuId));
+    int dependency_count,
+    const char** dependencies)
+    : ChromeV8Extension(
+          "extensions/context_menus_custom_bindings.js",
+          IDR_CONTEXT_MENUS_CUSTOM_BINDINGS_JS,
+          dependency_count,
+          dependencies,
+          NULL) {}
+
+static v8::Handle<v8::Value> GetNextContextMenuId(const v8::Arguments& args) {
+  // Note: this works because contextMenus.create() only works in the
+  // extension process.  If that API is opened up to content scripts, this
+  // will need to change.  See crbug.com/77023
+  static int next_context_menu_id = 1;
+  return v8::Integer::New(next_context_menu_id++);
+}
+
+v8::Handle<v8::FunctionTemplate> ContextMenusCustomBindings::GetNativeFunction(
+    v8::Handle<v8::String> name) {
+  if (name->Equals(v8::String::New("GetNextContextMenuId")))
+    return v8::FunctionTemplate::New(GetNextContextMenuId);
+
+  return ChromeV8Extension::GetNativeFunction(name);
 }
 
 }  // extensions

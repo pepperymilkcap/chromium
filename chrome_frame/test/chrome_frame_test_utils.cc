@@ -9,33 +9,25 @@
 #include <iepmapi.h>
 #include <sddl.h>
 #include <shlobj.h>
-#include <TlHelp32.h>
-#include <winsock2.h>
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/process/kill.h"
-#include "base/process/launch.h"
-#include "base/process/process.h"
-#include "base/process/process_iterator.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/process.h"
+#include "base/process_util.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "chrome_frame/utils.h"
-#include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
@@ -50,26 +42,15 @@ const DWORD kCrashServicePipeDesiredAccess = FILE_READ_DATA |
 
 const DWORD kCrashServicePipeFlagsAndAttributes = SECURITY_IDENTIFICATION |
                                                   SECURITY_SQOS_PRESENT;
-const int kCrashServiceDetectTimeoutMs = 500;
-const int kCrashServiceStartupTimeoutMs = 1000;
+const int kCrashServiceStartupTimeoutMs = 500;
 
 const wchar_t kIEImageName[] = L"iexplore.exe";
 const wchar_t kIEBrokerImageName[] = L"ieuser.exe";
 const char kChromeImageName[] = "chrome.exe";
 const wchar_t kIEProfileName[] = L"iexplore";
 const wchar_t kChromeLauncher[] = L"chrome_launcher.exe";
-
-#ifndef NDEBUG
-const base::TimeDelta kChromeFrameLongNavigationTimeout =
-    base::TimeDelta::FromSeconds(30);
-const base::TimeDelta kChromeFrameVeryLongNavigationTimeout =
-    base::TimeDelta::FromSeconds(90);
-#else
-const base::TimeDelta kChromeFrameLongNavigationTimeout =
-    base::TimeDelta::FromSeconds(10);
-const base::TimeDelta kChromeFrameVeryLongNavigationTimeout =
-    base::TimeDelta::FromSeconds(30);
-#endif
+const int kChromeFrameLongNavigationTimeoutInSeconds = 10;
+const int kChromeFrameVeryLongNavigationTimeoutInSeconds = 30;
 
 // Callback function for EnumThreadWindows.
 BOOL CALLBACK CloseWindowsThreadCallback(HWND hwnd, LPARAM param) {
@@ -83,8 +64,8 @@ BOOL CALLBACK CloseWindowsThreadCallback(HWND hwnd, LPARAM param) {
       }
       count++;
     } else {
-      LOG(WARNING) << "Skipping disabled window: "
-                   << base::StringPrintf(L"%08X", hwnd);
+      DLOG(WARNING) << "Skipping disabled window: "
+                    << base::StringPrintf(L"%08X", hwnd);
     }
   }
   return TRUE;  // continue enumeration
@@ -181,7 +162,7 @@ base::ProcessHandle LaunchExecutable(const std::wstring& executable,
       }
     }
   } else {
-    CommandLine cmdline((base::FilePath(path)));
+    CommandLine cmdline((FilePath(path)));
     cmdline.AppendArgNative(argument);
     if (!base::LaunchProcess(cmdline, base::LaunchOptions(), &process)) {
       LOG(ERROR) << "LaunchProcess failed: " << ::GetLastError();
@@ -190,16 +171,13 @@ base::ProcessHandle LaunchExecutable(const std::wstring& executable,
   return process;
 }
 
-base::ProcessHandle LaunchChrome(const std::wstring& url,
-                                 const base::FilePath& user_data_dir) {
-  base::FilePath path;
+base::ProcessHandle LaunchChrome(const std::wstring& url) {
+  FilePath path;
   PathService::Get(base::DIR_MODULE, &path);
   path = path.AppendASCII(kChromeImageName);
 
   CommandLine cmd(path);
   cmd.AppendSwitch(switches::kNoFirstRun);
-  if (!user_data_dir.empty())
-    cmd.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
   cmd.AppendArgNative(url);
 
   base::ProcessHandle process = NULL;
@@ -208,9 +186,10 @@ base::ProcessHandle LaunchChrome(const std::wstring& url,
 }
 
 base::ProcessHandle LaunchIEOnVista(const std::wstring& url) {
-  typedef HRESULT (WINAPI* IELaunchURLPtr)(const wchar_t* url,
-                                           PROCESS_INFORMATION* pi,
-                                           VOID* info);
+  typedef HRESULT (WINAPI* IELaunchURLPtr)(
+      const wchar_t* url,
+      PROCESS_INFORMATION *pi,
+      VOID *info);
 
   IELaunchURLPtr launch;
   PROCESS_INFORMATION pi = {0};
@@ -243,29 +222,6 @@ base::ProcessHandle LaunchIE(const std::wstring& url) {
   return LaunchExecutable(kIEImageName, url);
 }
 
-bool TakeSnapshotAndLog() {
-  testing::UnitTest* unit_test = testing::UnitTest::GetInstance();
-  const testing::TestInfo* test_info = unit_test->current_test_info();
-  std::string name;
-  if (test_info != NULL) {
-    name.append(test_info->test_case_name())
-        .append(1, '.')
-        .append(test_info->name());
-  } else {
-    name = "unknown test";
-  }
-
-  base::FilePath snapshot;
-  if (!ui_test_utils::SaveScreenSnapshotToDesktop(&snapshot)) {
-    LOG(ERROR) << "Failed saving screen snapshot for " << name;
-    return false;
-  }
-
-  LOG(ERROR) << "Saved screen snapshot for " << name << " to "
-             << snapshot.value();
-  return true;
-}
-
 int CloseAllIEWindows() {
   int ret = 0;
 
@@ -288,7 +244,7 @@ int CloseAllIEWindows() {
           HWND window = NULL;
           // Check the class of the browser window to make sure we only close
           // IE windows.
-          if (browser->get_HWND(reinterpret_cast<SHANDLE_PTR*>(&window))) {
+          if (browser->get_HWND(reinterpret_cast<SHANDLE_PTR*>(window))) {
             wchar_t class_name[MAX_PATH];
             if (::GetClassName(window, class_name, arraysize(class_name))) {
               is_ie = _wcsicmp(class_name, L"IEFrame") == 0;
@@ -333,7 +289,7 @@ BOOL LowIntegrityToken::Impersonate() {
   BOOL ok = ::OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE,
                                &process_token_handle);
   if (!ok) {
-    LOG(ERROR) << "::OpenProcessToken failed: " << GetLastError();
+    DLOG(ERROR) << "::OpenProcessToken failed: " << GetLastError();
     return ok;
   }
 
@@ -344,18 +300,18 @@ BOOL LowIntegrityToken::Impersonate() {
       TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_ADJUST_DEFAULT, NULL,
       SecurityImpersonation, TokenImpersonation, &impersonation_token_handle);
   if (!ok) {
-    LOG(ERROR) << "::DuplicateTokenEx failed: " << GetLastError();
+    DLOG(ERROR) << "::DuplicateTokenEx failed: " << GetLastError();
     return ok;
   }
 
-  // TODO(stoyan): sandbox/win/src/restricted_token_utils.cc has
+  // TODO(stoyan): sandbox/src/restricted_token_utils.cc has
   // SetTokenIntegrityLevel function already.
   base::win::ScopedHandle impersonation_token(impersonation_token_handle);
   PSID integrity_sid = NULL;
   TOKEN_MANDATORY_LABEL tml = {0};
   ok = ::ConvertStringSidToSid(SDDL_ML_LOW, &integrity_sid);
   if (!ok) {
-    LOG(ERROR) << "::ConvertStringSidToSid failed: " << GetLastError();
+    DLOG(ERROR) << "::ConvertStringSidToSid failed: " << GetLastError();
     return ok;
   }
 
@@ -365,7 +321,7 @@ BOOL LowIntegrityToken::Impersonate() {
       &tml, sizeof(tml) + ::GetLengthSid(integrity_sid));
   ::LocalFree(integrity_sid);
   if (!ok) {
-    LOG(ERROR) << "::SetTokenInformation failed: " << GetLastError();
+    DLOG(ERROR) << "::SetTokenInformation failed: " << GetLastError();
     return ok;
   }
 
@@ -374,7 +330,7 @@ BOOL LowIntegrityToken::Impersonate() {
   if (ok) {
     impersonated_ = true;
   } else {
-    LOG(ERROR) << "::ImpersonateLoggedOnUser failed: " << GetLastError();
+    DLOG(ERROR) << "::ImpersonateLoggedOnUser failed: " << GetLastError();
   }
 
   return ok;
@@ -443,34 +399,33 @@ HRESULT LaunchIEAsComServer(IWebBrowser2** web_browser) {
   return hr;
 }
 
+// TODO(joi@chromium.org) Could share this code with chrome_frame_plugin.h
+FilePath GetProfilePath(const std::wstring& profile_name) {
+  FilePath profile_path;
+  chrome::GetChromeFrameUserDataDirectory(&profile_path);
+  return profile_path.Append(profile_name);
+}
+
 std::wstring GetExeVersion(const std::wstring& exe_path) {
   scoped_ptr<FileVersionInfo> ie_version_info(
-      FileVersionInfo::CreateFileVersionInfo(base::FilePath(exe_path)));
+      FileVersionInfo::CreateFileVersionInfo(FilePath(exe_path)));
   return ie_version_info->product_version();
 }
 
 IEVersion GetInstalledIEVersion() {
-  std::wstring path(chrome_frame_test::GetExecutableAppPath(kIEImageName));
-  std::wstring version(GetExeVersion(path));
-  size_t first_dot = version.find(L'.');
-  int major_version = 0;
-  if (!base::StringToInt(base::StringPiece16(
-          version.data(),
-          first_dot == std::wstring::npos ? version.size() : first_dot),
-                         &major_version)) {
-    return IE_UNSUPPORTED;
-  }
+  std::wstring path = chrome_frame_test::GetExecutableAppPath(kIEImageName);
+  std::wstring version = GetExeVersion(path);
 
-  switch (major_version) {
-    case 6:
+  switch (version[0]) {
+    case '6':
       return IE_6;
-    case 7:
+    case '7':
       return IE_7;
-    case 8:
+    case '8':
       return IE_8;
-    case 9:
+    case '9':
       return IE_9;
-    case 10:
+    case '10':
       return IE_10;
     default:
       break;
@@ -479,8 +434,8 @@ IEVersion GetInstalledIEVersion() {
   return IE_UNSUPPORTED;
 }
 
-base::FilePath GetProfilePathForIE() {
-  base::FilePath profile_path;
+FilePath GetProfilePathForIE() {
+  FilePath profile_path;
   // Browsers without IDeleteBrowsingHistory in non-priv mode
   // have their profiles moved into "Temporary Internet Files".
   // The code below basically retrieves the version of IE and computes
@@ -489,13 +444,13 @@ base::FilePath GetProfilePathForIE() {
     profile_path = GetIETemporaryFilesFolder();
     profile_path = profile_path.Append(L"Google Chrome Frame");
   } else {
-    GetChromeFrameProfilePath(kIEProfileName, &profile_path);
+    profile_path = GetProfilePath(kIEProfileName);
   }
   return profile_path;
 }
 
-base::FilePath GetTestDataFolder() {
-  base::FilePath test_dir;
+FilePath GetTestDataFolder() {
+  FilePath test_dir;
   PathService::Get(base::DIR_SOURCE_ROOT, &test_dir);
   test_dir = test_dir.Append(FILE_PATH_LITERAL("chrome_frame"))
       .Append(FILE_PATH_LITERAL("test"))
@@ -503,8 +458,8 @@ base::FilePath GetTestDataFolder() {
   return test_dir;
 }
 
-base::FilePath GetSeleniumTestFolder() {
-  base::FilePath test_dir;
+FilePath GetSeleniumTestFolder() {
+  FilePath test_dir;
   PathService::Get(base::DIR_SOURCE_ROOT, &test_dir);
   test_dir = test_dir.Append(FILE_PATH_LITERAL("data"))
       .Append(FILE_PATH_LITERAL("selenium_core"));
@@ -512,38 +467,35 @@ base::FilePath GetSeleniumTestFolder() {
 }
 
 std::wstring GetPathFromUrl(const std::wstring& url) {
-  base::string16 url16 = base::WideToUTF16(url);
+  string16 url16 = WideToUTF16(url);
   GURL gurl = GURL(url16);
   if (gurl.has_query()) {
     GURL::Replacements replacements;
     replacements.ClearQuery();
     gurl = gurl.ReplaceComponents(replacements);
   }
-  return base::UTF8ToWide(gurl.PathForRequest());
+  return UTF8ToWide(gurl.PathForRequest());
 }
 
 std::wstring GetPathAndQueryFromUrl(const std::wstring& url) {
-  base::string16 url16 = base::WideToUTF16(url);
+  string16 url16 = WideToUTF16(url);
   GURL gurl = GURL(url16);
-  return base::UTF8ToWide(gurl.PathForRequest());
+  return UTF8ToWide(gurl.PathForRequest());
 }
 
 std::wstring GetClipboardText() {
-  base::string16 text16;
-  ui::Clipboard::GetForCurrentThread()->ReadText(
-      ui::CLIPBOARD_TYPE_COPY_PASTE, &text16);
-  return base::UTF16ToWide(text16);
-}
-
-void DestroyClipboard() {
-  ui::Clipboard::DestroyClipboardForCurrentThread();
+  ui::Clipboard clipboard;
+  string16 text16;
+  clipboard.ReadText(ui::Clipboard::BUFFER_STANDARD, &text16);
+  return UTF16ToWide(text16);
 }
 
 void SetClipboardText(const std::wstring& text) {
-  ui::ScopedClipboardWriter clipboard_writer(
-      ui::Clipboard::GetForCurrentThread(),
-      ui::CLIPBOARD_TYPE_COPY_PASTE);
-  clipboard_writer.WriteText(base::WideToUTF16(text));
+  ui::Clipboard clipboard;
+  {
+    ui::ScopedClipboardWriter clipboard_writer(&clipboard);
+    clipboard_writer.WriteText(WideToUTF16(text));
+  }
 }
 
 bool AddCFMetaTag(std::string* html_data) {
@@ -560,8 +512,8 @@ bool AddCFMetaTag(std::string* html_data) {
       head = html + strlen("<html>");
       html_data->insert(head, "<head></head>");
     } else {
-      LOG(ERROR) << "Meta tag will not be injected "
-                 << "because the html tag could not be found";
+      DLOG(ERROR) << "Meta tag will not be injected "
+          << "because the html tag could not be found";
     }
   }
   if (head != std::string::npos) {
@@ -574,7 +526,7 @@ bool AddCFMetaTag(std::string* html_data) {
 
 CloseIeAtEndOfScope::~CloseIeAtEndOfScope() {
   int closed = CloseAllIEWindows();
-  LOG_IF(ERROR, closed != 0) << "Closed " << closed << " windows forcefully";
+  DLOG_IF(ERROR, closed != 0) << "Closed " << closed << " windows forcefully";
 }
 
 // Attempt to connect to a running crash_service instance. Success occurs if we
@@ -628,44 +580,44 @@ bool DetectRunningCrashService(int timeout_ms) {
 }
 
 base::ProcessHandle StartCrashService() {
-  if (DetectRunningCrashService(kCrashServiceDetectTimeoutMs)) {
-    VLOG(1) << "crash_service.exe is already running. We will use the "
-               "existing process and leave it running after tests complete.";
+  if (DetectRunningCrashService(kCrashServiceStartupTimeoutMs)) {
+    DVLOG(1) << "crash_service.exe is already running. We will use the "
+                "existing process and leave it running after tests complete.";
     return NULL;
   }
 
-  base::FilePath exe_dir;
+  FilePath exe_dir;
   if (!PathService::Get(base::DIR_EXE, &exe_dir)) {
     DCHECK(false);
     return NULL;
   }
 
-  base::win::ScopedHandle crash_service;
+  base::ProcessHandle crash_service = NULL;
 
-  VLOG(1) << "Starting crash_service.exe so you know if a test crashes!";
+  DVLOG(1) << "Starting crash_service.exe so you know if a test crashes!";
 
-  base::FilePath crash_service_path = exe_dir.AppendASCII("crash_service.exe");
+  FilePath crash_service_path = exe_dir.AppendASCII("crash_service.exe");
   if (!base::LaunchProcess(crash_service_path.value(), base::LaunchOptions(),
                            &crash_service)) {
-    LOG(ERROR) << "Couldn't start crash_service.exe";
+    DLOG(ERROR) << "Couldn't start crash_service.exe";
     return NULL;
   }
 
   base::Time start = base::Time::Now();
 
   if (DetectRunningCrashService(kCrashServiceStartupTimeoutMs)) {
-    VLOG(1) << "crash_service.exe is ready for clients in "
-            << (base::Time::Now() - start).InMilliseconds() << " ms.";
-    return crash_service.Take();
+    DVLOG(1) << "crash_service.exe is ready for clients in "
+             << (base::Time::Now() - start).InMilliseconds() << " ms.";
+    return crash_service;
   } else {
-    LOG(ERROR) << "crash_service.exe failed to accept client connections "
-                  "within " << kCrashServiceStartupTimeoutMs << " ms. "
-                  "Terminating it now.";
+    DLOG(ERROR) << "crash_service.exe failed to accept client connections "
+                   "within " << kCrashServiceStartupTimeoutMs << " ms. "
+                   "Terminating it now.";
 
     // First check to see if it's even still running just to minimize the
     // likelihood of spurious error messages from KillProcess.
-    if (WAIT_OBJECT_0 != ::WaitForSingleObject(crash_service.Get(), 0)) {
-      base::KillProcess(crash_service.Get(), 0, false);
+    if (WAIT_OBJECT_0 != ::WaitForSingleObject(crash_service, 0)) {
+      base::KillProcess(crash_service, 0, false);
     }
     return NULL;
   }
@@ -677,6 +629,10 @@ ScopedVirtualizeHklmAndHkcu::ScopedVirtualizeHklmAndHkcu() {
 }
 
 ScopedVirtualizeHklmAndHkcu::~ScopedVirtualizeHklmAndHkcu() {
+}
+
+void ScopedVirtualizeHklmAndHkcu::RemoveAllOverrides() {
+  override_manager_.RemoveAllOverrides();
 }
 
 bool KillProcesses(const std::wstring& executable_name, int exit_code,
@@ -698,49 +654,13 @@ ScopedChromeFrameRegistrar::RegistrationType GetTestBedType() {
 }
 
 void ClearIESessionHistory() {
-  base::FilePath session_history_path;
-  if (!PathService::Get(base::DIR_LOCAL_APP_DATA, &session_history_path))
-    return;
+  wchar_t local_app_data_path[MAX_PATH + 1] = {0};
+  SHGetFolderPath(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT,
+                  local_app_data_path);
 
-  session_history_path = session_history_path.AppendASCII("Microsoft");
-  session_history_path = session_history_path.AppendASCII("Internet Explorer");
-  session_history_path = session_history_path.AppendASCII("Recovery");
-  base::DeleteFile(session_history_path, true);
-}
-
-std::string GetLocalIPv4Address() {
-  std::string address;
-  net::NetworkInterfaceList nic_list;
-
-  if (!net::GetNetworkList(&nic_list,
-                           net::INCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES)) {
-    LOG(ERROR) << "GetNetworkList failed to look up non-loopback adapters. "
-               << "Tests will be run over the loopback adapter, which may "
-               << "result in hangs.";
-  } else {
-    // GetNetworkList only returns 'Up' non-loopback adapters. Select the first
-    // IPv4 address found - we should be able to bind/connect over it.
-    for (size_t i = 0; i < nic_list.size(); ++i) {
-      if (nic_list[i].address.size() != net::kIPv4AddressSize)
-        continue;
-      char* address_string =
-          inet_ntoa(*reinterpret_cast<in_addr*>(&nic_list[i].address[0]));
-      DCHECK(address_string != NULL);
-      if (address_string != NULL) {
-        LOG(INFO) << "HTTP tests will run over " << address_string << ".";
-        address.assign(address_string);
-        break;
-      }
-    }
-  }
-
-  if (address.empty()) {
-    LOG(ERROR) << "Failed to find a non-loopback IP_V4 address. Tests will be "
-               << "run over the loopback adapter, which may result in hangs.";
-    address.assign("127.0.0.1");
-  }
-
-  return address;
+  std::wstring session_history_path = local_app_data_path;
+  session_history_path += L"\\Microsoft\\Internet Explorer\\Recovery";
+  file_util::Delete(session_history_path, true);
 }
 
 }  // namespace chrome_frame_test

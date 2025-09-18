@@ -24,7 +24,6 @@ class TestURLUtil : public TestCase {
   std::string TestDocumentCanAccessDocument();
   std::string TestGetDocumentURL();
   std::string TestGetPluginInstanceURL();
-  std::string TestGetPluginReferrerURL();
 
   const pp::URLUtil_Dev* util_;
 };

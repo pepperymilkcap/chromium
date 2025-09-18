@@ -1,26 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/url_request/url_request_context_storage.h"
 
 #include "base/logging.h"
+#include "net/base/cert_verifier.h"
+#include "net/base/cookie_store.h"
+#include "net/base/host_resolver.h"
 #include "net/base/net_log.h"
 #include "net/base/network_delegate.h"
-#include "net/cert/cert_verifier.h"
-#include "net/cookies/cookie_store.h"
-#include "net/dns/host_resolver.h"
+#include "net/base/origin_bound_cert_service.h"
 #include "net/ftp/ftp_transaction_factory.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_server_properties.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/proxy/proxy_service.h"
-#include "net/ssl/server_bound_cert_service.h"
 #include "net/url_request/fraudulent_certificate_reporter.h"
-#include "net/url_request/http_user_agent_settings.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory.h"
-#include "net/url_request/url_request_throttler_manager.h"
 
 namespace net {
 
@@ -36,10 +34,9 @@ void URLRequestContextStorage::set_net_log(NetLog* net_log) {
   net_log_.reset(net_log);
 }
 
-void URLRequestContextStorage::set_host_resolver(
-    scoped_ptr<HostResolver> host_resolver) {
-  context_->set_host_resolver(host_resolver.get());
-  host_resolver_ = host_resolver.Pass();
+void URLRequestContextStorage::set_host_resolver(HostResolver* host_resolver) {
+  context_->set_host_resolver(host_resolver);
+  host_resolver_.reset(host_resolver);
 }
 
 void URLRequestContextStorage::set_cert_verifier(CertVerifier* cert_verifier) {
@@ -47,10 +44,10 @@ void URLRequestContextStorage::set_cert_verifier(CertVerifier* cert_verifier) {
   cert_verifier_.reset(cert_verifier);
 }
 
-void URLRequestContextStorage::set_server_bound_cert_service(
-    ServerBoundCertService* server_bound_cert_service) {
-  context_->set_server_bound_cert_service(server_bound_cert_service);
-  server_bound_cert_service_.reset(server_bound_cert_service);
+void URLRequestContextStorage::set_origin_bound_cert_service(
+    OriginBoundCertService* origin_bound_cert_service) {
+  context_->set_origin_bound_cert_service(origin_bound_cert_service);
+  origin_bound_cert_service_.reset(origin_bound_cert_service);
 }
 
 void URLRequestContextStorage::set_fraudulent_certificate_reporter(
@@ -84,9 +81,9 @@ void URLRequestContextStorage::set_network_delegate(
 }
 
 void URLRequestContextStorage::set_http_server_properties(
-    scoped_ptr<HttpServerProperties> http_server_properties) {
-  http_server_properties_ = http_server_properties.Pass();
-  context_->set_http_server_properties(http_server_properties_->GetWeakPtr());
+    HttpServerProperties* http_server_properties) {
+  context_->set_http_server_properties(http_server_properties);
+  http_server_properties_.reset(http_server_properties);
 }
 
 void URLRequestContextStorage::set_cookie_store(CookieStore* cookie_store) {
@@ -106,22 +103,16 @@ void URLRequestContextStorage::set_http_transaction_factory(
   http_transaction_factory_.reset(http_transaction_factory);
 }
 
+void URLRequestContextStorage::set_ftp_transaction_factory(
+    FtpTransactionFactory* ftp_transaction_factory) {
+  context_->set_ftp_transaction_factory(ftp_transaction_factory);
+  ftp_transaction_factory_.reset(ftp_transaction_factory);
+}
+
 void URLRequestContextStorage::set_job_factory(
     URLRequestJobFactory* job_factory) {
   context_->set_job_factory(job_factory);
   job_factory_.reset(job_factory);
-}
-
-void URLRequestContextStorage::set_throttler_manager(
-    URLRequestThrottlerManager* throttler_manager) {
-  context_->set_throttler_manager(throttler_manager);
-  throttler_manager_.reset(throttler_manager);
-}
-
-void URLRequestContextStorage::set_http_user_agent_settings(
-    HttpUserAgentSettings* http_user_agent_settings) {
-  context_->set_http_user_agent_settings(http_user_agent_settings);
-  http_user_agent_settings_.reset(http_user_agent_settings);
 }
 
 }  // namespace net

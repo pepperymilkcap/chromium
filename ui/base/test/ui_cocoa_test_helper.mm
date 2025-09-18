@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "base/debug/debugger.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "base/test/test_timeouts.h"
 
 @implementation CocoaTestHelperWindow
@@ -108,7 +107,7 @@ void CocoaTest::TearDown() {
     // Cover delayed actions by spinning the loop at least once after
     // this timeout.
     const NSTimeInterval kCloseTimeoutSeconds =
-        TestTimeouts::action_timeout().InSecondsF();
+        TestTimeouts::action_timeout_ms() / 1000.0;
 
     // Cover chains of delayed actions by spinning the loop at least
     // this many times.
@@ -180,8 +179,10 @@ std::set<NSWindow*> CocoaTest::ApplicationWindows() {
 
 std::set<NSWindow*> CocoaTest::WindowsLeft() {
   const std::set<NSWindow*> windows(ApplicationWindows());
-  std::set<NSWindow*> windows_left =
-      base::STLSetDifference<std::set<NSWindow*> >(windows, initial_windows_);
+  std::set<NSWindow*> windows_left;
+  std::set_difference(windows.begin(), windows.end(),
+                      initial_windows_.begin(), initial_windows_.end(),
+                      std::inserter(windows_left, windows_left.begin()));
   return windows_left;
 }
 

@@ -11,7 +11,6 @@
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "net/base/net_util.h"
-#include "third_party/libjingle/source/talk/base/asyncresolverinterface.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -21,23 +20,25 @@ namespace content {
 
 class P2PSocketDispatcher;
 
-// P2PAsyncAddressResolver performs DNS hostname resolution. It's used
+// P2PHostAddressRequest performs DNS hostname resolution. It's used
 // to resolve addresses of STUN and relay servers.
-class P2PAsyncAddressResolver
-    : public base::RefCountedThreadSafe<P2PAsyncAddressResolver>,
-      public talk_base::AsyncResolverInterface {
+//
+// TODO(sergeyu): Name of this class may be confusing. Rename it to
+// something else, e.g. P2PHostnameResolver.
+class CONTENT_EXPORT P2PHostAddressRequest
+    : public base::RefCountedThreadSafe<P2PHostAddressRequest>  {
  public:
-  P2PAsyncAddressResolver(P2PSocketDispatcher* dispatcher);
+  typedef base::Callback<void(const net::IPAddressNumber&)> DoneCallback;
 
-  // Start address resolve process.
-  virtual void Start(const talk_base::SocketAddress& addr) OVERRIDE;
-  // Returns top most resolved address of |family|
-  virtual bool GetResolvedAddress(
-      int family, talk_base::SocketAddress* addr) const OVERRIDE;
-  // Returns error from resolver.
-  virtual int GetError() const OVERRIDE;
-  // Delete the resolver.
-  virtual void Destroy(bool wait) OVERRIDE;
+  P2PHostAddressRequest(P2PSocketDispatcher* dispatcher);
+
+  // Sends host address request.
+  void Request(const std::string& host_name,
+               const DoneCallback& done_callback);
+
+  // Cancels the request. The callback passed to Request() will not be
+  // called after Cancel() is called.
+  void Cancel();
 
  private:
   enum State {
@@ -48,18 +49,19 @@ class P2PAsyncAddressResolver
 
   friend class P2PSocketDispatcher;
 
-  friend class base::RefCountedThreadSafe<P2PAsyncAddressResolver>;
+  friend class base::RefCountedThreadSafe<P2PHostAddressRequest>;
+  virtual ~P2PHostAddressRequest();
 
-  virtual ~P2PAsyncAddressResolver();
-
-  void DoSendRequest(const talk_base::SocketAddress& host_name);
+  void DoSendRequest(const std::string& host_name,
+                     const DoneCallback& done_callback);
   void DoUnregister();
-  void OnResponse(const net::IPAddressList& address);
-  void DeliverResponse(const net::IPAddressList& address);
+  void OnResponse(const net::IPAddressNumber& address);
+  void DeliverResponse(const net::IPAddressNumber& address);
 
   P2PSocketDispatcher* dispatcher_;
   scoped_refptr<base::MessageLoopProxy> ipc_message_loop_;
   scoped_refptr<base::MessageLoopProxy> delegate_message_loop_;
+  DoneCallback done_callback_;
 
   // State must be accessed from delegate thread only.
   State state_;
@@ -67,10 +69,8 @@ class P2PAsyncAddressResolver
   // Accessed on the IPC thread only.
   int32 request_id_;
   bool registered_;
-  talk_base::SocketAddress addr_;
-  std::vector<talk_base::IPAddress> addresses_;
 
-  DISALLOW_COPY_AND_ASSIGN(P2PAsyncAddressResolver);
+  DISALLOW_COPY_AND_ASSIGN(P2PHostAddressRequest);
 };
 
 }  // namespace content

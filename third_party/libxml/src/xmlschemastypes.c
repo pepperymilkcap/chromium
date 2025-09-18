@@ -5115,9 +5115,9 @@ xmlSchemaValidateListSimpleTypeFacet(xmlSchemaFacetPtr facet,
  */
 static int
 xmlSchemaValidateLengthFacetInternal(xmlSchemaFacetPtr facet,
-				     xmlSchemaValType valType,
+				     xmlSchemaTypeType valType,
 				     const xmlChar *value,
-				     xmlSchemaValPtr val,
+				     xmlSchemaValPtr val,				     
 				     unsigned long *length,
 				     xmlSchemaWhitespaceValueType ws)  
 {

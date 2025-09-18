@@ -4,11 +4,12 @@
 
 #ifndef CHROME_TEST_BASE_TEST_LAUNCHER_UTILS_H_
 #define CHROME_TEST_BASE_TEST_LAUNCHER_UTILS_H_
+#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 
 class CommandLine;
 
@@ -20,8 +21,13 @@ namespace test_launcher_utils {
 void PrepareBrowserCommandLineForTests(CommandLine* command_line);
 
 // Overrides the current process' user data dir.
-bool OverrideUserDataDir(
-    const base::FilePath& user_data_dir) WARN_UNUSED_RESULT;
+bool OverrideUserDataDir(const FilePath& user_data_dir) WARN_UNUSED_RESULT;
+
+// Override the GL implementation. The names are the same as for the --use-gl
+// command line switch. Use the constants in the gfx namespace.
+bool OverrideGLImplementation(
+    CommandLine* command_line,
+    const std::string& implementation_name) WARN_UNUSED_RESULT;
 
 }  // namespace test_launcher_utils
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,10 +23,10 @@ class ObservableProvider : public ProviderInterface {
   void RemoveObserver(Observer* observer);
 
  protected:
-  void NotifyObservers(const ContentSettingsPattern& primary_pattern,
-                       const ContentSettingsPattern& secondary_pattern,
+  void NotifyObservers(ContentSettingsPattern primary_pattern,
+                       ContentSettingsPattern secondary_pattern,
                        ContentSettingsType content_type,
-                       const std::string& resource_identifier);
+                       std::string resource_identifier);
   void RemoveAllObservers();
 
  private:

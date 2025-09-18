@@ -1,20 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H_
-#define CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H_
+#ifndef CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H__
+#define CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H__
+#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 #include "printing/page_number.h"
-#include "printing/print_destination_interface.h"
 #include "printing/printing_context.h"
 #include "printing/print_job_constants.h"
-
-class PrintingUIWebContentsObserver;
+#include "ui/gfx/native_widget_types.h"
 
 namespace base {
 class DictionaryValue;
@@ -27,7 +26,8 @@ class PrintedPage;
 class PrintJob;
 class PrintJobWorkerOwner;
 
-// Worker thread code. It manages the PrintingContext, which can be blocking
+// Worker thread code. All this code, except for the constructor, is executed in
+// the worker thread. It manages the PrintingContext, which can be blocking
 // and/or run a message loop. This is the object that generates most
 // NOTIFY_PRINT_JOB_EVENT notifications, but they are generated through a
 // NotificationTask task to be executed from the right thread, the UI thread.
@@ -39,18 +39,13 @@ class PrintJobWorker : public base::Thread {
 
   void SetNewOwner(PrintJobWorkerOwner* new_owner);
 
-  // Set a destination for print.
-  // This supercedes the document's rendering destination.
-  void SetPrintDestination(PrintDestinationInterface* destination);
-
   // Initializes the print settings. If |ask_user_for_settings| is true, a
   // Print... dialog box will be shown to ask the user his preference.
-  void GetSettings(
-      bool ask_user_for_settings,
-      scoped_ptr<PrintingUIWebContentsObserver> web_contents_observer,
-      int document_page_count,
-      bool has_selection,
-      MarginType margin_type);
+  void GetSettings(bool ask_user_for_settings,
+                   gfx::NativeView parent_view,
+                   int document_page_count,
+                   bool has_selection,
+                   MarginType margin_type);
 
   // Set the new print settings. This function takes ownership of
   // |new_settings|.
@@ -96,10 +91,9 @@ class PrintJobWorker : public base::Thread {
   // Asks the user for print settings. Must be called on the UI thread.
   // Required on Mac and Linux. Windows can display UI from non-main threads,
   // but sticks with this for consistency.
-  void GetSettingsWithUI(
-      scoped_ptr<PrintingUIWebContentsObserver> web_contents_observer,
-      int document_page_count,
-      bool has_selection);
+  void GetSettingsWithUI(gfx::NativeView parent_view,
+                         int document_page_count,
+                         bool has_selection);
 
   // The callback used by PrintingContext::GetSettingsWithUI() to notify this
   // object that the print settings are set.  This is needed in order to bounce
@@ -124,9 +118,6 @@ class PrintJobWorker : public base::Thread {
   // The printed document. Only has read-only access.
   scoped_refptr<PrintedDocument> document_;
 
-  // The print destination, may be NULL.
-  scoped_refptr<PrintDestinationInterface> destination_;
-
   // The print job owning this worker thread. It is guaranteed to outlive this
   // object.
   PrintJobWorkerOwner* owner_;
@@ -142,4 +133,4 @@ class PrintJobWorker : public base::Thread {
 
 }  // namespace printing
 
-#endif  // CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H_
+#endif  // CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H__

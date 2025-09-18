@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,18 @@
 #include <algorithm>
 
 #include "base/base_paths.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
+#include "base/path_service.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/singleton.h"
-#include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/i18n.h"
 #include "base/win/windows_version.h"
 #include "chrome_frame/policy_settings.h"
 #include "ui/base/resource/data_pack.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
@@ -100,7 +101,7 @@ SimpleResourceLoader::SimpleResourceLoader()
   // but that's okay since we'll exit with success when the first is tried).
   language_tags.push_back(L"en-US");
 
-  base::FilePath locales_path;
+  FilePath locales_path;
 
   DetermineLocalesDirectory(&locales_path);
   if (!LoadLocalePack(language_tags, locales_path, &locale_dll_handle_,
@@ -132,24 +133,22 @@ void SimpleResourceLoader::GetPreferredLanguages(
   }
   // Use the base i18n routines (i.e., ICU) as a last, best hope for something
   // meaningful for the user.
-  PushBackWithFallbackIfAbsent(base::ASCIIToWide(
-                                   base::i18n::GetConfiguredLocale()),
+  PushBackWithFallbackIfAbsent(ASCIIToWide(base::i18n::GetConfiguredLocale()),
                                language_tags);
 }
 
 // static
-void SimpleResourceLoader::DetermineLocalesDirectory(
-    base::FilePath* locales_path) {
+void SimpleResourceLoader::DetermineLocalesDirectory(FilePath* locales_path) {
   DCHECK(locales_path);
 
-  base::FilePath module_path;
+  FilePath module_path;
   PathService::Get(base::DIR_MODULE, &module_path);
   *locales_path = module_path.Append(kLocalesDirName);
 
   // We may be residing in the "locales" directory's parent, or we might be
   // in a sibling directory. Move up one and look for Locales again in the
   // latter case.
-  if (!base::DirectoryExists(*locales_path)) {
+  if (!file_util::DirectoryExists(*locales_path)) {
     *locales_path = module_path.DirName();
     *locales_path = locales_path->Append(kLocalesDirName);
   }
@@ -173,7 +172,7 @@ bool SimpleResourceLoader::IsValidLanguageTag(
 // static
 bool SimpleResourceLoader::LoadLocalePack(
     const std::vector<std::wstring>& language_tags,
-    const base::FilePath& locales_path,
+    const FilePath& locales_path,
     HMODULE* dll_handle,
     ui::DataPack** data_pack,
     std::wstring* language) {
@@ -202,23 +201,20 @@ bool SimpleResourceLoader::LoadLocalePack(
 
     // Attempt to load both the resource pack and the dll. We return success
     // only we load both.
-    base::FilePath resource_pack_path =
-        locales_path.Append(*scan + pack_suffix);
-    base::FilePath dll_path = locales_path.Append(*scan + dll_suffix);
+    FilePath resource_pack_path = locales_path.Append(*scan + pack_suffix);
+    FilePath dll_path = locales_path.Append(*scan + dll_suffix);
 
-    if (base::PathExists(resource_pack_path) &&
-        base::PathExists(dll_path)) {
-      scoped_ptr<ui::DataPack> cur_data_pack(
-          new ui::DataPack(ui::SCALE_FACTOR_100P));
-      if (!cur_data_pack->LoadFromPath(resource_pack_path))
+    if (file_util::PathExists(resource_pack_path) &&
+        file_util::PathExists(dll_path)) {
+      *data_pack = ui::ResourceBundle::LoadResourcesDataPak(resource_pack_path);
+      if (!*data_pack) {
         continue;
-
+      }
       HMODULE locale_dll_handle = LoadLibraryEx(dll_path.value().c_str(), NULL,
                                                 load_flags);
       if (locale_dll_handle) {
         *dll_handle = locale_dll_handle;
         *language = dll_path.BaseName().RemoveExtension().value();
-        *data_pack = cur_data_pack.release();
         found_pack = true;
         break;
       } else {
@@ -226,7 +222,7 @@ bool SimpleResourceLoader::LoadLocalePack(
       }
     }
   }
-  DCHECK(found_pack || base::DirectoryExists(locales_path))
+  DCHECK(found_pack || file_util::DirectoryExists(locales_path))
       << "Could not locate locales DLL directory.";
   return found_pack;
 }
@@ -246,12 +242,12 @@ std::wstring SimpleResourceLoader::GetLocalizedResource(int message_id) {
   }
 
   // Data pack encodes strings as either UTF8 or UTF16.
-  base::string16 msg;
+  string16 msg;
   if (data_pack_->GetTextEncodingType() == ui::DataPack::UTF16) {
-    msg = base::string16(reinterpret_cast<const base::char16*>(data.data()),
-                         data.length() / 2);
+    msg = string16(reinterpret_cast<const char16*>(data.data()),
+                   data.length() / 2);
   } else if (data_pack_->GetTextEncodingType() == ui::DataPack::UTF8) {
-    msg = base::UTF8ToUTF16(data);
+    msg = UTF8ToUTF16(data);
   }
   return msg;
 }

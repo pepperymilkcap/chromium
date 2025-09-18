@@ -1,14 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/http/http_auth_handler_negotiate.h"
 
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
-#include "net/dns/mock_host_resolver.h"
 #include "net/http/http_request_info.h"
 #include "net/http/mock_allow_url_security_manager.h"
 #if defined(OS_WIN)
@@ -101,7 +101,7 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest {
         "localhost",                         // Source name
         "example.com",                       // Target name
         23,                                  // Lifetime
-        *CHROME_GSS_SPNEGO_MECH_OID_DESC,    // Mechanism
+        *CHROME_GSS_C_NT_HOSTBASED_SERVICE,  // Mechanism
         0,                                   // Context flags
         1,                                   // Locally initiated
         0);                                  // Open
@@ -109,7 +109,7 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest {
         "localhost",                         // Source name
         "example.com",                       // Target name
         23,                                  // Lifetime
-        *CHROME_GSS_SPNEGO_MECH_OID_DESC,    // Mechanism
+        *CHROME_GSS_C_NT_HOSTBASED_SERVICE,  // Mechanism
         0,                                   // Context flags
         1,                                   // Locally initiated
         1);                                  // Open
@@ -226,9 +226,9 @@ TEST_F(HttpAuthHandlerNegotiateTest, DisableCname) {
   EXPECT_EQ(OK, auth_handler->GenerateAuthToken(NULL, &request_info,
                                                 callback.callback(), &token));
 #if defined(OS_WIN)
-  EXPECT_EQ("HTTP/alias", auth_handler->spn());
+  EXPECT_EQ(L"HTTP/alias", auth_handler->spn());
 #elif defined(OS_POSIX)
-  EXPECT_EQ("HTTP@alias", auth_handler->spn());
+  EXPECT_EQ(L"HTTP@alias", auth_handler->spn());
 #endif
 }
 
@@ -244,9 +244,9 @@ TEST_F(HttpAuthHandlerNegotiateTest, DisableCnameStandardPort) {
   EXPECT_EQ(OK, auth_handler->GenerateAuthToken(NULL, &request_info,
                                                 callback.callback(), &token));
 #if defined(OS_WIN)
-  EXPECT_EQ("HTTP/alias", auth_handler->spn());
+  EXPECT_EQ(L"HTTP/alias", auth_handler->spn());
 #elif defined(OS_POSIX)
-  EXPECT_EQ("HTTP@alias", auth_handler->spn());
+  EXPECT_EQ(L"HTTP@alias", auth_handler->spn());
 #endif
 }
 
@@ -262,9 +262,9 @@ TEST_F(HttpAuthHandlerNegotiateTest, DisableCnameNonstandardPort) {
   EXPECT_EQ(OK, auth_handler->GenerateAuthToken(NULL, &request_info,
                                                 callback.callback(), &token));
 #if defined(OS_WIN)
-  EXPECT_EQ("HTTP/alias:500", auth_handler->spn());
+  EXPECT_EQ(L"HTTP/alias:500", auth_handler->spn());
 #elif defined(OS_POSIX)
-  EXPECT_EQ("HTTP@alias:500", auth_handler->spn());
+  EXPECT_EQ(L"HTTP@alias:500", auth_handler->spn());
 #endif
 }
 
@@ -280,9 +280,9 @@ TEST_F(HttpAuthHandlerNegotiateTest, CnameSync) {
   EXPECT_EQ(OK, auth_handler->GenerateAuthToken(NULL, &request_info,
                                                 callback.callback(), &token));
 #if defined(OS_WIN)
-  EXPECT_EQ("HTTP/canonical.example.com", auth_handler->spn());
+  EXPECT_EQ(L"HTTP/canonical.example.com", auth_handler->spn());
 #elif defined(OS_POSIX)
-  EXPECT_EQ("HTTP@canonical.example.com", auth_handler->spn());
+  EXPECT_EQ(L"HTTP@canonical.example.com", auth_handler->spn());
 #endif
 }
 
@@ -299,9 +299,9 @@ TEST_F(HttpAuthHandlerNegotiateTest, CnameAsync) {
       NULL, &request_info, callback.callback(), &token));
   EXPECT_EQ(OK, callback.WaitForResult());
 #if defined(OS_WIN)
-  EXPECT_EQ("HTTP/canonical.example.com", auth_handler->spn());
+  EXPECT_EQ(L"HTTP/canonical.example.com", auth_handler->spn());
 #elif defined(OS_POSIX)
-  EXPECT_EQ("HTTP@canonical.example.com", auth_handler->spn());
+  EXPECT_EQ(L"HTTP@canonical.example.com", auth_handler->spn());
 #endif
 }
 

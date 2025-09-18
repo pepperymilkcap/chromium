@@ -4,6 +4,7 @@
 
 #ifndef NET_HTTP_HTTP_PIPELINED_CONNECTION_H_
 #define NET_HTTP_HTTP_PIPELINED_CONNECTION_H_
+#pragma once
 
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
@@ -53,7 +54,7 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnection {
         const ProxyInfo& used_proxy_info,
         const BoundNetLog& net_log,
         bool was_npn_negotiated,
-        NextProto protocol_negotiated) = 0;
+        SSLClientSocket::NextProto protocol_negotiated) = 0;
   };
 
   virtual ~HttpPipelinedConnection() {}
@@ -85,7 +86,7 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnection {
   virtual bool was_npn_negotiated() const = 0;
 
   // Protocol negotiated with the server.
-  virtual NextProto protocol_negotiated() const = 0;
+  virtual SSLClientSocket::NextProto protocol_negotiated() const = 0;
 };
 
 }  // namespace net

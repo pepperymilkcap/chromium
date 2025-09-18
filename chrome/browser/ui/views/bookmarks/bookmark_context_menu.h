@@ -4,12 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_CONTEXT_MENU_H_
 #define CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_CONTEXT_MENU_H_
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/ui/bookmarks/bookmark_context_menu_controller.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_context_menu_controller_views.h"
 #include "ui/views/controls/menu/menu_delegate.h"
-
-class Browser;
 
 namespace views {
 class MenuRunner;
@@ -30,13 +29,11 @@ class BookmarkContextMenuObserver {
   virtual ~BookmarkContextMenuObserver() {}
 };
 
-class BookmarkContextMenu : public BookmarkContextMenuControllerDelegate,
+class BookmarkContextMenu : public BookmarkContextMenuControllerViewsDelegate,
                             public views::MenuDelegate {
  public:
-  // |browser| is used to open the bookmark manager, and is NULL in tests.
   BookmarkContextMenu(
       views::Widget* parent_widget,
-      Browser* browser,
       Profile* profile,
       content::PageNavigator* page_navigator,
       const BookmarkNode* parent,
@@ -45,8 +42,7 @@ class BookmarkContextMenu : public BookmarkContextMenuControllerDelegate,
   virtual ~BookmarkContextMenu();
 
   // Shows the context menu at the specified point.
-  void RunMenuAt(const gfx::Point& point,
-                 ui::MenuSourceType source_type);
+  void RunMenuAt(const gfx::Point& point);
 
   views::MenuItemView* menu() const { return menu_; }
 
@@ -58,20 +54,22 @@ class BookmarkContextMenu : public BookmarkContextMenuControllerDelegate,
   void SetPageNavigator(content::PageNavigator* navigator);
 
   // Overridden from views::MenuDelegate:
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
   virtual bool IsItemChecked(int command_id) const OVERRIDE;
   virtual bool IsCommandEnabled(int command_id) const OVERRIDE;
   virtual bool ShouldCloseAllMenusOnExecute(int id) OVERRIDE;
 
-  // Overridden from BookmarkContextMenuControllerDelegate:
+  // Overridden from BookmarkContextMenuControllerViewsDelegate:
   virtual void CloseMenu() OVERRIDE;
-  virtual void WillExecuteCommand(
-      int command_id,
+  virtual void AddItemWithStringId(int command_id, int string_id) OVERRIDE;
+  virtual void AddSeparator() OVERRIDE;
+  virtual void AddCheckboxItem(int command_id, int string_id) OVERRIDE;
+  virtual void WillRemoveBookmarks(
       const std::vector<const BookmarkNode*>& bookmarks) OVERRIDE;
-  virtual void DidExecuteCommand(int command_id) OVERRIDE;
+  virtual void DidRemoveBookmarks() OVERRIDE;
 
  private:
-  scoped_ptr<BookmarkContextMenuController> controller_;
+  scoped_ptr<BookmarkContextMenuControllerViews> controller_;
 
   // The parent of dialog boxes opened from the context menu.
   views::Widget* parent_widget_;

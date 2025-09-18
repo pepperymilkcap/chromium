@@ -4,18 +4,18 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_SUB_MENU_MODEL_GTK_H_
 #define CHROME_BROWSER_UI_GTK_BOOKMARKS_BOOKMARK_SUB_MENU_MODEL_GTK_H_
+#pragma once
 
 #include <vector>
 
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "ui/base/window_open_disposition.h"
+#include "webkit/glue/window_open_disposition.h"
 
 class Browser;
 class BookmarkModel;
 class BookmarkNode;
 class MenuGtk;  // See below for why we need this.
-class Profile;
 
 namespace content {
 class PageNavigator;
@@ -28,8 +28,7 @@ class BookmarkNodeMenuModel : public ui::SimpleMenuModel {
   BookmarkNodeMenuModel(ui::SimpleMenuModel::Delegate* delegate,
                         BookmarkModel* model,
                         const BookmarkNode* node,
-                        content::PageNavigator* page_navigator,
-                        Profile* profile);
+                        content::PageNavigator* page_navigator);
   virtual ~BookmarkNodeMenuModel();
 
   // From SimpleMenuModel. Takes care of deleting submenus.
@@ -70,8 +69,6 @@ class BookmarkNodeMenuModel : public ui::SimpleMenuModel {
   // The page navigator used to open bookmarks in ActivatedAt().
   content::PageNavigator* page_navigator_;
 
-  Profile* profile_;
-
   // A list of the submenus we own and will need to delete.
   std::vector<BookmarkNodeMenuModel*> submenus_;
 
@@ -93,15 +90,13 @@ class BookmarkSubMenuModel : public BookmarkNodeMenuModel,
   // See below; this is used to allow closing the menu when bookmarks change.
   void SetMenuGtk(MenuGtk* menu) { menu_ = menu; }
 
-  // BaseBookmarkModelObserver:
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
+  // From BookmarkModelObserver, BaseBookmarkModelObserver.
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
   virtual void BookmarkModelChanged() OVERRIDE;
   virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
 
-  // BookmarkNodeMenuModel:
+  // From MenuModel via BookmarkNodeMenuModel, SimpleMenuModel.
   virtual void MenuWillShow() OVERRIDE;
-  virtual void MenuClosed() OVERRIDE;
   virtual void ActivatedAt(int index) OVERRIDE;
   virtual void ActivatedAt(int index, int event_flags) OVERRIDE;
   virtual bool IsEnabledAt(int index) const OVERRIDE;
@@ -118,15 +113,10 @@ class BookmarkSubMenuModel : public BookmarkNodeMenuModel,
   // The index of the first non-bookmark item after the bookmarks.
   int bookmark_end_;
 
-  // We need to be able to call Cancel() on the wrench menu when bookmarks
-  // change. This is a bit of an abstraction violation but it could be converted
-  // to an interface with just a Cancel() method if necessary.
+  // We need to be able to call Cancel() on the menu when bookmarks change. This
+  // is a bit of an abstraction violation but it could be converted to an
+  // interface with just a Cancel() method if necessary.
   MenuGtk* menu_;
-
-  // We keep track of whether the bookmark submenu is currently showing. If it's
-  // not showing, then we don't need to forcibly close the entire wrench menu
-  // when the bookmark model loads.
-  bool menu_showing_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkSubMenuModel);
 };

@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_WIDGET_TOOLTIP_MANAGER_WIN_H_
 #define UI_VIEWS_WIDGET_TOOLTIP_MANAGER_WIN_H_
+#pragma once
 
 #include <windows.h>
 #include <commctrl.h>
@@ -11,7 +12,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/strings/string16.h"
+#include "base/memory/weak_ptr.h"
+#include "base/string16.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 #include "ui/views/widget/tooltip_manager.h"
@@ -66,10 +68,17 @@ class TooltipManagerWin : public TooltipManager {
   // and not used.
   bool Init();
 
-  // TooltipManager:
-  virtual const gfx::FontList& TooltipManagerWin::GetFontList() const OVERRIDE;
+  // Notification that the view hierarchy has changed in some way.
   virtual void UpdateTooltip() OVERRIDE;
+
+  // Invoked when the tooltip text changes for the specified views.
   virtual void TooltipTextChanged(View* view) OVERRIDE;
+
+  // Invoked when toolbar icon gets focus.
+  virtual void ShowKeyboardTooltip(View* view) OVERRIDE;
+
+  // Invoked when toolbar loses focus.
+  virtual void HideKeyboardTooltip() OVERRIDE;
 
   // Message handlers. These forward to the tooltip control.
   virtual void OnMouse(UINT u_msg, WPARAM w_param, LPARAM l_param);
@@ -103,6 +112,9 @@ class TooltipManagerWin : public TooltipManager {
   // positive value.
   int CalcTooltipHeight();
 
+  // Invoked when the timer elapses and tooltip has to be destroyed.
+  void DestroyKeyboardTooltipWindow(HWND window_to_destroy);
+
   // Hosting Widget.
   Widget* widget_;
 
@@ -116,16 +128,23 @@ class TooltipManagerWin : public TooltipManager {
   bool last_view_out_of_sync_;
 
   // Text for tooltip from the view.
-  base::string16 tooltip_text_;
+  string16 tooltip_text_;
 
   // The clipped tooltip.
-  base::string16 clipped_text_;
+  string16 clipped_text_;
 
   // Number of lines in the tooltip.
   int line_count_;
 
   // Width of the last tooltip.
   int tooltip_width_;
+
+  // control window for tooltip displayed using keyboard.
+  HWND keyboard_tooltip_hwnd_;
+
+  // Used to register DestroyTooltipWindow function with PostDelayedTask
+  // function.
+  base::WeakPtrFactory<TooltipManagerWin> keyboard_tooltip_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TooltipManagerWin);
 };

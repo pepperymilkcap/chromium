@@ -4,6 +4,7 @@
 
 #ifndef NET_FTP_FTP_NETWORK_TRANSACTION_H_
 #define NET_FTP_FTP_NETWORK_TRANSACTION_H_
+#pragma once
 
 #include <string>
 #include <utility>
@@ -13,9 +14,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "net/base/address_list.h"
 #include "net/base/auth.h"
+#include "net/base/host_resolver.h"
 #include "net/base/net_log.h"
-#include "net/dns/host_resolver.h"
-#include "net/dns/single_request_host_resolver.h"
+#include "net/base/single_request_host_resolver.h"
 #include "net/ftp/ftp_ctrl_response_buffer.h"
 #include "net/ftp/ftp_response_info.h"
 #include "net/ftp/ftp_transaction.h"
@@ -125,9 +126,6 @@ class NET_EXPORT_PRIVATE FtpNetworkTransaction : public FtpTransaction {
   // Resets the members of the transaction so it can be restarted.
   void ResetStateForRestart();
 
-  // Resets the data connection after an error and switches to |next_state|.
-  void ResetDataConnectionAfterError(State next_state);
-
   void DoCallback(int result);
   void OnIOComplete(int result);
 
@@ -135,9 +133,7 @@ class NET_EXPORT_PRIVATE FtpNetworkTransaction : public FtpTransaction {
   // issued command. Returns error code.
   int ProcessCtrlResponse();
 
-  int SendFtpCommand(const std::string& command,
-                     const std::string& command_for_log,
-                     Command cmd);
+  int SendFtpCommand(const std::string& command, Command cmd);
 
   // Returns request path suitable to be included in an FTP command. If the path
   // will be used as a directory, |is_directory| should be true.
@@ -252,9 +248,6 @@ class NET_EXPORT_PRIVATE FtpNetworkTransaction : public FtpTransaction {
   scoped_ptr<StreamSocket> data_socket_;
 
   State next_state_;
-
-  // State to switch to after data connection is complete.
-  State state_after_data_connect_complete_;
 };
 
 }  // namespace net

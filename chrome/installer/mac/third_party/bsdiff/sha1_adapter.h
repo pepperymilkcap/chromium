@@ -4,6 +4,7 @@
 
 #ifndef CHROME_INSTALLER_MAC_THIRD_PARTY_BSDIFF_SHA1_ADAPTER_H_
 #define CHROME_INSTALLER_MAC_THIRD_PARTY_BSDIFF_SHA1_ADAPTER_H_
+#pragma once
 
 /* This file defines a wrapper around Chromium's C++ base::SHA1HashBytes
  * function allowing it to be called from C code. */

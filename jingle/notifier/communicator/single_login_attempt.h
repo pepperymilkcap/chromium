@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef JINGLE_NOTIFIER_COMMUNICATOR_SINGLE_LOGIN_ATTEMPT_H_
 #define JINGLE_NOTIFIER_COMMUNICATOR_SINGLE_LOGIN_ATTEMPT_H_
 
+#include <string>
+
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "jingle/notifier/base/xmpp_connection.h"
-#include "jingle/notifier/communicator/connection_settings.h"
-#include "jingle/notifier/communicator/login_settings.h"
+#include "jingle/notifier/communicator/xmpp_connection_generator.h"
 #include "talk/xmpp/xmppengine.h"
 
 namespace buzz {
@@ -18,44 +19,30 @@ class XmppTaskParentInterface;
 
 namespace notifier {
 
-struct ServerInformation;
+class ConnectionSettings;
+class LoginSettings;
 
-// Handles all of the aspects of a single login attempt.  By
-// containing this within one class, when another login attempt is
-// made, this class can be destroyed to immediately stop the previous
-// login attempt.
-class SingleLoginAttempt : public XmppConnection::Delegate {
+// Handles all of the aspects of a single login attempt (across multiple ip
+// addresses) and maintainence. By containing this within one class, when
+// another login attempt is made, this class will be disposed and all of the
+// signalling for the previous login attempt will be cleaned up immediately.
+class SingleLoginAttempt : public XmppConnection::Delegate,
+                           public XmppConnectionGenerator::Delegate {
  public:
-  // At most one delegate method will be called, depending on the
-  // result of the login attempt.  After the delegate method is
-  // called, this class won't do anything anymore until it is
-  // destroyed, at which point it will disconnect if necessary.
   class Delegate {
    public:
-    // Called when the login attempt is successful.
+    virtual ~Delegate() {}
+
     virtual void OnConnect(
         base::WeakPtr<buzz::XmppTaskParentInterface> base_task) = 0;
-
-    // Called when the server responds with a redirect.  A new login
-    // attempt should be made to the given redirect server.
-    virtual void OnRedirect(const ServerInformation& redirect_server) = 0;
-
-    // Called when a server rejects the client's login credentials.  A
-    // new login attempt should be made once the client provides new
-    // credentials.
-    virtual void OnCredentialsRejected() = 0;
-
-    // Called when no server could be logged into for reasons other
-    // than redirection or rejected credentials.  A new login attempt
-    // may be created, but it should be done with exponential backoff.
-    virtual void OnSettingsExhausted() = 0;
-
-   protected:
-    virtual ~Delegate();
+    virtual void OnNeedReconnect() = 0;
+    virtual void OnRedirect(const std::string& redirect_server,
+                            int redirect_port) = 0;
   };
 
-  // Does not take ownership of |delegate|, which must not be NULL.
-  SingleLoginAttempt(const LoginSettings& login_settings, Delegate* delegate);
+  // Does not take ownership of |login_settings| or |delegate|.
+  // Neither may be NULL.
+  SingleLoginAttempt(LoginSettings* login_settings, Delegate* delegate);
 
   virtual ~SingleLoginAttempt();
 
@@ -66,13 +53,15 @@ class SingleLoginAttempt : public XmppConnection::Delegate {
                        int error_subcode,
                        const buzz::XmlElement* stream_error) OVERRIDE;
 
- private:
-  void TryConnect(const ConnectionSettings& new_settings);
+  // XmppConnectionGenerator::Delegate implementation.
+  virtual void OnNewSettings(const ConnectionSettings& new_settings) OVERRIDE;
+  virtual void OnExhaustedSettings(bool successfully_resolved_dns,
+                                   int first_dns_error) OVERRIDE;
 
-  const LoginSettings login_settings_;
-  Delegate* const delegate_;
-  const ConnectionSettingsList settings_list_;
-  ConnectionSettingsList::const_iterator current_settings_;
+ private:
+  LoginSettings* login_settings_;
+  Delegate* delegate_;
+  XmppConnectionGenerator connection_generator_;
   scoped_ptr<XmppConnection> xmpp_connection_;
 
   DISALLOW_COPY_AND_ASSIGN(SingleLoginAttempt);

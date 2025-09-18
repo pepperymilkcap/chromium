@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,6 +7,7 @@ import ctypes
 import email
 import logging
 import os
+import platform
 import shutil
 import smtplib
 import subprocess
@@ -16,21 +17,9 @@ import types
 import pyauto_functional
 import pyauto
 import pyauto_utils
-import pyauto_errors
 
 
 """Commonly used functions for PyAuto tests."""
-
-def CrashBrowser(test):
-  """Crashes the browser by navigating to special URL."""
-  try:
-    test.NavigateToURL('chrome://inducebrowsercrashforrealz')
-  except pyauto_errors.JSONInterfaceError:
-    pass
-  else:
-    raise RuntimeError(
-        'Browser did not crash at chrome://inducebrowsercrashforrealz')
-
 
 def CopyFileFromDataDirToDownloadDir(test, file_path):
   """Copy a file from data directory to downloads directory.
@@ -43,17 +32,22 @@ def CopyFileFromDataDirToDownloadDir(test, file_path):
   download_dir = test.GetDownloadDirectory().value()
   shutil.copy(data_file, download_dir)
 
-
-def CopyFileFromContentDataDirToDownloadDir(test, file_path):
-  """Copy a file from content data directory to downloads directory.
+def DownloadFileFromDownloadsDataDir(test, file_name):
+  """Download a file from downloads data directory, in first tab, first window.
 
   Args:
     test: derived from pyauto.PyUITest - base class for UI test cases.
-    path: path of the file relative to the data directory
+    file_name: name of file to download.
   """
-  data_file = os.path.join(test.ContentDataDir(), file_path)
-  download_dir = test.GetDownloadDirectory().value()
-  shutil.copy(data_file, download_dir)
+  file_url = test.GetFileURLForDataPath(os.path.join('downloads', file_name))
+  downloaded_pkg = os.path.join(test.GetDownloadDirectory().value(),
+                                file_name)
+  # Check if file already exists. If so then delete it.
+  if os.path.exists(downloaded_pkg):
+    RemoveDownloadedTestFile(test, file_name)
+  pre_download_ids = [x['id'] for x in test.GetDownloadsInfo().Downloads()]
+  test.DownloadAndWaitForStart(file_url)
+  test.WaitForAllDownloadsToComplete(pre_download_ids)
 
 
 def RemoveDownloadedTestFile(test, file_name):
@@ -69,8 +63,7 @@ def RemoveDownloadedTestFile(test, file_name):
   pyauto_utils.RemovePath(downloaded_pkg + '.crdownload')
 
 
-def GoogleAccountsLogin(test, username, password,
-                        tab_index=0, windex=0, url=None):
+def GoogleAccountsLogin(test, username, password, tab_index=0, windex=0):
   """Log into Google Accounts.
 
   Attempts to login to Google by entering the username/password into the google
@@ -82,10 +75,8 @@ def GoogleAccountsLogin(test, username, password,
     password: users login password input.
     tab_index: The tab index, default is 0.
     windex: The window index, default is 0.
-    url: an alternative url for login page, if None, original one will be used.
   """
-  url = url or 'https://accounts.google.com/'
-  test.NavigateToURL(url, windex, tab_index)
+  test.NavigateToURL('https://www.google.com/accounts/', windex, tab_index)
   email_id = 'document.getElementById("Email").value = "%s"; ' \
              'window.domAutomationController.send("done")' % username
   password = 'document.getElementById("Passwd").value = "%s"; ' \
@@ -116,6 +107,11 @@ def VerifyGoogleAccountCredsFilled(test, username, password, tab_index=0,
   test.assertTrue(passwd_value == password)
 
 
+def ClearPasswords(test):
+  """Clear saved passwords."""
+  test.ClearBrowsingData(['PASSWORDS'], 'EVERYTHING')
+
+
 def Shell2(cmd_string, bg=False):
   """Run a shell command.
 
@@ -142,20 +138,16 @@ def SendMail(send_from, send_to, subject, text, smtp, file_to_send=None):
   """Send mail to all the group to notify about the crash and uploaded data.
 
   Args:
-    send_from: From mail id as a string.
-    send_to: To mail id. Can be a string representing a single address, or a
-        list of strings representing multiple addresses.
-    subject: Mail subject as a string.
-    text: Mail body as a string.
-    smtp: The smtp to use, as a string.
-    file_to_send: Attachments for the mail.
+    send_from: from mail id.
+    send_to: to mail id.
+    subject: mail subject.
+    text: mail body.
+    smtp: The smtp to use.
+    file_to_send: attachments for the mail.
   """
   msg = email.MIMEMultipart.MIMEMultipart()
   msg['From'] = send_from
-  if isinstance(send_to, list):
-    msg['To'] = ','.join(send_to)
-  else:
-    msg['To'] = send_to
+  msg['To'] = send_to
   msg['Date'] = email.Utils.formatdate(localtime=True)
   msg['Subject'] = subject
 
@@ -312,12 +304,53 @@ def GetMemoryUsageOfProcess(pid):
     return 0
 
 
+def GetCredsKey():
+  """Get the credential key associated with a bot on the waterfall.
+
+  The key is associated with the proper credentials in the text data file stored
+  in the private directory. The key determines a bot's OS and machine name. Each
+  key credential is associated with its own user/password value. This allows
+  sync integration tests to run in parallel on all bots.
+
+  Returns:
+    A String of the credentials key for the specified bot. Otherwise None.
+  """
+  if pyauto.PyUITest.IsWin():
+    system_name = 'win'
+  elif pyauto.PyUITest.IsLinux():
+    system_name = 'linux'
+  elif pyauto.PyUITest.IsMac():
+    system_name = 'mac'
+  else:
+    return None
+  node = platform.uname()[1].split('.')[0]
+  creds_key = 'test_google_acct_%s_%s' % (system_name, node)
+  return creds_key
+
+
+def SignInToSyncAndVerifyState(test, account_key):
+  """Sign into sync and verify that it was successful.
+
+  Args:
+    test: derived from pyauto.PyUITest - base class for UI test cases.
+    account_key: the credentials key in the private account dictionary file.
+  """
+  creds = test.GetPrivateInfo()[account_key]
+  username = creds['username']
+  password = creds['password']
+  test.assertTrue(test.GetSyncInfo()['summary'] == 'OFFLINE_UNUSABLE')
+  test.assertTrue(test.GetSyncInfo()['last synced'] == 'Never')
+  test.assertTrue(test.SignInToSync(username, password))
+  test.assertTrue(test.GetSyncInfo()['summary'] == 'READY')
+  test.assertTrue(test.GetSyncInfo()['last synced'] == 'Just now')
+
+
 def LoginToDevice(test, test_account='test_google_account'):
   """Login to the Chromeos device using the given test account.
 
   If no test account is specified, we use test_google_account as the default.
   You can choose test accounts from -
-  chrome/test/data/pyauto_private/private_tests_info.txt
+  chrome/test/data/pyauto_private/private_tests_info.txt 
 
   Args:
     test_account: The account used to login to the Chromeos device.
@@ -329,73 +362,3 @@ def LoginToDevice(test, test_account='test_google_account'):
     test.assertTrue(login_info['is_logged_in'], msg='Login failed.')
   else:
     test.fail(msg='Another user is already logged in. Please logout first.')
-
-def GetInfobarIndexByType(test, infobar_type, windex=0, tab_index=0):
-  """Returns the index of the infobar of the given type.
-
-  Args:
-    test: Derived from pyauto.PyUITest - base class for UI test cases.
-    infobar_type: The infobar type to look for.
-    windex: Window index.
-    tab_index: Tab index.
-
-  Returns:
-    Index of infobar for infobar type, or None if not found.
-  """
-  infobar_list = (
-      test.GetBrowserInfo()['windows'][windex]['tabs'][tab_index] \
-          ['infobars'])
-  for infobar in infobar_list:
-    if infobar_type == infobar['type']:
-      return infobar_list.index(infobar)
-  return None
-
-def WaitForInfobarTypeAndGetIndex(test, infobar_type, windex=0, tab_index=0):
-  """Wait for infobar type to appear and returns its index.
-
-  If the infobar never appears, an exception will be raised.
-
-  Args:
-    test: Derived from pyauto.PyUITest - base class for UI test cases.
-    infobar_type: The infobar type to look for.
-    windex: Window index. Defaults to 0 (first window).
-    tab_index: Tab index. Defaults to 0 (first tab).
-
-  Returns:
-    Index of infobar for infobar type.
-  """
-  test.assertTrue(
-      test.WaitUntil(lambda: GetInfobarIndexByType(
-          test, infobar_type, windex, tab_index) is not None),
-      msg='Infobar type for %s did not appear.' % infobar_type)
-  # Return the infobar index.
-  return GetInfobarIndexByType(test, infobar_type, windex, tab_index)
-
-def AssertInfobarTypeDoesNotAppear(test, infobar_type, windex=0, tab_index=0):
-  """Check that the infobar type does not appear.
-
-  This function waits 20s to assert that the infobar does not appear.
-
-  Args:
-    test: Derived from pyauto.PyUITest - base class for UI test cases.
-    infobar_type: The infobar type to look for.
-    windex: Window index. Defaults to 0 (first window).
-    tab_index: Tab index. Defaults to 0 (first tab).
-  """
-  test.assertFalse(
-      test.WaitUntil(lambda: GetInfobarIndexByType(
-          test, infobar_type, windex, tab_index) is not None, timeout=20),
-      msg=('Infobar type for %s appeared when it should be hidden.'
-           % infobar_type))
-
-def OpenCroshVerification(self):
-  """This test opens crosh.
-
-  This function assumes that no browser windows are open.
-  """
-  self.assertEqual(0, self.GetBrowserWindowCount())
-  self.OpenCrosh()
-  self.assertEqual(1, self.GetBrowserWindowCount())
-  self.assertEqual(1, self.GetTabCount(),
-      msg='Could not open crosh')
-  self.assertEqual('crosh', self.GetActiveTabTitle())

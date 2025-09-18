@@ -4,9 +4,9 @@
 
 #ifndef GPU_COMMAND_BUFFER_SERVICE_STREAM_TEXTURE_H_
 #define GPU_COMMAND_BUFFER_SERVICE_STREAM_TEXTURE_H_
+#pragma once
 
 #include "base/basictypes.h"
-#include "ui/gfx/size.h"
 
 namespace gpu {
 
@@ -19,9 +19,6 @@ class StreamTexture {
   }
 
   virtual void Update() = 0;
-
-  // Get the size of the StreamTexture.
-  virtual gfx::Size GetSize() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StreamTexture);

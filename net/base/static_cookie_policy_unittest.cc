@@ -5,7 +5,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/static_cookie_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace net {
 

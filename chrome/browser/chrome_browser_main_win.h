@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #ifndef CHROME_BROWSER_CHROME_BROWSER_MAIN_WIN_H_
 #define CHROME_BROWSER_CHROME_BROWSER_MAIN_WIN_H_
+#pragma once
 
 #include "chrome/browser/chrome_browser_main.h"
 
@@ -21,16 +22,12 @@ class ChromeBrowserMainPartsWin : public ChromeBrowserMainParts {
   explicit ChromeBrowserMainPartsWin(
       const content::MainFunctionParams& parameters);
 
-  virtual ~ChromeBrowserMainPartsWin();
-
   // BrowserParts overrides.
   virtual void ToolkitInitialized() OVERRIDE;
   virtual void PreMainMessageLoopStart() OVERRIDE;
-  virtual int PreCreateThreads() OVERRIDE;
 
   // ChromeBrowserMainParts overrides.
   virtual void ShowMissingLocaleMessageBox() OVERRIDE;
-  virtual void PostBrowserStart() OVERRIDE;
 
   // Prepares the localized strings that are going to be displayed to
   // the user if the browser process dies. These strings are stored in the
@@ -55,13 +52,6 @@ class ChromeBrowserMainPartsWin : public ChromeBrowserMainParts {
   // allow the user level Chrome to run. So we notify the user and uninstall
   // user level Chrome.
   static bool CheckMachineLevelInstall();
-
-  // Sets the TranslationDelegate which provides localized strings to
-  // installer_util.
-  static void SetupInstallerUtilStrings();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsWin);
 };
 
 #endif  // CHROME_BROWSER_CHROME_BROWSER_MAIN_WIN_H_

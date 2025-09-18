@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,6 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace color_utils {
-
 
 // Helper functions -----------------------------------------------------------
 
@@ -54,7 +53,7 @@ double ConvertSRGB(double eight_bit_component) {
       (component / 12.92) : pow((component + 0.055) / 1.055, 2.4);
 }
 
-SkColor LumaInvertColor(SkColor color) {
+SkColor LumaInvertColor(const SkColor& color) {
   HSL hsl;
   SkColorToHSL(color, &hsl);
   hsl.l = 1.0 - hsl.l;
@@ -62,17 +61,14 @@ SkColor LumaInvertColor(SkColor color) {
 }
 
 double ContrastRatio(double foreground_luminance, double background_luminance) {
-  DCHECK_GE(foreground_luminance, 0.0);
-  DCHECK_GE(background_luminance, 0.0);
-  foreground_luminance += 0.05;
-  background_luminance += 0.05;
+  // NOTE: Only pass in numbers obtained from RelativeLuminance(), since those
+  // are guaranteed to be > 0 and thus not cause a divide-by-zero error here.
   return (foreground_luminance > background_luminance) ?
       (foreground_luminance / background_luminance) :
       (background_luminance / foreground_luminance);
 }
 
 }  // namespace
-
 
 // ----------------------------------------------------------------------------
 
@@ -85,8 +81,8 @@ unsigned char GetLuminanceForColor(SkColor color) {
 
 double RelativeLuminance(SkColor color) {
   return (0.2126 * ConvertSRGB(SkColorGetR(color))) +
-         (0.7152 * ConvertSRGB(SkColorGetG(color))) +
-         (0.0722 * ConvertSRGB(SkColorGetB(color)));
+      (0.7152 * ConvertSRGB(SkColorGetG(color))) +
+      (0.0722 * ConvertSRGB(SkColorGetB(color))) + 0.05;
 }
 
 void SkColorToHSL(SkColor c, HSL* hsl) {
@@ -103,8 +99,8 @@ void SkColorToHSL(SkColor c, HSL* hsl) {
     double dr = (((vmax - r) / 6.0) + (delta / 2.0)) / delta;
     double dg = (((vmax - g) / 6.0) + (delta / 2.0)) / delta;
     double db = (((vmax - b) / 6.0) + (delta / 2.0)) / delta;
-    // We need to compare for the max value because comparing vmax to r, g, or b
-    // can sometimes result in values overflowing registers.
+    // We need to compare for the max value because comparing vmax to r,
+    // g or b can sometimes result in values overflowing registers.
     if (r >= g && r >= b)
       hsl->h = db - dg;
     else if (g >= r && g >= b)
@@ -126,8 +122,8 @@ SkColor HSLToSkColor(const HSL& hsl, SkAlpha alpha) {
   double saturation = hsl.s;
   double lightness = hsl.l;
 
-  // If there's no color, we don't care about hue and can do everything based on
-  // brightness.
+  // If there's no color, we don't care about hue and can do everything based
+  // on brightness.
   if (!saturation) {
     uint8 light;
 
@@ -173,8 +169,9 @@ SkColor HSLShift(SkColor color, const HSL& shift) {
   if (shift.l < 0)
     return result;
 
-  // Lightness shifts in the style of popular image editors aren't actually
-  // represented in HSL - the L value does have some effect on saturation.
+  // Lightness shifts in the style of popular image editors aren't
+  // actually represented in HSL - the L value does have some effect
+  // on saturation.
   double r = static_cast<double>(SkColorGetR(result));
   double g = static_cast<double>(SkColorGetG(result));
   double b = static_cast<double>(SkColorGetB(result));
@@ -193,16 +190,72 @@ SkColor HSLShift(SkColor color, const HSL& shift) {
                         static_cast<int>(b));
 }
 
-void BuildLumaHistogram(const SkBitmap& bitmap, int histogram[256]) {
-  DCHECK_EQ(SkBitmap::kARGB_8888_Config, bitmap.config());
+bool IsColorCloseToTransparent(SkAlpha alpha) {
+  const int kCloseToBoundary = 64;
+  return alpha < kCloseToBoundary;
+}
 
-  SkAutoLockPixels bitmap_lock(bitmap);
+bool IsColorCloseToGrey(int r, int g, int b) {
+  const int kAverageBoundary = 15;
+  int average = (r + g + b) / 3;
+  return (abs(r - average) < kAverageBoundary) &&
+         (abs(g - average) < kAverageBoundary) &&
+         (abs(b - average) < kAverageBoundary);
+}
 
-  int pixel_width = bitmap.width();
-  int pixel_height = bitmap.height();
+SkColor GetAverageColorOfFavicon(SkBitmap* favicon, SkAlpha alpha) {
+  int r = 0, g = 0, b = 0;
+
+  SkAutoLockPixels favicon_lock(*favicon);
+  SkColor* pixels = static_cast<SkColor*>(favicon->getPixels());
+  if (!pixels)
+    return SkColorSetARGB(alpha, 0, 0, 0);
+
+  // Assume ARGB_8888 format.
+  DCHECK(favicon->getConfig() == SkBitmap::kARGB_8888_Config);
+  SkColor* current_color = pixels;
+
+  DCHECK(favicon->width() <= 16 && favicon->height() <= 16);
+
+  int pixel_count = favicon->width() * favicon->height();
+  int color_count = 0;
+  for (int i = 0; i < pixel_count; ++i, ++current_color) {
+    // Disregard this color if it is close to black, close to white, or close
+    // to transparent since any of those pixels do not contribute much to the
+    // color makeup of this icon.
+    int cr = SkColorGetR(*current_color);
+    int cg = SkColorGetG(*current_color);
+    int cb = SkColorGetB(*current_color);
+
+    if (IsColorCloseToTransparent(SkColorGetA(*current_color)) ||
+        IsColorCloseToGrey(cr, cg, cb))
+      continue;
+
+    r += cr;
+    g += cg;
+    b += cb;
+    ++color_count;
+  }
+
+  return color_count ?
+      SkColorSetARGB(alpha, r / color_count, g / color_count, b / color_count) :
+      SkColorSetARGB(alpha, 0, 0, 0);
+}
+
+void BuildLumaHistogram(SkBitmap* bitmap, int histogram[256]) {
+  SkAutoLockPixels bitmap_lock(*bitmap);
+  if (!bitmap->getPixels())
+    return;
+
+  // Assume ARGB_8888 format.
+  DCHECK(bitmap->getConfig() == SkBitmap::kARGB_8888_Config);
+
+  int pixel_width = bitmap->width();
+  int pixel_height = bitmap->height();
   for (int y = 0; y < pixel_height; ++y) {
-    for (int x = 0; x < pixel_width; ++x)
-      ++histogram[GetLuminanceForColor(bitmap.getColor(x, y))];
+    SkColor* current_color = static_cast<uint32_t*>(bitmap->getAddr32(0, y));
+    for (int x = 0; x < pixel_width; ++x, ++current_color)
+      histogram[GetLuminanceForColor(*current_color)]++;
   }
 }
 
@@ -217,7 +270,7 @@ SkColor AlphaBlend(SkColor foreground, SkColor background, SkAlpha alpha) {
 
   double normalizer = (f_alpha * alpha + b_alpha * (255 - alpha)) / 255.0;
   if (normalizer == 0.0)
-    return SK_ColorTRANSPARENT;
+    return SkColorSetARGB(0, 0, 0, 0);
 
   double f_weight = f_alpha * alpha / normalizer;
   double b_weight = b_alpha * (255 - alpha) / normalizer;
@@ -235,28 +288,12 @@ SkColor AlphaBlend(SkColor foreground, SkColor background, SkAlpha alpha) {
                         static_cast<int>(b));
 }
 
-SkColor BlendTowardOppositeLuminance(SkColor color, SkAlpha alpha) {
-  unsigned char background_luminance =
-      color_utils::GetLuminanceForColor(color);
-  const SkColor blend_color =
-      (background_luminance < 128) ? SK_ColorWHITE : SK_ColorBLACK;
-  return color_utils::AlphaBlend(blend_color, color, alpha);
-}
-
 SkColor GetReadableColor(SkColor foreground, SkColor background) {
   const SkColor foreground2 = LumaInvertColor(foreground);
   const double background_luminance = RelativeLuminance(background);
   return (ContrastRatio(RelativeLuminance(foreground), background_luminance) >=
           ContrastRatio(RelativeLuminance(foreground2), background_luminance)) ?
       foreground : foreground2;
-}
-
-SkColor InvertColor(SkColor color) {
-  return SkColorSetARGB(
-      SkColorGetA(color),
-      255 - SkColorGetR(color),
-      255 - SkColorGetG(color),
-      255 - SkColorGetB(color));
 }
 
 SkColor GetSysSkColor(int which) {

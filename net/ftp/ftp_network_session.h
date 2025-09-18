@@ -4,9 +4,11 @@
 
 #ifndef NET_FTP_FTP_NETWORK_SESSION_H_
 #define NET_FTP_FTP_NETWORK_SESSION_H_
+#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "net/base/net_export.h"
+#include "net/ftp/ftp_auth_cache.h"
 
 namespace net {
 
@@ -19,6 +21,7 @@ class NET_EXPORT_PRIVATE FtpNetworkSession
   explicit FtpNetworkSession(HostResolver* host_resolver);
 
   HostResolver* host_resolver() { return host_resolver_; }
+  FtpAuthCache* auth_cache() { return &auth_cache_; }
 
  private:
   friend class base::RefCounted<FtpNetworkSession>;
@@ -26,6 +29,7 @@ class NET_EXPORT_PRIVATE FtpNetworkSession
   virtual ~FtpNetworkSession();
 
   HostResolver* const host_resolver_;
+  FtpAuthCache auth_cache_;
 };
 
 }  // namespace net

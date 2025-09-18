@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_FRAME_NAVIGATE_PARAMS_H_
 #define CONTENT_PUBLIC_COMMON_FRAME_NAVIGATE_PARAMS_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -11,8 +12,9 @@
 #include "content/common/content_export.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"
-#include "url/gurl.h"
+#include "webkit/forms/password_form.h"
 
 namespace content {
 
@@ -57,6 +59,9 @@ struct CONTENT_EXPORT FrameNavigateParams {
   // See SearchableFormData for a description of these.
   GURL searchable_form_url;
   std::string searchable_form_encoding;
+
+  // See password_form.h.
+  webkit::forms::PasswordForm password_form;
 
   // Contents MIME type of main frame.
   std::string contents_mime_type;

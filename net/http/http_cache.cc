@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,24 +15,20 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/file_util.h"
 #include "base/format_macros.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
-#include "base/metrics/field_trial.h"
+#include "base/message_loop.h"
 #include "base/pickle.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/threading/worker_pool.h"
-#include "net/base/cache_type.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/upload_data_stream.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/http/disk_cache_based_ssl_host_info.h"
 #include "net/http/http_cache_transaction.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
@@ -40,25 +36,48 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
+#include "net/socket/ssl_host_info.h"
+
+namespace net {
 
 namespace {
 
-// Adaptor to delete a file on a worker thread.
-void DeletePath(base::FilePath path) {
-  base::DeleteFile(path, false);
+HttpNetworkSession* CreateNetworkSession(
+    HostResolver* host_resolver,
+    CertVerifier* cert_verifier,
+    OriginBoundCertService* origin_bound_cert_service,
+    TransportSecurityState* transport_security_state,
+    ProxyService* proxy_service,
+    SSLHostInfoFactory* ssl_host_info_factory,
+    const std::string& ssl_session_cache_shard,
+    SSLConfigService* ssl_config_service,
+    HttpAuthHandlerFactory* http_auth_handler_factory,
+    NetworkDelegate* network_delegate,
+    HttpServerProperties* http_server_properties,
+    NetLog* net_log) {
+  HttpNetworkSession::Params params;
+  params.host_resolver = host_resolver;
+  params.cert_verifier = cert_verifier;
+  params.origin_bound_cert_service = origin_bound_cert_service;
+  params.transport_security_state = transport_security_state;
+  params.proxy_service = proxy_service;
+  params.ssl_host_info_factory = ssl_host_info_factory;
+  params.ssl_session_cache_shard = ssl_session_cache_shard;
+  params.ssl_config_service = ssl_config_service;
+  params.http_auth_handler_factory = http_auth_handler_factory;
+  params.network_delegate = network_delegate;
+  params.http_server_properties = http_server_properties;
+  params.net_log = net_log;
+  return new HttpNetworkSession(params);
 }
 
 }  // namespace
 
-namespace net {
-
 HttpCache::DefaultBackend::DefaultBackend(CacheType type,
-                                          BackendType backend_type,
-                                          const base::FilePath& path,
+                                          const FilePath& path,
                                           int max_bytes,
                                           base::MessageLoopProxy* thread)
     : type_(type),
-      backend_type_(backend_type),
       path_(path),
       max_bytes_(max_bytes),
       thread_(thread) {
@@ -68,23 +87,15 @@ HttpCache::DefaultBackend::~DefaultBackend() {}
 
 // static
 HttpCache::BackendFactory* HttpCache::DefaultBackend::InMemory(int max_bytes) {
-  return new DefaultBackend(MEMORY_CACHE, net::CACHE_BACKEND_DEFAULT,
-                            base::FilePath(), max_bytes, NULL);
+  return new DefaultBackend(MEMORY_CACHE, FilePath(), max_bytes, NULL);
 }
 
 int HttpCache::DefaultBackend::CreateBackend(
-    NetLog* net_log, scoped_ptr<disk_cache::Backend>* backend,
+    NetLog* net_log, disk_cache::Backend** backend,
     const CompletionCallback& callback) {
   DCHECK_GE(max_bytes_, 0);
-  return disk_cache::CreateCacheBackend(type_,
-                                        backend_type_,
-                                        path_,
-                                        max_bytes_,
-                                        true,
-                                        thread_.get(),
-                                        net_log,
-                                        backend,
-                                        callback);
+  return disk_cache::CreateCacheBackend(type_, path_, max_bytes_, true,
+                                        thread_, net_log, backend, callback);
 }
 
 //-----------------------------------------------------------------------------
@@ -108,11 +119,11 @@ HttpCache::ActiveEntry::~ActiveEntry() {
 // This structure keeps track of work items that are attempting to create or
 // open cache entries or the backend itself.
 struct HttpCache::PendingOp {
-  PendingOp() : disk_entry(NULL), writer(NULL) {}
+  PendingOp() : disk_entry(NULL), backend(NULL), writer(NULL) {}
   ~PendingOp() {}
 
   disk_cache::Entry* disk_entry;
-  scoped_ptr<disk_cache::Backend> backend;
+  disk_cache::Backend* backend;
   WorkItem* writer;
   CompletionCallback callback;  // BackendCallback.
   WorkItemList pending_queue;
@@ -248,8 +259,7 @@ void HttpCache::MetadataWriter::VerifyResponse(int result) {
     return SelfDestroy();
 
   result = transaction_->WriteMetadata(
-      buf_.get(),
-      buf_len_,
+      buf_, buf_len_,
       base::Bind(&MetadataWriter::OnIOComplete, base::Unretained(this)));
   if (result != ERR_IO_PENDING)
     SelfDestroy();
@@ -267,13 +277,59 @@ void HttpCache::MetadataWriter::OnIOComplete(int result) {
 
 //-----------------------------------------------------------------------------
 
-HttpCache::HttpCache(const net::HttpNetworkSession::Params& params,
+class HttpCache::SSLHostInfoFactoryAdaptor : public SSLHostInfoFactory {
+ public:
+  SSLHostInfoFactoryAdaptor(CertVerifier* cert_verifier, HttpCache* http_cache)
+      : cert_verifier_(cert_verifier),
+        http_cache_(http_cache) {
+  }
+
+  virtual SSLHostInfo* GetForHost(const std::string& hostname,
+                                  const SSLConfig& ssl_config) {
+    return new DiskCacheBasedSSLHostInfo(
+        hostname, ssl_config, cert_verifier_, http_cache_);
+  }
+
+ private:
+  CertVerifier* const cert_verifier_;
+  HttpCache* const http_cache_;
+};
+
+//-----------------------------------------------------------------------------
+HttpCache::HttpCache(HostResolver* host_resolver,
+                     CertVerifier* cert_verifier,
+                     OriginBoundCertService* origin_bound_cert_service,
+                     TransportSecurityState* transport_security_state,
+                     ProxyService* proxy_service,
+                     const std::string& ssl_session_cache_shard,
+                     SSLConfigService* ssl_config_service,
+                     HttpAuthHandlerFactory* http_auth_handler_factory,
+                     NetworkDelegate* network_delegate,
+                     HttpServerProperties* http_server_properties,
+                     NetLog* net_log,
                      BackendFactory* backend_factory)
-    : net_log_(params.net_log),
+    : net_log_(net_log),
       backend_factory_(backend_factory),
       building_backend_(false),
       mode_(NORMAL),
-      network_layer_(new HttpNetworkLayer(new HttpNetworkSession(params))) {
+      ssl_host_info_factory_(new SSLHostInfoFactoryAdaptor(
+          cert_verifier,
+          ALLOW_THIS_IN_INITIALIZER_LIST(this))),
+      network_layer_(
+          new HttpNetworkLayer(
+              CreateNetworkSession(
+                  host_resolver,
+                  cert_verifier,
+                  origin_bound_cert_service,
+                  transport_security_state,
+                  proxy_service,
+                  ssl_host_info_factory_.get(),
+                  ssl_session_cache_shard,
+                  ssl_config_service,
+                  http_auth_handler_factory,
+                  network_delegate,
+                  http_server_properties,
+                  net_log))) {
 }
 
 
@@ -283,6 +339,9 @@ HttpCache::HttpCache(HttpNetworkSession* session,
       backend_factory_(backend_factory),
       building_backend_(false),
       mode_(NORMAL),
+      ssl_host_info_factory_(new SSLHostInfoFactoryAdaptor(
+          session->cert_verifier(),
+          ALLOW_THIS_IN_INITIALIZER_LIST(this))),
       network_layer_(new HttpNetworkLayer(session)) {
 }
 
@@ -365,9 +424,7 @@ bool HttpCache::ParseResponseInfo(const char* data, int len,
 }
 
 void HttpCache::WriteMetadata(const GURL& url,
-                              RequestPriority priority,
-                              base::Time expected_response_time,
-                              IOBuffer* buf,
+                              base::Time expected_response_time, IOBuffer* buf,
                               int buf_len) {
   if (!buf_len)
     return;
@@ -378,8 +435,7 @@ void HttpCache::WriteMetadata(const GURL& url,
     CreateBackend(NULL, net::CompletionCallback());
   }
 
-  HttpCache::Transaction* trans =
-      new HttpCache::Transaction(priority, this);
+  HttpCache::Transaction* trans = new HttpCache::Transaction(this);
   MetadataWriter* writer = new MetadataWriter(trans);
 
   // The writer will self destruct when done.
@@ -392,7 +448,7 @@ void HttpCache::CloseAllConnections() {
   HttpNetworkSession* session = network->GetSession();
   if (session)
     session->CloseAllConnections();
-}
+  }
 
 void HttpCache::CloseIdleConnections() {
   net::HttpNetworkLayer* network =
@@ -414,21 +470,14 @@ void HttpCache::OnExternalCacheHit(const GURL& url,
   disk_cache_->OnExternalCacheHit(key);
 }
 
-void HttpCache::InitializeInfiniteCache(const base::FilePath& path) {
-  if (base::FieldTrialList::FindFullName("InfiniteCache") != "Yes")
-    return;
-  base::WorkerPool::PostTask(FROM_HERE, base::Bind(&DeletePath, path), true);
-}
-
-int HttpCache::CreateTransaction(RequestPriority priority,
-                                 scoped_ptr<HttpTransaction>* trans) {
+int HttpCache::CreateTransaction(scoped_ptr<HttpTransaction>* trans) {
   // Do lazy initialization of disk cache if needed.
   if (!disk_cache_.get()) {
     // We don't care about the result.
     CreateBackend(NULL, net::CompletionCallback());
   }
 
-  trans->reset(new HttpCache::Transaction(priority, this));
+  trans->reset(new HttpCache::Transaction(this));
   return OK;
 }
 
@@ -456,7 +505,7 @@ int HttpCache::CreateBackend(disk_cache::Backend** backend,
 
   // This is the only operation that we can do that is not related to any given
   // entry, so we use an empty key for it.
-  PendingOp* pending_op = GetPendingOp(std::string());
+  PendingOp* pending_op = GetPendingOp("");
   if (pending_op->writer) {
     if (!callback.is_null())
       pending_op->pending_queue.push_back(item.release());
@@ -488,7 +537,7 @@ int HttpCache::GetBackendForTransaction(Transaction* trans) {
 
   WorkItem* item = new WorkItem(
       WI_CREATE_BACKEND, trans, net::CompletionCallback(), NULL);
-  PendingOp* pending_op = GetPendingOp(std::string());
+  PendingOp* pending_op = GetPendingOp("");
   DCHECK(pending_op->writer);
   pending_op->pending_queue.push_back(item);
   return ERR_IO_PENDING;
@@ -503,10 +552,9 @@ std::string HttpCache::GenerateCacheKey(const HttpRequestInfo* request) {
   if (mode_ == NORMAL) {
     // No valid URL can begin with numerals, so we should not have to worry
     // about collisions with normal URLs.
-    if (request->upload_data_stream &&
-        request->upload_data_stream->identifier()) {
-      url.insert(0, base::StringPrintf(
-          "%" PRId64 "/", request->upload_data_stream->identifier()));
+    if (request->upload_data && request->upload_data->identifier()) {
+      url.insert(0, base::StringPrintf("%" PRId64 "/",
+                                       request->upload_data->identifier()));
     }
     return url;
   }
@@ -534,17 +582,6 @@ std::string HttpCache::GenerateCacheKey(const HttpRequestInfo* request) {
   return result;
 }
 
-void HttpCache::DoomActiveEntry(const std::string& key) {
-  ActiveEntriesMap::iterator it = active_entries_.find(key);
-  if (it == active_entries_.end())
-    return;
-
-  // This is not a performance critical operation, this is handling an error
-  // condition so it is OK to look up the entry again.
-  int rv = DoomEntry(key, NULL);
-  DCHECK_EQ(OK, rv);
-}
-
 int HttpCache::DoomEntry(const std::string& key, Transaction* trans) {
   // Need to abandon the ActiveEntry, but any transaction attached to the entry
   // should not be impacted.  Dooming an entry only means that it will no
@@ -552,7 +589,6 @@ int HttpCache::DoomEntry(const std::string& key, Transaction* trans) {
   // all consumers are finished with the entry).
   ActiveEntriesMap::iterator it = active_entries_.find(key);
   if (it == active_entries_.end()) {
-    DCHECK(trans);
     return AsyncDoomEntry(key, trans);
   }
 
@@ -571,6 +607,7 @@ int HttpCache::DoomEntry(const std::string& key, Transaction* trans) {
 }
 
 int HttpCache::AsyncDoomEntry(const std::string& key, Transaction* trans) {
+  DCHECK(trans);
   WorkItem* item = new WorkItem(WI_DOOM_ENTRY, trans, NULL);
   PendingOp* pending_op = GetPendingOp(key);
   if (pending_op->writer) {
@@ -591,23 +628,6 @@ int HttpCache::AsyncDoomEntry(const std::string& key, Transaction* trans) {
   }
 
   return rv;
-}
-
-void HttpCache::DoomMainEntryForUrl(const GURL& url) {
-  if (!disk_cache_)
-    return;
-
-  HttpRequestInfo temp_info;
-  temp_info.url = url;
-  temp_info.method = "GET";
-  std::string key = GenerateCacheKey(&temp_info);
-
-  // Defer to DoomEntry if there is an active entry, otherwise call
-  // AsyncDoomEntry without triggering a callback.
-  if (active_entries_.count(key))
-    DoomEntry(key, NULL);
-  else
-    AsyncDoomEntry(key, NULL);
 }
 
 void HttpCache::FinalizeDoomedEntry(ActiveEntry* entry) {
@@ -736,9 +756,7 @@ int HttpCache::OpenEntry(const std::string& key, ActiveEntry** entry,
 
 int HttpCache::CreateEntry(const std::string& key, ActiveEntry** entry,
                            Transaction* trans) {
-  if (FindActiveEntry(key)) {
-    return ERR_CACHE_RACE;
-  }
+  DCHECK(!FindActiveEntry(key));
 
   WorkItem* item = new WorkItem(WI_CREATE_ENTRY, trans, entry);
   PendingOp* pending_op = GetPendingOp(key);
@@ -827,9 +845,6 @@ void HttpCache::DoneWithEntry(ActiveEntry* entry, Transaction* trans,
       // This is a successful operation in the sense that we want to keep the
       // entry.
       success = trans->AddTruncatedFlag();
-      // The previous operation may have deleted the entry.
-      if (!trans->entry())
-        return;
     }
     DoneWritingToEntry(entry, success);
   } else {
@@ -912,7 +927,7 @@ void HttpCache::RemovePendingTransaction(Transaction* trans) {
     return;
 
   if (building_backend_) {
-    PendingOpsMap::const_iterator j = pending_ops_.find(std::string());
+    PendingOpsMap::const_iterator j = pending_ops_.find("");
     if (j != pending_ops_.end())
       found = RemovePendingTransactionFromPendingOp(j->second, trans);
 
@@ -975,9 +990,11 @@ void HttpCache::ProcessPendingQueue(ActiveEntry* entry) {
     return;
   entry->will_process_pending_queue = true;
 
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(&HttpCache::OnProcessPendingQueue, AsWeakPtr(), entry));
+      base::Bind(&HttpCache::OnProcessPendingQueue,
+                 AsWeakPtr(),
+                 entry));
 }
 
 void HttpCache::OnProcessPendingQueue(ActiveEntry* entry) {
@@ -1113,6 +1130,7 @@ void HttpCache::OnBackendCreated(int result, PendingOp* pending_op) {
 
   // We don't need the callback anymore.
   pending_op->callback.Reset();
+  disk_cache::Backend* backend = pending_op->backend;
 
   if (backend_factory_.get()) {
     // We may end up calling OnBackendCreated multiple times if we have pending
@@ -1120,7 +1138,7 @@ void HttpCache::OnBackendCreated(int result, PendingOp* pending_op) {
     // and the last call clears building_backend_.
     backend_factory_.reset();  // Reclaim memory.
     if (result == OK)
-      disk_cache_ = pending_op->backend.Pass();
+      disk_cache_.reset(backend);
   }
 
   if (!pending_op->pending_queue.empty()) {
@@ -1132,17 +1150,17 @@ void HttpCache::OnBackendCreated(int result, PendingOp* pending_op) {
     // go away from the callback.
     pending_op->writer = pending_item;
 
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(
-            &HttpCache::OnBackendCreated, AsWeakPtr(), result, pending_op));
+        base::Bind(&HttpCache::OnBackendCreated, AsWeakPtr(),
+                   result, pending_op));
   } else {
     building_backend_ = false;
     DeletePendingOp(pending_op);
   }
 
   // The cache may be gone when we return from the callback.
-  if (!item->DoCallback(result, disk_cache_.get()))
+  if (!item->DoCallback(result, backend))
     item->NotifyTransaction(result, NULL);
 }
 

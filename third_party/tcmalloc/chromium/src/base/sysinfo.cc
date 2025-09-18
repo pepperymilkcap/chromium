@@ -30,11 +30,8 @@
 #include <config.h>
 #if (defined(_WIN32) || defined(__MINGW32__)) && !defined(__CYGWIN__) && !defined(__CYGWIN32)
 # define PLATFORM_WINDOWS 1
-#elif defined(__ANDROID__) || defined(ANDROID)
-# define PLATFORM_ANDROID 1
 #endif
 
-#include <ctype.h>    // for isspace()
 #include <stdlib.h>   // for getenv()
 #include <stdio.h>    // for snprintf(), sscanf()
 #include <string.h>   // for memmove(), memchr(), etc.
@@ -56,8 +53,6 @@
 #include <process.h>          // for getpid() (actually, _getpid())
 #include <shlwapi.h>          // for SHGetValueA()
 #include <tlhelp32.h>         // for Module32First()
-#elif defined(PLATFORM_ANDROID)
-#include <sys/system_properties.h>
 #endif
 #include "base/sysinfo.h"
 #include "base/commandlineflags.h"
@@ -91,20 +86,12 @@
 // time, so prefer making the syscalls directly if we can.
 #ifdef HAVE_SYS_SYSCALL_H
 # include <sys/syscall.h>
-#endif
-#ifdef SYS_open   // solaris 11, at least sometimes, only defines SYS_openat
 # define safeopen(filename, mode)  syscall(SYS_open, filename, mode)
-#else
-# define safeopen(filename, mode)  open(filename, mode)
-#endif
-#ifdef SYS_read
 # define saferead(fd, buffer, size)  syscall(SYS_read, fd, buffer, size)
-#else
-# define saferead(fd, buffer, size)  read(fd, buffer, size)
-#endif
-#ifdef SYS_close
 # define safeclose(fd)  syscall(SYS_close, fd)
 #else
+# define safeopen(filename, mode)  open(filename, mode)
+# define saferead(fd, buffer, size)  read(fd, buffer, size)
 # define safeclose(fd)  close(fd)
 #endif
 
@@ -196,12 +183,7 @@ const char* GetenvBeforeMain(const char* name) {
 // In Chromium this hack is intentionally disabled, because the path is not
 // re-initialized upon fork.
 bool GetUniquePathFromEnv(const char* env_name, char* path) {
-#if defined(PLATFORM_ANDROID)
-  char envval[PROP_VALUE_MAX];
-  __system_property_get(env_name, envval);
-#else
   char* envval = getenv(env_name);
-#endif
   if (envval == NULL || *envval == '\0')
     return false;
   if (envval[0] & 128) {                  // high bit is set
@@ -503,9 +485,7 @@ int NumCPUs(void) {
 //      true.
 // ----------------------------------------------------------------------
 bool HasPosixThreads() {
-// Android doesn't have confstr(), assume posix thread and fallback to
-// "other os".
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__)
 #ifndef _CS_GNU_LIBPTHREAD_VERSION
 #define _CS_GNU_LIBPTHREAD_VERSION 3
 #endif
@@ -574,145 +554,6 @@ static bool NextExtMachHelper(const mach_header* hdr,
   return false;
 }
 #endif
-
-// Finds |c| in |text|, and assign '\0' at the found position.
-// The original character at the modified position should be |c|.
-// A pointer to the modified position is stored in |endptr|.
-// |endptr| should not be NULL.
-static bool ExtractUntilChar(char *text, int c, char **endptr) {
-  CHECK_NE(text, NULL);
-  CHECK_NE(endptr, NULL);
-  char *found;
-  found = strchr(text, c);
-  if (found == NULL) {
-    *endptr = NULL;
-    return false;
-  }
-
-  *endptr = found;
-  *found = '\0';
-  return true;
-}
-
-// Increments |*text_pointer| while it points a whitespace character.
-// It is to follow sscanf's whilespace handling.
-static void SkipWhileWhitespace(char **text_pointer, int c) {
-  if (isspace(c)) {
-    while (isspace(**text_pointer) && isspace(*((*text_pointer) + 1))) {
-      ++(*text_pointer);
-    }
-  }
-}
-
-template<class T>
-static T StringToInteger(char *text, char **endptr, int base) {
-  assert(false);
-  return T();
-}
-
-template<>
-int StringToInteger<int>(char *text, char **endptr, int base) {
-  return strtol(text, endptr, base);
-}
-
-template<>
-int64 StringToInteger<int64>(char *text, char **endptr, int base) {
-  return strtoll(text, endptr, base);
-}
-
-template<>
-uint64 StringToInteger<uint64>(char *text, char **endptr, int base) {
-  return strtoull(text, endptr, base);
-}
-
-template<typename T>
-static T StringToIntegerUntilChar(
-    char *text, int base, int c, char **endptr_result) {
-  CHECK_NE(endptr_result, NULL);
-  *endptr_result = NULL;
-
-  char *endptr_extract;
-  if (!ExtractUntilChar(text, c, &endptr_extract))
-    return 0;
-
-  T result;
-  char *endptr_strto;
-  result = StringToInteger<T>(text, &endptr_strto, base);
-  *endptr_extract = c;
-
-  if (endptr_extract != endptr_strto)
-    return 0;
-
-  *endptr_result = endptr_extract;
-  SkipWhileWhitespace(endptr_result, c);
-
-  return result;
-}
-
-static char *CopyStringUntilChar(
-    char *text, unsigned out_len, int c, char *out) {
-  char *endptr;
-  if (!ExtractUntilChar(text, c, &endptr))
-    return NULL;
-
-  strncpy(out, text, out_len);
-  out[out_len-1] = '\0';
-  *endptr = c;
-
-  SkipWhileWhitespace(&endptr, c);
-  return endptr;
-}
-
-template<typename T>
-static bool StringToIntegerUntilCharWithCheck(
-    T *outptr, char *text, int base, int c, char **endptr) {
-  *outptr = StringToIntegerUntilChar<T>(*endptr, base, c, endptr);
-  if (*endptr == NULL || **endptr == '\0') return false;
-  ++(*endptr);
-  return true;
-}
-
-static bool ParseProcMapsLine(char *text, uint64 *start, uint64 *end,
-                              char *flags, uint64 *offset,
-                              int *major, int *minor, int64 *inode,
-                              unsigned *filename_offset) {
-#if defined(__linux__)
-  /*
-   * It's similar to:
-   * sscanf(text,"%" SCNx64 "-%" SCNx64 " %4s %" SCNx64 " %x:%x %" SCNd64 " %n",
-   *        start, end, flags, offset, major, minor, inode, filename_offset)
-   */
-  char *endptr = text;
-  if (endptr == NULL || *endptr == '\0')  return false;
-
-  if (!StringToIntegerUntilCharWithCheck(start, endptr, 16, '-', &endptr))
-    return false;
-
-  if (!StringToIntegerUntilCharWithCheck(end, endptr, 16, ' ', &endptr))
-    return false;
-
-  endptr = CopyStringUntilChar(endptr, 5, ' ', flags);
-  if (endptr == NULL || *endptr == '\0')  return false;
-  ++endptr;
-
-  if (!StringToIntegerUntilCharWithCheck(offset, endptr, 16, ' ', &endptr))
-    return false;
-
-  if (!StringToIntegerUntilCharWithCheck(major, endptr, 16, ':', &endptr))
-    return false;
-
-  if (!StringToIntegerUntilCharWithCheck(minor, endptr, 16, ' ', &endptr))
-    return false;
-
-  if (!StringToIntegerUntilCharWithCheck(inode, endptr, 10, ' ', &endptr))
-    return false;
-
-  *filename_offset = (endptr - text);
-  return true;
-#else
-  return false;
-#endif
-}
 
 ProcMapsIterator::ProcMapsIterator(pid_t pid) {
   Init(pid, NULL, false);
@@ -868,14 +709,13 @@ bool ProcMapsIterator::NextExt(uint64 *start, uint64 *end, char **flags,
     unsigned filename_offset = 0;
 #if defined(__linux__)
     // for now, assume all linuxes have the same format
-    if (!ParseProcMapsLine(
-        stext_,
-        start ? start : &tmpstart,
-        end ? end : &tmpend,
-        flags_,
-        offset ? offset : &tmpoffset,
-        &major, &minor,
-        inode ? inode : &tmpinode, &filename_offset)) continue;
+    if (sscanf(stext_, "%"SCNx64"-%"SCNx64" %4s %"SCNx64" %x:%x %"SCNd64" %n",
+               start ? start : &tmpstart,
+               end ? end : &tmpend,
+               flags_,
+               offset ? offset : &tmpoffset,
+               &major, &minor,
+               inode ? inode : &tmpinode, &filename_offset) != 7) continue;
 #elif defined(__CYGWIN__) || defined(__CYGWIN32__)
     // cygwin is like linux, except the third field is the "entry point"
     // rather than the offset (see format_process_maps at
@@ -943,8 +783,7 @@ bool ProcMapsIterator::NextExt(uint64 *start, uint64 *end, char **flags,
             uint64 tmp_anon_mapping;
             uint64 tmp_anon_pages;
 
-            sscanf(backing_ptr+1,
-                   "F %" SCNx64 " %" SCNd64 ") (A %" SCNx64 " %" SCNd64 ")",
+            sscanf(backing_ptr+1, "F %"SCNx64" %"SCNd64") (A %"SCNx64" %"SCNd64")",
                    file_mapping ? file_mapping : &tmp_file_mapping,
                    file_pages ? file_pages : &tmp_file_pages,
                    anon_mapping ? anon_mapping : &tmp_anon_mapping,
@@ -1084,8 +923,7 @@ int ProcMapsIterator::FormatLine(char* buffer, int bufsize,
       ? '-' : 'p';
 
   const int rc = snprintf(buffer, bufsize,
-                          "%08" PRIx64 "-%08" PRIx64 " %c%c%c%c %08" PRIx64 " "
-                          "%02x:%02x %-11" PRId64 " %s\n",
+                          "%08"PRIx64"-%08"PRIx64" %c%c%c%c %08"PRIx64" %02x:%02x %-11"PRId64" %s\n",
                           start, end, r,w,x,p, offset,
                           static_cast<int>(dev/256), static_cast<int>(dev%256),
                           inode, filename);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
-#include "content/renderer/p2p/network_list_observer.h"
 #include "content/renderer/p2p/socket_dispatcher.h"
+#include "net/base/net_util.h"
 #include "third_party/libjingle/source/talk/base/network.h"
 
 namespace content {
@@ -19,7 +19,7 @@ namespace content {
 // IpcNetworkManager is a NetworkManager for libjingle that gets a
 // list of network interfaces from the browser.
 class IpcNetworkManager : public talk_base::NetworkManagerBase,
-                          public NetworkListObserver {
+                          public P2PSocketDispatcher::NetworkListObserver {
  public:
   // Constructor doesn't take ownership of the |socket_dispatcher|.
   CONTENT_EXPORT IpcNetworkManager(P2PSocketDispatcher* socket_dispatcher);
@@ -35,9 +35,10 @@ class IpcNetworkManager : public talk_base::NetworkManagerBase,
  private:
   void SendNetworksChangedSignal();
 
+  MessageLoop* message_loop_;
   P2PSocketDispatcher* socket_dispatcher_;
-  int start_count_;
-  bool network_list_received_;
+  bool started_;
+  bool first_update_sent_;
 
   base::WeakPtrFactory<IpcNetworkManager> weak_factory_;
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,288 +6,58 @@
 
 #include <string>
 
-#include "base/basictypes.h"
-#include "base/bind.h"
-#include "base/files/file_path.h"
-#include "base/files/file_path_watcher.h"
-#include "base/lazy_instance.h"
+#include "base/compiler_specific.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/metrics/histogram.h"
-#include "base/time/time.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_util.h"
-#include "net/dns/dns_hosts.h"
-#include "net/dns/dns_protocol.h"
-#include "net/dns/notify_watcher_mac.h"
 #include "net/dns/serial_worker.h"
-
-#if defined(OS_MACOSX)
-#include <dlfcn.h>
-
-#include "third_party/apple_apsl/dnsinfo.h"
-
-namespace {
-
-// dnsinfo symbols are available via libSystem.dylib, but can also be present in
-// SystemConfiguration.framework. To avoid confusion, load them explicitly from
-// libSystem.dylib.
-class DnsInfoApi {
- public:
-  typedef const char* (*dns_configuration_notify_key_t)();
-  typedef dns_config_t* (*dns_configuration_copy_t)();
-  typedef void (*dns_configuration_free_t)(dns_config_t*);
-
-  DnsInfoApi()
-      : dns_configuration_notify_key(NULL),
-        dns_configuration_copy(NULL),
-        dns_configuration_free(NULL) {
-    handle_ = dlopen("/usr/lib/libSystem.dylib",
-                     RTLD_LAZY | RTLD_NOLOAD);
-    if (!handle_)
-      return;
-    dns_configuration_notify_key =
-        reinterpret_cast<dns_configuration_notify_key_t>(
-            dlsym(handle_, "dns_configuration_notify_key"));
-    dns_configuration_copy =
-        reinterpret_cast<dns_configuration_copy_t>(
-            dlsym(handle_, "dns_configuration_copy"));
-    dns_configuration_free =
-        reinterpret_cast<dns_configuration_free_t>(
-            dlsym(handle_, "dns_configuration_free"));
-  }
-
-  ~DnsInfoApi() {
-    if (handle_)
-      dlclose(handle_);
-  }
-
-  dns_configuration_notify_key_t dns_configuration_notify_key;
-  dns_configuration_copy_t dns_configuration_copy;
-  dns_configuration_free_t dns_configuration_free;
-
- private:
-  void* handle_;
-};
-
-const DnsInfoApi& GetDnsInfoApi() {
-  static base::LazyInstance<DnsInfoApi>::Leaky api = LAZY_INSTANCE_INITIALIZER;
-  return api.Get();
-}
-
-struct DnsConfigTDeleter {
-  inline void operator()(dns_config_t* ptr) const {
-    if (GetDnsInfoApi().dns_configuration_free)
-      GetDnsInfoApi().dns_configuration_free(ptr);
-  }
-};
-
-}  // namespace
-#endif  // defined(OS_MACOSX)
-
-namespace net {
-
-#if !defined(OS_ANDROID)
-namespace internal {
-
-namespace {
-
-const base::FilePath::CharType* kFilePathHosts =
-    FILE_PATH_LITERAL("/etc/hosts");
-
-#if defined(OS_MACOSX)
-class ConfigWatcher {
- public:
-  bool Watch(const base::Callback<void(bool succeeded)>& callback) {
-    if (!GetDnsInfoApi().dns_configuration_notify_key)
-      return false;
-    return watcher_.Watch(GetDnsInfoApi().dns_configuration_notify_key(),
-                          callback);
-  }
-
- private:
-  NotifyWatcherMac watcher_;
-};
-#else
+#include "net/dns/watching_file_reader.h"
 
 #ifndef _PATH_RESCONF  // Normally defined in <resolv.h>
 #define _PATH_RESCONF "/etc/resolv.conf"
 #endif
 
-static const base::FilePath::CharType* kFilePathConfig =
-    FILE_PATH_LITERAL(_PATH_RESCONF);
+namespace net {
 
-class ConfigWatcher {
- public:
-  typedef base::Callback<void(bool succeeded)> CallbackType;
-
-  bool Watch(const CallbackType& callback) {
-    callback_ = callback;
-    return watcher_.Watch(base::FilePath(kFilePathConfig), false,
-                          base::Bind(&ConfigWatcher::OnCallback,
-                                     base::Unretained(this)));
-  }
-
- private:
-  void OnCallback(const base::FilePath& path, bool error) {
-    callback_.Run(!error);
-  }
-
-  base::FilePathWatcher watcher_;
-  CallbackType callback_;
-};
-#endif
-
-ConfigParsePosixResult ReadDnsConfig(DnsConfig* config) {
-  ConfigParsePosixResult result;
-  config->unhandled_options = false;
-#if defined(OS_OPENBSD)
-  // Note: res_ninit in glibc always returns 0 and sets RES_INIT.
-  // res_init behaves the same way.
-  memset(&_res, 0, sizeof(_res));
-  if (res_init() == 0) {
-    result = ConvertResStateToDnsConfig(_res, config);
-  } else {
-    result = CONFIG_PARSE_POSIX_RES_INIT_FAILED;
-  }
-#else  // all other OS_POSIX
-  struct __res_state res;
-  memset(&res, 0, sizeof(res));
-  if (res_ninit(&res) == 0) {
-    result = ConvertResStateToDnsConfig(res, config);
-  } else {
-    result = CONFIG_PARSE_POSIX_RES_INIT_FAILED;
-  }
-  // Prefer res_ndestroy where available.
-#if defined(OS_MACOSX) || defined(OS_FREEBSD)
-  res_ndestroy(&res);
-#else
-  res_nclose(&res);
-#endif
-#endif
-
-#if defined(OS_MACOSX)
-  if (!GetDnsInfoApi().dns_configuration_copy)
-    return CONFIG_PARSE_POSIX_NO_DNSINFO;
-  scoped_ptr<dns_config_t, DnsConfigTDeleter> dns_config(
-      GetDnsInfoApi().dns_configuration_copy());
-  if (!dns_config)
-    return CONFIG_PARSE_POSIX_NO_DNSINFO;
-
-  // TODO(szym): Parse dns_config_t for resolvers rather than res_state.
-  // DnsClient can't handle domain-specific unscoped resolvers.
-  unsigned num_resolvers = 0;
-  for (int i = 0; i < dns_config->n_resolver; ++i) {
-    dns_resolver_t* resolver = dns_config->resolver[i];
-    if (!resolver->n_nameserver)
-      continue;
-    if (resolver->options && !strcmp(resolver->options, "mdns"))
-      continue;
-    ++num_resolvers;
-  }
-  if (num_resolvers > 1) {
-    LOG(WARNING) << "dns_config has unhandled options!";
-    config->unhandled_options = true;
-    return CONFIG_PARSE_POSIX_UNHANDLED_OPTIONS;
-  }
-#endif  // defined(OS_MACOSX)
-  // Override timeout value to match default setting on Windows.
-  config->timeout = base::TimeDelta::FromSeconds(kDnsTimeoutSeconds);
-  return result;
-}
-
-}  // namespace
-
-class DnsConfigServicePosix::Watcher {
- public:
-  explicit Watcher(DnsConfigServicePosix* service)
-      : weak_factory_(this),
-        service_(service) {}
-  ~Watcher() {}
-
-  bool Watch() {
-    bool success = true;
-    if (!config_watcher_.Watch(base::Bind(&Watcher::OnConfigChanged,
-                                          base::Unretained(this)))) {
-      LOG(ERROR) << "DNS config watch failed to start.";
-      success = false;
-      UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus",
-                                DNS_CONFIG_WATCH_FAILED_TO_START_CONFIG,
-                                DNS_CONFIG_WATCH_MAX);
-    }
-    if (!hosts_watcher_.Watch(base::FilePath(kFilePathHosts), false,
-                              base::Bind(&Watcher::OnHostsChanged,
-                                         base::Unretained(this)))) {
-      LOG(ERROR) << "DNS hosts watch failed to start.";
-      success = false;
-      UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus",
-                                DNS_CONFIG_WATCH_FAILED_TO_START_HOSTS,
-                                DNS_CONFIG_WATCH_MAX);
-    }
-    return success;
-  }
-
- private:
-  void OnConfigChanged(bool succeeded) {
-    // Ignore transient flutter of resolv.conf by delaying the signal a bit.
-    const base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(50);
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&Watcher::OnConfigChangedDelayed,
-                   weak_factory_.GetWeakPtr(),
-                   succeeded),
-        kDelay);
-  }
-  void OnConfigChangedDelayed(bool succeeded) {
-    service_->OnConfigChanged(succeeded);
-  }
-  void OnHostsChanged(const base::FilePath& path, bool error) {
-    service_->OnHostsChanged(!error);
-  }
-
-  base::WeakPtrFactory<Watcher> weak_factory_;
-  DnsConfigServicePosix* service_;
-  ConfigWatcher config_watcher_;
-  base::FilePathWatcher hosts_watcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(Watcher);
-};
-
-// A SerialWorker that uses libresolv to initialize res_state and converts
+// A SerialWorker that uses ResolverLib to initialize res_state and converts
 // it to DnsConfig.
 class DnsConfigServicePosix::ConfigReader : public SerialWorker {
  public:
   explicit ConfigReader(DnsConfigServicePosix* service)
-      : service_(service), success_(false) {}
+    : service_(service),
+      success_(false) {}
 
-  virtual void DoWork() OVERRIDE {
-    base::TimeTicks start_time = base::TimeTicks::Now();
-    ConfigParsePosixResult result = ReadDnsConfig(&dns_config_);
-    switch (result) {
-      case CONFIG_PARSE_POSIX_MISSING_OPTIONS:
-      case CONFIG_PARSE_POSIX_UNHANDLED_OPTIONS:
-        DCHECK(dns_config_.unhandled_options);
-        // Fall through.
-      case CONFIG_PARSE_POSIX_OK:
-        success_ = true;
-        break;
-      default:
-        success_ = false;
-        break;
+  void DoWork() OVERRIDE {
+    success_ = false;
+#if defined(OS_ANDROID)
+    NOTIMPLEMENTED();
+#else
+#if defined(OS_OPENBSD)
+    // Note: res_ninit in glibc always returns 0 and sets RES_INIT.
+    // res_init behaves the same way.
+    if ((res_init() == 0) && (_res.options & RES_INIT)) {
+      success_ = ConvertResToConfig(_res, &dns_config_);
     }
-    UMA_HISTOGRAM_ENUMERATION("AsyncDNS.ConfigParsePosix",
-                              result, CONFIG_PARSE_POSIX_MAX);
-    UMA_HISTOGRAM_BOOLEAN("AsyncDNS.ConfigParseResult", success_);
-    UMA_HISTOGRAM_TIMES("AsyncDNS.ConfigParseDuration",
-                        base::TimeTicks::Now() - start_time);
+#else
+    struct __res_state res;
+    if ((res_ninit(&res) == 0) && (res.options & RES_INIT)) {
+      success_ = ConvertResToConfig(res, &dns_config_);
+    }
+#endif
+#if defined(OS_MACOSX)
+    res_ndestroy(&res);
+#elif !defined(OS_OPENBSD)
+    res_nclose(&res);
+#endif
+#endif  // defined(OS_ANDROID)
   }
 
-  virtual void OnWorkFinished() OVERRIDE {
+  void OnWorkFinished() OVERRIDE {
     DCHECK(!IsCancelled());
-    if (success_) {
+    if (success_)
       service_->OnConfigRead(dns_config_);
-    } else {
-      LOG(WARNING) << "Failed to read DnsConfig.";
-    }
   }
 
  private:
@@ -297,151 +67,64 @@ class DnsConfigServicePosix::ConfigReader : public SerialWorker {
   // Written in DoWork, read in OnWorkFinished, no locking necessary.
   DnsConfig dns_config_;
   bool success_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfigReader);
-};
-
-// A SerialWorker that reads the HOSTS file and runs Callback.
-class DnsConfigServicePosix::HostsReader : public SerialWorker {
- public:
-  explicit HostsReader(DnsConfigServicePosix* service)
-      :  service_(service), path_(kFilePathHosts), success_(false) {}
-
- private:
-  virtual ~HostsReader() {}
-
-  virtual void DoWork() OVERRIDE {
-    base::TimeTicks start_time = base::TimeTicks::Now();
-    success_ = ParseHostsFile(path_, &hosts_);
-    UMA_HISTOGRAM_BOOLEAN("AsyncDNS.HostParseResult", success_);
-    UMA_HISTOGRAM_TIMES("AsyncDNS.HostsParseDuration",
-                        base::TimeTicks::Now() - start_time);
-  }
-
-  virtual void OnWorkFinished() OVERRIDE {
-    if (success_) {
-      service_->OnHostsRead(hosts_);
-    } else {
-      LOG(WARNING) << "Failed to read DnsHosts.";
-    }
-  }
-
-  DnsConfigServicePosix* service_;
-  const base::FilePath path_;
-  // Written in DoWork, read in OnWorkFinished, no locking necessary.
-  DnsHosts hosts_;
-  bool success_;
-
-  DISALLOW_COPY_AND_ASSIGN(HostsReader);
 };
 
 DnsConfigServicePosix::DnsConfigServicePosix()
-    : config_reader_(new ConfigReader(this)),
-      hosts_reader_(new HostsReader(this)) {}
+  : config_watcher_(new WatchingFileReader()),
+    hosts_watcher_(new WatchingFileReader()) {}
 
-DnsConfigServicePosix::~DnsConfigServicePosix() {
-  config_reader_->Cancel();
-  hosts_reader_->Cancel();
+DnsConfigServicePosix::~DnsConfigServicePosix() {}
+
+void DnsConfigServicePosix::Watch() {
+  DCHECK(CalledOnValidThread());
+  config_watcher_->StartWatch(FilePath(FILE_PATH_LITERAL(_PATH_RESCONF)),
+                              new ConfigReader(this));
+  FilePath hosts_path(FILE_PATH_LITERAL("/etc/hosts"));
+  hosts_watcher_->StartWatch(hosts_path, new DnsHostsReader(hosts_path, this));
 }
 
-void DnsConfigServicePosix::ReadNow() {
-  config_reader_->WorkNow();
-  hosts_reader_->WorkNow();
+// static
+DnsConfigService* DnsConfigService::CreateSystemService() {
+  return new DnsConfigServicePosix();
 }
 
-bool DnsConfigServicePosix::StartWatching() {
-  // TODO(szym): re-start watcher if that makes sense. http://crbug.com/116139
-  watcher_.reset(new Watcher(this));
-  UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus", DNS_CONFIG_WATCH_STARTED,
-                            DNS_CONFIG_WATCH_MAX);
-  return watcher_->Watch();
-}
-
-void DnsConfigServicePosix::OnConfigChanged(bool succeeded) {
-  InvalidateConfig();
-  if (succeeded) {
-    config_reader_->WorkNow();
-  } else {
-    LOG(ERROR) << "DNS config watch failed.";
-    set_watch_failed(true);
-    UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus",
-                              DNS_CONFIG_WATCH_FAILED_CONFIG,
-                              DNS_CONFIG_WATCH_MAX);
-  }
-}
-
-void DnsConfigServicePosix::OnHostsChanged(bool succeeded) {
-  InvalidateHosts();
-  if (succeeded) {
-    hosts_reader_->WorkNow();
-  } else {
-    LOG(ERROR) << "DNS hosts watch failed.";
-    set_watch_failed(true);
-    UMA_HISTOGRAM_ENUMERATION("AsyncDNS.WatchStatus",
-                              DNS_CONFIG_WATCH_FAILED_HOSTS,
-                              DNS_CONFIG_WATCH_MAX);
-  }
-}
-
-ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
-                                                  DnsConfig* dns_config) {
+#if !defined(OS_ANDROID)
+bool ConvertResToConfig(const struct __res_state& res, DnsConfig* dns_config) {
   CHECK(dns_config != NULL);
-  if (!(res.options & RES_INIT))
-    return CONFIG_PARSE_POSIX_RES_INIT_UNSET;
+  DCHECK(res.options & RES_INIT);
 
   dns_config->nameservers.clear();
 
-#if defined(OS_MACOSX) || defined(OS_FREEBSD)
-  union res_sockaddr_union addresses[MAXNS];
-  int nscount = res_getservers(const_cast<res_state>(&res), addresses, MAXNS);
-  DCHECK_GE(nscount, 0);
-  DCHECK_LE(nscount, MAXNS);
-  for (int i = 0; i < nscount; ++i) {
+#if defined(OS_LINUX)
+  // Initially, glibc stores IPv6 in _ext.nsaddrs and IPv4 in nsaddr_list.
+  // Next (res_send.c::__libc_res_nsend), it copies nsaddr_list after nsaddrs.
+  // If RES_ROTATE is enabled, the list is shifted left after each res_send.
+  // However, if nsaddr_list changes, it will refill nsaddr_list (IPv4) but
+  // leave the IPv6 entries in nsaddr in the same (shifted) order.
+
+  // Put IPv6 addresses ahead of IPv4.
+  for (int i = 0; i < res._u._ext.nscount6; ++i) {
     IPEndPoint ipe;
-    if (!ipe.FromSockAddr(
-            reinterpret_cast<const struct sockaddr*>(&addresses[i]),
-            sizeof addresses[i])) {
-      return CONFIG_PARSE_POSIX_BAD_ADDRESS;
-    }
-    dns_config->nameservers.push_back(ipe);
-  }
-#elif defined(OS_LINUX)
-  COMPILE_ASSERT(arraysize(res.nsaddr_list) >= MAXNS &&
-                 arraysize(res._u._ext.nsaddrs) >= MAXNS,
-                 incompatible_libresolv_res_state);
-  DCHECK_LE(res.nscount, MAXNS);
-  // Initially, glibc stores IPv6 in |_ext.nsaddrs| and IPv4 in |nsaddr_list|.
-  // In res_send.c:res_nsend, it merges |nsaddr_list| into |nsaddrs|,
-  // but we have to combine the two arrays ourselves.
-  for (int i = 0; i < res.nscount; ++i) {
-    IPEndPoint ipe;
-    const struct sockaddr* addr = NULL;
-    size_t addr_len = 0;
-    if (res.nsaddr_list[i].sin_family) {  // The indicator used by res_nsend.
-      addr = reinterpret_cast<const struct sockaddr*>(&res.nsaddr_list[i]);
-      addr_len = sizeof res.nsaddr_list[i];
-    } else if (res._u._ext.nsaddrs[i] != NULL) {
-      addr = reinterpret_cast<const struct sockaddr*>(res._u._ext.nsaddrs[i]);
-      addr_len = sizeof *res._u._ext.nsaddrs[i];
+    if (ipe.FromSockAddr(
+        reinterpret_cast<const struct sockaddr*>(res._u._ext.nsaddrs[i]),
+        sizeof *res._u._ext.nsaddrs[i])) {
+      dns_config->nameservers.push_back(ipe);
     } else {
-      return CONFIG_PARSE_POSIX_BAD_EXT_STRUCT;
+      return false;
     }
-    if (!ipe.FromSockAddr(addr, addr_len))
-      return CONFIG_PARSE_POSIX_BAD_ADDRESS;
-    dns_config->nameservers.push_back(ipe);
-  }
-#else  // !(defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_FREEBSD))
-  DCHECK_LE(res.nscount, MAXNS);
-  for (int i = 0; i < res.nscount; ++i) {
-    IPEndPoint ipe;
-    if (!ipe.FromSockAddr(
-            reinterpret_cast<const struct sockaddr*>(&res.nsaddr_list[i]),
-            sizeof res.nsaddr_list[i])) {
-      return CONFIG_PARSE_POSIX_BAD_ADDRESS;
-    }
-    dns_config->nameservers.push_back(ipe);
   }
 #endif
+
+  for (int i = 0; i < res.nscount; ++i) {
+    IPEndPoint ipe;
+    if (ipe.FromSockAddr(
+        reinterpret_cast<const struct sockaddr*>(&res.nsaddr_list[i]),
+        sizeof res.nsaddr_list[i])) {
+      dns_config->nameservers.push_back(ipe);
+    } else {
+      return false;
+    }
+  }
 
   dns_config->search.clear();
   for (int i = 0; (i < MAXDNSRCH) && res.dnsrch[i]; ++i) {
@@ -456,54 +139,8 @@ ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
 #endif
   dns_config->edns0 = res.options & RES_USE_EDNS0;
 
-  // The current implementation assumes these options are set. They normally
-  // cannot be overwritten by /etc/resolv.conf
-  unsigned kRequiredOptions = RES_RECURSE | RES_DEFNAMES | RES_DNSRCH;
-  if ((res.options & kRequiredOptions) != kRequiredOptions) {
-    dns_config->unhandled_options = true;
-    return CONFIG_PARSE_POSIX_MISSING_OPTIONS;
-  }
-
-  unsigned kUnhandledOptions = RES_USEVC | RES_IGNTC | RES_USE_DNSSEC;
-  if (res.options & kUnhandledOptions) {
-    dns_config->unhandled_options = true;
-    return CONFIG_PARSE_POSIX_UNHANDLED_OPTIONS;
-  }
-
-  if (dns_config->nameservers.empty())
-    return CONFIG_PARSE_POSIX_NO_NAMESERVERS;
-
-  // If any name server is 0.0.0.0, assume the configuration is invalid.
-  // TODO(szym): Measure how often this happens. http://crbug.com/125599
-  const IPAddressNumber kEmptyAddress(kIPv4AddressSize);
-  for (unsigned i = 0; i < dns_config->nameservers.size(); ++i) {
-    if (dns_config->nameservers[i].address() == kEmptyAddress)
-      return CONFIG_PARSE_POSIX_NULL_ADDRESS;
-  }
-  return CONFIG_PARSE_POSIX_OK;
+  return true;
 }
-
-}  // namespace internal
-
-// static
-scoped_ptr<DnsConfigService> DnsConfigService::CreateSystemService() {
-  return scoped_ptr<DnsConfigService>(new internal::DnsConfigServicePosix());
-}
-
-#else  // defined(OS_ANDROID)
-// Android NDK provides only a stub <resolv.h> header.
-class StubDnsConfigService : public DnsConfigService {
- public:
-  StubDnsConfigService() {}
-  virtual ~StubDnsConfigService() {}
- private:
-  virtual void ReadNow() OVERRIDE {}
-  virtual bool StartWatching() OVERRIDE { return false; }
-};
-// static
-scoped_ptr<DnsConfigService> DnsConfigService::CreateSystemService() {
-  return scoped_ptr<DnsConfigService>(new StubDnsConfigService());
-}
-#endif
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace net

@@ -1,47 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/chrome_browser_application_mac.h"
 
-#import "base/auto_reset.h"
-#include "base/debug/crash_logging.h"
-#include "base/debug/stack_trace.h"
 #import "base/logging.h"
+#include "base/mac/crash_logging.h"
 #import "base/mac/scoped_nsexception_enabler.h"
-#import "base/mac/scoped_nsobject.h"
 #import "base/metrics/histogram.h"
-#include "base/strings/stringprintf.h"
-#import "base/strings/sys_string_conversions.h"
+#import "base/memory/scoped_nsobject.h"
+#import "base/sys_string_conversions.h"
 #import "chrome/browser/app_controller_mac.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
-#include "chrome/common/crash_keys.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #import "chrome/common/mac/objc_method_swizzle.h"
 #import "chrome/common/mac/objc_zombie.h"
-#include "content/public/browser/browser_accessibility_state.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/browser/accessibility/browser_accessibility_state.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-
-namespace {
-
-// Tracking for cases being hit by -crInitWithName:reason:userInfo:.
-enum ExceptionEventType {
-  EXCEPTION_ACCESSIBILITY = 0,
-  EXCEPTION_MENU_ITEM_BOUNDS_CHECK,
-  EXCEPTION_VIEW_NOT_IN_WINDOW,
-  EXCEPTION_NSURL_INIT_NIL,
-  EXCEPTION_NSDATADETECTOR_NIL_STRING,
-
-  // Always keep this at the end.
-  EXCEPTION_MAX,
-};
-
-void RecordExceptionEvent(ExceptionEventType event_type) {
-  UMA_HISTOGRAM_ENUMERATION("OSX.ExceptionHandlerEvents",
-                            event_type, EXCEPTION_MAX);
-}
-
-}  // namespace
 
 // The implementation of NSExceptions break various assumptions in the
 // Chrome code.  This category defines a replacement for
@@ -72,24 +48,23 @@ static IMP gOriginalInitIMP = NULL;
     // If an object does not support an accessibility attribute, this will
     // get thrown.
     NSAccessibilityException,
+
+    nil
   };
 
   BOOL found = NO;
-  for (size_t i = 0; i < arraysize(kAcceptableNSExceptionNames); ++i) {
+  for (int i = 0; kAcceptableNSExceptionNames[i]; ++i) {
     if (aName == kAcceptableNSExceptionNames[i]) {
       found = YES;
-      RecordExceptionEvent(EXCEPTION_ACCESSIBILITY);
-      break;
     }
   }
 
   if (!found) {
     // Update breakpad with the exception info.
-    std::string value = base::StringPrintf("%s reason %s",
-        [aName UTF8String], [aReason UTF8String]);
-    base::debug::SetCrashKeyValue(crash_keys::mac::kNSException, value);
-    base::debug::SetCrashKeyToStackTrace(crash_keys::mac::kNSExceptionTrace,
-                                         base::debug::StackTrace());
+    static NSString* const kNSExceptionKey = @"nsexception";
+    NSString* value =
+        [NSString stringWithFormat:@"%@ reason %@", aName, aReason];
+    base::mac::SetCrashKeyValue(kNSExceptionKey, value);
 
     // Force crash for selected exceptions to generate crash dumps.
     BOOL fatal = NO;
@@ -98,13 +73,11 @@ static IMP gOriginalInitIMP = NULL;
           @"Invalid parameter not satisfying: (index >= 0) && "
           @"(index < [_itemArray count])";
       if ([aReason isEqualToString:kNSMenuItemArrayBoundsCheck]) {
-        RecordExceptionEvent(EXCEPTION_MENU_ITEM_BOUNDS_CHECK);
         fatal = YES;
       }
 
       NSString* const kNoWindowCheck = @"View is not in any window";
       if ([aReason isEqualToString:kNoWindowCheck]) {
-        RecordExceptionEvent(EXCEPTION_VIEW_NOT_IN_WINDOW);
         fatal = YES;
       }
     }
@@ -121,17 +94,6 @@ static IMP gOriginalInitIMP = NULL;
           @"*** -[NSURL initFileURLWithPath:isDirectory:]: "
           @"nil string parameter";
       if ([aReason isEqualToString:kNSURLInitNilCheck]) {
-        RecordExceptionEvent(EXCEPTION_NSURL_INIT_NIL);
-        fatal = NO;
-      }
-
-      // TODO(shess): <http://crbug.com/316759> OSX 10.9 is failing
-      // trying to extract structure from a string.
-      NSString* const kNSDataDetectorNilCheck =
-          @"*** -[NSDataDetector enumerateMatchesInString:"
-          @"options:range:usingBlock:]: nil argument";
-      if ([aReason isEqualToString:kNSDataDetectorNilCheck]) {
-        RecordExceptionEvent(EXCEPTION_NSDATADETECTOR_NIL_STRING);
         fatal = NO;
       }
     }
@@ -145,12 +107,13 @@ static IMP gOriginalInitIMP = NULL;
     const bool allow = base::mac::GetNSExceptionsAllowed();
     if (fatal && !allow) {
       LOG(FATAL) << "Someone is trying to raise an exception!  "
-                 << value;
+                 << base::SysNSStringToUTF8(value);
     } else {
       // Make sure that developers see when their code throws
       // exceptions.
-      DCHECK(allow) << "Someone is trying to raise an exception!  "
-                    << value;
+      DLOG(ERROR) << "Someone is trying to raise an exception!  "
+                  << base::SysNSStringToUTF8(value);
+      DCHECK(allow);
     }
   }
 
@@ -243,21 +206,6 @@ void SwizzleInit() {
 
 }  // namespace
 
-// These methods are being exposed for the purposes of overriding.
-// Used to determine when a Panel window can become the key window.
-@interface NSApplication (PanelsCanBecomeKey)
-- (void)_cycleWindowsReversed:(BOOL)arg1;
-- (id)_removeWindow:(NSWindow*)window;
-- (id)_setKeyWindow:(NSWindow*)window;
-@end
-
-@interface BrowserCrApplication (PrivateInternal)
-
-// This must be called under the protection of previousKeyWindowsLock_.
-- (void)removePreviousKeyWindow:(NSWindow*)window;
-
-@end
-
 @implementation BrowserCrApplication
 
 + (void)initialize {
@@ -268,16 +216,9 @@ void SwizzleInit() {
 
 - (id)init {
   SwizzleInit();
-  self = [super init];
-
-  // Sanity check to alert if overridden methods are not supported.
-  DCHECK([NSApplication
-      instancesRespondToSelector:@selector(_cycleWindowsReversed:)]);
-  DCHECK([NSApplication
-      instancesRespondToSelector:@selector(_removeWindow:)]);
-  DCHECK([NSApplication
-      instancesRespondToSelector:@selector(_setKeyWindow:)]);
-
+  if ((self = [super init])) {
+    eventHooks_.reset([[NSMutableArray alloc] init]);
+  }
   return self;
 }
 
@@ -365,15 +306,14 @@ void SwizzleInit() {
 // Termination is cancelled by resetting this flag. The standard
 // |-applicationShouldTerminate:| is not supported, and code paths leading to it
 // must be redirected.
-//
-// When the last browser has been destroyed, the BrowserList calls
-// chrome::OnAppExiting(), which is the point of no return. That will cause
-// the NSApplicationWillTerminateNotification to be posted, which ends the
-// NSApplication event loop, so final post- MessageLoop::Run() work is done
-// before exiting.
 - (void)terminate:(id)sender {
   AppController* appController = static_cast<AppController*>([NSApp delegate]);
-  [appController tryToTerminateApplication:self];
+  if ([appController tryToTerminateApplication:self]) {
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:NSApplicationWillTerminateNotification
+                      object:self];
+  }
+
   // Return, don't exit. The application is responsible for exiting on its own.
 }
 
@@ -407,6 +347,7 @@ void SwizzleInit() {
   // When a Cocoa control is wired to a freed object, we get crashers
   // in the call to |super| with no useful information in the
   // backtrace.  Attempt to add some useful information.
+  static NSString* const kActionKey = @"sendaction";
 
   // If the action is something generic like -commandDispatch:, then
   // the tag is essential.
@@ -421,13 +362,11 @@ void SwizzleInit() {
   }
 
   NSString* actionString = NSStringFromSelector(anAction);
-  std::string value = base::StringPrintf("%s tag %ld sending %s to %p",
-      [[sender className] UTF8String],
-      static_cast<long>(tag),
-      [actionString UTF8String],
-      aTarget);
+  NSString* value =
+        [NSString stringWithFormat:@"%@ tag %d sending %@ to %p",
+                  [sender className], tag, actionString, aTarget];
 
-  base::debug::ScopedCrashKey key(crash_keys::mac::kSendAction, value);
+  base::mac::ScopedCrashKey key(kActionKey, value);
 
   // Certain third-party code, such as print drivers, can still throw
   // exceptions and Chromium cannot fix them.  This provides a way to
@@ -440,10 +379,18 @@ void SwizzleInit() {
   }
 
   // Minimize the window by keeping this close to the super call.
-  scoped_ptr<base::mac::ScopedNSExceptionEnabler> enabler;
+  scoped_ptr<base::mac::ScopedNSExceptionEnabler> enabler(NULL);
   if (enableNSExceptions)
     enabler.reset(new base::mac::ScopedNSExceptionEnabler());
   return [super sendAction:anAction to:aTarget from:sender];
+}
+
+- (void)addEventHook:(id<CrApplicationEventHookProtocol>)handler {
+  [eventHooks_ addObject:handler];
+}
+
+- (void)removeEventHook:(id<CrApplicationEventHookProtocol>)handler {
+  [eventHooks_ removeObject:handler];
 }
 
 - (BOOL)isHandlingSendEvent {
@@ -456,6 +403,9 @@ void SwizzleInit() {
 
 - (void)sendEvent:(NSEvent*)event {
   base::mac::ScopedSendingEvent sendingEventScoper;
+  for (id<CrApplicationEventHookProtocol> handler in eventHooks_.get()) {
+    [handler hookForEvent:event];
+  }
   [super sendEvent:event];
 }
 
@@ -492,41 +442,27 @@ void SwizzleInit() {
     // is tracked because it may be the one which caused the system to
     // go off the rails.  The last exception thrown is tracked because
     // it may be the one most directly associated with the crash.
+    static NSString* const kFirstExceptionKey = @"firstexception";
     static BOOL trackedFirstException = NO;
+    static NSString* const kLastExceptionKey = @"lastexception";
 
-    const char* const kExceptionKey =
-        trackedFirstException ? crash_keys::mac::kLastNSException
-                              : crash_keys::mac::kFirstNSException;
+    // TODO(shess): It would be useful to post some stacktrace info
+    // from the exception.
+    // 10.6 has -[NSException callStackSymbols]
+    // 10.5 has -[NSException callStackReturnAddresses]
+    // 10.5 has backtrace_symbols().
+    // I've tried to combine the latter two, but got nothing useful.
+    // The addresses are right, though, maybe we could train the crash
+    // server to decode them for us.
+
     NSString* value = [NSString stringWithFormat:@"%@ reason %@",
                                 [anException name], [anException reason]];
-    base::debug::SetCrashKeyValue(kExceptionKey, [value UTF8String]);
-
-    // Encode the callstack from point of throw.
-    // TODO(shess): Our swizzle plus the 23-frame limit plus Cocoa
-    // overhead may make this less than useful.  If so, perhaps skip
-    // some items and/or use two keys.
-    const char* const kExceptionBtKey =
-        trackedFirstException ? crash_keys::mac::kLastNSExceptionTrace
-                              : crash_keys::mac::kFirstNSExceptionTrace;
-    NSArray* addressArray = [anException callStackReturnAddresses];
-    NSUInteger addressCount = [addressArray count];
-    if (addressCount) {
-      // SetCrashKeyFromAddresses() only encodes 23, so that's a natural limit.
-      const NSUInteger kAddressCountMax = 23;
-      void* addresses[kAddressCountMax];
-      if (addressCount > kAddressCountMax)
-        addressCount = kAddressCountMax;
-
-      for (NSUInteger i = 0; i < addressCount; ++i) {
-        addresses[i] = reinterpret_cast<void*>(
-            [[addressArray objectAtIndex:i] unsignedIntegerValue]);
-      }
-      base::debug::SetCrashKeyFromAddresses(
-          kExceptionBtKey, addresses, static_cast<size_t>(addressCount));
+    if (!trackedFirstException) {
+      base::mac::SetCrashKeyValue(kFirstExceptionKey, value);
+      trackedFirstException = YES;
     } else {
-      base::debug::ClearCrashKey(kExceptionBtKey);
+      base::mac::SetCrashKeyValue(kLastExceptionKey, value);
     }
-    trackedFirstException = YES;
 
     reportingException = NO;
   }
@@ -537,78 +473,19 @@ void SwizzleInit() {
 - (void)accessibilitySetValue:(id)value forAttribute:(NSString*)attribute {
   if ([attribute isEqualToString:@"AXEnhancedUserInterface"] &&
       [value intValue] == 1) {
-    content::BrowserAccessibilityState::GetInstance()->OnScreenReaderDetected();
-    for (TabContentsIterator it; !it.done(); it.Next()) {
-      if (content::WebContents* contents = *it)
-        if (content::RenderViewHost* rvh = contents->GetRenderViewHost())
-          rvh->EnableFullAccessibilityMode();
+    BrowserAccessibilityState::GetInstance()->OnScreenReaderDetected();
+    for (TabContentsIterator it;
+         !it.done();
+         ++it) {
+      if (TabContentsWrapper* contents = *it) {
+        if (RenderViewHost* rvh =
+                contents->web_contents()->GetRenderViewHost()) {
+          rvh->EnableRendererAccessibility();
+        }
+      }
     }
   }
   return [super accessibilitySetValue:value forAttribute:attribute];
-}
-
-- (void)_cycleWindowsReversed:(BOOL)arg1 {
-  base::AutoReset<BOOL> pin(&cyclingWindows_, YES);
-  [super _cycleWindowsReversed:arg1];
-}
-
-- (BOOL)isCyclingWindows {
-  return cyclingWindows_;
-}
-
-- (id)_removeWindow:(NSWindow*)window {
-  {
-    base::AutoLock lock(previousKeyWindowsLock_);
-    [self removePreviousKeyWindow:window];
-  }
-  id result = [super _removeWindow:window];
-
-  // Ensure app has a key window after a window is removed.
-  // OS wants to make a panel browser window key after closing an app window
-  // because panels use a higher priority window level, but panel windows may
-  // refuse to become key, leaving the app with no key window. The OS does
-  // not seem to consider other windows after the first window chosen refuses
-  // to become key. Force consideration of other windows here.
-  if ([self isActive] && [self keyWindow] == nil) {
-    NSWindow* key =
-        [self makeWindowsPerform:@selector(canBecomeKeyWindow) inOrder:YES];
-    [key makeKeyWindow];
-  }
-
-  // Return result from the super class. It appears to be the app that
-  // owns the removed window (determined via experimentation).
-  return result;
-}
-
-- (id)_setKeyWindow:(NSWindow*)window {
-  // |window| is nil when the current key window is being closed.
-  // A separate call follows with a new value when a new key window is set.
-  // Closed windows are not tracked in previousKeyWindows_.
-  if (window != nil) {
-    base::AutoLock lock(previousKeyWindowsLock_);
-    [self removePreviousKeyWindow:window];
-    NSWindow* currentKeyWindow = [self keyWindow];
-    if (currentKeyWindow != nil && currentKeyWindow != window)
-      previousKeyWindows_.push_back(currentKeyWindow);
-  }
-
-  return [super _setKeyWindow:window];
-}
-
-- (NSWindow*)previousKeyWindow {
-  base::AutoLock lock(previousKeyWindowsLock_);
-  return previousKeyWindows_.empty() ? nil : previousKeyWindows_.back();
-}
-
-- (void)removePreviousKeyWindow:(NSWindow*)window {
-  previousKeyWindowsLock_.AssertAcquired();
-  std::vector<NSWindow*>::iterator window_iterator =
-      std::find(previousKeyWindows_.begin(),
-                previousKeyWindows_.end(),
-                window);
-  if (window_iterator != previousKeyWindows_.end()) {
-    previousKeyWindows_.erase(window_iterator);
-  }
 }
 
 @end

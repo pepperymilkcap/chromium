@@ -1,19 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/tests/test_tcp_socket_private_disallowed.h"
 
 #include "ppapi/cpp/module.h"
-#include "ppapi/tests/test_utils.h"
 #include "ppapi/tests/testing_instance.h"
-
-namespace {
-
-const char kServerName[] = "www.google.com";
-const int kPort = 80;
-
-}
 
 REGISTER_TEST_CASE(TCPSocketPrivateDisallowed);
 
@@ -31,19 +23,15 @@ bool TestTCPSocketPrivateDisallowed::Init() {
 }
 
 void TestTCPSocketPrivateDisallowed::RunTests(const std::string& filter) {
-  RUN_TEST(Connect, filter);
+  RUN_TEST(Create, filter);
 }
 
-std::string TestTCPSocketPrivateDisallowed::TestConnect() {
+std::string TestTCPSocketPrivateDisallowed::TestCreate() {
   PP_Resource socket =
       tcp_socket_private_interface_->Create(instance_->pp_instance());
   if (0 != socket) {
-    TestCompletionCallback callback(instance_->pp_instance());
-    callback.WaitForResult(tcp_socket_private_interface_->Connect(
-        socket, kServerName, kPort,
-        callback.GetCallback().pp_completion_callback()));
-    CHECK_CALLBACK_BEHAVIOR(callback);
-    ASSERT_EQ(PP_ERROR_FAILED, callback.result());
+    return "PPB_TCPSocket_Private::Create returns valid socket " \
+        "without allowing switch";
   }
   PASS();
 }

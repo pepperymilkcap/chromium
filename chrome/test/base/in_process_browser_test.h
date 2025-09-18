@@ -1,32 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_BASE_IN_PROCESS_BROWSER_TEST_H_
 #define CHROME_TEST_BASE_IN_PROCESS_BROWSER_TEST_H_
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/scoped_temp_dir.h"
 #include "content/public/common/page_transition_types.h"
-#include "content/public/test/browser_test.h"
-#include "content/public/test/browser_test_base.h"
+#include "content/test/browser_test.h"
+#include "content/test/browser_test_base.h"
+#include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace base {
-#if defined(OS_MACOSX)
-namespace mac {
-class ScopedNSAutoreleasePool;
-}  // namespace mac
-#endif  // defined(OS_MACOSX)
-
-#if defined(OS_WIN) && defined(USE_AURA)
-namespace win {
-class ScopedCOMInitializer;
-}
-#endif  // defined(OS_WIN) && defined(USE_AURA)
-}  // namespace base
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#endif  // defined(OS_CHROMEOS)
 
 class Browser;
 class CommandLine;
@@ -34,6 +26,11 @@ class Profile;
 
 namespace content {
 class ContentRendererClient;
+class ResourceContext;
+}
+
+namespace net {
+class RuleBasedHostResolverProc;
 }
 
 // Base class for tests wanting to bring up a browser in the unit test process.
@@ -44,9 +41,9 @@ class ContentRendererClient;
 // . Your test method is invoked on the ui thread. If you need to block until
 //   state changes you'll need to run the message loop from your test method.
 //   For example, if you need to wait till a find bar has completely been shown
-//   you'll need to invoke content::RunMessageLoop. When the message bar is
-//   shown, invoke MessageLoop::current()->Quit() to return control back to your
-//   test method.
+//   you'll need to invoke ui_test_utils::RunMessageLoop. When the message bar
+//   is shown, invoke MessageLoop::current()->Quit() to return control back to
+//   your test method.
 // . If you subclass and override SetUp, be sure and invoke
 //   InProcessBrowserTest::SetUp. (But see also SetUpOnMainThread,
 //   SetUpInProcessBrowserTestFixture and other related hook methods for a
@@ -76,20 +73,7 @@ class ContentRendererClient;
 // InProcessBrowserTest disables the sandbox when running.
 //
 // See ui_test_utils for a handful of methods designed for use with this class.
-//
-// It's possible to write browser tests that span a restart by splitting each
-// run of the browser process into a separate test. Example:
-//
-// IN_PROC_BROWSER_TEST_F(Foo, PRE_Bar) {
-//   do something
-// }
-//
-// IN_PROC_BROWSER_TEST_F(Foo, Bar) {
-//   verify something persisted from before
-// }
-//
-//  This is recursive, so PRE_PRE_Bar would run before PRE_BAR.
-class InProcessBrowserTest : public content::BrowserTestBase {
+class InProcessBrowserTest : public BrowserTestBase {
  public:
   InProcessBrowserTest();
   virtual ~InProcessBrowserTest();
@@ -105,6 +89,10 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // Returns the browser created by CreateBrowser.
   Browser* browser() const { return browser_; }
 
+  // Returns the ResourceContext from browser_. Needed because tests in content
+  // don't have access to Profile.
+  const content::ResourceContext& GetResourceContext();
+
   // Convenience methods for adding tabs to a Browser.
   void AddTabAtIndexToBrowser(Browser* browser,
                               int index,
@@ -113,12 +101,23 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   void AddTabAtIndex(int index, const GURL& url,
                      content::PageTransition transition);
 
+  // Adds a selected tab at |index| to |url| with the specified |transition|.
+  void AddTabAt(int index, const GURL& url, content::PageTransition transition);
+
+  // Override this to add any custom setup code that needs to be done on the
+  // main thread after the browser is created and just before calling
+  // RunTestOnMainThread().
+  virtual void SetUpOnMainThread() {}
+
   // Initializes the contents of the user data directory. Called by SetUp()
   // after creating the user data directory, but before any browser is launched.
   // If a test wishes to set up some initial non-empty state in the user data
   // directory before the browser starts up, it can do so here. Returns true if
   // successful.
   virtual bool SetUpUserDataDirectory() WARN_UNUSED_RESULT;
+
+  // Override this to add command line flags specific to your test.
+  virtual void SetUpCommandLine(CommandLine* command_line) {}
 
   // Override this to add any custom cleanup code that needs to be done on the
   // main thread before the browser is torn down.
@@ -127,51 +126,38 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // BrowserTestBase:
   virtual void RunTestOnMainThreadLoop() OVERRIDE;
 
+  // Returns the testing server. Guaranteed to be non-NULL.
+  net::TestServer* test_server() { return test_server_.get(); }
+
   // Creates a browser with a single tab (about:blank), waits for the tab to
   // finish loading and shows the browser.
   //
   // This is invoked from Setup.
-  Browser* CreateBrowser(Profile* profile);
+  virtual Browser* CreateBrowser(Profile* profile);
 
   // Similar to |CreateBrowser|, but creates an incognito browser.
-  Browser* CreateIncognitoBrowser();
+  virtual Browser* CreateIncognitoBrowser();
 
   // Creates a browser for a popup window with a single tab (about:blank), waits
   // for the tab to finish loading, and shows the browser.
   Browser* CreateBrowserForPopup(Profile* profile);
 
-  // Creates a browser for an application and waits for it to load and shows
-  // the browser.
-  Browser* CreateBrowserForApp(const std::string& app_name, Profile* profile);
-
   // Called from the various CreateBrowser methods to add a blank tab, wait for
   // the navigation to complete, and show the browser's window.
   void AddBlankTabAndShow(Browser* browser);
 
-#if !defined OS_MACOSX
-  // Return a CommandLine object that is used to relaunch the browser_test
-  // binary as a browser process. This function is deliberately not defined on
-  // the Mac because re-using an existing browser process when launching from
-  // the command line isn't a concept that we support on the Mac; AppleEvents
-  // are the Mac solution for the same need. Any test based on these functions
-  // doesn't apply to the Mac.
-  CommandLine GetCommandLineForRelaunch();
-#endif
-
-#if defined(OS_MACOSX)
-  // Returns the autorelease pool in use inside RunTestOnMainThreadLoop().
-  base::mac::ScopedNSAutoreleasePool* AutoreleasePool() const {
-    return autorelease_pool_;
-  }
-#endif  // OS_MACOSX
-
-  void set_exit_when_last_browser_closes(bool value) {
-    exit_when_last_browser_closes_ = value;
+  // Returns the host resolver being used for the tests. Subclasses might want
+  // to configure it inside tests.
+  net::RuleBasedHostResolverProc* host_resolver() {
+    return host_resolver_.get();
   }
 
-  // This must be called before RunTestOnMainThreadLoop() to have any effect.
-  void set_multi_desktop_test(bool multi_desktop_test) {
-    multi_desktop_test_ = multi_desktop_test;
+  // Sets some test states (see below for comments).  Call this in your test
+  // constructor.
+  void set_show_window(bool show) { show_window_ = show; }
+  void EnableDOMAutomation() { dom_automation_enabled_ = true; }
+  void EnableTabCloseableStateWatcher() {
+    tab_closeable_state_watcher_enabled_ = true;
   }
 
  private:
@@ -189,24 +175,33 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // Browser created from CreateBrowser.
   Browser* browser_;
 
+  // Testing server, started on demand.
+  scoped_ptr<net::TestServer> test_server_;
+
+  // ContentRendererClient when running in single-process mode.
+  scoped_ptr<content::ContentRendererClient> single_process_renderer_client_;
+
+  // Whether this test requires the browser windows to be shown (interactive
+  // tests for example need the windows shown).
+  bool show_window_;
+
+  // Whether the JavaScript can access the DOMAutomationController (a JS object
+  // that can send messages back to the browser).
+  bool dom_automation_enabled_;
+
+  // Whether this test requires the TabCloseableStateWatcher.
+  bool tab_closeable_state_watcher_enabled_;
+
+  // Host resolver to use during the test.
+  scoped_refptr<net::RuleBasedHostResolverProc> host_resolver_;
+
   // Temporary user data directory. Used only when a user data directory is not
   // specified in the command line.
-  base::ScopedTempDir temp_user_data_dir_;
+  ScopedTempDir temp_user_data_dir_;
 
-  // True if we should exit the tests after the last browser instance closes.
-  bool exit_when_last_browser_closes_;
-
-  // True if this is a multi-desktop test (in which case this browser test will
-  // not ensure that Browsers are only created on the tested desktop).
-  bool multi_desktop_test_;
-
-#if defined(OS_MACOSX)
-  base::mac::ScopedNSAutoreleasePool* autorelease_pool_;
-#endif  // OS_MACOSX
-
-#if defined(OS_WIN) && defined(USE_AURA)
-  scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_;
-#endif
+#if defined(OS_CHROMEOS)
+  chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
+#endif  // defined(OS_CHROMEOS)
 };
 
 #endif  // CHROME_TEST_BASE_IN_PROCESS_BROWSER_TEST_H_

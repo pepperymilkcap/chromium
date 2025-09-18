@@ -4,6 +4,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_LZMA_UTIL_H_
 #define CHROME_INSTALLER_UTIL_LZMA_UTIL_H_
+#pragma once
 
 #include <windows.h>
 
@@ -12,9 +13,7 @@
 
 #include "base/basictypes.h"
 
-namespace base {
 class FilePath;
-}
 
 // This is a utility class that acts as a wrapper around LZMA SDK library
 class LzmaUtil {
@@ -42,7 +41,7 @@ class LzmaUtil {
   void CloseArchive();
 
  protected:
-  bool CreateDirectory(const base::FilePath& dir);
+  bool CreateDirectory(const FilePath& dir);
 
  private:
   HANDLE archive_handle_;

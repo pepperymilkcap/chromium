@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,10 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/stringprintf.h"
-#include "base/time/time.h"
-#include "net/base/load_flags.h"
-#include "net/base/load_timing_info.h"
+#include "base/message_loop.h"
+#include "base/stringprintf.h"
 #include "net/base/net_errors.h"
+#include "net/base/load_flags.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_request_info.h"
@@ -40,8 +38,7 @@ const MockTransaction kSimpleGET_Transaction = {
   "<html><body>Google Blah Blah</body></html>",
   TEST_MODE_NORMAL,
   NULL,
-  0,
-  net::OK
+  0
 };
 
 const MockTransaction kSimplePOST_Transaction = {
@@ -56,8 +53,7 @@ const MockTransaction kSimplePOST_Transaction = {
   "<html><body>Google Blah Blah</body></html>",
   TEST_MODE_NORMAL,
   NULL,
-  0,
-  net::OK
+  0
 };
 
 const MockTransaction kTypicalGET_Transaction = {
@@ -73,8 +69,7 @@ const MockTransaction kTypicalGET_Transaction = {
   "<html><body>Google Blah Blah</body></html>",
   TEST_MODE_NORMAL,
   NULL,
-  0,
-  net::OK
+  0
 };
 
 const MockTransaction kETagGET_Transaction = {
@@ -85,13 +80,12 @@ const MockTransaction kETagGET_Transaction = {
   net::LOAD_NORMAL,
   "HTTP/1.1 200 OK",
   "Cache-Control: max-age=10000\n"
-  "Etag: \"foopy\"\n",
+  "Etag: foopy\n",
   base::Time(),
   "<html><body>Google Blah Blah</body></html>",
   TEST_MODE_NORMAL,
   NULL,
-  0,
-  net::OK
+  0
 };
 
 const MockTransaction kRangeGET_Transaction = {
@@ -106,8 +100,7 @@ const MockTransaction kRangeGET_Transaction = {
   "<html><body>Google Blah Blah</body></html>",
   TEST_MODE_NORMAL,
   NULL,
-  0,
-  net::OK
+  0
 };
 
 static const MockTransaction* const kBuiltinMockTransactions[] = {
@@ -153,11 +146,12 @@ MockHttpRequest::MockHttpRequest(const MockTransaction& t) {
 int TestTransactionConsumer::quit_counter_ = 0;
 
 TestTransactionConsumer::TestTransactionConsumer(
-    net::RequestPriority priority,
     net::HttpTransactionFactory* factory)
-    : state_(IDLE), error_(net::OK) {
+    : state_(IDLE),
+      trans_(NULL),
+      error_(net::OK) {
   // Disregard the error code.
-  factory->CreateTransaction(priority, &trans_);
+  factory->CreateTransaction(&trans_);
   ++quit_counter_;
 }
 
@@ -195,14 +189,13 @@ void TestTransactionConsumer::DidFinish(int result) {
   state_ = DONE;
   error_ = result;
   if (--quit_counter_ == 0)
-    base::MessageLoop::current()->Quit();
+    MessageLoop::current()->Quit();
 }
 
 void TestTransactionConsumer::Read() {
   state_ = READING;
   read_buf_ = new net::IOBuffer(1024);
-  int result = trans_->Read(read_buf_.get(),
-                            1024,
+  int result = trans_->Read(read_buf_, 1024,
                             base::Bind(&TestTransactionConsumer::OnIOComplete,
                                        base::Unretained(this)));
   if (result != net::ERR_IO_PENDING)
@@ -222,17 +215,10 @@ void TestTransactionConsumer::OnIOComplete(int result) {
   }
 }
 
-MockNetworkTransaction::MockNetworkTransaction(
-    net::RequestPriority priority,
-    MockNetworkLayer* factory)
-    : weak_factory_(this),
-      request_(NULL),
+MockNetworkTransaction::MockNetworkTransaction(MockNetworkLayer* factory)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       data_cursor_(0),
-      priority_(priority),
-      websocket_handshake_stream_create_helper_(NULL),
-      transaction_factory_(factory->AsWeakPtr()),
-      received_bytes_(0),
-      socket_log_id_(net::NetLog::Source::kInvalidId) {
+      transaction_factory_(factory->AsWeakPtr()) {
 }
 
 MockNetworkTransaction::~MockNetworkTransaction() {}
@@ -240,11 +226,40 @@ MockNetworkTransaction::~MockNetworkTransaction() {}
 int MockNetworkTransaction::Start(const net::HttpRequestInfo* request,
                                   const net::CompletionCallback& callback,
                                   const net::BoundNetLog& net_log) {
-  if (request_)
+  const MockTransaction* t = FindMockTransaction(request->url);
+  if (!t)
     return net::ERR_FAILED;
 
-  request_ = request;
-  return StartInternal(request, callback, net_log);
+  std::string resp_status = t->status;
+  std::string resp_headers = t->response_headers;
+  std::string resp_data = t->data;
+  if (t->handler)
+    (t->handler)(request, &resp_status, &resp_headers, &resp_data);
+
+  std::string header_data = base::StringPrintf(
+      "%s\n%s\n", resp_status.c_str(), resp_headers.c_str());
+  std::replace(header_data.begin(), header_data.end(), '\n', '\0');
+
+  response_.request_time = base::Time::Now();
+  if (!t->request_time.is_null())
+    response_.request_time = t->request_time;
+
+  response_.was_cached = false;
+
+  response_.response_time = base::Time::Now();
+  if (!t->response_time.is_null())
+    response_.response_time = t->response_time;
+
+  response_.headers = new net::HttpResponseHeaders(header_data);
+  response_.ssl_info.cert_status = t->cert_status;
+  data_ = resp_data;
+  test_mode_ = t->test_mode;
+
+  if (test_mode_ & TEST_MODE_SYNC_NET_START)
+    return net::OK;
+
+  CallbackLater(callback, net::OK);
+  return net::ERR_IO_PENDING;
 }
 
 int MockNetworkTransaction::RestartIgnoringLastError(
@@ -261,24 +276,11 @@ int MockNetworkTransaction::RestartWithCertificate(
 int MockNetworkTransaction::RestartWithAuth(
     const net::AuthCredentials& credentials,
     const net::CompletionCallback& callback) {
-  if (!IsReadyToRestartForAuth())
-    return net::ERR_FAILED;
-
-  net::HttpRequestInfo auth_request_info = *request_;
-  auth_request_info.extra_headers.AddHeaderFromString("Authorization: Bar");
-
-  // Let the MockTransactionHandler worry about this: the only way for this
-  // test to succeed is by using an explicit handler for the transaction so
-  // that server behavior can be simulated.
-  return StartInternal(&auth_request_info, callback, net::BoundNetLog());
+  return net::ERR_FAILED;
 }
 
 bool MockNetworkTransaction::IsReadyToRestartForAuth() {
-  if (!request_)
-    return false;
-
-  // Only mock auth when the test asks for it.
-  return request_->extra_headers.HasHeader("X-Require-Mock-Auth");
+  return false;
 }
 
 int MockNetworkTransaction::Read(net::IOBuffer* buf, int buf_len,
@@ -298,17 +300,8 @@ int MockNetworkTransaction::Read(net::IOBuffer* buf, int buf_len,
 
 void MockNetworkTransaction::StopCaching() {}
 
-bool MockNetworkTransaction::GetFullRequestHeaders(
-    net::HttpRequestHeaders* headers) const {
-  return false;
-}
-
-int64 MockNetworkTransaction::GetTotalReceivedBytes() const {
-  return received_bytes_;
-}
-
 void MockNetworkTransaction::DoneReading() {
-  if (transaction_factory_.get())
+  if (transaction_factory_)
     transaction_factory_->TransactionDoneReading();
 }
 
@@ -322,99 +315,13 @@ net::LoadState MockNetworkTransaction::GetLoadState() const {
   return net::LOAD_STATE_IDLE;
 }
 
-net::UploadProgress MockNetworkTransaction::GetUploadProgress() const {
-  return net::UploadProgress();
-}
-
-bool MockNetworkTransaction::GetLoadTimingInfo(
-    net::LoadTimingInfo* load_timing_info) const {
-  if (socket_log_id_ != net::NetLog::Source::kInvalidId) {
-    // The minimal set of times for a request that gets a response, assuming it
-    // gets a new socket.
-    load_timing_info->socket_reused = false;
-    load_timing_info->socket_log_id = socket_log_id_;
-    load_timing_info->connect_timing.connect_start = base::TimeTicks::Now();
-    load_timing_info->connect_timing.connect_end = base::TimeTicks::Now();
-    load_timing_info->send_start = base::TimeTicks::Now();
-    load_timing_info->send_end = base::TimeTicks::Now();
-  } else {
-    // If there's no valid socket ID, just use the generic socket reused values.
-    // No tests currently depend on this, just should not match the values set
-    // by a cache hit.
-    load_timing_info->socket_reused = true;
-    load_timing_info->send_start = base::TimeTicks::Now();
-    load_timing_info->send_end = base::TimeTicks::Now();
-  }
-  return true;
-}
-
-void MockNetworkTransaction::SetPriority(net::RequestPriority priority) {
-  priority_ = priority;
-}
-
-void MockNetworkTransaction::SetWebSocketHandshakeStreamCreateHelper(
-    net::WebSocketHandshakeStreamBase::CreateHelper* create_helper) {
-  websocket_handshake_stream_create_helper_ = create_helper;
-}
-
-int MockNetworkTransaction::StartInternal(
-    const net::HttpRequestInfo* request,
-    const net::CompletionCallback& callback,
-    const net::BoundNetLog& net_log) {
-  const MockTransaction* t = FindMockTransaction(request->url);
-  if (!t)
-    return net::ERR_FAILED;
-
-  test_mode_ = t->test_mode;
-
-  // Return immediately if we're returning an error.
-  if (net::OK != t->return_code) {
-    if (test_mode_ & TEST_MODE_SYNC_NET_START)
-      return t->return_code;
-    CallbackLater(callback, t->return_code);
-    return net::ERR_IO_PENDING;
-  }
-
-  std::string resp_status = t->status;
-  std::string resp_headers = t->response_headers;
-  std::string resp_data = t->data;
-  received_bytes_ = resp_status.size() + resp_headers.size() + resp_data.size();
-  if (t->handler)
-    (t->handler)(request, &resp_status, &resp_headers, &resp_data);
-
-  std::string header_data = base::StringPrintf(
-      "%s\n%s\n", resp_status.c_str(), resp_headers.c_str());
-  std::replace(header_data.begin(), header_data.end(), '\n', '\0');
-
-  response_.request_time = base::Time::Now();
-  if (!t->request_time.is_null())
-    response_.request_time = t->request_time;
-
-  response_.was_cached = false;
-  response_.network_accessed = true;
-
-  response_.response_time = base::Time::Now();
-  if (!t->response_time.is_null())
-    response_.response_time = t->response_time;
-
-  response_.headers = new net::HttpResponseHeaders(header_data);
-  response_.vary_data.Init(*request, *response_.headers.get());
-  response_.ssl_info.cert_status = t->cert_status;
-  data_ = resp_data;
-
-  if (net_log.net_log())
-    socket_log_id_ = net_log.net_log()->NextID();
-
-  if (test_mode_ & TEST_MODE_SYNC_NET_START)
-    return net::OK;
-
-  CallbackLater(callback, net::OK);
-  return net::ERR_IO_PENDING;
+uint64 MockNetworkTransaction::GetUploadProgress() const {
+  return 0;
 }
 
 void MockNetworkTransaction::CallbackLater(
     const net::CompletionCallback& callback, int result) {
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&MockNetworkTransaction::RunCallback,
                             weak_factory_.GetWeakPtr(), callback, result));
 }
@@ -425,9 +332,7 @@ void MockNetworkTransaction::RunCallback(
 }
 
 MockNetworkLayer::MockNetworkLayer()
-    : transaction_count_(0),
-      done_reading_called_(false),
-      last_create_transaction_priority_(net::DEFAULT_PRIORITY) {}
+    : transaction_count_(0), done_reading_called_(false) {}
 
 MockNetworkLayer::~MockNetworkLayer() {}
 
@@ -436,14 +341,9 @@ void MockNetworkLayer::TransactionDoneReading() {
 }
 
 int MockNetworkLayer::CreateTransaction(
-    net::RequestPriority priority,
     scoped_ptr<net::HttpTransaction>* trans) {
   transaction_count_++;
-  last_create_transaction_priority_ = priority;
-  scoped_ptr<MockNetworkTransaction> mock_transaction(
-      new MockNetworkTransaction(priority, this));
-  last_transaction_ = mock_transaction->AsWeakPtr();
-  *trans = mock_transaction.Pass();
+  trans->reset(new MockNetworkTransaction(this));
   return net::OK;
 }
 
@@ -466,7 +366,7 @@ int ReadTransaction(net::HttpTransaction* trans, std::string* result) {
   std::string content;
   do {
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
-    rv = trans->Read(buf.get(), 256, callback.callback());
+    rv = trans->Read(buf, 256, callback.callback());
     if (rv == net::ERR_IO_PENDING)
       rv = callback.WaitForResult();
 

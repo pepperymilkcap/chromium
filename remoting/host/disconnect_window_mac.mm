@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,35 +6,22 @@
 
 #import "remoting/host/disconnect_window_mac.h"
 
-#include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/i18n/rtl.h"
-#include "base/memory/weak_ptr.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "remoting/base/string_resources.h"
-#include "remoting/host/client_session_control.h"
-#include "remoting/host/host_window.h"
-#include "ui/base/l10n/l10n_util_mac.h"
-
-@interface DisconnectWindowController()
-- (BOOL)isRToL;
-- (void)Hide;
-@end
-
-const int kMaximumConnectedNameWidthInPixels = 600;
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
+#include "remoting/host/chromoting_host.h"
+#include "remoting/host/disconnect_window.h"
 
 namespace remoting {
 
-class DisconnectWindowMac : public HostWindow {
+class DisconnectWindowMac : public remoting::DisconnectWindow {
  public:
   DisconnectWindowMac();
   virtual ~DisconnectWindowMac();
 
-  // HostWindow overrides.
-  virtual void Start(
-      const base::WeakPtr<ClientSessionControl>& client_session_control)
-      OVERRIDE;
+  virtual void Show(remoting::ChromotingHost* host,
+                    const std::string& username) OVERRIDE;
+  virtual void Hide() OVERRIDE;
 
  private:
   DisconnectWindowController* window_controller_;
@@ -47,73 +34,85 @@ DisconnectWindowMac::DisconnectWindowMac()
 }
 
 DisconnectWindowMac::~DisconnectWindowMac() {
-  DCHECK(CalledOnValidThread());
-
-  // DisconnectWindowController is responsible for releasing itself in its
-  // windowWillClose: method.
-  [window_controller_ Hide];
-  window_controller_ = nil;
+  [window_controller_ close];
 }
 
-void DisconnectWindowMac::Start(
-    const base::WeakPtr<ClientSessionControl>& client_session_control) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(client_session_control);
-  DCHECK(window_controller_ == nil);
-
-  // Create the window.
-  base::Closure disconnect_callback =
-      base::Bind(&ClientSessionControl::DisconnectSession,
-                 client_session_control);
-  std::string client_jid = client_session_control->client_jid();
-  std::string username = client_jid.substr(0, client_jid.find('/'));
+void DisconnectWindowMac::Show(remoting::ChromotingHost* host,
+                               const std::string& username) {
+  CHECK(window_controller_ == nil);
+  NSString* nsUsername = base::SysUTF8ToNSString(username);
   window_controller_ =
-      [[DisconnectWindowController alloc] initWithCallback:disconnect_callback
-                                                  username:username];
+      [[DisconnectWindowController alloc] initWithHost:host
+                                              username:nsUsername];
   [window_controller_ showWindow:nil];
 }
 
-// static
-scoped_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
-  return scoped_ptr<HostWindow>(new DisconnectWindowMac());
+void DisconnectWindowMac::Hide() {
+  // DisconnectWindowController is responsible for releasing itself in its
+  // windowWillClose: method.
+  [window_controller_ close];
+  window_controller_ = nil;
+}
+
+remoting::DisconnectWindow* remoting::DisconnectWindow::Create() {
+  return new DisconnectWindowMac;
 }
 
 }  // namespace remoting
 
+@interface DisconnectWindowController()
+@property (nonatomic, assign) remoting::ChromotingHost* host;
+@property (nonatomic, copy) NSString* username;
+
+- (BOOL)isRToL;
+
+@end
+
 @implementation DisconnectWindowController
-- (id)initWithCallback:(const base::Closure&)disconnect_callback
-              username:(const std::string&)username {
+
+@synthesize host = host_;
+@synthesize username = username_;
+
+- (id)initWithHost:(remoting::ChromotingHost*)host
+          username:(NSString*)username {
   self = [super initWithWindowNibName:@"disconnect_window"];
   if (self) {
-    disconnect_callback_ = disconnect_callback;
-    username_ = base::UTF8ToUTF16(username);
+    host_ = host;
+    username_ = [username copy];
   }
   return self;
 }
 
 - (void)dealloc {
+  [username_ release];
   [super dealloc];
 }
 
 - (IBAction)stopSharing:(id)sender {
-  if (!disconnect_callback_.is_null()) {
-    disconnect_callback_.Run();
+  if (self.host) {
+    self.host->Shutdown(base::Closure());
+    self.host = NULL;
   }
 }
 
 - (BOOL)isRToL {
-  return base::i18n::IsRTL();
+  return host_->ui_strings().direction == remoting::UiStrings::RTL;
 }
 
-- (void)Hide {
-  disconnect_callback_.Reset();
-  [self close];
+- (void)close {
+  self.host = NULL;
+  [super close];
 }
 
 - (void)windowDidLoad {
-  [connectedToField_ setStringValue:l10n_util::GetNSStringF(IDR_MESSAGE_SHARED,
-                                                            username_)];
-  [disconnectButton_ setTitle:l10n_util::GetNSString(IDR_STOP_SHARING_BUTTON)];
+  string16 text = ReplaceStringPlaceholders(
+      host_->ui_strings().disconnect_message,
+      base::SysNSStringToUTF16(self.username),
+      NULL);
+  [connectedToField_ setStringValue:base::SysUTF16ToNSString(text)];
+
+  [disconnectButton_ setTitle:base::SysUTF16ToNSString(
+      host_->ui_strings().disconnect_button_text_plus_shortcut)];
 
   // Resize the window dynamically based on the content.
   CGFloat oldConnectedWidth = NSWidth([connectedToField_ bounds]);
@@ -122,8 +121,10 @@ scoped_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
   CGFloat newConnectedWidth = NSWidth(connectedToFrame);
 
   // Set a max width for the connected to text field.
-  if (newConnectedWidth > kMaximumConnectedNameWidthInPixels) {
-    newConnectedWidth = kMaximumConnectedNameWidthInPixels;
+  if (newConnectedWidth >
+      remoting::DisconnectWindow::kMaximumConnectedNameWidthInPixels) {
+    newConnectedWidth
+        = remoting::DisconnectWindow::kMaximumConnectedNameWidthInPixels;
     connectedToFrame.size.width = newConnectedWidth;
     [connectedToField_ setFrame:connectedToFrame];
   }
@@ -178,7 +179,7 @@ scoped_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
 @implementation DisconnectWindow
 
 - (id)initWithContentRect:(NSRect)contentRect
-                styleMask:(NSUInteger)aStyle
+                styleMask:(unsigned int)aStyle
                   backing:(NSBackingStoreType)bufferingType
                   defer:(BOOL)flag {
   // Pass NSBorderlessWindowMask for the styleMask to remove the title bar.

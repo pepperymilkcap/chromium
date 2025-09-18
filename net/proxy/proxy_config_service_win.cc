@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/string_tokenizer.h"
+#include "base/string_util.h"
 #include "base/stl_util.h"
-#include "base/strings/string_util.h"
-#include "base/strings/string_tokenizer.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/win/registry.h"
 #include "net/base/net_errors.h"
@@ -159,7 +159,6 @@ void ProxyConfigServiceWin::GetCurrentProxyConfig(ProxyConfig* config) {
     LOG(ERROR) << "WinHttpGetIEProxyConfigForCurrentUser failed: " <<
         GetLastError();
     *config = ProxyConfig::CreateDirect();
-    config->set_source(PROXY_CONFIG_SOURCE_SYSTEM_FAILED);
     return;
   }
   SetFromIEConfig(config, ie_config);
@@ -180,7 +179,7 @@ void ProxyConfigServiceWin::SetFromIEConfig(
   if (ie_config.lpszProxyBypass) {
     std::string proxy_bypass = WideToASCII(ie_config.lpszProxyBypass);
 
-    base::StringTokenizer proxy_server_bypass_list(proxy_bypass, ";, \t\n\r");
+    StringTokenizer proxy_server_bypass_list(proxy_bypass, ";, \t\n\r");
     while (proxy_server_bypass_list.GetNext()) {
       std::string bypass_url_domain = proxy_server_bypass_list.token();
       config->proxy_rules().bypass_rules.AddRuleFromString(bypass_url_domain);
@@ -188,7 +187,6 @@ void ProxyConfigServiceWin::SetFromIEConfig(
   }
   if (ie_config.lpszAutoConfigUrl)
     config->set_pac_url(GURL(ie_config.lpszAutoConfigUrl));
-  config->set_source(PROXY_CONFIG_SOURCE_SYSTEM);
 }
 
 }  // namespace net

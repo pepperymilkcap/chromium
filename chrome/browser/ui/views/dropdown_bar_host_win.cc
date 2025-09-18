@@ -6,20 +6,18 @@
 
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "ui/events/event.h"
-#include "ui/events/keycodes/keyboard_code_conversion_win.h"
+#include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/views/controls/scrollbar/native_scroll_bar.h"
 
-using content::NativeWebKeyboardEvent;
 using content::WebContents;
 
 NativeWebKeyboardEvent DropdownBarHost::GetKeyboardEvent(
      const WebContents* contents,
-     const ui::KeyEvent& key_event) {
-  HWND hwnd = contents->GetView()->GetContentNativeView();
+     const views::KeyEvent& key_event) {
+  HWND hwnd = contents->GetContentNativeView();
   WORD key = WindowsKeyCodeForKeyboardCode(key_event.key_code());
 
   MSG msg = { hwnd, key_event.native_event().message, key, 0 };
@@ -36,9 +34,4 @@ void DropdownBarHost::SetWidgetPositionNative(const gfx::Rect& new_pos,
 
   ::SetWindowPos(host_->GetNativeView(), HWND_TOP, new_pos.x(), new_pos.y(),
                  new_pos.width(), new_pos.height(), swp_flags);
-}
-
-void DropdownBarHost::SetHostViewNative(views::View* host_view) {
-  // TODO(pkotwicz): Implement controlling the z-order of hwnds associated to a
-  // host view via the z-order of the host views in |browser_view_|'s view tree.
 }

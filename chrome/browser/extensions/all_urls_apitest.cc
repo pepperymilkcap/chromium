@@ -2,52 +2,34 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/command_line.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/test/base/test_switches.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/extensions_client.h"
-#include "extensions/common/id_util.h"
 
 const std::string kAllUrlsTarget =
     "files/extensions/api_test/all_urls/index.html";
 
 typedef ExtensionApiTest AllUrlsApiTest;
 
-#if defined(OS_WIN) && !defined(NDEBUG)
-// http://crbug.com/174341
-#define MAYBE_WhitelistedExtension DISABLED_WhitelistedExtension
-#else
-#define MAYBE_WhitelistedExtension WhitelistedExtension
-#endif
-IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, MAYBE_WhitelistedExtension) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
-    return;
-#endif
-
+IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, WhitelistedExtension) {
   // First setup the two extensions.
-  base::FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
+  FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("content_script");
-  base::FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
+  FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("execute_script");
 
   // Then add the two extensions to the whitelist.
-  extensions::ExtensionsClient::ScriptingWhitelist whitelist;
-  whitelist.push_back(extensions::id_util::GenerateIdForPath(extension_dir1));
-  whitelist.push_back(extensions::id_util::GenerateIdForPath(extension_dir2));
-  extensions::ExtensionsClient::Get()->SetScriptingWhitelist(whitelist);
+  Extension::ScriptingWhitelist whitelist;
+  whitelist.push_back(Extension::GenerateIdForPath(extension_dir1));
+  whitelist.push_back(Extension::GenerateIdForPath(extension_dir2));
+  Extension::SetScriptingWhitelist(whitelist);
 
   // Then load extensions.
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   const size_t size_before = service->extensions()->size();
   ASSERT_TRUE(LoadExtension(extension_dir1));
   ASSERT_TRUE(LoadExtension(extension_dir2));
@@ -101,14 +83,14 @@ IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, MAYBE_WhitelistedExtension) {
 // Test that an extension NOT whitelisted for scripting can ask for <all_urls>
 // and run scripts on non-restricted all pages.
 IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, RegularExtensions) {
-  // First load the two extensions.
-  base::FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
+  // First load the two extension.
+  FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("content_script");
-  base::FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
+  FilePath extension_dir2 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("execute_script");
 
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
+
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   const size_t size_before = service->extensions()->size();
   ASSERT_TRUE(LoadExtension(extension_dir1));
   ASSERT_TRUE(LoadExtension(extension_dir2));

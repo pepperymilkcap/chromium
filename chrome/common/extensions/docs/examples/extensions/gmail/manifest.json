@@ -1,10 +1,9 @@
 {
   "background": {
-    "persistent": false,
     "page": "background.html"
   },
   "browser_action": {
-    "default_icon": "gmail_not_logged_in.png"
+    "default_title": ""
   },
   "default_locale": "en",
   "description": "__MSG_gmailcheck_description__",
@@ -12,12 +11,11 @@
     "128": "icon_128.png"
   },
   "name": "__MSG_gmailcheck_name__",
+  "options_page": "options.html",
   "permissions": [
-    "alarms",
-    "tabs",
-    "webNavigation",
-    "*://*.google.com/"
+    "tabs", "http://*.google.com/", "https://*.google.com/"
    ],
-  "version": "4.4.0",
+  "version": "3.3",
+
   "manifest_version": 2
 }

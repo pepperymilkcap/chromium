@@ -1,12 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/x/work_area_watcher_x.h"
 
-#include "base/memory/singleton.h"
-#include "ui/base/work_area_watcher_observer.h"
 #include "ui/base/x/root_window_property_watcher_x.h"
+#include "ui/base/x/work_area_watcher_x_observer.h"
 #include "ui/base/x/x11_util.h"
 
 namespace ui {
@@ -19,14 +18,14 @@ WorkAreaWatcherX* WorkAreaWatcherX::GetInstance() {
 }
 
 // static
-void WorkAreaWatcherX::AddObserver(WorkAreaWatcherObserver* observer) {
+void WorkAreaWatcherX::AddObserver(WorkAreaWatcherXObserver* observer) {
   // Ensure that RootWindowPropertyWatcherX exists.
   internal::RootWindowPropertyWatcherX::GetInstance();
   GetInstance()->observers_.AddObserver(observer);
 }
 
 // static
-void WorkAreaWatcherX::RemoveObserver(WorkAreaWatcherObserver* observer) {
+void WorkAreaWatcherX::RemoveObserver(WorkAreaWatcherXObserver* observer) {
   GetInstance()->observers_.RemoveObserver(observer);
 }
 
@@ -47,7 +46,7 @@ WorkAreaWatcherX::~WorkAreaWatcherX() {
 }
 
 void WorkAreaWatcherX::NotifyWorkAreaChanged() {
-  FOR_EACH_OBSERVER(WorkAreaWatcherObserver, observers_, WorkAreaChanged());
+  FOR_EACH_OBSERVER(WorkAreaWatcherXObserver, observers_, WorkAreaChanged());
 }
 
 }  // namespace ui

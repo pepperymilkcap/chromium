@@ -1,16 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_EDITOR_BASE_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_EDITOR_BASE_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
-#include "chrome/browser/ui/bookmarks/bookmark_editor.h"
 
 class BookmarkEditorBaseControllerBridge;
 class BookmarkModel;
@@ -32,35 +34,32 @@ class BookmarkModel;
   NSWindow* parentWindow_;  // weak
   Profile* profile_;  // weak
   const BookmarkNode* parentNode_;  // weak; owned by the model
-  GURL url_;  // This and title_ are only used for new urls.
-  base::string16 title_;
   BookmarkEditor::Configuration configuration_;
   NSString* initialName_;
   NSString* displayName_;  // Bound to a text field in the dialog.
+  BOOL okEnabled_;  // Bound to the OK button.
   BOOL creatingNewFolders_;  // True while in createNewFolders.
   // An array of BookmarkFolderInfo where each item describes a folder in the
   // BookmarkNode structure.
-  base::scoped_nsobject<NSArray> folderTreeArray_;
+  scoped_nsobject<NSArray> folderTreeArray_;
   // Bound to the table view giving a path to the current selections, of which
   // there should only ever be one.
-  base::scoped_nsobject<NSArray> tableSelectionPaths_;
+  scoped_nsobject<NSArray> tableSelectionPaths_;
   // C++ bridge object that observes the BookmarkModel for me.
   scoped_ptr<BookmarkEditorBaseControllerBridge> observer_;
 }
 
 @property(nonatomic, copy) NSString* initialName;
 @property(nonatomic, copy) NSString* displayName;
+@property(nonatomic, assign) BOOL okEnabled;
 @property(nonatomic, retain, readonly) NSArray* folderTreeArray;
 @property(nonatomic, copy) NSArray* tableSelectionPaths;
 
 // Designated initializer.  Derived classes should call through to this init.
-// |url| and |title| are only used for BookmarkNode::Type::NEW_URL.
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                    nibName:(NSString*)nibName
                    profile:(Profile*)profile
                     parent:(const BookmarkNode*)parent
-                       url:(const GURL&)url
-                     title:(const base::string16&)title
              configuration:(BookmarkEditor::Configuration)configuration;
 
 // Run the bookmark editor as a modal sheet.  Does not block.
@@ -111,15 +110,10 @@ class BookmarkModel;
          fromParent:(const BookmarkNode*)parent;
 - (void)modelChangedPreserveSelection:(BOOL)preserve;
 
-// Determines if the ok button should be enabled, can be overridden.
-- (BOOL)okEnabled;
-
 // Accessors
 - (BookmarkModel*)bookmarkModel;
 - (Profile*)profile;
 - (const BookmarkNode*)parentNode;
-- (const GURL&)url;
-- (const base::string16&)title;
 
 @end
 

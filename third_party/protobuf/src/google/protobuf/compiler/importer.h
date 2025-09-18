@@ -280,9 +280,8 @@ class LIBPROTOBUF_EXPORT DiskSourceTree : public SourceTree {
     string virtual_path;
     string disk_path;
 
-    inline Mapping(const string& virtual_path_param,
-                   const string& disk_path_param)
-      : virtual_path(virtual_path_param), disk_path(disk_path_param) {}
+    inline Mapping(const string& virtual_path, const string& disk_path)
+      : virtual_path(virtual_path), disk_path(disk_path) {}
   };
   vector<Mapping> mappings_;
 

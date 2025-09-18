@@ -1,26 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_PROXY_PROXY_SCRIPT_DECIDER_H_
-#define NET_PROXY_PROXY_SCRIPT_DECIDER_H_
+#ifndef NET_PROXY_SCRIPT_DECIDER_H
+#define NET_PROXY_SCRIPT_DECIDER_H
+#pragma once
 
-#include <string>
 #include <vector>
 
-#include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
-#include "base/time/time.h"
-#include "base/timer/timer.h"
-#include "net/base/address_list.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/string16.h"
+#include "base/time.h"
+#include "base/timer.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
-#include "net/dns/host_resolver.h"
-#include "net/dns/single_request_host_resolver.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_resolver.h"
-#include "url/gurl.h"
 
 namespace net {
 
@@ -79,12 +76,6 @@ class NET_EXPORT_PRIVATE ProxyScriptDecider {
   // TODO(eroman): Return a const-pointer.
   ProxyResolverScriptData* script_data() const;
 
-  void set_quick_check_enabled(bool enabled) {
-    quick_check_enabled_ = enabled;
-  }
-
-  bool quick_check_enabled() const { return quick_check_enabled_; }
-
  private:
   // Represents the sources from which we can get PAC files; two types of
   // auto-detect or a custom URL.
@@ -98,12 +89,6 @@ class NET_EXPORT_PRIVATE ProxyScriptDecider {
     PacSource(Type type, const GURL& url)
         : type(type), url(url) {}
 
-    // Returns a Value representing the PacSource.  |effective_pac_url| must
-    // be non-NULL and point to the URL derived from information contained in
-    // |this|, if Type is not WPAD_DHCP.
-    base::Value* NetLogCallback(const GURL* effective_pac_url,
-                                NetLog::LogLevel log_level) const;
-
     Type type;
     GURL url;  // Empty unless |type == PAC_SOURCE_CUSTOM|.
   };
@@ -114,8 +99,6 @@ class NET_EXPORT_PRIVATE ProxyScriptDecider {
     STATE_NONE,
     STATE_WAIT,
     STATE_WAIT_COMPLETE,
-    STATE_QUICK_CHECK,
-    STATE_QUICK_CHECK_COMPLETE,
     STATE_FETCH_PAC_SCRIPT,
     STATE_FETCH_PAC_SCRIPT_COMPLETE,
     STATE_VERIFY_PAC_SCRIPT,
@@ -131,9 +114,6 @@ class NET_EXPORT_PRIVATE ProxyScriptDecider {
 
   int DoWait();
   int DoWaitComplete(int result);
-
-  int DoQuickCheck();
-  int DoQuickCheckComplete(int result);
 
   int DoFetchPacScript();
   int DoFetchPacScriptComplete(int result);
@@ -151,7 +131,8 @@ class NET_EXPORT_PRIVATE ProxyScriptDecider {
   // ProxyResolver doesn't |expect_pac_bytes()|.
   State GetStartState() const;
 
-  void DetermineURL(const PacSource& pac_source, GURL* effective_pac_url);
+  NetLogStringParameter* CreateNetLogParameterAndDetermineURL(
+      const PacSource& pac_source, GURL* effective_pac_url);
 
   // Returns the current PAC URL we are fetching/testing.
   const PacSource& current_pac_source() const;
@@ -169,14 +150,11 @@ class NET_EXPORT_PRIVATE ProxyScriptDecider {
   size_t current_pac_source_index_;
 
   // Filled when the PAC script fetch completes.
-  base::string16 pac_script_;
+  string16 pac_script_;
 
   // Flag indicating whether the caller requested a mandatory pac script
   // (i.e. fallback to direct connections are prohibited).
   bool pac_mandatory_;
-
-  // Whether we have an existing custom PAC URL.
-  bool have_custom_pac_url_;
 
   PacSourceList pac_sources_;
   State next_state_;
@@ -188,21 +166,14 @@ class NET_EXPORT_PRIVATE ProxyScriptDecider {
   base::TimeDelta wait_delay_;
   base::OneShotTimer<ProxyScriptDecider> wait_timer_;
 
-  // Whether to do DNS quick check
-  bool quick_check_enabled_;
-
   // Results.
   ProxyConfig effective_config_;
   scoped_refptr<ProxyResolverScriptData> script_data_;
 
-  AddressList wpad_addresses_;
-  base::OneShotTimer<ProxyScriptDecider> quick_check_timer_;
-  scoped_ptr<SingleRequestHostResolver> host_resolver_;
-  base::Time quick_check_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyScriptDecider);
 };
 
 }  // namespace net
 
-#endif  // NET_PROXY_PROXY_SCRIPT_DECIDER_H_
+#endif  // NET_PROXY_SCRIPT_DECIDER_H

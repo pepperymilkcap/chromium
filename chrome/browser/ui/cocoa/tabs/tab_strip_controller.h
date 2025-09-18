@@ -4,14 +4,16 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_TABS_TAB_STRIP_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_TABS_TAB_STRIP_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 #include "chrome/browser/ui/tabs/hover_tab_selector.h"
+#import "third_party/GTM/AppKit/GTMWindowSheetController.h"
 
 @class CrTrackingArea;
 @class NewTabButton;
@@ -21,12 +23,9 @@
 @class TabStripView;
 
 class Browser;
+class ConstrainedWindowMac;
 class TabStripModelObserverBridge;
 class TabStripModel;
-
-namespace content {
-class WebContents;
-}
 
 // The interface for the tab strip controller's delegate.
 // Delegating TabStripModelObserverBridge's events (in lieu of directly
@@ -37,6 +36,9 @@ class WebContents;
 
 // Stripped down version of TabStripModelObserverBridge:selectTabWithContents.
 - (void)onActivateTabWithContents:(content::WebContents*)contents;
+
+// Stripped down version of TabStripModelObserverBridge:tabReplacedWithContents.
+- (void)onReplaceTabWithContents:(content::WebContents*)contents;
 
 // Stripped down version of TabStripModelObserverBridge:tabChangedWithContents.
 - (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
@@ -56,19 +58,19 @@ class WebContents;
 // http://www.chromium.org/developers/design-documents/tab-strip-mac
 @interface TabStripController :
   NSObject<TabControllerTarget,
-           URLDropTargetController> {
+           URLDropTargetController,
+           GTMWindowSheetControllerDelegate> {
  @private
-  base::scoped_nsobject<TabStripView> tabStripView_;
+  scoped_nsobject<TabStripView> tabStripView_;
   NSView* switchView_;  // weak
-  base::scoped_nsobject<NSView> dragBlockingView_;  // avoid bad window server
-                                                    // drags
+  scoped_nsobject<NSView> dragBlockingView_;  // avoid bad window server drags
   NewTabButton* newTabButton_;  // weak, obtained from the nib.
 
   // The controller that manages all the interactions of dragging tabs.
-  base::scoped_nsobject<TabStripDragController> dragController_;
+  scoped_nsobject<TabStripDragController> dragController_;
 
   // Tracks the newTabButton_ for rollovers.
-  base::scoped_nsobject<CrTrackingArea> newTabTrackingArea_;
+  scoped_nsobject<CrTrackingArea> newTabTrackingArea_;
   scoped_ptr<TabStripModelObserverBridge> bridge_;
   Browser* browser_;  // weak
   TabStripModel* tabStripModel_;  // weak
@@ -87,14 +89,14 @@ class WebContents;
   // tabs are animating closed (closed tabs are removed from |tabStripModel_|
   // immediately, but from |tabContentsArray_| only after their close animation
   // has completed).
-  base::scoped_nsobject<NSMutableArray> tabContentsArray_;
+  scoped_nsobject<NSMutableArray> tabContentsArray_;
   // An array of TabControllers which manage the actual tab views. See note
   // above |tabContentsArray_|. |tabContentsArray_| and |tabArray_| always
   // contain objects belonging to the same tabs at the same indices.
-  base::scoped_nsobject<NSMutableArray> tabArray_;
+  scoped_nsobject<NSMutableArray> tabArray_;
 
   // Set of TabControllers that are currently animating closed.
-  base::scoped_nsobject<NSMutableSet> closingControllers_;
+  scoped_nsobject<NSMutableSet> closingControllers_;
 
   // These values are only used during a drag, and override tab positioning.
   TabView* placeholderTab_;  // weak. Tab being dragged
@@ -103,7 +105,7 @@ class WebContents;
   // Frame targets for all the current views.
   // target frames are used because repeated requests to [NSView animator].
   // aren't coalesced, so we store frames to avoid redundant calls.
-  base::scoped_nsobject<NSMutableDictionary> targetFrames_;
+  scoped_nsobject<NSMutableDictionary> targetFrames_;
   NSRect newTabTargetFrame_;
   // If YES, do not show the new tab button during layout.
   BOOL forceNewTabButtonHidden_;
@@ -119,20 +121,23 @@ class WebContents;
   float availableResizeWidth_;
   // A tracking area that's the size of the tab strip used to be notified
   // when the mouse moves in the tab strip
-  base::scoped_nsobject<CrTrackingArea> trackingArea_;
+  scoped_nsobject<CrTrackingArea> trackingArea_;
   TabView* hoveredTab_;  // weak. Tab that the mouse is hovering over
 
   // Array of subviews which are permanent (and which should never be removed),
   // such as the new-tab button, but *not* the tabs themselves.
-  base::scoped_nsobject<NSMutableArray> permanentSubviews_;
+  scoped_nsobject<NSMutableArray> permanentSubviews_;
 
   // The default favicon, so we can use one copy for all buttons.
-  base::scoped_nsobject<NSImage> defaultFavicon_;
+  scoped_nsobject<NSImage> defaultFavicon_;
 
   // The amount by which to indent the tabs on the sides (to make room for the
   // red/yellow/green and incognito/fullscreen buttons).
   CGFloat leftIndentForControls_;
   CGFloat rightIndentForControls_;
+
+  // Manages per-tab sheets.
+  scoped_nsobject<GTMWindowSheetController> sheetController_;
 
   // Is the mouse currently inside the strip;
   BOOL mouseInside_;
@@ -156,9 +161,6 @@ class WebContents;
            browser:(Browser*)browser
           delegate:(id<TabStripControllerDelegate>)delegate;
 
-// Returns the model behind this controller.
-- (TabStripModel*)tabStripModel;
-
 // Return the view for the currently active tab.
 - (NSView*)activeTabView;
 
@@ -169,16 +171,16 @@ class WebContents;
 // current placeholder.
 - (void)moveTabFromIndex:(NSInteger)from;
 
-// Drop a given WebContents at the location of the current placeholder.
-// If there is no placeholder, it will go at the end. Used when dragging from
-// another window when we don't have access to the WebContents as part of our
-// strip. |frame| is in the coordinate system of the tab strip view and
-// represents where the user dropped the new tab so it can be animated into its
-// correct location when the tab is added to the model. If the tab was pinned in
-// its previous window, setting |pinned| to YES will propagate that state to the
+// Drop a given TabContents at the location of the current placeholder. If there
+// is no placeholder, it will go at the end. Used when dragging from another
+// window when we don't have access to the TabContents as part of our strip.
+// |frame| is in the coordinate system of the tab strip view and represents
+// where the user dropped the new tab so it can be animated into its correct
+// location when the tab is added to the model. If the tab was pinned in its
+// previous window, setting |pinned| to YES will propagate that state to the
 // new window. Mini-tabs are either app or pinned tabs; the app state is stored
 // by the |contents|, but the |pinned| state is the caller's responsibility.
-- (void)dropWebContents:(content::WebContents*)contents
+- (void)dropTabContents:(TabContentsWrapper*)contents
               withFrame:(NSRect)frame
             asPinnedTab:(BOOL)pinned;
 
@@ -232,17 +234,31 @@ class WebContents;
 // Default indentation for tabs (see |leftIndentForControls_|).
 + (CGFloat)defaultLeftIndentForControls;
 
+// Returns the (lazily created) window sheet controller of this window. Used
+// for the per-tab sheets.
+- (GTMWindowSheetController*)sheetController;
+
+// Destroys the window sheet controller of this window, if it exists.  The sheet
+// controller can be recreated by a subsequent call to |-sheetController|.  Must
+// not be called if any sheets are currently open.
+// TODO(viettrungluu): This is temporary code needed to allow sheets to work
+// (read: not crash) in fullscreen mode.  Once GTMWindowSheetController is
+// modified to support moving sheets between windows, this code can go away.
+// http://crbug.com/19093.
+- (void)destroySheetController;
+
 // Returns the currently active TabContentsController.
 - (TabContentsController*)activeTabContentsController;
 
+  // See comments in browser_window_controller.h for documentation about these
+  // functions.
+- (void)attachConstrainedWindow:(ConstrainedWindowMac*)window;
+- (void)removeConstrainedWindow:(ConstrainedWindowMac*)window;
+
 @end
 
-@interface TabStripController(TestingAPI)
-- (void)setTabTitle:(TabController*)tab
-       withContents:(content::WebContents*)contents;
-@end
-
-// Returns the parent view to use when showing a sheet for a given web contents.
-NSView* GetSheetParentViewForWebContents(content::WebContents* web_contents);
+// Notification sent when the number of tabs changes. The object will be this
+// controller.
+extern NSString* const kTabStripNumberOfTabsChanged;
 
 #endif  // CHROME_BROWSER_UI_COCOA_TABS_TAB_STRIP_CONTROLLER_H_

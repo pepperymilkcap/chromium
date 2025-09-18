@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_BINDINGS_POLICY_H_
 #define CONTENT_PUBLIC_COMMON_BINDINGS_POLICY_H_
+#pragma once
 
 namespace content {
 
@@ -18,11 +19,8 @@ enum BindingsPolicy {
   // allowed unless the app has been started up with the --dom-automation
   // switch.)
   BINDINGS_POLICY_DOM_AUTOMATION = 1 << 1,
-  // Bindings that allows the JS content to retrieve a variety of internal
-  // metrics. (By default this isn't allowed unless the app has been started up
-  // with the --enable-stats-collection-bindings switch.)
-  BINDINGS_POLICY_STATS_COLLECTION = 1 << 2,
-
+  // Bindings that allow access to the external host (through automation).
+  BINDINGS_POLICY_EXTERNAL_HOST = 1 << 2,
 };
 
 }

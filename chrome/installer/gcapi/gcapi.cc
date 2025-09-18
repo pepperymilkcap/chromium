@@ -12,36 +12,27 @@
 
 #include <sddl.h>
 #define STRSAFE_NO_DEPRECATE
-#include <windows.h>
 #include <strsafe.h>
 #include <tlhelp32.h>
+#include <windows.h>
 
 #include <cstdlib>
-#include <iterator>
 #include <limits>
-#include <set>
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/command_line.h"
-#include "base/files/file_path.h"
-#include "base/process/launch.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/time/time.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/string_number_conversions.h"
+#include "base/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
-#include "chrome/installer/gcapi/gcapi_omaha_experiment.h"
-#include "chrome/installer/gcapi/gcapi_reactivation.h"
-#include "chrome/installer/launcher_support/chrome_launcher_support.h"
 #include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/util_constants.h"
-#include "chrome/installer/util/wmi.h"
-#include "google_update/google_update_idl.h"
+
+#include "google_update_idl.h"  // NOLINT
 
 using base::Time;
 using base::TimeDelta;
@@ -70,17 +61,7 @@ const wchar_t kChromeRegVersion[] = L"pv";
 const wchar_t kNoChromeOfferUntil[] =
     L"SOFTWARE\\Google\\No Chrome Offer Until";
 
-const wchar_t kC1FPendingKey[] =
-    L"Software\\Google\\Common\\Rlz\\Events\\C";
-const wchar_t kC1FSentKey[] =
-    L"Software\\Google\\Common\\Rlz\\StatefulEvents\\C";
-const wchar_t kC1FKey[] = L"C1F";
-
-const wchar_t kRelaunchBrandcodeValue[] = L"RelaunchBrandcode";
-const wchar_t kRelaunchAllowedAfterValue[] = L"RelaunchAllowedAfter";
-
-// Prefix used to match the window class for Chrome windows.
-const wchar_t kChromeWindowClassPrefix[] = L"Chrome_WidgetWin_";
+const wchar_t kChromeWindowClass[] = L"Chrome_WidgetWin_0";
 
 // Return the company name specified in the file version info resource.
 bool GetCompanyName(const wchar_t* filename, wchar_t* buffer, DWORD out_len) {
@@ -133,22 +114,6 @@ bool GetCompanyName(const wchar_t* filename, wchar_t* buffer, DWORD out_len) {
   return true;
 }
 
-// Offsets the current date by |months|. |months| must be between 0 and 12.
-// The returned date is in the YYYYMMDD format.
-DWORD FormatDateOffsetByMonths(int months) {
-  DCHECK(months >= 0 && months <= 12);
-
-  SYSTEMTIME now;
-  GetLocalTime(&now);
-  now.wMonth += months;
-  if (now.wMonth > 12) {
-    now.wMonth -= 12;
-    now.wYear += 1;
-  }
-
-  return now.wYear * 10000 + now.wMonth * 100 + now.wDay;
-}
-
 // Return true if we can re-offer Chrome; false, otherwise.
 // Each partner can only offer Chrome once every six months.
 bool CanReOfferChrome(BOOL set_flag) {
@@ -170,7 +135,9 @@ bool CanReOfferChrome(BOOL set_flag) {
       0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
       NULL, &key, &disposition) == ERROR_SUCCESS) {
     // Get today's date, and format it as YYYYMMDD numeric value.
-    DWORD today = FormatDateOffsetByMonths(0);
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    DWORD today = now.wYear * 10000 + now.wMonth * 100 + now.wDay;
 
     // Cannot re-offer, if the timer already exists and is not expired yet.
     DWORD value_type = REG_DWORD;
@@ -189,7 +156,13 @@ bool CanReOfferChrome(BOOL set_flag) {
       if (set_flag) {
         // Set expiration date for offer as six months from today,
         // represented as a YYYYMMDD numeric value.
-        DWORD value = FormatDateOffsetByMonths(6);
+        SYSTEMTIME timer = now;
+        timer.wMonth = timer.wMonth + 6;
+        if (timer.wMonth > 12) {
+          timer.wMonth = timer.wMonth - 12;
+          timer.wYear = timer.wYear + 1;
+        }
+        DWORD value = timer.wYear * 10000 + timer.wMonth * 100 + timer.wDay;
         ::RegSetValueEx(key, company, 0, REG_DWORD, (LPBYTE)&value,
                         sizeof(DWORD));
       }
@@ -201,30 +174,28 @@ bool CanReOfferChrome(BOOL set_flag) {
   return can_re_offer;
 }
 
+// Helper function to read a value from registry. Returns true if value
+// is read successfully and stored in parameter value. Returns false otherwise.
+bool ReadValueFromRegistry(HKEY root_key, const wchar_t* sub_key,
+                           const wchar_t* value_name, wchar_t* value,
+                           size_t* size) {
+  HKEY key;
+  if ((::RegOpenKeyEx(root_key, sub_key, NULL,
+                      KEY_READ, &key) == ERROR_SUCCESS) &&
+      (::RegQueryValueEx(key, value_name, NULL, NULL,
+                         reinterpret_cast<LPBYTE>(value),
+                         reinterpret_cast<LPDWORD>(size)) == ERROR_SUCCESS)) {
+    ::RegCloseKey(key);
+    return true;
+  }
+  return false;
+}
+
 bool IsChromeInstalled(HKEY root_key) {
-  RegKey key;
-  return key.Open(root_key, kChromeRegClientsKey, KEY_READ) == ERROR_SUCCESS &&
-         key.HasValue(kChromeRegVersion);
-}
-
-// Returns true if the |subkey| in |root| has the kC1FKey entry set to 1.
-bool RegKeyHasC1F(HKEY root, const wchar_t* subkey) {
-  RegKey key;
-  DWORD value;
-  return key.Open(root, subkey, KEY_READ) == ERROR_SUCCESS &&
-      key.ReadValueDW(kC1FKey, &value) == ERROR_SUCCESS &&
-      value == static_cast<DWORD>(1);
-}
-
-bool IsC1FSent() {
-  // The C1F RLZ key can either be in HKCU or in HKLM (the HKLM RLZ key is made
-  // readable to all-users via rlz_lib::CreateMachineState()) and can either be
-  // in sent or pending state. Return true if there is a match for any of these
-  // 4 states.
-  return RegKeyHasC1F(HKEY_CURRENT_USER, kC1FSentKey) ||
-      RegKeyHasC1F(HKEY_CURRENT_USER, kC1FPendingKey) ||
-      RegKeyHasC1F(HKEY_LOCAL_MACHINE, kC1FSentKey) ||
-      RegKeyHasC1F(HKEY_LOCAL_MACHINE, kC1FPendingKey);
+  wchar_t version[64];
+  size_t size = _countof(version);
+  return ReadValueFromRegistry(root_key, kChromeRegClientsKey,
+                               kChromeRegVersion, version, &size);
 }
 
 enum WindowsVersion {
@@ -345,62 +316,9 @@ bool GetUserIdForProcess(size_t pid, wchar_t** user_sid) {
   ::CloseHandle(process_handle);
   return result;
 }
-
-struct SetWindowPosParams {
-  int x;
-  int y;
-  int width;
-  int height;
-  DWORD flags;
-  HWND window_insert_after;
-  bool success;
-  std::set<HWND> shunted_hwnds;
-};
-
-BOOL CALLBACK ChromeWindowEnumProc(HWND hwnd, LPARAM lparam) {
-  wchar_t window_class[MAX_PATH] = {};
-  SetWindowPosParams* params = reinterpret_cast<SetWindowPosParams*>(lparam);
-
-  if (!params->shunted_hwnds.count(hwnd) &&
-      ::GetClassName(hwnd, window_class, arraysize(window_class)) &&
-      StartsWith(window_class, kChromeWindowClassPrefix, false) &&
-      ::SetWindowPos(hwnd, params->window_insert_after, params->x,
-                     params->y, params->width, params->height, params->flags)) {
-    params->shunted_hwnds.insert(hwnd);
-    params->success = true;
-  }
-
-  // Return TRUE to ensure we hit all possible top-level Chrome windows as per
-  // http://msdn.microsoft.com/en-us/library/windows/desktop/ms633498.aspx
-  return TRUE;
-}
-
-// Returns true and populates |chrome_exe_path| with the path to chrome.exe if
-// a valid installation can be found.
-bool GetGoogleChromePath(base::FilePath* chrome_exe_path) {
-  HKEY install_key = HKEY_LOCAL_MACHINE;
-  if (!IsChromeInstalled(install_key)) {
-    install_key = HKEY_CURRENT_USER;
-    if (!IsChromeInstalled(install_key)) {
-      return false;
-    }
-  }
-
-  // Now grab the uninstall string from the appropriate ClientState key
-  // and use that as the base for a path to chrome.exe.
-  *chrome_exe_path =
-      chrome_launcher_support::GetChromePathForInstallationLevel(
-          install_key == HKEY_LOCAL_MACHINE ?
-              chrome_launcher_support::SYSTEM_LEVEL_INSTALLATION :
-              chrome_launcher_support::USER_LEVEL_INSTALLATION);
-  return !chrome_exe_path->empty();
-}
-
 }  // namespace
 
-BOOL __stdcall GoogleChromeCompatibilityCheck(BOOL set_flag,
-                                              int shell_mode,
-                                              DWORD* reasons) {
+BOOL __stdcall GoogleChromeCompatibilityCheck(BOOL set_flag, DWORD* reasons) {
   DWORD local_reasons = 0;
 
   WindowsVersion windows_version = GetWindowsVersion();
@@ -414,17 +332,13 @@ BOOL __stdcall GoogleChromeCompatibilityCheck(BOOL set_flag,
   if (IsChromeInstalled(HKEY_CURRENT_USER))
     local_reasons |= GCCC_ERROR_USERLEVELALREADYPRESENT;
 
-  if (shell_mode == GCAPI_INVOKED_UAC_ELEVATION) {
-    // Only check that we have HKLM write permissions if we specify that
-    // GCAPI is being invoked from an elevated shell, or in admin mode
-    if (!VerifyHKLMAccess()) {
+  if (!VerifyHKLMAccess()) {
     local_reasons |= GCCC_ERROR_ACCESSDENIED;
-    } else if ((windows_version == VERSION_VISTA_OR_HIGHER) &&
-         !VerifyAdminGroup()) {
+  } else if ((windows_version == VERSION_VISTA_OR_HIGHER) &&
+             !VerifyAdminGroup()) {
     // For Vista or later check for elevation since even for admin user we could
     // be running in non-elevated mode. We require integrity level High.
     local_reasons |= GCCC_ERROR_INTEGRITYLEVEL;
-    }
   }
 
   // Then only check whether we can re-offer, if everything else is OK.
@@ -439,9 +353,43 @@ BOOL __stdcall GoogleChromeCompatibilityCheck(BOOL set_flag,
 }
 
 BOOL __stdcall LaunchGoogleChrome() {
-  base::FilePath chrome_exe_path;
-  if (!GetGoogleChromePath(&chrome_exe_path))
+  // Check to make sure we have a valid Chrome installation.
+  HKEY install_key = HKEY_LOCAL_MACHINE;
+  if (!IsChromeInstalled(install_key)) {
+    install_key = HKEY_CURRENT_USER;
+    if (!IsChromeInstalled(install_key)) {
+      return false;
+    }
+  }
+
+  // Now grab the uninstall string from the appropriate ClientState key
+  // and use that as the base for a path to chrome.exe.
+  FilePath chrome_exe_path;
+  RegKey client_state(install_key, kChromeRegClientStateKey, KEY_QUERY_VALUE);
+  if (client_state.Valid()) {
+    std::wstring uninstall_string;
+    if (client_state.ReadValue(installer::kUninstallStringField,
+                               &uninstall_string) == ERROR_SUCCESS) {
+      // The uninstall path contains the path to setup.exe which is two levels
+      // down from chrome.exe. Move up two levels (plus one to drop the file
+      // name) and look for chrome.exe from there.
+      FilePath uninstall_path(uninstall_string);
+      chrome_exe_path = uninstall_path.DirName()
+                                      .DirName()
+                                      .DirName()
+                                      .Append(installer::kChromeExe);
+      if (!file_util::PathExists(chrome_exe_path)) {
+        // By way of mild future proofing, look up one to see if there's a
+        // chrome.exe in the version directory
+        chrome_exe_path =
+            uninstall_path.DirName().DirName().Append(installer::kChromeExe);
+      }
+    }
+  }
+
+  if (!file_util::PathExists(chrome_exe_path)) {
     return false;
+  }
 
   ScopedCOMInitializer com_initializer;
   if (::CoInitializeSecurity(NULL, -1, NULL, NULL,
@@ -508,12 +456,6 @@ BOOL __stdcall LaunchGoogleChrome() {
     if (SUCCEEDED(ipl->LaunchCmdLine(chrome_exe_path.value().c_str())))
       ret = true;
     ipl.Release();
-  } else {
-    // Couldn't get Omaha's process launcher, Omaha may not be installed at
-    // system level. Try just running Chrome instead.
-    ret = base::LaunchProcess(chrome_exe_path.value(),
-                              base::LaunchOptions(),
-                              NULL);
   }
 
   if (impersonation_success)
@@ -526,68 +468,42 @@ BOOL __stdcall LaunchGoogleChromeWithDimensions(int x,
                                                 int width,
                                                 int height,
                                                 bool in_background) {
-  if (in_background) {
-    base::FilePath chrome_exe_path;
-    if (!GetGoogleChromePath(&chrome_exe_path))
-      return false;
+  if (!LaunchGoogleChrome())
+    return false;
 
-    // When launching in the background, use WMI to ensure that chrome.exe is
-    // is not our child process. This prevents it from pushing itself to
-    // foreground.
-    CommandLine chrome_command(chrome_exe_path);
-
-    ScopedCOMInitializer com_initializer;
-    if (!installer::WMIProcess::Launch(chrome_command.GetCommandLineString(),
-                                       NULL)) {
-      // For some reason WMI failed. Try and launch the old fashioned way,
-      // knowing that visual glitches will occur when the window pops up.
-      if (!LaunchGoogleChrome())
-        return false;
-    }
-
-  } else {
-    if (!LaunchGoogleChrome())
-      return false;
-  }
-
-  HWND hwnd_insert_after = in_background ? HWND_BOTTOM : NULL;
-  DWORD set_window_flags = in_background ? SWP_NOACTIVATE : SWP_NOZORDER;
-
-  if (x == -1 && y == -1)
-    set_window_flags |= SWP_NOMOVE;
-
-  if (width == -1 && height == -1)
-    set_window_flags |= SWP_NOSIZE;
-
-  SetWindowPosParams enum_params = { x, y, width, height, set_window_flags,
-                                     hwnd_insert_after, false };
+  HWND handle = NULL;
+  int seconds_elapsed = 0;
 
   // Chrome may have been launched, but the window may not have appeared
   // yet. Wait for it to appear for 10 seconds, but exit if it takes longer
   // than that.
-  int ms_elapsed = 0;
-  int timeout = 10000;
-  bool found_window = false;
-  while (ms_elapsed < timeout) {
-    // Enum all top-level windows looking for Chrome windows.
-    ::EnumWindows(ChromeWindowEnumProc, reinterpret_cast<LPARAM>(&enum_params));
-
-    // Give it five more seconds after finding the first window until we stop
-    // shoving new windows into the background.
-    if (!found_window && enum_params.success) {
-      found_window = true;
-      timeout = ms_elapsed + 5000;
+  while (!handle && seconds_elapsed < 10) {
+    handle = FindWindowEx(NULL, handle, kChromeWindowClass, NULL);
+    if (!handle) {
+      Sleep(1000);
+      seconds_elapsed++;
     }
-
-    Sleep(10);
-    ms_elapsed += 10;
   }
 
-  return found_window;
-}
+  if (!handle)
+    return false;
 
-BOOL __stdcall LaunchGoogleChromeInBackground() {
-  return LaunchGoogleChromeWithDimensions(-1, -1, -1, -1, true);
+  // At this point, there are several top-level Chrome windows
+  // but we only want the window that has child windows.
+
+  // This loop iterates through all of the top-level Windows named
+  // kChromeWindowClass, and looks for the first one with any children.
+  while (handle && !FindWindowEx(handle, NULL, kChromeWindowClass, NULL)) {
+    // Get the next top-level Chrome window.
+    handle = FindWindowEx(NULL, handle, kChromeWindowClass, NULL);
+  }
+
+  HWND set_window_hwnd_insert_after = in_background ? HWND_BOTTOM : NULL;
+  DWORD set_window_flags = in_background ? SWP_NOACTIVATE : SWP_NOZORDER;
+
+  return (handle &&
+          SetWindowPos(handle, set_window_hwnd_insert_after, x, y,
+                       width, height, set_window_flags));
 }
 
 int __stdcall GoogleChromeDaysSinceLastRun() {
@@ -622,168 +538,4 @@ int __stdcall GoogleChromeDaysSinceLastRun() {
   }
 
   return days_since_last_run;
-}
-
-BOOL __stdcall CanOfferReactivation(const wchar_t* brand_code,
-                                    int shell_mode,
-                                    DWORD* error_code) {
-  DCHECK(error_code);
-
-  if (!brand_code) {
-    if (error_code)
-      *error_code = REACTIVATE_ERROR_INVALID_INPUT;
-    return FALSE;
-  }
-
-  int days_since_last_run = GoogleChromeDaysSinceLastRun();
-  if (days_since_last_run >= 0 &&
-      days_since_last_run < kReactivationMinDaysDormant) {
-    if (error_code)
-      *error_code = REACTIVATE_ERROR_NOTDORMANT;
-    return FALSE;
-  }
-
-  // Only run the code below when this function is invoked from a standard,
-  // non-elevated cmd shell.  This is because this section of code looks at
-  // values in HKEY_CURRENT_USER, and we only want to look at the logged-in
-  // user's HKCU, not the admin user's HKCU.
-  if (shell_mode == GCAPI_INVOKED_STANDARD_SHELL) {
-    if (!IsChromeInstalled(HKEY_LOCAL_MACHINE) &&
-        !IsChromeInstalled(HKEY_CURRENT_USER)) {
-      if (error_code)
-        *error_code = REACTIVATE_ERROR_NOTINSTALLED;
-      return FALSE;
-    }
-
-    if (HasBeenReactivated()) {
-      if (error_code)
-        *error_code = REACTIVATE_ERROR_ALREADY_REACTIVATED;
-      return FALSE;
-    }
-  }
-
-  return TRUE;
-}
-
-BOOL __stdcall ReactivateChrome(wchar_t* brand_code,
-                                int shell_mode,
-                                DWORD* error_code) {
-  BOOL result = FALSE;
-  if (CanOfferReactivation(brand_code,
-                           shell_mode,
-                           error_code)) {
-    if (SetReactivationBrandCode(brand_code, shell_mode)) {
-      // Currently set this as a best-effort thing. We return TRUE if
-      // reactivation succeeded regardless of the experiment label result.
-      SetReactivationExperimentLabels(brand_code, shell_mode);
-
-      result = TRUE;
-    } else {
-      if (error_code)
-        *error_code = REACTIVATE_ERROR_REACTIVATION_FAILED;
-    }
-  }
-
-  return result;
-}
-
-BOOL __stdcall CanOfferRelaunch(const wchar_t** partner_brandcode_list,
-                                int partner_brandcode_list_length,
-                                int shell_mode,
-                                DWORD* error_code) {
-  DCHECK(error_code);
-
-  if (!partner_brandcode_list || partner_brandcode_list_length <= 0) {
-    if (error_code)
-      *error_code = RELAUNCH_ERROR_INVALID_INPUT;
-    return FALSE;
-  }
-
-  // These conditions need to be satisfied for relaunch:
-  // a) Chrome should be installed;
-  if (!IsChromeInstalled(HKEY_LOCAL_MACHINE) &&
-      (shell_mode != GCAPI_INVOKED_STANDARD_SHELL ||
-          !IsChromeInstalled(HKEY_CURRENT_USER))) {
-    if (error_code)
-      *error_code = RELAUNCH_ERROR_NOTINSTALLED;
-    return FALSE;
-  }
-
-  // b) the installed brandcode should belong to that partner (in
-  // brandcode_list);
-  std::wstring installed_brandcode;
-  bool valid_brandcode = false;
-  if (GoogleUpdateSettings::GetBrand(&installed_brandcode)) {
-    for (int i = 0; i < partner_brandcode_list_length; ++i) {
-      if (!_wcsicmp(installed_brandcode.c_str(), partner_brandcode_list[i])) {
-        valid_brandcode = true;
-        break;
-      }
-    }
-  }
-
-  if (!valid_brandcode) {
-    if (error_code)
-      *error_code = RELAUNCH_ERROR_INVALID_PARTNER;
-    return FALSE;
-  }
-
-  // c) C1F ping should not have been sent;
-  if (IsC1FSent()) {
-    if (error_code)
-      *error_code = RELAUNCH_ERROR_PINGS_SENT;
-    return FALSE;
-  }
-
-  // d) a minimum period (30 days) must have passed since Chrome was last used;
-  int days_since_last_run = GoogleChromeDaysSinceLastRun();
-  if (days_since_last_run >= 0 &&
-      days_since_last_run < kRelaunchMinDaysDormant) {
-    if (error_code)
-      *error_code = RELAUNCH_ERROR_NOTDORMANT;
-    return FALSE;
-  }
-
-  // e) a minimum period (6 months) must have passed since the previous
-  // relaunch offer for the current user;
-  RegKey key;
-  DWORD min_relaunch_date;
-  if (key.Open(HKEY_CURRENT_USER, kChromeRegClientStateKey,
-               KEY_QUERY_VALUE) == ERROR_SUCCESS &&
-      key.ReadValueDW(kRelaunchAllowedAfterValue,
-                      &min_relaunch_date) == ERROR_SUCCESS &&
-      FormatDateOffsetByMonths(0) < min_relaunch_date) {
-    if (error_code)
-      *error_code = RELAUNCH_ERROR_ALREADY_RELAUNCHED;
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
-BOOL __stdcall SetRelaunchOffered(const wchar_t** partner_brandcode_list,
-                                  int partner_brandcode_list_length,
-                                  const wchar_t* relaunch_brandcode,
-                                  int shell_mode,
-                                  DWORD* error_code) {
-  if (!CanOfferRelaunch(partner_brandcode_list, partner_brandcode_list_length,
-                        shell_mode, error_code))
-    return FALSE;
-
-  // Store the relaunched brand code and the minimum date for relaunch (6 months
-  // from now), and set the Omaha experiment label.
-  RegKey key;
-  if (key.Create(HKEY_CURRENT_USER, kChromeRegClientStateKey,
-                 KEY_SET_VALUE) != ERROR_SUCCESS ||
-      key.WriteValue(kRelaunchBrandcodeValue,
-                     relaunch_brandcode) != ERROR_SUCCESS ||
-      key.WriteValue(kRelaunchAllowedAfterValue,
-                     FormatDateOffsetByMonths(6)) != ERROR_SUCCESS ||
-      !SetRelaunchExperimentLabels(relaunch_brandcode, shell_mode)) {
-    if (error_code)
-      *error_code = RELAUNCH_ERROR_RELAUNCH_FAILED;
-    return FALSE;
-  }
-
-  return TRUE;
 }

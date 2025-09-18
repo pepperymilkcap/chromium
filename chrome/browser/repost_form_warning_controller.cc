@@ -4,37 +4,47 @@
 
 #include "chrome/browser/repost_form_warning_controller.h"
 
-#if defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_USES_GTK)
 #include <gtk/gtk.h>
 #endif
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::NavigationController;
+using content::WebContents;
+
 RepostFormWarningController::RepostFormWarningController(
-    content::WebContents* web_contents)
+    WebContents* web_contents)
     : TabModalConfirmDialogDelegate(web_contents),
-      content::WebContentsObserver(web_contents) {
+      navigation_controller_(&web_contents->GetController()) {
+  registrar_.Add(this, content::NOTIFICATION_REPOST_WARNING_SHOWN,
+                 content::Source<NavigationController>(
+                    navigation_controller_));
 }
 
 RepostFormWarningController::~RepostFormWarningController() {
 }
 
-base::string16 RepostFormWarningController::GetTitle() {
+string16 RepostFormWarningController::GetTitle() {
   return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_TITLE);
 }
 
-base::string16 RepostFormWarningController::GetMessage() {
+string16 RepostFormWarningController::GetMessage() {
   return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING);
 }
 
-base::string16 RepostFormWarningController::GetAcceptButtonTitle() {
+string16 RepostFormWarningController::GetAcceptButtonTitle() {
   return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_RESEND);
 }
 
-#if defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_USES_GTK)
 const char* RepostFormWarningController::GetAcceptButtonIcon() {
   return GTK_STOCK_REFRESH;
 }
@@ -42,22 +52,24 @@ const char* RepostFormWarningController::GetAcceptButtonIcon() {
 const char* RepostFormWarningController::GetCancelButtonIcon() {
   return GTK_STOCK_CANCEL;
 }
-#endif  // defined(TOOLKIT_GTK)
+#endif  // defined(TOOLKIT_USES_GTK)
 
 void RepostFormWarningController::OnAccepted() {
-  web_contents()->GetController().ContinuePendingReload();
+  navigation_controller_->ContinuePendingReload();
 }
 
 void RepostFormWarningController::OnCanceled() {
-  web_contents()->GetController().CancelPendingReload();
+  navigation_controller_->CancelPendingReload();
 }
 
-void RepostFormWarningController::OnClosed() {
-  web_contents()->GetController().CancelPendingReload();
-}
-
-void RepostFormWarningController::BeforeFormRepostWarningShow() {
+void RepostFormWarningController::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   // Close the dialog if we show an additional dialog, to avoid them
   // stacking up.
-  Cancel();
+  if (type == content::NOTIFICATION_REPOST_WARNING_SHOWN)
+    Cancel();
+  else
+    TabModalConfirmDialogDelegate::Observe(type, source, details);
 }

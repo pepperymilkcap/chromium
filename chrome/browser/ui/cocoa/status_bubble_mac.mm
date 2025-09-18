@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,17 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/mac/mac_util.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #import "chrome/browser/ui/cocoa/bubble_view.h"
 #include "net/base/net_util.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSBezierPath+RoundRect.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSColor+Luminance.h"
-#include "ui/base/cocoa/window_size_constants.h"
-#include "ui/gfx/font_list.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
+#import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/gfx/point.h"
-#include "ui/gfx/text_elider.h"
 
 namespace {
 
@@ -99,8 +97,8 @@ const CGFloat kExpansionDuration = 0.125;
 @end
 
 StatusBubbleMac::StatusBubbleMac(NSWindow* parent, id delegate)
-    : timer_factory_(this),
-      expand_timer_factory_(this),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(timer_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(expand_timer_factory_(this)),
       parent_(parent),
       delegate_(delegate),
       window_(nil),
@@ -124,7 +122,7 @@ StatusBubbleMac::~StatusBubbleMac() {
   window_ = nil;
 }
 
-void StatusBubbleMac::SetStatus(const base::string16& status) {
+void StatusBubbleMac::SetStatus(const string16& status) {
   SetText(status, false);
 }
 
@@ -150,12 +148,11 @@ void StatusBubbleMac::SetURL(const GURL& url, const std::string& languages) {
   scaled_width = [[parent_ contentView] convertSize:scaled_width fromView:nil];
   text_width = static_cast<int>(scaled_width.width);
   NSFont* font = [[window_ contentView] font];
-  gfx::FontList font_list_chr(
-      gfx::Font(base::SysNSStringToUTF8([font fontName]), [font pointSize]));
+  gfx::Font font_chr(base::SysNSStringToUTF8([font fontName]),
+                     [font pointSize]);
 
-  base::string16 original_url_text = net::FormatUrl(url, languages);
-  base::string16 status =
-      gfx::ElideUrl(url, font_list_chr, text_width, languages);
+  string16 original_url_text = net::FormatUrl(url, languages);
+  string16 status = ui::ElideUrl(url, font_chr, text_width, languages);
 
   SetText(status, true);
 
@@ -172,14 +169,14 @@ void StatusBubbleMac::SetURL(const GURL& url, const std::string& languages) {
   if (is_expanded_ && !url.is_empty()) {
     ExpandBubble();
   } else if (original_url_text.length() > status.length()) {
-    base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
         base::Bind(&StatusBubbleMac::ExpandBubble,
                    expand_timer_factory_.GetWeakPtr()),
-        base::TimeDelta::FromMilliseconds(kExpandHoverDelay));
+        kExpandHoverDelay);
   }
 }
 
-void StatusBubbleMac::SetText(const base::string16& text, bool is_url) {
+void StatusBubbleMac::SetText(const string16& text, bool is_url) {
   // The status bubble allows the status and URL strings to be set
   // independently.  Whichever was set non-empty most recently will be the
   // value displayed.  When both are empty, the status bubble hides.
@@ -362,7 +359,7 @@ void StatusBubbleMac::UpdateDownloadShelfVisibility(bool visible) {
 void StatusBubbleMac::Create() {
   DCHECK(!window_);
 
-  window_ = [[NSWindow alloc] initWithContentRect:ui::kWindowSizeDeterminedLater
+  window_ = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1, 1)
                                         styleMask:NSBorderlessWindowMask
                                           backing:NSBackingStoreBuffered
                                             defer:YES];
@@ -376,7 +373,7 @@ void StatusBubbleMac::Create() {
   // teardown sequence in BWC guarantees that |parent_| outlives the status
   // bubble and that the StatusBubble is torn down completely prior to the
   // window going away.
-  base::scoped_nsobject<BubbleView> view(
+  scoped_nsobject<BubbleView> view(
       [[BubbleView alloc] initWithFrame:NSZeroRect themeProvider:parent_]);
   [window_ setContentView:view];
 
@@ -449,18 +446,8 @@ void StatusBubbleMac::SetState(StatusBubbleState state) {
   if (state == state_)
     return;
 
-  if (state == kBubbleHidden) {
-    // When hidden (with alpha of 0), make the window have the minimum size,
-    // while still keeping the same origin. It's important to not set the
-    // origin to 0,0 as that will cause the window to use more space in
-    // Expose/Mission Control. See http://crbug.com/81969.
-    //
-    // Also, doing it this way instead of detaching the window avoids bugs with
-    // Spaces and Cmd-`. See http://crbug.com/31821 and http://crbug.com/61629.
-    NSRect frame = [window_ frame];
-    frame.size = NSMakeSize(1, 1);
-    [window_ setFrame:frame display:YES];
-  }
+  if (state == kBubbleHidden)
+    [window_ setFrame:NSMakeRect(0, 0, 1, 1) display:YES];
 
   if ([delegate_ respondsToSelector:@selector(statusBubbleWillEnterState:)])
     [delegate_ statusBubbleWillEnterState:state];
@@ -525,9 +512,9 @@ void StatusBubbleMac::StartTimer(int64 delay_ms) {
   // There can only be one running timer.
   CancelTimer();
 
-  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&StatusBubbleMac::TimerFired, timer_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(delay_ms));
+      delay_ms);
 }
 
 void StatusBubbleMac::CancelTimer() {
@@ -622,14 +609,14 @@ void StatusBubbleMac::ExpandBubble() {
 
   // Generate the URL string that fits in the expanded bubble.
   NSFont* font = [[window_ contentView] font];
-  gfx::FontList font_list_chr(
-      gfx::Font(base::SysNSStringToUTF8([font fontName]), [font pointSize]));
-  base::string16 expanded_url = gfx::ElideUrl(
-      url_, font_list_chr, max_bubble_width, languages_);
+  gfx::Font font_chr(base::SysNSStringToUTF8([font fontName]),
+      [font pointSize]);
+  string16 expanded_url = ui::ElideUrl(
+      url_, font_chr, max_bubble_width, languages_);
 
   // Scale width from gfx::Font in view coordinates to window coordinates.
   int required_width_for_string =
-      font_list_chr.GetStringWidth(expanded_url) +
+      font_chr.GetStringWidth(expanded_url) +
           kTextPadding * 2 + kBubbleViewTextPositionX;
   NSSize scaled_width = NSMakeSize(required_width_for_string, 0);
   scaled_width = [[parent_ contentView] convertSize:scaled_width toView:nil];

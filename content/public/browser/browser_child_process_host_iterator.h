@@ -4,18 +4,22 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_BROWSER_CHILD_PROCESS_HOST_ITERATOR_H_
 #define CONTENT_PUBLIC_BROWSER_BROWSER_CHILD_PROCESS_HOST_ITERATOR_H_
+#pragma once
 
 #include <list>
 
 #include "content/common/content_export.h"
+#include "content/public/common/process_type.h"
+
+class BrowserChildProcessHostImpl;
 
 namespace IPC {
 class Message;
 }
 
 namespace content {
+
 class BrowserChildProcessHostDelegate;
-class BrowserChildProcessHostImpl;
 struct ChildProcessData;
 
 // This class allows iteration through either all child processes, or ones of a
@@ -25,8 +29,7 @@ struct ChildProcessData;
 class CONTENT_EXPORT BrowserChildProcessHostIterator {
  public:
   BrowserChildProcessHostIterator();
-  explicit BrowserChildProcessHostIterator(int type);
-  ~BrowserChildProcessHostIterator();
+  explicit BrowserChildProcessHostIterator(content::ProcessType type);
 
   // These methods work on the current iterator object. Only call them if
   // Done() returns false.
@@ -38,7 +41,7 @@ class CONTENT_EXPORT BrowserChildProcessHostIterator {
 
  private:
   bool all_;
-  int process_type_;
+  content::ProcessType type_;
   std::list<BrowserChildProcessHostImpl*>::iterator iterator_;
 };
 
@@ -50,8 +53,8 @@ template <class T>
 class CONTENT_EXPORT BrowserChildProcessHostTypeIterator
     : public BrowserChildProcessHostIterator {
  public:
-  explicit BrowserChildProcessHostTypeIterator(int process_type)
-      : BrowserChildProcessHostIterator(process_type) {}
+  explicit BrowserChildProcessHostTypeIterator(content::ProcessType type)
+      : BrowserChildProcessHostIterator(type) {}
   T* operator->() {
     return static_cast<T*>(GetDelegate());
   }

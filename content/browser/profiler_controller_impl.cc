@@ -1,23 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/profiler_controller_impl.h"
 
 #include "base/bind.h"
-#include "base/command_line.h"
-#include "base/tracked_objects.h"
+#include "base/values.h"
 #include "content/common/child_process_messages.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/profiler_subscriber.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/common/content_switches.h"
+#include "content/public/common/process_type.h"
+
+using content::BrowserChildProcessHostIterator;
+using content::BrowserThread;
 
 namespace content {
 
-ProfilerController* ProfilerController::GetInstance() {
+content::ProfilerController* content::ProfilerController::GetInstance() {
   return ProfilerControllerImpl::GetInstance();
 }
 
@@ -41,24 +43,20 @@ void ProfilerControllerImpl::OnPendingProcesses(int sequence_number,
 
 void ProfilerControllerImpl::OnProfilerDataCollected(
     int sequence_number,
-    const tracked_objects::ProcessDataSnapshot& profiler_data,
-    int process_type) {
+    base::DictionaryValue* profiler_data) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&ProfilerControllerImpl::OnProfilerDataCollected,
                    base::Unretained(this),
                    sequence_number,
-                   profiler_data,
-                   process_type));
+                   profiler_data));
     return;
   }
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (subscriber_) {
-    subscriber_->OnProfilerDataCollected(sequence_number, profiler_data,
-                                         process_type);
-  }
+  if (subscriber_)
+    subscriber_->OnProfilerDataCollected(sequence_number, profiler_data);
 }
 
 void ProfilerControllerImpl::Register(ProfilerSubscriber* subscriber) {
@@ -67,9 +65,9 @@ void ProfilerControllerImpl::Register(ProfilerSubscriber* subscriber) {
   subscriber_ = subscriber;
 }
 
-void ProfilerControllerImpl::Unregister(const ProfilerSubscriber* subscriber) {
-  DCHECK_EQ(subscriber_, subscriber);
-  subscriber_ = NULL;
+void ProfilerControllerImpl::Unregister(ProfilerSubscriber* subscriber) {
+  if (subscriber == subscriber_)
+    subscriber_ = NULL;
 }
 
 void ProfilerControllerImpl::GetProfilerDataFromChildProcesses(
@@ -78,16 +76,13 @@ void ProfilerControllerImpl::GetProfilerDataFromChildProcesses(
 
   int pending_processes = 0;
   for (BrowserChildProcessHostIterator iter; !iter.Done(); ++iter) {
-    // Skips requesting profiler data from the "GPU Process" if we are using in
-    // process GPU. Those stats should be in the Browser-process's GPU thread.
-    if (iter.GetData().process_type == PROCESS_TYPE_GPU &&
-        CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessGPU)) {
-      continue;
-    }
-
+    const std::string process_type =
+        content::GetProcessTypeNameInEnglish(iter.GetData().type);
     ++pending_processes;
-    if (!iter.Send(new ChildProcessMsg_GetChildProfilerData(sequence_number)))
+    if (!iter.Send(new ChildProcessMsg_GetChildProfilerData(
+            sequence_number, process_type))) {
       --pending_processes;
+    }
   }
 
   BrowserThread::PostTask(
@@ -105,11 +100,14 @@ void ProfilerControllerImpl::GetProfilerData(int sequence_number) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   int pending_processes = 0;
+  const std::string render_process_type =
+      content::GetProcessTypeNameInEnglish(content::PROCESS_TYPE_RENDERER);
+
   for (RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
        !it.IsAtEnd(); it.Advance()) {
     ++pending_processes;
-    if (!it.GetCurrentValue()->Send(
-            new ChildProcessMsg_GetChildProfilerData(sequence_number))) {
+    if (!it.GetCurrentValue()->Send(new ChildProcessMsg_GetChildProfilerData(
+        sequence_number, render_process_type))) {
       --pending_processes;
     }
   }
@@ -123,4 +121,27 @@ void ProfilerControllerImpl::GetProfilerData(int sequence_number) {
                  sequence_number));
 }
 
+void ProfilerControllerImpl::SetProfilerStatusInChildProcesses(bool enable) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  for (BrowserChildProcessHostIterator iter; !iter.Done(); ++iter)
+    iter.Send(new ChildProcessMsg_SetProfilerStatus(enable));
+}
+
+void ProfilerControllerImpl::SetProfilerStatus(bool enable) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&ProfilerControllerImpl::SetProfilerStatusInChildProcesses,
+                 base::Unretained(this),
+                 enable));
+
+  for (content::RenderProcessHost::iterator it(
+          content::RenderProcessHost::AllHostsIterator());
+       !it.IsAtEnd(); it.Advance()) {
+    it.GetCurrentValue()->Send(new ChildProcessMsg_SetProfilerStatus(enable));
+  }
+}
 }  // namespace content

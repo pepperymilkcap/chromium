@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/installer/util/installation_state.h"
 
 #include "base/logging.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "chrome/installer/util/google_update_constants.h"
@@ -60,9 +60,7 @@ bool ProductState::Initialize(bool system_install,
     std::wstring version_str;
     if (key.ReadValue(google_update::kRegVersionField,
                       &version_str) == ERROR_SUCCESS) {
-      version_.reset(new Version(WideToASCII(version_str)));
-      if (!version_->IsValid())
-        version_.reset();
+      version_.reset(Version::GetVersionFromString(WideToASCII(version_str)));
     }
 
     // Attempt to read the other values even if the "pv" version value was
@@ -70,9 +68,8 @@ bool ProductState::Initialize(bool system_install,
     // only be accessible via InstallationState::GetNonVersionedProductState.
     if (key.ReadValue(google_update::kRegOldVersionField,
                       &version_str) == ERROR_SUCCESS) {
-      old_version_.reset(new Version(WideToASCII(version_str)));
-      if (!old_version_->IsValid())
-        old_version_.reset();
+      old_version_.reset(
+          Version::GetVersionFromString(WideToASCII(version_str)));
     }
 
     key.ReadValue(google_update::kRegRenameCmdField, &rename_cmd_);
@@ -143,7 +140,7 @@ bool ProductState::Initialize(bool system_install,
   return version_.get() != NULL;
 }
 
-base::FilePath ProductState::GetSetupPath() const {
+FilePath ProductState::GetSetupPath() const {
   return uninstall_command_.GetProgram();
 }
 
@@ -154,9 +151,9 @@ const Version& ProductState::version() const {
 
 ProductState& ProductState::CopyFrom(const ProductState& other) {
   channel_.set_value(other.channel_.value());
-  version_.reset(other.version_.get() ? new Version(*other.version_) : NULL);
+  version_.reset(other.version_.get() == NULL ? NULL : other.version_->Clone());
   old_version_.reset(
-      other.old_version_.get() ? new Version(*other.old_version_) : NULL);
+      other.old_version_.get() == NULL ? NULL : other.old_version_->Clone());
   brand_ = other.brand_;
   rename_cmd_ = other.rename_cmd_;
   uninstall_command_ = other.uninstall_command_;
@@ -226,12 +223,9 @@ int InstallationState::IndexFromDistType(BrowserDistribution::Type type) {
                  unexpected_chrome_frame_distribution_value_);
   COMPILE_ASSERT(BrowserDistribution::CHROME_BINARIES == CHROME_BINARIES_INDEX,
                  unexpected_chrome_frame_distribution_value_);
-  COMPILE_ASSERT(BrowserDistribution::CHROME_APP_HOST == CHROME_APP_HOST_INDEX,
-                 unexpected_chrome_frame_distribution_value_);
   DCHECK(type == BrowserDistribution::CHROME_BROWSER ||
          type == BrowserDistribution::CHROME_FRAME ||
-         type == BrowserDistribution::CHROME_BINARIES ||
-         type == BrowserDistribution::CHROME_APP_HOST);
+         type == BrowserDistribution::CHROME_BINARIES);
   return type;
 }
 
@@ -252,11 +246,6 @@ void InstallationState::Initialize() {
       BrowserDistribution::CHROME_BINARIES);
   user_products_[CHROME_BINARIES_INDEX].Initialize(false, distribution);
   system_products_[CHROME_BINARIES_INDEX].Initialize(true, distribution);
-
-  distribution = BrowserDistribution::GetSpecificDistribution(
-      BrowserDistribution::CHROME_APP_HOST);
-  user_products_[CHROME_APP_HOST_INDEX].Initialize(false, distribution);
-  system_products_[CHROME_APP_HOST_INDEX].Initialize(true, distribution);
 }
 
 const ProductState* InstallationState::GetNonVersionedProductState(

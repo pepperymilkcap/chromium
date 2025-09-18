@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_DNS_SERIAL_WORKER_H_
 #define NET_DNS_SERIAL_WORKER_H_
+#pragma once
 
 #include <string>
 
@@ -45,10 +46,13 @@ class NET_EXPORT_PRIVATE SerialWorker
   // Made virtual to allow mocking.
   virtual void WorkNow();
 
-  // Stop scheduling jobs.
+  // Stop scheduling read jobs.
   void Cancel();
 
   bool IsCancelled() const { return state_ == CANCELLED; }
+
+  // Delay between calls to WorkerPool::PostTask
+  static const int kWorkerPoolRetryDelayMs = 100;
 
  protected:
   friend class base::RefCountedThreadSafe<SerialWorker>;
@@ -61,7 +65,9 @@ class NET_EXPORT_PRIVATE SerialWorker
   // Executed on origin thread after |DoRead| completes.
   virtual void OnWorkFinished() = 0;
 
-  base::MessageLoopProxy* loop() { return message_loop_.get(); }
+  base::MessageLoopProxy* loop() {
+    return message_loop_;
+  }
 
  private:
   enum State {

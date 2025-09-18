@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,6 @@
 static const int kMaxOomScore = 1000;
 static const int kMaxOldOomScore = 15;
 
-// NOTE: This is not the only version of this function in the source:
-// the base library (in process_util_linux.cc) also has its own C++ version.
 bool AdjustOOMScore(pid_t process, int score) {
   if (score < 0 || score > kMaxOomScore)
     return false;

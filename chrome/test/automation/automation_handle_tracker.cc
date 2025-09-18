@@ -68,5 +68,5 @@ AutomationResourceProxy* AutomationHandleTracker::GetResource(
     return NULL;
 
   iter->second->AddRef();
-  return iter->second.get();
+  return iter->second;
 }

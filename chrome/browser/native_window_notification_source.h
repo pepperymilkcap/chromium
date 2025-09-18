@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_NATIVE_WINDOW_NOTIFICATION_SOURCE_H_
 #define CHROME_BROWSER_NATIVE_WINDOW_NOTIFICATION_SOURCE_H_
+#pragma once
 
 #include "content/public/browser/notification_source.h"
 #include "ui/gfx/native_widget_types.h"

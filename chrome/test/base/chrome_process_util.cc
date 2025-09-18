@@ -9,9 +9,8 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/process/kill.h"
-#include "base/process/process_iterator.h"
-#include "base/time/time.h"
+#include "base/process_util.h"
+#include "base/time.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/test_switches.h"
 #include "content/public/common/result_codes.h"
@@ -19,19 +18,50 @@
 using base::TimeDelta;
 using base::TimeTicks;
 
-namespace {
+void TerminateAllChromeProcesses(base::ProcessId browser_pid) {
+  ChromeProcessList process_pids(GetRunningChromeProcesses(browser_pid));
 
-// Returns the executable name of the current Chrome browser process.
-const base::FilePath::CharType* GetRunningBrowserExecutableName() {
+  ChromeProcessList::const_iterator it;
+  for (it = process_pids.begin(); it != process_pids.end(); ++it) {
+    base::ProcessHandle handle;
+    if (!base::OpenPrivilegedProcessHandle(*it, &handle)) {
+      // Ignore processes for which we can't open the handle. We don't
+      // guarantee that all processes will terminate, only try to do so.
+      continue;
+    }
+
+    base::KillProcess(handle, content::RESULT_CODE_KILLED, true);
+    base::CloseProcessHandle(handle);
+  }
+}
+
+class ChildProcessFilter : public base::ProcessFilter {
+ public:
+  explicit ChildProcessFilter(base::ProcessId parent_pid)
+      : parent_pids_(&parent_pid, (&parent_pid) + 1) {}
+
+  explicit ChildProcessFilter(std::vector<base::ProcessId> parent_pids)
+      : parent_pids_(parent_pids.begin(), parent_pids.end()) {}
+
+  virtual bool Includes(const base::ProcessEntry& entry) const {
+    return parent_pids_.find(entry.parent_pid()) != parent_pids_.end();
+  }
+
+ private:
+  const std::set<base::ProcessId> parent_pids_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChildProcessFilter);
+};
+
+const FilePath::CharType* GetRunningBrowserExecutableName() {
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
   if (cmd_line->HasSwitch(switches::kEnableChromiumBranding))
     return chrome::kBrowserProcessExecutableNameChromium;
   return chrome::kBrowserProcessExecutableName;
 }
 
-// Returns the executable name of the current Chrome helper process.
-std::vector<base::FilePath::StringType> GetRunningHelperExecutableNames() {
-  base::FilePath::StringType name;
+std::vector<FilePath::StringType> GetRunningHelperExecutableNames() {
+  FilePath::StringType name;
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
   if (cmd_line->HasSwitch(switches::kEnableChromiumBranding)) {
     name = chrome::kHelperProcessExecutableNameChromium;
@@ -39,7 +69,7 @@ std::vector<base::FilePath::StringType> GetRunningHelperExecutableNames() {
     name = chrome::kHelperProcessExecutableName;
   }
 
-  std::vector<base::FilePath::StringType> names;
+  std::vector<FilePath::StringType> names;
   names.push_back(name);
 
 #if defined(OS_MACOSX)
@@ -58,44 +88,8 @@ std::vector<base::FilePath::StringType> GetRunningHelperExecutableNames() {
   return names;
 }
 
-}  // namespace
-
-void TerminateAllChromeProcesses(const ChromeProcessList& process_pids) {
-  ChromeProcessList::const_iterator it;
-  for (it = process_pids.begin(); it != process_pids.end(); ++it) {
-    base::ProcessHandle handle;
-    if (!base::OpenProcessHandle(*it, &handle)) {
-      // Ignore processes for which we can't open the handle. We don't
-      // guarantee that all processes will terminate, only try to do so.
-      continue;
-    }
-
-    base::KillProcess(handle, content::RESULT_CODE_KILLED, true);
-    base::CloseProcessHandle(handle);
-  }
-}
-
-class ChildProcessFilter : public base::ProcessFilter {
- public:
-  explicit ChildProcessFilter(base::ProcessId parent_pid)
-      : parent_pids_(&parent_pid, (&parent_pid) + 1) {}
-
-  explicit ChildProcessFilter(const std::vector<base::ProcessId>& parent_pids)
-      : parent_pids_(parent_pids.begin(), parent_pids.end()) {}
-
-  virtual bool Includes(const base::ProcessEntry& entry) const OVERRIDE {
-    return parent_pids_.find(entry.parent_pid()) != parent_pids_.end();
-  }
-
- private:
-  const std::set<base::ProcessId> parent_pids_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChildProcessFilter);
-};
-
 ChromeProcessList GetRunningChromeProcesses(base::ProcessId browser_pid) {
-  const base::FilePath::CharType* executable_name =
-      GetRunningBrowserExecutableName();
+  const FilePath::CharType* executable_name = GetRunningBrowserExecutableName();
   ChromeProcessList result;
   if (browser_pid == static_cast<base::ProcessId>(-1))
     return result;
@@ -123,10 +117,9 @@ ChromeProcessList GetRunningChromeProcesses(base::ProcessId browser_pid) {
   // on Linux via /proc/self/exe, so they end up with a different
   // name.  We must collect them in a second pass.
   {
-    std::vector<base::FilePath::StringType> names =
-        GetRunningHelperExecutableNames();
+    std::vector<FilePath::StringType> names = GetRunningHelperExecutableNames();
     for (size_t i = 0; i < names.size(); ++i) {
-      base::FilePath::StringType name = names[i];
+      FilePath::StringType name = names[i];
       ChildProcessFilter filter(browser_pid);
       base::NamedProcessIterator it(name, &filter);
       while (const base::ProcessEntry* process_entry = it.NextProcessEntry())

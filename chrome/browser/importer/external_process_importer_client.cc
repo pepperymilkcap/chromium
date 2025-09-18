@@ -5,23 +5,24 @@
 #include "chrome/browser/importer/external_process_importer_client.h"
 
 #include "base/bind.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
+#include "chrome/browser/importer/firefox_importer_utils.h"
+#include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/in_process_importer_bridge.h"
-#include "chrome/common/importer/firefox_importer_utils.h"
-#include "chrome/common/importer/imported_bookmark_entry.h"
-#include "chrome/common/importer/profile_import_process_messages.h"
+#include "chrome/browser/importer/profile_import_process_messages.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/utility_process_host.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
-using content::UtilityProcessHost;
 
 ExternalProcessImporterClient::ExternalProcessImporterClient(
-    base::WeakPtr<ExternalProcessImporterHost> importer_host,
+    ExternalProcessImporterHost* importer_host,
     const importer::SourceProfile& source_profile,
     uint16 items,
     InProcessImporterBridge* bridge)
@@ -33,7 +34,31 @@ ExternalProcessImporterClient::ExternalProcessImporterClient(
       items_(items),
       bridge_(bridge),
       cancelled_(false) {
+  bridge_->AddRef();
   process_importer_host_->NotifyImportStarted();
+}
+
+ExternalProcessImporterClient::~ExternalProcessImporterClient() {
+  bridge_->Release();
+}
+
+void ExternalProcessImporterClient::CancelImportProcessOnIOThread() {
+  utility_process_host_->Send(new ProfileImportProcessMsg_CancelImport());
+}
+
+void ExternalProcessImporterClient::NotifyItemFinishedOnIOThread(
+    importer::ImportItem import_item) {
+  utility_process_host_->Send(
+      new ProfileImportProcessMsg_ReportImportItemFinished(import_item));
+}
+
+void ExternalProcessImporterClient::Cleanup() {
+  if (cancelled_)
+    return;
+
+  if (process_importer_host_)
+    process_importer_host_->NotifyImportEnded();
+  Release();
 }
 
 void ExternalProcessImporterClient::Start() {
@@ -47,28 +72,66 @@ void ExternalProcessImporterClient::Start() {
                  thread_id));
 }
 
+void ExternalProcessImporterClient::StartProcessOnIOThread(
+    BrowserThread::ID thread_id) {
+  utility_process_host_ =
+      (new UtilityProcessHost(this, thread_id))->AsWeakPtr();
+  utility_process_host_->set_no_sandbox(true);
+
+#if defined(OS_MACOSX)
+  base::environment_vector env;
+  std::string dylib_path = GetFirefoxDylibPath().value();
+  if (!dylib_path.empty())
+    env.push_back(std::make_pair("DYLD_FALLBACK_LIBRARY_PATH", dylib_path));
+  utility_process_host_->set_env(env);
+#endif
+
+  // Dictionary of all localized strings that could be needed by the importer
+  // in the external process.
+  DictionaryValue localized_strings;
+  localized_strings.SetString(
+      base::IntToString(IDS_BOOKMARK_GROUP_FROM_FIREFOX),
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_GROUP_FROM_FIREFOX));
+  localized_strings.SetString(
+      base::IntToString(IDS_BOOKMARK_GROUP_FROM_SAFARI),
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_GROUP_FROM_SAFARI));
+  localized_strings.SetString(
+      base::IntToString(IDS_IMPORT_FROM_FIREFOX),
+      l10n_util::GetStringUTF8(IDS_IMPORT_FROM_FIREFOX));
+  localized_strings.SetString(
+      base::IntToString(IDS_IMPORT_FROM_GOOGLE_TOOLBAR),
+      l10n_util::GetStringUTF8(IDS_IMPORT_FROM_GOOGLE_TOOLBAR));
+  localized_strings.SetString(
+      base::IntToString(IDS_IMPORT_FROM_SAFARI),
+      l10n_util::GetStringUTF8(IDS_IMPORT_FROM_SAFARI));
+  localized_strings.SetString(
+      base::IntToString(IDS_BOOKMARK_BAR_FOLDER_NAME),
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_BAR_FOLDER_NAME));
+
+  utility_process_host_->Send(new ProfileImportProcessMsg_StartImport(
+      source_profile_, items_, localized_strings));
+}
+
 void ExternalProcessImporterClient::Cancel() {
   if (cancelled_)
     return;
 
   cancelled_ = true;
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(
-          &ExternalProcessImporterClient::CancelImportProcessOnIOThread,
-          this));
+  if (utility_process_host_) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(
+            &ExternalProcessImporterClient::CancelImportProcessOnIOThread,
+            this));
+  }
   Release();
 }
 
 void ExternalProcessImporterClient::OnProcessCrashed(int exit_code) {
-  DLOG(ERROR) << __FUNCTION__;
   if (cancelled_)
     return;
 
-  // If the host is still around, cancel the import; otherwise it means the
-  // import was already cancelled or completed and this message can be dropped.
-  if (process_importer_host_.get())
-    process_importer_host_->Cancel();
+  process_importer_host_->Cancel();
 }
 
 bool ExternalProcessImporterClient::OnMessageReceived(
@@ -103,12 +166,6 @@ bool ExternalProcessImporterClient::OnMessageReceived(
                         OnPasswordFormImportReady)
     IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyKeywordsReady,
                         OnKeywordsImportReady)
-    IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyFirefoxSearchEngData,
-                        OnFirefoxSearchEngineDataReceived)
-#if defined(OS_WIN)
-    IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyIE7PasswordInfo,
-                        OnIE7PasswordReceived)
-#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -162,7 +219,7 @@ void ExternalProcessImporterClient::OnHistoryImportStart(
 }
 
 void ExternalProcessImporterClient::OnHistoryImportGroup(
-    const std::vector<ImporterURLRow>& history_rows_group,
+    const std::vector<history::URLRow>& history_rows_group,
     int visit_source) {
   if (cancelled_)
     return;
@@ -171,7 +228,7 @@ void ExternalProcessImporterClient::OnHistoryImportGroup(
                        history_rows_group.end());
   if (history_rows_.size() == total_history_rows_count_)
     bridge_->SetHistoryItems(history_rows_,
-                             static_cast<importer::VisitSource>(visit_source));
+                             static_cast<history::VisitSource>(visit_source));
 }
 
 void ExternalProcessImporterClient::OnHomePageImportReady(
@@ -183,7 +240,7 @@ void ExternalProcessImporterClient::OnHomePageImportReady(
 }
 
 void ExternalProcessImporterClient::OnBookmarksImportStart(
-    const base::string16& first_folder_name,
+    const string16& first_folder_name,
     size_t total_bookmarks_count) {
   if (cancelled_)
     return;
@@ -194,7 +251,7 @@ void ExternalProcessImporterClient::OnBookmarksImportStart(
 }
 
 void ExternalProcessImporterClient::OnBookmarksImportGroup(
-    const std::vector<ImportedBookmarkEntry>& bookmarks_group) {
+    const std::vector<ProfileWriter::BookmarkEntry>& bookmarks_group) {
   if (cancelled_)
     return;
 
@@ -216,7 +273,7 @@ void ExternalProcessImporterClient::OnFaviconsImportStart(
 }
 
 void ExternalProcessImporterClient::OnFaviconsImportGroup(
-    const std::vector<ImportedFaviconUsage>& favicons_group) {
+    const std::vector<history::ImportedFaviconUsage>& favicons_group) {
   if (cancelled_)
     return;
 
@@ -227,7 +284,7 @@ void ExternalProcessImporterClient::OnFaviconsImportGroup(
 }
 
 void ExternalProcessImporterClient::OnPasswordFormImportReady(
-    const autofill::PasswordForm& form) {
+    const webkit::forms::PasswordForm& form) {
   if (cancelled_)
     return;
 
@@ -235,91 +292,19 @@ void ExternalProcessImporterClient::OnPasswordFormImportReady(
 }
 
 void ExternalProcessImporterClient::OnKeywordsImportReady(
-    const std::vector<importer::URLKeywordInfo>& url_keywords,
-    bool unique_on_host_and_path) {
-  if (cancelled_)
-    return;
-  bridge_->SetKeywords(url_keywords, unique_on_host_and_path);
-}
-
-void ExternalProcessImporterClient::OnFirefoxSearchEngineDataReceived(
-    const std::vector<std::string> search_engine_data) {
-  if (cancelled_)
-    return;
-  bridge_->SetFirefoxSearchEnginesXMLData(search_engine_data);
-}
-
-#if defined(OS_WIN)
-void ExternalProcessImporterClient::OnIE7PasswordReceived(
-    const importer::ImporterIE7PasswordInfo& importer_password_info) {
-  if (cancelled_)
-    return;
-  bridge_->AddIE7PasswordInfo(importer_password_info);
-}
-#endif
-
-ExternalProcessImporterClient::~ExternalProcessImporterClient() {}
-
-void ExternalProcessImporterClient::Cleanup() {
+    const std::vector<TemplateURL>& template_urls,
+        int default_keyword_index, bool unique_on_host_and_path) {
   if (cancelled_)
     return;
 
-  if (process_importer_host_.get())
-    process_importer_host_->NotifyImportEnded();
-  Release();
-}
-
-void ExternalProcessImporterClient::CancelImportProcessOnIOThread() {
-  if (utility_process_host_.get())
-    utility_process_host_->Send(new ProfileImportProcessMsg_CancelImport());
-}
-
-void ExternalProcessImporterClient::NotifyItemFinishedOnIOThread(
-    importer::ImportItem import_item) {
-  utility_process_host_->Send(
-      new ProfileImportProcessMsg_ReportImportItemFinished(import_item));
-}
-
-void ExternalProcessImporterClient::StartProcessOnIOThread(
-    BrowserThread::ID thread_id) {
-  utility_process_host_ = UtilityProcessHost::Create(
-      this, BrowserThread::GetMessageLoopProxyForThread(thread_id).get())
-      ->AsWeakPtr();
-  utility_process_host_->DisableSandbox();
-
-#if defined(OS_MACOSX)
-  base::EnvironmentMap env;
-  std::string dylib_path = GetFirefoxDylibPath().value();
-  if (!dylib_path.empty())
-    env["DYLD_FALLBACK_LIBRARY_PATH"] = dylib_path;
-  utility_process_host_->SetEnv(env);
-#endif
-
-  // Dictionary of all localized strings that could be needed by the importer
-  // in the external process.
-  base::DictionaryValue localized_strings;
-  localized_strings.SetString(
-      base::IntToString(IDS_BOOKMARK_GROUP),
-      l10n_util::GetStringUTF8(IDS_BOOKMARK_GROUP));
-  localized_strings.SetString(
-      base::IntToString(IDS_BOOKMARK_GROUP_FROM_FIREFOX),
-      l10n_util::GetStringUTF8(IDS_BOOKMARK_GROUP_FROM_FIREFOX));
-  localized_strings.SetString(
-      base::IntToString(IDS_BOOKMARK_GROUP_FROM_SAFARI),
-      l10n_util::GetStringUTF8(IDS_BOOKMARK_GROUP_FROM_SAFARI));
-  localized_strings.SetString(
-      base::IntToString(IDS_IMPORT_FROM_FIREFOX),
-      l10n_util::GetStringUTF8(IDS_IMPORT_FROM_FIREFOX));
-  localized_strings.SetString(
-      base::IntToString(IDS_IMPORT_FROM_ICEWEASEL),
-      l10n_util::GetStringUTF8(IDS_IMPORT_FROM_ICEWEASEL));
-  localized_strings.SetString(
-      base::IntToString(IDS_IMPORT_FROM_SAFARI),
-      l10n_util::GetStringUTF8(IDS_IMPORT_FROM_SAFARI));
-  localized_strings.SetString(
-      base::IntToString(IDS_BOOKMARK_BAR_FOLDER_NAME),
-      l10n_util::GetStringUTF8(IDS_BOOKMARK_BAR_FOLDER_NAME));
-
-  utility_process_host_->Send(new ProfileImportProcessMsg_StartImport(
-      source_profile_, items_, localized_strings));
+  std::vector<TemplateURL*> template_url_vec;
+  template_url_vec.reserve(template_urls.size());
+  std::vector<TemplateURL>::const_iterator iter;
+  for (iter = template_urls.begin();
+       iter != template_urls.end();
+       ++iter) {
+    template_url_vec.push_back(new TemplateURL(*iter));
+  }
+  bridge_->SetKeywords(template_url_vec, default_keyword_index,
+                       unique_on_host_and_path);
 }

@@ -1,17 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PRINTING_PRINT_DIALOG_GTK_H_
 #define CHROME_BROWSER_PRINTING_PRINT_DIALOG_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <gtk/gtkunixprint.h>
 
 #include "base/compiler_specific.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner_helpers.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/message_loop_helpers.h"
 #include "content/public/browser/browser_thread.h"
 #include "printing/print_dialog_gtk_interface.h"
 #include "printing/printing_context_gtk.h"
@@ -36,13 +38,13 @@ class PrintDialogGtk
 
   // printing::PrintDialogGtkInterface implementation.
   virtual void UseDefaultSettings() OVERRIDE;
-  virtual bool UpdateSettings(printing::PrintSettings* settings) OVERRIDE;
+  virtual bool UpdateSettings(const base::DictionaryValue& job_settings,
+                              const printing::PageRanges& ranges,
+                              printing::PrintSettings* settings) OVERRIDE;
   virtual void ShowDialog(
-      gfx::NativeView parent_view,
-      bool has_selection,
       const PrintingContextGtk::PrintSettingsCallback& callback) OVERRIDE;
   virtual void PrintDocument(const printing::Metafile* metafile,
-                             const base::string16& document_name) OVERRIDE;
+                             const string16& document_name) OVERRIDE;
   virtual void AddRefToDialog() OVERRIDE;
   virtual void ReleaseDialog() OVERRIDE;
 
@@ -58,7 +60,7 @@ class PrintDialogGtk
   CHROMEGTK_CALLBACK_1(PrintDialogGtk, void, OnResponse, int);
 
   // Prints document named |document_name|.
-  void SendDocumentToPrinter(const base::string16& document_name);
+  void SendDocumentToPrinter(const string16& document_name);
 
   // Handles print job response.
   static void OnJobCompletedThunk(GtkPrintJob* print_job,
@@ -67,8 +69,9 @@ class PrintDialogGtk
   void OnJobCompleted(GtkPrintJob* print_job, GError* error);
 
   // Helper function for initializing |context_|'s PrintSettings with a given
-  // |settings|.
-  void InitPrintSettings(printing::PrintSettings* settings);
+  // set of |page_ranges| and |settings|.
+  void InitPrintSettings(const printing::PageRanges& page_ranges,
+                         printing::PrintSettings* settings);
 
   // Printing dialog callback.
   PrintingContextGtk::PrintSettingsCallback callback_;
@@ -81,7 +84,7 @@ class PrintDialogGtk
   GtkPageSetup* page_setup_;
   GtkPrinter* printer_;
 
-  base::FilePath path_to_pdf_;
+  FilePath path_to_pdf_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintDialogGtk);
 };

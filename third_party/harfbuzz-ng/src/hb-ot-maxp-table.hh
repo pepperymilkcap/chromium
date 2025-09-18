@@ -1,5 +1,5 @@
 /*
- * Copyright © 2011,2012  Google, Inc.
+ * Copyright © 2011  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -30,8 +30,6 @@
 #include "hb-open-type-private.hh"
 
 
-namespace OT {
-
 
 /*
  * maxp -- The Maximum Profile Table
@@ -41,20 +39,21 @@ namespace OT {
 
 struct maxp
 {
-  static const hb_tag_t tableTag	= HB_OT_TAG_maxp;
+  static const hb_tag_t Tag	= HB_OT_TAG_maxp;
 
   inline unsigned int get_num_glyphs (void) const {
     return numGlyphs;
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (c->check_struct (this) &&
-			 likely (version.major == 1 || (version.major == 0 && version.minor == 0x5000)));
+    TRACE_SANITIZE ();
+    return c->check_struct (this) &&
+	   likely (version.major == 1 ||
+		   (version.major == 0 && version.minor == 0x5000));
   }
 
   /* We only implement version 0.5 as none of the extra fields in version 1.0 are useful. */
-  protected:
+  private:
   FixedVersion	version;		/* Version of the maxp table (0.5 or 1.0),
 					 * 0x00005000 or 0x00010000. */
   USHORT	numGlyphs;		/* The number of glyphs in the font. */
@@ -62,8 +61,6 @@ struct maxp
   DEFINE_SIZE_STATIC (6);
 };
 
-
-} /* namespace OT */
 
 
 #endif /* HB_OT_MAXP_TABLE_HH */

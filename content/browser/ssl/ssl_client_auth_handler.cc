@@ -1,31 +1,30 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/ssl/ssl_client_auth_handler.h"
 
 #include "base/bind.h"
-#include "content/browser/loader/resource_dispatcher_host_impl.h"
-#include "content/browser/loader/resource_request_info_impl.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/browser/ssl/ssl_client_auth_notification_details.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
-#include "net/cert/x509_certificate.h"
+#include "content/public/browser/notification_service.h"
+#include "net/base/x509_certificate.h"
 #include "net/http/http_transaction_factory.h"
-#include "net/ssl/client_cert_store.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
-namespace content {
+using content::BrowserThread;
 
 SSLClientAuthHandler::SSLClientAuthHandler(
-    scoped_ptr<net::ClientCertStore> client_cert_store,
     net::URLRequest* request,
     net::SSLCertRequestInfo* cert_request_info)
     : request_(request),
       http_network_session_(
           request_->context()->http_transaction_factory()->GetSession()),
-      cert_request_info_(cert_request_info),
-      client_cert_store_(client_cert_store.Pass()) {
+      cert_request_info_(cert_request_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 }
 
@@ -40,50 +39,12 @@ void SSLClientAuthHandler::OnRequestCancelled() {
 
 void SSLClientAuthHandler::SelectCertificate() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(request_);
-
-  if (client_cert_store_) {
-    client_cert_store_->GetClientCerts(
-        *cert_request_info_,
-        &cert_request_info_->client_certs,
-        base::Bind(&SSLClientAuthHandler::DidGetClientCerts, this));
-  } else {
-    DidGetClientCerts();
-  }
-}
-
-void SSLClientAuthHandler::CertificateSelected(net::X509Certificate* cert) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  VLOG(1) << this << " CertificateSelected " << cert;
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(
-          &SSLClientAuthHandler::DoCertificateSelected, this,
-          make_scoped_refptr(cert)));
-}
-
-void SSLClientAuthHandler::DidGetClientCerts() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  // Request may have cancelled while we were getting client certs.
-  if (!request_)
-    return;
-
-  // Note that if |client_cert_store_| is NULL, we intentionally fall through to
-  // DoCertificateSelected. This is for platforms where the client cert matching
-  // is not performed by Chrome, the platform can handle the cert matching
-  // before showing the dialog.
-  if (client_cert_store_ && cert_request_info_->client_certs.empty()) {
-    // No need to query the user if there are no certs to choose from.
-    DoCertificateSelected(NULL);
-    return;
-  }
 
   int render_process_host_id;
-  int render_frame_host_id;
-  if (!ResourceRequestInfo::ForRequest(request_)->GetAssociatedRenderFrame(
-          &render_process_host_id,
-          &render_frame_host_id))
+  int render_view_host_id;
+  if (!ResourceDispatcherHost::RenderViewForRequest(request_,
+                                                    &render_process_host_id,
+                                                    &render_view_host_id))
     NOTREACHED();
 
   // If the RVH does not exist by the time this task gets run, then the task
@@ -94,7 +55,35 @@ void SSLClientAuthHandler::DidGetClientCerts() {
       BrowserThread::UI, FROM_HERE,
       base::Bind(
           &SSLClientAuthHandler::DoSelectCertificate, this,
-          render_process_host_id, render_frame_host_id));
+          render_process_host_id, render_view_host_id));
+}
+
+// Sends an SSL_CLIENT_AUTH_CERT_SELECTED notification and notifies the IO
+// thread that we have selected a cert.
+void SSLClientAuthHandler::CertificateSelected(net::X509Certificate* cert) {
+  VLOG(1) << this << " CertificateSelected " << cert;
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  SSLClientAuthNotificationDetails details(cert_request_info_, this, cert);
+  content::NotificationService* service =
+      content::NotificationService::current();
+  service->Notify(content::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
+                  content::Source<net::HttpNetworkSession>(
+                      http_network_session()),
+                  content::Details<SSLClientAuthNotificationDetails>(&details));
+
+  CertificateSelectedNoNotify(cert);
+}
+
+// Notifies the IO thread that we have selected a cert.
+void SSLClientAuthHandler::CertificateSelectedNoNotify(
+    net::X509Certificate* cert) {
+  VLOG(1) << this << " CertificateSelectedNoNotify " << cert;
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(
+          &SSLClientAuthHandler::DoCertificateSelected, this,
+          make_scoped_refptr(cert)));
 }
 
 void SSLClientAuthHandler::DoCertificateSelected(net::X509Certificate* cert) {
@@ -106,20 +95,67 @@ void SSLClientAuthHandler::DoCertificateSelected(net::X509Certificate* cert) {
   if (request_) {
     request_->ContinueWithCertificate(cert);
 
-    ResourceDispatcherHostImpl::Get()->
-        ClearSSLClientAuthHandlerForRequest(request_);
+    ResourceDispatcherHostRequestInfo* info =
+        ResourceDispatcherHost::InfoForRequest(request_);
+    if (info)
+      info->set_ssl_client_auth_handler(NULL);
+
     request_ = NULL;
   }
 }
 
 void SSLClientAuthHandler::DoSelectCertificate(
-    int render_process_host_id, int render_frame_host_id) {
-  GetContentClient()->browser()->SelectClientCertificate(
-      render_process_host_id,
-      render_frame_host_id,
-      http_network_session_,
-      cert_request_info_.get(),
-      base::Bind(&SSLClientAuthHandler::CertificateSelected, this));
+    int render_process_host_id, int render_view_host_id) {
+  content::GetContentClient()->browser()->SelectClientCertificate(
+      render_process_host_id, render_view_host_id, this);
 }
 
-}  // namespace content
+SSLClientAuthObserver::SSLClientAuthObserver(
+    net::SSLCertRequestInfo* cert_request_info,
+    SSLClientAuthHandler* handler)
+    : cert_request_info_(cert_request_info), handler_(handler) {
+}
+
+SSLClientAuthObserver::~SSLClientAuthObserver() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+}
+
+void SSLClientAuthObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  VLOG(1) << "SSLClientAuthObserver::Observe " << this << " " << handler_.get();
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(type == content::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED);
+
+  SSLClientAuthNotificationDetails* auth_details =
+      content::Details<SSLClientAuthNotificationDetails>(details).ptr();
+
+  if (auth_details->IsSameHandler(handler_.get())) {
+    VLOG(1) << "got notification from ourself " << handler_.get();
+    return;
+  }
+
+  if (!auth_details->IsSameHost(cert_request_info_))
+    return;
+
+  VLOG(1) << this << " got matching notification for "
+          << handler_.get() << ", selecting cert "
+          << auth_details->selected_cert();
+  StopObserving();
+  handler_->CertificateSelectedNoNotify(auth_details->selected_cert());
+  OnCertSelectedByNotification();
+}
+
+void SSLClientAuthObserver::StartObserving() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  notification_registrar_.Add(
+      this, content::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
+      content::Source<net::HttpNetworkSession>(
+          handler_->http_network_session()));
+}
+
+void SSLClientAuthObserver::StopObserving() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  notification_registrar_.RemoveAll();
+}

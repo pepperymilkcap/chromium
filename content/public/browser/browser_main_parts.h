@@ -1,12 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_BROWSER_BROWSER_MAIN_PARTS_H_
 #define CONTENT_PUBLIC_BROWSER_BROWSER_MAIN_PARTS_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace content {
 
@@ -52,41 +54,43 @@ class CONTENT_EXPORT BrowserMainParts {
   BrowserMainParts() {}
   virtual ~BrowserMainParts() {}
 
-  virtual void PreEarlyInitialization() {}
+  virtual void PreEarlyInitialization() = 0;
 
-  virtual void PostEarlyInitialization() {}
+  virtual void PostEarlyInitialization() = 0;
 
-  virtual void PreMainMessageLoopStart() {}
+  virtual void PreMainMessageLoopStart() = 0;
 
-  virtual void PostMainMessageLoopStart() {}
+  virtual void PostMainMessageLoopStart() = 0;
 
   // Allows an embedder to do any extra toolkit initialization.
-  virtual void ToolkitInitialized() {}
+  virtual void ToolkitInitialized() = 0;
 
   // Called just before any child threads owned by the content
   // framework are created.
   //
   // The main message loop has been started at this point (but has not
-  // been run), and the toolkit has been initialized. Returns the error code
-  // (or 0 if no error).
-  virtual int PreCreateThreads();
+  // been run), and the toolkit has been initialized.
+  virtual void PreCreateThreads() = 0;
 
   // This is called just before the main message loop is run.  The
   // various browser threads have all been created at this point
-  virtual void PreMainMessageLoopRun() {}
+  virtual void PreMainMessageLoopRun() = 0;
 
   // Returns true if the message loop was run, false otherwise.
   // If this returns false, the default implementation will be run.
   // May set |result_code|, which will be returned by |BrowserMain()|.
-  virtual bool MainMessageLoopRun(int* result_code);
+  virtual bool MainMessageLoopRun(int* result_code) = 0;
 
   // This happens after the main message loop has stopped, but before
   // threads are stopped.
-  virtual void PostMainMessageLoopRun() {}
+  virtual void PostMainMessageLoopRun() = 0;
 
   // Called as the very last part of shutdown, after threads have been
   // stopped and destroyed.
-  virtual void PostDestroyThreads() {}
+  virtual void PostDestroyThreads() = 0;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BrowserMainParts);
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,7 @@
 
 #include <windows.h>
 
-#include "base/compiler_specific.h"
-#include "base/win/win_util.h"
+#include "base/logging.h"
 
 // Indicate if another service is scanning the callbacks.  When this becomes
 // set to true, then DllMain() will stop supporting the callback service. This
@@ -84,17 +83,10 @@ PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_typical_entry = on_callback;
 #endif  // _WIN64
 }  // extern "C"
 
-// Custom crash code to get a unique entry in crash reports.
-NOINLINE static void CrashOnProcessDetach() {
-  *static_cast<volatile int*>(0) = 0x356;
-}
 
 // Make DllMain call the listed callbacks.  This way any third parties that are
 // linked in will also be called.
 BOOL WINAPI DllMain(PVOID h, DWORD reason, PVOID reserved) {
-  if (DLL_PROCESS_DETACH == reason && base::win::ShouldCrashOnProcessDetach())
-    CrashOnProcessDetach();
-
   if (DLL_THREAD_DETACH != reason && DLL_PROCESS_DETACH != reason)
     return true;  // We won't service THREAD_ATTACH calls.
 

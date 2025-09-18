@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,13 +7,13 @@
 #include <atlbase.h>
 #include <urlmon.h>
 
-#include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/string_tokenizer.h"
+#include "base/stringprintf.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome_frame/utils.h"
 #include "net/base/net_util.h"
-#include "webkit/common/user_agent/user_agent_util.h"
+#include "webkit/glue/user_agent.h"
 
 const wchar_t kQuotes[] = L"\"'";
 const char kXFrameOptionsHeader[] = "X-Frame-Options";
@@ -82,8 +82,8 @@ bool HTMLScanner::StringRange::GetTagAttribute(const wchar_t* attribute_name,
   // from string_util.h.
   std::string search_name_ascii(WideToASCII(attribute_name));
 
-  base::WStringTokenizer tokenizer(start_, end_, L" =/");
-  tokenizer.set_options(base::WStringTokenizer::RETURN_DELIMS);
+  WStringTokenizer tokenizer(start_, end_, L" =/");
+  tokenizer.set_options(WStringTokenizer::RETURN_DELIMS);
 
   // Set up the quote chars so that we get quoted attribute values as single
   // tokens.
@@ -343,8 +343,11 @@ const char* GetChromeFrameUserAgent() {
 
 std::string AddChromeFrameToUserAgentValue(const std::string& value) {
   if (value.empty()) {
-    return value;
+    DLOG(WARNING) << "empty user agent value";
+    return "";
   }
+
+  DCHECK_EQ(false, StartsWithASCII(value, "User-Agent:", true));
 
   if (value.find(kChromeFrameUserAgent) != std::string::npos) {
     // Our user agent has already been added.
@@ -352,7 +355,7 @@ std::string AddChromeFrameToUserAgentValue(const std::string& value) {
   }
 
   std::string ret(value);
-  size_t insert_position = ret.find(')');
+  std::string::size_type insert_position = ret.find(')');
   if (insert_position != std::string::npos) {
     if (insert_position > 1 && isalnum(ret[insert_position - 1]))
       ret.insert(insert_position++, ";");
@@ -362,38 +365,6 @@ std::string AddChromeFrameToUserAgentValue(const std::string& value) {
     ret += " ";
     ret += GetChromeFrameUserAgent();
   }
-
-  return ret;
-}
-
-std::string RemoveChromeFrameFromUserAgentValue(const std::string& value) {
-  size_t cf_start = value.find(kChromeFrameUserAgent);
-  if (cf_start == std::string::npos) {
-    // The user agent is not present.
-    return value;
-  }
-
-  size_t offset = 0;
-  // If we prepended a '; ' or a ' ' then remove that in the output.
-  if (cf_start > 1 && value[cf_start - 1] == ' ')
-    ++offset;
-  if (cf_start > 3 &&
-      value[cf_start - 2] == ';' &&
-      isalnum(value[cf_start - 3])) {
-    ++offset;
-  }
-
-  std::string ret(value, 0, std::max(cf_start - offset, 0U));
-  cf_start += strlen(kChromeFrameUserAgent);
-  while (cf_start < value.length() &&
-         ((value[cf_start] >= '0' && value[cf_start] <= '9') ||
-          value[cf_start] == '.' ||
-          value[cf_start] == '/')) {
-    ++cf_start;
-  }
-
-  if (cf_start < value.length())
-    ret.append(value, cf_start, std::string::npos);
 
   return ret;
 }

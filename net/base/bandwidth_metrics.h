@@ -4,12 +4,13 @@
 
 #ifndef NET_BASE_BANDWIDTH_METRICS_H_
 #define NET_BASE_BANDWIDTH_METRICS_H_
+#pragma once
 
 #include <list>
 
-#include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/time/time.h"
+#include "base/logging.h"
+#include "base/time.h"
 
 namespace net {
 

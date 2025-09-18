@@ -4,27 +4,24 @@
 
 #import "chrome/browser/mac/keystone_glue.h"
 
-#include <sys/mount.h>
 #include <sys/param.h>
-#include <sys/stat.h>
-#include <sys/sysctl.h>
-#include <sys/types.h>
+#include <sys/mount.h>
 
 #include <vector>
 
 #include "base/bind.h"
+#include "base/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/mac/authorization_util.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/mac/scoped_nsexception_enabler.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "base/threading/worker_pool.h"
-#include "build/build_config.h"
+#include "chrome/browser/mac/authorization_util.h"
 #import "chrome/browser/mac/keystone_registration.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
@@ -100,9 +97,9 @@ class PerformBridge : public base::RefCountedThreadSafe<PerformBridge> {
     [target_ performSelector:sel_ withObject:arg_];
   }
 
-  base::scoped_nsobject<id> target_;
+  scoped_nsobject<id> target_;
   SEL sel_;
-  base::scoped_nsobject<id> arg_;
+  scoped_nsobject<id> arg_;
 };
 
 }  // namespace
@@ -190,22 +187,6 @@ class PerformBridge : public base::RefCountedThreadSafe<PerformBridge> {
 
 // Returns the brand file path to use for Keystone.
 - (NSString*)brandFilePath;
-
-// YES if the system's CPU is 32-bit-only, NO if it's 64-bit-capable.
-- (BOOL)has32BitOnlyCPU;
-
-// YES if no update installation has succeeded since a binary diff patch
-// installation failed. This signals the need to attempt a full installer
-// which does not depend on applying a patch to existing files.
-- (BOOL)wantsFullInstaller;
-
-// Returns an NSString* suitable for appending to a Chrome Keystone tag value
-// or tag key. If the system has a 32-bit-only CPU, the tag suffix will
-// contain the string "-32bit". If a full installer (as opposed to a binary
-// diff/delta patch) is required, the tag suffix will contain the string
-// "-full". If no special treatment is required, the tag suffix will be an
-// empty string.
-- (NSString*)tagSuffix;
 
 @end  // @interface KeystoneGlue (Private)
 
@@ -472,13 +453,6 @@ NSString* const kVersionKey = @"KSVersion";
     brandKey = @"";
   }
 
-  // Note that channel_ is permitted to be an empty string, but it must not be
-  // nil.
-  DCHECK(channel_);
-  NSString* tagSuffix = [self tagSuffix];
-  NSString* tagValue = [channel_ stringByAppendingString:tagSuffix];
-  NSString* tagKey = [kChannelKey stringByAppendingString:tagSuffix];
-
   return [NSDictionary dictionaryWithObjectsAndKeys:
              version_, ksr::KSRegistrationVersionKey,
              appInfoPlistPath, ksr::KSRegistrationVersionPathKey,
@@ -487,9 +461,9 @@ NSString* const kVersionKey = @"KSVersion";
              appPath_, ksr::KSRegistrationExistenceCheckerStringKey,
              url_, ksr::KSRegistrationServerURLStringKey,
              preserveTTToken, ksr::KSRegistrationPreserveTrustedTesterTokenKey,
-             tagValue, ksr::KSRegistrationTagKey,
+             channel_, ksr::KSRegistrationTagKey,
              appInfoPlistPath, ksr::KSRegistrationTagPathKey,
-             tagKey, ksr::KSRegistrationTagKeyKey,
+             kChannelKey, ksr::KSRegistrationTagKeyKey,
              brandPath, ksr::KSRegistrationBrandPathKey,
              brandKey, ksr::KSRegistrationBrandKeyKey,
              nil];
@@ -603,11 +577,8 @@ NSString* const kVersionKey = @"KSVersion";
 - (void)installUpdateComplete:(NSNotification*)notification {
   NSDictionary* userInfo = [notification userInfo];
 
-  // http://crbug.com/160308 and b/7517358: when using system Keystone and on
-  // a user ticket, KSUpdateCheckSuccessfulKey will be NO even when an update
-  // was installed correctly, so don't check it. It should be redudnant when
-  // KSUpdateCheckSuccessfullyInstalledKey is checked.
-  if (![[userInfo objectForKey:ksr::KSUpdateCheckSuccessfullyInstalledKey]
+  if (![[userInfo objectForKey:ksr::KSUpdateCheckSuccessfulKey] boolValue] ||
+      ![[userInfo objectForKey:ksr::KSUpdateCheckSuccessfullyInstalledKey]
           intValue]) {
     [self updateStatus:kAutoupdateInstallFailed version:nil];
   } else {
@@ -807,8 +778,8 @@ NSString* const kVersionKey = @"KSVersion";
   NSString* prompt = l10n_util::GetNSStringFWithFixup(
       IDS_PROMOTE_AUTHENTICATION_PROMPT,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
-  base::mac::ScopedAuthorizationRef authorization(
-      base::mac::AuthorizationCreateToRunAsRoot(
+  ScopedAuthorizationRef authorization(
+      authorization_util::AuthorizationCreateToRunAsRoot(
           base::mac::NSToCFCast(prompt)));
   if (!authorization.get()) {
     return;
@@ -819,7 +790,7 @@ NSString* const kVersionKey = @"KSVersion";
 
 - (void)promoteTicketWithAuthorization:(AuthorizationRef)authorization_arg
                            synchronous:(BOOL)synchronous {
-  base::mac::ScopedAuthorizationRef authorization(authorization_arg);
+  ScopedAuthorizationRef authorization(authorization_arg);
   authorization_arg = NULL;
 
   if ([self asyncOperationPending]) {
@@ -875,7 +846,7 @@ NSString* const kVersionKey = @"KSVersion";
   const char* arguments[] = {userBrandFile, systemBrandFile, NULL};
 
   int exit_status;
-  OSStatus status = base::mac::ExecuteWithPrivilegesAndWait(
+  OSStatus status = authorization_util::ExecuteWithPrivilegesAndWait(
       authorization,
       preflightPathC,
       kAuthorizationFlagDefaults,
@@ -921,12 +892,6 @@ NSString* const kVersionKey = @"KSVersion";
 
   // Upon completion, ksr::KSRegistrationPromotionDidCompleteNotification will
   // be posted, and -promotionComplete: will be called.
-
-  // If synchronous, see to it that this happens immediately. Give it a
-  // 10-second deadline.
-  if (synchronous) {
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 10, false);
-  }
 }
 
 - (void)promotionComplete:(NSNotification*)notification {
@@ -944,13 +909,6 @@ NSString* const kVersionKey = @"KSVersion";
   } else {
     authorization_.reset();
     [self updateStatus:kAutoupdatePromoteFailed version:nil];
-  }
-
-  if (synchronousPromotion_) {
-    // The run loop doesn't need to wait for this any longer.
-    CFRunLoopRef runLoop = CFRunLoopGetCurrent();
-    CFRunLoopStop(runLoop);
-    CFRunLoopWakeUp(runLoop);
   }
 }
 
@@ -976,7 +934,7 @@ NSString* const kVersionKey = @"KSVersion";
   const char* arguments[] = {appPathC, NULL};
 
   int exit_status;
-  OSStatus status = base::mac::ExecuteWithPrivilegesAndWait(
+  OSStatus status = authorization_util::ExecuteWithPrivilegesAndWait(
       authorization_,
       toolPathC,
       kAuthorizationFlagDefaults,
@@ -1007,59 +965,6 @@ NSString* const kVersionKey = @"KSVersion";
     [appPath_ release];
     appPath_ = [appPath copy];
   }
-}
-
-- (BOOL)has32BitOnlyCPU {
-#if defined(ARCH_CPU_64_BITS)
-  return NO;
-#else  // ARCH_CPU_64_BITS
-  int value;
-  size_t valueSize = sizeof(value);
-  if (sysctlbyname("hw.cpu64bit_capable", &value, &valueSize, NULL, 0) != 0) {
-    return YES;
-  }
-  return value == 0;
-#endif  // ARCH_CPU_64_BITS
-}
-
-- (BOOL)wantsFullInstaller {
-  // It's difficult to check the tag prior to Keystone registration, and
-  // performing registration replaces the tag. keystone_install.sh
-  // communicates a need for a full installer with Chrome in this file,
-  // .want_full_installer.
-  NSString* wantFullInstallerPath =
-      [appPath_ stringByAppendingPathComponent:@".want_full_installer"];
-  NSString* wantFullInstallerContents =
-      [NSString stringWithContentsOfFile:wantFullInstallerPath
-                                encoding:NSUTF8StringEncoding
-                                   error:NULL];
-  if (!wantFullInstallerContents) {
-    return NO;
-  }
-
-  NSString* wantFullInstallerVersion =
-      [wantFullInstallerContents stringByTrimmingCharactersInSet:
-          [NSCharacterSet newlineCharacterSet]];
-  return [wantFullInstallerVersion isEqualToString:version_];
-}
-
-- (NSString*)tagSuffix {
-  // Tag suffix components are not entirely arbitrary: all possible tag keys
-  // must be present in the application's Info.plist, there must be
-  // server-side agreement on the processing and meaning of tag suffix
-  // components, and other code that manipulates tag values (such as the
-  // Keystone update installation script) must be tag suffix-aware. To reduce
-  // the number of tag suffix combinations that need to be listed in
-  // Info.plist, tag suffix components should only be appended to the tag
-  // suffix in ASCII sort order.
-  NSString* tagSuffix = @"";
-  if ([self has32BitOnlyCPU]) {
-    tagSuffix = [tagSuffix stringByAppendingString:@"-32bit"];
-  }
-  if ([self wantsFullInstaller]) {
-    tagSuffix = [tagSuffix stringByAppendingString:@"-full"];
-  }
-  return tagSuffix;
 }
 
 @end  // @implementation KeystoneGlue
@@ -1097,7 +1002,7 @@ bool KeystoneEnabled() {
   return [KeystoneGlue defaultKeystoneGlue] != nil;
 }
 
-base::string16 CurrentlyInstalledVersion() {
+string16 CurrentlyInstalledVersion() {
   KeystoneGlue* keystoneGlue = [KeystoneGlue defaultKeystoneGlue];
   NSString* version = [keystoneGlue currentlyInstalledVersion];
   return base::SysNSStringToUTF16(version);

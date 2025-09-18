@@ -4,17 +4,16 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_PROFILE_TEST_H_
 #define CHROME_BROWSER_UI_COCOA_PROFILE_TEST_H_
+#pragma once
 
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
+#include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-
-namespace content {
-class TestBrowserThreadBundle;
-}
-
-class Browser;
-class TestingProfile;
+#include "content/test/test_browser_thread.h"
 
 // Base class which contains a valid Browser*.  Lots of boilerplate to
 // recycle between unit test classes.
@@ -49,21 +48,25 @@ class CocoaProfileTest : public CocoaTest {
   TestingProfile* profile() { return profile_; }
   Browser* browser() { return browser_.get(); }
 
-  // Closes the window for this browser. This will automatically be called as
-  // part of TearDown() if it's not been done already.
+  // Creates the browser window. To close this window call |CloseBrowserWindow|.
+  // Do NOT call close directly on the window.
+  BrowserWindow* CreateBrowserWindow();
+
+  // Closes the window for this browser. This must only be called after
+  // CreateBrowserWindow(). This will automatically be called as part of
+  // TearDown() if it's not been done already.
   void CloseBrowserWindow();
 
- protected:
-  // Overridden by test subclasses to create their own browser, e.g. with a
-  // test window.
-  virtual Browser* CreateBrowser();
-
  private:
+  MessageLoopForUI message_loop_;
+  content::TestBrowserThread ui_thread_;
+
   TestingProfileManager profile_manager_;
   TestingProfile* profile_;  // Weak; owned by profile_manager_.
   scoped_ptr<Browser> browser_;
 
-  scoped_ptr<content::TestBrowserThreadBundle> thread_bundle_;
+  scoped_ptr<content::TestBrowserThread> file_thread_;
+  scoped_ptr<content::TestBrowserThread> io_thread_;
 };
 
 #endif  // CHROME_BROWSER_UI_COCOA_PROFILE_TEST_H_

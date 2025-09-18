@@ -4,18 +4,17 @@
 
 #ifndef ASH_WM_VIDEO_DETECTOR_H_
 #define ASH_WM_VIDEO_DETECTOR_H_
+#pragma once
 
 #include <map>
 
 #include "ash/ash_export.h"
-#include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
 #include "base/observer_list.h"
-#include "base/scoped_observer.h"
-#include "base/time/time.h"
-#include "ui/aura/env_observer.h"
+#include "base/time.h"
+#include "ui/aura/root_window_observer.h"
 #include "ui/aura/window_observer.h"
 
 namespace aura {
@@ -31,7 +30,7 @@ namespace ash {
 class ASH_EXPORT VideoDetectorObserver {
  public:
   // Invoked periodically while a video is being played onscreen.
-  virtual void OnVideoDetected(bool is_fullscreen) = 0;
+  virtual void OnVideoDetected() = 0;
 
  protected:
   virtual ~VideoDetectorObserver() {}
@@ -40,9 +39,8 @@ class ASH_EXPORT VideoDetectorObserver {
 // Watches for updates to windows and tries to detect when a video is playing.
 // We err on the side of false positives and can be fooled by things like
 // continuous scrolling of a page.
-class ASH_EXPORT VideoDetector : public aura::EnvObserver,
-                                 public aura::WindowObserver,
-                                 public ShellObserver  {
+class ASH_EXPORT VideoDetector : public aura::RootWindowObserver,
+                                 public aura::WindowObserver {
  public:
   // Minimum dimensions in pixels that a window update must have to be
   // considered a potential video frame.
@@ -65,16 +63,13 @@ class ASH_EXPORT VideoDetector : public aura::EnvObserver,
   void AddObserver(VideoDetectorObserver* observer);
   void RemoveObserver(VideoDetectorObserver* observer);
 
-  // EnvObserver overrides.
+  // RootWindowObserver overrides.
   virtual void OnWindowInitialized(aura::Window* window) OVERRIDE;
 
   // WindowObserver overrides.
   virtual void OnWindowPaintScheduled(aura::Window* window,
                                       const gfx::Rect& region) OVERRIDE;
   virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
-
-  // ShellObserver overrides.
-  virtual void OnAppTerminating() OVERRIDE;
 
  private:
   class WindowInfo;
@@ -96,10 +91,6 @@ class ASH_EXPORT VideoDetector : public aura::EnvObserver,
   // If set, used when the current time is needed.  This can be set by tests to
   // simulate the passage of time.
   base::TimeTicks now_for_test_;
-
-  ScopedObserver<aura::Window, aura::WindowObserver> observer_manager_;
-
-  bool is_shutting_down_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoDetector);
 };

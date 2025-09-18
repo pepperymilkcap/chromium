@@ -1,12 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/synchronization/lock.h"
-
 #include <stdlib.h>
 
-#include "base/compiler_specific.h"
+#include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -16,9 +14,9 @@ namespace base {
 
 class BasicLockTestThread : public PlatformThread::Delegate {
  public:
-  explicit BasicLockTestThread(Lock* lock) : lock_(lock), acquired_(0) {}
+  BasicLockTestThread(Lock* lock) : lock_(lock), acquired_(0) {}
 
-  virtual void ThreadMain() OVERRIDE {
+  virtual void ThreadMain() {
     for (int i = 0; i < 10; i++) {
       lock_->Acquire();
       acquired_++;
@@ -51,7 +49,7 @@ class BasicLockTestThread : public PlatformThread::Delegate {
 TEST(LockTest, Basic) {
   Lock lock;
   BasicLockTestThread thread(&lock);
-  PlatformThreadHandle handle;
+  PlatformThreadHandle handle = kNullThreadHandle;
 
   ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
 
@@ -91,9 +89,9 @@ TEST(LockTest, Basic) {
 
 class TryLockTestThread : public PlatformThread::Delegate {
  public:
-  explicit TryLockTestThread(Lock* lock) : lock_(lock), got_lock_(false) {}
+  TryLockTestThread(Lock* lock) : lock_(lock), got_lock_(false) {}
 
-  virtual void ThreadMain() OVERRIDE {
+  virtual void ThreadMain() {
     got_lock_ = lock_->Try();
     if (got_lock_)
       lock_->Release();
@@ -117,7 +115,7 @@ TEST(LockTest, TryLock) {
   // This thread will not be able to get the lock.
   {
     TryLockTestThread thread(&lock);
-    PlatformThreadHandle handle;
+    PlatformThreadHandle handle = kNullThreadHandle;
 
     ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
 
@@ -131,7 +129,7 @@ TEST(LockTest, TryLock) {
   // This thread will....
   {
     TryLockTestThread thread(&lock);
-    PlatformThreadHandle handle;
+    PlatformThreadHandle handle = kNullThreadHandle;
 
     ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
 
@@ -162,7 +160,7 @@ class MutexLockTestThread : public PlatformThread::Delegate {
     }
   }
 
-  virtual void ThreadMain() OVERRIDE {
+  virtual void ThreadMain() {
     DoStuff(lock_, value_);
   }
 
@@ -178,7 +176,7 @@ TEST(LockTest, MutexTwoThreads) {
   int value = 0;
 
   MutexLockTestThread thread(&lock, &value);
-  PlatformThreadHandle handle;
+  PlatformThreadHandle handle = kNullThreadHandle;
 
   ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
 
@@ -196,9 +194,9 @@ TEST(LockTest, MutexFourThreads) {
   MutexLockTestThread thread1(&lock, &value);
   MutexLockTestThread thread2(&lock, &value);
   MutexLockTestThread thread3(&lock, &value);
-  PlatformThreadHandle handle1;
-  PlatformThreadHandle handle2;
-  PlatformThreadHandle handle3;
+  PlatformThreadHandle handle1 = kNullThreadHandle;
+  PlatformThreadHandle handle2 = kNullThreadHandle;
+  PlatformThreadHandle handle3 = kNullThreadHandle;
 
   ASSERT_TRUE(PlatformThread::Create(0, &thread1, &handle1));
   ASSERT_TRUE(PlatformThread::Create(0, &thread2, &handle2));

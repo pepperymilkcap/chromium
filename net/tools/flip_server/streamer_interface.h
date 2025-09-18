@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_TOOLS_FLIP_SERVER_STREAMER_INTERFACE_H_
-#define NET_TOOLS_FLIP_SERVER_STREAMER_INTERFACE_H_
+#ifndef NET_TOOLS_FLIP_SERVER_STREAMER_INTERFACE_
+#define NET_TOOLS_FLIP_SERVER_STREAMER_INTERFACE_
 
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "net/tools/balsa/balsa_headers.h"
-#include "net/tools/balsa/balsa_visitor_interface.h"
+#include "net/tools/flip_server/balsa_headers.h"
+#include "net/tools/flip_server/balsa_visitor_interface.h"
 #include "net/tools/flip_server/sm_interface.h"
 
 namespace net {
@@ -20,7 +20,8 @@ class MemCacheIter;
 class SMConnection;
 class EpollServer;
 
-class StreamerSM : public BalsaVisitorInterface, public SMInterface {
+class StreamerSM : public BalsaVisitorInterface,
+                   public SMInterface  {
  public:
   StreamerSM(SMConnection* connection,
              SMInterface* sm_other_interface,
@@ -52,8 +53,7 @@ class StreamerSM : public BalsaVisitorInterface, public SMInterface {
   virtual void ResetForNewConnection() OVERRIDE;
   virtual void Cleanup() OVERRIDE;
   virtual int PostAcceptHook() OVERRIDE;
-  virtual void NewStream(uint32 stream_id,
-                         uint32 priority,
+  virtual void NewStream(uint32 stream_id, uint32 priority,
                          const std::string& filename) OVERRIDE {}
   virtual void SendEOF(uint32 stream_id) OVERRIDE {}
   virtual void SendErrorNotFound(uint32 stream_id) OVERRIDE {}
@@ -62,11 +62,8 @@ class StreamerSM : public BalsaVisitorInterface, public SMInterface {
                                const BalsaHeaders& headers) OVERRIDE;
   virtual size_t SendSynReply(uint32 stream_id,
                               const BalsaHeaders& headers) OVERRIDE;
-  virtual void SendDataFrame(uint32 stream_id,
-                             const char* data,
-                             int64 len,
-                             uint32 flags,
-                             bool compress) OVERRIDE {}
+  virtual void SendDataFrame(uint32 stream_id, const char* data, int64 len,
+                             uint32 flags, bool compress) OVERRIDE {}
   virtual void set_is_request() OVERRIDE;
   static std::string forward_ip_header() { return forward_ip_header_; }
   static void set_forward_ip_header(std::string value) {
@@ -83,19 +80,16 @@ class StreamerSM : public BalsaVisitorInterface, public SMInterface {
   size_t SendSynStreamImpl(uint32 stream_id, const BalsaHeaders& headers) {
     return 0;
   }
-  void SendDataFrameImpl(uint32 stream_id,
-                         const char* data,
-                         int64 len,
-                         uint32 flags,
-                         bool compress) {}
+  void SendDataFrameImpl(uint32 stream_id, const char* data, int64 len,
+                         uint32 flags, bool compress) {}
   virtual void GetOutput() OVERRIDE {}
 
-  virtual void ProcessBodyInput(const char* input, size_t size) OVERRIDE;
+  virtual void ProcessBodyInput(const char *input, size_t size) OVERRIDE;
   virtual void MessageDone() OVERRIDE;
   virtual void ProcessHeaders(const BalsaHeaders& headers) OVERRIDE;
-  virtual void ProcessBodyData(const char* input, size_t size) OVERRIDE {}
-  virtual void ProcessHeaderInput(const char* input, size_t size) OVERRIDE {}
-  virtual void ProcessTrailerInput(const char* input, size_t size) OVERRIDE {}
+  virtual void ProcessBodyData(const char *input, size_t size) OVERRIDE {}
+  virtual void ProcessHeaderInput(const char *input, size_t size) OVERRIDE {}
+  virtual void ProcessTrailerInput(const char *input, size_t size) OVERRIDE {}
   virtual void ProcessRequestFirstLine(const char* line_input,
                                        size_t line_length,
                                        const char* method_input,
@@ -104,17 +98,17 @@ class StreamerSM : public BalsaVisitorInterface, public SMInterface {
                                        size_t request_uri_length,
                                        const char* version_input,
                                        size_t version_length) OVERRIDE {}
-  virtual void ProcessResponseFirstLine(const char* line_input,
+  virtual void ProcessResponseFirstLine(const char *line_input,
                                         size_t line_length,
-                                        const char* version_input,
+                                        const char *version_input,
                                         size_t version_length,
-                                        const char* status_input,
+                                        const char *status_input,
                                         size_t status_length,
-                                        const char* reason_input,
+                                        const char *reason_input,
                                         size_t reason_length) OVERRIDE {}
   virtual void ProcessChunkLength(size_t chunk_length) OVERRIDE {}
-  virtual void ProcessChunkExtensions(const char* input, size_t size) OVERRIDE {
-  }
+  virtual void ProcessChunkExtensions(const char *input,
+                                      size_t size) OVERRIDE {}
   virtual void HeaderDone() OVERRIDE {}
   virtual void HandleHeaderError(BalsaFrame* framer) OVERRIDE;
   virtual void HandleHeaderWarning(BalsaFrame* framer) OVERRIDE {}
@@ -134,4 +128,5 @@ class StreamerSM : public BalsaVisitorInterface, public SMInterface {
 
 }  // namespace net
 
-#endif  // NET_TOOLS_FLIP_SERVER_STREAMER_INTERFACE_H_
+#endif  // NET_TOOLS_FLIP_SERVER_STREAMER_INTERFACE_
+

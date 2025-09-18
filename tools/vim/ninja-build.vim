@@ -3,12 +3,7 @@
 " found in the LICENSE file.
 "
 " Adds a "Compile this file" function, using ninja. On Mac, binds Cmd-k to
-" this command. On Windows, Ctrl-F7 (which is the same as the VS default).
-" On Linux, <Leader>o, which is \o by default ("o"=creates .o files)
-"
-" Adds a "Build this target" function, using ninja. This is not bound
-" to any key by default, but can be used via the :CrBuild command.
-" It builds 'chrome' by default, but :CrBuild target1 target2 etc works as well.
+" this command.
 "
 " Requires that gyp has already generated build.ninja files, and that ninja is
 " in your path (which it is automatically if depot_tools is in your path).
@@ -61,7 +56,7 @@ def guess_configuration():
   return configuration
 
 
-def compute_ninja_command_for_current_buffer(configuration=None):
+def compute_ninja_command(configuration=None):
   """Returns the shell command to compile the file in the current buffer."""
   if not configuration: configuration = guess_configuration()
   build_dir = os.path.join(path_to_source_root(), 'out', configuration)
@@ -71,59 +66,25 @@ def compute_ninja_command_for_current_buffer(configuration=None):
   file_to_build = path_to_current_buffer()
   file_to_build = os.path.relpath(file_to_build, build_dir)
 
-  build_cmd = ' '.join(['ninja', '-C', build_dir, file_to_build + '^'])
-  if sys.platform == 'win32':
-    # Escape \ for Vim, and ^ for both Vim and shell.
-    build_cmd = build_cmd.replace('\\', '\\\\').replace('^', '^^^^')
-  vim.command('return "%s"' % build_cmd)
+  return ' '.join(['ninja', '-C', build_dir, file_to_build + '^'])
 
 
-def compute_ninja_command_for_targets(targets='', configuration=None):
-  if not configuration: configuration = guess_configuration()
-  build_dir = os.path.join(path_to_source_root(), 'out', configuration)
-  build_cmd = ' '.join(['ninja', '-C', build_dir, targets])
-  vim.command('return "%s"' % build_cmd)
+def set_makepgr_to_single_file_ninja():
+  vim.command('let &makeprg="%s"' % compute_ninja_command())
 endpython
 
-fun! s:MakeWithCustomCommand(build_cmd)
+fun! CrCompileFile()
   let l:oldmakepgr = &makeprg
-  let &makeprg=a:build_cmd
+  python set_makepgr_to_single_file_ninja()
   silent make | cwindow
-  if !has('gui_running')
-    redraw!
-  endif
+  redraw!
   let &makeprg = l:oldmakepgr
 endfun
 
-fun! s:NinjaCommandForCurrentBuffer()
-  python compute_ninja_command_for_current_buffer()
-endfun
-
-fun! s:NinjaCommandForTargets(targets)
-  python compute_ninja_command_for_targets(vim.eval('a:targets'))
-endfun
-
-fun! CrCompileFile()
-  call s:MakeWithCustomCommand(s:NinjaCommandForCurrentBuffer())
-endfun
-
-fun! CrBuild(...)
-  let l:targets = a:0 > 0 ? join(a:000, ' ') : ''
-  if (l:targets !~ '\i')
-    let l:targets = 'chrome'
-  endif
-  call s:MakeWithCustomCommand(s:NinjaCommandForTargets(l:targets))
-endfun
-
 command! CrCompileFile call CrCompileFile()
-command! -nargs=* CrBuild call CrBuild(<q-args>)
 
 if has('mac')
   map <D-k> :CrCompileFile<cr>
   imap <D-k> <esc>:CrCompileFile<cr>
-elseif has('win32')
-  map <C-F7> :CrCompileFile<cr>
-  imap <C-F7> <esc>:CrCompileFile<cr>
-elseif has('unix')
-  map <Leader>o :CrCompileFile<cr>
 endif
+" TODO(linuxuser): Suggest a keyboard shortcut and send review to thakis@.

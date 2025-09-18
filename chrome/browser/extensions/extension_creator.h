@@ -1,24 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_CREATOR_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_CREATOR_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 
-namespace base {
-class FilePath;
-}
-
 namespace crypto {
 class RSAPrivateKey;
 }
 
-namespace extensions {
+class FilePath;
 
 // This class create an installable extension (.crx file) given an input
 // directory that contains a valid manifest.json and the extension's resources
@@ -32,17 +29,16 @@ class ExtensionCreator {
   // Settings to specify treatment of special or ignorable error conditions.
   enum RunFlags {
     kNoRunFlags = 0x0,
-    kOverwriteCRX = 0x1,
-    kRequireModernManifestVersion = 0x2,
+    kOverwriteCRX = 0x1
   };
 
   // Categories of error that may need special handling on the UI end.
   enum ErrorType { kOtherError, kCRXExists };
 
-  bool Run(const base::FilePath& extension_dir,
-           const base::FilePath& crx_path,
-           const base::FilePath& private_key_path,
-           const base::FilePath& private_key_output_path,
+  bool Run(const FilePath& extension_dir,
+           const FilePath& crx_path,
+           const FilePath& private_key_path,
+           const FilePath& private_key_output_path,
            int run_flags);
 
   // Returns the error message that will be present if Run(...) returned false.
@@ -58,38 +54,33 @@ class ExtensionCreator {
   // the extension. If not provided, a random key will be created (in which case
   // it is written to |private_key_output_path| -- if provided).
   // |flags| is a bitset of RunFlags values.
-  bool InitializeInput(const base::FilePath& extension_dir,
-                       const base::FilePath& crx_path,
-                       const base::FilePath& private_key_path,
-                       const base::FilePath& private_key_output_path,
+  bool InitializeInput(const FilePath& extension_dir,
+                       const FilePath& crx_path,
+                       const FilePath& private_key_path,
+                       const FilePath& private_key_output_path,
                        int run_flags);
 
-  // Validates the manifest by trying to load the extension.
-  bool ValidateManifest(const base::FilePath& extension_dir,
-                        crypto::RSAPrivateKey* key_pair,
-                        int run_flags);
-
   // Reads private key from |private_key_path|.
-  crypto::RSAPrivateKey* ReadInputKey(const base::FilePath& private_key_path);
+  crypto::RSAPrivateKey* ReadInputKey(const FilePath& private_key_path);
 
   // Generates a key pair and writes the private key to |private_key_path|
   // if provided.
-  crypto::RSAPrivateKey* GenerateKey(const base::FilePath& private_key_path);
+  crypto::RSAPrivateKey* GenerateKey(const FilePath& private_key_path);
 
   // Creates temporary zip file for the extension.
-  bool CreateZip(const base::FilePath& extension_dir, const base::FilePath& temp_path,
-                 base::FilePath* zip_path);
+  bool CreateZip(const FilePath& extension_dir, const FilePath& temp_path,
+                 FilePath* zip_path);
 
   // Signs the temporary zip and returns the signature.
-  bool SignZip(const base::FilePath& zip_path,
+  bool SignZip(const FilePath& zip_path,
                crypto::RSAPrivateKey* private_key,
                std::vector<uint8>* signature);
 
   // Export installable .crx to |crx_path|.
-  bool WriteCRX(const base::FilePath& zip_path,
+  bool WriteCRX(const FilePath& zip_path,
                 crypto::RSAPrivateKey* private_key,
                 const std::vector<uint8>& signature,
-                const base::FilePath& crx_path);
+                const FilePath& crx_path);
 
   // Holds a message for any error that is raised during Run(...).
   std::string error_message_;
@@ -99,7 +90,5 @@ class ExtensionCreator {
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionCreator);
 };
-
-}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_CREATOR_H_

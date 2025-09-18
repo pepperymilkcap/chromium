@@ -20,13 +20,15 @@ function logFailed(message) {
 }
 
 function writeResult() {
-  if (passedAll) {
+  var result = "1";
+  if (passedAll)
     logPassed("Everything passed.");
-    document.title = "OK";
-  } else {
+  else {
     logFailed("At least one test failed.");
-    document.title = "FAIL";
+    result = " " + document.body.innerText; // Add a space to ensure that the
+					    // result doesn't resemble success.
   }
+  document.cookie = document.location.hostname + "testResult=" + escape(result);
 }
 
 function MyObject() {

@@ -13,40 +13,22 @@
 #include "net/proxy/proxy_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace content {
+using content::BrowserThread;
+using content::BrowserThreadImpl;
 
 // This ProxyConfigService always returns "http://pac" as the PAC url to use.
 class MockProxyConfigService : public net::ProxyConfigService {
  public:
-  virtual void AddObserver(Observer* observer) OVERRIDE {}
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {}
-  virtual ConfigAvailability GetLatestProxyConfig(
-      net::ProxyConfig* results) OVERRIDE {
+  virtual void AddObserver(Observer* observer) {}
+  virtual void RemoveObserver(Observer* observer) {}
+  virtual ConfigAvailability GetLatestProxyConfig(net::ProxyConfig* results) {
     *results = net::ProxyConfig::CreateFromCustomPacURL(GURL("http://pac"));
     return CONFIG_VALID;
   }
 };
 
-class TestResolveProxyMsgHelper : public ResolveProxyMsgHelper {
- public:
-  TestResolveProxyMsgHelper(
-      net::ProxyService* proxy_service,
-      IPC::Listener* listener)
-      : ResolveProxyMsgHelper(proxy_service),
-        listener_(listener) {}
-  virtual bool Send(IPC::Message* message) OVERRIDE {
-    listener_->OnMessageReceived(*message);
-    delete message;
-    return true;
-  }
-
- protected:
-  virtual ~TestResolveProxyMsgHelper() {}
-
-  IPC::Listener* listener_;
-};
-
-class ResolveProxyMsgHelperTest : public testing::Test, public IPC::Listener {
+class ResolveProxyMsgHelperTest : public testing::Test,
+                                  public IPC::Channel::Listener {
  public:
   struct PendingResult {
     PendingResult(bool result,
@@ -60,12 +42,13 @@ class ResolveProxyMsgHelperTest : public testing::Test, public IPC::Listener {
 
   ResolveProxyMsgHelperTest()
       : resolver_(new net::MockAsyncProxyResolver),
-        service_(
-            new net::ProxyService(new MockProxyConfigService, resolver_, NULL)),
-        helper_(new TestResolveProxyMsgHelper(service_.get(), this)),
-        message_loop_(base::MessageLoop::TYPE_IO),
+        service_(new net::ProxyService(
+            new MockProxyConfigService, resolver_, NULL)),
+        helper_(new ResolveProxyMsgHelper(service_.get())),
+        message_loop_(MessageLoop::TYPE_IO),
         io_thread_(BrowserThread::IO, &message_loop_) {
     test_sink_.AddFilter(this);
+    helper_->OnFilterAdded(&test_sink_);
   }
 
  protected:
@@ -88,7 +71,7 @@ class ResolveProxyMsgHelperTest : public testing::Test, public IPC::Listener {
   scoped_ptr<PendingResult> pending_result_;
 
  private:
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
+  virtual bool OnMessageReceived(const IPC::Message& msg) {
     TupleTypes<ViewHostMsg_ResolveProxy::ReplyParam>::ValueTuple reply_data;
     EXPECT_TRUE(ViewHostMsg_ResolveProxy::ReadReplyParam(&msg, &reply_data));
     DCHECK(!pending_result_.get());
@@ -97,7 +80,7 @@ class ResolveProxyMsgHelperTest : public testing::Test, public IPC::Listener {
     return true;
   }
 
-  base::MessageLoop message_loop_;
+  MessageLoop message_loop_;
   BrowserThreadImpl io_thread_;
   IPC::TestSink test_sink_;
 };
@@ -253,5 +236,3 @@ TEST_F(ResolveProxyMsgHelperTest, CancelPendingRequests) {
   // It should also be the case that msg1, msg2, msg3 were deleted by the
   // cancellation. (Else will show up as a leak in Valgrind).
 }
-
-}  // namespace content

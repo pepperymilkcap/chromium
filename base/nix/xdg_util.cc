@@ -1,64 +1,37 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/nix/xdg_util.h"
 
-#include <string>
-
 #include "base/environment.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/third_party/xdg_user_dirs/xdg_user_dir_lookup.h"
-
-namespace {
-
-// The KDE session version environment variable used in KDE 4.
-const char kKDE4SessionEnvVar[] = "KDE_SESSION_VERSION";
-
-}  // namespace
 
 namespace base {
 namespace nix {
 
-const char kDotConfigDir[] = ".config";
-const char kXdgConfigHomeEnvVar[] = "XDG_CONFIG_HOME";
-
 FilePath GetXDGDirectory(Environment* env, const char* env_name,
                          const char* fallback_dir) {
-  FilePath path;
   std::string env_value;
   if (env->GetVar(env_name, &env_value) && !env_value.empty())
-    path = FilePath(env_value);
-  else
-    path = GetHomeDir().Append(fallback_dir);
-  return path.StripTrailingSeparators();
+    return FilePath(env_value);
+  return file_util::GetHomeDir().Append(fallback_dir);
 }
 
-FilePath GetXDGUserDirectory(const char* dir_name, const char* fallback_dir) {
-  FilePath path;
+FilePath GetXDGUserDirectory(Environment* env, const char* dir_name,
+                             const char* fallback_dir) {
   char* xdg_dir = xdg_user_dir_lookup(dir_name);
   if (xdg_dir) {
-    path = FilePath(xdg_dir);
+    FilePath rv(xdg_dir);
     free(xdg_dir);
-  } else {
-    path = GetHomeDir().Append(fallback_dir);
+    return rv;
   }
-  return path.StripTrailingSeparators();
+  return file_util::GetHomeDir().Append(fallback_dir);
 }
 
 DesktopEnvironment GetDesktopEnvironment(Environment* env) {
-  // XDG_CURRENT_DESKTOP is the newest standard circa 2012.
-  std::string xdg_current_desktop;
-  if (env->GetVar("XDG_CURRENT_DESKTOP", &xdg_current_desktop)) {
-    // Not all desktop environments set this env var as of this writing.
-    if (xdg_current_desktop == "Unity")
-      return DESKTOP_ENVIRONMENT_UNITY;
-    else if (xdg_current_desktop == "GNOME")
-      return DESKTOP_ENVIRONMENT_GNOME;
-  }
-
-  // DESKTOP_SESSION was what everyone used in 2010.
   std::string desktop_session;
   if (env->GetVar("DESKTOP_SESSION", &desktop_session)) {
     if (desktop_session == "gnome") {
@@ -67,7 +40,7 @@ DesktopEnvironment GetDesktopEnvironment(Environment* env) {
       return DESKTOP_ENVIRONMENT_KDE4;
     } else if (desktop_session == "kde") {
       // This may mean KDE4 on newer systems, so we have to check.
-      if (env->HasVar(kKDE4SessionEnvVar))
+      if (env->HasVar("KDE_SESSION_VERSION"))
         return DESKTOP_ENVIRONMENT_KDE4;
       return DESKTOP_ENVIRONMENT_KDE3;
     } else if (desktop_session.find("xfce") != std::string::npos ||
@@ -81,7 +54,7 @@ DesktopEnvironment GetDesktopEnvironment(Environment* env) {
   if (env->HasVar("GNOME_DESKTOP_SESSION_ID")) {
     return DESKTOP_ENVIRONMENT_GNOME;
   } else if (env->HasVar("KDE_FULL_SESSION")) {
-    if (env->HasVar(kKDE4SessionEnvVar))
+    if (env->HasVar("KDE_SESSION_VERSION"))
       return DESKTOP_ENVIRONMENT_KDE4;
     return DESKTOP_ENVIRONMENT_KDE3;
   }
@@ -99,8 +72,6 @@ const char* GetDesktopEnvironmentName(DesktopEnvironment env) {
       return "KDE3";
     case DESKTOP_ENVIRONMENT_KDE4:
       return "KDE4";
-    case DESKTOP_ENVIRONMENT_UNITY:
-      return "UNITY";
     case DESKTOP_ENVIRONMENT_XFCE:
       return "XFCE";
   }

@@ -4,35 +4,31 @@
 
 #ifndef NET_HTTP_HTTP_STREAM_PARSER_H_
 #define NET_HTTP_HTTP_STREAM_PARSER_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
-#include "net/base/upload_progress.h"
+#include "net/base/upload_data_stream.h"
+#include "net/http/http_chunked_decoder.h"
 
 namespace net {
 
 class ClientSocketHandle;
 class DrainableIOBuffer;
 class GrowableIOBuffer;
-class HttpChunkedDecoder;
 struct HttpRequestInfo;
 class HttpRequestHeaders;
 class HttpResponseInfo;
 class IOBuffer;
-class IOBufferWithSize;
 class SSLCertRequestInfo;
 class SSLInfo;
-class UploadDataStream;
 
-class NET_EXPORT_PRIVATE HttpStreamParser {
+class NET_EXPORT_PRIVATE HttpStreamParser  : public ChunkCallback {
  public:
   // Any data in |read_buffer| will be used before reading from the socket
   // and any data left over after parsing the stream will be put into
@@ -49,6 +45,7 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   // some additional functionality
   int SendRequest(const std::string& request_line,
                   const HttpRequestHeaders& headers,
+                  UploadDataStream* request_body,
                   HttpResponseInfo* response,
                   const CompletionCallback& callback);
 
@@ -59,9 +56,7 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
 
   void Close(bool not_reusable);
 
-  // Returns the progress of uploading. When data is chunked, size is set to
-  // zero, but position will not be.
-  UploadProgress GetUploadProgress() const;
+  uint64 GetUploadProgress() const;
 
   HttpResponseInfo* GetResponseInfo();
 
@@ -77,11 +72,12 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
 
   bool IsConnectionReusable() const;
 
-  int64 received_bytes() const { return received_bytes_; }
-
   void GetSSLInfo(SSLInfo* ssl_info);
 
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
+
+  // ChunkCallback methods.
+  virtual void OnChunkAvailable() OVERRIDE;
 
   // Encodes the given |payload| in the chunked format to |output|.
   // Returns the number of bytes written to |output|. |output_size| should
@@ -105,8 +101,6 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   static const size_t kChunkHeaderFooterSize;
 
  private:
-  class SeekableIOBuffer;
-
   // FOO_COMPLETE states implement the second half of potentially asynchronous
   // operations and don't necessarily mean that FOO is complete.
   enum State {
@@ -115,8 +109,8 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
     // If the request comes with a body, either of the following two
     // states will be executed, depending on whether the body is chunked
     // or not.
-    STATE_SENDING_BODY,
-    STATE_SEND_REQUEST_READING_BODY,
+    STATE_SENDING_CHUNKED_BODY,
+    STATE_SENDING_NON_CHUNKED_BODY,
     STATE_REQUEST_SENT,
     STATE_READ_HEADERS,
     STATE_READ_HEADERS_COMPLETE,
@@ -147,8 +141,8 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
 
   // The implementations of each state of the state machine.
   int DoSendHeaders(int result);
-  int DoSendBody(int result);
-  int DoSendRequestReadingBody(int result);
+  int DoSendChunkedBody(int result);
+  int DoSendNonChunkedBody(int result);
   int DoReadHeaders();
   int DoReadHeadersComplete(int result);
   int DoReadBody();
@@ -176,21 +170,19 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   // The request header data.
   scoped_refptr<DrainableIOBuffer> request_headers_;
 
+  // The request body data.
+  scoped_ptr<UploadDataStream> request_body_;
+
   // Temporary buffer for reading.
   scoped_refptr<GrowableIOBuffer> read_buf_;
 
   // Offset of the first unused byte in |read_buf_|.  May be nonzero due to
-  // body data in the same packet as header data but is zero when reading
-  // headers.
+  // a 1xx header, or body data in the same packet as header data.
   int read_buf_unused_offset_;
 
   // The amount beyond |read_buf_unused_offset_| where the status line starts;
   // -1 if not found yet.
   int response_header_start_offset_;
-
-  // The amount of received data.  If connection is reused then intermediate
-  // value may be bigger than final.
-  int64 received_bytes_;
 
   // The parsed response headers.  Owned by the caller.
   HttpResponseInfo* response_;
@@ -228,14 +220,15 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   // Callback to be used when doing IO.
   CompletionCallback io_callback_;
 
-  // Buffer used to read the request body from UploadDataStream.
-  scoped_refptr<SeekableIOBuffer> request_body_read_buf_;
-  // Buffer used to send the request body. This points the same buffer as
-  // |request_body_read_buf_| unless the data is chunked.
-  scoped_refptr<SeekableIOBuffer> request_body_send_buf_;
+  // Stores an encoded chunk for chunked uploads.
+  // Note: This should perhaps be improved to not create copies of the data.
+  scoped_refptr<IOBuffer> chunk_buf_;
+  // The size of the chunk buffer (chunk_buf_). The chunk buffer is
+  // guaranteed to be large enough to hold the encoded chunk.
+  const size_t chunk_buffer_size_;
+  size_t chunk_length_;
+  size_t chunk_length_without_encoding_;
   bool sent_last_chunk_;
-
-  base::WeakPtrFactory<HttpStreamParser> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpStreamParser);
 };

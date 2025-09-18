@@ -12,20 +12,20 @@ using ppapi::thunk::PPB_ResourceArray_API;
 
 namespace ppapi {
 
-PPB_ResourceArray_Shared::PPB_ResourceArray_Shared(ResourceObjectType type,
+PPB_ResourceArray_Shared::PPB_ResourceArray_Shared(const InitAsImpl&,
                                                    PP_Instance instance,
                                                    const PP_Resource elements[],
                                                    uint32_t size)
-    : Resource(type, instance) {
-  DCHECK(resources_.empty());
+    : Resource(instance) {
+  Initialize(elements, size);
+}
 
-  resources_.reserve(size);
-  for (uint32_t index = 0; index < size; ++index) {
-    PP_Resource element = elements[index];
-    if (element)
-      PpapiGlobals::Get()->GetResourceTracker()->AddRefResource(element);
-    resources_.push_back(element);
-  }
+PPB_ResourceArray_Shared::PPB_ResourceArray_Shared(const InitAsProxy&,
+                                                   PP_Instance instance,
+                                                   const PP_Resource elements[],
+                                                   uint32_t size)
+    : Resource(HostResource::MakeInstanceOnly(instance)) {
+  Initialize(elements, size);
 }
 
 PPB_ResourceArray_Shared::~PPB_ResourceArray_Shared() {
@@ -46,6 +46,19 @@ uint32_t PPB_ResourceArray_Shared::GetSize() {
 
 PP_Resource PPB_ResourceArray_Shared::GetAt(uint32_t index) {
   return index < resources_.size() ? resources_[index] : 0;
+}
+
+void PPB_ResourceArray_Shared::Initialize(const PP_Resource elements[],
+                                          uint32_t size) {
+  DCHECK(resources_.empty());
+
+  resources_.reserve(size);
+  for (uint32_t index = 0; index < size; ++index) {
+    PP_Resource element = elements[index];
+    if (element)
+      PpapiGlobals::Get()->GetResourceTracker()->AddRefResource(element);
+    resources_.push_back(element);
+  }
 }
 
 }  // namespace ppapi

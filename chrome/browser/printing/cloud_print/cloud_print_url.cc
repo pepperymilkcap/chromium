@@ -6,48 +6,37 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "components/user_prefs/pref_registry_syncable.h"
-#include "google_apis/gaia/gaia_urls.h"
-#include "net/base/url_util.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
-// Url must not be matched by "urls" section of
-// cloud_print_app/manifest.json. If it's matched, print driver dialog will
-// open sign-in page in separate window.
 const char kDefaultCloudPrintServiceURL[] = "https://www.google.com/cloudprint";
+const char kDefaultCloudPrintSigninURL[] =
+    "https://www.google.com/accounts/ServiceLogin?"
+    "service=cloudprint&continue=https%3A%2F%2Fwww.google.com%2Fcloudprint";
 
 const char kLearnMoreURL[] =
     "https://www.google.com/support/cloudprint";
 const char kTestPageURL[] =
     "http://www.google.com/landing/cloudprint/enable.html?print=true";
 
-// static
-void CloudPrintURL::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  GURL cloud_print_url(
-      command_line->GetSwitchValueASCII(switches::kCloudPrintServiceURL));
-  if (cloud_print_url.is_empty())
-    cloud_print_url = GURL(kDefaultCloudPrintServiceURL);
-  registry->RegisterStringPref(
-      prefs::kCloudPrintServiceURL,
-      cloud_print_url.spec(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  GURL gaia_url(GaiaUrls::GetInstance()->service_login_url());
-  gaia_url = net::AppendQueryParameter(gaia_url, "service", "cloudprint");
-  gaia_url = net::AppendQueryParameter(gaia_url, "sarp", "1");
-  gaia_url = net::AppendQueryParameter(gaia_url, "continue",
-                                       cloud_print_url.spec());
-  registry->RegisterStringPref(
-      prefs::kCloudPrintSigninURL,
-      gaia_url.spec(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+void CloudPrintURL::RegisterPreferences() {
+  DCHECK(profile_);
+  PrefService* pref_service = profile_->GetPrefs();
+  if (!pref_service->FindPreference(prefs::kCloudPrintServiceURL)) {
+    pref_service->RegisterStringPref(prefs::kCloudPrintServiceURL,
+                                     kDefaultCloudPrintServiceURL,
+                                     PrefService::UNSYNCABLE_PREF);
+  }
+  if (!pref_service->FindPreference(prefs::kCloudPrintSigninURL)) {
+    pref_service->RegisterStringPref(prefs::kCloudPrintSigninURL,
+                                     kDefaultCloudPrintSigninURL,
+                                     PrefService::UNSYNCABLE_PREF);
+  }
 }
 
 // Returns the root service URL for the cloud print service.  The default is to
@@ -55,12 +44,23 @@ void CloudPrintURL::RegisterProfilePrefs(
 // command line or by the user preferences.
 GURL CloudPrintURL::GetCloudPrintServiceURL() {
   DCHECK(profile_);
-  return GURL(profile_->GetPrefs()->GetString(prefs::kCloudPrintServiceURL));
+  RegisterPreferences();
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  GURL cloud_print_service_url = GURL(command_line.GetSwitchValueASCII(
+      switches::kCloudPrintServiceURL));
+  if (cloud_print_service_url.is_empty()) {
+    cloud_print_service_url = GURL(
+        profile_->GetPrefs()->GetString(prefs::kCloudPrintServiceURL));
+  }
+  return cloud_print_service_url;
 }
 
 GURL CloudPrintURL::GetCloudPrintSigninURL() {
   DCHECK(profile_);
-  GURL cloud_print_signin_url(
+  RegisterPreferences();
+
+  GURL cloud_print_signin_url = GURL(
       profile_->GetPrefs()->GetString(prefs::kCloudPrintSigninURL));
   return google_util::AppendGoogleLocaleParam(cloud_print_signin_url);
 }
@@ -92,7 +92,7 @@ GURL CloudPrintURL::GetCloudPrintServiceEnableURL(
       "/enable_chrome_connector/enable.html");
   GURL::Replacements replacements;
   replacements.SetPathStr(path);
-  std::string query = base::StringPrintf("proxy=%s", proxy_id.c_str());
+  std::string query = StringPrintf("proxy=%s", proxy_id.c_str());
   replacements.SetQueryStr(query);
   GURL cloud_print_enable_url = cloud_print_service_url.ReplaceComponents(
       replacements);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,9 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/weak_ptr.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
@@ -20,18 +18,18 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tab_restore_service_delegate.h"
-#include "chrome/browser/ui/gtk/event_utils.h"
 #include "chrome/browser/ui/gtk/global_menu_bar.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/gtk_util.h"
-#include "ui/gfx/text_elider.h"
 
 using content::OpenURLParams;
 
@@ -67,7 +65,7 @@ class GlobalHistoryMenu::HistoryItem {
         session_id(0) {}
 
   // The title for the menu item.
-  base::string16 title;
+  string16 title;
   // The URL that will be navigated to if the user selects this item.
   GURL url;
 
@@ -95,10 +93,8 @@ class GlobalHistoryMenu::HistoryItem {
 GlobalHistoryMenu::GlobalHistoryMenu(Browser* browser)
     : browser_(browser),
       profile_(browser_->profile()),
-      history_menu_(NULL),
       top_sites_(NULL),
-      tab_restore_service_(NULL),
-      weak_ptr_factory_(this) {
+      tab_restore_service_(NULL) {
 }
 
 GlobalHistoryMenu::~GlobalHistoryMenu() {
@@ -108,17 +104,11 @@ GlobalHistoryMenu::~GlobalHistoryMenu() {
   STLDeleteContainerPairSecondPointers(menu_item_history_map_.begin(),
                                        menu_item_history_map_.end());
   menu_item_history_map_.clear();
-
-  if (history_menu_) {
-    gtk_widget_destroy(history_menu_);
-    g_object_unref(history_menu_);
-  }
 }
 
 void GlobalHistoryMenu::Init(GtkWidget* history_menu,
                              GtkWidget* history_menu_item) {
-  history_menu_ = history_menu;
-  g_object_ref_sink(history_menu_);
+  history_menu_.Own(history_menu);
 
   // We have to connect to |history_menu_item|'s "activate" signal instead of
   // |history_menu|'s "show" signal because we are not supposed to modify the
@@ -143,16 +133,17 @@ void GlobalHistoryMenu::GetTopSitesData() {
   DCHECK(top_sites_);
 
   top_sites_->GetMostVisitedURLs(
+      &top_sites_consumer_,
       base::Bind(&GlobalHistoryMenu::OnTopSitesReceived,
-                 weak_ptr_factory_.GetWeakPtr()), false);
+                 base::Unretained(this)));
 }
 
 void GlobalHistoryMenu::OnTopSitesReceived(
     const history::MostVisitedURLList& visited_list) {
-  ClearMenuSection(history_menu_, GlobalMenuBar::TAG_MOST_VISITED);
+  ClearMenuSection(history_menu_.get(), GlobalMenuBar::TAG_MOST_VISITED);
 
   int index = GetIndexOfMenuItemWithTag(
-      history_menu_,
+      history_menu_.get(),
       GlobalMenuBar::TAG_MOST_VISITED_HEADER) + 1;
 
   for (size_t i = 0; i < visited_list.size() && i < kMostVisitedCount; ++i) {
@@ -165,7 +156,7 @@ void GlobalHistoryMenu::OnTopSitesReceived(
     item->url = visited.url;
 
     AddHistoryItemToMenu(item,
-                         history_menu_,
+                         history_menu_.get(),
                          GlobalMenuBar::TAG_MOST_VISITED,
                          index++);
   }
@@ -179,7 +170,7 @@ GlobalHistoryMenu::HistoryItem* GlobalHistoryMenu::HistoryItemForMenuItem(
 
 GlobalHistoryMenu::HistoryItem* GlobalHistoryMenu::HistoryItemForTab(
     const TabRestoreService::Tab& entry) {
-  const sessions::SerializedNavigationEntry& current_navigation =
+  const TabNavigation& current_navigation =
       entry.navigations.at(entry.current_navigation_index);
   HistoryItem* item = new HistoryItem();
   item->title = current_navigation.title();
@@ -193,15 +184,15 @@ GtkWidget* GlobalHistoryMenu::AddHistoryItemToMenu(HistoryItem* item,
                                                    GtkWidget* menu,
                                                    int tag,
                                                    int index) {
-  base::string16 title = item->title;
+  string16 title = item->title;
   std::string url_string = item->url.possibly_invalid_spec();
 
   if (title.empty())
-    title = base::UTF8ToUTF16(url_string);
-  gfx::ElideString(title, kMaximumMenuWidthInChars, &title);
+    title = UTF8ToUTF16(url_string);
+  ui::ElideString(title, kMaximumMenuWidthInChars, &title);
 
   GtkWidget* menu_item = gtk_menu_item_new_with_label(
-      base::UTF16ToUTF8(title).c_str());
+      UTF16ToUTF8(title).c_str());
 
   item->menu_item = menu_item;
   gtk_widget_show(menu_item);
@@ -290,12 +281,12 @@ void GlobalHistoryMenu::Observe(int type,
 void GlobalHistoryMenu::TabRestoreServiceChanged(TabRestoreService* service) {
   const TabRestoreService::Entries& entries = service->entries();
 
-  ClearMenuSection(history_menu_, GlobalMenuBar::TAG_RECENTLY_CLOSED);
+  ClearMenuSection(history_menu_.get(), GlobalMenuBar::TAG_RECENTLY_CLOSED);
 
   // We'll get the index the "Recently Closed" header. (This can vary depending
   // on the number of "Most Visited" items.
   int index = GetIndexOfMenuItemWithTag(
-      history_menu_,
+      history_menu_.get(),
       GlobalMenuBar::TAG_RECENTLY_CLOSED_HEADER) + 1;
 
   unsigned int added_count = 0;
@@ -362,14 +353,14 @@ void GlobalHistoryMenu::TabRestoreServiceChanged(TabRestoreService* service) {
                         GINT_TO_POINTER(GlobalMenuBar::TAG_RECENTLY_CLOSED));
       gtk_menu_item_set_submenu(GTK_MENU_ITEM(parent_item), submenu);
 
-      gtk_menu_shell_insert(GTK_MENU_SHELL(history_menu_), parent_item,
+      gtk_menu_shell_insert(GTK_MENU_SHELL(history_menu_.get()), parent_item,
                             index++);
       ++added_count;
     } else if (entry->type == TabRestoreService::TAB) {
       TabRestoreService::Tab* tab = static_cast<TabRestoreService::Tab*>(entry);
       HistoryItem* item = HistoryItemForTab(*tab);
       AddHistoryItemToMenu(item,
-                           history_menu_,
+                           history_menu_.get(),
                            GlobalMenuBar::TAG_RECENTLY_CLOSED,
                            index++);
       ++added_count;
@@ -384,7 +375,7 @@ void GlobalHistoryMenu::TabRestoreServiceDestroyed(
 
 void GlobalHistoryMenu::OnRecentlyClosedItemActivated(GtkWidget* sender) {
   WindowOpenDisposition disposition =
-      event_utils::DispositionForCurrentButtonPressEvent();
+      gtk_util::DispositionForCurrentButtonPressEvent();
   HistoryItem* item = HistoryItemForMenuItem(sender);
 
   // If this item can be restored using TabRestoreService, do so. Otherwise,
@@ -393,8 +384,7 @@ void GlobalHistoryMenu::OnRecentlyClosedItemActivated(GtkWidget* sender) {
       TabRestoreServiceFactory::GetForProfile(browser_->profile());
   if (item->session_id && service) {
     service->RestoreEntryById(browser_->tab_restore_service_delegate(),
-                              item->session_id, browser_->host_desktop_type(),
-                              UNKNOWN);
+                              item->session_id, UNKNOWN);
   } else {
     DCHECK(item->url.is_valid());
     browser_->OpenURL(OpenURLParams(item->url, content::Referrer(), disposition,

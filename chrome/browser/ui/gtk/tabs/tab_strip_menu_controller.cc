@@ -1,13 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/tabs/tab_strip_menu_controller.h"
 
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/gtk/tabs/tab_gtk.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 
 TabStripMenuController::TabStripMenuController(TabGtk* tab,
                                                TabStripModel* model,
@@ -41,21 +41,20 @@ bool TabStripMenuController::IsCommandIdEnabled(int command_id) const {
 
 bool TabStripMenuController::GetAcceleratorForCommandId(
     int command_id,
-    ui::Accelerator* out_accelerator) {
+    ui::Accelerator* accelerator) {
   int browser_command;
   if (!TabStripModel::ContextMenuCommandToBrowserCommand(command_id,
                                                          &browser_command))
     return false;
-  const ui::Accelerator* accelerator =
+  const ui::AcceleratorGtk* accelerator_gtk =
       AcceleratorsGtk::GetInstance()->GetPrimaryAcceleratorForCommand(
           browser_command);
-  if (!accelerator)
-    return false;
-  *out_accelerator = *accelerator;
-  return true;
+  if (accelerator_gtk)
+    *accelerator = *accelerator_gtk;
+  return !!accelerator_gtk;
 }
 
-void TabStripMenuController::ExecuteCommand(int command_id, int event_flags) {
+void TabStripMenuController::ExecuteCommand(int command_id) {
   // Checking if the tab still exists since it is possible that the tab
   // corresponding to this context menu has been closed.
   if (!tab_)

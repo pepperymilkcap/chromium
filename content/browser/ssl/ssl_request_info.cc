@@ -4,8 +4,6 @@
 
 #include "content/browser/ssl/ssl_request_info.h"
 
-namespace content {
-
 SSLRequestInfo::SSLRequestInfo(const GURL& url,
                                ResourceType::Type resource_type,
                                int child_id,
@@ -19,5 +17,3 @@ SSLRequestInfo::SSLRequestInfo(const GURL& url,
 }
 
 SSLRequestInfo::~SSLRequestInfo() {}
-
-}  // namespace content

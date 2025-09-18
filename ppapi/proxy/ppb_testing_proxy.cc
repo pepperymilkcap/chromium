@@ -1,26 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/ppb_testing_proxy.h"
 
-#include "base/message_loop/message_loop.h"
-#include "ppapi/c/private/ppb_testing_private.h"
+#include "base/message_loop.h"
+#include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
-#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/resource.h"
 #include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/thunk/enter.h"
-#include "ppapi/thunk/ppb_graphics_2d_api.h"
 #include "ppapi/thunk/ppb_input_event_api.h"
 
 using ppapi::thunk::EnterInstance;
 using ppapi::thunk::EnterResource;
-using ppapi::thunk::EnterResourceNoLock;
-using ppapi::thunk::PPB_Graphics2D_API;
 using ppapi::thunk::PPB_InputEvent_API;
 
 namespace ppapi {
@@ -31,7 +27,6 @@ namespace {
 PP_Bool ReadImageData(PP_Resource graphics_2d,
                       PP_Resource image,
                       const PP_Point* top_left) {
-  ProxyAutoLock lock;
   Resource* image_object =
       PpapiGlobals::Get()->GetResourceTracker()->GetResource(image);
   if (!image_object)
@@ -42,30 +37,30 @@ PP_Bool ReadImageData(PP_Resource graphics_2d,
       image_object->pp_instance() != graphics_2d_object->pp_instance())
     return PP_FALSE;
 
-  EnterResourceNoLock<PPB_Graphics2D_API> enter(graphics_2d, true);
-  if (enter.failed())
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(
+      image_object->pp_instance());
+  if (!dispatcher)
     return PP_FALSE;
-  const HostResource& host_image = image_object->host_resource();
-  return enter.object()->ReadImageData(host_image.host_resource(), top_left) ?
-      PP_TRUE : PP_FALSE;
+
+  PP_Bool result = PP_FALSE;
+  dispatcher->Send(new PpapiHostMsg_PPBTesting_ReadImageData(
+      API_ID_PPB_TESTING, graphics_2d_object->host_resource(),
+      image_object->host_resource(), *top_left, &result));
+  return result;
 }
 
 void RunMessageLoop(PP_Instance instance) {
-  base::MessageLoop::ScopedNestableTaskAllower allow(
-      base::MessageLoop::current());
-  CHECK(PpapiGlobals::Get()->GetMainThreadMessageLoop()->
-      BelongsToCurrentThread());
-  base::MessageLoop::current()->Run();
+  bool old_state = MessageLoop::current()->NestableTasksAllowed();
+  MessageLoop::current()->SetNestableTasksAllowed(true);
+  MessageLoop::current()->Run();
+  MessageLoop::current()->SetNestableTasksAllowed(old_state);
 }
 
 void QuitMessageLoop(PP_Instance instance) {
-  CHECK(PpapiGlobals::Get()->GetMainThreadMessageLoop()->
-            BelongsToCurrentThread());
-  base::MessageLoop::current()->QuitNow();
+  MessageLoop::current()->QuitNow();
 }
 
 uint32_t GetLiveObjectsForInstance(PP_Instance instance_id) {
-  ProxyAutoLock lock;
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance_id);
   if (!dispatcher)
     return static_cast<uint32_t>(-1);
@@ -81,11 +76,10 @@ PP_Bool IsOutOfProcess() {
 }
 
 void SimulateInputEvent(PP_Instance instance_id, PP_Resource input_event) {
-  ProxyAutoLock lock;
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance_id);
   if (!dispatcher)
     return;
-  EnterResourceNoLock<PPB_InputEvent_API> enter(input_event, false);
+  EnterResource<PPB_InputEvent_API> enter(input_event, false);
   if (enter.failed())
     return;
 
@@ -105,7 +99,6 @@ PP_Var GetDocumentURL(PP_Instance instance, PP_URLComponents_Dev* components) {
 // host-side tracker when running out-of-process, to make sure the proxy does
 // not leak host-side vars.
 uint32_t GetLiveVars(PP_Var live_vars[], uint32_t array_size) {
-  ProxyAutoLock lock;
   std::vector<PP_Var> vars =
       PpapiGlobals::Get()->GetVarTracker()->GetLiveVars();
   for (size_t i = 0u;
@@ -115,19 +108,7 @@ uint32_t GetLiveVars(PP_Var live_vars[], uint32_t array_size) {
   return vars.size();
 }
 
-void SetMinimumArrayBufferSizeForShmem(PP_Instance instance,
-                                       uint32_t threshold) {
-  ProxyAutoLock lock;
-  RawVarDataGraph::SetMinimumArrayBufferSizeForShmemForTest(threshold);
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
-  if (!dispatcher)
-    return;
-  dispatcher->Send(
-      new PpapiHostMsg_PPBTesting_SetMinimumArrayBufferSizeForShmem(
-          API_ID_PPB_TESTING, threshold));
-}
-
-const PPB_Testing_Private testing_interface = {
+const PPB_Testing_Dev testing_interface = {
   &ReadImageData,
   &RunMessageLoop,
   &QuitMessageLoop,
@@ -135,9 +116,12 @@ const PPB_Testing_Private testing_interface = {
   &IsOutOfProcess,
   &SimulateInputEvent,
   &GetDocumentURL,
-  &GetLiveVars,
-  &SetMinimumArrayBufferSizeForShmem
+  &GetLiveVars
 };
+
+InterfaceProxy* CreateTestingProxy(Dispatcher* dispatcher) {
+  return new PPB_Testing_Proxy(dispatcher);
+}
 
 }  // namespace
 
@@ -145,8 +129,8 @@ PPB_Testing_Proxy::PPB_Testing_Proxy(Dispatcher* dispatcher)
     : InterfaceProxy(dispatcher),
       ppb_testing_impl_(NULL) {
   if (!dispatcher->IsPlugin()) {
-    ppb_testing_impl_ = static_cast<const PPB_Testing_Private*>(
-        dispatcher->local_get_interface()(PPB_TESTING_PRIVATE_INTERFACE));
+    ppb_testing_impl_ = static_cast<const PPB_Testing_Dev*>(
+        dispatcher->local_get_interface()(PPB_TESTING_DEV_INTERFACE));
   }
 }
 
@@ -154,14 +138,18 @@ PPB_Testing_Proxy::~PPB_Testing_Proxy() {
 }
 
 // static
-const PPB_Testing_Private* PPB_Testing_Proxy::GetProxyInterface() {
-  return &testing_interface;
+const InterfaceProxy::Info* PPB_Testing_Proxy::GetInfo() {
+  static const Info info = {
+    &testing_interface,
+    PPB_TESTING_DEV_INTERFACE,
+    API_ID_PPB_TESTING,
+    false,
+    &CreateTestingProxy,
+  };
+  return &info;
 }
 
 bool PPB_Testing_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  if (!dispatcher()->permissions().HasPermission(PERMISSION_TESTING))
-    return false;
-
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Testing_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBTesting_ReadImageData,
@@ -170,9 +158,6 @@ bool PPB_Testing_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnMsgGetLiveObjectsForInstance)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBTesting_SimulateInputEvent,
                         OnMsgSimulateInputEvent)
-    IPC_MESSAGE_HANDLER(
-        PpapiHostMsg_PPBTesting_SetMinimumArrayBufferSizeForShmem,
-        OnMsgSetMinimumArrayBufferSizeForShmem)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -204,14 +189,11 @@ void PPB_Testing_Proxy::OnMsgSimulateInputEvent(
     PP_Instance instance,
     const InputEventData& input_event) {
   scoped_refptr<PPB_InputEvent_Shared> input_event_impl(
-      new PPB_InputEvent_Shared(OBJECT_IS_PROXY, instance, input_event));
+      new PPB_InputEvent_Shared(PPB_InputEvent_Shared::InitAsProxy(),
+                                instance,
+                                input_event));
   ppb_testing_impl_->SimulateInputEvent(instance,
                                         input_event_impl->pp_resource());
-}
-
-void PPB_Testing_Proxy::OnMsgSetMinimumArrayBufferSizeForShmem(
-    uint32_t threshold) {
-  RawVarDataGraph::SetMinimumArrayBufferSizeForShmemForTest(threshold);
 }
 
 }  // namespace proxy

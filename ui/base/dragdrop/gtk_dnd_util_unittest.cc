@@ -6,10 +6,10 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/pickle.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
-#include "url/gurl.h"
 
 namespace ui {
 
@@ -21,15 +21,15 @@ TEST(GtkDndUtilTest, ExtractNamedURLValid) {
   pickle.WriteString(kUrl);
 
   GtkSelectionData data;
-  scoped_ptr<guchar[]> test_data(new guchar[pickle.size()]);
+  scoped_array<guchar> test_data(new guchar[pickle.size()]);
   memcpy(test_data.get(), pickle.data(), pickle.size());
   data.data = test_data.get();
   data.length = pickle.size();
 
   GURL url;
-  base::string16 title;
+  string16 title;
   ASSERT_EQ(true, ui::ExtractNamedURL(&data, &url, &title));
-  EXPECT_EQ(base::UTF8ToUTF16(kTitle), title);
+  EXPECT_EQ(UTF8ToUTF16(kTitle), title);
   EXPECT_EQ(GURL(kUrl), url);
 }
 
@@ -41,19 +41,19 @@ TEST(GtkDndUtilTest, ExtractNamedURLInvalidURL) {
   pickle.WriteString(kBadUrl);
 
   GtkSelectionData data;
-  scoped_ptr<guchar[]> test_data(new guchar[pickle.size()]);
+  scoped_array<guchar> test_data(new guchar[pickle.size()]);
   memcpy(test_data.get(), pickle.data(), pickle.size());
   data.data = test_data.get();
   data.length = pickle.size();
 
   GURL url;
-  base::string16 title;
+  string16 title;
   EXPECT_FALSE(ui::ExtractNamedURL(&data, &url, &title));
 }
 
 TEST(GtkDndUtilTest, ExtractNamedURLInvalidInput) {
   GURL url;
-  base::string16 title;
+  string16 title;
   GtkSelectionData data;
   data.data = NULL;
   data.length = 0;
@@ -70,7 +70,7 @@ TEST(GtkDndUtilTest, ExtractNamedURLInvalidInput) {
   Pickle pickle;
   pickle.WriteString(kTitle);
 
-  scoped_ptr<guchar[]> test_data(new guchar[pickle.size()]);
+  scoped_array<guchar> test_data(new guchar[pickle.size()]);
   memcpy(test_data.get(), pickle.data(), pickle.size());
   data.data = test_data.get();
   data.length = pickle.size();

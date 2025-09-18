@@ -1,24 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_EULA_SCREEN_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_EULA_SCREEN_HANDLER_H_
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
-#include "chrome/browser/chromeos/login/screens/eula_screen_actor.h"
+#include "base/memory/scoped_ptr.h"
+#include "chrome/browser/chromeos/login/eula_screen_actor.h"
 #include "chrome/browser/chromeos/login/tpm_password_fetcher.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "content/public/browser/web_ui.h"
 
 namespace base {
 class DictionaryValue;
+class ListValue;
 }
 
 namespace chromeos {
 
-class CoreOobeActor;
 class HelpAppLauncher;
 
 // WebUI implementation of EulaScreenActor. It is used to interact
@@ -27,7 +28,7 @@ class EulaScreenHandler : public EulaScreenActor,
                           public BaseScreenHandler,
                           public TpmPasswordFetcherDelegate {
  public:
-  explicit EulaScreenHandler(CoreOobeActor* core_oobe_actor);
+  EulaScreenHandler();
   virtual ~EulaScreenHandler();
 
   // EulaScreenActor implementation:
@@ -38,8 +39,8 @@ class EulaScreenHandler : public EulaScreenActor,
   virtual void OnPasswordFetched(const std::string& tpm_password) OVERRIDE;
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) OVERRIDE;
-  virtual void GetAdditionalParameters(base::DictionaryValue* dict) OVERRIDE;
+  virtual void GetLocalizedStrings(
+      base::DictionaryValue* localized_strings) OVERRIDE;
   virtual void Initialize() OVERRIDE;
 
   // WebUIMessageHandler implementation:
@@ -47,12 +48,11 @@ class EulaScreenHandler : public EulaScreenActor,
 
  private:
   // JS messages handlers.
-  void HandleOnExit(bool accepted, bool usager_stats_enabled);
-  void HandleOnLearnMore();
-  void HandleOnInstallationSettingsPopupOpened();
+  void HandleOnExit(const base::ListValue* args);
+  void HandleOnLearnMore(const base::ListValue* args);
+  void HandleOnTpmPopupOpened(const base::ListValue* args);
 
-  EulaScreenActor::Delegate* delegate_;
-  CoreOobeActor* core_oobe_actor_;
+  Delegate* delegate_;
 
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;

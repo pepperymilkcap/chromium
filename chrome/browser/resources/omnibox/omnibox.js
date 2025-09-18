@@ -23,14 +23,12 @@ cr.define('omniboxDebug', function() {
    * Register our event handlers.
    */
   function initialize() {
-    $('omnibox-input-form').addEventListener(
+    document.getElementById('omnibox-input-form').addEventListener(
         'submit', startOmniboxQuery, false);
-    $('prevent-inline-autocomplete').addEventListener(
-        'change', startOmniboxQuery);
-    $('prefer-keyword').addEventListener('change', startOmniboxQuery);
-    $('show-details').addEventListener('change', refresh);
-    $('show-incomplete-results').addEventListener('change', refresh);
-    $('show-all-providers').addEventListener('change', refresh);
+    document.getElementById('show-details').addEventListener(
+        'change', refresh);
+    document.getElementById('show-incomplete-results').addEventListener(
+        'change', refresh);
   }
 
   /**
@@ -42,14 +40,6 @@ cr.define('omniboxDebug', function() {
   var progressiveAutocompleteResults = [];
 
   /**
-   * @type {number} the value for cursor position we sent with the most
-   *     recent request.  We need to remember this in order to display it
-   *     in the output; otherwise it's hard or impossible to determine
-   *     from screen captures or print-to-PDFs.
-   */
-  var cursorPositionUsed = -1;
-
-  /**
    * Extracts the input text from the text field and sends it to the
    * C++ portion of chrome to handle.  The C++ code will iteratively
    * call handleNewAutocompleteResult as results come in.
@@ -57,17 +47,9 @@ cr.define('omniboxDebug', function() {
   function startOmniboxQuery(event) {
     // First, clear the results of past calls (if any).
     progressiveAutocompleteResults = [];
-    // Then, call chrome with a four-element list:
-    // - first element: the value in the text box
-    // - second element: the location of the cursor in the text box
-    // - third element: the value of prevent-inline-autocomplete
-    // - forth element: the value of prefer-keyword
-    cursorPositionUsed = $('input-text').selectionEnd;
-    chrome.send('startOmniboxQuery', [
-        $('input-text').value,
-        cursorPositionUsed,
-        $('prevent-inline-autocomplete').checked,
-        $('prefer-keyword').checked]);
+    // Then, call chrome with a one-element list: the value in the text box.
+    chrome.send('startOmniboxQuery',
+                [document.getElementById('input-text').value]);
     // Cancel the submit action.  i.e., don't submit the form.  (We handle
     // display the results solely with Javascript.)
     event.preventDefault();
@@ -83,17 +65,13 @@ cr.define('omniboxDebug', function() {
    *     result record that we lookup.
    * @param {boolean} displayAlways whether the property should be displayed
    *     regardless of whether we're in detailed more.
-   * @param {string} tooltip a description of the property that will be
-   *     presented as a tooltip when the mouse is hovered over the column title.
    * @constructor
    */
-  function PresentationInfoRecord(header, url, propertyName, displayAlways,
-                                  tooltip) {
+  function PresentationInfoRecord(header, url, propertyName, displayAlways) {
     this.header = header;
     this.urlLabelForHeader = url;
     this.propertyName = propertyName;
     this.displayAlways = displayAlways;
-    this.tooltip = tooltip;
   }
 
   /**
@@ -105,61 +83,30 @@ cr.define('omniboxDebug', function() {
    * @const
    */
   var PROPERTY_OUTPUT_ORDER = [
-    new PresentationInfoRecord('Provider', '', 'provider_name', true,
-        'The AutocompleteProvider suggesting this result.'),
-    new PresentationInfoRecord('Type', '', 'type', true,
-        'The type of the result.'),
-    new PresentationInfoRecord('Relevance', '', 'relevance', true,
-        'The result score. Higher is more relevant.'),
-    new PresentationInfoRecord('Contents', '', 'contents', true,
-        'The text that is presented identifying the result.'),
+    new PresentationInfoRecord('URL', '', 'destination_url', true),
+    new PresentationInfoRecord('Provider Name', '', 'provider_name', true),
+    new PresentationInfoRecord('Type', '', 'type', true),
+    new PresentationInfoRecord('Relevance', '', 'relevance', true),
+    new PresentationInfoRecord('Starred', '', 'starred', false),
     new PresentationInfoRecord(
-        'Can Be Default', '', 'allowed_to_be_default_match', false,
-        'A green checkmark indicates that the result can be the default ' +
-        'match (i.e., can be the match that pressing enter in the omnibox ' +
-        'navigates to).'),
-    new PresentationInfoRecord('Starred', '', 'starred', false,
-        'A green checkmark indicates that the result has been bookmarked.'),
+        '== default_match iterator', '', 'is_default_match', false),
     new PresentationInfoRecord(
-        'HWYT', '', 'is_history_what_you_typed_match', false,
-        'A green checkmark indicates that the result is an History What You ' +
-        'Typed Match'),
-    new PresentationInfoRecord('Description', '', 'description', false,
-        'The page title of the result.'),
-    new PresentationInfoRecord('URL', '', 'destination_url', true,
-        'The URL for the result.'),
-    new PresentationInfoRecord('Fill Into Edit', '', 'fill_into_edit', false,
-        'The text shown in the omnibox when the result is selected.'),
+        'Is History What You Typed Match', '',
+        'is_history_what_you_typed_match', false),
+    new PresentationInfoRecord('Description', '', 'description', false),
+    new PresentationInfoRecord('Contents', '', 'contents', false),
+    new PresentationInfoRecord('Fill Into Edit', '', 'fill_into_edit', false),
     new PresentationInfoRecord(
-        'Inline Autocompletion', '', 'inline_autocompletion', false,
-        'The text shown in the omnibox as a blue highlight selection ' +
-        'following the cursor, if this match is shown inline.'),
-    new PresentationInfoRecord('Del', '', 'deletable', false,
-        'A green checkmark indicates that the result can be deleted from ' +
-        'the visit history.'),
-    new PresentationInfoRecord('Prev', '', 'from_previous', false, ''),
+        'Inline Autocomplete Offset', '', 'inline_autocomplete_offset', false),
+    new PresentationInfoRecord('Deletable', '', 'deletable', false),
+    new PresentationInfoRecord('From Previous', '', 'from_previous', false),
     new PresentationInfoRecord(
-        'Tran',
+        'Transition Type',
         'http://code.google.com/codesearch#OAMlx_jo-ck/src/content/public/' +
         'common/page_transition_types.h&exact_package=chromium&l=24',
-        'transition', false,
-        'How the user got to the result.'),
+        'transition', false),
     new PresentationInfoRecord(
-        'Done', '', 'provider_done', false,
-        'A green checkmark indicates that the provider is done looking for ' +
-        'more results.'),
-    new PresentationInfoRecord(
-        'Template URL', '', 'template_url', false, ''),
-    new PresentationInfoRecord(
-        'Associated Keyword', '', 'associated_keyword', false,
-        'If non-empty, a "press tab to search" hint will be shown and will ' +
-        'engage this keyword.'),
-    new PresentationInfoRecord(
-        'Keyword', '', 'keyword', false,
-        'The keyword of the search engine to be used.'),
-    new PresentationInfoRecord(
-        'Additional Info', '', 'additional_info', false,
-        'Provider-specific information about the result.')
+        'Is This Provider Done', '', 'provider_done', false)
   ];
 
   /**
@@ -170,7 +117,7 @@ cr.define('omniboxDebug', function() {
    */
   function createAutocompleteResultTableHeader() {
     var row = document.createElement('tr');
-    var inDetailedMode = $('show-details').checked;
+    var inDetailedMode = document.getElementById('show-details').checked;
     for (var i = 0; i < PROPERTY_OUTPUT_ORDER.length; i++) {
       if (inDetailedMode || PROPERTY_OUTPUT_ORDER[i].displayAlways) {
         var headerCell = document.createElement('th');
@@ -183,8 +130,6 @@ cr.define('omniboxDebug', function() {
         } else {
           // Output header text without a URL.
           headerCell.textContent = PROPERTY_OUTPUT_ORDER[i].header;
-          headerCell.className = 'table-header';
-          headerCell.title = PROPERTY_OUTPUT_ORDER[i].tooltip;
         }
         row.appendChild(headerCell);
       }
@@ -204,30 +149,7 @@ cr.define('omniboxDebug', function() {
                                                   propertyName) {
     var cell = document.createElement('td');
     if (propertyName in autocompleteSuggestion) {
-      if (propertyName == 'additional_info') {
-        // |additional_info| embeds a two-column table of provider-specific data
-        // within this cell.
-        var additionalInfoTable = document.createElement('table');
-        for (var additionalInfoKey in autocompleteSuggestion[propertyName]) {
-          var additionalInfoRow = document.createElement('tr');
-
-          // Set the title (name of property) cell text.
-          var propertyCell = document.createElement('td');
-          propertyCell.textContent = additionalInfoKey + ':';
-          propertyCell.className = 'additional-info-property';
-          additionalInfoRow.appendChild(propertyCell);
-
-          // Set the value of the property cell text.
-          var valueCell = document.createElement('td');
-          valueCell.textContent =
-              autocompleteSuggestion[propertyName][additionalInfoKey];
-          valueCell.className = 'additional-info-value';
-          additionalInfoRow.appendChild(valueCell);
-
-          additionalInfoTable.appendChild(additionalInfoRow);
-        }
-        cell.appendChild(additionalInfoTable);
-      } else if (typeof autocompleteSuggestion[propertyName] == 'boolean') {
+      if (typeof autocompleteSuggestion[propertyName] == 'boolean') {
         // If this is a boolean, display a checkmark or an X instead of
         // the strings true or false.
         if (autocompleteSuggestion[propertyName]) {
@@ -238,19 +160,9 @@ cr.define('omniboxDebug', function() {
           cell.textContent = '✗';
         }
       } else {
-        var text = String(autocompleteSuggestion[propertyName]);
-        // If it's a URL wrap it in an href.
-        var re = /^(http|https|ftp|chrome|file):\/\//;
-        if (re.test(text)) {
-          var aCell = document.createElement('a');
-          aCell.textContent = text;
-          aCell.href = text;
-          cell.appendChild(aCell);
-        } else {
-          // All other data types (integer, strings, etc.) display their
-          // normal toString() output.
-          cell.textContent = autocompleteSuggestion[propertyName];
-        }
+        // All other data types (integer, strings, etc.) display their
+        // normal toString() output.
+        cell.textContent = autocompleteSuggestion[propertyName];
       }
     }  // else: if propertyName is undefined, we leave the cell blank
     return cell;
@@ -276,51 +188,31 @@ cr.define('omniboxDebug', function() {
    * autocomplete matches.  Here's an example of what it looks like:
    * <pre>
    * {@code
-   * {
-   *   'done': false,
+   * { 'done': false,
    *   'time_since_omnibox_started_ms': 15,
-   *   'host': 'mai',
-   *   'is_typed_host': false,
-   *   'combined_results' : {
-   *     'num_items': 4,
-   *     'item_0': {
-   *       'destination_url': 'http://mail.google.com',
-   *       'provider_name': 'HistoryURL',
-   *       'relevance': 1410,
-   *       ...
-   *     }
-   *     'item_1: {
-   *       ...
-   *     }
+   *   'num_items': 4,
+   *   'item_0': {
+   *     'destination_url': 'http://mail.google.com',
+   *     'provider_name': 'HistoryURL',
+   *     'relevance': 1410,
+   *     'is_default_match': true,
    *     ...
    *   }
-   *   'results_by_provider': {
-   *     'HistoryURL' : {
-   *       'num_items': 3,
-   *         ...
-   *       }
-   *     'Search' : {
-   *       'num_items': 1,
-   *       ...
-   *     }
+   *   'item_1: {
    *     ...
    *   }
+   *   ...
    * }
    * }
    * </pre>
-   * For more information on how the result is packed, see the
+   * For information on how the result is packed, see the
    * corresponding code in chrome/browser/ui/webui/omnibox_ui.cc
    */
   function addResultToOutput(result) {
-    var output = $('omnibox-debug-text');
-    var inDetailedMode = $('show-details').checked;
-    var showIncompleteResults = $('show-incomplete-results').checked;
-    var showPerProviderResults = $('show-all-providers').checked;
-
-    // Always output cursor position.
-    var p = document.createElement('p');
-    p.textContent = 'cursor position = ' + cursorPositionUsed;
-    output.appendChild(p);
+    var output = document.getElementById('omnibox-debug-text');
+    var inDetailedMode = document.getElementById('show-details').checked;
+    var showIncompleteResults =
+        document.getElementById('show-incomplete-results').checked;
 
     // Output the result-level features in detailed mode and in
     // show incomplete results mode.  We do the latter because without
@@ -334,64 +226,8 @@ cr.define('omniboxDebug', function() {
       var p2 = document.createElement('p');
       p2.textContent = 'all providers done = ' + result.done;
       output.appendChild(p2);
-      var p3 = document.createElement('p');
-      p3.textContent = 'host = ' + result.host;
-      if ('is_typed_host' in result) {
-        // Only output the is_typed_host information if available.  (It may
-        // be missing if the history database lookup failed.)
-        p3.textContent = p3.textContent + ' has is_typed_host = ' +
-            result.is_typed_host;
-      }
-      output.appendChild(p3);
     }
 
-    // Combined results go after the lines below.
-    var group = document.createElement('a');
-    group.className = 'group-separator';
-    group.textContent = 'Combined results.';
-    output.appendChild(group);
-
-    // Add combined/merged result table.
-    var p = document.createElement('p');
-    p.appendChild(addResultTableToOutput(result.combined_results));
-    output.appendChild(p);
-
-    // Move forward only if you want to display per provider results.
-    if (!showPerProviderResults) {
-      return;
-    }
-
-    // Individual results go after the lines below.
-    var group = document.createElement('a');
-    group.className = 'group-separator';
-    group.textContent = 'Results for individual providers.';
-    output.appendChild(group);
-
-    // Add the per-provider result tables with labels. We do not append the
-    // combined/merged result table since we already have the per provider
-    // results.
-    for (var provider in result.results_by_provider) {
-      var results = result.results_by_provider[provider];
-      // If we have no results we do not display anything.
-      if (results.num_items == 0) {
-        continue;
-      }
-      var p = document.createElement('p');
-      p.appendChild(addResultTableToOutput(results));
-      output.appendChild(p);
-    }
-  }
-
-  /**
-   * @param {Object} result either the combined_results component of
-   *     the structure described in the comment by addResultToOutput()
-   *     above or one of the per-provider results in the structure.
-   *     (Both have the same format).
-   * @return {HTMLTableCellElement} that is a user-readable HTML
-   *     representation of this object.
-   */
-  function addResultTableToOutput(result) {
-    var inDetailedMode = $('show-details').checked;
     // Create a table to hold all the autocomplete items.
     var table = document.createElement('table');
     table.className = 'autocomplete-results-table';
@@ -432,7 +268,7 @@ cr.define('omniboxDebug', function() {
 
       table.appendChild(row);
     }
-    return table;
+    output.appendChild(table);
   }
 
   /* Repaints the page based on the contents of the array
@@ -443,17 +279,16 @@ cr.define('omniboxDebug', function() {
    */
   function refresh() {
     // Erase whatever is currently being displayed.
-    var output = $('omnibox-debug-text');
+    var output = document.getElementById('omnibox-debug-text');
     output.innerHTML = '';
 
-    if (progressiveAutocompleteResults.length > 0) {  // if we have results
-      // Display the results.
-      var showIncompleteResults = $('show-incomplete-results').checked;
-      var startIndex = showIncompleteResults ? 0 :
-          progressiveAutocompleteResults.length - 1;
-      for (var i = startIndex; i < progressiveAutocompleteResults.length; i++) {
-        addResultToOutput(progressiveAutocompleteResults[i]);
-      }
+    // Display the results.
+    var showIncompleteResults =
+        document.getElementById('show-incomplete-results').checked;
+    var startIndex = showIncompleteResults ? 0 :
+        progressiveAutocompleteResults.length - 1;
+    for (var i = startIndex; i < progressiveAutocompleteResults.length; i++) {
+      addResultToOutput(progressiveAutocompleteResults[i]);
     }
   }
 

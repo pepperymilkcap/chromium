@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 namespace pp {
 
 class CompletionCallback;
-class InstanceHandle;
+class Instance;
 
 /// This class represents a 3D rendering context in the browser.
 class Graphics3D : public Resource {
@@ -21,13 +21,12 @@ class Graphics3D : public Resource {
   /// Default constructor for creating an is_null() Graphics3D object.
   Graphics3D();
 
-  /// A constructor for creating and initializing a 3D rendering context.
+  /// A constructor for creating and and initializing a 3D rendering context.
   /// The returned context is created off-screen and must be attached
   /// to a module instance using <code>Instance::BindGraphics</code> to draw on
   /// the web page.
   ///
-  /// @param[in] instance The instance with which this resource will be
-  /// associated.
+  /// @param[in] instance The instance that will own the new Graphics3D.
   ///
   /// @param[in] attrib_list The list of attributes (name=value pairs) for the
   /// context. The list is terminated with
@@ -62,8 +61,8 @@ class Graphics3D : public Resource {
   /// Default: Implementation defined.
   ///
   /// On failure, the object will be is_null().
-  Graphics3D(const InstanceHandle& instance,
-             const int32_t attrib_list[]);
+  Graphics3D(const Instance* instance,
+             const int32_t* attrib_list);
 
   /// A constructor for creating and initializing a 3D rendering context. The
   /// returned context is created off-screen. It must be attached to a
@@ -85,9 +84,9 @@ class Graphics3D : public Resource {
   /// 2-argument version of this constructor for more information.
   ///
   /// On failure, the object will be is_null().
-  Graphics3D(const InstanceHandle& instance,
+  Graphics3D(const Instance* instance,
              const Graphics3D& share_context,
-             const int32_t attrib_list[]);
+             const int32_t* attrib_list);
 
   /// Destructor.
   ~Graphics3D();
@@ -109,7 +108,7 @@ class Graphics3D : public Resource {
   ///
   /// <strong>Example:</strong>
   ///
-  /// @code
+  /// <code>
   /// int attrib_list[] = {PP_GRAPHICS3DATTRIB_RED_SIZE, 0,
   ///                      PP_GRAPHICS3DATTRIB_GREEN_SIZE, 0,
   ///                      PP_GRAPHICS3DATTRIB_BLUE_SIZE, 0,
@@ -118,10 +117,10 @@ class Graphics3D : public Resource {
   /// int red_bits = attrib_list[1];
   /// int green_bits = attrib_list[3];
   /// int blue_bits = attrib_list[5];
-  /// @endcode
+  /// </code>
   ///
   /// This example retrieves the values for rgb bits in the color buffer.
-  int32_t GetAttribs(int32_t attrib_list[]) const;
+  int32_t GetAttribs(int32_t* attrib_list) const;
 
   /// SetAttribs() sets the values for each attribute in
   /// <code>attrib_list</code>. The list has the same structure as the list
@@ -134,7 +133,7 @@ class Graphics3D : public Resource {
   /// - PP_ERROR_BADRESOURCE if context is invalid.
   /// - PP_ERROR_BADARGUMENT if attrib_list is NULL or any attribute in the
   ///   attrib_list is not a valid attribute.
-  int32_t SetAttribs(const int32_t attrib_list[]);
+  int32_t SetAttribs(int32_t* attrib_list);
 
   /// ResizeBuffers() resizes the backing surface for the context.
   ///

@@ -8,7 +8,6 @@
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/threading/thread_local.h"
-#include "third_party/libjingle/source/talk/base/nullsocketserver.h"
 
 namespace jingle_glue {
 
@@ -29,12 +28,10 @@ base::LazyInstance<base::ThreadLocalPointer<JingleThreadWrapper> >
     g_jingle_thread_wrapper = LAZY_INSTANCE_INITIALIZER;
 
 // static
-void JingleThreadWrapper::EnsureForCurrentMessageLoop() {
+void JingleThreadWrapper::EnsureForCurrentThread() {
   if (JingleThreadWrapper::current() == NULL) {
-    base::MessageLoop* message_loop = base::MessageLoop::current();
-    g_jingle_thread_wrapper.Get()
-        .Set(new JingleThreadWrapper(message_loop->message_loop_proxy()));
-    message_loop->AddDestructionObserver(current());
+    g_jingle_thread_wrapper.Get().Set(
+        new JingleThreadWrapper(MessageLoop::current()));
   }
 
   DCHECK_EQ(talk_base::Thread::Current(), current());
@@ -45,23 +42,22 @@ JingleThreadWrapper* JingleThreadWrapper::current() {
   return g_jingle_thread_wrapper.Get().Get();
 }
 
-JingleThreadWrapper::JingleThreadWrapper(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-    : talk_base::Thread(new talk_base::NullSocketServer()),
-      task_runner_(task_runner),
+JingleThreadWrapper::JingleThreadWrapper(MessageLoop* message_loop)
+    : message_loop_(message_loop),
       send_allowed_(false),
       last_task_id_(0),
-      pending_send_event_(true, false),
-      weak_ptr_factory_(this) {
-  DCHECK(task_runner->BelongsToCurrentThread());
-  DCHECK(!talk_base::Thread::Current());
-  weak_ptr_ = weak_ptr_factory_.GetWeakPtr();
-  talk_base::MessageQueueManager::Add(this);
+      pending_send_event_(true, false) {
+  DCHECK_EQ(message_loop_, MessageLoop::current());
+
+  talk_base::ThreadManager::Instance()->UnwrapCurrentThread();
+  talk_base::ThreadManager::Instance()->SetCurrentThread(this);
+  talk_base::MessageQueueManager::Instance()->Add(this);
+  message_loop_->AddDestructionObserver(this);
+
   WrapCurrent();
 }
 
 JingleThreadWrapper::~JingleThreadWrapper() {
-  Clear(NULL, talk_base::MQID_ANY, NULL);
 }
 
 void JingleThreadWrapper::WillDestroyCurrentMessageLoop() {
@@ -69,10 +65,9 @@ void JingleThreadWrapper::WillDestroyCurrentMessageLoop() {
   UnwrapCurrent();
   g_jingle_thread_wrapper.Get().Set(NULL);
   talk_base::ThreadManager::Instance()->SetCurrentThread(NULL);
-  talk_base::MessageQueueManager::Remove(this);
-  talk_base::SocketServer* ss = socketserver();
+  talk_base::MessageQueueManager::Instance()->Remove(this);
+  message_loop_->RemoveDestructionObserver(this);
   delete this;
-  delete ss;
 }
 
 void JingleThreadWrapper::Post(
@@ -162,9 +157,9 @@ void JingleThreadWrapper::Send(talk_base::MessageHandler *handler, uint32 id,
   // Need to signal |pending_send_event_| here in case the thread is
   // sending message to another thread.
   pending_send_event_.Signal();
-  task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&JingleThreadWrapper::ProcessPendingSends,
-                                    weak_ptr_));
+  message_loop_->PostTask(FROM_HERE,
+                          base::Bind(&JingleThreadWrapper::ProcessPendingSends,
+                                     base::Unretained(this)));
 
 
   while (!pending_send.done_event.IsSignaled()) {
@@ -214,14 +209,14 @@ void JingleThreadWrapper::PostTaskInternal(
   }
 
   if (delay_ms <= 0) {
-    task_runner_->PostTask(FROM_HERE,
-                           base::Bind(&JingleThreadWrapper::RunTask,
-                                      weak_ptr_, task_id));
+    message_loop_->PostTask(FROM_HERE,
+                            base::Bind(&JingleThreadWrapper::RunTask,
+                                       base::Unretained(this), task_id));
   } else {
-    task_runner_->PostDelayedTask(FROM_HERE,
-                                  base::Bind(&JingleThreadWrapper::RunTask,
-                                             weak_ptr_, task_id),
-                                  base::TimeDelta::FromMilliseconds(delay_ms));
+    message_loop_->PostDelayedTask(FROM_HERE,
+                                   base::Bind(&JingleThreadWrapper::RunTask,
+                                              base::Unretained(this), task_id),
+                                   delay_ms);
   }
 }
 

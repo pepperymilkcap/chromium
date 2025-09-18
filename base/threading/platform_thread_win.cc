@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/threading/platform_thread.h"
 
 #include "base/debug/alias.h"
-#include "base/debug/profiler.h"
 #include "base/logging.h"
-#include "base/threading/thread_id_name_manager.h"
+#include "base/threading/thread_local.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/tracked_objects.h"
 
@@ -16,6 +15,8 @@
 namespace base {
 
 namespace {
+
+static ThreadLocalPointer<char> current_thread_name;
 
 // The information on how to set the thread name comes from
 // a MSDN article: http://msdn2.microsoft.com/en-us/library/xcb2z8hs.aspx
@@ -53,29 +54,8 @@ DWORD __stdcall ThreadFunc(void* params) {
   PlatformThread::Delegate* delegate = thread_params->delegate;
   if (!thread_params->joinable)
     base::ThreadRestrictions::SetSingletonAllowed(false);
-
-  /* Retrieve a copy of the thread handle to use as the key in the
-   * thread name mapping. */
-  PlatformThreadHandle::Handle platform_handle;
-  DuplicateHandle(
-      GetCurrentProcess(),
-      GetCurrentThread(),
-      GetCurrentProcess(),
-      &platform_handle,
-      0,
-      FALSE,
-      DUPLICATE_SAME_ACCESS);
-
-  ThreadIdNameManager::GetInstance()->RegisterThread(
-      platform_handle,
-      PlatformThread::CurrentId());
-
   delete thread_params;
   delegate->ThreadMain();
-
-  ThreadIdNameManager::GetInstance()->RemoveName(
-      platform_handle,
-      PlatformThread::CurrentId());
   return NULL;
 }
 
@@ -85,6 +65,7 @@ DWORD __stdcall ThreadFunc(void* params) {
 bool CreateThreadInternal(size_t stack_size,
                           PlatformThread::Delegate* delegate,
                           PlatformThreadHandle* out_thread_handle) {
+  PlatformThreadHandle thread_handle;
   unsigned int flags = 0;
   if (stack_size > 0 && base::win::GetVersion() >= base::win::VERSION_XP) {
     flags = STACK_SIZE_PARAM_IS_A_RESERVATION;
@@ -101,7 +82,7 @@ bool CreateThreadInternal(size_t stack_size,
   // have to work running on CreateThread() threads anyway, since we run code
   // on the Windows thread pool, etc.  For some background on the difference:
   //   http://www.microsoft.com/msj/1099/win32/win321099.aspx
-  void* thread_handle = CreateThread(
+  thread_handle = CreateThread(
       NULL, stack_size, ThreadFunc, params, flags, NULL);
   if (!thread_handle) {
     delete params;
@@ -109,7 +90,7 @@ bool CreateThreadInternal(size_t stack_size,
   }
 
   if (out_thread_handle)
-    *out_thread_handle = PlatformThreadHandle(thread_handle);
+    *out_thread_handle = thread_handle;
   else
     CloseHandle(thread_handle);
   return true;
@@ -123,44 +104,28 @@ PlatformThreadId PlatformThread::CurrentId() {
 }
 
 // static
-PlatformThreadHandle PlatformThread::CurrentHandle() {
-  NOTIMPLEMENTED(); // See OpenThread()
-  return PlatformThreadHandle();
-}
-
-// static
 void PlatformThread::YieldCurrentThread() {
   ::Sleep(0);
 }
 
 // static
+void PlatformThread::Sleep(int duration_ms) {
+  ::Sleep(duration_ms);
+}
+
+// static
 void PlatformThread::Sleep(TimeDelta duration) {
-  // When measured with a high resolution clock, Sleep() sometimes returns much
-  // too early. We may need to call it repeatedly to get the desired duration.
-  TimeTicks end = TimeTicks::Now() + duration;
-  TimeTicks now;
-  while ((now = TimeTicks::Now()) < end)
-    ::Sleep((end - now).InMillisecondsRoundedUp());
+  ::Sleep(duration.InMillisecondsRoundedUp());
 }
 
 // static
 void PlatformThread::SetName(const char* name) {
-  ThreadIdNameManager::GetInstance()->SetName(CurrentId(), name);
-
-  // On Windows only, we don't need to tell the profiler about the "BrokerEvent"
-  // thread, as it exists only in the chrome.exe image, and never spawns or runs
-  // tasks (items which could be profiled).  This test avoids the notification,
-  // which would also (as a side effect) initialize the profiler in this unused
-  // context, including setting up thread local storage, etc.  The performance
-  // impact is not terrible, but there is no reason to do initialize it.
-  if (0 != strcmp(name, "BrokerEvent"))
-    tracked_objects::ThreadData::InitializeThreadContext(name);
+  current_thread_name.Set(const_cast<char*>(name));
+  tracked_objects::ThreadData::InitializeThreadContext(name);
 
   // The debugger needs to be around to catch the name in the exception.  If
   // there isn't a debugger, we are just needlessly throwing an exception.
-  // If this image file is instrumented, we raise the exception anyway
-  // to provide the profiler with human-readable thread names.
-  if (!::IsDebuggerPresent() && !base::debug::IsBinaryInstrumented())
+  if (!::IsDebuggerPresent())
     return;
 
   SetNameInternal(CurrentId(), name);
@@ -168,7 +133,7 @@ void PlatformThread::SetName(const char* name) {
 
 // static
 const char* PlatformThread::GetName() {
-  return ThreadIdNameManager::GetInstance()->GetName(CurrentId());
+  return current_thread_name.Get();
 }
 
 // static
@@ -179,23 +144,13 @@ bool PlatformThread::Create(size_t stack_size, Delegate* delegate,
 }
 
 // static
-bool PlatformThread::CreateWithPriority(size_t stack_size, Delegate* delegate,
-                                        PlatformThreadHandle* thread_handle,
-                                        ThreadPriority priority) {
-  bool result = Create(stack_size, delegate, thread_handle);
-  if (result)
-    SetThreadPriority(*thread_handle, priority);
-  return result;
-}
-
-// static
 bool PlatformThread::CreateNonJoinable(size_t stack_size, Delegate* delegate) {
   return CreateThreadInternal(stack_size, delegate, NULL);
 }
 
 // static
 void PlatformThread::Join(PlatformThreadHandle thread_handle) {
-  DCHECK(thread_handle.handle_);
+  DCHECK(thread_handle);
   // TODO(willchan): Enable this check once I can get it to work for Windows
   // shutdown.
   // Joining another thread may block the current thread for a long time, since
@@ -207,17 +162,10 @@ void PlatformThread::Join(PlatformThreadHandle thread_handle) {
 
   // Wait for the thread to exit.  It should already have terminated but make
   // sure this assumption is valid.
-  DWORD result = WaitForSingleObject(thread_handle.handle_, INFINITE);
-  if (result != WAIT_OBJECT_0) {
-    // Debug info for bug 127931.
-    DWORD error = GetLastError();
-    debug::Alias(&error);
-    debug::Alias(&result);
-    debug::Alias(&thread_handle.handle_);
-    CHECK(false);
-  }
+  DWORD result = WaitForSingleObject(thread_handle, INFINITE);
+  DCHECK_EQ(WAIT_OBJECT_0, result);
 
-  CloseHandle(thread_handle.handle_);
+  CloseHandle(thread_handle);
 }
 
 // static
@@ -225,13 +173,13 @@ void PlatformThread::SetThreadPriority(PlatformThreadHandle handle,
                                        ThreadPriority priority) {
   switch (priority) {
     case kThreadPriority_Normal:
-      ::SetThreadPriority(handle.handle_, THREAD_PRIORITY_NORMAL);
+      ::SetThreadPriority(handle, THREAD_PRIORITY_NORMAL);
       break;
     case kThreadPriority_RealtimeAudio:
-      ::SetThreadPriority(handle.handle_, THREAD_PRIORITY_TIME_CRITICAL);
+      ::SetThreadPriority(handle, THREAD_PRIORITY_TIME_CRITICAL);
       break;
     default:
-      NOTREACHED() << "Unknown priority.";
+      NOTIMPLEMENTED();
       break;
   }
 }

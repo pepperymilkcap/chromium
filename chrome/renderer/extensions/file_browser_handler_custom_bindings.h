@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_H_
 #define CHROME_RENDERER_EXTENSIONS_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
@@ -13,11 +14,12 @@ namespace extensions {
 // Custom bindings for the fileBrowserHandler API.
 class FileBrowserHandlerCustomBindings : public ChromeV8Extension {
  public:
-  FileBrowserHandlerCustomBindings(Dispatcher* dispatcher,
-                                   ChromeV8Context* context);
+  FileBrowserHandlerCustomBindings(
+      int dependency_count, const char** dependencies);
 
  private:
-  void GetExternalFileEntry(const v8::FunctionCallbackInfo<v8::Value>& args);
+  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
+      v8::Handle<v8::String> name) OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(FileBrowserHandlerCustomBindings);
 };

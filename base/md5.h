@@ -4,9 +4,10 @@
 
 #ifndef BASE_MD5_H_
 #define BASE_MD5_H_
+#pragma once
 
 #include "base/base_export.h"
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 
 namespace base {
 

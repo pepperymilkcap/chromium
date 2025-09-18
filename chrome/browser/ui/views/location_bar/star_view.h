@@ -1,16 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_STAR_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_STAR_VIEW_H_
+#pragma once
 
-#include "chrome/browser/ui/views/location_bar/bubble_icon_view.h"
+#include "ui/views/controls/image_view.h"
 
 class CommandUpdater;
 
-// The star icon to show a bookmark bubble.
-class StarView : public BubbleIconView {
+namespace views {
+class KeyEvent;
+class MouseEvent;
+}
+
+class StarView : public views::ImageView {
  public:
   explicit StarView(CommandUpdater* command_updater);
   virtual ~StarView();
@@ -18,14 +23,19 @@ class StarView : public BubbleIconView {
   // Toggles the star on or off.
   void SetToggled(bool on);
 
- protected:
-  // BubbleIconView:
-  virtual bool IsBubbleShowing() const OVERRIDE;
-  virtual void OnExecuting(
-      BubbleIconView::ExecuteSource execute_source) OVERRIDE;
-
  private:
-  DISALLOW_COPY_AND_ASSIGN(StarView);
+  // views::ImageView overrides:
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual bool GetTooltipText(const gfx::Point& p,
+                              string16* tooltip) const OVERRIDE;
+  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
+
+  // The CommandUpdater for the Browser object that owns the location bar.
+  CommandUpdater* command_updater_;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(StarView);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_STAR_VIEW_H_

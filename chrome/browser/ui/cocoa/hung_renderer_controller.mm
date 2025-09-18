@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,18 @@
 
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/process_util.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/multi_key_equivalent_button.h"
-#import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
+#import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/logging_chrome.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
@@ -25,7 +27,7 @@
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
-#include "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -48,11 +50,11 @@ class WebContentsObserverBridge : public content::WebContentsObserver {
 
  protected:
   // WebContentsObserver overrides:
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE {
-    [controller_ renderProcessGone];
+  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE {
+    [controller_ renderViewGone];
   }
   virtual void WebContentsDestroyed(WebContents* tab) OVERRIDE {
-    [controller_ renderProcessGone];
+    [controller_ renderViewGone];
   }
 
  private:
@@ -76,17 +78,14 @@ class WebContentsObserverBridge : public content::WebContentsObserver {
 - (void)dealloc {
   DCHECK(!g_instance);
   [tableView_ setDataSource:nil];
-  [tableView_ setDelegate:nil];
-  [killButton_ setTarget:nil];
-  [waitButton_ setTarget:nil];
   [super dealloc];
 }
 
 - (void)awakeFromNib {
   // Load in the image
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  NSImage* backgroundImage =
-      rb.GetNativeImageNamed(IDR_FROZEN_TAB_ICON).ToNSImage();
+  NSImage* backgroundImage = rb.GetNativeImageNamed(IDR_FROZEN_TAB_ICON);
+  DCHECK(backgroundImage);
   [imageView_ setImage:backgroundImage];
 
   // Make the message fit.
@@ -155,13 +154,9 @@ class WebContentsObserverBridge : public content::WebContentsObserver {
 - (void)windowWillClose:(NSNotification*)notification {
   // We have to reset g_instance before autoreleasing the window,
   // because we want to avoid reusing the same dialog if someone calls
-  // chrome::ShowHungRendererDialog() between the autorelease call and the
-  // actual dealloc.
+  // browser::ShowHungRendererDialog() between the autorelease
+  // call and the actual dealloc.
   g_instance = nil;
-
-  // Prevent kills from happening after close if the user had the
-  // button depressed just when new activity was detected.
-  hungContents_ = NULL;
 
   [self autorelease];
 }
@@ -175,15 +170,16 @@ class WebContentsObserverBridge : public content::WebContentsObserver {
   DCHECK(contents);
   hungContents_ = contents;
   hungContentsObserver_.reset(new WebContentsObserverBridge(contents, self));
-  base::scoped_nsobject<NSMutableArray> titles([[NSMutableArray alloc] init]);
-  base::scoped_nsobject<NSMutableArray> favicons([[NSMutableArray alloc] init]);
-  for (TabContentsIterator it; !it.done(); it.Next()) {
-    if (it->GetRenderProcessHost() == hungContents_->GetRenderProcessHost()) {
-      base::string16 title = it->GetTitle();
+  scoped_nsobject<NSMutableArray> titles([[NSMutableArray alloc] init]);
+  scoped_nsobject<NSMutableArray> favicons([[NSMutableArray alloc] init]);
+  for (TabContentsIterator it; !it.done(); ++it) {
+    if (it->web_contents()->GetRenderProcessHost() ==
+        hungContents_->GetRenderProcessHost()) {
+      string16 title = (*it)->web_contents()->GetTitle();
       if (title.empty())
         title = CoreTabHelper::GetDefaultTitle();
       [titles addObject:base::SysUTF16ToNSString(title)];
-      [favicons addObject:mac::FaviconForWebContents(*it)];
+      [favicons addObject:mac::FaviconForTabContents(*it)];
     }
   }
   hungTitles_.reset([titles copy]);
@@ -204,7 +200,7 @@ class WebContentsObserverBridge : public content::WebContentsObserver {
   }
 }
 
-- (void)renderProcessGone {
+- (void)renderViewGone {
   // Cannot call performClose:, because the close button is disabled.
   [self close];
 }
@@ -221,9 +217,9 @@ class WebContentsObserverBridge : public content::WebContentsObserver {
 }
 @end
 
-namespace chrome {
+namespace browser {
 
-void ShowHungRendererDialog(WebContents* contents) {
+void ShowNativeHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
     if (!g_instance)
       g_instance = [[HungRendererController alloc]
@@ -232,9 +228,9 @@ void ShowHungRendererDialog(WebContents* contents) {
   }
 }
 
-void HideHungRendererDialog(WebContents* contents) {
+void HideNativeHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed() && g_instance)
     [g_instance endForWebContents:contents];
 }
 
-}  // namespace chrome
+}  // namespace browser

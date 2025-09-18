@@ -39,6 +39,7 @@
 
 #ifndef BASE_THREADING_SIMPLE_THREAD_H_
 #define BASE_THREADING_SIMPLE_THREAD_H_
+#pragma once
 
 #include <string>
 #include <queue>
@@ -96,7 +97,7 @@ class BASE_EXPORT SimpleThread : public PlatformThread::Delegate {
   PlatformThreadId tid() { return tid_; }
 
   // Return True if Start() has ever been called.
-  bool HasBeenStarted();
+  bool HasBeenStarted() { return event_.IsSignaled(); }
 
   // Return True if Join() has evern been called.
   bool HasBeenJoined() { return joined_; }

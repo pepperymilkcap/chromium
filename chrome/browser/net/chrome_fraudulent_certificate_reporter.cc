@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,10 @@
 #include "base/base64.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "chrome/browser/net/cert_logger.pb.h"
-#include "net/base/load_flags.h"
-#include "net/base/request_priority.h"
-#include "net/base/upload_bytes_element_reader.h"
-#include "net/base/upload_data_stream.h"
-#include "net/cert/x509_certificate.h"
-#include "net/ssl/ssl_info.h"
+#include "net/base/ssl_info.h"
+#include "net/base/x509_certificate.h"
 #include "net/url_request/url_request_context.h"
 
 namespace chrome_browser_net {
@@ -36,8 +32,9 @@ ChromeFraudulentCertificateReporter::~ChromeFraudulentCertificateReporter() {
   STLDeleteElements(&inflight_requests_);
 }
 
-static std::string BuildReport(const std::string& hostname,
-                               const net::SSLInfo& ssl_info) {
+static std::string BuildReport(
+    const std::string& hostname,
+    const net::SSLInfo& ssl_info) {
   CertLoggerRequest request;
   base::Time now = base::Time::Now();
   request.set_time_usec(now.ToInternalValue());
@@ -56,14 +53,8 @@ static std::string BuildReport(const std::string& hostname,
   return out;
 }
 
-scoped_ptr<net::URLRequest>
-ChromeFraudulentCertificateReporter::CreateURLRequest(
-    net::URLRequestContext* context) {
-  scoped_ptr<net::URLRequest> request =
-      context->CreateRequest(upload_url_, net::DEFAULT_PRIORITY, this);
-  request->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
-                        net::LOAD_DO_NOT_SAVE_COOKIES);
-  return request.Pass();
+net::URLRequest* ChromeFraudulentCertificateReporter::CreateURLRequest() {
+  return new net::URLRequest(upload_url_, this);
 }
 
 void ChromeFraudulentCertificateReporter::SendReport(
@@ -79,29 +70,25 @@ void ChromeFraudulentCertificateReporter::SendReport(
 
   std::string report = BuildReport(hostname, ssl_info);
 
-  scoped_ptr<net::URLRequest> url_request = CreateURLRequest(request_context_);
+  net::URLRequest* url_request = CreateURLRequest();
+  url_request->set_context(request_context_);
   url_request->set_method("POST");
-
-  scoped_ptr<net::UploadElementReader> reader(
-      net::UploadOwnedBytesElementReader::CreateWithString(report));
-  url_request->set_upload(make_scoped_ptr(
-      net::UploadDataStream::CreateWithReader(reader.Pass(), 0)));
+  url_request->AppendBytesToUpload(report.data(), report.size());
 
   net::HttpRequestHeaders headers;
   headers.SetHeader(net::HttpRequestHeaders::kContentType,
                     "x-application/chrome-fraudulent-cert-report");
   url_request->SetExtraRequestHeaders(headers);
 
-  net::URLRequest* raw_url_request = url_request.get();
-  inflight_requests_.insert(url_request.release());
-  raw_url_request->Start();
+  inflight_requests_.insert(url_request);
+  url_request->Start();
 }
 
 void ChromeFraudulentCertificateReporter::RequestComplete(
     net::URLRequest* request) {
   std::set<net::URLRequest*>::iterator i = inflight_requests_.find(request);
   DCHECK(i != inflight_requests_.end());
-  scoped_ptr<net::URLRequest> url_request(*i);
+  delete *i;
   inflight_requests_.erase(i);
 }
 
@@ -126,3 +113,4 @@ void ChromeFraudulentCertificateReporter::OnReadCompleted(
     net::URLRequest* request, int bytes_read) {}
 
 }  // namespace chrome_browser_net
+

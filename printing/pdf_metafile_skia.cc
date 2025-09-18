@@ -1,16 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "printing/pdf_metafile_skia.h"
 
-#include "base/containers/hash_tables.h"
+#include "base/eintr_wrapper.h"
 #include "base/file_descriptor_posix.h"
 #include "base/file_util.h"
+#include "base/hash_tables.h"
 #include "base/metrics/histogram.h"
-#include "base/posix/eintr_wrapper.h"
-#include "base/safe_numerics.h"
-#include "skia/ext/refptr.h"
 #include "skia/ext/vector_platform_device_skia.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -19,6 +17,8 @@
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/pdf/SkPDFDevice.h"
 #include "third_party/skia/include/pdf/SkPDFDocument.h"
+#include "third_party/skia/include/pdf/SkPDFFont.h"
+#include "third_party/skia/include/pdf/SkPDFPage.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
@@ -30,7 +30,7 @@
 namespace printing {
 
 struct PdfMetafileSkiaData {
-  skia::RefPtr<SkPDFDevice> current_page_;
+  SkRefPtr<SkPDFDevice> current_page_;
   SkPDFDocument pdf_doc_;
   SkDynamicMemoryWStream pdf_stream_;
 #if defined(OS_MACOSX)
@@ -48,7 +48,7 @@ bool PdfMetafileSkia::InitFromData(const void* src_buffer,
   return data_->pdf_stream_.write(src_buffer, src_buffer_size);
 }
 
-SkBaseDevice* PdfMetafileSkia::StartPageForVectorCanvas(
+SkDevice* PdfMetafileSkia::StartPageForVectorCanvas(
     const gfx::Size& page_size, const gfx::Rect& content_area,
     const float& scale_factor) {
   DCHECK(!page_outstanding_);
@@ -64,9 +64,9 @@ SkBaseDevice* PdfMetafileSkia::StartPageForVectorCanvas(
   SkISize pdf_page_size = SkISize::Make(page_size.width(), page_size.height());
   SkISize pdf_content_size =
       SkISize::Make(content_area.width(), content_area.height());
-  skia::RefPtr<SkPDFDevice> pdf_device =
-      skia::AdoptRef(new skia::VectorPlatformDeviceSkia(
-          pdf_page_size, pdf_content_size, transform));
+  SkRefPtr<SkPDFDevice> pdf_device =
+      new skia::VectorPlatformDeviceSkia(pdf_page_size, pdf_content_size,
+                                         transform);
   data_->current_page_ = pdf_device;
   return pdf_device.get();
 }
@@ -75,7 +75,7 @@ bool PdfMetafileSkia::StartPage(const gfx::Size& page_size,
                                 const gfx::Rect& content_area,
                                 const float& scale_factor) {
   NOTREACHED();
-  return false;
+  return NULL;
 }
 
 bool PdfMetafileSkia::FinishPage() {
@@ -94,17 +94,22 @@ bool PdfMetafileSkia::FinishDocument() {
   if (page_outstanding_)
     FinishPage();
 
-  data_->current_page_.clear();
+  data_->current_page_ = NULL;
+  base::hash_set<SkFontID> font_set;
 
-  int font_counts[SkAdvancedTypefaceMetrics::kOther_Font + 2];
-  data_->pdf_doc_.getCountOfFontTypes(font_counts);
-  for (int type = 0;
-       type <= SkAdvancedTypefaceMetrics::kOther_Font + 1;
-       type++) {
-    for (int count = 0; count < font_counts[type]; count++) {
-      UMA_HISTOGRAM_ENUMERATION(
-          "PrintPreview.FontType", type,
-          SkAdvancedTypefaceMetrics::kOther_Font + 2);
+  const SkTDArray<SkPDFPage*>& pages = data_->pdf_doc_.getPages();
+  for (int page_number = 0; page_number < pages.count(); page_number++) {
+    const SkTDArray<SkPDFFont*>& font_resources =
+        pages[page_number]->getFontResources();
+    for (int font = 0; font < font_resources.count(); font++) {
+      SkFontID font_id = font_resources[font]->typeface()->uniqueID();
+      if (font_set.find(font_id) == font_set.end()) {
+        font_set.insert(font_id);
+        UMA_HISTOGRAM_ENUMERATION(
+            "PrintPreview.FontType",
+            font_resources[font]->getType(),
+            SkAdvancedTypefaceMetrics::kNotEmbeddable_Font + 1);
+      }
     }
   }
 
@@ -112,7 +117,7 @@ bool PdfMetafileSkia::FinishDocument() {
 }
 
 uint32 PdfMetafileSkia::GetDataSize() const {
-  return base::checked_numeric_cast<uint32>(data_->pdf_stream_.getOffset());
+  return data_->pdf_stream_.getOffset();
 }
 
 bool PdfMetafileSkia::GetData(void* dst_buffer,
@@ -121,15 +126,15 @@ bool PdfMetafileSkia::GetData(void* dst_buffer,
     return false;
 
   SkAutoDataUnref data(data_->pdf_stream_.copyToData());
-  memcpy(dst_buffer, data->bytes(), dst_buffer_size);
+  memcpy(dst_buffer, data.bytes(), dst_buffer_size);
   return true;
 }
 
-bool PdfMetafileSkia::SaveTo(const base::FilePath& file_path) const {
+bool PdfMetafileSkia::SaveTo(const FilePath& file_path) const {
   DCHECK_GT(data_->pdf_stream_.getOffset(), 0U);
   SkAutoDataUnref data(data_->pdf_stream_.copyToData());
   if (file_util::WriteFile(file_path,
-                           reinterpret_cast<const char*>(data->data()),
+                           reinterpret_cast<const char*>(data.data()),
                            GetDataSize()) != static_cast<int>(GetDataSize())) {
     DLOG(ERROR) << "Failed to save file " << file_path.value().c_str();
     return false;
@@ -182,17 +187,22 @@ http://codereview.chromium.org/7200040/diff/1/webkit/plugins/ppapi/ppapi_plugin_
 bool PdfMetafileSkia::RenderPage(unsigned int page_number,
                                  CGContextRef context,
                                  const CGRect rect,
-                                 const MacRenderPageParams& params) const {
+                                 bool shrink_to_fit,
+                                 bool stretch_to_fit,
+                                 bool center_horizontally,
+                                 bool center_vertically) const {
   DCHECK_GT(data_->pdf_stream_.getOffset(), 0U);
   if (data_->pdf_cg_.GetDataSize() == 0) {
     SkAutoDataUnref data(data_->pdf_stream_.copyToData());
-    data_->pdf_cg_.InitFromData(data->bytes(), data->size());
+    data_->pdf_cg_.InitFromData(data.bytes(), data.size());
   }
-  return data_->pdf_cg_.RenderPage(page_number, context, rect, params);
+  return data_->pdf_cg_.RenderPage(page_number, context, rect, shrink_to_fit,
+                                   stretch_to_fit, center_horizontally,
+                                   center_vertically);
 }
 #endif
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(OS_CHROMEOS)
 bool PdfMetafileSkia::SaveToFD(const base::FileDescriptor& fd) const {
   DCHECK_GT(data_->pdf_stream_.getOffset(), 0U);
 
@@ -204,7 +214,7 @@ bool PdfMetafileSkia::SaveToFD(const base::FileDescriptor& fd) const {
   bool result = true;
   SkAutoDataUnref data(data_->pdf_stream_.copyToData());
   if (file_util::WriteFileDescriptor(fd.fd,
-                                     reinterpret_cast<const char*>(data->data()),
+                                     reinterpret_cast<const char*>(data.data()),
                                      GetDataSize()) !=
       static_cast<int>(GetDataSize())) {
     DLOG(ERROR) << "Failed to save file with fd " << fd.fd;
@@ -212,7 +222,7 @@ bool PdfMetafileSkia::SaveToFD(const base::FileDescriptor& fd) const {
   }
 
   if (fd.auto_close) {
-    if (IGNORE_EINTR(close(fd.fd)) < 0) {
+    if (HANDLE_EINTR(close(fd.fd)) < 0) {
       DPLOG(WARNING) << "close";
       result = false;
     }
@@ -236,12 +246,11 @@ PdfMetafileSkia* PdfMetafileSkia::GetMetafileForCurrentPage() {
     return NULL;
 
   SkAutoDataUnref data(pdf_stream.copyToData());
-  if (data->size() == 0)
+  if (data.size() == 0)
     return NULL;
 
   PdfMetafileSkia* metafile = new PdfMetafileSkia;
-  metafile->InitFromData(data->bytes(),
-                         base::checked_numeric_cast<uint32>(data->size()));
+  metafile->InitFromData(data.bytes(), data.size());
   return metafile;
 }
 

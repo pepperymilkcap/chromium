@@ -1,21 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/memory_details.h"
 
 #include <psapi.h>
-#include <TlHelp32.h>
 
 #include "base/bind.h"
+#include "base/file_path.h"
 #include "base/file_version_info.h"
-#include "base/files/file_path.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/backing_store_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/process_type.h"
 #include "grit/chromium_strings.h"
@@ -36,10 +36,9 @@ enum {
   MAX_BROWSERS
 } BrowserProcess;
 
-MemoryDetails::MemoryDetails()
-    : user_metrics_mode_(UPDATE_USER_METRICS) {
+MemoryDetails::MemoryDetails() {
   static const std::wstring google_browser_name =
-      base::UTF16ToWide(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
   struct {
     const wchar_t* name;
     const wchar_t* process_name;
@@ -109,9 +108,9 @@ void MemoryDetails::CollectProcessData(
       ProcessMemoryInformation info;
       info.pid = pid;
       if (info.pid == GetCurrentProcessId())
-        info.process_type = content::PROCESS_TYPE_BROWSER;
+        info.type = content::PROCESS_TYPE_BROWSER;
       else
-        info.process_type = content::PROCESS_TYPE_UNKNOWN;
+        info.type = content::PROCESS_TYPE_UNKNOWN;
 
       scoped_ptr<base::ProcessMetrics> metrics;
       metrics.reset(base::ProcessMetrics::CreateProcessMetrics(process_handle));
@@ -123,21 +122,21 @@ void MemoryDetails::CollectProcessData(
       if (index2 == CHROME_BROWSER || index2 == CHROME_NACL_PROCESS) {
         chrome::VersionInfo version_info;
         if (version_info.is_valid())
-          info.version = base::ASCIIToWide(version_info.Version());
+          info.version = ASCIIToWide(version_info.Version());
         // Check if this is one of the child processes whose data we collected
         // on the IO thread, and if so copy over that data.
         for (size_t child = 0; child < child_info.size(); child++) {
           if (child_info[child].pid != info.pid)
             continue;
           info.titles = child_info[child].titles;
-          info.process_type = child_info[child].process_type;
+          info.type = child_info[child].type;
           break;
         }
       } else if (GetModuleFileNameEx(process_handle, NULL, name,
                                      MAX_PATH - 1)) {
         std::wstring str_name(name);
         scoped_ptr<FileVersionInfo> version_info(
-            FileVersionInfo::CreateFileVersionInfo(base::FilePath(str_name)));
+            FileVersionInfo::CreateFileVersionInfo(FilePath(str_name)));
         if (version_info != NULL) {
           info.version = version_info->product_version();
           info.product_name = version_info->product_name();

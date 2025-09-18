@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,15 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "sync/internal_api/public/base/model_type.h"
 
 class ProfileSyncService;
 
-namespace syncer {
+namespace sync_api {
 struct UserShare;
-}  // namespace syncer
+}  // namespace sync_api
 
 namespace browser_sync {
 
@@ -33,7 +33,7 @@ class MigrationObserver {
 
 // A class to perform migration of a datatype pursuant to the 'MIGRATION_DONE'
 // code in the sync protocol definition (protocol/sync.proto).
-class BackendMigrator {
+class BackendMigrator : public content::NotificationObserver {
  public:
   enum State {
     IDLE,
@@ -48,27 +48,27 @@ class BackendMigrator {
 
   // TODO(akalin): Remove the dependency on |user_share|.
   BackendMigrator(const std::string& name,
-                  syncer::UserShare* user_share,
+                  sync_api::UserShare* user_share,
                   ProfileSyncService* service,
-                  DataTypeManager* manager,
-                  const base::Closure &migration_done_callback);
+                  DataTypeManager* manager);
   virtual ~BackendMigrator();
 
   // Starts a sequence of events that will disable and reenable |types|.
-  void MigrateTypes(syncer::ModelTypeSet types);
+  void MigrateTypes(syncable::ModelTypeSet types);
 
   void AddMigrationObserver(MigrationObserver* observer);
   bool HasMigrationObserver(MigrationObserver* observer) const;
   void RemoveMigrationObserver(MigrationObserver* observer);
 
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
   State state() const;
 
-  // Called from ProfileSyncService to notify us of configure done.
-  // Note: We receive these notificiations only when our state is not IDLE.
-  void OnConfigureDone(const DataTypeManager::ConfigureResult& result);
-
   // Returns the types that are currently pending migration (if any).
-  syncer::ModelTypeSet GetPendingMigrationTypesForTest() const;
+  syncable::ModelTypeSet GetPendingMigrationTypesForTest() const;
 
  private:
   void ChangeState(State new_state);
@@ -82,21 +82,21 @@ class BackendMigrator {
   // Restarts migration, interrupting any existing migration.
   void RestartMigration();
 
-  // Called by OnConfigureDone().
-  void OnConfigureDoneImpl(const DataTypeManager::ConfigureResult& result);
+  // Called by Observe().
+  void OnConfigureDone(const DataTypeManager::ConfigureResult& result);
 
   const std::string name_;
-  syncer::UserShare* user_share_;
+  sync_api::UserShare* user_share_;
   ProfileSyncService* service_;
   DataTypeManager* manager_;
 
   State state_;
 
+  content::NotificationRegistrar registrar_;
+
   ObserverList<MigrationObserver> migration_observers_;
 
-  syncer::ModelTypeSet to_migrate_;
-
-  base::Closure migration_done_callback_;
+  syncable::ModelTypeSet to_migrate_;
 
   base::WeakPtrFactory<BackendMigrator> weak_ptr_factory_;
 

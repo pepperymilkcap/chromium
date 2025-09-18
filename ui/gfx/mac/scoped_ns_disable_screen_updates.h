@@ -4,6 +4,7 @@
 
 #ifndef UI_GFX_MAC_SCOPED_NS_DISABLE_SCREEN_UPDATES_H_
 #define UI_GFX_MAC_SCOPED_NS_DISABLE_SCREEN_UPDATES_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 

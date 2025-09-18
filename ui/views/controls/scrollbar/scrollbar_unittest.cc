@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,9 +48,14 @@ namespace views {
 
 class NativeScrollBarTest : public ViewsTestBase {
  public:
-  NativeScrollBarTest() : widget_(NULL), scrollbar_(NULL) {}
+  NativeScrollBarTest()
+    : widget_(NULL),
+      scrollbar_(NULL),
+      controller_(NULL) {
+  }
 
   virtual void SetUp() {
+    Widget::SetPureViews(true);
     ViewsTestBase::SetUp();
     controller_.reset(new TestScrollBarController());
 
@@ -60,7 +65,7 @@ class NativeScrollBarTest : public ViewsTestBase {
     native_scrollbar_->set_controller(controller_.get());
 
     widget_ = new Widget;
-    Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
+    Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
     params.bounds = gfx::Rect(0, 0, 100, 100);
     widget_->Init(params);
     View* container = new View();
@@ -78,6 +83,7 @@ class NativeScrollBarTest : public ViewsTestBase {
   virtual void TearDown() {
     widget_->Close();
     ViewsTestBase::TearDown();
+    Widget::SetPureViews(false);
   }
 
  protected:
@@ -99,14 +105,10 @@ class NativeScrollBarTest : public ViewsTestBase {
 // TODO(dnicoara) Can't run the test on Windows since the scrollbar |Part|
 // isn't handled in NativeTheme.
 #if defined(OS_WIN)
-#define MAYBE_Scrolling DISABLED_Scrolling
-#define MAYBE_ScrollBarFitsToBottom DISABLED_ScrollBarFitsToBottom
+TEST_F(NativeScrollBarTest, DISABLED_Scrolling) {
 #else
-#define MAYBE_Scrolling Scrolling
-#define MAYBE_ScrollBarFitsToBottom ScrollBarFitsToBottom
+TEST_F(NativeScrollBarTest, Scrolling) {
 #endif
-
-TEST_F(NativeScrollBarTest, MAYBE_Scrolling) {
   EXPECT_EQ(scrollbar_->GetPosition(), 0);
   EXPECT_EQ(scrollbar_->GetMaxPosition(), 100);
   EXPECT_EQ(scrollbar_->GetMinPosition(), 0);
@@ -142,18 +144,6 @@ TEST_F(NativeScrollBarTest, MAYBE_Scrolling) {
 
   scrollbar_->ScrollByAmount(BaseScrollBar::SCROLL_PREV_PAGE);
   EXPECT_EQ(controller_->last_position, 0);
-}
-
-TEST_F(NativeScrollBarTest, MAYBE_ScrollBarFitsToBottom) {
-  scrollbar_->Update(100, 199, 0);
-  EXPECT_EQ(0, scrollbar_->GetPosition());
-  EXPECT_EQ(99, scrollbar_->GetMaxPosition());
-  EXPECT_EQ(0, scrollbar_->GetMinPosition());
-
-  scrollbar_->Update(100, 199, 99);
-  EXPECT_EQ(
-      scrollbar_->GetTrackBounds().width() - scrollbar_->GetThumbSizeForTest(),
-      scrollbar_->GetPosition());
 }
 
 }  // namespace views

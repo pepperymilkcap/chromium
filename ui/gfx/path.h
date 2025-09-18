@@ -1,34 +1,30 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_PATH_H_
 #define UI_GFX_PATH_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "third_party/skia/include/core/SkPath.h"
-#include "ui/gfx/gfx_export.h"
+#include "ui/base/ui_export.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
 
-class GFX_EXPORT Path : public SkPath {
+class UI_EXPORT Path : public SkPath {
  public:
   // Used by Path(Point,size_t) constructor.
   struct Point {
     int x;
     int y;
   };
-  struct PointF {
-    float x;
-    float y;
-  };
 
   Path();
 
   // Creates a path populated with the specified points.
   Path(const Point* points, size_t count);
-  Path(const PointF* points, size_t count);
 
   ~Path();
 

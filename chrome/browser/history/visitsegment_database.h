@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_HISTORY_VISITSEGMENT_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_VISITSEGMENT_DATABASE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/browser/history/history_types.h"
@@ -78,10 +79,6 @@ class VisitSegmentDatabase {
 
   // Deletes all the segment tables, returning true on success.
   bool DropSegmentTables();
-
-  // Removes the 'pres_index' column from the segments table and the
-  // presentation table is removed entirely.
-  bool MigratePresentationIndex();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(VisitSegmentDatabase);

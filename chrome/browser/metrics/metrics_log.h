@@ -7,64 +7,24 @@
 
 #ifndef CHROME_BROWSER_METRICS_METRICS_LOG_H_
 #define CHROME_BROWSER_METRICS_METRICS_LOG_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "chrome/browser/metrics/metrics_network_observer.h"
 #include "chrome/common/metrics/metrics_log_base.h"
-#include "chrome/common/metrics/variations/variations_util.h"
-#include "chrome/installer/util/google_update_settings.h"
-#include "ui/gfx/size.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/metrics/perf_provider_chromeos.h"
-#endif
-
-class MetricsNetworkObserver;
-struct OmniboxLog;
+struct AutocompleteLog;
 class PrefService;
-class PrefRegistrySimple;
 
 namespace base {
 class DictionaryValue;
 }
 
-namespace content {
+namespace webkit {
 struct WebPluginInfo;
 }
-
-namespace device {
-class BluetoothAdapter;
-}
-
-namespace tracked_objects {
-struct ProcessDataSnapshot;
-}
-
-namespace chrome_variations {
-struct ActiveGroupId;
-}
-
-// This is a small helper struct to pass Google Update metrics in a single
-// reference argument to MetricsLog::RecordEnvironment().
-struct GoogleUpdateMetrics {
-    GoogleUpdateMetrics();
-    ~GoogleUpdateMetrics();
-
-    // Defines whether this is a user-level or system-level install.
-    bool is_system_install;
-    // The time at which Google Update last started an automatic update check.
-    base::Time last_started_au;
-    // The time at which Google Update last successfully recieved update
-    // information from Google servers.
-    base::Time last_checked;
-    // Details about Google Update's attempts to update itself.
-    GoogleUpdateSettings::ProductData google_update_data;
-    // Details about Google Update's attempts to update this product.
-    GoogleUpdateSettings::ProductData product_data;
-};
 
 class MetricsLog : public MetricsLogBase {
  public:
@@ -74,7 +34,11 @@ class MetricsLog : public MetricsLogBase {
   MetricsLog(const std::string& client_id, int session_id);
   virtual ~MetricsLog();
 
-  static void RegisterPrefs(PrefRegistrySimple* registry);
+  static void RegisterPrefs(PrefService* prefs);
+
+  // Get the amount of uptime in seconds since this function was last called.
+  // This updates the cumulative uptime metric for uninstall as a side effect.
+  static int64 GetIncrementalUptime(PrefService* pref);
 
   // Get the current version of the application as a string.
   static std::string GetVersionString();
@@ -85,76 +49,31 @@ class MetricsLog : public MetricsLogBase {
   static const std::string& version_extension();
 
   // Records the current operating environment.  Takes the list of installed
-  // plugins, Google Update statistics, and synthetic trial IDs as parameters
-  // because those can't be obtained synchronously from the UI thread.
-  // A synthetic trial is one that is set up dynamically by code in Chrome. For
-  // example, a pref may be mapped to a synthetic trial such that the group
-  // is determined by the pref value.
+  // plugins as a parameter because that can't be obtained synchronously
+  // from the UI thread.
+  // profile_metrics, if non-null, gives a dictionary of all profile metrics
+  // that are to be recorded. Each value in profile_metrics should be a
+  // dictionary giving the metrics for the profile.
   void RecordEnvironment(
-      const std::vector<content::WebPluginInfo>& plugin_list,
-      const GoogleUpdateMetrics& google_update_metrics,
-      const std::vector<chrome_variations::ActiveGroupId>& synthetic_trials);
-
-  // Loads the environment proto that was saved by the last RecordEnvironment()
-  // call from prefs and clears the pref value. Returns true on success or false
-  // if there was no saved environment in prefs or it could not be decoded.
-  bool LoadSavedEnvironmentFromPrefs();
+      const std::vector<webkit::WebPluginInfo>& plugin_list,
+      const base::DictionaryValue* profile_metrics);
 
   // Records the input text, available choices, and selected entry when the
   // user uses the Omnibox to open a URL.
-  void RecordOmniboxOpenedURL(const OmniboxLog& log);
+  void RecordOmniboxOpenedURL(const AutocompleteLog& log);
 
-  // Records the passed profiled data, which should be a snapshot of the
-  // browser's profiled performance during startup for a single process.
-  void RecordProfilerData(
-      const tracked_objects::ProcessDataSnapshot& process_data,
-      int process_type);
-
-  // Writes application stability metrics (as part of the profile log). The
-  // system profile portion of the log must have already been filled in by a
-  // call to RecordEnvironment() or LoadSavedEnvironmentFromPrefs().
-  // NOTE: Has the side-effect of clearing the stability prefs..
-  //
-  // If |log_type| is INITIAL_LOG, records additional info such as number of
-  // incomplete shutdowns as well as extra breakpad and debugger stats.
-  void RecordStabilityMetrics(
-      base::TimeDelta incremental_uptime,
-      LogType log_type);
-
-  const base::TimeTicks& creation_time() const {
-    return creation_time_;
-  }
-
- protected:
-  // Exposed for the sake of mocking in test code.
-
-  // Returns the PrefService from which to log metrics data.
-  virtual PrefService* GetPrefService();
-
-  // Returns the screen size for the primary monitor.
-  virtual gfx::Size GetScreenSize() const;
-
-  // Returns the device scale factor for the primary monitor.
-  virtual float GetScreenDeviceScaleFactor() const;
-
-  // Returns the number of monitors the user is using.
-  virtual int GetScreenCount() const;
-
-  // Fills |field_trial_ids| with the list of initialized field trials name and
-  // group ids.
-  virtual void GetFieldTrialIds(
-      std::vector<chrome_variations::ActiveGroupId>* field_trial_ids) const;
+  // Record recent delta for critical stability metrics.  We can't wait for a
+  // restart to gather these, as that delay biases our observation away from
+  // users that run happily for a looooong time.  We send increments with each
+  // uma log upload, just as we send histogram data.
+  void RecordIncrementalStabilityElements();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(MetricsLogTest, ChromeOSStabilityData);
 
-  // Returns true if the environment has already been filled in by a call to
-  // RecordEnvironment() or LoadSavedEnvironmentFromPrefs().
-  bool HasEnvironment() const;
-
-  // Returns true if the stability metrics have already been filled in by a
-  // call to RecordStabilityMetrics().
-  bool HasStabilityMetrics() const;
+  // Writes application stability metrics (as part of the profile log).
+  // NOTE: Has the side-effect of clearing those counts.
+  void WriteStabilityElement(PrefService* pref);
 
   // Within stability group, write plugin crash stats.
   void WritePluginStabilityElements(PrefService* pref);
@@ -166,44 +85,24 @@ class MetricsLog : public MetricsLogBase {
   // and can't be delayed until the user decides to restart chromium.
   // Delaying these stats would bias metrics away from happy long lived
   // chromium processes (ones that don't crash, and keep on running).
-  void WriteRealtimeStabilityAttributes(PrefService* pref,
-                                        base::TimeDelta incremental_uptime);
+  void WriteRealtimeStabilityAttributes(PrefService* pref);
 
   // Writes the list of installed plugins.
-  void WritePluginList(const std::vector<content::WebPluginInfo>& plugin_list);
+  void WritePluginList(
+      const std::vector<webkit::WebPluginInfo>& plugin_list);
 
-  // Writes info about the Google Update install that is managing this client.
-  // This is a no-op if called on a non-Windows platform.
-  void WriteGoogleUpdateProto(const GoogleUpdateMetrics& google_update_metrics);
+  // Within the profile group, write basic install info including appversion.
+  void WriteInstallElement();
 
-  // Sets the Bluetooth Adapter instance used for the WriteBluetoothProto()
-  // call.
-  void SetBluetoothAdapter(scoped_refptr<device::BluetoothAdapter> adapter);
+  // Writes all profile metrics. This invokes WriteProfileMetrics for each key
+  // in all_profiles_metrics that starts with kProfilePrefix.
+  void WriteAllProfilesMetrics(
+      const base::DictionaryValue& all_profiles_metrics);
 
-  // Writes info about paired Bluetooth devices on this system.
-  // This is a no-op if called on a non-Chrome OS platform.
-  virtual void WriteBluetoothProto(
-      metrics::SystemProfileProto::Hardware* hardware);
-
-#if defined(OS_CHROMEOS)
-  // Update the number of users logged into a multi-profile session.
-  // If the number of users change while the log is open, the call invalidates
-  // the user count value.
-  void UpdateMultiProfileUserCount();
-#endif
-
-  // Observes network state to provide values for SystemProfile::Network.
-  MetricsNetworkObserver network_observer_;
-
-#if defined(OS_CHROMEOS)
-  metrics::PerfProvider perf_provider_;
-#endif
-
-  // Bluetooth Adapter instance for collecting information about paired devices.
-  scoped_refptr<device::BluetoothAdapter> adapter_;
-
-  // The time when the current log was created.
-  const base::TimeTicks creation_time_;
+  // Writes metrics for the profile identified by key. This writes all
+  // key/value pairs in profile_metrics.
+  void WriteProfileMetrics(const std::string& key,
+                           const base::DictionaryValue& profile_metrics);
 
   DISALLOW_COPY_AND_ASSIGN(MetricsLog);
 };

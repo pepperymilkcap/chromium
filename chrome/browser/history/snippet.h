@@ -7,10 +7,11 @@
 
 #ifndef CHROME_BROWSER_HISTORY_SNIPPET_H__
 #define CHROME_BROWSER_HISTORY_SNIPPET_H__
+#pragma once
 
 #include <vector>
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 class Snippet {
  public:
@@ -52,7 +53,7 @@ class Snippet {
   void ComputeSnippet(const MatchPositions& matches,
                       const std::string& document);
 
-  const base::string16& text() const { return text_; }
+  const string16& text() const { return text_; }
   const MatchPositions& matches() const { return matches_; }
 
   // Efficiently swaps the contents of this snippet with the other.
@@ -60,7 +61,7 @@ class Snippet {
 
  private:
   // The text of the snippet.
-  base::string16 text_;
+  string16 text_;
 
   // The matches within text_.
   MatchPositions matches_;

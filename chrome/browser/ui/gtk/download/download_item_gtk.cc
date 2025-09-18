@@ -8,35 +8,35 @@
 #include "base/callback.h"
 #include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/string_util.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_item_model.h"
-#include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/gtk/download/download_item_drag.h"
+#include "chrome/browser/ui/gtk/custom_drag.h"
 #include "chrome/browser/ui/gtk/download/download_shelf_context_menu_gtk.h"
 #include "chrome/browser/ui/gtk/download/download_shelf_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/animation/slide_animation.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skia_utils_gtk.h"
-#include "ui/gfx/text_elider.h"
-#include "ui/gfx/text_utils.h"
 
 namespace {
 
@@ -61,7 +61,7 @@ const int kTooltipMaxWidth = 1000;
 // The minimum width we will ever draw the download item. Used as a lower bound
 // during animation. This number comes from the width of the images used to
 // make the download item.
-const int kMinDownloadItemWidth = DownloadShelf::kSmallProgressIconSize;
+const int kMinDownloadItemWidth = download_util::kSmallProgressIconSize;
 
 // New download item animation speed in milliseconds.
 const int kNewItemAnimationDurationMs = 800;
@@ -70,11 +70,11 @@ const int kNewItemAnimationDurationMs = 800;
 const int kCompleteAnimationDurationMs = 2500;
 
 // Height of the body.
-const int kBodyHeight = DownloadShelf::kSmallProgressIconSize;
+const int kBodyHeight = download_util::kSmallProgressIconSize;
 
 // Width of the body area of the download item.
 // TODO(estade): get rid of the fudge factor. http://crbug.com/18692
-const int kBodyWidth = kTextWidth + 50 + DownloadShelf::kSmallProgressIconSize;
+const int kBodyWidth = kTextWidth + 50 + download_util::kSmallProgressIconSize;
 
 // The font size of the text, and that size rounded down to the nearest integer
 // for the size of the arrow in GTK theme mode.
@@ -84,10 +84,6 @@ const double kTextSize = 13.4;  // 13.4px == 10pt @ 96dpi
 // creating a "muted" version of title text for both dark-on-light and
 // light-on-dark themes.
 static const double kDownloadItemLuminanceMod = 0.8;
-
-// How long we keep the item disabled after the user clicked it to open the
-// downloaded item.
-static const int kDisabledOnOpenDurationMs = 3000;
 
 }  // namespace
 
@@ -104,23 +100,21 @@ NineBox* DownloadItemGtk::dangerous_nine_box_ = NULL;
 using content::DownloadItem;
 
 DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
-                                 DownloadItem* download_item)
+                                 BaseDownloadItemModel* download_model)
     : parent_shelf_(parent_shelf),
       arrow_(NULL),
       menu_showing_(false),
       theme_service_(
           GtkThemeService::GetFrom(parent_shelf->browser()->profile())),
-      progress_angle_(DownloadShelf::kStartAngleDegrees),
-      download_model_(download_item),
+      progress_angle_(download_util::kStartAngleDegrees),
+      download_model_(download_model),
       dangerous_prompt_(NULL),
       dangerous_label_(NULL),
       complete_animation_(this),
       icon_small_(NULL),
       icon_large_(NULL),
       creation_time_(base::Time::Now()),
-      download_complete_(false),
-      disabled_while_opening_(false),
-      weak_ptr_factory_(this) {
+      download_complete_(false) {
   LoadIcon();
 
   body_.Own(gtk_button_new());
@@ -161,8 +155,8 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
   // This choice of widget is not critically important though.
   progress_area_.Own(gtk_fixed_new());
   gtk_widget_set_size_request(progress_area_.get(),
-      DownloadShelf::kSmallProgressIconSize,
-      DownloadShelf::kSmallProgressIconSize);
+      download_util::kSmallProgressIconSize,
+      download_util::kSmallProgressIconSize);
   gtk_widget_set_app_paintable(progress_area_.get(), TRUE);
   g_signal_connect(progress_area_.get(), "expose-event",
                    G_CALLBACK(OnProgressAreaExposeThunk), this);
@@ -193,13 +187,13 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
   // Insert as the leftmost item.
   gtk_box_reorder_child(GTK_BOX(shelf_hbox), hbox_.get(), 0);
 
-  download()->AddObserver(this);
+  get_download()->AddObserver(this);
 
-  new_item_animation_.reset(new gfx::SlideAnimation(this));
+  new_item_animation_.reset(new ui::SlideAnimation(this));
   new_item_animation_->SetSlideDuration(kNewItemAnimationDurationMs);
   gtk_widget_show_all(hbox_.get());
 
-  if (download_model_.IsDangerous()) {
+  if (IsDangerous()) {
     // Hide the download item components for now.
     gtk_widget_set_no_show_all(body_.get(), TRUE);
     gtk_widget_set_no_show_all(menu_button_, TRUE);
@@ -237,16 +231,17 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
     gtk_util::CenterWidgetInHBox(dangerous_hbox_.get(), dangerous_decline,
                                  false, 0);
 
-    // Create the ok button, if this is the kind that can be bypassed.
-    if (!download_model_.IsMalicious()) {
-      GtkWidget* dangerous_accept = gtk_button_new_with_label(
-          base::UTF16ToUTF8(
-              download_model_.GetWarningConfirmButtonText()).c_str());
-      g_signal_connect(dangerous_accept, "clicked",
-                       G_CALLBACK(OnDangerousAcceptThunk), this);
-      gtk_util::CenterWidgetInHBox(
-          dangerous_hbox_.get(), dangerous_accept, false, 0);
-    }
+    // Create the ok button.
+    GtkWidget* dangerous_accept = gtk_button_new_with_label(
+        l10n_util::GetStringUTF8(
+            ChromeDownloadManagerDelegate::IsExtensionDownload(
+                download_model->download()) ?
+                    IDS_CONTINUE_EXTENSION_DOWNLOAD :
+                    IDS_CONFIRM_DOWNLOAD).c_str());
+    g_signal_connect(dangerous_accept, "clicked",
+                     G_CALLBACK(OnDangerousAcceptThunk), this);
+    gtk_util::CenterWidgetInHBox(dangerous_hbox_.get(), dangerous_accept, false,
+                                 0);
 
     // Put it in an alignment so that padding will be added on the left and
     // right.
@@ -268,7 +263,7 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
   theme_service_->InitThemesFor(this);
 
   // Set the initial width of the widget to be animated.
-  if (download_model_.IsDangerous()) {
+  if (IsDangerous()) {
     gtk_widget_set_size_request(dangerous_hbox_.get(),
                                 dangerous_hbox_start_width_, -1);
   } else {
@@ -277,11 +272,8 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
 
   new_item_animation_->Show();
 
-  complete_animation_.SetTweenType(gfx::Tween::LINEAR);
+  complete_animation_.SetTweenType(ui::Tween::LINEAR);
   complete_animation_.SetSlideDuration(kCompleteAnimationDurationMs);
-
-  // Update the status text and animation state.
-  OnDownloadUpdated(download());
 }
 
 DownloadItemGtk::~DownloadItemGtk() {
@@ -289,8 +281,9 @@ DownloadItemGtk::~DownloadItemGtk() {
   if (menu_.get())
     menu_.reset();
 
+  icon_consumer_.CancelAllRequests();
   StopDownloadProgress();
-  download()->RemoveObserver(this);
+  get_download()->RemoveObserver(this);
 
   // We may free some shelf space for showing more download items.
   parent_shelf_->MaybeShowMoreDownloadItems();
@@ -305,10 +298,11 @@ DownloadItemGtk::~DownloadItemGtk() {
   DCHECK(!status_label_);
 }
 
-void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download_item) {
-  DCHECK_EQ(download(), download_item);
+void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
+  DCHECK_EQ(download, get_download());
 
-  if (dangerous_prompt_ != NULL && !download_model_.IsDangerous()) {
+  if (dangerous_prompt_ != NULL &&
+      download->GetSafetyState() == DownloadItem::DANGEROUS_BUT_VALIDATED) {
     // We have been approved.
     gtk_widget_set_no_show_all(body_.get(), FALSE);
     gtk_widget_set_no_show_all(menu_button_, FALSE);
@@ -321,27 +315,32 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download_item) {
     parent_shelf_->MaybeShowMoreDownloadItems();
   }
 
-  if (download()->GetTargetFilePath() != icon_filepath_) {
+  if (download->GetUserVerifiedFilePath() != icon_filepath_) {
+    // Turns out the file path is "Unconfirmed %d.crdownload" for dangerous
+    // downloads. When the download is confirmed, the file is renamed on
+    // another thread, so reload the icon if the download filename changes.
     LoadIcon();
+
     UpdateTooltip();
   }
 
-  switch (download()->GetState()) {
+  switch (download->GetState()) {
+    case DownloadItem::REMOVING:
+      parent_shelf_->RemoveDownloadItem(this);  // This will delete us!
+      return;
     case DownloadItem::CANCELLED:
       StopDownloadProgress();
       gtk_widget_queue_draw(progress_area_.get());
       break;
     case DownloadItem::INTERRUPTED:
       StopDownloadProgress();
-      UpdateTooltip();
 
       complete_animation_.Show();
       break;
     case DownloadItem::COMPLETE:
-      // ShouldRemoveFromShelfWhenComplete() may change after the download's
-      // initial transition to COMPLETE, so we check it before the idemopotency
-      // shield below.
-      if (download_model_.ShouldRemoveFromShelfWhenComplete()) {
+      // GetAutoOpened() may change after the download's initial transition to
+      // COMPLETE, so we check it before the idemopotency shield below.
+      if (download->GetAutoOpened()) {
         parent_shelf_->RemoveDownloadItem(this);  // This will delete us!
         return;
       }
@@ -354,35 +353,29 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download_item) {
       StopDownloadProgress();
 
       // Set up the widget as a drag source.
-      DownloadItemDrag::SetSource(body_.get(), download(), icon_large_);
+      DownloadItemDrag::SetSource(body_.get(), get_download(), icon_large_);
 
       complete_animation_.Show();
       download_complete_ = true;
       break;
     case DownloadItem::IN_PROGRESS:
-      download()->IsPaused() ?
+      get_download()->IsPaused() ?
           StopDownloadProgress() : StartDownloadProgress();
       break;
     default:
       NOTREACHED();
   }
 
-  status_text_ = base::UTF16ToUTF8(download_model_.GetStatusText());
+  status_text_ = UTF16ToUTF8(download_model_->GetStatusText());
   UpdateStatusLabel(status_text_);
 }
 
-void DownloadItemGtk::OnDownloadDestroyed(DownloadItem* download_item) {
-  DCHECK_EQ(download(), download_item);
-  parent_shelf_->RemoveDownloadItem(this);
-  // This will delete us!
-}
-
-void DownloadItemGtk::AnimationProgressed(const gfx::Animation* animation) {
+void DownloadItemGtk::AnimationProgressed(const ui::Animation* animation) {
   if (animation == &complete_animation_) {
     gtk_widget_queue_draw(progress_area_.get());
   } else {
     DCHECK(animation == new_item_animation_.get());
-    if (download_model_.IsDangerous()) {
+    if (IsDangerous()) {
       int progress = static_cast<int>((dangerous_hbox_full_width_ -
                                        dangerous_hbox_start_width_) *
                                       animation->GetCurrentValue());
@@ -428,12 +421,20 @@ void DownloadItemGtk::Observe(int type,
   }
 }
 
+DownloadItem* DownloadItemGtk::get_download() {
+  return download_model_->download();
+}
+
+bool DownloadItemGtk::IsDangerous() {
+  return get_download()->GetSafetyState() == DownloadItem::DANGEROUS;
+}
+
 // Download progress animation functions.
 
 void DownloadItemGtk::UpdateDownloadProgress() {
-  progress_angle_ =
-      (progress_angle_ + DownloadShelf::kUnknownIncrementDegrees) %
-      DownloadShelf::kMaxDegrees;
+  progress_angle_ = (progress_angle_ +
+                     download_util::kUnknownIncrementDegrees) %
+                    download_util::kMaxDegrees;
   gtk_widget_queue_draw(progress_area_.get());
 }
 
@@ -441,7 +442,7 @@ void DownloadItemGtk::StartDownloadProgress() {
   if (progress_timer_.IsRunning())
     return;
   progress_timer_.Start(FROM_HERE,
-      base::TimeDelta::FromMilliseconds(DownloadShelf::kProgressRateMs), this,
+      base::TimeDelta::FromMilliseconds(download_util::kProgressRateMs), this,
       &DownloadItemGtk::UpdateDownloadProgress);
 }
 
@@ -451,75 +452,56 @@ void DownloadItemGtk::StopDownloadProgress() {
 
 // Icon loading functions.
 
-void DownloadItemGtk::OnLoadSmallIconComplete(gfx::Image* image) {
+void DownloadItemGtk::OnLoadSmallIconComplete(IconManager::Handle handle,
+                                              gfx::Image* image) {
   icon_small_ = image;
   gtk_widget_queue_draw(progress_area_.get());
 }
 
-void DownloadItemGtk::OnLoadLargeIconComplete(gfx::Image* image) {
+void DownloadItemGtk::OnLoadLargeIconComplete(IconManager::Handle handle,
+                                              gfx::Image* image) {
   icon_large_ = image;
-  if (download()->GetState() == DownloadItem::COMPLETE)
-    DownloadItemDrag::SetSource(body_.get(), download(), icon_large_);
-  // Else, the download will be made draggable once an OnDownloadUpdated()
-  // notification is received with a download in COMPLETE state.
+  DownloadItemDrag::SetSource(body_.get(), get_download(), icon_large_);
 }
 
 void DownloadItemGtk::LoadIcon() {
-  cancelable_task_tracker_.TryCancelAll();
+  icon_consumer_.CancelAllRequests();
   IconManager* im = g_browser_process->icon_manager();
-  icon_filepath_ = download()->GetTargetFilePath();
+  icon_filepath_ = get_download()->GetUserVerifiedFilePath();
   im->LoadIcon(icon_filepath_,
-               IconLoader::SMALL,
+               IconLoader::SMALL, &icon_consumer_,
                base::Bind(&DownloadItemGtk::OnLoadSmallIconComplete,
-                          base::Unretained(this)),
-               &cancelable_task_tracker_);
+                          base::Unretained(this)));
   im->LoadIcon(icon_filepath_,
-               IconLoader::LARGE,
+               IconLoader::LARGE, &icon_consumer_,
                base::Bind(&DownloadItemGtk::OnLoadLargeIconComplete,
-                          base::Unretained(this)),
-               &cancelable_task_tracker_);
+                          base::Unretained(this)));
 }
 
 void DownloadItemGtk::UpdateTooltip() {
-  const gfx::FontList& font_list =
-      ui::ResourceBundle::GetSharedInstance().GetFontList(
-          ui::ResourceBundle::BaseFont);
-  base::string16 tooltip_text =
-      download_model_.GetTooltipText(font_list, kTooltipMaxWidth);
+  string16 elided_filename = ui::ElideFilename(
+      get_download()->GetFileNameToReportUser(),
+      gfx::Font(), kTooltipMaxWidth);
   gtk_widget_set_tooltip_text(body_.get(),
-                              base::UTF16ToUTF8(tooltip_text).c_str());
+                              UTF16ToUTF8(elided_filename).c_str());
 }
 
 void DownloadItemGtk::UpdateNameLabel() {
-  const gfx::FontList& font_list =
-      ui::ResourceBundle::GetSharedInstance().GetFontList(
-          ui::ResourceBundle::BaseFont);
-  base::string16 filename;
-  if (!disabled_while_opening_) {
-    filename = gfx::ElideFilename(
-        download()->GetFileNameToReportUser(), font_list, kTextWidth);
-  } else {
-    // First, Calculate the download status opening string width.
-    base::string16 status_string =
-        l10n_util::GetStringFUTF16(IDS_DOWNLOAD_STATUS_OPENING,
-                                   base::string16());
-    int status_string_width = gfx::GetStringWidth(status_string, font_list);
-    // Then, elide the file name.
-    base::string16 filename_string =
-        gfx::ElideFilename(download()->GetFileNameToReportUser(), font_list,
-                          kTextWidth - status_string_width);
-    // Last, concat the whole string.
-    filename = l10n_util::GetStringFUTF16(IDS_DOWNLOAD_STATUS_OPENING,
-                                                 filename_string);
-  }
+  // TODO(estade): This is at best an educated guess, since we don't actually
+  // use gfx::Font() to draw the text. This is why we need to add so
+  // much padding when we set the size request. We need to either use gfx::Font
+  // or somehow extend TextElider.
+  string16 elided_filename = ui::ElideFilename(
+      get_download()->GetFileNameToReportUser(),
+      gfx::Font(), kTextWidth);
 
   GdkColor color = theme_service_->GetGdkColor(
-      ThemeProperties::COLOR_BOOKMARK_TEXT);
+      ThemeService::COLOR_BOOKMARK_TEXT);
   gtk_util::SetLabelColor(
       name_label_,
       theme_service_->UsingNativeTheme() ? NULL : &color);
   gtk_label_set_text(GTK_LABEL(name_label_),
-                     base::UTF16ToUTF8(filename).c_str());
+                     UTF16ToUTF8(elided_filename).c_str());
 }
 
 void DownloadItemGtk::UpdateStatusLabel(const std::string& status_text) {
@@ -554,7 +536,7 @@ void DownloadItemGtk::UpdateStatusLabel(const std::string& status_text) {
   GdkColor text_color;
   if (!theme_service_->UsingNativeTheme()) {
     SkColor color = theme_service_->GetColor(
-        ThemeProperties::COLOR_BOOKMARK_TEXT);
+        ThemeService::COLOR_BOOKMARK_TEXT);
     if (color_utils::RelativeLuminance(color) > 0.5) {
       color = SkColorSetRGB(
           static_cast<int>(kDownloadItemLuminanceMod *
@@ -584,21 +566,41 @@ void DownloadItemGtk::UpdateDangerWarning() {
 
     // We create |dangerous_warning| as a wide string so we can more easily
     // calculate its length in characters.
-    const gfx::FontList& font_list =
-        ui::ResourceBundle::GetSharedInstance().GetFontList(
-            ui::ResourceBundle::BaseFont);
-    base::string16 dangerous_warning =
-        download_model_.GetWarningText(font_list, kTextWidth);
+    string16 dangerous_warning;
+
+    // The dangerous download label text is different for different cases.
+    if (get_download()->GetDangerType() ==
+            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL) {
+      // TODO(noelutz): handle malicious content warning.
+      // Safebrowsing shows the download URL leads to malicious file.
+      dangerous_warning =
+          l10n_util::GetStringUTF16(IDS_PROMPT_MALICIOUS_DOWNLOAD_URL);
+    } else {
+      // It's a dangerous file type (e.g.: an executable).
+      DCHECK(get_download()->GetDangerType() ==
+             content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
+      if (ChromeDownloadManagerDelegate::IsExtensionDownload(get_download())) {
+        dangerous_warning =
+            l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
+      } else {
+        string16 elided_filename = ui::ElideFilename(
+            get_download()->GetTargetName(), gfx::Font(), kTextWidth);
+        dangerous_warning =
+            l10n_util::GetStringFUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD,
+                                       elided_filename);
+      }
+    }
+
     if (theme_service_->UsingNativeTheme()) {
       gtk_util::SetLabelColor(dangerous_label_, NULL);
     } else {
       GdkColor color = theme_service_->GetGdkColor(
-          ThemeProperties::COLOR_BOOKMARK_TEXT);
+          ThemeService::COLOR_BOOKMARK_TEXT);
       gtk_util::SetLabelColor(dangerous_label_, &color);
     }
 
     gtk_label_set_text(GTK_LABEL(dangerous_label_),
-                       base::UTF16ToUTF8(dangerous_warning).c_str());
+                       UTF16ToUTF8(dangerous_warning).c_str());
 
     // Until we switch to vector graphics, force the font size.
     gtk_util::ForceFontSizePixels(dangerous_label_, kTextSize);
@@ -635,18 +637,19 @@ void DownloadItemGtk::UpdateDangerWarning() {
 
 void DownloadItemGtk::UpdateDangerIcon() {
   if (theme_service_->UsingNativeTheme()) {
-    const char* stock = download_model_.MightBeMalicious() ?
-        GTK_STOCK_DIALOG_ERROR : GTK_STOCK_DIALOG_WARNING;
+    const char* stock = get_download()->GetDangerType() ==
+        content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ?
+            GTK_STOCK_DIALOG_ERROR : GTK_STOCK_DIALOG_WARNING;
     gtk_image_set_from_stock(
         GTK_IMAGE(dangerous_image_), stock, GTK_ICON_SIZE_SMALL_TOOLBAR);
   } else {
     // Set the warning icon.
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    int pixbuf_id =
-        download_model_.MightBeMalicious() ? IDR_SAFEBROWSING_WARNING
-                                           : IDR_WARNING;
-    gtk_image_set_from_pixbuf(GTK_IMAGE(dangerous_image_),
-                              rb.GetNativeImageNamed(pixbuf_id).ToGdkPixbuf());
+    int pixbuf_id = get_download()->GetDangerType() ==
+        content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ?
+            IDR_SAFEBROWSING_WARNING : IDR_WARNING;
+    GdkPixbuf* download_pixbuf = rb.GetNativeImageNamed(pixbuf_id);
+    gtk_image_set_from_pixbuf(GTK_IMAGE(dangerous_image_), download_pixbuf);
   }
 }
 
@@ -726,7 +729,7 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
     int width = allocation.width - border_width * 2;
     int height = allocation.height - border_width * 2;
 
-    if (download_model_.IsDangerous()) {
+    if (IsDangerous()) {
       // Draw a simple frame around the area when we're displaying the warning.
       gtk_paint_shadow(gtk_widget_get_style(widget),
                        gtk_widget_get_window(widget),
@@ -816,28 +819,11 @@ gboolean DownloadItemGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e) {
   return TRUE;
 }
 
-void DownloadItemGtk::ReenableHbox() {
-  gtk_widget_set_sensitive(hbox_.get(), true);
-  disabled_while_opening_ = false;
-  UpdateNameLabel();
-}
-
-void DownloadItemGtk::OnDownloadOpened(DownloadItem* download) {
-  disabled_while_opening_ = true;
-  gtk_widget_set_sensitive(hbox_.get(), false);
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&DownloadItemGtk::ReenableHbox,
-                 weak_ptr_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kDisabledOnOpenDurationMs));
-  UpdateNameLabel();
-  parent_shelf_->ItemOpened();
-}
-
 void DownloadItemGtk::OnClick(GtkWidget* widget) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.open_download",
                            base::Time::Now() - creation_time_);
-  download()->OpenDownload();
+  get_download()->OpenDownload();
+  parent_shelf_->ItemOpened();
 }
 
 gboolean DownloadItemGtk::OnButtonPress(GtkWidget* button,
@@ -858,38 +844,32 @@ gboolean DownloadItemGtk::OnProgressAreaExpose(GtkWidget* widget,
 
   // Create a transparent canvas.
   gfx::CanvasSkiaPaint canvas(event, false);
-  DownloadItem::DownloadState state = download()->GetState();
   if (complete_animation_.is_animating()) {
-    if (state == DownloadItem::INTERRUPTED) {
-      DownloadShelf::PaintDownloadInterrupted(
-          &canvas,
-          allocation.x,
-          allocation.y,
+    if (get_download()->IsInterrupted()) {
+      download_util::PaintDownloadInterrupted(&canvas,
+          allocation.x, allocation.y,
           complete_animation_.GetCurrentValue(),
-          DownloadShelf::SMALL);
+          download_util::SMALL);
     } else {
-      DownloadShelf::PaintDownloadComplete(
-          &canvas,
-          allocation.x,
-          allocation.y,
+      download_util::PaintDownloadComplete(&canvas,
+          allocation.x, allocation.y,
           complete_animation_.GetCurrentValue(),
-          DownloadShelf::SMALL);
+          download_util::SMALL);
     }
-  } else if (state == DownloadItem::IN_PROGRESS) {
-    DownloadShelf::PaintDownloadProgress(&canvas,
-                                         allocation.x,
-                                         allocation.y,
-                                         progress_angle_,
-                                         download_model_.PercentComplete(),
-                                         DownloadShelf::SMALL);
+  } else if (get_download()->IsInProgress()) {
+    download_util::PaintDownloadProgress(&canvas,
+        allocation.x, allocation.y,
+        progress_angle_,
+        get_download()->PercentComplete(),
+        download_util::SMALL);
   }
 
   // |icon_small_| may be NULL if it is still loading. If the file is an
   // unrecognized type then we will get back a generic system icon. Hence
   // there is no need to use the chromium-specific default download item icon.
   if (icon_small_) {
-    const int offset = DownloadShelf::kSmallProgressIconOffset;
-    canvas.DrawImageInt(icon_small_->AsImageSkia(),
+    const int offset = download_util::kSmallProgressIconOffset;
+    canvas.DrawBitmapInt(*icon_small_,
         allocation.x + offset, allocation.y + offset);
   }
 
@@ -913,10 +893,8 @@ void DownloadItemGtk::ShowPopupMenu(GtkWidget* button,
   if (complete_animation_.is_animating())
     complete_animation_.End();
 
-  if (!menu_.get()) {
-    menu_.reset(new DownloadShelfContextMenuGtk(this,
-                                                parent_shelf_->GetNavigator()));
-  }
+  if (!menu_.get())
+    menu_.reset(new DownloadShelfContextMenuGtk(download_model_.get(), this));
   menu_->Popup(button, event);
 }
 
@@ -933,11 +911,13 @@ gboolean DownloadItemGtk::OnDangerousPromptExpose(GtkWidget* widget,
 void DownloadItemGtk::OnDangerousAccept(GtkWidget* button) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
                            base::Time::Now() - creation_time_);
-  download()->ValidateDangerousDownload();
+  get_download()->DangerousDownloadValidated();
 }
 
 void DownloadItemGtk::OnDangerousDecline(GtkWidget* button) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download",
                            base::Time::Now() - creation_time_);
-  download()->Remove();
+  if (get_download()->IsPartialDownload())
+    get_download()->Cancel(true);
+  get_download()->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
 }

@@ -4,6 +4,7 @@
 
 #ifndef IPC_IPC_MESSAGE_UTILS_H_
 #define IPC_IPC_MESSAGE_UTILS_H_
+#pragma once
 
 #include <algorithm>
 #include <map>
@@ -12,13 +13,10 @@
 #include <vector>
 
 #include "base/format_macros.h"
-#include "base/memory/scoped_vector.h"
-#include "base/platform_file.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string16.h"
+#include "base/stringprintf.h"
+#include "base/string_util.h"
 #include "base/tuple.h"
-#include "ipc/ipc_message_start.h"
 #include "ipc/ipc_param_traits.h"
 #include "ipc/ipc_sync_message.h"
 
@@ -45,11 +43,71 @@
 #error "Please add the noinline property for your new compiler here."
 #endif
 
+// Used by IPC_BEGIN_MESSAGES so that each message class starts from a unique
+// base.  Messages have unique IDs across channels in order for the IPC logging
+// code to figure out the message class from its ID.
+enum IPCMessageStart {
+  AutomationMsgStart = 0,
+  ViewMsgStart,
+  PluginMsgStart,
+  ProfileImportMsgStart,
+  TestMsgStart,
+  DevToolsMsgStart,
+  WorkerMsgStart,
+  NaClMsgStart,
+  UtilityMsgStart,
+  GpuMsgStart,
+  ServiceMsgStart,
+  PpapiMsgStart,
+  FirefoxImporterUnittestMsgStart,
+  FileUtilitiesMsgStart,
+  MimeRegistryMsgStart,
+  DatabaseMsgStart,
+  DOMStorageMsgStart,
+  IndexedDBMsgStart,
+  PepperFileMsgStart,
+  SpeechInputMsgStart,
+  PepperMsgStart,
+  AutofillMsgStart,
+  SafeBrowsingMsgStart,
+  P2PMsgStart,
+  SocketStreamMsgStart,
+  ResourceMsgStart,
+  FileSystemMsgStart,
+  ChildProcessMsgStart,
+  ClipboardMsgStart,
+  BlobMsgStart,
+  AppCacheMsgStart,
+  DeviceOrientationMsgStart,
+  DesktopNotificationMsgStart,
+  GeolocationMsgStart,
+  AudioMsgStart,
+  ChromeMsgStart,
+  DragMsgStart,
+  PrintMsgStart,
+  SpellCheckMsgStart,
+  ExtensionMsgStart,
+  VideoCaptureMsgStart,
+  QuotaMsgStart,
+  IconMsgStart,
+  TextInputClientMsgStart,
+  ChromeUtilityMsgStart,
+  MediaStreamMsgStart,
+  ChromePluginMsgStart,
+  ChromeBenchmarkingMsgStart,
+  IntentsMsgStart,
+  JavaBridgeMsgStart,
+  GamepadMsgStart,
+  ShellMsgStart,
+  LastIPCMsgStart      // Must come last.
+};
+
+class FilePath;
+class NullableString16;
+
 namespace base {
 class DictionaryValue;
-class FilePath;
 class ListValue;
-class NullableString16;
 class Time;
 class TimeDelta;
 class TimeTicks;
@@ -60,31 +118,49 @@ namespace IPC {
 
 struct ChannelHandle;
 
-// -----------------------------------------------------------------------------
-// How we send IPC message logs across channels.
-struct IPC_EXPORT LogData {
-  LogData();
-  ~LogData();
+//-----------------------------------------------------------------------------
+// An iterator class for reading the fields contained within a Message.
 
-  std::string channel;
-  int32 routing_id;
-  uint32 type;  // "User-defined" message type, from ipc_message.h.
-  std::string flags;
-  int64 sent;  // Time that the message was sent (i.e. at Send()).
-  int64 receive;  // Time before it was dispatched (i.e. before calling
-                  // OnMessageReceived).
-  int64 dispatch;  // Time after it was dispatched (i.e. after calling
-                   // OnMessageReceived).
-  std::string message_name;
-  std::string params;
+class MessageIterator {
+ public:
+  explicit MessageIterator(const Message& m) : msg_(m), iter_(NULL) {
+  }
+  int NextInt() const {
+    int val = -1;
+    if (!msg_.ReadInt(&iter_, &val))
+      NOTREACHED();
+    return val;
+  }
+  const std::string NextString() const {
+    std::string val;
+    if (!msg_.ReadString(&iter_, &val))
+      NOTREACHED();
+    return val;
+  }
+  const std::wstring NextWString() const {
+    std::wstring val;
+    if (!msg_.ReadWString(&iter_, &val))
+      NOTREACHED();
+    return val;
+  }
+  void NextData(const char** data, int* length) const {
+    if (!msg_.ReadData(&iter_, data, length)) {
+      NOTREACHED();
+    }
+  }
+ private:
+  const Message& msg_;
+  mutable void* iter_;
 };
 
 //-----------------------------------------------------------------------------
-
 // A dummy struct to place first just to allow leading commas for all
 // members in the macro-generated constructor initializer lists.
 struct NoParams {
 };
+
+//-----------------------------------------------------------------------------
+// ParamTraits specializations, etc.
 
 template <class P>
 static inline void WriteParam(Message* m, const P& p) {
@@ -93,8 +169,7 @@ static inline void WriteParam(Message* m, const P& p) {
 }
 
 template <class P>
-static inline bool WARN_UNUSED_RESULT ReadParam(const Message* m,
-                                                PickleIterator* iter,
+static inline bool WARN_UNUSED_RESULT ReadParam(const Message* m, void** iter,
                                                 P* p) {
   typedef typename SimilarTypeTraits<P>::Type Type;
   return ParamTraits<Type>::Read(m, iter, reinterpret_cast<Type* >(p));
@@ -106,34 +181,18 @@ static inline void LogParam(const P& p, std::string* l) {
   ParamTraits<Type>::Log(static_cast<const Type& >(p), l);
 }
 
-// Primitive ParamTraits -------------------------------------------------------
-
 template <>
 struct ParamTraits<bool> {
   typedef bool param_type;
   static void Write(Message* m, const param_type& p) {
     m->WriteBool(p);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadBool(iter, r);
   }
-  IPC_EXPORT static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<unsigned char> {
-  typedef unsigned char param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<unsigned short> {
-  typedef unsigned short param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
+  static void Log(const param_type& p, std::string* l) {
+    l->append(p ? "true" : "false");
+  }
 };
 
 template <>
@@ -142,7 +201,7 @@ struct ParamTraits<int> {
   static void Write(Message* m, const param_type& p) {
     m->WriteInt(p);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt(iter, r);
   }
   IPC_EXPORT static void Log(const param_type& p, std::string* l);
@@ -154,7 +213,7 @@ struct ParamTraits<unsigned int> {
   static void Write(Message* m, const param_type& p) {
     m->WriteInt(p);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt(iter, reinterpret_cast<int*>(r));
   }
   IPC_EXPORT static void Log(const param_type& p, std::string* l);
@@ -164,9 +223,9 @@ template <>
 struct ParamTraits<long> {
   typedef long param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteLongUsingDangerousNonPortableLessPersistableForm(p);
+    m->WriteLong(p);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadLong(iter, r);
   }
   IPC_EXPORT static void Log(const param_type& p, std::string* l);
@@ -176,9 +235,9 @@ template <>
 struct ParamTraits<unsigned long> {
   typedef unsigned long param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteLongUsingDangerousNonPortableLessPersistableForm(p);
+    m->WriteLong(p);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadLong(iter, reinterpret_cast<long*>(r));
   }
   IPC_EXPORT static void Log(const param_type& p, std::string* l);
@@ -190,8 +249,7 @@ struct ParamTraits<long long> {
   static void Write(Message* m, const param_type& p) {
     m->WriteInt64(static_cast<int64>(p));
   }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt64(iter, reinterpret_cast<int64*>(r));
   }
   IPC_EXPORT static void Log(const param_type& p, std::string* l);
@@ -203,37 +261,156 @@ struct ParamTraits<unsigned long long> {
   static void Write(Message* m, const param_type& p) {
     m->WriteInt64(p);
   }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt64(iter, reinterpret_cast<int64*>(r));
   }
   IPC_EXPORT static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct IPC_EXPORT ParamTraits<unsigned short> {
+  typedef unsigned short param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
 };
 
 // Note that the IPC layer doesn't sanitize NaNs and +/- INF values.  Clients
 // should be sure to check the sanity of these values after receiving them over
 // IPC.
 template <>
-struct IPC_EXPORT ParamTraits<float> {
+struct ParamTraits<float> {
   typedef float param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteFloat(p);
+    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(param_type));
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
-    return m->ReadFloat(iter, r);
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    const char *data;
+    int data_size;
+    if (!m->ReadData(iter, &data, &data_size) ||
+        data_size != sizeof(param_type)) {
+      NOTREACHED();
+      return false;
+    }
+    memcpy(r, data, sizeof(param_type));
+    return true;
   }
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("%e", p));
+  }
+};
+
+template <>
+struct ParamTraits<double> {
+  typedef double param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(param_type));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    const char *data;
+    int data_size;
+    if (!m->ReadData(iter, &data, &data_size) ||
+        data_size != sizeof(param_type)) {
+      NOTREACHED();
+      return false;
+    }
+    memcpy(r, data, sizeof(param_type));
+    return true;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("%e", p));
+  }
+};
+
+template <>
+struct IPC_EXPORT ParamTraits<base::Time> {
+  typedef base::Time param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
 template <>
-struct IPC_EXPORT ParamTraits<double> {
-  typedef double param_type;
+struct IPC_EXPORT ParamTraits<base::TimeDelta> {
+  typedef base::TimeDelta param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
-// STL ParamTraits -------------------------------------------------------------
+template <>
+struct IPC_EXPORT ParamTraits<base::TimeTicks> {
+  typedef base::TimeTicks param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+#if defined(OS_WIN)
+template <>
+struct ParamTraits<LOGFONT> {
+  typedef LOGFONT param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(LOGFONT));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    const char *data;
+    int data_size = 0;
+    bool result = m->ReadData(iter, &data, &data_size);
+    if (result && data_size == sizeof(LOGFONT)) {
+      memcpy(r, data, sizeof(LOGFONT));
+    } else {
+      result = false;
+      NOTREACHED();
+    }
+
+    return result;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("<LOGFONT>"));
+  }
+};
+
+template <>
+struct ParamTraits<MSG> {
+  typedef MSG param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(MSG));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    const char *data;
+    int data_size = 0;
+    bool result = m->ReadData(iter, &data, &data_size);
+    if (result && data_size == sizeof(MSG)) {
+      memcpy(r, data, sizeof(MSG));
+    } else {
+      result = false;
+      NOTREACHED();
+    }
+
+    return result;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    l->append("<MSG>");
+  }
+};
+#endif  // defined(OS_WIN)
+
+template <>
+struct IPC_EXPORT ParamTraits<base::DictionaryValue> {
+  typedef base::DictionaryValue param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct IPC_EXPORT ParamTraits<base::ListValue> {
+  typedef base::ListValue param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
 
 template <>
 struct ParamTraits<std::string> {
@@ -241,65 +418,117 @@ struct ParamTraits<std::string> {
   static void Write(Message* m, const param_type& p) {
     m->WriteString(p);
   }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadString(iter, r);
   }
-  IPC_EXPORT static void Log(const param_type& p, std::string* l);
+  static void Log(const param_type& p, std::string* l) {
+    l->append(p);
+  }
 };
 
-template <>
-struct ParamTraits<std::wstring> {
-  typedef std::wstring param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteWString(p);
+template<typename CharType>
+static void LogBytes(const std::vector<CharType>& data, std::string* out) {
+#if defined(OS_WIN)
+  // Windows has a GUI for logging, which can handle arbitrary binary data.
+  for (size_t i = 0; i < data.size(); ++i)
+    out->push_back(data[i]);
+#else
+  // On POSIX, we log to stdout, which we assume can display ASCII.
+  static const size_t kMaxBytesToLog = 100;
+  for (size_t i = 0; i < std::min(data.size(), kMaxBytesToLog); ++i) {
+    if (isprint(data[i]))
+      out->push_back(data[i]);
+    else
+      out->append(StringPrintf("[%02X]", static_cast<unsigned char>(data[i])));
   }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
-    return m->ReadWString(iter, r);
+  if (data.size() > kMaxBytesToLog) {
+    out->append(
+        StringPrintf(" and %u more bytes",
+                     static_cast<unsigned>(data.size() - kMaxBytesToLog)));
   }
-  IPC_EXPORT static void Log(const param_type& p, std::string* l);
-};
-
-// If WCHAR_T_IS_UTF16 is defined, then string16 is a std::wstring so we don't
-// need this trait.
-#if !defined(WCHAR_T_IS_UTF16)
-template <>
-struct ParamTraits<base::string16> {
-  typedef base::string16 param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteString16(p);
-  }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
-    return m->ReadString16(iter, r);
-  }
-  IPC_EXPORT static void Log(const param_type& p, std::string* l);
-};
 #endif
+}
 
 template <>
-struct IPC_EXPORT ParamTraits<std::vector<char> > {
-  typedef std::vector<char> param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message*, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<std::vector<unsigned char> > {
+struct ParamTraits<std::vector<unsigned char> > {
   typedef std::vector<unsigned char> param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
+  static void Write(Message* m, const param_type& p) {
+    if (p.empty()) {
+      m->WriteData(NULL, 0);
+    } else {
+      m->WriteData(reinterpret_cast<const char*>(&p.front()),
+                   static_cast<int>(p.size()));
+    }
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    const char *data;
+    int data_size = 0;
+    if (!m->ReadData(iter, &data, &data_size) || data_size < 0)
+      return false;
+    r->resize(data_size);
+    if (data_size)
+      memcpy(&r->front(), data, data_size);
+    return true;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    LogBytes(p, l);
+  }
 };
 
 template <>
-struct IPC_EXPORT ParamTraits<std::vector<bool> > {
+struct ParamTraits<std::vector<char> > {
+  typedef std::vector<char> param_type;
+  static void Write(Message* m, const param_type& p) {
+    if (p.empty()) {
+      m->WriteData(NULL, 0);
+    } else {
+      m->WriteData(&p.front(), static_cast<int>(p.size()));
+    }
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    const char *data;
+    int data_size = 0;
+    if (!m->ReadData(iter, &data, &data_size) || data_size < 0)
+      return false;
+    r->resize(data_size);
+    if (data_size)
+      memcpy(&r->front(), data, data_size);
+    return true;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    LogBytes(p, l);
+  }
+};
+
+template <>
+struct ParamTraits<std::vector<bool> > {
   typedef std::vector<bool> param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, static_cast<int>(p.size()));
+    for (size_t i = 0; i < p.size(); i++)
+      WriteParam(m, p[i]);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    int size;
+    // ReadLength() checks for < 0 itself.
+    if (!m->ReadLength(iter, &size))
+      return false;
+    r->resize(size);
+    for (int i = 0; i < size; i++) {
+      bool value;
+      if (!ReadParam(m, iter, &value))
+        return false;
+      (*r)[i] = value;
+    }
+    return true;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    for (size_t i = 0; i < p.size(); ++i) {
+      if (i != 0)
+        l->append(" ");
+      LogParam((p[i]), l);
+    }
+  }
 };
 
 template <class P>
@@ -310,8 +539,7 @@ struct ParamTraits<std::vector<P> > {
     for (size_t i = 0; i < p.size(); i++)
       WriteParam(m, p[i]);
   }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     int size;
     // ReadLength() checks for < 0 itself.
     if (!m->ReadLength(iter, &size))
@@ -344,8 +572,7 @@ struct ParamTraits<std::set<P> > {
     for (iter = p.begin(); iter != p.end(); ++iter)
       WriteParam(m, *iter);
   }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     int size;
     if (!m->ReadLength(iter, &size))
       return false;
@@ -362,6 +589,7 @@ struct ParamTraits<std::set<P> > {
   }
 };
 
+
 template <class K, class V>
 struct ParamTraits<std::map<K, V> > {
   typedef std::map<K, V> param_type;
@@ -373,8 +601,7 @@ struct ParamTraits<std::map<K, V> > {
       WriteParam(m, iter->second);
     }
   }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     int size;
     if (!ReadParam(m, iter, &size) || size < 0)
       return false;
@@ -393,6 +620,19 @@ struct ParamTraits<std::map<K, V> > {
   }
 };
 
+
+template <>
+struct ParamTraits<std::wstring> {
+  typedef std::wstring param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteWString(p);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    return m->ReadWString(iter, r);
+  }
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
+};
+
 template <class A, class B>
 struct ParamTraits<std::pair<A, B> > {
   typedef std::pair<A, B> param_type;
@@ -400,8 +640,7 @@ struct ParamTraits<std::pair<A, B> > {
     WriteParam(m, p.first);
     WriteParam(m, p.second);
   }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return ReadParam(m, iter, &r->first) && ReadParam(m, iter, &r->second);
   }
   static void Log(const param_type& p, std::string* l) {
@@ -413,13 +652,102 @@ struct ParamTraits<std::pair<A, B> > {
   }
 };
 
-// Base ParamTraits ------------------------------------------------------------
+template <>
+struct IPC_EXPORT ParamTraits<NullableString16> {
+  typedef NullableString16 param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+// If WCHAR_T_IS_UTF16 is defined, then string16 is a std::wstring so we don't
+// need this trait.
+#if !defined(WCHAR_T_IS_UTF16)
+template <>
+struct ParamTraits<string16> {
+  typedef string16 param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteString16(p);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    return m->ReadString16(iter, r);
+  }
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
+};
+#endif
+
+// and, a few more useful types...
+#if defined(OS_WIN)
+template <>
+struct ParamTraits<HANDLE> {
+  typedef HANDLE param_type;
+  static void Write(Message* m, const param_type& p) {
+    // Note that HWNDs/HANDLE/HCURSOR/HACCEL etc are always 32 bits, even on 64
+    // bit systems.
+    m->WriteUInt32(reinterpret_cast<uint32>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    DCHECK_EQ(sizeof(param_type), sizeof(uint32));
+    return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
+  }
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("0x%X", p));
+  }
+};
 
 template <>
-struct IPC_EXPORT ParamTraits<base::DictionaryValue> {
-  typedef base::DictionaryValue param_type;
+struct ParamTraits<HCURSOR> {
+  typedef HCURSOR param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteUInt32(reinterpret_cast<uint32>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    DCHECK_EQ(sizeof(param_type), sizeof(uint32));
+    return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
+  }
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("0x%X", p));
+  }
+};
+
+template <>
+struct ParamTraits<HACCEL> {
+  typedef HACCEL param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteUInt32(reinterpret_cast<uint32>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    DCHECK_EQ(sizeof(param_type), sizeof(uint32));
+    return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
+  }
+};
+
+template <>
+struct ParamTraits<POINT> {
+  typedef POINT param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteInt(p.x);
+    m->WriteInt(p.y);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    int x, y;
+    if (!m->ReadInt(iter, &x) || !m->ReadInt(iter, &y))
+      return false;
+    r->x = x;
+    r->y = y;
+    return true;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("(%d, %d)", p.x, p.y));
+  }
+};
+#endif  // defined(OS_WIN)
+
+template <>
+struct IPC_EXPORT ParamTraits<FilePath> {
+  typedef FilePath param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -443,78 +771,96 @@ template<>
 struct IPC_EXPORT ParamTraits<base::FileDescriptor> {
   typedef base::FileDescriptor param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 #endif  // defined(OS_POSIX)
 
-template <>
-struct IPC_EXPORT ParamTraits<base::FilePath> {
-  typedef base::FilePath param_type;
+// A ChannelHandle is basically a platform-inspecific wrapper around the
+// fact that IPC endpoints are handled specially on POSIX.  See above comments
+// on FileDescriptor for more background.
+template<>
+struct IPC_EXPORT ParamTraits<IPC::ChannelHandle> {
+  typedef ChannelHandle param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<base::ListValue> {
-  typedef base::ListValue param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<base::NullableString16> {
-  typedef base::NullableString16 param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<base::PlatformFileInfo> {
-  typedef base::PlatformFileInfo param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct SimilarTypeTraits<base::PlatformFileError> {
-  typedef int Type;
 };
 
 #if defined(OS_WIN)
 template <>
-struct SimilarTypeTraits<HWND> {
-  typedef HANDLE Type;
+struct ParamTraits<XFORM> {
+  typedef XFORM param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(XFORM));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    const char *data;
+    int data_size = 0;
+    bool result = m->ReadData(iter, &data, &data_size);
+    if (result && data_size == sizeof(XFORM)) {
+      memcpy(r, data, sizeof(XFORM));
+    } else {
+      result = false;
+      NOTREACHED();
+    }
+
+    return result;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    l->append("<XFORM>");
+  }
 };
 #endif  // defined(OS_WIN)
 
-template <>
-struct IPC_EXPORT ParamTraits<base::Time> {
-  typedef base::Time param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
+struct IPC_EXPORT LogData {
+  LogData();
+  ~LogData();
+
+  std::string channel;
+  int32 routing_id;
+  uint32 type;  // "User-defined" message type, from ipc_message.h.
+  std::string flags;
+  int64 sent;  // Time that the message was sent (i.e. at Send()).
+  int64 receive;  // Time before it was dispatched (i.e. before calling
+                  // OnMessageReceived).
+  int64 dispatch;  // Time after it was dispatched (i.e. after calling
+                   // OnMessageReceived).
+  std::string message_name;
+  std::string params;
 };
 
 template <>
-struct IPC_EXPORT ParamTraits<base::TimeDelta> {
-  typedef base::TimeDelta param_type;
+struct IPC_EXPORT ParamTraits<LogData> {
+  typedef LogData param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l) {
+    // Doesn't make sense to implement this!
+  }
 };
 
 template <>
-struct IPC_EXPORT ParamTraits<base::TimeTicks> {
-  typedef base::TimeTicks param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
+struct ParamTraits<Message> {
+  static void Write(Message* m, const Message& p) {
+    DCHECK(p.size() <= INT_MAX);
+    int message_size = static_cast<int>(p.size());
+    m->WriteInt(message_size);
+    m->WriteData(reinterpret_cast<const char*>(p.data()), message_size);
+  }
+  static bool Read(const Message* m, void** iter, Message* r) {
+    int size;
+    if (!m->ReadInt(iter, &size))
+      return false;
+    const char* data;
+    if (!m->ReadData(iter, &data, &size))
+      return false;
+    *r = Message(data, size);
+    return true;
+  }
+  static void Log(const Message& p, std::string* l) {
+    l->append("<IPC::Message>");
+  }
 };
 
 template <>
@@ -522,7 +868,7 @@ struct ParamTraits<Tuple0> {
   typedef Tuple0 param_type;
   static void Write(Message* m, const param_type& p) {
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return true;
   }
   static void Log(const param_type& p, std::string* l) {
@@ -535,7 +881,7 @@ struct ParamTraits< Tuple1<A> > {
   static void Write(Message* m, const param_type& p) {
     WriteParam(m, p.a);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return ReadParam(m, iter, &r->a);
   }
   static void Log(const param_type& p, std::string* l) {
@@ -550,7 +896,7 @@ struct ParamTraits< Tuple2<A, B> > {
     WriteParam(m, p.a);
     WriteParam(m, p.b);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return (ReadParam(m, iter, &r->a) &&
             ReadParam(m, iter, &r->b));
   }
@@ -569,7 +915,7 @@ struct ParamTraits< Tuple3<A, B, C> > {
     WriteParam(m, p.b);
     WriteParam(m, p.c);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return (ReadParam(m, iter, &r->a) &&
             ReadParam(m, iter, &r->b) &&
             ReadParam(m, iter, &r->c));
@@ -592,7 +938,7 @@ struct ParamTraits< Tuple4<A, B, C, D> > {
     WriteParam(m, p.c);
     WriteParam(m, p.d);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return (ReadParam(m, iter, &r->a) &&
             ReadParam(m, iter, &r->b) &&
             ReadParam(m, iter, &r->c) &&
@@ -619,7 +965,7 @@ struct ParamTraits< Tuple5<A, B, C, D, E> > {
     WriteParam(m, p.d);
     WriteParam(m, p.e);
   }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
+  static bool Read(const Message* m, void** iter, param_type* r) {
     return (ReadParam(m, iter, &r->a) &&
             ReadParam(m, iter, &r->b) &&
             ReadParam(m, iter, &r->c) &&
@@ -638,93 +984,6 @@ struct ParamTraits< Tuple5<A, B, C, D, E> > {
     LogParam(p.e, l);
   }
 };
-
-template<class P>
-struct ParamTraits<ScopedVector<P> > {
-  typedef ScopedVector<P> param_type;
-  static void Write(Message* m, const param_type& p) {
-    WriteParam(m, static_cast<int>(p.size()));
-    for (size_t i = 0; i < p.size(); i++)
-      WriteParam(m, *p[i]);
-  }
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r) {
-    int size = 0;
-    if (!m->ReadLength(iter, &size))
-      return false;
-    if (INT_MAX/sizeof(P) <= static_cast<size_t>(size))
-      return false;
-    r->resize(size);
-    for (int i = 0; i < size; i++) {
-      (*r)[i] = new P();
-      if (!ReadParam(m, iter, (*r)[i]))
-        return false;
-    }
-    return true;
-  }
-  static void Log(const param_type& p, std::string* l) {
-    for (size_t i = 0; i < p.size(); ++i) {
-      if (i != 0)
-        l->append(" ");
-      LogParam(*p[i], l);
-    }
-  }
-};
-
-// IPC types ParamTraits -------------------------------------------------------
-
-// A ChannelHandle is basically a platform-inspecific wrapper around the
-// fact that IPC endpoints are handled specially on POSIX.  See above comments
-// on FileDescriptor for more background.
-template<>
-struct IPC_EXPORT ParamTraits<IPC::ChannelHandle> {
-  typedef ChannelHandle param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<LogData> {
-  typedef LogData param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<Message> {
-  static void Write(Message* m, const Message& p);
-  static bool Read(const Message* m, PickleIterator* iter, Message* r);
-  static void Log(const Message& p, std::string* l);
-};
-
-// Windows ParamTraits ---------------------------------------------------------
-
-#if defined(OS_WIN)
-template <>
-struct IPC_EXPORT ParamTraits<HANDLE> {
-  typedef HANDLE param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<LOGFONT> {
-  typedef LOGFONT param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct IPC_EXPORT ParamTraits<MSG> {
-  typedef MSG param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-#endif  // defined(OS_WIN)
 
 //-----------------------------------------------------------------------------
 // Generic message subclasses
@@ -794,7 +1053,7 @@ class ParamDeserializer : public MessageReplyDeserializer {
  public:
   explicit ParamDeserializer(const RefTuple& out) : out_(out) { }
 
-  bool SerializeOutputParameters(const IPC::Message& msg, PickleIterator iter) {
+  bool SerializeOutputParameters(const IPC::Message& msg, void* iter) {
     return ReadParam(&msg, &iter, &out_);
   }
 
@@ -881,6 +1140,8 @@ class SyncMessageSchema {
     WriteParam(reply, p);
   }
 };
+
+//-----------------------------------------------------------------------------
 
 }  // namespace IPC
 

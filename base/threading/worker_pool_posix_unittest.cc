@@ -97,11 +97,11 @@ class PosixDynamicThreadPoolTest : public testing::Test {
         num_waiting_to_start_cv_(&num_waiting_to_start_lock_),
         start_(true, false) {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() {
     peer_.set_num_idle_threads_cv(new ConditionVariable(peer_.lock()));
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() {
     // Wake up the idle threads so they can terminate.
     if (pool_.get()) pool_->Terminate();
   }
@@ -160,6 +160,7 @@ TEST_F(PosixDynamicThreadPoolTest, Basic) {
 
   EXPECT_EQ(1U, unique_threads_.size()) <<
       "There should be only one thread allocated for one task.";
+  EXPECT_EQ(1, peer_.num_idle_threads());
   EXPECT_EQ(1, counter_);
 }
 

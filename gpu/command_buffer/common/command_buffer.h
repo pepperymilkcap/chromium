@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GPU_COMMAND_BUFFER_COMMON_COMMAND_BUFFER_H_
 #define GPU_COMMAND_BUFFER_COMMON_COMMAND_BUFFER_H_
 
-#include "gpu/command_buffer/common/buffer.h"
-#include "gpu/command_buffer/common/constants.h"
-#include "gpu/gpu_export.h"
+#include "../common/buffer.h"
+#include "../common/constants.h"
 
 namespace base {
 class SharedMemory;
@@ -16,8 +15,12 @@ class SharedMemory;
 namespace gpu {
 
 // Common interface for CommandBuffer implementations.
-class GPU_EXPORT CommandBuffer {
+class CommandBuffer {
  public:
+  enum {
+    kMaxCommandBufferSize = 4 * 1024 * 1024
+  };
+
   struct State {
     State()
         : num_entries(0),
@@ -79,13 +82,6 @@ class GPU_EXPORT CommandBuffer {
   // Returns the last state without synchronizing with the service.
   virtual State GetLastState() = 0;
 
-  // Returns the last token without synchronizing with the service. Note that
-  // while you could just call GetLastState().token, GetLastState needs to be
-  // fast as it is called for every command where GetLastToken is only called
-  // by code that needs to know the last token so it can be slower but more up
-  // to date than GetLastState.
-  virtual int32 GetLastToken() = 0;
-
   // The writer calls this to update its put offset. This ensures the reader
   // sees the latest added commands, and will eventually process them. On the
   // service side, commands are processed up to the given put_offset before
@@ -104,16 +100,28 @@ class GPU_EXPORT CommandBuffer {
   // Sets the current get offset. This can be called from any thread.
   virtual void SetGetOffset(int32 get_offset) = 0;
 
-  // Create a transfer buffer of the given size. Returns its ID or -1 on
-  // error.
-  virtual Buffer CreateTransferBuffer(size_t size, int32* id) = 0;
+  // Create a transfer buffer and return a handle that uniquely
+  // identifies it or -1 on error. id_request lets the caller request a
+  // specific id for the transfer buffer, or -1 if the caller does not care.
+  // If the requested id can not be fulfilled, a different id will be returned.
+  // id_request must be either -1 or between 0 and 100.
+  virtual int32 CreateTransferBuffer(size_t size, int32 id_request) = 0;
 
-  // Destroy a transfer buffer. The ID must be positive.
+  // Register an existing shared memory object and get an ID that can be used
+  // to identify it in the command buffer. Callee dups the handle until
+  // DestroyTransferBuffer is called. id_request lets the caller request a
+  // specific id for the transfer buffer, or -1 if the caller does not care.
+  // If the requested id can not be fulfilled, a different id will be returned.
+  // id_request must be either -1 or between 0 and 100.
+  virtual int32 RegisterTransferBuffer(base::SharedMemory* shared_memory,
+                                       size_t size,
+                                       int32 id_request) = 0;
+
+  // Destroy a transfer buffer and recycle the handle.
   virtual void DestroyTransferBuffer(int32 id) = 0;
 
-  // Get the transfer buffer associated with an ID. Returns a null buffer for
-  // ID 0.
-  virtual Buffer GetTransferBuffer(int32 id) = 0;
+  // Get the transfer buffer associated with a handle.
+  virtual Buffer GetTransferBuffer(int32 handle) = 0;
 
   // Allows the reader to update the current token value.
   virtual void SetToken(int32 token) = 0;
@@ -125,17 +133,6 @@ class GPU_EXPORT CommandBuffer {
   // NOTE: if calling this in conjunction with SetParseError,
   // call this first.
   virtual void SetContextLostReason(error::ContextLostReason) = 0;
-
-// The NaCl Win64 build only really needs the struct definitions above; having
-// GetLastError declared would mean we'd have to also define it, and pull more
-// of gpu in to the NaCl Win64 build.
-#if !defined(NACL_WIN64)
-  // TODO(apatrick): this is a temporary optimization while skia is calling
-  // RendererGLContext::MakeCurrent prior to every GL call. It saves returning 6
-  // ints redundantly when only the error is needed for the CommandBufferProxy
-  // implementation.
-  virtual error::Error GetLastError();
-#endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CommandBuffer);

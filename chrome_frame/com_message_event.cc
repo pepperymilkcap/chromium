@@ -5,9 +5,9 @@
 #include "chrome_frame/com_message_event.h"
 
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 
 ComMessageEvent::ComMessageEvent() {
 }
@@ -108,15 +108,15 @@ STDMETHODIMP ComMessageEvent::Invoke(DISPID dispid, REFIID iid, LCID lcid,
   HRESULT hr = DISP_E_MEMBERNOTFOUND;
   switch (dispid) {
     case DISPID_MESSAGE_EVENT_DATA:
-      hr = GetStringProperty(flags, base::UTF8ToWide(message_).c_str(), result);
+      hr = GetStringProperty(flags, UTF8ToWide(message_).c_str(), result);
       break;
 
     case DISPID_MESSAGE_EVENT_ORIGIN:
-      hr = GetStringProperty(flags, base::UTF8ToWide(origin_).c_str(), result);
+      hr = GetStringProperty(flags, UTF8ToWide(origin_).c_str(), result);
       break;
 
     case DISPID_MESSAGE_EVENT_TYPE:
-      hr = GetStringProperty(flags, base::UTF8ToWide(type_).c_str(), result);
+      hr = GetStringProperty(flags, UTF8ToWide(type_).c_str(), result);
       break;
 
     case DISPID_MESSAGE_EVENT_LAST_EVENT_ID:

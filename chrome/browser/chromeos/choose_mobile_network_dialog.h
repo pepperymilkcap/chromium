@@ -5,15 +5,13 @@
 #ifndef CHROME_BROWSER_CHROMEOS_CHOOSE_MOBILE_NETWORK_DIALOG_H_
 #define CHROME_BROWSER_CHROMEOS_CHOOSE_MOBILE_NETWORK_DIALOG_H_
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
+#include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/web_dialogs/web_dialog_delegate.h"
 
 namespace chromeos {
 
 // Dialog for manual selection of cellular network.
-class ChooseMobileNetworkDialog : public ui::WebDialogDelegate {
+class ChooseMobileNetworkDialog : private HtmlDialogUIDelegate {
  public:
   // Shows the dialog box.
   static void ShowDialog(gfx::NativeWindow owning_window);
@@ -21,9 +19,9 @@ class ChooseMobileNetworkDialog : public ui::WebDialogDelegate {
  private:
   ChooseMobileNetworkDialog();
 
-  // Overridden from ui::WebDialogDelegate:
+  // Overridden from HtmlDialogUI::Delegate:
   virtual ui::ModalType GetDialogModalType() const OVERRIDE;
-  virtual base::string16 GetDialogTitle() const OVERRIDE;
+  virtual string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
       std::vector<content::WebUIMessageHandler*>* handlers) const OVERRIDE;
@@ -33,8 +31,7 @@ class ChooseMobileNetworkDialog : public ui::WebDialogDelegate {
   virtual void OnCloseContents(
       content::WebContents* source, bool* out_close_dialog) OVERRIDE;
   virtual bool ShouldShowDialogTitle() const OVERRIDE;
-  virtual bool HandleContextMenu(
-      const content::ContextMenuParams& params) OVERRIDE;
+  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(ChooseMobileNetworkDialog);
 };

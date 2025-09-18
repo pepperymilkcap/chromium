@@ -32,19 +32,21 @@ var tree = {
   ]
 };
 
-// Mock chrome.bookmarkManagerPrivate.getSubtree
+// Mock chrome.experimental.bookmarkManager.getSubtree
 chrome = chrome || {};
-chrome.bookmarkManagerPrivate = chrome.bookmarkManagerPrivate || {};
+chrome.experimental = chrome.experimental || {};
+chrome.experimental.bookmarkManager = chrome.experimental.bookmarkManager || {};
 
 var callbacks = {};
 
-chrome.bookmarkManagerPrivate.getSubtree = function(id, foldersOnly, callback) {
+chrome.experimental.bookmarkManager.getSubtree = function(id, foldersOnly,
+                                                          callback) {
   callbacks[id] = callbacks[id] || [];
   callbacks[id].push(callback);
   callbacks[id].$calls = callbacks[id].$calls ? callbacks[id].$calls++ : 1;
 };
 
-chrome.bookmarkManagerPrivate.getSubtree.load = function(node) {
+chrome.experimental.bookmarkManager.getSubtree.load = function(node) {
   // getSubtree gets the root tree when id is ''.
   var id = node.id;
   if (id == tree.id)
@@ -67,7 +69,7 @@ function testLoadSingle() {
   var p = bmm.loadTree();
   p.addListener(f);
 
-  chrome.bookmarkManagerPrivate.getSubtree.load(tree);
+  chrome.experimental.bookmarkManager.getSubtree.load(tree);
 
   assertEquals(1, calls);
   assertEquals(1, callbacks[''].$calls);
@@ -90,7 +92,7 @@ function testLoadMultiple() {
   p.addListener(f1);
   p2.addListener(f2);
 
-  chrome.bookmarkManagerPrivate.getSubtree.load(tree);
+  chrome.experimental.bookmarkManager.getSubtree.load(tree);
 
   assertEquals(1, calls1);
   assertEquals(1, calls2);
@@ -106,7 +108,7 @@ function testLoadSubtree() {
   var p = bmm.loadSubtree(1);
   p.addListener(f);
 
-  chrome.bookmarkManagerPrivate.getSubtree.load(tree.children[0]);
+  chrome.experimental.bookmarkManager.getSubtree.load(tree.children[0]);
 
   assertEquals(1, calls);
   assertEquals(1, callbacks[1].$calls);

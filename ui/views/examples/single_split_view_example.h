@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_EXAMPLES_SINGLE_SPLIT_VIEW_EXAMPLE_H_
 #define UI_VIEWS_EXAMPLES_SINGLE_SPLIT_VIEW_EXAMPLE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -25,7 +25,6 @@ to unittest.py
 """
 
 import cStringIO
-import copy
 import functools
 import hashlib
 import inspect
@@ -34,7 +33,6 @@ import optparse
 import os
 import pickle
 import pprint
-import re
 import shutil
 import signal
 import socket
@@ -84,20 +82,16 @@ import history_info
 import omnibox_info
 import plugins_info
 import prefs_info
-from pyauto_errors import AutomationCommandFail
-from pyauto_errors import AutomationCommandTimeout
-from pyauto_errors import JavascriptRuntimeError
 from pyauto_errors import JSONInterfaceError
 from pyauto_errors import NTPThumbnailNotShownError
 import pyauto_utils
 import simplejson as json  # found in third_party
 
 _CHROME_DRIVER_FACTORY = None
-_DEFAULT_AUTOMATION_TIMEOUT = 45
 _HTTP_SERVER = None
 _REMOTE_PROXY = None
 _OPTIONS = None
-_BROWSER_PID = None
+
 
 class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
   """Base class for UI Test Cases in Python.
@@ -136,7 +130,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     # Fetch provided keyword args, or fill in defaults.
     clear_profile = kwargs.get('clear_profile', True)
     homepage = kwargs.get('homepage', 'about:blank')
-    self._automation_timeout = _DEFAULT_AUTOMATION_TIMEOUT * 1000
 
     pyautolib.PyUITestBase.__init__(self, clear_profile, homepage)
     self.Initialize(pyautolib.FilePath(self.BrowserPath()))
@@ -174,7 +167,15 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       else:
         self.AppendBrowserLaunchSwitch(flag)
 
-  def __SetUp(self):
+  def setUp(self):
+    """Override this method to launch browser differently.
+
+    Can be used to prevent launching the browser window by default in case a
+    test wants to do some additional setup before firing browser.
+
+    When using the named interface, it connects to an existing browser
+    instance.
+    """
     named_channel_id = None
     if _OPTIONS:
       named_channel_id = _OPTIONS.channel_id
@@ -193,14 +194,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     # on ChromeOS).
     self.SetUp()
 
-    global _BROWSER_PID
-    try:
-      _BROWSER_PID = self.GetBrowserInfo()['browser_pid']
-    except JSONInterfaceError:
-      raise JSONInterfaceError('Unable to get browser_pid over automation '
-                               'channel on first attempt.  Something went very '
-                               'wrong.  Chrome probably did not launch.')
-
     # Forcibly trigger all plugins to get registered.  crbug.com/94123
     # Sometimes flash files loaded too quickly after firing browser
     # ends up getting downloaded, which seems to indicate that the plugin
@@ -208,43 +201,15 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     if not self.IsChromeOS():
       self.GetPluginsInfo()
 
-    if (self.IsChromeOS() and not self.GetLoginInfo()['is_logged_in'] and
-        self.ShouldOOBESkipToLogin()):
-      if self.GetOOBEScreenInfo()['screen_name'] != 'login':
-        self.SkipToLogin()
-      if self.ShouldAutoLogin():
-        # Login with default creds.
-        sys.path.append('/usr/local')  # to import autotest libs
-        from autotest.cros import constants
-        creds = constants.CREDENTIALS['$default']
-        self.Login(creds[0], creds[1])
-        assert self.GetLoginInfo()['is_logged_in']
-        logging.info('Logged in as %s.' % creds[0])
+    # TODO(dtu): Remove this after crosbug.com/4558 is fixed.
+    if self.IsChromeOS():
+      self.WaitUntil(lambda: not self.GetNetworkInfo()['offline_mode'])
 
     # If we are connected to any RemoteHosts, create PyAuto
     # instances on the remote sides and set them up too.
     for remote in self.remotes:
       remote.CreateTarget(self)
       remote.setUp()
-
-  def setUp(self):
-    """Override this method to launch browser differently.
-
-    Can be used to prevent launching the browser window by default in case a
-    test wants to do some additional setup before firing browser.
-
-    When using the named interface, it connects to an existing browser
-    instance.
-
-    On ChromeOS, a browser showing the login window is started. Tests can
-    initiate a user session by calling Login() or LoginAsGuest(). Cryptohome
-    vaults or flimflam profiles left over by previous tests can be cleared by
-    calling RemoveAllCryptohomeVaults() respectively CleanFlimflamDirs() before
-    logging in to improve isolation. Note that clearing flimflam profiles
-    requires a flimflam restart, briefly taking down network connectivity and
-    slowing down the test. This should be done for tests that use flimflam only.
-    """
-    self.__SetUp()
 
   def tearDown(self):
     for remote in self.remotes:
@@ -271,59 +236,21 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     These are flags needed to facilitate testing.  Override this function to
     use a custom set of Chrome flags.
     """
-    auth_ext_path = ('/usr/local/autotest/deps/pyauto_dep/' +
-        'test_src/chrome/browser/resources/gaia_auth')
     if self.IsChromeOS():
       return [
         '--homepage=about:blank',
         '--allow-file-access',
         '--allow-file-access-from-files',
         '--enable-file-cookies',
-        '--disable-default-apps',
         '--dom-automation',
         '--skip-oauth-login',
         # Enables injection of test content script for webui login automation
-        '--auth-ext-path=%s' % auth_ext_path,
-        # Enable automation provider, chromeos net and chromeos login logs
-        '--vmodule=*/browser/automation/*=2,*/chromeos/net/*=2,' +
-            '*/chromeos/login/*=2',
+        '--auth-ext-path=/usr/share/chromeos-assets/gaia_auth',
+        # Enable automation provider and chromeos net logs
+        '--vmodule=*/browser/automation/*=2,*/chromeos/net/*=2',
       ]
     else:
       return []
-
-  def ShouldOOBESkipToLogin(self):
-    """Determine if we should skip the OOBE flow on ChromeOS.
-
-    This makes automation skip the OOBE flow during setUp() and land directly
-    to the login screen. Applies only if not logged in already.
-
-    Override and return False if OOBE flow is required, for OOBE tests, for
-    example. Calling this function directly will have no effect.
-
-    Returns:
-      True, if the OOBE should be skipped and automation should
-            go to the 'Add user' login screen directly
-      False, if the OOBE should not be skipped.
-    """
-    assert self.IsChromeOS()
-    return True
-
-  def ShouldAutoLogin(self):
-    """Determine if we should auto-login on ChromeOS at browser startup.
-
-    To be used for tests that expect user to be logged in before running test,
-    without caring which user. ShouldOOBESkipToLogin() should return True
-    for this to take effect.
-
-    Override and return False to not auto login, for tests where login is part
-    of the use case.
-
-    Returns:
-      True, if chrome should auto login after startup.
-      False, otherwise.
-    """
-    assert self.IsChromeOS()
-    return True
 
   def CloseChromeOnChromeOS(self):
     """Gracefully exit chrome on ChromeOS."""
@@ -390,7 +317,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'Did not find suid-root python at %s' % PyUITest.SuidPythonPath()
     file_path = os.path.join(os.path.dirname(__file__), 'chromeos',
                              'suid_actions.py')
-    args = [PyUITest.SuidPythonPath(), file_path, '--action=%s' % action]
+    args = [PyUITest.SuidPythonPath(), file_path, '--action=CleanFlimflamDir']
     proc = subprocess.Popen(
         args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = proc.communicate()
@@ -479,30 +406,28 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
   def CleanupBrowserProfileOnChromeOS():
     """Cleanup browser profile dir on ChromeOS.
 
-    This does not clear cryptohome.
-
     Browser should not be running, or else there will be locked files.
     """
     profile_dir = '/home/chronos/user'
     for item in os.listdir(profile_dir):
+
+      # We should not delete the flimflam directory because it puts
+      # flimflam in a weird state if the device is already logged in.
+      # However, deleting its contents is okay.
+      if item == 'flimflam' and os.path.isdir(os.path.join(profile_dir,
+                                              'flimflam')):
+        PyUITest.RunSuperuserActionOnChromeOS('CleanFlimflamDir')
+        continue
+
       # Deleting .pki causes stateful partition to get erased.
-      if item not in ['log', 'flimflam'] and not item.startswith('.'):
-         pyauto_utils.RemovePath(os.path.join(profile_dir, item))
+      if item != 'log' and not item.startswith('.'):
+        pyauto_utils.RemovePath(os.path.join(profile_dir, item))
 
     chronos_dir = '/home/chronos'
     for item in os.listdir(chronos_dir):
       if item != 'user' and not item.startswith('.'):
         pyauto_utils.RemovePath(os.path.join(chronos_dir, item))
 
-  @staticmethod
-  def CleanupFlimflamDirsOnChromeOS():
-    """Clean the contents of flimflam profiles and restart flimflam."""
-    PyUITest.RunSuperuserActionOnChromeOS('CleanFlimflamDirs')
-
-  @staticmethod
-  def RemoveAllCryptohomeVaultsOnChromeOS():
-    """Remove any existing cryptohome vaults."""
-    PyUITest.RunSuperuserActionOnChromeOS('RemoveAllCryptohomeVaults')
 
   @staticmethod
   def _IsInodeNew(path, old_inode):
@@ -551,7 +476,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     self.set_clear_profile(clear_profile)
     if pre_launch_hook:
       pre_launch_hook()
-    logging.debug('Restarting browser with clear_profile=%s',
+    logging.debug('Restarting browser with clear_profile=%s' %
                   self.get_clear_profile())
     self.LaunchBrowserAndServer()
     self.set_clear_profile(orig_clear_state)  # Reset to original state.
@@ -561,13 +486,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     """Returns the path to the data dir chrome/test/data."""
     return os.path.normpath(
         os.path.join(os.path.dirname(__file__), os.pardir, "data"))
-
-  @staticmethod
-  def ChromeOSDataDir():
-    """Returns the path to the data dir chromeos/test/data."""
-    return os.path.normpath(
-        os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir,
-                     "chromeos", "test", "data"))
 
   @staticmethod
   def GetFileURLForPath(*path):
@@ -612,28 +530,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     return _HTTP_SERVER.GetURL(os.path.join('files', *relative_path)).spec()
 
   @staticmethod
-  def ContentDataDir():
-    """Get path to content/test/data."""
-    return os.path.join(PyUITest.DataDir(), os.pardir, os.pardir, os.pardir,
-        'content', 'test', 'data')
-
-  @staticmethod
-  def GetFileURLForContentDataPath(*relative_path):
-    """Get file:// url for the given path relative to content test data dir.
-
-    Also quotes the url using urllib.quote().
-
-    Args:
-      relative_path: Variable number of strings that can be joined.
-    """
-    return PyUITest.GetFileURLForPath(PyUITest.ContentDataDir(), *relative_path)
-
-  @staticmethod
   def GetFtpURLForDataPath(ftp_server, *relative_path):
     """Get ftp:// url for the given path in the data dir.
 
     Args:
-      ftp_server: handle to ftp server, an instance of SpawnedTestServer
+      ftp_server: handle to ftp server, an instance of TestServer
       relative_path: any number of path elements
 
     The URL will be usable only after starting the ftp server.
@@ -706,21 +607,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     return True
 
   @staticmethod
-  def GetPlatform():
-    """Return the platform name."""
-    # Since ChromeOS is also Linux, we check for it first.
-    if PyUITest.IsChromeOS():
-      return 'chromeos'
-    elif PyUITest.IsLinux():
-      return 'linux'
-    elif PyUITest.IsMac():
-      return 'mac'
-    elif PyUITest.IsWin():
-      return 'win'
-    else:
-      return 'unknown'
-
-  @staticmethod
   def EvalDataFrom(filename):
     """Return eval of python code from given file.
 
@@ -757,19 +643,38 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       os.kill(pid, signal.SIGTERM)
 
   @staticmethod
-  def GetPrivateInfo():
+  def ChromeFlagsForSyncTestServer(port, xmpp_port):
+    """Creates the flags list for the browser to connect to the sync server.
+
+    Use the |ExtraBrowser| class to launch a new browser with these flags.
+
+    Args:
+      port: The HTTP port number.
+      xmpp_port: The XMPP port number.
+
+    Returns:
+      A list with the flags.
+    """
+    return [
+      '--sync-url=http://127.0.0.1:%s/chromiumsync' % port,
+      '--sync-allow-insecure-xmpp-connection',
+      '--sync-notification-host=127.0.0.1:%s' % xmpp_port,
+      '--sync-notification-method=p2p',
+    ]
+
+  def GetPrivateInfo(self):
     """Fetch info from private_tests_info.txt in private dir.
 
     Returns:
       a dictionary of items from private_tests_info.txt
     """
     private_file = os.path.join(
-        PyUITest.DataDir(), 'pyauto_private', 'private_tests_info.txt')
+        self.DataDir(), 'pyauto_private', 'private_tests_info.txt')
     assert os.path.exists(private_file), '%s missing' % private_file
-    return PyUITest.EvalDataFrom(private_file)
+    return self.EvalDataFrom(private_file)
 
   def WaitUntil(self, function, timeout=-1, retry_sleep=0.25, args=[],
-                expect_retval=None, return_retval=False, debug=True):
+                expect_retval=None, debug=True):
     """Poll on a condition until timeout.
 
     Waits until the |function| evalues to |expect_retval| or until |timeout|
@@ -802,42 +707,48 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                      exit criteria. In case this is None (the default),
                      |function|'s return value is checked for truth,
                      so 'non-empty-string' should match with True
-      return_retval: If True, return the value returned by the last call to
-                     |function()|
       debug: if True, displays debug info at each retry.
 
     Returns:
-      The return value of the |function| (when return_retval == True)
-      True, if returning when |function| evaluated to True (when
-          return_retval == False)
+      True, if returning when |function| evaluated to True
       False, when returning due to timeout
     """
     if timeout == -1:  # Default
-      timeout = self._automation_timeout / 1000.0
+      timeout = self.action_max_timeout_ms() / 1000.0
     assert callable(function), "function should be a callable"
     begin = time.time()
-    debug_begin = begin
-    retval = None
     while timeout is None or time.time() - begin <= timeout:
       retval = function(*args)
-      if (expect_retval is None and retval) or \
-         (expect_retval is not None and expect_retval == retval):
-        return retval if return_retval else True
-      if debug and time.time() - debug_begin > 5:
-        debug_begin += 5
-        if function.func_name == (lambda: True).func_name:
-          function_info = inspect.getsource(function).strip()
-        else:
-          function_info = '%s()' % function.func_name
-        logging.debug('WaitUntil(%s:%d %s) still waiting. '
-                      'Expecting %s. Last returned %s.',
-                      os.path.basename(inspect.getsourcefile(function)),
-                      inspect.getsourcelines(function)[1],
-                      function_info,
-                      True if expect_retval is None else expect_retval,
-                      retval)
+      if (expect_retval is None and retval) or expect_retval == retval:
+        return True
+      if debug:
+        logging.debug('WaitUntil(%s) still waiting. '
+                      'Expecting %s. Last returned %s.' % (
+                      function, expect_retval, retval))
       time.sleep(retry_sleep)
-    return retval if return_retval else False
+    return False
+
+  def StartSyncServer(self):
+    """Start a local sync server.
+
+    Adds a dictionary attribute 'ports' in returned object.
+
+    Returns:
+      A handle to Sync Server, an instance of TestServer
+    """
+    sync_server = pyautolib.TestServer(pyautolib.TestServer.TYPE_SYNC,
+        pyautolib.FilePath(''))
+    assert sync_server.Start(), 'Could not start sync server'
+    sync_server.ports = dict(port=sync_server.GetPort(),
+                             xmpp_port=sync_server.GetSyncXmppPort())
+    logging.debug('Started sync server at ports %s.' % sync_server.ports)
+    return sync_server
+
+  def StopSyncServer(self, sync_server):
+    """Stop the local sync server."""
+    assert sync_server, 'Sync Server not yet started'
+    assert sync_server.Stop(), 'Could not stop sync server'
+    logging.debug('Stopped sync server at ports %s.' % sync_server.ports)
 
   def StartFTPServer(self, data_dir):
     """Start a local file server hosting data files over ftp://
@@ -846,14 +757,12 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       data_dir: path where ftp files should be served
 
     Returns:
-      handle to FTP Server, an instance of SpawnedTestServer
+      handle to FTP Server, an instance of TestServer
     """
-    ftp_server = pyautolib.SpawnedTestServer(
-        pyautolib.SpawnedTestServer.TYPE_FTP,
-        '127.0.0.1',
+    ftp_server = pyautolib.TestServer(pyautolib.TestServer.TYPE_FTP,
         pyautolib.FilePath(data_dir))
     assert ftp_server.Start(), 'Could not start ftp server'
-    logging.debug('Started ftp server at "%s".', data_dir)
+    logging.debug('Started ftp server at "%s".' % data_dir)
     return ftp_server
 
   def StopFTPServer(self, ftp_server):
@@ -863,21 +772,19 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     logging.debug('Stopped ftp server.')
 
   def StartHTTPServer(self, data_dir):
-    """Starts a local HTTP SpawnedTestServer serving files from |data_dir|.
+    """Starts a local HTTP TestServer serving files from |data_dir|.
 
     Args:
-      data_dir: path where the SpawnedTestServer should serve files from.
-      This will be appended to the source dir to get the final document root.
+      data_dir: path where the TestServer should serve files from. This will be
+      appended to the source dir to get the final document root.
 
     Returns:
-      handle to the HTTP SpawnedTestServer
+      handle to the HTTP TestServer
     """
-    http_server = pyautolib.SpawnedTestServer(
-        pyautolib.SpawnedTestServer.TYPE_HTTP,
-        '127.0.0.1',
+    http_server = pyautolib.TestServer(pyautolib.TestServer.TYPE_HTTP,
         pyautolib.FilePath(data_dir))
     assert http_server.Start(), 'Could not start HTTP server'
-    logging.debug('Started HTTP server at "%s".', data_dir)
+    logging.debug('Started HTTP server at "%s".' % data_dir)
     return http_server
 
   def StopHTTPServer(self, http_server):
@@ -885,38 +792,12 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     assert http_server.Stop(), 'Cloud not stop the HTTP server'
     logging.debug('Stopped HTTP server.')
 
-  def StartHttpsServer(self, cert_type, data_dir):
-    """Starts a local HTTPS SpawnedTestServer serving files from |data_dir|.
-
-    Args:
-      cert_type: An instance of SSLOptions.ServerCertificate for three
-                 certificate types: ok, expired, or mismatch.
-      data_dir: The path where SpawnedTestServer should serve files from.
-                This is appended to the source dir to get the final
-                document root.
-
-    Returns:
-      Handle to the HTTPS SpawnedTestServer
-    """
-    https_server = pyautolib.SpawnedTestServer(
-        pyautolib.SpawnedTestServer.TYPE_HTTPS,
-        pyautolib.SSLOptions(cert_type),
-        pyautolib.FilePath(data_dir))
-    assert https_server.Start(), 'Could not start HTTPS server.'
-    logging.debug('Start HTTPS server at "%s".' % data_dir)
-    return https_server
-
-  def StopHttpsServer(self, https_server):
-    assert https_server, 'HTTPS server not yet started.'
-    assert https_server.Stop(), 'Could not stop the HTTPS server.'
-    logging.debug('Stopped HTTPS server.')
-
   class ActionTimeoutChanger(object):
-    """Facilitate temporary changes to PyAuto command timeout.
+    """Facilitate temporary changes to action_timeout_ms.
 
     Automatically resets to original timeout when object is destroyed.
     """
-    _saved_timeout = -1  # Saved timeout value
+    _saved_timeout = -1  # Saved value for action_timeout_ms
 
     def __init__(self, ui_test, new_timeout):
       """Initialize.
@@ -925,13 +806,15 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         ui_test: a PyUITest object
         new_timeout: new timeout to use (in milli secs)
       """
-      self._saved_timeout = ui_test._automation_timeout
-      ui_test._automation_timeout = new_timeout
+      self._saved_timeout = ui_test.action_timeout_ms()
+      if new_timeout != self._saved_timeout:
+        ui_test.set_action_timeout_ms(new_timeout)
       self._ui_test = ui_test
 
     def __del__(self):
       """Reset command_execution_timeout_ms to original value."""
-      self._ui_test._automation_timeout = self._saved_timeout
+      if self._ui_test.action_timeout_ms() != self._saved_timeout:
+        self._ui_test.set_action_timeout_ms(self._saved_timeout)
 
   class JavascriptExecutor(object):
     """Abstract base class for JavaScript injection.
@@ -984,25 +867,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                                                          self.view,
                                                          self.frame_xpath)
 
-  def _GetResultFromJSONRequestDiagnostics(self):
-    """Same as _GetResultFromJSONRequest without throwing a timeout exception.
-
-    This method is used to diagnose if a command returns without causing a
-    timout exception to be thrown.  This should be used for debugging purposes
-    only.
-
-    Returns:
-      True if the request returned; False if it timed out.
-    """
-    result = self._SendJSONRequest(-1,
-             json.dumps({'command': 'GetBrowserInfo',}),
-             self._automation_timeout)
-    if not result:
-      # The diagnostic command did not complete, Chrome is probably in a bad
-      # state
-      return False
-    return True
-
   def _GetResultFromJSONRequest(self, cmd_dict, windex=0, timeout=-1):
     """Issue call over the JSON automation channel and fetch output.
 
@@ -1018,8 +882,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                     'text': text,
                   }
       windex: 0-based window index on which to work. Default: 0 (first window)
-              Use -ve windex or None if the automation command does not apply
-              to a browser window. Example: for chromeos login
+              Use -ve windex if the automation command does not apply to a
+              browser window. example: chromeos login
 
       timeout: request timeout (in milliseconds)
 
@@ -1030,762 +894,26 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     if timeout == -1:  # Default
-      timeout = self._automation_timeout
-    if windex is None:  # Do not target any window
-      windex = -1
+      timeout = self.action_max_timeout_ms()
     result = self._SendJSONRequest(windex, json.dumps(cmd_dict), timeout)
-    if not result:
-      additional_info = 'No information available.'
-      # Windows does not support os.kill until Python 2.7.
-      if not self.IsWin() and _BROWSER_PID:
-        browser_pid_exists = True
-        # Does the browser PID exist?
-        try:
-          # Does not actually kill the process
-          os.kill(int(_BROWSER_PID), 0)
-        except OSError:
-          browser_pid_exists = False
-        if browser_pid_exists:
-          if self._GetResultFromJSONRequestDiagnostics():
-            # Browser info, worked, that means this hook had a problem
-            additional_info = ('The browser process ID %d still exists. '
-                               'PyAuto was able to obtain browser info. It '
-                               'is possible this hook is broken.'
-                               % _BROWSER_PID)
-          else:
-            additional_info = ('The browser process ID %d still exists. '
-                               'PyAuto was not able to obtain browser info. '
-                               'It is possible the browser is hung.'
-                               % _BROWSER_PID)
-        else:
-          additional_info = ('The browser process ID %d no longer exists. '
-                             'Perhaps the browser crashed.' % _BROWSER_PID)
-      elif not _BROWSER_PID:
-        additional_info = ('The browser PID was not obtained. Does this test '
-                           'have a unique startup configuration?')
-      # Mask private data if it is in the JSON dictionary
-      cmd_dict_copy = copy.copy(cmd_dict)
-      if 'password' in cmd_dict_copy.keys():
-        cmd_dict_copy['password'] = '**********'
-      if 'username' in cmd_dict_copy.keys():
-        cmd_dict_copy['username'] = 'removed_username'
+    if len(result) == 0:
       raise JSONInterfaceError('Automation call %s received empty response.  '
-                               'Additional information:\n%s' % (cmd_dict_copy,
-                               additional_info))
+                               'Perhaps the browser crashed.' % cmd_dict)
     ret_dict = json.loads(result)
     if ret_dict.has_key('error'):
-      if ret_dict.get('is_interface_timeout'):
-        raise AutomationCommandTimeout(ret_dict['error'])
-      elif ret_dict.get('is_interface_error'):
-        raise JSONInterfaceError(ret_dict['error'])
-      else:
-        raise AutomationCommandFail(ret_dict['error'])
+      raise JSONInterfaceError(ret_dict['error'])
     return ret_dict
 
-  def NavigateToURL(self, url, windex=0, tab_index=None, navigation_count=1):
-    """Navigate the given tab to the given URL.
-
-    Note that this method also activates the corresponding tab/window if it's
-    not active already. Blocks until |navigation_count| navigations have
-    completed.
-
-    Args:
-      url: The URL to which to navigate, can be a string or GURL object.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-      tab_index: The index of the tab to work on. Defaults to the active tab.
-      navigation_count: the number of navigations to wait for. Defaults to 1.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(url, GURL):
-      url = url.spec()
-    if tab_index is None:
-      tab_index = self.GetActiveTabIndex(windex)
-    cmd_dict = {
-        'command': 'NavigateToURL',
-        'url': url,
-        'windex': windex,
-        'tab_index': tab_index,
-        'navigation_count': navigation_count,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def NavigateToURLAsync(self, url, windex=0, tab_index=None):
-    """Initiate a URL navigation.
-
-    A wrapper for NavigateToURL with navigation_count set to 0.
-    """
-    self.NavigateToURL(url, windex, tab_index, 0)
-
-  def ApplyAccelerator(self, accelerator, windex=0):
-    """Apply the accelerator with the given id.
-
-    Note that this method schedules the accelerator, but does not wait for it to
-    actually finish doing anything.
-
-    Args:
-      accelerator: The accelerator id, IDC_BACK, IDC_NEWTAB, etc. The list of
-          ids can be found at chrome/app/chrome_command_ids.h.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-
-    cmd_dict = {
-        'command': 'ApplyAccelerator',
-        'accelerator': accelerator,
-        'windex': windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def RunCommand(self, accelerator, windex=0):
-    """Apply the accelerator with the given id and wait for it to finish.
-
-    This is like ApplyAccelerator except that it waits for the command to finish
-    executing.
-
-    Args:
-      accelerator: The accelerator id. The list of ids can be found at
-          chrome/app/chrome_command_ids.h.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'RunCommand',
-        'accelerator': accelerator,
-        'windex': windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def IsMenuCommandEnabled(self, accelerator, windex=0):
-    """Check if a command is enabled for a window.
-
-    Returns true if the command with the given accelerator id is enabled on the
-    given window.
-
-    Args:
-      accelerator: The accelerator id. The list of ids can be found at
-          chrome/app/chrome_command_ids.h.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Returns:
-      True if the command is enabled for the given window.
-    """
-    cmd_dict = {
-        'command': 'IsMenuCommandEnabled',
-        'accelerator': accelerator,
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None).get('enabled')
-
-  def TabGoForward(self, tab_index=0, windex=0):
-    """Navigate a tab forward in history.
-
-    Equivalent to clicking the Forward button in the UI. Activates the tab as a
-    side effect.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    self.ActivateTab(tab_index, windex)
-    self.RunCommand(IDC_FORWARD, windex)
-
-  def TabGoBack(self, tab_index=0, windex=0):
-    """Navigate a tab backwards in history.
-
-    Equivalent to clicking the Back button in the UI. Activates the tab as a
-    side effect.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    self.ActivateTab(tab_index, windex)
-    self.RunCommand(IDC_BACK, windex)
-
-  def ReloadTab(self, tab_index=0, windex=0):
-    """Reload the given tab.
-
-    Blocks until the page has reloaded.
-
-    Args:
-      tab_index: The index of the tab to reload. Defaults to 0.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    self.ActivateTab(tab_index, windex)
-    self.RunCommand(IDC_RELOAD, windex)
-
-  def CloseTab(self, tab_index=0, windex=0, wait_until_closed=True):
-    """Close the given tab.
-
-    Note: Be careful closing the last tab in a window as it may close the
-        browser.
-
-    Args:
-      tab_index: The index of the tab to reload. Defaults to 0.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-      wait_until_closed: Whether to block until the tab finishes closing.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'CloseTab',
-        'tab_index': tab_index,
-        'windex': windex,
-        'wait_until_closed': wait_until_closed,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def WaitForTabToBeRestored(self, tab_index=0, windex=0, timeout=-1):
-    """Wait for the given tab to be restored.
-
-    Args:
-      tab_index: The index of the tab to reload. Defaults to 0.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-      timeout: Timeout in milliseconds.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'CloseTab',
-        'tab_index': tab_index,
-        'windex': windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None, timeout=timeout)
-
-  def ReloadActiveTab(self, windex=0):
-    """Reload an active tab.
-
-    Warning: Depending on the concept of an active tab is dangerous as it can
-    change during the test. Use ReloadTab and supply a tab_index explicitly.
-
-    Args:
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    self.ReloadTab(self.GetActiveTabIndex(windex), windex)
-
-  def GetActiveTabIndex(self, windex=0):
-    """Get the index of the currently active tab in the given browser window.
-
-    Warning: Depending on the concept of an active tab is dangerous as it can
-    change during the test. Supply the tab_index explicitly, if possible.
-
-    Args:
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Returns:
-      An integer index for the currently active tab.
-    """
-    cmd_dict = {
-        'command': 'GetActiveTabIndex',
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict,
-                                          windex=None).get('tab_index')
-
-  def ActivateTab(self, tab_index=0, windex=0):
-    """Activates the given tab in the specified window.
-
-    Warning: Depending on the concept of an active tab is dangerous as it can
-    change during the test. Instead use functions that accept a tab_index
-    explicitly.
-
-    Args:
-      tab_index: Integer index of the tab to activate; defaults to 0.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'ActivateTab',
-        'tab_index': tab_index,
-        'windex': windex,
-    }
-    self.BringBrowserToFront(windex)
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def BringBrowserToFront(self, windex=0):
-    """Activate the browser's window and bring it to front.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'BringBrowserToFront',
-        'windex': windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetBrowserWindowCount(self):
-    """Get the browser window count.
-
-    Args:
-      None.
-
-    Returns:
-      Integer count of the number of browser windows. Includes popups.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {'command': 'GetBrowserWindowCount'}
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['count']
-
-  def OpenNewBrowserWindow(self, show):
-    """Create a new browser window.
-
-    Args:
-      show: Boolean indicating whether to show the window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'OpenNewBrowserWindow',
-        'show': show,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def CloseBrowserWindow(self, windex=0):
-    """Create a new browser window.
-
-    Args:
-      windex: Index of the browser window to close; defaults to 0.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'CloseBrowserWindow',
-        'windex': windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def AppendTab(self, url, windex=0):
-    """Append a new tab.
-
-    Creates a new tab at the end of given browser window and activates
-    it. Blocks until the specified |url| is loaded.
-
-    Args:
-      url: The url to load, can be string or a GURL object.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Returns:
-      True if the url loads successfully in the new tab. False otherwise.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(url, GURL):
-      url = url.spec()
-    cmd_dict = {
-        'command': 'AppendTab',
-        'url': url,
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None).get('result')
-
-  def GetTabCount(self, windex=0):
-    """Gets the number of tab in the given browser window.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      The tab count.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'GetTabCount',
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['tab_count']
-
-  def GetTabInfo(self, tab_index=0, windex=0):
-    """Gets information about the specified tab.
-
-    Args:
-      tab_index: Integer index of the tab to activate; defaults to 0.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      A dictionary containing information about the tab.
-      Example:
-        { u'title': "Hello World",
-          u'url': "http://foo.bar", }
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'GetTabInfo',
-        'tab_index': tab_index,
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetActiveTabTitle(self, windex=0):
-    """Gets the title of the active tab.
-
-    Warning: Depending on the concept of an active tab is dangerous as it can
-    change during the test. Use GetTabInfo and supply a tab_index explicitly.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      The tab title as a string.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    return self.GetTabInfo(self.GetActiveTabIndex(windex), windex)['title']
-
-  def GetActiveTabURL(self, windex=0):
-    """Gets the URL of the active tab.
-
-    Warning: Depending on the concept of an active tab is dangerous as it can
-    change during the test. Use GetTabInfo and supply a tab_index explicitly.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      The tab URL as a GURL object.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    return GURL(str(self.GetTabInfo(self.GetActiveTabIndex(windex),
-                                    windex)['url']))
-
-  def ActionOnSSLBlockingPage(self, tab_index=0, windex=0, proceed=True):
-    """Take action on an interstitial page.
-
-    Calling this when an interstitial page is not showing is an error.
-
-    Args:
-      tab_index: Integer index of the tab to activate; defaults to 0.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-      proceed: Whether to proceed to the URL or not.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'ActionOnSSLBlockingPage',
-        'tab_index': tab_index,
-        'windex': windex,
-        'proceed': proceed,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetBookmarkModel(self, windex=0):
+  def GetBookmarkModel(self):
     """Return the bookmark model as a BookmarkModel object.
 
     This is a snapshot of the bookmark model; it is not a proxy and
     does not get updated as the bookmark model changes.
     """
-    bookmarks_as_json = self._GetBookmarksAsJSON(windex)
-    if not bookmarks_as_json:
+    bookmarks_as_json = self._GetBookmarksAsJSON()
+    if bookmarks_as_json == None:
       raise JSONInterfaceError('Could not resolve browser proxy.')
     return bookmark_model.BookmarkModel(bookmarks_as_json)
-
-  def _GetBookmarksAsJSON(self, windex=0):
-    """Get bookmarks as a JSON dictionary; used by GetBookmarkModel()."""
-    cmd_dict = {
-        'command': 'GetBookmarksAsJSON',
-        'windex': windex,
-    }
-    self.WaitForBookmarkModelToLoad(windex)
-    return self._GetResultFromJSONRequest(cmd_dict,
-                                          windex=None)['bookmarks_as_json']
-
-  def WaitForBookmarkModelToLoad(self, windex=0):
-    """Gets the status of the bookmark bar as a dictionary.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'WaitForBookmarkModelToLoad',
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetBookmarkBarStatus(self, windex=0):
-    """Gets the status of the bookmark bar as a dictionary.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      A dictionary.
-      Example:
-        { u'visible': True,
-          u'animating': False,
-          u'detached': False, }
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'GetBookmarkBarStatus',
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetBookmarkBarStatus(self, windex=0):
-    """Gets the status of the bookmark bar as a dictionary.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      A dictionary.
-      Example:
-        { u'visible': True,
-          u'animating': False,
-          u'detached': False, }
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'GetBookmarkBarStatus',
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetBookmarkBarStatus(self, windex=0):
-    """Gets the status of the bookmark bar as a dictionary.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      A dictionary.
-      Example:
-        { u'visible': True,
-          u'animating': False,
-          u'detached': False, }
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-        'command': 'GetBookmarkBarStatus',
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetBookmarkBarVisibility(self, windex=0):
-    """Returns the visibility of the bookmark bar.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      True if the bookmark bar is visible, false otherwise.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    return self.GetBookmarkBarStatus(windex)['visible']
-
-  def AddBookmarkGroup(self, parent_id, index, title, windex=0):
-    """Adds a bookmark folder.
-
-    Args:
-      parent_id: The parent bookmark folder.
-      index: The location in the parent's list to insert this bookmark folder.
-      title: The name of the bookmark folder.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Returns:
-      True if the bookmark bar is detached, false otherwise.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(parent_id, basestring):
-      parent_id = int(parent_id)
-    cmd_dict = {
-        'command': 'AddBookmark',
-        'parent_id': parent_id,
-        'index': index,
-        'title': title,
-        'is_folder': True,
-        'windex': windex,
-    }
-    self.WaitForBookmarkModelToLoad(windex)
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def AddBookmarkURL(self, parent_id, index, title, url, windex=0):
-    """Add a bookmark URL.
-
-    Args:
-      parent_id: The parent bookmark folder.
-      index: The location in the parent's list to insert this bookmark.
-      title: The name of the bookmark.
-      url: The url of the bookmark.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(parent_id, basestring):
-      parent_id = int(parent_id)
-    cmd_dict = {
-        'command': 'AddBookmark',
-        'parent_id': parent_id,
-        'index': index,
-        'title': title,
-        'url': url,
-        'is_folder': False,
-        'windex': windex,
-    }
-    self.WaitForBookmarkModelToLoad(windex)
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def ReparentBookmark(self, id, new_parent_id, index, windex=0):
-    """Move a bookmark.
-
-    Args:
-      id: The bookmark to move.
-      new_parent_id: The new parent bookmark folder.
-      index: The location in the parent's list to insert this bookmark.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(id, basestring):
-      id = int(id)
-    if isinstance(new_parent_id, basestring):
-      new_parent_id = int(new_parent_id)
-    cmd_dict = {
-        'command': 'ReparentBookmark',
-        'id': id,
-        'new_parent_id': new_parent_id,
-        'index': index,
-        'windex': windex,
-    }
-    self.WaitForBookmarkModelToLoad(windex)
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def SetBookmarkTitle(self, id, title, windex=0):
-    """Change the title of a bookmark.
-
-    Args:
-      id: The bookmark to rename.
-      title: The new title for the bookmark.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(id, basestring):
-      id = int(id)
-    cmd_dict = {
-        'command': 'SetBookmarkTitle',
-        'id': id,
-        'title': title,
-        'windex': windex,
-    }
-    self.WaitForBookmarkModelToLoad(windex)
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def SetBookmarkURL(self, id, url, windex=0):
-    """Change the URL of a bookmark.
-
-    Args:
-      id: The bookmark to change.
-      url: The new url for the bookmark.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(id, basestring):
-      id = int(id)
-    cmd_dict = {
-        'command': 'SetBookmarkURL',
-        'id': id,
-        'url': url,
-        'windex': windex,
-    }
-    self.WaitForBookmarkModelToLoad(windex)
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def RemoveBookmark(self, id, windex=0):
-    """Remove a bookmark.
-
-    Args:
-      id: The bookmark to remove.
-      windex: Integer index of the browser window to use; defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(id, basestring):
-      id = int(id)
-    cmd_dict = {
-        'command': 'RemoveBookmark',
-        'id': id,
-        'windex': windex,
-    }
-    self.WaitForBookmarkModelToLoad(windex)
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
 
   def GetDownloadsInfo(self, windex=0):
     """Return info about downloads.
@@ -1796,8 +924,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       an instance of downloads_info.DownloadInfo
     """
     return download_info.DownloadInfo(
-        self._GetResultFromJSONRequest({'command': 'GetDownloadsInfo'},
-                                       windex=windex))
+        self._SendJSONRequest(
+            windex, json.dumps({'command': 'GetDownloadsInfo'}),
+            self.action_max_timeout_ms()))
 
   def GetOmniboxInfo(self, windex=0):
     """Return info about Omnibox.
@@ -1823,8 +952,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       an instance of omnibox_info.OmniboxInfo
     """
     return omnibox_info.OmniboxInfo(
-        self._GetResultFromJSONRequest({'command': 'GetOmniboxInfo'},
-                                       windex=windex))
+        self._SendJSONRequest(windex,
+                              json.dumps({'command': 'GetOmniboxInfo'}),
+                              self.action_max_timeout_ms()))
 
   def SetOmniboxText(self, text, windex=0):
     """Enter text into the omnibox. This shifts focus to the omnibox.
@@ -1902,81 +1032,34 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
-  def GetCookie(self, url, windex=0):
-    """Get the value of the cookie at url in context of the specified browser.
+  def GetInstantInfo(self):
+    """Return info about the instant overlay tab.
 
-    Args:
-      url: Either a GURL object or url string specifing the cookie url.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
+    Returns:
+      A dictionary.
+      Examples:
+        { u'enabled': True,
+          u'active': True,
+          u'current': True,
+          u'loading': True,
+          u'location': u'http://cnn.com/',
+          u'showing': False,
+          u'title': u'CNN.com - Breaking News'},
 
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+        { u'enabled': False }
     """
-    if isinstance(url, GURL):
-      url = url.spec()
-    cmd_dict = {
-        'command': 'GetCookiesInBrowserContext',
-        'url': url,
-        'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['cookies']
+    cmd_dict = {'command': 'GetInstantInfo'}
+    return self._GetResultFromJSONRequest(cmd_dict)['instant']
 
-  def DeleteCookie(self, url, cookie_name, windex=0):
-    """Delete the cookie at url with name cookie_name.
-
-    Args:
-      url: Either a GURL object or url string specifing the cookie url.
-      cookie_name: The name of the cookie to delete as a string.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(url, GURL):
-      url = url.spec()
-    cmd_dict = {
-        'command': 'DeleteCookieInBrowserContext',
-        'url': url,
-        'cookie_name': cookie_name,
-        'windex': windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def SetCookie(self, url, value, windex=0):
-    """Set the value of the cookie at url to value in the context of a browser.
-
-    Args:
-      url: Either a GURL object or url string specifing the cookie url.
-      value: A string to set as the cookie's value.
-      windex: The index of the browser window to work on. Defaults to the first
-          window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if isinstance(url, GURL):
-      url = url.spec()
-    cmd_dict = {
-        'command': 'SetCookieInBrowserContext',
-        'url': url,
-        'value': value,
-        'windex': windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetSearchEngineInfo(self, windex=0):
+  def GetSearchEngineInfo(self):
     """Return info about search engines.
-
-    Args:
-      windex: The window index, default is 0.
 
     Returns:
       An ordered list of dictionaries describing info about each search engine.
 
       Example:
-        [ { u'display_url': u'{google:baseURL}search?q=%s',
+        [ { u'description': u'',
+            u'display_url': u'{google:baseURL}search?q=%s',
             u'host': u'www.google.com',
             u'in_default_list': True,
             u'is_default': True,
@@ -1986,7 +1069,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
             u'short_name': u'Google',
             u'supports_replacement': True,
             u'url': u'{google:baseURL}search?q={searchTerms}'},
-          { u'display_url': u'http://search.yahoo.com/search?p=%s',
+          { u'description': u'',
+            u'display_url': u'http://search.yahoo.com/search?p=%s',
             u'host': u'search.yahoo.com',
             u'in_default_list': True,
             u'is_default': False,
@@ -1998,13 +1082,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
             u'url': u'http://search.yahoo.com/search?p={searchTerms}'},
     """
     # Ensure that the search engine profile is loaded into data model.
-    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'},
-                                   windex=windex)
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
     cmd_dict = {'command': 'GetSearchEngineInfo'}
-    return self._GetResultFromJSONRequest(
-        cmd_dict, windex=windex)['search_engines']
+    return self._GetResultFromJSONRequest(cmd_dict)['search_engines']
 
-  def AddSearchEngine(self, title, keyword, url, windex=0):
+  def AddSearchEngine(self, title, keyword, url):
     """Add a search engine, as done through the search engines UI.
 
     Args:
@@ -2012,19 +1094,16 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       keyword: keyword, used to initiate a custom search from omnibox.
       url: url template for this search engine's query.
            '%s' is replaced by search query string when used to search.
-      windex: The window index, default is 0.
     """
     # Ensure that the search engine profile is loaded into data model.
-    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'},
-                                   windex=windex)
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
     cmd_dict = {'command': 'AddOrEditSearchEngine',
                 'new_title': title,
                 'new_keyword': keyword,
                 'new_url': url}
-    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+    self._GetResultFromJSONRequest(cmd_dict)
 
-  def EditSearchEngine(self, keyword, new_title, new_keyword, new_url,
-                       windex=0):
+  def EditSearchEngine(self, keyword, new_title, new_keyword, new_url):
     """Edit info for existing search engine.
 
     Args:
@@ -2032,45 +1111,82 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       new_title: new name for this search engine.
       new_keyword: new keyword for this search engine.
       new_url: new url for this search engine.
-      windex: The window index, default is 0.
     """
     # Ensure that the search engine profile is loaded into data model.
-    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'},
-                                   windex=windex)
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
     cmd_dict = {'command': 'AddOrEditSearchEngine',
                 'keyword': keyword,
                 'new_title': new_title,
                 'new_keyword': new_keyword,
                 'new_url': new_url}
-    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+    self._GetResultFromJSONRequest(cmd_dict)
 
-  def DeleteSearchEngine(self, keyword, windex=0):
+  def DeleteSearchEngine(self, keyword):
     """Delete search engine with given keyword.
 
     Args:
       keyword: the keyword string of the search engine to delete.
-      windex: The window index, default is 0.
     """
     # Ensure that the search engine profile is loaded into data model.
-    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'},
-                                   windex=windex)
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
     cmd_dict = {'command': 'PerformActionOnSearchEngine', 'keyword': keyword,
                 'action': 'delete'}
-    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+    self._GetResultFromJSONRequest(cmd_dict)
 
-  def MakeSearchEngineDefault(self, keyword, windex=0):
+  def MakeSearchEngineDefault(self, keyword):
     """Make search engine with given keyword the default search.
 
     Args:
       keyword: the keyword string of the search engine to make default.
-      windex: The window index, default is 0.
     """
     # Ensure that the search engine profile is loaded into data model.
-    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'},
-                                   windex=windex)
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
     cmd_dict = {'command': 'PerformActionOnSearchEngine', 'keyword': keyword,
                 'action': 'default'}
-    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def _EnsureProtectorCheck(self):
+    """Ensure that Protector check for changed settings has been performed in
+    the current browser session.
+
+    No-op if Protector is disabled.
+    """
+    # Ensure that check for default search engine change has been performed.
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
+
+  def GetProtectorState(self):
+    """Returns current Protector state.
+
+    This will trigger Protector's check for changed settings if it hasn't been
+    performed yet.
+
+    Returns:
+      A dictionary.
+      Example:
+        { u'enabled': True,
+          u'showing_change': False }
+    """
+    self._EnsureProtectorCheck()
+    cmd_dict = {'command': 'GetProtectorState'}
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def ApplyProtectorChange(self):
+    """Applies the change shown by Protector and closes the bubble.
+
+    No-op if Protector is not showing any change.
+    """
+    cmd_dict = {'command': 'PerformProtectorAction',
+                'action': 'apply_change'}
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def DiscardProtectorChange(self):
+    """Discards the change shown by Protector and closes the bubble.
+
+    No-op if Protector is not showing any change.
+    """
+    cmd_dict = {'command': 'PerformProtectorAction',
+                'action': 'discard_change'}
+    self._GetResultFromJSONRequest(cmd_dict)
 
   def GetLocalStatePrefsInfo(self):
     """Return info about preferences.
@@ -2083,8 +1199,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       an instance of prefs_info.PrefsInfo
     """
     return prefs_info.PrefsInfo(
-        self._GetResultFromJSONRequest({'command': 'GetLocalStatePrefsInfo'},
-                                       windex=None))
+        self._SendJSONRequest(0,
+                              json.dumps({'command': 'GetLocalStatePrefsInfo'}),
+                              self.action_max_timeout_ms()))
 
   def SetLocalStatePrefs(self, path, value):
     """Set local state preference for the given path.
@@ -2114,28 +1231,27 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'path': path,
       'value': value,
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
-  def GetPrefsInfo(self, windex=0):
+  def GetPrefsInfo(self):
     """Return info about preferences.
 
     This represents a snapshot of the preferences. If you expect preferences
     to have changed, you need to call this method again to get a fresh
     snapshot.
 
-    Args:
-      windex: The window index, default is 0.
     Returns:
       an instance of prefs_info.PrefsInfo
     """
     cmd_dict = {
       'command': 'GetPrefsInfo',
-      'windex': windex,
+      'windex': 0,
     }
     return prefs_info.PrefsInfo(
-        self._GetResultFromJSONRequest(cmd_dict, windex=None))
+        self._SendJSONRequest(-1, json.dumps(cmd_dict),
+                              self.action_max_timeout_ms()))
 
-  def SetPrefs(self, path, value, windex=0):
+  def SetPrefs(self, path, value):
     """Set preference for the given path.
 
     Preferences are stored by Chromium as a hierarchical dictionary.
@@ -2156,15 +1272,14 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
              The user has to ensure that the right value is specified for the
              right key. It's useful to dump the preferences first to determine
              what type is expected for a particular preference path.
-      windex: window index to work on. Defaults to 0 (first window).
     """
     cmd_dict = {
       'command': 'SetPrefs',
-      'windex': windex,
+      'windex': 0,
       'path': path,
       'value': value,
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def SendWebkitKeyEvent(self, key_type, key_code, tab_index=0, windex=0):
     """Send a webkit key event to the browser.
@@ -2188,7 +1303,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'tab_index': tab_index,
     }
     # Sending request for key event.
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def SendWebkitCharEvent(self, char, tab_index=0, windex=0):
     """Send a webkit char to the browser.
@@ -2211,68 +1326,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'tab_index': tab_index,
     }
     # Sending request for a char.
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def SetDownloadShelfVisible(self, is_visible, windex=0):
-    """Set download shelf visibility for the specified browser window.
-
-    Args:
-      is_visible: A boolean indicating the desired shelf visibility.
-      windex: The window index, defaults to 0 (the first window).
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'SetDownloadShelfVisible',
-      'is_visible': is_visible,
-      'windex': windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def IsDownloadShelfVisible(self, windex=0):
-    """Determine whether the download shelf is visible in the given window.
-
-    Args:
-      windex: The window index, defaults to 0 (the first window).
-
-    Returns:
-      A boolean indicating the shelf visibility.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'IsDownloadShelfVisible',
-      'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['is_visible']
-
-  def GetDownloadDirectory(self, tab_index=None, windex=0):
-    """Get the path to the download directory.
-
-    Warning: Depending on the concept of an active tab is dangerous as it can
-    change during the test. Always supply a tab_index explicitly.
-
-    Args:
-      tab_index: The index of the tab to work on. Defaults to the active tab.
-      windex: The index of the browser window to work on. Defaults to 0.
-
-    Returns:
-      The path to the download directory as a FilePath object.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    if tab_index is None:
-      tab_index = self.GetActiveTabIndex(windex)
-    cmd_dict = {
-      'command': 'GetDownloadDirectory',
-      'tab_index': tab_index,
-      'windex': windex,
-    }
-    return FilePath(str(self._GetResultFromJSONRequest(cmd_dict,
-                                                       windex=None)['path']))
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def WaitForAllDownloadsToComplete(self, pre_download_ids=[], windex=0,
                                     timeout=-1):
@@ -2313,10 +1367,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                     after downloading a dangerous download (ex. an executable).
                 'save_dangerous_download': Equivalent to 'Save' option after
                     downloading a dangerous file.
-                'pause': Pause the download.  If the download completed before
-                    this call or is already paused, it's a no-op.
-                'resume': Resume the download.  If the download completed before
-                    this call or was not paused, it's a no-op.
+                'toggle_pause': Toggles the paused state of the download. If the
+                    download completed before this call, it's a no-op.
                 'cancel': Cancel the download.
       window_index: The window index, default is 0.
 
@@ -2334,8 +1386,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         u'is_temporary': False,
         u'open_when_complete': False,
         u'referrer_url': u'',
+        u'safety_state': u'SAFE',
         u'state': u'COMPLETE',
-        u'danger_type': u'DANGEROUS_FILE',
         u'url':  u'file://url/to/file.txt'
       }
     """
@@ -2431,7 +1483,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
               Valid inputs are:
               - "dismiss": closes the infobar (for all infobars)
               - "accept", "cancel": click accept / cancel (for confirm infobars)
-              - "allow", "deny": click allow / deny (for media stream infobars)
       infobar_index: 0-based index of the infobar on which to perform the action
       windex: 0-based window index  Defaults to 0 (first window)
       tab_index: 0-based tab index.  Defaults to 0 (first tab)
@@ -2445,7 +1496,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'infobar_index': infobar_index,
       'tab_index': tab_index,
     }
-    if action not in ('dismiss', 'accept', 'allow', 'deny', 'cancel'):
+    if action not in ('dismiss', 'accept', 'cancel'):
       raise JSONInterfaceError('Invalid action %s' % action)
     self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
@@ -2536,7 +1587,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     cmd_dict = {  # Prepare command for the json interface
       'command': 'GetBrowserInfo',
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def IsAura(self):
     """Is this Aura?"""
@@ -2599,7 +1650,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     cmd_dict = {  # Prepare command for the json interface.
       'command': 'GetProcessInfo',
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def GetNavigationInfo(self, tab_index=0, windex=0):
     """Get info about the navigation state of a given tab.
@@ -2635,29 +1686,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
-  def GetSecurityState(self, tab_index=0, windex=0):
-    """Get security details for a given tab.
-
-    Args:
-      tab_index: The tab index, default is 0.
-      window_index: The window index, default is 0.
-
-    Returns:
-      a dictionary.
-      Sample:
-      { "security_style": SECURITY_STYLE_AUTHENTICATED,
-        "ssl_cert_status": 3,  // bitmask of status flags
-        "insecure_content_status": 1,  // bitmask of status flags
-      }
-    """
-    cmd_dict = {  # Prepare command for the json interface
-      'command': 'GetSecurityState',
-      'tab_index': tab_index,
-      'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def GetHistoryInfo(self, search_text='', windex=0):
+  def GetHistoryInfo(self, search_text=''):
     """Return info about browsing history.
 
     Args:
@@ -2668,7 +1697,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                    When non-empty, the history items returned will contain a
                    "snippet" field corresponding to the snippet visible in
                    the chrome://history/ UI.
-      windex: index of the browser window, defaults to 0.
 
     Returns:
       an instance of history_info.HistoryInfo
@@ -2678,10 +1706,106 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'search_text': search_text,
     }
     return history_info.HistoryInfo(
-        self._GetResultFromJSONRequest(cmd_dict, windex=windex))
+        self._SendJSONRequest(0, json.dumps(cmd_dict),
+                              self.action_max_timeout_ms()))
 
-  def InstallExtension(self, extension_path, with_ui=False, from_webstore=None,
-                       windex=0, tab_index=0):
+  def GetTranslateInfo(self, tab_index=0, window_index=0):
+    """Returns info about translate for the given page.
+
+    If the translate bar is showing, also returns information about the bar.
+
+    Args:
+      tab_index: The tab index, default is 0.
+      window_index: The window index, default is 0.
+
+    Returns:
+      A dictionary of information about translate for the page. Example:
+      { u'always_translate_lang_button_showing': False,
+        u'never_translate_lang_button_showing': False,
+        u'can_translate_page': True,
+        u'original_language': u'es',
+        u'page_translated': False,
+        # The below will only appear if the translate bar is showing.
+        u'translate_bar': { u'bar_state': u'BEFORE_TRANSLATE',
+                            u'original_lang_code': u'es',
+                            u'target_lang_code': u'en'}}
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'GetTranslateInfo',
+      'tab_index': tab_index
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
+
+  def ClickTranslateBarTranslate(self, tab_index=0, window_index=0):
+    """If the translate bar is showing, clicks the 'Translate' button on the
+       bar. This will show the 'this page has been translated...' infobar.
+
+    Args:
+      tab_index: The index of the tab, default is 0.
+      window_index: The index of the window, default is 0.
+
+    Returns:
+      True if the translation was successful or false if there was an error.
+      Note that an error shouldn't neccessarily mean a failed test - retry the
+      call on error.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'SelectTranslateOption',
+      'tab_index': tab_index,
+      'option': 'translate_page'
+    }
+    return self._GetResultFromJSONRequest(
+        cmd_dict, windex=window_index)['translation_success']
+
+  def RevertPageTranslation(self, tab_index=0, window_index=0):
+    """Select the 'Show original' button on  the 'this page has been
+       translated...' infobar. This will remove the infobar and revert the
+       page translation.
+
+    Args:
+      tab_index: The index of the tab, default is 0.
+      window_index: The index of the window, default is 0.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'SelectTranslateOption',
+      'tab_index': tab_index,
+      'option': 'revert_translation'
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
+
+  def ChangeTranslateToLanguage(self, new_language, tab_index=0,
+                                window_index=0):
+    """Set the target language to be a new language.
+
+    This is equivalent to selecting a different language from the 'to'
+    drop-down menu on the translate bar. If the page was already translated
+    before calling this function, this will trigger a re-translate to the
+    new language.
+
+    Args:
+      new_language: The new target language. The string should be equivalent
+                    to the text seen in the translate bar options.
+                    Example: 'English'.
+      tab_index: The tab index - default is 0.
+      window_index: The window index - default is 0.
+
+    Returns:
+      False, if a new translation was triggered and the translation failed.
+      True on success.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'SelectTranslateOption',
+      'tab_index': tab_index,
+      'option': 'set_target_language',
+      'target_language': new_language
+    }
+    return self._GetResultFromJSONRequest(
+        cmd_dict, windex=window_index)['translation_success']
+
+  def InstallExtension(self, extension_path, with_ui=False):
     """Installs an extension from the given path.
 
     The path must be absolute and may be a crx file or an unpacked extension
@@ -2692,11 +1816,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       extension_path: The absolute path to the extension to install. If the
                       extension is packed, it must have a .crx extension.
       with_ui: Whether the extension install confirmation UI should be shown.
-      from_webstore: If True, forces a .crx extension to be recognized as one
-          from the webstore. Can be used to force install an extension with
-          'experimental' permissions.
-      windex: Integer index of the browser window to use; defaults to 0
-              (first window).
 
     Returns:
       The ID of the installed extension.
@@ -2707,21 +1826,12 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     cmd_dict = {
         'command': 'InstallExtension',
         'path': extension_path,
-        'with_ui': with_ui,
-        'windex': windex,
-        'tab_index': tab_index,
+        'with_ui': with_ui
     }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)['id']
 
-    if from_webstore:
-      cmd_dict['from_webstore'] = True
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['id']
-
-  def GetExtensionsInfo(self, windex=0):
+  def GetExtensionsInfo(self):
     """Returns information about all installed extensions.
-
-    Args:
-      windex: Integer index of the browser window to use; defaults to 0
-              (first window).
 
     Returns:
       A list of dictionaries representing each of the installed extensions.
@@ -2760,18 +1870,15 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
           u'allowed_in_incognito': True} ]
     """
     cmd_dict = {  # Prepare command for the json interface
-      'command': 'GetExtensionsInfo',
-      'windex': windex,
+      'command': 'GetExtensionsInfo'
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['extensions']
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)['extensions']
 
-  def UninstallExtensionById(self, id, windex=0):
+  def UninstallExtensionById(self, id):
     """Uninstall the extension with the given id.
 
     Args:
       id: The string id of the extension.
-      windex: Integer index of the browser window to use; defaults to 0
-              (first window).
 
     Returns:
       True, if the extension was successfully uninstalled, or
@@ -2780,28 +1887,24 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     cmd_dict = {  # Prepare command for the json interface
       'command': 'UninstallExtensionById',
       'id': id,
-      'windex': windex,
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['success']
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)['success']
 
-  def SetExtensionStateById(self, id, enable, allow_in_incognito, windex=0):
+  def SetExtensionStateById(self, id, enable, allow_in_incognito):
     """Set extension state: enable/disable, allow/disallow in incognito mode.
 
     Args:
       id: The string id of the extension.
       enable: A boolean, enable extension.
       allow_in_incognito: A boolean, allow extension in incognito.
-      windex: Integer index of the browser window to use; defaults to 0
-              (first window).
     """
     cmd_dict = {  # Prepare command for the json interface
       'command': 'SetExtensionStateById',
       'id': id,
       'enable': enable,
       'allow_in_incognito': allow_in_incognito,
-      'windex': windex,
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def TriggerPageActionById(self, id, tab_index=0, windex=0):
     """Trigger page action asynchronously in the active tab.
@@ -2820,7 +1923,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'windex': windex,
       'tab_index': tab_index,
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def TriggerBrowserActionById(self, id, tab_index=0, windex=0):
     """Trigger browser action asynchronously in the active tab.
@@ -2837,27 +1940,22 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'windex': windex,
       'tab_index': tab_index,
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
-  def UpdateExtensionsNow(self, windex=0):
+  def UpdateExtensionsNow(self):
     """Auto-updates installed extensions.
 
     Waits until all extensions are updated, loaded, and ready for use.
     This is equivalent to clicking the "Update extensions now" button on the
     chrome://extensions page.
 
-    Args:
-      windex: Integer index of the browser window to use; defaults to 0
-              (first window).
-
     Raises:
       pyauto_errors.JSONInterfaceError if the automation returns an error.
     """
     cmd_dict = {  # Prepare command for the json interface.
       'command': 'UpdateExtensionsNow',
-      'windex': windex,
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def WaitUntilExtensionViewLoaded(self, name=None, extension_id=None,
                                    url=None, view_type=None):
@@ -2922,7 +2020,328 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
 
     return self.WaitUntil(lambda: _IsExtensionViewClosed())
 
-  def GetPluginsInfo(self, windex=0):
+  def SelectTranslateOption(self, option, tab_index=0, window_index=0):
+    """Selects one of the options in the drop-down menu for the translate bar.
+
+    Args:
+      option: One of 'never_translate_language', 'never_translate_site', or
+              'toggle_always_translate'. See notes on each below.
+      tab_index: The index of the tab, default is 0.
+      window_index: The index of the window, default is 0.
+
+    *Notes*
+    never_translate_language: Selecting this means that no sites in this
+      language will be translated. This dismisses the infobar.
+    never_translate_site: Selecting this means that this site will never be
+      translated, regardless of the language. This dismisses the infobar.
+    toggle_always_translate: This does not dismiss the infobar or translate the
+      page. See ClickTranslateBarTranslate and PerformActioOnInfobar to do
+      those. If a language is selected to be always translated, then whenver
+      the user visits a page with that language, the infobar will show the
+      'This page has been translated...' message.
+    decline_translation: Equivalent to selecting 'Nope' on the translate bar.
+    click_never_translate_lang_button: This button appears when the user has
+      declined translation of this language several times. Selecting it causes
+      the language to never be translated. Look at GetTranslateInfo to
+      determine if the button is showing.
+    click_always_translate_lang_button: This button appears when the user has
+      accepted translation of this language several times. Selecting it causes
+      the language to always be translated. Look at GetTranslateInfo to
+      determine if the button is showing.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'SelectTranslateOption',
+      'option': option,
+      'tab_index': tab_index
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
+
+  def WaitUntilTranslateComplete(self, tab_index=0, window_index=0):
+    """Waits until an attempted translation has finished.
+
+    This should be called after navigating to a page that should be translated
+    automatically (because the language always-translate is on). It does not
+    need to be called after 'ClickTranslateBarTranslate'.
+
+    Do not call this function if you are not expecting a page translation - it
+    will hang. If you call it when there is no translate bar, it will return
+    False.
+
+    Args:
+      tab_index: The tab index, default is 0.
+      window_index: The window index, default is 0.
+
+    Returns:
+      True if the translation was successful, False if there was an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'WaitUntilTranslateComplete',
+      'tab_index': tab_index
+    }
+    # TODO(phajdan.jr): We need a solid automation infrastructure to handle
+    # these cases. See crbug.com/53647.
+    return self.WaitUntil(
+        lambda tab_index, window_index: self.GetTranslateInfo(
+            tab_index=tab_index, window_index=window_index)['page_translated'],
+        args=[tab_index, window_index])
+
+  def FillAutofillProfile(self, profiles=None, credit_cards=None,
+                          tab_index=0, window_index=0):
+    """Set the autofill profile to contain the given profiles and credit cards.
+
+    If profiles or credit_cards are specified, they will overwrite existing
+    profiles and credit cards. To update profiles and credit cards, get the
+    existing ones with the GetAutofillProfile function and then append new
+    profiles to the list and call this function.
+
+    Autofill profiles (not credit cards) support multiple values for some of the
+    fields. To account for this, all values in a profile must be specified as
+    a list of strings. If a form field only has a single value associated with
+    it, that value must still be specified as a list containing a single string.
+
+    Args:
+      profiles: (optional) a list of dictionaries representing each profile to
+      add. Example:
+      [{
+        'NAME_FIRST': ['Bob',],
+        'NAME_LAST': ['Smith',],
+        'ADDRESS_HOME_ZIP': ['94043',],
+      },
+      {
+        'EMAIL_ADDRESS': ['sue@example.com',],
+        'COMPANY_NAME': ['Company X',],
+      }]
+
+      Other possible keys are:
+      'NAME_FIRST', 'NAME_MIDDLE', 'NAME_LAST', 'EMAIL_ADDRESS',
+      'COMPANY_NAME', 'ADDRESS_HOME_LINE1', 'ADDRESS_HOME_LINE2',
+      'ADDRESS_HOME_CITY', 'ADDRESS_HOME_STATE', 'ADDRESS_HOME_ZIP',
+      'ADDRESS_HOME_COUNTRY', 'PHONE_HOME_WHOLE_NUMBER'
+
+      credit_cards: (optional) a list of dictionaries representing each credit
+      card to add. Example:
+      [{
+        'CREDIT_CARD_NAME': 'Bob C. Smith',
+        'CREDIT_CARD_NUMBER': '5555555555554444',
+        'CREDIT_CARD_EXP_MONTH': '12',
+        'CREDIT_CARD_EXP_4_DIGIT_YEAR': '2011'
+      },
+      {
+        'CREDIT_CARD_NAME': 'Bob C. Smith',
+        'CREDIT_CARD_NUMBER': '4111111111111111',
+        'CREDIT_CARD_TYPE': 'Visa'
+      }
+
+      Other possible keys are:
+      'CREDIT_CARD_NAME', 'CREDIT_CARD_NUMBER', 'CREDIT_CARD_EXP_MONTH',
+      'CREDIT_CARD_EXP_4_DIGIT_YEAR'
+
+      All values must be strings.
+
+      tab_index: tab index, defaults to 0.
+
+      window_index: window index, defaults to 0.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'FillAutofillProfile',
+      'tab_index': tab_index,
+      'profiles': profiles,
+      'credit_cards': credit_cards
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
+
+  def GetAutofillProfile(self, tab_index=0, window_index=0):
+    """Returns all autofill profile and credit card information.
+
+    The format of the returned dictionary is described above in
+    FillAutofillProfile. The general format is:
+    {'profiles': [list of profile dictionaries as described above],
+     'credit_cards': [list of credit card dictionaries as described above]}
+
+    Args:
+       tab_index: tab index, defaults to 0.
+       window_index: window index, defaults to 0.
+
+    Raises:
+       pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'GetAutofillProfile',
+      'tab_index': tab_index
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
+
+  def SubmitAutofillForm(self, js, frame_xpath='', tab_index=0, windex=0):
+    """Submits a webpage autofill form and waits for autofill to be updated.
+
+    This function should be called when submitting autofill profiles via
+    webpage forms.  It waits until the autofill data has been updated internally
+    before returning.
+
+    Args:
+      js: The string Javascript code that can be injected into the given webpage
+          to submit an autofill form.  This Javascript MUST submit the form.
+      frame_xpath: The string xpath for the frame in which to inject javascript.
+      tab_index: Integer index of the tab to work on; defaults to 0 (first tab).
+      windex: Integer index of the browser window to use; defaults to 0
+              (first window).
+    """
+    cmd_dict = {  # Prepare command for the json interface.
+      'command': 'SubmitAutofillForm',
+      'javascript': js,
+      'frame_xpath': frame_xpath,
+      'tab_index': tab_index,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def AutofillTriggerSuggestions(self, field_id=None, tab_index=0, windex=0):
+    """Focuses a webpage form field and triggers the autofill popup in it.
+
+    This function focuses the specified input field in a webpage form, then
+    causes the autofill popup to appear in that field.  The underlying
+    automation hook sends a "down arrow" keypress event to trigger the autofill
+    popup.  This function waits until the popup is displayed before returning.
+
+    Args:
+      field_id: The string ID of the webpage form field to focus.  Can be
+                'None' (the default), in which case nothing is focused.  This
+                can be useful if the field has already been focused by other
+                means.
+      tab_index: Integer index of the tab to work on; defaults to 0 (first tab).
+      windex: Integer index of the browser window to work on; defaults to 0
+              (first window).
+
+    Returns:
+      True, if no errors were encountered, or False otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    # Focus the field with the specified ID, if necessary.
+    if field_id:
+      if not self.JavascriptFocusElementById(field_id, tab_index, windex):
+        return False
+
+    # Cause the autofill popup to be shown in the focused form field.
+    cmd_dict = {
+      'command': 'AutofillTriggerSuggestions',
+      'tab_index': tab_index,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+    return True
+
+  def AutofillHighlightSuggestion(self, direction, tab_index=0, windex=0):
+    """Highlights the previous or next suggestion in an existing autofill popup.
+
+    This function assumes that an existing autofill popup is currently displayed
+    in a webpage form.  The underlying automation hook sends either a
+    "down arrow" or an "up arrow" keypress event to cause the next or previous
+    suggestion to be highlighted, respectively.  This function waits until
+    autofill displays a preview of the form's filled state before returning.
+
+    Use AutofillTriggerSuggestions() to trigger the autofill popup before
+    calling this function.  Use AutofillAcceptSelection() after calling this
+    function to accept a selection.
+
+    Args:
+      direction: The string direction in which to highlight an autofill
+                 suggestion.  Must be either "up" or "down".
+      tab_index: Integer index of the tab to work on; defaults to 0 (first tab).
+      windex: Integer index of the browser window to work on; defaults to 0
+              (first window).
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    assert direction in ('up', 'down')
+    cmd_dict = {
+      'command': 'AutofillHighlightSuggestion',
+      'direction': direction,
+      'tab_index': tab_index,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def AutofillAcceptSelection(self, tab_index=0, windex=0):
+    """Accepts the current selection in an already-displayed autofill popup.
+
+    This function assumes that a profile is already highlighted in an existing
+    autofill popup in a webpage form.  The underlying automation hook sends a
+    "return" keypress event to cause the highlighted profile to be accepted.
+    This function waits for the webpage form to be filled in with autofill data
+    before returning.  This function does not submit the webpage form.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'AutofillAcceptSelection',
+      'tab_index': tab_index,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def AutofillPopulateForm(self, field_id, profile_index=0, tab_index=0,
+                           windex=0):
+    """Populates a webpage form using autofill data and keypress events.
+
+    This function focuses the specified input field in the form, and then
+    sends keypress events to the associated tab to cause the form to be
+    populated with information from the requested autofill profile.
+
+    Args:
+      field_id: The string ID of the webpage form field to focus for autofill
+                purposes.
+      profile_index: The index of the profile in the autofill popup to use to
+                     populate the form; defaults to 0 (first profile).
+      tab_index: Integer index of the tab to work on; defaults to 0 (first tab).
+      windex: Integer index of the browser window to work on; defaults to 0
+              (first window).
+
+    Returns:
+      True, if the webpage form is populated successfully, or False if not.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if an automation call returns an error.
+    """
+    if not self.AutofillTriggerSuggestions(field_id, tab_index, windex):
+      return False
+
+    for _ in range(profile_index + 1):
+      self.AutofillHighlightSuggestion('down', tab_index, windex)
+
+    self.AutofillAcceptSelection(tab_index, windex)
+    return True
+
+  def AddHistoryItem(self, item):
+    """Forge a history item for Chrome.
+
+    Args:
+      item: a python dictionary representing the history item.  Example:
+      {
+        # URL is the only mandatory item.
+        'url': 'http://news.google.com',
+        # Title is optional.
+        'title': 'Google News',
+        # Time is optional; if not set, assume "now".  Time is in
+        # seconds since the Epoch.  The python construct to get "Now"
+        # in the right scale is "time.time()".  Can be float or int.
+        'time': 1271781612
+      }
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'AddHistoryItem',
+      'item': item
+    }
+    if not 'url' in item:
+      raise JSONInterfaceError('must specify url')
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def GetPluginsInfo(self):
     """Return info about plugins.
 
     This is the info available from about:plugins
@@ -2931,8 +2350,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       an instance of plugins_info.PluginsInfo
     """
     return plugins_info.PluginsInfo(
-        self._GetResultFromJSONRequest({'command': 'GetPluginsInfo'},
-                                       windex=windex))
+        self._SendJSONRequest(0, json.dumps({'command': 'GetPluginsInfo'}),
+                              self.action_max_timeout_ms()))
 
   def EnablePlugin(self, path):
     """Enable the plugin at the given path.
@@ -2975,8 +2394,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       html content of a page as a string.
     """
     tempdir = tempfile.mkdtemp()
-    # Make it writable by chronos on chromeos
-    os.chmod(tempdir, 0777)
     filename = os.path.join(tempdir, 'content.html')
     cmd_dict = {  # Prepare command for the json interface
       'command': 'SaveTabContents',
@@ -2991,6 +2408,60 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       return all_data
     finally:
       shutil.rmtree(tempdir, ignore_errors=True)
+
+  def ImportSettings(self, import_from, first_run, import_items):
+    """Import the specified import items from the specified browser.
+
+    Implements the features available in the "Import Settings" part of the
+    first-run UI dialog.
+
+    Args:
+      import_from: A string indicating which browser to import from. Possible
+                   strings (depending on which browsers are installed on the
+                   machine) are: 'Mozilla Firefox', 'Google Toolbar',
+                   'Microsoft Internet Explorer', 'Safari'
+      first_run: A boolean indicating whether this is the first run of
+                 the browser.
+                 If it is not the first run then:
+                 1) Bookmarks are only imported to the bookmarks bar if there
+                    aren't already bookmarks.
+                 2) The bookmark bar is shown.
+      import_items: A list of strings indicating which items to import.
+                    Strings that can be in the list are:
+                    HISTORY, FAVORITES, PASSWORDS, SEARCH_ENGINES, HOME_PAGE,
+                    ALL (note: COOKIES is not supported by the browser yet)
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'ImportSettings',
+      'import_from': import_from,
+      'first_run': first_run,
+      'import_items': import_items
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def ClearBrowsingData(self, to_remove, time_period):
+    """Clear the specified browsing data. Implements the features available in
+       the "ClearBrowsingData" UI.
+
+    Args:
+      to_remove: a list of strings indicating which types of browsing data
+                 should be removed. Strings that can be in the list are:
+                 HISTORY, DOWNLOADS, COOKIES, PASSWORDS, FORM_DATA, CACHE
+      time_period: a string indicating the time period for the removal.
+                   Possible strings are:
+                   LAST_HOUR, LAST_DAY, LAST_WEEK, FOUR_WEEKS, EVERYTHING
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'ClearBrowsingData',
+      'to_remove': to_remove,
+      'time_period': time_period
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
 
   def AddSavedPassword(self, password_dict, windex=0):
     """Adds the given username-password combination to the saved passwords.
@@ -3056,7 +2527,38 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict)['passwords']
 
-  def SetTheme(self, crx_file_path, windex=0):
+  def GetBlockedPopupsInfo(self, tab_index=0, windex=0):
+    """Get info about blocked popups in a tab.
+
+    Args:
+      tab_index: 0-based tab index. Default: 0
+      windex: 0-based window index. Default: 0
+
+    Returns:
+      [a list of property dictionaries for each blocked popup]
+      Property dictionary contains: title, url
+    """
+    cmd_dict = {
+      'command': 'GetBlockedPopupsInfo',
+      'tab_index': tab_index,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict,
+                                          windex=windex)['blocked_popups']
+
+  def UnblockAndLaunchBlockedPopup(self, popup_index, tab_index=0, windex=0):
+    """Unblock/launch a poup at the given index.
+
+    This is equivalent to clicking on a blocked popup in the UI available
+    from the omnibox.
+    """
+    cmd_dict = {
+      'command': 'UnblockAndLaunchBlockedPopup',
+      'popup_index': popup_index,
+      'tab_index': tab_index,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def SetTheme(self, crx_file_path):
     """Installs the given theme synchronously.
 
     A theme file is a file with a .crx suffix, like an extension.  The theme
@@ -3072,7 +2574,65 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    return self.InstallExtension(crx_file_path, True, windex)
+    return self.InstallExtension(crx_file_path, True)
+
+  def WaitUntilDownloadedThemeSet(self, theme_name):
+    """Waits until the theme has been set.
+
+    This should not be called after SetTheme(). It only needs to be called after
+    downloading a theme file (which will automatically set the theme).
+
+    Uses WaitUntil so timeout is capped by automation timeout.
+
+    Args:
+      theme_name: The name that the theme will have once it is installed.
+    """
+    def _ReturnThemeSet(name):
+      theme_info = self.GetThemeInfo()
+      return theme_info and theme_info['name'] == name
+    return self.WaitUntil(_ReturnThemeSet, args=[theme_name])
+
+  def ClearTheme(self):
+    """Clear the theme.  Resets to default.
+
+    Has no effect when the theme is already the default one.
+    This is a blocking call.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'ClearTheme',
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def GetThemeInfo(self):
+    """Get info about theme.
+
+    This includes info about the theme name, its colors, images, etc.
+
+    Returns:
+      a dictionary containing info about the theme.
+      empty dictionary if no theme has been applied (default theme).
+    SAMPLE:
+    { u'colors': { u'frame': [71, 105, 91],
+                   u'ntp_link': [36, 70, 0],
+                   u'ntp_section': [207, 221, 192],
+                   u'ntp_text': [20, 40, 0],
+                   u'toolbar': [207, 221, 192]},
+      u'images': { u'theme_frame': u'images/theme_frame_camo.png',
+                   u'theme_ntp_background': u'images/theme_ntp_background.png',
+                   u'theme_toolbar': u'images/theme_toolbar_camo.png'},
+      u'name': u'camo theme',
+      u'tints': {u'buttons': [0.33000000000000002, 0.5, 0.46999999999999997]}}
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'GetThemeInfo',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
 
   def GetActiveNotifications(self):
     """Gets a list of the currently active/shown HTML5 notifications.
@@ -3199,259 +2759,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     return self._GetResultFromJSONRequest(cmd_dict, windex=windex,
                                           timeout=timeout)
 
-  def OpenFindInPage(self, windex=0):
-    """Opens the "Find in Page" box.
-
-    Args:
-      windex: Index of the window; defaults to 0.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'OpenFindInPage',
-      'windex' : windex,
-    }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def IsFindInPageVisible(self, windex=0):
-    """Returns the visibility of the "Find in Page" box.
-
-    Args:
-      windex: Index of the window; defaults to 0.
-
-    Returns:
-      A boolean indicating the visibility state of the "Find in Page" box.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'IsFindInPageVisible',
-      'windex' : windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['is_visible']
-
-
-  def AddDomEventObserver(self, event_name='', automation_id=-1,
-                          recurring=False):
-    """Adds a DomEventObserver associated with the AutomationEventQueue.
-
-    An app raises a matching event in Javascript by calling:
-    window.domAutomationController.sendWithId(automation_id, event_name)
-
-    Args:
-      event_name: The event name to watch for. By default an event is raised
-                  for any message.
-      automation_id: The Automation Id of the sent message. By default all
-                     messages sent from the window.domAutomationController are
-                     observed. Note that other PyAuto functions also send
-                     messages through window.domAutomationController with
-                     arbirary Automation Ids and they will be observed.
-      recurring: If False the observer will be removed after it generates one
-                 event, otherwise it will continue observing and generating
-                 events until explicity removed with RemoveEventObserver(id).
-
-    Returns:
-      The id of the created observer, which can be used with GetNextEvent(id)
-      and RemoveEventObserver(id).
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'AddDomEventObserver',
-      'event_name': event_name,
-      'automation_id': automation_id,
-      'recurring': recurring,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['observer_id']
-
-  def AddDomMutationObserver(self, mutation_type, xpath,
-                             attribute='textContent', expected_value=None,
-                             automation_id=44444,
-                             exec_js=None, **kwargs):
-    """Sets up an event observer watching for a specific DOM mutation.
-
-    Creates an observer that raises an event when a mutation of the given type
-    occurs on a DOM node specified by |selector|.
-
-    Args:
-      mutation_type: One of 'add', 'remove', 'change', or 'exists'.
-      xpath: An xpath specifying the DOM node to watch. The node must already
-          exist if |mutation_type| is 'change'.
-      attribute: Attribute to match |expected_value| against, if given. Defaults
-          to 'textContent'.
-      expected_value: Optional regular expression to match against the node's
-          textContent attribute after the mutation. Defaults to None.
-      automation_id: The automation_id used to route the observer javascript
-          messages. Defaults to 44444.
-      exec_js: A callable of the form f(self, js, **kwargs) used to inject the
-          MutationObserver javascript. Defaults to None, which uses
-          PyUITest.ExecuteJavascript.
-
-      Any additional keyword arguments are passed on to ExecuteJavascript and
-      can be used to select the tab where the DOM MutationObserver is created.
-
-    Returns:
-      The id of the created observer, which can be used with GetNextEvent(id)
-      and RemoveEventObserver(id).
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-      pyauto_errors.JavascriptRuntimeError if the injected javascript
-          MutationObserver returns an error.
-    """
-    assert mutation_type in ('add', 'remove', 'change', 'exists'), \
-        'Unexpected value "%s" for mutation_type.' % mutation_type
-    cmd_dict = {
-      'command': 'AddDomEventObserver',
-      'event_name': '__dom_mutation_observer__:$(id)',
-      'automation_id': automation_id,
-      'recurring': False,
-    }
-    observer_id = (
-        self._GetResultFromJSONRequest(cmd_dict, windex=None)['observer_id'])
-    expected_string = ('null' if expected_value is None else '"%s"' %
-                       expected_value.replace('"', r'\"'))
-    jsfile = os.path.join(os.path.abspath(os.path.dirname(__file__)),
-                          'dom_mutation_observer.js')
-    with open(jsfile, 'r') as f:
-      js = ('(' + f.read() + ')(%d, %d, "%s", "%s", "%s", %s);' %
-            (automation_id, observer_id, mutation_type,
-             xpath.replace('"', r'\"'), attribute, expected_string))
-    exec_js = exec_js or PyUITest.ExecuteJavascript
-    try:
-      jsreturn = exec_js(self, js, **kwargs)
-    except JSONInterfaceError:
-      raise JSONInterfaceError('Failed to inject DOM mutation observer.')
-    if jsreturn != 'success':
-      self.RemoveEventObserver(observer_id)
-      raise JavascriptRuntimeError(jsreturn)
-    return observer_id
-
-  def WaitForDomNode(self, xpath, attribute='textContent',
-                     expected_value=None, exec_js=None, timeout=-1,
-                     msg='Expected DOM node failed to appear.', **kwargs):
-    """Waits until a node specified by an xpath exists in the DOM.
-
-    NOTE: This does NOT poll. It returns as soon as the node appears, or
-      immediately if the node already exists.
-
-    Args:
-      xpath: An xpath specifying the DOM node to watch.
-      attribute: Attribute to match |expected_value| against, if given. Defaults
-          to 'textContent'.
-      expected_value: Optional regular expression to match against the node's
-          textContent attribute. Defaults to None.
-      exec_js: A callable of the form f(self, js, **kwargs) used to inject the
-          MutationObserver javascript. Defaults to None, which uses
-          PyUITest.ExecuteJavascript.
-      msg: An optional error message used if a JSONInterfaceError is caught
-          while waiting for the DOM node to appear.
-      timeout: Time to wait for the node to exist before raising an exception,
-          defaults to the default automation timeout.
-
-      Any additional keyword arguments are passed on to ExecuteJavascript and
-      can be used to select the tab where the DOM MutationObserver is created.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-      pyauto_errors.JavascriptRuntimeError if the injected javascript
-          MutationObserver returns an error.
-    """
-    observer_id = self.AddDomMutationObserver('exists', xpath, attribute,
-                                              expected_value, exec_js=exec_js,
-                                              **kwargs)
-    try:
-      self.GetNextEvent(observer_id, timeout=timeout)
-    except JSONInterfaceError:
-      raise JSONInterfaceError(msg)
-
-  def GetNextEvent(self, observer_id=-1, blocking=True, timeout=-1):
-    """Waits for an observed event to occur.
-
-    The returned event is removed from the Event Queue. If there is already a
-    matching event in the queue it is returned immediately, otherwise the call
-    blocks until a matching event occurs. If blocking is disabled and no
-    matching event is in the queue this function will immediately return None.
-
-    Args:
-      observer_id: The id of the observer to wait for, matches any event by
-                   default.
-      blocking: If True waits until there is a matching event in the queue,
-                if False and there is no event waiting in the queue returns None
-                immediately.
-      timeout: Time to wait for a matching event, defaults to the default
-               automation timeout.
-
-    Returns:
-      Event response dictionary, or None if blocking is disabled and there is no
-      matching event in the queue.
-      SAMPLE:
-      { 'observer_id': 1,
-        'name': 'login completed',
-        'type': 'raised_event'}
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'GetNextEvent',
-      'observer_id' : observer_id,
-      'blocking' : blocking,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None,
-                                          timeout=timeout)
-
-  def RemoveEventObserver(self, observer_id):
-    """Removes an Event Observer from the AutomationEventQueue.
-
-    Expects a valid observer_id.
-
-    Args:
-      observer_id: The id of the observer to remove.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'RemoveEventObserver',
-      'observer_id' : observer_id,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def ClearEventQueue(self):
-    """Removes all events currently in the AutomationEventQueue.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'ClearEventQueue',
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def WaitUntilNavigationCompletes(self, tab_index=0, windex=0):
-    """Wait until the specified tab is done navigating.
-
-    It is safe to call ExecuteJavascript() as soon as the call returns. If
-    there is no outstanding navigation the call will return immediately.
-
-    Args:
-      tab_index: index of the tab.
-      windex: index of the window.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'WaitUntilNavigationCompletes',
-      'tab_index': tab_index,
-      'windex': windex,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict)
-
   def ExecuteJavascript(self, js, tab_index=0, windex=0, frame_xpath=''):
     """Executes a script in the specified frame of a tab.
 
@@ -3517,43 +2824,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'view' : view,
       'frame_xpath' : frame_xpath,
     }
-    result = self._GetResultFromJSONRequest(cmd_dict, windex=None)['result']
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1)['result']
     # Wrap result in an array before deserializing because valid JSON has an
     # array or an object as the root.
     json_string = '[' + result + ']'
     return json.loads(json_string)[0]
-
-  def ExecuteJavascriptInOOBEWebUI(self, js, frame_xpath=''):
-    """Executes a script in the specified frame of the OOBE WebUI.
-
-    By default, execute the script in the top frame of the OOBE window. This
-    also works for all OOBE pages, including the enterprise enrollment
-    screen and login page. The invoked javascript function must send a result
-    back via the domAutomationController.send function, or this function will
-    never return.
-
-    Args:
-      js: Script to be executed.
-      frame_xpath: XPath of the frame to execute the script. Default is no
-          frame. Example: '//frames[1]'
-
-    Returns:
-      A value that was sent back via the domAutomationController.send method.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {
-      'command': 'ExecuteJavascriptInOOBEWebUI',
-
-      'javascript': js,
-      'frame_xpath': frame_xpath,
-    }
-    result = self._GetResultFromJSONRequest(cmd_dict, windex=None)['result']
-    # Wrap result in an array before deserializing because valid JSON has an
-    # array or an object as the root.
-    return json.loads('[' + result + ']')[0]
-
 
   def GetDOMValue(self, expr, tab_index=0, windex=0, frame_xpath=''):
     """Executes a Javascript expression and returns the value.
@@ -3597,57 +2872,175 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     logging.debug('Executing javascript: %s', js)
     return self.ExecuteJavascript(js, tab_index, windex)
 
-  def HeapProfilerDump(self, process_type, reason, tab_index=0, windex=0):
-    """Dumps a heap profile. It works only on Linux and ChromeOS.
-
-    We need an environment variable "HEAPPROFILE" set to a directory and a
-    filename prefix, for example, "/tmp/prof".  In a case of this example,
-    heap profiles will be dumped into "/tmp/prof.(pid).0002.heap",
-    "/tmp/prof.(pid).0003.heap", and so on.  Nothing happens when this
-    function is called without the env.
-
-    Also, this requires the --enable-memory-benchmarking command line flag.
+  def JavascriptFocusElementById(self, field_id, tab_index=0, windex=0):
+    """Uses Javascript to focus an element with the given ID in a webpage.
 
     Args:
-      process_type: A string which is one of 'browser' or 'renderer'.
-      reason: A string which describes the reason for dumping a heap profile.
-              The reason will be included in the logged message.
-              Examples:
-                'To check memory leaking'
-                'For PyAuto tests'
-      tab_index: tab index to work on if 'process_type' == 'renderer'.
-          Defaults to 0 (first tab).
-      windex: window index to work on if 'process_type' == 'renderer'.
-          Defaults to 0 (first window).
+      field_id: The string ID of the webpage form field to focus.
+      tab_index: Integer index of the tab to work on; defaults to 0 (first tab).
+      windex: Integer index of the browser window to work on; defaults to 0
+              (first window).
+
+    Returns:
+      True, on success, or False on failure.
+    """
+    focus_field_js = """
+        var field = document.getElementById("%s");
+        if (!field) {
+          window.domAutomationController.send("error");
+        } else {
+          field.focus();
+          window.domAutomationController.send("done");
+        }
+    """ % field_id
+    return self.ExecuteJavascript(focus_field_js, tab_index, windex) == 'done'
+
+  def SignInToSync(self, username, password):
+    """Signs in to sync using the given username and password.
+
+    Args:
+      username: The account with which to sign in. Example: "user@gmail.com".
+      password: Password for the above account. Example: "pa$$w0rd".
+
+    Returns:
+      True, on success.
 
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    assert process_type in ('browser', 'renderer')
-    if self.IsLinux():  # IsLinux() also implies IsChromeOS().
-      js = """
-          if (!chrome.memoryBenchmarking ||
-              !chrome.memoryBenchmarking.isHeapProfilerRunning()) {
-            domAutomationController.send('memory benchmarking disabled');
-          } else {
-            chrome.memoryBenchmarking.heapProfilerDump("%s", "%s");
-            domAutomationController.send('success');
-          }
-      """ % (process_type, reason.replace('"', '\\"'))
-      result = self.ExecuteJavascript(js, tab_index, windex)
-      if result != 'success':
-        raise JSONInterfaceError('Heap profiler dump failed: ' + result)
-    else:
-      logging.warn('Heap-profiling is not supported in this OS.')
+    cmd_dict = {
+      'command': 'SignInToSync',
+      'username': username,
+      'password': password,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
+
+  def GetSyncInfo(self):
+    """Returns info about sync.
+
+    Returns:
+      A dictionary of info about sync.
+      Example dictionaries:
+        {u'summary': u'SYNC DISABLED'}
+
+        { u'authenticated': True,
+          u'last synced': u'Just now',
+          u'summary': u'READY',
+          u'sync url': u'clients4.google.com',
+          u'updates received': 42,
+          u'synced datatypes': [ u'Bookmarks',
+                                 u'Preferences',
+                                 u'Passwords',
+                                 u'Autofill',
+                                 u'Themes',
+                                 u'Extensions',
+                                 u'Apps']}
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'GetSyncInfo',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['sync_info']
+
+  def AwaitSyncCycleCompletion(self):
+    """Waits for the ongoing sync cycle to complete. Must be signed in to sync
+       before calling this method.
+
+    Returns:
+      True, on success.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'AwaitSyncCycleCompletion',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
+
+  def AwaitSyncRestart(self):
+    """Waits for sync to reinitialize itself. Typically used when the browser
+       is restarted and a full sync cycle is not expected to occur. Must be
+       previously signed in to sync before calling this method.
+
+    Returns:
+      True, on success.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'AwaitSyncRestart',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
+
+  def EnableSyncForDatatypes(self, datatypes):
+    """Enables sync for a given list of sync datatypes. Must be signed in to
+       sync before calling this method.
+
+    Args:
+      datatypes: A list of strings indicating the datatypes for which to enable
+                 sync. Strings that can be in the list are:
+                 Bookmarks, Preferences, Passwords, Autofill, Themes,
+                 Typed URLs, Extensions, Encryption keys, Sessions, Apps, All.
+                 For an updated list of valid sync datatypes, refer to the
+                 function ModelTypeToString() in the file
+                 chrome/browser/sync/syncable/model_type.cc.
+                 Examples:
+                   ['Bookmarks', 'Preferences', 'Passwords']
+                   ['All']
+
+    Returns:
+      True, on success.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'EnableSyncForDatatypes',
+      'datatypes': datatypes,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
+
+  def DisableSyncForDatatypes(self, datatypes):
+    """Disables sync for a given list of sync datatypes. Must be signed in to
+       sync before calling this method.
+
+    Args:
+      datatypes: A list of strings indicating the datatypes for which to
+                 disable sync. Strings that can be in the list are:
+                 Bookmarks, Preferences, Passwords, Autofill, Themes,
+                 Typed URLs, Extensions, Encryption keys, Sessions, Apps, All.
+                 For an updated list of valid sync datatypes, refer to the
+                 function ModelTypeToString() in the file
+                 chrome/browser/sync/syncable/model_type.cc.
+                 Examples:
+                   ['Bookmarks', 'Preferences', 'Passwords']
+                   ['All']
+
+    Returns:
+      True, on success.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'DisableSyncForDatatypes',
+      'datatypes': datatypes,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
 
   def GetNTPThumbnails(self):
     """Return a list of info about the sites in the NTP most visited section.
     SAMPLE:
       [{ u'title': u'Google',
-         u'url': u'http://www.google.com'},
+         u'url': u'http://www.google.com',
+         u'is_pinned': False},
        {
          u'title': u'Yahoo',
-         u'url': u'http://www.yahoo.com'}]
+         u'url': u'http://www.yahoo.com',
+         u'is_pinned': True}]
     """
     return self._GetNTPInfo()['most_visited']
 
@@ -3663,6 +3056,32 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         return i
     return -1
 
+  def MoveNTPThumbnail(self, thumbnail, new_index):
+    """Moves the given thumbnail to a new index. The indices in the NTP Most
+    Visited sites section look like:
+      0  1  2  3
+      4  5  6  7
+
+    When a thumbnail is moved, it is automatically pinned.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+      new_index: the index to be moved to in the Most Visited sites section
+
+    Raises:
+      IndexError if there is no thumbnail at the index
+    """
+    if new_index < 0 or new_index >= len(self.GetNTPThumbnails()):
+      raise IndexError()
+    self._CheckNTPThumbnailShown(thumbnail)
+    cmd_dict = {
+      'command': 'MoveNTPMostVisitedThumbnail',
+      'url': thumbnail['url'],
+      'index': new_index,
+      'old_index': self.GetNTPThumbnailIndex(thumbnail)
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
   def RemoveNTPThumbnail(self, thumbnail):
     """Removes the NTP thumbnail and returns true on success.
 
@@ -3675,6 +3094,38 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'url': thumbnail['url']
     }
     self._GetResultFromJSONRequest(cmd_dict)
+
+  def PinNTPThumbnail(self, thumbnail):
+    """Pins the NTP thumbnail.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+    """
+    self._CheckNTPThumbnailShown(thumbnail)
+    self.MoveNTPThumbnail(thumbnail, self.GetNTPThumbnailIndex(thumbnail))
+
+  def UnpinNTPThumbnail(self, thumbnail):
+    """Unpins the NTP thumbnail and returns true on success.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+    """
+    self._CheckNTPThumbnailShown(thumbnail)
+    cmd_dict = {
+      'command': 'UnpinNTPMostVisitedThumbnail',
+      'url': thumbnail['url']
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def IsNTPThumbnailPinned(self, thumbnail):
+    """Returns whether the NTP thumbnail is pinned.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+    """
+    self._CheckNTPThumbnailShown(thumbnail)
+    index = self.GetNTPThumbnailIndex(thumbnail)
+    return self.GetNTPThumbnails()[index]['is_pinned']
 
   def RestoreAllNTPThumbnails(self):
     """Restores all the removed NTP thumbnails.
@@ -3859,107 +3310,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
-  def GetV8HeapStats(self, tab_index=0, windex=0):
-    """Returns statistics about the v8 heap in the renderer process for a tab.
-
-    Args:
-      tab_index: The tab index, default is 0.
-      window_index: The window index, default is 0.
-
-    Returns:
-      A dictionary containing v8 heap statistics. Memory values are in bytes.
-      Example:
-        { 'renderer_id': 6223,
-          'v8_memory_allocated': 21803776,
-          'v8_memory_used': 10565392 }
-    """
-    cmd_dict = {  # Prepare command for the json interface.
-      'command': 'GetV8HeapStats',
-      'tab_index': tab_index,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
-
-  def GetFPS(self, tab_index=0, windex=0):
-    """Returns the current FPS associated with the renderer process for a tab.
-
-    FPS is the rendered frames per second.
-
-    Args:
-      tab_index: The tab index, default is 0.
-      window_index: The window index, default is 0.
-
-    Returns:
-      A dictionary containing FPS info.
-      Example:
-        { 'renderer_id': 23567,
-          'routing_id': 1,
-          'fps': 29.404298782348633 }
-    """
-    cmd_dict = {  # Prepare command for the json interface.
-      'command': 'GetFPS',
-      'tab_index': tab_index,
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
-
-  def IsFullscreenForBrowser(self, windex=0):
-    """Returns true if the window is currently fullscreen and was initially
-    transitioned to fullscreen by a browser (vs tab) mode transition."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'IsFullscreenForBrowser' },
-      windex=windex).get('result')
-
-  def IsFullscreenForTab(self, windex=0):
-    """Returns true if fullscreen has been caused by a tab."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'IsFullscreenForTab' },
-      windex=windex).get('result')
-
-  def IsMouseLocked(self, windex=0):
-    """Returns true if the mouse is currently locked."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'IsMouseLocked' },
-      windex=windex).get('result')
-
-  def IsMouseLockPermissionRequested(self, windex=0):
-    """Returns true if the user is currently prompted to give permision for
-    mouse lock."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'IsMouseLockPermissionRequested' },
-      windex=windex).get('result')
-
-  def IsFullscreenPermissionRequested(self, windex=0):
-    """Returns true if the user is currently prompted to give permision for
-    fullscreen."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'IsFullscreenPermissionRequested' },
-      windex=windex).get('result')
-
-  def IsFullscreenBubbleDisplayed(self, windex=0):
-    """Returns true if the fullscreen and mouse lock bubble is currently
-    displayed."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'IsFullscreenBubbleDisplayed' },
-      windex=windex).get('result')
-
-  def IsFullscreenBubbleDisplayingButtons(self, windex=0):
-    """Returns true if the fullscreen and mouse lock bubble is currently
-    displayed and presenting buttons."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'IsFullscreenBubbleDisplayingButtons' },
-      windex=windex).get('result')
-
-  def AcceptCurrentFullscreenOrMouseLockRequest(self, windex=0):
-    """Activate the accept button on the fullscreen and mouse lock bubble."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'AcceptCurrentFullscreenOrMouseLockRequest' },
-      windex=windex)
-
-  def DenyCurrentFullscreenOrMouseLockRequest(self, windex=0):
-    """Activate the deny button on the fullscreen and mouse lock bubble."""
-    return self._GetResultFromJSONRequest(
-      { 'command': 'DenyCurrentFullscreenOrMouseLockRequest' },
-      windex=windex)
-
   def KillRendererProcess(self, pid):
     """Kills the given renderer process.
 
@@ -3978,13 +3328,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict)
 
-  def NewWebDriver(self, port=0):
+  def NewWebDriver(self):
     """Returns a new remote WebDriver instance.
-
-    Args:
-      port: The port to start WebDriver on; by default the service selects an
-            open port. It is an error to request a port number and request a
-            different port later.
 
     Returns:
       selenium.webdriver.remote.webdriver.WebDriver instance
@@ -3992,10 +3337,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     from chrome_driver_factory import ChromeDriverFactory
     global _CHROME_DRIVER_FACTORY
     if _CHROME_DRIVER_FACTORY is None:
-      _CHROME_DRIVER_FACTORY = ChromeDriverFactory(port=port)
-    self.assertTrue(_CHROME_DRIVER_FACTORY.GetPort() == port or port == 0,
-                    msg='Requested a WebDriver on a specific port while already'
-                        ' running on a different port.')
+      _CHROME_DRIVER_FACTORY = ChromeDriverFactory()
     return _CHROME_DRIVER_FACTORY.NewChromeDriver(self)
 
   def CreateNewAutomationProvider(self, channel_id):
@@ -4017,42 +3359,13 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
 
     This is equivalent to 'Add new user' action with multi-profiles.
 
-    To account for crbug.com/108761 on Win XP, this call polls until the
-    profile count increments by 1.
-
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    num_profiles = len(self.GetMultiProfileInfo()['profiles'])
     cmd_dict = {  # Prepare command for the json interface
       'command': 'OpenNewBrowserWindowWithNewProfile'
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-    # TODO(nirnimesh): Remove when crbug.com/108761 is fixed
-    self.WaitUntil(
-        lambda: len(self.GetMultiProfileInfo()['profiles']),
-        expect_retval=(num_profiles + 1))
-
-  def OpenProfileWindow(self, path, num_loads=1):
-   """Open browser window for an existing profile.
-
-   This is equivalent to picking a profile from the multi-profile menu.
-
-   Multi-profile should be enabled and the requested profile should already
-   exist. Creates a new window for the given profile. Use
-   OpenNewBrowserWindowWithNewProfile() to create a new profile.
-
-   Args:
-     path: profile path of the profile to be opened.
-     num_loads: the number of loads to wait for, when a new browser window
-                is created.  Useful when restoring a window with many tabs.
-   """
-   cmd_dict = {  # Prepare command for the json interface
-    'command': 'OpenProfileWindow',
-    'path': path,
-    'num_loads': num_loads,
-   }
-   return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def GetMultiProfileInfo(self):
     """Fetch info about all multi-profile users.
@@ -4076,7 +3389,52 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     cmd_dict = {  # Prepare command for the json interface
       'command': 'GetMultiProfileInfo'
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def SetPolicies(self, managed_platform=None, recommended_platform=None,
+                  managed_cloud=None, recommended_cloud=None):
+    """Sets the policies on the browser. Always fails on official builds.
+
+    Args:
+      managed_platform: a dictionary with the policy values for the managed
+                        platform provider.
+      recommended_platform: a dictionary with the policy values for the
+                            recommended platform provider.
+      managed_cloud: a dictionary with the policy values for the managed
+                     cloud provider.
+      recommended_cloud: a dictionary with the policy values for the recommended
+                         cloud provider.
+
+    Leaving an argument to None will restore the default behavior for that
+    provider.
+    """
+    assert not self.GetBrowserInfo()['properties']['is_official']
+    cmd_dict = {
+        'command': 'SetPolicies',
+        'managed_cloud': managed_cloud,
+        'managed_platform': managed_platform,
+        'recommended_cloud': recommended_cloud,
+        'recommended_platform': recommended_platform
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def GetPolicyDefinitionList(self):
+    """Gets a dictionary of existing policies mapped to their value types.
+
+    SAMPLE OUTPUT:
+    {
+      'ShowHomeButton': 'bool',
+      'DefaultSearchProviderSearchURL': 'str',
+      ...
+    }
+
+    Returns:
+      A dictionary mapping policy names to their value types.
+    """
+    cmd_dict = {
+        'command': 'GetPolicyDefinitionList'
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
 
   def RefreshPolicies(self):
     """Refreshes all the available policy providers.
@@ -4086,11 +3444,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     installed before this call is issued are guaranteed to be ready after it
     returns.
     """
-    # TODO(craigdh): Determine the root cause of RefreshPolicies' flakiness.
-    #                See crosbug.com/30221
-    timeout = PyUITest.ActionTimeoutChanger(self, 3 * 60 * 1000)
     cmd_dict = { 'command': 'RefreshPolicies' }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def SubmitForm(self, form_id, tab_index=0, windex=0, frame_xpath=''):
     """Submits the given form ID, and returns after it has been submitted.
@@ -4114,16 +3469,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                                  tab_index, windex, frame_xpath),
         expect_retval='complete')
 
-  def SimulateAsanMemoryBug(self):
-    """Simulates a memory bug for Address Sanitizer to catch.
-
-    Address Sanitizer (if it was built it) will catch the bug and abort
-    the process.
-    This method returns immediately before it actually causes a crash.
-    """
-    cmd_dict = { 'command': 'SimulateAsanMemoryBug' }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
   ## ChromeOS section
 
   def GetLoginInfo(self):
@@ -4138,7 +3483,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       { u'is_guest': False,
         u'is_owner': True,
         u'email': u'example@gmail.com',
-        u'user_image': 2,  # non-negative int, 'profile', 'file'
         u'is_screen_locked': False,
         u'login_ui_type': 'nativeui', # or 'webui'
         u'is_logged_in': True}
@@ -4147,7 +3491,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     cmd_dict = { 'command': 'GetLoginInfo' }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def WaitForSessionManagerRestart(self, function):
     """Call a function and wait for the ChromeOS session_manager to restart.
@@ -4189,114 +3533,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     # the user in as guest in order to access the account creation page.
     assert self._WaitForInodeChange(
         self._named_channel_id,
-        lambda: self._GetResultFromJSONRequest(cmd_dict, windex=None)), \
+        lambda: self._GetResultFromJSONRequest(cmd_dict, windex=-1)), \
         'Chrome did not reopen the testing channel after login as guest.'
     self.SetUp()
-
-  def SkipToLogin(self, skip_image_selection=True):
-    """Skips OOBE to the login screen.
-
-    Assumes that we're at the beginning of OOBE.
-
-    Args:
-      skip_image_selection: Boolean indicating whether the user image selection
-                            screen should also be skipped.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = { 'command': 'SkipToLogin',
-                 'skip_image_selection': skip_image_selection }
-    result = self._GetResultFromJSONRequest(cmd_dict, windex=None)
-    assert result['next_screen'] == 'login', 'Unexpected wizard transition'
-
-  def GetOOBEScreenInfo(self):
-    """Queries info about the current OOBE screen.
-
-    Returns:
-      A dictionary with the following keys:
-
-      'screen_name': The title of the current OOBE screen as a string.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = { 'command': 'GetOOBEScreenInfo' }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def AcceptOOBENetworkScreen(self):
-    """Accepts OOBE network screen and advances to the next one.
-
-    Assumes that we're already at the OOBE network screen.
-
-    Returns:
-      A dictionary with the following keys:
-
-      'next_screen': The title of the next OOBE screen as a string.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = { 'command': 'AcceptOOBENetworkScreen' }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def AcceptOOBEEula(self, accepted, usage_stats_reporting=False):
-    """Accepts OOBE EULA and advances to the next screen.
-
-    Assumes that we're already at the OOBE EULA screen.
-
-    Args:
-      accepted: Boolean indicating whether the EULA should be accepted.
-      usage_stats_reporting: Boolean indicating whether UMA should be enabled.
-
-    Returns:
-      A dictionary with the following keys:
-
-      'next_screen': The title of the next OOBE screen as a string.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = { 'command': 'AcceptOOBEEula',
-                 'accepted': accepted,
-                 'usage_stats_reporting': usage_stats_reporting }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def CancelOOBEUpdate(self):
-    """Skips update on OOBE and advances to the next screen.
-
-    Returns:
-      A dictionary with the following keys:
-
-      'next_screen': The title of the next OOBE screen as a string.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = { 'command': 'CancelOOBEUpdate' }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def PickUserImage(self, image):
-    """Chooses image for the newly created user.
-
-    Should be called immediately after login.
-
-    Args:
-      image_type: type of user image to choose. Possible values:
-        - "profile": Google profile image
-        - non-negative int: one of the default images
-
-    Returns:
-      A dictionary with the following keys:
-
-      'next_screen': The title of the next OOBE screen as a string.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = { 'command': 'PickUserImage',
-                 'image': image }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
 
   def LoginAsGuest(self):
     """Login to chromeos as a guest user.
@@ -4313,24 +3552,18 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     # We need to call SetUp() again to reconnect to the new channel.
     assert self._WaitForInodeChange(
         self._named_channel_id,
-        lambda: self._GetResultFromJSONRequest(cmd_dict, windex=None)), \
+        lambda: self._GetResultFromJSONRequest(cmd_dict, windex=-1)), \
         'Chrome did not reopen the testing channel after login as guest.'
     self.SetUp()
 
-  def Login(self, username, password, timeout=120 * 1000):
+  def Login(self, username, password):
     """Login to chromeos.
 
     Waits until logged in and browser is ready.
     Should be displaying the login screen to work.
 
     Note that in case of webui auth-extension-based login, gaia auth errors
-    will not be noticed here, because the browser has no knowledge of it. In
-    this case the GetNextEvent automation command will always time out.
-
-    Args:
-      username: the username to log in as.
-      password: the user's password.
-      timeout: timeout in ms; defaults to two minutes.
+    will not be noticed here, because the browser has no knowledge of it.
 
     Returns:
       An error string if an error occured.
@@ -4339,43 +3572,28 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    self._GetResultFromJSONRequest({'command': 'AddLoginEventObserver'},
-                                   windex=None)
     cmd_dict = {
-        'command': 'SubmitLoginForm',
+        'command': 'Login',
         'username': username,
         'password': password,
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-    self.AddDomEventObserver('loginfail', automation_id=4444)
-    try:
-      if self.GetNextEvent(timeout=timeout).get('name') == 'loginfail':
-        raise JSONInterfaceError('Login denied by auth server.')
-    except JSONInterfaceError as e:
-      raise JSONInterfaceError('Login failed. Perhaps Chrome crashed, '
-                               'failed to start, or the login flow is '
-                               'broken? Error message: %s' % str(e))
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+    return result.get('error_string')
 
   def Logout(self):
     """Log out from ChromeOS and wait for session_manager to come up.
 
-    This is equivalent to pressing the 'Sign out' button from the
-    aura shell tray when logged in.
-
-    Should be logged in to work. Re-initializes the automation channel
-    after logout.
+    May return before logout is complete and
+    gives no indication of success or failure.
+    Should be logged in to work.
     """
-    clear_profile_orig = self.get_clear_profile()
-    self.set_clear_profile(False)
     assert self.GetLoginInfo()['is_logged_in'], \
         'Trying to log out when already logged out.'
-    def _SignOut():
-      cmd_dict = { 'command': 'SignOut' }
-      self._GetResultFromJSONRequest(cmd_dict, windex=None)
-    assert self.WaitForSessionManagerRestart(_SignOut), \
+    assert self.WaitForSessionManagerRestart(
+        lambda: self.ApplyAccelerator(IDC_EXIT)), \
         'Session manager did not restart after logout.'
-    self.__SetUp()
-    self.set_clear_profile(clear_profile_orig)
+
+    self.setUp()
 
   def LockScreen(self):
     """Locks the screen on chromeos.
@@ -4387,7 +3605,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     cmd_dict = { 'command': 'LockScreen' }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def UnlockScreen(self, password):
     """Unlocks the screen on chromeos, authenticating the user's password first.
@@ -4406,7 +3624,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'command': 'UnlockScreen',
         'password': password,
     }
-    result = self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    result = self._GetResultFromJSONRequest(
+        cmd_dict, windex=-1, timeout=self.large_test_timeout_ms())
     return result.get('error_string')
 
   def SignoutInScreenLocker(self):
@@ -4420,9 +3639,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     """
     cmd_dict = { 'command': 'SignoutInScreenLocker' }
     assert self.WaitForSessionManagerRestart(
-        lambda: self._GetResultFromJSONRequest(cmd_dict, windex=None)), \
+        lambda: self._GetResultFromJSONRequest(cmd_dict, windex=-1)), \
         'Session manager did not restart after logout.'
-    self.__SetUp()
+    self.setUp()
 
   def GetBatteryInfo(self):
     """Get details about battery state.
@@ -4458,7 +3677,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     cmd_dict = { 'command': 'GetBatteryInfo' }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def GetPanelInfo(self):
     """Get details about open ChromeOS panels.
@@ -4492,33 +3711,481 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
 
     return panels
 
-  def EnableSpokenFeedback(self, enabled):
-    """Enables or disables spoken feedback accessibility mode.
+  def GetNetworkInfo(self):
+    """Get details about ethernet, wifi, and cellular networks on chromeos.
 
-    Args:
-      enabled: Boolean value indicating the desired state of spoken feedback.
+    Returns:
+      A dictionary.
+      Sample:
+      { u'cellular_available': True,
+        u'cellular_enabled': False,
+        u'connected_ethernet': u'/profile/default/ethernet_abcd',
+        u'connected_wifi': u'/profile/default/wifi_abcd_1234_managed_none',
+        u'ethernet_available': True,
+        u'ethernet_enabled': True,
+        u'ethernet_networks':
+            { u'/profile/default/ethernet_abcd':
+                { u'device_path': u'/device/abcdeth',
+                  u'ip_address': u'11.22.33.44',
+                  u'name': u'',
+                  u'service_path':
+                  u'/profile/default/ethernet_abcd',
+                  u'status': u'Connected'}},
+        u'ip_address': u'11.22.33.44',
+        u'remembered_wifi': [ u'/profile/default/ethernet_abcd',
+                              u'/profile/default/ethernet_efgh'],
+        u'wifi_available': True,
+        u'wifi_enabled': True,
+        u'wifi_networks':
+            { u'/profile/default/wifi_abcd_1234_managed_none':
+                { u'device_path': u'/device/abcdwifi',
+                  u'encrypted': False,
+                  u'encryption': u'',
+                  u'ip_address': u'123.123.123.123',
+                  u'name': u'WifiNetworkName1',
+                  u'status': u'Connected',
+                  u'strength': 76},
+              u'/profile/default/wifi_abcd_1234_managed_802_1x':
+                  { u'device_path': u'/device/abcdwifi',
+                    u'encrypted': True,
+                    u'encryption': u'8021X',
+                    u'ip_address': u'',
+                    u'name': u'WifiNetworkName2',
+                    u'service_path':
+                    u'status': u'Idle',
+                    u'strength': 79}}}
+
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'GetNetworkInfo' }
+    network_info = self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+    # Remembered networks do not have /service/ prepended to the service path
+    # even though wifi_networks does.  We want this prepended to allow for
+    # consistency and easy string comparison with wifi_networks.
+    network_info['remembered_wifi'] = ['/service/' + service for service in
+                                       network_info['remembered_wifi']]
+    return network_info
+
+  def NetworkScan(self):
+    """Causes ChromeOS to scan for available wifi networks.
+
+    Blocks until scanning is complete.
+
+    Returns:
+      The new list of networks obtained from GetNetworkInfo().
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'NetworkScan' }
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+    return self.GetNetworkInfo()
+
+  def ToggleNetworkDevice(self, device, enable):
+    """Enable or disable a network device on ChromeOS.
+
+    Valid device names are ethernet, wifi, cellular.
 
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     cmd_dict = {
-        'command': 'EnableSpokenFeedback',
-        'enabled': enabled,
+        'command': 'ToggleNetworkDevice',
+        'device': device,
+        'enable': enable,
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
-  def IsSpokenFeedbackEnabled(self):
-    """Check whether spoken feedback accessibility mode is enabled.
+  PROXY_TYPE_DIRECT = 1
+  PROXY_TYPE_MANUAL = 2
+  PROXY_TYPE_PAC = 3
+
+  def GetProxyTypeName(self, proxy_type):
+    values = { self.PROXY_TYPE_DIRECT: 'Direct Internet connection',
+               self.PROXY_TYPE_MANUAL: 'Manual proxy configuration',
+               self.PROXY_TYPE_PAC: 'Automatic proxy configuration' }
+    return values[proxy_type]
+
+  def GetProxySettingsOnChromeOS(self, windex=0):
+    """Get current proxy settings on Chrome OS.
 
     Returns:
-      True if spoken feedback is enabled, False otherwise.
+      A dictionary. See SetProxySettings() below
+      for the full list of possible dictionary keys.
+
+      Samples:
+      { u'ignorelist': [],
+        u'single': False,
+        u'type': 1}
+
+      { u'ignorelist': [u'www.example.com', u'www.example2.com'],
+        u'single': True,
+        u'singlehttp': u'24.27.78.152',
+        u'singlehttpport': 1728,
+        u'type': 2}
+
+      { u'ignorelist': [],
+        u'pacurl': u'http://example.com/config.pac',
+        u'single': False,
+        u'type': 3}
 
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    cmd_dict = { 'command': 'IsSpokenFeedbackEnabled', }
-    result = self._GetResultFromJSONRequest(cmd_dict, windex=None)
-    return result.get('spoken_feedback')
+    cmd_dict = { 'command': 'GetProxySettings' }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def SetProxySettingsOnChromeOS(self, key, value, windex=0):
+    """Set a proxy setting on Chrome OS.
+
+    Owner must be logged in for these to persist.
+    If user is not logged in or is logged in as non-owner or guest,
+    proxy settings do not persist across browser restarts or login/logout.
+
+    Valid settings are:
+      'type': int - Type of proxy. Should be one of:
+                     PROXY_TYPE_DIRECT, PROXY_TYPE_MANUAL, PROXY_TYPE_PAC.
+      'ignorelist': list - The list of hosts and domains to ignore.
+
+      These settings set 'type' to PROXY_TYPE_MANUAL:
+        'single': boolean - Whether to use the same proxy for all protocols.
+
+        These settings set 'single' to True:
+          'singlehttp': string - If single is true, the proxy address to use.
+          'singlehttpport': int - If single is true, the proxy port to use.
+
+        These settings set 'single' to False:
+          'httpurl': string - HTTP proxy address.
+          'httpport': int - HTTP proxy port.
+          'httpsurl': string - Secure HTTP proxy address.
+          'httpsport': int - Secure HTTP proxy port.
+          'ftpurl': string - FTP proxy address.
+          'ftpport': int - FTP proxy port.
+          'socks': string - SOCKS host address.
+          'socksport': int - SOCKS host port.
+
+      This setting sets 'type' to PROXY_TYPE_PAC:
+        'pacurl': string - Autoconfiguration URL.
+
+    Examples:
+      # Sets direct internet connection, no proxy.
+      self.SetProxySettings('type', self.PROXY_TYPE_DIRECT)
+
+      # Sets manual proxy configuration, same proxy for all protocols.
+      self.SetProxySettings('singlehttp', '24.27.78.152')
+      self.SetProxySettings('singlehttpport', 1728)
+      self.SetProxySettings('ignorelist', ['www.example.com', 'example2.com'])
+
+      # Sets automatic proxy configuration with the specified PAC url.
+      self.SetProxySettings('pacurl', 'http://example.com/config.pac')
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'SetProxySettings',
+        'key': key,
+        'value': value,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def ForgetWifiNetwork(self, service_path):
+    """Forget a remembered network by its service path.
+
+    This function is equivalent to clicking the 'Forget Network' button in the
+    chrome://settings/internet page.  This function does not indicate whether
+    or not forget succeeded or failed.  It is up to the caller to call
+    GetNetworkInfo to check the updated remembered_wifi list to verify the
+    service has been removed.
+
+    Args:
+      service_path: Flimflam path that defines the remembered network.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    # Usually the service_path is prepended with '/service/', such as when the
+    # service path is retrieved from GetNetworkInfo.  ForgetWifiNetwork works
+    # only for service paths where this has already been stripped.
+    service_path = service_path.split('/service/')[-1]
+    cmd_dict = {
+        'command': 'ForgetWifiNetwork',
+        'service_path': service_path,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1, timeout=50000)
+
+  def ConnectToCellularNetwork(self):
+    """Connects to the available cellular network.
+
+    Blocks until connection succeeds or fails.
+
+    Returns:
+      An error string if an error occured.
+      None otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    # Every device should only have one cellular network present, so we can
+    # scan for it.
+    cellular_networks = self.NetworkScan().get('cellular_networks', {}).keys()
+    self.assertTrue(cellular_networks, 'Could not find cellular service.')
+    service_path = cellular_networks[0]
+
+    cmd_dict = {
+        'command': 'ConnectToCellularNetwork',
+        'service_path': service_path,
+    }
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1, timeout=50000)
+    return result.get('error_string')
+
+  def DisconnectFromCellularNetwork(self):
+    """Disconnect from the connected cellular network.
+
+    Blocks until disconnect is complete.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'DisconnectFromCellularNetwork',
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def ConnectToWifiNetwork(self, service_path, password='', shared=True):
+    """Connect to a wifi network by its service path.
+
+    Blocks until connection succeeds or fails.
+
+    Args:
+      service_path: Flimflam path that defines the wifi network.
+      password: Passphrase for connecting to the wifi network.
+      shared: Boolean value specifying whether the network should be shared.
+
+    Returns:
+      An error string if an error occured.
+      None otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'ConnectToWifiNetwork',
+        'service_path': service_path,
+        'password': password,
+        'shared': shared,
+    }
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1, timeout=50000)
+    return result.get('error_string')
+
+  def ConnectToHiddenWifiNetwork(self, ssid, security, password='',
+                                 shared=True, save_credentials=False):
+    """Connect to a wifi network by its service path.
+
+    Blocks until connection succeeds or fails.
+
+    Args:
+      ssid: The SSID of the network to connect to.
+      security: The network's security type. One of: 'SECURITY_NONE',
+                'SECURITY_WEP', 'SECURITY_WPA', 'SECURITY_RSN', 'SECURITY_8021X'
+      password: Passphrase for connecting to the wifi network.
+      shared: Boolean value specifying whether the network should be shared.
+      save_credentials: Boolean value specifying whether 802.1x credentials are
+                        saved.
+
+    Returns:
+      An error string if an error occured.
+      None otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    assert security in ('SECURITY_NONE', 'SECURITY_WEP', 'SECURITY_WPA',
+                        'SECURITY_RSN', 'SECURITY_8021X')
+    cmd_dict = {
+        'command': 'ConnectToHiddenWifiNetwork',
+        'ssid': ssid,
+        'security': security,
+        'password': password,
+        'shared': shared,
+        'save_credentials': save_credentials,
+    }
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1, timeout=50000)
+    return result.get('error_string')
+
+  def DisconnectFromWifiNetwork(self):
+    """Disconnect from the connected wifi network.
+
+    Blocks until disconnect is complete.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'DisconnectFromWifiNetwork',
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def AddPrivateNetwork(self,
+                        hostname,
+                        service_name,
+                        provider_type,
+                        username,
+                        password,
+                        cert_nss='',
+                        cert_id='',
+                        key=''):
+    """Add and connect to a private network.
+
+    Blocks until connection succeeds or fails. This is equivalent to
+    'Add Private Network' in the network menu UI.
+
+    Args:
+      hostname: Server hostname for the private network.
+      service_name: Service name that defines the private network. Do not
+                    add multiple services with the same name.
+      provider_type: Types are L2TP_IPSEC_PSK and L2TP_IPSEC_USER_CERT.
+                     Provider type OPEN_VPN is not yet supported.
+                     Type names returned by GetPrivateNetworkInfo will
+                     also work.
+      username: Username for connecting to the virtual network.
+      password: Passphrase for connecting to the virtual network.
+      cert_nss: Certificate nss nickname for a L2TP_IPSEC_USER_CERT network.
+      cert_id: Certificate id for a L2TP_IPSEC_USER_CERT network.
+      key: Pre-shared key for a L2TP_IPSEC_PSK network.
+
+    Returns:
+      An error string if an error occured.
+      None otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'AddPrivateNetwork',
+        'hostname': hostname,
+        'service_name': service_name,
+        'provider_type': provider_type,
+        'username': username,
+        'password': password,
+        'cert_nss': cert_nss,
+        'cert_id': cert_id,
+        'key': key,
+    }
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1, timeout=50000)
+    return result.get('error_string')
+
+  def GetPrivateNetworkInfo(self):
+    """Get details about private networks on chromeos.
+
+    Returns:
+      A dictionary including information about all remembered virtual networks
+      as well as the currently connected virtual network, if any.
+      Sample:
+      { u'connected': u'/service/vpn_123_45_67_89_test_vpn'}
+        u'/service/vpn_123_45_67_89_test_vpn':
+          { u'username': u'vpn_user',
+            u'name': u'test_vpn',
+            u'hostname': u'123.45.67.89',
+            u'key': u'abcde',
+            u'cert_id': u'',
+            u'password': u'zyxw123',
+            u'provider_type': u'L2TP_IPSEC_PSK'},
+        u'/service/vpn_111_11_11_11_test_vpn2':
+          { u'username': u'testerman',
+            u'name': u'test_vpn2',
+            u'hostname': u'111.11.11.11',
+            u'key': u'fghijklm',
+            u'cert_id': u'',
+            u'password': u'789mnop',
+            u'provider_type': u'L2TP_IPSEC_PSK'},
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'GetPrivateNetworkInfo' }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def ConnectToPrivateNetwork(self, service_path):
+    """Connect to a remembered private network by its service path.
+
+    Blocks until connection succeeds or fails. The network must have been
+    previously added with all necessary connection details.
+
+    Args:
+      service_path: Service name that defines the private network.
+
+    Returns:
+      An error string if an error occured.
+      None otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'ConnectToPrivateNetwork',
+        'service_path': service_path,
+    }
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1, timeout=50000)
+    return result.get('error_string')
+
+  def DisconnectFromPrivateNetwork(self):
+    """Disconnect from the active private network.
+
+    Expects a private network to be active.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'DisconnectFromPrivateNetwork',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def IsEnterpriseDevice(self):
+    """Check whether the device is managed by an enterprise.
+
+    Returns:
+      True if the device is managed by an enterprise, False otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'IsEnterpriseDevice',
+    }
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+    return result.get('enterprise')
+
+  def GetEnterprisePolicyInfo(self):
+    """Get details about enterprise policy on chromeos.
+
+    Returns:
+      A dictionary including information about the enterprise policy.
+      Sample:
+        {u'device_token_cache_loaded': True,
+         u'device_cloud_policy_state': u'success',
+         u'device_id': u'11111-222222222-33333333-4444444',
+         u'device_mandatory_policies': {},
+         u'device_recommended_policies': {},
+         u'device_token': u'ABjmT7nqGWTHRLO',
+         u'enterprise_domain': u'example.com',
+         u'gaia_token': u'',
+         u'machine_id': u'123456789',
+         u'machine_model': u'COMPUTER',
+         u'user_cache_loaded': True,
+         u'user_cloud_policy_state': u'success',
+         u'user_mandatory_policies': {u'AuthSchemes': u'',
+                                      u'AutoFillEnabled': True,
+                                      u'ChromeOsLockOnIdleSuspend': True}
+         u'user_recommended_policies': {},
+         u'user_name': u'user@example.com'}
+    """
+    cmd_dict = { 'command': 'GetEnterprisePolicyInfo' }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def GetTimeInfo(self, windex=0):
     """Gets info about the ChromeOS status bar clock.
@@ -4540,18 +4207,17 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     if self.GetLoginInfo()['is_logged_in']:
       return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
     else:
-      return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+      return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def SetTimezone(self, timezone):
     """Sets the timezone on ChromeOS. A user must be logged in.
 
     The timezone is the relative path to the timezone file in
-    /usr/share/zoneinfo. For example, /usr/share/zoneinfo/America/Los_Angeles is
-    'America/Los_Angeles'. For a list of valid timezones see
-    'chromeos/settings/timezone_settings.cc'.
+    /usr/share/zoneinfo. For example, /usr/share/zoneinfo/America/Los_Angeles
+    is 'America/Los_Angeles'.
 
     This method does not return indication of success or failure.
-    If the timezone is it falls back to a valid timezone.
+    If the timezone is invalid, it falls back to UTC/GMT.
 
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
@@ -4560,7 +4226,51 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'command': 'SetTimezone',
         'timezone': timezone,
     }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def EnrollEnterpriseDevice(self, user, password):
+    """Enrolls an unenrolled device as an enterprise device.
+
+    Expects the device to be unenrolled with the TPM unlocked. This is
+    equivalent to pressing Ctrl-Alt-e to enroll the device from the login
+    screen.
+
+    Returns:
+      An error string if the enrollment fails.
+      None otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'EnrollEnterpriseDevice',
+        'user': user,
+        'password': password,
+    }
+    time.sleep(5) # TODO(craigdh): Block until Install Attributes is ready.
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+    return result.get('error_string')
+
+  def GetUpdateInfo(self):
+    """Gets the status of the ChromeOS updater.
+
+    Returns:
+      a dictionary.
+      Samples:
+      { u'status': u'idle',
+        u'release_track': u'beta-channel'}
+
+      { u'status': u'downloading',
+        u'release_track': u'beta-channel',
+        u'download_progress': 0.1203236708350371,   # 0.0 ~ 1.0
+        u'new_size': 152033593,                     # size of payload, in bytes
+        u'last_checked_time': 1302055709}           # seconds since UNIX epoch
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = { 'command': 'GetUpdateInfo' }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def UpdateCheck(self):
     """Checks for a ChromeOS update. Blocks until finished updating.
@@ -4569,7 +4279,24 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     cmd_dict = { 'command': 'UpdateCheck' }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def SetReleaseTrack(self, track):
+    """Sets the release track (channel) of the ChromeOS updater.
+
+    Valid values for the track parameter are:
+      'stable-channel', 'beta-channel', 'dev-channel'
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    assert track in ('stable-channel', 'beta-channel', 'dev-channel'), \
+        'Attempt to set release track to unknown release track "%s".' % track
+    cmd_dict = {
+        'command': 'SetReleaseTrack',
+        'track': track,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def GetVolumeInfo(self):
     """Gets the volume and whether the device is muted.
@@ -4583,7 +4310,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     cmd_dict = { 'command': 'GetVolumeInfo' }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def SetVolume(self, volume):
     """Sets the volume on ChromeOS. Only valid if not muted.
@@ -4599,7 +4326,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'command': 'SetVolume',
         'volume': float(volume),
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def SetMute(self, mute):
     """Sets whether ChromeOS is muted or not.
@@ -4615,242 +4342,23 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'command': 'SetMute',
         'mute': mute,
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
-  # HTML Terminal
+  def CaptureProfilePhoto(self):
+    """Captures user profile photo on ChromeOS.
 
-  def OpenCrosh(self):
-    """Open crosh.
+    This is done by driving the TakePhotoDialog. The image file is
+    saved on disk and its path is set in the local state preferences.
 
-    Equivalent to pressing Ctrl-Alt-t.
-    Opens in the last active (non-incognito) window.
+    A user needs to be logged-in as a precondition. Note that the UI is not
+    destroyed afterwards, a browser restart is necessary if you want
+    to interact with the browser after this call in the same test case.
 
-    Waits long enough for crosh to load, but does not wait for the crosh
-    prompt. Use WaitForHtermText() for that.
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    cmd_dict = { 'command': 'OpenCrosh' }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def WaitForHtermText(self, text, msg=None, tab_index=0, windex=0):
-    """Waits for the given text in a hterm tab.
-
-    Can be used to wait for the crosh> prompt or ssh prompt.
-
-    This does not poll. It uses dom mutation observers to wait
-    for the given text to show up.
-
-    Args:
-      text: the text to wait for. Can be a regex.
-      msg: the failure message to emit if the text could not be found.
-      tab_index: the tab for the hterm tab. Default: 0.
-      windex: the window index for the hterm tab. Default: 0.
-    """
-    self.WaitForDomNode(
-        xpath='//*[contains(text(), "%s")]' % text, frame_xpath='//iframe',
-        msg=msg, tab_index=tab_index, windex=windex)
-
-  def GetHtermRowsText(self, start, end, tab_index=0, windex=0):
-    """Fetch rows from a html terminal tab.
-
-    Works for both crosh and ssh tab.
-    Uses term_.getRowsText(start, end) javascript call.
-
-    Args:
-      start: start line number (0-based).
-      end: the end line (one beyond the line of interest).
-      tab_index: the tab for the hterm tab. Default: 0.
-      windex: the window index for the hterm tab. Default: 0.
-    """
-    return self.ExecuteJavascript(
-        'domAutomationController.send(term_.getRowsText(%d, %d))' % (
-            start, end),
-        tab_index=tab_index, windex=windex)
-
-  def SendKeysToHterm(self, text, tab_index=0, windex=0):
-    """Send keys to a html terminal tab.
-
-    Works for both crosh and ssh tab.
-    Uses term_.onVTKeystroke(str) javascript call.
-
-    Args:
-      text: the text to send.
-      tab_index: the tab for the hterm tab. Default: 0.
-      windex: the window index for the hterm tab. Default: 0.
-    """
-    return self.ExecuteJavascript(
-        'term_.onVTKeystroke("%s");'
-        'domAutomationController.send("done")' % text,
-        tab_index=tab_index, windex=windex)
-
-
-  def GetMemoryStatsChromeOS(self, duration):
-    """Identifies and returns different kinds of current memory usage stats.
-
-    This function samples values each second for |duration| seconds, then
-    outputs the min, max, and ending values for each measurement type.
-
-    Args:
-      duration: The number of seconds to sample data before outputting the
-          minimum, maximum, and ending values for each measurement type.
-
-    Returns:
-      A dictionary containing memory usage information.  Each measurement type
-      is associated with the min, max, and ending values from among all
-      sampled values.  Values are specified in KB.
-      {
-        'gem_obj': {  # GPU memory usage.
-          'min': ...,
-          'max': ...,
-          'end': ...,
-        },
-        'gtt': { ... },  # GPU memory usage (graphics translation table).
-        'mem_free': { ... },  # CPU free memory.
-        'mem_available': { ... },  # CPU available memory.
-        'mem_shared': { ... },  # CPU shared memory.
-        'mem_cached': { ... },  # CPU cached memory.
-        'mem_anon': { ... },  # CPU anon memory (active + inactive).
-        'mem_file': { ... },  # CPU file memory (active + inactive).
-        'mem_slab': { ... },  # CPU slab memory.
-        'browser_priv': { ... },  # Chrome browser private memory.
-        'browser_shared': { ... },  # Chrome browser shared memory.
-        'gpu_priv': { ... },  # Chrome GPU private memory.
-        'gpu_shared': { ... },  # Chrome GPU shared memory.
-        'renderer_priv': { ... },  # Total private memory of all renderers.
-        'renderer_shared': { ... },  # Total shared memory of all renderers.
-      }
-    """
-    logging.debug('Sampling memory information for %d seconds...' % duration)
-    stats = {}
-
-    for _ in xrange(duration):
-      # GPU memory.
-      gem_obj_path = '/sys/kernel/debug/dri/0/i915_gem_objects'
-      if os.path.exists(gem_obj_path):
-        p = subprocess.Popen('grep bytes %s' % gem_obj_path,
-                             stdout=subprocess.PIPE, shell=True)
-        stdout = p.communicate()[0]
-
-        gem_obj = re.search(
-            '\d+ objects, (\d+) bytes\n', stdout).group(1)
-        if 'gem_obj' not in stats:
-          stats['gem_obj'] = []
-        stats['gem_obj'].append(int(gem_obj) / 1024.0)
-
-      gtt_path = '/sys/kernel/debug/dri/0/i915_gem_gtt'
-      if os.path.exists(gtt_path):
-        p = subprocess.Popen('grep bytes %s' % gtt_path,
-                             stdout=subprocess.PIPE, shell=True)
-        stdout = p.communicate()[0]
-
-        gtt = re.search(
-            'Total [\d]+ objects, ([\d]+) bytes', stdout).group(1)
-        if 'gtt' not in stats:
-          stats['gtt'] = []
-        stats['gtt'].append(int(gtt) / 1024.0)
-
-      # CPU memory.
-      stdout = ''
-      with open('/proc/meminfo') as f:
-        stdout = f.read()
-      mem_free = re.search('MemFree:\s*([\d]+) kB', stdout).group(1)
-
-      if 'mem_free' not in stats:
-        stats['mem_free'] = []
-      stats['mem_free'].append(int(mem_free))
-
-      mem_dirty = re.search('Dirty:\s*([\d]+) kB', stdout).group(1)
-      mem_active_file = re.search(
-          'Active\(file\):\s*([\d]+) kB', stdout).group(1)
-      mem_inactive_file = re.search(
-          'Inactive\(file\):\s*([\d]+) kB', stdout).group(1)
-
-      with open('/proc/sys/vm/min_filelist_kbytes') as f:
-        mem_min_file = f.read()
-
-      # Available memory =
-      #     MemFree + ActiveFile + InactiveFile - DirtyMem - MinFileMem
-      if 'mem_available' not in stats:
-        stats['mem_available'] = []
-      stats['mem_available'].append(
-          int(mem_free) + int(mem_active_file) + int(mem_inactive_file) -
-          int(mem_dirty) - int(mem_min_file))
-
-      mem_shared = re.search('Shmem:\s*([\d]+) kB', stdout).group(1)
-      if 'mem_shared' not in stats:
-        stats['mem_shared'] = []
-      stats['mem_shared'].append(int(mem_shared))
-
-      mem_cached = re.search('Cached:\s*([\d]+) kB', stdout).group(1)
-      if 'mem_cached' not in stats:
-        stats['mem_cached'] = []
-      stats['mem_cached'].append(int(mem_cached))
-
-      mem_anon_active = re.search('Active\(anon\):\s*([\d]+) kB',
-                                  stdout).group(1)
-      mem_anon_inactive = re.search('Inactive\(anon\):\s*([\d]+) kB',
-                                    stdout).group(1)
-      if 'mem_anon' not in stats:
-        stats['mem_anon'] = []
-      stats['mem_anon'].append(int(mem_anon_active) + int(mem_anon_inactive))
-
-      mem_file_active = re.search('Active\(file\):\s*([\d]+) kB',
-                                  stdout).group(1)
-      mem_file_inactive = re.search('Inactive\(file\):\s*([\d]+) kB',
-                                    stdout).group(1)
-      if 'mem_file' not in stats:
-        stats['mem_file'] = []
-      stats['mem_file'].append(int(mem_file_active) + int(mem_file_inactive))
-
-      mem_slab = re.search('Slab:\s*([\d]+) kB', stdout).group(1)
-      if 'mem_slab' not in stats:
-        stats['mem_slab'] = []
-      stats['mem_slab'].append(int(mem_slab))
-
-      # Chrome process memory.
-      pinfo = self.GetProcessInfo()['browsers'][0]['processes']
-      total_renderer_priv = 0
-      total_renderer_shared = 0
-      for process in pinfo:
-        mem_priv = process['working_set_mem']['priv']
-        mem_shared = process['working_set_mem']['shared']
-        if process['child_process_type'] == 'Browser':
-          if 'browser_priv' not in stats:
-            stats['browser_priv'] = []
-            stats['browser_priv'].append(int(mem_priv))
-          if 'browser_shared' not in stats:
-            stats['browser_shared'] = []
-            stats['browser_shared'].append(int(mem_shared))
-        elif process['child_process_type'] == 'GPU':
-          if 'gpu_priv' not in stats:
-            stats['gpu_priv'] = []
-            stats['gpu_priv'].append(int(mem_priv))
-          if 'gpu_shared' not in stats:
-            stats['gpu_shared'] = []
-            stats['gpu_shared'].append(int(mem_shared))
-        elif process['child_process_type'] == 'Tab':
-          # Sum the memory of all renderer processes.
-          total_renderer_priv += int(mem_priv)
-          total_renderer_shared += int(mem_shared)
-      if 'renderer_priv' not in stats:
-        stats['renderer_priv'] = []
-        stats['renderer_priv'].append(int(total_renderer_priv))
-      if 'renderer_shared' not in stats:
-        stats['renderer_shared'] = []
-        stats['renderer_shared'].append(int(total_renderer_shared))
-
-      time.sleep(1)
-
-    # Compute min, max, and ending values to return.
-    result = {}
-    for measurement_type in stats:
-      values = stats[measurement_type]
-      result[measurement_type] = {
-        'min': min(values),
-        'max': max(values),
-        'end': values[-1],
-      }
-
-    return result
+    cmd_dict = { 'command': 'CaptureProfilePhoto' }
+    return self._GetResultFromJSONRequest(cmd_dict)
 
   ## ChromeOS section -- end
 
@@ -5014,13 +4522,11 @@ class PyUITestSuite(pyautolib.PyUITestSuiteBase, unittest.TestSuite):
     global _HTTP_SERVER
     assert not _HTTP_SERVER, 'HTTP Server already started'
     http_data_dir = _OPTIONS.http_data_dir
-    http_server = pyautolib.SpawnedTestServer(
-        pyautolib.SpawnedTestServer.TYPE_HTTP,
-        '127.0.0.1',
+    http_server = pyautolib.TestServer(pyautolib.TestServer.TYPE_HTTP,
         pyautolib.FilePath(http_data_dir))
     assert http_server.Start(), 'Could not start http server'
     _HTTP_SERVER = http_server
-    logging.debug('Started http server at "%s".', http_data_dir)
+    logging.debug('Started http server at "%s".' % http_data_dir)
 
   def _StopHTTPServer(self):
     """Stop the local http server."""
@@ -5077,9 +4583,7 @@ class _GTestTextTestResult(unittest._TextTestResult):
     if sys.version_info[:2] <= (2, 4):
       return '%s.%s' % (unittest._strclass(test.__class__),
                         test._TestCase__testMethodName)
-    return '%s.%s.%s' % (test.__class__.__module__,
-                         test.__class__.__name__,
-                         test._testMethodName)
+    return '%s.%s' % (unittest._strclass(test.__class__), test._testMethodName)
 
   def getDescription(self, test):
     return '%s: "%s"' % (self._GetTestURI(test), test.shortDescription())
@@ -5150,12 +4654,11 @@ class Main(object):
         default=os.path.join('chrome', 'test', 'data'),
         help='Relative path from which http server should serve files.')
     parser.add_option(
+        '', '--list-missing-tests', action='store_true', default=False,
+        help='Print a list of tests not included in PYAUTO_TESTS, and exit')
+    parser.add_option(
         '-L', '--list-tests', action='store_true', default=False,
         help='List all tests, and exit.')
-    parser.add_option(
-        '--shard',
-        help='Specify sharding params. Example: 1/3 implies split the list of '
-             'tests into 3 groups of which this is the 1st.')
     parser.add_option(
         '', '--log-file', type='string', default=None,
         help='Provide a path to a file to which the logger will log')
@@ -5194,6 +4697,10 @@ class Main(object):
 
     logging.basicConfig(level=level, format=format,
                         filename=self._options.log_file)
+
+    if self._options.list_missing_tests:
+      self._ListMissingTests()
+      sys.exit(0)
 
   def TestsDir(self):
     """Returns the path to dir containing tests.
@@ -5258,8 +4765,26 @@ class Main(object):
     elif type(obj) == types.UnboundMethodType:
       return [name]
     else:
-      logging.warn('No tests in "%s"', name)
+      logging.warn('No tests in "%s"' % name)
       return []
+
+  def _ListMissingTests(self):
+    """Print tests missing from PYAUTO_TESTS."""
+    # Fetch tests from all test scripts
+    all_test_files = filter(lambda x: x.endswith('.py'),
+                            os.listdir(self.TestsDir()))
+    all_tests_modules = [os.path.splitext(x)[0] for x in all_test_files]
+    all_tests = reduce(lambda x, y: x + y,
+                       map(self._ImportTestsFromName, all_tests_modules))
+    # Fetch tests included by PYAUTO_TESTS
+    pyauto_tests_file = os.path.join(self.TestsDir(), self._tests_filename)
+    pyauto_tests = reduce(lambda x, y: x + y,
+                          map(self._ImportTestsFromName,
+                              self._ExpandTestNamesFrom(pyauto_tests_file,
+                                                        self._options.suite)))
+    for a_test in all_tests:
+      if a_test not in pyauto_tests:
+        print a_test
 
   def _HasTestCases(self, module_string):
     """Determines if we have any PyUITest test case classes in the module
@@ -5277,13 +4802,11 @@ class Main(object):
 
     The given args can be either a module (ex: module1) or a testcase
     (ex: module2.MyTestCase) or a test (ex: module1.MyTestCase.testX)
-    or a suite name (ex: @FULL). If empty, the tests in the already imported
-    modules are loaded.
+    If empty, the tests in the already imported modules are loaded.
 
     Args:
       args: [module1, module2, module3.testcase, module4.testcase.testX]
-            These modules or test cases or tests should be importable.
-            Suites can be specified by prefixing @. Example: @FULL
+            These modules or test cases or tests should be importable
 
       Returns:
         a list of expanded test names.  Example:
@@ -5295,34 +4818,18 @@ class Main(object):
             'module4.testcase.testX'
           ]
     """
-
-    def _TestsFromDescriptionFile(suite):
-      pyauto_tests_file = os.path.join(self.TestsDir(), self._tests_filename)
-      if suite:
-        logging.debug("Reading %s (@%s)", pyauto_tests_file, suite)
-      else:
-        logging.debug("Reading %s", pyauto_tests_file)
-      if not os.path.exists(pyauto_tests_file):
-        logging.warn("%s missing. Cannot load tests.", pyauto_tests_file)
-        return []
-      else:
-        return self._ExpandTestNamesFrom(pyauto_tests_file, suite)
-
     if not args:  # Load tests ourselves
       if self._HasTestCases('__main__'):    # we are running a test script
         module_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
         args.append(module_name)   # run the test cases found in it
       else:  # run tests from the test description file
-        args = _TestsFromDescriptionFile(self._options.suite)
-    else:  # Check args with @ prefix for suites
-      out_args = []
-      for arg in args:
-        if arg.startswith('@'):
-          suite = arg[1:]
-          out_args += _TestsFromDescriptionFile(suite)
+        pyauto_tests_file = os.path.join(self.TestsDir(), self._tests_filename)
+        logging.debug("Reading %s", pyauto_tests_file)
+        if not os.path.exists(pyauto_tests_file):
+          logging.warn("%s missing. Cannot load tests." % pyauto_tests_file)
         else:
-          out_args.append(arg)
-      args = out_args
+          args = self._ExpandTestNamesFrom(pyauto_tests_file,
+                                           self._options.suite)
     return args
 
   def _ExpandTestNamesFrom(self, filename, suite):
@@ -5342,7 +4849,7 @@ class Main(object):
       platform = 'chromeos'
     assert platform in self._platform_map, '%s unsupported' % platform
     def _NamesInSuite(suite_name):
-      logging.debug('Expanding suite %s', suite_name)
+      logging.debug('Expanding suite %s' % suite_name)
       platforms = suites.get(suite_name)
       names = platforms.get('all', []) + \
               platforms.get(self._platform_map[platform], [])
@@ -5369,9 +4876,9 @@ class Main(object):
       if name in args:
         args.remove(name)
       else:
-        logging.warn('Cannot exclude %s. Not included. Ignoring', name)
+        logging.warn('Cannot exclude %s. Not included. Ignoring' % name)
     if excluded:
-      logging.debug('Excluded %d test(s): %s', len(excluded), excluded)
+      logging.debug('Excluded %d test(s): %s' % (len(excluded), excluded))
     return args
 
   def _Run(self):
@@ -5384,28 +4891,14 @@ class Main(object):
     # Set CHROME_HEADLESS. It enables crash reporter on posix.
     os.environ['CHROME_HEADLESS'] = '1'
     os.environ['EXTRA_CHROME_FLAGS'] = chrome_flags
+    pyauto_suite = PyUITestSuite(suite_args)
     test_names = self._ExpandTestNames(self._args)
-
-    # Shard, if requested (--shard).
-    if self._options.shard:
-      matched = re.match('(\d+)/(\d+)', self._options.shard)
-      if not matched:
-        print >>sys.stderr, 'Invalid sharding params: %s' % self._options.shard
-        sys.exit(1)
-      shard_index = int(matched.group(1)) - 1
-      num_shards = int(matched.group(2))
-      if shard_index < 0 or shard_index >= num_shards:
-        print >>sys.stderr, 'Invalid sharding params: %s' % self._options.shard
-        sys.exit(1)
-      test_names = pyauto_utils.Shard(test_names, shard_index, num_shards)
-
     test_names *= self._options.repeat
     logging.debug("Loading %d tests from %s", len(test_names), test_names)
     if self._options.list_tests:  # List tests and exit
       for name in test_names:
         print name
       sys.exit(0)
-    pyauto_suite = PyUITestSuite(suite_args)
     loaded_tests = unittest.defaultTestLoader.loadTestsFromNames(test_names)
     pyauto_suite.addTests(loaded_tests)
     verbosity = 1

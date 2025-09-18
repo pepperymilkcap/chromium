@@ -7,45 +7,28 @@
 #include <limits>
 
 #include "base/command_line.h"
-#include "base/debug/crash_logging.h"
-#include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/process_util.h"
 #include "base/rand_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/threading/platform_thread.h"
-#include "base/time/time.h"
-#include "content/child/browser_font_resource_trusted.h"
-#include "content/child/child_process.h"
+#include "base/stringprintf.h"
+#include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
-#include "content/common/sandbox_util.h"
 #include "content/ppapi_plugin/broker_process_dispatcher.h"
 #include "content/ppapi_plugin/plugin_process_dispatcher.h"
 #include "content/ppapi_plugin/ppapi_webkitplatformsupport_impl.h"
-#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/sandbox_init.h"
-#include "content/public/plugin/content_plugin_client.h"
 #include "ipc/ipc_channel_handle.h"
-#include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_sync_channel.h"
-#include "ipc/ipc_sync_message_filter.h"
 #include "ppapi/c/dev/ppp_network_state_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp.h"
-#include "ppapi/proxy/interface_list.h"
 #include "ppapi/proxy/plugin_globals.h"
-#include "ppapi/proxy/plugin_message_filter.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "ppapi/proxy/resource_reply_thread_registrar.h"
-#include "third_party/WebKit/public/web/WebKit.h"
-#include "ui/base/ui_base_switches.h"
+#include "ppapi/proxy/interface_list.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 
 #if defined(OS_WIN)
-#include "base/win/win_util.h"
-#include "base/win/windows_version.h"
-#include "sandbox/win/src/sandbox.h"
+#include "sandbox/src/sandbox.h"
 #elif defined(OS_MACOSX)
 #include "content/common/sandbox_init_mac.h"
 #endif
@@ -56,73 +39,67 @@ extern sandbox::TargetServices* g_target_services;
 extern void* g_target_services;
 #endif
 
-namespace content {
-
 typedef int32_t (*InitializeBrokerFunc)
     (PP_ConnectInstance_Func* connect_instance_func);
 
-PpapiThread::PpapiThread(const CommandLine& command_line, bool is_broker)
+PpapiThread::PpapiThread(bool is_broker)
     : is_broker_(is_broker),
+      get_plugin_interface_(NULL),
       connect_instance_func_(NULL),
       local_pp_module_(
           base::RandInt(0, std::numeric_limits<PP_Module>::max())),
       next_plugin_dispatcher_id_(1) {
-  ppapi::proxy::PluginGlobals* globals = ppapi::proxy::PluginGlobals::Get();
-  globals->set_plugin_proxy_delegate(this);
-  globals->set_command_line(
-      command_line.GetSwitchValueASCII(switches::kPpapiFlashArgs));
-
+  ppapi::proxy::PluginGlobals::Get()->set_plugin_proxy_delegate(this);
   webkit_platform_support_.reset(new PpapiWebKitPlatformSupportImpl);
-  blink::initialize(webkit_platform_support_.get());
-
-  if (!is_broker_) {
-    channel()->AddFilter(
-        new ppapi::proxy::PluginMessageFilter(
-            NULL, globals->resource_reply_thread_registrar()));
-  }
+  WebKit::initialize(webkit_platform_support_.get());
 }
 
 PpapiThread::~PpapiThread() {
-}
-
-void PpapiThread::Shutdown() {
   ppapi::proxy::PluginGlobals::Get()->set_plugin_proxy_delegate(NULL);
-  if (plugin_entry_points_.shutdown_module)
-    plugin_entry_points_.shutdown_module();
-  webkit_platform_support_->Shutdown();
-  blink::shutdown();
+
+  if (!library_.is_valid())
+    return;
+
+  // The ShutdownModule/ShutdownBroker function is optional.
+  ppapi::proxy::ProxyChannel::ShutdownModuleFunc shutdown_function =
+      is_broker_ ?
+      reinterpret_cast<ppapi::proxy::ProxyChannel::ShutdownModuleFunc>(
+          library_.GetFunctionPointer("PPP_ShutdownBroker")) :
+      reinterpret_cast<ppapi::proxy::ProxyChannel::ShutdownModuleFunc>(
+          library_.GetFunctionPointer("PPP_ShutdownModule"));
+  if (shutdown_function)
+    shutdown_function();
+  WebKit::shutdown();
 }
 
-bool PpapiThread::Send(IPC::Message* msg) {
-  // Allow access from multiple threads.
-  if (base::MessageLoop::current() == message_loop())
-    return ChildThread::Send(msg);
-
-  return sync_message_filter()->Send(msg);
-}
-
+// The "regular" ChildThread implements this function and does some standard
+// dispatching, then uses the message router. We don't actually need any of
+// this so this function just overrides that one.
+//
 // Note that this function is called only for messages from the channel to the
 // browser process. Messages from the renderer process are sent via a different
 // channel that ends up at Dispatcher::OnMessageReceived.
-bool PpapiThread::OnControlMessageReceived(const IPC::Message& msg) {
-  bool handled = true;
+bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PpapiThread, msg)
-    IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnLoadPlugin)
-    IPC_MESSAGE_HANDLER(PpapiMsg_CreateChannel, OnCreateChannel)
-    IPC_MESSAGE_HANDLER(PpapiMsg_SetNetworkState, OnSetNetworkState)
-    IPC_MESSAGE_HANDLER(PpapiMsg_Crash, OnCrash)
-    IPC_MESSAGE_HANDLER(PpapiMsg_Hang, OnHang)
-    IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnMsgLoadPlugin)
+    IPC_MESSAGE_HANDLER(PpapiMsg_CreateChannel, OnMsgCreateChannel)
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ConnectACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_SSLHandshakeACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ReadACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_WriteACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_RecvFromACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_SendToACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_BindACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER(PpapiMsg_SetNetworkState, OnMsgSetNetworkState)
   IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
-void PpapiThread::OnChannelConnected(int32 peer_pid) {
-  ChildThread::OnChannelConnected(peer_pid);
-#if defined(OS_WIN)
-  if (is_broker_)
-    peer_handle_.Set(::OpenProcess(PROCESS_DUP_HANDLE, FALSE, peer_pid));
-#endif
+  return true;
 }
 
 base::MessageLoopProxy* PpapiThread::GetIPCMessageLoop() {
@@ -133,33 +110,12 @@ base::WaitableEvent* PpapiThread::GetShutdownEvent() {
   return ChildProcess::current()->GetShutDownEvent();
 }
 
-IPC::PlatformFileForTransit PpapiThread::ShareHandleWithRemote(
-    base::PlatformFile handle,
-    base::ProcessId peer_pid,
-    bool should_close_source) {
-#if defined(OS_WIN)
-  if (peer_handle_.IsValid()) {
-    DCHECK(is_broker_);
-    return IPC::GetFileHandleForProcess(handle, peer_handle_,
-                                        should_close_source);
-  }
-#endif
-
-  DCHECK(peer_pid != base::kNullProcessId);
-  return BrokerGetFileHandleForProcess(handle, peer_pid, should_close_source);
-}
-
 std::set<PP_Instance>* PpapiThread::GetGloballySeenInstanceIDSet() {
   return &globally_seen_instance_ids_;
 }
 
-IPC::Sender* PpapiThread::GetBrowserSender() {
-  return this;
-}
-
-std::string PpapiThread::GetUILanguage() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return command_line->GetSwitchValueASCII(switches::kLang);
+bool PpapiThread::SendToBrowser(IPC::Message* msg) {
+  return Send(msg);
 }
 
 void PpapiThread::PreCacheFont(const void* logfontw) {
@@ -167,21 +123,6 @@ void PpapiThread::PreCacheFont(const void* logfontw) {
   Send(new ChildProcessHostMsg_PreCacheFont(
       *static_cast<const LOGFONTW*>(logfontw)));
 #endif
-}
-
-void PpapiThread::SetActiveURL(const std::string& url) {
-  GetContentClient()->SetActiveURL(GURL(url));
-}
-
-PP_Resource PpapiThread::CreateBrowserFont(
-    ppapi::proxy::Connection connection,
-    PP_Instance instance,
-    const PP_BrowserFont_Trusted_Description& desc,
-    const ppapi::Preferences& prefs) {
-  if (!BrowserFontResource_Trusted::IsPPFontDescriptionValid(desc))
-    return 0;
-  return (new BrowserFontResource_Trusted(
-        connection, instance, desc, prefs))->GetReference();
 }
 
 uint32 PpapiThread::Register(ppapi::proxy::PluginDispatcher* plugin_dispatcher) {
@@ -205,91 +146,17 @@ void PpapiThread::Unregister(uint32 plugin_dispatcher_id) {
   plugin_dispatchers_.erase(plugin_dispatcher_id);
 }
 
-void PpapiThread::OnLoadPlugin(const base::FilePath& path,
-                               const ppapi::PpapiPermissions& permissions) {
-  // In case of crashes, the crash dump doesn't indicate which plugin
-  // it came from.
-  base::debug::SetCrashKeyValue("ppapi_path", path.MaybeAsASCII());
-
+void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
   SavePluginName(path);
 
-  // This must be set before calling into the plugin so it can get the
-  // interfaces it has permission for.
-  ppapi::proxy::InterfaceList::SetProcessGlobalPermissions(permissions);
-  permissions_ = permissions;
-
-  // Trusted Pepper plugins may be "internal", i.e. built-in to the browser
-  // binary.  If we're being asked to load such a plugin (e.g. the Chromoting
-  // client) then fetch the entry points from the embedder, rather than a DLL.
-  std::vector<PepperPluginInfo> plugins;
-  GetContentClient()->AddPepperPlugins(&plugins);
-  for (size_t i = 0; i < plugins.size(); ++i) {
-    if (plugins[i].is_internal && plugins[i].path == path) {
-      // An internal plugin is being loaded, so fetch the entry points.
-      plugin_entry_points_ = plugins[i].internal_entry_points;
-    }
-  }
-
-  // If the plugin isn't internal then load it from |path|.
-  base::ScopedNativeLibrary library;
-  if (plugin_entry_points_.initialize_module == NULL) {
-    // Load the plugin from the specified library.
-    std::string error;
-    library.Reset(base::LoadNativeLibrary(path, &error));
-    if (!library.is_valid()) {
-      LOG(ERROR) << "Failed to load Pepper module from "
-        << path.value() << " (error: " << error << ")";
-      ReportLoadResult(path, LOAD_FAILED);
-      return;
-    }
-
-    // Get the GetInterface function (required).
-    plugin_entry_points_.get_interface =
-        reinterpret_cast<PP_GetInterface_Func>(
-            library.GetFunctionPointer("PPP_GetInterface"));
-    if (!plugin_entry_points_.get_interface) {
-      LOG(WARNING) << "No PPP_GetInterface in plugin library";
-      ReportLoadResult(path, ENTRY_POINT_MISSING);
-      return;
-    }
-
-    // The ShutdownModule/ShutdownBroker function is optional.
-    plugin_entry_points_.shutdown_module =
-        is_broker_ ?
-        reinterpret_cast<PP_ShutdownModule_Func>(
-            library.GetFunctionPointer("PPP_ShutdownBroker")) :
-        reinterpret_cast<PP_ShutdownModule_Func>(
-            library.GetFunctionPointer("PPP_ShutdownModule"));
-
-    if (!is_broker_) {
-      // Get the InitializeModule function (required for non-broker code).
-      plugin_entry_points_.initialize_module =
-          reinterpret_cast<PP_InitializeModule_Func>(
-              library.GetFunctionPointer("PPP_InitializeModule"));
-      if (!plugin_entry_points_.initialize_module) {
-        LOG(WARNING) << "No PPP_InitializeModule in plugin library";
-        ReportLoadResult(path, ENTRY_POINT_MISSING);
-        return;
-      }
-    }
-  }
+  std::string error;
+  base::ScopedNativeLibrary library(base::LoadNativeLibrary(path, &error));
 
 #if defined(OS_WIN)
-  // If code subsequently tries to exit using abort(), force a crash (since
-  // otherwise these would be silent terminations and fly under the radar).
-  base::win::SetAbortBehaviorForCrashReporting();
-
   // Once we lower the token the sandbox is locked down and no new modules
   // can be loaded. TODO(cpu): consider changing to the loading style of
   // regular plugins.
   if (g_target_services) {
-    // Let Flash load DRM before lockdown on Vista+.
-    if (permissions.HasPermission(ppapi::PERMISSION_FLASH) &&
-        base::win::OSInfo::GetInstance()->version() >=
-        base::win::VERSION_VISTA ) {
-      LoadLibrary(L"dxva2.dll");
-    }
-
     // Cause advapi32 to load before the sandbox is turned on.
     unsigned int dummy_rand;
     rand_s(&dummy_rand);
@@ -301,6 +168,12 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
   }
 #endif
 
+  if (!library.is_valid()) {
+    LOG(ERROR) << "Failed to load Pepper module from "
+      << path.value() << " (error: " << error << ")";
+    return;
+  }
+
   if (is_broker_) {
     // Get the InitializeBroker function (required).
     InitializeBrokerFunc init_broker =
@@ -308,53 +181,66 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
             library.GetFunctionPointer("PPP_InitializeBroker"));
     if (!init_broker) {
       LOG(WARNING) << "No PPP_InitializeBroker in plugin library";
-      ReportLoadResult(path, ENTRY_POINT_MISSING);
       return;
     }
 
     int32_t init_error = init_broker(&connect_instance_func_);
     if (init_error != PP_OK) {
       LOG(WARNING) << "InitBroker failed with error " << init_error;
-      ReportLoadResult(path, INIT_FAILED);
       return;
     }
     if (!connect_instance_func_) {
       LOG(WARNING) << "InitBroker did not provide PP_ConnectInstance_Func";
-      ReportLoadResult(path, INIT_FAILED);
       return;
     }
   } else {
+    // Get the GetInterface function (required).
+    get_plugin_interface_ =
+        reinterpret_cast<ppapi::proxy::Dispatcher::GetInterfaceFunc>(
+            library.GetFunctionPointer("PPP_GetInterface"));
+    if (!get_plugin_interface_) {
+      LOG(WARNING) << "No PPP_GetInterface in plugin library";
+      return;
+    }
+
 #if defined(OS_MACOSX)
     // We need to do this after getting |PPP_GetInterface()| (or presumably
     // doing something nontrivial with the library), else the sandbox
     // intercedes.
-    CHECK(InitializeSandbox());
+    if (!content::InitializeSandbox()) {
+      LOG(WARNING) << "Failed to initialize sandbox";
+    }
 #endif
 
-    int32_t init_error = plugin_entry_points_.initialize_module(
+    // Get the InitializeModule function (required).
+    ppapi::proxy::Dispatcher::InitModuleFunc init_module =
+        reinterpret_cast<ppapi::proxy::Dispatcher::InitModuleFunc>(
+            library.GetFunctionPointer("PPP_InitializeModule"));
+    if (!init_module) {
+      LOG(WARNING) << "No PPP_InitializeModule in plugin library";
+      return;
+    }
+    int32_t init_error = init_module(
         local_pp_module_,
         &ppapi::proxy::PluginDispatcher::GetBrowserInterface);
     if (init_error != PP_OK) {
       LOG(WARNING) << "InitModule failed with error " << init_error;
-      ReportLoadResult(path, INIT_FAILED);
       return;
     }
   }
 
-  // Initialization succeeded, so keep the plugin DLL loaded.
   library_.Reset(library.Release());
-
-  ReportLoadResult(path, LOAD_SUCCESS);
 }
 
-void PpapiThread::OnCreateChannel(base::ProcessId renderer_pid,
-                                  int renderer_child_id,
-                                  bool incognito) {
+void PpapiThread::OnMsgCreateChannel(base::ProcessHandle host_process_handle,
+                                     int renderer_id) {
   IPC::ChannelHandle channel_handle;
-
-  if (!plugin_entry_points_.get_interface ||  // Plugin couldn't be loaded.
-      !SetupRendererChannel(renderer_pid, renderer_child_id, incognito,
+  if (!library_.is_valid() ||  // Plugin couldn't be loaded.
+      !SetupRendererChannel(host_process_handle, renderer_id,
                             &channel_handle)) {
+    // TODO(xhwang): Add CHECK to investigate the root cause of
+    // crbug.com/103957.  Will remove after the bug is fixed.
+    CHECK(!is_broker_ || library_.is_valid());
     Send(new PpapiHostMsg_ChannelCreated(IPC::ChannelHandle()));
     return;
   }
@@ -362,58 +248,52 @@ void PpapiThread::OnCreateChannel(base::ProcessId renderer_pid,
   Send(new PpapiHostMsg_ChannelCreated(channel_handle));
 }
 
-void PpapiThread::OnSetNetworkState(bool online) {
-  // Note the browser-process side shouldn't send us these messages in the
-  // first unless the plugin has dev permissions, so we don't need to check
-  // again here. We don't want random plugins depending on this dev interface.
-  if (!plugin_entry_points_.get_interface)
+void PpapiThread::OnMsgSetNetworkState(bool online) {
+  if (!get_plugin_interface_)
     return;
   const PPP_NetworkState_Dev* ns = static_cast<const PPP_NetworkState_Dev*>(
-      plugin_entry_points_.get_interface(PPP_NETWORK_STATE_DEV_INTERFACE));
+      get_plugin_interface_(PPP_NETWORK_STATE_DEV_INTERFACE));
   if (ns)
     ns->SetOnLine(PP_FromBool(online));
 }
 
-void PpapiThread::OnCrash() {
-  // Intentionally crash upon the request of the browser.
-  volatile int* null_pointer = NULL;
-  *null_pointer = 0;
+void PpapiThread::OnPluginDispatcherMessageReceived(const IPC::Message& msg) {
+  // The first parameter should be a plugin dispatcher ID.
+  void* iter = NULL;
+  uint32 id = 0;
+  if (!msg.ReadUInt32(&iter, &id)) {
+    NOTREACHED();
+    return;
+  }
+  std::map<uint32, ppapi::proxy::PluginDispatcher*>::iterator dispatcher =
+      plugin_dispatchers_.find(id);
+  if (dispatcher != plugin_dispatchers_.end())
+    dispatcher->second->OnMessageReceived(msg);
 }
 
-void PpapiThread::OnHang() {
-  // Intentionally hang upon the request of the browser.
-  for (;;)
-    base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(1));
-}
-
-bool PpapiThread::SetupRendererChannel(base::ProcessId renderer_pid,
-                                       int renderer_child_id,
-                                       bool incognito,
+bool PpapiThread::SetupRendererChannel(base::ProcessHandle host_process_handle,
+                                       int renderer_id,
                                        IPC::ChannelHandle* handle) {
   DCHECK(is_broker_ == (connect_instance_func_ != NULL));
+  DCHECK(is_broker_ == (get_plugin_interface_ == NULL));
   IPC::ChannelHandle plugin_handle;
-  plugin_handle.name = IPC::Channel::GenerateVerifiedChannelID(
-      base::StringPrintf(
-          "%d.r%d", base::GetCurrentProcId(), renderer_child_id));
+  plugin_handle.name = StringPrintf("%d.r%d", base::GetCurrentProcId(),
+                                    renderer_id);
 
   ppapi::proxy::ProxyChannel* dispatcher = NULL;
   bool init_result = false;
   if (is_broker_) {
     BrokerProcessDispatcher* broker_dispatcher =
-        new BrokerProcessDispatcher(plugin_entry_points_.get_interface,
+        new BrokerProcessDispatcher(host_process_handle,
                                     connect_instance_func_);
     init_result = broker_dispatcher->InitBrokerWithChannel(this,
-                                                           renderer_pid,
                                                            plugin_handle,
                                                            false);
     dispatcher = broker_dispatcher;
   } else {
     PluginProcessDispatcher* plugin_dispatcher =
-        new PluginProcessDispatcher(plugin_entry_points_.get_interface,
-                                    permissions_,
-                                    incognito);
+        new PluginProcessDispatcher(host_process_handle, get_plugin_interface_);
     init_result = plugin_dispatcher->InitPluginWithChannel(this,
-                                                           renderer_pid,
                                                            plugin_handle,
                                                            false);
     dispatcher = plugin_dispatcher;
@@ -430,6 +310,9 @@ bool PpapiThread::SetupRendererChannel(base::ProcessId renderer_pid,
   // This ensures this process will be notified when it is closed even if a
   // connection is not established.
   handle->socket = base::FileDescriptor(dispatcher->TakeRendererFD(), true);
+  // Check the validity of fd for bug investigation. Remove after fixed.
+  // See for details: crbug.com/103957.
+  CHECK_NE(-1, handle->socket.fd);
   if (handle->socket.fd == -1)
     return false;
 #endif
@@ -439,36 +322,7 @@ bool PpapiThread::SetupRendererChannel(base::ProcessId renderer_pid,
   return true;
 }
 
-void PpapiThread::SavePluginName(const base::FilePath& path) {
+void PpapiThread::SavePluginName(const FilePath& path) {
   ppapi::proxy::PluginGlobals::Get()->set_plugin_name(
       path.BaseName().AsUTF8Unsafe());
-
-  // plugin() is NULL when in-process, which is fine, because this is
-  // just a hook for setting the process name.
-  if (GetContentClient()->plugin()) {
-    GetContentClient()->plugin()->PluginProcessStarted(
-        path.BaseName().RemoveExtension().LossyDisplayName());
-  }
 }
-
-void PpapiThread::ReportLoadResult(const base::FilePath& path,
-                                   LoadResult result) {
-  DCHECK_LT(result, LOAD_RESULT_MAX);
-
-  std::ostringstream histogram_name;
-  histogram_name << "Plugin.Ppapi" << (is_broker_ ? "Broker" : "Plugin")
-                 << "LoadResult_" << path.BaseName().MaybeAsASCII();
-
-  // Note: This leaks memory, which is expected behavior.
-  base::HistogramBase* histogram =
-      base::LinearHistogram::FactoryGet(
-          histogram_name.str(),
-          1,
-          LOAD_RESULT_MAX,
-          LOAD_RESULT_MAX + 1,
-          base::HistogramBase::kUmaTargetedHistogramFlag);
-
-  histogram->Add(result);
-}
-
-}  // namespace content

@@ -4,10 +4,11 @@
 
 #ifndef NET_PROXY_MOCK_PROXY_SCRIPT_FETCHER_H_
 #define NET_PROXY_MOCK_PROXY_SCRIPT_FETCHER_H_
+#pragma once
 
 #include "base/compiler_specific.h"
+#include "googleurl/src/gurl.h"
 #include "net/proxy/proxy_script_fetcher.h"
-#include "url/gurl.h"
 
 #include <string>
 
@@ -24,7 +25,7 @@ class MockProxyScriptFetcher : public ProxyScriptFetcher {
 
   // ProxyScriptFetcher implementation.
   virtual int Fetch(const GURL& url,
-                    base::string16* text,
+                    string16* text,
                     const CompletionCallback& callback) OVERRIDE;
   virtual void Cancel() OVERRIDE;
   virtual URLRequestContext* GetRequestContext() const OVERRIDE;
@@ -39,7 +40,7 @@ class MockProxyScriptFetcher : public ProxyScriptFetcher {
  private:
   GURL pending_request_url_;
   CompletionCallback pending_request_callback_;
-  base::string16* pending_request_text_;
+  string16* pending_request_text_;
   bool waiting_for_fetch_;
 };
 

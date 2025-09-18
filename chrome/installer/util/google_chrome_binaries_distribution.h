@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,22 +6,21 @@
 
 #ifndef CHROME_INSTALLER_UTIL_GOOGLE_CHROME_BINARIES_DISTRIBUTION_H_
 #define CHROME_INSTALLER_UTIL_GOOGLE_CHROME_BINARIES_DISTRIBUTION_H_
+#pragma once
 
 #include "chrome/installer/util/chromium_binaries_distribution.h"
 
 class GoogleChromeBinariesDistribution : public ChromiumBinariesDistribution {
  public:
-  virtual base::string16 GetAppGuid();
+  virtual std::wstring GetAppGuid();
 
-  virtual base::string16 GetDisplayName();
+  virtual std::wstring GetAppShortCutName();
 
-  virtual base::string16 GetShortcutName(ShortcutType shortcut_type);
+  virtual std::wstring GetStateKey();
 
-  virtual base::string16 GetStateKey();
+  virtual std::wstring GetStateMediumKey();
 
-  virtual base::string16 GetStateMediumKey();
-
-  virtual base::string16 GetVersionKey();
+  virtual std::wstring GetVersionKey();
 
   virtual void UpdateInstallStatus(bool system_install,
       installer::ArchiveType archive_type,

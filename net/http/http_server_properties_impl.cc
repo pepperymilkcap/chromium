@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 #include "net/http/http_pipelined_host_capability.h"
 
 namespace net {
@@ -19,8 +19,7 @@ static const int kDefaultNumHostsToRemember = 200;
 
 HttpServerPropertiesImpl::HttpServerPropertiesImpl()
     : pipeline_capability_map_(
-        new CachedPipelineCapabilityMap(kDefaultNumHostsToRemember)),
-      weak_ptr_factory_(this) {
+        new CachedPipelineCapabilityMap(kDefaultNumHostsToRemember)) {
 }
 
 HttpServerPropertiesImpl::~HttpServerPropertiesImpl() {
@@ -53,7 +52,7 @@ void HttpServerPropertiesImpl::InitializeAlternateProtocolServers(
 }
 
 void HttpServerPropertiesImpl::InitializeSpdySettingsServers(
-    SpdySettingsMap* spdy_settings_map) {
+    std::map<HostPortPair, spdy::SpdySettings>* spdy_settings_map) {
   spdy_settings_map_.swap(*spdy_settings_map);
 }
 
@@ -82,7 +81,7 @@ void HttpServerPropertiesImpl::GetSpdyServerList(
        it != spdy_servers_table_.end(); ++it) {
     const std::string spdy_server_host_port = it->first;
     if (it->second)
-      spdy_server_list->Append(new base::StringValue(spdy_server_host_port));
+      spdy_server_list->Append(new StringValue(spdy_server_host_port));
   }
 }
 
@@ -111,10 +110,6 @@ void HttpServerPropertiesImpl::ForceAlternateProtocol(
 void HttpServerPropertiesImpl::DisableForcedAlternateProtocol() {
   delete g_forced_alternate_protocol;
   g_forced_alternate_protocol = NULL;
-}
-
-base::WeakPtr<HttpServerProperties> HttpServerPropertiesImpl::GetWeakPtr() {
-  return weak_ptr_factory_.GetWeakPtr();
 }
 
 void HttpServerPropertiesImpl::Clear() {
@@ -184,7 +179,7 @@ void HttpServerPropertiesImpl::SetAlternateProtocol(
     uint16 alternate_port,
     AlternateProtocol alternate_protocol) {
   if (alternate_protocol == ALTERNATE_PROTOCOL_BROKEN) {
-    LOG(DFATAL) << "Call SetBrokenAlternateProtocol() instead.";
+    LOG(DFATAL) << "Call MarkBrokenAlternateProtocolFor() instead.";
     return;
   }
 
@@ -225,36 +220,41 @@ HttpServerPropertiesImpl::alternate_protocol_map() const {
   return alternate_protocol_map_;
 }
 
-const SettingsMap& HttpServerPropertiesImpl::GetSpdySettings(
+const spdy::SpdySettings& HttpServerPropertiesImpl::GetSpdySettings(
     const HostPortPair& host_port_pair) const {
   SpdySettingsMap::const_iterator it = spdy_settings_map_.find(host_port_pair);
   if (it == spdy_settings_map_.end()) {
-    CR_DEFINE_STATIC_LOCAL(SettingsMap, kEmptySettingsMap, ());
-    return kEmptySettingsMap;
+    CR_DEFINE_STATIC_LOCAL(spdy::SpdySettings, kEmptySpdySettings, ());
+    return kEmptySpdySettings;
   }
   return it->second;
 }
 
-bool HttpServerPropertiesImpl::SetSpdySetting(
+bool HttpServerPropertiesImpl::SetSpdySettings(
     const HostPortPair& host_port_pair,
-    SpdySettingsIds id,
-    SpdySettingsFlags flags,
-    uint32 value) {
-  if (!(flags & SETTINGS_FLAG_PLEASE_PERSIST))
-      return false;
+    const spdy::SpdySettings& settings) {
+  spdy::SpdySettings persistent_settings;
 
-  SettingsMap& settings_map = spdy_settings_map_[host_port_pair];
-  SettingsFlagsAndValue flags_and_value(SETTINGS_FLAG_PERSISTED, value);
-  settings_map[id] = flags_and_value;
+  // Iterate through the list, and only copy those settings which are marked
+  // for persistence.
+  spdy::SpdySettings::const_iterator it;
+  for (it = settings.begin(); it != settings.end(); ++it) {
+    spdy::SettingsFlagsAndId id = it->first;
+    if (id.flags() & spdy::SETTINGS_FLAG_PLEASE_PERSIST) {
+      id.set_flags(spdy::SETTINGS_FLAG_PERSISTED);
+      persistent_settings.push_back(std::make_pair(id, it->second));
+    }
+  }
+
+  // If we didn't persist anything, then we are done.
+  if (persistent_settings.empty())
+    return false;
+
+  spdy_settings_map_[host_port_pair] = persistent_settings;
   return true;
 }
 
-void HttpServerPropertiesImpl::ClearSpdySettings(
-    const HostPortPair& host_port_pair) {
-  spdy_settings_map_.erase(host_port_pair);
-}
-
-void HttpServerPropertiesImpl::ClearAllSpdySettings() {
+void HttpServerPropertiesImpl::ClearSpdySettings() {
   spdy_settings_map_.clear();
 }
 

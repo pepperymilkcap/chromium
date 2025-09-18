@@ -8,15 +8,15 @@
 
 #include "base/logging.h"
 #include "base/pickle.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "googleurl/src/gurl.h"
 #include "ui/base/clipboard/custom_data_helper.h"
-#include "url/gurl.h"
+
+static const int kBitsPerByte = 8;
 
 namespace ui {
 
 namespace {
-
-const int kBitsPerByte = 8;
 
 void AddTargetToList(GtkTargetList* targets, int target_code) {
   switch (target_code) {
@@ -154,12 +154,12 @@ void SetDestTargetList(GtkWidget* dest, const int* target_codes) {
 
 void WriteURLWithName(GtkSelectionData* selection_data,
                       const GURL& url,
-                      base::string16 title,
+                      string16 title,
                       int type) {
   if (title.empty()) {
     // We prefer to not have empty titles. Set it to the filename extracted
     // from the URL.
-    title = base::UTF8ToUTF16(url.ExtractFileName());
+    title = UTF8ToUTF16(url.ExtractFileName());
   }
 
   switch (type) {
@@ -178,7 +178,7 @@ void WriteURLWithName(GtkSelectionData* selection_data,
     }
     case CHROME_NAMED_URL: {
       Pickle pickle;
-      pickle.WriteString(base::UTF16ToUTF8(title));
+      pickle.WriteString(UTF16ToUTF8(title));
       pickle.WriteString(url.spec());
       gtk_selection_data_set(
           selection_data,
@@ -190,7 +190,7 @@ void WriteURLWithName(GtkSelectionData* selection_data,
     }
     case NETSCAPE_URL: {
       // _NETSCAPE_URL format is URL + \n + title.
-      std::string utf8_text = url.spec() + "\n" + base::UTF16ToUTF8(title);
+      std::string utf8_text = url.spec() + "\n" + UTF16ToUTF8(title);
       gtk_selection_data_set(selection_data,
                              gtk_selection_data_get_target(selection_data),
                              kBitsPerByte,
@@ -208,7 +208,7 @@ void WriteURLWithName(GtkSelectionData* selection_data,
 
 bool ExtractNamedURL(GtkSelectionData* selection_data,
                      GURL* url,
-                     base::string16* title) {
+                     string16* title) {
   if (!selection_data || gtk_selection_data_get_length(selection_data) <= 0)
     return false;
 
@@ -216,7 +216,7 @@ bool ExtractNamedURL(GtkSelectionData* selection_data,
       reinterpret_cast<const char*>(
           gtk_selection_data_get_data(selection_data)),
       gtk_selection_data_get_length(selection_data));
-  PickleIterator iter(data);
+  void* iter = NULL;
   std::string title_utf8, url_utf8;
   if (!data.ReadString(&iter, &title_utf8) ||
       !data.ReadString(&iter, &url_utf8)) {
@@ -228,7 +228,7 @@ bool ExtractNamedURL(GtkSelectionData* selection_data,
     return false;
 
   *url = gurl;
-  *title = base::UTF8ToUTF16(title_utf8);
+  *title = UTF8ToUTF16(title_utf8);
   return true;
 }
 
@@ -249,7 +249,7 @@ bool ExtractURIList(GtkSelectionData* selection_data, std::vector<GURL>* urls) {
 
 bool ExtractNetscapeURL(GtkSelectionData* selection_data,
                         GURL* url,
-                        base::string16* title) {
+                        string16* title) {
   if (!selection_data || gtk_selection_data_get_length(selection_data) <= 0)
     return false;
 
@@ -268,7 +268,7 @@ bool ExtractNetscapeURL(GtkSelectionData* selection_data,
     return false;
 
   *url = gurl;
-  *title = base::UTF8ToUTF16(data.substr(newline + 1));
+  *title = UTF8ToUTF16(data.substr(newline + 1));
   return true;
 }
 

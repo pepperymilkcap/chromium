@@ -22,7 +22,7 @@ class CacheStream : public CComObjectRoot, public StreamImpl {
     COM_INTERFACE_ENTRY(ISequentialStream)
   END_COM_MAP()
 
-  CacheStream() : size_(0), position_(0), eof_(false) {
+  CacheStream() : cache_(NULL), size_(0), position_(0), eof_(false) {
   }
   HRESULT Initialize(const char* cache, size_t size, bool eof);
   static HRESULT BSCBFeedData(IBindStatusCallback* bscb, const char* data,
@@ -33,7 +33,7 @@ class CacheStream : public CComObjectRoot, public StreamImpl {
   STDMETHOD(Read)(void* pv, ULONG cb, ULONG* read);
 
  protected:
-  scoped_ptr<char[]> cache_;
+  scoped_ptr<char> cache_;
   size_t size_;
   size_t position_;
   bool eof_;
@@ -126,7 +126,8 @@ END_COM_MAP()
              const wchar_t* status_text)
         : progress_(progress),
           progress_max_(progress_max),
-          status_code_(status_code) {
+          status_code_(status_code),
+          status_text_(NULL) {
       if (status_text) {
         int len = lstrlenW(status_text) + 1;
         status_text_.reset(new wchar_t[len]);
@@ -164,7 +165,7 @@ END_COM_MAP()
     // We don't use std::wstring here since we want to be able to play
     // progress notifications back exactly as we got them.  NULL and L"" are
     // not equal.
-    scoped_ptr<wchar_t[]> status_text_;
+    scoped_ptr<wchar_t> status_text_;
   };
 
   typedef std::vector<Progress*> ProgressVector;

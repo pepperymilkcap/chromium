@@ -1,7 +1,3 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 // API test for chrome.tabs.captureVisibleTab(), capturing PNG images.
 // browser_tests.exe --gtest_filter=ExtensionApiTest.CaptureVisibleTabPng
 
@@ -15,7 +11,7 @@ var kWindowRect = {
   'height': 400
 };
 
-var kTestDir = '/extensions/api_test/tabs/capture_visible_tab/common/';
+var kTestDir = '/files/extensions/api_test/tabs/capture_visible_tab/common/';
 var kURLBaseA = 'http://a.com:PORT' + kTestDir;
 var kURLBaseB = 'http://b.com:PORT' + kTestDir;
 

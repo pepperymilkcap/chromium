@@ -4,17 +4,8 @@
 
 {
   'variables': {
-    'use_snappy%': 1,
+    'use_snappy%': 0,
   },
-  'conditions': [
-    ['OS == "android" and android_webview_build == 1', {
-      'variables': {
-        # Snappy not used in Android WebView
-        # crbug.com/236780
-        'use_snappy': 0,
-      },
-    }],
-  ],
   'target_defaults': {
     'defines': [
       'LEVELDB_PLATFORM_CHROMIUM=1',
@@ -25,6 +16,11 @@
       'src/include/',
     ],
     'conditions': [
+      ['OS == "win"', {
+        'include_dirs': [
+          'src/port/win',
+        ],
+      }],
       ['use_snappy', {
         'defines': [
           'USE_SNAPPY=1',
@@ -35,13 +31,12 @@
   'targets': [
     {
       'target_name': 'leveldatabase',
-      'type': 'static_library',
+      'type': '<(library)',
       'dependencies': [
         '../../base/base.gyp:base',
         # base::LazyInstance is a template that pulls in dynamic_annotations so
         # we need to explictly link in the code for dynamic_annotations.
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-        '../re2/re2.gyp:re2',
       ],
       'conditions': [
         ['use_snappy', {
@@ -54,25 +49,19 @@
         'include_dirs': [
           'src/include/',
           'src/',
-          '.',
+        ],
+        'conditions': [
+          ['OS == "win"', {
+            'include_dirs': [
+              'src/port/win',
+            ],
+          }],
         ],
       },
-      # Patch posted for upstream, can be removed once that's landed and
-      # rolled into Chromium.
-      # Internal link: https://mondrian.corp.google.com/#review/29997992
-      'msvs_disabled_warnings': [
-        # Signed/unsigned comparison.
-        4018,
-
-        # TODO(jschuh): http://crbug.com/167187 size_t -> int
-        4267,
-      ],
       'sources': [
         # Include and then exclude so that all files show up in IDEs, even if
         # they don't build.
         'env_chromium.cc',
-        'env_chromium.h',
-        'env_idb.h',
         'port/port_chromium.cc',
         'port/port_chromium.h',
         'src/db/builder.cc',
@@ -109,7 +98,6 @@
         'src/include/leveldb/comparator.h',
         'src/include/leveldb/db.h',
         'src/include/leveldb/env.h',
-        'src/include/leveldb/filter_policy.h',
         'src/include/leveldb/iterator.h',
         'src/include/leveldb/options.h',
         'src/include/leveldb/slice.h',
@@ -125,8 +113,6 @@
         'src/table/block.h',
         'src/table/block_builder.cc',
         'src/table/block_builder.h',
-        'src/table/filter_block.cc',
-        'src/table/filter_block.h',
         'src/table/format.cc',
         'src/table/format.h',
         'src/table/iterator.cc',
@@ -139,7 +125,6 @@
         'src/table/two_level_iterator.h',
         'src/util/arena.cc',
         'src/util/arena.h',
-        'src/util/bloom.cc',
         'src/util/cache.cc',
         'src/util/coding.cc',
         'src/util/coding.h',
@@ -147,7 +132,6 @@
         'src/util/crc32c.cc',
         'src/util/crc32c.h',
         'src/util/env.cc',
-        'src/util/filter_policy.cc',
         'src/util/hash.cc',
         'src/util/hash.h',
         'src/util/logging.cc',
@@ -162,20 +146,8 @@
       ],
     },
     {
-      'target_name': 'env_chromium_unittests',
-      'type': '<(gtest_target_type)',
-      'dependencies': [
-        'leveldatabase',
-        '../../base/base.gyp:test_support_base',
-        '../../testing/gtest.gyp:gtest',
-      ],
-      'sources': [
-        'env_chromium_unittest.cc',
-      ],
-    },
-    {
       'target_name': 'leveldb_testutil',
-      'type': 'static_library',
+      'type': '<(library)',
       'dependencies': [
         '../../base/base.gyp:base',
         'leveldatabase',
@@ -202,16 +174,6 @@
       ],
       'sources': [
         'src/util/arena_test.cc',
-      ],
-    },
-    {
-      'target_name': 'leveldb_bloom_test',
-      'type': 'executable',
-      'dependencies': [
-        'leveldb_testutil',
-      ],
-      'sources': [
-        'src/util/bloom_test.cc',
       ],
     },
     {
@@ -302,16 +264,6 @@
       ],
       'sources': [
         'src/db/filename_test.cc',
-      ],
-    },
-    {
-      'target_name': 'leveldb_filter_block_test',
-      'type': 'executable',
-      'dependencies': [
-        'leveldb_testutil',
-      ],
-      'sources': [
-        'src/table/filter_block_test.cc',
       ],
     },
     {

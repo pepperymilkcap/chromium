@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -126,47 +126,37 @@ def main():
 
   # If no GRD files were given, default them:
   if len(grd_files) == 0:
-    ash_base_dir = os.path.join(src_dir, 'ash')
     chrome_dir = os.path.join(src_dir, 'chrome')
     chrome_app_dir = os.path.join(chrome_dir, 'app')
     chrome_app_res_dir = os.path.join(chrome_app_dir, 'resources')
-    device_base_dir = os.path.join(src_dir, 'device')
-    ui_base_dir = os.path.join(src_dir, 'ui', 'base',)
-    ui_base_strings_dir = os.path.join(ui_base_dir, 'strings')
+    ui_base_dir = os.path.join(src_dir, 'ui', 'base', 'strings')
     grd_files = [
-      os.path.join(ash_base_dir, 'ash_strings.grd'),
-      os.path.join(ash_base_dir, 'resources', 'ash_resources.grd'),
       os.path.join(chrome_app_dir, 'chromium_strings.grd'),
       os.path.join(chrome_app_dir, 'generated_resources.grd'),
       os.path.join(chrome_app_dir, 'google_chrome_strings.grd'),
       os.path.join(chrome_app_res_dir, 'locale_settings.grd'),
-      os.path.join(chrome_app_res_dir, 'locale_settings_chromiumos.grd'),
-      os.path.join(chrome_app_res_dir, 'locale_settings_google_chromeos.grd'),
+      os.path.join(chrome_app_res_dir, 'locale_settings_cros.grd'),
       os.path.join(chrome_app_res_dir, 'locale_settings_linux.grd'),
       os.path.join(chrome_app_res_dir, 'locale_settings_mac.grd'),
       os.path.join(chrome_app_res_dir, 'locale_settings_win.grd'),
       os.path.join(chrome_app_dir, 'theme', 'theme_resources.grd'),
       os.path.join(chrome_dir, 'browser', 'browser_resources.grd'),
+      os.path.join(chrome_dir, 'browser', 'resources', 'shared_resources.grd'),
       os.path.join(chrome_dir, 'common', 'common_resources.grd'),
-      os.path.join(chrome_dir, 'renderer', 'resources',
-                   'renderer_resources.grd'),
-      os.path.join(device_base_dir, 'bluetooth', 'bluetooth_strings.grd'),
+      os.path.join(chrome_dir, 'renderer', 'renderer_resources.grd'),
+      os.path.join(src_dir, 'ui', 'gfx', 'gfx_resources.grd'),
       os.path.join(src_dir, 'ui', 'resources', 'ui_resources.grd'),
-      os.path.join(src_dir, 'ui', 'webui', 'resources', 'webui_resources.grd'),
-      os.path.join(ui_base_strings_dir, 'app_locale_settings.grd'),
-      os.path.join(ui_base_strings_dir, 'ui_strings.grd'),
+      os.path.join(ui_base_dir, 'app_locale_settings.grd'),
+      os.path.join(ui_base_dir, 'ui_strings.grd'),
     ]
 
   # If no source directories were given, default them:
   if len(src_dirs) == 0:
     src_dirs = [
       os.path.join(src_dir, 'app'),
-      os.path.join(src_dir, 'ash'),
       os.path.join(src_dir, 'chrome'),
       os.path.join(src_dir, 'chrome_frame'),
-      os.path.join(src_dir, 'components'),
       os.path.join(src_dir, 'content'),
-      os.path.join(src_dir, 'device'),
       os.path.join(src_dir, 'ui'),
       os.path.join(src_dir, 'views'),
       # nsNSSCertHelper.cpp has a bunch of ids

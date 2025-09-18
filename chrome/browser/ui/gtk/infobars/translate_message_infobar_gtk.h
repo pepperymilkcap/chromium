@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_INFOBARS_TRANSLATE_MESSAGE_INFOBAR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_INFOBARS_TRANSLATE_MESSAGE_INFOBAR_GTK_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/gtk/infobars/translate_infobar_base_gtk.h"
@@ -12,15 +13,14 @@ class TranslateInfoBarDelegate;
 
 class TranslateMessageInfoBar : public TranslateInfoBarBase {
  public:
-  explicit TranslateMessageInfoBar(
-      scoped_ptr<TranslateInfoBarDelegate> delegate);
-
- private:
+  TranslateMessageInfoBar(InfoBarTabHelper* owner,
+                          TranslateInfoBarDelegate* delegate);
   virtual ~TranslateMessageInfoBar();
 
-  // TranslateInfoBarBase:
-  virtual void PlatformSpecificSetOwner() OVERRIDE;
+  // Overridden from TranslateInfoBarBase:
+  virtual void Init() OVERRIDE;
 
+ private:
   CHROMEGTK_CALLBACK_0(TranslateMessageInfoBar, void, OnButtonPressed);
 
   DISALLOW_COPY_AND_ASSIGN(TranslateMessageInfoBar);

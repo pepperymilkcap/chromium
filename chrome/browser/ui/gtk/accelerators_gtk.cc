@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,6 @@
 
 #include "base/memory/singleton.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "ui/base/accelerators/platform_accelerator_gtk.h"
-#include "ui/events/keycodes/keyboard_code_conversion_gtk.h"
 
 namespace {
 
@@ -137,7 +135,7 @@ const struct AcceleratorMapping {
   { GDK_u, IDC_VIEW_SOURCE, GDK_CONTROL_MASK },
   { GDK_i, IDC_DEV_TOOLS,
     GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
-  { GDK_F12, IDC_DEV_TOOLS_TOGGLE, GdkModifierType(0) },
+  { GDK_F12, IDC_DEV_TOOLS, GdkModifierType(0) },
   { GDK_j, IDC_DEV_TOOLS_CONSOLE,
     GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
   { GDK_c, IDC_DEV_TOOLS_INSPECT,
@@ -167,7 +165,7 @@ const struct AcceleratorMapping {
     GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
   { GDK_h, IDC_SHOW_HISTORY, GDK_CONTROL_MASK },
   { GDK_j, IDC_SHOW_DOWNLOADS, GDK_CONTROL_MASK },
-  { GDK_F1, IDC_HELP_PAGE_VIA_KEYBOARD, GdkModifierType(0) },
+  { GDK_F1, IDC_HELP_PAGE, GdkModifierType(0) },
   { XF86XK_AddFavorite, IDC_BOOKMARK_PAGE, GdkModifierType(0) },
   { XF86XK_Favorites, IDC_SHOW_BOOKMARK_BAR, GdkModifierType(0) },
   { XF86XK_History, IDC_SHOW_HISTORY, GdkModifierType(0) },
@@ -188,20 +186,18 @@ AcceleratorsGtk* AcceleratorsGtk::GetInstance() {
   return Singleton<AcceleratorsGtk>::get();
 }
 
-const ui::Accelerator* AcceleratorsGtk::GetPrimaryAcceleratorForCommand(
+const ui::AcceleratorGtk* AcceleratorsGtk::GetPrimaryAcceleratorForCommand(
     int command_id) {
-  AcceleratorMap::const_iterator i(primary_accelerators_.find(command_id));
+  AcceleratorGtkMap::const_iterator i(primary_accelerators_.find(command_id));
   return i != primary_accelerators_.end() ? &i->second : NULL;
 }
 
 AcceleratorsGtk::AcceleratorsGtk() {
   for (size_t i = 0; i < arraysize(kAcceleratorMap); ++i) {
     const AcceleratorMapping& entry = kAcceleratorMap[i];
-
-    ui::Accelerator accelerator = ui::AcceleratorForGdkKeyCodeAndModifier(
-        entry.keyval, entry.modifier_type);
-
+    ui::AcceleratorGtk accelerator(entry.keyval, entry.modifier_type);
     all_accelerators_.push_back(std::make_pair(entry.command_id, accelerator));
+
     if (primary_accelerators_.find(entry.command_id) ==
         primary_accelerators_.end()) {
       primary_accelerators_[entry.command_id] = accelerator;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <algorithm>
 
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "chrome_frame/utils.h"
 #include "policy/policy_constants.h"
@@ -55,10 +55,6 @@ PolicySettings::RendererForUrl PolicySettings::GetRendererForContentType(
   return renderer;
 }
 
-const CommandLine& PolicySettings::AdditionalLaunchParameters() const {
-  return additional_launch_parameters_;
-}
-
 // static
 void PolicySettings::ReadUrlSettings(
     RendererForUrl* default_renderer,
@@ -72,9 +68,9 @@ void PolicySettings::ReadUrlSettings(
   base::win::RegKey config_key;
   DWORD value = RENDERER_NOT_SPECIFIED;
   std::wstring settings_value(
-      base::ASCIIToWide(policy::key::kChromeFrameRendererSettings));
+      ASCIIToWide(policy::key::kChromeFrameRendererSettings));
   for (int i = 0; i < arraysize(kRootKeys); ++i) {
-    if ((config_key.Open(kRootKeys[i], policy::kRegistryChromePolicyKey,
+    if ((config_key.Open(kRootKeys[i], policy::kRegistryMandatorySubKey,
                          KEY_READ) == ERROR_SUCCESS) &&
         (config_key.ReadValueDW(settings_value.c_str(),
                                 &value) == ERROR_SUCCESS)) {
@@ -84,8 +80,8 @@ void PolicySettings::ReadUrlSettings(
 
   DCHECK(value == RENDERER_NOT_SPECIFIED ||
          value == RENDER_IN_HOST ||
-         value == RENDER_IN_CHROME_FRAME)
-      << "invalid default renderer setting: " << value;
+         value == RENDER_IN_CHROME_FRAME) <<
+      "invalid default renderer setting: " << value;
 
   if (value != RENDER_IN_HOST && value != RENDER_IN_CHROME_FRAME) {
     DVLOG(1) << "default renderer not specified via policy";
@@ -96,8 +92,7 @@ void PolicySettings::ReadUrlSettings(
         policy::key::kRenderInHostList;
 
     EnumerateKeyValues(config_key.Handle(),
-                       base::ASCIIToWide(exclusion_list_name).c_str(),
-                       renderer_exclusion_list);
+        ASCIIToWide(exclusion_list_name).c_str(), renderer_exclusion_list);
 
     DVLOG(1) << "Default renderer as specified via policy: "
              << *default_renderer
@@ -106,47 +101,13 @@ void PolicySettings::ReadUrlSettings(
 }
 
 // static
-void PolicySettings::ReadMetadataCheckSettings(
-    SkipMetadataCheck* skip_metadata_check) {
-  DCHECK(skip_metadata_check);
-
-  *skip_metadata_check = SKIP_METADATA_CHECK_NOT_SPECIFIED;
-
-  base::win::RegKey config_key;
-  DWORD value = SKIP_METADATA_CHECK_NOT_SPECIFIED;
-  base::string16 settings_value(
-      base::ASCIIToWide(policy::key::kSkipMetadataCheck));
-  for (int i = 0; i < arraysize(kRootKeys); ++i) {
-    if ((config_key.Open(kRootKeys[i], policy::kRegistryChromePolicyKey,
-                         KEY_READ) == ERROR_SUCCESS) &&
-        (config_key.ReadValueDW(settings_value.c_str(),
-                                &value) == ERROR_SUCCESS)) {
-      break;
-    }
-  }
-
-  DCHECK(value == SKIP_METADATA_CHECK_NOT_SPECIFIED ||
-         value == SKIP_METADATA_CHECK_NO ||
-         value == SKIP_METADATA_CHECK_YES)
-      << "invalid skip metadata check setting: " << value;
-
-  if (value != SKIP_METADATA_CHECK_NO && value != SKIP_METADATA_CHECK_YES) {
-    DVLOG(1) << "metadata check not specified via policy";
-  } else {
-    *skip_metadata_check = static_cast<SkipMetadataCheck>(value);
-    DVLOG(1) << "SkipMetadata check as specified via policy: "
-             << *skip_metadata_check;
-  }
-}
-
-// static
 void PolicySettings::ReadContentTypeSetting(
     std::vector<std::wstring>* content_type_list) {
   DCHECK(content_type_list);
 
-  std::wstring sub_key(policy::kRegistryChromePolicyKey);
+  std::wstring sub_key(policy::kRegistryMandatorySubKey);
   sub_key += L"\\";
-  sub_key += base::ASCIIToWide(policy::key::kChromeFrameContentTypes);
+  sub_key += ASCIIToWide(policy::key::kChromeFrameContentTypes);
 
   content_type_list->clear();
   for (int i = 0; i < arraysize(kRootKeys) && content_type_list->empty();
@@ -156,74 +117,43 @@ void PolicySettings::ReadContentTypeSetting(
 }
 
 // static
-void PolicySettings::ReadStringSetting(const char* value_name,
-                                       std::wstring* value) {
-  DCHECK(value);
-  value->clear();
-  base::win::RegKey config_key;
-  std::wstring value_name_str(base::ASCIIToWide(value_name));
-  for (int i = 0; i < arraysize(kRootKeys); ++i) {
-    if ((config_key.Open(kRootKeys[i], policy::kRegistryChromePolicyKey,
-                         KEY_READ) == ERROR_SUCCESS) &&
-        (config_key.ReadValue(value_name_str.c_str(),
-                              value) == ERROR_SUCCESS)) {
-      break;
-    }
-  }
-}
+void PolicySettings::ReadApplicationLocaleSetting(
+    std::wstring* application_locale) {
+  DCHECK(application_locale);
 
-// static
-void PolicySettings::ReadBoolSetting(const char* value_name, bool* value) {
-  DCHECK(value);
+  application_locale->clear();
   base::win::RegKey config_key;
-  base::string16 value_name_str(base::ASCIIToWide(value_name));
-  DWORD dword_value = 0;
+  std::wstring application_locale_value(
+      ASCIIToWide(policy::key::kApplicationLocaleValue));
   for (int i = 0; i < arraysize(kRootKeys); ++i) {
-    if ((config_key.Open(kRootKeys[i], policy::kRegistryChromePolicyKey,
-                         KEY_QUERY_VALUE) == ERROR_SUCCESS) &&
-        (config_key.ReadValueDW(value_name_str.c_str(),
-                                &dword_value) == ERROR_SUCCESS)) {
-      *value = (dword_value != 0);
-      break;
+    if ((config_key.Open(kRootKeys[i], policy::kRegistryMandatorySubKey,
+                         KEY_READ) == ERROR_SUCCESS) &&
+        (config_key.ReadValue(application_locale_value.c_str(),
+                              application_locale) == ERROR_SUCCESS)) {
+        break;
     }
   }
 }
 
 void PolicySettings::RefreshFromRegistry() {
   RendererForUrl default_renderer;
-  SkipMetadataCheck skip_metadata_check;
   std::vector<std::wstring> renderer_exclusion_list;
   std::vector<std::wstring> content_type_list;
   std::wstring application_locale;
-  CommandLine additional_launch_parameters(CommandLine::NO_PROGRAM);
-  std::wstring additional_parameters_str;
-  bool suppress_turndown_prompt = false;
 
   // Read the latest settings from the registry
   ReadUrlSettings(&default_renderer, &renderer_exclusion_list);
-  ReadMetadataCheckSettings(&skip_metadata_check);
   ReadContentTypeSetting(&content_type_list);
-  ReadStringSetting(policy::key::kApplicationLocaleValue, &application_locale);
-  ReadStringSetting(policy::key::kAdditionalLaunchParameters,
-                    &additional_parameters_str);
-  if (!additional_parameters_str.empty()) {
-    additional_parameters_str.insert(0, L"fake.exe ");
-    additional_launch_parameters.ParseFromString(additional_parameters_str);
-  }
-  ReadBoolSetting(policy::key::kSuppressChromeFrameTurndownPrompt,
-                  &suppress_turndown_prompt);
+  ReadApplicationLocaleSetting(&application_locale);
 
   // Nofail swap in the new values.  (Note: this is all that need be protected
   // under a mutex if/when this becomes thread safe.)
   using std::swap;
 
   swap(default_renderer_, default_renderer);
-  swap(skip_metadata_check_, skip_metadata_check);
   swap(renderer_exclusion_list_, renderer_exclusion_list);
   swap(content_type_list_, content_type_list);
   swap(application_locale_, application_locale);
-  swap(additional_launch_parameters_, additional_launch_parameters);
-  swap(suppress_turndown_prompt_, suppress_turndown_prompt);
 }
 
 // static

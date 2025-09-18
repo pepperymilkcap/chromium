@@ -1,17 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_DOWNLOAD_SAVE_FILE_H_
 #define CONTENT_BROWSER_DOWNLOAD_SAVE_FILE_H_
+#pragma once
 
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/download/base_file.h"
 #include "content/browser/download/save_types.h"
 
-namespace content {
 // SaveFile ----------------------------------------------------------------
 
 // These objects live exclusively on the file thread and handle the writing
@@ -25,14 +25,14 @@ class SaveFile {
   virtual ~SaveFile();
 
   // BaseFile delegated functions.
-  DownloadInterruptReason Initialize();
-  DownloadInterruptReason AppendDataToFile(const char* data, size_t data_len);
-  DownloadInterruptReason Rename(const base::FilePath& full_path);
+  net::Error Initialize();
+  net::Error AppendDataToFile(const char* data, size_t data_len);
+  net::Error Rename(const FilePath& full_path);
   void Detach();
   void Cancel();
   void Finish();
   void AnnotateWithSourceInformation();
-  base::FilePath FullPath() const;
+  FilePath FullPath() const;
   bool InProgress() const;
   int64 BytesSoFar() const;
   bool GetHash(std::string* hash);
@@ -53,7 +53,5 @@ class SaveFile {
 
   DISALLOW_COPY_AND_ASSIGN(SaveFile);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_SAVE_FILE_H_

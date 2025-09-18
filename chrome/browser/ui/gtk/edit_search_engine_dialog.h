@@ -1,16 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_EDIT_SEARCH_ENGINE_DIALOG_H_
 #define CHROME_BROWSER_UI_GTK_EDIT_SEARCH_ENGINE_DIALOG_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "ui/base/gtk/gtk_signal.h"
 
 class EditSearchEngineController;
@@ -21,7 +22,7 @@ class TemplateURL;
 class EditSearchEngineDialog {
  public:
   EditSearchEngineDialog(GtkWindow* parent_window,
-                         TemplateURL* template_url,
+                         const TemplateURL* template_url,
                          EditSearchEngineControllerDelegate* delegate,
                          Profile* profile);
   ~EditSearchEngineDialog();
@@ -31,8 +32,8 @@ class EditSearchEngineDialog {
   void Init(GtkWindow* parent_window, Profile* profile);
 
   // Retrieve the user input in the various fields.
-  base::string16 GetTitleInput() const;
-  base::string16 GetKeywordInput() const;
+  string16 GetTitleInput() const;
+  string16 GetKeywordInput() const;
   std::string GetURLInput() const;
 
   // Set sensitivity of buttons based on entry state.

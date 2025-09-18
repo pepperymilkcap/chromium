@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_MODEL_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_MODEL_H_
+#pragma once
 
-#include <map>
 #include <set>
 #include <vector>
 
@@ -14,17 +14,17 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
-#include "chrome/common/cancelable_task_tracker.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
-#include "content/public/browser/notification_observer.h"
+#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/history/history.h"
 #include "content/public/browser/notification_registrar.h"
+#include "googleurl/src/gurl.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/tree_node_model.h"
-#include "ui/gfx/image/image.h"
-#include "url/gurl.h"
 
 class BookmarkExpandedStateTracker;
 class BookmarkIndex;
@@ -32,15 +32,11 @@ class BookmarkLoadDetails;
 class BookmarkModel;
 class BookmarkModelObserver;
 class BookmarkStorage;
-struct BookmarkTitleMatch;
+class PrefService;
 class Profile;
 
-namespace base {
-class SequencedTaskRunner;
-}
-
-namespace chrome {
-struct FaviconImageResult;
+namespace bookmark_utils {
+struct TitleMatch;
 }
 
 // BookmarkNode ---------------------------------------------------------------
@@ -57,16 +53,6 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
     MOBILE
   };
 
-  enum FaviconState {
-    INVALID_FAVICON,
-    LOADING_FAVICON,
-    LOADED_FAVICON,
-  };
-
-  typedef std::map<std::string, std::string> MetaInfoMap;
-
-  static const int64 kInvalidSyncTransactionVersion;
-
   // Creates a new node with an id of 0 and |url|.
   explicit BookmarkNode(const GURL& url);
   // Creates a new node with |id| and |url|.
@@ -77,7 +63,7 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
   // Set the node's internal title. Note that this neither invokes observers
   // nor updates any bookmark model this node may be in. For that functionality,
   // BookmarkModel::SetTitle(..) should be used instead.
-  virtual void SetTitle(const base::string16& title) OVERRIDE;
+  virtual void SetTitle(const string16& title) OVERRIDE;
 
   // Returns an unique id for this node.
   // For bookmark nodes that are managed by the bookmark model, the IDs are
@@ -87,10 +73,6 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
 
   const GURL& url() const { return url_; }
   void set_url(const GURL& url) { url_ = url; }
-
-  // Returns the favicon's URL. Returns an empty URL if there is no favicon
-  // associated with this bookmark.
-  const GURL& icon_url() const { return icon_url_; }
 
   Type type() const { return type_; }
   void set_type(Type type) { type_ = type; }
@@ -113,7 +95,25 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
   bool is_folder() const { return type_ != URL; }
   bool is_url() const { return type_ == URL; }
 
-  bool is_favicon_loaded() const { return favicon_state_ == LOADED_FAVICON; }
+  // Returns the favicon. In nearly all cases you should use the method
+  // BookmarkModel::GetFavicon rather than this. BookmarkModel::GetFavicon
+  // takes care of loading the favicon if it isn't already loaded, where as
+  // this does not.
+  const SkBitmap& favicon() const { return favicon_; }
+  void set_favicon(const SkBitmap& icon) { favicon_ = icon; }
+
+  // The following methods are used by the bookmark model, and are not
+  // really useful outside of it.
+
+  bool is_favicon_loaded() const { return is_favicon_loaded_; }
+  void set_is_favicon_loaded(bool loaded) { is_favicon_loaded_ = loaded; }
+
+  HistoryService::Handle favicon_load_handle() const {
+    return favicon_load_handle_;
+  }
+  void set_favicon_load_handle(HistoryService::Handle handle) {
+    favicon_load_handle_ = handle;
+  }
 
   // Accessor method for controlling the visibility of a bookmark node/sub-tree.
   // Note that visibility is not propagated down the tree hierarchy so if a
@@ -121,23 +121,6 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
   // function is primarily useful when traversing the model to generate a UI
   // representation but we may want to suppress some nodes.
   virtual bool IsVisible() const;
-
-  // Gets/sets/deletes value of |key| in the meta info represented by
-  // |meta_info_str_|. Return true if key is found in meta info for gets or
-  // meta info is changed indeed for sets/deletes.
-  bool GetMetaInfo(const std::string& key, std::string* value) const;
-  bool SetMetaInfo(const std::string& key, const std::string& value);
-  bool DeleteMetaInfo(const std::string& key);
-  void SetMetaInfoMap(const MetaInfoMap& meta_info_map);
-  // Returns NULL if there are no values in the map.
-  const MetaInfoMap* GetMetaInfoMap() const;
-
-  void set_sync_transaction_version(int64 sync_transaction_version) {
-    sync_transaction_version_ = sync_transaction_version;
-  }
-  int64 sync_transaction_version() const {
-    return sync_transaction_version_;
-  }
 
   // TODO(sky): Consider adding last visit time here, it'll greatly simplify
   // HistoryContentsProvider.
@@ -150,24 +133,6 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
 
   // Called when the favicon becomes invalid.
   void InvalidateFavicon();
-
-  // Sets the favicon's URL.
-  void set_icon_url(const GURL& icon_url) {
-    icon_url_ = icon_url;
-  }
-
-  const gfx::Image& favicon() const { return favicon_; }
-  void set_favicon(const gfx::Image& icon) { favicon_ = icon; }
-
-  FaviconState favicon_state() const { return favicon_state_; }
-  void set_favicon_state(FaviconState state) { favicon_state_ = state; }
-
-  CancelableTaskTracker::TaskId favicon_load_task_id() const {
-    return favicon_load_task_id_;
-  }
-  void set_favicon_load_task_id(CancelableTaskTracker::TaskId id) {
-    favicon_load_task_id_ = id;
-  }
 
   // The unique identifier for this node.
   int64 id_;
@@ -186,23 +151,14 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
   base::Time date_folder_modified_;
 
   // The favicon of this node.
-  gfx::Image favicon_;
+  SkBitmap favicon_;
 
-  // The URL of the node's favicon.
-  GURL icon_url_;
+  // Whether the favicon has been loaded.
+  bool is_favicon_loaded_;
 
-  // The loading state of the favicon.
-  FaviconState favicon_state_;
-
-  // If not CancelableTaskTracker::kBadTaskId, it indicates we're loading the
-  // favicon and the task is tracked by CancelabelTaskTracker.
-  CancelableTaskTracker::TaskId favicon_load_task_id_;
-
-  // A map that stores arbitrary meta information about the node.
-  scoped_ptr<MetaInfoMap> meta_info_map_;
-
-  // The sync transaction version. Defaults to kInvalidSyncTransactionVersion.
-  int64 sync_transaction_version_;
+  // If non-zero, it indicates we're loading the favicon and this is the handle
+  // from the HistoryService.
+  HistoryService::Handle favicon_load_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkNode);
 };
@@ -236,24 +192,25 @@ class BookmarkPermanentNode : public BookmarkNode {
 // An observer may be attached to observe relevant events.
 //
 // You should NOT directly create a BookmarkModel, instead go through the
-// BookmarkModelFactory.
+// Profile.
 class BookmarkModel : public content::NotificationObserver,
-                      public BookmarkService,
-                      public BrowserContextKeyedService {
+                      public BookmarkService {
  public:
   explicit BookmarkModel(Profile* profile);
   virtual ~BookmarkModel();
 
-  // Invoked prior to destruction to release any necessary resources.
-  virtual void Shutdown() OVERRIDE;
+  static void RegisterUserPrefs(PrefService* prefs);
 
-  // Loads the bookmarks. This is called upon creation of the
+  // Invoked prior to destruction to release any necessary resources.
+  void Cleanup();
+
+  // Loads the bookmarks. This is called by Profile upon creation of the
   // BookmarkModel. You need not invoke this directly.
-  // All load operations will be executed on |task_runner|.
-  void Load(const scoped_refptr<base::SequencedTaskRunner>& task_runner);
+  void Load();
 
   // Returns true if the model finished loading.
-  bool loaded() const { return loaded_; }
+  // This is virtual so it can be mocked.
+  virtual bool IsLoaded() const;
 
   // Returns the root node. The 'bookmark bar' node and 'other' node are
   // children of the root node.
@@ -279,6 +236,8 @@ class BookmarkModel : public content::NotificationObserver,
            node == mobile_node_;
   }
 
+  Profile* profile() const { return profile_; }
+
   // Returns the parent the last node was added to. This never returns NULL
   // (as long as the model is loaded).
   const BookmarkNode* GetParentForNewNodes();
@@ -286,26 +245,14 @@ class BookmarkModel : public content::NotificationObserver,
   void AddObserver(BookmarkModelObserver* observer);
   void RemoveObserver(BookmarkModelObserver* observer);
 
-  // Notifies the observers that an extensive set of changes is about to happen,
-  // such as during import or sync, so they can delay any expensive UI updates
-  // until it's finished.
-  void BeginExtensiveChanges();
-  void EndExtensiveChanges();
-
-  // Returns true if this bookmark model is currently in a mode where extensive
-  // changes might happen, such as for import and sync. This is helpful for
-  // observers that are created after the mode has started, and want to check
-  // state during their own initializer, such as the NTP.
-  bool IsDoingExtensiveChanges() const { return extensive_changes_ > 0; }
+  // Notifies the observers that an import is about to happen, so they can delay
+  // any expensive UI updates until it's finished.
+  void BeginImportMode();
+  void EndImportMode();
 
   // Removes the node at the given |index| from |parent|. Removing a folder node
   // recursively removes all nodes. Observers are notified immediately.
   void Remove(const BookmarkNode* parent, int index);
-
-  // Removes all the non-permanent bookmark nodes. Observers are only notified
-  // when all nodes have been removed. There is no notification for individual
-  // node removals.
-  void RemoveAll();
 
   // Moves |node| to |new_parent| and inserts it at the given |index|.
   void Move(const BookmarkNode* node,
@@ -319,16 +266,13 @@ class BookmarkModel : public content::NotificationObserver,
 
   // Returns the favicon for |node|. If the favicon has not yet been
   // loaded it is loaded and the observer of the model notified when done.
-  const gfx::Image& GetFavicon(const BookmarkNode* node);
+  const SkBitmap& GetFavicon(const BookmarkNode* node);
 
   // Sets the title of |node|.
-  void SetTitle(const BookmarkNode* node, const base::string16& title);
+  void SetTitle(const BookmarkNode* node, const string16& title);
 
   // Sets the URL of |node|.
   void SetURL(const BookmarkNode* node, const GURL& url);
-
-  // Sets the date added time of |node|.
-  void SetDateAdded(const BookmarkNode* node, base::Time date_added);
 
   // Returns the set of nodes with the |url|.
   void GetNodesByURL(const GURL& url, std::vector<const BookmarkNode*>* nodes);
@@ -346,11 +290,10 @@ class BookmarkModel : public content::NotificationObserver,
   // See BookmarkService for more details on this.
   virtual bool IsBookmarked(const GURL& url) OVERRIDE;
 
-  // Returns all the bookmarked urls and their titles.
+  // Returns all the bookmarked urls.
   // This method is thread safe.
   // See BookmarkService for more details on this.
-  virtual void GetBookmarks(
-      std::vector<BookmarkService::URLAndTitle>* urls) OVERRIDE;
+  virtual void GetBookmarks(std::vector<GURL>* urls) OVERRIDE;
 
   // Blocks until loaded; this is NOT invoked on the main thread.
   // See BookmarkService for more details on this.
@@ -362,31 +305,24 @@ class BookmarkModel : public content::NotificationObserver,
   // Adds a new folder node at the specified position.
   const BookmarkNode* AddFolder(const BookmarkNode* parent,
                                 int index,
-                                const base::string16& title);
+                                const string16& title);
 
   // Adds a url at the specified position.
   const BookmarkNode* AddURL(const BookmarkNode* parent,
                              int index,
-                             const base::string16& title,
+                             const string16& title,
                              const GURL& url);
 
   // Adds a url with a specific creation date.
   const BookmarkNode* AddURLWithCreationTime(const BookmarkNode* parent,
                                              int index,
-                                             const base::string16& title,
+                                             const string16& title,
                                              const GURL& url,
                                              const base::Time& creation_time);
 
   // Sorts the children of |parent|, notifying observers by way of the
   // BookmarkNodeChildrenReordered method.
   void SortChildren(const BookmarkNode* parent);
-
-  // Order the children of |parent| as specified in |ordered_nodes|.  This
-  // function should only be used to reorder the child nodes of |parent| and
-  // is not meant to move nodes between different parent. Notifies observers
-  // using the BookmarkNodeChildrenReordered method.
-  void ReorderChildren(const BookmarkNode* parent,
-                       const std::vector<const BookmarkNode*>& ordered_nodes);
 
   // Sets the date when the folder was modified.
   void SetDateFolderModified(const BookmarkNode* node, const base::Time time);
@@ -397,14 +333,17 @@ class BookmarkModel : public content::NotificationObserver,
   void ResetDateFolderModified(const BookmarkNode* node);
 
   void GetBookmarksWithTitlesMatching(
-      const base::string16& text,
+      const string16& text,
       size_t max_count,
-      std::vector<BookmarkTitleMatch>* matches);
+      std::vector<bookmark_utils::TitleMatch>* matches);
 
   // Sets the store to NULL, making it so the BookmarkModel does not persist
   // any changes to disk. This is only useful during testing to speed up
   // testing.
   void ClearStore();
+
+  // Returns whether the bookmarks file changed externally.
+  bool file_changed() const { return file_changed_; }
 
   // Returns the next node ID.
   int64 next_node_id() const { return next_node_id_; }
@@ -417,22 +356,6 @@ class BookmarkModel : public content::NotificationObserver,
 
   // Sets the visibility of one of the permanent nodes. This is set by sync.
   void SetPermanentNodeVisible(BookmarkNode::Type type, bool value);
-
-  // Sets/deletes meta info of |node|.
-  void SetNodeMetaInfo(const BookmarkNode* node,
-                       const std::string& key,
-                       const std::string& value);
-  void SetNodeMetaInfoMap(const BookmarkNode* node,
-                          const BookmarkNode::MetaInfoMap& meta_info_map);
-  void DeleteNodeMetaInfo(const BookmarkNode* node,
-                          const std::string& key);
-
-  // Sets the sync transaction version of |node|.
-  void SetNodeSyncTransactionVersion(const BookmarkNode* node,
-                                     int64 sync_transaction_version);
-
-  // Returns the profile that corresponds to this BookmarkModel.
-  Profile* profile() { return profile_; }
 
  private:
   friend class BookmarkCodecTest;
@@ -457,36 +380,24 @@ class BookmarkModel : public content::NotificationObserver,
   // This does NOT delete the node.
   void RemoveNode(BookmarkNode* node, std::set<GURL>* removed_urls);
 
-  // Invoked when loading is finished. Sets |loaded_| and notifies observers.
+  // Invoked when loading is finished. Sets loaded_ and notifies observers.
   // BookmarkModel takes ownership of |details|.
   void DoneLoading(BookmarkLoadDetails* details);
 
   // Populates |nodes_ordered_by_url_set_| from root.
   void PopulateNodesByURL(BookmarkNode* node);
 
-  // Removes the node from its parent, but does not delete it. No notifications
-  // are sent. |removed_urls| is populated with the urls which no longer have
-  // any bookmarks associated with them.
-  // This method should be called after acquiring |url_lock_|.
-  void RemoveNodeAndGetRemovedUrls(BookmarkNode* node,
-                                   std::set<GURL>* removed_urls);
-
   // Removes the node from its parent, sends notification, and deletes it.
   // type specifies how the node should be removed.
   void RemoveAndDeleteNode(BookmarkNode* delete_me);
 
-  // Remove |node| from |nodes_ordered_by_url_set_|.
-  void RemoveNodeFromURLSet(BookmarkNode* node);
-
-  // Notifies the history backend about urls of removed bookmarks.
-  void NotifyHistoryAboutRemovedBookmarks(
-      const std::set<GURL>& removed_bookmark_urls) const;
-
-  // Adds the |node| at |parent| in the specified |index| and notifies its
-  // observers.
+  // Adds the node at the specified position and sends notification. If
+  // was_bookmarked is true, it indicates a bookmark already existed for the
+  // URL.
   BookmarkNode* AddNode(BookmarkNode* parent,
                         int index,
-                        BookmarkNode* node);
+                        BookmarkNode* node,
+                        bool was_bookmarked);
 
   // Implementation of GetNodeByID.
   const BookmarkNode* GetNodeByID(const BookmarkNode* node, int64 id) const;
@@ -500,8 +411,8 @@ class BookmarkModel : public content::NotificationObserver,
 
   // Notification that a favicon has finished loading. If we can decode the
   // favicon, FaviconLoaded is invoked.
-  void OnFaviconDataAvailable(BookmarkNode* node,
-                              const chrome::FaviconImageResult& image_result);
+  void OnFaviconDataAvailable(FaviconService::Handle handle,
+                              history::FaviconData favicon);
 
   // Invoked from the node to load the favicon. Requests the favicon from the
   // favicon service.
@@ -537,6 +448,10 @@ class BookmarkModel : public content::NotificationObserver,
   // Whether the initial set of data has been loaded.
   bool loaded_;
 
+  // Whether the bookmarks file was changed externally. This is set after
+  // loading is complete and once set the value never changes.
+  bool file_changed_;
+
   // The root node. This contains the bookmark bar node and the 'other' node as
   // children.
   BookmarkNode root_;
@@ -559,8 +474,8 @@ class BookmarkModel : public content::NotificationObserver,
   NodesOrderedByURLSet nodes_ordered_by_url_set_;
   base::Lock url_lock_;
 
-  // Used for loading favicons.
-  CancelableTaskTracker cancelable_task_tracker_;
+  // Used for loading favicons and the empty history request.
+  CancelableRequestConsumerTSimple<BookmarkNode*> load_consumer_;
 
   // Reads/writes bookmarks to disk.
   scoped_refptr<BookmarkStorage> store_;
@@ -568,9 +483,6 @@ class BookmarkModel : public content::NotificationObserver,
   scoped_ptr<BookmarkIndex> index_;
 
   base::WaitableEvent loaded_signal_;
-
-  // See description of IsDoingExtensiveChanges above.
-  int extensive_changes_;
 
   scoped_ptr<BookmarkExpandedStateTracker> expanded_state_tracker_;
 

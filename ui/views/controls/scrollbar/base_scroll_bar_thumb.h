@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_SCROLLBAR_BASE_SCROLL_BAR_THUMB_H_
 #define UI_VIEWS_CONTROLS_SCROLLBAR_BASE_SCROLL_BAR_THUMB_H_
+#pragma once
 
 #include "ui/gfx/size.h"
 #include "ui/views/controls/button/custom_button.h"
@@ -49,18 +50,16 @@ class VIEWS_EXPORT BaseScrollBarThumb : public View {
  protected:
   // View overrides:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE = 0;
-  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseEntered(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
 
   CustomButton::ButtonState GetState() const;
   // Update our state and schedule a repaint when the mouse moves over us.
   void SetState(CustomButton::ButtonState state);
-
-  BaseScrollBar* scroll_bar() { return scroll_bar_; }
 
  private:
   // The BaseScrollBar that owns us.

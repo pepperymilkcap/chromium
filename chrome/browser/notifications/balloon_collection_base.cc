@@ -7,7 +7,7 @@
 #include "base/stl_util.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/notification.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 BalloonCollectionBase::BalloonCollectionBase() {
 }
@@ -33,17 +33,6 @@ void BalloonCollectionBase::Remove(Balloon* balloon) {
       return;
     }
   }
-}
-
-const Notification* BalloonCollectionBase::FindById(
-    const std::string& id) const {
-  Balloons::const_iterator iter;
-  for (iter = balloons_.begin(); iter != balloons_.end(); ++iter) {
-    if ((*iter)->notification().notification_id() == id) {
-      return &((*iter)->notification());
-    }
-  }
-  return NULL;
 }
 
 bool BalloonCollectionBase::CloseById(const std::string& id) {
@@ -77,21 +66,6 @@ bool BalloonCollectionBase::CloseAllBySourceOrigin(
   return !to_close.empty();
 }
 
-bool BalloonCollectionBase::CloseAllByProfile(Profile* profile) {
-  // Use a local list of balloons to close to avoid breaking
-  // iterator changes on each close.
-  Balloons to_close;
-  Balloons::iterator iter;
-  for (iter = balloons_.begin(); iter != balloons_.end(); ++iter) {
-    if ((*iter)->profile() == profile)
-      to_close.push_back(*iter);
-  }
-  for (iter = to_close.begin(); iter != to_close.end(); ++iter)
-    (*iter)->CloseByScript();
-
-  return !to_close.empty();
-}
-
 void BalloonCollectionBase::CloseAll() {
   // Use a local list of balloons to close to avoid breaking
   // iterator changes on each close.
@@ -101,17 +75,14 @@ void BalloonCollectionBase::CloseAll() {
     (*iter)->CloseByScript();
 }
 
-Balloon* BalloonCollectionBase::FindBalloonById(
-    const std::string& notification_id) {
+Balloon* BalloonCollectionBase::FindBalloon(
+    const Notification& notification) {
   Balloons::iterator iter;
   for (iter = balloons_.begin(); iter != balloons_.end(); ++iter) {
-    if ((*iter)->notification().notification_id() == notification_id) {
+    if ((*iter)->notification().notification_id() ==
+        notification.notification_id()) {
       return *iter;
     }
   }
   return NULL;
-}
-
-Balloon* BalloonCollectionBase::FindBalloon(const Notification& notification) {
-  return FindBalloonById(notification.notification_id());
 }

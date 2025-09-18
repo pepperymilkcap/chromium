@@ -3,36 +3,14 @@
 // found in the LICENSE file.
 
 #include <shlobj.h>
-#include <wtsapi32.h>
-#pragma comment(lib, "wtsapi32.lib")
 
 #include "chrome/browser/policy/policy_path_parser.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/win/registry.h"
-#include "chrome/common/chrome_switches.h"
-#include "policy/policy_constants.h"
 
-namespace {
+namespace policy {
 
-// Checks if the registry key exists in the given hive and expands any
-// variables in the string.
-bool LoadUserDataDirPolicyFromRegistry(HKEY hive,
-                                       const std::wstring& key_name,
-                                       base::FilePath* user_data_dir) {
-  std::wstring value;
-
-  base::win::RegKey policy_key(hive,
-                               policy::kRegistryChromePolicyKey,
-                               KEY_READ);
-  if (policy_key.ReadValue(key_name.c_str(), &value) == ERROR_SUCCESS) {
-    *user_data_dir =
-        base::FilePath(policy::path_parser::ExpandPathVariables(value));
-    return true;
-  }
-  return false;
-}
+namespace path_parser {
 
 const WCHAR* kMachineNamePolicyVarName = L"${machine_name}";
 const WCHAR* kUserNamePolicyVarName = L"${user_name}";
@@ -43,7 +21,6 @@ const WCHAR* kWinProfileFolderVarName = L"${profile}";
 const WCHAR* kWinProgramDataFolderVarName = L"${global_app_data}";
 const WCHAR* kWinProgramFilesFolderVarName = L"${program_files}";
 const WCHAR* kWinWindowsFolderVarName = L"${windows}";
-const WCHAR* kWinClientName = L"${client_name}";
 
 struct WinFolderNamesToCSIDLMapping {
   const WCHAR* name;
@@ -61,17 +38,11 @@ const WinFolderNamesToCSIDLMapping win_folder_mapping[] = {
     { kWinDocumentsFolderVarName,      CSIDL_PERSONAL}
 };
 
-}  // namespace
-
-namespace policy {
-
-namespace path_parser {
-
 // Replaces all variable occurances in the policy string with the respective
 // system settings values.
-base::FilePath::StringType ExpandPathVariables(
-    const base::FilePath::StringType& untranslated_string) {
-  base::FilePath::StringType result(untranslated_string);
+FilePath::StringType ExpandPathVariables(
+    const FilePath::StringType& untranslated_string) {
+  FilePath::StringType result(untranslated_string);
   if (result.length() == 0)
     return result;
   // Sanitize quotes in case of any around the whole string.
@@ -91,13 +62,13 @@ base::FilePath::StringType ExpandPathVariables(
       result.replace(position, wcslen(win_folder_mapping[i].name), path_string);
     }
   }
-  // Next translate other windows specific variables.
+  // Next translate two speacial variables ${user_name} and ${machine_name}
   size_t position = result.find(kUserNamePolicyVarName);
   if (position != std::wstring::npos) {
     DWORD return_length = 0;
     ::GetUserName(NULL, &return_length);
     if (return_length != 0) {
-      scoped_ptr<WCHAR[]> username(new WCHAR[return_length]);
+      scoped_array<WCHAR> username(new WCHAR[return_length]);
       ::GetUserName(username.get(), &return_length);
       std::wstring username_string(username.get());
       result.replace(position, wcslen(kUserNamePolicyVarName), username_string);
@@ -108,7 +79,7 @@ base::FilePath::StringType ExpandPathVariables(
     DWORD return_length = 0;
     ::GetComputerNameEx(ComputerNamePhysicalDnsHostname, NULL, &return_length);
     if (return_length != 0) {
-      scoped_ptr<WCHAR[]> machinename(new WCHAR[return_length]);
+      scoped_array<WCHAR> machinename(new WCHAR[return_length]);
       ::GetComputerNameEx(ComputerNamePhysicalDnsHostname,
                           machinename.get(), &return_length);
       std::wstring machinename_string(machinename.get());
@@ -116,33 +87,7 @@ base::FilePath::StringType ExpandPathVariables(
           position, wcslen(kMachineNamePolicyVarName), machinename_string);
     }
   }
-  position = result.find(kWinClientName);
-  if (position != std::wstring::npos) {
-    LPWSTR buffer = NULL;
-    DWORD buffer_length = 0;
-    if (::WTSQuerySessionInformation(WTS_CURRENT_SERVER, WTS_CURRENT_SESSION,
-                                     WTSClientName,
-                                     &buffer, &buffer_length)) {
-      std::wstring clientname_string(buffer);
-      result.replace(position, wcslen(kWinClientName), clientname_string);
-      ::WTSFreeMemory(buffer);
-    }
-  }
-
   return result;
-}
-
-void CheckUserDataDirPolicy(base::FilePath* user_data_dir) {
-  DCHECK(user_data_dir);
-
-  // Policy from the HKLM hive has precedence over HKCU so if we have one here
-  // we don't have to try to load HKCU.
-  std::wstring key_name(base::ASCIIToWide(policy::key::kUserDataDir));
-  if (!LoadUserDataDirPolicyFromRegistry(HKEY_LOCAL_MACHINE, key_name,
-                                         user_data_dir)) {
-    LoadUserDataDirPolicyFromRegistry(
-        HKEY_CURRENT_USER, key_name, user_data_dir);
-  }
 }
 
 }  // namespace path_parser

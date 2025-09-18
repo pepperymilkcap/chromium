@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "base/perftimer.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/timer/elapsed_timer.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
 #include "chrome/renderer/safe_browsing/features.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
+#include "net/base/registry_controlled_domain.h"
 
 namespace safe_browsing {
 
@@ -25,14 +25,13 @@ PhishingUrlFeatureExtractor::~PhishingUrlFeatureExtractor() {}
 
 bool PhishingUrlFeatureExtractor::ExtractFeatures(const GURL& url,
                                                   FeatureMap* features) {
-  base::ElapsedTimer timer;
+  PerfTimer timer;
   if (url.HostIsIPAddress()) {
     if (!features->AddBooleanFeature(features::kUrlHostIsIpAddress))
       return false;
   } else {
-    // Remove any leading/trailing dots.
     std::string host;
-    base::TrimString(url.host(), ".", &host);
+    TrimString(url.host(), ".", &host);  // Remove any leading/trailing dots.
 
     // TODO(bryner): Ensure that the url encoding is consistent with
     // the features in the model.
@@ -40,10 +39,7 @@ bool PhishingUrlFeatureExtractor::ExtractFeatures(const GURL& url,
     // Disallow unknown registries so that we don't classify
     // partial hostnames (e.g. "www.subdomain").
     size_t registry_length =
-        net::registry_controlled_domains::GetRegistryLength(
-            host,
-            net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
-            net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
+        net::RegistryControlledDomainService::GetRegistryLength(host, false);
 
     if (registry_length == 0 || registry_length == std::string::npos) {
       DVLOG(1) << "Could not find TLD for host: " << host;

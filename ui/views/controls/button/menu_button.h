@@ -1,20 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_BUTTON_MENU_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_MENU_BUTTON_H_
+#pragma once
 
 #include <string>
 
-#include "base/strings/string16.h"
-#include "base/time/time.h"
+#include "base/string16.h"
+#include "base/time.h"
+#include "ui/gfx/font.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/text_button.h"
 
 namespace views {
 
-class MenuButtonListener;
+class MouseEvent;
+class ViewMenuDelegate;
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -27,22 +31,16 @@ class VIEWS_EXPORT MenuButton : public TextButton {
  public:
   static const char kViewClassName[];
 
-  // How much padding to put on the left and right of the menu marker.
-  static const int kMenuMarkerPaddingLeft;
-  static const int kMenuMarkerPaddingRight;
-
   // Create a Button.
   MenuButton(ButtonListener* listener,
-             const base::string16& text,
-             MenuButtonListener* menu_button_listener,
+             const string16& text,
+             ViewMenuDelegate* menu_delegate,
              bool show_menu_marker);
   virtual ~MenuButton();
 
-  bool show_menu_marker() const { return show_menu_marker_; }
-  void set_menu_marker(const gfx::ImageSkia* menu_marker) {
+  void set_menu_marker(const SkBitmap* menu_marker) {
     menu_marker_ = menu_marker;
   }
-  const gfx::ImageSkia* menu_marker() const { return menu_marker_; }
 
   const gfx::Point& menu_offset() const { return menu_offset_; }
   void set_menu_offset(int x, int y) { menu_offset_.SetPoint(x, y); }
@@ -55,19 +53,15 @@ class VIEWS_EXPORT MenuButton : public TextButton {
 
   // Overridden from View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
-  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
-  virtual bool OnKeyReleased(const ui::KeyEvent& event) OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyReleased(const KeyEvent& event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
  protected:
-  // Paint the menu marker image.
-  void PaintMenuMarker(gfx::Canvas* canvas);
-
   // True if the menu is currently visible.
   bool menu_visible_;
 
@@ -87,17 +81,17 @@ class VIEWS_EXPORT MenuButton : public TextButton {
   // menu. There is no clean way to get the second click event because the
   // menu is displayed using a modal loop and, unlike regular menus in Windows,
   // the button is not part of the displayed menu.
-  base::TimeTicks menu_closed_time_;
+  base::Time menu_closed_time_;
 
-  // Our listener. Not owned.
-  MenuButtonListener* listener_;
+  // The associated menu's resource identifier.
+  ViewMenuDelegate* menu_delegate_;
 
   // Whether or not we're showing a drop marker.
   bool show_menu_marker_;
 
   // The down arrow used to differentiate the menu button from normal
   // text buttons.
-  const gfx::ImageSkia* menu_marker_;
+  const SkBitmap* menu_marker_;
 
   // If non-null the destuctor sets this to true. This is set while the menu is
   // showing and used to detect if the menu was deleted while running.

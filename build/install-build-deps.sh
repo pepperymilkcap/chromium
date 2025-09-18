@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,23 +12,12 @@ usage() {
   echo "Usage: $0 [--options]"
   echo "Options:"
   echo "--[no-]syms: enable or disable installation of debugging symbols"
+  echo "--[no-]gold: enable or disable installation of gold linker"
   echo "--[no-]lib32: enable or disable installation of 32 bit libraries"
-  echo "--[no-]arm: enable or disable installation of arm cross toolchain"
-  echo "--[no-]chromeos-fonts: enable or disable installation of Chrome OS"\
-       "fonts"
-  echo "--no-prompt: silently select standard options/defaults"
-  echo "--quick-check: quickly try to determine if dependencies are installed"
-  echo "               (this avoids interactive prompts and sudo commands,"
-  echo "               so might not be 100% accurate)"
-  echo "--unsupported: attempt installation even on unsupported systems"
+  echo "--[no-]restore-usr-bin-ld: enable or disable restoring /usr/bin/ld to"
+  echo "                           ld.bfd if it is currently gold"
   echo "Script will prompt interactively if options not given."
   exit 1
-}
-
-# Checks whether a particular package is available in the repos.
-# USAGE: $ package_exists <package name>
-package_exists() {
-  apt-cache pkgnames | grep -x "$1" > /dev/null 2>&1
 }
 
 while test "$1" != ""
@@ -36,148 +25,128 @@ do
   case "$1" in
   --syms)                   do_inst_syms=1;;
   --no-syms)                do_inst_syms=0;;
+  --gold)                   do_inst_gold=1;;
+  --no-gold)                do_inst_gold=0;;
   --lib32)                  do_inst_lib32=1;;
   --no-lib32)               do_inst_lib32=0;;
-  --arm)                    do_inst_arm=1;;
-  --no-arm)                 do_inst_arm=0;;
-  --chromeos-fonts)         do_inst_chromeos_fonts=1;;
-  --no-chromeos-fonts)      do_inst_chromeos_fonts=0;;
-  --no-prompt)              do_default=1
-                            do_quietly="-qq --assume-yes"
-    ;;
-  --quick-check)            do_quick_check=1;;
-  --unsupported)            do_unsupported=1;;
+  --restore-usr-bin-ld)     do_restore_usr_bin_ld=1;;
+  --no-restore-usr-bin-ld)  do_restore_usr_bin_ld=0;;
   *) usage;;
   esac
   shift
 done
 
-ubuntu_versions="12\.04|12\.10|13\.04"
-ubuntu_codenames="precise|quantal|raring"
-ubuntu_issue="Ubuntu ($ubuntu_versions|$ubuntu_codenames)"
-# GCEL is an Ubuntu-derived VM image used on Google Compute Engine; /etc/issue
-# doesn't contain a version number so just trust that the user knows what
-# they're doing.
-gcel_issue="^GCEL"
+install_gold() {
+  # Gold is optional; it's a faster replacement for ld,
+  # and makes life on 2GB machines much more pleasant.
 
-if [ 0 -eq "${do_unsupported-0}" ] && [ 0 -eq "${do_quick_check-0}" ] ; then
-  if ! egrep -q "($ubuntu_issue|$gcel_issue)" /etc/issue; then
-    echo "ERROR: Only Ubuntu 12.04 (precise) through 13.04 (raring) are"\
-        "currently supported" >&2
+  # First make sure root can access this directory, as that's tripped
+  # up some folks.
+  if sudo touch xyz.$$
+  then
+    sudo rm xyz.$$
+  else
+    echo root cannot write to the current directory, not installing gold
+    return
+  fi
+
+  BINUTILS=binutils-2.21.1
+  BINUTILS_URL=http://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2
+  BINUTILS_SHA1=525255ca6874b872540c9967a1d26acfbc7c8230
+
+  test -f $BINUTILS.tar.bz2 || wget $BINUTILS_URL
+  if test "`sha1sum $BINUTILS.tar.bz2|cut -d' ' -f1`" != "$BINUTILS_SHA1"
+  then
+    echo Bad sha1sum for $BINUTILS.tar.bz2
     exit 1
   fi
 
-  if ! uname -m | egrep -q "i686|x86_64"; then
-    echo "Only x86 architectures are currently supported" >&2
-    exit
+  tar -xjvf $BINUTILS.tar.bz2
+  cd $BINUTILS
+  ./configure --prefix=/usr/local/gold --enable-gold=default --enable-threads \
+    --enable-bfd=yes
+  NCPU=`cat /proc/cpuinfo |grep ^processor|wc -l`
+  make maybe-all-binutils maybe-all-gold maybe-all-ld -j${NCPU}
+  if sudo make maybe-install-binutils maybe-install-gold maybe-install-ld
+  then
+    # Still need to figure out graceful way of pointing gyp to use
+    # /usr/local/gold/bin/ld without requiring him to set environment
+    # variables.
+    sudo strip /usr/local/gold/bin/ld.gold
+    sudo strip /usr/local/gold/bin/ld.bfd
+  else
+    echo "make install failed, not installing gold"
   fi
+}
+
+if ! egrep -q \
+    'Ubuntu (10\.04|10\.10|11\.04|11\.10|lucid|maverick|natty|oneiric)' \
+    /etc/issue; then
+  echo "Only Ubuntu 10.04 (lucid) through 11.10 (oneiric) are currently" \
+      "supported" >&2
+  exit 1
 fi
 
-if [ "x$(id -u)" != x0 ] && [ 0 -eq "${do_quick_check-0}" ]; then
+if ! uname -m | egrep -q "i686|x86_64"; then
+  echo "Only x86 architectures are currently supported" >&2
+  exit
+fi
+
+if [ "x$(id -u)" != x0 ]; then
   echo "Running as non-root user."
   echo "You might have to enter your password one or more times for 'sudo'."
   echo
 fi
 
 # Packages needed for chromeos only
-chromeos_dev_list="libbluetooth-dev"
+chromeos_dev_list="libpulse-dev"
 
-# Packages needed for development
-dev_list="apache2.2-bin bison curl dpkg-dev elfutils fakeroot flex g++ git-core
-          gperf language-pack-da language-pack-fr language-pack-he
-          language-pack-zh-hant libapache2-mod-php5 libasound2-dev libbrlapi-dev
-          libbz2-dev libcairo2-dev libcap-dev libcups2-dev libcurl4-gnutls-dev
-          libdrm-dev libelf-dev libgconf2-dev libgl1-mesa-dev libglib2.0-dev
-          libglu1-mesa-dev libgnome-keyring-dev libgtk2.0-dev libkrb5-dev
-          libnspr4-dev libnss3-dev libpam0g-dev libpci-dev libpulse-dev
-          libsctp-dev libspeechd-dev libsqlite3-dev libssl-dev libudev-dev
-          libwww-perl libxslt1-dev libxss-dev libxt-dev libxtst-dev
-          mesa-common-dev openbox patch perl php5-cgi pkg-config python
-          python-cherrypy3 python-dev python-psutil rpm ruby subversion
-          ttf-dejavu-core ttf-indic-fonts ttf-kochi-gothic ttf-kochi-mincho
-          ttf-thai-tlwg wdiff xfonts-mathml $chromeos_dev_list"
-
-# 64-bit systems need a minimum set of 32-bit compat packages for the pre-built
-# NaCl binaries. These are always needed, regardless of whether or not we want
-# the full 32-bit "cross-compile" support (--lib32).
-if file /sbin/init | grep -q 'ELF 64-bit'; then
-  dev_list="${dev_list} libc6-i386 lib32gcc1 lib32stdc++6"
-fi
+# Packages need for development
+dev_list="apache2.2-bin bison curl elfutils fakeroot flex g++ gperf
+          language-pack-fr libapache2-mod-php5 libasound2-dev libbz2-dev
+          libcairo2-dev libcups2-dev libcurl4-gnutls-dev libdbus-glib-1-dev
+          libelf-dev libgconf2-dev libgl1-mesa-dev libglib2.0-dev
+          libglu1-mesa-dev libgnome-keyring-dev libgtk2.0-dev libjpeg62-dev
+          libkrb5-dev libnspr4-dev libnss3-dev libpam0g-dev libsctp-dev
+          libsqlite3-dev libssl-dev libudev-dev libwww-perl libxslt1-dev
+          libxss-dev libxt-dev libxtst-dev mesa-common-dev msttcorefonts patch
+          perl php5-cgi pkg-config python python-cherrypy3 python-dev
+          python-psutil rpm ruby subversion ttf-dejavu-core ttf-indic-fonts
+          ttf-kochi-gothic ttf-kochi-mincho ttf-thai-tlwg wdiff
+          $chromeos_dev_list"
 
 # Run-time libraries required by chromeos only
-chromeos_lib_list="libpulse0 libbz2-1.0"
+chromeos_lib_list="libpulse0 libbz2-1.0 libcurl4-gnutls-dev"
 
 # Full list of required run-time libraries
-lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libcap2 libcups2 libexpat1
-          libfontconfig1 libfreetype6 libglib2.0-0 libgnome-keyring0
-          libgtk2.0-0 libpam0g libpango1.0-0 libpci3 libpcre3 libpixman-1-0
-          libpng12-0 libspeechd2 libstdc++6 libsqlite3-0 libx11-6
-          libxau6 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxdmcp6
-          libxext6 libxfixes3 libxi6 libxinerama1 libxrandr2 libxrender1
-          libxtst6 zlib1g $chromeos_lib_list"
+lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libcups2 libdbus-glib-1-2
+          libexpat1 libfontconfig1 libfreetype6 libglib2.0-0 libgnome-keyring0
+          libgtk2.0-0 libpam0g libpango1.0-0 libpcre3 libpixman-1-0
+          libpng12-0 libstdc++6 libsqlite3-0 libudev0 libx11-6 libxau6 libxcb1
+          libxcomposite1 libxcursor1 libxdamage1 libxdmcp6 libxext6 libxfixes3
+          libxi6 libxinerama1 libxrandr2 libxrender1 libxtst6 zlib1g
+          $chromeos_lib_list"
 
 # Debugging symbols for all of the run-time libraries
-dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg libfontconfig1-dbg
-          libglib2.0-0-dbg libgtk2.0-0-dbg libpango1.0-0-dbg libpcre3-dbg
-          libpixman-1-0-dbg libsqlite3-0-dbg libx11-6-dbg libxau6-dbg
-          libxcb1-dbg libxcomposite1-dbg libxcursor1-dbg libxdamage1-dbg
-          libxdmcp6-dbg libxext6-dbg libxfixes3-dbg libxi6-dbg libxinerama1-dbg
-          libxrandr2-dbg libxrender1-dbg libxtst6-dbg zlib1g-dbg
-          libstdc++6-4.6-dbg"
+dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg libdbus-glib-1-2-dbg
+          libfontconfig1-dbg libglib2.0-0-dbg libgtk2.0-0-dbg
+          libpango1.0-0-dbg libpcre3-dbg libpixman-1-0-dbg
+          libsqlite3-0-dbg
+          libx11-6-dbg libxau6-dbg libxcb1-dbg libxcomposite1-dbg
+          libxcursor1-dbg libxdamage1-dbg libxdmcp6-dbg libxext6-dbg
+          libxfixes3-dbg libxi6-dbg libxinerama1-dbg libxrandr2-dbg
+          libxrender1-dbg libxtst6-dbg zlib1g-dbg"
 
-# arm cross toolchain packages needed to build chrome on armhf
-arm_list="libc6-armhf-cross libc6-dev-armhf-cross libgcc1-armhf-cross
-          libgomp1-armhf-cross linux-libc-dev-armhf-cross
-          libgcc1-dbg-armhf-cross libgomp1-dbg-armhf-cross
-          binutils-arm-linux-gnueabihf cpp-arm-linux-gnueabihf
-          gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
-          libmudflap0-dbg-armhf-cross"
+# Plugin lists needed for tests.
+plugin_list="flashplugin-installer"
 
-# Old armel cross toolchain packages
-armel_list="libc6-armel-cross libc6-dev-armel-cross libgcc1-armel-cross
-            libgomp1-armel-cross linux-libc-dev-armel-cross
-            libgcc1-dbg-armel-cross libgomp1-dbg-armel-cross
-            binutils-arm-linux-gnueabi cpp-arm-linux-gnueabi
-            gcc-arm-linux-gnueabi g++-arm-linux-gnueabi
-            libmudflap0-dbg-armel-cross"
-
-# TODO(sbc): remove armel once the armhf transition is complete
-arm_list="$arm_list $armel_list"
-
-# Some package names have changed over time
-if package_exists ttf-mscorefonts-installer; then
-  dev_list="${dev_list} ttf-mscorefonts-installer"
-else
-  dev_list="${dev_list} msttcorefonts"
-fi
-if package_exists libnspr4-dbg; then
-  dbg_list="${dbg_list} libnspr4-dbg libnss3-dbg"
-  lib_list="${lib_list} libnspr4 libnss3"
-else
+# Some NSS packages were renamed in Natty.
+if egrep -q 'Ubuntu (10\.04|10\.10)' /etc/issue; then
   dbg_list="${dbg_list} libnspr4-0d-dbg libnss3-1d-dbg"
   lib_list="${lib_list} libnspr4-0d libnss3-1d"
-fi
-if package_exists libjpeg-dev; then
-  dev_list="${dev_list} libjpeg-dev"
 else
-  dev_list="${dev_list} libjpeg62-dev"
-fi
-if package_exists libudev1; then
-  dev_list="${dev_list} libudev1"
-else
-  dev_list="${dev_list} libudev0"
-fi
-if package_exists libbrlapi0.6; then
-  dev_list="${dev_list} libbrlapi0.6"
-else
-  dev_list="${dev_list} libbrlapi0.5"
-fi
-
-
-# Some packages are only needed if the distribution actually supports
-# installing them.
-if package_exists appmenu-gtk; then
-  lib_list="$lib_list appmenu-gtk"
+  dbg_list="${dbg_list} libnspr4-dbg libnss3-dbg"
+  lib_list="${lib_list} libnspr4 libnss3"
 fi
 
 # Waits for the user to press 'Y' or 'N'. Either uppercase of lowercase is
@@ -187,10 +156,6 @@ fi
 # The function will echo the user's selection followed by a newline character.
 # Users can abort the function by pressing CTRL-C. This will call "exit 1".
 yes_no() {
-  if [ 0 -ne "${do_default-0}" ] ; then
-    [ $1 -eq 0 ] && echo "Y" || echo "N"
-    return $1
-  fi
   local c
   while :; do
     c="$(trap 'stty echo -iuclc icanon 2>/dev/null' EXIT INT TERM QUIT
@@ -219,7 +184,7 @@ yes_no() {
   done
 }
 
-if test "$do_inst_syms" = "" && test 0 -eq ${do_quick_check-0}
+if test "$do_inst_syms" = ""
 then
   echo "This script installs all tools and libraries needed to build Chromium."
   echo ""
@@ -232,70 +197,10 @@ then
   fi
 fi
 if test "$do_inst_syms" = "1"; then
-  echo "Including debugging symbols."
+  echo "Installing debugging symbols."
 else
-  echo "Skipping debugging symbols."
+  echo "Skipping installation of debugging symbols."
   dbg_list=
-fi
-
-# When cross building for arm on 64-bit systems the host binaries
-# that are part of v8 need to be compiled with -m32 which means
-# that basic multilib support is needed.
-if file /sbin/init | grep -q 'ELF 64-bit'; then
-  arm_list="$arm_list g++-multilib"
-fi
-
-if test "$do_inst_arm" = "1" ; then
-  . /etc/lsb-release
-  if ! [ "${DISTRIB_CODENAME}" = "precise" -o \
-      1 -eq "${do_unsupported-0}" ]; then
-    echo "ERROR: Installing the ARM cross toolchain is only available on" \
-         "Ubuntu precise." >&2
-    exit 1
-  fi
-  echo "Including ARM cross toolchain."
-else
-  echo "Skipping ARM cross toolchain."
-  arm_list=
-fi
-
-packages="$(echo "${dev_list} ${lib_list} ${dbg_list} ${arm_list}" | \
-  tr " " "\n" | sort -u | tr "\n" " ")"
-
-if [ 1 -eq "${do_quick_check-0}" ] ; then
-  failed_check="$(dpkg-query -W -f '${PackageSpec}:${Status}\n' \
-    ${packages} 2>&1 | grep -v "ok installed" || :)"
-  if [ -n "${failed_check}" ]; then
-    echo
-    nomatch="$(echo "${failed_check}" | \
-      sed -e "s/^No packages found matching \(.*\).$/\1/;t;d")"
-    missing="$(echo "${failed_check}" | \
-      sed -e "/^No packages found matching/d;s/^\(.*\):.*$/\1/")"
-    if [ "$nomatch" ]; then
-      # Distinguish between packages that actually aren't available to the
-      # system (i.e. not in any repo) and packages that just aren't known to
-      # dpkg (i.e. managed by apt).
-      unknown=""
-      for p in ${nomatch}; do
-        if apt-cache show ${p} > /dev/null 2>&1; then
-          missing="${p}\n${missing}"
-        else
-          unknown="${p}\n${unknown}"
-        fi
-      done
-      if [ -n "${unknown}" ]; then
-        echo "WARNING: The following packages are unknown to your system"
-        echo "(maybe missing a repo or need to 'sudo apt-get update'):"
-        echo -e "${unknown}" | sed -e "s/^/  /"
-      fi
-    fi
-    if [ -n "${missing}" ]; then
-      echo "WARNING: The following packages are not installed:"
-      echo -e "${missing}" | sed -e "s/^/  /"
-    fi
-    exit 1
-  fi
-  exit 0
 fi
 
 sudo apt-get update
@@ -305,16 +210,17 @@ sudo apt-get update
 # without accidentally promoting any packages from "auto" to "manual".
 # We then re-run "apt-get" with just the list of missing packages.
 echo "Finding missing packages..."
-# Intentionally leaving $packages unquoted so it's more readable.
+packages="${dev_list} ${lib_list} ${dbg_list} ${plugin_list}"
+# Intentially leaving $packages unquoted so it's more readable.
 echo "Packages required: " $packages
 echo
 new_list_cmd="sudo apt-get install --reinstall $(echo $packages)"
-if new_list="$(yes n | LANGUAGE=en LANG=C $new_list_cmd)"; then
+if new_list="$(yes n | LANG=C $new_list_cmd)"; then
   # We probably never hit this following line.
   echo "No missing packages, and the packages are up-to-date."
 elif [ $? -eq 1 ]; then
   # We expect apt-get to have exit status of 1.
-  # This indicates that we cancelled the install with "yes n|".
+  # This indicates that we canceled the install with "yes n|".
   new_list=$(echo "$new_list" |
     sed -e '1,/The following NEW packages will be installed:/d;s/^  //;t;d')
   new_list=$(echo "$new_list" | sed 's/ *$//')
@@ -322,7 +228,7 @@ elif [ $? -eq 1 ]; then
     echo "No missing packages, and the packages are up-to-date."
   else
     echo "Installing missing packages: $new_list."
-    sudo apt-get install ${do_quietly-} ${new_list}
+    sudo apt-get install ${new_list}
   fi
   echo
 else
@@ -340,75 +246,106 @@ else
   exit 100
 fi
 
-# Install the Chrome OS default fonts. This must go after running
-# apt-get, since install-chromeos-fonts depends on curl.
-if test "$do_inst_chromeos_fonts" != "0"; then
+# Some operating systems already ship gold (on recent Debian and
+# Ubuntu you can do "apt-get install binutils-gold" to get it), but
+# older releases didn't.  Additionally, gold 2.20 (included in Ubuntu
+# Lucid) makes binaries that just segfault, and 2.20.1 does not support
+# --map-whole-files.
+# So install from source if we don't have a good version.
+
+case `ld --version` in
+*gold*2.2[1-9].*)
+  echo "*** Warning ***"
+  echo "If the default linker is gold, linking may fail for:"
+  echo "the Linux kernel, kernel modules, Valgrind, and Wine."
+  echo "If you previously installed gold as the default linker,"
+  echo "you can restore the original linker by running:"
+  echo "'cd /usr/bin; sudo rm ld; sudo mv ld.orig ld'"
   echo
-  echo "Installing Chrome OS fonts."
-  dir=`echo $0 | sed -r -e 's/\/[^/]+$//'`
-  if ! sudo $dir/linux/install-chromeos-fonts.py; then
-    echo "ERROR: The installation of the Chrome OS default fonts failed."
-    if [ `stat -f -c %T $dir` == "nfs" ]; then
-      echo "The reason is that your repo is installed on a remote file system."
-    else
-      echo "This is expected if your repo is installed on a remote file system."
+  if [ "$do_restore_usr_bin_ld" = "" ]
+  then
+    echo -n "Restore /usr/bin/ld to the original linker? (Y/n) "
+    if yes_no 0
+    then
+      do_restore_usr_bin_ld=1
     fi
-    echo "It is recommended to install your repo on a local file system."
-    echo "You can skip the installation of the Chrome OS default founts with"
-    echo "the command line option: --no-chromeos-fonts."
-    exit 1
+    echo
   fi
-else
-  echo "Skipping installation of Chrome OS fonts."
+  if [ "$do_restore_usr_bin_ld" = "1" ]
+  then
+    if sudo mv /usr/bin/ld.orig /usr/bin/ld
+    then
+      echo "Restored /usr/bin/ld.orig as /usr/bin/ld"
+    else
+      echo "Failed to restore /usr/bin/ld.orig as /usr/bin/ld"
+    fi
+    echo
+  fi
+  ;;
+esac
+
+# Check the gold version first.
+gold_up_to_date="1"
+if [ -x "/usr/local/gold/bin/ld" ]
+then
+  case `/usr/local/gold/bin/ld --version` in
+  *gold*2.2[1-9].*) ;;
+  * )
+    gold_up_to_date="0"
+  esac
+fi
+
+# Then check and make sure ld.bfd exists.
+if [ "$gold_up_to_date" = "1" ] && [ ! -x "/usr/local/gold/bin/ld.bfd" ]
+then
+  gold_up_to_date="0"
+fi
+
+if [ "$gold_up_to_date" = "0" ]
+then
+  if test "$do_inst_gold" = ""
+  then
+    echo "Gold is a new linker that links Chrome 5x faster than GNU ld."
+    echo -n "*** To use the gold linker, "
+    echo "you must pass -B/usr/local/gold/bin/ to g++ ***"
+    echo -n "Install the gold linker? (y/N) "
+    if yes_no 1; then
+      do_inst_gold=1
+    fi
+  fi
+  if test "$do_inst_gold" = "1"
+  then
+    echo "Building binutils with gold..."
+    install_gold || exit 99
+  else
+    echo "Not installing gold."
+  fi
 fi
 
 # Install 32bit backwards compatibility support for 64bit systems
-if file /sbin/init | grep -q 'ELF 64-bit'; then
-  if test "$do_inst_lib32" != "1"
+if [ "$(uname -m)" = "x86_64" ]; then
+  if test "$do_inst_lib32" = ""
   then
-    echo "NOTE: If you were expecting the option to install 32bit libs,"
-    echo "please run with the --lib32 flag."
+    echo "Installing 32bit libraries not already provided by the system"
     echo
-    echo "Installation complete."
-    exit 0
-  else
-    # This conditional statement has been added to deprecate and eventually
-    # remove support for 32bit libraries on 64bit systems. But for the time
-    # being, we still have to support a few legacy systems (e.g. bots), where
-    # this feature is needed.
-    # We only even give the user the option to install these libraries, if
-    # they explicitly requested doing so by setting the --lib32 command line
-    # flag.
-    # And even then, we interactively ask them one more time whether they are
-    # absolutely sure.
-    # In order for that to work, we must reset the ${do_inst_lib32} variable.
-    # There are other ways to achieve the same goal. But resetting the
-    # variable is the best way to document the intended behavior -- and to
-    # allow us to gradually deprecate and then remove the obsolete code.
-    if test "${do_default-0}" -ne 1; then
-      do_inst_lib32=
-    fi
-  fi
-
-  echo "WARNING"
-  echo
-  echo "We no longer recommend that you use this script to install"
-  echo "32bit libraries on a 64bit system. Instead, consider using the"
-  echo "install-chroot.sh script to help you set up a 32bit environment"
-  echo "for building and testing 32bit versions of Chrome."
-  echo
-  echo "The code for installing 32bit libraries on a 64bit system is"
-  echo "unmaintained and might not work with modern versions of Ubuntu"
-  echo "or Debian."
-  if test "$do_inst_lib32" != "" ; then
+    echo "This is only needed to build a 32-bit Chrome on your 64-bit system."
     echo
-    echo -n "Are you sure you want to proceed (y/N) "
+    echo "While we only need to install a relatively small number of library"
+    echo "files, we temporarily need to download a lot of large *.deb packages"
+    echo "that contain these files. We will create new *.deb packages that"
+    echo "include just the 32bit libraries. These files will then be found on"
+    echo "your system in places like /lib32, /usr/lib32, /usr/lib/debug/lib32,"
+    echo "/usr/lib/debug/usr/lib32. If you ever need to uninstall these files,"
+    echo "look for packages named *-ia32.deb."
+    echo "Do you want me to download all packages needed to build new 32bit"
+    echo -n "package files (y/N) "
     if yes_no 1; then
       do_inst_lib32=1
     fi
   fi
   if test "$do_inst_lib32" != "1"
   then
+    echo "Exiting without installing any 32bit libraries."
     exit 0
   fi
 
@@ -421,7 +358,7 @@ if file /sbin/init | grep -q 'ELF 64-bit'; then
   else
     cmp_list="${cmp_list} lib32readline5-dev"
   fi
-  sudo apt-get install ${do_quietly-} $cmp_list
+  sudo apt-get install $cmp_list
 
   tmp=/tmp/install-32bit.$$
   trap 'rm -rf "${tmp}"' EXIT INT TERM QUIT
@@ -460,7 +397,7 @@ EOF
       mkdir -p "'"${tmp}"'/staging/dpkg/DEBIAN"
       cd "'"${tmp}"'/staging"
       ar x "'${orig}'"
-      tar Cfx dpkg data.tar*
+      tar zCfx dpkg data.tar.gz
       tar zCfx dpkg/DEBIAN control.tar.gz
 
       # Create a posix extended regular expression fragment that will

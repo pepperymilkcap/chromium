@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,20 @@ cr.define('mobile', function() {
   cr.addSingletonGetter(SimUnlock);
 
   // State of the dialog.
-  SimUnlock.SIM_UNLOCK_LOADING = -1;
-  SimUnlock.SIM_ABSENT_NOT_LOCKED = 0,
-  SimUnlock.SIM_NOT_LOCKED_ASK_PIN = 1;
-  SimUnlock.SIM_NOT_LOCKED_CHANGE_PIN = 2;
-  SimUnlock.SIM_LOCKED_PIN = 3;
-  SimUnlock.SIM_LOCKED_NO_PIN_TRIES_LEFT = 4;
-  SimUnlock.SIM_LOCKED_PUK = 5;
-  SimUnlock.SIM_LOCKED_NO_PUK_TRIES_LEFT = 6;
-  SimUnlock.SIM_DISABLED = 7;
+  SimUnlock.SIM_UNLOCK_LOADING           = -1;
+  SimUnlock.SIM_ABSENT_NOT_LOCKED        =  0,
+  SimUnlock.SIM_NOT_LOCKED_ASK_PIN       =  1;
+  SimUnlock.SIM_NOT_LOCKED_CHANGE_PIN    =  2;
+  SimUnlock.SIM_LOCKED_PIN               =  3;
+  SimUnlock.SIM_LOCKED_NO_PIN_TRIES_LEFT =  4;
+  SimUnlock.SIM_LOCKED_PUK               =  5;
+  SimUnlock.SIM_LOCKED_NO_PUK_TRIES_LEFT =  6;
+  SimUnlock.SIM_DISABLED                 =  7;
 
   // Mode of the dialog.
-  SimUnlock.SIM_DIALOG_UNLOCK = 0;
-  SimUnlock.SIM_DIALOG_CHANGE_PIN = 1;
-  SimUnlock.SIM_DIALOG_SET_LOCK_ON = 2;
+  SimUnlock.SIM_DIALOG_UNLOCK       = 0;
+  SimUnlock.SIM_DIALOG_CHANGE_PIN   = 1;
+  SimUnlock.SIM_DIALOG_SET_LOCK_ON  = 2;
   SimUnlock.SIM_DIALOG_SET_LOCK_OFF = 3;
 
   // Error codes.
@@ -41,10 +41,6 @@ cr.define('mobile', function() {
     initialized_: false,
     mode_: SimUnlock.SIM_DIALOG_UNLOCK,
     pukValue_: '',
-    defaultDialogSize_: {
-      'width': window.innerWidth,
-      'height': window.innerHeight
-    },
     state_: SimUnlock.SIM_UNLOCK_LOADING,
 
     changeState_: function(simInfo) {
@@ -53,7 +49,7 @@ cr.define('mobile', function() {
       var tries = simInfo.tries;
       var pinMessage;
       this.hideAll_();
-      switch (newState) {
+      switch(newState) {
         case SimUnlock.SIM_UNLOCK_LOADING:
           break;
         case SimUnlock.SIM_ABSENT_NOT_LOCKED:
@@ -121,14 +117,11 @@ cr.define('mobile', function() {
           $('enter-puk-confirm').disabled = true;
           $('locked-puk-overlay').hidden = false;
           $('puk-input').focus();
-
-          // Resize the dialog to accomodate the PUK contents.
-          this.updateDialogSize_(0, 45);
           break;
         case SimUnlock.SIM_LOCKED_NO_PUK_TRIES_LEFT:
           $('locked-puk-no-tries-overlay').hidden = false;
           break;
-        case SimUnlock.SIM_DISABLED:
+        case SimUnlock.SimUnlock.SIM_DISABLED:
           $('sim-disabled-overlay').hidden = false;
           break;
       }
@@ -141,11 +134,6 @@ cr.define('mobile', function() {
      */
     get state() {
       return this.state_;
-    },
-
-    updateDialogSize_: function(deltaX, deltaY) {
-      window.resizeTo(this.defaultDialogSize_.width + deltaX,
-                      this.defaultDialogSize_.height + deltaY);
     },
 
     hideAll_: function() {
@@ -198,7 +186,6 @@ cr.define('mobile', function() {
       $('retype-new-pin-input').value = '';
       $('choose-pin-overlay').hidden = false;
       $('new-pin-input').focus();
-      this.updateDialogSize_(0, 18);
     },
 
     updateSimStatus_: function(simInfo) {
@@ -247,7 +234,7 @@ cr.define('mobile', function() {
     $('pin-input').addEventListener('textInput',
                                     SimUnlock.processInput.bind(this));
     $('enter-pin-confirm').addEventListener('click', function(event) {
-      SimUnlock.submitPin();
+      SimUnlock.submitPin()
     });
     $('enter-pin-dismiss').addEventListener('click', function(event) {
       SimUnlock.cancel();

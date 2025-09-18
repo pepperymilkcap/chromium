@@ -6,7 +6,8 @@
 
 #include <algorithm>
 
-#include "base/strings/string_util.h"
+#include "base/string_tokenizer.h"
+#include "base/string_util.h"
 #include "net/base/net_util.h"
 #include "net/http/http_util.h"
 
@@ -207,22 +208,6 @@ int ProxyServer::GetDefaultPortForScheme(Scheme scheme) {
 ProxyServer::Scheme ProxyServer::GetSchemeFromURI(const std::string& scheme) {
   return GetSchemeFromURIInternal(scheme.begin(), scheme.end());
 }
-
-// TODO(bengr): Use |scheme_| to indicate that this is the data reduction proxy.
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-bool ProxyServer::isDataReductionProxy() const {
-  return host_port_pair_.Equals(
-      HostPortPair::FromURL(GURL(SPDY_PROXY_AUTH_ORIGIN)));
-}
-
-bool ProxyServer::isDataReductionProxyFallback() const {
-#if defined(DATA_REDUCTION_FALLBACK_HOST)
-  return host_port_pair_.Equals(
-      HostPortPair::FromURL(GURL(DATA_REDUCTION_FALLBACK_HOST)));
-#endif  // defined(DATA_REDUCTION_FALLBACK_HOST)
-  return false;
-}
-#endif  // defined(SPDY_PROXY_AUTH_ORIGIN)
 
 // static
 ProxyServer ProxyServer::FromSchemeHostAndPort(

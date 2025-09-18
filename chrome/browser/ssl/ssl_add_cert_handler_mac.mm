@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 #include <SecurityInterface/SFCertificateView.h>
 
 #include "base/logging.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
+#include "base/memory/scoped_nsobject.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "grit/generated_resources.h"
-#include "net/cert/x509_certificate.h"
+#include "net/base/x509_certificate.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 @interface SSLAddCertHandlerCocoa : NSObject
@@ -55,10 +56,10 @@ void SSLAddCertHandler::AskToAddCert() {
 
 - (void)askToAddCert {
   NSWindow* parentWindow = NULL;
-  Browser* browser = chrome::GetLastActiveBrowser();
+  Browser* browser = BrowserList::GetLastActive();
   // TODO(snej): Can I get the Browser that issued the request?
   if (browser) {
-    parentWindow = browser->window()->GetNativeWindow();
+    parentWindow = browser->window()->GetNativeHandle();
     if ([parentWindow attachedSheet])
       parentWindow = nil;
   }

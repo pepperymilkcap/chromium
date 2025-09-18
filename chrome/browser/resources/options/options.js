@@ -1,46 +1,37 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 var AddLanguageOverlay = options.AddLanguageOverlay;
+var AdvancedOptions = options.AdvancedOptions;
 var AlertOverlay = options.AlertOverlay;
 var AutofillEditAddressOverlay = options.AutofillEditAddressOverlay;
 var AutofillEditCreditCardOverlay = options.AutofillEditCreditCardOverlay;
 var AutofillOptions = options.AutofillOptions;
 var BrowserOptions = options.BrowserOptions;
 var ClearBrowserDataOverlay = options.ClearBrowserDataOverlay;
-var ConfirmDialog = options.ConfirmDialog;
+var ContentSettings = options.ContentSettings;
 var ContentSettingsExceptionsArea =
     options.contentSettings.ContentSettingsExceptionsArea;
-var ContentSettings = options.ContentSettings;
 var CookiesView = options.CookiesView;
-var CreateProfileOverlay = options.CreateProfileOverlay;
-var EditDictionaryOverlay = cr.IsMac ? null : options.EditDictionaryOverlay;
-var FactoryResetOverlay = options.FactoryResetOverlay;
-<if expr="pp_ifdef('enable_google_now')">
-var GeolocationOptions = options.GeolocationOptions;
-</if>
+var ExtensionSettings = options.ExtensionSettings;
 var FontSettings = options.FontSettings;
 var HandlerOptions = options.HandlerOptions;
-var HomePageOverlay = options.HomePageOverlay;
 var ImportDataOverlay = options.ImportDataOverlay;
+var IntentsView = options.IntentsView;
+var InstantConfirmOverlay = options.InstantConfirmOverlay;
 var LanguageOptions = options.LanguageOptions;
-var ManageProfileOverlay = options.ManageProfileOverlay;
-var ManagedUserCreateConfirmOverlay = options.ManagedUserCreateConfirmOverlay;
-var ManagedUserImportOverlay = options.ManagedUserImportOverlay;
-var ManagedUserLearnMoreOverlay = options.ManagedUserLearnMoreOverlay;
-var MediaGalleriesManager = options.MediaGalleriesManager;
-var OptionsFocusManager = options.OptionsFocusManager;
 var OptionsPage = options.OptionsPage;
+var PackExtensionOverlay = options.PackExtensionOverlay;
 var PasswordManager = options.PasswordManager;
+var PersonalOptions = options.PersonalOptions;
 var Preferences = options.Preferences;
-var PreferredNetworks = options.PreferredNetworks;
-var ResetProfileSettingsBanner = options.ResetProfileSettingsBanner;
-var ResetProfileSettingsOverlay = options.ResetProfileSettingsOverlay;
+var ManageProfileOverlay = options.ManageProfileOverlay;
+var ProxyOptions = options.ProxyOptions;
 var SearchEngineManager = options.SearchEngineManager;
 var SearchPage = options.SearchPage;
-var StartupOverlay = options.StartupOverlay;
 var SyncSetupOverlay = options.SyncSetupOverlay;
+var VirtualKeyboardManager = options.VirtualKeyboardManager;
 
 /**
  * DOMContentLoaded handler, sets up the page.
@@ -62,11 +53,107 @@ function load() {
   cr.ui.decorate('span.controlled-setting-indicator',
       options.ControlledSettingIndicator);
 
-  // Top level pages.
-  OptionsPage.register(SearchPage.getInstance());
-  OptionsPage.register(BrowserOptions.getInstance());
+  var menuOffPattern = /(^\?|&)menu=off($|&)/;
+  var menuDisabled = menuOffPattern.test(window.location.search);
+  // document.documentElement.setAttribute('hide-menu', menuDisabled);
+  // We can't use an attribute on the html element because of webkit bug
+  // 12519. Instead, we add a class.
+  if (menuDisabled)
+    document.documentElement.classList.add('hide-menu');
 
-  // Overlays.
+  localStrings = new LocalStrings();
+
+  OptionsPage.register(SearchPage.getInstance());
+
+  OptionsPage.register(BrowserOptions.getInstance());
+  OptionsPage.registerSubPage(SearchEngineManager.getInstance(),
+                              BrowserOptions.getInstance(),
+                              [$('defaultSearchManageEnginesButton')]);
+  OptionsPage.register(PersonalOptions.getInstance());
+  OptionsPage.registerSubPage(AutofillOptions.getInstance(),
+                              PersonalOptions.getInstance(),
+                              [$('autofill-settings')]);
+  OptionsPage.registerSubPage(PasswordManager.getInstance(),
+                              PersonalOptions.getInstance(),
+                              [$('manage-passwords')]);
+  if (cr.isChromeOS) {
+    OptionsPage.register(SystemOptions.getInstance());
+    OptionsPage.registerSubPage(AboutPage.getInstance(),
+                                SystemOptions.getInstance());
+    OptionsPage.registerSubPage(LanguageOptions.getInstance(),
+                                SystemOptions.getInstance(),
+                                [$('language-button')]);
+    OptionsPage.registerSubPage(
+        new OptionsPage('languageChewing',
+                        templateData.languageChewingPageTabTitle,
+                        'languageChewingPage'),
+        LanguageOptions.getInstance());
+    OptionsPage.registerSubPage(
+        new OptionsPage('languageHangul',
+                        templateData.languageHangulPageTabTitle,
+                        'languageHangulPage'),
+        LanguageOptions.getInstance());
+    OptionsPage.registerSubPage(
+        new OptionsPage('languageMozc',
+                        templateData.languageMozcPageTabTitle,
+                        'languageMozcPage'),
+        LanguageOptions.getInstance());
+    OptionsPage.registerSubPage(
+        new OptionsPage('languagePinyin',
+                        templateData.languagePinyinPageTabTitle,
+                        'languagePinyinPage'),
+        LanguageOptions.getInstance());
+    // Only use the VirtualKeyboardManager if the keyboard DOM elements (which
+    // it will assume exists) are present (i.e. if we were built with
+    // USE_VIRTUAL_KEYBOARD).
+    if ($('language-options-virtual-keyboard')) {
+      OptionsPage.registerSubPage(VirtualKeyboardManager.getInstance(),
+                                  LanguageOptions.getInstance());
+    }
+    OptionsPage.register(InternetOptions.getInstance());
+  }
+  OptionsPage.register(AdvancedOptions.getInstance());
+  OptionsPage.registerSubPage(ContentSettings.getInstance(),
+                              AdvancedOptions.getInstance(),
+                              [$('privacyContentSettingsButton')]);
+  OptionsPage.registerSubPage(ContentSettingsExceptionsArea.getInstance(),
+                              ContentSettings.getInstance());
+  OptionsPage.registerSubPage(CookiesView.getInstance(),
+                              ContentSettings.getInstance(),
+                              [$('privacyContentSettingsButton'),
+                               $('show-cookies-button')]);
+  // If HandlerOptions is null it means it got compiled out.
+  if (HandlerOptions) {
+    OptionsPage.registerSubPage(HandlerOptions.getInstance(),
+                                ContentSettings.getInstance(),
+                                [$('manage-handlers-button')]);
+  }
+  if (IntentsView && $('manage-intents-button')) {
+    OptionsPage.registerSubPage(IntentsView.getInstance(),
+                                ContentSettings.getInstance(),
+                                [$('manage-intents-button')]);
+  }
+  OptionsPage.registerSubPage(FontSettings.getInstance(),
+                              AdvancedOptions.getInstance(),
+                              [$('fontSettingsCustomizeFontsButton')]);
+  if (!cr.isChromeOS) {
+    OptionsPage.registerSubPage(LanguageOptions.getInstance(),
+                                AdvancedOptions.getInstance(),
+                                [$('language-button')]);
+  }
+  if (!cr.isWindows && !cr.isMac) {
+    OptionsPage.registerSubPage(CertificateManager.getInstance(),
+                                AdvancedOptions.getInstance(),
+                                [$('certificatesManageButton')]);
+    OptionsPage.registerOverlay(CertificateRestoreOverlay.getInstance(),
+                                CertificateManager.getInstance());
+    OptionsPage.registerOverlay(CertificateBackupOverlay.getInstance(),
+                                CertificateManager.getInstance());
+    OptionsPage.registerOverlay(CertificateEditCaTrustOverlay.getInstance(),
+                                CertificateManager.getInstance());
+    OptionsPage.registerOverlay(CertificateImportErrorOverlay.getInstance(),
+                                CertificateManager.getInstance());
+  }
   OptionsPage.registerOverlay(AddLanguageOverlay.getInstance(),
                               LanguageOptions.getInstance());
   OptionsPage.registerOverlay(AlertOverlay.getInstance());
@@ -74,148 +161,50 @@ function load() {
                               AutofillOptions.getInstance());
   OptionsPage.registerOverlay(AutofillEditCreditCardOverlay.getInstance(),
                               AutofillOptions.getInstance());
-  OptionsPage.registerOverlay(AutofillOptions.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('autofill-settings')]);
   OptionsPage.registerOverlay(ClearBrowserDataOverlay.getInstance(),
-                              BrowserOptions.getInstance(),
+                              AdvancedOptions.getInstance(),
                               [$('privacyClearDataButton')]);
-  OptionsPage.registerOverlay(
-      new ConfirmDialog(
-          'doNotTrackConfirm',
-          loadTimeData.getString('doNotTrackConfirmOverlayTabTitle'),
-          'do-not-track-confirm-overlay',
-          $('do-not-track-confirm-ok'),
-          $('do-not-track-confirm-cancel'),
-          $('do-not-track-enabled').pref,
-          $('do-not-track-enabled').metric),
-      BrowserOptions.getInstance());
-  // 'spelling-enabled-control' element is only present on Chrome branded
-  // builds.
-  if ($('spelling-enabled-control')) {
-    OptionsPage.registerOverlay(
-        new ConfirmDialog(
-            'spellingConfirm',
-            loadTimeData.getString('spellingConfirmOverlayTabTitle'),
-            'spelling-confirm-overlay',
-            $('spelling-confirm-ok'),
-            $('spelling-confirm-cancel'),
-            $('spelling-enabled-control').pref,
-            $('spelling-enabled-control').metric),
-        BrowserOptions.getInstance());
-  }
-  OptionsPage.registerOverlay(ContentSettings.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('privacyContentSettingsButton')]);
-  OptionsPage.registerOverlay(ContentSettingsExceptionsArea.getInstance(),
-                              ContentSettings.getInstance());
-  OptionsPage.registerOverlay(CookiesView.getInstance(),
-                              ContentSettings.getInstance(),
-                              [$('privacyContentSettingsButton'),
-                               $('show-cookies-button')]);
-  OptionsPage.registerOverlay(CreateProfileOverlay.getInstance(),
-                              BrowserOptions.getInstance());
-  if (!cr.isMac) {
-    OptionsPage.registerOverlay(EditDictionaryOverlay.getInstance(),
-                                LanguageOptions.getInstance(),
-                                [$('edit-dictionary-button')]);
-  }
-  OptionsPage.registerOverlay(FontSettings.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('fontSettingsCustomizeFontsButton')]);
-  if (HandlerOptions && $('manage-handlers-button')) {
-    OptionsPage.registerOverlay(HandlerOptions.getInstance(),
-                                ContentSettings.getInstance(),
-                                [$('manage-handlers-button')]);
-  }
-  OptionsPage.registerOverlay(HomePageOverlay.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('change-home-page')]);
   OptionsPage.registerOverlay(ImportDataOverlay.getInstance(),
-                              BrowserOptions.getInstance());
-  OptionsPage.registerOverlay(LanguageOptions.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('language-button'),
-                               $('manage-languages')]);
-  OptionsPage.registerOverlay(ManageProfileOverlay.getInstance(),
-                              BrowserOptions.getInstance());
-  if (!cr.isChromeOS) {
-    OptionsPage.registerOverlay(ManagedUserCreateConfirmOverlay.getInstance(),
-                                BrowserOptions.getInstance());
-    if (loadTimeData.getBoolean('allowCreateExistingManagedUsers')) {
-      OptionsPage.registerOverlay(ManagedUserImportOverlay.getInstance(),
-                                  BrowserOptions.getInstance());
-    }
-    OptionsPage.registerOverlay(ManagedUserLearnMoreOverlay.getInstance(),
-                                CreateProfileOverlay.getInstance());
-  }
-  OptionsPage.registerOverlay(MediaGalleriesManager.getInstance(),
-                              ContentSettings.getInstance(),
-                              [$('manage-galleries-button')]);
-  OptionsPage.registerOverlay(PasswordManager.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('manage-passwords')]);
-  OptionsPage.registerOverlay(ResetProfileSettingsOverlay.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('reset-profile-settings')]);
-  OptionsPage.registerOverlay(SearchEngineManager.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('manage-default-search-engines')]);
-  OptionsPage.registerOverlay(StartupOverlay.getInstance(),
+                              PersonalOptions.getInstance());
+  OptionsPage.registerOverlay(InstantConfirmOverlay.getInstance(),
                               BrowserOptions.getInstance());
   OptionsPage.registerOverlay(SyncSetupOverlay.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('customize-sync')]);
+                              PersonalOptions.getInstance());
+  OptionsPage.registerOverlay(ManageProfileOverlay.getInstance(),
+                              PersonalOptions.getInstance());
+  OptionsPage.register(ExtensionSettings.getInstance());
+  OptionsPage.registerOverlay(PackExtensionOverlay.getInstance(),
+                              ExtensionSettings.getInstance());
+
   if (cr.isChromeOS) {
-    OptionsPage.registerOverlay(AccountsOptions.getInstance(),
-                                BrowserOptions.getInstance(),
-                                [$('manage-accounts-button')]);
+    OptionsPage.register(AccountsOptions.getInstance());
+    OptionsPage.registerSubPage(ProxyOptions.getInstance(),
+                                InternetOptions.getInstance());
+    OptionsPage.registerSubPage(ChangePictureOptions.getInstance(),
+                                PersonalOptions.getInstance(),
+                                [$('change-picture-button')]);
+    OptionsPage.registerOverlay(DetailsInternetPage.getInstance(),
+                                InternetOptions.getInstance());
+
+    var languageModifierKeysOverlay = new OptionsPage(
+        'languageCustomizeModifierKeysOverlay',
+        localStrings.getString('languageCustomizeModifierKeysOverlay'),
+        'languageCustomizeModifierKeysOverlay')
+    $('languageCustomizeModifierKeysOverleyDismissButton').onclick =
+        function() {
+      OptionsPage.closeOverlay();
+    };
+    OptionsPage.registerOverlay(languageModifierKeysOverlay,
+                                SystemOptions.getInstance(),
+                                [$('modifier-keys-button')]);
     OptionsPage.registerOverlay(BluetoothOptions.getInstance(),
-                                BrowserOptions.getInstance(),
+                                SystemOptions.getInstance(),
                                 [$('bluetooth-add-device')]);
     OptionsPage.registerOverlay(BluetoothPairing.getInstance(),
-                                BrowserOptions.getInstance());
-    OptionsPage.registerOverlay(FactoryResetOverlay.getInstance(),
-                                BrowserOptions.getInstance(),
-                                [$('factory-reset-restart')]);
-    OptionsPage.registerOverlay(ChangePictureOptions.getInstance(),
-                                BrowserOptions.getInstance(),
-                                [$('account-picture')]);
-    OptionsPage.registerOverlay(DetailsInternetPage.getInstance(),
-                                BrowserOptions.getInstance());
-    OptionsPage.registerOverlay(DisplayOptions.getInstance(),
-                                BrowserOptions.getInstance(),
-                                [$('display-options')]);
-    OptionsPage.registerOverlay(DisplayOverscan.getInstance(),
-                                DisplayOptions.getInstance());
-    OptionsPage.registerOverlay(KeyboardOverlay.getInstance(),
-                                BrowserOptions.getInstance(),
-                                [$('keyboard-settings-button')]);
-    OptionsPage.registerOverlay(PointerOverlay.getInstance(),
-                                BrowserOptions.getInstance(),
-                                [$('pointer-settings-button')]);
-    OptionsPage.registerOverlay(PreferredNetworks.getInstance(),
-                                BrowserOptions.getInstance());
+                                SystemOptions.getInstance());
   }
 
-  if (!cr.isWindows && !cr.isMac) {
-    OptionsPage.registerOverlay(CertificateBackupOverlay.getInstance(),
-                                CertificateManager.getInstance());
-    OptionsPage.registerOverlay(CertificateEditCaTrustOverlay.getInstance(),
-                                CertificateManager.getInstance());
-    OptionsPage.registerOverlay(CertificateImportErrorOverlay.getInstance(),
-                                CertificateManager.getInstance());
-    OptionsPage.registerOverlay(CertificateManager.getInstance(),
-                                BrowserOptions.getInstance(),
-                                [$('certificatesManageButton')]);
-    OptionsPage.registerOverlay(CertificateRestoreOverlay.getInstance(),
-                                CertificateManager.getInstance());
-  }
-
-  cr.ui.FocusManager.disableMouseFocusOnButtons();
-  OptionsFocusManager.getInstance().initialize();
   Preferences.getInstance().initialize();
-  ResetProfileSettingsBanner.getInstance().initialize();
   OptionsPage.initialize();
 
   var path = document.location.pathname;
@@ -223,37 +212,40 @@ function load() {
   if (path.length > 1) {
     // Skip starting slash and remove trailing slash (if any).
     var pageName = path.slice(1).replace(/\/$/, '');
-    OptionsPage.showPageByName(pageName, true, {replaceState: true});
+    // Proxy page is now per network and only reachable from internet details.
+    if (pageName != 'proxy') {
+      // Show page, but don't update history (there's already an entry for it).
+      OptionsPage.showPageByName(pageName, false);
+    }
   } else {
     OptionsPage.showDefaultPage();
   }
 
   var subpagesNavTabs = document.querySelectorAll('.subpages-nav-tabs');
-  for (var i = 0; i < subpagesNavTabs.length; i++) {
+  for(var i = 0; i < subpagesNavTabs.length; i++) {
     subpagesNavTabs[i].onclick = function(event) {
       OptionsPage.showTab(event.srcElement);
-    };
+    }
   }
 
-  window.setTimeout(function() {
-    document.documentElement.classList.remove('loading');
-  });
+  // Allow platform specific CSS rules.
+  cr.enablePlatformSpecificCSSRules();
+
+  if (navigator.plugins['Shockwave Flash'])
+    document.documentElement.setAttribute('hasFlashPlugin', '');
+
+  // Clicking on the Settings title brings up the 'Basics' page.
+  $('navbar-content-title').onclick = function() {
+    OptionsPage.navigateToPage(BrowserOptions.getInstance().name);
+  };
 }
 
-document.documentElement.classList.add('loading');
 document.addEventListener('DOMContentLoaded', load);
 
-/**
- * Listener for the |beforeunload| event.
- */
-window.onbeforeunload = function() {
-  options.OptionsPage.willClose();
-};
-
-/**
- * Listener for the |popstate| event.
- * @param {Event} e The |popstate| event.
- */
 window.onpopstate = function(e) {
   options.OptionsPage.setState(e.state);
+};
+
+window.onbeforeunload = function() {
+  options.OptionsPage.willClose();
 };

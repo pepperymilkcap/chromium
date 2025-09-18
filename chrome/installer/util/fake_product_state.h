@@ -4,6 +4,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_FAKE_PRODUCT_STATE_H_
 #define CHROME_INSTALLER_UTIL_FAKE_PRODUCT_STATE_H_
+#pragma once
 
 #include <string>
 #include "chrome/installer/util/installation_state.h"
@@ -22,7 +23,7 @@ class FakeProductState : public ProductState {
     usagestats_ = usagestats;
   }
   void clear_usagestats() { has_usagestats_ = false; }
-  void SetUninstallProgram(const base::FilePath& setup_exe) {
+  void SetUninstallProgram(const FilePath& setup_exe) {
     uninstall_command_ = CommandLine(setup_exe);
   }
   void AddUninstallSwitch(const std::string& option) {

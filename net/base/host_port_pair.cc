@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/base/host_port_pair.h"
 
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "net/base/ip_endpoint.h"
-#include "url/gurl.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "googleurl/src/gurl.h"
+#include "net/base/net_util.h"
+#include "net/base/sys_addrinfo.h"
 
 namespace net {
 
@@ -23,8 +24,9 @@ HostPortPair HostPortPair::FromURL(const GURL& url) {
 }
 
 // static
-HostPortPair HostPortPair::FromIPEndPoint(const IPEndPoint& ipe) {
-  return HostPortPair(ipe.ToStringWithoutPort(), ipe.port());
+HostPortPair HostPortPair::FromAddrInfo(const struct addrinfo* ai) {
+  return HostPortPair(NetAddressToString(ai),
+                      GetPortFromSockaddr(ai->ai_addr, ai->ai_addrlen));
 }
 
 HostPortPair HostPortPair::FromString(const std::string& str) {

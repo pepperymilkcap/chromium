@@ -15,7 +15,8 @@ chrome.webRequest.onBeforeRequest.addListener(
   // filters
   {
     urls: [
-      "https://i.chzbgr.com/*"
+      "http://icanhascheezburger.files.wordpress.com/*",
+      "http://chzmemebase.files.wordpress.com/*",
     ],
     types: ["image"]
   },

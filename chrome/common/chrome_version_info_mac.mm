@@ -4,11 +4,11 @@
 
 #include "chrome/common/chrome_version_info.h"
 
-#import <Foundation/Foundation.h>
+#import <Cocoa/Cocoa.h>
 
 #include "base/basictypes.h"
 #include "base/mac/bundle_locations.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 
 namespace chrome {
 

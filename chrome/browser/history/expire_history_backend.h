@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H_
 #define CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H_
+#pragma once
 
 #include <queue>
 #include <set>
@@ -13,7 +14,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "chrome/browser/history/history_types.h"
 
 class BookmarkService;
@@ -25,6 +26,7 @@ namespace history {
 class ArchivedDatabase;
 class HistoryDatabase;
 struct HistoryDetails;
+class TextDatabaseManager;
 class ThumbnailDatabase;
 
 // Delegate used to broadcast notifications to the main thread.
@@ -34,11 +36,6 @@ class BroadcastNotificationDelegate {
   // thread. The details argument will have ownership taken by this function.
   virtual void BroadcastNotifications(int type,
                                       HistoryDetails* details_deleted) = 0;
-
-  // Trigger handling of deleted urls in typed url sync code
-  virtual void NotifySyncURLsDeleted(bool all_history,
-                                     bool archived,
-                                     URLRows* rows) = 0;
 
  protected:
   virtual ~BroadcastNotificationDelegate() {}
@@ -75,7 +72,8 @@ class ExpireHistoryBackend {
   // Completes initialization by setting the databases that this class will use.
   void SetDatabases(HistoryDatabase* main_db,
                     ArchivedDatabase* archived_db,
-                    ThumbnailDatabase* thumb_db);
+                    ThumbnailDatabase* thumb_db,
+                    TextDatabaseManager* text_db);
 
   // Begins periodic expiration of history older than the given threshold. This
   // will continue until the object is deleted.
@@ -88,14 +86,9 @@ class ExpireHistoryBackend {
   void DeleteURLs(const std::vector<GURL>& url);
 
   // Removes all visits to restrict_urls (or all URLs if empty) in the given
-  // time range, updating the URLs accordingly.
+  // time range, updating the URLs accordingly,
   void ExpireHistoryBetween(const std::set<GURL>& restrict_urls,
                             base::Time begin_time, base::Time end_time);
-
-  // Removes all visits to all URLs with the given times, updating the
-  // URLs accordingly.  |times| must be in reverse chronological order
-  // and not contain any duplicates.
-  void ExpireHistoryForTimes(const std::vector<base::Time>& times);
 
   // Removes the given list of visits, updating the URLs accordingly (similar to
   // ExpireHistoryBetween(), but affecting a specific set of visits).
@@ -126,6 +119,9 @@ class ExpireHistoryBackend {
   // Deletes the visit-related stuff for all the visits in the given list, and
   // adds the rows for unique URLs affected to the affected_urls list in
   // the dependencies structure.
+  //
+  // Deleted information is the visits themselves and the full-text index
+  // entries corresponding to them.
   void DeleteVisitRelatedInfo(const VisitVector& visits,
                               DeleteDependencies* dependencies);
 
@@ -133,7 +129,8 @@ class ExpireHistoryBackend {
   void ArchiveVisits(const VisitVector& visits);
 
   // Finds or deletes dependency information for the given URL. Information that
-  // is specific to this URL (URL row, thumbnails, etc.) is deleted.
+  // is specific to this URL (URL row, thumbnails, full text indexed stuff,
+  // etc.) is deleted.
   //
   // This does not affect the visits! This is used for expiration as well as
   // deleting from the UI, and they handle visits differently.
@@ -162,7 +159,7 @@ class ExpireHistoryBackend {
 
   // Deletes all the URLs in the given vector and handles their dependencies.
   // This will delete starred URLs
-  void DeleteURLs(const URLRows& urls,
+  void DeleteURLs(const std::vector<URLRow>& urls,
                   DeleteDependencies* dependencies);
 
   // Expiration involves removing visits, then propagating the visits out from
@@ -196,23 +193,10 @@ class ExpireHistoryBackend {
 
   // Deletes the favicons listed in the set if unused. Fails silently (we don't
   // care about favicons so much, so don't want to stop everything if it fails).
-  // Fills |expired_favicons| with the set of favicon urls that no longer
-  // have associated visits and were therefore expired.
-  void DeleteFaviconsIfPossible(const std::set<chrome::FaviconID>& favicon_id,
-                                std::set<GURL>* expired_favicons);
-
-  // Enum representing what type of action resulted in the history DB deletion.
-  enum DeletionType {
-    // User initiated the deletion from the History UI.
-    DELETION_USER_INITIATED,
-    // History data was automatically archived due to being more than 90 days
-    // old.
-    DELETION_ARCHIVED
-  };
+  void DeleteFaviconsIfPossible(const std::set<FaviconID>& favicon_id);
 
   // Broadcast the URL deleted notification.
-  void BroadcastDeleteNotifications(DeleteDependencies* dependencies,
-                                    DeletionType type);
+  void BroadcastDeleteNotifications(DeleteDependencies* dependencies);
 
   // Schedules a call to DoArchiveIteration.
   void ScheduleArchive();
@@ -233,6 +217,12 @@ class ExpireHistoryBackend {
   // Tries to detect possible bad history or inconsistencies in the database
   // and deletes items. For example, URLs with no visits.
   void ParanoidExpireHistory();
+
+  // Schedules a call to DoExpireHistoryIndexFiles.
+  void ScheduleExpireHistoryIndexFiles();
+
+  // Deletes old history index files.
+  void DoExpireHistoryIndexFiles();
 
   // Returns the BookmarkService, blocking until it is loaded. This may return
   // NULL.
@@ -257,6 +247,7 @@ class ExpireHistoryBackend {
   HistoryDatabase* main_db_;       // Main history database.
   ArchivedDatabase* archived_db_;  // Old history.
   ThumbnailDatabase* thumb_db_;    // Thumbnails and favicons.
+  TextDatabaseManager* text_db_;   // Full text index.
 
   // Used to generate runnable methods to do timers on this class. They will be
   // automatically canceled when this class is deleted.

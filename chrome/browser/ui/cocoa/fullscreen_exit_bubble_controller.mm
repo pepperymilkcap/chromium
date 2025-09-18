@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,25 +7,25 @@
 #include "base/logging.h"  // for NOTREACHED()
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_commands.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#include "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/fullscreen_exit_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/hyperlink_text_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_exit_bubble_type.h"
+#include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_strings.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
-#include "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
-#include "ui/base/accelerators/platform_accelerator_cocoa.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#include "ui/base/accelerators/accelerator_cocoa.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -53,14 +53,13 @@ const float kHideDuration = 0.7;
 - (void)hideSoon;
 
 // Returns the Accelerator for the Toggle Fullscreen menu item.
-+ (scoped_ptr<ui::PlatformAcceleratorCocoa>)acceleratorForToggleFullscreen;
++ (ui::AcceleratorCocoa)acceleratorForToggleFullscreen;
 
 // Returns a string representation fit for display of
 // +acceleratorForToggleFullscreen.
 + (NSString*)keyCommandString;
 
-+ (NSString*)keyCombinationForAccelerator:
-    (const ui::PlatformAcceleratorCocoa&)item;
++ (NSString*)keyCombinationForAccelerator:(const ui::AcceleratorCocoa&)item;
 @end
 
 @implementation FullscreenExitBubbleController
@@ -77,11 +76,6 @@ const float kHideDuration = 0.7;
     owner_ = owner;
     url_ = url;
     bubbleType_ = bubbleType;
-    // Mouse lock expects mouse events to reach the main window immediately.
-    // Make the bubble transparent for mouse events if mouse lock is enabled.
-    if (bubbleType_ == FEB_TYPE_FULLSCREEN_MOUSELOCK_EXIT_INSTRUCTION ||
-        bubbleType_ == FEB_TYPE_MOUSELOCK_EXIT_INSTRUCTION)
-      [[self window] setIgnoresMouseEvents:YES];
   }
   return self;
 }
@@ -95,12 +89,15 @@ const float kHideDuration = 0.7;
     [[self window] setIgnoresMouseEvents:YES];
 
   DCHECK(fullscreen_bubble::ShowButtonsForType(bubbleType_));
-  browser_->fullscreen_controller()->OnAcceptFullscreenPermission();
+  browser_->OnAcceptFullscreenPermission(
+      url_, bubbleType_);
+  [self showButtons:NO];
+  [self hideSoon];
 }
 
 - (void)deny:(id)sender {
   DCHECK(fullscreen_bubble::ShowButtonsForType(bubbleType_));
-  browser_->fullscreen_controller()->OnDenyFullscreenPermission();
+  browser_->OnDenyFullscreenPermission(bubbleType_);
 }
 
 - (void)showButtons:(BOOL)show {
@@ -123,9 +120,10 @@ const float kHideDuration = 0.7;
     [self showButtons:NO];
     [self hideSoon];
   }
+  NSRect windowFrame = [owner_ window].frame;
   [tweaker_ tweakUI:info_bubble];
+  [self positionInWindowAtTop:NSHeight(windowFrame) width:NSWidth(windowFrame)];
   [[owner_ window] addChildWindow:info_bubble ordered:NSWindowAbove];
-  [owner_ layoutSubviews];
 
   [info_bubble orderFront:self];
 }
@@ -138,20 +136,48 @@ const float kHideDuration = 0.7;
 
 - (void)positionInWindowAtTop:(CGFloat)maxY width:(CGFloat)maxWidth {
   NSRect windowFrame = [self window].frame;
-  NSRect ownerWindowFrame = [owner_ window].frame;
   NSPoint origin;
-  origin.x = ownerWindowFrame.origin.x +
-      (int)(NSWidth(ownerWindowFrame)/2 - NSWidth(windowFrame)/2);
-  origin.y = ownerWindowFrame.origin.y + maxY - NSHeight(windowFrame);
+  origin.x = (int)(maxWidth/2 - NSWidth(windowFrame)/2);
+  origin.y = maxY - NSHeight(windowFrame);
   [[self window] setFrameOrigin:origin];
+}
+
+- (void)updateURL:(const GURL&)url
+       bubbleType:(FullscreenExitBubbleType)bubbleType {
+  bubbleType_ = bubbleType;
+
+  [messageLabel_ setStringValue:[self getLabelText]];
+
+  // Make sure the bubble is visible.
+  [hideAnimation_.get() stopAnimation];
+  [hideTimer_ invalidate];
+  [[[self window] animator] setAlphaValue:1.0];
+
+  if (fullscreen_bubble::ShowButtonsForType(bubbleType)) {
+    [denyButton_ setTitle:SysUTF16ToNSString(
+        fullscreen_bubble::GetDenyButtonTextForType(bubbleType))];
+    [self showButtons:YES];
+
+    // Reenable mouse events if they were disabled previously.
+    [[self window] setIgnoresMouseEvents:NO];
+  } else {
+    [self showButtons:NO];
+    // Only button-less bubbles auto-hide.
+    [self hideSoon];
+  }
+  // TODO(jeremya): show "Press Esc to exit" instead of a link on mouselock.
+
+  // Relayout. A bit jumpy, but functional.
+  [tweaker_ tweakUI:[self window]];
+  NSRect windowFrame = [owner_ window].frame;
+  [self positionInWindowAtTop:NSHeight(windowFrame) width:NSWidth(windowFrame)];
 }
 
 // Called when someone clicks on the embedded link.
 - (BOOL) textView:(NSTextView*)textView
     clickedOnLink:(id)link
           atIndex:(NSUInteger)charIndex {
-  browser_->fullscreen_controller()->
-      ExitTabOrBrowserFullscreenToPreviousState();
+  browser_->ExecuteCommand(IDC_FULLSCREEN);
   return YES;
 }
 
@@ -182,7 +208,7 @@ const float kHideDuration = 0.7;
   [[infoBubble parentWindow] removeChildWindow:infoBubble];
   [hideAnimation_.get() stopAnimation];
   [hideTimer_ invalidate];
-  [infoBubble setAllowedAnimations:info_bubble::kAnimateNone];
+  [infoBubble setDelayOnClose:NO];
   [self close];
 }
 
@@ -211,25 +237,15 @@ const float kHideDuration = 0.7;
   exitLabelPlaceholder_ = nil;  // Now released.
   [exitLabel_.get() setDelegate:self];
 
-  NSString* exitLinkText;
-  NSString* exitUnlinkedText;
-  if (bubbleType_ == FEB_TYPE_FULLSCREEN_MOUSELOCK_EXIT_INSTRUCTION ||
-      bubbleType_ == FEB_TYPE_MOUSELOCK_EXIT_INSTRUCTION) {
-    exitLinkText = @"";
-    exitUnlinkedText = [@" " stringByAppendingString:
-        l10n_util::GetNSStringF(IDS_FULLSCREEN_PRESS_ESC_TO_EXIT,
-                                l10n_util::GetStringUTF16(IDS_APP_ESC_KEY))];
-  } else {
-    exitLinkText = l10n_util::GetNSString(IDS_EXIT_FULLSCREEN_MODE);
-    exitUnlinkedText = [@" " stringByAppendingString:
-        l10n_util::GetNSStringF(IDS_EXIT_FULLSCREEN_MODE_ACCELERATOR,
-                                l10n_util::GetStringUTF16(IDS_APP_ESC_KEY))];
-  }
+  NSString* exitLinkText = l10n_util::GetNSString(IDS_EXIT_FULLSCREEN_MODE);
+  NSString* acceleratorText = [@" " stringByAppendingString:
+      l10n_util::GetNSStringF(IDS_EXIT_FULLSCREEN_MODE_ACCELERATOR,
+                              l10n_util::GetStringUTF16(IDS_APP_ESC_KEY))];
 
   NSFont* font = [NSFont systemFontOfSize:
       [NSFont systemFontSizeForControlSize:NSRegularControlSize]];
   [(HyperlinkTextView*)exitLabel_.get()
-        setMessageAndLink:exitUnlinkedText
+        setMessageAndLink:acceleratorText
                  withLink:exitLinkText
                  atOffset:0
                      font:font
@@ -255,8 +271,6 @@ const float kHideDuration = 0.7;
 }
 
 - (NSString*)getLabelText {
-  if (bubbleType_ == FEB_TYPE_NONE)
-    return @"";
   return SysUTF16ToNSString(fullscreen_bubble::GetLabelTextForType(
           bubbleType_, url_, browser_->profile()->GetExtensionService()));
 }
@@ -264,37 +278,34 @@ const float kHideDuration = 0.7;
 // This looks at the Main Menu and determines what the user has set as the
 // key combination for quit. It then gets the modifiers and builds an object
 // to hold the data.
-+ (scoped_ptr<ui::PlatformAcceleratorCocoa>)acceleratorForToggleFullscreen {
++ (ui::AcceleratorCocoa)acceleratorForToggleFullscreen {
   NSMenu* mainMenu = [NSApp mainMenu];
   // Get the application menu (i.e. Chromium).
   for (NSMenuItem* menu in [mainMenu itemArray]) {
     for (NSMenuItem* item in [[menu submenu] itemArray]) {
       // Find the toggle presentation mode item.
       if ([item tag] == IDC_PRESENTATION_MODE) {
-        return scoped_ptr<ui::PlatformAcceleratorCocoa>(
-          new ui::PlatformAcceleratorCocoa([item keyEquivalent],
-                                           [item keyEquivalentModifierMask]));
+        return ui::AcceleratorCocoa([item keyEquivalent],
+                                    [item keyEquivalentModifierMask]);
       }
     }
   }
   // Default to Cmd+Shift+F.
-  return scoped_ptr<ui::PlatformAcceleratorCocoa>(
-      new ui::PlatformAcceleratorCocoa(@"f", NSCommandKeyMask|NSShiftKeyMask));
+  return ui::AcceleratorCocoa(@"f", NSCommandKeyMask|NSShiftKeyMask);
 }
 
 // This looks at the Main Menu and determines what the user has set as the
 // key combination for quit. It then gets the modifiers and builds a string
 // to display them.
 + (NSString*)keyCommandString {
-  scoped_ptr<ui::PlatformAcceleratorCocoa> accelerator(
-      [[self class] acceleratorForToggleFullscreen]);
-  return [[self class] keyCombinationForAccelerator:*accelerator];
+  ui::AcceleratorCocoa accelerator =
+      [[self class] acceleratorForToggleFullscreen];
+  return [[self class] keyCombinationForAccelerator:accelerator];
 }
 
-+ (NSString*)keyCombinationForAccelerator:
-    (const ui::PlatformAcceleratorCocoa&)item {
++ (NSString*)keyCombinationForAccelerator:(const ui::AcceleratorCocoa&)item {
   NSMutableString* string = [NSMutableString string];
-  NSUInteger modifiers = item.modifier_mask();
+  NSUInteger modifiers = item.modifiers();
 
   if (modifiers & NSCommandKeyMask)
     [string appendString:@"\u2318"];

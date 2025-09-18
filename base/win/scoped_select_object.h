@@ -4,6 +4,7 @@
 
 #ifndef BASE_WIN_SCOPED_SELECT_OBJECT_H_
 #define BASE_WIN_SCOPED_SELECT_OBJECT_H_
+#pragma once
 
 #include <windows.h>
 

@@ -19,10 +19,11 @@
 
 #ifndef CHROME_INSTALLER_UTIL_WMI_H_
 #define CHROME_INSTALLER_UTIL_WMI_H_
+#pragma once
 
+#include "base/string16.h"
 #include <string>
 #include <wbemidl.h>
-#include "base/strings/string16.h"
 
 namespace installer {
 
@@ -78,7 +79,7 @@ class WMIProcess {
 class WMIComputerSystem {
  public:
   // Returns a human readable string for the model/make of this computer.
-  static base::string16 GetModel();
+  static string16 GetModel();
 };
 
 }  // namespace installer

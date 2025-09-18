@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_FIRST_RUN_TRY_CHROME_DIALOG_VIEW_H_
 #define CHROME_BROWSER_FIRST_RUN_TRY_CHROME_DIALOG_VIEW_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -19,7 +20,6 @@ class Rect;
 
 namespace views {
 class RadioButton;
-class Checkbox;
 class Widget;
 }
 
@@ -28,47 +28,23 @@ class Widget;
 // resulting actions are up to the caller. One flavor looks like this:
 //
 //   +-----------------------------------------------+
-//   | |icon| There is a new, safer version      [x] |
-//   | |icon| of Google Chrome available             |
-//   |        [o] Try it out (already installed)     |
+//   | |icon| You stopped using Google Chrome    [x] |
+//   | |icon| Would you like to:                     |
+//   |        [o] Give the new version a try         |
 //   |        [ ] Uninstall Google Chrome            |
 //   |        [ OK ] [Don't bug me]                  |
+//   |                                               |
 //   |        _why_am_I_seeing this?_                |
 //   +-----------------------------------------------+
 //
-// Another flavor looks like:
-//   +-----------------------------------------------+
-//   | |icon| There is a new, safer version      [x] |
-//   | |icon| of Google Chrome available             |
-//   |        [o] Try it out (already installed)     |
-//   |        [ ] Don't bug me                       |
-//   |                  [ OK ]                       |
-//   +-----------------------------------------------+
-//
-// And the 2013 version looks like:
-//   +-----------------------------------------------+
-//   | |icon| There is a new version of          [x] |
-//   | |icon| Google Chrome available                |
-//   |        [o] Try it out (already installed)     |
-//   |        [ ] Don't bug me                       |
-//   | --------------------------------------------- |
-//   | [x] Make it the default browser       [ OK ]  |
-//   +-----------------------------------------------+
-
 class TryChromeDialogView : public views::ButtonListener,
                             public views::LinkListener {
  public:
-  // Receives a handle to the active modal dialog, or NULL when the active
-  // dialog is dismissed.
-  typedef base::Callback<void(gfx::NativeWindow active_dialog)>
-      ActiveModalDialogListener;
-
   enum Result {
-    TRY_CHROME,             // Launch chrome right now.
-    TRY_CHROME_AS_DEFAULT,  // Launch chrome and make it the default.
-    NOT_NOW,                // Don't launch chrome. Exit now.
-    UNINSTALL_CHROME,       // Initiate chrome uninstall and exit.
-    DIALOG_ERROR,           // An error occurred creating the dialog.
+    TRY_CHROME,          // Launch chrome right now.
+    NOT_NOW,             // Don't launch chrome. Exit now.
+    UNINSTALL_CHROME,    // Initiate chrome uninstall and exit.
+    DIALOG_ERROR,        // An error occurred creating the dialog.
     COUNT
   };
 
@@ -76,18 +52,24 @@ class TryChromeDialogView : public views::ButtonListener,
   // above for the possible outcomes of the function. This is an experimental,
   // non-localized dialog.
   // |flavor| can be 0, 1, 2 or 3 and selects what strings to present.
-  // |listener| will be notified when the dialog becomes active and when it is
-  // dismissed.
+  // |process_singleton| needs to be valid and it will be locked while
+  // the dialog is shown.
   // Note that the dialog has no parent and it will position itself in a lower
   // corner of the screen. The dialog does not steal focus and does not have an
   // entry in the taskbar.
-  static Result Show(size_t flavor, const ActiveModalDialogListener& listener);
+  static Result Show(size_t flavor, ProcessSingleton* process_singleton);
 
  private:
+  enum ButtonTags {
+    BT_NONE,
+    BT_CLOSE_BUTTON,
+    BT_OK_BUTTON,
+  };
+
   explicit TryChromeDialogView(size_t flavor);
   virtual ~TryChromeDialogView();
 
-  Result ShowModal(const ActiveModalDialogListener& listener);
+  Result ShowModal(ProcessSingleton* process_singleton);
 
   // Returns a screen rectangle that is fit to show the window. In particular
   // it has the following properties: a) is visible and b) is attached to the
@@ -98,13 +80,13 @@ class TryChromeDialogView : public views::ButtonListener,
 
   // Create a windows region that looks like a toast of width |w| and height
   // |h|. This is best effort, so we don't care much if the operation fails.
-  void SetToastRegion(HWND window, int w, int h);
+  void SetToastRegion(gfx::NativeWindow window, int w, int h);
 
   // views::ButtonListener:
   // We have two buttons and according to what the user clicked we set |result_|
   // and we should always close and end the modal loop.
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   // views::LinkListener:
   // If the user selects the link we need to fire off the default browser that
@@ -120,7 +102,6 @@ class TryChromeDialogView : public views::ButtonListener,
   views::RadioButton* try_chrome_;
   views::RadioButton* kill_chrome_;
   views::RadioButton* dont_try_chrome_;
-  views::Checkbox* make_default_;
   Result result_;
 
   DISALLOW_COPY_AND_ASSIGN(TryChromeDialogView);

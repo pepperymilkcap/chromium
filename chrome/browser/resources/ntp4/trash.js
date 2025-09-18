@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
  * This is the class for the trash can that appears when dragging an app.
  */
 
-cr.define('ntp', function() {
+cr.define('ntp4', function() {
   'use strict';
 
   function Trash(trash) {
@@ -26,10 +26,10 @@ cr.define('ntp', function() {
     /**
      * Determines whether we are interested in the drag data for |e|.
      * @param {Event} e The event from drag enter.
-     * @return {boolean} True if we are interested in the drag data for |e|.
+     * @return {bool}
      */
     shouldAcceptDrag: function(e) {
-      var tile = ntp.getCurrentlyDraggingTile();
+      var tile = ntp4.getCurrentlyDraggingTile();
       if (!tile)
         return false;
 
@@ -41,9 +41,9 @@ cr.define('ntp', function() {
      * @param {Event} e The drag event.
      */
     doDragOver: function(e) {
-      ntp.getCurrentlyDraggingTile().dragClone.classList.add(
+      ntp4.getCurrentlyDraggingTile().dragClone.classList.add(
           'hovering-on-trash');
-      ntp.setCurrentDropEffect(e.dataTransfer, 'move');
+      ntp4.setCurrentDropEffect(e.dataTransfer, 'move');
       e.preventDefault();
     },
 
@@ -62,7 +62,7 @@ cr.define('ntp', function() {
     doDrop: function(e) {
       e.preventDefault();
 
-      var tile = ntp.getCurrentlyDraggingTile();
+      var tile = ntp4.getCurrentlyDraggingTile();
       tile.firstChild.removeFromChrome();
       tile.landedOnTrash = true;
     },
@@ -72,7 +72,7 @@ cr.define('ntp', function() {
      * @param {Event} e The drag event.
      */
     doDragLeave: function(e) {
-      ntp.getCurrentlyDraggingTile().dragClone.classList.remove(
+      ntp4.getCurrentlyDraggingTile().dragClone.classList.remove(
           'hovering-on-trash');
     },
   };

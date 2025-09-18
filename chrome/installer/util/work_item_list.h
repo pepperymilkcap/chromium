@@ -4,6 +4,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_WORK_ITEM_LIST_H_
 #define CHROME_INSTALLER_UTIL_WORK_ITEM_LIST_H_
+#pragma once
 
 #include <windows.h>
 
@@ -11,13 +12,10 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/installer/util/work_item.h"
 
-namespace base {
 class FilePath;
-}
 
 // A WorkItem subclass that recursively contains a list of WorkItems. Thus it
 // provides functionalities to carry out or roll back the sequence of actions
@@ -39,10 +37,6 @@ class WorkItemList : public WorkItem {
   // Once a WorkItem is added to the list. The list owns the WorkItem.
   virtual void AddWorkItem(WorkItem* work_item);
 
-  // Add a CallbackWorkItem that invokes a callback.
-  virtual WorkItem* AddCallbackWorkItem(
-      base::Callback<bool(const CallbackWorkItem&)> callback);
-
   // Add a CopyRegKeyWorkItem that recursively copies a given registry key.
   virtual WorkItem* AddCopyRegKeyWorkItem(HKEY predefined_root,
                                           const std::wstring& source_key_path,
@@ -60,7 +54,7 @@ class WorkItemList : public WorkItem {
       const std::wstring& alternative_path = L"");
 
   // Add a CreateDirWorkItem that creates a directory at the given path.
-  virtual WorkItem* AddCreateDirWorkItem(const base::FilePath& path);
+  virtual WorkItem* AddCreateDirWorkItem(const FilePath& path);
 
   // Add a CreateRegKeyWorkItem that creates a registry key at the given
   // path.
@@ -82,13 +76,13 @@ class WorkItemList : public WorkItem {
   // hierarchy at the given root path. A key file can be optionally specified
   // by key_path.
   virtual WorkItem* AddDeleteTreeWorkItem(
-      const base::FilePath& root_path,
-      const base::FilePath& temp_path,
-      const std::vector<base::FilePath>& key_paths);
+      const FilePath& root_path,
+      const FilePath& temp_path,
+      const std::vector<FilePath>& key_paths);
 
   // Same as above but without support for key files.
-  virtual WorkItem* AddDeleteTreeWorkItem(const base::FilePath& root_path,
-                                          const base::FilePath& temp_path);
+  virtual WorkItem* AddDeleteTreeWorkItem(const FilePath& root_path,
+                                          const FilePath& temp_path);
 
   // Add a MoveTreeWorkItem to the list of work items.
   virtual WorkItem* AddMoveTreeWorkItem(const std::wstring& source_path,
@@ -167,7 +161,7 @@ class NoRollbackWorkItemList : public WorkItemList {
   // WorkItems will still be executed.
   virtual bool Do();
 
-  // No-op.
+  // Just does a NOTREACHED.
   virtual void Rollback();
 };
 

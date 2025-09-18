@@ -1,27 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_GENERIC_CHANGE_PROCESSOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_GENERIC_CHANGE_PROCESSOR_H_
+#pragma once
 
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
+#include "chrome/browser/sync/api/sync_change_processor.h"
 #include "chrome/browser/sync/glue/change_processor.h"
-#include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/glue/data_type_error_handler.h"
-#include "sync/api/sync_change_processor.h"
-#include "sync/api/sync_merge_result.h"
 
-namespace syncer {
 class SyncData;
 class SyncableService;
 
-typedef std::vector<syncer::SyncData> SyncDataList;
-}  // namespace syncer
+typedef std::vector<SyncData> SyncDataList;
 
 namespace browser_sync {
 
@@ -36,80 +32,63 @@ namespace browser_sync {
 // As a rule, the GenericChangeProcessor is not thread safe, and should only
 // be used on the same thread in which it was created.
 class GenericChangeProcessor : public ChangeProcessor,
-                               public syncer::SyncChangeProcessor,
+                               public SyncChangeProcessor,
                                public base::NonThreadSafe {
  public:
   // Create a change processor and connect it to the syncer.
-  GenericChangeProcessor(
-      DataTypeErrorHandler* error_handler,
-      const base::WeakPtr<syncer::SyncableService>& local_service,
-      const base::WeakPtr<syncer::SyncMergeResult>& merge_result,
-      syncer::UserShare* user_share);
+  GenericChangeProcessor(UnrecoverableErrorHandler* error_handler,
+                         const base::WeakPtr<SyncableService>& local_service,
+                         sync_api::UserShare* user_share);
   virtual ~GenericChangeProcessor();
 
   // ChangeProcessor interface.
   // Build and store a list of all changes into |syncer_changes_|.
   virtual void ApplyChangesFromSyncModel(
-      const syncer::BaseTransaction* trans,
-      int64 version,
-      const syncer::ImmutableChangeRecordList& changes) OVERRIDE;
+      const sync_api::BaseTransaction* trans,
+      const sync_api::ImmutableChangeRecordList& changes) OVERRIDE;
   // Passes |syncer_changes_|, built in ApplyChangesFromSyncModel, onto
-  // |local_service_| by way of its ProcessSyncChanges method.
+  // |local_service_| by way of it's ProcessSyncChanges method.
   virtual void CommitChangesFromSyncModel() OVERRIDE;
 
-  // syncer::SyncChangeProcessor implementation.
-  virtual syncer::SyncError ProcessSyncChanges(
+  // SyncChangeProcessor implementation.
+  virtual SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const SyncChangeList& change_list) OVERRIDE;
 
-  // Fills a list of SyncData. This should create an up to date representation
-  // of all the data known to the ChangeProcessor for |datatype|, and
-  // should match/be a subset of the server's view of that datatype.
-  virtual syncer::SyncDataList GetAllSyncData(syncer::ModelType type)
-      const OVERRIDE;
-
-  // Similar to above, but returns a SyncError for use by direct clients
-  // of GenericChangeProcessor that may need more error visibility.
-  virtual syncer::SyncError GetAllSyncDataReturnError(
-      syncer::ModelType type,
-      syncer::SyncDataList* data) const;
-
-  // Returns the number of items for this type.
-  virtual int GetSyncCountForType(syncer::ModelType type);
+  // Fills |current_sync_data| with all the syncer data for the specified type.
+  SyncError GetSyncDataForType(syncable::ModelType type,
+                               SyncDataList* current_sync_data);
 
   // Generic versions of AssociatorInterface methods. Called by
-  // syncer::SyncableServiceAdapter or the DataTypeController.
-  virtual bool SyncModelHasUserCreatedNodes(syncer::ModelType type,
-                                            bool* has_nodes);
-  virtual bool CryptoReadyIfNecessary(syncer::ModelType type);
+  // SyncableServiceAdapter or the DataTypeController.
+  bool SyncModelHasUserCreatedNodes(syncable::ModelType type,
+                                    bool* has_nodes);
+  bool CryptoReadyIfNecessary(syncable::ModelType type);
 
  protected:
   // ChangeProcessor interface.
   virtual void StartImpl(Profile* profile) OVERRIDE;           // Does nothing.
-  virtual syncer::UserShare* share_handle() const OVERRIDE;
+  // Called from UI thread (as part of deactivating datatype), but does
+  // nothing and is guaranteed to still be alive, so it's okay.
+  virtual void StopImpl() OVERRIDE;                            // Does nothing.
+  virtual sync_api::UserShare* share_handle() const OVERRIDE;
 
  private:
   // The SyncableService this change processor will forward changes on to.
-  const base::WeakPtr<syncer::SyncableService> local_service_;
-
-  // A SyncMergeResult used to track the changes made during association. The
-  // owner will invalidate the weak pointer when association is complete. While
-  // the pointer is valid though, we increment it with any changes received
-  // via ProcessSyncChanges.
-  const base::WeakPtr<syncer::SyncMergeResult> merge_result_;
+  const base::WeakPtr<SyncableService> local_service_;
 
   // The current list of changes received from the syncer. We buffer because
   // we must ensure no syncapi transaction is held when we pass it on to
   // |local_service_|.
   // Set in ApplyChangesFromSyncModel, consumed in CommitChangesFromSyncModel.
-  syncer::SyncChangeList syncer_changes_;
+  SyncChangeList syncer_changes_;
 
   // Our handle to the sync model. Unlike normal ChangeProcessors, we need to
   // be able to access the sync model before the change processor begins
   // listening to changes (the local_service_ will be interacting with us
   // when it starts up). As such we can't wait until Start(_) has been called,
   // and have to keep a local pointer to the user_share.
-  syncer::UserShare* const share_handle_;
+  sync_api::UserShare* const share_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(GenericChangeProcessor);
 };

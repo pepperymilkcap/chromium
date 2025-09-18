@@ -4,8 +4,11 @@
 
 #include "chrome/browser/ui/views/update_recommended_message_box.h"
 
-#include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/dialog_style.h"
+#include "chrome/browser/ui/views/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -13,39 +16,19 @@
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/power_manager_client.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // UpdateRecommendedMessageBox, public:
 
 // static
-void UpdateRecommendedMessageBox::Show(gfx::NativeWindow parent_window) {
+void UpdateRecommendedMessageBox::ShowMessageBox(
+    gfx::NativeWindow parent_window) {
   // When the window closes, it will delete itself.
-  CreateBrowserModalDialogViews(new UpdateRecommendedMessageBox(),
-                                parent_window)->Show();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// UpdateRecommendedMessageBox, private:
-
-UpdateRecommendedMessageBox::UpdateRecommendedMessageBox() {
-  const int kDialogWidth = 400;
-#if defined(OS_CHROMEOS)
-  const int kProductNameID = IDS_SHORT_PRODUCT_OS_NAME;
-#else
-  const int kProductNameID = IDS_PRODUCT_NAME;
-#endif
-  const base::string16 product_name = l10n_util::GetStringUTF16(kProductNameID);
-  views::MessageBoxView::InitParams params(
-      l10n_util::GetStringFUTF16(IDS_UPDATE_RECOMMENDED, product_name));
-  params.message_width = kDialogWidth;
-  // Also deleted when the window closes.
-  message_box_view_ = new views::MessageBoxView(params);
-}
-
-UpdateRecommendedMessageBox::~UpdateRecommendedMessageBox() {
+  new UpdateRecommendedMessageBox(parent_window);
 }
 
 bool UpdateRecommendedMessageBox::Accept() {
@@ -53,14 +36,20 @@ bool UpdateRecommendedMessageBox::Accept() {
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
   // If running the Chrome OS build, but we're not on the device, fall through
 #endif
-  chrome::AttemptRestart();
+  BrowserList::AttemptRestart();
   return true;
 }
 
-base::string16 UpdateRecommendedMessageBox::GetDialogButtonLabel(
+int UpdateRecommendedMessageBox::GetDialogButtons() const {
+  return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
+}
+
+string16 UpdateRecommendedMessageBox::GetDialogButtonLabel(
     ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16((button == ui::DIALOG_BUTTON_OK) ?
-      IDS_RELAUNCH_AND_UPDATE : IDS_NOT_NOW);
+  DCHECK(button == ui::DIALOG_BUTTON_OK || button == ui::DIALOG_BUTTON_CANCEL);
+  return button == ui::DIALOG_BUTTON_OK ?
+      l10n_util::GetStringUTF16(IDS_RELAUNCH_AND_UPDATE) :
+      l10n_util::GetStringUTF16(IDS_NOT_NOW);
 }
 
 bool UpdateRecommendedMessageBox::ShouldShowWindowTitle() const {
@@ -71,7 +60,7 @@ bool UpdateRecommendedMessageBox::ShouldShowWindowTitle() const {
 #endif
 }
 
-base::string16 UpdateRecommendedMessageBox::GetWindowTitle() const {
+string16 UpdateRecommendedMessageBox::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
 }
 
@@ -93,4 +82,28 @@ views::Widget* UpdateRecommendedMessageBox::GetWidget() {
 
 const views::Widget* UpdateRecommendedMessageBox::GetWidget() const {
   return message_box_view_->GetWidget();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// UpdateRecommendedMessageBox, private:
+
+UpdateRecommendedMessageBox::UpdateRecommendedMessageBox(
+    gfx::NativeWindow parent_window) {
+  const int kDialogWidth = 400;
+#if defined(OS_CHROMEOS)
+  const int kProductNameId = IDS_PRODUCT_OS_NAME;
+#else
+  const int kProductNameId = IDS_PRODUCT_NAME;
+#endif
+  const string16 product_name = l10n_util::GetStringUTF16(kProductNameId);
+  // Also deleted when the window closes.
+  message_box_view_ = new views::MessageBoxView(
+      views::MessageBoxView::NO_OPTIONS,
+      l10n_util::GetStringFUTF16(IDS_UPDATE_RECOMMENDED, product_name),
+      string16(),
+      kDialogWidth);
+  browser::CreateViewsWindow(parent_window, this, STYLE_GENERIC)->Show();
+}
+
+UpdateRecommendedMessageBox::~UpdateRecommendedMessageBox() {
 }

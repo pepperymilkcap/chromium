@@ -1,28 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <vector>
 
 #include "base/bind.h"
-#include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/message_loop.h"
+#include "base/string_util.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
 #include "net/base/test_completion_callback.h"
-#include "net/dns/mock_host_resolver.h"
 #include "net/proxy/dhcp_proxy_script_fetcher.h"
-#include "net/proxy/mock_proxy_script_fetcher.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_script_decider.h"
 #include "net/proxy/proxy_script_fetcher.h"
-#include "net/url_request/url_request_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -42,12 +37,12 @@ class Rules {
           is_valid_script(is_valid_script) {
     }
 
-    base::string16 text() const {
+    string16 text() const {
       if (is_valid_script)
-        return base::UTF8ToUTF16(url.spec() + "!FindProxyForURL");
+        return UTF8ToUTF16(url.spec() + "!FindProxyForURL");
       if (fetch_error == OK)
-        return base::UTF8ToUTF16(url.spec() + "!invalid-script");
-      return base::string16();
+        return UTF8ToUTF16(url.spec() + "!invalid-script");
+      return string16();
     }
 
     GURL url;
@@ -80,7 +75,7 @@ class Rules {
     return rules_[0];
   }
 
-  const Rule& GetRuleByText(const base::string16& text) const {
+  const Rule& GetRuleByText(const string16& text) const {
     for (RuleList::const_iterator it = rules_.begin(); it != rules_.end();
          ++it) {
       if (it->text() == text)
@@ -97,17 +92,12 @@ class Rules {
 
 class RuleBasedProxyScriptFetcher : public ProxyScriptFetcher {
  public:
-  explicit RuleBasedProxyScriptFetcher(const Rules* rules)
-      : rules_(rules), request_context_(NULL) {}
-
-  virtual void SetRequestContext(URLRequestContext* context) {
-    request_context_ = context;
-  }
+  explicit RuleBasedProxyScriptFetcher(const Rules* rules) : rules_(rules) {}
 
   // ProxyScriptFetcher implementation.
   virtual int Fetch(const GURL& url,
-                    base::string16* text,
-                    const CompletionCallback& callback) OVERRIDE {
+                    string16* text,
+                    const CompletionCallback& callback) {
     const Rules::Rule& rule = rules_->GetRuleByUrl(url);
     int rv = rule.fetch_error;
     EXPECT_NE(ERR_UNEXPECTED, rv);
@@ -116,65 +106,13 @@ class RuleBasedProxyScriptFetcher : public ProxyScriptFetcher {
     return rv;
   }
 
-  virtual void Cancel() OVERRIDE {}
+  virtual void Cancel() {}
 
-  virtual URLRequestContext* GetRequestContext() const OVERRIDE {
-    return request_context_;
-  }
+  virtual URLRequestContext* GetRequestContext() const { return NULL; }
 
  private:
   const Rules* rules_;
-  URLRequestContext* request_context_;
 };
-
-// A mock retriever, returns asynchronously when CompleteRequests() is called.
-class MockDhcpProxyScriptFetcher : public DhcpProxyScriptFetcher {
- public:
-  MockDhcpProxyScriptFetcher();
-  virtual ~MockDhcpProxyScriptFetcher();
-
-  virtual int Fetch(base::string16* utf16_text,
-                    const CompletionCallback& callback) OVERRIDE;
-  virtual void Cancel() OVERRIDE;
-  virtual const GURL& GetPacURL() const OVERRIDE;
-
-  virtual void SetPacURL(const GURL& url);
-
-  virtual void CompleteRequests(int result, const base::string16& script);
-
- private:
-  CompletionCallback callback_;
-  base::string16* utf16_text_;
-  GURL gurl_;
-  DISALLOW_COPY_AND_ASSIGN(MockDhcpProxyScriptFetcher);
-};
-
-MockDhcpProxyScriptFetcher::MockDhcpProxyScriptFetcher() { }
-
-MockDhcpProxyScriptFetcher::~MockDhcpProxyScriptFetcher() { }
-
-int MockDhcpProxyScriptFetcher::Fetch(base::string16* utf16_text,
-                                      const CompletionCallback& callback) {
-  utf16_text_ = utf16_text;
-  callback_ = callback;
-  return ERR_IO_PENDING;
-}
-
-void MockDhcpProxyScriptFetcher::Cancel() { }
-
-const GURL& MockDhcpProxyScriptFetcher::GetPacURL() const {
-  return gurl_;
-}
-
-void MockDhcpProxyScriptFetcher::SetPacURL(const GURL& url) {
-  gurl_ = url;
-}
-
-void MockDhcpProxyScriptFetcher::CompleteRequests(
-    int result, const base::string16& script) {
-  *utf16_text_ = script;
-  callback_.Run(result);
-}
 
 // Succeed using custom PAC script.
 TEST(ProxyScriptDeciderTest, CustomPacSucceeds) {
@@ -188,14 +126,14 @@ TEST(ProxyScriptDeciderTest, CustomPacSucceeds) {
   Rules::Rule rule = rules.AddSuccessRule("http://custom/proxy.pac");
 
   TestCompletionCallback callback;
-  CapturingNetLog log;
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
   ProxyScriptDecider decider(&fetcher, &dhcp_fetcher, &log);
   EXPECT_EQ(OK, decider.Start(
       config, base::TimeDelta(), true, callback.callback()));
   EXPECT_EQ(rule.text(), decider.script_data()->utf16());
 
   // Check the NetLog was filled correctly.
-  CapturingNetLog::CapturedEntryList entries;
+  CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
 
   EXPECT_EQ(4u, entries.size());
@@ -224,7 +162,7 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1) {
   rules.AddFailDownloadRule("http://custom/proxy.pac");
 
   TestCompletionCallback callback;
-  CapturingNetLog log;
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
   ProxyScriptDecider decider(&fetcher, &dhcp_fetcher, &log);
   EXPECT_EQ(kFailedDownloading,
             decider.Start(config, base::TimeDelta(), true,
@@ -232,7 +170,7 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1) {
   EXPECT_EQ(NULL, decider.script_data());
 
   // Check the NetLog was filled correctly.
-  CapturingNetLog::CapturedEntryList entries;
+  CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
 
   EXPECT_EQ(4u, entries.size());
@@ -304,130 +242,6 @@ TEST(ProxyScriptDeciderTest, AutodetectSuccess) {
   EXPECT_EQ(rule.url, decider.effective_config().pac_url());
 }
 
-class ProxyScriptDeciderQuickCheckTest : public ::testing::Test {
- public:
-  ProxyScriptDeciderQuickCheckTest()
-      : rule_(rules_.AddSuccessRule("http://wpad/wpad.dat")),
-        fetcher_(&rules_) { }
-
-  virtual void SetUp() OVERRIDE {
-    request_context_.set_host_resolver(&resolver_);
-    fetcher_.SetRequestContext(&request_context_);
-    config_.set_auto_detect(true);
-    decider_.reset(new ProxyScriptDecider(&fetcher_, &dhcp_fetcher_, NULL));
-  }
-
-  int StartDecider() {
-    return decider_->Start(config_, base::TimeDelta(), true,
-                            callback_.callback());
-  }
-
- protected:
-  scoped_ptr<ProxyScriptDecider> decider_;
-  MockHostResolver resolver_;
-  Rules rules_;
-  Rules::Rule rule_;
-  TestCompletionCallback callback_;
-  RuleBasedProxyScriptFetcher fetcher_;
-  ProxyConfig config_;
-  DoNothingDhcpProxyScriptFetcher dhcp_fetcher_;
-
- private:
-  URLRequestContext request_context_;
-};
-
-// Fails if a synchronous DNS lookup success for wpad causes QuickCheck to fail.
-TEST_F(ProxyScriptDeciderQuickCheckTest, SyncSuccess) {
-  resolver_.set_synchronous_mode(true);
-  resolver_.rules()->AddRule("wpad", "1.2.3.4");
-
-  EXPECT_EQ(OK, StartDecider());
-  EXPECT_EQ(rule_.text(), decider_->script_data()->utf16());
-
-  EXPECT_TRUE(decider_->effective_config().has_pac_url());
-  EXPECT_EQ(rule_.url, decider_->effective_config().pac_url());
-}
-
-// Fails if an asynchronous DNS lookup success for wpad causes QuickCheck to
-// fail.
-TEST_F(ProxyScriptDeciderQuickCheckTest, AsyncSuccess) {
-  resolver_.set_ondemand_mode(true);
-  resolver_.rules()->AddRule("wpad", "1.2.3.4");
-
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
-  ASSERT_TRUE(resolver_.has_pending_requests());
-  resolver_.ResolveAllPending();
-  callback_.WaitForResult();
-  EXPECT_FALSE(resolver_.has_pending_requests());
-  EXPECT_EQ(rule_.text(), decider_->script_data()->utf16());
-  EXPECT_TRUE(decider_->effective_config().has_pac_url());
-  EXPECT_EQ(rule_.url, decider_->effective_config().pac_url());
-}
-
-// Fails if an asynchronous DNS lookup failure (i.e. an NXDOMAIN) still causes
-// ProxyScriptDecider to yield a PAC URL.
-TEST_F(ProxyScriptDeciderQuickCheckTest, AsyncFail) {
-  resolver_.set_ondemand_mode(true);
-  resolver_.rules()->AddSimulatedFailure("wpad");
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
-  ASSERT_TRUE(resolver_.has_pending_requests());
-  resolver_.ResolveAllPending();
-  callback_.WaitForResult();
-  EXPECT_FALSE(decider_->effective_config().has_pac_url());
-}
-
-// Fails if a DNS lookup timeout either causes ProxyScriptDecider to yield a PAC
-// URL or causes ProxyScriptDecider not to cancel its pending resolution.
-TEST_F(ProxyScriptDeciderQuickCheckTest, AsyncTimeout) {
-  resolver_.set_ondemand_mode(true);
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
-  ASSERT_TRUE(resolver_.has_pending_requests());
-  callback_.WaitForResult();
-  EXPECT_FALSE(resolver_.has_pending_requests());
-  EXPECT_FALSE(decider_->effective_config().has_pac_url());
-}
-
-// Fails if DHCP check doesn't take place before QuickCheck.
-TEST_F(ProxyScriptDeciderQuickCheckTest, QuickCheckInhibitsDhcp) {
-  MockDhcpProxyScriptFetcher dhcp_fetcher;
-  const char *kPac = "function FindProxyForURL(u,h) { return \"DIRECT\"; }";
-  base::string16 pac_contents = base::UTF8ToUTF16(kPac);
-  GURL url("http://foobar/baz");
-  dhcp_fetcher.SetPacURL(url);
-  decider_.reset(new ProxyScriptDecider(&fetcher_, &dhcp_fetcher, NULL));
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
-  dhcp_fetcher.CompleteRequests(OK, pac_contents);
-  EXPECT_TRUE(decider_->effective_config().has_pac_url());
-  EXPECT_EQ(decider_->effective_config().pac_url(), url);
-}
-
-// Fails if QuickCheck still happens when disabled. To ensure QuickCheck is not
-// happening, we add a synchronous failing resolver, which would ordinarily
-// mean a QuickCheck failure, then ensure that our ProxyScriptFetcher is still
-// asked to fetch.
-TEST_F(ProxyScriptDeciderQuickCheckTest, QuickCheckDisabled) {
-  const char *kPac = "function FindProxyForURL(u,h) { return \"DIRECT\"; }";
-  resolver_.set_synchronous_mode(true);
-  resolver_.rules()->AddSimulatedFailure("wpad");
-  MockProxyScriptFetcher fetcher;
-  decider_.reset(new ProxyScriptDecider(&fetcher, &dhcp_fetcher_, NULL));
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
-  EXPECT_TRUE(fetcher.has_pending_request());
-  fetcher.NotifyFetchCompletion(OK, kPac);
-}
-
-TEST_F(ProxyScriptDeciderQuickCheckTest, ExplicitPacUrl) {
-  const char *kCustomUrl = "http://custom/proxy.pac";
-  config_.set_pac_url(GURL(kCustomUrl));
-  Rules::Rule rule = rules_.AddSuccessRule(kCustomUrl);
-  resolver_.rules()->AddSimulatedFailure("wpad");
-  resolver_.rules()->AddRule("custom", "1.2.3.4");
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
-  callback_.WaitForResult();
-  EXPECT_TRUE(decider_->effective_config().has_pac_url());
-  EXPECT_EQ(rule.url, decider_->effective_config().pac_url());
-}
-
 // Fails at WPAD (downloading), but succeeds in choosing the custom PAC.
 TEST(ProxyScriptDeciderTest, AutodetectFailCustomSuccess1) {
   Rules rules;
@@ -467,7 +281,7 @@ TEST(ProxyScriptDeciderTest, AutodetectFailCustomSuccess2) {
   Rules::Rule rule = rules.AddSuccessRule("http://custom/proxy.pac");
 
   TestCompletionCallback callback;
-  CapturingNetLog log;
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
 
   ProxyScriptDecider decider(&fetcher, &dhcp_fetcher, &log);
   EXPECT_EQ(OK, decider.Start(config, base::TimeDelta(),
@@ -482,7 +296,7 @@ TEST(ProxyScriptDeciderTest, AutodetectFailCustomSuccess2) {
   // Check the NetLog was filled correctly.
   // (Note that various states are repeated since both WPAD and custom
   // PAC scripts are tried).
-  CapturingNetLog::CapturedEntryList entries;
+  CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
 
   EXPECT_EQ(10u, entries.size());
@@ -572,7 +386,7 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1_WithPositiveDelay) {
   rules.AddFailDownloadRule("http://custom/proxy.pac");
 
   TestCompletionCallback callback;
-  CapturingNetLog log;
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
   ProxyScriptDecider decider(&fetcher, &dhcp_fetcher, &log);
   EXPECT_EQ(ERR_IO_PENDING,
             decider.Start(config, base::TimeDelta::FromMilliseconds(1),
@@ -582,7 +396,7 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1_WithPositiveDelay) {
   EXPECT_EQ(NULL, decider.script_data());
 
   // Check the NetLog was filled correctly.
-  CapturingNetLog::CapturedEntryList entries;
+  CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
 
   EXPECT_EQ(6u, entries.size());
@@ -614,7 +428,7 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1_WithNegativeDelay) {
   rules.AddFailDownloadRule("http://custom/proxy.pac");
 
   TestCompletionCallback callback;
-  CapturingNetLog log;
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
   ProxyScriptDecider decider(&fetcher, &dhcp_fetcher, &log);
   EXPECT_EQ(kFailedDownloading,
             decider.Start(config, base::TimeDelta::FromSeconds(-5),
@@ -622,7 +436,7 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1_WithNegativeDelay) {
   EXPECT_EQ(NULL, decider.script_data());
 
   // Check the NetLog was filled correctly.
-  CapturingNetLog::CapturedEntryList entries;
+  CapturingNetLog::EntryList entries;
   log.GetEntries(&entries);
 
   EXPECT_EQ(4u, entries.size());
@@ -638,30 +452,29 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1_WithNegativeDelay) {
 
 class SynchronousSuccessDhcpFetcher : public DhcpProxyScriptFetcher {
  public:
-  explicit SynchronousSuccessDhcpFetcher(const base::string16& expected_text)
+  explicit SynchronousSuccessDhcpFetcher(const string16& expected_text)
       : gurl_("http://dhcppac/"), expected_text_(expected_text) {
   }
 
-  virtual int Fetch(base::string16* utf16_text,
-                    const CompletionCallback& callback) OVERRIDE {
+  int Fetch(string16* utf16_text, const CompletionCallback& callback) OVERRIDE {
     *utf16_text = expected_text_;
     return OK;
   }
 
-  virtual void Cancel() OVERRIDE {
+  void Cancel() OVERRIDE {
   }
 
-  virtual const GURL& GetPacURL() const OVERRIDE {
+  const GURL& GetPacURL() const OVERRIDE {
     return gurl_;
   }
 
-  const base::string16& expected_text() const {
+  const string16& expected_text() const {
     return expected_text_;
   }
 
  private:
   GURL gurl_;
-  base::string16 expected_text_;
+  string16 expected_text_;
 
   DISALLOW_COPY_AND_ASSIGN(SynchronousSuccessDhcpFetcher);
 };
@@ -675,7 +488,7 @@ TEST(ProxyScriptDeciderTest, AutodetectDhcpSuccess) {
   Rules rules;
   RuleBasedProxyScriptFetcher fetcher(&rules);
   SynchronousSuccessDhcpFetcher dhcp_fetcher(
-      base::WideToUTF16(L"http://bingo/!FindProxyForURL"));
+      WideToUTF16(L"http://bingo/!FindProxyForURL"));
 
   ProxyConfig config;
   config.set_auto_detect(true);
@@ -698,7 +511,7 @@ TEST(ProxyScriptDeciderTest, AutodetectDhcpFailParse) {
   Rules rules;
   RuleBasedProxyScriptFetcher fetcher(&rules);
   SynchronousSuccessDhcpFetcher dhcp_fetcher(
-      base::WideToUTF16(L"http://bingo/!invalid-script"));
+      WideToUTF16(L"http://bingo/!invalid-script"));
 
   ProxyConfig config;
   config.set_auto_detect(true);
@@ -719,25 +532,23 @@ TEST(ProxyScriptDeciderTest, AutodetectDhcpFailParse) {
 
 class AsyncFailDhcpFetcher
     : public DhcpProxyScriptFetcher,
-      public base::SupportsWeakPtr<AsyncFailDhcpFetcher> {
+      public base::RefCountedThreadSafe<AsyncFailDhcpFetcher> {
  public:
   AsyncFailDhcpFetcher() {}
-  virtual ~AsyncFailDhcpFetcher() {}
 
-  virtual int Fetch(base::string16* utf16_text,
-                    const CompletionCallback& callback) OVERRIDE {
+  int Fetch(string16* utf16_text, const CompletionCallback& callback) OVERRIDE {
     callback_ = callback;
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(&AsyncFailDhcpFetcher::CallbackWithFailure, AsWeakPtr()));
+        base::Bind(&AsyncFailDhcpFetcher::CallbackWithFailure, this));
     return ERR_IO_PENDING;
   }
 
-  virtual void Cancel() OVERRIDE {
+  void Cancel() OVERRIDE {
     callback_.Reset();
   }
 
-  virtual const GURL& GetPacURL() const OVERRIDE {
+  const GURL& GetPacURL() const OVERRIDE {
     return dummy_gurl_;
   }
 
@@ -759,7 +570,7 @@ TEST(ProxyScriptDeciderTest, DhcpCancelledByDestructor) {
   Rules rules;
   RuleBasedProxyScriptFetcher fetcher(&rules);
 
-  scoped_ptr<AsyncFailDhcpFetcher> dhcp_fetcher(new AsyncFailDhcpFetcher());
+  scoped_refptr<AsyncFailDhcpFetcher> dhcp_fetcher(new AsyncFailDhcpFetcher());
 
   ProxyConfig config;
   config.set_auto_detect(true);
@@ -777,7 +588,7 @@ TEST(ProxyScriptDeciderTest, DhcpCancelledByDestructor) {
   // back. Before the fix linked to above, this would try to invoke on
   // the callback object provided by ProxyScriptDecider after it was
   // no longer valid.
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
 }
 
 }  // namespace

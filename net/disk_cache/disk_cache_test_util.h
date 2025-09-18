@@ -4,20 +4,24 @@
 
 #ifndef NET_DISK_CACHE_DISK_CACHE_TEST_UTIL_H_
 #define NET_DISK_CACHE_DISK_CACHE_TEST_UTIL_H_
+#pragma once
 
 #include <string>
 
-#include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
-#include "base/timer/timer.h"
+#include "base/file_path.h"
+#include "base/message_loop.h"
+#include "base/timer.h"
 #include "base/tuple.h"
 #include "build/build_config.h"
 
 // Re-creates a given test file inside the cache test folder.
-bool CreateCacheTestFile(const base::FilePath& name);
+bool CreateCacheTestFile(const FilePath& name);
 
 // Deletes all file son the cache.
-bool DeleteCache(const base::FilePath& path);
+bool DeleteCache(const FilePath& path);
+
+// Gets the path to the cache test folder.
+FilePath GetCacheFilePath();
 
 // Fills buffer with random values (may contain nulls unless no_nulls is true).
 void CacheTestFillBuffer(char* buffer, size_t len, bool no_nulls);
@@ -26,8 +30,24 @@ void CacheTestFillBuffer(char* buffer, size_t len, bool no_nulls);
 std::string GenerateKey(bool same_length);
 
 // Returns true if the cache is not corrupt.
-bool CheckCacheIntegrity(const base::FilePath& path, bool new_eviction,
-                         uint32 mask);
+bool CheckCacheIntegrity(const FilePath& path, bool new_eviction, uint32 mask);
+
+// Helper class which ensures that the cache dir returned by GetCacheFilePath
+// exists and is clear in ctor and that the directory gets deleted in dtor.
+class ScopedTestCache {
+ public:
+  explicit ScopedTestCache(const FilePath& path);
+  // Use a specific folder name.
+  explicit ScopedTestCache(const std::string& name);
+  ~ScopedTestCache();
+
+  FilePath path() const { return path_; }
+
+ private:
+  const FilePath path_;  // Path to the cache test folder.
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedTestCache);
+};
 
 // -----------------------------------------------------------------------
 
@@ -85,20 +105,17 @@ class MessageLoopHelper {
 class CallbackTest {
  public:
   // Creates a new CallbackTest object. When the callback is called, it will
-  // update |helper|. If |reuse| is false and a callback is called more than
-  // once, or if |reuse| is true and a callback is called more than twice, an
-  // error will be reported to |helper|.
+  // update |helper| with the result of the call. If |reuse| is false and a
+  // callback is called more than once, or if |reuse| is true and a callback
+  // is called more than twice, an error will be reported to |helper|.
   CallbackTest(MessageLoopHelper* helper, bool reuse);
   ~CallbackTest();
 
-  void Run(int result);
-
-  int last_result() const { return last_result_; }
+  void Run(int params);
 
  private:
   MessageLoopHelper* helper_;
   int reuse_;
-  int last_result_;
   DISALLOW_COPY_AND_ASSIGN(CallbackTest);
 };
 

@@ -16,8 +16,6 @@ using ::testing::_;
 
 namespace media {
 
-enum { kBlockCount = 5 };
-
 class MockWebMParserClient : public WebMParserClient {
  public:
   virtual ~MockWebMParserClient() {}
@@ -29,6 +27,7 @@ class MockWebMParserClient : public WebMParserClient {
   MOCK_METHOD2(OnFloat, bool(int, double));
   MOCK_METHOD3(OnBinary, bool(int, const uint8*, int));
   MOCK_METHOD2(OnString, bool(int, const std::string&));
+  MOCK_METHOD5(OnSimpleBlock, bool(int, int, int, const uint8*, int));
 };
 
 class WebMParserTest : public testing::Test {
@@ -36,29 +35,44 @@ class WebMParserTest : public testing::Test {
   StrictMock<MockWebMParserClient> client_;
 };
 
-static scoped_ptr<Cluster> CreateCluster(int block_count) {
+struct SimpleBlockInfo {
+  int track_num;
+  int timestamp;
+};
+
+static void AddSimpleBlock(ClusterBuilder* cb, int track_num,
+                           int64 timecode) {
+  uint8 data[] = { 0x00 };
+  cb->AddSimpleBlock(track_num, timecode, 0, data, sizeof(data));
+}
+
+static scoped_ptr<Cluster> CreateCluster(int timecode,
+                                         const SimpleBlockInfo* block_info,
+                                         int block_count) {
   ClusterBuilder cb;
   cb.SetClusterTimecode(0);
 
-  for (int i = 0; i < block_count; i++) {
-    uint8 data[] = { 0x00 };
-    cb.AddSimpleBlock(0, i, 0, data, sizeof(data));
-  }
+  for (int i = 0; i < block_count; i++)
+    AddSimpleBlock(&cb, block_info[i].track_num, block_info[i].timestamp);
 
   return cb.Finish();
 }
 
-static void CreateClusterExpectations(int block_count,
+static void CreateClusterExpectations(int timecode,
+                                      const SimpleBlockInfo* block_info,
+                                      int block_count,
                                       bool is_complete_cluster,
                                       MockWebMParserClient* client) {
 
   InSequence s;
   EXPECT_CALL(*client, OnListStart(kWebMIdCluster)).WillOnce(Return(client));
-  EXPECT_CALL(*client, OnUInt(kWebMIdTimecode, 0))
+  EXPECT_CALL(*client, OnUInt(kWebMIdTimecode, timecode))
       .WillOnce(Return(true));
 
   for (int i = 0; i < block_count; i++) {
-    EXPECT_CALL(*client, OnBinary(kWebMIdSimpleBlock, _, _))
+    EXPECT_CALL(*client, OnSimpleBlock(block_info[i].track_num,
+                                       block_info[i].timestamp,
+                                       _, _, _))
         .WillOnce(Return(true));
   }
 
@@ -191,8 +205,17 @@ TEST_F(WebMParserTest, VoidAndCRC32InList) {
 
 
 TEST_F(WebMParserTest, ParseListElementWithSingleCall) {
-  scoped_ptr<Cluster> cluster(CreateCluster(kBlockCount));
-  CreateClusterExpectations(kBlockCount, true, &client_);
+  const SimpleBlockInfo kBlockInfo[] = {
+    { 0, 1 },
+    { 1, 2 },
+    { 0, 3 },
+    { 0, 4 },
+    { 1, 4 },
+  };
+  int block_count = arraysize(kBlockInfo);
+
+  scoped_ptr<Cluster> cluster(CreateCluster(0, kBlockInfo, block_count));
+  CreateClusterExpectations(0, kBlockInfo, block_count, true, &client_);
 
   WebMListParser parser(kWebMIdCluster, &client_);
   int result = parser.Parse(cluster->data(), cluster->size());
@@ -201,8 +224,17 @@ TEST_F(WebMParserTest, ParseListElementWithSingleCall) {
 }
 
 TEST_F(WebMParserTest, ParseListElementWithMultipleCalls) {
-  scoped_ptr<Cluster> cluster(CreateCluster(kBlockCount));
-  CreateClusterExpectations(kBlockCount, true, &client_);
+  const SimpleBlockInfo kBlockInfo[] = {
+    { 0, 1 },
+    { 1, 2 },
+    { 0, 3 },
+    { 0, 4 },
+    { 1, 4 },
+  };
+  int block_count = arraysize(kBlockInfo);
+
+  scoped_ptr<Cluster> cluster(CreateCluster(0, kBlockInfo, block_count));
+  CreateClusterExpectations(0, kBlockInfo, block_count, true, &client_);
 
   const uint8* data = cluster->data();
   int size = cluster->size();
@@ -212,8 +244,8 @@ TEST_F(WebMParserTest, ParseListElementWithMultipleCalls) {
 
   while (size > 0) {
     int result = parser.Parse(data, parse_size);
-    ASSERT_GE(result, 0);
-    ASSERT_LE(result, parse_size);
+    EXPECT_GE(result, 0);
+    EXPECT_LE(result, parse_size);
 
     if (result == 0) {
       // The parser needs more data so increase the parse_size a little.
@@ -233,15 +265,25 @@ TEST_F(WebMParserTest, ParseListElementWithMultipleCalls) {
   EXPECT_TRUE(parser.IsParsingComplete());
 }
 
-TEST_F(WebMParserTest, Reset) {
+TEST_F(WebMParserTest, TestReset) {
   InSequence s;
-  scoped_ptr<Cluster> cluster(CreateCluster(kBlockCount));
+
+  const SimpleBlockInfo kBlockInfo[] = {
+    { 0, 1 },
+    { 1, 2 },
+    { 0, 3 },
+    { 0, 4 },
+    { 1, 4 },
+  };
+  int block_count = arraysize(kBlockInfo);
+
+  scoped_ptr<Cluster> cluster(CreateCluster(0, kBlockInfo, block_count));
 
   // First expect all but the last block.
-  CreateClusterExpectations(kBlockCount - 1, false, &client_);
+  CreateClusterExpectations(0, kBlockInfo, block_count - 1, false, &client_);
 
   // Now expect all blocks.
-  CreateClusterExpectations(kBlockCount, true, &client_);
+  CreateClusterExpectations(0, kBlockInfo, block_count, true, &client_);
 
   WebMListParser parser(kWebMIdCluster, &client_);
 
@@ -308,88 +350,6 @@ TEST_F(WebMParserTest, InvalidClient) {
   int result = parser.Parse(kBuffer, size);
   EXPECT_EQ(-1, result);
   EXPECT_FALSE(parser.IsParsingComplete());
-}
-
-TEST_F(WebMParserTest, ReservedIds) {
-  const uint8 k1ByteReservedId[] = { 0xFF, 0x81 };
-  const uint8 k2ByteReservedId[] = { 0x7F, 0xFF, 0x81 };
-  const uint8 k3ByteReservedId[] = { 0x3F, 0xFF, 0xFF, 0x81 };
-  const uint8 k4ByteReservedId[] = { 0x1F, 0xFF, 0xFF, 0xFF, 0x81 };
-  const uint8* kBuffers[] = {
-    k1ByteReservedId,
-    k2ByteReservedId,
-    k3ByteReservedId,
-    k4ByteReservedId
-  };
-
-  for (size_t i = 0; i < arraysize(kBuffers); i++) {
-    int id;
-    int64 element_size;
-    int buffer_size = 2 + i;
-    EXPECT_EQ(buffer_size, WebMParseElementHeader(kBuffers[i], buffer_size,
-                                                  &id, &element_size));
-    EXPECT_EQ(id, kWebMReservedId);
-    EXPECT_EQ(element_size, 1);
-  }
-}
-
-TEST_F(WebMParserTest, ReservedSizes) {
-  const uint8 k1ByteReservedSize[] = { 0xA3, 0xFF };
-  const uint8 k2ByteReservedSize[] = { 0xA3, 0x7F, 0xFF };
-  const uint8 k3ByteReservedSize[] = { 0xA3, 0x3F, 0xFF, 0xFF };
-  const uint8 k4ByteReservedSize[] = { 0xA3, 0x1F, 0xFF, 0xFF, 0xFF };
-  const uint8 k5ByteReservedSize[] = { 0xA3, 0x0F, 0xFF, 0xFF, 0xFF, 0xFF };
-  const uint8 k6ByteReservedSize[] = { 0xA3, 0x07, 0xFF, 0xFF, 0xFF, 0xFF,
-                                       0xFF };
-  const uint8 k7ByteReservedSize[] = { 0xA3, 0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                       0xFF };
-  const uint8 k8ByteReservedSize[] = { 0xA3, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                       0xFF, 0xFF };
-  const uint8* kBuffers[] = {
-    k1ByteReservedSize,
-    k2ByteReservedSize,
-    k3ByteReservedSize,
-    k4ByteReservedSize,
-    k5ByteReservedSize,
-    k6ByteReservedSize,
-    k7ByteReservedSize,
-    k8ByteReservedSize
-  };
-
-  for (size_t i = 0; i < arraysize(kBuffers); i++) {
-    int id;
-    int64 element_size;
-    int buffer_size = 2 + i;
-    EXPECT_EQ(buffer_size, WebMParseElementHeader(kBuffers[i], buffer_size,
-                                                  &id, &element_size));
-    EXPECT_EQ(id, 0xA3);
-    EXPECT_EQ(element_size, kWebMUnknownSize);
-  }
-}
-
-TEST_F(WebMParserTest, ZeroPaddedStrings) {
-  const uint8 kBuffer[] = {
-    0x1A, 0x45, 0xDF, 0xA3, 0x91,  // EBMLHEADER (size = 17)
-    0x42, 0x82, 0x80,  // DocType (size = 0)
-    0x42, 0x82, 0x81, 0x00,  // DocType (size = 1) ""
-    0x42, 0x82, 0x81, 'a',  // DocType (size = 1) "a"
-    0x42, 0x82, 0x83, 'a', 0x00, 0x00  // DocType (size = 3) "a"
-  };
-  int size = sizeof(kBuffer);
-
-  InSequence s;
-  EXPECT_CALL(client_, OnListStart(kWebMIdEBMLHeader))
-      .WillOnce(Return(&client_));
-  EXPECT_CALL(client_, OnString(kWebMIdDocType, "")).WillOnce(Return(true));
-  EXPECT_CALL(client_, OnString(kWebMIdDocType, "")).WillOnce(Return(true));
-  EXPECT_CALL(client_, OnString(kWebMIdDocType, "a")).WillOnce(Return(true));
-  EXPECT_CALL(client_, OnString(kWebMIdDocType, "a")).WillOnce(Return(true));
-  EXPECT_CALL(client_, OnListEnd(kWebMIdEBMLHeader)).WillOnce(Return(true));
-
-  WebMListParser parser(kWebMIdEBMLHeader, &client_);
-  int result = parser.Parse(kBuffer, size);
-  EXPECT_EQ(size, result);
-  EXPECT_TRUE(parser.IsParsingComplete());
 }
 
 }  // namespace media

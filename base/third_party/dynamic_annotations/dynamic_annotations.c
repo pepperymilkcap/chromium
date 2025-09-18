@@ -42,19 +42,10 @@
 # include "base/third_party/valgrind/valgrind.h"
 #endif
 
-/* Compiler-based ThreadSanitizer defines
-   DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL = 1
-   and provides its own definitions of the functions. */
-
-#ifndef DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL
-# define DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL 0
-#endif
-
 /* Each function is empty and called (via a macro) only in debug mode.
    The arguments are captured by dynamic tools at runtime. */
 
-#if DYNAMIC_ANNOTATIONS_ENABLED == 1 \
-    && DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL == 0
+#if DYNAMIC_ANNOTATIONS_ENABLED == 1
 
 /* Identical code folding(-Wl,--icf=all) countermeasures.
    This makes all Annotate* functions different, which prevents the linker from
@@ -223,11 +214,9 @@ void DYNAMIC_ANNOTATIONS_NAME(AnnotateFlushState)(
     const char *file, int line)
 {DYNAMIC_ANNOTATIONS_IMPL}
 
-#endif  /* DYNAMIC_ANNOTATIONS_ENABLED == 1
-    && DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL == 0 */
+#endif  /* DYNAMIC_ANNOTATIONS_ENABLED == 1 */
 
-#if DYNAMIC_ANNOTATIONS_PROVIDE_RUNNING_ON_VALGRIND == 1 \
-    && DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL == 0
+#if DYNAMIC_ANNOTATIONS_PROVIDE_RUNNING_ON_VALGRIND == 1
 static int GetRunningOnValgrind(void) {
 #ifdef RUNNING_ON_VALGRIND
   if (RUNNING_ON_VALGRIND) return 1;
@@ -265,5 +254,4 @@ int RunningOnValgrind(void) {
   return local_running_on_valgrind;
 }
 
-#endif /* DYNAMIC_ANNOTATIONS_PROVIDE_RUNNING_ON_VALGRIND == 1
-    && DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL == 0 */
+#endif /* DYNAMIC_ANNOTATIONS_PROVIDE_RUNNING_ON_VALGRIND == 1 */

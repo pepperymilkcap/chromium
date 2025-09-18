@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_NSVIEW_ADDITIONS_H_
 #define CHROME_BROWSER_UI_COCOA_NSVIEW_ADDITIONS_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -14,23 +15,6 @@
 
 // Checks if the mouse is currently in this view.
 - (BOOL)cr_isMouseInView;
-
-// Returns YES if this view is below |otherView|.
-- (BOOL)cr_isBelowView:(NSView*)otherView;
-
-// Returns YES if this view is aobve |otherView|.
-- (BOOL)cr_isAboveView:(NSView*)otherView;
-
-// Ensures that the z-order of |subview| is correct relative to |otherView|.
-- (void)cr_ensureSubview:(NSView*)subview
-            isPositioned:(NSWindowOrderingMode)place
-              relativeTo:(NSView *)otherView;
-
-// Return best color for keyboard focus ring.
-- (NSColor*)cr_keyboardFocusIndicatorColor;
-
-// Set needsDisplay for this view and all descendants.
-- (void)cr_recursivelySetNeedsDisplay:(BOOL)flag;
 
 @end
 

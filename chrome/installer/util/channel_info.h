@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_INSTALLER_UTIL_CHANNEL_INFO_H_
 #define CHROME_INSTALLER_UTIL_CHANNEL_INFO_H_
+#pragma once
 
 #include <string>
 
@@ -57,13 +58,6 @@ class ChannelInfo {
   // modified.
   bool SetChromeFrame(bool value);
 
-  // Returns true if the -applauncher modifier is present in the value.
-  bool IsAppLauncher() const;
-
-  // Adds or removes the -applauncher modifier, returning true if the value is
-  // modified.
-  bool SetAppLauncher(bool value);
-
   // Returns true if the -multi modifier is present in the value.
   bool IsMultiInstall() const;
 
@@ -100,17 +94,6 @@ class ChannelInfo {
   // Adds or removes the -multifail suffix, returning true if the value is
   // modified.
   bool SetMultiFailSuffix(bool value);
-
-  // Adds or removes the -migrating suffix, returning true if the value is
-  // modified.
-  bool SetMigratingSuffix(bool value);
-
-  // Returns true if the -migrating suffix is present in the value.
-  bool HasMigratingSuffix() const;
-
-  // Removes all modifiers and suffixes. For example, 2.0-dev-multi-chrome-full
-  // becomes 2.0-dev. Returns true if the value is modified.
-  bool RemoveAllModifiersAndSuffixes();
 
  private:
   std::wstring value_;

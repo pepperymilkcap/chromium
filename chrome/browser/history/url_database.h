@@ -1,13 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_URL_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_URL_DATABASE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/history/query_parser.h"
 #include "chrome/browser/search_engines/template_url_id.h"
 #include "sql/statement.h"
 
@@ -57,7 +57,7 @@ class URLDatabase {
 
   // Looks up all urls that were typed in manually. Fills info with the data.
   // Returns true on success and false otherwise.
-  bool GetAllTypedUrls(URLRows* urls);
+  bool GetAllTypedUrls(std::vector<history::URLRow>* urls);
 
   // Looks up the given URL and if it exists, fills the given pointers with the
   // associated info and returns the ID of that URL. If the info pointer is
@@ -138,6 +138,19 @@ class URLDatabase {
     DISALLOW_COPY_AND_ASSIGN(URLEnumerator);
   };
 
+  // A basic enumerator to enumerate icon mapping, it is only used for icon
+  // mapping migration.
+  class IconMappingEnumerator : public URLEnumeratorBase {
+   public:
+    IconMappingEnumerator();
+
+    // Retreives the next url. Returns false if no more urls are available
+    bool GetNextIconMapping(IconMapping* r);
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(IconMappingEnumerator);
+  };
+
   // Initializes the given enumerator to enumerator all URLs in the database.
   bool InitURLEnumeratorForEverything(URLEnumerator* enumerator);
 
@@ -159,7 +172,7 @@ class URLDatabase {
   bool AutocompleteForPrefix(const std::string& prefix,
                              size_t max_results,
                              bool typed_only,
-                             URLRows* results);
+                             std::vector<URLRow>* results);
 
   // Returns true if the database holds some past typed navigation to a URL on
   // the provided hostname.
@@ -177,27 +190,16 @@ class URLDatabase {
                                bool allow_base,
                                history::URLRow* info);
 
-  // History search ------------------------------------------------------------
-
-  // Performs a brute force search over the database to find any URLs or titles
-  // which match the |query| string.  Returns any matches in |results|.
-  bool GetTextMatches(const base::string16& query, URLRows* results);
-
   // Keyword Search Terms ------------------------------------------------------
 
   // Sets the search terms for the specified url/keyword pair.
   bool SetKeywordSearchTermsForURL(URLID url_id,
                                    TemplateURLID keyword_id,
-                                   const base::string16& term);
+                                   const string16& term);
 
-  // Looks up a keyword search term given a url id. Returns all the search terms
-  // in |rows|. Returns true on success.
-  bool GetKeywordSearchTermRow(URLID url_id, KeywordSearchTermRow* row);
-
-  // Looks up all keyword search terms given a term, Fills the rows with data.
+  // Looks up a keyword search term given a url id. Fills row with the data.
   // Returns true on success and false otherwise.
-  bool GetKeywordSearchTermRows(const base::string16& term,
-                                std::vector<KeywordSearchTermRow>* rows);
+  bool GetKeywordSearchTermRow(URLID url_id, KeywordSearchTermRow* row);
 
   // Deletes all search terms for the specified keyword that have been added by
   // way of SetKeywordSearchTermsForURL.
@@ -207,15 +209,9 @@ class URLDatabase {
   // keyword.
   void GetMostRecentKeywordSearchTerms(
       TemplateURLID keyword_id,
-      const base::string16& prefix,
+      const string16& prefix,
       int max_count,
       std::vector<KeywordSearchTermVisit>* matches);
-
-  // Deletes all searches matching |term|.
-  bool DeleteKeywordSearchTerm(const base::string16& term);
-
-  // Deletes any search corresponding to |url_id|.
-  bool DeleteKeywordSearchTermForURL(URLID url_id);
 
   // Migration -----------------------------------------------------------------
 
@@ -223,6 +219,11 @@ class URLDatabase {
   // about:blank to have no icon or title. Returns true on success, false if
   // the favicon couldn't be updated.
   bool MigrateFromVersion11ToVersion12();
+
+  // Initializes the given enumerator to enumerator all URL and icon mappings
+  // in the database. Only used for icon mapping migration.
+  bool InitIconMappingEnumeratorForEverything(
+      IconMappingEnumerator* enumerator);
 
  protected:
   friend class VisitDatabase;
@@ -281,8 +282,6 @@ class URLDatabase {
   // have keyword search terms.
   bool has_keyword_search_terms_;
 
-  QueryParser query_parser_;
-
   DISALLOW_COPY_AND_ASSIGN(URLDatabase);
 };
 
@@ -297,6 +296,6 @@ class URLDatabase {
     " urls.id, urls.url, urls.title, urls.visit_count, urls.typed_count, " \
     "urls.last_visit_time, urls.hidden "
 
-}  // namespace history
+}  // history
 
 #endif  // CHROME_BROWSER_HISTORY_URL_DATABASE_H_

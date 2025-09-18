@@ -1,26 +1,23 @@
-Welcome to the Native Client SDK
-================================
+Welcome to the Native Client SDK.
 
 Native Client Tools Bundle
 Version: ${VERSION}
-Chrome Revision: ${CHROME_REVISION}
-Native Client Revision: ${NACL_REVISION}
+Revision: ${REVISION}
 Build Date: ${DATE}
 
 Please refer to the online documentation here:
 
-  https://developers.google.com/native-client
+  http://code.google.com/chrome/nativeclient
 
-Contributing
-------------
+OTHER DEVELOPMENT
 
-If you want to contribute to the Native Client SDK itself, please read the
-online documentation on contributing code to Chromium here:
+If you want to contribute to the Native Client SDK itself, the code site is
+here:
 
-  http://www.chromium.org/developers/contributing-code
+  http://code.google.com/p/nativeclient-sdk/
 
-Known Issues
-------------
+
+KNOWN ISSUES
 
 Please refer to the online documentation here:
 

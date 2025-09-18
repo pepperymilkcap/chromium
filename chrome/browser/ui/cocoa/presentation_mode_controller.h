@@ -1,12 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_PRESENTATION_MODE_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_PRESENTATION_MODE_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/mac/cocoa_protocols.h"
 #include "base/mac/mac_util.h"
 #include "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 
@@ -45,16 +47,16 @@
   // hidden, we still need to keep a 1px tall tracking area visible.  Attaching
   // to the content view allows us to do this.  |trackingArea_| can be nil if
   // not in presentation mode or during animations.
-  base::scoped_nsobject<NSTrackingArea> trackingArea_;
+  scoped_nsobject<NSTrackingArea> trackingArea_;
 
   // Pointer to the currently running animation.  Is nil if no animation is
   // running.
-  base::scoped_nsobject<DropdownAnimation> currentAnimation_;
+  scoped_nsobject<DropdownAnimation> currentAnimation_;
 
   // Timers for scheduled showing/hiding of the bar (which are always done with
   // animation).
-  base::scoped_nsobject<NSTimer> showTimer_;
-  base::scoped_nsobject<NSTimer> hideTimer_;
+  scoped_nsobject<NSTimer> showTimer_;
+  scoped_nsobject<NSTimer> hideTimer_;
 
   // Holds the current bounds of |trackingArea_|, even if |trackingArea_| is
   // currently nil.  Used to restore the tracking area when an animation

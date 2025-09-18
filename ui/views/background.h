@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_BACKGROUND_H_
 #define UI_VIEWS_BACKGROUND_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -42,7 +43,7 @@ class VIEWS_EXPORT Background {
   virtual ~Background();
 
   // Creates a background that fills the canvas in the specified color.
-  static Background* CreateSolidBackground(SkColor color);
+  static Background* CreateSolidBackground(const SkColor& color);
 
   // Creates a background that fills the canvas in the specified color.
   static Background* CreateSolidBackground(int r, int g, int b) {
@@ -56,17 +57,8 @@ class VIEWS_EXPORT Background {
 
   // Creates a background that contains a vertical gradient that varies
   // from |color1| to |color2|
-  static Background* CreateVerticalGradientBackground(SkColor color1,
-                                                      SkColor color2);
-
-  // Creates a background that contains a vertical gradient. The gradient can
-  // have multiple |colors|. The |pos| array contains the relative positions of
-  // each corresponding color. |colors| and |pos| must be the same size. The
-  // first element in |pos| must be 0.0 and the last element must be 1.0.
-  // |count| contains the number of elements in |colors| and |pos|.
-  static Background* CreateVerticalMultiColorGradientBackground(SkColor* colors,
-                                                                SkScalar* pos,
-                                                                size_t count);
+  static Background* CreateVerticalGradientBackground(const SkColor& color1,
+                                                      const SkColor& color2);
 
   // Creates Chrome's standard panel background
   static Background* CreateStandardPanelBackground();

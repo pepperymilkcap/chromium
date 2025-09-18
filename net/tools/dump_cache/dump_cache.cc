@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,11 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "net/disk_cache/disk_format.h"
-#include "net/tools/dump_cache/dump_files.h"
-#include "net/tools/dump_cache/simple_cache_dumper.h"
-
-#if defined(OS_WIN)
-#include "base/process/launch.h"
+#include "base/process_util.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/win/scoped_handle.h"
-#include "net/tools/dump_cache/upgrade_win.h"
-#endif
+#include "net/disk_cache/disk_format.h"
 
 enum Errors {
   GENERIC = -1,
@@ -32,7 +25,13 @@ enum Errors {
   TOOL_NOT_FOUND,
 };
 
-#if defined(OS_WIN)
+int GetMajorVersion(const std::wstring& input_path);
+int DumpContents(const std::wstring& input_path);
+int DumpHeaders(const std::wstring& input_path);
+int RunSlave(const std::wstring& input_path, const std::wstring& pipe_number);
+int CopyCache(const std::wstring& output_path, HANDLE pipe, bool copy_to_text);
+HANDLE CreateServer(std::wstring* pipe_number);
+
 const char kUpgradeHelp[] =
     "\nIn order to use the upgrade function, a version of this tool that\n"
     "understands the file format of the files to upgrade is needed. For\n"
@@ -40,7 +39,6 @@ const char kUpgradeHelp[] =
     "a version of this program that was compiled with version 3.4 has to be\n"
     "located beside this executable, and named dump_cache_3.exe, and this\n"
     "executable should be compiled with version 5.2 being the current one.";
-#endif  // defined(OS_WIN)
 
 // Folders to read and write cache files.
 const char kInputPath[] = "input";
@@ -60,9 +58,7 @@ const char kUpgrade[] = "upgrade";
 
 // Internal use:
 const char kSlave[] = "slave";
-#if defined(OS_WIN)
 const char kPipe[] = "pipe";
-#endif  // defined(OS_WIN)
 
 int Help() {
   printf("warning: input files are modified by this tool\n");
@@ -74,25 +70,23 @@ int Help() {
   return INVALID_ARGUMENT;
 }
 
-#if defined(OS_WIN)
-
 // Starts a new process, to generate the files.
 int LaunchSlave(CommandLine command_line,
-                const base::string16& pipe_number,
+                const std::wstring& pipe_number,
                 int version) {
   bool do_upgrade = command_line.HasSwitch(kUpgrade);
   bool do_convert_to_text = command_line.HasSwitch(kDumpToFiles);
 
   if (do_upgrade) {
-    base::FilePath program(
-        base::StringPrintf(L"%ls%d", L"dump_cache", version));
+    FilePath program(base::StringPrintf(L"%ls%d", L"dump_cache", version));
     command_line.SetProgram(program);
   }
 
   if (do_upgrade || do_convert_to_text)
     command_line.AppendSwitch(kSlave);
 
-  command_line.AppendSwitchNative(kPipe, pipe_number);
+  // TODO(evanm): remove needless usage of wstring from here and elsewhere.
+  command_line.AppendSwitchASCII(kPipe, WideToASCII(pipe_number));
   if (!base::LaunchProcess(command_line, base::LaunchOptions(), NULL)) {
     printf("Unable to launch the needed version of this tool: %ls\n",
            command_line.GetProgram().value().c_str());
@@ -101,8 +95,6 @@ int LaunchSlave(CommandLine command_line,
   }
   return ALL_GOOD;
 }
-
-#endif
 
 // -----------------------------------------------------------------------
 
@@ -113,22 +105,34 @@ int main(int argc, const char* argv[]) {
   CommandLine::Init(argc, argv);
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  base::FilePath input_path = command_line.GetSwitchValuePath(kInputPath);
+  std::wstring input_path = command_line.GetSwitchValueNative(kInputPath);
   if (input_path.empty())
     return Help();
 
-  bool dump_to_files = command_line.HasSwitch(kDumpToFiles);
-  bool upgrade = command_line.HasSwitch(kUpgrade);
+  bool upgrade = false;
+  bool slave_required = false;
+  bool copy_to_text = false;
+  // TODO(evanm): port to FilePath.
+  std::wstring output_path = command_line.GetSwitchValueNative(kOutputPath);
+  // Make sure that output directory ends with a slash.
+  if (output_path.size() >= 1 && output_path[output_path.size() - 1] != '\\')
+    output_path.push_back('\\');
 
-  base::FilePath output_path = command_line.GetSwitchValuePath(kOutputPath);
-  if ((dump_to_files || upgrade) && output_path.empty())
-    return Help();
+  if (command_line.HasSwitch(kUpgrade))
+    upgrade = true;
+  if (command_line.HasSwitch(kDumpToFiles))
+    copy_to_text = true;
+
+  if (upgrade || copy_to_text) {
+    if (output_path.empty())
+      return Help();
+    slave_required = true;
+  }
 
   int version = GetMajorVersion(input_path);
   if (!version)
     return FILE_ACCESS_ERROR;
 
-  bool slave_required = upgrade;
   if (version != disk_cache::kCurrentVersion >> 16) {
     if (command_line.HasSwitch(kSlave)) {
       printf("Unknown version\n");
@@ -137,8 +141,7 @@ int main(int argc, const char* argv[]) {
     slave_required = true;
   }
 
-#if defined(OS_WIN)
-  base::string16 pipe_number = command_line.GetSwitchValueNative(kPipe);
+  std::wstring pipe_number = command_line.GetSwitchValueNative(kPipe);
   if (command_line.HasSwitch(kSlave) && slave_required)
     return RunSlave(input_path, pipe_number);
 
@@ -147,7 +150,7 @@ int main(int argc, const char* argv[]) {
     server.Set(CreateServer(&pipe_number));
     if (!server.IsValid()) {
       printf("Unable to create the server pipe\n");
-      return GENERIC;
+      return -1;
     }
 
     int ret = LaunchSlave(command_line, pipe_number, version);
@@ -155,8 +158,8 @@ int main(int argc, const char* argv[]) {
       return ret;
   }
 
-  if (upgrade)
-    return UpgradeCache(output_path, server);
+  if (upgrade || copy_to_text)
+    return CopyCache(output_path, server, copy_to_text);
 
   if (slave_required) {
     // Wait until the slave starts dumping data before we quit. Lazy "fix" for a
@@ -164,24 +167,10 @@ int main(int argc, const char* argv[]) {
     Sleep(500);
     return ALL_GOOD;
   }
-#else  // defined(OS_WIN)
-  if (slave_required) {
-    printf("Unsupported operation\n");
-    return INVALID_ARGUMENT;
-  }
-#endif
-
-  if (dump_to_files) {
-    net::SimpleCacheDumper dumper(input_path, output_path);
-    dumper.Run();
-    return ALL_GOOD;
-  }
 
   if (command_line.HasSwitch(kDumpContents))
     return DumpContents(input_path);
-
   if (command_line.HasSwitch(kDumpHeaders))
     return DumpHeaders(input_path);
-
   return Help();
 }

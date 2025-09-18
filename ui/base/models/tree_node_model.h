@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_MODELS_TREE_NODE_MODEL_H_
 #define UI_BASE_MODELS_TREE_NODE_MODEL_H_
+#pragma once
 
 #include <algorithm>
 #include <vector>
@@ -14,7 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "ui/base/models/tree_model.h"
 
 namespace ui {
@@ -65,7 +66,7 @@ class TreeNode : public TreeModelNode {
  public:
   TreeNode() : parent_(NULL) {}
 
-  explicit TreeNode(const base::string16& title)
+  explicit TreeNode(const string16& title)
       : title_(title), parent_(NULL) {}
 
   virtual ~TreeNode() {}
@@ -80,33 +81,25 @@ class TreeNode : public TreeModelNode {
     if (parent)
       parent->Remove(node);
     node->parent_ = static_cast<NodeType*>(this);
-    children_.insert(children_.begin() + index, node);
+    children_->insert(children_->begin() + index, node);
   }
 
   // Removes |node| from this node and returns it. It's up to the caller to
   // delete it.
   virtual NodeType* Remove(NodeType* node) {
     typename std::vector<NodeType*>::iterator i =
-        std::find(children_.begin(), children_.end(), node);
-    DCHECK(i != children_.end());
+        std::find(children_->begin(), children_->end(), node);
+    DCHECK(i != children_->end());
     node->parent_ = NULL;
-    children_.weak_erase(i);
+    children_->erase(i);
     return node;
   }
 
   // Removes all the children from this node. This does NOT delete the nodes.
   void RemoveAll() {
-    for (size_t i = 0; i < children_.size(); ++i)
+    for (size_t i = 0; i < children_->size(); ++i)
       children_[i]->parent_ = NULL;
-    children_.weak_clear();
-  }
-
-  // Removes all existing children without deleting the nodes and adds all nodes
-  // contained in |children| into this node as children.
-  void SetChildren(const std::vector<NodeType*>& children) {
-    RemoveAll();
-    for (size_t i = 0; i < children.size(); ++i)
-      Add(children[i], i);
+    children_->clear();
   }
 
   // Returns the parent node, or NULL if this is the root node.
@@ -117,16 +110,16 @@ class TreeNode : public TreeModelNode {
   bool is_root() const { return parent_ == NULL; }
 
   // Returns the number of children.
-  int child_count() const { return static_cast<int>(children_.size()); }
+  int child_count() const { return static_cast<int>(children_->size()); }
 
   // Returns true if this node has no children.
-  bool empty() const { return children_.empty(); }
+  bool empty() const { return children_->empty(); }
 
   // Returns the number of all nodes in the subtree rooted at this node,
   // including this node.
   int GetTotalNodeCount() const {
     int count = 1;  // Start with one to include the node itself.
-    for (size_t i = 0; i < children_.size(); ++i)
+    for (size_t i = 0; i < children_->size(); ++i)
       count += children_[i]->GetTotalNodeCount();
     return count;
   }
@@ -146,15 +139,16 @@ class TreeNode : public TreeModelNode {
   int GetIndexOf(const NodeType* node) const {
     DCHECK(node);
     typename std::vector<NodeType*>::const_iterator i =
-        std::find(children_.begin(), children_.end(), node);
-    return i != children_.end() ? static_cast<int>(i - children_.begin()) : -1;
+        std::find(children_->begin(), children_->end(), node);
+    return
+        i != children_->end() ? static_cast<int>(i - children_->begin()) : -1;
   }
 
   // Sets the title of the node.
-  virtual void SetTitle(const base::string16& title) { title_ = title; }
+  virtual void SetTitle(const string16& title) { title_ = title; }
 
   // TreeModelNode:
-  virtual const base::string16& GetTitle() const OVERRIDE { return title_; }
+  virtual const string16& GetTitle() const OVERRIDE { return title_; }
 
   // Returns true if this == ancestor, or one of this nodes parents is
   // ancestor.
@@ -171,7 +165,7 @@ class TreeNode : public TreeModelNode {
 
  private:
   // Title displayed in the tree.
-  base::string16 title_;
+  string16 title_;
 
   // This node's parent.
   NodeType* parent_;
@@ -190,9 +184,9 @@ class TreeNodeWithValue : public TreeNode< TreeNodeWithValue<ValueType> > {
   TreeNodeWithValue() {}
 
   explicit TreeNodeWithValue(const ValueType& value)
-      : ParentType(base::string16()), value(value) {}
+      : ParentType(string16()), value(value) {}
 
-  TreeNodeWithValue(const base::string16& title, const ValueType& value)
+  TreeNodeWithValue(const string16& title, const ValueType& value)
       : ParentType(title), value(value) {}
 
   ValueType value;
@@ -283,8 +277,7 @@ class TreeNodeModel : public TreeModel {
     observer_list_.RemoveObserver(observer);
   }
 
-  virtual void SetTitle(TreeModelNode* node,
-                        const base::string16& title) OVERRIDE {
+  virtual void SetTitle(TreeModelNode* node, const string16& title) OVERRIDE {
     DCHECK(node);
     AsNode(node)->SetTitle(title);
     NotifyObserverTreeNodeChanged(node);

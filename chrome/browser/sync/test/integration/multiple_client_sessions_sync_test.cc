@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_vector.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/sessions/session_service.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
-#include "chrome/browser/sync/test/integration/sessions_helper.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "chrome/browser/sync/test/integration/sessions_helper.h"
 
 using sessions_helper::CheckForeignSessionsAgainst;
 using sessions_helper::CheckInitialState;
@@ -46,7 +46,7 @@ IN_PROC_BROWSER_TEST_F(MultipleClientSessionsSyncTest, MAYBE_AllChanged) {
   for (int i = 0; i < num_clients(); ++i) {
     SessionWindowMap windows;
     ASSERT_TRUE(OpenTabAndGetLocalWindows(
-        i, GURL(base::StringPrintf("http://127.0.0.1/bubba%i", i)), &windows));
+        i, GURL(StringPrintf("http://127.0.0.1/bubba%i", i)), &windows));
     client_windows[i].Reset(&windows);
   }
 
@@ -70,7 +70,7 @@ IN_PROC_BROWSER_TEST_F(MultipleClientSessionsSyncTest,
   }
 
   // Enable encryption on client 0, should propagate to all other clients.
-  ASSERT_TRUE(EnableEncryption(0));
+  ASSERT_TRUE(EnableEncryption(0, syncable::SESSIONS));
 
   // Wait for sync.
   // TODO(zea): Fix sync completion detection so we don't need this. For now,
@@ -82,7 +82,7 @@ IN_PROC_BROWSER_TEST_F(MultipleClientSessionsSyncTest,
   for (int i = 0; i < num_clients(); ++i) {
     SessionWindowMap windows;
     ASSERT_TRUE(OpenTabAndGetLocalWindows(
-        i, GURL(base::StringPrintf("http://127.0.0.1/bubba%i", i)), &windows));
+        i, GURL(StringPrintf("http://127.0.0.1/bubba%i", i)), &windows));
     client_windows[i].Reset(&windows);
   }
 
@@ -92,7 +92,7 @@ IN_PROC_BROWSER_TEST_F(MultipleClientSessionsSyncTest,
   // Get foreign session data from all clients and check it against all
   // client_windows.
   for (int i = 0; i < num_clients(); ++i) {
-    ASSERT_TRUE(IsEncryptionComplete(i));
+    ASSERT_TRUE(IsEncrypted(i, syncable::SESSIONS));
     ASSERT_TRUE(CheckForeignSessionsAgainst(i, client_windows));
   }
 }

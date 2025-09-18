@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/address_family.h"
+#include "net/base/host_resolver.h"
 #include "net/base/net_errors.h"
-#include "net/dns/host_resolver.h"
-#include "net/dns/single_request_host_resolver.h"
+#include "net/base/single_request_host_resolver.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/url_security_manager.h"
 
@@ -25,7 +27,8 @@ HttpAuthHandlerNegotiate::Factory::Factory()
       max_token_length_(0),
       first_creation_(true),
 #endif
-      is_unsupported_(false) {
+      is_unsupported_(false),
+      auth_library_(NULL) {
 }
 
 HttpAuthHandlerNegotiate::Factory::~Factory() {
@@ -97,7 +100,7 @@ HttpAuthHandlerNegotiate::HttpAuthHandlerNegotiate(
 #if defined(OS_WIN)
     : auth_system_(auth_library, "Negotiate", NEGOSSP_NAME, max_token_length),
 #elif defined(OS_POSIX)
-    : auth_system_(auth_library, "Negotiate", CHROME_GSS_SPNEGO_MECH_OID_DESC),
+    : auth_system_(auth_library, "Negotiate", CHROME_GSS_KRB5_MECH_OID_DESC),
 #endif
       disable_cname_lookup_(disable_cname_lookup),
       use_port_(use_port),
@@ -112,7 +115,7 @@ HttpAuthHandlerNegotiate::HttpAuthHandlerNegotiate(
 HttpAuthHandlerNegotiate::~HttpAuthHandlerNegotiate() {
 }
 
-std::string HttpAuthHandlerNegotiate::CreateSPN(
+std::wstring HttpAuthHandlerNegotiate::CreateSPN(
     const AddressList& address_list, const GURL& origin) {
   // Kerberos Web Server SPNs are in the form HTTP/<host>:<port> through SSPI,
   // and in the form HTTP@<host>:<port> through GSSAPI
@@ -144,8 +147,8 @@ std::string HttpAuthHandlerNegotiate::CreateSPN(
   // and IE. Users can override the behavior so aliases are allowed and
   // non-standard ports are included.
   int port = origin.EffectiveIntPort();
-  std::string server = address_list.canonical_name();
-  if (server.empty())
+  std::string server;
+  if (!address_list.GetCanonicalName(&server))
     server = origin.host();
 #if defined(OS_WIN)
   static const char kSpnSeparator = '/';
@@ -153,10 +156,11 @@ std::string HttpAuthHandlerNegotiate::CreateSPN(
   static const char kSpnSeparator = '@';
 #endif
   if (port != 80 && port != 443 && use_port_) {
-    return base::StringPrintf("HTTP%c%s:%d", kSpnSeparator, server.c_str(),
-                              port);
+    return ASCIIToWide(base::StringPrintf("HTTP%c%s:%d", kSpnSeparator,
+                                          server.c_str(), port));
   } else {
-    return base::StringPrintf("HTTP%c%s", kSpnSeparator, server.c_str());
+    return ASCIIToWide(base::StringPrintf("HTTP%c%s", kSpnSeparator,
+                                          server.c_str()));
   }
 }
 
@@ -288,9 +292,7 @@ int HttpAuthHandlerNegotiate::DoResolveCanonicalName() {
   info.set_host_resolver_flags(HOST_RESOLVER_CANONNAME);
   single_resolve_.reset(new SingleRequestHostResolver(resolver_));
   return single_resolve_->Resolve(
-      info,
-      DEFAULT_PRIORITY,
-      &address_list_,
+      info, &address_list_,
       base::Bind(&HttpAuthHandlerNegotiate::OnIOComplete,
                  base::Unretained(this)),
       net_log_);

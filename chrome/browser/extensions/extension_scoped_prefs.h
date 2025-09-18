@@ -4,8 +4,7 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_SCOPED_PREFS_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_SCOPED_PREFS_H_
-
-namespace extensions {
+#pragma once
 
 class ExtensionScopedPrefs {
  public:
@@ -21,36 +20,24 @@ class ExtensionScopedPrefs {
   virtual void DeleteExtensionPrefs(const std::string& id) = 0;
 
   // Reads a boolean pref |pref_key| from extension with id |extension_id|.
-  virtual bool ReadPrefAsBoolean(const std::string& extension_id,
-                                 const std::string& pref_key,
-                                 bool* out_value) const = 0;
+  virtual bool ReadExtensionPrefBoolean(const std::string& extension_id,
+                                        const std::string& pref_key) const = 0;
 
   // Reads an integer pref |pref_key| from extension with id |extension_id|.
-  virtual bool ReadPrefAsInteger(const std::string& extension_id,
-                                 const std::string& pref_key,
-                                 int* out_value) const = 0;
-
-  // Reads a string pref |pref_key| from extension with id |extension_id|.
-  virtual bool ReadPrefAsString(const std::string& extension_id,
-                                const std::string& pref_key,
-                                std::string* out_value) const = 0;
+  virtual bool ReadExtensionPrefInteger(const std::string& extension_id,
+                                        const std::string& pref_key,
+                                        int* out_value) const = 0;
 
   // Reads a list pref |pref_key| from extension with id |extension_id|.
-  virtual bool ReadPrefAsList(const std::string& extension_id,
-                              const std::string& pref_key,
-                              const base::ListValue** out_value) const = 0;
-
-  // Reads a dictionary pref |pref_key| from extension with id |extension_id|.
-  virtual bool ReadPrefAsDictionary(
+  virtual bool ReadExtensionPrefList(
       const std::string& extension_id,
       const std::string& pref_key,
-      const base::DictionaryValue** out_value) const = 0;
+      const base::ListValue** out_value) const = 0;
 
-  // Returns true if the prefs contain an entry for an extension with id
-  // |extension_id|.
-  virtual bool HasPrefForExtension(const std::string& extension_id) const = 0;
+  // Reads a string pref |pref_key| from extension with id |extension_id|.
+  virtual bool ReadExtensionPrefString(const std::string& extension_id,
+                                       const std::string& pref_key,
+                                       std::string* out_value) const = 0;
 };
-
-}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_SCOPED_PREFS_H_

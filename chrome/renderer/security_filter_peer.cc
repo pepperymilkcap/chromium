@@ -1,11 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/security_filter_peer.h"
 
-#include "base/memory/scoped_ptr.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
@@ -39,8 +38,6 @@ SecurityFilterPeer*
     case net::ERR_CERT_REVOKED:
     case net::ERR_CERT_INVALID:
     case net::ERR_CERT_WEAK_SIGNATURE_ALGORITHM:
-    case net::ERR_CERT_WEAK_KEY:
-    case net::ERR_CERT_NAME_CONSTRAINT_VIOLATION:
     case net::ERR_INSECURE_RESPONSE:
     case net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN:
       if (ResourceType::IsFrame(resource_type))
@@ -91,8 +88,7 @@ void SecurityFilterPeer::OnReceivedData(const char* data,
 }
 
 void SecurityFilterPeer::OnCompletedRequest(
-    int error_code,
-    bool was_ignored_by_handler,
+    const net::URLRequestStatus& status,
     const std::string& security_info,
     const base::TimeTicks& completion_time) {
   NOTREACHED();
@@ -152,19 +148,19 @@ void BufferedPeer::OnReceivedData(const char* data,
   data_.append(data, data_length);
 }
 
-void BufferedPeer::OnCompletedRequest(int error_code,
-                                      bool was_ignored_by_handler,
+void BufferedPeer::OnCompletedRequest(const net::URLRequestStatus& status,
                                       const std::string& security_info,
                                       const base::TimeTicks& completion_time) {
   // Make sure we delete ourselves at the end of this call.
   scoped_ptr<BufferedPeer> this_deleter(this);
 
   // Give sub-classes a chance at altering the data.
-  if (error_code != net::OK || !DataReady()) {
+  if (status.status() != net::URLRequestStatus::SUCCESS || !DataReady()) {
     // Pretend we failed to load the resource.
     original_peer_->OnReceivedResponse(response_info_);
-    original_peer_->OnCompletedRequest(net::ERR_ABORTED, false, security_info,
-                                       completion_time);
+    net::URLRequestStatus status(net::URLRequestStatus::CANCELED,
+                                 net::ERR_ABORTED);
+    original_peer_->OnCompletedRequest(status, security_info, completion_time);
     return;
   }
 
@@ -173,8 +169,7 @@ void BufferedPeer::OnCompletedRequest(int error_code,
     original_peer_->OnReceivedData(data_.data(),
                                    static_cast<int>(data_.size()),
                                    -1);
-  original_peer_->OnCompletedRequest(error_code, was_ignored_by_handler,
-                                     security_info, completion_time);
+  original_peer_->OnCompletedRequest(status, security_info, completion_time);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -205,8 +200,7 @@ void ReplaceContentPeer::OnReceivedData(const char* data,
 }
 
 void ReplaceContentPeer::OnCompletedRequest(
-    int error_code,
-    bool was_ignored_by_handler,
+    const net::URLRequestStatus& status,
     const std::string& security_info,
     const base::TimeTicks& completion_time) {
   webkit_glue::ResourceResponseInfo info;
@@ -218,8 +212,7 @@ void ReplaceContentPeer::OnCompletedRequest(
     original_peer_->OnReceivedData(data_.data(),
                                    static_cast<int>(data_.size()),
                                    -1);
-  original_peer_->OnCompletedRequest(net::OK,
-                                     false,
+  original_peer_->OnCompletedRequest(net::URLRequestStatus(),
                                      security_info,
                                      completion_time);
 

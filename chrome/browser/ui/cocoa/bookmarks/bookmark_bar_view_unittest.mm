@@ -1,13 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
-#include "base/strings/string16.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/string16.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_view.h"
@@ -17,7 +15,6 @@
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
-#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
@@ -202,7 +199,7 @@ class BookmarkBarViewTest : public CocoaProfileTest {
     view_.reset([[BookmarkBarView alloc] init]);
   }
 
-  base::scoped_nsobject<BookmarkBarView> view_;
+  scoped_nsobject<BookmarkBarView> view_;
 };
 
 TEST_F(BookmarkBarViewTest, CanDragWindow) {
@@ -210,26 +207,24 @@ TEST_F(BookmarkBarViewTest, CanDragWindow) {
 }
 
 TEST_F(BookmarkBarViewTest, BookmarkButtonDragAndDrop) {
-  base::scoped_nsobject<FakeBookmarkDraggingInfo> info(
-      [[FakeBookmarkDraggingInfo alloc] init]);
+  scoped_nsobject<FakeBookmarkDraggingInfo>
+      info([[FakeBookmarkDraggingInfo alloc] init]);
   [view_ setController:info.get()];
   [info reset];
 
-  BookmarkModel* bookmark_model =
-      BookmarkModelFactory::GetForProfile(profile());
+  BookmarkModel* bookmark_model = profile()->GetBookmarkModel();
   const BookmarkNode* node =
       bookmark_model->AddURL(bookmark_model->bookmark_bar_node(),
                              0,
-                             base::ASCIIToUTF16("Test Bookmark"),
+                             ASCIIToUTF16("Test Bookmark"),
                              GURL("http://www.exmaple.com"));
 
-  base::scoped_nsobject<BookmarkButtonCell> button_cell(
+  scoped_nsobject<BookmarkButtonCell> button_cell(
       [[BookmarkButtonCell buttonCellForNode:node
-                                        text:nil
-                                       image:nil
-                              menuController:nil] retain]);
-  base::scoped_nsobject<BookmarkButton> dragged_button(
-      [[BookmarkButton alloc] init]);
+                                 contextMenu:nil
+                                    cellText:nil
+                                   cellImage:nil] retain]);
+  scoped_nsobject<BookmarkButton> dragged_button([[BookmarkButton alloc] init]);
   [dragged_button setCell:button_cell];
   [info setDraggingSource:dragged_button.get()];
   [info setDragDataType:kBookmarkButtonDragType];
@@ -245,8 +240,8 @@ TEST_F(BookmarkBarViewTest, BookmarkButtonDragAndDrop) {
 
 // When dragging bookmarks across profiles, we should always copy, never move.
 TEST_F(BookmarkBarViewTest, BookmarkButtonDragAndDropAcrossProfiles) {
-  base::scoped_nsobject<FakeBookmarkDraggingInfo> info(
-      [[FakeBookmarkDraggingInfo alloc] init]);
+  scoped_nsobject<FakeBookmarkDraggingInfo>
+  info([[FakeBookmarkDraggingInfo alloc] init]);
   [view_ setController:info.get()];
   [info reset];
 
@@ -254,29 +249,26 @@ TEST_F(BookmarkBarViewTest, BookmarkButtonDragAndDropAcrossProfiles) {
   TestingProfile* other_profile =
       testing_profile_manager()->CreateTestingProfile("other");
   other_profile->CreateBookmarkModel(true);
+  other_profile->BlockUntilBookmarkModelLoaded();
 
-  BookmarkModel* bookmark_model =
-      BookmarkModelFactory::GetForProfile(profile());
-  test::WaitForBookmarkModelToLoad(bookmark_model);
-
+  BookmarkModel* bookmark_model = profile()->GetBookmarkModel();
   const BookmarkNode* node =
       bookmark_model->AddURL(bookmark_model->bookmark_bar_node(),
                              0,
-                             base::ASCIIToUTF16("Test Bookmark"),
+                             ASCIIToUTF16("Test Bookmark"),
                              GURL("http://www.exmaple.com"));
 
-  base::scoped_nsobject<BookmarkButtonCell> button_cell(
+  scoped_nsobject<BookmarkButtonCell> button_cell(
       [[BookmarkButtonCell buttonCellForNode:node
-                                        text:nil
-                                       image:nil
-                              menuController:nil] retain]);
-  base::scoped_nsobject<BookmarkButton> dragged_button(
-      [[BookmarkButton alloc] init]);
+                                 contextMenu:nil
+                                    cellText:nil
+                                   cellImage:nil] retain]);
+  scoped_nsobject<BookmarkButton> dragged_button([[BookmarkButton alloc] init]);
   [dragged_button setCell:button_cell];
   [info setDraggingSource:dragged_button.get()];
   [info setDragDataType:kBookmarkButtonDragType];
   [info setButton:dragged_button.get()];
-  [info setBookmarkModel:BookmarkModelFactory::GetForProfile(other_profile)];
+  [info setBookmarkModel:other_profile->GetBookmarkModel()];
   EXPECT_EQ([view_ draggingEntered:(id)info.get()], NSDragOperationMove);
   EXPECT_TRUE([view_ performDragOperation:(id)info.get()]);
   EXPECT_TRUE([info dragButtonToPong]);
@@ -286,8 +278,8 @@ TEST_F(BookmarkBarViewTest, BookmarkButtonDragAndDropAcrossProfiles) {
 }
 
 TEST_F(BookmarkBarViewTest, URLDragAndDrop) {
-  base::scoped_nsobject<FakeBookmarkDraggingInfo> info(
-      [[FakeBookmarkDraggingInfo alloc] init]);
+  scoped_nsobject<FakeBookmarkDraggingInfo>
+      info([[FakeBookmarkDraggingInfo alloc] init]);
   [view_ setController:info.get()];
   [info reset];
 
@@ -304,13 +296,12 @@ TEST_F(BookmarkBarViewTest, URLDragAndDrop) {
 }
 
 TEST_F(BookmarkBarViewTest, BookmarkButtonDropIndicator) {
-  base::scoped_nsobject<FakeBookmarkDraggingInfo> info(
-      [[FakeBookmarkDraggingInfo alloc] init]);
+  scoped_nsobject<FakeBookmarkDraggingInfo>
+      info([[FakeBookmarkDraggingInfo alloc] init]);
   [view_ setController:info.get()];
   [info reset];
 
-  base::scoped_nsobject<BookmarkButton> dragged_button(
-      [[BookmarkButton alloc] init]);
+  scoped_nsobject<BookmarkButton> dragged_button([[BookmarkButton alloc] init]);
   [info setDraggingSource:dragged_button.get()];
   [info setDragDataType:kBookmarkButtonDragType];
   EXPECT_FALSE([info draggingEnteredCalled]);

@@ -3,35 +3,31 @@
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  /** @const */ var OptionsPage = options.OptionsPage;
+  const OptionsPage = options.OptionsPage;
 
   /**
    * Enumeration of possible states during pairing.  The value associated with
    * each state maps to a localized string in the global variable
-   * |loadTimeData|.
+   * 'templateData'.
    * @enum {string}
    */
   var PAIRING = {
-    STARTUP: 'bluetoothStartConnecting',
-    ENTER_PIN_CODE: 'bluetoothEnterPinCode',
-    ENTER_PASSKEY: 'bluetoothEnterPasskey',
-    REMOTE_PIN_CODE: 'bluetoothRemotePinCode',
-    REMOTE_PASSKEY: 'bluetoothRemotePasskey',
     CONFIRM_PASSKEY: 'bluetoothConfirmPasskey',
-    CONNECT_FAILED: 'bluetoothConnectFailed',
-    CANCELED: 'bluetoothPairingCanceled',
-    DISMISSED: 'bluetoothPairingDismissed', // pairing dismissed(succeeded or
-                                            // canceled).
+    ENTER_PASSKEY: 'bluetoothEnterPasskey',
+    REMOTE_PASSKEY: 'bluetoothRemotePasskey',
+    ERROR_NO_DEVICE: 'bluetoothErrorNoDevice',
+    ERROR_INCORRECT_PIN: 'bluetoothErrorIncorrectPin',
+    ERROR_CONNECTION_TIMEOUT: 'bluetoothErrorTimeout',
+    ERROR_CONNECTION_FAILED: 'bluetoothErrorConnectionFailed'
   };
 
   /**
    * List of IDs for conditionally visible elements in the dialog.
-   * @type {Array.<string>}
+   * @type {Array.<String>}
    * @const
    */
   var ELEMENTS = ['bluetooth-pairing-passkey-display',
                   'bluetooth-pairing-passkey-entry',
-                  'bluetooth-pairing-pincode-entry',
                   'bluetooth-pair-device-connect-button',
                   'bluetooth-pair-device-cancel-button',
                   'bluetooth-pair-device-accept-button',
@@ -45,7 +41,7 @@ cr.define('options', function() {
   function BluetoothPairing() {
     OptionsPage.call(this,
                      'bluetoothPairing',
-                     loadTimeData.getString('bluetoothOptionsPageTabTitle'),
+                     templateData.bluetoothOptionsPageTabTitle,
                      'bluetooth-pairing');
   }
 
@@ -58,87 +54,45 @@ cr.define('options', function() {
      * Description of the bluetooth device.
      * @type {{name: string,
      *         address: string,
+     *         icon: Constants.DEVICE_TYPE,
      *         paired: boolean,
      *         connected: boolean,
-     *         connecting: boolean,
-     *         connectable: boolean,
      *         pairing: string|undefined,
      *         passkey: number|undefined,
-     *         pincode: string|undefined,
      *         entered: number|undefined}}
      * @private.
      */
     device_: null,
 
-    /**
-     * Can the dialog be programmatically dismissed.
-     * @type {boolean}
-     */
-    dismissible_: true,
-
-    /** @override */
+     /** @inheritDoc */
     initializePage: function() {
       OptionsPage.prototype.initializePage.call(this);
       var self = this;
-      $('bluetooth-pair-device-cancel-button').onclick = function() {
-        OptionsPage.closeOverlay();
-      };
-      $('bluetooth-pair-device-reject-button').onclick = function() {
+      var cancel = function() {
         chrome.send('updateBluetoothDevice',
-                    [self.device_.address, 'reject']);
+                    [self.device_.address, 'cancel']);
         OptionsPage.closeOverlay();
       };
-      $('bluetooth-pair-device-connect-button').onclick = function() {
+      var connect = function() {
         var args = [self.device_.address, 'connect'];
         var passkey = self.device_.passkey;
+        if (!passkey && !$('bluetooth-pairing-passkey-entry').hidden)
+          passkey = $('bluetooth-passkey').value;
         if (passkey)
           args.push(String(passkey));
-        else if (!$('bluetooth-pairing-passkey-entry').hidden)
-          args.push($('bluetooth-passkey').value);
-        else if (!$('bluetooth-pairing-pincode-entry').hidden)
-          args.push($('bluetooth-pincode').value);
         chrome.send('updateBluetoothDevice', args);
-        // Prevent sending a 'connect' command twice.
-        $('bluetooth-pair-device-connect-button').disabled = true;
-      };
-      $('bluetooth-pair-device-accept-button').onclick = function() {
-        chrome.send('updateBluetoothDevice',
-                    [self.device_.address, 'accept']);
         OptionsPage.closeOverlay();
       };
+      $('bluetooth-pair-device-cancel-button').onclick = cancel;
+      $('bluetooth-pair-device-reject-button').onclick = cancel;
+      $('bluetooth-pair-device-connect-button').onclick = connect;
+      $('bluetooth-pair-device-accept-button').onclick = connect;
       $('bluetooth-pair-device-dismiss-button').onclick = function() {
         OptionsPage.closeOverlay();
       };
       $('bluetooth-passkey').oninput = function() {
-        var inputField = $('bluetooth-passkey');
-        var value = inputField.value;
-        // Note that using <input type="number"> is insufficient to restrict
-        // the input as it allows negative numbers and does not limit the
-        // number of charactes typed even if a range is set.  Furthermore,
-        // it sometimes produces strange repaint artifacts.
-        var filtered = value.replace(/[^0-9]/g, '');
-        if (filtered != value)
-          inputField.value = filtered;
         $('bluetooth-pair-device-connect-button').disabled =
-            inputField.value.length == 0;
-      }
-      $('bluetooth-pincode').oninput = function() {
-        $('bluetooth-pair-device-connect-button').disabled =
-            $('bluetooth-pincode').value.length == 0;
-      }
-      $('bluetooth-passkey').addEventListener('keydown',
-          this.keyDownEventHandler_.bind(this));
-      $('bluetooth-pincode').addEventListener('keydown',
-          this.keyDownEventHandler_.bind(this));
-    },
-
-    /** @override */
-    didClosePage: function() {
-      if (this.device_.pairing != PAIRING.DISMISSED &&
-          this.device_.pairing != PAIRING.CONNECT_FAILED) {
-        this.device_.pairing = PAIRING.CANCELED;
-        chrome.send('updateBluetoothDevice',
-                    [this.device_.address, 'cancel']);
+            $('bluetooth-passkey').value.length == 0;
       }
     },
 
@@ -146,20 +100,10 @@ cr.define('options', function() {
      * Override to prevent showing the overlay if the Bluetooth device details
      * have not been specified.  Prevents showing an empty dialog if the user
      * quits and restarts Chrome while in the process of pairing with a device.
-     * @return {boolean} True if the overlay can be displayed.
+     " @return {boolean} True if the overlay can be displayed.
      */
     canShowPage: function() {
       return this.device_ && this.device_.address && this.device_.pairing;
-    },
-
-    /**
-     * Sets input focus on the passkey or pincode field if appropriate.
-     */
-    didShowPage: function() {
-      if (!$('bluetooth-pincode').hidden)
-        $('bluetooth-pincode').focus();
-      else if (!$('bluetooth-passkey').hidden)
-        $('bluetooth-passkey').focus();
     },
 
     /**
@@ -173,10 +117,8 @@ cr.define('options', function() {
       // Update the pairing instructions.
       var instructionsEl = $('bluetooth-pairing-instructions');
       this.clearElement_(instructionsEl);
-      this.dismissible_ = ('dismissible' in device) ?
-        device.dismissible : true;
 
-      var message = loadTimeData.getString(device.pairing);
+      var message = templateData[device.pairing];
       message = message.replace('%1', this.device_.name);
       instructionsEl.textContent = message;
 
@@ -193,47 +135,17 @@ cr.define('options', function() {
           this.displayElements_(['bluetooth-pairing-passkey-display',
                                  'bluetooth-pair-device-cancel-button']);
         }
-      } else if (this.device_.pincode) {
-        this.updatePinCode_();
-        this.displayElements_(['bluetooth-pairing-passkey-display',
-                               'bluetooth-pair-device-cancel-button']);
-      } else if (this.device_.pairing == PAIRING.ENTER_PIN_CODE) {
-        // Prompting the user to enter a PIN code.
-        this.displayElements_(['bluetooth-pairing-pincode-entry',
-                               'bluetooth-pair-device-connect-button',
-                               'bluetooth-pair-device-cancel-button']);
-        $('bluetooth-pincode').value = '';
       } else if (this.device_.pairing == PAIRING.ENTER_PASSKEY) {
         // Prompting the user to enter a passkey.
         this.displayElements_(['bluetooth-pairing-passkey-entry',
                                'bluetooth-pair-device-connect-button',
                                'bluetooth-pair-device-cancel-button']);
-        $('bluetooth-passkey').value = '';
-      } else if (this.device_.pairing == PAIRING.STARTUP) {
-        // Starting the pairing process.
-        this.displayElements_(['bluetooth-pair-device-cancel-button']);
       } else {
         // Displaying an error message.
         this.displayElements_(['bluetooth-pair-device-dismiss-button']);
       }
-      // User is required to enter a passkey or pincode before the connect
-      // button can be enabled.  The 'oninput' methods for the input fields
-      // determine when the connect button becomes active.
-      $('bluetooth-pair-device-connect-button').disabled = true;
-    },
-
-    /**
-     * Handles the ENTER key for the passkey or pincode entry field.
-     * @return {Event} a keydown event.
-     * @private
-     */
-    keyDownEventHandler_: function(event) {
-      /** @const */ var ENTER_KEY_CODE = 13;
-      if (event.keyCode == ENTER_KEY_CODE) {
-        var button = $('bluetooth-pair-device-connect-button');
-        if (!button.hidden)
-          button.click();
-      }
+      $('bluetooth-pair-device-connect-button').disabled =
+          $('bluetooth-passkey').value.length == 0;
     },
 
     /**
@@ -268,6 +180,7 @@ cr.define('options', function() {
 
     /**
      * Formats an element for displaying the passkey.
+     * @return {Element} Element containing the passkey.
      */
     updatePasskey_: function() {
       var passkeyEl = $('bluetooth-pairing-passkey-display');
@@ -275,59 +188,22 @@ cr.define('options', function() {
           'bluetooth-keyboard-button' : 'bluetooth-passkey-char';
       this.clearElement_(passkeyEl);
       var key = String(this.device_.passkey);
-      // Passkey should always have 6 digits.
-      key = '000000'.substring(0, 6 - key.length) + key;
-      var progress = this.device_.entered;
+      var progress = this.device_.entered | 0;
       for (var i = 0; i < key.length; i++) {
         var keyEl = document.createElement('span');
         keyEl.textContent = key.charAt(i);
         keyEl.className = keyClass;
-        if (progress == undefined)
-          keyEl.classList.add('key-pin');
-        else if (i < progress)
+        if (i < progress)
           keyEl.classList.add('key-typed');
         passkeyEl.appendChild(keyEl);
       }
       if (this.device_.pairing == PAIRING.REMOTE_PASSKEY) {
         // Add enter key.
-        var label = loadTimeData.getString('bluetoothEnterKey');
+        var label = templateData['bluetoothEnterKey'];
         var keyEl = document.createElement('span');
         keyEl.textContent = label;
         keyEl.className = keyClass;
-        keyEl.id = 'bluetooth-enter-key';
-        if (progress == undefined)
-          keyEl.classList.add('key-pin');
-        else if (progress > key.length)
-          keyEl.classList.add('key-typed');
-        passkeyEl.appendChild(keyEl);
-      }
-      passkeyEl.hidden = false;
-    },
-
-    /**
-     * Formats an element for displaying the PIN code.
-     */
-    updatePinCode_: function() {
-      var passkeyEl = $('bluetooth-pairing-passkey-display');
-      var keyClass = this.device_.pairing == PAIRING.REMOTE_PIN_CODE ?
-          'bluetooth-keyboard-button' : 'bluetooth-passkey-char';
-      this.clearElement_(passkeyEl);
-      var key = String(this.device_.pincode);
-      for (var i = 0; i < key.length; i++) {
-        var keyEl = document.createElement('span');
-        keyEl.textContent = key.charAt(i);
-        keyEl.className = keyClass;
-        keyEl.classList.add('key-pin');
-        passkeyEl.appendChild(keyEl);
-      }
-      if (this.device_.pairing == PAIRING.REMOTE_PIN_CODE) {
-        // Add enter key.
-        var label = loadTimeData.getString('bluetoothEnterKey');
-        var keyEl = document.createElement('span');
-        keyEl.textContent = label;
-        keyEl.className = keyClass;
-        keyEl.classList.add('key-pin');
-        keyEl.id = 'bluetooth-enter-key';
+        keyEl.id = "bluetooth-enter-key";
         passkeyEl.appendChild(keyEl);
       }
       passkeyEl.hidden = false;
@@ -341,54 +217,7 @@ cr.define('options', function() {
    */
   BluetoothPairing.showDialog = function(device) {
     BluetoothPairing.getInstance().update(device);
-    OptionsPage.showPageByName('bluetoothPairing', false);
-  };
-
-  /**
-   * Displays a message from the Bluetooth adapter.
-   * @param {{string: label,
-   *          string: address} data  Data for constructing the message.
-   */
-  BluetoothPairing.showMessage = function(data) {
-    var name = data.address;
-    if (name.length == 0)
-      return;
-    var dialog = BluetoothPairing.getInstance();
-    if (dialog.device_ && name == dialog.device_.address &&
-        dialog.device_.pairing == PAIRING.CANCELED) {
-      // Do not show any error message after cancelation of the pairing.
-      return;
-    }
-
-    var list = $('bluetooth-paired-devices-list');
-    if (list) {
-      var index = list.find(name);
-      if (index == undefined) {
-        list = $('bluetooth-unpaired-devices-list');
-        index = list.find(name);
-      }
-      if (index != undefined) {
-        var entry = list.dataModel.item(index);
-        if (entry && entry.name)
-          name = entry.name;
-      }
-    }
-    BluetoothPairing.showDialog({name: name,
-                                 address: data.address,
-                                 pairing: data.label,
-                                 dismissible: false});
-  };
-
-  /**
-   * Closes the Bluetooth pairing dialog.
-   */
-  BluetoothPairing.dismissDialog = function() {
-    var overlay = OptionsPage.getTopmostVisiblePage();
-    var dialog = BluetoothPairing.getInstance();
-    if (overlay == dialog && dialog.dismissible_) {
-      dialog.device_.pairing = PAIRING.DISMISSED;
-      OptionsPage.closeOverlay();
-    }
+    OptionsPage.navigateToPage('bluetoothPairing');
   };
 
   // Export

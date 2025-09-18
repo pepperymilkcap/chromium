@@ -1,10 +1,8 @@
-// Copyright 2011 Google Inc. All Rights Reserved.
+// Copyright 2011 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 //   Speed-critical functions.
@@ -23,22 +21,6 @@ extern "C" {
 //------------------------------------------------------------------------------
 // CPU detection
 
-#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
-#define WEBP_MSC_SSE2  // Visual C++ SSE2 targets
-#endif
-
-#if defined(__SSE2__) || defined(WEBP_MSC_SSE2)
-#define WEBP_USE_SSE2
-#endif
-
-#if defined(__ANDROID__) && defined(__ARM_ARCH_7A__)
-#define WEBP_ANDROID_NEON  // Android targets that might support NEON
-#endif
-
-#if defined(__ARM_NEON__) || defined(WEBP_ANDROID_NEON)
-#define WEBP_USE_NEON
-#endif
-
 typedef enum {
   kSSE2,
   kSSE3,
@@ -50,6 +32,8 @@ extern VP8CPUInfo VP8GetCPUInfo;
 
 //------------------------------------------------------------------------------
 // Encoding
+
+int VP8GetAlpha(const int histo[]);
 
 // Transforms
 // VP8Idct: Does one of two inverse transforms. If do_two is set, the transforms
@@ -79,17 +63,18 @@ extern VP8WMetric VP8TDisto4x4, VP8TDisto16x16;
 
 typedef void (*VP8BlockCopy)(const uint8_t* src, uint8_t* dst);
 extern VP8BlockCopy VP8Copy4x4;
+extern VP8BlockCopy VP8Copy8x8;
+extern VP8BlockCopy VP8Copy16x16;
 // Quantization
 struct VP8Matrix;   // forward declaration
 typedef int (*VP8QuantizeBlock)(int16_t in[16], int16_t out[16],
                                 int n, const struct VP8Matrix* const mtx);
 extern VP8QuantizeBlock VP8EncQuantizeBlock;
 
-// Collect histogram for susceptibility calculation and accumulate in histo[].
-struct VP8Histogram;
-typedef void (*VP8CHisto)(const uint8_t* ref, const uint8_t* pred,
-                          int start_block, int end_block,
-                          struct VP8Histogram* const histo);
+// Compute susceptibility based on DCT-coeff histograms:
+// the higher, the "easier" the macroblock is to compress.
+typedef int (*VP8CHisto)(const uint8_t* ref, const uint8_t* pred,
+                         int start_block, int end_block);
 extern const int VP8DspScan[16 + 4 + 4];
 extern VP8CHisto VP8CollectHistogram;
 
@@ -105,14 +90,14 @@ extern VP8DecIdct2 VP8Transform;
 extern VP8DecIdct VP8TransformUV;
 extern VP8DecIdct VP8TransformDC;
 extern VP8DecIdct VP8TransformDCUV;
-extern VP8WHT VP8TransformWHT;
+extern void (*VP8TransformWHT)(const int16_t* in, int16_t* out);
 
 // *dst is the destination block, with stride BPS. Boundary samples are
 // assumed accessible when needed.
 typedef void (*VP8PredFunc)(uint8_t* dst);
-extern const VP8PredFunc VP8PredLuma16[/* NUM_B_DC_MODES */];
-extern const VP8PredFunc VP8PredChroma8[/* NUM_B_DC_MODES */];
-extern const VP8PredFunc VP8PredLuma4[/* NUM_BMODES */];
+extern VP8PredFunc VP8PredLuma16[/* NUM_B_DC_MODES */];
+extern VP8PredFunc VP8PredChroma8[/* NUM_B_DC_MODES */];
+extern VP8PredFunc VP8PredLuma4[/* NUM_BMODES */];
 
 // simple filter (only for luma)
 typedef void (*VP8SimpleFilterFunc)(uint8_t* p, int stride, int thresh);
@@ -139,31 +124,27 @@ extern VP8ChromaFilterFunc VP8VFilter8i;  // filtering u and v altogether
 extern VP8ChromaFilterFunc VP8HFilter8i;
 
 // must be called before anything using the above
-void VP8DspInit(void);
+extern void VP8DspInit(void);
 
 //------------------------------------------------------------------------------
 // WebP I/O
 
 #define FANCY_UPSAMPLING   // undefined to remove fancy upsampling support
 
+#ifdef FANCY_UPSAMPLING
 typedef void (*WebPUpsampleLinePairFunc)(
     const uint8_t* top_y, const uint8_t* bottom_y,
     const uint8_t* top_u, const uint8_t* top_v,
     const uint8_t* cur_u, const uint8_t* cur_v,
     uint8_t* top_dst, uint8_t* bottom_dst, int len);
 
-#ifdef FANCY_UPSAMPLING
 
 // Fancy upsampling functions to convert YUV to RGB(A) modes
 extern WebPUpsampleLinePairFunc WebPUpsamplers[/* MODE_LAST */];
+extern WebPUpsampleLinePairFunc WebPUpsamplersKeepAlpha[/* MODE_LAST */];
 
 // Initializes SSE2 version of the fancy upsamplers.
 void WebPInitUpsamplersSSE2(void);
-
-#if defined(WEBP_USE_NEON)
-// NEON version
-void WebPInitUpsamplersNEON(void);
-#endif
 
 #endif    // FANCY_UPSAMPLING
 
@@ -175,11 +156,6 @@ typedef void (*WebPSampleLinePairFunc)(
 
 extern const WebPSampleLinePairFunc WebPSamplers[/* MODE_LAST */];
 
-// General function for converting two lines of ARGB or RGBA.
-// 'alpha_is_last' should be true if 0xff000000 is stored in memory as
-// as 0x00, 0x00, 0x00, 0xff (little endian).
-WebPUpsampleLinePairFunc WebPGetLinePairConverter(int alpha_is_last);
-
 // YUV444->RGB converters
 typedef void (*WebPYUV444Converter)(const uint8_t* y,
                                     const uint8_t* u, const uint8_t* v,
@@ -189,27 +165,6 @@ extern const WebPYUV444Converter WebPYUV444Converters[/* MODE_LAST */];
 
 // Main function to be called
 void WebPInitUpsamplers(void);
-
-//------------------------------------------------------------------------------
-// Pre-multiply planes with alpha values
-
-// Apply alpha pre-multiply on an rgba, bgra or argb plane of size w * h.
-// alpha_first should be 0 for argb, 1 for rgba or bgra (where alpha is last).
-extern void (*WebPApplyAlphaMultiply)(
-    uint8_t* rgba, int alpha_first, int w, int h, int stride);
-
-// Same, buf specifically for RGBA4444 format
-extern void (*WebPApplyAlphaMultiply4444)(
-    uint8_t* rgba4444, int w, int h, int stride);
-
-// To be called first before using the above.
-void WebPInitPremultiply(void);
-
-void WebPInitPremultiplySSE2(void);   // should not be called directly.
-
-#if defined(WEBP_USE_NEON)
-void WebPInitPremultiplyNEON(void);
-#endif
 
 //------------------------------------------------------------------------------
 

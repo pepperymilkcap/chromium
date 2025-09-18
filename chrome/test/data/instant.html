@@ -1,50 +1,50 @@
-<html><body><h1>Instant</h1><script>
+<html>
+<body>
+<h1>Instant</h1>
+<script>
+window.chrome.sv = true;
 
-var onvisibilitycalls = 0;
-document.addEventListener("visibilitychange", function() {
-  onvisibilitycalls++;
-}, false);
+window.onsubmitcalls = 0;
+window.onchangecalls = 0;
+window.oncancelcalls = 0;
+window.onresizecalls = 0;
 
-var onchangecalls = 0;
-var onsubmitcalls = 0;
-var oncancelcalls = 0;
-var onresizecalls = 0;
-
-var value = "";
-var verbatim = false;
-var height = 0;
-
-var suggestion = [ { value: "query suggestion" } ];
-var behavior = "now";
-
-chrome.embeddedSearch.searchBox.onchange = function() {
-  onchangecalls++;
-  value = chrome.embeddedSearch.searchBox.value;
-  verbatim = chrome.embeddedSearch.searchBox.verbatim;
-  chrome.embeddedSearch.searchBox.setSuggestions({
-    suggestions: suggestion,
-    complete_behavior: behavior
-  });
+Object.prototype.clone = function() {
+  var copy = {};
+  for (var prop in this) copy[prop] = this[prop];
+  return copy;
 };
 
-chrome.embeddedSearch.searchBox.onsubmit = function() {
-  onsubmitcalls++;
-  value = chrome.embeddedSearch.searchBox.value;
-  verbatim = chrome.embeddedSearch.searchBox.verbatim;
+window.beforeLoadSearchBox = window.chrome.searchBox.clone();
+window.lastSearchBox = window.chrome.searchBox.clone();
+
+window.setSuggestionsArgument = {
+  suggestions: [
+    { value: "defghi" }
+  ]
 };
 
-chrome.embeddedSearch.searchBox.oncancel = function() {
-  oncancelcalls++;
-  value = chrome.embeddedSearch.searchBox.value;
-  verbatim = chrome.embeddedSearch.searchBox.verbatim;
+window.chrome.searchBox.onsubmit = function() {
+  window.chrome.searchBox.setSuggestions(setSuggestionsArgument);
+  window.lastSearchBox = window.chrome.searchBox.clone();
+  window.onsubmitcalls++;
 };
 
-chrome.embeddedSearch.searchBox.onresize = function() {
-  onresizecalls++;
-  height = chrome.embeddedSearch.searchBox.height;
+window.chrome.searchBox.onchange = function() {
+  window.chrome.searchBox.setSuggestions(setSuggestionsArgument);
+  window.lastSearchBox = window.chrome.searchBox.clone();
+  window.onchangecalls++;
 };
 
-if (chrome.embeddedSearch.searchBox.value != "")
-  chrome.embeddedSearch.searchBox.onchange();
+window.chrome.searchBox.oncancel = function() {
+  window.chrome.searchBox.setSuggestions(setSuggestionsArgument);
+  window.lastSearchBox = window.chrome.searchBox.clone();
+  window.oncancelcalls++;
+};
 
-</script></body></html>
+window.chrome.searchBox.onresize = function() {
+  window.onresizecalls++;
+};
+</script>
+</body>
+</html>

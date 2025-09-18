@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -35,7 +35,7 @@ class SleepInsideInitThread : public Thread {
     Stop();
   }
 
-  virtual void Init() OVERRIDE {
+  virtual void Init() {
     base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(500));
     init_called_ = true;
   }
@@ -66,19 +66,18 @@ class CaptureToEventList : public Thread {
   // the order they occured in. |event_list| must remain valid for the
   // lifetime of this thread.
   explicit CaptureToEventList(EventList* event_list)
-      : Thread("none"),
-        event_list_(event_list) {
+      : Thread("none"), event_list_(event_list) {
   }
 
   virtual ~CaptureToEventList() {
     Stop();
   }
 
-  virtual void Init() OVERRIDE {
+  virtual void Init() {
     event_list_->push_back(THREAD_EVENT_INIT);
   }
 
-  virtual void CleanUp() OVERRIDE {
+  virtual void CleanUp() {
     event_list_->push_back(THREAD_EVENT_CLEANUP);
   }
 
@@ -88,8 +87,7 @@ class CaptureToEventList : public Thread {
 
 // Observer that writes a value into |event_list| when a message loop has been
 // destroyed.
-class CapturingDestructionObserver
-    : public base::MessageLoop::DestructionObserver {
+class CapturingDestructionObserver : public MessageLoop::DestructionObserver {
  public:
   // |event_list| must remain valid throughout the observer's lifetime.
   explicit CapturingDestructionObserver(EventList* event_list)
@@ -97,7 +95,7 @@ class CapturingDestructionObserver
   }
 
   // DestructionObserver implementation:
-  virtual void WillDestroyCurrentMessageLoop() OVERRIDE {
+  virtual void WillDestroyCurrentMessageLoop() {
     event_list_->push_back(THREAD_EVENT_MESSAGE_LOOP_DESTROYED);
     event_list_ = NULL;
   }
@@ -107,9 +105,8 @@ class CapturingDestructionObserver
 };
 
 // Task that adds a destruction observer to the current message loop.
-void RegisterDestructionObserver(
-    base::MessageLoop::DestructionObserver* observer) {
-  base::MessageLoop::current()->AddDestructionObserver(observer);
+void RegisterDestructionObserver(MessageLoop::DestructionObserver* observer) {
+  MessageLoop::current()->AddDestructionObserver(observer);
 }
 
 }  // namespace

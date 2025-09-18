@@ -4,20 +4,30 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 
+#include "base/base64.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/google/google_util.h"
+#include "crypto/hmac.h"
 #include "crypto/sha2.h"
+#include "googleurl/src/gurl.h"
+#include "googleurl/src/url_util.h"
 #include "net/base/escape.h"
-#include "url/gurl.h"
-#include "url/url_util.h"
+#include "unicode/locid.h"
 
 #if defined(OS_WIN)
 #include "chrome/installer/util/browser_distribution.h"
 #endif
 
-static const char kReportParams[] = "?tpl=%s&url=%s";
+static const int kSafeBrowsingMacDigestSize = 20;
+
+// Continue to this URL after submitting the phishing report form.
+// TODO(paulg): Change to a Chrome specific URL.
+static const char kContinueUrlFormat[] =
+  "http://www.google.com/tools/firefox/toolbar/FT2/intl/%s/submit_success.html";
+
+static const char kReportParams[] = "?tpl=%s&continue=%s&url=%s";
 
 // SBChunk ---------------------------------------------------------------------
 
@@ -152,17 +162,6 @@ void SBEntry::SetFullHashAt(int index, const SBFullHash& full_hash) {
 
 // Utility functions -----------------------------------------------------------
 
-namespace {
-bool IsKnownList(const std::string& name) {
-  for (size_t i = 0; i < arraysize(safe_browsing_util::kAllLists); ++i) {
-    if (!strcmp(safe_browsing_util::kAllLists[i], name.c_str())) {
-      return true;
-    }
-  }
-  return false;
-}
-}  // namespace
-
 namespace safe_browsing_util {
 
 // Listnames that browser can process.
@@ -174,25 +173,9 @@ const char kBinUrlList[] = "goog-badbinurl-shavar";
 const char kBinHashList[] = "goog-badbin-digestvar-disabled";
 const char kCsdWhiteList[] = "goog-csdwhite-sha256";
 const char kDownloadWhiteList[] = "goog-downloadwhite-digest256";
-const char kExtensionBlacklist[] = "goog-badcrxids-digestvar";
-const char kSideEffectFreeWhitelist[] = "goog-sideeffectfree-shavar";
-const char kIPBlacklist[] = "goog-badip-digest256";
 
-const char* kAllLists[10] = {
-  kMalwareList,
-  kPhishingList,
-  kBinUrlList,
-  kBinHashList,
-  kCsdWhiteList,
-  kDownloadWhiteList,
-  kDownloadWhiteList,
-  kExtensionBlacklist,
-  kSideEffectFreeWhitelist,
-  kIPBlacklist,
-};
-
-ListType GetListId(const std::string& name) {
-  ListType id;
+int GetListId(const std::string& name) {
+  int id;
   if (name == safe_browsing_util::kMalwareList) {
     id = MALWARE;
   } else if (name == safe_browsing_util::kPhishingList) {
@@ -205,19 +188,13 @@ ListType GetListId(const std::string& name) {
     id = CSDWHITELIST;
   } else if (name == safe_browsing_util::kDownloadWhiteList) {
     id = DOWNLOADWHITELIST;
-  } else if (name == safe_browsing_util::kExtensionBlacklist) {
-    id = EXTENSIONBLACKLIST;
-  } else if (name == safe_browsing_util::kSideEffectFreeWhitelist) {
-    id = SIDEEFFECTFREEWHITELIST;
-  } else if (name == safe_browsing_util::kIPBlacklist) {
-    id = IPBLACKLIST;
   } else {
     id = INVALID;
   }
   return id;
 }
 
-bool GetListName(ListType list_id, std::string* list) {
+bool GetListName(int list_id, std::string* list) {
   switch (list_id) {
     case MALWARE:
       *list = safe_browsing_util::kMalwareList;
@@ -237,19 +214,9 @@ bool GetListName(ListType list_id, std::string* list) {
     case DOWNLOADWHITELIST:
       *list = safe_browsing_util::kDownloadWhiteList;
       break;
-    case EXTENSIONBLACKLIST:
-      *list = safe_browsing_util::kExtensionBlacklist;
-      break;
-    case SIDEEFFECTFREEWHITELIST:
-      *list = safe_browsing_util::kSideEffectFreeWhitelist;
-      break;
-    case IPBLACKLIST:
-      *list = safe_browsing_util::kIPBlacklist;
-      break;
     default:
       return false;
   }
-  DCHECK(IsKnownList(*list));
   return true;
 }
 
@@ -335,24 +302,21 @@ void CanonicalizeUrl(const GURL& url,
       url_unescaped_str.length(), &parsed);
 
   // 3. In hostname, remove all leading and trailing dots.
-  const std::string host =
-      (parsed.host.len > 0)
-          ? url_unescaped_str.substr(parsed.host.begin, parsed.host.len)
-          : std::string();
+  const std::string host = (parsed.host.len > 0) ? url_unescaped_str.substr(
+      parsed.host.begin, parsed.host.len) : "";
   const char kCharsToTrim[] = ".";
   std::string host_without_end_dots;
-  base::TrimString(host, kCharsToTrim, &host_without_end_dots);
+  TrimString(host, kCharsToTrim, &host_without_end_dots);
 
   // 4. In hostname, replace consecutive dots with a single dot.
   std::string host_without_consecutive_dots(RemoveConsecutiveChars(
       host_without_end_dots, '.'));
 
   // 5. In path, replace runs of consecutive slashes with a single slash.
-  std::string path =
-      (parsed.path.len > 0)
-          ? url_unescaped_str.substr(parsed.path.begin, parsed.path.len)
-          : std::string();
-  std::string path_without_consecutive_slash(RemoveConsecutiveChars(path, '/'));
+  std::string path = (parsed.path.len > 0) ? url_unescaped_str.substr(
+       parsed.path.begin, parsed.path.len): "";
+  std::string path_without_consecutive_slash(RemoveConsecutiveChars(
+      path, '/'));
 
   url_canon::Replacements<char> hp_replacements;
   hp_replacements.SetHost(host_without_consecutive_dots.data(),
@@ -515,13 +479,48 @@ bool IsBadbinhashList(const std::string& list_name) {
   return list_name.compare(kBinHashList) == 0;
 }
 
-bool IsExtensionList(const std::string& list_name) {
-  return list_name.compare(kExtensionBlacklist) == 0;
+static void DecodeWebSafe(std::string* decoded) {
+  DCHECK(decoded);
+  for (std::string::iterator i(decoded->begin()); i != decoded->end(); ++i) {
+    if (*i == '_')
+      *i = '/';
+    else if (*i == '-')
+      *i = '+';
+  }
+}
+
+bool VerifyMAC(const std::string& key, const std::string& mac,
+               const char* data, int data_length) {
+  std::string key_copy = key;
+  DecodeWebSafe(&key_copy);
+  std::string decoded_key;
+  base::Base64Decode(key_copy, &decoded_key);
+
+  std::string mac_copy = mac;
+  DecodeWebSafe(&mac_copy);
+  std::string decoded_mac;
+  base::Base64Decode(mac_copy, &decoded_mac);
+
+  crypto::HMAC hmac(crypto::HMAC::SHA1);
+  if (!hmac.Init(decoded_key))
+    return false;
+  const std::string data_str(data, data_length);
+  unsigned char digest[kSafeBrowsingMacDigestSize];
+  if (!hmac.Sign(data_str, digest, kSafeBrowsingMacDigestSize))
+    return false;
+
+  return !memcmp(digest, decoded_mac.data(), kSafeBrowsingMacDigestSize);
 }
 
 GURL GeneratePhishingReportUrl(const std::string& report_page,
                                const std::string& url_to_report,
                                bool is_client_side_detection) {
+  icu::Locale locale = icu::Locale::getDefault();
+  const char* lang = locale.getLanguage();
+  if (!lang)
+    lang = "en";  // fallback
+  const std::string continue_esc = net::EscapeQueryParamValue(
+      base::StringPrintf(kContinueUrlFormat, lang), true);
   const std::string current_esc = net::EscapeQueryParamValue(url_to_report,
                                                              true);
 
@@ -536,20 +535,18 @@ GURL GeneratePhishingReportUrl(const std::string& report_page,
 
   GURL report_url(report_page + base::StringPrintf(kReportParams,
                                                    client_name.c_str(),
+                                                   continue_esc.c_str(),
                                                    current_esc.c_str()));
   return google_util::AppendGoogleLocaleParam(report_url);
 }
 
-SBFullHash StringToSBFullHash(const std::string& hash_in) {
+void StringToSBFullHash(const std::string& hash_in, SBFullHash* hash_out) {
   DCHECK_EQ(crypto::kSHA256Length, hash_in.size());
-  SBFullHash hash_out;
-  memcpy(hash_out.full_hash, hash_in.data(), crypto::kSHA256Length);
-  return hash_out;
+  memcpy(hash_out->full_hash, hash_in.data(), crypto::kSHA256Length);
 }
 
 std::string SBFullHashToString(const SBFullHash& hash) {
   DCHECK_EQ(crypto::kSHA256Length, sizeof(hash.full_hash));
   return std::string(hash.full_hash, sizeof(hash.full_hash));
 }
-
 }  // namespace safe_browsing_util

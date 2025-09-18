@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,54 +28,23 @@ class FileSystem : public Resource {
   /// use it.
   FileSystem();
 
-  /// The copy constructor for <code>FileSystem</code>.
-  ///
-  /// @param[in] other A reference to a <code>FileSystem</code>.
-  FileSystem(const FileSystem& other);
-
-  /// Constructs a <code>FileSystem</code> from a <code>Resource</code>.
-  ///
-  /// @param[in] resource A <code>Resource</code> containing a file system.
-  explicit FileSystem(const Resource& resource);
-
-  /// A constructor used when you have received a PP_Resource as a return
-  /// value that has already been reference counted.
-  ///
-  /// @param[in] resource A PP_Resource corresponding to a PPB_FileSystem.
-  FileSystem(PassRef, PP_Resource resource);
-
   /// This constructor creates a file system object of the given type.
   ///
-  /// @param[in] instance The instance with which this resource will be
-  /// associated.
-  ///
+  /// @param[in] instance A <code>Instance</code> identifying the instance
+  /// with the file.
   /// @param[in] type A file system type as defined by
   /// <code>PP_FileSystemType</code> enum.
-  FileSystem(const InstanceHandle& instance, PP_FileSystemType type);
+  FileSystem(Instance* instance, PP_FileSystemType type);
 
   /// Open() opens the file system. A file system must be opened before running
   /// any other operation on it.
   ///
-  /// @param[in] expected_size The expected size of the file system. Note that
-  /// this does not request quota; to do that, you must either invoke
-  /// requestQuota from JavaScript:
-  /// http://www.html5rocks.com/en/tutorials/file/filesystem/#toc-requesting-quota
-  /// or set the unlimitedStorage permission for Chrome Web Store apps:
-  /// http://code.google.com/chrome/extensions/manifest.html#permissions
-  ///
+  /// @param[in] expected_size The expected size of the file system.
   /// @param[in] cc A <code>PP_CompletionCallback</code> to be called upon
   /// completion of Open().
   ///
   /// @return An int32_t containing an error code from <code>pp_errors.h</code>.
   int32_t Open(int64_t expected_size, const CompletionCallback& cc);
-
-  /// Checks whether a <code>Resource</code> is a file system, to test whether
-  /// it is appropriate for use with the <code>FileSystem</code> constructor.
-  ///
-  /// @param[in] resource A <code>Resource</code> to test.
-  ///
-  /// @return True if <code>resource</code> is a file system.
-  static bool IsFileSystem(const Resource& resource);
 };
 
 }  // namespace pp

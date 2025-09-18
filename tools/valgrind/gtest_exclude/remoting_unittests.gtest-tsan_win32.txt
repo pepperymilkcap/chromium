@@ -1,2 +1,6 @@
-# These tests load mstscax.dll, which generates a bunch of race reports, see http://crbug.com/177832
-RdpClientTest.*
+# Following tests create real libjingle connections, and libjingle has
+# hardcoded timeouts, so these tests fail under TSan.
+JingleSessionTest.Connect
+JingleSessionTest.TestUdpChannel
+JingleSessionTest.TestTcpChannel
+JingleSessionTest.TestSpeed

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -23,29 +23,27 @@
 #include <ostream>
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/files/file_enumerator.h"
-#include "base/files/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/path_service.h"
-#include "base/prefs/json_pref_store.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/pref_value_store.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/test/test_file_util.h"
-#include "base/time/time.h"
-#include "chrome/browser/prefs/pref_service_mock_factory.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_service_mock_builder.h"
+#include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/json_pref_store.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
@@ -56,8 +54,7 @@
 #include "chrome_frame/test/ie_event_sink.h"
 #include "chrome_frame/test/reliability/page_load_test.h"
 #include "chrome_frame/utils.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "net/base/net_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -87,7 +84,7 @@ const char kV8LogFileDefaultName[] = "v8.log";
 // String name of local chrome dll for looking up file information.
 const wchar_t kChromeDll[] = L"chrome.dll";
 
-base::FilePath g_url_file_path;
+FilePath g_url_file_path;
 int32 g_start_index = 1;
 int32 g_end_index = kint32max;
 int32 g_iterations = 1;
@@ -95,11 +92,11 @@ bool g_memory_usage = false;
 bool g_page_down = true;
 bool g_clear_profile = true;
 std::string g_end_url;
-base::FilePath g_log_file_path;
+FilePath g_log_file_path;
 bool g_save_debug_log = false;
-base::FilePath g_chrome_log_path;
-base::FilePath g_v8_log_path;
-base::FilePath g_test_log_path;
+FilePath g_chrome_log_path;
+FilePath g_v8_log_path;
+FilePath g_test_log_path;
 bool g_stand_alone = false;
 
 const int kUrlNavigationTimeoutSeconds = 20;
@@ -136,7 +133,6 @@ class PageLoadTest : public testing::Test {
     int crash_dump_count;
     // These are stability metrics recorded by Chrome itself
     bool browser_clean_exit;
-    int browser_execution_phase;
     int browser_launch_count;
     int page_load_count;
     int browser_crash_count;
@@ -156,14 +152,14 @@ class PageLoadTest : public testing::Test {
     std::ofstream test_log;
 
     // Create a test log.
-    g_test_log_path = base::FilePath(FILE_PATH_LITERAL("test_log.log"));
+    g_test_log_path = FilePath(FILE_PATH_LITERAL("test_log.log"));
     test_log.open(g_test_log_path.value().c_str());
 
     // Check file version info for chrome dll.
     scoped_ptr<FileVersionInfo> file_info;
 #if defined(OS_WIN)
     file_info.reset(
-        FileVersionInfo::CreateFileVersionInfo(base::FilePath(kChromeDll)));
+        FileVersionInfo::CreateFileVersionInfo(FilePath(kChromeDll)));
 #elif defined(OS_LINUX) || defined(OS_MACOSX)
     // TODO(fmeawad): the version retrieved here belongs to the test module and
     // not the chrome binary, need to be changed to chrome binary instead.
@@ -197,7 +193,7 @@ class PageLoadTest : public testing::Test {
     test_log << (time_now.ToDoubleT() - time_start) << std::endl;
 
     bool is_chrome_frame_navigation =
-        StartsWith(base::UTF8ToWide(url.spec()), kChromeProtocolPrefix, true);
+        StartsWith(UTF8ToWide(url.spec()), kChromeProtocolPrefix, true);
 
     CComObjectStack<chrome_frame_test::IEEventSink> ie_event_sink;
     MockLoadListener load_listener;
@@ -221,9 +217,9 @@ class PageLoadTest : public testing::Test {
     // Attach the sink and navigate.
     ie_event_sink.set_listener(&load_listener);
     ie_event_sink.Attach(web_browser2);
-    hr = ie_event_sink.Navigate(base::UTF8ToWide(url.spec()));
+    hr = ie_event_sink.Navigate(UTF8ToWide(url.spec()));
     if (SUCCEEDED(hr)) {
-      message_loop.RunFor(base::TimeDelta::FromSeconds(g_timeout_seconds));
+      message_loop.RunFor(g_timeout_seconds);
       if (!message_loop.WasTimedOut())
         metrics.result = NAVIGATION_SUCCESS;
     }
@@ -317,7 +313,7 @@ class PageLoadTest : public testing::Test {
       // Every 3rd URL goes into the host browser.
       if (line_index % 3 != 0) {
         std::string actual_url;
-        actual_url = base::WideToUTF8(kChromeProtocolPrefix);
+        actual_url = WideToUTF8(kChromeProtocolPrefix);
         actual_url += url_str;
         url_str = actual_url;
       }
@@ -334,17 +330,17 @@ class PageLoadTest : public testing::Test {
   virtual void SetUp() {
     // Initialize crash_dumps_dir_path_.
     PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dumps_dir_path_);
-    base::FileEnumerator enumerator(crash_dumps_dir_path_,
-                                    false,  // not recursive
-                                    base::FileEnumerator::FILES);
-    for (base::FilePath path = enumerator.Next(); !path.value().empty();
+    file_util::FileEnumerator enumerator(crash_dumps_dir_path_,
+                                         false,  // not recursive
+                                         file_util::FileEnumerator::FILES);
+    for (FilePath path = enumerator.Next(); !path.value().empty();
          path = enumerator.Next()) {
       if (path.MatchesExtension(FILE_PATH_LITERAL(".dmp")))
         crash_dumps_[path.BaseName()] = true;
     }
 
     if (g_clear_profile) {
-      base::FilePath user_data_dir;
+      FilePath user_data_dir;
       chrome::GetChromeFrameUserDataDirectory(&user_data_dir);
       ASSERT_TRUE(file_util::DieFileDie(user_data_dir, true));
     }
@@ -358,19 +354,19 @@ class PageLoadTest : public testing::Test {
     DeleteConfigValue(kAllowUnsafeURLs);
   }
 
-  base::FilePath ConstructSavedDebugLogPath(const base::FilePath& debug_log_path,
-                                            int index) {
+  FilePath ConstructSavedDebugLogPath(const FilePath& debug_log_path,
+                                      int index) {
     std::string suffix("_");
     suffix.append(base::IntToString(index));
     return debug_log_path.InsertBeforeExtensionASCII(suffix);
   }
 
-  void SaveDebugLog(const base::FilePath& log_path, const std::wstring& log_id,
+  void SaveDebugLog(const FilePath& log_path, const std::wstring& log_id,
                     std::ofstream& log_file, int index) {
     if (!log_path.empty()) {
-      base::FilePath saved_log_file_path =
+      FilePath saved_log_file_path =
           ConstructSavedDebugLogPath(log_path, index);
-      if (base::Move(log_path, saved_log_file_path)) {
+      if (file_util::Move(log_path, saved_log_file_path)) {
         log_file << " " << log_id << "=" << saved_log_file_path.value();
       }
     }
@@ -389,10 +385,10 @@ class PageLoadTest : public testing::Test {
   // If a log_file is provided, log the crash dump with the given path;
   // otherwise, delete the crash dump file.
   void LogOrDeleteCrashDump(std::ofstream& log_file,
-                            base::FilePath crash_dump_file_name) {
-    base::FilePath crash_dump_file_path(crash_dumps_dir_path_);
+                            FilePath crash_dump_file_name) {
+    FilePath crash_dump_file_path(crash_dumps_dir_path_);
     crash_dump_file_path = crash_dump_file_path.Append(crash_dump_file_name);
-    base::FilePath crash_text_file_path =
+    FilePath crash_text_file_path =
         crash_dump_file_path.ReplaceExtension(FILE_PATH_LITERAL("txt"));
 
     if (log_file.is_open()) {
@@ -413,10 +409,10 @@ class PageLoadTest : public testing::Test {
                                 NavigationMetrics* metrics) {
     int num_dumps = 0;
 
-    base::FileEnumerator enumerator(crash_dumps_dir_path_,
-                                    false,  // not recursive
-                                    base::FileEnumerator::FILES);
-    for (base::FilePath path = enumerator.Next(); !path.value().empty();
+    file_util::FileEnumerator enumerator(crash_dumps_dir_path_,
+                                         false,  // not recursive
+                                         file_util::FileEnumerator::FILES);
+    for (FilePath path = enumerator.Next(); !path.value().empty();
          path = enumerator.Next()) {
       if (path.MatchesExtension(FILE_PATH_LITERAL(".dmp")) &&
           !crash_dumps_[path.BaseName()]) {
@@ -431,36 +427,26 @@ class PageLoadTest : public testing::Test {
   // Get a PrefService whose contents correspond to the Local State file
   // that was saved by the app as it closed.  The caller takes ownership of the
   // returned PrefService object.
-  PrefService* GetLocalState(PrefRegistry* registry) {
-    base::FilePath path;
+  PrefService* GetLocalState() {
+    FilePath path;
     chrome::GetChromeFrameUserDataDirectory(&path);
-    PrefServiceMockFactory factory;
-    factory.SetUserPrefsFile(
-        path,
-        JsonPrefStore::GetTaskRunnerForFile(
-            path, content::BrowserThread::GetBlockingPool()));
-    return factory.Create(registry).release();
+    return PrefServiceMockBuilder().WithUserFilePrefs(path).Create();
   }
 
   void GetStabilityMetrics(NavigationMetrics* metrics) {
     if (!metrics)
       return;
-    scoped_refptr<PrefRegistrySimple> registry = new PrefRegistrySimple();
-    registry->RegisterBooleanPref(prefs::kStabilityExitedCleanly, false);
-    registry->RegisterIntegerPref(prefs::kStabilityExecutionPhase, 0);
-    registry->RegisterIntegerPref(prefs::kStabilityLaunchCount, -1);
-    registry->RegisterIntegerPref(prefs::kStabilityPageLoadCount, -1);
-    registry->RegisterIntegerPref(prefs::kStabilityCrashCount, 0);
-    registry->RegisterIntegerPref(prefs::kStabilityRendererCrashCount, 0);
-
-    scoped_ptr<PrefService> local_state(GetLocalState(registry));
+    scoped_ptr<PrefService> local_state(GetLocalState());
     if (!local_state.get())
       return;
+    local_state->RegisterBooleanPref(prefs::kStabilityExitedCleanly, false);
+    local_state->RegisterIntegerPref(prefs::kStabilityLaunchCount, -1);
+    local_state->RegisterIntegerPref(prefs::kStabilityPageLoadCount, -1);
+    local_state->RegisterIntegerPref(prefs::kStabilityCrashCount, 0);
+    local_state->RegisterIntegerPref(prefs::kStabilityRendererCrashCount, 0);
 
     metrics->browser_clean_exit =
         local_state->GetBoolean(prefs::kStabilityExitedCleanly);
-    metrics->browser_execution_phase =
-        local_state->GetInteger(prefs::kStabilityExecutionPhase);
     metrics->browser_launch_count =
         local_state->GetInteger(prefs::kStabilityLaunchCount);
     metrics->page_load_count =
@@ -476,8 +462,8 @@ class PageLoadTest : public testing::Test {
       metrics->browser_crash_count++;
   }
 
-  base::FilePath GetSampleDataDir() {
-    base::FilePath test_dir;
+  FilePath GetSampleDataDir() {
+    FilePath test_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
     test_dir = test_dir.AppendASCII("reliability");
     test_dir = test_dir.AppendASCII("sample_pages");
@@ -485,7 +471,7 @@ class PageLoadTest : public testing::Test {
   }
 
   // The pathname of Chrome's crash dumps directory.
-  base::FilePath crash_dumps_dir_path_;
+  FilePath crash_dumps_dir_path_;
 
   // The set of all the crash dumps we have seen.  Each crash generates a
   // .dmp and a .txt file in the crash dumps directory.  We only store the
@@ -496,7 +482,7 @@ class PageLoadTest : public testing::Test {
   // in the set).  The initial value for any key in std::map is 0 (false),
   // which in this case means a new file is not in the set initially,
   // exactly the semantics we want.
-  std::map<base::FilePath, bool> crash_dumps_;
+  std::map<FilePath, bool> crash_dumps_;
 };
 
 TEST_F(PageLoadTest, IEFullTabMode_Reliability) {
@@ -592,8 +578,9 @@ void SetPageRange(const CommandLine& parsed_command_line) {
         CommandLine v8_command_line(
             parsed_command_line.GetSwitchValuePath(switches::kJavaScriptFlags));
         if (v8_command_line.HasSwitch(kV8LogFileSwitch)) {
-          g_v8_log_path = base::MakeAbsoluteFilePath(
-              v8_command_line.GetSwitchValuePath(kV8LogFileSwitch));
+          g_v8_log_path = v8_command_line.GetSwitchValuePath(kV8LogFileSwitch);
+          if (!file_util::AbsolutePath(&g_v8_log_path))
+            g_v8_log_path = FilePath();
         }
       }
     }

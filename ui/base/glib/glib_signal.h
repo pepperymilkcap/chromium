@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_GLIB_GLIB_SIGNAL_H_
 #define UI_BASE_GLIB_GLIB_SIGNAL_H_
+#pragma once
 
 typedef void* gpointer;
 

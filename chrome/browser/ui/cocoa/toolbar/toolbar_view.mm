@@ -6,7 +6,6 @@
 
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
-#import "ui/base/cocoa/nsgraphics_context_additions.h"
 
 @implementation ToolbarView
 
@@ -18,9 +17,10 @@
 }
 
 - (void)drawRect:(NSRect)rect {
-  NSPoint position = [[self window]
-      themeImagePositionForAlignment:THEME_IMAGE_ALIGN_WITH_TAB_STRIP];
-  [[NSGraphicsContext currentContext] cr_setPatternPhase:position forView:self];
+  // The toolbar's background pattern is phased relative to the
+  // tab strip view's background pattern.
+  NSPoint phase = [[self window] themePatternPhase];
+  [[NSGraphicsContext currentContext] setPatternPhase:phase];
   [self drawBackgroundWithOpaque:YES];
 }
 
@@ -42,6 +42,42 @@
 
 - (ViewID)viewID {
   return VIEW_ID_TOOLBAR;
+}
+
+// Some toolbar buttons draw differently depending on the fouc state of the
+// window.
+- (void)windowFocusDidChange:(NSNotification*)notification {
+  [self setNeedsDisplay:YES];
+}
+
+- (void)viewWillMoveToWindow:(NSWindow*)window {
+  if ([self window]) {
+    [[NSNotificationCenter defaultCenter]
+        removeObserver:self
+                  name:NSWindowDidBecomeKeyNotification
+                object:[self window]];
+    [[NSNotificationCenter defaultCenter]
+        removeObserver:self
+                  name:NSWindowDidBecomeMainNotification
+                object:[self window]];
+  }
+  if (window) {
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(windowFocusDidChange:)
+               name:NSWindowDidBecomeKeyNotification
+             object:[self window]];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(windowFocusDidChange:)
+               name:NSWindowDidBecomeMainNotification
+             object:[self window]];
+  }
+}
+
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [super dealloc];
 }
 
 - (BOOL)isOpaque {

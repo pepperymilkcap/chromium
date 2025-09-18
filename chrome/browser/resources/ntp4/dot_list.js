@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
  * @fileoverview DotList implementation
  */
 
-cr.define('ntp', function() {
+cr.define('ntp4', function() {
   'use strict';
 
   /**
@@ -25,7 +25,7 @@ cr.define('ntp', function() {
   DotList.prototype = {
     __proto__: HTMLUListElement.prototype,
 
-    /** @override */
+    /** @inheritDoc */
     decorate: function() {
       this.addEventListener('keydown', this.onKeyDown_.bind(this));
       navDots = this.getElementsByClassName('dot');

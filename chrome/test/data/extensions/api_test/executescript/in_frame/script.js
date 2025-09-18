@@ -1,7 +1,3 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 function getStyle(elem, name) {
   if (document.defaultView && document.defaultView.getComputedStyle) {
     name = name.toLowerCase();
@@ -19,5 +15,5 @@ function getStyle(elem, name) {
 
 var bElement = document.getElementById('test2');
 var display = getStyle(bElement, 'display').toLowerCase();
-var extensionPort = chrome.runtime.connect();
+var extensionPort = chrome.extension.connect();
 extensionPort.postMessage({message: display});

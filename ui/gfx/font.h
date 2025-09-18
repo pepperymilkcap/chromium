@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_FONT_H_
 #define UI_GFX_FONT_H_
+#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
-#include "ui/gfx/gfx_export.h"
+#include "base/string16.h"
+#include "ui/base/ui_export.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
@@ -18,23 +19,14 @@ class PlatformFont;
 
 // Font provides a wrapper around an underlying font. Copy and assignment
 // operators are explicitly allowed, and cheap.
-//
-// Figure of font metrics:
-//   +--------+-------------------+------------------+
-//   |        |                   | internal leading |
-//   |        | ascent (baseline) +------------------+
-//   | height |                   | cap height       |
-//   |        |-------------------+------------------+
-//   |        | descent (height - baseline)          |
-//   +--------+--------------------------------------+
-class GFX_EXPORT Font {
+class UI_EXPORT Font {
  public:
   // The following constants indicate the font style.
   enum FontStyle {
     NORMAL = 0,
     BOLD = 1,
     ITALIC = 2,
-    UNDERLINE = 4,
+    UNDERLINED = 4,
   };
 
   // Creates a font with the default name and style.
@@ -47,7 +39,7 @@ class GFX_EXPORT Font {
   // Creates a font from the specified native font.
   explicit Font(NativeFont native_font);
 
-  // Constructs a Font object with the specified PlatformFont object. The Font
+  // Construct a Font object with the specified PlatformFont object. The Font
   // object takes ownership of the PlatformFont object.
   explicit Font(PlatformFont* platform_font);
 
@@ -65,7 +57,7 @@ class GFX_EXPORT Font {
   // |size_delta| is the size in pixels to add to the current font. See the
   // single argument version of this method for an example.
   // The style parameter specifies the new style for the font, and is a
-  // bitmask of the values: BOLD, ITALIC and UNDERLINE.
+  // bitmask of the values: BOLD, ITALIC and UNDERLINED.
   Font DeriveFont(int size_delta, int style) const;
 
   // Returns the number of vertical pixels needed to display characters from
@@ -78,15 +70,12 @@ class GFX_EXPORT Font {
   // Returns the baseline, or ascent, of the font.
   int GetBaseline() const;
 
-  // Returns the cap height of the font.
-  int GetCapHeight() const;
-
   // Returns the average character width for the font.
   int GetAverageCharacterWidth() const;
 
   // Returns the number of horizontal pixels needed to display the specified
   // string.
-  int GetStringWidth(const base::string16& text) const;
+  int GetStringWidth(const string16& text) const;
 
   // Returns the expected number of horizontal pixels needed to display the
   // specified length of characters. Call GetStringWidth() to retrieve the
@@ -96,11 +85,8 @@ class GFX_EXPORT Font {
   // Returns the style of the font.
   int GetStyle() const;
 
-  // Returns the specified font name in UTF-8.
+  // Returns the font name in UTF-8.
   std::string GetFontName() const;
-
-  // Returns the actually used font name in UTF-8.
-  std::string GetActualFontNameForTesting() const;
 
   // Returns the font size in pixels.
   int GetFontSize() const;
@@ -111,8 +97,7 @@ class GFX_EXPORT Font {
   //          destroyed by the caller.
   // Mac:     The object is owned by the system and should not be released.
   // Gtk:     This handle is created on demand, and must be freed by calling
-  //          pango_font_description_free() when the caller is done using it or
-  //          by using ScopedPangoFontDescription.
+  //          pango_font_description_free() when the caller is done using it.
   NativeFont GetNativeFont() const;
 
   // Raw access to the underlying platform font implementation. Can be

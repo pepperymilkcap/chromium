@@ -7,7 +7,8 @@
 #include <gtk/gtk.h>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
+#include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_lock_dialog.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "content/public/browser/user_metrics.h"
@@ -21,22 +22,21 @@ using content::UserMetricsAction;
 namespace importer {
 
 void ShowImportLockDialog(gfx::NativeWindow parent,
-                          const base::Callback<void(bool)>& callback) {
-  ImportLockDialogGtk::Show(parent, callback);
+                          ImporterHost* importer_host) {
+  ImportLockDialogGtk::Show(parent, importer_host);
   content::RecordAction(UserMetricsAction("ImportLockDialogGtk_Shown"));
 }
 
 }  // namespace importer
 
 // static
-void ImportLockDialogGtk::Show(GtkWindow* parent,
-                               const base::Callback<void(bool)>& callback) {
-  new ImportLockDialogGtk(parent, callback);
+void ImportLockDialogGtk::Show(GtkWindow* parent, ImporterHost* importer_host) {
+  new ImportLockDialogGtk(parent, importer_host);
 }
 
-ImportLockDialogGtk::ImportLockDialogGtk(
-    GtkWindow* parent,
-    const base::Callback<void(bool)>& callback) : callback_(callback) {
+ImportLockDialogGtk::ImportLockDialogGtk(GtkWindow* parent,
+                                         ImporterHost* importer_host)
+    : importer_host_(importer_host) {
   // Build the dialog.
   dialog_ = gtk_dialog_new_with_buttons(
       l10n_util::GetStringUTF8(IDS_IMPORTER_LOCK_TITLE).c_str(),
@@ -66,9 +66,12 @@ ImportLockDialogGtk::ImportLockDialogGtk(
 ImportLockDialogGtk::~ImportLockDialogGtk() {}
 
 void ImportLockDialogGtk::OnResponse(GtkWidget* dialog, int response_id) {
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(callback_, response_id == GTK_RESPONSE_ACCEPT));
+  bool is_continue = response_id == GTK_RESPONSE_ACCEPT;
+  MessageLoop::current()->PostTask(FROM_HERE,
+      base::Bind(&ImporterHost::OnImportLockDialogEnd,
+                 importer_host_.get(),
+                 is_continue));
+
   gtk_widget_destroy(dialog_);
   delete this;
 }

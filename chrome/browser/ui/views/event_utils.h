@@ -1,22 +1,28 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_UI_VIEWS_EVENT_UTILS_H_
-#define CHROME_BROWSER_UI_VIEWS_EVENT_UTILS_H_
+#ifndef CHROME_BROWSER_UI_VIEWS_EVENT_UTILS_H__
+#define CHROME_BROWSER_UI_VIEWS_EVENT_UTILS_H__
+#pragma once
 
-#include "chrome/browser/ui/views/chrome_views_export.h"
+#include "webkit/glue/window_open_disposition.h"
 
-namespace ui {
-class Event;
+namespace views {
+class MouseEvent;
 }
 
 namespace event_utils {
 
-// Returns true if the specified event may have a
+// Translates event flags into what kind of disposition they represents.
+// For example, a middle click would mean to open a background tab.
+// event_flags are the flags as understood by views::MouseEvent.
+WindowOpenDisposition DispositionFromEventFlags(int event_flags);
+
+// Returns true if the specified mouse event may have a
 // WindowOptionDisposition.
-CHROME_VIEWS_EXPORT bool IsPossibleDispositionEvent(const ui::Event& event);
+bool IsPossibleDispositionEvent(const views::MouseEvent& event);
 
-}  // namespace event_utils
+}
 
-#endif  // CHROME_BROWSER_UI_VIEWS_EVENT_UTILS_H_
+#endif  // CHROME_BROWSER_UI_VIEWS_EVENT_UTILS_H__

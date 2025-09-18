@@ -1,17 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_NETWORK_LAYER_H_
 #define NET_HTTP_HTTP_NETWORK_LAYER_H_
+#pragma once
 
 #include <string>
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/power_monitor/power_observer.h"
+#include "base/system_monitor/system_monitor.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/net_export.h"
 #include "net/http/http_transaction_factory.h"
@@ -22,7 +21,7 @@ class HttpNetworkSession;
 
 class NET_EXPORT HttpNetworkLayer
     : public HttpTransactionFactory,
-      public base::PowerObserver,
+      public base::SystemMonitor::PowerObserver,
       NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   // Construct a HttpNetworkLayer with an existing HttpNetworkSession which
@@ -38,25 +37,28 @@ class NET_EXPORT HttpNetworkLayer
   // when network session is shared.
   static HttpTransactionFactory* CreateFactory(HttpNetworkSession* session);
 
-  // Forces an alternate protocol of SPDY/3 on port 443.
-  // TODO(rch): eliminate this method.
-  static void ForceAlternateProtocol();
+  // Enable the spdy protocol.
+  // Without calling this function, SPDY is disabled.  The mode can be:
+  //   ""            : (default) SSL and compression are enabled, flow
+  //                   control disabled.
+  //   "no-ssl"      : disables SSL.
+  //   "no-compress" : disables compression.
+  //   "flow-control": enables flow control.
+  //   "none"        : disables both SSL and compression.
+  static void EnableSpdy(const std::string& mode);
 
   // HttpTransactionFactory methods:
-  virtual int CreateTransaction(RequestPriority priority,
-                                scoped_ptr<HttpTransaction>* trans) OVERRIDE;
+  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans) OVERRIDE;
   virtual HttpCache* GetCache() OVERRIDE;
   virtual HttpNetworkSession* GetSession() OVERRIDE;
 
-  // base::PowerObserver methods:
+  // base::SystemMonitor::PowerObserver methods:
   virtual void OnSuspend() OVERRIDE;
   virtual void OnResume() OVERRIDE;
 
  private:
   const scoped_refptr<HttpNetworkSession> session_;
   bool suspended_;
-
-  DISALLOW_COPY_AND_ASSIGN(HttpNetworkLayer);
 };
 
 }  // namespace net

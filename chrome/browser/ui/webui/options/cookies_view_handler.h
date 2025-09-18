@@ -1,18 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_COOKIES_VIEW_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_COOKIES_VIEW_HANDLER_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/browsing_data/cookies_tree_model.h"
+#include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
-
-class CookiesTreeModelUtil;
-
-namespace options {
 
 class CookiesViewHandler : public OptionsPageUIHandler,
                            public CookiesTreeModel::Observer {
@@ -58,11 +55,7 @@ class CookiesViewHandler : public OptionsPageUIHandler,
 
   // Get children nodes data and pass it to 'CookiesView.loadChildren' to
   // update the WebUI.
-  void SendChildren(const CookieTreeNode* parent);
-
-  // Reloads the CookiesTreeModel and passes the nodes to
-  // 'CookiesView.loadChildren' to update the WebUI.
-  void ReloadCookies(const base::ListValue* args);
+  void SendChildren(CookieTreeNode* parent);
 
   // The Cookies Tree model
   scoped_ptr<CookiesTreeModel> cookies_tree_model_;
@@ -70,11 +63,7 @@ class CookiesViewHandler : public OptionsPageUIHandler,
   // Flag to indicate whether there is a batch update in progress.
   bool batch_update_;
 
-  scoped_ptr<CookiesTreeModelUtil> model_util_;
-
   DISALLOW_COPY_AND_ASSIGN(CookiesViewHandler);
 };
-
-}  // namespace options
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_COOKIES_VIEW_HANDLER_H_

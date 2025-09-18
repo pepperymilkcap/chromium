@@ -10,10 +10,10 @@
 #include <string.h>
 #include <time.h>
 
-#include "gpu/command_buffer/common/cmd_buffer_common.h"
-#include "gpu/command_buffer/common/command_buffer.h"
-#include "gpu/command_buffer/common/constants.h"
-#include "gpu/gpu_export.h"
+#include "../common/logging.h"
+#include "../common/constants.h"
+#include "../common/cmd_buffer_common.h"
+#include "../common/command_buffer.h"
 
 namespace gpu {
 
@@ -32,7 +32,7 @@ namespace gpu {
 //
 // helper.WaitForToken(token);  // this doesn't return until the first two
 //                              // commands have been executed.
-class GPU_EXPORT CommandBufferHelper {
+class CommandBufferHelper {
  public:
   explicit CommandBufferHelper(CommandBuffer* command_buffer);
   virtual ~CommandBufferHelper();
@@ -42,13 +42,6 @@ class GPU_EXPORT CommandBufferHelper {
   //   ring_buffer_size: The size of the ring buffer portion of the command
   //       buffer.
   bool Initialize(int32 ring_buffer_size);
-
-  // Sets whether the command buffer should automatically flush periodically
-  // to try to increase performance. Defaults to true.
-  void SetAutomaticFlushes(bool enabled);
-
-  // True if the context is lost.
-  bool IsContextLost();
 
   // Asynchronously flushes the commands, setting the put pointer to let the
   // buffer interface know that new commands have been added. After a flush
@@ -123,17 +116,19 @@ class GPU_EXPORT CommandBufferHelper {
   }
 
   int32 last_token_read() const {
-    return command_buffer_->GetLastToken();
+    return command_buffer_->GetLastState().token;
   }
 
   int32 get_offset() const {
     return command_buffer_->GetLastState().get_offset;
   }
 
+  error::Error GetError();
+
   // Common Commands
   void Noop(uint32 skip_count) {
     cmd::Noop* cmd = GetImmediateCmdSpace<cmd::Noop>(
-        (skip_count - 1) * sizeof(CommandBufferEntry));
+        skip_count * sizeof(CommandBufferEntry));
     if (cmd) {
       cmd->Init(skip_count);
     }
@@ -143,6 +138,41 @@ class GPU_EXPORT CommandBufferHelper {
     cmd::SetToken* cmd = GetCmdSpace<cmd::SetToken>();
     if (cmd) {
       cmd->Init(token);
+    }
+  }
+
+  void Jump(uint32 offset) {
+    cmd::Jump* cmd = GetCmdSpace<cmd::Jump>();
+    if (cmd) {
+      cmd->Init(offset);
+    }
+  }
+
+  void JumpRelative(int32 offset) {
+    cmd::JumpRelative* cmd = GetCmdSpace<cmd::JumpRelative>();
+    if (cmd) {
+      cmd->Init(offset);
+    }
+  }
+
+  void Call(uint32 offset) {
+    cmd::Call* cmd = GetCmdSpace<cmd::Call>();
+    if (cmd) {
+      cmd->Init(offset);
+    }
+  }
+
+  void CallRelative(int32 offset) {
+    cmd::CallRelative* cmd = GetCmdSpace<cmd::CallRelative>();
+    if (cmd) {
+      cmd->Init(offset);
+    }
+  }
+
+  void Return() {
+    cmd::Return* cmd = GetCmdSpace<cmd::Return>();
+    if (cmd) {
+      cmd->Init();
     }
   }
 
@@ -178,20 +208,14 @@ class GPU_EXPORT CommandBufferHelper {
     }
   }
 
-  void GetBucketStart(uint32 bucket_id,
-                      uint32 result_memory_id,
-                      uint32 result_memory_offset,
-                      uint32 data_memory_size,
-                      uint32 data_memory_id,
-                      uint32 data_memory_offset) {
-    cmd::GetBucketStart* cmd = GetCmdSpace<cmd::GetBucketStart>();
+  void GetBucketSize(uint32 bucket_id,
+                     uint32 shared_memory_id,
+                     uint32 shared_memory_offset) {
+    cmd::GetBucketSize* cmd = GetCmdSpace<cmd::GetBucketSize>();
     if (cmd) {
       cmd->Init(bucket_id,
-                result_memory_id,
-                result_memory_offset,
-                data_memory_size,
-                data_memory_id,
-                data_memory_offset);
+                shared_memory_id,
+                shared_memory_offset);
     }
   }
 
@@ -238,11 +262,11 @@ class GPU_EXPORT CommandBufferHelper {
 
   // Returns the number of available entries (they may not be contiguous).
   int32 AvailableEntries() {
-    return (get_offset() - put_ - 1 + total_entry_count_) % total_entry_count_;
+    return (get_offset() - put_ - 1 + usable_entry_count_) %
+        usable_entry_count_;
   }
 
   bool AllocateRingBuffer();
-  void FreeResources();
 
   CommandBuffer* command_buffer_;
   int32 ring_buffer_id_;
@@ -250,13 +274,12 @@ class GPU_EXPORT CommandBufferHelper {
   Buffer ring_buffer_;
   CommandBufferEntry* entries_;
   int32 total_entry_count_;  // the total number of entries
+  int32 usable_entry_count_;  // the usable number (ie, minus space for jump)
   int32 token_;
   int32 put_;
   int32 last_put_sent_;
   int commands_issued_;
   bool usable_;
-  bool context_lost_;
-  bool flush_automatically_;
 
   // Using C runtime instead of base because this file cannot depend on base.
   clock_t last_flush_time_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,14 +12,15 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_ACCESS_TOKEN_STORE_H_
 #define CONTENT_PUBLIC_BROWSER_ACCESS_TOKEN_STORE_H_
+#pragma once
 
 #include <map>
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "content/common/content_export.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 class GURL;
 
@@ -33,7 +34,7 @@ namespace content {
 class AccessTokenStore : public base::RefCountedThreadSafe<AccessTokenStore> {
  public:
   // Map of server URLs to associated access token.
-  typedef std::map<GURL, base::string16> AccessTokenSet;
+  typedef std::map<GURL, string16> AccessTokenSet;
   typedef base::Callback<void(AccessTokenSet, net::URLRequestContextGetter*)>
       LoadAccessTokensCallbackType;
 
@@ -47,7 +48,7 @@ class AccessTokenStore : public base::RefCountedThreadSafe<AccessTokenStore> {
       const LoadAccessTokensCallbackType& callback) = 0;
 
   virtual void SaveAccessToken(
-      const GURL& server_url, const base::string16& access_token) = 0;
+      const GURL& server_url, const string16& access_token) = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<AccessTokenStore>;

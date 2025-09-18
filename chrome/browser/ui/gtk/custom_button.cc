@@ -7,37 +7,25 @@
 #include "base/basictypes.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
-#include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
-#include "ui/gfx/image/image.h"
 #include "ui/gfx/skbitmap_operations.h"
-
-namespace {
-
-GdkPixbuf* GetImage(int resource_id) {
-  if (!resource_id)
-    return NULL;
-  return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-    resource_id, ui::ResourceBundle::RTL_ENABLED).ToGdkPixbuf();
-}
-
-}  // namespace
 
 CustomDrawButtonBase::CustomDrawButtonBase(GtkThemeService* theme_provider,
                                            int normal_id,
                                            int pressed_id,
                                            int hover_id,
                                            int disabled_id)
-    : paint_override_(-1),
+    : background_image_(NULL),
+      paint_override_(-1),
       normal_id_(normal_id),
       pressed_id_(pressed_id),
       hover_id_(hover_id),
@@ -58,11 +46,16 @@ CustomDrawButtonBase::CustomDrawButtonBase(GtkThemeService* theme_provider,
                    content::Source<ThemeService>(theme_provider));
   } else {
     // Load the button images from the resource bundle.
-    surfaces_[GTK_STATE_NORMAL]->UsePixbuf(GetImage(normal_id_));
-    surfaces_[GTK_STATE_ACTIVE]->UsePixbuf(GetImage(pressed_id_));
-    surfaces_[GTK_STATE_PRELIGHT]->UsePixbuf(GetImage(hover_id_));
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    surfaces_[GTK_STATE_NORMAL]->UsePixbuf(
+        normal_id_ ? rb.GetRTLEnabledPixbufNamed(normal_id_) : NULL);
+    surfaces_[GTK_STATE_ACTIVE]->UsePixbuf(
+        pressed_id_ ? rb.GetRTLEnabledPixbufNamed(pressed_id_) : NULL);
+    surfaces_[GTK_STATE_PRELIGHT]->UsePixbuf(
+        hover_id_ ? rb.GetRTLEnabledPixbufNamed(hover_id_) : NULL);
     surfaces_[GTK_STATE_SELECTED]->UsePixbuf(NULL);
-    surfaces_[GTK_STATE_INSENSITIVE]->UsePixbuf(GetImage(disabled_id_));
+    surfaces_[GTK_STATE_INSENSITIVE]->UsePixbuf(
+        disabled_id_ ? rb.GetRTLEnabledPixbufNamed(disabled_id_) : NULL);
   }
 }
 
@@ -139,17 +132,16 @@ gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget,
 }
 
 void CustomDrawButtonBase::SetBackground(SkColor color,
-                                         const SkBitmap& image,
-                                         const SkBitmap& mask) {
-  if (image.isNull() || mask.isNull()) {
+                                         SkBitmap* image, SkBitmap* mask) {
+  if (!image || !mask) {
     if (background_image_->valid()) {
       background_image_->UsePixbuf(NULL);
     }
   } else {
     SkBitmap img =
-        SkBitmapOperations::CreateButtonBackground(color, image, mask);
+        SkBitmapOperations::CreateButtonBackground(color, *image, *mask);
 
-    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(img);
+    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&img);
     background_image_->UsePixbuf(pixbuf);
     g_object_unref(pixbuf);
   }
@@ -208,7 +200,7 @@ void CustomDrawHoverController::Init(GtkWidget* widget) {
 }
 
 void CustomDrawHoverController::AnimationProgressed(
-    const gfx::Animation* animation) {
+    const ui::Animation* animation) {
   gtk_widget_queue_draw(widget_);
 }
 
@@ -337,8 +329,7 @@ void CustomDrawButton::UnsetPaintOverride() {
 }
 
 void CustomDrawButton::SetBackground(SkColor color,
-                                     const SkBitmap& image,
-                                     const SkBitmap& mask) {
+                                     SkBitmap* image, SkBitmap* mask) {
   button_base_.SetBackground(color, image, mask);
 }
 
@@ -355,20 +346,10 @@ gboolean CustomDrawButton::OnCustomExpose(GtkWidget* sender,
 }
 
 // static
-CustomDrawButton* CustomDrawButton::CloseButtonBar(
+CustomDrawButton* CustomDrawButton::CloseButton(
     GtkThemeService* theme_provider) {
-  CustomDrawButton* button = new CustomDrawButton(theme_provider,
-      IDR_CLOSE_1, IDR_CLOSE_1_P, IDR_CLOSE_1_H, 0,
-      GTK_STOCK_CLOSE, GTK_ICON_SIZE_MENU);
-  return button;
-}
-
-// static
-CustomDrawButton* CustomDrawButton::CloseButtonBubble(
-    GtkThemeService* theme_provider) {
-  CustomDrawButton* button = new CustomDrawButton(theme_provider,
-      IDR_CLOSE_2, IDR_CLOSE_2_P, IDR_CLOSE_2_H, 0,
-      GTK_STOCK_CLOSE, GTK_ICON_SIZE_MENU);
+  CustomDrawButton* button = new CustomDrawButton(theme_provider, IDR_CLOSE_BAR,
+      IDR_CLOSE_BAR_P, IDR_CLOSE_BAR_H, 0, GTK_STOCK_CLOSE, GTK_ICON_SIZE_MENU);
   return button;
 }
 

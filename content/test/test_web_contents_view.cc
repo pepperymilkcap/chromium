@@ -12,30 +12,64 @@ TestWebContentsView::TestWebContentsView() {
 TestWebContentsView::~TestWebContentsView() {
 }
 
+void TestWebContentsView::CreateNewWindow(
+    int route_id,
+    const ViewHostMsg_CreateWindow_Params& params) {
+}
+
+void TestWebContentsView::CreateNewWidget(int route_id,
+                                          WebKit::WebPopupType popup_type) {
+}
+
+void TestWebContentsView::CreateNewFullscreenWidget(int route_id) {
+}
+
+void TestWebContentsView::ShowCreatedWindow(int route_id,
+                                            WindowOpenDisposition disposition,
+                                            const gfx::Rect& initial_pos,
+                                            bool user_gesture) {
+}
+
+void TestWebContentsView::ShowCreatedWidget(int route_id,
+                                            const gfx::Rect& initial_pos) {
+}
+
+void TestWebContentsView::ShowCreatedFullscreenWidget(int route_id) {
+}
+
+void TestWebContentsView::ShowContextMenu(const ContextMenuParams& params) {
+}
+
 void TestWebContentsView::ShowPopupMenu(const gfx::Rect& bounds,
                                         int item_height,
                                         double item_font_size,
                                         int selected_item,
-                                        const std::vector<MenuItem>& items,
-                                        bool right_aligned,
-                                        bool allow_multiple_selection) {
+                                        const std::vector<WebMenuItem>& items,
+                                        bool right_aligned) {
 }
 
 void TestWebContentsView::StartDragging(
-    const DropData& drop_data,
-    blink::WebDragOperationsMask allowed_ops,
-    const gfx::ImageSkia& image,
-    const gfx::Vector2d& image_offset,
-    const DragEventSourceInfo& event_info) {
+    const WebDropData& drop_data,
+    WebKit::WebDragOperationsMask allowed_ops,
+    const SkBitmap& image,
+    const gfx::Point& image_offset) {
 }
 
-void TestWebContentsView::UpdateDragCursor(blink::WebDragOperation operation) {
+void TestWebContentsView::UpdateDragCursor(WebKit::WebDragOperation operation) {
 }
 
 void TestWebContentsView::GotFocus() {
 }
 
 void TestWebContentsView::TakeFocus(bool reverse) {
+}
+
+void TestWebContentsView::CreateView(const gfx::Size& initial_size) {
+}
+
+RenderWidgetHostView* TestWebContentsView::CreateViewForWidget(
+    RenderWidgetHost* render_widget_host) {
+  return NULL;
 }
 
 gfx::NativeView TestWebContentsView::GetNativeView() const {
@@ -53,11 +87,17 @@ gfx::NativeWindow TestWebContentsView::GetTopLevelNativeWindow() const {
 void TestWebContentsView::GetContainerBounds(gfx::Rect *out) const {
 }
 
+void TestWebContentsView::SetPageTitle(const string16& title) {
+}
+
 void TestWebContentsView::OnTabCrashed(base::TerminationStatus status,
                                        int error_code) {
 }
 
 void TestWebContentsView::SizeContents(const gfx::Size& size) {
+}
+
+void TestWebContentsView::RenderViewCreated(RenderViewHost* host) {
 }
 
 void TestWebContentsView::Focus() {
@@ -72,63 +112,27 @@ void TestWebContentsView::StoreFocus() {
 void TestWebContentsView::RestoreFocus() {
 }
 
-DropData* TestWebContentsView::GetDropData() const {
-  return NULL;
-}
-
-gfx::Rect TestWebContentsView::GetViewBounds() const {
-  return gfx::Rect();
-}
-
-#if defined(OS_MACOSX)
-void TestWebContentsView::SetAllowOverlappingViews(bool overlapping) {
-}
-
-bool TestWebContentsView::GetAllowOverlappingViews() const {
+bool TestWebContentsView::IsDoingDrag() const {
   return false;
 }
 
-void TestWebContentsView::SetOverlayView(
-    WebContentsView* overlay, const gfx::Point& offset) {
+void TestWebContentsView::CancelDragAndCloseTab() {
 }
 
-void TestWebContentsView::RemoveOverlayView() {
-}
-#endif
-
-void TestWebContentsView::CreateView(const gfx::Size& initial_size,
-                                     gfx::NativeView context) {
-}
-
-RenderWidgetHostView* TestWebContentsView::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host) {
-  return NULL;
-}
-
-RenderWidgetHostView* TestWebContentsView::CreateViewForPopupWidget(
-    RenderWidgetHost* render_widget_host) {
-  return NULL;
-}
-
-void TestWebContentsView::SetPageTitle(const base::string16& title) {
-}
-
-void TestWebContentsView::RenderViewCreated(RenderViewHost* host) {
-}
-
-void TestWebContentsView::RenderViewSwappedIn(RenderViewHost* host) {
-}
-
-void TestWebContentsView::SetOverscrollControllerEnabled(bool enabled) {
-}
-
-#if defined(OS_MACOSX)
 bool TestWebContentsView::IsEventTracking() const {
   return false;
 }
 
 void TestWebContentsView::CloseTabAfterEventTracking() {
 }
-#endif
+
+void TestWebContentsView::GetViewBounds(gfx::Rect* out) const {
+}
+
+void TestWebContentsView::InstallOverlayView(gfx::NativeView view) {
+}
+
+void TestWebContentsView::RemoveOverlayView() {
+}
 
 }  // namespace content

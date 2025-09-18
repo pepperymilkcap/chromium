@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include <X11/extensions/Xcomposite.h>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "media/base/video_frame.h"
 #include "media/base/yuv_convert.h"
 
 // Creates a 32-bit XImage.
 static XImage* CreateImage(Display* display, int width, int height) {
-  VLOG(0) << "Allocating XImage " << width << "x" << height;
+  LOG(INFO) << "Allocating XImage " << width << "x" << height;
   return  XCreateImage(display,
                        DefaultVisual(display, DefaultScreen(display)),
                        DefaultDepth(display, DefaultScreen(display)),
@@ -84,18 +84,16 @@ X11VideoRenderer::~X11VideoRenderer() {
 }
 
 void X11VideoRenderer::Paint(media::VideoFrame* video_frame) {
-  if (!image_)
-    Initialize(video_frame->coded_size(), video_frame->visible_rect());
+  int width = video_frame->width();
+  int height = video_frame->height();
 
-  const int coded_width = video_frame->coded_size().width();
-  const int coded_height = video_frame->coded_size().height();
-  const int visible_width = video_frame->visible_rect().width();
-  const int visible_height = video_frame->visible_rect().height();
+  if (!image_)
+    Initialize(width, height);
 
   // Check if we need to reallocate our XImage.
-  if (image_->width != coded_width || image_->height != coded_height) {
+  if (image_->width != width || image_->height != height) {
     XDestroyImage(image_);
-    image_ = CreateImage(display_, coded_width, coded_height);
+    image_ = CreateImage(display_, width, height);
   }
 
   // Convert YUV frame to RGB.
@@ -111,7 +109,9 @@ void X11VideoRenderer::Paint(media::VideoFrame* video_frame) {
   media::ConvertYUVToRGB32(video_frame->data(media::VideoFrame::kYPlane),
                            video_frame->data(media::VideoFrame::kUPlane),
                            video_frame->data(media::VideoFrame::kVPlane),
-                           (uint8*)image_->data, coded_width, coded_height,
+                           (uint8*)image_->data,
+                           video_frame->width(),
+                           video_frame->height(),
                            video_frame->stride(media::VideoFrame::kYPlane),
                            video_frame->stride(media::VideoFrame::kUPlane),
                            image_->bytes_per_line,
@@ -125,8 +125,8 @@ void X11VideoRenderer::Paint(media::VideoFrame* video_frame) {
     // Creates a XImage.
     XImage image;
     memset(&image, 0, sizeof(image));
-    image.width = coded_width;
-    image.height = coded_height;
+    image.width = width;
+    image.height = height;
     image.depth = 32;
     image.bits_per_pixel = 32;
     image.format = ZPixmap;
@@ -140,15 +140,15 @@ void X11VideoRenderer::Paint(media::VideoFrame* video_frame) {
     image.data = image_->data;
 
     // Creates a pixmap and uploads from the XImage.
-    unsigned long pixmap = XCreatePixmap(display_, window_,
-                                         visible_width, visible_height,
+    unsigned long pixmap = XCreatePixmap(display_,
+                                         window_,
+                                         width,
+                                         height,
                                          32);
     GC gc = XCreateGC(display_, pixmap, 0, NULL);
     XPutImage(display_, pixmap, gc, &image,
-              video_frame->visible_rect().x(),
-              video_frame->visible_rect().y(),
-              0, 0,
-              visible_width, visible_height);
+              0, 0, 0, 0,
+              width, height);
     XFreeGC(display_, gc);
 
     // Creates the picture representing the pixmap.
@@ -158,7 +158,7 @@ void X11VideoRenderer::Paint(media::VideoFrame* video_frame) {
     // Composite the picture over the picture representing the window.
     XRenderComposite(display_, PictOpSrc, picture, 0,
                      picture_, 0, 0, 0, 0, 0, 0,
-                     visible_width, visible_height);
+                     width, height);
 
     XRenderFreePicture(display_, picture);
     XFreePixmap(display_, pixmap);
@@ -171,21 +171,18 @@ void X11VideoRenderer::Paint(media::VideoFrame* video_frame) {
   // to the window.
   GC gc = XCreateGC(display_, window_, 0, NULL);
   XPutImage(display_, window_, gc, image_,
-            video_frame->visible_rect().x(),
-            video_frame->visible_rect().y(),
-            0, 0, visible_width, visible_height);
+            0, 0, 0, 0, width, height);
   XFlush(display_);
   XFreeGC(display_, gc);
 }
 
-void X11VideoRenderer::Initialize(gfx::Size coded_size,
-                                  gfx::Rect visible_rect) {
+void X11VideoRenderer::Initialize(int width, int height) {
   CHECK(!image_);
-  VLOG(0) << "Initializing X11 Renderer...";
+  LOG(INFO) << "Initializing X11 Renderer...";
 
   // Resize the window to fit that of the video.
-  XResizeWindow(display_, window_, visible_rect.width(), visible_rect.height());
-  image_ = CreateImage(display_, coded_size.width(), coded_size.height());
+  XResizeWindow(display_, window_, width, height);
+  image_ = CreateImage(display_, width, height);
 
   // Testing XRender support. We'll use the very basic of XRender
   // so if it presents it is already good enough. We don't need
@@ -194,7 +191,7 @@ void X11VideoRenderer::Initialize(gfx::Size coded_size,
   use_render_ = XRenderQueryExtension(display_, &dummy, &dummy);
 
   if (use_render_) {
-    VLOG(0) << "Using XRender extension.";
+    LOG(INFO) << "Using XRender extension.";
 
     // If we are using XRender, we'll create a picture representing the
     // window.

@@ -1,2 +1,2 @@
-# http://crbug.com/241856
-VideoSchedulerTest.StartAndStop
+# Flaky and sometimes hangs under Valgrind, see http://crbug.com/103774
+JingleSessionTest.TestSpeed

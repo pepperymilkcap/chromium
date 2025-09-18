@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/download/background_theme.h"
 
-#import "chrome/browser/themes/theme_properties.h"
+#import "chrome/browser/themes/theme_service.h"
 
 BackgroundTheme::BackgroundTheme(ui::ThemeProvider* provider) :
     provider_(provider) {
@@ -27,16 +27,16 @@ BackgroundTheme::BackgroundTheme(ui::ThemeProvider* provider) :
 
 BackgroundTheme::~BackgroundTheme() {}
 
-gfx::ImageSkia* BackgroundTheme::GetImageSkiaNamed(int id) const {
-  return NULL;
+SkBitmap* BackgroundTheme::GetBitmapNamed(int id) const {
+  return nil;
 }
 
 SkColor BackgroundTheme::GetColor(int id) const {
   return SkColor();
 }
 
-int BackgroundTheme::GetDisplayProperty(int id) const {
-  return -1;
+bool BackgroundTheme::GetDisplayProperty(int id, int* result) const {
+  return false;
 }
 
 bool BackgroundTheme::ShouldUseNativeFrame() const {
@@ -47,38 +47,37 @@ bool BackgroundTheme::HasCustomImage(int id) const {
   return false;
 }
 
-base::RefCountedMemory* BackgroundTheme::GetRawData(
-    int id,
-    ui::ScaleFactor scale_factor) const {
+RefCountedMemory* BackgroundTheme::GetRawData(int id) const {
   return NULL;
 }
 
-NSImage* BackgroundTheme::GetNSImageNamed(int id) const {
+NSImage* BackgroundTheme::GetNSImageNamed(int id, bool allow_default) const {
   return nil;
 }
 
-NSColor* BackgroundTheme::GetNSImageColorNamed(int id) const {
+NSColor* BackgroundTheme::GetNSImageColorNamed(int id,
+                                               bool allow_default) const {
   return nil;
 }
 
-NSColor* BackgroundTheme::GetNSColor(int id) const {
-  return provider_->GetNSColor(id);
+NSColor* BackgroundTheme::GetNSColor(int id, bool allow_default) const {
+  return provider_->GetNSColor(id, allow_default);
 }
 
-NSColor* BackgroundTheme::GetNSColorTint(int id) const {
-  if (id == ThemeProperties::TINT_BUTTONS)
+NSColor* BackgroundTheme::GetNSColorTint(int id, bool allow_default) const {
+  if (id == ThemeService::TINT_BUTTONS)
     return borderColor_.get();
 
-  return provider_->GetNSColorTint(id);
+  return provider_->GetNSColorTint(id, allow_default);
 }
 
 NSGradient* BackgroundTheme::GetNSGradient(int id) const {
   switch (id) {
-    case ThemeProperties::GRADIENT_TOOLBAR_BUTTON:
-    case ThemeProperties::GRADIENT_TOOLBAR_BUTTON_INACTIVE:
+    case ThemeService::GRADIENT_TOOLBAR_BUTTON:
+    case ThemeService::GRADIENT_TOOLBAR_BUTTON_INACTIVE:
       return buttonGradient_.get();
-    case ThemeProperties::GRADIENT_TOOLBAR_BUTTON_PRESSED:
-    case ThemeProperties::GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE:
+    case ThemeService::GRADIENT_TOOLBAR_BUTTON_PRESSED:
+    case ThemeService::GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE:
       return buttonPressedGradient_.get();
     default:
       return provider_->GetNSGradient(id);

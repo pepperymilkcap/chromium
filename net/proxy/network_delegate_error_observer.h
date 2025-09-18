@@ -4,6 +4,7 @@
 
 #ifndef NET_PROXY_NETWORK_DELEGATE_ERROR_OBSERVER_H_
 #define NET_PROXY_NETWORK_DELEGATE_ERROR_OBSERVER_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -27,7 +28,7 @@ class NET_EXPORT_PRIVATE NetworkDelegateErrorObserver
   virtual ~NetworkDelegateErrorObserver();
 
   // ProxyResolverErrorObserver implementation.
-  virtual void OnPACScriptError(int line_number, const base::string16& error)
+  virtual void OnPACScriptError(int line_number, const string16& error)
       OVERRIDE;
 
  private:

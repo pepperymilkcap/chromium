@@ -10,9 +10,8 @@
 #import <Foundation/Foundation.h>
 
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/mac/scoped_nsobject.h"
-#include "base/metrics/histogram.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/sys_string_conversions.h"
 
 // Define a subset of the CoreWLAN interfaces we require. We can't depend on
 // CoreWLAN.h existing as we need to build on 10.5 SDKs. We can't just send
@@ -43,8 +42,6 @@
 - (BOOL)isEqualToNetwork:(CWNetwork*)network;
 @end
 
-namespace content {
-
 class CoreWlanApi : public WifiDataProviderCommon::WlanApiInterface {
  public:
   CoreWlanApi() {}
@@ -55,11 +52,11 @@ class CoreWlanApi : public WifiDataProviderCommon::WlanApiInterface {
   bool Init();
 
   // WlanApiInterface
-  virtual bool GetAccessPointData(WifiData::AccessPointDataSet* data) OVERRIDE;
+  virtual bool GetAccessPointData(WifiData::AccessPointDataSet* data);
 
  private:
-  base::scoped_nsobject<NSBundle> bundle_;
-  base::scoped_nsobject<NSString> merge_key_;
+  scoped_nsobject<NSBundle> bundle_;
+  scoped_nsobject<NSString> merge_key_;
 
   DISALLOW_COPY_AND_ASSIGN(CoreWlanApi);
 };
@@ -89,7 +86,7 @@ bool CoreWlanApi::Init() {
   }
   // "Leak" dl_handle rather than dlclose it, to ensure |merge_key_|
   // remains valid.
-  if (!merge_key_) {
+  if (!merge_key_.get()) {
     // Fall back to a known-working value should the lookup fail (if
     // this value is itself wrong it's not the end of the world, we might just
     // get very slightly lower quality location fixes due to SSID merges).
@@ -120,8 +117,6 @@ bool CoreWlanApi::GetAccessPointData(WifiData::AccessPointDataSet* data) {
       continue;
     }
 
-    const base::TimeTicks start_time = base::TimeTicks::Now();
-
     NSError* err = nil;
     NSArray* scan = [corewlan_interface scanForNetworksWithParameters:params
                                                                 error:&err];
@@ -135,16 +130,6 @@ bool CoreWlanApi::GetAccessPointData(WifiData::AccessPointDataSet* data) {
       ++interface_error_count;
       continue;
     }
-
-    const base::TimeDelta duration = base::TimeTicks::Now() - start_time;
-
-    UMA_HISTOGRAM_CUSTOM_TIMES(
-        "Net.Wifi.ScanLatency",
-        duration,
-        base::TimeDelta::FromMilliseconds(1),
-        base::TimeDelta::FromMinutes(1),
-        100);
-
     DVLOG(1) << interface_name << ": found " << count << " wifi APs";
 
     for (CWNetwork* network in scan) {
@@ -162,14 +147,6 @@ bool CoreWlanApi::GetAccessPointData(WifiData::AccessPointDataSet* data) {
       data->insert(access_point_data);
     }
   }
-
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "Net.Wifi.InterfaceCount",
-      [supported_interfaces count] - interface_error_count,
-      1,
-      5,
-      5);
-
   // Return true even if some interfaces failed to scan, so long as at least
   // one interface did not fail.
   return interface_error_count == 0 ||
@@ -183,5 +160,3 @@ WifiDataProviderCommon::WlanApiInterface* NewCoreWlanApi() {
 
   return NULL;
 }
-
-}  // namespace content

@@ -4,8 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_TRANSLATE_INFOBAR_BASE_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_TRANSLATE_INFOBAR_BASE_H_
+#pragma once
 
 #include "base/compiler_specific.h"
+#include "chrome/browser/translate/languages_menu_model.h"
+#include "chrome/browser/translate/translate_infobar_view.h"
 #include "chrome/browser/ui/views/infobars/infobar_background.h"
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
 
@@ -17,29 +20,33 @@ class MenuButton;
 
 // This class contains some of the base functionality that translate infobars
 // use.
-class TranslateInfoBarBase : public InfoBarView {
+class TranslateInfoBarBase : public TranslateInfoBarView,
+                             public InfoBarView {
  public:
-  // Sets the text of the provided language menu button.
-  void UpdateLanguageButtonText(views::MenuButton* button,
-                                const base::string16& text);
-
- protected:
-  explicit TranslateInfoBarBase(scoped_ptr<TranslateInfoBarDelegate> delegate);
+  TranslateInfoBarBase(InfoBarTabHelper* owner,
+                       TranslateInfoBarDelegate* delegate);
   virtual ~TranslateInfoBarBase();
 
+ protected:
+  static const int kButtonInLabelSpacing;
+
   // InfoBarView:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
+
+  // Sets the text of the provided language menu button to reflect the current
+  // value from the delegate.
+  void UpdateLanguageButtonText(views::MenuButton* button,
+                                LanguagesMenuModel::LanguageType language);
 
   // Convenience to retrieve the TranslateInfoBarDelegate for this infobar.
   TranslateInfoBarDelegate* GetDelegate();
 
-  static const int kButtonInLabelSpacing;
-
  private:
   // InfoBarView:
   virtual void OnPaintBackground(gfx::Canvas* canvas) OVERRIDE;
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
   // Returns the background that should be displayed when not animating.
   const views::Background& GetBackground();
@@ -51,7 +58,7 @@ class TranslateInfoBarBase : public InfoBarView {
                       const views::Background& background);
 
   InfoBarBackground error_background_;
-  scoped_ptr<gfx::SlideAnimation> background_color_animation_;
+  scoped_ptr<ui::SlideAnimation> background_color_animation_;
 
   DISALLOW_COPY_AND_ASSIGN(TranslateInfoBarBase);
 };

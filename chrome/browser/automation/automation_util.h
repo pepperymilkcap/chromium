@@ -1,30 +1,31 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_AUTOMATION_AUTOMATION_UTIL_H_
 #define CHROME_BROWSER_AUTOMATION_AUTOMATION_UTIL_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 
+class AutomationId;
 class AutomationProvider;
 class Browser;
+class Extension;
+class ExtensionHost;
 class GURL;
 class Profile;
+class RenderViewHost;
+class TabContentsWrapper;
 
 namespace content {
-class RenderViewHost;
 class WebContents;
 }
 
 namespace base {
 class DictionaryValue;
-}
-
-namespace extensions {
-class Extension;
 }
 
 namespace IPC {
@@ -42,11 +43,6 @@ Browser* GetBrowserAt(int index);
 // Returns the tab at |tab_index| within the browser at |browser_index| in the
 // |BrowserList|. If any of these indices are invalid, NULL will be returned.
 content::WebContents* GetWebContentsAt(int browser_index, int tab_index);
-
-#if defined(OS_CHROMEOS)
-// Returns the appropriate profile depending on signed in state of user.
-Profile* GetCurrentProfileOnChromeOS(std::string* error_message);
-#endif
 
 // Returns the browser that contains the given tab, or NULL if none exists.
 Browser* GetBrowserForTab(content::WebContents* tab);
@@ -92,6 +88,31 @@ void SetCookieJSON(AutomationProvider* provider,
 // an error reply was sent.
 bool SendErrorIfModalDialogActive(AutomationProvider* provider,
                                   IPC::Message* message);
+
+// Returns a valid automation ID for the given tab.
+AutomationId GetIdForTab(const TabContentsWrapper* tab);
+
+// Returns a valid automation ID for the extension host.
+AutomationId GetIdForExtensionView(const ExtensionHost* ext_host);
+
+// Returns a valid automation ID for the extension.
+AutomationId GetIdForExtension(const Extension* extension);
+
+// Gets the tab for the given ID. Returns true on success.
+bool GetTabForId(const AutomationId& id, content::WebContents** tab);
+
+// Gets the render view for the given ID. Returns true on success.
+bool GetRenderViewForId(const AutomationId& id,
+                        Profile* profile,
+                        RenderViewHost** rvh);
+
+// Gets the extension for the given ID. Returns true on success.
+bool GetExtensionForId(const AutomationId& id,
+                       Profile* profile,
+                       const Extension** extension);
+
+// Returns whether the given ID refers to an actual automation entity.
+bool DoesObjectWithIdExist(const AutomationId& id, Profile* profile);
 
 }  // namespace automation_util
 

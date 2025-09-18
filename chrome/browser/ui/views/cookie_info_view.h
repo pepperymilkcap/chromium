@@ -1,16 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_COOKIE_INFO_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_COOKIE_INFO_VIEW_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
+#include "net/base/cookie_monster.h"
+#include "ui/base/models/combobox_model.h"
+#include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -19,22 +23,32 @@ class Label;
 class Textfield;
 }
 
-namespace net {
-class CanonicalCookie;
-}
+
+///////////////////////////////////////////////////////////////////////////////
+// CookieInfoViewDelegate
+//
+class CookieInfoViewDelegate {
+ public:
+  virtual void ModifyExpireDate(bool session_expire) = 0;
+
+ protected:
+  virtual ~CookieInfoViewDelegate() {}
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // CookieInfoView
 //
 //  Responsible for displaying a tabular grid of Cookie information.
-class CookieInfoView : public views::View {
+class CookieInfoView : public views::View,
+                       public views::ComboboxListener,
+                       public ui::ComboboxModel {
  public:
-  CookieInfoView();
+  explicit CookieInfoView(bool editable_expiration_date);
   virtual ~CookieInfoView();
 
   // Update the display from the specified CookieNode.
   void SetCookie(const std::string& domain,
-                 const net::CanonicalCookie& cookie_node);
+                 const net::CookieMonster::CanonicalCookie& cookie_node);
 
   // Update the display from the specified cookie string.
   void SetCookieString(const GURL& url, const std::string& cookie_line);
@@ -46,15 +60,29 @@ class CookieInfoView : public views::View {
   // Enables or disables the cookie property text fields.
   void EnableCookieDisplay(bool enabled);
 
+  void set_delegate(CookieInfoViewDelegate* delegate) { delegate_ = delegate; }
+
  protected:
   // views::View:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    views::View* parent,
+                                    views::View* child) OVERRIDE;
+
+  // views::ComboboxListener:
+  virtual void ItemChanged(views::Combobox* combo_box,
+                           int prev_index,
+                           int new_index) OVERRIDE;
+
+  // ui::ComboboxModel:
+  virtual int GetItemCount() OVERRIDE;
+  virtual string16 GetItemAt(int index) OVERRIDE;
 
  private:
   // Layout helper routines.
   void AddLabelRow(int layout_id, views::GridLayout* layout,
-                   views::Label* label, views::Textfield* value);
+                   views::View* label, views::View* value);
+  void AddControlRow(int layout_id, views::GridLayout* layout,
+                     views::View* label, views::View* control);
 
   // Sets up the view layout.
   void Init();
@@ -74,6 +102,20 @@ class CookieInfoView : public views::View {
   views::Textfield* created_value_field_;
   views::Label* expires_label_;
   views::Textfield* expires_value_field_;
+  views::Combobox* expires_value_combobox_;
+  views::View* expire_view_;
+
+  // Option values for expires_value_combobox_.
+  std::vector<string16> expire_combo_values_;
+
+  // True if expiration date can be edited. In this case we will show
+  // expires_value_combobox_ instead of expires_value_field_. The cookie's
+  // expiration date is editable only this class is used in
+  // CookiesPromptView (alert before cookie is set), in all other cases we
+  // don't let user directly change cookie setting.
+  bool editable_expiration_date_;
+
+  CookieInfoViewDelegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(CookieInfoView);
 };

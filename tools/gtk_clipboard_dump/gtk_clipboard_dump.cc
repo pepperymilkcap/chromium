@@ -5,7 +5,6 @@
 #include <gtk/gtk.h>
 #include <stdio.h>
 #include <string.h>
-#include <string>
 
 namespace {
 
@@ -30,10 +29,7 @@ void PrintClipboardContents(GtkClipboard* clip) {
   printf("%d available targets:\n---------------\n", num_targets);
 
   for (int i = 0; i < num_targets; i++) {
-    gchar* target_name_cstr = gdk_atom_name(targets[i]);
-    std::string target_name(target_name_cstr);
-    g_free(target_name_cstr);
-    printf("  [format: %s", target_name.c_str());
+    printf("  [format: %s", gdk_atom_name(targets[i]));
     GtkSelectionData* data = gtk_clipboard_wait_for_contents(clip, targets[i]);
     if (!data) {
       printf("]: NULL\n\n");
@@ -42,20 +38,21 @@ void PrintClipboardContents(GtkClipboard* clip) {
 
     printf(" / length: %d / bits %d]: ", data->length, data->format);
 
-    if (strstr(target_name.c_str(), "image")) {
+    if (strstr(gdk_atom_name(targets[i]), "image")) {
       printf("(image omitted)\n\n");
-    } else if (strstr(target_name.c_str(), "TIMESTAMP")) {
+      continue;
+    } else if (strstr(gdk_atom_name(targets[i]), "TIMESTAMP")) {
       // TODO(estade): Print the time stamp in human readable format.
       printf("(time omitted)\n\n");
-    } else {
-      for (int j = 0; j < data->length; j++) {
-        // Output data one byte at a time. Currently wide strings look
-        // pretty weird.
-        printf("%c", (data->data[j] == 0 ? '_' : data->data[j]));
-      }
-      printf("\n\n");
+      continue;
     }
-    gtk_selection_data_free(data);
+
+    for (int j = 0; j < data->length; j++) {
+      // Output data one byte at a time. Currently wide strings look
+      // pretty weird.
+      printf("%c", (data->data[j] == 0 ? '_' : data->data[j]));
+    }
+    printf("\n\n");
   }
 
   if (num_targets <= 0) {
@@ -66,7 +63,6 @@ void PrintClipboardContents(GtkClipboard* clip) {
   }
 
   g_free(targets);
-  gtk_selection_data_free(target_data);
 }
 
 }

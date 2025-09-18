@@ -1,9 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/time/time.h"
-#include "base/timer/timer.h"
+#include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher.h"
 #include "ui/gfx/screen.h"
 
@@ -18,7 +18,6 @@ class PanelMouseWatcherTimer : public PanelMouseWatcher {
   virtual void Start() OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual bool IsActive() const OVERRIDE;
-  virtual gfx::Point GetMousePosition() const OVERRIDE;
 
   // Specifies the rate at which we want to sample the mouse position.
   static const int kMousePollingIntervalMs = 250;
@@ -64,11 +63,6 @@ bool PanelMouseWatcherTimer::IsActive() const {
   return timer_.IsRunning();
 }
 
-gfx::Point PanelMouseWatcherTimer::GetMousePosition() const {
-  // TODO(scottmg): NativeScreen is wrong. http://crbug.com/133312
-  return gfx::Screen::GetNativeScreen()->GetCursorScreenPoint();
-}
-
 void PanelMouseWatcherTimer::DoWork() {
-  NotifyMouseMovement(GetMousePosition());
+  NotifyMouseMovement(gfx::Screen::GetCursorScreenPoint());
 }

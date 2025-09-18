@@ -8,40 +8,45 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "grit/renderer_resources.h"
-#include "third_party/WebKit/public/platform/WebFileSystem.h"
-#include "third_party/WebKit/public/platform/WebFileSystemType.h"
-#include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 namespace extensions {
 
 FileBrowserPrivateCustomBindings::FileBrowserPrivateCustomBindings(
-    Dispatcher* dispatcher, ChromeV8Context* context)
-    : ChromeV8Extension(dispatcher, context) {
-  RouteFunction(
-      "GetFileSystem",
-       base::Bind(&FileBrowserPrivateCustomBindings::GetFileSystem,
-                  base::Unretained(this)));
-}
+    int dependency_count,
+    const char** dependencies)
+    : ChromeV8Extension("extensions/file_browser_private_custom_bindings.js",
+                        IDR_FILE_BROWSER_PRIVATE_CUSTOM_BINDINGS_JS,
+                        dependency_count,
+                        dependencies,
+                        NULL) {}
 
-void FileBrowserPrivateCustomBindings::GetFileSystem(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
+static v8::Handle<v8::Value> GetLocalFileSystem(
+    const v8::Arguments& args) {
   DCHECK(args.Length() == 2);
   DCHECK(args[0]->IsString());
   DCHECK(args[1]->IsString());
   std::string name(*v8::String::Utf8Value(args[0]));
-  std::string root_url(*v8::String::Utf8Value(args[1]));
+  std::string path(*v8::String::Utf8Value(args[1]));
 
-  blink::WebFrame* webframe =
-      blink::WebFrame::frameForContext(context()->v8_context());
+  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForCurrentContext();
   DCHECK(webframe);
-  args.GetReturnValue().Set(
-      webframe->createFileSystem(
-          blink::WebFileSystemTypeExternal,
-          blink::WebString::fromUTF8(name.c_str()),
-          blink::WebString::fromUTF8(root_url.c_str())));
+  return webframe->createFileSystem(
+      WebKit::WebFileSystem::TypeExternal,
+      WebKit::WebString::fromUTF8(name.c_str()),
+      WebKit::WebString::fromUTF8(path.c_str()));
+}
+
+v8::Handle<v8::FunctionTemplate>
+FileBrowserPrivateCustomBindings::GetNativeFunction(
+    v8::Handle<v8::String> name) {
+  if (name->Equals(v8::String::New("GetLocalFileSystem")))
+    return v8::FunctionTemplate::New(GetLocalFileSystem);
+
+  return ChromeV8Extension::GetNativeFunction(name);
 }
 
 }  // namespace extensions

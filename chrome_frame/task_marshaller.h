@@ -4,6 +4,7 @@
 
 #ifndef CHROME_FRAME_TASK_MARSHALLER_H_
 #define CHROME_FRAME_TASK_MARSHALLER_H_
+#pragma once
 
 #include <windows.h>
 #include <deque>
@@ -13,7 +14,7 @@
 #include "base/pending_task.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/time/time.h"
+#include "base/time.h"
 
 class Task;
 

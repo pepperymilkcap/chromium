@@ -1,8 +1,11 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
+  'includes': [
+    '../../build/common.gypi',
+  ],
   'target_defaults': {
     'include_dirs': [
       # all our own includes are relative to src/
@@ -82,20 +85,20 @@
     {
       'target_name': 'vectored_handler_tests',
       'type': 'executable',
-      'dependencies': [
-        '../../base/base.gyp:base',
-        '../../base/base.gyp:run_all_unittests',
-        '../../breakpad/breakpad.gyp:breakpad_handler',
-        '../../testing/gmock.gyp:gmock',
-        '../../testing/gtest.gyp:gtest',
-        'crash_dll',
-        'crash_report',
-      ],
       'sources': [
         'nt_loader_unittest.cc',
         'vectored_handler_unittest.cc',
         'veh_test.cc',
         'veh_test.h',
+      ],
+      'dependencies': [
+        'crash_dll',
+        'crash_report',
+        '../../base/base.gyp:base',
+        '../../testing/gmock.gyp:gmock',
+        '../../testing/gtest.gyp:gtest',
+        '../../testing/gtest.gyp:gtest_main',
+        '../../breakpad/breakpad.gyp:breakpad_handler',
       ],
     },
     {

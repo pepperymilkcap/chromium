@@ -7,13 +7,12 @@
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_SIGNATURE_UTIL_H_
 #define CHROME_BROWSER_SAFE_BROWSING_SIGNATURE_UTIL_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 
-namespace base {
 class FilePath;
-}
 
 namespace safe_browsing {
 class ClientDownloadRequest_SignatureInfo;
@@ -25,7 +24,7 @@ class SignatureUtil : public base::RefCountedThreadSafe<SignatureUtil> {
   // Fills in the DownloadRequest_SignatureInfo for the given file path.
   // This method may be called on any thread.
   virtual void CheckSignature(
-      const base::FilePath& file_path,
+      const FilePath& file_path,
       ClientDownloadRequest_SignatureInfo* signature_info);
 
  protected:

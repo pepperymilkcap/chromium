@@ -4,12 +4,13 @@
 
 #ifndef CHROME_BROWSER_CHARACTER_ENCODING_H_
 #define CHROME_BROWSER_CHARACTER_ENCODING_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 class CharacterEncoding {
  public:
@@ -24,14 +25,14 @@ class CharacterEncoding {
     // l10n_util::SortVectorWithStringKey to sort the encoding menu items
     // by current locale character sequence. We need to keep the order within
     // encoding category name, that's why we use category name as key.
-    const base::string16& GetStringKey() const { return encoding_category_name; }
+    const string16& GetStringKey() const { return encoding_category_name; }
 
     // Encoding command id.
     int encoding_id;
     // Encoding display name.
-    base::string16 encoding_display_name;
+    string16 encoding_display_name;
     // Encoding category name.
-    base::string16 encoding_category_name;
+    string16 encoding_category_name;
   };
 
   // Return canonical encoding name according to the command ID.
@@ -42,7 +43,7 @@ class CharacterEncoding {
   // Return display name of canonical encoding according to the command
   // ID. THIS FUNCTION IS NOT THREADSAFE. You must run this function
   // only in UI thread.
-  static base::string16 GetCanonicalEncodingDisplayNameByCommandId(int id);
+  static string16 GetCanonicalEncodingDisplayNameByCommandId(int id);
 
   // Return count number of all supported canonical encoding.
   static int GetSupportCanonicalEncodingCount();
@@ -56,7 +57,7 @@ class CharacterEncoding {
   // which starts from zero to GetSupportCanonicalEncodingCount() - 1.
   // THIS FUNCTION IS NOT THREADSAFE. You must run this function
   // only in UI thread.
-  static base::string16 GetCanonicalEncodingDisplayNameByIndex(int index);
+  static string16 GetCanonicalEncodingDisplayNameByIndex(int index);
 
   // Return encoding command id according to the index, which starts from
   // zero to GetSupportCanonicalEncodingCount() - 1. Otherwise returns 0.

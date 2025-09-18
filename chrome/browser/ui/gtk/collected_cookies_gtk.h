@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_COLLECTED_COOKIES_GTK_H_
 #define CHROME_BROWSER_UI_GTK_COLLECTED_COOKIES_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -19,20 +20,23 @@
 #include "ui/base/gtk/gtk_signal.h"
 
 class CookiesTreeModel;
-
-namespace content {
-class WebContents;
-}
+class TabContentsWrapper;
 
 // CollectedCookiesGtk is a dialog that displays the allowed and blocked
 // cookies of the current tab contents.  To display the dialog, invoke
-// ShowCollectedCookiesDialog() on the delegate of the web contents's
+// ShowCollectedCookiesDialog() on the delegate of the tab contents wrapper's
 // content settings tab helper.
 
-class CollectedCookiesGtk : public gtk_tree::TreeAdapter::Delegate,
+class CollectedCookiesGtk : public ConstrainedWindowGtkDelegate,
+                            public gtk_tree::TreeAdapter::Delegate,
                             public content::NotificationObserver {
  public:
-  CollectedCookiesGtk(GtkWindow* parent, content::WebContents* web_contents);
+  CollectedCookiesGtk(GtkWindow* parent, TabContentsWrapper* wrapper);
+
+  // ConstrainedWindowGtkDelegate methods.
+  virtual GtkWidget* GetWidgetRoot() OVERRIDE;
+  virtual GtkWidget* GetFocusWidget() OVERRIDE;
+  virtual void DeleteDelegate() OVERRIDE;
 
  private:
   virtual ~CollectedCookiesGtk();
@@ -40,11 +44,11 @@ class CollectedCookiesGtk : public gtk_tree::TreeAdapter::Delegate,
   // Initialize all widgets of this dialog.
   void Init();
 
-  // True if the selection contains at least one host node.
-  bool SelectionContainsHostNode(GtkTreeSelection* selection,
-                                 gtk_tree::TreeAdapter* adapter);
+  // True if the selection contains at least one origin node.
+  bool SelectionContainsOriginNode(GtkTreeSelection* selection,
+                                   gtk_tree::TreeAdapter* adapter);
 
-  // Enable the allow/block buttons if at least one host node is selected.
+  // Enable the allow/block buttons if at least one origin node is selected.
   void EnableControls();
 
   // Add exceptions for all origin nodes within the selection.
@@ -78,11 +82,10 @@ class CollectedCookiesGtk : public gtk_tree::TreeAdapter::Delegate,
                        OnForSessionBlockedButtonClicked);
   CHROMEGTK_CALLBACK_2(CollectedCookiesGtk, void, OnSwitchPage,
                        gpointer, guint);
-  CHROMEGTK_CALLBACK_0(CollectedCookiesGtk, void, OnDestroy);
 
   content::NotificationRegistrar registrar_;
 
-  GtkWidget* window_;
+  ConstrainedWindow* window_;
 
   // Widgets of the dialog.
   GtkWidget* dialog_;
@@ -111,8 +114,8 @@ class CollectedCookiesGtk : public gtk_tree::TreeAdapter::Delegate,
   // Displays information about selected cookie.
   GtkWidget* cookie_info_view_;
 
-  // The web contents.
-  content::WebContents* web_contents_;
+  // The tab contents wrapper.
+  TabContentsWrapper* wrapper_;
 
   bool status_changed_;
 

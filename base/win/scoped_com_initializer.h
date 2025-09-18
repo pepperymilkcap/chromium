@@ -1,15 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_WIN_SCOPED_COM_INITIALIZER_H_
 #define BASE_WIN_SCOPED_COM_INITIALIZER_H_
-
-#include <objbase.h>
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "build/build_config.h"
+
+#if defined(OS_WIN)
+
+#include <objbase.h>
 
 namespace base {
 namespace win {
@@ -31,12 +34,12 @@ class ScopedCOMInitializer {
     Initialize(COINIT_MULTITHREADED);
   }
 
-  ~ScopedCOMInitializer() {
+  ScopedCOMInitializer::~ScopedCOMInitializer() {
 #ifndef NDEBUG
     // Using the windows API directly to avoid dependency on platform_thread.
     DCHECK_EQ(GetCurrentThreadId(), thread_id_);
 #endif
-    if (succeeded())
+    if (SUCCEEDED(hr_))
       CoUninitialize();
   }
 
@@ -48,12 +51,6 @@ class ScopedCOMInitializer {
     thread_id_ = GetCurrentThreadId();
 #endif
     hr_ = CoInitializeEx(NULL, init);
-#ifndef NDEBUG
-    if (hr_ == S_FALSE)
-      LOG(ERROR) << "Multiple CoInitialize() calls for thread " << thread_id_;
-    else
-      DCHECK_NE(RPC_E_CHANGED_MODE, hr_) << "Invalid COM thread model change";
-#endif
   }
 
   HRESULT hr_;
@@ -70,5 +67,29 @@ class ScopedCOMInitializer {
 
 }  // namespace win
 }  // namespace base
+
+#else
+
+namespace base {
+namespace win {
+
+// Do-nothing class for other platforms.
+class ScopedCOMInitializer {
+ public:
+  enum SelectMTA { kMTA };
+  ScopedCOMInitializer() {}
+  explicit ScopedCOMInitializer(SelectMTA mta) {}
+  ~ScopedCOMInitializer() {}
+
+  bool succeeded() const { return true; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ScopedCOMInitializer);
+};
+
+}  // namespace win
+}  // namespace base
+
+#endif
 
 #endif  // BASE_WIN_SCOPED_COM_INITIALIZER_H_

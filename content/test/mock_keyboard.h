@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_TEST_MOCK_KEYBOARD_H_
 #define CONTENT_TEST_MOCK_KEYBOARD_H_
+#pragma once
 
 #include <string>
 
@@ -12,8 +13,6 @@
 #if defined(OS_WIN)
 #include "content/test/mock_keyboard_driver_win.h"
 #endif
-
-namespace content {
 
 // A mock keyboard interface.
 // This class defines a pseudo keyboard device, which implements mappings from
@@ -104,7 +103,5 @@ class MockKeyboard {
 
   DISALLOW_COPY_AND_ASSIGN(MockKeyboard);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_TEST_MOCK_KEYBOARD_H_

@@ -6,7 +6,6 @@
 #define PPAPI_CPP_DEV_WIDGET_CLIENT_DEV_H_
 
 #include "ppapi/c/pp_stdint.h"
-#include "ppapi/cpp/instance_handle.h"
 
 namespace pp {
 
@@ -20,7 +19,7 @@ class Widget_Dev;
 // instance.
 class WidgetClient_Dev {
  public:
-  explicit WidgetClient_Dev(Instance* instance);
+  WidgetClient_Dev(Instance* instance);
   virtual ~WidgetClient_Dev();
 
   /**
@@ -44,7 +43,7 @@ class WidgetClient_Dev {
                                        bool type) = 0;
 
  private:
-  InstanceHandle associated_instance_;
+  Instance* associated_instance_;
 };
 
 }  // namespace pp

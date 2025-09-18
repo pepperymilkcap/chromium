@@ -6,11 +6,9 @@
 
 #import <AppKit/AppKit.h>
 
-#include "third_party/WebKit/public/web/mac/WebInputEventFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebInputEventFactory.h"
 
-using blink::WebInputEventFactory;
-
-namespace content {
+using WebKit::WebInputEventFactory;
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent()
     : os_event(NULL),
@@ -56,5 +54,3 @@ NativeWebKeyboardEvent& NativeWebKeyboardEvent::operator=(
 NativeWebKeyboardEvent::~NativeWebKeyboardEvent() {
   [os_event release];
 }
-
-}  // namespace content

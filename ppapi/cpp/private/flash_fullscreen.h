@@ -5,15 +5,14 @@
 #ifndef PPAPI_CPP_PRIVATE_FLASH_FULLSCREEN_H_
 #define PPAPI_CPP_PRIVATE_FLASH_FULLSCREEN_H_
 
-#include "ppapi/cpp/instance_handle.h"
-
 namespace pp {
 
+class Instance;
 class Size;
 
 class FlashFullscreen {
  public:
-  FlashFullscreen(const InstanceHandle& instance);
+  FlashFullscreen(Instance* instance);
   virtual ~FlashFullscreen();
 
   // PPB_FlashFullscreen methods.
@@ -21,10 +20,8 @@ class FlashFullscreen {
   bool SetFullscreen(bool fullscreen);
   bool GetScreenSize(Size* size);
 
-  bool MustRecreateContexts();
-
  private:
-  InstanceHandle instance_;
+  Instance* instance_;
 };
 
 }  // namespace pp

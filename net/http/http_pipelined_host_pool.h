@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_PIPELINED_HOST_POOL_H_
 #define NET_HTTP_HTTP_PIPELINED_HOST_POOL_H_
+#pragma once
 
 #include <map>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "net/http/http_pipelined_host.h"
 #include "net/http/http_pipelined_host_capability.h"
 
@@ -35,39 +35,37 @@ class NET_EXPORT_PRIVATE HttpPipelinedHostPool
     // Called when a HttpPipelinedHost has new capacity. Attempts to allocate
     // any pending pipeline-capable requests to pipelines.
     virtual void OnHttpPipelinedHostHasAdditionalCapacity(
-        HttpPipelinedHost* host) = 0;
+        const HostPortPair& origin) = 0;
   };
 
-  HttpPipelinedHostPool(
-      Delegate* delegate,
-      HttpPipelinedHost::Factory* factory,
-      const base::WeakPtr<HttpServerProperties>& http_server_properties,
-      bool force_pipelining);
+  HttpPipelinedHostPool(Delegate* delegate,
+                        HttpPipelinedHost::Factory* factory,
+                        HttpServerProperties* http_server_properties_);
   virtual ~HttpPipelinedHostPool();
 
-  // Returns true if pipelining might work for |key|. Generally, this returns
-  // true, unless |key| is known to have failed pipelining recently.
-  bool IsKeyEligibleForPipelining(const HttpPipelinedHost::Key& key);
+  // Returns true if pipelining might work for |origin|. Generally, this returns
+  // true, unless |origin| is known to have failed pipelining recently.
+  bool IsHostEligibleForPipelining(const HostPortPair& origin);
 
   // Constructs a new pipeline on |connection| and returns a new
   // HttpPipelinedStream that uses it.
   HttpPipelinedStream* CreateStreamOnNewPipeline(
-      const HttpPipelinedHost::Key& key,
+      const HostPortPair& origin,
       ClientSocketHandle* connection,
       const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
       const BoundNetLog& net_log,
       bool was_npn_negotiated,
-      NextProto protocol_negotiated);
+      SSLClientSocket::NextProto protocol_negotiated);
 
   // Tries to find an existing pipeline with capacity for a new request. If
   // successful, returns a new stream on that pipeline. Otherwise, returns NULL.
   HttpPipelinedStream* CreateStreamOnExistingPipeline(
-      const HttpPipelinedHost::Key& key);
+      const HostPortPair& origin);
 
-  // Returns true if a pipelined connection already exists for |key| and
+  // Returns true if a pipelined connection already exists for this origin and
   // can accept new requests.
-  bool IsExistingPipelineAvailableForKey(const HttpPipelinedHost::Key& key);
+  bool IsExistingPipelineAvailableForOrigin(const HostPortPair& origin);
 
   // Callbacks for HttpPipelinedHost.
   virtual void OnHostIdle(HttpPipelinedHost* host) OVERRIDE;
@@ -83,16 +81,15 @@ class NET_EXPORT_PRIVATE HttpPipelinedHostPool
   base::Value* PipelineInfoToValue() const;
 
  private:
-  typedef std::map<HttpPipelinedHost::Key, HttpPipelinedHost*> HostMap;
+  typedef std::map<const HostPortPair, HttpPipelinedHost*> HostMap;
 
-  HttpPipelinedHost* GetPipelinedHost(const HttpPipelinedHost::Key& key,
+  HttpPipelinedHost* GetPipelinedHost(const HostPortPair& origin,
                                       bool create_if_not_found);
 
   Delegate* delegate_;
   scoped_ptr<HttpPipelinedHost::Factory> factory_;
   HostMap host_map_;
-  const base::WeakPtr<HttpServerProperties> http_server_properties_;
-  bool force_pipelining_;
+  HttpServerProperties* http_server_properties_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpPipelinedHostPool);
 };

@@ -1,22 +1,31 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_BASICTYPES_H_
 #define BASE_BASICTYPES_H_
+#pragma once
 
-#include <limits.h>  // So we can set the bounds of our types.
-#include <stddef.h>  // For size_t.
-#include <stdint.h>  // For intptr_t.
-#include <string.h>  // For memcpy.
+#include <limits.h>         // So we can set the bounds of our types
+#include <stddef.h>         // For size_t
+#include <string.h>         // for memcpy
 
-#include "base/compiler_specific.h"
-#include "base/port.h"  // Types that only need exist on certain systems.
+#include "base/port.h"    // Types that only need exist on certain systems
+
+#ifndef COMPILER_MSVC
+// stdint.h is part of C99 but MSVC doesn't have it.
+#include <stdint.h>         // For intptr_t.
+#endif
 
 typedef signed char         schar;
 typedef signed char         int8;
 typedef short               int16;
+// TODO: Remove these type guards.  These are to avoid conflicts with
+// obsolete/protypes.h in the Gecko SDK.
+#ifndef _INT32
+#define _INT32
 typedef int                 int32;
+#endif
 
 // The NSPR system headers define 64-bit as |long| when possible, except on
 // Mac OS X.  In order to not have typedef mismatches, we do the same on LP64.
@@ -29,25 +38,20 @@ typedef long                int64;
 typedef long long           int64;
 #endif
 
-// NOTE: It is DANGEROUS to compare signed with unsigned types in loop
-// conditions and other conditional expressions, and it is DANGEROUS to
-// compute object/allocation sizes, indices, and offsets with signed types.
-// Integer overflow behavior for signed types is UNDEFINED in the C/C++
-// standards, but is defined for unsigned types.
-//
-// Use the unsigned types if your variable represents a bit pattern (e.g. a
-// hash value), object or allocation size, object count, offset,
-// array/vector index, etc.
-//
-// Do NOT use 'unsigned' to express "this value should always be positive";
+// NOTE: unsigned types are DANGEROUS in loops and other arithmetical
+// places.  Use the signed types unless your variable represents a bit
+// pattern (eg a hash value) or you really need the extra bit.  Do NOT
+// use 'unsigned' to express "this value should always be positive";
 // use assertions for this.
-//
-// See the Chromium style guide for more information.
-// https://sites.google.com/a/chromium.org/dev/developers/coding-style
 
 typedef unsigned char      uint8;
 typedef unsigned short     uint16;
+// TODO: Remove these type guards.  These are to avoid conflicts with
+// obsolete/protypes.h in the Gecko SDK.
+#ifndef _UINT32
+#define _UINT32
 typedef unsigned int       uint32;
+#endif
 
 // See the comment above about NSPR and 64-bit.
 #if defined(__LP64__) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
@@ -75,14 +79,6 @@ const  int32 kint32max  = (( int32) 0x7FFFFFFF);
 const  int64 kint64min  = (( int64) GG_LONGLONG(0x8000000000000000));
 const  int64 kint64max  = (( int64) GG_LONGLONG(0x7FFFFFFFFFFFFFFF));
 
-// Put this in the private: declarations for a class to be uncopyable.
-#define DISALLOW_COPY(TypeName) \
-  TypeName(const TypeName&)
-
-// Put this in the private: declarations for a class to be unassignable.
-#define DISALLOW_ASSIGN(TypeName) \
-  void operator=(const TypeName&)
-
 // A macro to disallow the copy constructor and operator= functions
 // This should be used in the private: declarations for a class
 #define DISALLOW_COPY_AND_ASSIGN(TypeName) \
@@ -90,7 +86,7 @@ const  int64 kint64max  = (( int64) GG_LONGLONG(0x7FFFFFFFFFFFFFFF));
   void operator=(const TypeName&)
 
 // An older, deprecated, politically incorrect name for the above.
-// NOTE: The usage of this macro was banned from our code base, but some
+// NOTE: The usage of this macro was baned from our code base, but some
 // third_party libraries are yet using it.
 // TODO(tfarina): Figure out how to fix the usage of this macro in the
 // third_party libraries and get rid of it.
@@ -182,7 +178,7 @@ char (&ArraySizeHelper(const T (&array)[N]))[N];
 // When you use implicit_cast, the compiler checks that the cast is safe.
 // Such explicit implicit_casts are necessary in surprisingly many
 // situations where C++ demands an exact type match instead of an
-// argument type convertible to a target type.
+// argument type convertable to a target type.
 //
 // The From type can be inferred, so the preferred syntax for using
 // implicit_cast is the same as for static_cast etc.:
@@ -212,21 +208,13 @@ inline To implicit_cast(From const &f) {
 // the expression is false, most compilers will issue a warning/error
 // containing the name of the variable.
 
-#undef COMPILE_ASSERT
-
-#if __cplusplus >= 201103L
-
-// Under C++11, just use static_assert.
-#define COMPILE_ASSERT(expr, msg) static_assert(expr, #msg)
-
-#else
-
 template <bool>
 struct CompileAssert {
 };
 
+#undef COMPILE_ASSERT
 #define COMPILE_ASSERT(expr, msg) \
-  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1] ALLOW_UNUSED
+  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1]
 
 // Implementation details of COMPILE_ASSERT:
 //
@@ -269,7 +257,6 @@ struct CompileAssert {
 //   This is to avoid running into a bug in MS VC 7.1, which
 //   causes ((0.0) ? 1 : -1) to incorrectly evaluate to 1.
 
-#endif
 
 // bit_cast<Dest,Source> is a template function that implements the
 // equivalent of "*reinterpret_cast<Dest*>(&source)".  We need this in
@@ -294,7 +281,7 @@ struct CompileAssert {
 //
 // This is true for any cast syntax, either *(int*)&f or
 // *reinterpret_cast<int*>(&f).  And it is particularly true for
-// conversions between integral lvalues and floating-point lvalues.
+// conversions betweeen integral lvalues and floating-point lvalues.
 //
 // The purpose of 3.10 -15- is to allow optimizing compilers to assume
 // that expressions with different types refer to different memory.  gcc
@@ -327,7 +314,9 @@ struct CompileAssert {
 
 template <class Dest, class Source>
 inline Dest bit_cast(const Source& source) {
-  COMPILE_ASSERT(sizeof(Dest) == sizeof(Source), VerifySizesAreEqual);
+  // Compile time assertion: sizeof(Dest) == sizeof(Source)
+  // A compile error here means your Dest and Source have different sizes.
+  typedef char VerifySizesAreEqual [sizeof(Dest) == sizeof(Source) ? 1 : -1];
 
   Dest dest;
   memcpy(&dest, &source, sizeof(dest));

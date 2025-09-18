@@ -6,40 +6,23 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/lazy_instance.h"
-#include "base/posix/eintr_wrapper.h"
+#include "base/eintr_wrapper.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_restrictions.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
-#include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/dom_storage/session_storage_namespace_impl.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_thread.h"
 
-namespace content {
-namespace {
+using content::BrowserThread;
 
-typedef std::map<int, RenderWidgetHelper*> WidgetHelperMap;
-base::LazyInstance<WidgetHelperMap> g_widget_helpers =
-    LAZY_INSTANCE_INITIALIZER;
-
-void AddWidgetHelper(int render_process_id,
-                     const scoped_refptr<RenderWidgetHelper>& widget_helper) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  // We don't care if RenderWidgetHelpers overwrite an existing process_id. Just
-  // want this to be up to date.
-  g_widget_helpers.Get()[render_process_id] = widget_helper.get();
-}
-
-}  // namespace
-
-// A helper used with DidReceiveBackingStoreMsg that we hold a pointer to in
+// A helper used with DidReceiveUpdateMsg that we hold a pointer to in
 // pending_paints_.
-class RenderWidgetHelper::BackingStoreMsgProxy {
+class RenderWidgetHelper::UpdateMsgProxy {
  public:
-  BackingStoreMsgProxy(RenderWidgetHelper* h, const IPC::Message& m);
-  ~BackingStoreMsgProxy();
+  UpdateMsgProxy(RenderWidgetHelper* h, const IPC::Message& m);
+  ~UpdateMsgProxy();
   void Run();
   void Cancel() { cancelled_ = true; }
 
@@ -50,26 +33,26 @@ class RenderWidgetHelper::BackingStoreMsgProxy {
   IPC::Message message_;
   bool cancelled_;  // If true, then the message will not be dispatched.
 
-  DISALLOW_COPY_AND_ASSIGN(BackingStoreMsgProxy);
+  DISALLOW_COPY_AND_ASSIGN(UpdateMsgProxy);
 };
 
-RenderWidgetHelper::BackingStoreMsgProxy::BackingStoreMsgProxy(
+RenderWidgetHelper::UpdateMsgProxy::UpdateMsgProxy(
     RenderWidgetHelper* h, const IPC::Message& m)
     : helper_(h),
       message_(m),
       cancelled_(false) {
 }
 
-RenderWidgetHelper::BackingStoreMsgProxy::~BackingStoreMsgProxy() {
+RenderWidgetHelper::UpdateMsgProxy::~UpdateMsgProxy() {
   // If the paint message was never dispatched, then we need to let the
   // helper know that we are going away.
-  if (!cancelled_ && helper_.get())
-    helper_->OnDiscardBackingStoreMsg(this);
+  if (!cancelled_ && helper_)
+    helper_->OnDiscardUpdateMsg(this);
 }
 
-void RenderWidgetHelper::BackingStoreMsgProxy::Run() {
+void RenderWidgetHelper::UpdateMsgProxy::Run() {
   if (!cancelled_) {
-    helper_->OnDispatchBackingStoreMsg(this);
+    helper_->OnDispatchUpdateMsg(this);
     helper_ = NULL;
   }
 }
@@ -85,70 +68,59 @@ RenderWidgetHelper::RenderWidgetHelper()
 }
 
 RenderWidgetHelper::~RenderWidgetHelper() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  // Delete this RWH from the map if it is found.
-  WidgetHelperMap& widget_map = g_widget_helpers.Get();
-  WidgetHelperMap::iterator it = widget_map.find(render_process_id_);
-  if (it != widget_map.end() && it->second == this)
-    widget_map.erase(it);
-
   // The elements of pending_paints_ each hold an owning reference back to this
   // object, so we should not be destroyed unless pending_paints_ is empty!
   DCHECK(pending_paints_.empty());
 
-#if defined(OS_POSIX) && !defined(TOOLKIT_GTK) && !defined(OS_ANDROID)
+#if defined(OS_MACOSX)
   ClearAllocatedDIBs();
 #endif
 }
 
 void RenderWidgetHelper::Init(
     int render_process_id,
-    ResourceDispatcherHostImpl* resource_dispatcher_host) {
+    ResourceDispatcherHost* resource_dispatcher_host) {
   render_process_id_ = render_process_id;
   resource_dispatcher_host_ = resource_dispatcher_host;
-
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&AddWidgetHelper,
-                 render_process_id_, make_scoped_refptr(this)));
 }
 
 int RenderWidgetHelper::GetNextRoutingID() {
   return next_routing_id_.GetNext() + 1;
 }
 
-// static
-RenderWidgetHelper* RenderWidgetHelper::FromProcessHostID(
-    int render_process_host_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  WidgetHelperMap::const_iterator ci = g_widget_helpers.Get().find(
-      render_process_host_id);
-  return (ci == g_widget_helpers.Get().end())? NULL : ci->second;
-}
+void RenderWidgetHelper::CancelResourceRequests(int render_widget_id) {
+  if (render_process_id_ == -1)
+    return;
 
-void RenderWidgetHelper::ResumeDeferredNavigation(
-    const GlobalRequestID& request_id) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&RenderWidgetHelper::OnResumeDeferredNavigation,
+      base::Bind(&RenderWidgetHelper::OnCancelResourceRequests,
                  this,
-                 request_id));
+                 render_widget_id));
 }
 
-bool RenderWidgetHelper::WaitForBackingStoreMsg(
-    int render_widget_id, const base::TimeDelta& max_delay, IPC::Message* msg) {
+void RenderWidgetHelper::CrossSiteSwapOutACK(
+    const ViewMsg_SwapOut_Params& params) {
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&RenderWidgetHelper::OnCrossSiteSwapOutACK,
+                 this,
+                 params));
+}
+
+bool RenderWidgetHelper::WaitForUpdateMsg(int render_widget_id,
+                                          const base::TimeDelta& max_delay,
+                                          IPC::Message* msg) {
   base::TimeTicks time_start = base::TimeTicks::Now();
 
   for (;;) {
-    BackingStoreMsgProxy* proxy = NULL;
+    UpdateMsgProxy* proxy = NULL;
     {
       base::AutoLock lock(pending_paints_lock_);
 
-      BackingStoreMsgProxyMap::iterator it =
-          pending_paints_.find(render_widget_id);
+      UpdateMsgProxyMap::iterator it = pending_paints_.find(render_widget_id);
       if (it != pending_paints_.end()) {
-        BackingStoreMsgProxyQueue &queue = it->second;
+        UpdateMsgProxyQueue &queue = it->second;
         DCHECK(!queue.empty());
         proxy = queue.front();
 
@@ -174,28 +146,16 @@ bool RenderWidgetHelper::WaitForBackingStoreMsg(
     if (max_sleep_time <= base::TimeDelta::FromMilliseconds(0))
       break;
 
-    base::ThreadRestrictions::ScopedAllowWait allow_wait;
     event_.TimedWait(max_sleep_time);
   }
 
   return false;
 }
 
-void RenderWidgetHelper::ResumeRequestsForView(int route_id) {
-  // We only need to resume blocked requests if we used a valid route_id.
-  // See CreateNewWindow.
-  if (route_id != MSG_ROUTING_NONE) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(&RenderWidgetHelper::OnResumeRequestsForView,
-            this, route_id));
-  }
-}
-
-void RenderWidgetHelper::DidReceiveBackingStoreMsg(const IPC::Message& msg) {
+void RenderWidgetHelper::DidReceiveUpdateMsg(const IPC::Message& msg) {
   int render_widget_id = msg.routing_id();
 
-  BackingStoreMsgProxy* proxy = new BackingStoreMsgProxy(this, msg);
+  UpdateMsgProxy* proxy = new UpdateMsgProxy(this, msg);
   {
     base::AutoLock lock(pending_paints_lock_);
 
@@ -208,20 +168,19 @@ void RenderWidgetHelper::DidReceiveBackingStoreMsg(const IPC::Message& msg) {
   event_.Signal();
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&BackingStoreMsgProxy::Run, base::Owned(proxy)));
+                          base::Bind(&UpdateMsgProxy::Run, base::Owned(proxy)));
 }
 
-void RenderWidgetHelper::OnDiscardBackingStoreMsg(BackingStoreMsgProxy* proxy) {
+void RenderWidgetHelper::OnDiscardUpdateMsg(UpdateMsgProxy* proxy) {
   const IPC::Message& msg = proxy->message();
 
   // Remove the proxy from the map now that we are going to handle it normally.
   {
     base::AutoLock lock(pending_paints_lock_);
 
-    BackingStoreMsgProxyMap::iterator it =
-        pending_paints_.find(msg.routing_id());
+    UpdateMsgProxyMap::iterator it = pending_paints_.find(msg.routing_id());
     DCHECK(it != pending_paints_.end());
-    BackingStoreMsgProxyQueue &queue = it->second;
+    UpdateMsgProxyQueue &queue = it->second;
     DCHECK(queue.front() == proxy);
 
     queue.pop_front();
@@ -230,77 +189,66 @@ void RenderWidgetHelper::OnDiscardBackingStoreMsg(BackingStoreMsgProxy* proxy) {
   }
 }
 
-void RenderWidgetHelper::OnDispatchBackingStoreMsg(
-    BackingStoreMsgProxy* proxy) {
-  OnDiscardBackingStoreMsg(proxy);
+void RenderWidgetHelper::OnDispatchUpdateMsg(UpdateMsgProxy* proxy) {
+  OnDiscardUpdateMsg(proxy);
 
   // It is reasonable for the host to no longer exist.
-  RenderProcessHost* host = RenderProcessHost::FromID(render_process_id_);
+  content::RenderProcessHost* host =
+      content::RenderProcessHost::FromID(render_process_id_);
   if (host)
     host->OnMessageReceived(proxy->message());
 }
 
-void RenderWidgetHelper::OnResumeDeferredNavigation(
-    const GlobalRequestID& request_id) {
-  resource_dispatcher_host_->ResumeDeferredNavigation(request_id);
+void RenderWidgetHelper::OnCancelResourceRequests(
+    int render_widget_id) {
+  resource_dispatcher_host_->CancelRequestsForRoute(
+      render_process_id_, render_widget_id);
+}
+
+void RenderWidgetHelper::OnCrossSiteSwapOutACK(
+    const ViewMsg_SwapOut_Params& params) {
+  resource_dispatcher_host_->OnSwapOutACK(params);
 }
 
 void RenderWidgetHelper::CreateNewWindow(
     const ViewHostMsg_CreateWindow_Params& params,
-    bool no_javascript_access,
     base::ProcessHandle render_process,
     int* route_id,
-    int* main_frame_route_id,
-    int* surface_id,
-    SessionStorageNamespace* session_storage_namespace) {
-  if (params.opener_suppressed || no_javascript_access) {
-    // If the opener is supppressed or script access is disallowed, we should
-    // open the window in a new BrowsingInstance, and thus a new process. That
-    // means the current renderer process will not be able to route messages to
-    // it. Because of this, we will immediately show and navigate the window
-    // in OnCreateWindowOnUI, using the params provided here.
-    *route_id = MSG_ROUTING_NONE;
-    *main_frame_route_id = MSG_ROUTING_NONE;
-    *surface_id = 0;
-  } else {
-    *route_id = GetNextRoutingID();
-    *main_frame_route_id = GetNextRoutingID();
-    *surface_id = GpuSurfaceTracker::Get()->AddSurfaceForRenderer(
-        render_process_id_, *route_id);
-    // Block resource requests until the view is created, since the HWND might
-    // be needed if a response ends up creating a plugin.
-    resource_dispatcher_host_->BlockRequestsForRoute(
-        render_process_id_, *route_id);
-    resource_dispatcher_host_->BlockRequestsForRoute(
-        render_process_id_, *main_frame_route_id);
-  }
+    int* surface_id) {
+  *route_id = GetNextRoutingID();
+  *surface_id = GpuSurfaceTracker::Get()->AddSurfaceForRenderer(
+      render_process_id_, *route_id);
+  // Block resource requests until the view is created, since the HWND might be
+  // needed if a response ends up creating a plugin.
+  resource_dispatcher_host_->BlockRequestsForRoute(
+      render_process_id_, *route_id);
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&RenderWidgetHelper::OnCreateWindowOnUI,
-                 this, params, *route_id, *main_frame_route_id,
-                 make_scoped_refptr(session_storage_namespace)));
+                 this, params, *route_id));
 }
 
 void RenderWidgetHelper::OnCreateWindowOnUI(
     const ViewHostMsg_CreateWindow_Params& params,
-    int route_id,
-    int main_frame_route_id,
-    SessionStorageNamespace* session_storage_namespace) {
-  RenderViewHostImpl* host =
-      RenderViewHostImpl::FromID(render_process_id_, params.opener_id);
+    int route_id) {
+  RenderViewHost* host =
+      RenderViewHost::FromID(render_process_id_, params.opener_id);
   if (host)
-    host->CreateNewWindow(route_id, main_frame_route_id, params,
-        session_storage_namespace);
+    host->CreateNewWindow(route_id, params);
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&RenderWidgetHelper::OnCreateWindowOnIO, this, route_id));
 }
 
-void RenderWidgetHelper::OnResumeRequestsForView(int route_id) {
+void RenderWidgetHelper::OnCreateWindowOnIO(int route_id) {
   resource_dispatcher_host_->ResumeBlockedRequestsForRoute(
       render_process_id_, route_id);
 }
 
 void RenderWidgetHelper::CreateNewWidget(int opener_id,
-                                         blink::WebPopupType popup_type,
+                                         WebKit::WebPopupType popup_type,
                                          int* route_id,
                                          int* surface_id) {
   *route_id = GetNextRoutingID();
@@ -327,22 +275,20 @@ void RenderWidgetHelper::CreateNewFullscreenWidget(int opener_id,
 }
 
 void RenderWidgetHelper::OnCreateWidgetOnUI(
-    int opener_id, int route_id, blink::WebPopupType popup_type) {
-  RenderViewHostImpl* host = RenderViewHostImpl::FromID(
-      render_process_id_, opener_id);
+    int opener_id, int route_id, WebKit::WebPopupType popup_type) {
+  RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
   if (host)
     host->CreateNewWidget(route_id, popup_type);
 }
 
 void RenderWidgetHelper::OnCreateFullscreenWidgetOnUI(int opener_id,
                                                       int route_id) {
-  RenderViewHostImpl* host = RenderViewHostImpl::FromID(
-      render_process_id_, opener_id);
+  RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
   if (host)
     host->CreateNewFullscreenWidget(route_id);
 }
 
-#if defined(OS_POSIX) && !defined(TOOLKIT_GTK) && !defined(OS_ANDROID)
+#if defined(OS_MACOSX)
 TransportDIB* RenderWidgetHelper::MapTransportDIB(TransportDIB::Id dib_id) {
   base::AutoLock locked(allocated_dibs_lock_);
 
@@ -355,9 +301,8 @@ TransportDIB* RenderWidgetHelper::MapTransportDIB(TransportDIB::Id dib_id) {
   return TransportDIB::Map(fd);
 }
 
-void RenderWidgetHelper::AllocTransportDIB(uint32 size,
-                                           bool cache_in_browser,
-                                           TransportDIB::Handle* result) {
+void RenderWidgetHelper::AllocTransportDIB(
+    size_t size, bool cache_in_browser, TransportDIB::Handle* result) {
   scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory());
   if (!shared_memory->CreateAnonymous(size)) {
     result->fd = -1;
@@ -381,7 +326,7 @@ void RenderWidgetHelper::FreeTransportDIB(TransportDIB::Id dib_id) {
     i = allocated_dibs_.find(dib_id);
 
   if (i != allocated_dibs_.end()) {
-    if (IGNORE_EINTR(close(i->second)) < 0)
+    if (HANDLE_EINTR(close(i->second)) < 0)
       PLOG(ERROR) << "close";
     allocated_dibs_.erase(i);
   } else {
@@ -392,12 +337,10 @@ void RenderWidgetHelper::FreeTransportDIB(TransportDIB::Id dib_id) {
 void RenderWidgetHelper::ClearAllocatedDIBs() {
   for (std::map<TransportDIB::Id, int>::iterator
        i = allocated_dibs_.begin(); i != allocated_dibs_.end(); ++i) {
-    if (IGNORE_EINTR(close(i->second)) < 0)
+    if (HANDLE_EINTR(close(i->second)) < 0)
       PLOG(ERROR) << "close: " << i->first;
   }
 
   allocated_dibs_.clear();
 }
 #endif
-
-}  // namespace content

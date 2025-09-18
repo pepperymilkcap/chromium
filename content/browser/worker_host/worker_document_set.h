@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_WORKER_HOST_WORKER_DOCUMENT_SET_H_
 #define CONTENT_BROWSER_WORKER_HOST_WORKER_DOCUMENT_SET_H_
+#pragma once
 
 #include <set>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 
-namespace content {
 class WorkerMessageFilter;
 
 // The WorkerDocumentSet tracks all of the DOM documents associated with a
@@ -25,13 +25,11 @@ class WorkerDocumentSet : public base::RefCounted<WorkerDocumentSet> {
   class DocumentInfo {
    public:
     DocumentInfo(WorkerMessageFilter* filter, unsigned long long document_id,
-                 int renderer_process_id, int render_view_id,
-                 int render_frame_id);
+                 int renderer_process_id, int render_view_id);
     WorkerMessageFilter* filter() const { return filter_; }
     unsigned long long document_id() const { return document_id_; }
     int render_process_id() const { return render_process_id_; }
     int render_view_id() const { return render_view_id_; }
-    int render_frame_id() const { return render_frame_id_; }
 
     // Define operator "<", which is used to determine uniqueness within
     // the set.
@@ -52,7 +50,6 @@ class WorkerDocumentSet : public base::RefCounted<WorkerDocumentSet> {
     unsigned long long document_id_;
     int render_process_id_;
     int render_view_id_;
-    int render_frame_id_;
   };
 
   // Adds a document to a shared worker's document set. Also includes the
@@ -61,8 +58,7 @@ class WorkerDocumentSet : public base::RefCounted<WorkerDocumentSet> {
   void Add(WorkerMessageFilter* parent,
            unsigned long long document_id,
            int render_process_id,
-           int render_view_id,
-           int render_frame_id);
+           int render_view_id);
 
   // Checks to see if a document is in a shared worker's document set.
   bool Contains(WorkerMessageFilter* parent,
@@ -90,7 +86,5 @@ class WorkerDocumentSet : public base::RefCounted<WorkerDocumentSet> {
 
   DocumentInfoSet document_set_;
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_WORKER_HOST_WORKER_DOCUMENT_SET_H_

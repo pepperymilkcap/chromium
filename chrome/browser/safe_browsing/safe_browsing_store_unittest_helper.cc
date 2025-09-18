@@ -15,6 +15,7 @@ const int kAddChunk4 = 7;
 // Disjoint chunk numbers for subs to flush out typos.
 const int kSubChunk1 = 2;
 const int kSubChunk2 = 4;
+const int kSubChunk3 = 6;
 
 const SBFullHash kHash1 = SBFullHashFromString("one");
 const SBFullHash kHash2 = SBFullHashFromString("two");
@@ -43,10 +44,12 @@ void SafeBrowsingStoreTestEmpty(SafeBrowsingStore* store) {
   EXPECT_FALSE(store->CheckSubChunk(-1));
 
   std::vector<SBAddFullHash> pending_adds;
+  std::set<SBPrefix> prefix_misses;
   SBAddPrefixes add_prefixes_result;
   std::vector<SBAddFullHash> add_full_hashes_result;
 
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
   EXPECT_TRUE(add_prefixes_result.empty());
@@ -86,10 +89,12 @@ void SafeBrowsingStoreTestStorePrefix(SafeBrowsingStore* store) {
   EXPECT_EQ(kSubChunk1, chunks[0]);
 
   std::vector<SBAddFullHash> pending_adds;
+  std::set<SBPrefix> prefix_misses;
   SBAddPrefixes add_prefixes_result;
   std::vector<SBAddFullHash> add_full_hashes_result;
 
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
 
@@ -123,6 +128,7 @@ void SafeBrowsingStoreTestStorePrefix(SafeBrowsingStore* store) {
   EXPECT_TRUE(store->CheckSubChunk(kSubChunk1));
 
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
 
@@ -156,10 +162,12 @@ void SafeBrowsingStoreTestSubKnockout(SafeBrowsingStore* store) {
   EXPECT_TRUE(store->FinishChunk());
 
   std::vector<SBAddFullHash> pending_adds;
+  std::set<SBPrefix> prefix_misses;
   SBAddPrefixes add_prefixes_result;
   std::vector<SBAddFullHash> add_full_hashes_result;
 
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
 
@@ -180,6 +188,7 @@ void SafeBrowsingStoreTestSubKnockout(SafeBrowsingStore* store) {
   EXPECT_TRUE(store->FinishChunk());
 
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
   EXPECT_EQ(1U, add_prefixes_result.size());
@@ -198,6 +207,7 @@ void SafeBrowsingStoreTestSubKnockout(SafeBrowsingStore* store) {
   EXPECT_TRUE(store->FinishChunk());
 
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
   ASSERT_EQ(2U, add_prefixes_result.size());
@@ -256,10 +266,12 @@ void SafeBrowsingStoreTestDeleteChunks(SafeBrowsingStore* store) {
   EXPECT_TRUE(store->CheckSubChunk(kSubChunk2));
 
   std::vector<SBAddFullHash> pending_adds;
+  std::set<SBPrefix> prefix_misses;
   SBAddPrefixes add_prefixes_result;
   std::vector<SBAddFullHash> add_full_hashes_result;
 
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
 
@@ -285,6 +297,7 @@ void SafeBrowsingStoreTestDeleteChunks(SafeBrowsingStore* store) {
   add_prefixes_result.clear();
   add_full_hashes_result.clear();
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
 
@@ -297,6 +310,7 @@ void SafeBrowsingStoreTestDeleteChunks(SafeBrowsingStore* store) {
   add_prefixes_result.clear();
   add_full_hashes_result.clear();
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
   EXPECT_TRUE(add_prefixes_result.empty());
@@ -304,9 +318,9 @@ void SafeBrowsingStoreTestDeleteChunks(SafeBrowsingStore* store) {
 }
 
 void SafeBrowsingStoreTestDelete(SafeBrowsingStore* store,
-                                 const base::FilePath& filename) {
+                                 const FilePath& filename) {
   // Delete should work if the file wasn't there in the first place.
-  EXPECT_FALSE(base::PathExists(filename));
+  EXPECT_FALSE(file_util::PathExists(filename));
   EXPECT_TRUE(store->Delete());
 
   // Create a store file.
@@ -322,14 +336,16 @@ void SafeBrowsingStoreTestDelete(SafeBrowsingStore* store,
   EXPECT_TRUE(store->FinishChunk());
 
   std::vector<SBAddFullHash> pending_adds;
+  std::set<SBPrefix> prefix_misses;
   SBAddPrefixes add_prefixes_result;
   std::vector<SBAddFullHash> add_full_hashes_result;
 
   EXPECT_TRUE(store->FinishUpdate(pending_adds,
+                                  prefix_misses,
                                   &add_prefixes_result,
                                   &add_full_hashes_result));
 
-  EXPECT_TRUE(base::PathExists(filename));
+  EXPECT_TRUE(file_util::PathExists(filename));
   EXPECT_TRUE(store->Delete());
-  EXPECT_FALSE(base::PathExists(filename));
+  EXPECT_FALSE(file_util::PathExists(filename));
 }

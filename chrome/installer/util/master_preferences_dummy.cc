@@ -14,7 +14,7 @@
 
 #include "base/logging.h"
 #include "base/values.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace installer {
 
@@ -22,7 +22,7 @@ MasterPreferences::MasterPreferences(const CommandLine& cmd_line)
     : distribution_(NULL), preferences_read_from_file_(false) {
 }
 
-MasterPreferences::MasterPreferences(const base::FilePath& prefs_path)
+MasterPreferences::MasterPreferences(const FilePath& prefs_path)
     : distribution_(NULL), preferences_read_from_file_(false) {
 }
 
@@ -45,9 +45,9 @@ bool MasterPreferences::GetString(const std::string& name,
   return false;
 }
 
-std::vector<std::string> MasterPreferences::GetFirstRunTabs() const {
+std::vector<GURL> MasterPreferences::GetFirstRunTabs() const {
   NOTREACHED();
-  return std::vector<std::string>();
+  return std::vector<GURL>();
 }
 
 // static
@@ -55,5 +55,18 @@ const MasterPreferences& MasterPreferences::ForCurrentProcess() {
   static MasterPreferences prefs(*CommandLine::ForCurrentProcess());
   return prefs;
 }
+}
 
-}  // namespace installer
+// The use of std::vector<GURL>() above requires us to have a destructor for
+// GURL.  GURL contains a member of type url_parse::Parsed, which declares (but
+// does not implement) an explicit destructor in its header file.  We're missing
+// the real implementation by not depending on the googleurl library.  However,
+// we don't really need it, so we just replace it here rather than building a
+// 64-bit version of the googleurl library with all its dependencies.
+namespace url_parse {
+
+Parsed::~Parsed() {
+  NOTREACHED();
+}
+
+}

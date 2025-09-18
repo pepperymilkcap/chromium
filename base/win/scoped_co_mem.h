@@ -4,6 +4,7 @@
 
 #ifndef BASE_WIN_SCOPED_CO_MEM_H_
 #define BASE_WIN_SCOPED_CO_MEM_H_
+#pragma once
 
 #include <objbase.h>
 
@@ -50,10 +51,6 @@ class ScopedCoMem {
     if (mem_ptr_)
       CoTaskMemFree(mem_ptr_);
     mem_ptr_ = ptr;
-  }
-
-  T* get() const {
-    return mem_ptr_;
   }
 
  private:

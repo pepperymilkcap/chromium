@@ -6,6 +6,7 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_BALLOON_COLLECTION_H_
 #define CHROME_BROWSER_NOTIFICATIONS_BALLOON_COLLECTION_H_
+#pragma once
 
 #include <deque>
 #include <string>
@@ -54,19 +55,13 @@ class BalloonCollection {
   virtual void Add(const Notification& notification,
                    Profile* profile) = 0;
 
-  // Returns true if any balloon has this notification id.
-  virtual const Notification* FindById(const std::string& id) const = 0;
-
-  // Removes any balloons that have this notification id. Returns
+  // Removes any balloons that have this notification id.  Returns
   // true if anything was removed.
   virtual bool RemoveById(const std::string& id) = 0;
 
-  // Removes any balloons that have this source origin. Returns
+  // Removes any balloons that have this source origin.  Returns
   // true if anything was removed.
   virtual bool RemoveBySourceOrigin(const GURL& source_origin) = 0;
-
-  // Removes any balloons matching |profile. Returns true if any were removed.
-  virtual bool RemoveByProfile(Profile* profile) = 0;
 
   // Removes all balloons.
   virtual void RemoveAll() = 0;

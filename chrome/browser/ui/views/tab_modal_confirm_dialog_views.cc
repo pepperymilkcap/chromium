@@ -1,105 +1,61 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/tab_modal_confirm_dialog_views.h"
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
-#include "chrome/common/chrome_switches.h"
-#include "components/web_modal/web_contents_modal_dialog_host.h"
-#include "components/web_modal/web_contents_modal_dialog_manager.h"
-#include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
-#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/window_open_disposition.h"
 #include "ui/views/controls/message_box_view.h"
-#include "ui/views/layout/layout_constants.h"
-#include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_client_view.h"
 
-using web_modal::WebContentsModalDialogManager;
-using web_modal::WebContentsModalDialogManagerDelegate;
+namespace browser {
 
-// static
-TabModalConfirmDialog* TabModalConfirmDialog::Create(
-    TabModalConfirmDialogDelegate* delegate,
-    content::WebContents* web_contents) {
-  return new TabModalConfirmDialogViews(
-      delegate, web_contents);
+// Declared in browser_dialogs.h so others don't have to depend on our header.
+void ShowTabModalConfirmDialog(TabModalConfirmDialogDelegate* delegate,
+                               TabContentsWrapper* wrapper) {
+  new TabModalConfirmDialogViews(delegate, wrapper);
 }
+
+}  // namespace browser
 
 //////////////////////////////////////////////////////////////////////////////
 // TabModalConfirmDialogViews, constructor & destructor:
 
 TabModalConfirmDialogViews::TabModalConfirmDialogViews(
     TabModalConfirmDialogDelegate* delegate,
-    content::WebContents* web_contents)
+    TabContentsWrapper* wrapper)
     : delegate_(delegate),
-      dialog_(NULL),
-      browser_context_(web_contents->GetBrowserContext()) {
-  views::MessageBoxView::InitParams init_params(delegate->GetMessage());
-  init_params.inter_row_vertical_spacing =
-      views::kUnrelatedControlVerticalSpacing;
-  message_box_view_ = new views::MessageBoxView(init_params);
-
-  base::string16 link_text(delegate->GetLinkText());
-  if (!link_text.empty())
-    message_box_view_->SetLink(link_text, this);
-
-  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
-      WebContentsModalDialogManager::FromWebContents(web_contents);
-  WebContentsModalDialogManagerDelegate* modal_delegate =
-      web_contents_modal_dialog_manager->delegate();
-  DCHECK(modal_delegate);
-  dialog_ = views::Widget::CreateWindowAsFramelessChild(
-      this, modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(dialog_->GetNativeView());
-  delegate_->set_close_delegate(this);
+      message_box_view_(new views::MessageBoxView(
+          views::MessageBoxView::NO_OPTIONS,
+          delegate->GetMessage(),
+          string16())) {
+  delegate_->set_window(new ConstrainedWindowViews(wrapper, this));
 }
 
 TabModalConfirmDialogViews::~TabModalConfirmDialogViews() {
 }
 
-void TabModalConfirmDialogViews::AcceptTabModalDialog() {
-  GetDialogClientView()->AcceptWindow();
-}
-
-void TabModalConfirmDialogViews::CancelTabModalDialog() {
-  GetDialogClientView()->CancelWindow();
-}
-
-void TabModalConfirmDialogViews::CloseDialog() {
-  dialog_->Close();
-}
-
-//////////////////////////////////////////////////////////////////////////////
-// TabModalConfirmDialogViews, views::LinkListener implementation:
-
-void TabModalConfirmDialogViews::LinkClicked(views::Link* source,
-                                             int event_flags) {
-  delegate_->LinkClicked(ui::DispositionFromEventFlags(event_flags));
-}
-
 //////////////////////////////////////////////////////////////////////////////
 // TabModalConfirmDialogViews, views::DialogDelegate implementation:
 
-base::string16 TabModalConfirmDialogViews::GetWindowTitle() const {
+string16 TabModalConfirmDialogViews::GetWindowTitle() const {
   return delegate_->GetTitle();
 }
 
-base::string16 TabModalConfirmDialogViews::GetDialogButtonLabel(
+string16 TabModalConfirmDialogViews::GetDialogButtonLabel(
     ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_OK)
     return delegate_->GetAcceptButtonTitle();
   if (button == ui::DIALOG_BUTTON_CANCEL)
     return delegate_->GetCancelButtonTitle();
-  return base::string16();
+  return string16();
 }
 
 bool TabModalConfirmDialogViews::Cancel() {
@@ -112,23 +68,11 @@ bool TabModalConfirmDialogViews::Accept() {
   return true;
 }
 
-bool TabModalConfirmDialogViews::Close() {
-  delegate_->Close();
-  return true;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // TabModalConfirmDialogViews, views::WidgetDelegate implementation:
 
 views::View* TabModalConfirmDialogViews::GetContentsView() {
   return message_box_view_;
-}
-
-// TODO(wittman): Remove this override once we move to the new style frame view
-// on all dialogs.
-views::NonClientFrameView* TabModalConfirmDialogViews::CreateNonClientFrameView(
-    views::Widget* widget) {
-  return CreateConstrainedStyleNonClientFrameView(widget, browser_context_);
 }
 
 views::Widget* TabModalConfirmDialogViews::GetWidget() {
@@ -141,12 +85,4 @@ const views::Widget* TabModalConfirmDialogViews::GetWidget() const {
 
 void TabModalConfirmDialogViews::DeleteDelegate() {
   delete this;
-}
-
-ui::ModalType TabModalConfirmDialogViews::GetModalType() const {
-#if defined(USE_ASH)
-  return ui::MODAL_TYPE_CHILD;
-#else
-  return views::WidgetDelegate::GetModalType();
-#endif
 }

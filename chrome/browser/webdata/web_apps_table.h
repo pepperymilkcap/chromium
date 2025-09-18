@@ -4,15 +4,15 @@
 
 #ifndef CHROME_BROWSER_WEBDATA_WEB_APPS_TABLE_H_
 #define CHROME_BROWSER_WEBDATA_WEB_APPS_TABLE_H_
+#pragma once
 
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "components/webdata/common/web_database_table.h"
+#include "chrome/browser/webdata/web_database_table.h"
 
 class GURL;
 class SkBitmap;
-class WebDatabase;
 
 // This class manages the WebApps tables within the SQLite database passed to
 // the constructor. It expects the following schema:
@@ -31,17 +31,11 @@ class WebDatabase;
 //
 class WebAppsTable : public WebDatabaseTable {
  public:
-  WebAppsTable() {}
+  WebAppsTable(sql::Connection* db, sql::MetaTable* meta_table)
+      : WebDatabaseTable(db, meta_table) {}
   virtual ~WebAppsTable() {}
-
-  // Retrieves the WebAppsTable* owned by |database|.
-  static WebAppsTable* FromWebDatabase(WebDatabase* database);
-
-  virtual WebDatabaseTable::TypeKey GetTypeKey() const OVERRIDE;
-  virtual bool Init(sql::Connection* db, sql::MetaTable* meta_table) OVERRIDE;
+  virtual bool Init() OVERRIDE;
   virtual bool IsSyncable() OVERRIDE;
-  virtual bool MigrateToVersion(int version,
-                                bool* update_compatible_version) OVERRIDE;
 
   bool SetWebAppImage(const GURL& url, const SkBitmap& image);
 

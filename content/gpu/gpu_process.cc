@@ -4,12 +4,8 @@
 
 #include "content/gpu/gpu_process.h"
 
-namespace content {
-
 GpuProcess::GpuProcess() {
 }
 
 GpuProcess::~GpuProcess() {
 }
-
-}  // namespace content

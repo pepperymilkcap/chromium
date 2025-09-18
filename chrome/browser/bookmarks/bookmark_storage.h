@@ -4,32 +4,28 @@
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_STORAGE_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_STORAGE_H_
+#pragma once
 
-#include "base/files/important_file_writer.h"
+#include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_index.h"
+#include "chrome/common/important_file_writer.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
-class BookmarkIndex;
 class BookmarkModel;
 class BookmarkPermanentNode;
-
-namespace base {
-class SequencedTaskRunner;
-}
-
-namespace content {
-class BrowserContext;
-}
+class Profile;
 
 // BookmarkLoadDetails is used by BookmarkStorage when loading bookmarks.
 // BookmarkModel creates a BookmarkLoadDetails and passes it (including
-// ownership) to BookmarkStorage. BookmarkStorage loads the bookmarks (and
-// index) in the background thread, then calls back to the BookmarkModel (on
-// the main thread) when loading is done, passing ownership back to the
-// BookmarkModel. While loading BookmarkModel does not maintain references to
-// the contents of the BookmarkLoadDetails, this ensures we don't have any
-// threading problems.
+// ownership) to BookmarkStorage. BoomarkStorage loads the bookmarks (and index)
+// in the background thread, then calls back to the BookmarkModel (on the main
+// thread) when loading is done, passing ownership back to the BookmarkModel.
+// While loading BookmarkModel does not maintain references to the contents
+// of the BookmarkLoadDetails, this ensures we don't have any threading
+// problems.
 class BookmarkLoadDetails {
  public:
   BookmarkLoadDetails(BookmarkPermanentNode* bb_node,
@@ -55,20 +51,6 @@ class BookmarkLoadDetails {
   }
   BookmarkIndex* index() { return index_.get(); }
   BookmarkIndex* release_index() { return index_.release(); }
-
-  const BookmarkNode::MetaInfoMap& model_meta_info_map() const {
-    return model_meta_info_map_;
-  }
-  void set_model_meta_info_map(const BookmarkNode::MetaInfoMap& meta_info_map) {
-    model_meta_info_map_ = meta_info_map;
-  }
-
-  int64 model_sync_transaction_version() const {
-    return model_sync_transaction_version_;
-  }
-  void set_model_sync_transaction_version(int64 sync_transaction_version) {
-    model_sync_transaction_version_ = sync_transaction_version;
-  }
 
   // Max id of the nodes.
   void set_max_id(int64 max_id) { max_id_ = max_id; }
@@ -98,8 +80,6 @@ class BookmarkLoadDetails {
   scoped_ptr<BookmarkPermanentNode> other_folder_node_;
   scoped_ptr<BookmarkPermanentNode> mobile_folder_node_;
   scoped_ptr<BookmarkIndex> index_;
-  BookmarkNode::MetaInfoMap model_meta_info_map_;
-  int64 model_sync_transaction_version_;
   int64 max_id_;
   std::string computed_checksum_;
   std::string stored_checksum_;
@@ -113,13 +93,12 @@ class BookmarkLoadDetails {
 // as notifying the BookmarkStorage every time the model changes.
 //
 // Internally BookmarkStorage uses BookmarkCodec to do the actual read/write.
-class BookmarkStorage : public base::ImportantFileWriter::DataSerializer,
+class BookmarkStorage : public content::NotificationObserver,
+                        public ImportantFileWriter::DataSerializer,
                         public base::RefCountedThreadSafe<BookmarkStorage> {
  public:
   // Creates a BookmarkStorage for the specified model
-  BookmarkStorage(content::BrowserContext* context,
-                  BookmarkModel* model,
-                  base::SequencedTaskRunner* sequenced_task_runner);
+  BookmarkStorage(Profile* profile, BookmarkModel* model);
 
   // Loads the bookmarks into the model, notifying the model when done. This
   // takes ownership of |details|. See BookmarkLoadDetails for details.
@@ -132,8 +111,11 @@ class BookmarkStorage : public base::ImportantFileWriter::DataSerializer,
   // a pending save, it is saved immediately.
   void BookmarkModelDeleted();
 
-  // Callback from backend after loading the bookmark file.
-  void OnLoadFinished();
+  // Callback from backend with the results of the bookmark file. This may be
+  // called multiple times, with different paths. This happens when we migrate
+  // bookmark data from database.
+  void OnLoadFinished(bool file_exists,
+                      const FilePath& path);
 
   // ImportantFileWriter::DataSerializer implementation.
   virtual bool SerializeData(std::string* output) OVERRIDE;
@@ -143,21 +125,46 @@ class BookmarkStorage : public base::ImportantFileWriter::DataSerializer,
 
   virtual ~BookmarkStorage();
 
+  // Loads bookmark data from |file| and notifies the model when finished.
+  void DoLoadBookmarks(const FilePath& file);
+
+  // Load bookmarks data from the file written by history (StarredURLDatabase).
+  void MigrateFromHistory();
+
+  // Called when history has written the file with bookmarks data. Loads data
+  // from that file.
+  void OnHistoryFinishedWriting();
+
+  // Called after we loaded file generated by history. Saves the data, deletes
+  // the temporary file, and notifies the model.
+  void FinishHistoryMigration();
+
+  // content::NotificationObserver
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
   // Serializes the data and schedules save using ImportantFileWriter.
   // Returns true on successful serialization.
   bool SaveNow();
+
+  // Keep the pointer to profile, we may need it for migration from history.
+  Profile* profile_;
 
   // The model. The model is NULL once BookmarkModelDeleted has been invoked.
   BookmarkModel* model_;
 
   // Helper to write bookmark data safely.
-  base::ImportantFileWriter writer_;
+  ImportantFileWriter writer_;
+
+  // Helper to ensure that we unregister from notifications on destruction.
+  content::NotificationRegistrar notification_registrar_;
+
+  // Path to temporary file created during migrating bookmarks from history.
+  const FilePath tmp_history_path_;
 
   // See class description of BookmarkLoadDetails for details on this.
   scoped_ptr<BookmarkLoadDetails> details_;
-
-  // Sequenced task runner where file I/O operations will be performed at.
-  scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkStorage);
 };

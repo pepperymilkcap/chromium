@@ -4,7 +4,7 @@
 
 #include "chrome/browser/importer/firefox_profile_lock.h"
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/threading/thread_restrictions.h"
 
 // This class is based on Firefox code in:
@@ -54,22 +54,22 @@
 
 // static
 #if defined(OS_MACOSX)
-const base::FilePath::CharType* FirefoxProfileLock::kLockFileName =
+const FilePath::CharType* FirefoxProfileLock::kLockFileName =
     FILE_PATH_LITERAL(".parentlock");
-const base::FilePath::CharType* FirefoxProfileLock::kOldLockFileName =
+const FilePath::CharType* FirefoxProfileLock::kOldLockFileName =
     FILE_PATH_LITERAL("parent.lock");
 #elif defined(OS_POSIX)
 // http://www.google.com/codesearch/p?hl=en#e_ObwTAVPyo/profile/dirserviceprovider/src/nsProfileLock.cpp&l=433
-const base::FilePath::CharType* FirefoxProfileLock::kLockFileName =
+const FilePath::CharType* FirefoxProfileLock::kLockFileName =
     FILE_PATH_LITERAL(".parentlock");
-const base::FilePath::CharType* FirefoxProfileLock::kOldLockFileName =
+const FilePath::CharType* FirefoxProfileLock::kOldLockFileName =
     FILE_PATH_LITERAL("lock");
 #else
-const base::FilePath::CharType* FirefoxProfileLock::kLockFileName =
+const FilePath::CharType* FirefoxProfileLock::kLockFileName =
     FILE_PATH_LITERAL("parent.lock");
 #endif
 
-FirefoxProfileLock::FirefoxProfileLock(const base::FilePath& path) {
+FirefoxProfileLock::FirefoxProfileLock(const FilePath& path) {
   Init();
   lock_file_ = path.Append(kLockFileName);
   Lock();

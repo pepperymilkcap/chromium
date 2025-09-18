@@ -4,6 +4,7 @@
 
 #ifndef NET_SERVER_HTTP_SERVER_REQUEST_INFO_H_
 #define NET_SERVER_HTTP_SERVER_REQUEST_INFO_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -19,8 +20,7 @@ class HttpServerRequestInfo {
   HttpServerRequestInfo();
   ~HttpServerRequestInfo();
 
-  // Returns header value for given header name. |header_name| should be
-  // lower case.
+  // Returns header value for given header name.
   std::string GetHeaderValue(const std::string& header_name) const;
 
   // Request method.
@@ -32,8 +32,7 @@ class HttpServerRequestInfo {
   // Request data.
   std::string data;
 
-  // A map of the names -> values for HTTP headers. These should always
-  // contain lower case field names.
+  // A map of the names -> values for HTTP headers.
   typedef std::map<std::string, std::string> HeadersMap;
   mutable HeadersMap headers;
 };

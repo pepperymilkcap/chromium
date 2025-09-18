@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 TEST(SymmetricKeyTest, GenerateRandomKey) {
@@ -80,7 +80,7 @@ class SymmetricKeyDeriveKeyFromPasswordTest
 
 TEST_P(SymmetricKeyDeriveKeyFromPasswordTest, DeriveKeyFromPassword) {
   PBKDF2TestVector test_data(GetParam());
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX)
   // The OS X crypto libraries have minimum salt and iteration requirements
   // so some of the tests below will cause them to barf. Skip these.
   if (strlen(test_data.salt) < 8 || test_data.rounds < 1000) {

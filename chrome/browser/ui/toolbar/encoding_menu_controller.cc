@@ -1,15 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 
 #include "base/i18n/rtl.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
@@ -85,8 +85,10 @@ bool EncodingMenuController::IsItemChecked(
     return false;
 
   std::string encoding = current_tab_encoding;
-  if (encoding.empty())
-    encoding = browser_profile->GetPrefs()->GetString(prefs::kDefaultCharset);
+  if (encoding.empty()) {
+    encoding =
+        browser_profile->GetPrefs()->GetString(prefs::kGlobalDefaultCharset);
+  }
 
   if (item_id == IDC_ENCODING_AUTO_DETECT) {
     return browser_profile->GetPrefs()->GetBoolean(
@@ -105,7 +107,7 @@ void EncodingMenuController::GetEncodingMenuItems(Profile* profile,
     EncodingMenuItemList* menu_items) {
 
   DCHECK(menu_items);
-  EncodingMenuItem separator(0, base::string16());
+  EncodingMenuItem separator(0, string16());
 
   menu_items->clear();
   menu_items->push_back(
@@ -130,7 +132,7 @@ void EncodingMenuController::GetEncodingMenuItems(Profile* profile,
   std::vector<CharacterEncoding::EncodingInfo>::const_iterator it;
   for (it = encodings->begin(); it != encodings->end(); ++it) {
     if (it->encoding_id) {
-      base::string16 encoding = it->encoding_display_name;
+      string16 encoding = it->encoding_display_name;
       base::i18n::AdjustStringForLocaleDirection(&encoding);
       menu_items->push_back(EncodingMenuItem(it->encoding_id, encoding));
     } else {

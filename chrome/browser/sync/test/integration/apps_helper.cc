@@ -5,12 +5,12 @@
 #include "chrome/browser/sync/test/integration/apps_helper.h"
 
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/sync_app_helper.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_extension_helper.h"
-#include "extensions/common/manifest.h"
+#include "chrome/common/extensions/extension.h"
 
 using sync_datatype_helper::test;
 
@@ -40,24 +40,9 @@ bool AllProfilesHaveSameAppsAsVerifier() {
   return true;
 }
 
-std::string InstallApp(Profile* profile, int index) {
+void InstallApp(Profile* profile, int index) {
   return SyncExtensionHelper::GetInstance()->InstallExtension(
-      profile,
-      CreateFakeAppName(index),
-      extensions::Manifest::TYPE_HOSTED_APP);
-}
-
-std::string InstallPlatformApp(Profile* profile, int index) {
-  return SyncExtensionHelper::GetInstance()->InstallExtension(
-      profile,
-      CreateFakeAppName(index),
-      extensions::Manifest::TYPE_PLATFORM_APP);
-}
-
-std::string InstallAppForAllProfiles(int index) {
-  for (int i = 0; i < test()->num_clients(); ++i)
-    InstallApp(test()->GetProfile(i), index);
-  return InstallApp(test()->verifier(), index);
+      profile, CreateFakeAppName(index), Extension::TYPE_HOSTED_APP);
 }
 
 void UninstallApp(Profile* profile, int index) {
@@ -86,32 +71,32 @@ void IncognitoDisableApp(Profile* profile, int index) {
 }
 
 void InstallAppsPendingForSync(Profile* profile) {
-  SyncExtensionHelper::GetInstance()->InstallExtensionsPendingForSync(profile);
+  SyncExtensionHelper::GetInstance()->InstallExtensionsPendingForSync(
+      profile, Extension::TYPE_HOSTED_APP);
 }
 
-syncer::StringOrdinal GetPageOrdinalForApp(Profile* profile,
-                                           int app_index) {
+StringOrdinal GetPageOrdinalForApp(Profile* profile,
+                                   int app_index) {
   return SyncAppHelper::GetInstance()->GetPageOrdinalForApp(
       profile, CreateFakeAppName(app_index));
 }
 
 void SetPageOrdinalForApp(Profile* profile,
                           int app_index,
-                          const syncer::StringOrdinal& page_ordinal) {
+                          const StringOrdinal& page_ordinal) {
   SyncAppHelper::GetInstance()->SetPageOrdinalForApp(
       profile, CreateFakeAppName(app_index), page_ordinal);
 }
 
-syncer::StringOrdinal GetAppLaunchOrdinalForApp(Profile* profile,
-                                                int app_index) {
+StringOrdinal GetAppLaunchOrdinalForApp(Profile* profile,
+                                        int app_index) {
   return SyncAppHelper::GetInstance()->GetAppLaunchOrdinalForApp(
       profile, CreateFakeAppName(app_index));
 }
 
-void SetAppLaunchOrdinalForApp(
-    Profile* profile,
-    int app_index,
-    const syncer::StringOrdinal& app_launch_ordinal) {
+void SetAppLaunchOrdinalForApp(Profile* profile,
+                               int app_index,
+                               const StringOrdinal& app_launch_ordinal) {
   SyncAppHelper::GetInstance()->SetAppLaunchOrdinalForApp(
       profile, CreateFakeAppName(app_index), app_launch_ordinal);
 }

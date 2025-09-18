@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@
 #include <stdio.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
-#include <GLES2/gl2extchromium.h>
 
-#include "gpu/command_buffer/common/gles2_cmd_format.h"
-#include "gpu/command_buffer/common/gles2_cmd_utils.h"
+#include "../common/gles2_cmd_utils.h"
+#include "../common/gles2_cmd_format.h"
 
 namespace gpu {
 namespace gles2 {
@@ -200,8 +199,6 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_TEXTURE_BINDING_RECTANGLE_ARB:
       return 1;
-    case GL_TEXTURE_IMMUTABLE_FORMAT_EXT:
-      return 1;
     case GL_UNPACK_ALIGNMENT:
       return 1;
     case GL_VIEWPORT:
@@ -209,8 +206,6 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     // -- glGetBooleanv, glGetFloatv, glGetIntergerv with
     //    GL_CHROMIUM_framebuffer_multisample
     case GL_MAX_SAMPLES_EXT:
-      return 1;
-    case GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT:
       return 1;
 
     // -- glGetBufferParameteriv
@@ -228,12 +223,8 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:
       return 1;
-    // -- glGetFramebufferAttachmentParameteriv with
-    //    GL_EXT_multisampled_render_to_texture
-    case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_SAMPLES_EXT:
-      return 1;
 
-    // -- glGetProgramiv
+    // -- glGetFramebufferAttachmentParameteriv
     case GL_DELETE_STATUS:
       return 1;
     case GL_LINK_STATUS:
@@ -273,10 +264,6 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_RENDERBUFFER_STENCIL_SIZE:
       return 1;
-    // -- glGetRenderbufferAttachmentParameteriv with
-    //    GL_EXT_multisampled_render_to_texture
-    case GL_RENDERBUFFER_SAMPLES_EXT:
-      return 1;
 
     // -- glGetShaderiv
     case GL_SHADER_TYPE:
@@ -302,8 +289,6 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     case GL_TEXTURE_WRAP_S:
       return 1;
     case GL_TEXTURE_WRAP_T:
-      return 1;
-    case GL_TEXTURE_MAX_ANISOTROPY_EXT:
       return 1;
 
     // -- glGetVertexAttribfv, glGetVertexAttribiv
@@ -357,10 +342,6 @@ int ElementsPerGroup(int format, int type) {
     case GL_ALPHA:
     case GL_LUMINANCE:
     case GL_DEPTH_COMPONENT:
-    case GL_DEPTH_COMPONENT24_OES:
-    case GL_DEPTH_COMPONENT32_OES:
-    case GL_DEPTH_COMPONENT16:
-    case GL_DEPTH24_STENCIL8_OES:
     case GL_DEPTH_STENCIL_OES:
        return 1;
     default:
@@ -392,31 +373,12 @@ int BytesPerElement(int type) {
 
 }  // anonymous namespace
 
-uint32 GLES2Util::ComputeImageGroupSize(int format, int type) {
-  return BytesPerElement(type) * ElementsPerGroup(format, type);
-}
-
-bool GLES2Util::ComputeImagePaddedRowSize(
-        int width, int format, int type, int unpack_alignment,
-        uint32* padded_row_size) {
-  uint32 bytes_per_group = ComputeImageGroupSize(format, type);
-  uint32 unpadded_row_size;
-  if (!SafeMultiplyUint32(width, bytes_per_group, &unpadded_row_size)) {
-    return false;
-  }
-  uint32 temp;
-  if (!SafeAddUint32(unpadded_row_size, unpack_alignment - 1, &temp)) {
-      return false;
-  }
-  *padded_row_size = (temp / unpack_alignment) * unpack_alignment;
-  return true;
-}
-
 // Returns the amount of data glTexImage2D or glTexSubImage2D will access.
-bool GLES2Util::ComputeImageDataSizes(
+bool GLES2Util::ComputeImageDataSize(
     int width, int height, int format, int type, int unpack_alignment,
-    uint32* size, uint32* ret_unpadded_row_size, uint32* ret_padded_row_size) {
-  uint32 bytes_per_group = ComputeImageGroupSize(format, type);
+    uint32* size) {
+  uint32 bytes_per_group =
+      BytesPerElement(type) * ElementsPerGroup(format, type);
   uint32 row_size;
   if (!SafeMultiplyUint32(width, bytes_per_group, &row_size)) {
     return false;
@@ -435,21 +397,11 @@ bool GLES2Util::ComputeImageDataSizes(
     if (!SafeAddUint32(size_of_all_but_last_row, row_size, size)) {
       return false;
     }
-    if (ret_padded_row_size) {
-      *ret_padded_row_size = padded_row_size;
-    }
   } else {
     if (!SafeMultiplyUint32(height, row_size, size)) {
       return false;
     }
-    if (ret_padded_row_size) {
-      *ret_padded_row_size = row_size;
-    }
   }
-  if (ret_unpadded_row_size) {
-    *ret_unpadded_row_size = row_size;
-  }
-
   return true;
 }
 
@@ -508,8 +460,6 @@ uint32 GLES2Util::GetGLDataTypeSizeForUniforms(int type) {
       return sizeof(GLfloat) * 4 * 4;      // NOLINT
     case GL_SAMPLER_2D:
       return sizeof(GLint);                // NOLINT
-    case GL_SAMPLER_2D_RECT_ARB:
-      return sizeof(GLint);                // NOLINT
     case GL_SAMPLER_CUBE:
       return sizeof(GLint);                // NOLINT
     case GL_SAMPLER_EXTERNAL_OES:
@@ -555,7 +505,7 @@ uint32 GLES2Util::GLErrorToErrorBit(uint32 error) {
     case GL_INVALID_FRAMEBUFFER_OPERATION:
       return gl_error_bit::kInvalidFrameBufferOperation;
     default:
-      NOTREACHED();
+      GPU_NOTREACHED();
       return gl_error_bit::kNoError;
   }
 }
@@ -573,7 +523,7 @@ uint32 GLES2Util::GLErrorBitToGLError(uint32 error_bit) {
     case gl_error_bit::kInvalidFrameBufferOperation:
       return GL_INVALID_FRAMEBUFFER_OPERATION;
     default:
-      NOTREACHED();
+      GPU_NOTREACHED();
       return GL_NO_ERROR;
   }
 }
@@ -590,96 +540,25 @@ uint32 GLES2Util::IndexToGLFaceTarget(int index) {
   return faces[index];
 }
 
-uint32 GLES2Util::GetPreferredGLReadPixelsFormat(uint32 internal_format) {
-  switch (internal_format) {
-    case GL_RGB16F_EXT:
-    case GL_RGB32F_EXT:
-      return GL_RGB;
-    case GL_RGBA16F_EXT:
-    case GL_RGBA32F_EXT:
-      return GL_RGBA;
-    default:
-      return GL_RGBA;
-  }
-}
-
-uint32 GLES2Util::GetPreferredGLReadPixelsType(
-    uint32 internal_format, uint32 texture_type) {
-  switch (internal_format) {
-    case GL_RGBA32F_EXT:
-    case GL_RGB32F_EXT:
-      return GL_FLOAT;
-    case GL_RGBA16F_EXT:
-    case GL_RGB16F_EXT:
-      return GL_HALF_FLOAT_OES;
-    case GL_RGBA:
-    case GL_RGB:
-      // Unsized internal format, check the type
-      switch (texture_type) {
-        case GL_FLOAT:
-        case GL_HALF_FLOAT_OES:
-          return GL_FLOAT;
-        default:
-          return GL_UNSIGNED_BYTE;
-      }
-    default:
-      return GL_UNSIGNED_BYTE;
-  }
-}
-
 uint32 GLES2Util::GetChannelsForFormat(int format) {
   switch (format) {
     case GL_ALPHA:
-    case GL_ALPHA16F_EXT:
-    case GL_ALPHA32F_EXT:
-      return kAlpha;
+      return 0x0008;
     case GL_LUMINANCE:
-      return kRGB;
+      return 0x0007;
     case GL_LUMINANCE_ALPHA:
-      return kRGBA;
+      return 0x000F;
     case GL_RGB:
     case GL_RGB8_OES:
     case GL_RGB565:
-    case GL_RGB16F_EXT:
-    case GL_RGB32F_EXT:
-      return kRGB;
+      return 0x0007;
     case GL_BGRA_EXT:
-    case GL_BGRA8_EXT:
-    case GL_RGBA16F_EXT:
-    case GL_RGBA32F_EXT:
     case GL_RGBA:
     case GL_RGBA8_OES:
     case GL_RGBA4:
     case GL_RGB5_A1:
-      return kRGBA;
-    case GL_DEPTH_COMPONENT32_OES:
-    case GL_DEPTH_COMPONENT24_OES:
-    case GL_DEPTH_COMPONENT16:
-    case GL_DEPTH_COMPONENT:
-      return kDepth;
-    case GL_STENCIL_INDEX8:
-      return kStencil;
-    case GL_DEPTH_STENCIL_OES:
-    case GL_DEPTH24_STENCIL8_OES:
-      return kDepth | kStencil;
+      return 0x000F;
     default:
-      return 0x0000;
-  }
-}
-
-uint32 GLES2Util::GetChannelsNeededForAttachmentType(
-    int type, uint32 max_color_attachments) {
-  switch (type) {
-    case GL_DEPTH_ATTACHMENT:
-      return kDepth;
-    case GL_STENCIL_ATTACHMENT:
-      return kStencil;
-    default:
-      if (type >= GL_COLOR_ATTACHMENT0 &&
-          type < static_cast<int>(
-              GL_COLOR_ATTACHMENT0 + max_color_attachments)) {
-        return kRGBA;
-      }
       return 0x0000;
   }
 }
@@ -706,7 +585,7 @@ std::string GLES2Util::GetStringError(uint32 value) {
 }
 
 std::string GLES2Util::GetStringBool(uint32 value) {
-  return value ? "GL_TRUE" : "GL_FALSE";
+  return value ? "true" : "false";
 }
 
 std::string GLES2Util::GetQualifiedEnumString(
@@ -719,185 +598,7 @@ std::string GLES2Util::GetQualifiedEnumString(
   return GetStringEnum(value);
 }
 
-bool GLES2Util::ParseUniformName(
-    const std::string& name,
-    size_t* array_pos,
-    int* element_index,
-    bool* getting_array) {
-  bool getting_array_location = false;
-  size_t open_pos = std::string::npos;
-  int index = 0;
-  if (name[name.size() - 1] == ']') {
-    if (name.size() < 3) {
-      return false;
-    }
-    open_pos = name.find_last_of('[');
-    if (open_pos == std::string::npos ||
-        open_pos >= name.size() - 2) {
-      return false;
-    }
-    size_t last = name.size() - 1;
-    for (size_t pos = open_pos + 1; pos < last; ++pos) {
-      int8 digit = name[pos] - '0';
-      if (digit < 0 || digit > 9) {
-        return false;
-      }
-      index = index * 10 + digit;
-    }
-    getting_array_location = true;
-  }
-  *getting_array = getting_array_location;
-  *element_index = index;
-  *array_pos = open_pos;
-  return true;
-}
-
-namespace {
-
-// From <EGL/egl.h>.
-const int32 kAlphaSize       = 0x3021;  // EGL_ALPHA_SIZE
-const int32 kBlueSize        = 0x3022;  // EGL_BLUE_SIZE
-const int32 kGreenSize       = 0x3023;  // EGL_GREEN_SIZE
-const int32 kRedSize         = 0x3024;  // EGL_RED_SIZE
-const int32 kDepthSize       = 0x3025;  // EGL_DEPTH_SIZE
-const int32 kStencilSize     = 0x3026;  // EGL_STENCIL_SIZE
-const int32 kSamples         = 0x3031;  // EGL_SAMPLES
-const int32 kSampleBuffers   = 0x3032;  // EGL_SAMPLE_BUFFERS
-const int32 kNone            = 0x3038;  // EGL_NONE
-const int32 kSwapBehavior    = 0x3093;  // EGL_SWAP_BEHAVIOR
-const int32 kBufferPreserved = 0x3094;  // EGL_BUFFER_PRESERVED
-const int32 kBufferDestroyed = 0x3095;  // EGL_BUFFER_DESTROYED
-
-// Chromium only.
-const int32 kShareResources        = 0x10000;
-const int32 kBindGeneratesResource = 0x10001;
-const int32 kFailIfMajorPerfCaveat = 0x10002;
-
-}  // namespace
-
-ContextCreationAttribHelper::ContextCreationAttribHelper()
-  : alpha_size_(-1),
-    blue_size_(-1),
-    green_size_(-1),
-    red_size_(-1),
-    depth_size_(-1),
-    stencil_size_(-1),
-    samples_(-1),
-    sample_buffers_(-1),
-    buffer_preserved_(true),
-    share_resources_(false),
-    bind_generates_resource_(true),
-    fail_if_major_perf_caveat_(false) {
-}
-
-void ContextCreationAttribHelper::Serialize(std::vector<int32>* attribs) {
-  if (alpha_size_ != -1) {
-    attribs->push_back(kAlphaSize);
-    attribs->push_back(alpha_size_);
-  }
-  if (blue_size_ != -1) {
-    attribs->push_back(kBlueSize);
-    attribs->push_back(blue_size_);
-  }
-  if (green_size_ != -1) {
-    attribs->push_back(kGreenSize);
-    attribs->push_back(green_size_);
-  }
-  if (red_size_ != -1) {
-    attribs->push_back(kRedSize);
-    attribs->push_back(red_size_);
-  }
-  if (depth_size_ != -1) {
-    attribs->push_back(kDepthSize);
-    attribs->push_back(depth_size_);
-  }
-  if (stencil_size_ != -1) {
-    attribs->push_back(kStencilSize);
-    attribs->push_back(stencil_size_);
-  }
-  if (samples_ != -1) {
-    attribs->push_back(kSamples);
-    attribs->push_back(samples_);
-  }
-  if (sample_buffers_ != -1) {
-    attribs->push_back(kSampleBuffers);
-    attribs->push_back(sample_buffers_);
-  }
-  attribs->push_back(kSwapBehavior);
-  attribs->push_back(buffer_preserved_ ? kBufferPreserved : kBufferDestroyed);
-  attribs->push_back(kShareResources);
-  attribs->push_back(share_resources_ ? 1 : 0);
-  attribs->push_back(kBindGeneratesResource);
-  attribs->push_back(bind_generates_resource_ ? 1 : 0);
-  attribs->push_back(kFailIfMajorPerfCaveat);
-  attribs->push_back(fail_if_major_perf_caveat_ ? 1 : 0);
-  attribs->push_back(kNone);
-}
-
-bool ContextCreationAttribHelper::Parse(const std::vector<int32>& attribs) {
-  for (size_t i = 0; i < attribs.size(); i += 2) {
-    const int32 attrib = attribs[i];
-    if (i + 1 >= attribs.size()) {
-      if (attrib == kNone) {
-        return true;
-      }
-
-      DLOG(ERROR) << "Missing value after context creation attribute: "
-                  << attrib;
-      return false;
-    }
-
-    const int32 value = attribs[i+1];
-    switch (attrib) {
-      case kAlphaSize:
-        alpha_size_ = value;
-        break;
-      case kBlueSize:
-        blue_size_ = value;
-        break;
-      case kGreenSize:
-        green_size_ = value;
-        break;
-      case kRedSize:
-        red_size_ = value;
-        break;
-      case kDepthSize:
-        depth_size_ = value;
-        break;
-      case kStencilSize:
-        stencil_size_ = value;
-        break;
-      case kSamples:
-        samples_ = value;
-        break;
-      case kSampleBuffers:
-        sample_buffers_ = value;
-        break;
-      case kSwapBehavior:
-        buffer_preserved_ = value == kBufferPreserved;
-        break;
-      case kShareResources:
-        share_resources_ = value != 0;
-        break;
-      case kBindGeneratesResource:
-        bind_generates_resource_ = value != 0;
-        break;
-      case kFailIfMajorPerfCaveat:
-        fail_if_major_perf_caveat_ = value != 0;
-        break;
-      case kNone:
-        // Terminate list, even if more attributes.
-        return true;
-      default:
-        DLOG(ERROR) << "Invalid context creation attribute: " << attrib;
-        return false;
-    }
-  }
-
-  return true;
-}
-
-#include "gpu/command_buffer/common/gles2_cmd_utils_implementation_autogen.h"
+#include "../common/gles2_cmd_utils_implementation_autogen.h"
 
 }  // namespace gles2
 }  // namespace gpu

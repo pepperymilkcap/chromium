@@ -1,10 +1,12 @@
 {
   "name": "Platform Test",
+  "platform_app": true,
   "version": "1",
   "manifest_version": 2,
   "app": {
-    "background": {
-      "scripts": ["background.js"]
+    "launch": {
+      "container": "shell",
+      "local_path": "launch.html"
     }
   }
 }

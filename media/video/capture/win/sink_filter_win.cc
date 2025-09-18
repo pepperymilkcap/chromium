@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,12 +28,13 @@ SinkFilter::~SinkFilter() {
   input_pin_->SetOwner(NULL);
 }
 
-void SinkFilter::SetRequestedMediaFormat(const VideoCaptureFormat& format) {
-  input_pin_->SetRequestedMediaFormat(format);
+void SinkFilter::SetRequestedMediaCapability(
+    const VideoCaptureDevice::Capability& capability) {
+  input_pin_->SetRequestedMediaCapability(capability);
 }
 
-const VideoCaptureFormat& SinkFilter::ResultingFormat() {
-  return input_pin_->ResultingFormat();
+const VideoCaptureDevice::Capability& SinkFilter::ResultingCapability() {
+  return input_pin_->ResultingCapability();
 }
 
 size_t SinkFilter::NoOfPins() {

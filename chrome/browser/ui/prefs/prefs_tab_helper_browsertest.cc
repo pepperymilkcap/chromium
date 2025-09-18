@@ -1,48 +1,43 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/testing_profile.h"
 
 class PrefsTabHelperBrowserTest : public InProcessBrowserTest {
  protected:
-  virtual base::FilePath GetPreferencesFilePath() {
-    base::FilePath test_data_directory;
-    PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory);
-    return test_data_directory
-        .AppendASCII("profiles")
-        .AppendASCII("web_prefs")
-        .AppendASCII("Default")
-        .Append(chrome::kPreferencesFilename);
-  }
-
   virtual bool SetUpUserDataDirectory() OVERRIDE {
-    base::FilePath user_data_directory;
+    FilePath test_data_directory;
+    PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory);
+    FilePath user_data_directory;
     PathService::Get(chrome::DIR_USER_DATA, &user_data_directory);
-    base::FilePath default_profile =
-        user_data_directory.AppendASCII(TestingProfile::kTestUserProfileDir);
-    if (!base::CreateDirectory(default_profile)) {
+    FilePath default_profile = user_data_directory.AppendASCII("Default");
+    if (!file_util::CreateDirectory(default_profile)) {
       LOG(ERROR) << "Can't create " << default_profile.MaybeAsASCII();
       return false;
     }
-    base::FilePath pref_file = GetPreferencesFilePath();
-    if (!base::PathExists(pref_file)) {
-      LOG(ERROR) << "Doesn't exist " << pref_file.MaybeAsASCII();
+    FilePath non_global_pref_file;
+    non_global_pref_file = test_data_directory
+        .AppendASCII("profiles")
+        .AppendASCII("webkit_global_migration")
+        .AppendASCII("Default")
+        .Append(chrome::kPreferencesFilename);
+    if (!file_util::PathExists(non_global_pref_file)) {
+      LOG(ERROR) << "Doesn't exist " << non_global_pref_file.MaybeAsASCII();
       return false;
     }
-    base::FilePath default_pref_file =
+    FilePath default_pref_file =
         default_profile.Append(chrome::kPreferencesFilename);
-    if (!base::CopyFile(pref_file, default_pref_file)) {
-      LOG(ERROR) << "Copy error from " << pref_file.MaybeAsASCII()
+    if (!file_util::CopyFile(non_global_pref_file, default_pref_file)) {
+      LOG(ERROR) << "Copy error from " << non_global_pref_file.MaybeAsASCII()
                  << " to " << default_pref_file.MaybeAsASCII();
       return false;
     }
@@ -57,24 +52,38 @@ class PrefsTabHelperBrowserTest : public InProcessBrowserTest {
   }
 };
 
-// Tests that a sampling of web prefs are registered and ones with values in the
-// test user preferences file take on those values.
-IN_PROC_BROWSER_TEST_F(PrefsTabHelperBrowserTest, WebPrefs) {
+IN_PROC_BROWSER_TEST_F(PrefsTabHelperBrowserTest, NonGlobalPrefsAreMigrated) {
   PrefService* prefs = browser()->profile()->GetPrefs();
 
-  EXPECT_TRUE(prefs->FindPreference(
-      prefs::kWebKitCursiveFontFamily)->IsDefaultValue());
-  EXPECT_TRUE(prefs->FindPreference(
-      prefs::kWebKitSerifFontFamily)->IsDefaultValue());
-  EXPECT_TRUE(prefs->FindPreference(
-      prefs::kWebKitSerifFontFamilyJapanese)->IsDefaultValue());
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kDefaultCharset));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitDefaultFontSize));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitDefaultFixedFontSize));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitMinimumFontSize));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitMinimumLogicalFontSize));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitCursiveFontFamily));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitFantasyFontFamily));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitFixedFontFamily));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitSansSerifFontFamily));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitSerifFontFamily));
+  EXPECT_EQ(NULL, prefs->FindPreference(prefs::kWebKitStandardFontFamily));
 
-  EXPECT_EQ("ISO-8859-1", prefs->GetString(prefs::kDefaultCharset));
-  EXPECT_EQ(16, prefs->GetInteger(prefs::kWebKitDefaultFontSize));
-  EXPECT_EQ("Nanum Gothic",
-            prefs->GetString(prefs::kWebKitStandardFontFamilyKorean));
-  EXPECT_EQ("Tinos", prefs->GetString(prefs::kWebKitStandardFontFamily));
-  EXPECT_EQ("DejaVu Sans", prefs->GetString(prefs::kWebKitSansSerifFontFamily));
-};
-
-
+  EXPECT_EQ("ISO-8859-1", prefs->GetString(prefs::kGlobalDefaultCharset));
+  EXPECT_EQ(42, prefs->GetInteger(prefs::kWebKitGlobalDefaultFontSize));
+  EXPECT_EQ(42,
+            prefs->GetInteger(prefs::kWebKitGlobalDefaultFixedFontSize));
+  EXPECT_EQ(42, prefs->GetInteger(prefs::kWebKitGlobalMinimumFontSize));
+  EXPECT_EQ(42,
+            prefs->GetInteger(prefs::kWebKitGlobalMinimumLogicalFontSize));
+  EXPECT_EQ("CursiveFontFamily",
+            prefs->GetString(prefs::kWebKitGlobalCursiveFontFamily));
+  EXPECT_EQ("FantasyFontFamily",
+            prefs->GetString(prefs::kWebKitGlobalFantasyFontFamily));
+  EXPECT_EQ("FixedFontFamily",
+            prefs->GetString(prefs::kWebKitGlobalFixedFontFamily));
+  EXPECT_EQ("SansSerifFontFamily",
+            prefs->GetString(prefs::kWebKitGlobalSansSerifFontFamily));
+  EXPECT_EQ("SerifFontFamily",
+            prefs->GetString(prefs::kWebKitGlobalSerifFontFamily));
+  EXPECT_EQ("StandardFontFamily",
+            prefs->GetString(prefs::kWebKitGlobalStandardFontFamily));
+}

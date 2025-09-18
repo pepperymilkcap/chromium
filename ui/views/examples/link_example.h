@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_EXAMPLES_LINK_EXAMPLE_H_
 #define UI_VIEWS_EXAMPLES_LINK_EXAMPLE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -11,6 +12,8 @@
 #include "ui/views/examples/example_base.h"
 
 namespace views {
+class View;
+
 namespace examples {
 
 class LinkExample : public ExampleBase, public LinkListener {

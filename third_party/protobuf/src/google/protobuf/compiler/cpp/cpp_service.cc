@@ -43,14 +43,14 @@ namespace compiler {
 namespace cpp {
 
 ServiceGenerator::ServiceGenerator(const ServiceDescriptor* descriptor,
-                                   const Options& options)
+                                   const string& dllexport_decl)
   : descriptor_(descriptor) {
   vars_["classname"] = descriptor_->name();
   vars_["full_name"] = descriptor_->full_name();
-  if (options.dllexport_decl.empty()) {
+  if (dllexport_decl.empty()) {
     vars_["dllexport"] = "";
   } else {
-    vars_["dllexport"] = options.dllexport_decl + " ";
+    vars_["dllexport"] = dllexport_decl + " ";
   }
 }
 

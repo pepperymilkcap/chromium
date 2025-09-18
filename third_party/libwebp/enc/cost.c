@@ -1,17 +1,17 @@
-// Copyright 2011 Google Inc. All Rights Reserved.
+// Copyright 2011 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 // Cost tables for level and modes
 //
 // Author: Skal (pascal.massimino@gmail.com)
 
-#include "./cost.h"
+#include <assert.h>
+
+#include "cost.h"
 
 #if defined(__cplusplus) || defined(c_plusplus)
 extern "C" {
@@ -52,9 +52,9 @@ const uint16_t VP8EntropyCost[256] = {
 //------------------------------------------------------------------------------
 // Level cost tables
 
-// For each given level, the following table gives the pattern of contexts to
-// use for coding it (in [][0]) as well as the bit value to use for each
-// context (in [][1]).
+// For each given level, the following table given the pattern of contexts
+// to use for coding it (in [][0]) as well as the bit value to use for
+// each context (in [][1]).
 const uint16_t VP8LevelCodes[MAX_VARIABLE_LEVEL][2] = {
                   {0x001, 0x000}, {0x007, 0x001}, {0x00f, 0x005},
   {0x00f, 0x00d}, {0x033, 0x003}, {0x033, 0x003}, {0x033, 0x023},
@@ -77,7 +77,7 @@ const uint16_t VP8LevelCodes[MAX_VARIABLE_LEVEL][2] = {
 
 // fixed costs for coding levels, deduce from the coding tree.
 // This is only the part that doesn't depend on the probability state.
-const uint16_t VP8LevelFixedCosts[MAX_LEVEL + 1] = {
+const uint16_t VP8LevelFixedCosts[2048] = {
      0,  256,  256,  256,  256,  432,  618,  630,
    731,  640,  640,  828,  901,  948, 1021, 1101,
   1174, 1221, 1294, 1042, 1085, 1115, 1158, 1202,
@@ -356,12 +356,9 @@ static int VariableLevelCost(int level, const uint8_t probas[NUM_PROBAS]) {
 
 void VP8CalculateLevelCosts(VP8Proba* const proba) {
   int ctype, band, ctx;
-
-  if (!proba->dirty_) return;  // nothing to do.
-
   for (ctype = 0; ctype < NUM_TYPES; ++ctype) {
     for (band = 0; band < NUM_BANDS; ++band) {
-      for (ctx = 0; ctx < NUM_CTX; ++ctx) {
+      for(ctx = 0; ctx < NUM_CTX; ++ctx) {
         const uint8_t* const p = proba->coeffs_[ctype][band][ctx];
         uint16_t* const table = proba->level_cost_[ctype][band][ctx];
         const int cost_base = VP8BitCost(1, p[1]);
@@ -375,7 +372,6 @@ void VP8CalculateLevelCosts(VP8Proba* const proba) {
       }
     }
   }
-  proba->dirty_ = 0;
 }
 
 //------------------------------------------------------------------------------

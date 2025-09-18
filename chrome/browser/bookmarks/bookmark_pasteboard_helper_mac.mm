@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,17 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/files/file_path.h"
-#include "base/strings/sys_string_conversions.h"
+#include <cmath>
+
+#include "base/memory/scoped_nsobject.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "ui/base/clipboard/clipboard.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tab_contents/moving_to_content/tab_contents_view_mac.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
+#include "skia/ext/skia_utils_mac.h"
+#include "ui/gfx/mac/nsimage_cache.h"
+#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 NSString* const kBookmarkDictionaryListPboardType =
     @"BookmarkDictionaryListPboardType";
@@ -18,7 +25,8 @@ namespace {
 
 // An unofficial standard pasteboard title type to be provided alongside the
 // |NSURLPboardType|.
-NSString* const kNSURLTitlePboardType = @"public.url-name";
+NSString* const kNSURLTitlePboardType =
+    @"public.url-name";
 
 // Pasteboard type used to store profile path to determine which profile
 // a set of bookmarks came from.
@@ -27,18 +35,23 @@ NSString* const kChromiumProfilePathPboardType =
 
 // Internal bookmark ID for a bookmark node.  Used only when moving inside
 // of one profile.
-NSString* const kChromiumBookmarkId = @"ChromiumBookmarkId";
+NSString* const kChromiumBookmarkId =
+    @"ChromiumBookmarkId";
 
 // Mac WebKit uses this type, declared in
 // WebKit/mac/History/WebURLsWithTitles.h.
-NSString* const kCrWebURLsWithTitlesPboardType = @"WebURLsWithTitlesPboardType";
+NSString* const kWebURLsWithTitlesPboardType =
+    @"WebURLsWithTitlesPboardType";
 
 // Keys for the type of node in BookmarkDictionaryListPboardType.
-NSString* const kWebBookmarkType = @"WebBookmarkType";
+NSString* const kWebBookmarkType =
+    @"WebBookmarkType";
 
-NSString* const kWebBookmarkTypeList = @"WebBookmarkTypeList";
+NSString* const kWebBookmarkTypeList =
+    @"WebBookmarkTypeList";
 
-NSString* const kWebBookmarkTypeLeaf = @"WebBookmarkTypeLeaf";
+NSString* const kWebBookmarkTypeLeaf =
+    @"WebBookmarkTypeLeaf";
 
 void ConvertPlistToElements(NSArray* input,
                             std::vector<BookmarkNodeData::Element>& elements) {
@@ -87,7 +100,7 @@ bool ReadWebURLsWithTitlesPboardType(
     NSPasteboard* pb,
     std::vector<BookmarkNodeData::Element>& elements) {
   NSArray* bookmarkPairs =
-      [pb propertyListForType:kCrWebURLsWithTitlesPboardType];
+      [pb propertyListForType:kWebURLsWithTitlesPboardType];
   if (![bookmarkPairs isKindOfClass:[NSArray class]])
     return false;
 
@@ -100,7 +113,7 @@ bool ReadWebURLsWithTitlesPboardType(
 
   NSUInteger len = [titlesArr count];
   for (NSUInteger i = 0; i < len; ++i) {
-    base::string16 title = base::SysNSStringToUTF16([titlesArr objectAtIndex:i]);
+    string16 title = base::SysNSStringToUTF16([titlesArr objectAtIndex:i]);
     std::string url = base::SysNSStringToUTF8([urlsArr objectAtIndex:i]);
     if (!url.empty()) {
       BookmarkNodeData::Element element;
@@ -177,8 +190,7 @@ void WriteBookmarkDictionaryListPboardType(
 
 void FillFlattenedArraysForBookmarks(
     const std::vector<BookmarkNodeData::Element>& elements,
-    NSMutableArray* titles,
-    NSMutableArray* urls) {
+    NSMutableArray* titles, NSMutableArray* urls) {
   for (size_t i = 0; i < elements.size(); ++i) {
     BookmarkNodeData::Element element = elements[i];
     if (element.is_url) {
@@ -192,8 +204,7 @@ void FillFlattenedArraysForBookmarks(
   }
 }
 
-void WriteSimplifiedBookmarkTypes(
-    NSPasteboard* pb,
+void WriteSimplifiedBookmarkTypes(NSPasteboard* pb,
     const std::vector<BookmarkNodeData::Element>& elements) {
   NSMutableArray* titles = [NSMutableArray array];
   NSMutableArray* urls = [NSMutableArray array];
@@ -205,7 +216,7 @@ void WriteSimplifiedBookmarkTypes(
 
   // Write WebURLsWithTitlesPboardType.
   [pb setPropertyList:[NSArray arrayWithObjects:urls, titles, nil]
-              forType:kCrWebURLsWithTitlesPboardType];
+              forType:kWebURLsWithTitlesPboardType];
 
   // Write NSStringPboardType.
   [pb setString:[urls componentsJoinedByString:@"\n"]
@@ -218,69 +229,206 @@ void WriteSimplifiedBookmarkTypes(
   [pb setString:titleString forType:kNSURLTitlePboardType];
 }
 
-NSPasteboard* PasteboardFromType(ui::ClipboardType type) {
+NSPasteboard* PasteboardFromType(
+    bookmark_pasteboard_helper_mac::PasteboardType type) {
   NSString* type_string = nil;
   switch (type) {
-    case ui::CLIPBOARD_TYPE_COPY_PASTE:
+    case bookmark_pasteboard_helper_mac::kCopyPastePasteboard:
       type_string = NSGeneralPboard;
       break;
-    case ui::CLIPBOARD_TYPE_DRAG:
+    case bookmark_pasteboard_helper_mac::kDragPasteboard:
       type_string = NSDragPboard;
-      break;
-    case ui::CLIPBOARD_TYPE_SELECTION:
-      NOTREACHED();
       break;
   }
 
   return [NSPasteboard pasteboardWithName:type_string];
 }
 
+// Make a drag image from the drop data.
+NSImage* MakeDragImage(const std::vector<const BookmarkNode*>& nodes) {
+  if (nodes.size() == 1) {
+    const BookmarkNode* node = nodes[0];
+    return bookmark_pasteboard_helper_mac::DragImageForBookmark(
+        gfx::SkBitmapToNSImage(node->favicon()), node->GetTitle());
+  } else {
+    // TODO(feldstein): Do something better than this. Should have badging
+    // and a single drag image.
+    // http://crbug.com/37264
+    return [NSImage imageNamed:NSImageNameMultipleDocuments];
+  }
+}
+
+// Draws string |title| within box |frame|, positioning it at the origin.
+// Truncates text with fading if it is too long to fit horizontally.
+// Based on code from GradientButtonCell but simplified where possible.
+void DrawTruncatedTitle(NSAttributedString* title, NSRect frame) {
+  NSSize size = [title size];
+  if (std::floor(size.width) <= NSWidth(frame)) {
+    [title drawAtPoint:frame.origin];
+    return;
+  }
+
+  // Gradient is about twice our line height long.
+  CGFloat gradient_width = std::min(size.height * 2, NSWidth(frame) / 4);
+  NSRect solid_part, gradient_part;
+  NSDivideRect(frame, &gradient_part, &solid_part, gradient_width, NSMaxXEdge);
+  CGContextRef context = static_cast<CGContextRef>(
+      [[NSGraphicsContext currentContext] graphicsPort]);
+  CGContextBeginTransparencyLayerWithRect(context, NSRectToCGRect(frame), 0);
+  { // Draw text clipped to frame.
+    gfx::ScopedNSGraphicsContextSaveGState scoped_state;
+    [NSBezierPath clipRect:frame];
+    [title drawAtPoint:frame.origin];
+  }
+
+  NSColor* color = [NSColor blackColor];
+  NSColor* alpha_color = [color colorWithAlphaComponent:0.0];
+  scoped_nsobject<NSGradient> mask(
+      [[NSGradient alloc] initWithStartingColor:color
+                                    endingColor:alpha_color]);
+  // Draw the gradient mask.
+  CGContextSetBlendMode(context, kCGBlendModeDestinationIn);
+  [mask drawFromPoint:NSMakePoint(NSMaxX(frame) - gradient_width,
+                                  NSMinY(frame))
+              toPoint:NSMakePoint(NSMaxX(frame),
+                                  NSMinY(frame))
+              options:NSGradientDrawsBeforeStartingLocation];
+  CGContextEndTransparencyLayer(context);
+}
+
 }  // namespace
 
-void WriteBookmarksToPasteboard(
-    ui::ClipboardType type,
-    const std::vector<BookmarkNodeData::Element>& elements,
-    const base::FilePath& profile_path) {
+namespace bookmark_pasteboard_helper_mac {
+
+void WriteToPasteboard(PasteboardType type,
+                       const std::vector<BookmarkNodeData::Element>& elements,
+                       FilePath::StringType profile_path) {
   if (elements.empty())
     return;
 
   NSPasteboard* pb = PasteboardFromType(type);
 
   NSArray* types = [NSArray arrayWithObjects:kBookmarkDictionaryListPboardType,
-                                             kCrWebURLsWithTitlesPboardType,
+                                             kWebURLsWithTitlesPboardType,
                                              NSStringPboardType,
                                              NSURLPboardType,
                                              kNSURLTitlePboardType,
                                              kChromiumProfilePathPboardType,
                                              nil];
   [pb declareTypes:types owner:nil];
-  [pb setString:base::SysUTF8ToNSString(profile_path.value())
+  [pb setString:base::SysUTF8ToNSString(profile_path)
         forType:kChromiumProfilePathPboardType];
   WriteBookmarkDictionaryListPboardType(pb, elements);
   WriteSimplifiedBookmarkTypes(pb, elements);
 }
 
-bool ReadBookmarksFromPasteboard(
-    ui::ClipboardType type,
-    std::vector<BookmarkNodeData::Element>& elements,
-    base::FilePath* profile_path) {
+bool ReadFromPasteboard(PasteboardType type,
+                        std::vector<BookmarkNodeData::Element>& elements,
+                        FilePath* profile_path) {
   NSPasteboard* pb = PasteboardFromType(type);
 
   elements.clear();
   NSString* profile = [pb stringForType:kChromiumProfilePathPboardType];
-  *profile_path = base::FilePath(base::SysNSStringToUTF8(profile));
+  *profile_path = FilePath(base::SysNSStringToUTF8(profile));
   return ReadBookmarkDictionaryListPboardType(pb, elements) ||
          ReadWebURLsWithTitlesPboardType(pb, elements) ||
          ReadNSURLPboardType(pb, elements);
 }
 
-bool PasteboardContainsBookmarks(ui::ClipboardType type) {
+bool PasteboardContainsBookmarks(PasteboardType type) {
   NSPasteboard* pb = PasteboardFromType(type);
 
   NSArray* availableTypes =
       [NSArray arrayWithObjects:kBookmarkDictionaryListPboardType,
-                                kCrWebURLsWithTitlesPboardType,
+                                kWebURLsWithTitlesPboardType,
                                 NSURLPboardType,
                                 nil];
   return [pb availableTypeFromArray:availableTypes] != nil;
 }
+
+NSImage* DragImageForBookmark(NSImage* favicon, const string16& title) {
+  // If no favicon, use a default.
+  if (!favicon)
+    favicon = gfx::GetCachedImageWithName(@"nav.pdf");
+
+  // If no title, just use icon.
+  if (title.empty())
+    return favicon;
+  NSString* ns_title = base::SysUTF16ToNSString(title);
+
+  // Set the look of the title.
+  NSDictionary* attrs =
+      [NSDictionary dictionaryWithObject:[NSFont systemFontOfSize:
+                                           [NSFont smallSystemFontSize]]
+                                  forKey:NSFontAttributeName];
+  scoped_nsobject<NSAttributedString> rich_title(
+      [[NSAttributedString alloc] initWithString:ns_title
+                                      attributes:attrs]);
+
+  // Set up sizes and locations for rendering.
+  const CGFloat kIconMargin = 2.0;  // Gap between icon and text.
+  CGFloat text_left = [favicon size].width + kIconMargin;
+  NSSize drag_image_size = [favicon size];
+  NSSize text_size = [rich_title size];
+  CGFloat max_text_width = bookmarks::kDefaultBookmarkWidth - text_left;
+  text_size.width = std::min(text_size.width, max_text_width);
+  drag_image_size.width = text_left + text_size.width;
+
+  // Render the drag image.
+  NSImage* drag_image =
+      [[[NSImage alloc] initWithSize:drag_image_size] autorelease];
+  [drag_image lockFocus];
+  [favicon drawAtPoint:NSMakePoint(0, 0)
+              fromRect:NSZeroRect
+             operation:NSCompositeSourceOver
+              fraction:0.7];
+  NSRect target_text_rect = NSMakeRect(text_left, 0,
+                                       text_size.width, drag_image_size.height);
+  DrawTruncatedTitle(rich_title, target_text_rect);
+  [drag_image unlockFocus];
+
+  return drag_image;
+}
+
+void StartDrag(Profile* profile,
+               const std::vector<const BookmarkNode*>& nodes,
+               gfx::NativeView view) {
+
+  std::vector<BookmarkNodeData::Element> elements;
+  for (std::vector<const BookmarkNode*>::const_iterator it = nodes.begin();
+       it != nodes.end(); ++it) {
+    elements.push_back(BookmarkNodeData::Element(*it));
+  }
+
+  WriteToPasteboard(kDragPasteboard, elements, profile->GetPath().value());
+
+  // Synthesize an event for dragging, since we can't be sure that
+  // [NSApp currentEvent] will return a valid dragging event.
+  NSWindow* window = [view window];
+  NSPoint position = [window mouseLocationOutsideOfEventStream];
+  NSTimeInterval event_time = [[NSApp currentEvent] timestamp];
+  NSEvent* drag_event = [NSEvent mouseEventWithType:NSLeftMouseDragged
+                                           location:position
+                                      modifierFlags:NSLeftMouseDraggedMask
+                                          timestamp:event_time
+                                       windowNumber:[window windowNumber]
+                                            context:nil
+                                        eventNumber:0
+                                         clickCount:1
+                                           pressure:1.0];
+
+  // TODO(avi): Do better than this offset.
+  NSImage* drag_image = MakeDragImage(nodes);
+  NSSize image_size = [drag_image size];
+  position.x -= std::floor(image_size.width / 2);
+  position.y -= std::floor(image_size.height / 5);
+  [window dragImage:drag_image
+                 at:position
+             offset:NSZeroSize
+              event:drag_event
+         pasteboard:[NSPasteboard pasteboardWithName:NSDragPboard]
+             source:nil
+          slideBack:YES];
+}
+
+}  // namespace bookmark_pasteboard_helper_mac

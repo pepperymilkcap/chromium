@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <atlwin.h>
 
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
 #include "resource.h"
 #include "grit/chrome_frame_dialogs.h"
 
@@ -47,10 +46,6 @@ class CFFindDialog : public CDialogImpl<CFFindDialog> {
   bool UninstallMessageHook();
   static LRESULT CALLBACK GetMsgProc(int code, WPARAM wparam, LPARAM lparam);
   static HHOOK msg_hook_;
-
-  // Store the text we searched for last to determine whether we are doing a
-  // "Find" or a "Find Next".
-  base::string16 last_find_text_;
 
   // We don't own these, and they must exist at least as long as we do.
   scoped_refptr<ChromeFrameAutomationClient> automation_client_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 
@@ -43,13 +43,8 @@ class Flag : public RefCountedThreadSafe<Flag> {
   }
 
  private:
-  friend class RefCountedThreadSafe<Flag>;
-  ~Flag() {}
-
   mutable Lock lock_;
   bool flag_;
-
-  DISALLOW_COPY_AND_ASSIGN(Flag);
 };
 
 // -----------------------------------------------------------------------------
@@ -65,7 +60,7 @@ class AsyncWaiter : public WaitableEvent::Waiter {
         callback_(callback),
         flag_(flag) { }
 
-  virtual bool Fire(WaitableEvent* event) OVERRIDE {
+  bool Fire(WaitableEvent* event) {
     // Post the callback if we haven't been cancelled.
     if (!flag_->value()) {
       message_loop_->PostTask(FROM_HERE, callback_);
@@ -81,7 +76,7 @@ class AsyncWaiter : public WaitableEvent::Waiter {
   }
 
   // See StopWatching for discussion
-  virtual bool Compare(void* tag) OVERRIDE {
+  bool Compare(void* tag) {
     return tag == flag_.get();
   }
 
@@ -97,14 +92,14 @@ class AsyncWaiter : public WaitableEvent::Waiter {
 // the event is canceled.
 // -----------------------------------------------------------------------------
 void AsyncCallbackHelper(Flag* flag,
-                         const WaitableEventWatcher::EventCallback& callback,
+                         WaitableEventWatcher::Delegate* delegate,
                          WaitableEvent* event) {
   // Runs in MessageLoop thread.
   if (!flag->value()) {
     // This is to let the WaitableEventWatcher know that the event has occured
     // because it needs to be able to return NULL from GetWatchedObject
     flag->Set();
-    callback.Run(event);
+    delegate->OnWaitableEventSignaled(event);
   }
 }
 
@@ -112,7 +107,8 @@ WaitableEventWatcher::WaitableEventWatcher()
     : message_loop_(NULL),
       cancel_flag_(NULL),
       waiter_(NULL),
-      event_(NULL) {
+      event_(NULL),
+      delegate_(NULL) {
 }
 
 WaitableEventWatcher::~WaitableEventWatcher() {
@@ -123,9 +119,8 @@ WaitableEventWatcher::~WaitableEventWatcher() {
 // The Handle is how the user cancels a wait. After deleting the Handle we
 // insure that the delegate cannot be called.
 // -----------------------------------------------------------------------------
-bool WaitableEventWatcher::StartWatching(
-    WaitableEvent* event,
-    const EventCallback& callback) {
+bool WaitableEventWatcher::StartWatching
+    (WaitableEvent* event, WaitableEventWatcher::Delegate* delegate) {
   MessageLoop *const current_ml = MessageLoop::current();
   DCHECK(current_ml) << "Cannot create WaitableEventWatcher without a "
                         "current MessageLoop";
@@ -145,13 +140,12 @@ bool WaitableEventWatcher::StartWatching(
   DCHECK(!cancel_flag_.get()) << "StartWatching called while still watching";
 
   cancel_flag_ = new Flag;
-  callback_ = callback;
-  internal_callback_ =
-      base::Bind(&AsyncCallbackHelper, cancel_flag_, callback_, event);
+  callback_ = base::Bind(&AsyncCallbackHelper, cancel_flag_, delegate, event);
   WaitableEvent::WaitableEventKernel* kernel = event->kernel_.get();
 
   AutoLock locked(kernel->lock_);
 
+  delegate_ = delegate;
   event_ = event;
 
   if (kernel->signaled_) {
@@ -160,7 +154,7 @@ bool WaitableEventWatcher::StartWatching(
 
     // No hairpinning - we can't call the delegate directly here. We have to
     // enqueue a task on the MessageLoop as normal.
-    current_ml->PostTask(FROM_HERE, internal_callback_);
+    current_ml->PostTask(FROM_HERE, callback_);
     return true;
   }
 
@@ -168,14 +162,14 @@ bool WaitableEventWatcher::StartWatching(
   current_ml->AddDestructionObserver(this);
 
   kernel_ = kernel;
-  waiter_ = new AsyncWaiter(current_ml, internal_callback_, cancel_flag_.get());
+  waiter_ = new AsyncWaiter(current_ml, callback_, cancel_flag_);
   event->Enqueue(waiter_);
 
   return true;
 }
 
 void WaitableEventWatcher::StopWatching() {
-  callback_.Reset();
+  delegate_ = NULL;
 
   if (message_loop_) {
     message_loop_->RemoveDestructionObserver(this);
@@ -228,7 +222,7 @@ void WaitableEventWatcher::StopWatching() {
     // have been enqueued with the MessageLoop because the waiter was never
     // signaled)
     delete waiter_;
-    internal_callback_.Reset();
+    callback_.Reset();
     cancel_flag_ = NULL;
     return;
   }

@@ -4,16 +4,19 @@
 
 #ifndef CHROME_BROWSER_NET_CRL_SET_FETCHER_H_
 #define CHROME_BROWSER_NET_CRL_SET_FETCHER_H_
+#pragma once
 
 #include <string>
 
-#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
+
+class FilePath;
 
 namespace base {
 class DictionaryValue;
-class FilePath;
 }
 
 namespace net {
@@ -26,24 +29,19 @@ class CRLSetFetcher : public ComponentInstaller,
                       public base::RefCountedThreadSafe<CRLSetFetcher> {
  public:
   CRLSetFetcher();
+  virtual ~CRLSetFetcher();
 
   void StartInitialLoad(ComponentUpdateService* cus);
 
   // ComponentInstaller interface
   virtual void OnUpdateError(int error) OVERRIDE;
-  virtual bool Install(const base::DictionaryValue& manifest,
-                       const base::FilePath& unpack_path) OVERRIDE;
-  virtual bool GetInstalledFile(const std::string& file,
-                                base::FilePath* installed_file) OVERRIDE;
+  virtual bool Install(base::DictionaryValue* manifest,
+                       const FilePath& unpack_path) OVERRIDE;
 
  private:
-  friend class base::RefCountedThreadSafe<CRLSetFetcher>;
-
-  virtual ~CRLSetFetcher();
-
-  // GetCRLSetbase::FilePath gets the path of the CRL set file in the user data
+  // GetCRLSetFilePath gets the path of the CRL set file in the user data
   // dir.
-  bool GetCRLSetFilePath(base::FilePath* path) const;
+  bool GetCRLSetFilePath(FilePath* path) const;
 
   // DoInitialLoadFromDisk runs on the FILE thread and attempts to load a CRL
   // set from the user-data dir. It then registers this object as a component
@@ -52,7 +50,7 @@ class CRLSetFetcher : public ComponentInstaller,
 
   // LoadFromDisk runs on the FILE thread and attempts to load a CRL set
   // from |load_from|.
-  void LoadFromDisk(base::FilePath load_from,
+  void LoadFromDisk(FilePath load_from,
                     scoped_refptr<net::CRLSet>* out_crl_set);
 
   // SetCRLSetIfNewer runs on the IO thread and installs a CRL set

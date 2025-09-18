@@ -50,7 +50,7 @@
 #include "base/base64.h"
 #include "base/logging.h"
 #include "crypto/nss_util.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace {
 
@@ -107,7 +107,7 @@ std::string GenKeyAndSignChallenge(int key_size_in_bits,
   SECKEYPrivateKey *privateKey = NULL;
   SECKEYPublicKey *publicKey = NULL;
   CERTSubjectPublicKeyInfo *spkInfo = NULL;
-  PLArenaPool *arena = NULL;
+  PRArenaPool *arena = NULL;
   SECStatus sec_rv =SECFailure;
   SECItem spkiItem;
   SECItem pkacItem;
@@ -215,9 +215,13 @@ std::string GenKeyAndSignChallenge(int key_size_in_bits,
   }
 
   // Convert the signed public key and challenge into base64/ascii.
-  base::Base64Encode(
-      std::string(reinterpret_cast<char*>(signedItem.data), signedItem.len),
-      &result_blob);
+  if (!base::Base64Encode(std::string(reinterpret_cast<char*>(signedItem.data),
+                                      signedItem.len),
+                          &result_blob)) {
+    LOG(ERROR) << "Couldn't convert signed public key into base64";
+    isSuccess = false;
+    goto failure;
+  }
 
  failure:
   if (!isSuccess) {

@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_LOGGING_WIN_H_
 #define BASE_LOGGING_WIN_H_
+#pragma once
 
 #include <string>
 
@@ -18,7 +19,7 @@ struct StaticMemorySingletonTraits;
 namespace logging {
 
 // Event ID for the log messages we generate.
-EXTERN_C BASE_EXPORT const GUID kLogEventId;
+extern const GUID kLogEventId;
 
 // Feature enable mask for LogEventProvider.
 enum LogEnableMask {

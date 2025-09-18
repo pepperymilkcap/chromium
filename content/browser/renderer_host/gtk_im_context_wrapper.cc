@@ -11,19 +11,17 @@
 #include <algorithm>
 
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-#include "third_party/WebKit/public/web/WebCompositionUnderline.h"
-#include "ui/base/ime/composition_text_util_pango.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
+#include "ui/base/gtk/gtk_im_context_util.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/rect.h"
 
-namespace content {
 namespace {
-
 // Copied from third_party/WebKit/Source/WebCore/page/EventHandler.cpp
 //
 // Match key code of composition keydown event on windows.
@@ -37,15 +35,14 @@ namespace {
 // - ImmGetVirtualKey Function
 //   http://msdn.microsoft.com/en-us/library/dd318570(VS.85).aspx
 const int kCompositionEventKeyCode = 229;
-
 }  // namespace
 
 // ui::CompositionUnderline should be identical to
-// blink::WebCompositionUnderline, so that we can do reinterpret_cast safely.
+// WebKit::WebCompositionUnderline, so that we can do reinterpret_cast safely.
 // TODO(suzhe): remove it after migrating all code in chrome to use
 // ui::CompositionUnderline.
 COMPILE_ASSERT(sizeof(ui::CompositionUnderline) ==
-               sizeof(blink::WebCompositionUnderline),
+               sizeof(WebKit::WebCompositionUnderline),
                ui_CompositionUnderline__WebKit_WebCompositionUnderline_diff);
 
 GtkIMContextWrapper::GtkIMContextWrapper(RenderWidgetHostViewGtk* host_view)
@@ -228,7 +225,7 @@ void GtkIMContextWrapper::UpdateInputMethodState(
 
   // The renderer has updated its IME status.
   // Control the GtkIMContext object according to this status.
-  if (!context_)
+  if (!context_ || !is_focused_)
     return;
 
   DCHECK(!is_in_key_event_handler_);
@@ -237,7 +234,7 @@ void GtkIMContextWrapper::UpdateInputMethodState(
       type != ui::TEXT_INPUT_TYPE_PASSWORD);
   if (is_enabled_ != is_enabled) {
     is_enabled_ = is_enabled;
-    if (is_enabled && is_focused_)
+    if (is_enabled)
       gtk_im_context_focus_in(context_);
     else
       gtk_im_context_focus_out(context_);
@@ -286,10 +283,8 @@ void GtkIMContextWrapper::OnFocusIn() {
 
   // Enables RenderWidget's IME related events, so that we can be notified
   // when WebKit wants to enable or disable IME.
-  if (host_view_->GetRenderWidgetHost()) {
-    RenderWidgetHostImpl::From(
-        host_view_->GetRenderWidgetHost())->SetInputMethodActive(true);
-  }
+  if (host_view_->GetRenderWidgetHost())
+    host_view_->GetRenderWidgetHost()->SetInputMethodActive(true);
 }
 
 void GtkIMContextWrapper::OnFocusOut() {
@@ -315,18 +310,20 @@ void GtkIMContextWrapper::OnFocusOut() {
   is_composing_text_ = false;
 
   // Disable RenderWidget's IME related events to save bandwidth.
-  if (host_view_->GetRenderWidgetHost()) {
-    RenderWidgetHostImpl::From(
-        host_view_->GetRenderWidgetHost())->SetInputMethodActive(false);
-  }
+  if (host_view_->GetRenderWidgetHost())
+    host_view_->GetRenderWidgetHost()->SetInputMethodActive(false);
 }
 
+#if !defined(TOOLKIT_VIEWS)
+// Not defined for views because the views context menu doesn't
+// implement input methods yet.
 GtkWidget* GtkIMContextWrapper::BuildInputMethodsGtkMenu() {
   GtkWidget* submenu = gtk_menu_new();
   gtk_im_multicontext_append_menuitems(GTK_IM_MULTICONTEXT(context_),
                                        GTK_MENU_SHELL(submenu));
   return submenu;
 }
+#endif
 
 void GtkIMContextWrapper::CancelComposition() {
   if (!is_enabled_)
@@ -402,7 +399,7 @@ void GtkIMContextWrapper::ProcessUnfilteredKeyPressEvent(
   // isSystemKey will be set to true if this key event has Alt modifier,
   // see WebInputEventFactory::keyboardEvent() for details.
   if (wke->text[0]) {
-    wke->type = blink::WebInputEvent::Char;
+    wke->type = WebKit::WebInputEvent::Char;
     wke->skip_in_browser = true;
     host_view_->ForwardKeyboardEvent(*wke);
   }
@@ -410,8 +407,7 @@ void GtkIMContextWrapper::ProcessUnfilteredKeyPressEvent(
 
 void GtkIMContextWrapper::ProcessInputMethodResult(const GdkEventKey* event,
                                                    bool filtered) {
-  RenderWidgetHostImpl* host = RenderWidgetHostImpl::From(
-      host_view_->GetRenderWidgetHost());
+  RenderWidgetHost* host = host_view_->GetRenderWidgetHost();
   if (!host)
     return;
 
@@ -438,8 +434,7 @@ void GtkIMContextWrapper::ProcessInputMethodResult(const GdkEventKey* event,
       // Send an IME event.
       // Unlike a Char event, an IME event is NOT dispatched to onkeypress()
       // handlers or autofill.
-      host->ImeConfirmComposition(
-          commit_text_,gfx::Range::InvalidRange(),false);
+      host->ImeConfirmComposition(commit_text_);
       // Set this flag to false, as this composition session has been
       // finished.
       is_composing_text_ = false;
@@ -455,8 +450,8 @@ void GtkIMContextWrapper::ProcessInputMethodResult(const GdkEventKey* event,
       is_composing_text_ = true;
       // TODO(suzhe): convert both renderer_host and renderer to use
       // ui::CompositionText.
-      const std::vector<blink::WebCompositionUnderline>& underlines =
-          reinterpret_cast<const std::vector<blink::WebCompositionUnderline>&>(
+      const std::vector<WebKit::WebCompositionUnderline>& underlines =
+          reinterpret_cast<const std::vector<WebKit::WebCompositionUnderline>&>(
               composition_.underlines);
       host->ImeSetComposition(composition_.text, underlines,
                               composition_.selection.start(),
@@ -474,20 +469,19 @@ void GtkIMContextWrapper::ConfirmComposition() {
   DCHECK(!is_in_key_event_handler_);
 
   if (is_composing_text_) {
-    if (host_view_->GetRenderWidgetHost()) {
-      RenderWidgetHostImpl::From(
-          host_view_->GetRenderWidgetHost())->ImeConfirmComposition(
-              base::string16(), gfx::Range::InvalidRange(), false);
-    }
+    if (host_view_->GetRenderWidgetHost())
+      host_view_->GetRenderWidgetHost()->ImeConfirmComposition();
 
     // Reset the input method.
     CancelComposition();
   }
 }
 
-void GtkIMContextWrapper::HandleCommit(const base::string16& text) {
-  if (suppress_next_commit_)
+void GtkIMContextWrapper::HandleCommit(const string16& text) {
+  if (suppress_next_commit_) {
+    suppress_next_commit_ = false;
     return;
+  }
 
   // Append the text to the buffer, because commit signal might be fired
   // multiple times when processing a key event.
@@ -500,11 +494,9 @@ void GtkIMContextWrapper::HandleCommit(const base::string16& text) {
   // In this case, the text must be committed directly.
   if (!is_in_key_event_handler_ && host_view_->GetRenderWidgetHost()) {
     // Workaround http://crbug.com/45478 by sending fake key down/up events.
-    SendFakeCompositionKeyEvent(blink::WebInputEvent::RawKeyDown);
-    RenderWidgetHostImpl::From(
-        host_view_->GetRenderWidgetHost())->ImeConfirmComposition(
-            text, gfx::Range::InvalidRange(), false);
-    SendFakeCompositionKeyEvent(blink::WebInputEvent::KeyUp);
+    SendFakeCompositionKeyEvent(WebKit::WebInputEvent::RawKeyDown);
+    host_view_->GetRenderWidgetHost()->ImeConfirmComposition(text);
+    SendFakeCompositionKeyEvent(WebKit::WebInputEvent::KeyUp);
   }
 }
 
@@ -532,7 +524,7 @@ void GtkIMContextWrapper::HandlePreeditChanged(const gchar* text,
 
   // TODO(suzhe): due to a bug of webkit, we currently can't use selection range
   // with composition string. See: https://bugs.webkit.org/show_bug.cgi?id=40805
-  composition_.selection = gfx::Range(cursor_position);
+  composition_.selection = ui::Range(cursor_position);
 
   // In case we are using a buggy input method which doesn't fire
   // "preedit_start" signal.
@@ -545,17 +537,16 @@ void GtkIMContextWrapper::HandlePreeditChanged(const gchar* text,
   if (!is_in_key_event_handler_ && is_composing_text_ &&
       host_view_->GetRenderWidgetHost()) {
     // Workaround http://crbug.com/45478 by sending fake key down/up events.
-    SendFakeCompositionKeyEvent(blink::WebInputEvent::RawKeyDown);
+    SendFakeCompositionKeyEvent(WebKit::WebInputEvent::RawKeyDown);
     // TODO(suzhe): convert both renderer_host and renderer to use
     // ui::CompositionText.
-    const std::vector<blink::WebCompositionUnderline>& underlines =
-        reinterpret_cast<const std::vector<blink::WebCompositionUnderline>&>(
+    const std::vector<WebKit::WebCompositionUnderline>& underlines =
+        reinterpret_cast<const std::vector<WebKit::WebCompositionUnderline>&>(
             composition_.underlines);
-    RenderWidgetHostImpl::From(
-        host_view_->GetRenderWidgetHost())->ImeSetComposition(
-            composition_.text, underlines, composition_.selection.start(),
-            composition_.selection.end());
-    SendFakeCompositionKeyEvent(blink::WebInputEvent::KeyUp);
+    host_view_->GetRenderWidgetHost()->ImeSetComposition(
+        composition_.text, underlines, composition_.selection.start(),
+        composition_.selection.end());
+    SendFakeCompositionKeyEvent(WebKit::WebInputEvent::KeyUp);
   }
 }
 
@@ -568,10 +559,8 @@ void GtkIMContextWrapper::HandlePreeditEnd() {
     // If there is still a preedit text when firing "preedit-end" signal,
     // we need inform webkit to clear it.
     // It's only necessary when it's not in ProcessKeyEvent ().
-    if (!is_in_key_event_handler_ && host_view_->GetRenderWidgetHost()) {
-      RenderWidgetHostImpl::From(
-          host_view_->GetRenderWidgetHost())->ImeCancelComposition();
-    }
+    if (!is_in_key_event_handler_ && host_view_->GetRenderWidgetHost())
+      host_view_->GetRenderWidgetHost()->ImeCancelComposition();
   }
 
   // Don't set is_composing_text_ to false here, because "preedit_end"
@@ -613,7 +602,7 @@ void GtkIMContextWrapper::HandleHostViewUnrealize() {
 }
 
 void GtkIMContextWrapper::SendFakeCompositionKeyEvent(
-    blink::WebInputEvent::Type type) {
+    WebKit::WebInputEvent::Type type) {
   NativeWebKeyboardEvent fake_event;
   fake_event.windowsKeyCode = kCompositionEventKeyCode;
   fake_event.skip_in_browser = true;
@@ -623,7 +612,7 @@ void GtkIMContextWrapper::SendFakeCompositionKeyEvent(
 
 void GtkIMContextWrapper::HandleCommitThunk(
     GtkIMContext* context, gchar* text, GtkIMContextWrapper* self) {
-  self->HandleCommit(base::UTF8ToUTF16(text));
+  self->HandleCommit(UTF8ToUTF16(text));
 }
 
 void GtkIMContextWrapper::HandlePreeditStartThunk(
@@ -661,5 +650,3 @@ void GtkIMContextWrapper::HandleHostViewUnrealizeThunk(
     GtkWidget* widget, GtkIMContextWrapper* self) {
   self->HandleHostViewUnrealize();
 }
-
-}  // namespace content

@@ -18,54 +18,49 @@ cr.define('extensions', function() {
      * Initialize the page.
      */
     initializePage: function() {
-      var overlay = $('overlay');
-      cr.ui.overlay.setupOverlay(overlay);
-      cr.ui.overlay.globalInitialization();
-      overlay.addEventListener('cancelOverlay', this.handleDismiss_.bind(this));
-
-      $('pack-extension-dismiss').addEventListener('click',
+      $('packExtensionDismiss').addEventListener('click',
           this.handleDismiss_.bind(this));
-      $('pack-extension-commit').addEventListener('click',
+      $('packExtensionCommit').addEventListener('click',
           this.handleCommit_.bind(this));
-      $('browse-extension-dir').addEventListener('click',
+      $('browseExtensionDir').addEventListener('click',
           this.handleBrowseExtensionDir_.bind(this));
-      $('browse-private-key').addEventListener('click',
+      $('browsePrivateKey').addEventListener('click',
           this.handleBrowsePrivateKey_.bind(this));
     },
 
     /**
      * Handles a click on the dismiss button.
-     * @param {Event} e The click event.
+     * @param {Event} e
      */
     handleDismiss_: function(e) {
-      extensions.ExtensionSettings.showOverlay(null);
+      ExtensionSettings.showOverlay(null);
     },
 
     /**
      * Handles a click on the pack button.
-     * @param {Event} e The click event.
+     * @param {Event} e
      */
     handleCommit_: function(e) {
-      var extensionPath = $('extension-root-dir').value;
-      var privateKeyPath = $('extension-private-key').value;
+      var extensionPath = $('extensionRootDir').value;
+      var privateKeyPath = $('extensionPrivateKey').value;
       chrome.send('pack', [extensionPath, privateKeyPath, 0]);
     },
 
     /**
-     * Utility function which asks the C++ to show a platform-specific file
-     * select dialog, and fire |callback| with the |filePath| that resulted.
-     * |selectType| can be either 'file' or 'folder'. |operation| can be 'load'
-     * or 'pem' which are signals to the C++ to do some operation-specific
-     * configuration.
-     * @private
-     */
+    * Utility function which asks the C++ to show a platform-specific file
+    * select dialog, and fire |callback| with the |filePath| that resulted.
+    * |selectType| can be either 'file' or 'folder'. |operation| can be 'load',
+    * 'packRoot', or 'pem' which are signals to the C++ to do some
+    * operation-specific configuration.
+    * @private
+    */
     showFileDialog_: function(selectType, operation, callback) {
       handleFilePathSelected = function(filePath) {
         callback(filePath);
         handleFilePathSelected = function() {};
       };
 
-      chrome.send('packExtensionSelectFilePath', [selectType, operation]);
+      chrome.send('extensionSettingsSelectFilePath', [selectType, operation]);
     },
 
     /**
@@ -75,7 +70,7 @@ cr.define('extensions', function() {
      */
     handleBrowseExtensionDir_: function(e) {
       this.showFileDialog_('folder', 'load', function(filePath) {
-        $('extension-root-dir').value = filePath;
+        $('extensionRootDir').value = filePath;
       });
     },
 
@@ -85,8 +80,8 @@ cr.define('extensions', function() {
      * @private
      */
     handleBrowsePrivateKey_: function(e) {
-      this.showFileDialog_('file', 'pem', function(filePath) {
-        $('extension-private-key').value = filePath;
+      this.showFileDialog_('file', 'load', function(filePath) {
+        $('extensionPrivateKey').value = filePath;
       });
     },
   };
@@ -94,19 +89,19 @@ cr.define('extensions', function() {
   /**
    * Wrap up the pack process by showing the success |message| and closing
    * the overlay.
-   * @param {string} message The message to show to the user.
+   * @param {String} message The message to show to the user.
    */
   PackExtensionOverlay.showSuccessMessage = function(message) {
     alertOverlay.setValues(
-        loadTimeData.getString('packExtensionOverlay'),
+        localStrings.getString('packExtensionOverlay'),
         message,
-        loadTimeData.getString('ok'),
+        localStrings.getString('ok'),
         '',
         function() {
-          extensions.ExtensionSettings.showOverlay(null);
+          ExtensionSettings.showOverlay($('packExtensionOverlay'));
         },
         null);
-    extensions.ExtensionSettings.showOverlay($('alertOverlay'));
+    ExtensionSettings.showOverlay($('alertOverlay'));
   };
 
   /**
@@ -115,15 +110,15 @@ cr.define('extensions', function() {
    */
   PackExtensionOverlay.showError = function(message) {
     alertOverlay.setValues(
-        loadTimeData.getString('packExtensionErrorTitle'),
+        localStrings.getString('packExtensionErrorTitle'),
         message,
-        loadTimeData.getString('ok'),
+        localStrings.getString('ok'),
         '',
         function() {
-          extensions.ExtensionSettings.showOverlay($('pack-extension-overlay'));
+          ExtensionSettings.showOverlay($('packExtensionOverlay'));
         },
         null);
-    extensions.ExtensionSettings.showOverlay($('alertOverlay'));
+    ExtensionSettings.showOverlay($('alertOverlay'));
   };
 
   // Export
@@ -131,3 +126,6 @@ cr.define('extensions', function() {
     PackExtensionOverlay: PackExtensionOverlay
   };
 });
+
+// Update the C++ call so this isn't necessary.
+var PackExtensionOverlay = extensions.PackExtensionOverlay;

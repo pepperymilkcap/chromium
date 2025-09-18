@@ -15,18 +15,12 @@
 @end
 
 @implementation FastResizeView
-
 - (void)setFastResizeMode:(BOOL)fastResizeMode {
-  if (fastResizeMode_ == fastResizeMode)
-    return;
-
   fastResizeMode_ = fastResizeMode;
 
   // Force a relayout when coming out of fast resize mode.
   if (!fastResizeMode_)
     [self layoutSubviews];
-
-  [self setNeedsDisplay:YES];
 }
 
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
@@ -37,17 +31,16 @@
   // If we are in fast resize mode, our subviews may not completely cover our
   // bounds, so we fill with white.  If we are not in fast resize mode, we do
   // not need to draw anything.
-  if (!fastResizeMode_)
-    return;
-
-  [[NSColor whiteColor] set];
-  NSRectFill(dirtyRect);
+  if (fastResizeMode_) {
+    [[NSColor whiteColor] set];
+    NSRectFill(dirtyRect);
+  }
 }
+
 
 @end
 
 @implementation FastResizeView (PrivateMethods)
-
 - (void)layoutSubviews {
   // There should never be more than one subview.  There can be zero, if we are
   // in the process of switching tabs or closing the window.  In those cases, no
@@ -69,5 +62,4 @@
     [subview setFrame:bounds];
   }
 }
-
 @end

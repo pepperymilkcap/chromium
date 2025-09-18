@@ -3,76 +3,17 @@
 // found in the LICENSE file.
 
 <include src="../uber/uber_utils.js"></include>
-<include src="extension_commands_overlay.js"></include>
-<include src="extension_focus_manager.js"></include>
 <include src="extension_list.js"></include>
 <include src="pack_extension_overlay.js"></include>
-<include src="extension_error_overlay.js"></include>
-
-<if expr="pp_ifdef('chromeos')">
-<include src="chromeos/kiosk_apps.js"></include>
-</if>
 
 // Used for observing function of the backend datasource for this page by
 // tests.
-var webuiResponded = false;
+var webui_responded_ = false;
+
+var localStrings = new LocalStrings();
 
 cr.define('extensions', function() {
   var ExtensionsList = options.ExtensionsList;
-
-  // Implements the DragWrapper handler interface.
-  var dragWrapperHandler = {
-    /** @override */
-    shouldAcceptDrag: function(e) {
-      // We can't access filenames during the 'dragenter' event, so we have to
-      // wait until 'drop' to decide whether to do something with the file or
-      // not.
-      // See: http://www.w3.org/TR/2011/WD-html5-20110113/dnd.html#concept-dnd-p
-      return (e.dataTransfer.types &&
-              e.dataTransfer.types.indexOf('Files') > -1);
-    },
-    /** @override */
-    doDragEnter: function() {
-      chrome.send('startDrag');
-      ExtensionSettings.showOverlay(null);
-      ExtensionSettings.showOverlay($('drop-target-overlay'));
-    },
-    /** @override */
-    doDragLeave: function() {
-      ExtensionSettings.showOverlay(null);
-      chrome.send('stopDrag');
-    },
-    /** @override */
-    doDragOver: function(e) {
-      e.preventDefault();
-    },
-    /** @override */
-    doDrop: function(e) {
-      ExtensionSettings.showOverlay(null);
-      if (e.dataTransfer.files.length != 1)
-        return;
-
-      var toSend = null;
-      // Files lack a check if they're a directory, but we can find out through
-      // its item entry.
-      for (var i = 0; i < e.dataTransfer.items.length; ++i) {
-        if (e.dataTransfer.items[i].kind == 'file' &&
-            e.dataTransfer.items[i].webkitGetAsEntry().isDirectory) {
-          toSend = 'installDroppedDirectory';
-          break;
-        }
-      }
-      // Only process files that look like extensions. Other files should
-      // navigate the browser normally.
-      if (!toSend && /\.(crx|user\.js)$/i.test(e.dataTransfer.files[0].name))
-        toSend = 'installDroppedFile';
-
-      if (toSend) {
-        e.preventDefault();
-        chrome.send(toSend);
-      }
-    }
-  };
 
   /**
    * ExtensionSettings class
@@ -89,24 +30,26 @@ cr.define('extensions', function() {
      * Perform initial setup.
      */
     initialize: function() {
-      uber.onContentFrameLoaded();
-      cr.ui.FocusOutlineManager.forDocument(document);
-      measureCheckboxStrings();
+      cr.enablePlatformSpecificCSSRules();
 
       // Set the title.
-      var title = loadTimeData.getString('extensionSettings');
+      var title = localStrings.getString('extensionSettings');
       uber.invokeMethodOnParent('setTitle', {title: title});
 
       // This will request the data to show on the page and will get a response
       // back in returnExtensionsData.
       chrome.send('extensionSettingsRequestExtensionsData');
 
-      $('toggle-dev-on').addEventListener('change',
+      // Set up the developer mode button.
+      var toggleDevMode = $('toggle-dev-on');
+      toggleDevMode.addEventListener('click',
           this.handleToggleDevMode_.bind(this));
-      $('dev-controls').addEventListener('webkitTransitionEnd',
-          this.handleDevControlsTransitionEnd_.bind(this));
-      $('open-apps-dev-tools').addEventListener('click',
-          this.handleOpenAppsDevTools_.bind(this));
+
+      // Setup the gallery related links and text.
+      $('suggest-gallery').innerHTML =
+          localStrings.getString('extensionSettingsSuggestGallery');
+      $('get-more-extensions').innerHTML =
+          localStrings.getString('extensionSettingsGetMoreExtensions');
 
       // Set up the three dev mode buttons (load unpacked, pack and update).
       $('load-unpacked').addEventListener('click',
@@ -116,50 +59,34 @@ cr.define('extensions', function() {
       $('update-extensions-now').addEventListener('click',
           this.handleUpdateExtensionNow_.bind(this));
 
-      if (!loadTimeData.getBoolean('offStoreInstallEnabled')) {
-        this.dragWrapper_ = new cr.ui.DragWrapper(document.documentElement,
-                                                  dragWrapperHandler);
-      }
+      this.pageHeader_ = $('page-header');
 
-      extensions.PackExtensionOverlay.getInstance().initializePage();
+      document.addEventListener('scroll', this.handleScroll_.bind(this));
+      window.addEventListener('message', this.handleWindowMessage_.bind(this));
 
-      // Hook up the configure commands link to the overlay.
-      var link = document.querySelector('.extension-commands-config');
-      link.addEventListener('click',
-          this.handleExtensionCommandsConfig_.bind(this));
+      var packExtensionOverlay = extensions.PackExtensionOverlay.getInstance();
+      packExtensionOverlay.initializePage();
 
-      // Initialize the Commands overlay.
-      extensions.ExtensionCommandsOverlay.getInstance().initializePage();
+      // Trigger the scroll handler to tell the navigation if our page started
+      // with some scroll (happens when you use tab restore).
+      this.handleScroll_();
+    },
 
-      extensions.ExtensionErrorOverlay.getInstance().initializePage();
+    /**
+     * Utility function which asks the C++ to show a platform-specific file
+     * select dialog, and fire |callback| with the |filePath| that resulted.
+     * |selectType| can be either 'file' or 'folder'. |operation| can be 'load',
+     * 'packRoot', or 'pem' which are signals to the C++ to do some
+     * operation-specific configuration.
+     * @private
+     */
+    showFileDialog_: function(selectType, operation, callback) {
+      handleFilePathSelected = function(filePath) {
+        callback(filePath);
+        handleFilePathSelected = function() {};
+      };
 
-      // Initialize the kiosk overlay.
-      if (cr.isChromeOS) {
-        var kioskOverlay = extensions.KioskAppsOverlay.getInstance();
-        kioskOverlay.initialize();
-
-        $('add-kiosk-app').addEventListener('click', function() {
-          ExtensionSettings.showOverlay($('kiosk-apps-page'));
-          kioskOverlay.didShowPage();
-        });
-
-        extensions.KioskDisableBailoutConfirm.getInstance().initialize();
-      }
-
-      cr.ui.overlay.setupOverlay($('drop-target-overlay'));
-      cr.ui.overlay.globalInitialization();
-
-      extensions.ExtensionFocusManager.getInstance().initialize();
-
-      var path = document.location.pathname;
-      if (path.length > 1) {
-        // Skip starting slash and remove trailing slash (if any).
-        var overlayName = path.slice(1).replace(/\/$/, '');
-        if (overlayName == 'configureCommands')
-          this.showExtensionCommandsConfigUi_();
-      }
-
-      preventDefaultOnPoundLinkClicks();  // From webui/js/util.js.
+      chrome.send('extensionSettingsSelectFilePath', [selectType, operation]);
     },
 
     /**
@@ -168,7 +95,12 @@ cr.define('extensions', function() {
      * @private
      */
     handleLoadUnpackedExtension_: function(e) {
-      chrome.send('extensionSettingsLoadUnpackedExtension');
+      this.showFileDialog_('folder', 'pem', function(filePath) {
+        chrome.send('extensionSettingsLoad', [String(filePath)]);
+      });
+
+      chrome.send('coreOptionsUserMetricsAction',
+                  ['Options_LoadUnpackedExtension']);
     },
 
     /**
@@ -177,28 +109,8 @@ cr.define('extensions', function() {
      * @private
      */
     handlePackExtension_: function(e) {
-      ExtensionSettings.showOverlay($('pack-extension-overlay'));
-      chrome.send('metricsHandler:recordAction', ['Options_PackExtension']);
-    },
-
-    /**
-     * Shows the Extension Commands configuration UI.
-     * @param {Event} e Change event.
-     * @private
-     */
-    showExtensionCommandsConfigUi_: function(e) {
-      ExtensionSettings.showOverlay($('extension-commands-overlay'));
-      chrome.send('metricsHandler:recordAction',
-                  ['Options_ExtensionCommands']);
-    },
-
-    /**
-     * Handles the Configure (Extension) Commands link.
-     * @param {Event} e Change event.
-     * @private
-     */
-    handleExtensionCommandsConfig_: function(e) {
-      this.showExtensionCommandsConfigUi_();
+      ExtensionSettings.showOverlay($('packExtensionOverlay'));
+      chrome.send('coreOptionsUserMetricsAction', ['Options_PackExtension']);
     },
 
     /**
@@ -207,7 +119,7 @@ cr.define('extensions', function() {
      * @private
      */
     handleUpdateExtensionNow_: function(e) {
-      chrome.send('extensionSettingsAutoupdate');
+      chrome.send('extensionSettingsAutoupdate', []);
     },
 
     /**
@@ -216,39 +128,63 @@ cr.define('extensions', function() {
      * @private
      */
     handleToggleDevMode_: function(e) {
-      if ($('toggle-dev-on').checked) {
-        $('dev-controls').hidden = false;
-        window.setTimeout(function() {
-          $('extension-settings').classList.add('dev-mode');
-        }, 0);
+      var dev = $('dev');
+      if (!dev.classList.contains('dev-open')) {
+        // Make the Dev section visible.
+        dev.classList.add('dev-open');
+        dev.classList.remove('dev-closed');
+
+        $('load-unpacked').classList.add('dev-button-visible');
+        $('load-unpacked').classList.remove('dev-button-hidden');
+        $('pack-extension').classList.add('dev-button-visible');
+        $('pack-extension').classList.remove('dev-button-hidden');
+        $('update-extensions-now').classList.add('dev-button-visible');
+        $('update-extensions-now').classList.remove('dev-button-hidden');
       } else {
-        $('extension-settings').classList.remove('dev-mode');
+        // Hide the Dev section.
+        dev.classList.add('dev-closed');
+        dev.classList.remove('dev-open');
+
+        $('load-unpacked').classList.add('dev-button-hidden');
+        $('load-unpacked').classList.remove('dev-button-visible');
+        $('pack-extension').classList.add('dev-button-hidden');
+        $('pack-extension').classList.remove('dev-button-visible');
+        $('update-extensions-now').classList.add('dev-button-hidden');
+        $('update-extensions-now').classList.remove('dev-button-visible');
       }
 
-      chrome.send('extensionSettingsToggleDeveloperMode');
+      chrome.send('extensionSettingsToggleDeveloperMode', []);
     },
 
     /**
-     * Called when a transition has ended for #dev-controls.
-     * @param {Event} e webkitTransitionEnd event.
+     * Called when the page is scrolled; moves elements that are position:fixed
+     * but should only behave as if they are fixed for vertical scrolling.
      * @private
      */
-    handleDevControlsTransitionEnd_: function(e) {
-      if (e.propertyName == 'height' &&
-          !$('extension-settings').classList.contains('dev-mode')) {
-        $('dev-controls').hidden = true;
-      }
+    handleScroll_: function() {
+      var offset = document.body.scrollLeft * -1;
+      this.pageHeader_.style.webkitTransform = 'translateX(' + offset + 'px)';
+      uber.invokeMethodOnParent('adjustToScroll', document.body.scrollLeft);
     },
 
     /**
-     * Called when the user clicked on the button to launch Apps Developer
-     * Tools.
-     * @param {!Event} e A click event.
+     * Handles postMessage from chrome://chrome.
+     * @param {Event} e The post data.
+     */
+    handleWindowMessage_: function(e) {
+      if (e.data.method === 'frameSelected')
+        this.handleFrameSelected_();
+      else
+        console.error('Received unexpected message', e.data);
+    },
+
+    /**
+     * This is called when a user selects this frame via the navigation bar
+     * frame (and is triggered via postMessage() from the uber page).
      * @private
      */
-    handleOpenAppsDevTools_: function(e) {
-      chrome.send('extensionSettingsLaunch',
-                  ['lphgohfeebnhcpiohjndkgbhhkoapkjc']);
+    handleFrameSelected_: function() {
+      document.body.scrollLeft = 0;
     },
   };
 
@@ -257,64 +193,33 @@ cr.define('extensions', function() {
    * the current state of installed extensions.
    */
   ExtensionSettings.returnExtensionsData = function(extensionsData) {
-    // We can get called many times in short order, thus we need to
-    // be careful to remove the 'finished loading' timeout.
-    if (this.loadingTimeout_)
-      window.clearTimeout(this.loadingTimeout_);
-    document.documentElement.classList.add('loading');
-    this.loadingTimeout_ = window.setTimeout(function() {
-      document.documentElement.classList.remove('loading');
-    }, 0);
+    webui_responded_ = true;
 
-    webuiResponded = true;
+    $('no-extensions').hidden = true;
+    $('suggest-gallery').hidden = true;
+    $('get-more-extensions-container').hidden = true;
 
     if (extensionsData.extensions.length > 0) {
       // Enforce order specified in the data or (if equal) then sort by
-      // extension name (case-insensitive) followed by their ID (in the case
-      // where extensions have the same name).
+      // extension name (case-insensitive).
       extensionsData.extensions.sort(function(a, b) {
-        function compare(x, y) {
-          return x < y ? -1 : (x > y ? 1 : 0);
+        if (a.order == b.order) {
+          a = a.name.toLowerCase();
+          b = b.name.toLowerCase();
+          return a < b ? -1 : (a > b ? 1 : 0);
+        } else {
+          return a.order < b.order ? -1 : 1;
         }
-        return compare(a.order, b.order) ||
-               compare(a.name.toLowerCase(), b.name.toLowerCase()) ||
-               compare(a.id, b.id);
       });
-    }
 
-    var pageDiv = $('extension-settings');
-    var marginTop = 0;
-    if (extensionsData.profileIsManaged) {
-      pageDiv.classList.add('profile-is-managed');
+      $('get-more-extensions-container').hidden = false;
     } else {
-      pageDiv.classList.remove('profile-is-managed');
+      $('no-extensions').hidden = false;
+      $('suggest-gallery').hidden = false;
     }
-    if (extensionsData.profileIsManaged) {
-      pageDiv.classList.add('showing-banner');
-      $('toggle-dev-on').disabled = true;
-      marginTop += 45;
-    } else {
-      pageDiv.classList.remove('showing-banner');
-      $('toggle-dev-on').disabled = false;
-    }
-
-    pageDiv.style.marginTop = marginTop + 'px';
-
-    if (extensionsData.developerMode) {
-      pageDiv.classList.add('dev-mode');
-      $('toggle-dev-on').checked = true;
-      $('dev-controls').hidden = false;
-    } else {
-      pageDiv.classList.remove('dev-mode');
-      $('toggle-dev-on').checked = false;
-    }
-
-    if (extensionsData.appsDevToolsEnabled)
-      pageDiv.classList.add('apps-dev-tools-mode');
-
-    $('load-unpacked').disabled = extensionsData.loadUnpackedDisabled;
 
     ExtensionsList.prototype.data_ = extensionsData;
+
     var extensionList = $('extension-settings-list');
     ExtensionsList.decorate(extensionList);
   }
@@ -329,10 +234,10 @@ cr.define('extensions', function() {
     };
 
     alertOverlay.setValues(
-        loadTimeData.getString('packExtensionWarningTitle'),
+        localStrings.getString('packExtensionWarningTitle'),
         message,
-        loadTimeData.getString('packExtensionProceedAnyway'),
-        loadTimeData.getString('cancel'),
+        localStrings.getString('packExtensionProceedAnyway'),
+        localStrings.getString('cancel'),
         function() {
           chrome.send('pack', [crx_path, pem_path, overrideFlags]);
           closeAlert();
@@ -342,74 +247,20 @@ cr.define('extensions', function() {
   }
 
   /**
-   * Returns the current overlay or null if one does not exist.
-   * @return {Element} The overlay element.
-   */
-  ExtensionSettings.getCurrentOverlay = function() {
-    return document.querySelector('#overlay .page.showing');
-  }
-
-  /**
    * Sets the given overlay to show. This hides whatever overlay is currently
    * showing, if any.
    * @param {HTMLElement} node The overlay page to show. If falsey, all overlays
    *     are hidden.
    */
   ExtensionSettings.showOverlay = function(node) {
-    var pageDiv = $('extension-settings');
-    if (node) {
-      pageDiv.style.width = window.getComputedStyle(pageDiv).width;
-      document.body.classList.add('no-scroll');
-    } else {
-      document.body.classList.remove('no-scroll');
-      pageDiv.style.width = '';
-    }
-
-    var currentlyShowingOverlay = ExtensionSettings.getCurrentOverlay();
+    var currentlyShowingOverlay =
+        document.querySelector('#overlay .page.showing');
     if (currentlyShowingOverlay)
       currentlyShowingOverlay.classList.remove('showing');
 
     if (node)
       node.classList.add('showing');
-
-    var pages = document.querySelectorAll('.page');
-    for (var i = 0; i < pages.length; i++) {
-      pages[i].setAttribute('aria-hidden', node ? 'true' : 'false');
-    }
-
     overlay.hidden = !node;
-    uber.invokeMethodOnParent(node ? 'beginInterceptingEvents' :
-                                     'stopInterceptingEvents');
-  }
-
-  /**
-   * Utility function to find the width of various UI strings and synchronize
-   * the width of relevant spans. This is crucial for making sure the
-   * Enable/Enabled checkboxes align, as well as the Developer Mode checkbox.
-   */
-  function measureCheckboxStrings() {
-    var trashWidth = 30;
-    var measuringDiv = $('font-measuring-div');
-    measuringDiv.textContent =
-        loadTimeData.getString('extensionSettingsEnabled');
-    var pxWidth = measuringDiv.clientWidth + trashWidth;
-    measuringDiv.textContent =
-        loadTimeData.getString('extensionSettingsEnable');
-    pxWidth = Math.max(measuringDiv.clientWidth + trashWidth, pxWidth);
-    measuringDiv.textContent =
-        loadTimeData.getString('extensionSettingsDeveloperMode');
-    pxWidth = Math.max(measuringDiv.clientWidth, pxWidth);
-
-    var style = document.createElement('style');
-    style.type = 'text/css';
-    style.textContent =
-        '.enable-checkbox-text {' +
-        '  min-width: ' + (pxWidth - trashWidth) + 'px;' +
-        '}' +
-        '#dev-toggle span {' +
-        '  min-width: ' + pxWidth + 'px;' +
-        '}';
-    document.querySelector('head').appendChild(style);
   }
 
   // Export
@@ -418,6 +269,9 @@ cr.define('extensions', function() {
   };
 });
 
-window.addEventListener('load', function(e) {
-  extensions.ExtensionSettings.getInstance().initialize();
+var ExtensionSettings = extensions.ExtensionSettings;
+
+// 'load' seems to have a bad interaction with open_sans.woff.
+window.addEventListener('DOMContentLoaded', function(e) {
+  ExtensionSettings.getInstance().initialize();
 });

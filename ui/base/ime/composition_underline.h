@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_IME_COMPOSITION_UNDERLINE_H_
 #define UI_BASE_IME_COMPOSITION_UNDERLINE_H_
+#pragma once
 
 #include <vector>
 
@@ -11,8 +12,8 @@
 
 namespace ui {
 
-// Intentionally keep sync with blink::WebCompositionUnderline defined in:
-// third_party/WebKit/public/web/WebCompositionUnderline.h
+// Intentionally keep sync with WebKit::WebCompositionUnderline defined in:
+// third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h
 struct CompositionUnderline {
   CompositionUnderline()
     : start_offset(0),
@@ -38,7 +39,7 @@ struct CompositionUnderline {
   }
 
   // Though use of unsigned is discouraged, we use it here to make sure it's
-  // identical to blink::WebCompositionUnderline.
+  // identical to WebKit::WebCompositionUnderline.
   unsigned start_offset;
   unsigned end_offset;
   SkColor color;

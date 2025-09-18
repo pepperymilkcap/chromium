@@ -7,148 +7,125 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/json/json_string_value_serializer.h"
+#include "base/json/json_value_serializer.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/api/messaging/message.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/renderer/extensions/app_bindings.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
-#include "chrome/renderer/extensions/console.h"
-#include "chrome/renderer/extensions/dispatcher.h"
-#include "chrome/renderer/extensions/messaging_bindings.h"
-#include "chrome/renderer/extensions/user_script_scheduler.h"
+#include "chrome/renderer/extensions/chrome_webstore_bindings.h"
+#include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_dispatcher.h"
+#include "chrome/renderer/extensions/miscellaneous_bindings.h"
+#include "chrome/renderer/extensions/schema_generated_bindings.h"
+#include "chrome/renderer/extensions/user_script_idle_scheduler.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
-#include "chrome/renderer/web_apps.h"
 #include "content/public/renderer/render_view.h"
-#include "content/public/renderer/render_view_visitor.h"
-#include "extensions/common/constants.h"
-#include "third_party/WebKit/public/platform/WebURLRequest.h"
-#include "third_party/WebKit/public/web/WebConsoleMessage.h"
-#include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebScopedUserGesture.h"
-#include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "webkit/glue/image_resource_fetcher.h"
+#include "webkit/glue/resource_fetcher.h"
 
-using content::ConsoleMessageLevel;
-using blink::WebConsoleMessage;
-using blink::WebDataSource;
-using blink::WebFrame;
-using blink::WebURLRequest;
-using blink::WebScopedUserGesture;
-using blink::WebView;
-
-namespace extensions {
+using extensions::MiscellaneousBindings;
+using extensions::SchemaGeneratedBindings;
+using WebKit::WebConsoleMessage;
+using WebKit::WebDataSource;
+using WebKit::WebFrame;
+using WebKit::WebURLRequest;
+using WebKit::WebView;
+using webkit_glue::ImageResourceFetcher;
+using webkit_glue::ResourceFetcher;
 
 namespace {
-// Keeps a mapping from the frame pointer to a UserScriptScheduler object.
+// Keeps a mapping from the frame pointer to a UserScriptIdleScheduler object.
 // We store this mapping per process, because a frame can jump from one
 // document to another with adoptNode, and so having the object be a
 // RenderViewObserver means it might miss some notifications after it moves.
-typedef std::map<WebFrame*, UserScriptScheduler*> SchedulerMap;
+typedef std::map<WebFrame*, UserScriptIdleScheduler*> SchedulerMap;
 static base::LazyInstance<SchedulerMap> g_schedulers =
     LAZY_INSTANCE_INITIALIZER;
-
-// A RenderViewVisitor class that iterates through the set of available
-// views, looking for a view of the given type, in the given browser window
-// and within the given extension.
-// Used to accumulate the list of views associated with an extension.
-class ViewAccumulator : public content::RenderViewVisitor {
- public:
-  ViewAccumulator(const std::string& extension_id,
-                  int browser_window_id,
-                  ViewType view_type)
-      : extension_id_(extension_id),
-        browser_window_id_(browser_window_id),
-        view_type_(view_type) {
-  }
-
-  std::vector<content::RenderView*> views() { return views_; }
-
-  // Returns false to terminate the iteration.
-  virtual bool Visit(content::RenderView* render_view) OVERRIDE {
-    ExtensionHelper* helper = ExtensionHelper::Get(render_view);
-    if (!ViewTypeMatches(helper->view_type(), view_type_))
-      return true;
-
-    GURL url = render_view->GetWebView()->mainFrame()->document().url();
-    if (!url.SchemeIs(kExtensionScheme))
-      return true;
-    const std::string& extension_id = url.host();
-    if (extension_id != extension_id_)
-      return true;
-
-    if (browser_window_id_ != extension_misc::kUnknownWindowId &&
-        helper->browser_window_id() != browser_window_id_) {
-      return true;
-    }
-
-    views_.push_back(render_view);
-
-    if (view_type_ == VIEW_TYPE_EXTENSION_BACKGROUND_PAGE)
-      return false;  // There can be only one...
-    return true;
-  }
-
- private:
-  // Returns true if |type| "isa" |match|.
-  static bool ViewTypeMatches(ViewType type, ViewType match) {
-    if (type == match)
-      return true;
-
-    // INVALID means match all.
-    if (match == VIEW_TYPE_INVALID)
-      return true;
-
-    return false;
-  }
-
-  std::string extension_id_;
-  int browser_window_id_;
-  ViewType view_type_;
-  std::vector<content::RenderView*> views_;
-};
-
-}  // namespace
-
-// static
-std::vector<content::RenderView*> ExtensionHelper::GetExtensionViews(
-    const std::string& extension_id,
-    int browser_window_id,
-    ViewType view_type) {
-  ViewAccumulator accumulator(extension_id, browser_window_id, view_type);
-  content::RenderView::ForEach(&accumulator);
-  return accumulator.views();
-}
-
-// static
-content::RenderView* ExtensionHelper::GetBackgroundPage(
-    const std::string& extension_id) {
-  ViewAccumulator accumulator(extension_id, extension_misc::kUnknownWindowId,
-                              VIEW_TYPE_EXTENSION_BACKGROUND_PAGE);
-  content::RenderView::ForEach(&accumulator);
-  CHECK_LE(accumulator.views().size(), 1u);
-  if (accumulator.views().size() == 0)
-    return NULL;
-  return accumulator.views()[0];
 }
 
 ExtensionHelper::ExtensionHelper(content::RenderView* render_view,
-                                 Dispatcher* dispatcher)
+                                 ExtensionDispatcher* extension_dispatcher)
     : content::RenderViewObserver(render_view),
       content::RenderViewObserverTracker<ExtensionHelper>(render_view),
-      dispatcher_(dispatcher),
+      extension_dispatcher_(extension_dispatcher),
       pending_app_icon_requests_(0),
-      view_type_(VIEW_TYPE_INVALID),
-      tab_id_(-1),
+      view_type_(content::VIEW_TYPE_INVALID),
       browser_window_id_(-1) {
 }
 
 ExtensionHelper::~ExtensionHelper() {
+}
+
+bool ExtensionHelper::InstallWebApplicationUsingDefinitionFile(
+    WebFrame* frame, string16* error) {
+  // There is an issue of drive-by installs with the below implementation. A web
+  // site could force a user to install an app by timing the dialog to come up
+  // just before the user clicks.
+  //
+  // We do show a success UI that allows users to uninstall, but it seems that
+  // we might still want to put up an infobar before showing the install dialog.
+  //
+  // TODO(aa): Figure out this issue before removing the kEnableCrxlessWebApps
+  // switch.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableCrxlessWebApps)) {
+    *error = ASCIIToUTF16("CRX-less web apps aren't enabled.");
+    return false;
+  }
+
+  if (frame != frame->top()) {
+    *error = ASCIIToUTF16("Applications can only be installed from the top "
+                          "frame.");
+    return false;
+  }
+
+  if (pending_app_info_.get()) {
+    *error = ASCIIToUTF16("An application install is already in progress.");
+    return false;
+  }
+
+  pending_app_info_.reset(new WebApplicationInfo());
+  if (!web_apps::ParseWebAppFromWebDocument(frame, pending_app_info_.get(),
+                                            error)) {
+    return false;
+  }
+
+  if (!pending_app_info_->manifest_url.is_valid()) {
+    *error = ASCIIToUTF16("Web application definition not found or invalid.");
+    return false;
+  }
+
+  app_definition_fetcher_.reset(new ResourceFetcher(
+      pending_app_info_->manifest_url, render_view()->GetWebView()->mainFrame(),
+      WebURLRequest::TargetIsSubresource,
+      base::Bind(&ExtensionHelper::DidDownloadApplicationDefinition,
+                 base::Unretained(this))));
+  return true;
+}
+
+void ExtensionHelper::InlineWebstoreInstall(
+    int install_id,
+    const std::string& webstore_item_id,
+    const GURL& requestor_url) {
+  Send(new ExtensionHostMsg_InlineWebstoreInstall(
+      routing_id(), install_id, webstore_item_id, requestor_url));
+}
+
+void ExtensionHelper::OnInlineWebstoreInstallResponse(
+    int install_id,
+    bool success,
+    const std::string& error) {
+  ChromeWebstoreExtension::HandleInstallResponse(install_id, success, error);
 }
 
 bool ExtensionHelper::OnMessageReceived(const IPC::Message& message) {
@@ -156,29 +133,22 @@ bool ExtensionHelper::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(ExtensionHelper, message)
     IPC_MESSAGE_HANDLER(ExtensionMsg_Response, OnExtensionResponse)
     IPC_MESSAGE_HANDLER(ExtensionMsg_MessageInvoke, OnExtensionMessageInvoke)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_DispatchOnConnect,
-                        OnExtensionDispatchOnConnect)
     IPC_MESSAGE_HANDLER(ExtensionMsg_DeliverMessage, OnExtensionDeliverMessage)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_DispatchOnDisconnect,
-                        OnExtensionDispatchOnDisconnect)
     IPC_MESSAGE_HANDLER(ExtensionMsg_ExecuteCode, OnExecuteCode)
     IPC_MESSAGE_HANDLER(ExtensionMsg_GetApplicationInfo, OnGetApplicationInfo)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_SetTabId, OnSetTabId)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateBrowserWindowId,
                         OnUpdateBrowserWindowId)
     IPC_MESSAGE_HANDLER(ExtensionMsg_NotifyRenderViewType,
                         OnNotifyRendererViewType)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_AddMessageToConsole,
-                        OnAddMessageToConsole)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_AppWindowClosed,
-                        OnAppWindowClosed);
+    IPC_MESSAGE_HANDLER(ExtensionMsg_InlineWebstoreInstallResponse,
+                        OnInlineWebstoreInstallResponse)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
 void ExtensionHelper::DidFinishDocumentLoad(WebFrame* frame) {
-  dispatcher_->user_script_slave()->InjectScripts(
+  extension_dispatcher_->user_script_slave()->InjectScripts(
       frame, UserScript::DOCUMENT_END);
 
   SchedulerMap::iterator i = g_schedulers.Get().find(frame);
@@ -186,39 +156,21 @@ void ExtensionHelper::DidFinishDocumentLoad(WebFrame* frame) {
     i->second->DidFinishDocumentLoad();
 }
 
-void ExtensionHelper::DidFinishLoad(blink::WebFrame* frame) {
+void ExtensionHelper::DidFinishLoad(WebKit::WebFrame* frame) {
   SchedulerMap::iterator i = g_schedulers.Get().find(frame);
   if (i != g_schedulers.Get().end())
     i->second->DidFinishLoad();
 }
 
 void ExtensionHelper::DidCreateDocumentElement(WebFrame* frame) {
-  dispatcher_->user_script_slave()->InjectScripts(
+  extension_dispatcher_->user_script_slave()->InjectScripts(
       frame, UserScript::DOCUMENT_START);
-  SchedulerMap::iterator i = g_schedulers.Get().find(frame);
-  if (i != g_schedulers.Get().end())
-    i->second->DidCreateDocumentElement();
-
-  dispatcher_->DidCreateDocumentElement(frame);
 }
 
-void ExtensionHelper::DidStartProvisionalLoad(blink::WebFrame* frame) {
+void ExtensionHelper::DidStartProvisionalLoad(WebKit::WebFrame* frame) {
   SchedulerMap::iterator i = g_schedulers.Get().find(frame);
   if (i != g_schedulers.Get().end())
     i->second->DidStartProvisionalLoad();
-}
-
-void ExtensionHelper::DraggableRegionsChanged(blink::WebFrame* frame) {
-  blink::WebVector<blink::WebDraggableRegion> webregions =
-      frame->document().draggableRegions();
-  std::vector<DraggableRegion> regions;
-  for (size_t i = 0; i < webregions.size(); ++i) {
-    DraggableRegion region;
-    region.bounds = webregions[i].bounds;
-    region.draggable = webregions[i].draggable;
-    regions.push_back(region);
-  }
-  Send(new ExtensionHostMsg_UpdateDraggableRegions(routing_id(), regions));
 }
 
 void ExtensionHelper::FrameDetached(WebFrame* frame) {
@@ -232,70 +184,49 @@ void ExtensionHelper::FrameDetached(WebFrame* frame) {
   g_schedulers.Get().erase(i);
 }
 
-void ExtensionHelper::DidMatchCSS(
-    blink::WebFrame* frame,
-    const blink::WebVector<blink::WebString>& newly_matching_selectors,
-    const blink::WebVector<blink::WebString>& stopped_matching_selectors) {
-  dispatcher_->DidMatchCSS(
-      frame, newly_matching_selectors, stopped_matching_selectors);
-}
-
 void ExtensionHelper::DidCreateDataSource(WebFrame* frame, WebDataSource* ds) {
+  // If there are any app-related fetches in progress, they can be cancelled now
+  // since we have navigated away from the page that created them.
+  if (!frame->parent()) {
+    app_icon_fetchers_.clear();
+    app_definition_fetcher_.reset(NULL);
+  }
+
   // Check first if we created a scheduler for the frame, since this function
   // gets called for navigations within the document.
   if (g_schedulers.Get().count(frame))
     return;
 
-  g_schedulers.Get()[frame] = new UserScriptScheduler(frame, dispatcher_);
+  g_schedulers.Get()[frame] = new UserScriptIdleScheduler(
+      frame, extension_dispatcher_);
 }
 
 void ExtensionHelper::OnExtensionResponse(int request_id,
                                           bool success,
-                                          const base::ListValue& response,
+                                          const std::string& response,
                                           const std::string& error) {
-  dispatcher_->OnExtensionResponse(request_id,
-                                   success,
-                                   response,
-                                   error);
+  std::string extension_id;
+  SchemaGeneratedBindings::HandleResponse(
+      extension_dispatcher_->v8_context_set(), request_id, success,
+      response, error, &extension_id);
+
+  extension_dispatcher_->CheckIdleStatus(extension_id);
 }
 
 void ExtensionHelper::OnExtensionMessageInvoke(const std::string& extension_id,
-                                               const std::string& module_name,
                                                const std::string& function_name,
-                                               const base::ListValue& args,
-                                               bool user_gesture) {
-  dispatcher_->InvokeModuleSystemMethod(
-      render_view(), extension_id, module_name, function_name, args,
-      user_gesture);
-}
-
-void ExtensionHelper::OnExtensionDispatchOnConnect(
-    int target_port_id,
-    const std::string& channel_name,
-    const base::DictionaryValue& source_tab,
-    const ExtensionMsg_ExternalConnectionInfo& info,
-    const std::string& tls_channel_id) {
-  MessagingBindings::DispatchOnConnect(
-      dispatcher_->v8_context_set().GetAll(),
-      target_port_id, channel_name, source_tab,
-      info.source_id, info.target_id, info.source_url,
-      tls_channel_id, render_view());
+                                               const ListValue& args,
+                                               const GURL& event_url) {
+  extension_dispatcher_->v8_context_set().DispatchChromeHiddenMethod(
+      extension_id, function_name, args, render_view(), event_url);
 }
 
 void ExtensionHelper::OnExtensionDeliverMessage(int target_id,
-                                                const Message& message) {
-  MessagingBindings::DeliverMessage(dispatcher_->v8_context_set().GetAll(),
-                                        target_id,
-                                        message,
-                                        render_view());
-}
-
-void ExtensionHelper::OnExtensionDispatchOnDisconnect(
-    int port_id,
-    const std::string& error_message) {
-  MessagingBindings::DispatchOnDisconnect(
-      dispatcher_->v8_context_set().GetAll(),
-      port_id, error_message,
+                                                const std::string& message) {
+  MiscellaneousBindings::DeliverMessage(
+      extension_dispatcher_->v8_context_set().GetAll(),
+      target_id,
+      message,
       render_view());
 }
 
@@ -304,13 +235,8 @@ void ExtensionHelper::OnExecuteCode(
   WebView* webview = render_view()->GetWebView();
   WebFrame* main_frame = webview->mainFrame();
   if (!main_frame) {
-    base::ListValue val;
-    Send(new ExtensionHostMsg_ExecuteCodeFinished(routing_id(),
-                                                  params.request_id,
-                                                  "No main frame",
-                                                  -1,
-                                                  GURL(std::string()),
-                                                  val));
+    Send(new ExtensionHostMsg_ExecuteCodeFinished(
+        routing_id(), params.request_id, false, ""));
     return;
   }
 
@@ -324,7 +250,7 @@ void ExtensionHelper::OnExecuteCode(
 void ExtensionHelper::OnGetApplicationInfo(int page_id) {
   WebApplicationInfo app_info;
   if (page_id == render_view()->GetPageId()) {
-    base::string16 error;
+    string16 error;
     web_apps::ParseWebAppFromWebDocument(
         render_view()->GetWebView()->mainFrame(), &app_info, &error);
   }
@@ -344,35 +270,110 @@ void ExtensionHelper::OnGetApplicationInfo(int page_id) {
       routing_id(), page_id, app_info));
 }
 
-void ExtensionHelper::OnNotifyRendererViewType(ViewType type) {
+void ExtensionHelper::OnNotifyRendererViewType(content::ViewType type) {
   view_type_ = type;
-}
-
-void ExtensionHelper::OnSetTabId(int init_tab_id) {
-  CHECK_EQ(tab_id_, -1);
-  CHECK_GE(init_tab_id, 0);
-  tab_id_ = init_tab_id;
 }
 
 void ExtensionHelper::OnUpdateBrowserWindowId(int window_id) {
   browser_window_id_ = window_id;
 }
 
-void ExtensionHelper::OnAddMessageToConsole(ConsoleMessageLevel level,
-                                            const std::string& message) {
-  console::AddMessage(render_view(), level, message);
-}
+void ExtensionHelper::DidDownloadApplicationDefinition(
+    const WebKit::WebURLResponse& response,
+    const std::string& data) {
+  scoped_ptr<WebApplicationInfo> app_info(
+      pending_app_info_.release());
 
-void ExtensionHelper::OnAppWindowClosed() {
-  v8::HandleScope scope(v8::Isolate::GetCurrent());
-  v8::Handle<v8::Context> script_context =
-      render_view()->GetWebView()->mainFrame()->mainWorldScriptContext();
-  ChromeV8Context* chrome_v8_context =
-      dispatcher_->v8_context_set().GetByV8Context(script_context);
-  if (!chrome_v8_context)
+  JSONStringValueSerializer serializer(data);
+  int error_code = 0;
+  std::string error_message;
+  scoped_ptr<Value> result(serializer.Deserialize(&error_code, &error_message));
+  if (!result.get()) {
+    AddErrorToRootConsole(UTF8ToUTF16(error_message));
     return;
-  chrome_v8_context->module_system()->CallModuleMethod(
-      "app.window", "onAppWindowClosed");
+  }
+
+  string16 error_message_16;
+  if (!web_apps::ParseWebAppFromDefinitionFile(result.get(), app_info.get(),
+                                               &error_message_16)) {
+    AddErrorToRootConsole(error_message_16);
+    return;
+  }
+
+  if (!app_info->icons.empty()) {
+    pending_app_info_.reset(app_info.release());
+    pending_app_icon_requests_ =
+        static_cast<int>(pending_app_info_->icons.size());
+    for (size_t i = 0; i < pending_app_info_->icons.size(); ++i) {
+      app_icon_fetchers_.push_back(linked_ptr<ImageResourceFetcher>(
+          new ImageResourceFetcher(
+              pending_app_info_->icons[i].url,
+              render_view()->GetWebView()->mainFrame(),
+              static_cast<int>(i),
+              pending_app_info_->icons[i].width,
+              WebURLRequest::TargetIsFavicon,
+              base::Bind(
+                  &ExtensionHelper::DidDownloadApplicationIcon,
+                  base::Unretained(this)))));
+    }
+  } else {
+    Send(new ExtensionHostMsg_InstallApplication(routing_id(), *app_info));
+  }
 }
 
-}  // namespace extensions
+void ExtensionHelper::DidDownloadApplicationIcon(ImageResourceFetcher* fetcher,
+                                            const SkBitmap& image) {
+  pending_app_info_->icons[fetcher->id()].data = image;
+
+  // Remove the image fetcher from our pending list. We're in the callback from
+  // ImageResourceFetcher, best to delay deletion.
+  ImageResourceFetcherList::iterator i;
+  for (i = app_icon_fetchers_.begin(); i != app_icon_fetchers_.end(); ++i) {
+    if (i->get() == fetcher) {
+      i->release();
+      app_icon_fetchers_.erase(i);
+      break;
+    }
+  }
+
+  // We're in the callback from the ImageResourceFetcher, best to delay
+  // deletion.
+  MessageLoop::current()->DeleteSoon(FROM_HERE, fetcher);
+
+  if (--pending_app_icon_requests_ > 0)
+    return;
+
+  // There is a maximum size of IPC on OS X and Linux that we have run into in
+  // some situations. We're not sure what it is, but our hypothesis is in the
+  // neighborhood of 1 MB.
+  //
+  // To be on the safe side, we give ourselves 128 KB for just the image data.
+  // This should be more than enough for 128, 48, and 16 px 32-bit icons. If we
+  // want to start allowing larger icons (see bug 63406), we'll have to either
+  // experiment mor ewith this and find the real limit, or else come up with
+  // some alternative way to transmit the icon data to the browser process.
+  //
+  // See also: bug 63729.
+  const size_t kMaxIconSize = 1024 * 128;
+  size_t actual_icon_size = 0;
+  for (size_t i = 0; i < pending_app_info_->icons.size(); ++i) {
+    size_t current_size = pending_app_info_->icons[i].data.getSize();
+    if (current_size > kMaxIconSize - actual_icon_size) {
+      AddErrorToRootConsole(ASCIIToUTF16(
+        "Icons are too large. Maximum total size for app icons is 128 KB."));
+      return;
+    }
+    actual_icon_size += current_size;
+  }
+
+  Send(new ExtensionHostMsg_InstallApplication(
+      routing_id(), *pending_app_info_));
+  pending_app_info_.reset(NULL);
+}
+
+void ExtensionHelper::AddErrorToRootConsole(const string16& message) {
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    render_view()->GetWebView()->mainFrame()->addMessageToConsole(
+        WebConsoleMessage(WebConsoleMessage::LevelError, message));
+  }
+}

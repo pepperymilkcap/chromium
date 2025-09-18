@@ -1,12 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/ppp_input_event_proxy.h"
 
+#include <algorithm>
+
 #include "ppapi/c/ppp_input_event.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
+#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/ppb_input_event_shared.h"
 #include "ppapi/thunk/enter.h"
@@ -20,7 +23,6 @@ namespace proxy {
 
 namespace {
 
-#if !defined(OS_NACL)
 PP_Bool HandleInputEvent(PP_Instance instance, PP_Resource input_event) {
   EnterResourceNoLock<PPB_InputEvent_API> enter(input_event, false);
   if (enter.failed()) {
@@ -49,10 +51,10 @@ PP_Bool HandleInputEvent(PP_Instance instance, PP_Resource input_event) {
 static const PPP_InputEvent input_event_interface = {
   &HandleInputEvent
 };
-#else
-// The NaCl plugin doesn't need the host side interface - stub it out.
-static const PPP_InputEvent input_event_interface = {};
-#endif  // !defined(OS_NACL)
+
+InterfaceProxy* CreateInputEventProxy(Dispatcher* dispatcher) {
+  return new PPP_InputEvent_Proxy(dispatcher);
+}
 
 }  // namespace
 
@@ -69,14 +71,18 @@ PPP_InputEvent_Proxy::~PPP_InputEvent_Proxy() {
 }
 
 // static
-const PPP_InputEvent* PPP_InputEvent_Proxy::GetProxyInterface() {
-  return &input_event_interface;
+const InterfaceProxy::Info* PPP_InputEvent_Proxy::GetInfo() {
+  static const Info info = {
+    &input_event_interface,
+    PPP_INPUT_EVENT_INTERFACE,
+    API_ID_PPP_INPUT_EVENT,
+    false,
+    &CreateInputEventProxy,
+  };
+  return &info;
 }
 
 bool PPP_InputEvent_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  if (!dispatcher()->IsPlugin())
-    return false;
-
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_InputEvent_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPInputEvent_HandleInputEvent,
@@ -91,10 +97,8 @@ bool PPP_InputEvent_Proxy::OnMessageReceived(const IPC::Message& msg) {
 void PPP_InputEvent_Proxy::OnMsgHandleInputEvent(PP_Instance instance,
                                                  const InputEventData& data) {
   scoped_refptr<PPB_InputEvent_Shared> resource(new PPB_InputEvent_Shared(
-      OBJECT_IS_PROXY, instance, data));
-  CallWhileUnlocked(ppp_input_event_impl_->HandleInputEvent,
-                    instance,
-                    resource->pp_resource());
+      PPB_InputEvent_Shared::InitAsProxy(), instance, data));
+  ppp_input_event_impl_->HandleInputEvent(instance, resource->pp_resource());
 }
 
 void PPP_InputEvent_Proxy::OnMsgHandleFilteredInputEvent(
@@ -102,10 +106,9 @@ void PPP_InputEvent_Proxy::OnMsgHandleFilteredInputEvent(
     const InputEventData& data,
     PP_Bool* result) {
   scoped_refptr<PPB_InputEvent_Shared> resource(new PPB_InputEvent_Shared(
-      OBJECT_IS_PROXY, instance, data));
-  *result = CallWhileUnlocked(ppp_input_event_impl_->HandleInputEvent,
-                              instance,
-                              resource->pp_resource());
+      PPB_InputEvent_Shared::InitAsProxy(), instance, data));
+  *result = ppp_input_event_impl_->HandleInputEvent(instance,
+                                                    resource->pp_resource());
 }
 
 }  // namespace proxy

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-GEN('#if !defined(OS_CHROMEOS)');
-
 /**
  * Test fixture for sync setup WebUI testing.
  * @constructor
@@ -15,15 +13,21 @@ SyncSetupWebUITest.prototype = {
   __proto__: testing.Test.prototype,
 
   /**
-   * Browse to the settings sub-frame.
-   */
-  browsePreload: 'chrome://settings-frame',
+   * Browse to personal options.
+   **/
+  browsePreload: 'chrome://settings/personal',
 
   /** @inheritDoc */
   preLoad: function() {
-    this.makeAndRegisterMockHandler(['SyncSetupConfigure',
+    this.makeAndRegisterMockHandler(['stopSyncing',
+                                     'SyncSetupDidClosePage',
+                                     'SyncSetupSubmitAuth',
+                                     'SyncSetupConfigure',
+                                     'SyncSetupPassphrase',
+                                     'SyncSetupPassphraseCancel',
+                                     'SyncSetupAttachHandler',
+                                     'SyncSetupShowErrorUI',
                                      'SyncSetupShowSetupUI',
-                                     'SyncSetupStartSignIn',
                                     ]);
   },
 
@@ -31,15 +35,28 @@ SyncSetupWebUITest.prototype = {
    * Verifies starting point is not synced.
    */
   verifyUnsynced: function() {
-    assertFalse(BrowserOptions.getInstance().signedIn_);
   },
 
   /**
    * Clicks the "Sign in to Chrome" button.
    */
   startSyncing: function() {
-    var startStopSyncButton = BrowserOptions.getStartStopSyncButton();
+    var startStopSyncButton = PersonalOptions.getStartStopSyncButton();
     assertNotEquals(null, startStopSyncButton);
+    this.mockHandler.expects(once()).SyncSetupShowSetupUI().
+        will(callFunction(function() {
+                            OptionsPage.navigateToPage('syncSetup');
+                          }));
+
+    this.mockHandler.expects(once()).SyncSetupAttachHandler().
+        will(callFunction(function() {
+                            SyncSetupOverlay.showSyncSetupPage(
+                                'login', {
+                                  user: '',
+                                  error: 0,
+                                  editable_user: true,
+                                });
+                          }));
     startStopSyncButton.click();
   },
 };
@@ -58,32 +75,19 @@ SyncSetupWebUITestAsync.prototype = {
   isAsync: true,
 };
 
-// Verify that initial state is unsynced, click the sign in button, verify
-// that the sync setup dialog appears, and dismiss it.
+// Verify that initial state is unsynced, start syncing, then login.
 TEST_F('SyncSetupWebUITestAsync', 'VerifySignIn', function() {
-  // Make sure the user is not starting off in the signed in or syncing state.
-  this.verifyUnsynced();
+  // Start syncing to pull up the sign in page.
+  assertFalse(PersonalOptions.getInstance().syncSetupCompleted);
+  this.startSyncing();
 
-  // Handle SyncSetupShowSetupUI by navigating to chrome://settings/syncSetup.
-  this.mockHandler.expects(once()).SyncSetupShowSetupUI().
-      will(callFunction(function() {
-                          OptionsPage.navigateToPage('syncSetup');
-                        }));
-
-  // Handle SyncSetupStartSignIn by displaying the sync setup dialog, verifying
-  // that a confirmation dialog appears, and clicking OK to dismiss the dialog.
-  // Note that this test doesn't actually do a gaia sign in.
-  this.mockHandler.expects(once()).SyncSetupStartSignIn().
-      will(callFunction(function() {
-                          SyncSetupOverlay.showSyncSetupPage('configure');
-                          var okButton = $('confirm-everything-ok');
-                          assertNotEquals(null, okButton);
-                          okButton.click();
-                        }));
-
-  // The test completes after the sync config is sent out.
-  this.mockHandler.expects(once()).SyncSetupConfigure(ANYTHING).
-      will(callFunction(testDone));
+  // Verify the DOM objects on the page.
+  var gaiaEmail = SyncSetupOverlay.getLoginEmail();
+  assertNotEquals(null, gaiaEmail);
+  var gaiaPasswd = SyncSetupOverlay.getLoginPasswd();
+  assertNotEquals(null, gaiaPasswd);
+  var signInButton = SyncSetupOverlay.getSignInButton();
+  assertNotEquals(null, signInButton);
 
   // For testing, don't wait to execute timeouts.
   var oldSetTimeout = setTimeout;
@@ -91,8 +95,21 @@ TEST_F('SyncSetupWebUITestAsync', 'VerifySignIn', function() {
     oldSetTimeout(fn, 0);
   };
 
-  // Kick off the test by clicking the "Sign in to Chrome..." button.
-  this.startSyncing();
-});
+  // Expect set up submission and close messages sent through chrome.send().
+  this.mockHandler.expects(once()).SyncSetupSubmitAuth(NOT_NULL).
+      will(callFunction(
+          function() {
+            var loginSuccess = localStrings.getString('loginSuccess');
+            expectNotEquals(loginSuccess, signInButton.value);
+            SyncSetupOverlay.showSuccessAndClose();
+            expectEquals(loginSuccess, signInButton.value);
+          }));
+  // The test completes after the asynchronous close.
+  this.mockHandler.expects(once()).SyncSetupDidClosePage().
+      will(callFunction(testDone));
 
-GEN('#endif  // OS_CHROMEOS');
+  // Set the email & password, then sign in.
+  gaiaEmail.value = 'foo@bar.baz';
+  gaiaPasswd.value = 'foo@bar.baz';
+  signInButton.click();
+});

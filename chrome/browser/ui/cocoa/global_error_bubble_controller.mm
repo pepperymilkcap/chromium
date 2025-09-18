@@ -5,29 +5,30 @@
 #import "chrome/browser/ui/cocoa/global_error_bubble_controller.h"
 
 #include "base/logging.h"
-#include "base/mac/scoped_nsobject.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/search_engines/util.h"
 #import "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
+#import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
-#include "chrome/browser/ui/global_error/global_error.h"
-#include "chrome/browser/ui/global_error/global_error_bubble_view_base.h"
-#include "chrome/browser/ui/global_error/global_error_service.h"
-#include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/global_error.h"
+#include "chrome/browser/ui/global_error_bubble_view_base.h"
+#include "chrome/browser/ui/global_error_service.h"
+#include "chrome/browser/ui/global_error_service_factory.h"
 #include "grit/generated_resources.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 
 namespace {
-const CGFloat kParagraphSpacing = 6;
+
+// The vertical offset of the wrench bubble from the wrench menu button.
+const CGFloat kWrenchBubblePointOffsetY = 6;
+
 } // namespace
 
 namespace GlobalErrorBubbleControllerInternal {
@@ -51,14 +52,13 @@ class Bridge : public GlobalErrorBubbleViewBase {
 @implementation GlobalErrorBubbleController
 
 + (GlobalErrorBubbleViewBase*)showForBrowser:(Browser*)browser
-    error:(const base::WeakPtr<GlobalErrorWithStandardBubble>&)error {
-  NSWindow* parentWindow = browser->window()->GetNativeWindow();
+    error:(const base::WeakPtr<GlobalError>&)error {
+  NSWindow* parentWindow = browser->window()->GetNativeHandle();
   BrowserWindowController* bwc = [BrowserWindowController
       browserWindowControllerForWindow:parentWindow];
   NSView* wrenchButton = [[bwc toolbarController] wrenchButton];
-  NSPoint offset = NSMakePoint(
-      NSMidX([wrenchButton bounds]),
-      wrench_menu_controller::kWrenchBubblePointOffsetY);
+  NSPoint offset = NSMakePoint(NSMidX([wrenchButton bounds]),
+                               kWrenchBubblePointOffsetY);
 
   // The bubble will be automatically deleted when the window is closed.
   GlobalErrorBubbleController* bubble = [[GlobalErrorBubbleController alloc]
@@ -79,35 +79,21 @@ class Bridge : public GlobalErrorBubbleViewBase {
 
   DCHECK(error_);
 
-  gfx::Image image = error_->GetBubbleViewIcon();
-  DCHECK(!image.IsEmpty());
-  [iconView_ setImage:image.ToNSImage()];
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  [iconView_ setImage:rb.GetNativeImageNamed(
+      error_->GetBubbleViewIconResourceID()).ToNSImage()];
 
   [title_ setStringValue:SysUTF16ToNSString(error_->GetBubbleViewTitle())];
-  std::vector<base::string16> messages = error_->GetBubbleViewMessages();
-  base::string16 message = JoinString(messages, '\n');
-
-  base::scoped_nsobject<NSMutableAttributedString> messageValue(
-      [[NSMutableAttributedString alloc]
-          initWithString:SysUTF16ToNSString(message)]);
-  base::scoped_nsobject<NSMutableParagraphStyle> style(
-      [[NSMutableParagraphStyle alloc] init]);
-  [style setParagraphSpacing:kParagraphSpacing];
-  [messageValue addAttribute:NSParagraphStyleAttributeName
-                       value:style
-                       range:NSMakeRange(0, [messageValue length])];
-
-  [message_ setAttributedStringValue:messageValue];
-
+  [message_ setStringValue:SysUTF16ToNSString(error_->GetBubbleViewMessage())];
   [acceptButton_ setTitle:
       SysUTF16ToNSString(error_->GetBubbleViewAcceptButtonLabel())];
-  base::string16 cancelLabel = error_->GetBubbleViewCancelButtonLabel();
+  string16 cancelLabel = error_->GetBubbleViewCancelButtonLabel();
   if (cancelLabel.empty())
     [cancelButton_ setHidden:YES];
   else
     [cancelButton_ setTitle:SysUTF16ToNSString(cancelLabel)];
 
-  // First make sure that the window is wide enough to accommodate the buttons.
+  // First make sure that the window is wide enough to accomidate the buttons.
   NSRect frame = [[self window] frame];
   [layoutTweaker_ tweakUI:buttonContainer_];
   CGFloat delta =  NSWidth([buttonContainer_ frame]) - NSWidth(frame);
@@ -158,8 +144,8 @@ class Bridge : public GlobalErrorBubbleViewBase {
 
 @end
 
-GlobalErrorBubbleViewBase* GlobalErrorBubbleViewBase::ShowStandardBubbleView(
+GlobalErrorBubbleViewBase* GlobalErrorBubbleViewBase::ShowBubbleView(
     Browser* browser,
-    const base::WeakPtr<GlobalErrorWithStandardBubble>& error) {
+    const base::WeakPtr<GlobalError>& error) {
   return [GlobalErrorBubbleController showForBrowser:browser error:error];
 }

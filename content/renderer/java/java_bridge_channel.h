@@ -4,19 +4,17 @@
 
 #ifndef CONTENT_RENDERER_JAVA_JAVA_BRIDGE_CHANNEL_H_
 #define CONTENT_RENDERER_JAVA_JAVA_BRIDGE_CHANNEL_H_
+#pragma once
 
-#include "base/memory/scoped_ptr.h"
-#include "content/child/npapi/np_channel_base.h"
+#include "content/common/np_channel_base.h"
 #include "ipc/ipc_channel_handle.h"
 
-namespace content {
-
-class JavaBridgeChannel : public content::NPChannelBase {
+class JavaBridgeChannel : public NPChannelBase {
  public:
-  // The return value may be null.
   static JavaBridgeChannel* GetJavaBridgeChannel(
       const IPC::ChannelHandle& channel_handle,
       base::MessageLoopProxy* ipc_message_loop);
+  virtual ~JavaBridgeChannel() {}
 
   // NPChannelBase implementation:
   virtual int GenerateRouteID() OVERRIDE;
@@ -25,19 +23,11 @@ class JavaBridgeChannel : public content::NPChannelBase {
   virtual bool OnControlMessageReceived(const IPC::Message& msg) OVERRIDE;
 
  private:
-  JavaBridgeChannel();
-  // This class is ref-counted.
-  virtual ~JavaBridgeChannel();
+  JavaBridgeChannel() {}
 
   static NPChannelBase* ClassFactory() { return new JavaBridgeChannel(); }
 
-  // Dummy NPObject owner Id used to track objects owned by the JavaBridge
-  // peer in the Browser process.
-  scoped_ptr<struct _NPP> peer_owner_id_;
-
   DISALLOW_COPY_AND_ASSIGN(JavaBridgeChannel);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_RENDERER_JAVA_JAVA_BRIDGE_CHANNEL_H_

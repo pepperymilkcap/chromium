@@ -1,41 +1,39 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_CONTENT_CLIENT_H_
 #define CONTENT_PUBLIC_COMMON_CONTENT_CLIENT_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_piece.h"
+#include "base/string16.h"
+#include "base/string_piece.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
-#include "ui/base/layout.h"
 
 class CommandLine;
 class GURL;
-
-namespace base {
-class RefCountedStaticMemory;
-}
 
 namespace IPC {
 class Message;
 }
 
-namespace gfx {
-class Image;
-}
-
-namespace gpu {
-struct GPUInfo;
-}
-
 namespace sandbox {
 class TargetPolicy;
+}
+
+namespace webkit {
+namespace npapi {
+class PluginList;
+}
+
+namespace ppapi {
+class HostGlobals;
+}
 }
 
 namespace content {
@@ -45,25 +43,13 @@ class ContentClient;
 class ContentPluginClient;
 class ContentRendererClient;
 class ContentUtilityClient;
+struct GPUInfo;
 struct PepperPluginInfo;
 
 // Setter and getter for the client.  The client should be set early, before any
 // content code is called.
 CONTENT_EXPORT void SetContentClient(ContentClient* client);
-
-#if defined(CONTENT_IMPLEMENTATION)
-// Content's embedder API should only be used by content.
-ContentClient* GetContentClient();
-#endif
-
-// Used for tests to override the relevant embedder interfaces. Each method
-// returns the old value.
-CONTENT_EXPORT ContentBrowserClient* SetBrowserClientForTesting(
-    ContentBrowserClient* b);
-CONTENT_EXPORT ContentRendererClient* SetRendererClientForTesting(
-    ContentRendererClient* r);
-CONTENT_EXPORT ContentUtilityClient* SetUtilityClientForTesting(
-    ContentUtilityClient* u);
+CONTENT_EXPORT ContentClient* GetContentClient();
 
 // Returns the user agent string being used by the browser. SetContentClient()
 // must be called prior to calling this, and this routine must be used
@@ -75,6 +61,10 @@ CONTENT_EXPORT ContentUtilityClient* SetUtilityClientForTesting(
 // webkit_glue.
 CONTENT_EXPORT const std::string& GetUserAgent(const GURL& url);
 
+// Returns the PPAPI global singleton. See webkit/plugins/ppapi/host_globals.h
+// TODO(dpranke): Also needed since webkit_glue is a library.
+CONTENT_EXPORT webkit::ppapi::HostGlobals* GetHostGlobals();
+
 // Interface that the embedder implements.
 class CONTENT_EXPORT ContentClient {
  public:
@@ -82,61 +72,54 @@ class CONTENT_EXPORT ContentClient {
   virtual ~ContentClient();
 
   ContentBrowserClient* browser() { return browser_; }
+  void set_browser(ContentBrowserClient* c) { browser_ = c; }
   ContentPluginClient* plugin() { return plugin_; }
+  void set_plugin(ContentPluginClient* p) { plugin_ = p; }
   ContentRendererClient* renderer() { return renderer_; }
+  void set_renderer(ContentRendererClient* r) { renderer_ = r; }
   ContentUtilityClient* utility() { return utility_; }
+  void set_utility(ContentUtilityClient* u) { utility_ = u; }
 
   // Sets the currently active URL.  Use GURL() to clear the URL.
-  virtual void SetActiveURL(const GURL& url) {}
+  virtual void SetActiveURL(const GURL& url) = 0;
 
   // Sets the data on the current gpu.
-  virtual void SetGpuInfo(const gpu::GPUInfo& gpu_info) {}
+  virtual void SetGpuInfo(const content::GPUInfo& gpu_info) = 0;
 
   // Gives the embedder a chance to register its own pepper plugins.
   virtual void AddPepperPlugins(
-      std::vector<content::PepperPluginInfo>* plugins) {}
+      std::vector<content::PepperPluginInfo>* plugins) = 0;
 
-  // Gives the embedder a chance to register its own standard and saveable
-  // url schemes early on in the startup sequence.
-  virtual void AddAdditionalSchemes(
-      std::vector<std::string>* standard_schemes,
-      std::vector<std::string>* savable_schemes) {}
+  // Gives the embedder a chance to register its own internal NPAPI plugins.
+  virtual void AddNPAPIPlugins(
+      webkit::npapi::PluginList* plugin_list) = 0;
 
-  // Returns whether the given message should be sent in a swapped out renderer.
-  virtual bool CanSendWhileSwappedOut(const IPC::Message* message);
+  // Returns whether the given message should be allowed to be sent from a
+  // swapped out renderer.
+  virtual bool CanSendWhileSwappedOut(const IPC::Message* msg) = 0;
 
   // Returns whether the given message should be processed in the browser on
   // behalf of a swapped out renderer.
-  virtual bool CanHandleWhileSwappedOut(const IPC::Message& message);
+  virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg) = 0;
 
-  // Returns a string describing the embedder product name and version,
-  // of the form "productname/version", with no other slashes.
-  // Used as part of the user agent string.
-  virtual std::string GetProduct() const;
-
-  // Returns the user agent.
-  virtual std::string GetUserAgent() const;
+  // Returns the user agent and a flag indicating whether the returned
+  // string should always be used (if false, callers may override the
+  // value as needed to work around various user agent sniffing bugs).
+  virtual std::string GetUserAgent(bool *overriding) const = 0;
 
   // Returns a string resource given its id.
-  virtual base::string16 GetLocalizedString(int message_id) const;
+  virtual string16 GetLocalizedString(int message_id) const = 0;
 
   // Return the contents of a resource in a StringPiece given the resource id.
-  virtual base::StringPiece GetDataResource(
-      int resource_id,
-      ui::ScaleFactor scale_factor) const;
+  virtual base::StringPiece GetDataResource(int resource_id) const = 0;
 
-  // Returns the raw bytes of a scale independent data resource.
-  virtual base::RefCountedStaticMemory* GetDataResourceBytes(
-      int resource_id) const;
+#if defined(OS_WIN)
+  // Allows the embedder to sandbox a plugin, and apply a custom policy.
+  virtual bool SandboxPlugin(CommandLine* command_line,
+                             sandbox::TargetPolicy* policy) = 0;
+#endif
 
-  // Returns a native image given its id.
-  virtual gfx::Image& GetNativeImageNamed(int resource_id) const;
-
-  // Called by content::GetProcessTypeNameInEnglish for process types that it
-  // doesn't know about because they're from the embedder.
-  virtual std::string GetProcessTypeNameInEnglish(int type);
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX)
   // Allows the embedder to define a new |sandbox_type| by mapping it to the
   // resource ID corresponding to the sandbox profile to use. The legal values
   // for |sandbox_type| are defined by the embedder and should start with
@@ -146,17 +129,10 @@ class CONTENT_EXPORT ContentClient {
   // the sandbox profile to use and true is returned.
   virtual bool GetSandboxProfileForSandboxType(
       int sandbox_type,
-      int* sandbox_profile_resource_id) const;
-
-  // Gets the Carbon interposing path to give to DYLD. Returns an empty string
-  // if the embedder doesn't bundle it.
-  virtual std::string GetCarbonInterposePath() const;
+      int* sandbox_profile_resource_id) const = 0;
 #endif
 
  private:
-  friend class ContentClientInitializer;  // To set these pointers.
-  friend class InternalTestInitializer;
-
   // The embedder API for participating in browser logic.
   ContentBrowserClient* browser_;
   // The embedder API for participating in plugin logic.

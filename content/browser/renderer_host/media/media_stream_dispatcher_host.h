@@ -14,50 +14,43 @@
 #include "content/common/content_export.h"
 #include "content/common/media/media_stream_options.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "content/public/browser/resource_context.h"
 
 namespace content {
+class ResourceContext;
+}  // namespace content
 
-class MediaStreamManager;
+namespace media_stream {
 
 // MediaStreamDispatcherHost is a delegate for Media Stream API messages used by
 // MediaStreamImpl. It's the complement of MediaStreamDispatcher
 // (owned by RenderView).
-class CONTENT_EXPORT MediaStreamDispatcherHost : public BrowserMessageFilter,
-                                                 public MediaStreamRequester {
+class CONTENT_EXPORT MediaStreamDispatcherHost
+    : public content::BrowserMessageFilter,
+      public MediaStreamRequester {
  public:
-  MediaStreamDispatcherHost(int render_process_id,
-                            ResourceContext* resource_context,
-                            MediaStreamManager* media_stream_manager);
+  MediaStreamDispatcherHost(const content::ResourceContext* resource_context,
+                            int render_process_id);
+  virtual ~MediaStreamDispatcherHost();
 
   // MediaStreamRequester implementation.
   virtual void StreamGenerated(
-      int render_view_id,
-      int page_request_id,
       const std::string& label,
       const StreamDeviceInfoArray& audio_devices,
       const StreamDeviceInfoArray& video_devices) OVERRIDE;
-  virtual void StreamGenerationFailed(int render_view_id,
-                                      int page_request_id) OVERRIDE;
-  virtual void DeviceStopped(int render_view_id,
-                             const std::string& label,
-                             const StreamDeviceInfo& device) OVERRIDE;
-  virtual void DevicesEnumerated(int render_view_id,
-                                 int page_request_id,
-                                 const std::string& label,
+  virtual void StreamGenerationFailed(const std::string& label) OVERRIDE;
+  virtual void AudioDeviceFailed(const std::string& label, int index) OVERRIDE;
+  virtual void VideoDeviceFailed(const std::string& label, int index) OVERRIDE;
+  virtual void DevicesEnumerated(const std::string& label,
                                  const StreamDeviceInfoArray& devices) OVERRIDE;
-  virtual void DeviceOpened(int render_view_id,
-                            int page_request_id,
-                            const std::string& label,
+  virtual void DevicesEnumerationFailed(const std::string& label) OVERRIDE;
+  virtual void DeviceOpened(const std::string& label,
                             const StreamDeviceInfo& video_device) OVERRIDE;
+  virtual void DeviceOpenFailed(const std::string& label) OVERRIDE;
 
-  // BrowserMessageFilter implementation.
+  // content::BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
   virtual void OnChannelClosing() OVERRIDE;
-
- protected:
-  virtual ~MediaStreamDispatcherHost();
 
  private:
   friend class MockMediaStreamDispatcherHost;
@@ -65,40 +58,36 @@ class CONTENT_EXPORT MediaStreamDispatcherHost : public BrowserMessageFilter,
   void OnGenerateStream(int render_view_id,
                         int page_request_id,
                         const StreamOptions& components,
-                        const GURL& security_origin);
-  void OnCancelGenerateStream(int render_view_id,
-                              int page_request_id);
-  void OnStopStreamDevice(int render_view_id,
-                          const std::string& device_id);
+                        const std::string& security_origin);
+
+  void OnStopGeneratedStream(int render_view_id, const std::string& label);
 
   void OnEnumerateDevices(int render_view_id,
                           int page_request_id,
-                          MediaStreamType type,
-                          const GURL& security_origin);
-
-  void OnCancelEnumerateDevices(int render_view_id,
-                                int page_request_id);
+                          media_stream::MediaStreamType type,
+                          const std::string& security_origin);
 
   void OnOpenDevice(int render_view_id,
                     int page_request_id,
                     const std::string& device_id,
-                    MediaStreamType type,
-                    const GURL& security_origin);
+                    media_stream::MediaStreamType type,
+                    const std::string& security_origin);
 
-  void OnCloseDevice(int render_view_id,
-                     const std::string& label);
+  // Returns the media stream manager to forward events to,
+  // creating one if needed.
+  MediaStreamManager* manager();
 
-  void StoreRequest(int render_view_id,
-                    int page_request_id,
-                    const std::string& label);;
-
+  const content::ResourceContext* resource_context_;
   int render_process_id_;
-  ResourceContext* resource_context_;
-  MediaStreamManager* media_stream_manager_;
+
+  struct StreamRequest;
+  typedef std::map<std::string, StreamRequest> StreamMap;
+  // Streams generated for this host.
+  StreamMap streams_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamDispatcherHost);
 };
 
-}  // namespace content
+}  // namespace media_stream
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_MEDIA_STREAM_DISPATCHER_HOST_H_

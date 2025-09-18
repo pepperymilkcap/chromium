@@ -4,12 +4,14 @@
 
 #ifndef CHROME_INSTALLER_UTIL_PRODUCT_UNITTEST_H_
 #define CHROME_INSTALLER_UTIL_PRODUCT_UNITTEST_H_
+#pragma once
 
 #include <windows.h>
 
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/scoped_temp_dir.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class TestWithTempDir : public testing::Test {
@@ -17,7 +19,7 @@ class TestWithTempDir : public testing::Test {
   virtual void SetUp();
   virtual void TearDown();
 
-  base::ScopedTempDir test_dir_;
+  ScopedTempDir test_dir_;
 };
 
 class TestWithTempDirAndDeleteTempOverrideKeys : public TestWithTempDir {

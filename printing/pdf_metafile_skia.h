@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ class PRINTING_EXPORT PdfMetafileSkia : public Metafile {
   virtual bool InitFromData(const void* src_buffer,
                             uint32 src_buffer_size) OVERRIDE;
 
-  virtual SkBaseDevice* StartPageForVectorCanvas(
+  virtual SkDevice* StartPageForVectorCanvas(
       const gfx::Size& page_size,
       const gfx::Rect& content_area,
       const float& scale_factor) OVERRIDE;
@@ -44,7 +44,7 @@ class PRINTING_EXPORT PdfMetafileSkia : public Metafile {
   virtual uint32 GetDataSize() const OVERRIDE;
   virtual bool GetData(void* dst_buffer, uint32 dst_buffer_size) const OVERRIDE;
 
-  virtual bool SaveTo(const base::FilePath& file_path) const OVERRIDE;
+  virtual bool SaveTo(const FilePath& file_path) const OVERRIDE;
 
   virtual gfx::Rect GetPageBounds(unsigned int page_number) const OVERRIDE;
   virtual unsigned int GetPageCount() const OVERRIDE;
@@ -58,14 +58,17 @@ class PRINTING_EXPORT PdfMetafileSkia : public Metafile {
   virtual HENHMETAFILE emf() const OVERRIDE;
 #elif defined(OS_MACOSX)
   virtual bool RenderPage(unsigned int page_number,
-                          gfx::NativeDrawingContext context,
+                          CGContextRef context,
                           const CGRect rect,
-                          const MacRenderPageParams& params) const OVERRIDE;
+                          bool shrink_to_fit,
+                          bool stretch_to_fit,
+                          bool center_horizontally,
+                          bool center_vertically) const OVERRIDE;
 #endif
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(OS_CHROMEOS)
   virtual bool SaveToFD(const base::FileDescriptor& fd) const OVERRIDE;
-#endif  // if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#endif  // if defined(OS_CHROMEOS)
 
   // Return a new metafile containing just the current page in draft mode.
   PdfMetafileSkia* GetMetafileForCurrentPage();

@@ -59,10 +59,8 @@ cr.define('chrome.sync', function() {
         submodule: submodule,
         event: event,
         date: new Date(),
-        details: details,
-        textDetails: ''
+        details: details
       };
-      entry.textDetails = JSON.stringify(entry.details, null, 2);
       this.entries.push(entry);
       // Fire append event.
       var e = cr.doc.createEvent('CustomEvent');

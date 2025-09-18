@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_REFERRER_H_
 #define CONTENT_PUBLIC_COMMON_REFERRER_H_
+#pragma once
 
 #include "content/common/content_export.h"
-#include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 
 namespace content {
 
@@ -15,14 +16,14 @@ namespace content {
 // applied to this URL. When passing around referrers that will eventually end
 // up being used for URL requests, always use this struct.
 struct CONTENT_EXPORT Referrer {
-  Referrer(const GURL& url, blink::WebReferrerPolicy policy) : url(url),
+  Referrer(const GURL& url, WebKit::WebReferrerPolicy policy) : url(url),
                                                                 policy(policy) {
   }
-  Referrer() : policy(blink::WebReferrerPolicyDefault) {
+  Referrer() : policy(WebKit::WebReferrerPolicyDefault) {
   }
 
   GURL url;
-  blink::WebReferrerPolicy policy;
+  WebKit::WebReferrerPolicy policy;
 };
 
 }  // namespace content

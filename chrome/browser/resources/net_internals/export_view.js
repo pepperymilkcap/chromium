@@ -20,9 +20,12 @@ var ExportView = (function() {
     // Call superclass's constructor.
     superClass.call(this, ExportView.MAIN_BOX_ID);
 
-    var privacyStrippingCheckbox = $(ExportView.PRIVACY_STRIPPING_CHECKBOX_ID);
-    privacyStrippingCheckbox.onclick =
-        this.onSetPrivacyStripping_.bind(this, privacyStrippingCheckbox);
+    var securityStrippingCheckbox =
+        $(ExportView.SECURITY_STRIPPING_CHECKBOX_ID);
+    securityStrippingCheckbox.onclick =
+        this.onSetSecurityStripping_.bind(this, securityStrippingCheckbox);
+
+    this.downloadIframe_ = $(ExportView.DOWNLOAD_IFRAME_ID);
 
     this.saveFileButton_ = $(ExportView.SAVE_FILE_BUTTON_ID);
     this.saveFileButton_.onclick = this.onSaveFile_.bind(this);
@@ -38,19 +41,17 @@ var ExportView = (function() {
     this.loadedLogDump_ = null;
   }
 
-  ExportView.TAB_ID = 'tab-handle-export';
-  ExportView.TAB_NAME = 'Export';
-  ExportView.TAB_HASH = '#export';
+  // ID for special HTML element in category_tabs.html
+  ExportView.TAB_HANDLE_ID = 'tab-handle-export';
 
   // IDs for special HTML elements in export_view.html
   ExportView.MAIN_BOX_ID = 'export-view-tab-content';
-  ExportView.DOWNLOAD_ANCHOR_ID = 'export-view-download-anchor';
+  ExportView.DOWNLOAD_IFRAME_ID = 'export-view-download-iframe';
   ExportView.SAVE_FILE_BUTTON_ID = 'export-view-save-log-file';
   ExportView.SAVE_STATUS_TEXT_ID = 'export-view-save-status-text';
-  ExportView.PRIVACY_STRIPPING_CHECKBOX_ID =
-      'export-view-privacy-stripping-checkbox';
+  ExportView.SECURITY_STRIPPING_CHECKBOX_ID =
+      'export-view-security-stripping-checkbox';
   ExportView.USER_COMMENTS_TEXT_AREA_ID = 'export-view-user-comments';
-  ExportView.PRIVACY_WARNING_ID = 'export-view-privacy-warning';
 
   cr.addSingletonGetter(ExportView);
 
@@ -62,9 +63,9 @@ var ExportView = (function() {
      * Depending on the value of the checkbox, enables or disables stripping
      * cookies and passwords from log dumps and displayed events.
      */
-    onSetPrivacyStripping_: function(privacyStrippingCheckbox) {
-      SourceTracker.getInstance().setPrivacyStripping(
-          privacyStrippingCheckbox.checked);
+    onSetSecurityStripping_: function(securityStrippingCheckbox) {
+      g_browser.sourceTracker.setSecurityStripping(
+          securityStrippingCheckbox.checked);
     },
 
     /**
@@ -91,16 +92,6 @@ var ExportView = (function() {
 
     enableSaveFileButton_: function(enabled) {
       this.saveFileButton_.disabled = !enabled;
-    },
-
-    showPrivacyWarning: function() {
-      setNodeDisplay($(ExportView.PRIVACY_WARNING_ID), true);
-      $(ExportView.PRIVACY_STRIPPING_CHECKBOX_ID).checked = false;
-      $(ExportView.PRIVACY_STRIPPING_CHECKBOX_ID).disabled = true;
-
-      // Updating the checkbox doesn't actually disable privacy stripping, since
-      // the onclick function will not be called.
-      this.onSetPrivacyStripping_($(ExportView.PRIVACY_STRIPPING_CHECKBOX_ID));
     },
 
     /**
@@ -132,13 +123,13 @@ var ExportView = (function() {
 
       this.setSaveFileStatus('Preparing data...', true);
 
-      var privacyStripping = SourceTracker.getInstance().getPrivacyStripping();
+      var securityStripping = g_browser.sourceTracker.getSecurityStripping();
 
       // If we have a cached log dump, update it synchronously.
       if (this.loadedLogDump_) {
         var dumpText = log_util.createUpdatedLogDump(userComments,
                                                      this.loadedLogDump_,
-                                                     privacyStripping);
+                                                     securityStripping);
         callback(dumpText);
         return;
       }
@@ -146,7 +137,7 @@ var ExportView = (function() {
       // Otherwise, poll information from the browser before creating one.
       log_util.createLogDumpAsync(userComments,
                                   callback,
-                                  privacyStripping);
+                                  securityStripping);
     },
 
     /**
@@ -164,7 +155,7 @@ var ExportView = (function() {
       var value = this.userCommentsTextArea_.value;
 
       // Reset the class name in case we had hilighted it earlier.
-      this.userCommentsTextArea_.className = '';
+      this.userCommentsTextArea_.className = ''
 
       // We don't accept empty explanations. We don't care what is entered, as
       // long as there is something (a single whitespace would work).
@@ -173,7 +164,6 @@ var ExportView = (function() {
         this.userCommentsTextArea_.className =
             'export-view-explanation-warning';
         alert('Please fill in the text field!');
-        this.userCommentsTextArea_.focus();
         return undefined;
       }
 
@@ -184,15 +174,11 @@ var ExportView = (function() {
      * Creates a blob url and starts downloading it.
      */
     onLogDumpCreated_: function(dumpText) {
-      var textBlob = new Blob([dumpText], {type: 'octet/stream'});
+      var blobBuilder = new WebKitBlobBuilder();
+      blobBuilder.append(dumpText, 'native');
+      var textBlob = blobBuilder.getBlob('octet/stream');
       this.lastBlobURL_ = window.webkitURL.createObjectURL(textBlob);
-
-      // Update the anchor tag and simulate a click on it to start the
-      // download.
-      var downloadAnchor = $(ExportView.DOWNLOAD_ANCHOR_ID);
-      downloadAnchor.href = this.lastBlobURL_;
-      downloadAnchor.click();
-
+      this.downloadIframe_.src = this.lastBlobURL_;
       this.setSaveFileStatus('Dump successful', false);
     }
   };

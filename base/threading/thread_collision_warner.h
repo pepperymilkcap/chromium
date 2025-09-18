@@ -4,6 +4,7 @@
 
 #ifndef BASE_THREADING_THREAD_COLLISION_WARNER_H_
 #define BASE_THREADING_THREAD_COLLISION_WARNER_H_
+#pragma once
 
 #include <memory>
 
@@ -144,7 +145,7 @@ struct BASE_EXPORT DCheckAsserter : public AsserterBase {
 class BASE_EXPORT ThreadCollisionWarner {
  public:
   // The parameter asserter is there only for test purpose
-  explicit ThreadCollisionWarner(AsserterBase* asserter = new DCheckAsserter())
+  ThreadCollisionWarner(AsserterBase* asserter = new DCheckAsserter())
       : valid_thread_id_(0),
         counter_(0),
         asserter_(asserter) {}

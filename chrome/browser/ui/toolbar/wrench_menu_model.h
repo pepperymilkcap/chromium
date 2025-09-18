@@ -1,23 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_TOOLBAR_WRENCH_MENU_MODEL_H_
 #define CHROME_BROWSER_UI_TOOLBAR_WRENCH_MENU_MODEL_H_
+#pragma once
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-#include "content/public/browser/host_zoom_map.h"
+#include "chrome/browser/tabs/tab_strip_model_observer.h"
+#include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/models/button_menu_item_model.h"
 #include "ui/base/models/simple_menu_model.h"
 
-class BookmarkSubMenuModel;
 class Browser;
-class RecentTabsSubMenuModel;
 class TabStripModel;
 
 namespace {
@@ -37,7 +36,7 @@ class EncodingMenuModel : public ui::SimpleMenuModel,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
 
  private:
   void Build();
@@ -79,20 +78,7 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
                         public TabStripModelObserver,
                         public content::NotificationObserver {
  public:
-  // Range of command ID's to use for the items representing bookmarks in the
-  // bookmark menu, must not overlap with that for recent tabs submenu.
-  static const int kMinBookmarkCommandId = 1;
-  static const int kMaxBookmarkCommandId = 1000;
-
-  // Range of command ID's to use for the items in the recent tabs submenu, must
-  // not overlap with that for bookmarks.
-  static const int kMinRecentTabsCommandId = 1001;
-  static const int kMaxRecentTabsCommandId = 1200;
-
-  // TODO: remove |is_new_menu|.
-  WrenchMenuModel(ui::AcceleratorProvider* provider,
-                  Browser* browser,
-                  bool is_new_menu);
+  WrenchMenuModel(ui::AcceleratorProvider* provider, Browser* browser);
   virtual ~WrenchMenuModel();
 
   // Overridden for ButtonMenuItemModel::Delegate:
@@ -100,10 +86,10 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
 
   // Overridden for both ButtonMenuItemModel::Delegate and SimpleMenuModel:
   virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
-  virtual base::string16 GetLabelForCommandId(int command_id) const OVERRIDE;
+  virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
   virtual bool GetIconForCommandId(int command_id,
-                                   gfx::Image* icon) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+                                   SkBitmap* icon) const OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
   virtual bool IsCommandIdVisible(int command_id) const OVERRIDE;
@@ -112,13 +98,13 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
       ui::Accelerator* accelerator) OVERRIDE;
 
   // Overridden from TabStripModelObserver:
-  virtual void ActiveTabChanged(content::WebContents* old_contents,
-                                content::WebContents* new_contents,
+  virtual void ActiveTabChanged(TabContentsWrapper* old_contents,
+                                TabContentsWrapper* new_contents,
                                 int index,
-                                int reason) OVERRIDE;
+                                bool user_gesture) OVERRIDE;
   virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             content::WebContents* old_contents,
-                             content::WebContents* new_contents,
+                             TabContentsWrapper* old_contents,
+                             TabContentsWrapper* new_contents,
                              int index) OVERRIDE;
   virtual void TabStripModelDeleted() OVERRIDE;
 
@@ -142,32 +128,23 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
   friend class ::MockWrenchMenuModel;
   WrenchMenuModel();
 
-  void Build(bool is_new_menu);
+  void Build();
 
   void AddGlobalErrorMenuItems();
 
-  // Appends everything needed for the clipboard menu: a menu break, the
-  // clipboard menu content and the finalizing menu break. If the last break
-  // is not needed it can be suppressed by setting |new_menu|
-  // to false.
-  void CreateCutCopyPasteMenu(bool new_menu);
+  // Adds custom items to the menu. Deprecated in favor of a cross platform
+  // model for button items.
+  void CreateCutCopyPaste();
+  void CreateZoomFullscreen();
 
-  // Appends everything needed for the zoom menu: a menu break, then the zoom
-  // menu content and then another menu break. If the new menu type is used,
-  // |new_menu| should be set to true.
-  void CreateZoomMenu(bool new_menu);
-
-  void OnZoomLevelChanged(const content::HostZoomMap::ZoomLevelChange& change);
-
-  bool ShouldShowNewIncognitoWindowMenuItem();
-  bool ShouldShowNewWindowMenuItem();
+  string16 GetSyncMenuLabel() const;
 
   // Models for the special menu items with buttons.
   scoped_ptr<ui::ButtonMenuItemModel> edit_menu_item_model_;
   scoped_ptr<ui::ButtonMenuItemModel> zoom_menu_item_model_;
 
   // Label of the zoom label in the zoom menu item.
-  base::string16 zoom_label_;
+  string16 zoom_label_;
 
   // Tools menu.
   scoped_ptr<ToolsMenuModel> tools_menu_model_;
@@ -175,15 +152,11 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
   // Bookmark submenu.
   scoped_ptr<BookmarkSubMenuModel> bookmark_sub_menu_model_;
 
-  // Recent Tabs submenu.
-  scoped_ptr<RecentTabsSubMenuModel> recent_tabs_sub_menu_model_;
-
   ui::AcceleratorProvider* provider_;  // weak
 
   Browser* browser_;  // weak
-  TabStripModel* tab_strip_model_; // weak
+  TabStripModel* tabstrip_model_; // weak
 
-  scoped_ptr<content::HostZoomMap::Subscription> zoom_subscription_;
   content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WrenchMenuModel);

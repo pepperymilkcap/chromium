@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,14 @@
 
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/common/cancelable_request.h"
-#include "chrome/browser/sessions/persistent_tab_restore_service.h"
+#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
-#include "chrome/common/favicon/favicon_types.h"
-#include "chrome/test/base/testing_profile.h"
-#include "components/sessions/serialized_navigation_entry_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
@@ -26,9 +23,9 @@
 
 namespace {
 
-class MockTRS : public PersistentTabRestoreService {
+class MockTRS : public TabRestoreService {
  public:
-  MockTRS(Profile* profile) : PersistentTabRestoreService(profile, NULL) {}
+  MockTRS(Profile* profile) : TabRestoreService(profile, NULL) {}
   MOCK_CONST_METHOD0(entries, const TabRestoreService::Entries&());
 };
 
@@ -38,12 +35,12 @@ class MockBridge : public HistoryMenuBridge {
       : HistoryMenuBridge(profile),
         menu_([[NSMenu alloc] initWithTitle:@"History"]) {}
 
-  virtual NSMenu* HistoryMenu() OVERRIDE {
+  virtual NSMenu* HistoryMenu() {
     return menu_.get();
   }
 
  private:
-  base::scoped_nsobject<NSMenu> menu_;
+  scoped_nsobject<NSMenu> menu_;
 };
 
 class HistoryMenuBridgeTest : public CocoaProfileTest {
@@ -85,7 +82,7 @@ class HistoryMenuBridgeTest : public CocoaProfileTest {
     return item;
   }
 
-  HistoryMenuBridge::HistoryItem* CreateItem(const base::string16& title) {
+  HistoryMenuBridge::HistoryItem* CreateItem(const string16& title) {
     HistoryMenuBridge::HistoryItem* item =
         new HistoryMenuBridge::HistoryItem();
     item->title = title;
@@ -93,13 +90,12 @@ class HistoryMenuBridgeTest : public CocoaProfileTest {
     return item;
   }
 
-  MockTRS::Tab CreateSessionTab(const std::string& url,
-                                const std::string& title) {
+  MockTRS::Tab CreateSessionTab(const GURL& url, const string16& title) {
     MockTRS::Tab tab;
     tab.current_navigation_index = 0;
     tab.navigations.push_back(
-        sessions::SerializedNavigationEntryTestHelper::CreateNavigation(
-            url, title));
+        TabNavigation(0, url, content::Referrer(), title, std::string(),
+                      content::PAGE_TRANSITION_LINK));
     return tab;
   }
 
@@ -107,10 +103,9 @@ class HistoryMenuBridgeTest : public CocoaProfileTest {
     bridge_->GetFaviconForHistoryItem(item);
   }
 
-  void GotFaviconData(
-      HistoryMenuBridge::HistoryItem* item,
-      const chrome::FaviconImageResult& image_result) {
-    bridge_->GotFaviconData(item, image_result);
+  void GotFaviconData(FaviconService::Handle handle,
+                      history::FaviconData favicon) {
+    bridge_->GotFaviconData(handle, favicon);
   }
 
   CancelableRequestConsumerTSimple<HistoryMenuBridge::HistoryItem*>&
@@ -175,9 +170,8 @@ TEST_F(HistoryMenuBridgeTest, ClearHistoryMenuEmpty) {
 TEST_F(HistoryMenuBridgeTest, AddItemToMenu) {
   NSMenu* menu = [[[NSMenu alloc] initWithTitle:@"history foo"] autorelease];
 
-  const base::string16 short_url = base::ASCIIToUTF16("http://foo/");
-  const base::string16 long_url = base::ASCIIToUTF16(
-      "http://super-duper-long-url--."
+  const string16 short_url = ASCIIToUTF16("http://foo/");
+  const string16 long_url = ASCIIToUTF16("http://super-duper-long-url--."
       "that.cannot.possibly.fit.even-in-80-columns"
       "or.be.reasonably-displayed-in-a-menu"
       "without.looking-ridiculous.com/"); // 140 chars total
@@ -218,11 +212,13 @@ TEST_F(HistoryMenuBridgeTest, RecentlyClosedTabs) {
   scoped_ptr<MockTRS> trs(new MockTRS(profile()));
   MockTRS::Entries entries;
 
-  MockTRS::Tab tab1 = CreateSessionTab("http://google.com", "Google");
+  MockTRS::Tab tab1 = CreateSessionTab(GURL("http://google.com"),
+                                       ASCIIToUTF16("Google"));
   tab1.id = 24;
   entries.push_back(&tab1);
 
-  MockTRS::Tab tab2 = CreateSessionTab("http://apple.com", "Apple");
+  MockTRS::Tab tab2 = CreateSessionTab(GURL("http://apple.com"),
+                                       ASCIIToUTF16("Apple"));
   tab2.id = 42;
   entries.push_back(&tab2);
 
@@ -252,29 +248,37 @@ TEST_F(HistoryMenuBridgeTest, RecentlyClosedTabsAndWindows) {
   scoped_ptr<MockTRS> trs(new MockTRS(profile()));
   MockTRS::Entries entries;
 
-  MockTRS::Tab tab1 = CreateSessionTab("http://google.com", "Google");
+  MockTRS::Tab tab1 = CreateSessionTab(GURL("http://google.com"),
+                                       ASCIIToUTF16("Google"));
   tab1.id = 24;
   entries.push_back(&tab1);
 
   MockTRS::Window win1;
   win1.id = 30;
-  win1.tabs.push_back(CreateSessionTab("http://foo.com", "foo"));
+  win1.tabs.push_back(
+      CreateSessionTab(GURL("http://foo.com"), ASCIIToUTF16("foo")));
   win1.tabs[0].id = 31;
-  win1.tabs.push_back(CreateSessionTab("http://bar.com", "bar"));
+  win1.tabs.push_back(
+      CreateSessionTab(GURL("http://bar.com"), ASCIIToUTF16("bar")));
   win1.tabs[1].id = 32;
   entries.push_back(&win1);
 
-  MockTRS::Tab tab2 = CreateSessionTab("http://apple.com", "Apple");
+  MockTRS::Tab tab2 = CreateSessionTab(GURL("http://apple.com"),
+                                       ASCIIToUTF16("Apple"));
   tab2.id = 42;
   entries.push_back(&tab2);
 
   MockTRS::Window win2;
   win2.id = 50;
-  win2.tabs.push_back(CreateSessionTab("http://magic.com", "magic"));
+  win2.tabs.push_back(
+      CreateSessionTab(GURL("http://magic.com"), ASCIIToUTF16("magic")));
   win2.tabs[0].id = 51;
-  win2.tabs.push_back(CreateSessionTab("http://goats.com", "goats"));
+  win2.tabs.push_back(
+      CreateSessionTab(GURL("http://goats.com"), ASCIIToUTF16("goats")));
   win2.tabs[1].id = 52;
-  win2.tabs.push_back(CreateSessionTab("http://teleporter.com", "teleporter"));
+  win2.tabs.push_back(
+      CreateSessionTab(GURL("http://teleporter.com"),
+                       ASCIIToUTF16("teleporter")));
   win2.tabs[1].id = 53;
   entries.push_back(&win2);
 
@@ -330,15 +334,21 @@ TEST_F(HistoryMenuBridgeTest, RecentlyClosedTabsAndWindows) {
 TEST_F(HistoryMenuBridgeTest, GetFaviconForHistoryItem) {
   // Create a fake item.
   HistoryMenuBridge::HistoryItem item;
-  item.title = base::ASCIIToUTF16("Title");
+  item.title = ASCIIToUTF16("Title");
   item.url = GURL("http://google.com");
 
   // Request the icon.
   GetFaviconForHistoryItem(&item);
 
+  // Make sure that there is ClientData for the request.
+  std::vector<HistoryMenuBridge::HistoryItem*> data;
+  favicon_consumer().GetAllClientData(&data);
+  ASSERT_EQ(data.size(), 1U);
+  EXPECT_EQ(&item, data[0]);
+
   // Make sure the item was modified properly.
   EXPECT_TRUE(item.icon_requested);
-  EXPECT_NE(CancelableTaskTracker::kBadTaskId, item.icon_task_id);
+  EXPECT_GT(item.icon_handle, 0);
 }
 
 TEST_F(HistoryMenuBridgeTest, GotFaviconData) {
@@ -348,15 +358,25 @@ TEST_F(HistoryMenuBridgeTest, GotFaviconData) {
   bitmap.allocPixels();
   bitmap.eraseRGB(255, 0, 0);
 
+  // Convert it to raw PNG bytes. We totally ignore color order here because
+  // we just want to test the roundtrip through the Bridge, not that we can
+  // make icons look pretty.
+  std::vector<unsigned char> raw;
+  gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, true, &raw);
+
   // Set up the HistoryItem.
   HistoryMenuBridge::HistoryItem item;
   item.menu_item.reset([[NSMenuItem alloc] init]);
   GetFaviconForHistoryItem(&item);
 
   // Pretend to be called back.
-  chrome::FaviconImageResult image_result;
-  image_result.image = gfx::Image::CreateFrom1xBitmap(bitmap);
-  GotFaviconData(&item, image_result);
+  history::FaviconData favicon;
+  favicon.known_icon = true;
+  favicon.image_data = new RefCountedBytes(raw);
+  favicon.expired = false;
+  favicon.icon_url = GURL();
+  favicon.icon_type = history::FAVICON;
+  GotFaviconData(item.icon_handle, favicon);
 
   // Make sure the callback works.
   EXPECT_FALSE(item.icon_requested);

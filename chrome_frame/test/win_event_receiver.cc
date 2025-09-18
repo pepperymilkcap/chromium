@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_util.h"
+#include "base/message_loop.h"
 #include "base/win/object_watcher.h"
+#include "base/string_util.h"
 #include "chrome_frame/function_stub.h"
 
 // WinEventReceiver methods
@@ -58,7 +58,7 @@ bool WinEventReceiver::InitializeHook(DWORD event_min, DWORD event_max) {
   hook_ = SetWinEventHook(event_min, event_max, NULL,
                           reinterpret_cast<WINEVENTPROC>(hook_stub_->code()), 0,
                           0, WINEVENT_OUTOFCONTEXT);
-  LOG_IF(ERROR, hook_ == NULL) << "Unable to SetWinEvent hook";
+  DLOG_IF(ERROR, hook_ == NULL) << "Unable to SetWinEvent hook";
   return hook_ != NULL;
 }
 
@@ -105,7 +105,7 @@ WindowWatchdog::ProcessExitObserver::ProcessExitObserver(
     : window_watchdog_(window_watchdog),
       process_handle_(NULL),
       hwnd_(hwnd),
-      weak_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DWORD pid = 0;
   ::GetWindowThreadProcessId(hwnd, &pid);
   if (pid != 0) {
@@ -116,7 +116,7 @@ WindowWatchdog::ProcessExitObserver::ProcessExitObserver(
     object_watcher_.StartWatching(process_handle_, this);
   } else {
     // Process is gone, so the window must be gone too. Notify our observer!
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(&ProcessExitObserver::OnObjectSignaled,
                               weak_factory_.GetWeakPtr(), HANDLE(NULL)));
   }

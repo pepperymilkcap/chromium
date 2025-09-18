@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SQL_META_TABLE_H_
 #define SQL_META_TABLE_H_
+#pragma once
 
 #include <string>
 
@@ -23,24 +24,9 @@ class SQL_EXPORT MetaTable {
   // Returns true if the 'meta' table exists.
   static bool DoesTableExist(Connection* db);
 
-  // If the current version of the database is less than or equal to
-  // |deprecated_version|, raze the database.  Must be called outside
-  // of a transaction.
-  // TODO(shess): At this time the database is razed IFF meta exists
-  // and contains a version row with value <= deprecated_version.  It
-  // may make sense to also raze if meta exists but has no version
-  // row, or if meta doesn't exist.  In those cases if the database is
-  // not already empty, it probably resulted from a broken
-  // initialization.
-  // TODO(shess): Folding this into Init() would allow enforcing
-  // |deprecated_version|<|version|.  But Init() is often called in a
-  // transaction.
-  static void RazeIfDeprecated(Connection* db, int deprecated_version);
-
   // Initializes the MetaTableHelper, creating the meta table if necessary. For
   // new tables, it will initialize the version number to |version| and the
-  // compatible version number to |compatible_version|.  Versions must be
-  // greater than 0 to distinguish missing versions (see GetVersionNumber()).
+  // compatible version number to |compatible_version|.
   bool Init(Connection* db, int version, int compatible_version);
 
   // Resets this MetaTable object, making another call to Init() possible.
@@ -81,9 +67,6 @@ class SQL_EXPORT MetaTable {
   bool GetValue(const char* key, std::string* value);
   bool GetValue(const char* key, int* value);
   bool GetValue(const char* key, int64* value);
-
-  // Deletes the key from the table.
-  bool DeleteKey(const char* key);
 
  private:
   // Conveniences to prepare the two types of statements used by

@@ -7,8 +7,9 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/basictypes.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/notifications/balloon_controller.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSBezierPath+RoundRect.h"
+#import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
 
 namespace {
 
@@ -18,7 +19,7 @@ const int kRoundedCornerSize = 6;
 
 @implementation BalloonWindow
 - (id)initWithContentRect:(NSRect)contentRect
-                styleMask:(NSUInteger)aStyle
+                styleMask:(unsigned int)aStyle
                   backing:(NSBackingStoreType)bufferingType
                     defer:(BOOL)flag {
   self = [super initWithContentRect:contentRect

@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_PASSWORD_MODEL_ASSOCIATOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_PASSWORD_MODEL_ASSOCIATOR_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -13,22 +14,20 @@
 #include "base/compiler_specific.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "chrome/browser/sync/glue/model_associator.h"
-#include "sync/protocol/password_specifics.pb.h"
+#include "chrome/browser/sync/protocol/password_specifics.pb.h"
 
+class MessageLoop;
 class PasswordStore;
 class ProfileSyncService;
 
-namespace autofill {
+namespace webkit {
+namespace forms {
 struct PasswordForm;
 }
-
-namespace base {
-class MessageLoop;
 }
 
-namespace syncer {
+namespace sync_api {
 class WriteNode;
 class WriteTransaction;
 }
@@ -45,26 +44,23 @@ extern const char kPasswordTag[];
 class PasswordModelAssociator
   : public PerDataTypeAssociatorInterface<std::string, std::string> {
  public:
-  typedef std::vector<autofill::PasswordForm> PasswordVector;
+  typedef std::vector<webkit::forms::PasswordForm> PasswordVector;
 
-  static syncer::ModelType model_type() { return syncer::PASSWORDS; }
+  static syncable::ModelType model_type() { return syncable::PASSWORDS; }
   PasswordModelAssociator(ProfileSyncService* sync_service,
-                          PasswordStore* password_store,
-                          DataTypeErrorHandler* error_handler);
+                          PasswordStore* password_store);
   virtual ~PasswordModelAssociator();
 
   // PerDataTypeAssociatorInterface implementation.
   //
   // Iterates through the sync model looking for matched pairs of items.
-  virtual syncer::SyncError AssociateModels(
-      syncer::SyncMergeResult* local_merge_result,
-      syncer::SyncMergeResult* syncer_merge_result) OVERRIDE;
+  virtual bool AssociateModels(SyncError* error) OVERRIDE;
 
   // Delete all password nodes.
-  bool DeleteAllNodes(syncer::WriteTransaction* trans);
+  bool DeleteAllNodes(sync_api::WriteTransaction* trans);
 
   // Clears all associations.
-  virtual syncer::SyncError DisassociateModels() OVERRIDE;
+  virtual bool DisassociateModels(SyncError* error) OVERRIDE;
 
   // The has_nodes out param is true if the sync model has nodes other
   // than the permanent tagged nodes.
@@ -81,9 +77,9 @@ class PasswordModelAssociator
 
   // Not implemented.
   virtual bool InitSyncNodeFromChromeId(const std::string& node_id,
-                                        syncer::BaseNode* sync_node) OVERRIDE;
+                                        sync_api::BaseNode* sync_node) OVERRIDE;
 
-  // Returns the sync id for the given password name, or syncer::kInvalidId
+  // Returns the sync id for the given password name, or sync_api::kInvalidId
   // if the password name is not associated to any sync id.
   virtual int64 GetSyncIdFromChromeId(const std::string& node_id) OVERRIDE;
 
@@ -97,11 +93,11 @@ class PasswordModelAssociator
   // |sync_id| with that node's id.
   virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id);
 
-  syncer::SyncError WriteToPasswordStore(const PasswordVector* new_passwords,
-                                 const PasswordVector* updated_passwords,
-                                 const PasswordVector* deleted_passwords);
+  bool WriteToPasswordStore(const PasswordVector* new_passwords,
+                            const PasswordVector* updated_passwords,
+                            const PasswordVector* deleted_passwords);
 
-  static std::string MakeTag(const autofill::PasswordForm& password);
+  static std::string MakeTag(const webkit::forms::PasswordForm& password);
   static std::string MakeTag(const sync_pb::PasswordSpecificsData& password);
   static std::string MakeTag(const std::string& origin_url,
                              const std::string& username_element,
@@ -110,31 +106,36 @@ class PasswordModelAssociator
                              const std::string& signon_realm);
 
   static void CopyPassword(const sync_pb::PasswordSpecificsData& password,
-                           autofill::PasswordForm* new_password);
+                           webkit::forms::PasswordForm* new_password);
 
   static bool MergePasswords(const sync_pb::PasswordSpecificsData& password,
-                             const autofill::PasswordForm& password_form,
-                             autofill::PasswordForm* new_password);
-  static void WriteToSyncNode(const autofill::PasswordForm& password_form,
-                              syncer::WriteNode* node);
+                             const webkit::forms::PasswordForm& password_form,
+                             webkit::forms::PasswordForm* new_password);
+  static void WriteToSyncNode(const webkit::forms::PasswordForm& password_form,
+                              sync_api::WriteNode* node);
+
+  // Called at various points in model association to determine if the
+  // user requested an abort.
+  bool IsAbortPending();
 
  private:
   typedef std::map<std::string, int64> PasswordToSyncIdMap;
   typedef std::map<int64, std::string> SyncIdToPasswordMap;
 
   ProfileSyncService* sync_service_;
-  scoped_refptr<PasswordStore> password_store_;
+  PasswordStore* password_store_;
   int64 password_node_id_;
 
-  // Set true by AbortAssociation.
-  bool abort_association_requested_;
-  base::Lock association_lock_;
+  // Abort association pending flag and lock.  If this is set to true
+  // (via the AbortAssociation method), return from the
+  // AssociateModels method as soon as possible.
+  base::Lock abort_association_pending_lock_;
+  bool abort_association_pending_;
 
-  base::MessageLoop* expected_loop_;
+  MessageLoop* expected_loop_;
 
   PasswordToSyncIdMap id_map_;
   SyncIdToPasswordMap id_map_inverse_;
-  DataTypeErrorHandler* error_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordModelAssociator);
 };

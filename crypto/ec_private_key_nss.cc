@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@ extern "C" {
 #include <pk11pub.h>
 #include <secmod.h>
 
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "crypto/nss_util.h"
@@ -24,34 +23,6 @@ extern "C" {
 #include "crypto/third_party/nss/chromium-nss.h"
 
 namespace {
-
-PK11SlotInfo* GetTempKeySlot() {
-  return PK11_GetInternalSlot();
-}
-
-class EllipticCurveSupportChecker {
- public:
-  EllipticCurveSupportChecker() {
-    // NOTE: we can do this check here only because we use the NSS internal
-    // slot.  If we support other slots in the future, checking whether they
-    // support ECDSA may block NSS, and the value may also change as devices are
-    // inserted/removed, so we would need to re-check on every use.
-    crypto::EnsureNSSInit();
-    crypto::ScopedPK11Slot slot(GetTempKeySlot());
-    supported_ = PK11_DoesMechanism(slot.get(), CKM_EC_KEY_PAIR_GEN) &&
-        PK11_DoesMechanism(slot.get(), CKM_ECDSA);
-  }
-
-  bool Supported() {
-    return supported_;
-  }
-
- private:
-  bool supported_;
-};
-
-static base::LazyInstance<EllipticCurveSupportChecker>::Leaky
-    g_elliptic_curve_supported = LAZY_INSTANCE_INITIALIZER;
 
 // Copied from rsa_private_key_nss.cc.
 static bool ReadAttribute(SECKEYPrivateKey* key,
@@ -82,65 +53,59 @@ ECPrivateKey::~ECPrivateKey() {
 }
 
 // static
-bool ECPrivateKey::IsSupported() {
-  return g_elliptic_curve_supported.Get().Supported();
-}
-
-// static
 ECPrivateKey* ECPrivateKey::Create() {
-  EnsureNSSInit();
-
-  ScopedPK11Slot slot(GetTempKeySlot());
-  return CreateWithParams(slot.get(),
-                          false /* not permanent */,
-                          false /* not sensitive */);
+  return CreateWithParams(PR_FALSE /* not permanent */,
+                          PR_FALSE /* not sensitive */);
 }
 
-#if defined(USE_NSS)
 // static
-ECPrivateKey* ECPrivateKey::CreateSensitive(PK11SlotInfo* slot) {
-  return CreateWithParams(
-      slot, true /* permanent */, true /* sensitive */);
-}
+ECPrivateKey* ECPrivateKey::CreateSensitive() {
+#if defined(USE_NSS)
+  return CreateWithParams(PR_TRUE /* permanent */,
+                          PR_TRUE /* sensitive */);
+#else
+  // If USE_NSS is not defined, we initialize NSS with no databases, so we can't
+  // create permanent keys.
+  NOTREACHED();
+  return NULL;
 #endif
+}
 
 // static
 ECPrivateKey* ECPrivateKey::CreateFromEncryptedPrivateKeyInfo(
     const std::string& password,
     const std::vector<uint8>& encrypted_private_key_info,
     const std::vector<uint8>& subject_public_key_info) {
-  EnsureNSSInit();
-
-  ScopedPK11Slot slot(GetTempKeySlot());
   return CreateFromEncryptedPrivateKeyInfoWithParams(
-      slot.get(),
       password,
       encrypted_private_key_info,
       subject_public_key_info,
-      false /* not permanent */,
-      false /* not sensitive */);
+      PR_FALSE /* not permanent */,
+      PR_FALSE /* not sensitive */);
 }
 
-#if defined(USE_NSS)
 // static
 ECPrivateKey* ECPrivateKey::CreateSensitiveFromEncryptedPrivateKeyInfo(
-    PK11SlotInfo* slot,
     const std::string& password,
     const std::vector<uint8>& encrypted_private_key_info,
     const std::vector<uint8>& subject_public_key_info) {
+#if defined(USE_NSS)
   return CreateFromEncryptedPrivateKeyInfoWithParams(
-      slot,
       password,
       encrypted_private_key_info,
       subject_public_key_info,
-      true /* permanent */,
-      true /* sensitive */);
-}
+      PR_TRUE /* permanent */,
+      PR_TRUE /* sensitive */);
+#else
+  // If USE_NSS is not defined, we initialize NSS with no databases, so we can't
+  // create permanent keys.
+  NOTREACHED();
+  return NULL;
 #endif
+}
 
 // static
 bool ECPrivateKey::ImportFromEncryptedPrivateKeyInfo(
-    PK11SlotInfo* slot,
     const std::string& password,
     const uint8* encrypted_private_key_info,
     size_t encrypted_private_key_info_len,
@@ -149,7 +114,8 @@ bool ECPrivateKey::ImportFromEncryptedPrivateKeyInfo(
     bool sensitive,
     SECKEYPrivateKey** key,
     SECKEYPublicKey** public_key) {
-  if (!slot)
+  ScopedPK11Slot slot(GetPrivateNSSKeySlot());
+  if (!slot.get())
     return false;
 
   *public_key = SECKEY_ExtractPublicKey(decoded_spki);
@@ -162,7 +128,7 @@ bool ECPrivateKey::ImportFromEncryptedPrivateKeyInfo(
   SECItem encoded_epki = {
     siBuffer,
     const_cast<unsigned char*>(encrypted_private_key_info),
-    static_cast<unsigned>(encrypted_private_key_info_len)
+    encrypted_private_key_info_len
   };
   SECKEYEncryptedPrivateKeyInfo epki;
   memset(&epki, 0, sizeof(epki));
@@ -184,11 +150,11 @@ bool ECPrivateKey::ImportFromEncryptedPrivateKeyInfo(
   SECItem password_item = {
     siBuffer,
     reinterpret_cast<unsigned char*>(const_cast<char*>(password.data())),
-    static_cast<unsigned>(password.size())
+    password.size()
   };
 
   rv = ImportEncryptedECPrivateKeyInfoAndReturnKey(
-      slot,
+      slot.get(),
       &epki,
       &password_item,
       NULL,  // nickname
@@ -219,7 +185,7 @@ bool ECPrivateKey::ExportEncryptedPrivateKey(
   SECItem password_item = {
     siBuffer,
     reinterpret_cast<unsigned char*>(const_cast<char*>(password.data())),
-    static_cast<unsigned>(password.size())
+    password.size()
   };
 
   SECKEYEncryptedPrivateKeyInfo* encrypted = PK11_ExportEncryptedPrivKeyInfo(
@@ -275,13 +241,15 @@ bool ECPrivateKey::ExportECParams(std::vector<uint8>* output) {
 ECPrivateKey::ECPrivateKey() : key_(NULL), public_key_(NULL) {}
 
 // static
-ECPrivateKey* ECPrivateKey::CreateWithParams(PK11SlotInfo* slot,
-                                             bool permanent,
+ECPrivateKey* ECPrivateKey::CreateWithParams(bool permanent,
                                              bool sensitive) {
-  if (!slot)
-    return NULL;
+  EnsureNSSInit();
 
   scoped_ptr<ECPrivateKey> result(new ECPrivateKey);
+
+  ScopedPK11Slot slot(GetPrivateNSSKeySlot());
+  if (!slot.get())
+    return NULL;
 
   SECOidData* oid_data = SECOID_FindOIDByTag(SEC_OID_SECG_EC_SECP256R1);
   if (!oid_data) {
@@ -296,15 +264,14 @@ ECPrivateKey* ECPrivateKey::CreateWithParams(PK11SlotInfo* slot,
   DCHECK_LE(oid_data->oid.len, 127U);
   std::vector<unsigned char> parameters_buf(2 + oid_data->oid.len);
   SECKEYECParams ec_parameters = {
-    siDEROID, &parameters_buf[0],
-    static_cast<unsigned>(parameters_buf.size())
+    siDEROID, &parameters_buf[0], parameters_buf.size()
   };
 
   ec_parameters.data[0] = SEC_ASN1_OBJECT_ID;
   ec_parameters.data[1] = oid_data->oid.len;
   memcpy(ec_parameters.data + 2, oid_data->oid.data, oid_data->oid.len);
 
-  result->key_ = PK11_GenerateKeyPair(slot,
+  result->key_ = PK11_GenerateKeyPair(slot.get(),
                                       CKM_EC_KEY_PAIR_GEN,
                                       &ec_parameters,
                                       &result->public_key_,
@@ -321,18 +288,19 @@ ECPrivateKey* ECPrivateKey::CreateWithParams(PK11SlotInfo* slot,
 
 // static
 ECPrivateKey* ECPrivateKey::CreateFromEncryptedPrivateKeyInfoWithParams(
-    PK11SlotInfo* slot,
     const std::string& password,
     const std::vector<uint8>& encrypted_private_key_info,
     const std::vector<uint8>& subject_public_key_info,
     bool permanent,
     bool sensitive) {
+  EnsureNSSInit();
+
   scoped_ptr<ECPrivateKey> result(new ECPrivateKey);
 
   SECItem encoded_spki = {
     siBuffer,
     const_cast<unsigned char*>(&subject_public_key_info[0]),
-    static_cast<unsigned>(subject_public_key_info.size())
+    subject_public_key_info.size()
   };
   CERTSubjectPublicKeyInfo* decoded_spki = SECKEY_DecodeDERSubjectPublicKeyInfo(
       &encoded_spki);
@@ -341,8 +309,7 @@ ECPrivateKey* ECPrivateKey::CreateFromEncryptedPrivateKeyInfoWithParams(
     return NULL;
   }
 
-  bool success = ImportFromEncryptedPrivateKeyInfo(
-      slot,
+  bool success = ECPrivateKey::ImportFromEncryptedPrivateKeyInfo(
       password,
       &encrypted_private_key_info[0],
       encrypted_private_key_info.size(),

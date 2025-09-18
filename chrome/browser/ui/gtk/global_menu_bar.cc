@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,21 @@
 #include <gtk/gtk.h>
 
 #include "base/command_line.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
-#include "ui/base/accelerators/menu_label_accelerator_util_linux.h"
-#include "ui/base/accelerators/platform_accelerator_gtk.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/gtk_util.h"
 
 struct GlobalMenuBarCommand {
   int str_id;
@@ -133,16 +131,13 @@ GlobalMenuBarCommand tools_menu[] = {
   { IDS_VIEW_SOURCE, IDC_VIEW_SOURCE },
   { IDS_DEV_TOOLS, IDC_DEV_TOOLS },
   { IDS_DEV_TOOLS_CONSOLE, IDC_DEV_TOOLS_CONSOLE },
-  { IDS_DEV_TOOLS_DEVICES, IDC_DEV_TOOLS_DEVICES },
 
   { MENU_END, MENU_END }
 };
 
 GlobalMenuBarCommand help_menu[] = {
-#if defined(GOOGLE_CHROME_BUILD)
   { IDS_FEEDBACK, IDC_FEEDBACK },
-#endif
-  { IDS_HELP_PAGE , IDC_HELP_PAGE_VIA_MENU },
+  { IDS_HELP_PAGE , IDC_HELP_PAGE },
   { MENU_END, MENU_END }
 };
 
@@ -157,11 +152,10 @@ GlobalMenuBar::GlobalMenuBar(Browser* browser)
   // The global menu bar should never actually be shown in the app; it should
   // instead remain in our widget hierarchy simply to be noticed by third party
   // components.
-  g_object_ref_sink(menu_bar_);
-  gtk_widget_set_no_show_all(menu_bar_, TRUE);
+  gtk_widget_set_no_show_all(menu_bar_.get(), TRUE);
 
   // Set a nice name so it shows up in gtkparasite and others.
-  gtk_widget_set_name(menu_bar_, "chrome-hidden-global-menubar");
+  gtk_widget_set_name(menu_bar_.get(), "chrome-hidden-global-menubar");
 
   BuildGtkMenuFrom(IDS_FILE_MENU_LINUX, &id_to_menu_item_, file_menu, NULL);
   BuildGtkMenuFrom(IDS_EDIT_MENU_LINUX, &id_to_menu_item_, edit_menu, NULL);
@@ -175,44 +169,40 @@ GlobalMenuBar::GlobalMenuBar(Browser* browser)
   for (CommandIDMenuItemMap::const_iterator it = id_to_menu_item_.begin();
        it != id_to_menu_item_.end(); ++it) {
     // Get the starting enabled state.
-    gtk_widget_set_sensitive(it->second,
-                             chrome::IsCommandEnabled(browser_, it->first));
+    gtk_widget_set_sensitive(
+        it->second,
+        browser_->command_updater()->IsCommandEnabled(it->first));
 
     // Set the accelerator for each menu item.
-    AcceleratorsGtk* accelerators = AcceleratorsGtk::GetInstance();
-    const ui::Accelerator* accelerator =
-        accelerators->GetPrimaryAcceleratorForCommand(it->first);
-    if (accelerator) {
+    const ui::AcceleratorGtk* accelerator_gtk =
+        AcceleratorsGtk::GetInstance()->GetPrimaryAcceleratorForCommand(
+            it->first);
+    if (accelerator_gtk) {
       gtk_widget_add_accelerator(it->second,
                                  "activate",
                                  dummy_accel_group_,
-                                 ui::GetGdkKeyCodeForAccelerator(*accelerator),
-                                 ui::GetGdkModifierForAccelerator(*accelerator),
+                                 accelerator_gtk->GetGdkKeyCode(),
+                                 accelerator_gtk->gdk_modifier_type(),
                                  GTK_ACCEL_VISIBLE);
     }
 
-    chrome::AddCommandObserver(browser_, it->first, this);
+    browser_->command_updater()->AddCommandObserver(it->first, this);
   }
 
   pref_change_registrar_.Init(browser_->profile()->GetPrefs());
-  pref_change_registrar_.Add(
-      prefs::kShowBookmarkBar,
-      base::Bind(&GlobalMenuBar::OnBookmarkBarVisibilityChanged,
-                 base::Unretained(this)));
+  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
   OnBookmarkBarVisibilityChanged();
 }
 
 GlobalMenuBar::~GlobalMenuBar() {
   Disable();
   g_object_unref(dummy_accel_group_);
-  gtk_widget_destroy(menu_bar_);
-  g_object_unref(menu_bar_);
 }
 
 void GlobalMenuBar::Disable() {
   for (CommandIDMenuItemMap::const_iterator it = id_to_menu_item_.begin();
        it != id_to_menu_item_.end(); ++it) {
-    chrome::RemoveCommandObserver(browser_, it->first, this);
+    browser_->command_updater()->RemoveCommandObserver(it->first, this);
   }
   id_to_menu_item_.clear();
 
@@ -235,7 +225,7 @@ void GlobalMenuBar::BuildGtkMenuFrom(
   gtk_widget_show(menu);
 
   GtkWidget* menu_item = gtk_menu_item_new_with_mnemonic(
-      ui::RemoveWindowsStyleAccelerators(
+      gfx::RemoveWindowsStyleAccelerators(
           l10n_util::GetStringUTF8(menu_str_id)).c_str());
 
   // Give the owner a chance to sink the reference before we add it to the menu
@@ -245,7 +235,7 @@ void GlobalMenuBar::BuildGtkMenuFrom(
 
   gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_item), menu);
   gtk_widget_show(menu_item);
-  gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar_), menu_item);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar_.get()), menu_item);
 }
 
 GtkWidget* GlobalMenuBar::BuildMenuItem(
@@ -258,8 +248,9 @@ GtkWidget* GlobalMenuBar::BuildMenuItem(
   if (string_id == MENU_SEPARATOR) {
     menu_item = gtk_separator_menu_item_new();
   } else {
-    std::string label = ui::ConvertAcceleratorsFromWindowsStyle(
-        l10n_util::GetStringUTF8(string_id));
+    std::string label =
+        gfx::ConvertAcceleratorsFromWindowsStyle(
+            l10n_util::GetStringUTF8(string_id));
 
     if (command_id == IDC_SHOW_BOOKMARK_BAR)
       menu_item = gtk_check_menu_item_new_with_mnemonic(label.c_str());
@@ -291,6 +282,15 @@ void GlobalMenuBar::EnabledStateChangedForCommand(int id, bool enabled) {
     gtk_widget_set_sensitive(it->second, enabled);
 }
 
+void GlobalMenuBar::Observe(int type,
+                            const content::NotificationSource& source,
+                            const content::NotificationDetails& details) {
+  DCHECK_EQ(chrome::NOTIFICATION_PREF_CHANGED, type);
+  const std::string& pref_name = *content::Details<std::string>(details).ptr();
+  DCHECK_EQ(prefs::kShowBookmarkBar, pref_name);
+  OnBookmarkBarVisibilityChanged();
+}
+
 void GlobalMenuBar::OnBookmarkBarVisibilityChanged() {
   CommandIDMenuItemMap::iterator it =
       id_to_menu_item_.find(IDC_SHOW_BOOKMARK_BAR);
@@ -309,5 +309,5 @@ void GlobalMenuBar::OnItemActivated(GtkWidget* sender) {
     return;
 
   int id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sender), "command-id"));
-  chrome::ExecuteCommand(browser_, id);
+  browser_->ExecuteCommandIfEnabled(id);
 }

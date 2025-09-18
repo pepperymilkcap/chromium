@@ -4,31 +4,30 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_EXTENSIONS_BROWSER_ACTIONS_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_EXTENSIONS_BROWSER_ACTIONS_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/scoped_nsobject.h"
+#import "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 
 class Browser;
 @class BrowserActionButton;
 @class BrowserActionsContainerView;
+class Extension;
 @class ExtensionPopupController;
 class ExtensionToolbarModel;
 class ExtensionServiceObserverBridge;
 @class MenuButton;
+class PrefService;
 class Profile;
-
-namespace extensions {
-class Extension;
-}
 
 // Sent when the visibility of the Browser Actions changes.
 extern NSString* const kBrowserActionVisibilityChangedNotification;
 
 // Handles state and provides an interface for controlling the Browser Actions
 // container within the Toolbar.
-@interface BrowserActionsController : NSObject<NSMenuDelegate> {
+@interface BrowserActionsController : NSObject {
  @private
   // Reference to the current browser. Weak.
   Browser* browser_;
@@ -48,19 +47,19 @@ extern NSString* const kBrowserActionVisibilityChangedNotification;
   // A dictionary of Extension ID -> BrowserActionButton pairs representing the
   // buttons present in the container view. The ID is a string unique to each
   // extension.
-  base::scoped_nsobject<NSMutableDictionary> buttons_;
+  scoped_nsobject<NSMutableDictionary> buttons_;
 
   // Array of hidden buttons in the correct order in which the user specified.
-  base::scoped_nsobject<NSMutableArray> hiddenButtons_;
+  scoped_nsobject<NSMutableArray> hiddenButtons_;
 
   // The currently running chevron animation (fade in/out).
-  base::scoped_nsobject<NSViewAnimation> chevronAnimation_;
+  scoped_nsobject<NSViewAnimation> chevronAnimation_;
 
   // The chevron button used when Browser Actions are hidden.
-  base::scoped_nsobject<MenuButton> chevronMenuButton_;
+  scoped_nsobject<MenuButton> chevronMenuButton_;
 
   // The Browser Actions overflow menu.
-  base::scoped_nsobject<NSMenu> overflowMenu_;
+  scoped_nsobject<NSMenu> overflowMenu_;
 }
 
 @property(readonly, nonatomic) BrowserActionsContainerView* containerView;
@@ -81,13 +80,15 @@ extern NSString* const kBrowserActionVisibilityChangedNotification;
 // container.
 - (NSUInteger)visibleButtonCount;
 
+// Returns a pointer to the chevron menu button.
+- (MenuButton*)chevronMenuButton;
+
 // Resizes the container given the number of visible buttons, taking into
 // account the size of the grippy. Also updates the persistent width preference.
 - (void)resizeContainerAndAnimate:(BOOL)animate;
 
 // Returns the NSView for the action button associated with an extension.
-- (NSView*)browserActionViewForExtension:(
-    const extensions::Extension*)extension;
+- (NSView*)browserActionViewForExtension:(const Extension*)extension;
 
 // Returns the saved width determined by the number of shown Browser Actions
 // preference property. If no preference is found, then the width for the
@@ -97,12 +98,15 @@ extern NSString* const kBrowserActionVisibilityChangedNotification;
 // Returns where the popup arrow should point to for a given Browser Action. If
 // it is passed an extension that is not a Browser Action, then it will return
 // NSZeroPoint.
-- (NSPoint)popupPointForBrowserAction:(const extensions::Extension*)extension;
+- (NSPoint)popupPointForBrowserAction:(const Extension*)extension;
 
 // Returns whether the chevron button is currently hidden or in the process of
 // being hidden (fading out). Will return NO if it is not hidden or is in the
 // process of fading in.
 - (BOOL)chevronIsHidden;
+
+// Registers the user preferences used by this class.
++ (void)registerUserPrefs:(PrefService*)prefs;
 
 @end  // @interface BrowserActionsController
 

@@ -10,26 +10,19 @@
 
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "base/win/i18n.h"
 #include "base/win/windows_version.h"
 #include "grit/app_locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/display.h"
-#include "ui/gfx/win/dpi.h"
 
 namespace {
 
-void AdjustLogFont(const base::string16& font_family,
+void AdjustLogFont(const std::wstring& font_family,
                    double font_size_scaler,
-                   double dpi_scale,
                    LOGFONT* logfont) {
   DCHECK(font_size_scaler > 0);
   font_size_scaler = std::max(std::min(font_size_scaler, 2.0), 0.7);
-  // Font metrics are computed in pixels and scale in high-DPI mode.
-  // Normalized by the DPI scale factor in order to work in DIP with
-  // Views/Aura. Call with dpi_scale=1 to keep the size in pixels.
-  font_size_scaler /= dpi_scale;
   logfont->lfHeight = static_cast<long>(font_size_scaler *
       static_cast<double>(abs(logfont->lfHeight)) + 0.5) *
       (logfont->lfHeight > 0 ? 1 : -1);
@@ -113,7 +106,7 @@ bool IsLocaleSupportedByOS(const std::string& locale) {
       !LowerCaseEqualsASCII(locale, "am") || IsFontPresent(L"Abyssinica SIL"));
 }
 
-bool NeedOverrideDefaultUIFont(base::string16* override_font_family,
+bool NeedOverrideDefaultUIFont(std::wstring* override_font_family,
                                double* font_size_scaler) {
   // This is rather simple-minded to deal with the UI font size
   // issue for some Indian locales (ml, bn, hi) for which
@@ -130,7 +123,7 @@ bool NeedOverrideDefaultUIFont(base::string16* override_font_family,
     ui_font_size_scaler_id = IDS_UI_FONT_SIZE_SCALER_XP;
   }
 
-  base::string16 ui_font_family = GetStringUTF16(ui_font_family_id);
+  std::wstring ui_font_family = GetStringUTF16(ui_font_family_id);
   int scaler100;
   if (!base::StringToInt(l10n_util::GetStringUTF16(ui_font_size_scaler_id),
                          &scaler100))
@@ -152,31 +145,19 @@ bool NeedOverrideDefaultUIFont(base::string16* override_font_family,
 }
 
 void AdjustUIFont(LOGFONT* logfont) {
-  double dpi_scale = gfx::GetDPIScale();
-  if (gfx::Display::HasForceDeviceScaleFactor()) {
-    // If the scale is forced, we don't need to adjust it here.
-    dpi_scale = 1.0;
-  }
-  AdjustUIFontForDIP(dpi_scale, logfont);
-}
-
-void AdjustUIFontForDIP(float dpi_scale, LOGFONT* logfont) {
-  base::string16 ui_font_family = L"default";
-  double ui_font_size_scaler = 1;
-  if (NeedOverrideDefaultUIFont(&ui_font_family, &ui_font_size_scaler) ||
-      dpi_scale != 1) {
-    AdjustLogFont(ui_font_family, ui_font_size_scaler, dpi_scale, logfont);
-  }
+  std::wstring ui_font_family;
+  double ui_font_size_scaler;
+  if (NeedOverrideDefaultUIFont(&ui_font_family, &ui_font_size_scaler))
+    AdjustLogFont(ui_font_family, ui_font_size_scaler, logfont);
 }
 
 void AdjustUIFontForWindow(HWND hwnd) {
-  base::string16 ui_font_family;
+  std::wstring ui_font_family;
   double ui_font_size_scaler;
   if (NeedOverrideDefaultUIFont(&ui_font_family, &ui_font_size_scaler)) {
     LOGFONT logfont;
     if (GetObject(GetWindowFont(hwnd), sizeof(logfont), &logfont)) {
-      double dpi_scale = 1;
-      AdjustLogFont(ui_font_family, ui_font_size_scaler, dpi_scale, &logfont);
+      AdjustLogFont(ui_font_family, ui_font_size_scaler, &logfont);
       HFONT hfont = CreateFontIndirect(&logfont);
       if (hfont)
         SetWindowFont(hwnd, hfont, FALSE);

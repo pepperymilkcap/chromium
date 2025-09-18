@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // Linux specific implementation of VideoCaptureDevice.
-// V4L2 is used for capturing. V4L2 does not provide its own thread for
+// V4L2 is used for capturing. V4L2 does not provide it's own thread for
 // capturing so this implementation uses a Chromium thread for fetching frames
 // from V4L2.
 
@@ -12,10 +12,8 @@
 
 #include <string>
 
-#include "base/file_util.h"
 #include "base/threading/thread.h"
 #include "media/video/capture/video_capture_device.h"
-#include "media/video/capture/video_capture_types.h"
 
 namespace media {
 
@@ -25,14 +23,19 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
   virtual ~VideoCaptureDeviceLinux();
 
   // VideoCaptureDevice implementation.
-  virtual void AllocateAndStart(const VideoCaptureParams& params,
-                                scoped_ptr<Client> client) OVERRIDE;
-
-  virtual void StopAndDeAllocate() OVERRIDE;
+  virtual void Allocate(int width,
+                        int height,
+                        int frame_rate,
+                        EventHandler* observer) OVERRIDE;
+  virtual void Start() OVERRIDE;
+  virtual void Stop() OVERRIDE;
+  virtual void DeAllocate() OVERRIDE;
+  virtual const Name& device_name() OVERRIDE;
 
  private:
   enum InternalState {
     kIdle,  // The device driver is opened but camera is not in use.
+    kAllocated,  // The camera has been allocated and can be started.
     kCapturing,  // Video is being captured.
     kError  // Error accessing HW functions.
             // User needs to recover by destroying the object.
@@ -46,11 +49,13 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
   };
 
   // Called on the v4l2_thread_.
-  void OnAllocateAndStart(int width,
-                          int height,
-                          int frame_rate,
-                          scoped_ptr<Client> client);
-  void OnStopAndDeAllocate();
+  void OnAllocate(int width,
+                  int height,
+                  int frame_rate,
+                  EventHandler* observer);
+  void OnStart();
+  void OnStop();
+  void OnDeAllocate();
   void OnCaptureTask();
 
   bool AllocateVideoBuffers();
@@ -58,15 +63,12 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
   void SetErrorState(const std::string& reason);
 
   InternalState state_;
-  scoped_ptr<VideoCaptureDevice::Client> client_;
+  VideoCaptureDevice::EventHandler* observer_;
   Name device_name_;
   int device_fd_;  // File descriptor for the opened camera device.
-  file_util::ScopedFD device_fd_closer_;
   base::Thread v4l2_thread_;  // Thread used for reading data from the device.
   Buffer* buffer_pool_;
   int buffer_pool_size_;  // Number of allocated buffers.
-  int timeout_count_;
-  VideoCaptureFormat capture_format_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(VideoCaptureDeviceLinux);
 };

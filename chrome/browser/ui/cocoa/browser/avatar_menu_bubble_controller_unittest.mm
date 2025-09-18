@@ -1,57 +1,56 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
 
-#include "base/mac/scoped_nsobject.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_pump_mac.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
-#include "chrome/browser/profiles/avatar_menu.h"
-#include "chrome/browser/profiles/avatar_menu_observer.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/message_pump_mac.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/profiles/avatar_menu_model.h"
+#include "chrome/browser/profiles/avatar_menu_model_observer.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#import "chrome/browser/ui/cocoa/hyperlink_button_cell.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "testing/gtest_mac.h"
-#import "ui/base/cocoa/controls/hyperlink_button_cell.h"
 #include "ui/base/test/cocoa_test_event_utils.h"
+
+class FakeBridge : public AvatarMenuModelObserver {
+ public:
+  void OnAvatarMenuModelChanged(AvatarMenuModel* model) OVERRIDE {}
+};
 
 class AvatarMenuBubbleControllerTest : public CocoaTest {
  public:
   AvatarMenuBubbleControllerTest()
-      : manager_(TestingBrowserProcess::GetGlobal()) {
+      : manager_(static_cast<TestingBrowserProcess*>(g_browser_process)) {
   }
 
   virtual void SetUp() {
     CocoaTest::SetUp();
     ASSERT_TRUE(manager_.SetUp());
 
-    manager_.CreateTestingProfile("test1", scoped_ptr<PrefServiceSyncable>(),
-                                  base::ASCIIToUTF16("Test 1"), 1,
-                                  std::string(),
-                                  TestingProfile::TestingFactories());
-    manager_.CreateTestingProfile("test2", scoped_ptr<PrefServiceSyncable>(),
-                                  base::ASCIIToUTF16("Test 2"), 0,
-                                  std::string(),
-                                  TestingProfile::TestingFactories());
+    manager_.CreateTestingProfile("test1", ASCIIToUTF16("Test 1"), 1);
+    manager_.CreateTestingProfile("test2", ASCIIToUTF16("Test 2"), 0);
 
-    menu_ = new AvatarMenu(manager_.profile_info_cache(), NULL, NULL);
-    menu_->RebuildMenu();
+    bridge_ = new FakeBridge;
+    model_ = new AvatarMenuModel(manager_.profile_info_cache(), bridge(), NULL);
 
     NSRect frame = [test_window() frame];
     NSPoint point = NSMakePoint(NSMidX(frame), NSMidY(frame));
     controller_ =
-        [[AvatarMenuBubbleController alloc] initWithMenu:menu()
+        [[AvatarMenuBubbleController alloc] initWithModel:model()
+                                                   bridge:bridge()
                                              parentWindow:test_window()
                                                anchoredAt:point];
   }
 
   TestingProfileManager* manager() { return &manager_; }
   AvatarMenuBubbleController* controller() { return controller_; }
-  AvatarMenu* menu() { return menu_; }
+  AvatarMenuModel* model() { return model_; }
+  FakeBridge* bridge() { return bridge_; }
 
   AvatarMenuItemController* GetHighlightedItem() {
     for (AvatarMenuItemController* item in [controller() items]) {
@@ -68,7 +67,8 @@ class AvatarMenuBubbleControllerTest : public CocoaTest {
   AvatarMenuBubbleController* controller_;
 
   // Weak; owned by |controller_|.
-  AvatarMenu* menu_;
+  AvatarMenuModel* model_;
+  FakeBridge* bridge_;
 };
 
 TEST_F(AvatarMenuBubbleControllerTest, InitialLayout) {
@@ -122,13 +122,10 @@ TEST_F(AvatarMenuBubbleControllerTest, PerformLayout) {
   NSView* contents = [[controller() window] contentView];
   EXPECT_EQ(4U, [[contents subviews] count]);
 
-  base::scoped_nsobject<NSMutableArray> oldItems([[controller() items] copy]);
+  scoped_nsobject<NSMutableArray> oldItems([[controller() items] copy]);
 
   // Now create a new profile and notify the delegate.
-  manager()->CreateTestingProfile("test3", scoped_ptr<PrefServiceSyncable>(),
-                                  base::ASCIIToUTF16("Test 3"), 0,
-                                  std::string(),
-                                  TestingProfile::TestingFactories());
+  manager()->CreateTestingProfile("test3", ASCIIToUTF16("Test 3"), 0);
 
   // Testing the bridge is not worth the effort...
   [controller() performLayout];
@@ -150,7 +147,7 @@ TEST_F(AvatarMenuBubbleControllerTest, PerformLayout) {
 @interface TestingAvatarMenuItemController : AvatarMenuItemController
                                                  <NSAnimationDelegate> {
  @private
-  scoped_ptr<base::MessagePumpNSRunLoop> pump_;
+  scoped_refptr<base::MessagePumpNSRunLoop> pump_;
 }
 // After calling |-highlightForEventType:| an animation will possibly be
 // started. Since the animation is non-blocking, the run loop will need to be
@@ -160,8 +157,8 @@ TEST_F(AvatarMenuBubbleControllerTest, PerformLayout) {
 
 @implementation TestingAvatarMenuItemController
 - (void)runMessagePump {
-  if (!pump_)
-    pump_.reset(new base::MessagePumpNSRunLoop);
+  if (!pump_.get())
+    pump_ = new base::MessagePumpNSRunLoop;
   pump_->Run(NULL);
 }
 
@@ -188,8 +185,8 @@ TEST_F(AvatarMenuBubbleControllerTest, PerformLayout) {
 @end
 
 TEST_F(AvatarMenuBubbleControllerTest, HighlightForEventType) {
-  base::scoped_nsobject<TestingAvatarMenuItemController> item(
-      [[TestingAvatarMenuItemController alloc] initWithMenuIndex:0
+  scoped_nsobject<TestingAvatarMenuItemController> item(
+      [[TestingAvatarMenuItemController alloc] initWithModelIndex:0
                                                    menuController:nil]);
   // Test non-active states first.
   [[item activeView] setHidden:YES];

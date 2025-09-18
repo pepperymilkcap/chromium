@@ -9,7 +9,7 @@
 
 #include "net/http/http_auth_handler_ntlm.h"
 
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/http/http_auth_sspi_win.h"
@@ -45,7 +45,8 @@ bool HttpAuthHandlerNTLM::AllowsDefaultCredentials() {
 HttpAuthHandlerNTLM::Factory::Factory()
     : max_token_length_(0),
       first_creation_(true),
-      is_unsupported_(false) {
+      is_unsupported_(false),
+      sspi_library_(NULL) {
 }
 
 HttpAuthHandlerNTLM::Factory::~Factory() {

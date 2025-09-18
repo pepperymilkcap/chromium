@@ -4,16 +4,16 @@
 
 #ifndef NET_HTTP_HTTP_UTIL_H_
 #define NET_HTTP_HTTP_UTIL_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/strings/string_tokenizer.h"
+#include "base/string_tokenizer.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/net_export.h"
 #include "net/http/http_byte_range.h"
-#include "net/http/http_version.h"
-#include "url/gurl.h"
 
 // This is a macro to support extending this string literal at compile time.
 // Please excuse me polluting your global namespace!
@@ -176,27 +176,16 @@ class NET_EXPORT HttpUtil {
   static std::string GenerateAcceptLanguageHeader(
       const std::string& raw_language_list);
 
+  // Given a charset, return the list with a qvalue. If charset is utf-8,
+  // it will return 'utf-8,*;q=0.5'. Otherwise (e.g. 'euc-jp'), it'll return
+  // 'euc-jp,utf-8;q=0.7,*;q=0.3'.
+  static std::string GenerateAcceptCharsetHeader(const std::string& charset);
+
   // Helper. If |*headers| already contains |header_name| do nothing,
   // otherwise add <header_name> ": " <header_value> to the end of the list.
   static void AppendHeaderIfMissing(const char* header_name,
                                     const std::string& header_value,
                                     std::string* headers);
-
-  // Returns true if the parameters describe a response with a strong etag or
-  // last-modified header.  See section 13.3.3 of RFC 2616.
-  static bool HasStrongValidators(HttpVersion version,
-                                  const std::string& etag_header,
-                                  const std::string& last_modified_header,
-                                  const std::string& date_header);
-
-  // Gets a vector of common HTTP status codes for histograms of status
-  // codes.  Currently returns everything in the range [100, 600), plus 0
-  // (for invalid responses/status codes).
-  static std::vector<int> GetStatusCodesForHistogram();
-
-  // Maps an HTTP status code to one of the status codes in the vector
-  // returned by GetStatusCodesForHistogram.
-  static int MapStatusCodeForHistogram(int code);
 
   // Used to iterate over the name/value pairs of HTTP headers.  To iterate
   // over the values in a multi-value header, use ValuesIterator.
@@ -247,7 +236,7 @@ class NET_EXPORT HttpUtil {
     }
 
    private:
-    base::StringTokenizer lines_;
+    StringTokenizer lines_;
     std::string::const_iterator name_begin_;
     std::string::const_iterator name_end_;
     std::string::const_iterator values_begin_;
@@ -287,7 +276,7 @@ class NET_EXPORT HttpUtil {
     }
 
    private:
-    base::StringTokenizer values_;
+    StringTokenizer values_;
     std::string::const_iterator value_begin_;
     std::string::const_iterator value_end_;
   };
@@ -338,6 +327,9 @@ class NET_EXPORT HttpUtil {
    private:
     HttpUtil::ValuesIterator props_;
     bool valid_;
+
+    std::string::const_iterator begin_;
+    std::string::const_iterator end_;
 
     std::string::const_iterator name_begin_;
     std::string::const_iterator name_end_;

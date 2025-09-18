@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,37 +7,33 @@
 #include "content/common/view_messages.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using appcache::AppCacheBackend;
-using blink::WebApplicationCacheHostClient;
-using blink::WebConsoleMessage;
-
-namespace content {
+using WebKit::WebApplicationCacheHostClient;
+using WebKit::WebConsoleMessage;
 
 RendererWebApplicationCacheHostImpl::RendererWebApplicationCacheHostImpl(
     RenderViewImpl* render_view,
     WebApplicationCacheHostClient* client,
     AppCacheBackend* backend)
     : WebApplicationCacheHostImpl(client, backend),
+      content_blocked_(false),
       routing_id_(render_view->routing_id()) {
 }
 
 void RendererWebApplicationCacheHostImpl::OnLogMessage(
     appcache::LogLevel log_level, const std::string& message) {
-  if (RenderThreadImpl::current()->layout_test_mode())
-    return;
-
   RenderViewImpl* render_view = GetRenderView();
   if (!render_view || !render_view->webview() ||
       !render_view->webview()->mainFrame())
     return;
 
-  blink::WebFrame* frame = render_view->webview()->mainFrame();
+  WebKit::WebFrame* frame = render_view->webview()->mainFrame();
   frame->addMessageToConsole(WebConsoleMessage(
         static_cast<WebConsoleMessage::Level>(log_level),
-        blink::WebString::fromUTF8(message.c_str())));
+        WebKit::WebString::fromUTF8(message.c_str())));
 }
 
 void RendererWebApplicationCacheHostImpl::OnContentBlocked(
@@ -56,7 +52,6 @@ void RendererWebApplicationCacheHostImpl::OnCacheSelected(
 }
 
 RenderViewImpl* RendererWebApplicationCacheHostImpl::GetRenderView() {
-  return RenderViewImpl::FromRoutingID(routing_id_);
+  return static_cast<RenderViewImpl*>
+      (RenderThreadImpl::current()->ResolveRoute(routing_id_));
 }
-
-}  // namespace content

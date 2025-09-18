@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/sys_byteorder.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
+#include "net/base/sys_addrinfo.h"
 #include "net/socket/client_socket_handle.h"
 
 namespace net {
@@ -55,20 +55,32 @@ struct SOCKS4ServerResponse {
 COMPILE_ASSERT(sizeof(SOCKS4ServerResponse) == kReadHeaderSize,
                socks4_server_response_struct_wrong_size);
 
-SOCKSClientSocket::SOCKSClientSocket(
-    scoped_ptr<ClientSocketHandle> transport_socket,
-    const HostResolver::RequestInfo& req_info,
-    RequestPriority priority,
-    HostResolver* host_resolver)
-    : transport_(transport_socket.Pass()),
+SOCKSClientSocket::SOCKSClientSocket(ClientSocketHandle* transport_socket,
+                                     const HostResolver::RequestInfo& req_info,
+                                     HostResolver* host_resolver)
+    : transport_(transport_socket),
       next_state_(STATE_NONE),
       completed_handshake_(false),
       bytes_sent_(0),
       bytes_received_(0),
       host_resolver_(host_resolver),
       host_request_info_(req_info),
-      priority_(priority),
-      net_log_(transport_->socket()->NetLog()) {}
+      net_log_(transport_socket->socket()->NetLog()) {
+}
+
+SOCKSClientSocket::SOCKSClientSocket(StreamSocket* transport_socket,
+                                     const HostResolver::RequestInfo& req_info,
+                                     HostResolver* host_resolver)
+    : transport_(new ClientSocketHandle()),
+      next_state_(STATE_NONE),
+      completed_handshake_(false),
+      bytes_sent_(0),
+      bytes_received_(0),
+      host_resolver_(host_resolver),
+      host_request_info_(req_info),
+      net_log_(transport_socket->NetLog()) {
+  transport_->set_socket(transport_socket);
+}
 
 SOCKSClientSocket::~SOCKSClientSocket() {
   Disconnect();
@@ -86,7 +98,7 @@ int SOCKSClientSocket::Connect(const CompletionCallback& callback) {
 
   next_state_ = STATE_RESOLVE_HOST;
 
-  net_log_.BeginEvent(NetLog::TYPE_SOCKS_CONNECT);
+  net_log_.BeginEvent(NetLog::TYPE_SOCKS_CONNECT, NULL);
 
   int rv = DoLoop(OK);
   if (rv == ERR_IO_PENDING) {
@@ -152,30 +164,22 @@ bool SOCKSClientSocket::UsingTCPFastOpen() const {
   return false;
 }
 
-bool SOCKSClientSocket::WasNpnNegotiated() const {
+int64 SOCKSClientSocket::NumBytesRead() const {
   if (transport_.get() && transport_->socket()) {
-    return transport_->socket()->WasNpnNegotiated();
+    return transport_->socket()->NumBytesRead();
   }
   NOTREACHED();
-  return false;
+  return -1;
 }
 
-NextProto SOCKSClientSocket::GetNegotiatedProtocol() const {
+base::TimeDelta SOCKSClientSocket::GetConnectTimeMicros() const {
   if (transport_.get() && transport_->socket()) {
-    return transport_->socket()->GetNegotiatedProtocol();
+    return transport_->socket()->GetConnectTimeMicros();
   }
   NOTREACHED();
-  return kProtoUnknown;
+  return base::TimeDelta::FromMicroseconds(-1);
 }
 
-bool SOCKSClientSocket::GetSSLInfo(SSLInfo* ssl_info) {
-  if (transport_.get() && transport_->socket()) {
-    return transport_->socket()->GetSSLInfo(ssl_info);
-  }
-  NOTREACHED();
-  return false;
-
-}
 
 // Read is called by the transport layer above to read. This can only be done
 // if the SOCKS handshake is complete.
@@ -271,9 +275,7 @@ int SOCKSClientSocket::DoResolveHost() {
   // addresses for the target host.
   host_request_info_.set_address_family(ADDRESS_FAMILY_IPV4);
   return host_resolver_.Resolve(
-      host_request_info_,
-      priority_,
-      &addresses_,
+      host_request_info_, &addresses_,
       base::Bind(&SOCKSClientSocket::OnIOComplete, base::Unretained(this)),
       net_log_);
 }
@@ -295,21 +297,22 @@ const std::string SOCKSClientSocket::BuildHandshakeWriteBuffer() const {
   SOCKS4ServerRequest request;
   request.version = kSOCKSVersion4;
   request.command = kSOCKSStreamRequest;
-  request.nw_port = base::HostToNet16(host_request_info_.port());
+  request.nw_port = htons(host_request_info_.port());
 
-  DCHECK(!addresses_.empty());
-  const IPEndPoint& endpoint = addresses_.front();
+  const struct addrinfo* ai = addresses_.head();
+  DCHECK(ai);
 
   // We disabled IPv6 results when resolving the hostname, so none of the
   // results in the list will be IPv6.
   // TODO(eroman): we only ever use the first address in the list. It would be
   //               more robust to try all the IP addresses we have before
   //               failing the connect attempt.
-  CHECK_EQ(ADDRESS_FAMILY_IPV4, endpoint.GetFamily());
-  CHECK_LE(endpoint.address().size(), sizeof(request.ip));
-  memcpy(&request.ip, &endpoint.address()[0], endpoint.address().size());
+  CHECK_EQ(AF_INET, ai->ai_addr->sa_family);
+  struct sockaddr_in* ipv4_host =
+      reinterpret_cast<struct sockaddr_in*>(ai->ai_addr);
+  memcpy(&request.ip, &ipv4_host->sin_addr, sizeof(ipv4_host->sin_addr));
 
-  DVLOG(1) << "Resolved Host is : " << endpoint.ToStringWithoutPort();
+  DVLOG(1) << "Resolved Host is : " << NetAddressToString(ai);
 
   std::string handshake_data(reinterpret_cast<char*>(&request),
                              sizeof(request));
@@ -333,8 +336,7 @@ int SOCKSClientSocket::DoHandshakeWrite() {
   memcpy(handshake_buf_->data(), &buffer_[bytes_sent_],
          handshake_buf_len);
   return transport_->socket()->Write(
-      handshake_buf_.get(),
-      handshake_buf_len,
+      handshake_buf_, handshake_buf_len,
       base::Bind(&SOCKSClientSocket::OnIOComplete, base::Unretained(this)));
 }
 
@@ -367,10 +369,9 @@ int SOCKSClientSocket::DoHandshakeRead() {
 
   int handshake_buf_len = kReadHeaderSize - bytes_received_;
   handshake_buf_ = new IOBuffer(handshake_buf_len);
-  return transport_->socket()->Read(
-      handshake_buf_.get(),
-      handshake_buf_len,
-      base::Bind(&SOCKSClientSocket::OnIOComplete, base::Unretained(this)));
+  return transport_->socket()->Read(handshake_buf_, handshake_buf_len,
+                                    base::Bind(&SOCKSClientSocket::OnIOComplete,
+                                               base::Unretained(this)));
 }
 
 int SOCKSClientSocket::DoHandshakeReadComplete(int result) {
@@ -424,7 +425,7 @@ int SOCKSClientSocket::DoHandshakeReadComplete(int result) {
   // Note: we ignore the last 6 bytes as specified by the SOCKS protocol
 }
 
-int SOCKSClientSocket::GetPeerAddress(IPEndPoint* address) const {
+int SOCKSClientSocket::GetPeerAddress(AddressList* address) const {
   return transport_->socket()->GetPeerAddress(address);
 }
 

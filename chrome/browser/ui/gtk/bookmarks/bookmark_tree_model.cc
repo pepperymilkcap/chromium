@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include <gtk/gtk.h>
 
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
@@ -25,20 +25,16 @@ void AddSingleNodeToTreeStore(GtkTreeStore* store, const BookmarkNode* node,
   // pixbuf-expander-open. Unfortunately there is no GTK_STOCK_OPEN_DIRECTORY
   // (and indeed, Nautilus does not render an expanded directory any
   // differently).
-  gtk_tree_store_set(store,
-                     iter,
-                     FOLDER_ICON,
-                     GtkThemeService::GetFolderIcon(true).ToGdkPixbuf(),
-                     FOLDER_NAME,
-                     base::UTF16ToUTF8(node->GetTitle()).c_str(),
-                     ITEM_ID,
-                     node->id(),
-                     // We don't want to use node->is_folder() because that
-                     // would let the
-                     // user edit "Bookmarks Bar" and "Other Bookmarks".
-                     IS_EDITABLE,
-                     node->type() == BookmarkNode::FOLDER,
-                     -1);
+  gtk_tree_store_set(store, iter,
+      bookmark_utils::FOLDER_ICON,
+      GtkThemeService::GetFolderIcon(true)->ToGdkPixbuf(),
+      bookmark_utils::FOLDER_NAME,
+      UTF16ToUTF8(node->GetTitle()).c_str(),
+      bookmark_utils::ITEM_ID, node->id(),
+      // We don't want to use node->is_folder() because that would let the
+      // user edit "Bookmarks Bar" and "Other Bookmarks".
+      bookmark_utils::IS_EDITABLE, node->type() == BookmarkNode::FOLDER,
+      -1);
 }
 
 // Helper function for CommitTreeStoreDifferencesBetween() which recursively
@@ -60,9 +56,11 @@ void RecursiveResolve(BookmarkModel* bb_model,
   if (gtk_tree_model_iter_children(GTK_TREE_MODEL(tree_store), &child_iter,
                                    parent_iter)) {
     do {
-      int64 id = GetIdFromTreeIter(GTK_TREE_MODEL(tree_store), &child_iter);
-      base::string16 title =
-          GetTitleFromTreeIter(GTK_TREE_MODEL(tree_store), &child_iter);
+      int64 id = bookmark_utils::GetIdFromTreeIter(GTK_TREE_MODEL(tree_store),
+                                                   &child_iter);
+      string16 title =
+          bookmark_utils::GetTitleFromTreeIter(GTK_TREE_MODEL(tree_store),
+                                               &child_iter);
       const BookmarkNode* child_bb_node = NULL;
       if (id == 0) {
         child_bb_node = bb_model->AddFolder(
@@ -73,7 +71,8 @@ void RecursiveResolve(BookmarkModel* bb_model,
         GValue value  = { 0 };
         g_value_init(&value, G_TYPE_INT64);
         g_value_set_int64(&value, child_bb_node->id());
-        gtk_tree_store_set_value(tree_store, &child_iter, ITEM_ID, &value);
+        gtk_tree_store_set_value(tree_store, &child_iter,
+                                 bookmark_utils::ITEM_ID, &value);
       } else {
         // Existing node, reset the title (BookmarkModel ignores changes if the
         // title is the same).
@@ -101,12 +100,15 @@ void OnFolderNameEdited(GtkCellRendererText* render,
   gboolean rv = gtk_tree_model_get_iter(GTK_TREE_MODEL(tree_store),
                                         &folder_iter, tree_path);
   DCHECK(rv);
-  gtk_tree_store_set(
-      tree_store, &folder_iter, FOLDER_NAME, new_folder_name, -1);
+  gtk_tree_store_set(tree_store, &folder_iter,
+                     bookmark_utils::FOLDER_NAME, new_folder_name,
+                     -1);
   gtk_tree_path_free(tree_path);
 }
 
 }  // namespace
+
+namespace bookmark_utils {
 
 GtkTreeStore* MakeFolderTreeStore() {
   return gtk_tree_store_new(FOLDER_STORE_NUM_COLUMNS, GDK_TYPE_PIXBUF,
@@ -227,13 +229,13 @@ int64 GetIdFromTreeIter(GtkTreeModel* model, GtkTreeIter* iter) {
   return ret_val;
 }
 
-base::string16 GetTitleFromTreeIter(GtkTreeModel* model, GtkTreeIter* iter) {
+string16 GetTitleFromTreeIter(GtkTreeModel* model, GtkTreeIter* iter) {
   GValue value = { 0, };
-  base::string16 ret_val;
+  string16 ret_val;
   gtk_tree_model_get_value(model, iter, FOLDER_NAME, &value);
   if (G_VALUE_HOLDS_STRING(&value)) {
     const gchar* utf8str = g_value_get_string(&value);
-    ret_val = base::UTF8ToUTF16(utf8str);
+    ret_val = UTF8ToUTF16(utf8str);
     g_value_unset(&value);
   } else {
     NOTREACHED() << "Impossible type mismatch";
@@ -241,3 +243,5 @@ base::string16 GetTitleFromTreeIter(GtkTreeModel* model, GtkTreeIter* iter) {
 
   return ret_val;
 }
+
+}  // namespace bookmark_utils

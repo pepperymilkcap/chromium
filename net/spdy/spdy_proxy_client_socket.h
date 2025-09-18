@@ -1,19 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_SPDY_SPDY_PROXY_CLIENT_SOCKET_H_
 #define NET_SPDY_SPDY_PROXY_CLIENT_SOCKET_H_
+#pragma once
 
-#include <list>
 #include <string>
+#include <list>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/load_timing_info.h"
 #include "net/base/net_log.h"
 #include "net/http/http_auth_controller.h"
 #include "net/http/http_request_headers.h"
@@ -22,7 +22,6 @@
 #include "net/http/proxy_client_socket.h"
 #include "net/spdy/spdy_http_stream.h"
 #include "net/spdy/spdy_protocol.h"
-#include "net/spdy/spdy_read_queue.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_stream.h"
 
@@ -42,13 +41,12 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   // Create a socket on top of the |spdy_stream| by sending a SYN_STREAM
   // CONNECT frame for |endpoint|.  After the SYN_REPLY is received,
   // any data read/written to the socket will be transferred in data
-  // frames. This object will set itself as |spdy_stream|'s delegate.
-  SpdyProxyClientSocket(const base::WeakPtr<SpdyStream>& spdy_stream,
+  // frames.
+  SpdyProxyClientSocket(SpdyStream* spdy_stream,
                         const std::string& user_agent,
                         const HostPortPair& endpoint,
                         const GURL& url,
                         const HostPortPair& proxy_server,
-                        const BoundNetLog& source_net_log,
                         HttpAuthCache* auth_cache,
                         HttpAuthHandlerFactory* auth_handler_factory);
 
@@ -56,14 +54,17 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   // On destruction Disconnect() is called.
   virtual ~SpdyProxyClientSocket();
 
+  const scoped_refptr<HttpAuthController>& auth_controller() {
+    return auth_;
+  }
+
   // ProxyClientSocket methods:
   virtual const HttpResponseInfo* GetConnectResponseInfo() const OVERRIDE;
+
+  // In the event of a non-200 response to the CONNECT request, this
+  // method may be called to return an HttpStream in order to read
+  // the response body.
   virtual HttpStream* CreateConnectResponseStream() OVERRIDE;
-  virtual const scoped_refptr<HttpAuthController>& GetAuthController() const
-      OVERRIDE;
-  virtual int RestartWithAuth(const CompletionCallback& callback) OVERRIDE;
-  virtual bool IsUsingSpdy() const OVERRIDE;
-  virtual NextProto GetProtocolNegotiated() const OVERRIDE;
 
   // StreamSocket implementation.
   virtual int Connect(const CompletionCallback& callback) OVERRIDE;
@@ -75,9 +76,8 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   virtual void SetOmniboxSpeculation() OVERRIDE;
   virtual bool WasEverUsed() const OVERRIDE;
   virtual bool UsingTCPFastOpen() const OVERRIDE;
-  virtual bool WasNpnNegotiated() const OVERRIDE;
-  virtual NextProto GetNegotiatedProtocol() const OVERRIDE;
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
+  virtual int64 NumBytesRead() const OVERRIDE;
+  virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
 
   // Socket implementation.
   virtual int Read(IOBuffer* buf,
@@ -88,16 +88,20 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
                     const CompletionCallback& callback) OVERRIDE;
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
-  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE;
+  virtual int GetPeerAddress(AddressList* address) const OVERRIDE;
   virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
 
   // SpdyStream::Delegate implementation.
-  virtual void OnRequestHeadersSent() OVERRIDE;
-  virtual SpdyResponseHeadersStatus OnResponseHeadersUpdated(
-      const SpdyHeaderBlock& response_headers) OVERRIDE;
-  virtual void OnDataReceived(scoped_ptr<SpdyBuffer> buffer) OVERRIDE;
-  virtual void OnDataSent() OVERRIDE;
+  virtual bool OnSendHeadersComplete(int status) OVERRIDE;
+  virtual int OnSendBody() OVERRIDE;
+  virtual int OnSendBodyComplete(int status, bool* eof) OVERRIDE;
+  virtual int OnResponseReceived(const spdy::SpdyHeaderBlock& response,
+                                 base::Time response_time,
+                                 int status) OVERRIDE;
+  virtual void OnDataReceived(const char* data, int length) OVERRIDE;
+  virtual void OnDataSent(int length) OVERRIDE;
   virtual void OnClose(int status) OVERRIDE;
+  virtual void set_chunk_callback(ChunkCallback* /*callback*/) OVERRIDE;
 
  private:
   enum State {
@@ -111,8 +115,6 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
     STATE_CLOSED
   };
 
-  void LogBlockedTunnelResponse() const;
-
   void OnIOComplete(int result);
 
   int DoLoop(int last_io_result);
@@ -124,12 +126,12 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
 
   // Populates |user_buffer_| with as much read data as possible
   // and returns the number of bytes read.
-  size_t PopulateUserReadBuffer(char* out, size_t len);
+  int PopulateUserReadBuffer();
 
   State next_state_;
 
   // Pointer to the SPDY Stream that this sits on top of.
-  base::WeakPtr<SpdyStream> spdy_stream_;
+  scoped_refptr<SpdyStream> spdy_stream_;
 
   // Stores the callback to the layer above, called on completing Read() or
   // Connect().
@@ -147,21 +149,20 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   scoped_refptr<HttpAuthController> auth_;
 
   // We buffer the response body as it arrives asynchronously from the stream.
-  SpdyReadQueue read_buffer_queue_;
+  std::list<scoped_refptr<DrainableIOBuffer> > read_buffer_;
 
   // User provided buffer for the Read() response.
-  scoped_refptr<IOBuffer> user_buffer_;
-  size_t user_buffer_len_;
+  scoped_refptr<DrainableIOBuffer> user_buffer_;
 
   // User specified number of bytes to be written.
   int write_buffer_len_;
+  // Number of bytes written which have not been confirmed
+  int write_bytes_outstanding_;
 
   // True if the transport socket has ever sent data.
   bool was_ever_used_;
 
-  // Used only for redirects.
-  bool redirect_has_load_timing_info_;
-  LoadTimingInfo redirect_load_timing_info_;
+  scoped_ptr<SpdyHttpStream> response_stream_;
 
   base::WeakPtrFactory<SpdyProxyClientSocket> weak_factory_;
 

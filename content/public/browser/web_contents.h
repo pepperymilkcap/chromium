@@ -4,31 +4,26 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_WEB_CONTENTS_H_
 #define CONTENT_PUBLIC_BROWSER_WEB_CONTENTS_H_
-
-#include <set>
+#pragma once
 
 #include "base/basictypes.h"
-#include "base/callback_forward.h"
-#include "base/files/file_path.h"
-#include "base/process/kill.h"
-#include "base/strings/string16.h"
-#include "base/supports_user_data.h"
+#include "base/process_util.h"
+#include "base/string16.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/save_page_type.h"
 #include "content/public/browser/web_ui.h"
-#include "ipc/ipc_sender.h"
-#include "third_party/skia/include/core/SkColor.h"
-#include "ui/base/window_open_disposition.h"
+#include "content/public/common/view_type.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/size.h"
+#include "webkit/glue/window_open_disposition.h"
 
-#if defined(OS_ANDROID)
-#include "base/android/scoped_java_ref.h"
-#endif
+class InterstitialPage;
+class RenderViewHost;
+class RenderWidgetHostView;
+class SessionStorageNamespace;
 
 namespace base {
+class PropertyBag;
 class TimeTicks;
 }
 
@@ -44,100 +39,48 @@ struct LoadStateWithParam;
 namespace content {
 
 class BrowserContext;
-class InterstitialPage;
-class PageState;
-class RenderFrameHost;
+class NavigationController;
 class RenderProcessHost;
-class RenderViewHost;
-class RenderWidgetHostView;
-class SiteInstance;
 class WebContentsDelegate;
-class WebContentsView;
 struct RendererPreferences;
+class SiteInstance;
+struct SSLStatus;
+// TODO(jam): of course we will have to rename WebContentsView etc to use
+// WebContents.
+class WebContentsView;
 
-// WebContents is the core class in content/. A WebContents renders web content
-// (usually HTML) in a rectangular area.
-//
-// Instantiating one is simple:
-//   scoped_ptr<content::WebContents> web_contents(
-//       content::WebContents::Create(
-//           content::WebContents::CreateParams(browser_context)));
-//   gfx::NativeView view = web_contents->GetView()->GetNativeView();
-//   // |view| is an HWND, NSView*, GtkWidget*, etc.; insert it into the view
-//   // hierarchy wherever it needs to go.
-//
-// That's it; go to your kitchen, grab a scone, and chill. WebContents will do
-// all the multi-process stuff behind the scenes. More details are at
-// http://www.chromium.org/developers/design-documents/multi-process-architecture .
-//
-// Each WebContents has exactly one NavigationController; each
-// NavigationController belongs to one WebContents. The NavigationController can
-// be obtained from GetController(), and is used to load URLs into the
-// WebContents, navigate it backwards/forwards, etc. See navigation_controller.h
-// for more details.
-class WebContents : public PageNavigator,
-                    public IPC::Sender,
-                    public base::SupportsUserData {
+// Describes what goes in the main content area of a tab.
+class WebContents : public PageNavigator {
  public:
-  struct CONTENT_EXPORT CreateParams {
-    explicit CreateParams(BrowserContext* context);
-    CreateParams(BrowserContext* context, SiteInstance* site);
-
-    BrowserContext* browser_context;
-
-    // Specifying a SiteInstance here is optional.  It can be set to avoid an
-    // extra process swap if the first navigation is expected to require a
-    // privileged process.
-    SiteInstance* site_instance;
-
-    WebContents* opener;
-    int routing_id;
-    int main_frame_routing_id;
-
-    // Initial size of the new WebContent's view. Can be (0, 0) if not needed.
-    gfx::Size initial_size;
-
-    // True if the contents should be initially hidden.
-    bool initially_hidden;
-
-    // Used to specify the location context which display the new view should
-    // belong. This can be NULL if not needed.
-    gfx::NativeView context;
-  };
-
-  // Creates a new WebContents.
-  CONTENT_EXPORT static WebContents* Create(const CreateParams& params);
-
-  // Similar to Create() above but should be used when you need to prepopulate
-  // the SessionStorageNamespaceMap of the WebContents. This can happen if
-  // you duplicate a WebContents, try to reconstitute it from a saved state,
-  // or when you create a new WebContents based on another one (eg., when
-  // servicing a window.open() call).
+  // |base_tab_contents| is used if we want to size the new tab contents view
+  // based on an existing tab contents view.  This can be NULL if not needed.
   //
-  // You do not want to call this. If you think you do, make sure you completely
-  // understand when SessionStorageNamespace objects should be cloned, why
-  // they should not be shared by multiple WebContents, and what bad things
-  // can happen if you share the object.
-  CONTENT_EXPORT static WebContents* CreateWithSessionStorage(
-      const CreateParams& params,
-      const SessionStorageNamespaceMap& session_storage_namespace_map);
-
-  // Returns a WebContents that wraps the RenderViewHost, or NULL if the
-  // render view host's delegate isn't a WebContents.
-  CONTENT_EXPORT static WebContents* FromRenderViewHost(
-      const RenderViewHost* rvh);
-
-  CONTENT_EXPORT static WebContents* FromRenderFrameHost(RenderFrameHost* rfh);
+  // The session storage namespace parameter allows multiple render views and
+  // tab contentses to share the same session storage (part of the WebStorage
+  // spec) space. This is useful when restoring tabs, but most callers should
+  // pass in NULL which will cause a new SessionStorageNamespace to be created.
+  CONTENT_EXPORT static WebContents* Create(
+      BrowserContext* browser_context,
+      SiteInstance* site_instance,
+      int routing_id,
+      const WebContents* base_tab_contents,
+      SessionStorageNamespace* session_storage_namespace);
 
   virtual ~WebContents() {}
 
   // Intrinsic tab state -------------------------------------------------------
 
+  // Returns the property bag for this tab contents, where callers can add
+  // extra data they may wish to associate with the tab. Returns a pointer
+  // rather than a reference since the PropertyAccessors expect this.
+  virtual const base::PropertyBag* GetPropertyBag() const = 0;
+  virtual base::PropertyBag* GetPropertyBag() = 0;
+
   // Gets/Sets the delegate.
   virtual WebContentsDelegate* GetDelegate() = 0;
   virtual void SetDelegate(WebContentsDelegate* delegate) = 0;
 
-  // Gets the controller for this WebContents.
+  // Gets the controller for this tab contents.
   virtual NavigationController& GetController() = 0;
   virtual const NavigationController& GetController() const = 0;
 
@@ -145,73 +88,23 @@ class WebContents : public PageNavigator,
   // NavigationController).
   virtual content::BrowserContext* GetBrowserContext() const = 0;
 
+  // Allows overriding the type of this tab.
+  virtual void SetViewType(content::ViewType type) = 0;
+  virtual content::ViewType GetViewType() const = 0;
+
   // Gets the URL that is currently being displayed, if there is one.
-  // This method is deprecated. DO NOT USE! Pick either |GetVisibleURL| or
-  // |GetLastCommittedURL| as appropriate.
   virtual const GURL& GetURL() const = 0;
-
-  // Gets the URL currently being displayed in the URL bar, if there is one.
-  // This URL might be a pending navigation that hasn't committed yet, so it is
-  // not guaranteed to match the current page in this WebContents. A typical
-  // example of this is interstitials, which show the URL of the new/loading
-  // page (active) but the security context is of the old page (last committed).
-  virtual const GURL& GetVisibleURL() const = 0;
-
-  // Gets the last committed URL. It represents the current page that is
-  // displayed in  this WebContents. It represents the current security
-  // context.
-  virtual const GURL& GetLastCommittedURL() const = 0;
 
   // Return the currently active RenderProcessHost and RenderViewHost. Each of
   // these may change over time.
   virtual RenderProcessHost* GetRenderProcessHost() const = 0;
 
-  // Returns the main frame for the currently active view.
-  virtual RenderFrameHost* GetMainFrame() = 0;
-
-  // Calls |on_frame| for each frame in the currently active view.
-  virtual void ForEachFrame(
-      const base::Callback<void(RenderFrameHost*)>& on_frame) = 0;
-
-  // Sends the given IPC to all frames in the currently active view. This is a
-  // convenience method instead of calling ForEach.
-  virtual void SendToAllFrames(IPC::Message* message) = 0;
-
   // Gets the current RenderViewHost for this tab.
   virtual RenderViewHost* GetRenderViewHost() const = 0;
-
-  typedef base::Callback<void(RenderViewHost* /* render_view_host */,
-                              int /* x */,
-                              int /* y */)> GetRenderViewHostCallback;
-  // Gets the RenderViewHost at coordinates (|x|, |y|) for this WebContents via
-  // |callback|.
-  // This can be different than the current RenderViewHost if there is a
-  // BrowserPlugin at the specified position.
-  virtual void GetRenderViewHostAtPosition(
-      int x,
-      int y,
-      const GetRenderViewHostCallback& callback) = 0;
-
-  // Returns the WebContents embedding this WebContents, if any.
-  // If this is a top-level WebContents then it returns NULL.
-  virtual WebContents* GetEmbedderWebContents() const = 0;
-
-  // Gets the instance ID of the current WebContents if it is embedded
-  // within a BrowserPlugin. The instance ID of a WebContents uniquely
-  // identifies it within its embedder WebContents.
-  virtual int GetEmbeddedInstanceID() const = 0;
-
-  // Gets the current RenderViewHost's routing id. Returns
-  // MSG_ROUTING_NONE when there is no RenderViewHost.
-  virtual int GetRoutingID() const = 0;
 
   // Returns the currently active RenderWidgetHostView. This may change over
   // time and can be NULL (during setup and teardown).
   virtual RenderWidgetHostView* GetRenderWidgetHostView() const = 0;
-
-  // Returns the currently active fullscreen widget. If there is none, returns
-  // NULL.
-  virtual RenderWidgetHostView* GetFullscreenRenderWidgetHostView() const = 0;
 
   // The WebContentsView will never change and is guaranteed non-NULL.
   virtual WebContentsView* GetView() const = 0;
@@ -223,34 +116,28 @@ class WebContents : public PageNavigator,
   virtual WebUI* CreateWebUI(const GURL& url) = 0;
 
   // Returns the committed WebUI if one exists, otherwise the pending one.
+  // Callers who want to use the pending WebUI for the pending navigation entry
+  // should use GetWebUIForCurrentState instead.
   virtual WebUI* GetWebUI() const = 0;
   virtual WebUI* GetCommittedWebUI() const = 0;
-
-  // Allows overriding the user agent used for NavigationEntries it owns.
-  virtual void SetUserAgentOverride(const std::string& override) = 0;
-  virtual const std::string& GetUserAgentOverride() const = 0;
-
-#if defined(OS_WIN) && defined(USE_AURA)
-  virtual void SetParentNativeViewAccessible(
-      gfx::NativeViewAccessible accessible_parent) = 0;
-#endif
 
   // Tab navigation state ------------------------------------------------------
 
   // Returns the current navigation properties, which if a navigation is
   // pending may be provisional (e.g., the navigation could result in a
   // download, in which case the URL would revert to what it was previously).
-  virtual const base::string16& GetTitle() const = 0;
+  virtual const string16& GetTitle() const = 0;
 
   // The max page ID for any page that the current SiteInstance has loaded in
-  // this WebContents.  Page IDs are specific to a given SiteInstance and
-  // WebContents, corresponding to a specific RenderView in the renderer.
+  // this TabContents.  Page IDs are specific to a given SiteInstance and
+  // TabContents, corresponding to a specific RenderView in the renderer.
   // Page IDs increase with each new page that is loaded by a tab.
   virtual int32 GetMaxPageID() = 0;
 
   // The max page ID for any page that the given SiteInstance has loaded in
-  // this WebContents.
-  virtual int32 GetMaxPageIDForSiteInstance(SiteInstance* site_instance) = 0;
+  // this TabContents.
+  virtual int32 GetMaxPageIDForSiteInstance(
+      SiteInstance* site_instance) = 0;
 
   // Returns the SiteInstance associated with the current page.
   virtual SiteInstance* GetSiteInstance() const = 0;
@@ -259,23 +146,20 @@ class WebContents : public PageNavigator,
   // returns the current SiteInstance.
   virtual SiteInstance* GetPendingSiteInstance() const = 0;
 
-  // Return whether this WebContents is loading a resource.
+  // Return whether this tab contents is loading a resource.
   virtual bool IsLoading() const = 0;
 
-  // Returns whether this WebContents is waiting for a first-response for the
+  // Returns whether this tab contents is waiting for a first-response for the
   // main resource of the page.
   virtual bool IsWaitingForResponse() const = 0;
 
   // Return the current load state and the URL associated with it.
   virtual const net::LoadStateWithParam& GetLoadState() const = 0;
-  virtual const base::string16& GetLoadStateHost() const = 0;
+  virtual const string16& GetLoadStateHost() const = 0;
 
   // Return the upload progress.
   virtual uint64 GetUploadSize() const = 0;
   virtual uint64 GetUploadPosition() const = 0;
-
-  // Returns a set of the site URLs currently committed in this tab.
-  virtual std::set<GURL> GetSitesInTab() const = 0;
 
   // Return the character encoding of the page.
   virtual const std::string& GetEncoding() const = 0;
@@ -285,33 +169,38 @@ class WebContents : public PageNavigator,
 
   // Internal state ------------------------------------------------------------
 
-  // Indicates whether the WebContents is being captured (e.g., for screenshots
-  // or mirroring).  Increment calls must be balanced with an equivalent number
-  // of decrement calls.
-  virtual void IncrementCapturerCount() = 0;
-  virtual void DecrementCapturerCount() = 0;
-  virtual int GetCapturerCount() const = 0;
+  // This flag indicates whether the tab contents is currently being
+  // screenshotted by the DraggedTabController.
+  virtual void SetCapturingContents(bool cap)  = 0;
 
   // Indicates whether this tab should be considered crashed. The setter will
   // also notify the delegate when the flag is changed.
   virtual bool IsCrashed() const  = 0;
   virtual void SetIsCrashed(base::TerminationStatus status, int error_code) = 0;
 
-  virtual base::TerminationStatus GetCrashedStatus() const = 0;
+  virtual base::TerminationStatus GetCrashedStatus() const  = 0;
 
   // Whether the tab is in the process of being destroyed.
-  virtual bool IsBeingDestroyed() const = 0;
+  // Added as a tentative work-around for focus related bug #4633.  This allows
+  // us not to store focus when a tab is being closed.
+  virtual bool IsBeingDestroyed() const  = 0;
 
   // Convenience method for notifying the delegate of a navigation state
   // change. See InvalidateType enum.
   virtual void NotifyNavigationStateChanged(unsigned changed_flags) = 0;
 
-  // Get the last time that the WebContents was made visible with WasShown()
+  // Invoked when the tab contents becomes selected. If you override, be sure
+  // and invoke super's implementation.
+  virtual void DidBecomeSelected() = 0;
   virtual base::TimeTicks GetLastSelectedTime() const = 0;
 
-  // Invoked when the WebContents becomes shown/hidden.
-  virtual void WasShown() = 0;
+  // Invoked when the tab contents becomes hidden.
+  // NOTE: If you override this, call the superclass version too!
   virtual void WasHidden() = 0;
+
+  // TODO(brettw) document these.
+  virtual void ShowContents() = 0;
+  virtual void HideContents() = 0;
 
   // Returns true if the before unload and unload listeners need to be
   // fired. The value of this changes over time. For example, if true and the
@@ -328,7 +217,36 @@ class WebContents : public PageNavigator,
   // heap-allocated pointer is owned by the caller.
   virtual WebContents* Clone() = 0;
 
+  // Shows the page info.
+  virtual void ShowPageInfo(const GURL& url,
+                            const SSLStatus& ssl,
+                            bool show_history) = 0;
+
+  // Window management ---------------------------------------------------------
+
+  // Adds a new tab or window with the given already-created contents.
+  virtual void AddNewContents(WebContents* new_contents,
+                              WindowOpenDisposition disposition,
+                              const gfx::Rect& initial_pos,
+                              bool user_gesture) = 0;
+
   // Views and focus -----------------------------------------------------------
+  // TODO(brettw): Most of these should be removed and the caller should call
+  // the view directly.
+
+  // Returns the actual window that is focused when this TabContents is shown.
+  virtual gfx::NativeView GetContentNativeView() const = 0;
+
+  // Returns the NativeView associated with this TabContents. Outside of
+  // automation in the context of the UI, this is required to be implemented.
+  virtual gfx::NativeView GetNativeView() const = 0;
+
+  // Returns the bounds of this TabContents in the screen coordinate system.
+  virtual void GetContainerBounds(gfx::Rect* out) const = 0;
+
+  // Makes the tab the focused window.
+  virtual void Focus() = 0;
+
   // Focuses the first (last if |reverse| is true) element in the page.
   // Invoked when this tab is getting the focus through tab traversal (|reverse|
   // is true when using Shift-Tab).
@@ -355,19 +273,9 @@ class WebContents : public PageNavigator,
   // Save page with the main HTML file path, the directory for saving resources,
   // and the save type: HTML only or complete web page. Returns true if the
   // saving process has been initiated successfully.
-  virtual bool SavePage(const base::FilePath& main_file,
-                        const base::FilePath& dir_path,
+  virtual bool SavePage(const FilePath& main_file,
+                        const FilePath& dir_path,
                         SavePageType save_type) = 0;
-
-  // Saves the given frame's URL to the local filesystem..
-  virtual void SaveFrame(const GURL& url,
-                         const Referrer& referrer) = 0;
-
-  // Generate an MHTML representation of the current page in the given file.
-  virtual void GenerateMHTML(
-      const base::FilePath& file,
-      const base::Callback<void(
-          int64 /* size of the file */)>& callback) = 0;
 
   // Returns true if the active NavigationEntry's page_id equals page_id.
   virtual bool IsActiveEntry(int32 page_id) = 0;
@@ -375,7 +283,7 @@ class WebContents : public PageNavigator,
   // Returns the contents MIME type after a navigation.
   virtual const std::string& GetContentsMimeType() const = 0;
 
-  // Returns true if this WebContents will notify about disconnection.
+  // Returns true if this TabContents will notify about disconnection.
   virtual bool WillNotifyDisconnection() const = 0;
 
   // Override the encoding and reload the page by sending down
@@ -392,18 +300,21 @@ class WebContents : public PageNavigator,
   // Returns the settings which get passed to the renderer.
   virtual content::RendererPreferences* GetMutableRendererPrefs() = 0;
 
-  // Tells the tab to close now. The tab will take care not to close until it's
-  // out of nested message loops.
-  virtual void Close() = 0;
+  // Set the time when we started to create the new tab page.  This time is
+  // from before we created this TabContents.
+  virtual void SetNewTabStartTime(const base::TimeTicks& time) = 0;
+  virtual base::TimeTicks GetNewTabStartTime() const = 0;
+
+  // Notification that tab closing has started.  This can be called multiple
+  // times, subsequent calls are ignored.
+  virtual void OnCloseStarted() = 0;
+
+  // Returns true if underlying WebContentsView should accept drag-n-drop.
+  virtual bool ShouldAcceptDragAndDrop() const = 0;
 
   // A render view-originated drag has ended. Informs the render view host and
-  // WebContentsDelegate.
+  // tab contents delegate.
   virtual void SystemDragEnded() = 0;
-
-  // Notification the user has made a gesture while focus was on the
-  // page. This is used to avoid uninitiated user downloads (aka carpet
-  // bombing), see DownloadRequestLimiter for details.
-  virtual void UserGestureDone() = 0;
 
   // Indicates if this tab was explicitly closed by the user (control-w, close
   // tab menu item...). This is false for actions that indirectly close the tab,
@@ -417,13 +328,13 @@ class WebContents : public PageNavigator,
 
   // Gets the zoom percent for this tab.
   virtual int GetZoomPercent(bool* enable_increment,
-                             bool* enable_decrement) const = 0;
+                             bool* enable_decrement) = 0;
 
   // Opens view-source tab for this contents.
   virtual void ViewSource() = 0;
 
   virtual void ViewFrameSource(const GURL& url,
-                               const PageState& page_state)= 0;
+                               const std::string& content_state)= 0;
 
   // Gets the minimum/maximum zoom percent.
   virtual int GetMinimumZoomPercent() const = 0;
@@ -432,66 +343,28 @@ class WebContents : public PageNavigator,
   // Gets the preferred size of the contents.
   virtual gfx::Size GetPreferredSize() const = 0;
 
+  // Get the content restrictions (see content::ContentRestriction).
+  virtual int GetContentRestrictions() const = 0;
+
+  // Query the WebUIFactory for the TypeID for the current URL.
+  virtual WebUI::TypeID GetWebUITypeForCurrentState() = 0;
+
+  // Returns the WebUI for the current state of the tab. This will either be
+  // the pending WebUI, the committed WebUI, or NULL.
+  virtual WebUI* GetWebUIForCurrentState()= 0;
+
   // Called when the reponse to a pending mouse lock request has arrived.
   // Returns true if |allowed| is true and the mouse has been successfully
   // locked.
   virtual bool GotResponseToLockMouseRequest(bool allowed) = 0;
-
-  // Called when the user has selected a color in the color chooser.
-  virtual void DidChooseColorInColorChooser(SkColor color) = 0;
-
-  // Called when the color chooser has ended.
-  virtual void DidEndColorChooser() = 0;
 
   // Returns true if the location bar should be focused by default rather than
   // the page contents. The view calls this function when the tab is focused
   // to see what it should do.
   virtual bool FocusLocationBarByDefault() = 0;
 
-  // Does this have an opener associated with it?
-  virtual bool HasOpener() const = 0;
-
-  typedef base::Callback<void(
-      int, /* id */
-      int, /* HTTP status code */
-      const GURL&, /* image_url */
-      const std::vector<SkBitmap>&, /* bitmaps */
-      /* The sizes in pixel of the bitmaps before they were resized due to the
-         max bitmap size passed to DownloadImage(). Each entry in the bitmaps
-         vector corresponds to an entry in the sizes vector. If a bitmap was
-         resized, there should be a single returned bitmap. */
-      const std::vector<gfx::Size>&)>
-          ImageDownloadCallback;
-
-  // Sends a request to download the given image |url| and returns the unique
-  // id of the download request. When the download is finished, |callback| will
-  // be called with the bitmaps received from the renderer. If |is_favicon| is
-  // true, the cookies are not sent and not accepted during download.
-  // Bitmaps with pixel sizes larger than |max_bitmap_size| are filtered out
-  // from the bitmap results. If there are no bitmap results <=
-  // |max_bitmap_size|, the smallest bitmap is resized to |max_bitmap_size| and
-  // is the only result. A |max_bitmap_size| of 0 means unlimited.
-  virtual int DownloadImage(const GURL& url,
-                            bool is_favicon,
-                            uint32_t max_bitmap_size,
-                            const ImageDownloadCallback& callback) = 0;
-
-  // Returns true if the WebContents is responsible for displaying a subframe
-  // in a different process from its parent page.
-  // TODO: this doesn't really belong here. With site isolation, this should be
-  // removed since we can then embed iframes in different processes.
-  virtual bool IsSubframe() const = 0;
-
-#if defined(OS_ANDROID)
-  CONTENT_EXPORT static WebContents* FromJavaWebContents(
-      jobject jweb_contents_android);
-  virtual base::android::ScopedJavaLocalRef<jobject> GetJavaWebContents() = 0;
-#endif  // OS_ANDROID
-
- private:
-  // This interface should only be implemented inside content.
-  friend class WebContentsImpl;
-  WebContents() {}
+  // Focuses the location bar.
+  virtual void SetFocusToLocationBar(bool select_all) = 0;
 };
 
 }  // namespace content

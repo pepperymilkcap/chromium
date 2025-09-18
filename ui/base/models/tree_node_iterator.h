@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_MODELS_TREE_NODE_ITERATOR_H_
 #define UI_BASE_MODELS_TREE_NODE_ITERATOR_H_
+#pragma once
 
 #include <stack>
 

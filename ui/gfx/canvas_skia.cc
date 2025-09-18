@@ -2,432 +2,435 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
+
+#include <limits>
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
-#include "ui/gfx/font_list.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/range/range.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/effects/SkGradientShader.h"
+#include "ui/gfx/brush.h"
+#include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
-#include "ui/gfx/render_text.h"
-#include "ui/gfx/shadow_value.h"
-#include "ui/gfx/text_elider.h"
-#include "ui/gfx/text_utils.h"
+#include "ui/gfx/skia_util.h"
+#include "ui/gfx/transform.h"
 
-namespace gfx {
+#if defined(OS_WIN)
+#include "ui/gfx/canvas_skia_paint.h"
+#endif
 
 namespace {
 
-#if defined(OS_WIN)
-// If necessary, wraps |text| with RTL/LTR directionality characters based on
-// |flags| and |text| content.
-// Returns true if the text will be rendered right-to-left.
-// TODO(msw): Nix this, now that RenderTextWin supports directionality directly.
-bool AdjustStringDirection(int flags, base::string16* text) {
-  // TODO(msw): FORCE_LTR_DIRECTIONALITY does not work for RTL text now.
-
-  // If the string is empty or LTR was forced, simply return false since the
-  // default RenderText directionality is already LTR.
-  if (text->empty() || (flags & Canvas::FORCE_LTR_DIRECTIONALITY))
-    return false;
-
-  // If RTL is forced, apply it to the string.
-  if (flags & Canvas::FORCE_RTL_DIRECTIONALITY) {
-    base::i18n::WrapStringWithRTLFormatting(text);
-    return true;
+// A platform wrapper for a Skia shader that makes sure the underlying
+// SkShader object is unref'ed when this object is destroyed.
+class SkiaShader : public gfx::Brush {
+ public:
+  explicit SkiaShader(SkShader* shader) : shader_(shader) {
+  }
+  virtual ~SkiaShader() {
+    shader_->unref();
   }
 
-  // If a direction wasn't forced but the UI language is RTL and there were
-  // strong RTL characters, ensure RTL is applied.
-  if (base::i18n::IsRTL() && base::i18n::StringContainsStrongRTLChars(*text)) {
-    base::i18n::WrapStringWithRTLFormatting(text);
-    return true;
-  }
+  // Accessor for shader, so it can be associated with a SkPaint.
+  SkShader* shader() const { return shader_; }
 
-  // In the default case, the string should be rendered as LTR. RenderText's
-  // default directionality is LTR, so the text doesn't need to be wrapped.
-  // Note that individual runs within the string may still be rendered RTL
-  // (which will be the case for RTL text under non-RTL locales, since under RTL
-  // locales it will be handled by the if statement above).
-  return false;
-}
-#endif  // defined(OS_WIN)
+ private:
+  SkShader* shader_;
 
-// Checks each pixel immediately adjacent to the given pixel in the bitmap. If
-// any of them are not the halo color, returns true. This defines the halo of
-// pixels that will appear around the text. Note that we have to check each
-// pixel against both the halo color and transparent since
-// |DrawStringRectWithHalo| will modify the bitmap as it goes, and cleared
-// pixels shouldn't count as changed.
-bool PixelShouldGetHalo(const SkBitmap& bitmap,
-                        int x, int y,
-                        SkColor halo_color) {
-  if (x > 0 &&
-      *bitmap.getAddr32(x - 1, y) != halo_color &&
-      *bitmap.getAddr32(x - 1, y) != 0)
-    return true;  // Touched pixel to the left.
-  if (x < bitmap.width() - 1 &&
-      *bitmap.getAddr32(x + 1, y) != halo_color &&
-      *bitmap.getAddr32(x + 1, y) != 0)
-    return true;  // Touched pixel to the right.
-  if (y > 0 &&
-      *bitmap.getAddr32(x, y - 1) != halo_color &&
-      *bitmap.getAddr32(x, y - 1) != 0)
-    return true;  // Touched pixel above.
-  if (y < bitmap.height() - 1 &&
-      *bitmap.getAddr32(x, y + 1) != halo_color &&
-      *bitmap.getAddr32(x, y + 1) != 0)
-    return true;  // Touched pixel below.
-  return false;
-}
+  DISALLOW_COPY_AND_ASSIGN(SkiaShader);
+};
 
-// Strips accelerator character prefixes in |text| if needed, based on |flags|.
-// Returns a range in |text| to underline or gfx::Range::InvalidRange() if
-// underlining is not needed.
-Range StripAcceleratorChars(int flags, base::string16* text) {
-  if (flags & (Canvas::SHOW_PREFIX | Canvas::HIDE_PREFIX)) {
-    int char_pos = -1;
-    int char_span = 0;
-    *text = RemoveAcceleratorChar(*text, '&', &char_pos, &char_span);
-    if ((flags & Canvas::SHOW_PREFIX) && char_pos != -1)
-      return Range(char_pos, char_pos + char_span);
-  }
-  return Range::InvalidRange();
-}
-
-// Elides |text| and adjusts |range| appropriately. If eliding causes |range|
-// to no longer point to the same character in |text|, |range| is made invalid.
-void ElideTextAndAdjustRange(const FontList& font_list,
-                             int width,
-                             base::string16* text,
-                             Range* range) {
-  const base::char16 start_char =
-      (range->IsValid() ? text->at(range->start()) : 0);
-  *text = gfx::ElideText(*text, font_list, width, gfx::ELIDE_AT_END);
-  if (!range->IsValid())
-    return;
-  if (range->start() >= text->length() ||
-      text->at(range->start()) != start_char) {
-    *range = Range::InvalidRange();
-  }
-}
-
-// Updates |render_text| from the specified parameters.
-void UpdateRenderText(const Rect& rect,
-                      const base::string16& text,
-                      const FontList& font_list,
-                      int flags,
-                      SkColor color,
-                      RenderText* render_text) {
-  render_text->SetFontList(font_list);
-  render_text->SetText(text);
-  render_text->SetCursorEnabled(false);
-
-  Rect display_rect = rect;
-  display_rect.set_height(font_list.GetHeight());
-  render_text->SetDisplayRect(display_rect);
-
-  // Set the text alignment explicitly based on the directionality of the UI,
-  // if not specified.
-  if (!(flags & (Canvas::TEXT_ALIGN_CENTER |
-                 Canvas::TEXT_ALIGN_RIGHT |
-                 Canvas::TEXT_ALIGN_LEFT))) {
-    flags |= Canvas::DefaultCanvasTextAlignment();
-  }
-
-  if (flags & Canvas::TEXT_ALIGN_RIGHT)
-    render_text->SetHorizontalAlignment(ALIGN_RIGHT);
-  else if (flags & Canvas::TEXT_ALIGN_CENTER)
-    render_text->SetHorizontalAlignment(ALIGN_CENTER);
-  else
-    render_text->SetHorizontalAlignment(ALIGN_LEFT);
-
-  if (flags & Canvas::NO_SUBPIXEL_RENDERING)
-    render_text->set_background_is_transparent(true);
-
-  render_text->SetColor(color);
-  const int font_style = font_list.GetFontStyle();
-  render_text->SetStyle(BOLD, (font_style & Font::BOLD) != 0);
-  render_text->SetStyle(ITALIC, (font_style & Font::ITALIC) != 0);
-  render_text->SetStyle(UNDERLINE, (font_style & Font::UNDERLINE) != 0);
-}
 
 }  // namespace
 
+namespace gfx {
+
+////////////////////////////////////////////////////////////////////////////////
+// CanvasSkia, public:
+
+CanvasSkia::CanvasSkia(const gfx::Size& size, bool is_opaque)
+    : owned_canvas_(new skia::PlatformCanvas(size.width(), size.height(),
+                                             is_opaque)),
+      canvas_(owned_canvas_.get()) {
+}
+
+CanvasSkia::CanvasSkia(const SkBitmap& bitmap, bool is_opaque)
+    : owned_canvas_(new skia::PlatformCanvas(bitmap.width(), bitmap.height(),
+                                             is_opaque)),
+      canvas_(owned_canvas_.get()) {
+  DrawBitmapInt(bitmap, 0, 0);
+}
+
+CanvasSkia::CanvasSkia()
+    : owned_canvas_(new skia::PlatformCanvas()),
+      canvas_(owned_canvas_.get()) {
+}
+
+CanvasSkia::CanvasSkia(SkCanvas* canvas)
+    : owned_canvas_(),
+      canvas_(canvas) {
+  DCHECK(canvas);
+}
+
+CanvasSkia::~CanvasSkia() {
+}
+
 // static
-void Canvas::SizeStringFloat(const base::string16& text,
-                             const FontList& font_list,
-                             float* width, float* height,
-                             int line_height,
-                             int flags) {
-  DCHECK_GE(*width, 0);
-  DCHECK_GE(*height, 0);
-
-  base::string16 adjusted_text = text;
-#if defined(OS_WIN)
-  AdjustStringDirection(flags, &adjusted_text);
-#endif
-
-  if ((flags & MULTI_LINE) && *width != 0) {
-    gfx::WordWrapBehavior wrap_behavior = gfx::TRUNCATE_LONG_WORDS;
-    if (flags & CHARACTER_BREAK)
-      wrap_behavior = gfx::WRAP_LONG_WORDS;
-    else if (!(flags & NO_ELLIPSIS))
-      wrap_behavior = gfx::ELIDE_LONG_WORDS;
-
-    Rect rect(*width, INT_MAX);
-    std::vector<base::string16> strings;
-    gfx::ElideRectangleText(adjusted_text, font_list,
-                           rect.width(), rect.height(),
-                           wrap_behavior, &strings);
-    scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
-    UpdateRenderText(rect, base::string16(), font_list, flags, 0,
-                     render_text.get());
-
-    float h = 0;
-    float w = 0;
-    for (size_t i = 0; i < strings.size(); ++i) {
-      StripAcceleratorChars(flags, &strings[i]);
-      render_text->SetText(strings[i]);
-      const SizeF& string_size = render_text->GetStringSizeF();
-      w = std::max(w, string_size.width());
-      h += (i > 0 && line_height > 0) ? line_height : string_size.height();
-    }
-    *width = w;
-    *height = h;
-  } else {
-    // If the string is too long, the call by |RenderTextWin| to |ScriptShape()|
-    // will inexplicably fail with result E_INVALIDARG. Guard against this.
-    const size_t kMaxRenderTextLength = 5000;
-    if (adjusted_text.length() >= kMaxRenderTextLength) {
-      *width = font_list.GetExpectedTextWidth(adjusted_text.length());
-      *height = font_list.GetHeight();
-    } else {
-      scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
-      Rect rect(*width, *height);
-      StripAcceleratorChars(flags, &adjusted_text);
-      UpdateRenderText(rect, adjusted_text, font_list, flags, 0,
-                       render_text.get());
-      const SizeF& string_size = render_text->GetStringSizeF();
-      *width = string_size.width();
-      *height = string_size.height();
-    }
-  }
+int CanvasSkia::GetStringWidth(const string16& text, const gfx::Font& font) {
+  int width = 0, height = 0;
+  CanvasSkia::SizeStringInt(text, font, &width, &height, Canvas::NO_ELLIPSIS);
+  return width;
 }
 
-void Canvas::DrawStringRectWithShadows(const base::string16& text,
-                                       const FontList& font_list,
-                                       SkColor color,
-                                       const Rect& text_bounds,
-                                       int line_height,
-                                       int flags,
-                                       const ShadowValues& shadows) {
-  if (!IntersectsClipRect(text_bounds))
-    return;
+// static
+int CanvasSkia::DefaultCanvasTextAlignment() {
+  if (!base::i18n::IsRTL())
+    return gfx::Canvas::TEXT_ALIGN_LEFT;
+  return gfx::Canvas::TEXT_ALIGN_RIGHT;
+}
 
-  Rect clip_rect(text_bounds);
-  clip_rect.Inset(ShadowValue::GetMargin(shadows));
+SkBitmap CanvasSkia::ExtractBitmap() const {
+  const SkBitmap& device_bitmap = canvas_->getDevice()->accessBitmap(false);
 
-  canvas_->save(SkCanvas::kClip_SaveFlag);
-  ClipRect(clip_rect);
+  // Make a bitmap to return, and a canvas to draw into it. We don't just want
+  // to call extractSubset or the copy constructor, since we want an actual copy
+  // of the bitmap.
+  SkBitmap result;
+  device_bitmap.copyTo(&result, SkBitmap::kARGB_8888_Config);
+  return result;
+}
 
-  Rect rect(text_bounds);
-  base::string16 adjusted_text = text;
+////////////////////////////////////////////////////////////////////////////////
+// CanvasSkia, Canvas implementation:
 
-#if defined(OS_WIN)
-  AdjustStringDirection(flags, &adjusted_text);
-#endif
+void CanvasSkia::Save() {
+  canvas_->save();
+}
 
-  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
-  render_text->SetTextShadows(shadows);
+void CanvasSkia::SaveLayerAlpha(uint8 alpha) {
+  canvas_->saveLayerAlpha(NULL, alpha);
+}
 
-  if (flags & MULTI_LINE) {
-    gfx::WordWrapBehavior wrap_behavior = gfx::IGNORE_LONG_WORDS;
-    if (flags & CHARACTER_BREAK)
-      wrap_behavior = gfx::WRAP_LONG_WORDS;
-    else if (!(flags & NO_ELLIPSIS))
-      wrap_behavior = gfx::ELIDE_LONG_WORDS;
 
-    std::vector<base::string16> strings;
-    gfx::ElideRectangleText(adjusted_text,
-                           font_list,
-                           text_bounds.width(), text_bounds.height(),
-                           wrap_behavior,
-                           &strings);
+void CanvasSkia::SaveLayerAlpha(uint8 alpha, const gfx::Rect& layer_bounds) {
+  SkRect bounds;
+  bounds.set(SkIntToScalar(layer_bounds.x()),
+             SkIntToScalar(layer_bounds.y()),
+             SkIntToScalar(layer_bounds.right()),
+             SkIntToScalar(layer_bounds.bottom()));
+  canvas_->saveLayerAlpha(&bounds, alpha);
+}
 
-    for (size_t i = 0; i < strings.size(); i++) {
-      Range range = StripAcceleratorChars(flags, &strings[i]);
-      UpdateRenderText(rect, strings[i], font_list, flags, color,
-                       render_text.get());
-      int line_padding = 0;
-      if (line_height > 0)
-        line_padding = line_height - render_text->GetStringSize().height();
-      else
-        line_height = render_text->GetStringSize().height();
-
-      // TODO(msw|asvitkine): Center Windows multi-line text: crbug.com/107357
-#if !defined(OS_WIN)
-      if (i == 0) {
-        // TODO(msw|asvitkine): Support multi-line text with varied heights.
-        const int text_height = strings.size() * line_height - line_padding;
-        rect += Vector2d(0, (text_bounds.height() - text_height) / 2);
-      }
-#endif
-
-      rect.set_height(line_height - line_padding);
-
-      if (range.IsValid())
-        render_text->ApplyStyle(UNDERLINE, true, range);
-      render_text->SetDisplayRect(rect);
-      render_text->Draw(this);
-      rect += Vector2d(0, line_height);
-    }
-  } else {
-    Range range = StripAcceleratorChars(flags, &adjusted_text);
-    bool elide_text = ((flags & NO_ELLIPSIS) == 0);
-
-#if defined(OS_LINUX)
-    // On Linux, eliding really means fading the end of the string. But only
-    // for LTR text. RTL text is still elided (on the left) with "...".
-    if (elide_text) {
-      render_text->SetText(adjusted_text);
-      if (render_text->GetTextDirection() == base::i18n::LEFT_TO_RIGHT) {
-        render_text->set_fade_tail(true);
-        elide_text = false;
-      }
-    }
-#endif
-
-    if (elide_text) {
-      ElideTextAndAdjustRange(font_list,
-                              text_bounds.width(),
-                              &adjusted_text,
-                              &range);
-    }
-
-    UpdateRenderText(rect, adjusted_text, font_list, flags, color,
-                     render_text.get());
-
-    const int text_height = render_text->GetStringSize().height();
-    // Center the text vertically.
-    rect += Vector2d(0, (text_bounds.height() - text_height) / 2);
-    rect.set_height(text_height);
-    render_text->SetDisplayRect(rect);
-    if (range.IsValid())
-      render_text->ApplyStyle(UNDERLINE, true, range);
-    render_text->Draw(this);
-  }
-
+void CanvasSkia::Restore() {
   canvas_->restore();
 }
 
-void Canvas::DrawStringRectWithHalo(const base::string16& text,
-                                    const FontList& font_list,
-                                    SkColor text_color,
-                                    SkColor halo_color_in,
-                                    const Rect& display_rect,
-                                    int flags) {
-  // Some callers will have semitransparent halo colors, which we don't handle
-  // (since the resulting image can have 1-bit transparency only).
-  SkColor halo_color = SkColorSetA(halo_color_in, 0xFF);
+bool CanvasSkia::ClipRect(const gfx::Rect& rect) {
+  return canvas_->clipRect(gfx::RectToSkRect(rect));
+}
 
-  // Create a temporary buffer filled with the halo color. It must leave room
-  // for the 1-pixel border around the text.
-  Size size(display_rect.width() + 2, display_rect.height() + 2);
-  Canvas text_canvas(size, image_scale(), false);
-  SkPaint bkgnd_paint;
-  bkgnd_paint.setColor(halo_color);
-  text_canvas.DrawRect(Rect(size), bkgnd_paint);
+void CanvasSkia::Translate(const gfx::Point& point) {
+  canvas_->translate(SkIntToScalar(point.x()), SkIntToScalar(point.y()));
+}
 
-  // Draw the text into the temporary buffer. This will have correct
-  // ClearType since the background color is the same as the halo color.
-  text_canvas.DrawStringRectWithFlags(
-      text, font_list, text_color,
-      Rect(1, 1, display_rect.width(), display_rect.height()), flags);
+void CanvasSkia::Scale(int x_scale, int y_scale) {
+  canvas_->scale(SkIntToScalar(x_scale), SkIntToScalar(y_scale));
+}
 
-  uint32_t halo_premul = SkPreMultiplyColor(halo_color);
-  SkBitmap& text_bitmap = const_cast<SkBitmap&>(
-      skia::GetTopDevice(*text_canvas.sk_canvas())->accessBitmap(true));
+void CanvasSkia::FillRect(const SkColor& color, const gfx::Rect& rect) {
+  FillRect(color, rect, SkXfermode::kSrcOver_Mode);
+}
 
-  for (int cur_y = 0; cur_y < text_bitmap.height(); cur_y++) {
-    uint32_t* text_row = text_bitmap.getAddr32(0, cur_y);
-    for (int cur_x = 0; cur_x < text_bitmap.width(); cur_x++) {
-      if (text_row[cur_x] == halo_premul) {
-        // This pixel was not touched by the text routines. See if it borders
-        // a touched pixel in any of the 4 directions (not diagonally).
-        if (!PixelShouldGetHalo(text_bitmap, cur_x, cur_y, halo_premul))
-          text_row[cur_x] = 0;  // Make transparent.
-      } else {
-        text_row[cur_x] |= 0xff << SK_A32_SHIFT;  // Make opaque.
+void CanvasSkia::FillRect(const SkColor& color,
+                          const gfx::Rect& rect,
+                          SkXfermode::Mode mode) {
+  SkPaint paint;
+  paint.setColor(color);
+  paint.setStyle(SkPaint::kFill_Style);
+  paint.setXfermodeMode(mode);
+  DrawRect(rect, paint);
+}
+
+void CanvasSkia::FillRect(const gfx::Brush* brush, const gfx::Rect& rect) {
+  const SkiaShader* shader = static_cast<const SkiaShader*>(brush);
+  SkPaint paint;
+  paint.setShader(shader->shader());
+  // TODO(beng): set shader transform to match canvas transform.
+  DrawRect(rect, paint);
+}
+
+void CanvasSkia::DrawRect(const gfx::Rect& rect, const SkColor& color) {
+  DrawRect(rect, color, SkXfermode::kSrcOver_Mode);
+}
+
+void CanvasSkia::DrawRect(const gfx::Rect& rect,
+                          const SkColor& color,
+                          SkXfermode::Mode mode) {
+  SkPaint paint;
+  paint.setColor(color);
+  paint.setStyle(SkPaint::kStroke_Style);
+  // Set a stroke width of 0, which will put us down the stroke rect path.  If
+  // we set a stroke width of 1, for example, this will internally create a
+  // path and fill it, which causes problems near the edge of the canvas.
+  paint.setStrokeWidth(SkIntToScalar(0));
+  paint.setXfermodeMode(mode);
+
+  DrawRect(rect, paint);
+}
+
+void CanvasSkia::DrawRect(const gfx::Rect& rect, const SkPaint& paint) {
+  canvas_->drawIRect(RectToSkIRect(rect), paint);
+}
+
+void CanvasSkia::DrawLineInt(const SkColor& color,
+                             int x1, int y1,
+                             int x2, int y2) {
+  SkPaint paint;
+  paint.setColor(color);
+  paint.setStrokeWidth(SkIntToScalar(1));
+  canvas_->drawLine(SkIntToScalar(x1), SkIntToScalar(y1), SkIntToScalar(x2),
+                    SkIntToScalar(y2), paint);
+}
+
+void CanvasSkia::DrawFocusRect(const gfx::Rect& rect) {
+  // Create a 2D bitmap containing alternating on/off pixels - we do this
+  // so that you never get two pixels of the same color around the edges
+  // of the focus rect (this may mean that opposing edges of the rect may
+  // have a dot pattern out of phase to each other).
+  static SkBitmap* dots = NULL;
+  if (!dots) {
+    int col_pixels = 32;
+    int row_pixels = 32;
+
+    dots = new SkBitmap;
+    dots->setConfig(SkBitmap::kARGB_8888_Config, col_pixels, row_pixels);
+    dots->allocPixels();
+    dots->eraseARGB(0, 0, 0, 0);
+
+    uint32_t* dot = dots->getAddr32(0, 0);
+    for (int i = 0; i < row_pixels; i++) {
+      for (int u = 0; u < col_pixels; u++) {
+        if ((u % 2 + i % 2) % 2 != 0) {
+          dot[i * row_pixels + u] = SK_ColorGRAY;
+        }
       }
     }
   }
 
-  // Draw the halo bitmap with blur.
-  ImageSkia text_image = ImageSkia(ImageSkiaRep(text_bitmap,
-      text_canvas.image_scale()));
-  DrawImageInt(text_image, display_rect.x() - 1, display_rect.y() - 1);
+  // Make a shader for the bitmap with an origin of the box we'll draw. This
+  // shader is refcounted and will have an initial refcount of 1.
+  SkShader* shader = SkShader::CreateBitmapShader(
+      *dots, SkShader::kRepeat_TileMode, SkShader::kRepeat_TileMode);
+  // Assign the shader to the paint & release our reference. The paint will
+  // now own the shader and the shader will be destroyed when the paint goes
+  // out of scope.
+  SkPaint paint;
+  paint.setShader(shader);
+  shader->unref();
+
+  DrawRect(gfx::Rect(rect.x(), rect.y(), rect.width(), 1), paint);
+  DrawRect(gfx::Rect(rect.x(), rect.y() + rect.height() - 1, rect.width(), 1),
+           paint);
+  DrawRect(gfx::Rect(rect.x(), rect.y(), 1, rect.height()), paint);
+  DrawRect(gfx::Rect(rect.x() + rect.width() - 1, rect.y(), 1, rect.height()),
+           paint);
 }
 
-void Canvas::DrawFadeTruncatingStringRect(
-    const base::string16& text,
-    TruncateFadeMode truncate_mode,
-    const FontList& font_list,
-    SkColor color,
-    const Rect& display_rect) {
-  DrawFadeTruncatingStringRectWithFlags(
-      text, truncate_mode, font_list, color, display_rect, NO_ELLIPSIS);
+void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap, int x, int y) {
+  canvas_->drawBitmap(bitmap, SkIntToScalar(x), SkIntToScalar(y));
 }
 
-void Canvas::DrawFadeTruncatingStringRectWithFlags(
-    const base::string16& text,
-    TruncateFadeMode truncate_mode,
-    const FontList& font_list,
-    SkColor color,
-    const Rect& display_rect,
-    int flags) {
-  // If the whole string fits in the destination then just draw it directly.
-  if (GetStringWidth(text, font_list) <= display_rect.width()) {
-    DrawStringRectWithFlags(text, font_list, color, display_rect, flags);
+void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap,
+                               int x, int y,
+                               const SkPaint& paint) {
+  canvas_->drawBitmap(bitmap, SkIntToScalar(x), SkIntToScalar(y), &paint);
+}
+
+void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap,
+                               int src_x, int src_y, int src_w, int src_h,
+                               int dest_x, int dest_y, int dest_w, int dest_h,
+                               bool filter) {
+  SkPaint p;
+  DrawBitmapInt(bitmap, src_x, src_y, src_w, src_h, dest_x, dest_y,
+                dest_w, dest_h, filter, p);
+}
+
+void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap,
+                               int src_x, int src_y, int src_w, int src_h,
+                               int dest_x, int dest_y, int dest_w, int dest_h,
+                               bool filter,
+                               const SkPaint& paint) {
+  DLOG_ASSERT(src_x + src_w < std::numeric_limits<int16_t>::max() &&
+              src_y + src_h < std::numeric_limits<int16_t>::max());
+  if (src_w <= 0 || src_h <= 0) {
+    NOTREACHED() << "Attempting to draw bitmap from an empty rect!";
     return;
   }
 
-  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
-  const bool is_rtl = base::i18n::GetFirstStrongCharacterDirection(text) ==
-                      base::i18n::RIGHT_TO_LEFT;
+  if (!IntersectsClipRectInt(dest_x, dest_y, dest_w, dest_h))
+    return;
 
-  switch (truncate_mode) {
-    case TruncateFadeTail:
-      render_text->set_fade_tail(true);
-      if (is_rtl)
-        flags |= TEXT_ALIGN_RIGHT;
-      break;
-    case TruncateFadeHead:
-      render_text->set_fade_head(true);
-      if (!is_rtl)
-        flags |= TEXT_ALIGN_RIGHT;
-      break;
+  SkRect dest_rect = { SkIntToScalar(dest_x),
+                       SkIntToScalar(dest_y),
+                       SkIntToScalar(dest_x + dest_w),
+                       SkIntToScalar(dest_y + dest_h) };
+
+  if (src_w == dest_w && src_h == dest_h) {
+    // Workaround for apparent bug in Skia that causes image to occasionally
+    // shift.
+    SkIRect src_rect = { src_x, src_y, src_x + src_w, src_y + src_h };
+    canvas_->drawBitmapRect(bitmap, &src_rect, dest_rect, &paint);
+    return;
   }
 
-  // Default to left alignment unless right alignment was chosen above.
-  if (!(flags & TEXT_ALIGN_RIGHT))
-    flags |= TEXT_ALIGN_LEFT;
+  // Make a bitmap shader that contains the bitmap we want to draw. This is
+  // basically what SkCanvas.drawBitmap does internally, but it gives us
+  // more control over quality and will use the mipmap in the source image if
+  // it has one, whereas drawBitmap won't.
+  SkShader* shader = SkShader::CreateBitmapShader(bitmap,
+                                                  SkShader::kRepeat_TileMode,
+                                                  SkShader::kRepeat_TileMode);
+  SkMatrix shader_scale;
+  shader_scale.setScale(SkFloatToScalar(static_cast<float>(dest_w) / src_w),
+                        SkFloatToScalar(static_cast<float>(dest_h) / src_h));
+  shader_scale.preTranslate(SkIntToScalar(-src_x), SkIntToScalar(-src_y));
+  shader_scale.postTranslate(SkIntToScalar(dest_x), SkIntToScalar(dest_y));
+  shader->setLocalMatrix(shader_scale);
 
-  Rect rect = display_rect;
-  UpdateRenderText(rect, text, font_list, flags, color, render_text.get());
+  // Set up our paint to use the shader & release our reference (now just owned
+  // by the paint).
+  SkPaint p(paint);
+  p.setFilterBitmap(filter);
+  p.setShader(shader);
+  shader->unref();
 
-  const int line_height = render_text->GetStringSize().height();
-  // Center the text vertically.
-  rect += Vector2d(0, (display_rect.height() - line_height) / 2);
-  rect.set_height(line_height);
-  render_text->SetDisplayRect(rect);
+  // The rect will be filled by the bitmap.
+  canvas_->drawRect(dest_rect, p);
+}
 
-  canvas_->save(SkCanvas::kClip_SaveFlag);
-  ClipRect(display_rect);
-  render_text->Draw(this);
+void CanvasSkia::DrawStringInt(const string16& text,
+                               const gfx::Font& font,
+                               const SkColor& color,
+                               int x, int y, int w, int h) {
+  DrawStringInt(text, font, color, x, y, w, h,
+                gfx::CanvasSkia::DefaultCanvasTextAlignment());
+}
+
+void CanvasSkia::DrawStringInt(const string16& text,
+                               const gfx::Font& font,
+                               const SkColor& color,
+                               const gfx::Rect& display_rect) {
+  DrawStringInt(text, font, color, display_rect.x(), display_rect.y(),
+                display_rect.width(), display_rect.height());
+}
+
+void CanvasSkia::TileImageInt(const SkBitmap& bitmap,
+                              int x, int y, int w, int h) {
+  TileImageInt(bitmap, 0, 0, x, y, w, h);
+}
+
+void CanvasSkia::TileImageInt(const SkBitmap& bitmap,
+                              int src_x, int src_y,
+                              int dest_x, int dest_y, int w, int h) {
+  if (!IntersectsClipRectInt(dest_x, dest_y, w, h))
+    return;
+
+  SkPaint paint;
+
+  SkShader* shader = SkShader::CreateBitmapShader(bitmap,
+                                                  SkShader::kRepeat_TileMode,
+                                                  SkShader::kRepeat_TileMode);
+  paint.setShader(shader);
+  paint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
+
+  // CreateBitmapShader returns a Shader with a reference count of one, we
+  // need to unref after paint takes ownership of the shader.
+  shader->unref();
+  canvas_->save();
+  canvas_->translate(SkIntToScalar(dest_x - src_x),
+                     SkIntToScalar(dest_y - src_y));
+  ClipRect(gfx::Rect(src_x, src_y, w, h));
+  canvas_->drawPaint(paint);
   canvas_->restore();
+}
+
+gfx::NativeDrawingContext CanvasSkia::BeginPlatformPaint() {
+  return skia::BeginPlatformPaint(canvas_);
+}
+
+void CanvasSkia::EndPlatformPaint() {
+  skia::EndPlatformPaint(canvas_);
+}
+
+void CanvasSkia::Transform(const ui::Transform& transform) {
+  canvas_->concat(transform.matrix());
+}
+
+CanvasSkia* CanvasSkia::AsCanvasSkia() {
+  return this;
+}
+
+const CanvasSkia* CanvasSkia::AsCanvasSkia() const {
+  return this;
+}
+
+SkCanvas* CanvasSkia::GetSkCanvas() {
+  return canvas_;
+}
+
+const SkCanvas* CanvasSkia::GetSkCanvas() const {
+  return canvas_;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// CanvasSkia, private:
+
+bool CanvasSkia::IntersectsClipRectInt(int x, int y, int w, int h) {
+  SkRect clip;
+  return canvas_->getClipBounds(&clip) &&
+      clip.intersect(SkIntToScalar(x), SkIntToScalar(y), SkIntToScalar(x + w),
+                     SkIntToScalar(y + h));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Canvas, public:
+
+Canvas* Canvas::CreateCanvas() {
+  return new CanvasSkia;
+}
+
+Canvas* Canvas::CreateCanvas(const gfx::Size& size, bool is_opaque) {
+  return new CanvasSkia(size, is_opaque);
+}
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+// TODO(beng): move to canvas_win.cc, etc.
+class CanvasPaintWin : public CanvasSkiaPaint, public CanvasPaint {
+ public:
+  CanvasPaintWin(gfx::NativeView view) : CanvasSkiaPaint(view) {}
+
+  // Overridden from CanvasPaint2:
+  virtual bool IsValid() const {
+    return isEmpty();
+  }
+
+  virtual gfx::Rect GetInvalidRect() const {
+    return gfx::Rect(paintStruct().rcPaint);
+  }
+
+  virtual Canvas* AsCanvas() {
+    return this;
+  }
+};
+#endif
+
+CanvasPaint* CanvasPaint::CreateCanvasPaint(gfx::NativeView view) {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  return new CanvasPaintWin(view);
+#else
+  return NULL;
+#endif
 }
 
 }  // namespace gfx

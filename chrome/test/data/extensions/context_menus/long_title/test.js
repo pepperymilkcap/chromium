@@ -10,7 +10,7 @@ window.onload = function() {
   }
   chrome.test.log("creating item");
   chrome.contextMenus.create({"title":title}, function() {
-    if (!chrome.runtime.lastError) {
+    if (!chrome.extension.lastError) {
       chrome.test.sendMessage("created");
     }
   });

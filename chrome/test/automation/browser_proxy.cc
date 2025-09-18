@@ -9,7 +9,7 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/threading/platform_thread.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
@@ -51,6 +51,14 @@ bool BrowserProxy::BringToFront() {
   return succeeded;
 }
 
+bool BrowserProxy::IsMenuCommandEnabled(int id, bool* enabled) {
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_IsMenuCommandEnabled(handle_, id,
+                                                              enabled));
+}
+
 bool BrowserProxy::AppendTab(const GURL& tab_url) {
   if (!is_valid())
     return false;
@@ -59,6 +67,17 @@ bool BrowserProxy::AppendTab(const GURL& tab_url) {
 
   sender_->Send(new AutomationMsg_AppendTab(handle_, tab_url,
                                             &append_tab_response));
+  return append_tab_response >= 0;
+}
+
+bool BrowserProxy::AppendBackgroundTab(const GURL& tab_url) {
+  if (!is_valid())
+    return false;
+
+  int append_tab_response = -1;
+
+  sender_->Send(new AutomationMsg_AppendBackgroundTab(handle_, tab_url,
+                                                      &append_tab_response));
   return append_tab_response >= 0;
 }
 
@@ -156,8 +175,44 @@ bool BrowserProxy::GetType(Browser::Type* type) const {
   return true;
 }
 
+bool BrowserProxy::IsApplication(bool* is_application) {
+  DCHECK(is_application);
+
+  if (!is_valid())
+    return false;
+
+  bool success = false;
+  if (!sender_->Send(new AutomationMsg_IsBrowserInApplicationMode(
+          handle_, is_application, &success))) {
+    return false;
+  }
+
+  return success;
+}
+
 bool BrowserProxy::ApplyAccelerator(int id) {
   return RunCommandAsync(id);
+}
+
+bool BrowserProxy::SimulateDrag(const gfx::Point& start,
+                                const gfx::Point& end,
+                                int flags,
+                                bool press_escape_en_route) {
+  if (!is_valid())
+    return false;
+
+  std::vector<gfx::Point> drag_path;
+  drag_path.push_back(start);
+  drag_path.push_back(end);
+
+  bool result = false;
+
+  if (!sender_->Send(new AutomationMsg_WindowDrag(
+          handle_, drag_path, flags, press_escape_en_route, &result))) {
+    return false;
+  }
+
+  return result;
 }
 
 bool BrowserProxy::WaitForTabCountToBecome(int count) {
@@ -171,9 +226,10 @@ bool BrowserProxy::WaitForTabCountToBecome(int count) {
 }
 
 bool BrowserProxy::WaitForTabToBecomeActive(int tab,
-                                            base::TimeDelta wait_timeout) {
+                                            int wait_timeout) {
   const TimeTicks start = TimeTicks::Now();
-  while (TimeTicks::Now() - start < wait_timeout) {
+  const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
+  while (TimeTicks::Now() - start < timeout) {
     base::PlatformThread::Sleep(
         base::TimeDelta::FromMilliseconds(automation::kSleepTime));
     int active_tab;
@@ -182,6 +238,21 @@ bool BrowserProxy::WaitForTabToBecomeActive(int tab,
   }
   // If we get here, the active tab hasn't changed.
   return false;
+}
+
+bool BrowserProxy::OpenFindInPage() {
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_OpenFindInPage(handle_));
+  // This message expects no response.
+}
+
+bool BrowserProxy::GetFindWindowLocation(int* x, int* y) {
+  if (!is_valid() || !x || !y)
+    return false;
+
+  return sender_->Send(new AutomationMsg_FindWindowLocation(handle_, x, y));
 }
 
 bool BrowserProxy::IsFindWindowFullyVisible(bool* is_visible) {
@@ -223,6 +294,196 @@ bool BrowserProxy::RunCommand(int browser_command) const {
   return result;
 }
 
+bool BrowserProxy::GetBookmarkBarVisibility(bool* is_visible,
+                                            bool* is_animating,
+                                            bool* is_detached) {
+  if (!is_valid())
+    return false;
+
+  if (!is_visible || !is_animating) {
+    NOTREACHED();
+    return false;
+  }
+
+  return sender_->Send(new AutomationMsg_BookmarkBarVisibility(
+      handle_, is_visible, is_animating, is_detached));
+}
+
+bool BrowserProxy::GetBookmarksAsJSON(std::string *json_string) {
+  if (!is_valid())
+    return false;
+
+  if (!WaitForBookmarkModelToLoad())
+    return false;
+
+  bool result = false;
+  sender_->Send(new AutomationMsg_GetBookmarksAsJSON(handle_,
+                                                     json_string,
+                                                     &result));
+  return result;
+}
+
+bool BrowserProxy::WaitForBookmarkModelToLoad() {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+  sender_->Send(new AutomationMsg_WaitForBookmarkModelToLoad(handle_, &result));
+  return result;
+}
+
+bool BrowserProxy::AddBookmarkGroup(int64 parent_id, int index,
+                                    std::wstring& title) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_AddBookmarkGroup(handle_,
+                                                   parent_id, index,
+                                                   title,
+                                                   &result));
+  return result;
+}
+
+bool BrowserProxy::AddBookmarkURL(int64 parent_id, int index,
+                                  std::wstring& title, const GURL& url) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_AddBookmarkURL(handle_,
+                                                 parent_id, index,
+                                                 title, url,
+                                                 &result));
+  return result;
+}
+
+bool BrowserProxy::ReparentBookmark(int64 id, int64 new_parent_id, int index) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_ReparentBookmark(handle_,
+                                                   id, new_parent_id,
+                                                   index,
+                                                   &result));
+  return result;
+}
+
+bool BrowserProxy::SetBookmarkTitle(int64 id, const std::wstring& title) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_SetBookmarkTitle(handle_,
+                                                   id, title,
+                                                   &result));
+  return result;
+}
+
+bool BrowserProxy::SetBookmarkURL(int64 id, const GURL& url) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_SetBookmarkURL(handle_,
+                                                 id, url,
+                                                 &result));
+  return result;
+}
+
+bool BrowserProxy::RemoveBookmark(int64 id) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_RemoveBookmark(handle_,
+                                                 id,
+                                                 &result));
+  return result;
+}
+
+bool BrowserProxy::IsShelfVisible(bool* is_visible) {
+  if (!is_valid())
+    return false;
+
+  if (!is_visible) {
+    NOTREACHED();
+    return false;
+  }
+
+  return sender_->Send(new AutomationMsg_ShelfVisibility(handle_,
+                                                         is_visible));
+}
+
+bool BrowserProxy::SetShelfVisible(bool is_visible) {
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_SetShelfVisibility(handle_,
+                                                            is_visible));
+}
+
+bool BrowserProxy::SetIntPreference(const std::string& name, int value) {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+
+  sender_->Send(new AutomationMsg_SetIntPreference(handle_, name, value,
+                                                   &result));
+  return result;
+}
+
+bool BrowserProxy::SetStringPreference(const std::string& name,
+                                       const std::string& value) {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+
+  sender_->Send(new AutomationMsg_SetStringPreference(handle_, name, value,
+                                                      &result));
+  return result;
+}
+
+bool BrowserProxy::GetBooleanPreference(const std::string& name,
+                                        bool* value) {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+
+  sender_->Send(new AutomationMsg_GetBooleanPreference(handle_, name, value,
+                                                       &result));
+  return result;
+}
+
+bool BrowserProxy::SetBooleanPreference(const std::string& name,
+                                        bool value) {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+
+  sender_->Send(new AutomationMsg_SetBooleanPreference(handle_, name,
+                                                       value, &result));
+  return result;
+}
+
+bool BrowserProxy::SetDefaultContentSetting(ContentSettingsType content_type,
+                                            ContentSetting setting) {
+  return SetContentSetting(std::string(), content_type, setting);
+}
+
+bool BrowserProxy::SetContentSetting(const std::string& host,
+                                     ContentSettingsType content_type,
+                                     ContentSetting setting) {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+
+  sender_->Send(new AutomationMsg_SetContentSetting(handle_, host,
+                                                    content_type, setting,
+                                                    &result));
+  return result;
+}
+
 bool BrowserProxy::TerminateSession() {
   if (!is_valid())
     return false;
@@ -259,6 +520,60 @@ scoped_refptr<WindowProxy> BrowserProxy::GetWindow() const {
   return result;
 }
 
+bool BrowserProxy::IsFullscreen(bool* is_fullscreen) {
+  DCHECK(is_fullscreen);
+
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_IsFullscreen(handle_, is_fullscreen));
+}
+
+bool BrowserProxy::IsFullscreenBubbleVisible(bool* is_visible) {
+  DCHECK(is_visible);
+
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_IsFullscreenBubbleVisible(handle_,
+                                                                   is_visible));
+}
+
+bool BrowserProxy::ShutdownSessionService() {
+  bool did_shutdown = false;
+  bool succeeded = sender_->Send(
+      new AutomationMsg_ShutdownSessionService(handle_, &did_shutdown));
+
+  if (!succeeded) {
+    DLOG(ERROR) <<
+        "ShutdownSessionService did not complete in a timely fashion";
+    return false;
+  }
+
+  return did_shutdown;
+}
+
+bool BrowserProxy::StartTrackingPopupMenus() {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+  if (!sender_->Send(new AutomationMsg_StartTrackingPopupMenus(
+          handle_, &result)))
+    return false;
+  return result;
+}
+
+bool BrowserProxy::WaitForPopupMenuToOpen() {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+  if (!sender_->Send(new AutomationMsg_WaitForPopupMenuToOpen(&result)))
+    return false;
+  return result;
+}
+
 bool BrowserProxy::SendJSONRequest(const std::string& request,
                                    int timeout_ms,
                                    std::string* response) {
@@ -266,17 +581,16 @@ bool BrowserProxy::SendJSONRequest(const std::string& request,
     return false;
 
   bool result = false;
-  if (!sender_->Send(
-      new AutomationMsg_SendJSONRequestWithBrowserHandle(handle_,
-                                                         request,
-                                                         response,
-                                                         &result),
-                                                         timeout_ms))
+  if (!sender_->Send(new AutomationMsg_SendJSONRequest(handle_,
+                                                       request,
+                                                       response,
+                                                       &result),
+                                                       timeout_ms))
     return false;
   return result;
 }
 
-bool BrowserProxy::GetInitialLoadTimes(base::TimeDelta timeout,
+bool BrowserProxy::GetInitialLoadTimes(int timeout_ms,
                                        float* min_start_time,
                                        float* max_stop_time,
                                        std::vector<float>* stop_times) {
@@ -285,38 +599,37 @@ bool BrowserProxy::GetInitialLoadTimes(base::TimeDelta timeout,
 
   *max_stop_time = 0;
   *min_start_time = -1;
-  if (!SendJSONRequest(
-          kJSONCommand, timeout.InMilliseconds(), &json_response)) {
+  if (!SendJSONRequest(kJSONCommand, timeout_ms, &json_response)) {
     // Older browser versions do not support GetInitialLoadTimes.
     // Fail gracefully and do not record them in this case.
     return false;
   }
   std::string error;
-  scoped_ptr<base::Value> values(base::JSONReader::ReadAndReturnError(
-      json_response, base::JSON_ALLOW_TRAILING_COMMAS, NULL, &error));
-  if (!error.empty() || values->GetType() != base::Value::TYPE_DICTIONARY)
+  base::JSONReader reader;
+  scoped_ptr<Value> values(reader.ReadAndReturnError(json_response, true,
+                                                     NULL, &error));
+  if (!error.empty() || values->GetType() != Value::TYPE_DICTIONARY)
     return false;
 
-  base::DictionaryValue* values_dict =
-      static_cast<base::DictionaryValue*>(values.get());
+  DictionaryValue* values_dict = static_cast<DictionaryValue*>(values.get());
 
-  base::Value* tabs_value;
+  Value* tabs_value;
   if (!values_dict->Get("tabs", &tabs_value) ||
-      tabs_value->GetType() != base::Value::TYPE_LIST)
+      tabs_value->GetType() != Value::TYPE_LIST)
     return false;
 
-  base::ListValue* tabs_list = static_cast<base::ListValue*>(tabs_value);
+  ListValue* tabs_list = static_cast<ListValue*>(tabs_value);
 
   for (size_t i = 0; i < tabs_list->GetSize(); i++) {
     float stop_ms = 0;
     float start_ms = 0;
-    base::Value* tab_value;
-    base::DictionaryValue* tab_dict;
+    Value* tab_value;
+    DictionaryValue* tab_dict;
 
     if (!tabs_list->Get(i, &tab_value) ||
-        tab_value->GetType() != base::Value::TYPE_DICTIONARY)
+        tab_value->GetType() != Value::TYPE_DICTIONARY)
       return false;
-    tab_dict = static_cast<base::DictionaryValue*>(tab_value);
+    tab_dict = static_cast<DictionaryValue*>(tab_value);
 
     double temp;
     if (!tab_dict->GetDouble("load_start_ms", &temp))

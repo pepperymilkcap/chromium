@@ -7,13 +7,13 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
+#include "base/message_loop.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
@@ -23,7 +23,7 @@ class EncodingMenuControllerTest : public testing::Test {
   EncodingMenuControllerTest()
       : ui_thread_(BrowserThread::UI, &message_loop_) {}
  private:
-  base::MessageLoop message_loop_;
+  MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
 };
 

@@ -46,12 +46,4 @@ BOOL CryptAcquireContextLocked(HCRYPTPROV* prov,
   return CryptAcquireContext(prov, container, provider, prov_type, flags);
 }
 
-void* WINAPI CryptAlloc(size_t size) {
-  return malloc(size);
-}
-
-void WINAPI CryptFree(void* p) {
-  free(p);
-}
-
 }  // namespace crypto

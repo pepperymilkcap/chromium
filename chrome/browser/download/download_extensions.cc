@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "chrome/browser/download/download_extensions.h"
 
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
 
@@ -60,156 +60,139 @@ static const struct Executables {
     const char* extension;
     DownloadDangerLevel level;
 } g_executables[] = {
-  // Some files are dangerous on all platforms.
-  //
-  // Flash files downloaded locally can sometimes access the local filesystem.
-  { "swf", DANGEROUS },
-  { "spl", DANGEROUS },
-  // Chrome extensions should be obtained through the web store.
-  { "crx", ALLOW_ON_USER_GESTURE },
-
-  // Windows, all file categories.
+  { "class", Dangerous },
+  { "htm", AllowOnUserGesture },
+  { "html", AllowOnUserGesture },
+  { "jar", Dangerous },
+  { "jnlp", Dangerous },
+  { "pdf", AllowOnUserGesture },
+  { "pdfxml", AllowOnUserGesture },
+  { "mars", AllowOnUserGesture },
+  { "fdf", AllowOnUserGesture },
+  { "xfdf", AllowOnUserGesture },
+  { "xdp", AllowOnUserGesture },
+  { "xfd", AllowOnUserGesture },
+  { "pl", AllowOnUserGesture },
+  { "py", AllowOnUserGesture },
+  { "rb", AllowOnUserGesture },
+  { "shtm", AllowOnUserGesture },
+  { "shtml", AllowOnUserGesture },
+  { "svg", AllowOnUserGesture },
+  { "swf", AllowOnUserGesture },
+  { "xht", AllowOnUserGesture },
+  { "xhtm", AllowOnUserGesture },
+  { "xhtml", AllowOnUserGesture },
+  { "xml", AllowOnUserGesture },
+  { "xsl", AllowOnUserGesture },
+  { "xslt", AllowOnUserGesture },
 #if defined(OS_WIN)
-  { "ad", ALLOW_ON_USER_GESTURE },
-  { "ade", ALLOW_ON_USER_GESTURE },
-  { "adp", ALLOW_ON_USER_GESTURE },
-  { "app", ALLOW_ON_USER_GESTURE },
-  { "application", ALLOW_ON_USER_GESTURE },
-  { "asp", ALLOW_ON_USER_GESTURE },
-  { "asx", ALLOW_ON_USER_GESTURE },
-  { "bas", ALLOW_ON_USER_GESTURE },
-  { "bat", ALLOW_ON_USER_GESTURE },
-  { "cfg", DANGEROUS },
-  { "chi", ALLOW_ON_USER_GESTURE },
-  { "chm", ALLOW_ON_USER_GESTURE },
-  { "cmd", ALLOW_ON_USER_GESTURE },
-  { "com", ALLOW_ON_USER_GESTURE },
-  { "cpl", ALLOW_ON_USER_GESTURE },
-  { "crt", ALLOW_ON_USER_GESTURE },
-  { "dll", DANGEROUS },
-  { "drv", DANGEROUS },
-  { "exe", ALLOW_ON_USER_GESTURE },
-  { "fxp", ALLOW_ON_USER_GESTURE },
-  { "grp", DANGEROUS },
-  { "hlp", ALLOW_ON_USER_GESTURE },
-  { "hta", ALLOW_ON_USER_GESTURE },
-  { "htt", ALLOW_ON_USER_GESTURE },
-  { "inf", ALLOW_ON_USER_GESTURE },
-  { "ini", DANGEROUS },
-  { "ins", ALLOW_ON_USER_GESTURE },
-  { "isp", ALLOW_ON_USER_GESTURE },
-  { "js", ALLOW_ON_USER_GESTURE },
-  { "jse", ALLOW_ON_USER_GESTURE },
-  { "lnk", ALLOW_ON_USER_GESTURE },
-  { "local", DANGEROUS },
-  { "mad", ALLOW_ON_USER_GESTURE },
-  { "maf", ALLOW_ON_USER_GESTURE },
-  { "mag", ALLOW_ON_USER_GESTURE },
-  { "mam", ALLOW_ON_USER_GESTURE },
-  { "manifest", DANGEROUS },
-  { "maq", ALLOW_ON_USER_GESTURE },
-  { "mar", ALLOW_ON_USER_GESTURE },
-  { "mas", ALLOW_ON_USER_GESTURE },
-  { "mat", ALLOW_ON_USER_GESTURE },
-  { "mau", ALLOW_ON_USER_GESTURE },
-  { "mav", ALLOW_ON_USER_GESTURE },
-  { "maw", ALLOW_ON_USER_GESTURE },
-  { "mda", ALLOW_ON_USER_GESTURE },
-  { "mdb", ALLOW_ON_USER_GESTURE },
-  { "mde", ALLOW_ON_USER_GESTURE },
-  { "mdt", ALLOW_ON_USER_GESTURE },
-  { "mdw", ALLOW_ON_USER_GESTURE },
-  { "mdz", ALLOW_ON_USER_GESTURE },
-  { "mht", ALLOW_ON_USER_GESTURE },
-  { "mhtml", ALLOW_ON_USER_GESTURE },
-  { "mmc", ALLOW_ON_USER_GESTURE },
-  { "mof", DANGEROUS },
-  { "msc", ALLOW_ON_USER_GESTURE },
-  { "msh", ALLOW_ON_USER_GESTURE },
-  { "mshxml", ALLOW_ON_USER_GESTURE },
-  { "msi", ALLOW_ON_USER_GESTURE },
-  { "msp", ALLOW_ON_USER_GESTURE },
-  { "mst", ALLOW_ON_USER_GESTURE },
-  { "ocx", DANGEROUS },
-  { "ops", ALLOW_ON_USER_GESTURE },
-  { "pcd", ALLOW_ON_USER_GESTURE },
-  { "pif", ALLOW_ON_USER_GESTURE },
-  { "plg", ALLOW_ON_USER_GESTURE },
-  { "prf", ALLOW_ON_USER_GESTURE },
-  { "prg", ALLOW_ON_USER_GESTURE },
-  { "pst", ALLOW_ON_USER_GESTURE },
-  { "reg", ALLOW_ON_USER_GESTURE },
-  { "scf", ALLOW_ON_USER_GESTURE },
-  { "scr", ALLOW_ON_USER_GESTURE },
-  { "sct", ALLOW_ON_USER_GESTURE },
-  { "shb", ALLOW_ON_USER_GESTURE },
-  { "shs", ALLOW_ON_USER_GESTURE },
-  { "sys", DANGEROUS },
-  { "url", ALLOW_ON_USER_GESTURE },
-  { "vb", ALLOW_ON_USER_GESTURE },
-  { "vbe", ALLOW_ON_USER_GESTURE },
-  { "vbs", ALLOW_ON_USER_GESTURE },
-  { "vsd", ALLOW_ON_USER_GESTURE },
-  { "vsmacros", ALLOW_ON_USER_GESTURE },
-  { "vss", ALLOW_ON_USER_GESTURE },
-  { "vst", ALLOW_ON_USER_GESTURE },
-  { "vsw", ALLOW_ON_USER_GESTURE },
-  { "ws", ALLOW_ON_USER_GESTURE },
-  { "wsc", ALLOW_ON_USER_GESTURE },
-  { "wsf", ALLOW_ON_USER_GESTURE },
-  { "wsh", ALLOW_ON_USER_GESTURE },
-  { "xbap", DANGEROUS },
-#endif  // OS_WIN
-
-  // Java.
-#if !defined(OS_CHROMEOS)
-  { "class", DANGEROUS },
-  { "jar", DANGEROUS },
-  { "jnlp", DANGEROUS },
-#endif
-
-  // Scripting languages. (Shells are handled below.)
-#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
-  { "pl", ALLOW_ON_USER_GESTURE },
-  { "py", ALLOW_ON_USER_GESTURE },
-  { "pyc", ALLOW_ON_USER_GESTURE },
-  { "pyw", ALLOW_ON_USER_GESTURE },
-  { "rb", ALLOW_ON_USER_GESTURE },
-#endif
-
-  // Shell languages. (OS_ANDROID is OS_POSIX.) OS_WIN shells are handled above.
-#if defined(OS_POSIX)
-  { "bash", ALLOW_ON_USER_GESTURE },
-  { "csh", ALLOW_ON_USER_GESTURE },
-  { "ksh", ALLOW_ON_USER_GESTURE },
-  { "sh", ALLOW_ON_USER_GESTURE },
-  { "shar", ALLOW_ON_USER_GESTURE },
-  { "tcsh", ALLOW_ON_USER_GESTURE },
-#endif
-#if defined(OS_MACOSX)
-  { "command", ALLOW_ON_USER_GESTURE },
-#endif
-
-  // Package management formats. OS_WIN package formats are handled above.
-#if defined(OS_MACOSX) || defined(OS_LINUX)
-  { "pkg", ALLOW_ON_USER_GESTURE },
-#endif
-#if defined(OS_LINUX)
-  { "deb", ALLOW_ON_USER_GESTURE },
-  { "rpm", ALLOW_ON_USER_GESTURE },
-#endif
-#if defined(OS_ANDROID)
-  { "apk", ALLOW_ON_USER_GESTURE },
-  { "dex", ALLOW_ON_USER_GESTURE },  // Really an executable format.
+  { "ad", AllowOnUserGesture },
+  { "ade", AllowOnUserGesture },
+  { "adp", AllowOnUserGesture },
+  { "app", AllowOnUserGesture },
+  { "application", AllowOnUserGesture },
+  { "asp", AllowOnUserGesture },
+  { "asx", AllowOnUserGesture },
+  { "bas", AllowOnUserGesture },
+  { "bat", AllowOnUserGesture },
+  { "chi", AllowOnUserGesture },
+  { "chm", AllowOnUserGesture },
+  { "cmd", AllowOnUserGesture },
+  { "com", AllowOnUserGesture },
+  { "cpl", AllowOnUserGesture },
+  { "crt", AllowOnUserGesture },
+  { "dll", Dangerous },
+  { "drv", Dangerous },
+  { "exe", AllowOnUserGesture },
+  { "fxp", AllowOnUserGesture },
+  { "grp", Dangerous },
+  { "hlp", AllowOnUserGesture },
+  { "hta", AllowOnUserGesture },
+  { "htt", AllowOnUserGesture },
+  { "inf", AllowOnUserGesture },
+  { "ins", AllowOnUserGesture },
+  { "isp", AllowOnUserGesture },
+  { "js", AllowOnUserGesture },
+  { "jse", AllowOnUserGesture },
+  { "lnk", AllowOnUserGesture },
+  { "mad", AllowOnUserGesture },
+  { "maf", AllowOnUserGesture },
+  { "mag", AllowOnUserGesture },
+  { "mam", AllowOnUserGesture },
+  { "maq", AllowOnUserGesture },
+  { "mar", AllowOnUserGesture },
+  { "mas", AllowOnUserGesture },
+  { "mat", AllowOnUserGesture },
+  { "mau", AllowOnUserGesture },
+  { "mav", AllowOnUserGesture },
+  { "maw", AllowOnUserGesture },
+  { "mda", AllowOnUserGesture },
+  { "mdb", AllowOnUserGesture },
+  { "mde", AllowOnUserGesture },
+  { "mdt", AllowOnUserGesture },
+  { "mdw", AllowOnUserGesture },
+  { "mdz", AllowOnUserGesture },
+  { "mht", AllowOnUserGesture },
+  { "mhtml", AllowOnUserGesture },
+  { "mmc", AllowOnUserGesture },
+  { "msc", AllowOnUserGesture },
+  { "msh", AllowOnUserGesture },
+  { "mshxml", AllowOnUserGesture },
+  { "msi", AllowOnUserGesture },
+  { "msp", AllowOnUserGesture },
+  { "mst", AllowOnUserGesture },
+  { "ocx", AllowOnUserGesture },
+  { "ops", AllowOnUserGesture },
+  { "pcd", AllowOnUserGesture },
+  { "pif", AllowOnUserGesture },
+  { "plg", AllowOnUserGesture },
+  { "prf", AllowOnUserGesture },
+  { "prg", AllowOnUserGesture },
+  { "pst", AllowOnUserGesture },
+  { "reg", AllowOnUserGesture },
+  { "scf", AllowOnUserGesture },
+  { "scr", AllowOnUserGesture },
+  { "sct", AllowOnUserGesture },
+  { "shb", AllowOnUserGesture },
+  { "shs", AllowOnUserGesture },
+  { "sys", Dangerous },
+  { "url", AllowOnUserGesture },
+  { "vb", AllowOnUserGesture },
+  { "vbe", AllowOnUserGesture },
+  { "vbs", AllowOnUserGesture },
+  { "vsd", AllowOnUserGesture },
+  { "vsmacros", AllowOnUserGesture },
+  { "vss", AllowOnUserGesture },
+  { "vst", AllowOnUserGesture },
+  { "vsw", AllowOnUserGesture },
+  { "ws", AllowOnUserGesture },
+  { "wsc", AllowOnUserGesture },
+  { "wsf", AllowOnUserGesture },
+  { "wsh", AllowOnUserGesture },
+  { "xbap", Dangerous },
+#elif defined(OS_MACOSX)
+  // TODO(thakis): Figure out what makes sense here -- crbug.com/19096
+  { "app", AllowOnUserGesture },
+  { "dmg", AllowOnUserGesture },
+#elif defined(OS_POSIX)
+  // TODO(estade): lengthen this list.
+  { "bash", AllowOnUserGesture },
+  { "csh", AllowOnUserGesture },
+  { "deb", AllowOnUserGesture },
+  { "exe", AllowOnUserGesture },
+  { "ksh", AllowOnUserGesture },
+  { "rpm", AllowOnUserGesture },
+  { "sh", AllowOnUserGesture },
+  { "tcsh", AllowOnUserGesture },
 #endif
 };
 
-DownloadDangerLevel GetFileDangerLevel(const base::FilePath& path) {
-  base::FilePath::StringType extension(path.FinalExtension());
+DownloadDangerLevel GetFileDangerLevel(const FilePath& path) {
+  FilePath::StringType extension(path.Extension());
   if (extension.empty())
-    return NOT_DANGEROUS;
+    return NotDangerous;
   if (!IsStringASCII(extension))
-    return NOT_DANGEROUS;
+    return NotDangerous;
 #if defined(OS_WIN)
   std::string ascii_extension = WideToASCII(extension);
 #elif defined(OS_POSIX)
@@ -217,14 +200,14 @@ DownloadDangerLevel GetFileDangerLevel(const base::FilePath& path) {
 #endif
 
   // Strip out leading dot if it's still there
-  if (ascii_extension[0] == base::FilePath::kExtensionSeparator)
+  if (ascii_extension[0] == FilePath::kExtensionSeparator)
     ascii_extension.erase(0, 1);
 
   for (size_t i = 0; i < arraysize(g_executables); ++i) {
     if (LowerCaseEqualsASCII(ascii_extension, g_executables[i].extension))
       return g_executables[i].level;
   }
-  return NOT_DANGEROUS;
+  return NotDangerous;
 }
 
 static const char* kExecutableWhiteList[] = {

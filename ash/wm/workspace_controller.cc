@@ -4,141 +4,138 @@
 
 #include "ash/wm/workspace_controller.h"
 
-#include "ash/root_window_controller.h"
-#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
-#include "ash/wm/base_layout_manager.h"
-#include "ash/wm/window_animations.h"
-#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace/workspace_event_handler.h"
+#include "ash/wm/workspace/workspace_event_filter.h"
 #include "ash/wm/workspace/workspace_layout_manager.h"
+#include "ash/wm/workspace/workspace_manager.h"
+#include "base/utf_string_conversions.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/compositor/layer.h"
-#include "ui/compositor/scoped_layer_animation_settings.h"
-#include "ui/views/corewm/visibility_controller.h"
-#include "ui/views/corewm/window_animations.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
 
 namespace ash {
 namespace internal {
+
 namespace {
 
-// Amount of time to pause before animating anything. Only used during initial
-// animation (when logging in).
-const int kInitialPauseTimeMS = 750;
-
-// Returns true if there are visible docked windows in the same screen as the
-// |shelf|.
-bool IsDockedAreaVisible(const ShelfLayoutManager* shelf) {
-  return shelf->dock_bounds().width() > 0;
-}
+// Size of the grid when a grid is enabled.
+const int kGridSize = 8;
 
 }  // namespace
 
 WorkspaceController::WorkspaceController(aura::Window* viewport)
     : viewport_(viewport),
-      shelf_(NULL),
-      event_handler_(new WorkspaceEventHandler(viewport_)) {
-  SetWindowVisibilityAnimationTransition(
-      viewport_, views::corewm::ANIMATE_NONE);
-
-  // The layout-manager cannot be created in the initializer list since it
-  // depends on the window to have been initialized.
-  layout_manager_ = new WorkspaceLayoutManager(viewport_);
-  viewport_->SetLayoutManager(layout_manager_);
-
-  viewport_->Show();
+      workspace_manager_(new WorkspaceManager(viewport)),
+      layout_manager_(NULL),
+      event_filter_(NULL) {
+  event_filter_ = new WorkspaceEventFilter(viewport);
+  viewport->SetEventFilter(event_filter_);
+  layout_manager_ = new WorkspaceLayoutManager(workspace_manager_.get());
+  viewport->SetLayoutManager(layout_manager_);
+  aura::RootWindow::GetInstance()->AddRootWindowObserver(this);
+  aura::RootWindow::GetInstance()->AddObserver(this);
+  workspace_manager_->set_grid_size(kGridSize);
+  event_filter_->set_grid_size(kGridSize);
 }
 
 WorkspaceController::~WorkspaceController() {
-  viewport_->SetLayoutManager(NULL);
-  viewport_->SetEventFilter(NULL);
-  viewport_->RemovePreTargetHandler(event_handler_.get());
-  viewport_->RemovePostTargetHandler(event_handler_.get());
+  aura::RootWindow::GetInstance()->RemoveObserver(this);
+  aura::RootWindow::GetInstance()->RemoveRootWindowObserver(this);
 }
 
-WorkspaceWindowState WorkspaceController::GetWindowState() const {
-  if (!shelf_)
-    return WORKSPACE_WINDOW_STATE_DEFAULT;
-  const aura::Window* topmost_fullscreen_window = GetRootWindowController(
-      viewport_->GetRootWindow())->GetWindowForFullscreenMode();
-  if (topmost_fullscreen_window &&
-      !wm::GetWindowState(topmost_fullscreen_window)->ignored_by_shelf()) {
-    return WORKSPACE_WINDOW_STATE_FULL_SCREEN;
-  }
+void WorkspaceController::ToggleOverview() {
+  workspace_manager_->SetOverview(!workspace_manager_->is_overview());
+}
 
-  // These are the container ids of containers which may contain windows that
-  // may overlap the launcher shelf and affect its transparency.
-  const int kWindowContainerIds[] = {
-      internal::kShellWindowId_DefaultContainer,
-      internal::kShellWindowId_DockedContainer,
-  };
-  const gfx::Rect shelf_bounds(shelf_->GetIdealBounds());
-  bool window_overlaps_launcher = false;
-  for (size_t idx = 0; idx < arraysize(kWindowContainerIds); idx++) {
-    const aura::Window* container = Shell::GetContainer(
-        viewport_->GetRootWindow(), kWindowContainerIds[idx]);
-    const aura::Window::Windows& windows(container->children());
-    for (aura::Window::Windows::const_iterator i = windows.begin();
-         i != windows.end(); ++i) {
-      wm::WindowState* window_state = wm::GetWindowState(*i);
-      if (window_state->ignored_by_shelf())
-        continue;
-      ui::Layer* layer = (*i)->layer();
-      if (!layer->GetTargetVisibility())
-        continue;
-      if (window_state->IsMaximized())
-        return WORKSPACE_WINDOW_STATE_MAXIMIZED;
-      if (!window_overlaps_launcher &&
-          ((*i)->bounds().Intersects(shelf_bounds))) {
-        window_overlaps_launcher = true;
+void WorkspaceController::ShowMenu(views::Widget* widget,
+                                   const gfx::Point& location) {
+  ui::SimpleMenuModel menu_model(this);
+  // This is just for testing and will be ripped out before we ship, so none of
+  // the strings are localized.
+  menu_model.AddCheckItem(MENU_SNAP_TO_GRID,
+                          ASCIIToUTF16("Snap to grid"));
+  menu_model.AddCheckItem(MENU_OPEN_MAXIMIZED,
+                          ASCIIToUTF16("Maximize new windows"));
+  views::MenuModelAdapter menu_model_adapter(&menu_model);
+  menu_runner_.reset(new views::MenuRunner(menu_model_adapter.CreateMenu()));
+  if (menu_runner_->RunMenuAt(
+          widget, NULL, gfx::Rect(location, gfx::Size()),
+          views::MenuItemView::TOPRIGHT, views::MenuRunner::HAS_MNEMONICS) ==
+      views::MenuRunner::MENU_DELETED)
+    return;
+}
+
+void WorkspaceController::OnRootWindowResized(const gfx::Size& new_size) {
+  workspace_manager_->SetWorkspaceSize(new_size);
+}
+
+void WorkspaceController::OnWindowPropertyChanged(aura::Window* window,
+                                                  const char* key,
+                                                  void* old) {
+  if (key == aura::client::kRootWindowActiveWindow)
+    workspace_manager_->SetActiveWorkspaceByWindow(GetActiveWindow());
+}
+
+bool WorkspaceController::IsCommandIdChecked(int command_id) const {
+  switch (static_cast<MenuItem>(command_id)) {
+    case MENU_SNAP_TO_GRID:
+      return workspace_manager_->grid_size() != 0;
+
+    case MENU_OPEN_MAXIMIZED:
+      return workspace_manager_->open_new_windows_maximized();
+
+    default:
+      break;
+  }
+  return false;
+}
+
+bool WorkspaceController::IsCommandIdEnabled(int command_id) const {
+  switch (static_cast<MenuItem>(command_id)) {
+    case MENU_OPEN_MAXIMIZED:
+      return workspace_manager_->contents_view()->bounds().width() <
+          WorkspaceManager::kOpenMaximizedThreshold;
+
+    default:
+      return true;
+  }
+  return true;
+}
+
+void WorkspaceController::ExecuteCommand(int command_id) {
+  switch (static_cast<MenuItem>(command_id)) {
+    case MENU_SNAP_TO_GRID: {
+      int size = workspace_manager_->grid_size() == 0 ? kGridSize : 0;
+      workspace_manager_->set_grid_size(size);
+      event_filter_->set_grid_size(size);
+      if (!size)
+        return;
+      for (size_t i = 0; i < viewport_->children().size(); ++i) {
+        aura::Window* window = viewport_->children()[i];
+        if (!window_util::IsWindowMaximized(window) &&
+            !window_util::IsWindowFullscreen(window)) {
+          window->SetBounds(workspace_manager_->AlignBoundsToGrid(
+                                window->GetTargetBounds()));
+        }
       }
+      break;
     }
-  }
 
-  return (window_overlaps_launcher || IsDockedAreaVisible(shelf_)) ?
-      WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF :
-      WORKSPACE_WINDOW_STATE_DEFAULT;
+    case MENU_OPEN_MAXIMIZED:
+      workspace_manager_->set_open_new_windows_maximized(
+          !workspace_manager_->open_new_windows_maximized());
+      break;
+  }
 }
 
-void WorkspaceController::SetShelf(ShelfLayoutManager* shelf) {
-  shelf_ = shelf;
-  layout_manager_->SetShelf(shelf);
-}
-
-void WorkspaceController::DoInitialAnimation() {
-  viewport_->Show();
-
-  viewport_->layer()->SetOpacity(0.0f);
-  SetTransformForScaleAnimation(
-      viewport_->layer(), LAYER_SCALE_ANIMATION_ABOVE);
-
-  // In order for pause to work we need to stop animations.
-  viewport_->layer()->GetAnimator()->StopAnimating();
-
-  {
-    ui::ScopedLayerAnimationSettings settings(
-        viewport_->layer()->GetAnimator());
-
-    settings.SetPreemptionStrategy(ui::LayerAnimator::ENQUEUE_NEW_ANIMATION);
-    viewport_->layer()->GetAnimator()->SchedulePauseForProperties(
-        base::TimeDelta::FromMilliseconds(kInitialPauseTimeMS),
-        ui::LayerAnimationElement::TRANSFORM,
-        ui::LayerAnimationElement::OPACITY,
-        ui::LayerAnimationElement::BRIGHTNESS,
-        ui::LayerAnimationElement::VISIBILITY,
-        -1);
-
-    settings.SetTweenType(gfx::Tween::EASE_OUT);
-    settings.SetTransitionDuration(
-        base::TimeDelta::FromMilliseconds(kCrossFadeDurationMS));
-    viewport_->layer()->SetTransform(gfx::Transform());
-    viewport_->layer()->SetOpacity(1.0f);
-  }
+bool WorkspaceController::GetAcceleratorForCommandId(
+      int command_id,
+      ui::Accelerator* accelerator) {
+  return false;
 }
 
 }  // namespace internal

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,8 @@ namespace pp {
 
 namespace {
 
-template <> const char* interface_name<PPB_View_1_0>() {
-  return PPB_VIEW_INTERFACE_1_0;
-}
-
-template <> const char* interface_name<PPB_View_1_1>() {
-  return PPB_VIEW_INTERFACE_1_1;
+template <> const char* interface_name<PPB_View>() {
+  return PPB_VIEW_INTERFACE;
 }
 
 }  // namespace
@@ -28,71 +24,39 @@ View::View(PP_Resource view_resource) : Resource(view_resource) {
 }
 
 Rect View::GetRect() const {
+  if (!has_interface<PPB_View>())
+    return Rect();
   PP_Rect out;
-  if (has_interface<PPB_View_1_1>()) {
-    if (PP_ToBool(get_interface<PPB_View_1_1>()->GetRect(pp_resource(), &out)))
-      return Rect(out);
-  } else if (has_interface<PPB_View_1_0>()) {
-    if (PP_ToBool(get_interface<PPB_View_1_0>()->GetRect(pp_resource(), &out)))
-      return Rect(out);
-  }
+  if (PP_ToBool(get_interface<PPB_View>()->GetRect(pp_resource(), &out)))
+    return Rect(out);
   return Rect();
 }
 
 bool View::IsFullscreen() const {
-  if (has_interface<PPB_View_1_1>()) {
-    return PP_ToBool(get_interface<PPB_View_1_1>()->IsFullscreen(
-        pp_resource()));
-  } else if (has_interface<PPB_View_1_0>()) {
-    return PP_ToBool(get_interface<PPB_View_1_0>()->IsFullscreen(
-        pp_resource()));
-  }
-  return false;
+  if (!has_interface<PPB_View>())
+    return false;
+  return PP_ToBool(get_interface<PPB_View>()->IsFullscreen(pp_resource()));
 }
 
 bool View::IsVisible() const {
-  if (has_interface<PPB_View_1_1>())
-    return PP_ToBool(get_interface<PPB_View_1_1>()->IsVisible(pp_resource()));
-  else if (has_interface<PPB_View_1_0>())
-    return PP_ToBool(get_interface<PPB_View_1_0>()->IsVisible(pp_resource()));
-  return false;
+  if (!has_interface<PPB_View>())
+    return false;
+  return PP_ToBool(get_interface<PPB_View>()->IsVisible(pp_resource()));
 }
 
 bool View::IsPageVisible() const {
-  if (has_interface<PPB_View_1_1>()) {
-    return PP_ToBool(get_interface<PPB_View_1_1>()->IsPageVisible(
-        pp_resource()));
-  } else if (has_interface<PPB_View_1_0>()) {
-    return PP_ToBool(get_interface<PPB_View_1_0>()->IsPageVisible(
-        pp_resource()));
-  }
-  return true;
+  if (!has_interface<PPB_View>())
+    return true;
+  return PP_ToBool(get_interface<PPB_View>()->IsPageVisible(pp_resource()));
 }
 
 Rect View::GetClipRect() const {
+  if (!has_interface<PPB_View>())
+    return Rect();
   PP_Rect out;
-  if (has_interface<PPB_View_1_1>()) {
-    if (PP_ToBool(get_interface<PPB_View_1_1>()->GetClipRect(pp_resource(),
-                                                             &out)))
-      return Rect(out);
-  } else if (has_interface<PPB_View_1_0>()) {
-    if (PP_ToBool(get_interface<PPB_View_1_0>()->GetClipRect(pp_resource(),
-                                                             &out)))
-      return Rect(out);
-  }
+  if (PP_ToBool(get_interface<PPB_View>()->GetClipRect(pp_resource(), &out)))
+    return Rect(out);
   return Rect();
-}
-
-float View::GetDeviceScale() const {
-  if (has_interface<PPB_View_1_1>())
-    return get_interface<PPB_View_1_1>()->GetDeviceScale(pp_resource());
-  return 1.0f;
-}
-
-float View::GetCSSScale() const {
-  if (has_interface<PPB_View_1_1>())
-    return get_interface<PPB_View_1_1>()->GetCSSScale(pp_resource());
-  return 1.0f;
 }
 
 }  // namespace pp

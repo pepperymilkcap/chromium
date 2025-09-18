@@ -1,48 +1,46 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/browser/download_manager_delegate.h"
 
-#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_id.h"
 
 namespace content {
 
-void DownloadManagerDelegate::GetNextId(const DownloadIdCallback& callback) {
-  callback.Run(content::DownloadItem::kInvalidId);
+DownloadId DownloadManagerDelegate::GetNextId() {
+  return DownloadId::Invalid();
 }
 
-bool DownloadManagerDelegate::DetermineDownloadTarget(
-    DownloadItem* item,
-    const DownloadTargetCallback& callback) {
-  return false;
-}
-
-bool DownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
-    const base::FilePath& path) {
-  return false;
-}
-
-bool DownloadManagerDelegate::ShouldCompleteDownload(
-    DownloadItem* item,
-    const base::Closure& callback) {
+bool DownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
   return true;
 }
 
-bool DownloadManagerDelegate::ShouldOpenDownload(
-    DownloadItem* item, const DownloadOpenDelayedCallback& callback) {
+FilePath DownloadManagerDelegate::GetIntermediatePath(
+    const FilePath& suggested_path) {
+  return suggested_path;
+}
+
+WebContents* DownloadManagerDelegate::
+    GetAlternativeWebContentsToNotifyForDownload() {
+  return NULL;
+}
+
+bool DownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
+    const FilePath& path) {
+  return false;
+}
+
+bool DownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
+  return true;
+}
+
+bool DownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
   return true;
 }
 
 bool DownloadManagerDelegate::GenerateFileHash() {
   return false;
 }
-
-std::string
-DownloadManagerDelegate::ApplicationClientIdForFileScanning() const {
-  return std::string();
-}
-
-DownloadManagerDelegate::~DownloadManagerDelegate() {}
 
 }  // namespace content

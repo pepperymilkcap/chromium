@@ -6,11 +6,9 @@
 #define PPAPI_C_PRIVATE_PPB_PDF_H_
 
 #include "ppapi/c/dev/ppb_font_dev.h"
-#include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/c/private/pp_private_font_charset.h"
 
 #define PPB_PDF_INTERFACE "PPB_PDF;1"
 
@@ -69,14 +67,30 @@ typedef enum {
   PP_RESOURCEIMAGE_PDF_BUTTON_ZOOMIN_END_HOVER = 41,
   PP_RESOURCEIMAGE_PDF_BUTTON_ZOOMIN_END_PRESSED = 42,
   PP_RESOURCEIMAGE_PDF_PAN_SCROLL_ICON = 43,
-  PP_RESOURCEIMAGE_PDF_PAGE_INDICATOR_BACKGROUND = 44,
-  PP_RESOURCEIMAGE_PDF_BUTTON_PRINT_DISABLED = 45
+  PP_RESOURCEIMAGE_PDF_PAGE_INDICATOR_BACKGROUND = 44
 } PP_ResourceImage;
 
 typedef enum {
-  PP_PDFFEATURE_HIDPI = 0,
-  PP_PDFFEATURE_PRINTING = 1
-} PP_PDFFeature;
+  PP_PRIVATEFONTCHARSET_ANSI = 0,
+  PP_PRIVATEFONTCHARSET_DEFAULT = 1,
+  PP_PRIVATEFONTCHARSET_SYMBOL = 2,
+  PP_PRIVATEFONTCHARSET_MAC = 77,
+  PP_PRIVATEFONTCHARSET_SHIFTJIS = 128,
+  PP_PRIVATEFONTCHARSET_HANGUL = 129,
+  PP_PRIVATEFONTCHARSET_JOHAB = 130,
+  PP_PRIVATEFONTCHARSET_GB2312 =134,
+  PP_PRIVATEFONTCHARSET_CHINESEBIG5 = 136,
+  PP_PRIVATEFONTCHARSET_GREEK = 161,
+  PP_PRIVATEFONTCHARSET_TURKISH = 162,
+  PP_PRIVATEFONTCHARSET_VIETNAMESE = 163,
+  PP_PRIVATEFONTCHARSET_HEBREW = 177,
+  PP_PRIVATEFONTCHARSET_ARABIC = 178,
+  PP_PRIVATEFONTCHARSET_BALTIC = 186,
+  PP_PRIVATEFONTCHARSET_RUSSIAN = 204,
+  PP_PRIVATEFONTCHARSET_THAI = 222,
+  PP_PRIVATEFONTCHARSET_EASTEUROPE = 238,
+  PP_PRIVATEFONTCHARSET_OEM = 255
+} PP_PrivateFontCharset;
 
 struct PP_PrivateFontFileDescription {
   const char* face;
@@ -104,7 +118,7 @@ struct PPB_PDF {
   // Currently Linux-only.
   PP_Resource (*GetFontFileWithFallback)(
       PP_Instance instance,
-      const struct PP_BrowserFont_Trusted_Description* description,
+      const struct PP_FontDescription_Dev* description,
       PP_PrivateFontCharset charset);
 
   // Given a resource previously returned by GetFontFileWithFallback, returns
@@ -135,10 +149,10 @@ struct PPB_PDF {
   void (*SetContentRestriction)(PP_Instance instance, int restrictions);
 
   // Use UMA so we know average pdf page count.
-  void (*HistogramPDFPageCount)(PP_Instance instance, int count);
+  void (*HistogramPDFPageCount)(int count);
 
   // Notifies the browser that the given action has been performed.
-  void (*UserMetricsRecordAction)(PP_Instance instance, struct PP_Var action);
+  void (*UserMetricsRecordAction)(struct PP_Var action);
 
   // Notifies the browser that the PDF has an unsupported feature.
   void (*HasUnsupportedFeature)(PP_Instance instance);
@@ -148,21 +162,6 @@ struct PPB_PDF {
 
   // Invoke Print dialog for plugin.
   void (*Print)(PP_Instance instance);
-
-  PP_Bool(*IsFeatureEnabled)(PP_Instance instance, PP_PDFFeature feature);
-
-  // Returns a resource image appropriate for a device with |scale| density.
-  // Returns 0 (NULL resource) if there is no resource at that scale
-  PP_Resource (*GetResourceImageForScale)(PP_Instance instance,
-                                          PP_ResourceImage image_id,
-                                          float scale);
-
-  // Invoke password dialog for plugin.
- struct PP_Var (*ModalPromptForPassword)(PP_Instance instance,
-                                         struct PP_Var message);
-
- // Returns PP_TRUE if the plugin is out of process.
- PP_Bool(*IsOutOfProcess)(PP_Instance instance);
 };
 
 #endif  // PPAPI_C_PRIVATE_PPB_PDF_H_

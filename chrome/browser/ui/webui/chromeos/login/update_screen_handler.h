@@ -1,28 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_UPDATE_SCREEN_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_UPDATE_SCREEN_HANDLER_H_
 
-#include <string>
-
 #include "base/compiler_specific.h"
-#include "chrome/browser/chromeos/login/screens/update_screen_actor.h"
+#include "chrome/browser/chromeos/login/update_screen_actor.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
-#include "chrome/browser/ui/webui/chromeos/login/network_dropdown_handler.h"
 
 namespace chromeos {
 
 class UpdateScreenHandler : public UpdateScreenActor,
-                            public BaseScreenHandler,
-                            public NetworkDropdownHandler::Observer {
+                            public BaseScreenHandler {
  public:
   UpdateScreenHandler();
   virtual ~UpdateScreenHandler();
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) OVERRIDE;
+  virtual void GetLocalizedStrings(
+      base::DictionaryValue* localized_strings) OVERRIDE;
   virtual void Initialize() OVERRIDE;
 
   // UpdateScreenActor implementation:
@@ -32,23 +29,16 @@ class UpdateScreenHandler : public UpdateScreenActor,
   virtual void PrepareToShow() OVERRIDE;
   virtual void ShowManualRebootInfo() OVERRIDE;
   virtual void SetProgress(int progress) OVERRIDE;
-  virtual void ShowEstimatedTimeLeft(bool visible) OVERRIDE;
-  virtual void SetEstimatedTimeLeft(const base::TimeDelta& time) OVERRIDE;
-  virtual void ShowProgressMessage(bool visible) OVERRIDE;
-  virtual void SetProgressMessage(ProgressMessage message) OVERRIDE;
-  virtual void ShowCurtain(bool visible) OVERRIDE;
+  virtual void ShowCurtain(bool enable) OVERRIDE;
+  virtual void ShowPreparingUpdatesInfo(bool visible) OVERRIDE;
 
   // WebUIMessageHandler implementation:
   virtual void RegisterMessages() OVERRIDE;
 
  private:
-  // NetworkDropdownHandler::Observer implementation:
-  virtual void OnConnectToNetworkRequested(
-      const std::string& service_path) OVERRIDE;
-
 #if !defined(OFFICIAL_BUILD)
   // Called when user presses Escape to cancel update.
-  void HandleUpdateCancel();
+  void HandleUpdateCancel(const base::ListValue* args);
 #endif
 
   UpdateScreenActor::Delegate* screen_;

@@ -1,23 +1,21 @@
-// Copyright 2010 Google Inc. All Rights Reserved.
+// Copyright 2010 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 // Quantizer initialization
 //
 // Author: Skal (pascal.massimino@gmail.com)
 
-#include "./vp8i.h"
+#include "vp8i.h"
 
 #if defined(__cplusplus) || defined(c_plusplus)
 extern "C" {
 #endif
 
-static WEBP_INLINE int clip(int v, int M) {
+static inline int clip(int v, int M) {
   return v < 0 ? 0 : v > M ? M : v;
 }
 
@@ -96,10 +94,8 @@ void VP8ParseQuant(VP8Decoder* const dec) {
       m->y1_mat_[1] = kAcTable[clip(q + 0,       127)];
 
       m->y2_mat_[0] = kDcTable[clip(q + dqy2_dc, 127)] * 2;
-      // For all x in [0..284], x*155/100 is bitwise equal to (x*101581) >> 16.
-      // The smallest precision for that is '(x*6349) >> 12' but 16 is a good
-      // word size.
-      m->y2_mat_[1] = (kAcTable[clip(q + dqy2_ac, 127)] * 101581) >> 16;
+      // TODO(skal): make it another table?
+      m->y2_mat_[1] = kAcTable[clip(q + dqy2_ac, 127)] * 155 / 100;
       if (m->y2_mat_[1] < 8) m->y2_mat_[1] = 8;
 
       m->uv_mat_[0] = kDcTable[clip(q + dquv_dc, 117)];

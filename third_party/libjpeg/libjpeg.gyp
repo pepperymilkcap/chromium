@@ -3,17 +3,22 @@
 # found in the LICENSE file.
 
 {
-  # This file handles building both with our local libjpeg and with the system
-  # libjpeg.
+  'variables': {
+    'conditions': [
+      [ 'os_posix == 1 and OS != "mac"', {
+        # Link to system .so since we already use it due to GTK.
+        'use_system_libjpeg%': 1,
+      }, {  # os_posix != 1 or OS == "mac"
+        'use_system_libjpeg%': 0,
+      }],
+    ],
+  },
   'conditions': [
     ['use_system_libjpeg==0', {
       'targets': [
         {
           'target_name': 'libjpeg',
           'type': 'static_library',
-          'defines': [
-            'NO_GETENV',  # getenv() is not thread-safe.
-          ],
           'sources': [
             'jcapimin.c',
             'jcapistd.c',
@@ -88,18 +93,6 @@
           'direct_dependent_settings': {
             'defines': [
               'USE_SYSTEM_LIBJPEG',
-            ],
-            'conditions': [
-              ['os_bsd==1', {
-                'include_dirs': [
-                  '/usr/local/include',
-                ],
-              }],
-              ['OS=="android"', {
-                'include_dirs': [
-                  '<(android_src)/external/jpeg',
-                ],
-              }],
             ],
           },
           'link_settings': {

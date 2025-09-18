@@ -1,68 +1,66 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_EXTENSION_INFOBAR_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_EXTENSION_INFOBAR_H_
+#pragma once
 
 #include "base/compiler_specific.h"
+#include "chrome/browser/extensions/extension_infobar_delegate.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
-#include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 class Browser;
-class ExtensionInfoBarDelegate;
-
 namespace views {
-class ImageView;
 class MenuButton;
 }
 
 class ExtensionInfoBar : public InfoBarView,
-                         public views::MenuButtonListener {
+                         public ImageLoadingTracker::Observer,
+                         public ExtensionInfoBarDelegate::DelegateObserver,
+                         public views::ViewMenuDelegate {
  public:
-  ExtensionInfoBar(scoped_ptr<ExtensionInfoBarDelegate> delegate,
-                   Browser* browser);
+  ExtensionInfoBar(Browser* browser,
+                   InfoBarTabHelper* owner,
+                   ExtensionInfoBarDelegate* delegate);
 
  private:
   virtual ~ExtensionInfoBar();
 
   // InfoBarView:
   virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
-  virtual int ContentMinimumWidth() OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
+  virtual int ContentMinimumWidth() const OVERRIDE;
 
-  // views::MenuButtonListener:
-  virtual void OnMenuButtonClicked(views::View* source,
-                                   const gfx::Point& point) OVERRIDE;
+  // ImageLoadingTracker::Observer:
+  virtual void OnImageLoaded(SkBitmap* image,
+                             const ExtensionResource& resource,
+                             int index) OVERRIDE;
 
-  void OnImageLoaded(const gfx::Image& image);
+  // ExtensionInfoBarDelegate::DelegateObserver:
+  virtual void OnDelegateDeleted() OVERRIDE;
+
+  // views::ViewMenuDelegate:
+  virtual void RunMenu(View* source, const gfx::Point& pt) OVERRIDE;
+
   ExtensionInfoBarDelegate* GetDelegate();
 
-  // Returns the width of all content other than the extension view.  Layout()
-  // uses this to determine how much space the extension view can take.
-  int NonExtensionViewWidth() const;
+  // TODO(pkasting): This shadows InfoBarView::delegate_.  Get rid of this once
+  // InfoBars own their delegates (and thus we don't need the DelegateObserver
+  // functionality).  For now, almost everyone should use GetDelegate() instead.
+  InfoBarDelegate* delegate_;
 
   Browser* browser_;
 
-  // The infobar icon used for the extension infobar. The icon can be either a
-  // plain image (in which case |icon_as_image_| is set) or a dropdown menu (in
-  // which case |icon_as_menu_| is set).
-  // The icon is a dropdown menu if the extension showing the infobar shows
-  // configure context menus.
-  views::View* infobar_icon_;
-
   // The dropdown menu for accessing the contextual extension actions.
-  // It is non-NULL if the |infobar_icon_| is a menu button and in that case
-  // |icon_as_menu_ == infobar_icon_|.
-  views::MenuButton* icon_as_menu_;
+  views::MenuButton* menu_;
 
-  // The image view for the icon.
-  // It is non-NULL if |infobar_icon_| is an image and in that case
-  // |icon_as_image_ == infobar_icon_|.
-  views::ImageView* icon_as_image_;
-
-  base::WeakPtrFactory<ExtensionInfoBar> weak_ptr_factory_;
+  // Keeps track of images being loaded on the File thread.
+  ImageLoadingTracker tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInfoBar);
 };

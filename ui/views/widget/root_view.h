@@ -4,21 +4,20 @@
 
 #ifndef UI_VIEWS_WIDGET_ROOT_VIEW_H_
 #define UI_VIEWS_WIDGET_ROOT_VIEW_H_
+#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "ui/events/event_dispatcher.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/focus/focus_search.h"
 #include "ui/views/view.h"
 
-namespace views {
-
-namespace test {
-class RootViewTestHelper;
-class WidgetTest;
+namespace ui {
+enum TouchStatus;
 }
+
+namespace views {
 
 class Widget;
 
@@ -43,9 +42,7 @@ namespace internal {
 //  TODO(beng): Clean up API further, make Widget a friend.
 //  TODO(sky): We don't really want to export this class.
 //
-class VIEWS_EXPORT RootView : public View,
-                              public FocusTraversable,
-                              public ui::EventDispatcherDelegate {
+class VIEWS_EXPORT RootView : public View, public FocusTraversable {
  public:
   static const char kViewClassName[];
 
@@ -61,17 +58,15 @@ class VIEWS_EXPORT RootView : public View,
   View* GetContentsView();
 
   // Called when parent of the host changed.
-  void NotifyNativeViewHierarchyChanged();
+  void NotifyNativeViewHierarchyChanged(bool attached,
+                                        gfx::NativeView native_view);
 
   // Input ---------------------------------------------------------------------
 
   // Process a key event. Send the event to the focused view and up the focus
   // path, and finally to the default keyboard handler, until someone consumes
   // it. Returns whether anyone consumed the event.
-  void DispatchKeyEvent(ui::KeyEvent* event);
-  void DispatchScrollEvent(ui::ScrollEvent* event);
-  void DispatchTouchEvent(ui::TouchEvent* event);
-  virtual void DispatchGestureEvent(ui::GestureEvent* event);
+  bool OnKeyEvent(const KeyEvent& event);
 
   // Focus ---------------------------------------------------------------------
 
@@ -101,35 +96,33 @@ class VIEWS_EXPORT RootView : public View,
   virtual const Widget* GetWidget() const OVERRIDE;
   virtual Widget* GetWidget() OVERRIDE;
   virtual bool IsDrawn() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
+  virtual void OnMouseMoved(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseWheel(const MouseWheelEvent& event) OVERRIDE;
+  virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE;
   virtual void SetMouseHandler(View* new_mouse_handler) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual void UpdateParentLayer() OVERRIDE;
+  virtual void ReorderChildLayers(ui::Layer* parent_layer) OVERRIDE;
 
  protected:
   // Overridden from View:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
-  virtual void VisibilityChanged(View* starting_from, bool is_visible) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add, View* parent,
+                                    View* child) OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual gfx::Vector2d CalculateOffsetToAncestorWithLayer(
+  virtual void CalculateOffsetToAncestorWithLayer(
+      gfx::Point* offset,
       ui::Layer** layer_parent) OVERRIDE;
-  virtual View::DragInfo* GetDragInfo() OVERRIDE;
 
  private:
-  friend class ::views::View;
-  friend class ::views::Widget;
-  friend class ::views::test::RootViewTestHelper;
-  friend class ::views::test::WidgetTest;
+  friend class View;
+  friend class Widget;
 
   // Input ---------------------------------------------------------------------
 
@@ -138,29 +131,12 @@ class VIEWS_EXPORT RootView : public View,
   // cursor during drag operations. The location of the mouse should be in the
   // current coordinate system (i.e. any necessary transformation should be
   // applied to the point prior to calling this).
-  void UpdateCursor(const ui::MouseEvent& event);
+  void UpdateCursor(const MouseEvent& event);
 
   // Updates the last_mouse_* fields from e. The location of the mouse should be
   // in the current coordinate system (i.e. any necessary transformation should
   // be applied to the point prior to calling this).
-  void SetMouseLocationAndFlags(const ui::MouseEvent& event);
-
-  void DispatchEventToTarget(View* target, ui::Event* event);
-
-  // |view| is the view receiving |event|. This function sends the event to all
-  // the Views up the hierarchy that has |notify_enter_exit_on_child_| flag
-  // turned on, but does not contain |sibling|.
-  void NotifyEnterExitOfDescendant(const ui::MouseEvent& event,
-                                   ui::EventType type,
-                                   View* view,
-                                   View* sibling);
-
-  // Dispatches the KeyEvent to |view| and ancestors until the event is
-  // handled.
-  void DispatchKeyEventStartAt(View* view, ui::KeyEvent* event);
-
-  // Overridden from ui::EventDispatcherDelegate:
-  virtual bool CanDispatchToTarget(ui::EventTarget* target) OVERRIDE;
+  void SetMouseLocationAndFlags(const MouseEvent& event);
 
   //////////////////////////////////////////////////////////////////////////////
 
@@ -193,13 +169,8 @@ class VIEWS_EXPORT RootView : public View,
   // The view currently handling touch events.
   View* touch_pressed_handler_;
 
-  // The view currently handling gesture events. When set, this handler receives
-  // all gesture events, except when there is an event handler for the specific
-  // gesture (e.g. scroll).
-  View* gesture_handler_;
-
-  // The view currently handling scroll gesture events.
-  View* scroll_gesture_handler_;
+  // The view currently handling gesture events.
+  View* gesture_handling_view_;
 
   // Focus ---------------------------------------------------------------------
 
@@ -215,8 +186,6 @@ class VIEWS_EXPORT RootView : public View,
   // The View that contains this RootView. This is used when we have RootView
   // wrapped inside native components, and is used for the focus traversal.
   View* focus_traversable_parent_view_;
-
-  View* event_dispatch_target_;
 
   // Drag and drop -------------------------------------------------------------
 

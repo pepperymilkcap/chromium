@@ -7,9 +7,7 @@
 
 #include <map>
 #include <set>
-#include <vector>
 
-#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_log.h"
@@ -17,7 +15,6 @@
 #include "net/http/http_stream_factory.h"
 #include "net/proxy/proxy_server.h"
 #include "net/socket/ssl_client_socket.h"
-#include "net/spdy/spdy_session_key.h"
 
 namespace net {
 
@@ -29,68 +26,39 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl :
     public HttpStreamFactory,
     public HttpPipelinedHostPool::Delegate {
  public:
-  // RequestStream may only be called if |for_websockets| is false.
-  // RequestWebSocketHandshakeStream may only be called if |for_websockets|
-  // is true.
-  HttpStreamFactoryImpl(HttpNetworkSession* session, bool for_websockets);
+  explicit HttpStreamFactoryImpl(HttpNetworkSession* session);
   virtual ~HttpStreamFactoryImpl();
 
   // HttpStreamFactory interface
   virtual HttpStreamRequest* RequestStream(
       const HttpRequestInfo& info,
-      RequestPriority priority,
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
-      const BoundNetLog& net_log) OVERRIDE;
-
-  virtual HttpStreamRequest* RequestWebSocketHandshakeStream(
-      const HttpRequestInfo& info,
-      RequestPriority priority,
-      const SSLConfig& server_ssl_config,
-      const SSLConfig& proxy_ssl_config,
-      HttpStreamRequest::Delegate* delegate,
-      WebSocketHandshakeStreamBase::CreateHelper* create_helper,
       const BoundNetLog& net_log) OVERRIDE;
 
   virtual void PreconnectStreams(int num_streams,
                                  const HttpRequestInfo& info,
-                                 RequestPriority priority,
                                  const SSLConfig& server_ssl_config,
                                  const SSLConfig& proxy_ssl_config) OVERRIDE;
+  virtual void AddTLSIntolerantServer(const HostPortPair& server) OVERRIDE;
+  virtual bool IsTLSIntolerantServer(const HostPortPair& server) const OVERRIDE;
   virtual base::Value* PipelineInfoToValue() const OVERRIDE;
-  virtual const HostMappingRules* GetHostMappingRules() const OVERRIDE;
 
   // HttpPipelinedHostPool::Delegate interface
   virtual void OnHttpPipelinedHostHasAdditionalCapacity(
-      HttpPipelinedHost* host) OVERRIDE;
-
-  size_t num_orphaned_jobs() const { return orphaned_job_set_.size(); }
+      const HostPortPair& origin) OVERRIDE;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(HttpStreamFactoryImplRequestTest, SetPriority);
-
-  class NET_EXPORT_PRIVATE Request;
-  class NET_EXPORT_PRIVATE Job;
+  class Request;
+  class Job;
 
   typedef std::set<Request*> RequestSet;
-  typedef std::vector<Request*> RequestVector;
-  typedef std::map<SpdySessionKey, RequestSet> SpdySessionRequestMap;
-  typedef std::map<HttpPipelinedHost::Key,
-                   RequestVector> HttpPipeliningRequestMap;
+  typedef std::map<HostPortProxyPair, RequestSet> SpdySessionRequestMap;
+  typedef std::map<HostPortPair, RequestSet> HttpPipeliningRequestMap;
 
-  HttpStreamRequest* RequestStreamInternal(
-      const HttpRequestInfo& info,
-      RequestPriority priority,
-      const SSLConfig& server_ssl_config,
-      const SSLConfig& proxy_ssl_config,
-      HttpStreamRequest::Delegate* delegate,
-      WebSocketHandshakeStreamBase::CreateHelper* create_helper,
-      const BoundNetLog& net_log);
-
-  PortAlternateProtocolPair GetAlternateProtocolRequestFor(
-      const GURL& original_url,
-      GURL* alternate_url) const;
+  bool GetAlternateProtocolRequestFor(const GURL& original_url,
+                                      GURL* alternate_url) const;
 
   // Detaches |job| from |request|.
   void OrphanJob(Job* job, const Request* request);
@@ -98,14 +66,14 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl :
   // Called when a SpdySession is ready. It will find appropriate Requests and
   // fulfill them. |direct| indicates whether or not |spdy_session| uses a
   // proxy.
-  void OnNewSpdySessionReady(const base::WeakPtr<SpdySession>& spdy_session,
-                             bool direct,
-                             const SSLConfig& used_ssl_config,
-                             const ProxyInfo& used_proxy_info,
-                             bool was_npn_negotiated,
-                             NextProto protocol_negotiated,
-                             bool using_spdy,
-                             const BoundNetLog& net_log);
+  void OnSpdySessionReady(scoped_refptr<SpdySession> spdy_session,
+                          bool direct,
+                          const SSLConfig& used_ssl_config,
+                          const ProxyInfo& used_proxy_info,
+                          bool was_npn_negotiated,
+                          SSLClientSocket::NextProto protocol_negotiated,
+                          bool using_spdy,
+                          const BoundNetLog& net_log);
 
   // Called when the Job detects that the endpoint indicated by the
   // Alternate-Protocol does not work. Lets the factory update
@@ -121,12 +89,9 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl :
   // Called when the Preconnect completes. Used for testing.
   virtual void OnPreconnectsCompleteInternal() {}
 
-  void AbortPipelinedRequestsWithKey(const Job* job,
-                                     const HttpPipelinedHost::Key& key,
-                                     int status,
-                                     const SSLConfig& used_ssl_config);
-
   HttpNetworkSession* const session_;
+
+  std::set<HostPortPair> tls_intolerant_servers_;
 
   // All Requests are handed out to clients. By the time HttpStreamFactoryImpl
   // is destroyed, all Requests should be deleted (which should remove them from
@@ -150,7 +115,6 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl :
   // deleted when the factory is destroyed.
   std::set<const Job*> preconnect_job_set_;
 
-  const bool for_websockets_;
   DISALLOW_COPY_AND_ASSIGN(HttpStreamFactoryImpl);
 };
 

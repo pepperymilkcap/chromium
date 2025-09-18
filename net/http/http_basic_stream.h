@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,48 +8,54 @@
 
 #ifndef NET_HTTP_HTTP_BASIC_STREAM_H_
 #define NET_HTTP_HTTP_BASIC_STREAM_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "net/http/http_basic_state.h"
+#include "base/memory/scoped_ptr.h"
 #include "net/http/http_stream.h"
 
 namespace net {
 
 class BoundNetLog;
 class ClientSocketHandle;
+class GrowableIOBuffer;
 class HttpResponseInfo;
 struct HttpRequestInfo;
 class HttpRequestHeaders;
 class HttpStreamParser;
 class IOBuffer;
+class UploadDataStream;
 
 class HttpBasicStream : public HttpStream {
  public:
-  // Constructs a new HttpBasicStream. InitializeStream must be called to
-  // initialize it correctly.
-  HttpBasicStream(ClientSocketHandle* connection, bool using_proxy);
+  // Constructs a new HttpBasicStream.  If |parser| is NULL, then
+  // InitializeStream should be called to initialize it correctly.  If
+  // |parser| is non-null, then InitializeStream should not be called,
+  // as the stream is already initialized.
+  HttpBasicStream(ClientSocketHandle* connection,
+                  HttpStreamParser* parser,
+                  bool using_proxy);
   virtual ~HttpBasicStream();
 
   // HttpStream methods:
   virtual int InitializeStream(const HttpRequestInfo* request_info,
-                               RequestPriority priority,
                                const BoundNetLog& net_log,
                                const CompletionCallback& callback) OVERRIDE;
 
   virtual int SendRequest(const HttpRequestHeaders& headers,
+                          UploadDataStream* request_body,
                           HttpResponseInfo* response,
                           const CompletionCallback& callback) OVERRIDE;
 
-  virtual UploadProgress GetUploadProgress() const OVERRIDE;
+  virtual uint64 GetUploadProgress() const OVERRIDE;
 
   virtual int ReadResponseHeaders(const CompletionCallback& callback) OVERRIDE;
 
   virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
 
-  virtual int ReadResponseBody(IOBuffer* buf,
-                               int buf_len,
+  virtual int ReadResponseBody(IOBuffer* buf, int buf_len,
                                const CompletionCallback& callback) OVERRIDE;
 
   virtual void Close(bool not_reusable) OVERRIDE;
@@ -60,16 +66,13 @@ class HttpBasicStream : public HttpStream {
 
   virtual bool CanFindEndOfResponse() const OVERRIDE;
 
+  virtual bool IsMoreDataBuffered() const OVERRIDE;
+
   virtual bool IsConnectionReused() const OVERRIDE;
 
   virtual void SetConnectionReused() OVERRIDE;
 
   virtual bool IsConnectionReusable() const OVERRIDE;
-
-  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
-
-  virtual bool GetLoadTimingInfo(
-      LoadTimingInfo* load_timing_info) const OVERRIDE;
 
   virtual void GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
 
@@ -78,14 +81,26 @@ class HttpBasicStream : public HttpStream {
 
   virtual bool IsSpdyHttpStream() const OVERRIDE;
 
+  virtual void LogNumRttVsBytesMetrics() const OVERRIDE;
+
   virtual void Drain(HttpNetworkSession* session) OVERRIDE;
 
-  virtual void SetPriority(RequestPriority priority) OVERRIDE;
-
  private:
-  HttpStreamParser* parser() const { return state_.parser(); }
+  scoped_refptr<GrowableIOBuffer> read_buf_;
 
-  HttpBasicState state_;
+  scoped_ptr<HttpStreamParser> parser_;
+
+  scoped_ptr<ClientSocketHandle> connection_;
+
+  bool using_proxy_;
+
+  std::string request_line_;
+
+  const HttpRequestInfo* request_info_;
+
+  const HttpResponseInfo* response_;
+
+  int64 bytes_read_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpBasicStream);
 };

@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_MEMORY_DETAILS_H_
 #define CHROME_BROWSER_MEMORY_DETAILS_H_
+#pragma once
 
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/process/process_metrics.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/site_details.h"
+#include "base/process_util.h"
+#include "base/string16.h"
 #include "content/public/common/process_type.h"
 
 // We collect data about each browser process.  A browser may
@@ -32,14 +32,11 @@ struct ProcessMemoryInformation {
 
   static std::string GetRendererTypeNameInEnglish(RendererProcessType type);
   static std::string GetFullTypeNameInEnglish(
-      int process_type,
+      content::ProcessType type,
       RendererProcessType rtype);
 
   ProcessMemoryInformation();
   ~ProcessMemoryInformation();
-
-  // Default ordering is by private memory consumption.
-  bool operator<(const ProcessMemoryInformation& rhs) const;
 
   // The process id.
   base::ProcessId pid;
@@ -48,9 +45,9 @@ struct ProcessMemoryInformation {
   // The committed bytes.
   base::CommittedKBytes committed;
   // The process version
-  base::string16 version;
+  string16 version;
   // The process product name.
-  base::string16 product_name;
+  string16 product_name;
   // The number of processes which this memory represents.
   int num_processes;
   // A process is a diagnostics process if it is rendering about:memory.
@@ -58,11 +55,11 @@ struct ProcessMemoryInformation {
   // results.
   bool is_diagnostics;
   // If this is a child process of Chrome, what type (i.e. plugin) it is.
-  int process_type;
+  content::ProcessType type;
   // If this is a renderer process, what type it is.
   RendererProcessType renderer_type;
   // A collection of titles used, i.e. for a tab it'll show all the page titles.
-  std::vector<base::string16> titles;
+  std::vector<string16> titles;
 };
 
 typedef std::vector<ProcessMemoryInformation> ProcessMemoryInformationList;
@@ -74,13 +71,9 @@ struct ProcessData {
   ~ProcessData();
   ProcessData& operator=(const ProcessData& rhs);
 
-  base::string16 name;
-  base::string16 process_name;
+  string16 name;
+  string16 process_name;
   ProcessMemoryInformationList processes;
-
-  // Track site data for predicting process counts with out-of-process iframes.
-  // See site_details.h.
-  BrowserContextSiteDataMap site_data;
 };
 
 #if defined(OS_MACOSX)
@@ -114,11 +107,6 @@ class ProcessInfoSnapshot;
 //    }
 class MemoryDetails : public base::RefCountedThreadSafe<MemoryDetails> {
  public:
-  enum UserMetricsMode {
-    UPDATE_USER_METRICS,  // Update UMA memory histograms with results.
-    SKIP_USER_METRICS
-  };
-
   // Constructor.
   MemoryDetails();
 
@@ -128,15 +116,10 @@ class MemoryDetails : public base::RefCountedThreadSafe<MemoryDetails> {
 
   // Initiate updating the current memory details.  These are fetched
   // asynchronously because data must be collected from multiple threads.
-  // Updates UMA memory histograms if |mode| is UPDATE_USER_METRICS.
   // OnDetailsAvailable will be called when this process is complete.
-  void StartFetch(UserMetricsMode user_metrics_mode);
+  void StartFetch();
 
-  virtual void OnDetailsAvailable() = 0;
-
-  // Returns a string summarizing memory usage of the Chrome browser process
-  // and all sub-processes, suitable for logging.
-  std::string ToLogString();
+  virtual void OnDetailsAvailable() {}
 
  protected:
   friend class base::RefCountedThreadSafe<MemoryDetails>;
@@ -173,23 +156,14 @@ class MemoryDetails : public base::RefCountedThreadSafe<MemoryDetails> {
   // renderer processes is only available there.
   void CollectChildInfoOnUIThread();
 
-  // Updates the global histograms for tracking memory usage.
+  // Each time we take a memory sample, we do a little work to update
+  // the global histograms for tracking memory usage.
   void UpdateHistograms();
-
-#if defined(OS_CHROMEOS)
-  void UpdateSwapHistograms();
-#endif
 
   // Returns a pointer to the ProcessData structure for Chrome.
   ProcessData* ChromeBrowser();
 
   std::vector<ProcessData> process_data_;
-
-  UserMetricsMode user_metrics_mode_;
-
-#if defined(OS_CHROMEOS)
-  base::SwapInfo swap_info_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(MemoryDetails);
 };

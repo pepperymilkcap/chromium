@@ -4,8 +4,6 @@
 
 #include "chrome/service/cloud_print/print_system.h"
 
-#include "base/guid.h"
-
 namespace cloud_print {
 
 PrintJobDetails::PrintJobDetails()
@@ -31,9 +29,4 @@ PrintSystem::JobSpooler::~JobSpooler() {}
 
 PrintSystem::~PrintSystem() {}
 
-std::string PrintSystem::GenerateProxyId() {
-  return base::GenerateGUID();
-}
-
 }  // namespace cloud_print
-

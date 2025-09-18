@@ -19,22 +19,30 @@
 
 class IDLVisitor(object):
   def __init__(self):
-    pass
+    self.depth = 0
 
   # Return TRUE if the node should be visited
   def VisitFilter(self, node, data):
     return True
 
+  # Return TRUE if data should be added to the childdata list
+  def AgrigateFilter(self, data):
+    return data is not None
+
   def Visit(self, node, data):
+    self.depth += 1
     if not self.VisitFilter(node, data): return None
 
     childdata = []
     newdata = self.Arrive(node, data)
     for child in node.GetChildren():
       ret = self.Visit(child, newdata)
-      if ret is not None:
+      if self.AgrigateFilter(ret):
         childdata.append(ret)
-    return self.Depart(node, newdata, childdata)
+    out = self.Depart(node, newdata, childdata)
+
+    self.depth -= 1
+    return out
 
   def Arrive(self, node, data):
     __pychecker__ = 'unusednames=node'
@@ -43,3 +51,31 @@ class IDLVisitor(object):
   def Depart(self, node, data, childdata):
     __pychecker__ = 'unusednames=node,childdata'
     return data
+
+
+#
+# IDLVersionVisitor
+#
+# The IDLVersionVisitor will only visit nodes with intervals that include the
+# version.  It will also optionally filter based on a class list
+#
+class IDLVersionVisitor(object):
+  def __init__(self, version, classList):
+    self.version = version
+    self.classes = classes
+
+  def Filter(self, node, data):
+    if self.classList and node.cls not in self.classList: return False
+    if not node.IsVersion(self.version): return False
+    return True
+
+class IDLRangeVisitor(object):
+  def __init__(self, vmin, vmax, classList):
+    self.vmin = vmin
+    self.vmax = vmax
+    self.classList = classList
+
+  def Filter(self, node, data):
+    if self.classList and node.cls not in self.classList: return False
+    if not node.IsVersion(self.version): return False
+    return True

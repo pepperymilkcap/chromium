@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  /** @const */ var OptionsPage = options.OptionsPage;
-  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
+  const OptionsPage = options.OptionsPage;
+  const ArrayDataModel = cr.ui.ArrayDataModel;
 
   // The GUID of the loaded address.
   var guid;
@@ -16,7 +16,7 @@ cr.define('options', function() {
    */
   function AutofillEditAddressOverlay() {
     OptionsPage.call(this, 'autofillEditAddress',
-                     loadTimeData.getString('autofillEditAddressTitle'),
+                     templateData.autofillEditAddressTitle,
                      'autofill-edit-address-overlay');
   }
 
@@ -36,46 +36,16 @@ cr.define('options', function() {
       var self = this;
       $('autofill-edit-address-cancel-button').onclick = function(event) {
         self.dismissOverlay_();
-      };
-
-      // TODO(jhawkins): Investigate other possible solutions.
+      }
       $('autofill-edit-address-apply-button').onclick = function(event) {
-        // Blur active element to ensure that pending changes are committed.
-        if (document.activeElement)
-          document.activeElement.blur();
-        // Blurring is delayed for list elements.  Queue save and close to
-        // ensure that pending changes have been applied.
-        setTimeout(function() {
-          self.saveAddress_();
-          self.dismissOverlay_();
-        }, 0);
-      };
-
-      // Prevent 'blur' events on the OK and cancel buttons, which can trigger
-      // insertion of new placeholder elements.  The addition of placeholders
-      // affects layout, which interferes with being able to click on the
-      // buttons.
-      $('autofill-edit-address-apply-button').onmousedown = function(event) {
-        event.preventDefault();
-      };
-      $('autofill-edit-address-cancel-button').onmousedown = function(event) {
-        event.preventDefault();
-      };
+        self.saveAddress_();
+        self.dismissOverlay_();
+      }
 
       self.guid = '';
       self.populateCountryList_();
       self.clearInputFields_();
       self.connectInputEvents_();
-    },
-
-    /**
-    * Specifically catch the situations in which the overlay is cancelled
-    * externally (e.g. by pressing <Esc>), so that the input fields and
-    * GUID can be properly cleared.
-    * @override
-    */
-    handleCancel: function() {
-      this.dismissOverlay_();
     },
 
     /**
@@ -100,25 +70,44 @@ cr.define('options', function() {
     /**
      * Updates the data model for the list named |listName| with the values from
      * |entries|.
-     * @param {string} listName The id of the list.
+     * @param {String} listName The id of the list.
      * @param {Array} entries The list of items to be added to the list.
      */
     setMultiValueList_: function(listName, entries) {
       // Add data entries.
       var list = $(listName);
+      list.dataModel = new ArrayDataModel(entries);
 
       // Add special entry for adding new values.
-      var augmentedList = entries.slice();
-      augmentedList.push(null);
-      list.dataModel = new ArrayDataModel(augmentedList);
+      list.dataModel.splice(list.dataModel.length, 0, null);
 
       // Update the status of the 'OK' button.
       this.inputFieldChanged_();
 
-      list.dataModel.addEventListener('splice',
-                                      this.inputFieldChanged_.bind(this));
-      list.dataModel.addEventListener('change',
-                                      this.inputFieldChanged_.bind(this));
+      var self = this;
+      list.dataModel.addEventListener(
+        'splice', function(event) { self.inputFieldChanged_(); });
+      list.dataModel.addEventListener(
+        'change', function(event) { self.inputFieldChanged_(); });
+    },
+
+    /**
+     * Updates the data model for the name list with the values from |entries|.
+     * @param {Array} names The list of names to be added to the list.
+     */
+    setNameList_: function(names) {
+      // Add the given |names| as backing data for the list.
+      var list = $('full-name-list');
+      list.dataModel = new ArrayDataModel(names);
+
+      // Add special entry for adding new values.
+      list.dataModel.splice(list.dataModel.length, 0, null);
+
+      var self = this;
+      list.dataModel.addEventListener(
+        'splice', function(event) { self.inputFieldChanged_(); });
+      list.dataModel.addEventListener(
+        'change', function(event) { self.inputFieldChanged_(); });
     },
 
     /**
@@ -166,14 +155,14 @@ cr.define('options', function() {
     connectInputEvents_: function() {
       var self = this;
       $('company-name').oninput = $('addr-line-1').oninput =
-          $('addr-line-2').oninput = $('city').oninput = $('state').oninput =
-          $('postal-code').oninput = function(event) {
+      $('addr-line-2').oninput = $('city').oninput = $('state').oninput =
+      $('postal-code').oninput = function(event) {
         self.inputFieldChanged_();
-      };
+      }
 
       $('country').onchange = function(event) {
         self.countryChanged_();
-      };
+      }
     },
 
     /**
@@ -200,13 +189,14 @@ cr.define('options', function() {
      * @private
      */
     countryChanged_: function() {
-      var countryCode = $('country').value ||
-          loadTimeData.getString('defaultCountryCode');
+      var countryCode = $('country').value;
+      if (!countryCode)
+        countryCode = templateData.defaultCountryCode;
 
-      var details = loadTimeData.getValue('autofillCountryData')[countryCode];
+      var details = templateData.autofillCountryData[countryCode];
       var postal = $('postal-code-label');
-      postal.textContent = details.postalCodeLabel;
-      $('state-label').textContent = details.stateLabel;
+      postal.textContent = details['postalCodeLabel'];
+      $('state-label').textContent = details['stateLabel'];
 
       // Also update the 'Ok' button as needed.
       this.inputFieldChanged_();
@@ -217,17 +207,47 @@ cr.define('options', function() {
      * @private
      */
     populateCountryList_: function() {
-      var countryList = loadTimeData.getValue('autofillCountrySelectList');
+      var countryData = templateData.autofillCountryData;
+      var defaultCountryCode = templateData.defaultCountryCode;
+
+      // Build an array of the country names and their corresponding country
+      // codes, so that we can sort and insert them in order.
+      var countries = [];
+      for (var countryCode in countryData) {
+        var country = {
+          countryCode: countryCode,
+          name: countryData[countryCode]['name']
+        };
+        countries.push(country);
+      }
+
+      // Sort the countries in alphabetical order by name.
+      countries = countries.sort(function(a, b) {
+        return a.name < b.name ? -1 : 1;
+      });
+
+      // Insert the empty and default countries at the beginning of the array.
+      var emptyCountry = {
+        countryCode: '',
+        name: ''
+      };
+      var defaultCountry = {
+        countryCode: defaultCountryCode,
+        name: countryData[defaultCountryCode]['name']
+      };
+      var separator = {
+        countryCode: '',
+        name: '---',
+        disabled: true
+      }
+      countries.unshift(emptyCountry, defaultCountry, separator);
 
       // Add the countries to the country <select> list.
-      var countrySelect = $('country');
-      // Add an empty option.
-      countrySelect.appendChild(new Option('', ''));
-      for (var i = 0; i < countryList.length; i++) {
-        var option = new Option(countryList[i].name,
-                                countryList[i].value);
-        option.disabled = countryList[i].value == 'separator';
-        countrySelect.appendChild(option);
+      var countryList = $('country');
+      for (var i = 0; i < countries.length; i++) {
+        var country = new Option(countries[i].name, countries[i].countryCode);
+        country.disabled = countries[i].disabled;
+        countryList.appendChild(country)
       }
     },
 
@@ -236,7 +256,7 @@ cr.define('options', function() {
      * @private
      */
     clearInputFields_: function() {
-      this.setMultiValueList_('full-name-list', []);
+      this.setNameList_([]);
       $('company-name').value = '';
       $('addr-line-1').value = '';
       $('addr-line-2').value = '';
@@ -258,7 +278,7 @@ cr.define('options', function() {
     loadAddress_: function(address) {
       this.setInputFields_(address);
       this.inputFieldChanged_();
-      this.guid = address.guid;
+      this.guid = address['guid'];
     },
 
     /**
@@ -266,19 +286,23 @@ cr.define('options', function() {
      * @private
      */
     setInputFields_: function(address) {
-      this.setMultiValueList_('full-name-list', address.fullName);
-      $('company-name').value = address.companyName;
-      $('addr-line-1').value = address.addrLine1;
-      $('addr-line-2').value = address.addrLine2;
-      $('city').value = address.city;
-      $('state').value = address.state;
-      $('postal-code').value = address.postalCode;
-      $('country').value = address.country;
-      this.setMultiValueList_('phone-list', address.phone);
-      this.setMultiValueList_('email-list', address.email);
+      this.setNameList_(address['fullName']);
+      $('company-name').value = address['companyName'];
+      $('addr-line-1').value = address['addrLine1'];
+      $('addr-line-2').value = address['addrLine2'];
+      $('city').value = address['city'];
+      $('state').value = address['state'];
+      $('postal-code').value = address['postalCode'];
+      $('country').value = address['country'];
+      this.setMultiValueList_('phone-list', address['phone']);
+      this.setMultiValueList_('email-list', address['email']);
 
       this.countryChanged_();
     },
+  };
+
+  AutofillEditAddressOverlay.clearInputFields = function() {
+    AutofillEditAddressOverlay.getInstance().clearInputFields_();
   };
 
   AutofillEditAddressOverlay.loadAddress = function(address) {

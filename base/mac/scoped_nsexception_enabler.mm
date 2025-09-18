@@ -39,11 +39,11 @@ void SetNSExceptionsAllowed(bool allowed) {
   return g_exceptionsAllowed.Get().Set(allowed);
 }
 
-id RunBlockIgnoringExceptions(BlockReturningId block) {
+id PerformSelectorIgnoringExceptions(NSObject* target, SEL sel) {
   id ret = nil;
   @try {
     base::mac::ScopedNSExceptionEnabler enable;
-    ret = block();
+    ret = [target performSelector:sel];
   }
   @catch(id exception) {
   }

@@ -1,20 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_all_tabs_controller.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
-#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-
-using base::ASCIIToUTF16;
 
 @interface BookmarkAllTabsControllerOverride : BookmarkAllTabsController
 @end
@@ -42,12 +39,12 @@ class BookmarkAllTabsControllerTest : public CocoaProfileTest {
   const BookmarkNode* folder_a_;
 
   void CreateModel() {
-    BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-    const BookmarkNode* root = model->bookmark_bar_node();
-    folder_a_ = model->AddFolder(root, 0, ASCIIToUTF16("a"));
-    model->AddURL(folder_a_, 0, ASCIIToUTF16("a-0"), GURL("http://a-0.com"));
-    model->AddURL(folder_a_, 1, ASCIIToUTF16("a-1"), GURL("http://a-1.com"));
-    model->AddURL(folder_a_, 2, ASCIIToUTF16("a-2"), GURL("http://a-2.com"));
+    BookmarkModel& model(*(profile()->GetBookmarkModel()));
+    const BookmarkNode* root = model.bookmark_bar_node();
+    folder_a_ = model.AddFolder(root, 0, ASCIIToUTF16("a"));
+    model.AddURL(folder_a_, 0, ASCIIToUTF16("a-0"), GURL("http://a-0.com"));
+    model.AddURL(folder_a_, 1, ASCIIToUTF16("a-1"), GURL("http://a-1.com"));
+    model.AddURL(folder_a_, 2, ASCIIToUTF16("a-2"), GURL("http://a-2.com"));
   }
 
   virtual BookmarkAllTabsControllerOverride* CreateController() {
@@ -55,8 +52,6 @@ class BookmarkAllTabsControllerTest : public CocoaProfileTest {
             initWithParentWindow:test_window()
                          profile:profile()
                           parent:folder_a_
-                             url:GURL()
-                           title:base::string16()
                    configuration:BookmarkEditor::SHOW_TREE];
   }
 

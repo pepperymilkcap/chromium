@@ -4,21 +4,17 @@
 
 #ifndef CHROME_BROWSER_HISTORY_IN_MEMORY_URL_INDEX_TYPES_H_
 #define CHROME_BROWSER_HISTORY_IN_MEMORY_URL_INDEX_TYPES_H_
+#pragma once
 
 #include <map>
 #include <set>
 #include <vector>
 
-#include "base/strings/string16.h"
-#include "chrome/browser/autocomplete/history_provider_util.h"
+#include "base/string16.h"
 #include "chrome/browser/history/history_types.h"
-#include "url/gurl.h"
+#include "chrome/browser/autocomplete/history_provider_util.h"
 
 namespace history {
-
-// The maximum number of characters to consider from an URL and page title
-// while matching user-typed terms.
-const size_t kMaxSignificantChars = 50;
 
 // Matches within URL and Title Strings ----------------------------------------
 
@@ -38,31 +34,13 @@ struct TermMatch {
 };
 typedef std::vector<TermMatch> TermMatches;
 
-// Truncates an overly-long URL, unescapes it, and lower-cases it,
-// returning the result.  This unescaping makes it possible to match
-// substrings that were originally escaped for navigation; for
-// example, if the user searched for "a&p", the query would be escaped
-// as "a%26p", so without unescaping, an input string of "a&p" would
-// no longer match this URL.  Note that the resulting unescaped URL
-// may not be directly navigable (which is why we escaped it to begin
-// with).  |languages| is passed to net::FormatUrl().
-base::string16 CleanUpUrlForMatching(const GURL& gurl,
-                                     const std::string& languages);
-
-// Returns the lower-cased title, possibly truncated if the original title
-// is overly-long.
-base::string16 CleanUpTitleForMatching(const base::string16& title);
-
-// Returns a TermMatches which has an entry for each occurrence of the
-// string |term| found in the string |cleaned_string|. Use
-// CleanUpUrlForMatching() or CleanUpUrlTitleMatching() before passing
-// |cleaned_string| to this function. The function marks each match
-// with |term_num| so that the resulting TermMatches can be merged
-// with other TermMatches for other terms. Note that only the first
-// 2,048 characters of |string| are considered during the match
-// operation.
-TermMatches MatchTermInString(const base::string16& term,
-                              const base::string16& cleaned_string,
+// Returns a TermMatches which has an entry for each occurrence of the string
+// |term| found in the string |string|. Mark each match with |term_num| so
+// that the resulting TermMatches can be merged with other TermMatches for
+// other terms. Note that only the first 2,048 characters of |string| are
+// considered during the match operation.
+TermMatches MatchTermInString(const string16& term,
+                              const string16& string,
                               int term_num);
 
 // Sorts and removes overlapping substring matches from |matches| and
@@ -77,51 +55,54 @@ std::vector<size_t> OffsetsFromTermMatches(const TermMatches& matches);
 TermMatches ReplaceOffsetsInTermMatches(const TermMatches& matches,
                                         const std::vector<size_t>& offsets);
 
+// Used for intermediate history result operations -----------------------------
+
+struct ScoredHistoryMatch : public history::HistoryMatch {
+  ScoredHistoryMatch();  // Required by STL.
+  explicit ScoredHistoryMatch(const history::URLRow& url_info);
+  ~ScoredHistoryMatch();
+
+  static bool MatchScoreGreater(const ScoredHistoryMatch& m1,
+                                const ScoredHistoryMatch& m2);
+
+  // An interim score taking into consideration location and completeness
+  // of the match.
+  int raw_score;
+  TermMatches url_matches;  // Term matches within the URL.
+  TermMatches title_matches;  // Term matches within the page title.
+  bool can_inline;  // True if this is a candidate for in-line autocompletion.
+};
+typedef std::vector<ScoredHistoryMatch> ScoredHistoryMatches;
+
 // Convenience Types -----------------------------------------------------------
 
-typedef std::vector<base::string16> String16Vector;
-typedef std::set<base::string16> String16Set;
-typedef std::set<base::char16> Char16Set;
-typedef std::vector<base::char16> Char16Vector;
-
-// A vector that contains the offsets at which each word starts within a string.
-typedef std::vector<size_t> WordStarts;
+typedef std::vector<string16> String16Vector;
+typedef std::set<string16> String16Set;
+typedef std::set<char16> Char16Set;
+typedef std::vector<char16> Char16Vector;
 
 // Utility Functions -----------------------------------------------------------
 
-// Breaks the string |cleaned_uni_string| down into individual words.
-// Use CleanUpUrlForMatching() or CleanUpUrlTitleMatching() before
-// passing |cleaned_uni_string| to this function. If |word_starts| is
-// not NULL then clears and pushes the offsets within
-// |cleaned_uni_string| at which each word starts onto
-// |word_starts|. These offsets are collected only up to the first
-// kMaxSignificantChars of |cleaned_uni_string|.
-String16Set String16SetFromString16(const base::string16& cleaned_uni_string,
-                                    WordStarts* word_starts);
+// Breaks a string down into individual words.
+String16Set String16SetFromString16(const string16& uni_string);
 
-// Breaks the |cleaned_uni_string| string down into individual words
-// and return a vector with the individual words in their original
-// order.  Use CleanUpUrlForMatching() or CleanUpUrlTitleMatching()
-// before passing |cleaned_uni_string| to this function.  If
-// |break_on_space| is false then the resulting list will contain only
-// words containing alpha-numeric characters. If |break_on_space| is
-// true then the resulting list will contain strings broken at
-// whitespace. (|break_on_space| indicates that the
-// BreakIterator::BREAK_SPACE (equivalent to BREAK_LINE) approach is
-// to be used. For a complete description of this algorithm refer to
-// the comments in base/i18n/break_iterator.h.) If |word_starts| is
-// not NULL then clears and pushes the word starts onto |word_starts|.
+// Breaks the |uni_string| string down into individual words and return
+// a vector with the individual words in their original order. If
+// |break_on_space| is false then the resulting list will contain only words
+// containing alpha-numeric characters. If |break_on_space| is true then the
+// resulting list will contain strings broken at whitespace. (|break_on_space|
+// indicates that the BreakIterator::BREAK_SPACE (equivalent to BREAK_LINE)
+// approach is to be used. For a complete description of this algorithm
+// refer to the comments in base/i18n/break_iterator.h.)
 //
 // Example:
-//   Given: |cleaned_uni_string|: "http://www.google.com/ harry the rabbit."
+//   Given: |uni_string|: "http://www.google.com/ harry the rabbit."
 //   With |break_on_space| false the returned list will contain:
 //    "http", "www", "google", "com", "harry", "the", "rabbit"
 //   With |break_on_space| true the returned list will contain:
 //    "http://", "www.google.com/", "harry", "the", "rabbit."
-String16Vector String16VectorFromString16(
-    const base::string16& cleaned_uni_string,
-    bool break_on_space,
-    WordStarts* word_starts);
+String16Vector String16VectorFromString16(const string16& uni_string,
+                                          bool break_on_space);
 
 // Breaks the |uni_word| string down into its individual characters.
 // Note that this is temporarily intended to work on a single word, but
@@ -131,7 +112,10 @@ String16Vector String16VectorFromString16(
 // and properly handle substring matches, scoring and sorting the results
 // by score. Also, provide the metrics for where the matches occur so that
 // the UI can highlight the matched sections.
-Char16Set Char16SetFromString16(const base::string16& uni_word);
+Char16Set Char16SetFromString16(const string16& uni_word);
+
+// Determine if |prefix| is any of the standard 'ftp' or 'http[s]' prefixes.
+bool IsInlineablePrefix(const string16& prefix);
 
 // Support for InMemoryURLIndex Private Data -----------------------------------
 
@@ -139,11 +123,11 @@ Char16Set Char16SetFromString16(const base::string16& uni_word);
 typedef size_t WordID;
 
 // A map allowing a WordID to be determined given a word.
-typedef std::map<base::string16, WordID> WordMap;
+typedef std::map<string16, WordID> WordMap;
 
 // A map from character to the word_ids of words containing that character.
 typedef std::set<WordID> WordIDSet;  // An index into the WordList.
-typedef std::map<base::char16, WordIDSet> CharWordIDMap;
+typedef std::map<char16, WordIDSet> CharWordIDMap;
 
 // A map from word (by word_id) to history items containing that word.
 typedef history::URLID HistoryID;
@@ -152,38 +136,11 @@ typedef std::vector<HistoryID> HistoryIDVector;
 typedef std::map<WordID, HistoryIDSet> WordIDHistoryMap;
 typedef std::map<HistoryID, WordIDSet> HistoryIDWordMap;
 
-
-// Information used in scoring a particular URL.
-typedef std::vector<VisitInfo> VisitInfoVector;
-struct HistoryInfoMapValue {
-  HistoryInfoMapValue();
-  ~HistoryInfoMapValue();
-
-  // This field is always populated.
-  URLRow url_row;
-
-  // This field gets filled in asynchronously after a visit.  As such,
-  // it's almost always correct.  If it's wrong, it's likely to either
-  // be empty (if this URL was recently added to the index) or
-  // slightly out-of-date (one visit behind).
-  VisitInfoVector visits;
-};
-
 // A map from history_id to the history's URL and title.
-typedef std::map<HistoryID, HistoryInfoMapValue> HistoryInfoMap;
+typedef std::map<HistoryID, URLRow> HistoryInfoMap;
 
-// A map from history_id to URL and page title word start metrics.
-struct RowWordStarts {
-  RowWordStarts();
-  ~RowWordStarts();
-
-  // Clears both url_word_starts_ and title_word_starts_.
-  void Clear();
-
-  WordStarts url_word_starts_;
-  WordStarts title_word_starts_;
-};
-typedef std::map<HistoryID, RowWordStarts> WordStartsMap;
+// TODO(rohitrao): Probably replace this with QueryResults.
+typedef std::vector<history::URLRow> URLRowVector;
 
 }  // namespace history
 

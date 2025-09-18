@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
 #import "content/browser/accessibility/browser_accessibility_delegate_mac.h"
-#include "content/browser/accessibility/browser_accessibility_manager_mac.h"
+#include "content/browser/accessibility/browser_accessibility_manager.h"
 
-namespace content {
 
 // Static.
 BrowserAccessibility* BrowserAccessibility::Create() {
@@ -28,27 +27,24 @@ void BrowserAccessibilityMac::PreInitialize() {
     return;
 
   // We take ownership of the cocoa obj here.
-  BrowserAccessibilityManagerMac* manager =
-      static_cast<BrowserAccessibilityManagerMac*>(manager_);
   browser_accessibility_cocoa_ = [[BrowserAccessibilityCocoa alloc]
       initWithObject:this
       delegate:
-          (id<BrowserAccessibilityDelegateCocoa>)manager->parent_view()];
+          (id<BrowserAccessibilityDelegateCocoa>)manager_->GetParentView()];
 }
 
 void BrowserAccessibilityMac::NativeReleaseReference() {
-  // Detach this object from |browser_accessibility_cocoa_| so it
-  // no longer has a pointer to this object.
-  [browser_accessibility_cocoa_ detach];
-  // Now, release it - but at this point, other processes may have a
-  // reference to the cocoa object.
-  [browser_accessibility_cocoa_ release];
-  // Finally, it's safe to delete this since we've detached.
-  delete this;
-}
-
-bool BrowserAccessibilityMac::IsNative() const {
-  return true;
+  if (browser_accessibility_cocoa_) {
+    BrowserAccessibilityCocoa* temp = browser_accessibility_cocoa_;
+    browser_accessibility_cocoa_ = nil;
+    // Relinquish ownership of the cocoa obj.
+    [temp release];
+    // At this point, other processes may have a reference to
+    // the cocoa object. When the retain count hits zero, it will
+    // destroy us in dealloc.
+    // For that reason, do *not* make any more calls here after
+    // as we might have been deleted.
+  }
 }
 
 void BrowserAccessibilityMac::DetachTree(
@@ -57,15 +53,17 @@ void BrowserAccessibilityMac::DetachTree(
   BrowserAccessibility::DetachTree(nodes);
 }
 
-void BrowserAccessibilityMac::SwapChildren(
-    std::vector<BrowserAccessibility*>& children) {
-  [browser_accessibility_cocoa_ childrenChanged];
-  BrowserAccessibility::SwapChildren(children);
-}
-
-BrowserAccessibilityCocoa* BrowserAccessibility::ToBrowserAccessibilityCocoa() {
+BrowserAccessibilityCocoa* BrowserAccessibility::toBrowserAccessibilityCocoa() {
   return static_cast<BrowserAccessibilityMac*>(this)->
       native_view();
 }
 
-}  // namespace content
+std::string BrowserAccessibility::ToString() {
+  BrowserAccessibilityCocoa* cocoa_node = this->toBrowserAccessibilityCocoa();
+  NSString* dump = [NSString stringWithFormat:@"%@|%@|%@|%@",
+      [cocoa_node role],
+      [cocoa_node subrole],
+      [cocoa_node title],
+      [cocoa_node value]];
+  return [dump cStringUsingEncoding:NSUTF8StringEncoding];
+}

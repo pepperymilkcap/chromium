@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,38 +11,37 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
+#include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
+#include "chrome/browser/ui/cocoa/animation_utils.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
-#import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
+#import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host_view.h"
+#include "content/browser/renderer_host/backing_store_mac.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/utils/mac/SkCGUtils.h"
-#include "ui/base/cocoa/animation_utils.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/scoped_cg_context_save_gstate_mac.h"
 
 using content::BrowserThread;
-using content::RenderWidgetHost;
 
 // Height of the bottom gradient, in pixels.
 const CGFloat kBottomGradientHeight = 50;
@@ -89,11 +88,11 @@ const CGFloat kSelectionInset = 5;
 }
 
 - (void)drawInContext:(CGContextRef)context {
-  base::ScopedCFTypeRef<CGColorSpaceRef> grayColorSpace(
+  base::mac::ScopedCFTypeRef<CGColorSpaceRef> grayColorSpace(
       CGColorSpaceCreateWithName(kCGColorSpaceGenericGray));
   CGFloat grays[] = { startGray_, 1.0, endGray_, 1.0 };
   CGFloat locations[] = { 0, 1 };
-  base::ScopedCFTypeRef<CGGradientRef> gradient(
+  base::mac::ScopedCFTypeRef<CGGradientRef> gradient(
       CGGradientCreateWithColorComponents(
           grayColorSpace.get(), grays, locations, arraysize(locations)));
   CGPoint topLeft = CGPointMake(0.0, self.bounds.size.height);
@@ -105,12 +104,12 @@ namespace tabpose {
 class ThumbnailLoader;
 }
 
-// A CALayer that draws a thumbnail for a WebContents object. The layer
-// tries to draw the WebContents's backing store directly if possible, and
-// requests a thumbnail bitmap from the WebContents's renderer process if not.
+// A CALayer that draws a thumbnail for a TabContentsWrapper object. The layer
+// tries to draw the TabContents's backing store directly if possible, and
+// requests a thumbnail bitmap from the TabContents's renderer process if not.
 @interface ThumbnailLayer : CALayer {
-  // The WebContents the thumbnail is for.
-  content::WebContents* contents_;  // weak
+  // The TabContentsWrapper the thumbnail is for.
+  TabContentsWrapper* contents_;  // weak
 
   // The size the thumbnail is drawn at when zoomed in.
   NSSize fullSize_;
@@ -120,12 +119,12 @@ class ThumbnailLoader;
 
   // If the backing store couldn't be used and a thumbnail was returned from a
   // renderer process, it's stored in |thumbnail_|.
-  base::ScopedCFTypeRef<CGImageRef> thumbnail_;
+  base::mac::ScopedCFTypeRef<CGImageRef> thumbnail_;
 
   // True if the layer already sent a thumbnail request to a renderer.
   BOOL didSendLoad_;
 }
-- (id)initWithWebContents:(content::WebContents*)contents
+- (id)initWithTabContents:(TabContentsWrapper*)contents
                  fullSize:(NSSize)fullSize;
 - (void)drawInContext:(CGContextRef)context;
 - (void)setThumbnail:(const SkBitmap&)bitmap;
@@ -147,11 +146,17 @@ class ThumbnailLoader : public base::RefCountedThreadSafe<ThumbnailLoader> {
  private:
   friend class base::RefCountedThreadSafe<ThumbnailLoader>;
   ~ThumbnailLoader() {
+    ResetPaintingObserver();
   }
 
   void DidReceiveBitmap(const SkBitmap& bitmap) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    ResetPaintingObserver();
     [layer_ setThumbnail:bitmap];
+  }
+
+  void ResetPaintingObserver() {
+    g_browser_process->GetThumbnailGenerator()->MonitorRenderer(rwh_, false);
   }
 
   gfx::Size size_;
@@ -164,6 +169,9 @@ class ThumbnailLoader : public base::RefCountedThreadSafe<ThumbnailLoader> {
 
 void ThumbnailLoader::LoadThumbnail() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  ThumbnailGenerator* generator = g_browser_process->GetThumbnailGenerator();
+  if (!generator)  // In unit tests.
+    return;
 
   // As mentioned in ThumbnailLayer's -drawInContext:, it's sufficient to have
   // thumbnails at the zoomed-out pixel size for all but the thumbnail the user
@@ -173,9 +181,12 @@ void ThumbnailLoader::LoadThumbnail() {
   gfx::Size page_size(size_);  // Logical size the renderer renders at.
   gfx::Size pixel_size(size_);  // Physical pixel size the image is rendered at.
 
+  generator->MonitorRenderer(rwh_, true);
+
   // Will send an IPC to the renderer on the IO thread.
-  g_browser_process->GetRenderWidgetSnapshotTaker()->AskForSnapshot(
+  generator->AskForSnapshot(
       rwh_,
+      /*prefer_backing_store=*/false,
       base::Bind(&ThumbnailLoader::DidReceiveBitmap,
                  weak_factory_.GetWeakPtr()),
       page_size,
@@ -186,7 +197,7 @@ void ThumbnailLoader::LoadThumbnail() {
 
 @implementation ThumbnailLayer
 
-- (id)initWithWebContents:(content::WebContents*)contents
+- (id)initWithTabContents:(TabContentsWrapper*)contents
                  fullSize:(NSSize)fullSize {
   CHECK(contents);
   if ((self = [super init])) {
@@ -196,7 +207,7 @@ void ThumbnailLoader::LoadThumbnail() {
   return self;
 }
 
-- (void)setWebContents:(content::WebContents*)contents {
+- (void)setTabContents:(TabContentsWrapper*)contents {
   contents_ = contents;
 }
 
@@ -214,7 +225,7 @@ void ThumbnailLoader::LoadThumbnail() {
 
   // Medium term, we want to show thumbs of the actual info bar views, which
   // means I need to create InfoBarControllers here.
-  NSWindow* window = [contents_->GetView()->GetNativeView() window];
+  NSWindow* window = [contents_->web_contents()->GetNativeView() window];
   NSWindowController* windowController = [window windowController];
   if ([windowController isKindOfClass:[BrowserWindowController class]]) {
     BrowserWindowController* bwc =
@@ -227,52 +238,65 @@ void ThumbnailLoader::LoadThumbnail() {
         [infoBarContainer overlappingTipHeight];
   }
 
-  BookmarkTabHelper* bookmark_tab_helper =
-      BookmarkTabHelper::FromWebContents(contents_);
-  Profile* profile =
-      Profile::FromBrowserContext(contents_->GetBrowserContext());
   bool always_show_bookmark_bar =
-      profile->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
+      contents_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
   bool has_detached_bookmark_bar =
-      bookmark_tab_helper->ShouldShowBookmarkBar() &&
+      contents_->bookmark_tab_helper()->ShouldShowBookmarkBar() &&
       !always_show_bookmark_bar;
   if (has_detached_bookmark_bar)
-    topOffset += chrome::kNTPBookmarkBarHeight;
+    topOffset += bookmarks::kNTPBookmarkBarHeight;
 
   return topOffset;
 }
 
 - (int)bottomOffset {
   int bottomOffset = 0;
-  DevToolsWindow* devToolsWindow =
-      DevToolsWindow::GetDockedInstanceForInspectedTab(contents_);
-  content::WebContents* devToolsContents =
-      devToolsWindow ? devToolsWindow->web_contents() : NULL;
-  if (devToolsContents && devToolsContents->GetRenderViewHost() &&
-      devToolsContents->GetRenderViewHost()->GetView()) {
+  TabContentsWrapper* devToolsContents =
+      DevToolsWindow::GetDevToolsContents(contents_->web_contents());
+  if (devToolsContents && devToolsContents->web_contents() &&
+      devToolsContents->web_contents()->GetRenderViewHost() &&
+      devToolsContents->web_contents()->GetRenderViewHost()->view()) {
     // The devtool's size might not be up-to-date, but since its height doesn't
     // change on window resize, and since most users don't use devtools, this is
     // good enough.
-    bottomOffset += devToolsContents->GetRenderViewHost()->GetView()->
-        GetViewBounds().height();
+    bottomOffset +=
+        devToolsContents->web_contents()->GetRenderViewHost()->view()->
+            GetViewBounds().height();
     bottomOffset += 1;  // :-( Divider line between web contents and devtools.
   }
   return bottomOffset;
 }
 
+- (void)drawBackingStore:(BackingStoreMac*)backing_store
+                  inRect:(CGRect)destRect
+                 context:(CGContextRef)context {
+  // TODO(thakis): Add a sublayer for each accelerated surface in the rwhv.
+  // Until then, accelerated layers (CoreAnimation NPAPI plugins, compositor)
+  // won't show up in tabpose.
+  gfx::ScopedCGContextSaveGState CGContextSaveGState(context);
+  CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
+  if (backing_store->cg_layer()) {
+    CGContextDrawLayerInRect(context, destRect, backing_store->cg_layer());
+  } else {
+    base::mac::ScopedCFTypeRef<CGImageRef> image(
+        CGBitmapContextCreateImage(backing_store->cg_bitmap()));
+    CGContextDrawImage(context, destRect, image);
+  }
+}
+
 - (void)drawInContext:(CGContextRef)context {
-  RenderWidgetHost* rwh = contents_->GetRenderViewHost();
+  RenderWidgetHost* rwh = contents_->web_contents()->GetRenderViewHost();
   // NULL if renderer crashed.
-  content::RenderWidgetHostView* rwhv = rwh ? rwh->GetView() : NULL;
+  RenderWidgetHostView* rwhv = rwh ? rwh->view() : NULL;
   if (!rwhv) {
     // TODO(thakis): Maybe draw a sad tab layer?
     [super drawInContext:context];
     return;
   }
 
-  // The size of the WebContents's RenderWidgetHost might not fit to the
+  // The size of the TabContent's RenderWidgetHost might not fit to the
   // current browser window at all, for example if the window was resized while
-  // this WebContents object was not an active tab.
+  // this TabContents object was not an active tab.
   // Compute the required size ourselves. Leave room for eventual infobars and
   // a detached bookmarks bar on the top, and for the devtools on the bottom.
   // Download shelf is not included in the |fullSize| rect, so no need to
@@ -287,7 +311,10 @@ void ThumbnailLoader::LoadThumbnail() {
   // a) there's no backing store or
   // b) the backing store's size doesn't match our required size and
   // c) we didn't already send a thumbnail request to the renderer.
-  bool draw_backing_store = rwh->GetBackingStoreSize() == desiredThumbSize;
+  BackingStoreMac* backing_store =
+      (BackingStoreMac*)rwh->GetBackingStore(/*force_create=*/false);
+  bool draw_backing_store =
+      backing_store && backing_store->size() == desiredThumbSize;
 
   // Next weirdness: The destination rect. If the layer is |fullSize_| big, the
   // destination rect is (0, bottomOffset), (fullSize_.width, topOffset). But we
@@ -318,13 +345,10 @@ void ThumbnailLoader::LoadThumbnail() {
 
   if (draw_backing_store) {
     // Backing store 'cache' hit!
-    // TODO(thakis): Add a sublayer for each accelerated surface in the rwhv.
-    // Until then, accelerated layers (CoreAnimation NPAPI plugins, compositor)
-    // won't show up in tabpose.
-    rwh->CopyFromBackingStoreToCGContext(destRect, context);
+    [self drawBackingStore:backing_store inRect:destRect context:context];
   } else if (thumbnail_) {
     // No cache hit, but the renderer returned a thumbnail to us.
-    gfx::ScopedCGContextSaveGState save_gstate(context);
+    gfx::ScopedCGContextSaveGState CGContextSaveGState(context);
     CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
     CGContextDrawImage(context, destRect, thumbnail_.get());
   }
@@ -406,12 +430,12 @@ class Tile {
   NSRect title_rect() const { return NSIntegralRect(title_rect_); }
 
   // Returns an unelided title. The view logic is responsible for eliding.
-  const base::string16& title() const {
-    return contents_->GetTitle();
+  const string16& title() const {
+    return contents_->web_contents()->GetTitle();
   }
 
-  content::WebContents* web_contents() const { return contents_; }
-  void set_tab_contents(content::WebContents* new_contents) {
+  TabContentsWrapper* tab_contents() const { return contents_; }
+  void set_tab_contents(TabContentsWrapper* new_contents) {
     contents_ = new_contents;
   }
 
@@ -428,7 +452,7 @@ class Tile {
   CGFloat title_font_size_;
   NSRect title_rect_;
 
-  content::WebContents* contents_;  // weak
+  TabContentsWrapper* contents_;  // weak
 
   DISALLOW_COPY_AND_ASSIGN(Tile);
 };
@@ -451,14 +475,12 @@ NSRect Tile::GetFaviconStartRectRelativeTo(const Tile& tile) const {
 }
 
 NSImage* Tile::favicon() const {
-  extensions::TabHelper* extensions_tab_helper =
-      extensions::TabHelper::FromWebContents(contents_);
-  if (extensions_tab_helper->is_app()) {
-    SkBitmap* bitmap = extensions_tab_helper->GetExtensionAppIcon();
+  if (contents_->extension_tab_helper()->is_app()) {
+    SkBitmap* bitmap = contents_->extension_tab_helper()->GetExtensionAppIcon();
     if (bitmap)
       return gfx::SkBitmapToNSImage(*bitmap);
   }
-  return mac::FaviconForWebContents(contents_);
+  return mac::FaviconForTabContents(contents_);
 }
 
 NSRect Tile::GetTitleStartRectRelativeTo(const Tile& tile) const {
@@ -523,7 +545,7 @@ class TileSet {
 
   // Inserts a new Tile object containing |contents| at |index|. Does no
   // relayout.
-  void InsertTileAt(int index, content::WebContents* contents);
+  void InsertTileAt(int index, TabContentsWrapper* contents);
 
   // Removes the Tile object at |index|. Does no relayout.
   void RemoveTileAt(int index);
@@ -567,7 +589,7 @@ void TileSet::Build(TabStripModel* source_model) {
   tiles_.resize(source_model->count());
   for (size_t i = 0; i < tiles_.size(); ++i) {
     tiles_[i] = new Tile;
-    tiles_[i]->contents_ = source_model->GetWebContentsAt(i);
+    tiles_[i]->contents_ = source_model->GetTabContentsAt(i);
   }
 }
 
@@ -789,7 +811,7 @@ int TileSet::previous_index() const {
   return new_index;
 }
 
-void TileSet::InsertTileAt(int index, content::WebContents* contents) {
+void TileSet::InsertTileAt(int index, TabContentsWrapper* contents) {
   tiles_.insert(tiles_.begin() + index, new Tile);
   tiles_[index]->contents_ = contents;
 }
@@ -942,8 +964,10 @@ void AnimateCALayerOpacityFromTo(
     tileSet_.reset(new tabpose::TileSet);
     tabStripModelObserverBridge_.reset(
         new TabStripModelObserverBridge(tabStripModel_, self));
-    closeIcon_.reset([ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-            IDR_TABPOSE_CLOSE).ToNSImage() retain]);
+    NSImage* nsCloseIcon =
+        ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+            IDR_TABPOSE_CLOSE);
+    closeIcon_.reset(base::mac::CopyNSImageToCGImage(nsCloseIcon));
     [self setReleasedWhenClosed:YES];
     [self setOpaque:NO];
     [self setBackgroundColor:[NSColor clearColor]];
@@ -974,10 +998,10 @@ void AnimateCALayerOpacityFromTo(
                 showZoom:(BOOL)showZoom
                    slomo:(BOOL)slomo
        animationDelegate:(id)animationDelegate {
-  base::scoped_nsobject<CALayer> layer(
-      [[ThumbnailLayer alloc] initWithWebContents:tile.web_contents()
-                                         fullSize:tile.GetStartRectRelativeTo(
-                                             tileSet_->selected_tile()).size]);
+  scoped_nsobject<CALayer> layer([[ThumbnailLayer alloc]
+      initWithTabContents:tile.tab_contents()
+                 fullSize:tile.GetStartRectRelativeTo(
+                     tileSet_->selected_tile()).size]);
   [layer setNeedsDisplay];
 
   NSTimeInterval interval =
@@ -1003,9 +1027,10 @@ void AnimateCALayerOpacityFromTo(
 
   // Add a close button to the thumb layer.
   CALayer* closeLayer = [CALayer layer];
-  closeLayer.contents = closeIcon_.get();
+  closeLayer.contents = reinterpret_cast<id>(closeIcon_.get());
   CGRect closeBounds = {};
-  closeBounds.size = NSSizeToCGSize([closeIcon_ size]);
+  closeBounds.size.width = CGImageGetWidth(closeIcon_);
+  closeBounds.size.height = CGImageGetHeight(closeIcon_);
   closeLayer.bounds = closeBounds;
   closeLayer.hidden = YES;
 
@@ -1028,6 +1053,9 @@ void AnimateCALayerOpacityFromTo(
   NSFont* font = [NSFont systemFontOfSize:tile.title_font_size()];
   tile.set_font_metrics([font ascender], -[font descender]);
 
+  base::mac::ScopedCFTypeRef<CGImageRef> favicon(
+      base::mac::CopyNSImageToCGImage(tile.favicon()));
+
   CALayer* faviconLayer = [CALayer layer];
   if (showZoom) {
     AnimateCALayerFrameFromTo(
@@ -1040,7 +1068,7 @@ void AnimateCALayerOpacityFromTo(
   } else {
     faviconLayer.frame = NSRectToCGRect(tile.favicon_rect());
   }
-  faviconLayer.contents = tile.favicon();
+  faviconLayer.contents = (id)favicon.get();
   faviconLayer.zPosition = 1;  // On top of the thumb shadow.
   [bgLayer_ addSublayer:faviconLayer];
   [allFaviconLayers_ addObject:faviconLayer];
@@ -1306,7 +1334,7 @@ void AnimateCALayerOpacityFromTo(
     CGPoint lp = [layer convertPoint:p fromLayer:rootLayer_];
     if ([static_cast<CALayer*>([layer presentationLayer]) containsPoint:lp] &&
         !layer.hidden) {
-      tabStripModel_->CloseWebContentsAt(i,
+      tabStripModel_->CloseTabContentsAt(i,
           TabStripModel::CLOSE_USER_GESTURE |
           TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
       return;
@@ -1512,7 +1540,7 @@ void AnimateCALayerOpacityFromTo(
       nil);
 }
 
-- (void)insertTabWithContents:(content::WebContents*)contents
+- (void)insertTabWithContents:(TabContentsWrapper*)contents
                       atIndex:(NSInteger)index
                  inForeground:(bool)inForeground {
   // This happens if you cmd-click a link and then immediately open tabpose
@@ -1549,13 +1577,13 @@ void AnimateCALayerOpacityFromTo(
   }
 }
 
-- (void)tabClosingWithContents:(content::WebContents*)contents
+- (void)tabClosingWithContents:(TabContentsWrapper*)contents
                        atIndex:(NSInteger)index {
   // We will also get a -tabDetachedWithContents:atIndex: notification for
   // closing tabs, so do nothing here.
 }
 
-- (void)tabDetachedWithContents:(content::WebContents*)contents
+- (void)tabDetachedWithContents:(TabContentsWrapper*)contents
                         atIndex:(NSInteger)index {
   ScopedCAActionSetDuration durationSetter(kObserverChangeAnimationDuration);
 
@@ -1596,7 +1624,7 @@ void AnimateCALayerOpacityFromTo(
     [self refreshLayerFramesAtIndex:i];
 }
 
-- (void)tabMovedWithContents:(content::WebContents*)contents
+- (void)tabMovedWithContents:(TabContentsWrapper*)contents
                     fromIndex:(NSInteger)from
                       toIndex:(NSInteger)to {
   ScopedCAActionSetDuration durationSetter(kObserverChangeAnimationDuration);
@@ -1605,15 +1633,15 @@ void AnimateCALayerOpacityFromTo(
   tileSet_->MoveTileFromTo(from, to);
 
   // Move corresponding layers from |from| to |to|.
-  base::scoped_nsobject<CALayer> thumbLayer(
+  scoped_nsobject<CALayer> thumbLayer(
       [[allThumbnailLayers_ objectAtIndex:from] retain]);
   [allThumbnailLayers_ removeObjectAtIndex:from];
   [allThumbnailLayers_ insertObject:thumbLayer.get() atIndex:to];
-  base::scoped_nsobject<CALayer> faviconLayer(
+  scoped_nsobject<CALayer> faviconLayer(
       [[allFaviconLayers_ objectAtIndex:from] retain]);
   [allFaviconLayers_ removeObjectAtIndex:from];
   [allFaviconLayers_ insertObject:faviconLayer.get() atIndex:to];
-  base::scoped_nsobject<CALayer> titleLayer(
+  scoped_nsobject<CALayer> titleLayer(
       [[allTitleLayers_ objectAtIndex:from] retain]);
   [allTitleLayers_ removeObjectAtIndex:from];
   [allTitleLayers_ insertObject:titleLayer.get() atIndex:to];
@@ -1633,7 +1661,7 @@ void AnimateCALayerOpacityFromTo(
     [self refreshLayerFramesAtIndex:i];
 }
 
-- (void)tabChangedWithContents:(content::WebContents*)contents
+- (void)tabChangedWithContents:(TabContentsWrapper*)contents
                        atIndex:(NSInteger)index
                     changeType:(TabStripModelObserver::TabChangeType)change {
   // Tell the window to update text, title, and thumb layers at |index| to get
@@ -1642,10 +1670,10 @@ void AnimateCALayerOpacityFromTo(
   // While a tab is loading, this is unfortunately called quite often for
   // both the "loading" and the "all" change types, so we don't really want to
   // send thumb requests to the corresponding renderer when this is called.
-  // For now, just make sure that we don't hold on to an invalid WebContents
+  // For now, just make sure that we don't hold on to an invalid TabContents
   // object.
   tabpose::Tile& tile = tileSet_->tile_at(index);
-  if (contents == tile.web_contents()) {
+  if (contents == tile.tab_contents()) {
     // TODO(thakis): Install a timer to send a thumb request/update title/update
     // favicon after 20ms or so, and reset the timer every time this is called
     // to make sure we get an updated thumb, without requesting them all over.
@@ -1654,7 +1682,7 @@ void AnimateCALayerOpacityFromTo(
 
   tile.set_tab_contents(contents);
   ThumbnailLayer* thumbLayer = [allThumbnailLayers_ objectAtIndex:index];
-  [thumbLayer setWebContents:contents];
+  [thumbLayer setTabContents:contents];
 }
 
 - (void)tabStripModelDeleted {

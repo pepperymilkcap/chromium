@@ -8,10 +8,10 @@
 #include <shlguid.h>
 
 #include "base/logging.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/threading/platform_thread.h"
+#include "base/utf_string_conversions.h"
 #include "chrome_frame/bind_context_info.h"
 #include "chrome_frame/chrome_tab.h"
 #include "chrome_frame/exception_barrier.h"
@@ -183,8 +183,7 @@ void SniffData::DetermineRendererType(bool last_chance) {
         std::wstring html_contents;
         // TODO(joshia): detect and handle different content encodings
         if (buffer && size_) {
-          base::UTF8ToWide(buffer, std::min(size_, kMaxSniffSize),
-                           &html_contents);
+          UTF8ToWide(buffer, std::min(size_, kMaxSniffSize), &html_contents);
           GlobalUnlock(memory);
         }
 
@@ -321,8 +320,6 @@ STDMETHODIMP BSCBStorageBind::OnStopBinding(HRESULT hresult, LPCWSTR error) {
   ExceptionBarrier barrier;
 
   HRESULT hr = MayPlayBack(BSCF_LASTDATANOTIFICATION);
-  if (FAILED(hr))
-    return hr;
   hr = CallbackImpl::OnStopBinding(hresult, error);
   ReleaseBind();
   return hr;

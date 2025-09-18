@@ -1,18 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_UNINSTALL_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_UNINSTALL_VIEW_H_
+#pragma once
 
 #include <map>
 
-#include "base/basictypes.h"
-#include "base/callback.h"
-#include "base/compiler_specific.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "ui/base/models/combobox_model.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/window/dialog_delegate.h"
 
 namespace views {
@@ -28,42 +25,37 @@ class UninstallView : public views::ButtonListener,
                       public views::DialogDelegateView,
                       public ui::ComboboxModel {
  public:
-  explicit UninstallView(int* user_selection,
-                         const base::Closure& quit_closure,
-                         bool show_delete_profile);
+  explicit UninstallView(int* user_selection);
   virtual ~UninstallView();
 
   // Overridden form views::ButtonListener.
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   // Overridden from views::DialogDelegateView:
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
 
   // Overridden from ui::ComboboxModel:
-  virtual int GetItemCount() const OVERRIDE;
-  virtual base::string16 GetItemAt(int index) OVERRIDE;
+  virtual int GetItemCount() OVERRIDE;
+  virtual string16 GetItemAt(int index) OVERRIDE;
 
  private:
-  typedef std::map<base::string16, base::string16> BrowsersMap;
-
   // Initializes the controls on the dialog.
   void SetupControls();
 
   views::Label* confirm_label_;
-  bool show_delete_profile_;
   views::Checkbox* delete_profile_;
   views::Checkbox* change_default_browser_;
   views::Combobox* browsers_combo_;
+  typedef std::map<std::wstring, std::wstring> BrowsersMap;
   scoped_ptr<BrowsersMap> browsers_;
   int& user_selection_;
-  base::Closure quit_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(UninstallView);
 };

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_COPY_REG_KEY_WORK_ITEM_H_
 #define CHROME_INSTALLER_UTIL_COPY_REG_KEY_WORK_ITEM_H_
+#pragma once
 
 #include <string>
 

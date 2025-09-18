@@ -1,22 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GPU_COMMAND_BUFFER_CLIENT_MAPPED_MEMORY_H_
 #define GPU_COMMAND_BUFFER_CLIENT_MAPPED_MEMORY_H_
 
-#include "base/memory/scoped_vector.h"
-#include "gpu/command_buffer/client/fenced_allocator.h"
-#include "gpu/command_buffer/common/buffer.h"
-#include "gpu/command_buffer/common/types.h"
-#include "gpu/gpu_export.h"
+#include <vector>
+
+#include "../common/types.h"
+#include "../client/fenced_allocator.h"
+#include "../common/buffer.h"
 
 namespace gpu {
 
 class CommandBufferHelper;
 
 // Manages a shared memory segment.
-class GPU_EXPORT MemoryChunk {
+class MemoryChunk {
  public:
   MemoryChunk(int32 shm_id, gpu::Buffer shm, CommandBufferHelper* helper);
 
@@ -33,7 +33,7 @@ class GPU_EXPORT MemoryChunk {
 
   // Gets the size of the chunk.
   unsigned int GetSize() const {
-    return static_cast<unsigned int>(shm_.size);
+    return shm_.size;
   }
 
   // The shared memory id for this chunk.
@@ -79,7 +79,7 @@ class GPU_EXPORT MemoryChunk {
     allocator_.FreePendingToken(pointer, token);
   }
 
-  // Frees any blocks whose tokens have passed.
+  // Frees any blocks who's tokens have passed.
   void FreeUnused() {
     allocator_.FreeUnused();
   }
@@ -90,13 +90,9 @@ class GPU_EXPORT MemoryChunk {
            pointer < reinterpret_cast<const int8*>(shm_.ptr) + shm_.size;
   }
 
-  // Returns true of any memory in this chunk is in use.
+  // Returns true of any memory in this chuck is in use.
   bool InUse() {
     return allocator_.InUse();
-  }
-
-  size_t bytes_in_use() const {
-    return allocator_.bytes_in_use();
   }
 
  private:
@@ -107,17 +103,10 @@ class GPU_EXPORT MemoryChunk {
   DISALLOW_COPY_AND_ASSIGN(MemoryChunk);
 };
 
-// Manages MemoryChunks.
-class GPU_EXPORT MappedMemoryManager {
+// Manages MemoryChucks.
+class MappedMemoryManager {
  public:
-  enum MemoryLimit {
-    kNoLimit = 0,
-  };
-
-  // |unused_memory_reclaim_limit|: When exceeded this causes pending memory
-  // to be reclaimed before allocating more memory.
-  MappedMemoryManager(CommandBufferHelper* helper,
-                      size_t unused_memory_reclaim_limit);
+  explicit MappedMemoryManager(CommandBufferHelper* helper);
 
   ~MappedMemoryManager();
 
@@ -157,24 +146,17 @@ class GPU_EXPORT MappedMemoryManager {
   void FreeUnused();
 
   // Used for testing
-  size_t num_chunks() const {
+  size_t num_chunks() {
     return chunks_.size();
   }
 
-  // Used for testing
-  size_t allocated_memory() const {
-    return allocated_memory_;
-  }
-
  private:
-  typedef ScopedVector<MemoryChunk> MemoryChunkVector;
+  typedef std::vector<MemoryChunk*> MemoryChunkVector;
 
   // size a chunk is rounded up to.
   unsigned int chunk_size_multiple_;
   CommandBufferHelper* helper_;
   MemoryChunkVector chunks_;
-  size_t allocated_memory_;
-  size_t max_free_bytes_;
 
   DISALLOW_COPY_AND_ASSIGN(MappedMemoryManager);
 };

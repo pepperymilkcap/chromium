@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_FIND_BAR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_FIND_BAR_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -25,6 +26,7 @@ class CustomDrawButton;
 class FindBarController;
 class GtkThemeService;
 class NineBox;
+class SlideAnimatorGtk;
 
 typedef struct _GtkFloatingContainer GtkFloatingContainer;
 
@@ -50,25 +52,20 @@ class FindBarGtk : public FindBar,
   virtual void StopAnimation() OVERRIDE;
   virtual void MoveWindowIfNecessary(const gfx::Rect& selection_rect,
                                      bool no_redraw) OVERRIDE;
-  virtual void SetFindTextAndSelectedRange(
-      const base::string16& find_text,
-      const gfx::Range& selected_range) OVERRIDE;
-  virtual base::string16 GetFindText() OVERRIDE;
-  virtual gfx::Range GetSelectedRange() OVERRIDE;
+  virtual void SetFindText(const string16& find_text) OVERRIDE;
   virtual void UpdateUIForFindResult(const FindNotificationDetails& result,
-                                     const base::string16& find_text) OVERRIDE;
+                                     const string16& find_text) OVERRIDE;
   virtual void AudibleAlert() OVERRIDE;
   virtual bool IsFindBarVisible() OVERRIDE;
   virtual void RestoreSavedFocus() OVERRIDE;
-  virtual bool HasGlobalFindPasteboard() OVERRIDE;
-  virtual void UpdateFindBarForChangedWebContents() OVERRIDE;
   virtual FindBarTesting* GetFindBarTesting() OVERRIDE;
 
   // Methods from FindBarTesting.
   virtual bool GetFindBarWindowInfo(gfx::Point* position,
                                     bool* fully_visible) OVERRIDE;
-  virtual base::string16 GetFindSelectedText() OVERRIDE;
-  virtual base::string16 GetMatchCountText() OVERRIDE;
+  virtual string16 GetFindText() OVERRIDE;
+  virtual string16 GetFindSelectedText() OVERRIDE;
+  virtual string16 GetMatchCountText() OVERRIDE;
   virtual int GetWidth() OVERRIDE;
 
   // Overridden from content::NotificationObserver:
@@ -107,7 +104,7 @@ class FindBarGtk : public FindBar,
   // the top of the page area, (it will be converted to coordinates relative to
   // the top of the browser window, when comparing against the dialog
   // coordinates). The returned value is relative to the browser window.
-  gfx::Rect GetDialogPosition(const gfx::Rect& avoid_overlapping_rect);
+  gfx::Rect GetDialogPosition(gfx::Rect avoid_overlapping_rect);
 
   // Adjust the text alignment according to the text direction of the widget
   // and |text_entry_|'s content, to make sure the real text alignment is

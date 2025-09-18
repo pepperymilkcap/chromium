@@ -14,11 +14,9 @@
 #include "base/threading/non_thread_safe.h"
 #include "net/base/ip_endpoint.h"
 #include "third_party/libjingle/source/talk/base/asyncpacketsocket.h"
-#include "third_party/libjingle/source/talk/p2p/base/packetsocketfactory.h"
+#include "third_party/libjingle/source/talk/base/packetsocketfactory.h"
 
-namespace base {
 class MessageLoop;
-}
 
 namespace jingle_glue {
 
@@ -38,11 +36,9 @@ class FakeUDPPacketSocket : public talk_base::AsyncPacketSocket,
   // talk_base::AsyncPacketSocket implementation.
   virtual talk_base::SocketAddress GetLocalAddress() const OVERRIDE;
   virtual talk_base::SocketAddress GetRemoteAddress() const OVERRIDE;
-  virtual int Send(const void *pv, size_t cb,
-                   talk_base::DiffServCodePoint dscp) OVERRIDE;
+  virtual int Send(const void *pv, size_t cb) OVERRIDE;
   virtual int SendTo(const void *pv, size_t cb,
-                     const talk_base::SocketAddress& addr,
-                     talk_base::DiffServCodePoint dscp) OVERRIDE;
+                     const talk_base::SocketAddress& addr) OVERRIDE;
   virtual int Close() OVERRIDE;
   virtual State GetState() const OVERRIDE;
   virtual int GetOption(talk_base::Socket::Option opt, int* value) OVERRIDE;
@@ -86,7 +82,7 @@ class FakeSocketManager : public base::RefCountedThreadSafe<FakeSocketManager> {
                      const net::IPEndPoint& to,
                      const std::vector<char>& data);
 
-  base::MessageLoop* message_loop_;
+  MessageLoop* message_loop_;
   std::map<net::IPEndPoint, FakeUDPPacketSocket*> endpoints_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeSocketManager);
@@ -104,13 +100,13 @@ class FakeSocketFactory : public talk_base::PacketSocketFactory {
       int min_port, int max_port) OVERRIDE;
   virtual talk_base::AsyncPacketSocket* CreateServerTcpSocket(
       const talk_base::SocketAddress& local_address, int min_port, int max_port,
-      int opts) OVERRIDE;
+      bool ssl) OVERRIDE;
   virtual talk_base::AsyncPacketSocket* CreateClientTcpSocket(
       const talk_base::SocketAddress& local_address,
       const talk_base::SocketAddress& remote_address,
       const talk_base::ProxyInfo& proxy_info,
       const std::string& user_agent,
-      int opts) OVERRIDE;
+      bool ssl) OVERRIDE;
 
  private:
   scoped_refptr<FakeSocketManager> socket_manager_;

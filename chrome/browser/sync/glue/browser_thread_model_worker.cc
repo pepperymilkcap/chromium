@@ -14,88 +14,66 @@ using content::BrowserThread;
 namespace browser_sync {
 
 BrowserThreadModelWorker::BrowserThreadModelWorker(
-    BrowserThread::ID thread, syncer::ModelSafeGroup group,
-    syncer::WorkerLoopDestructionObserver* observer)
-    : ModelSafeWorker(observer),
-      thread_(thread), group_(group) {
-}
+    BrowserThread::ID thread, ModelSafeGroup group)
+    : thread_(thread), group_(group) {}
 
-syncer::SyncerError BrowserThreadModelWorker::DoWorkAndWaitUntilDoneImpl(
-    const syncer::WorkCallback& work) {
-  syncer::SyncerError error = syncer::UNSET;
+BrowserThreadModelWorker::~BrowserThreadModelWorker() {}
+
+SyncerError BrowserThreadModelWorker::DoWorkAndWaitUntilDone(
+    const WorkCallback& work) {
+  SyncerError error = UNSET;
   if (BrowserThread::CurrentlyOn(thread_)) {
     DLOG(WARNING) << "Already on thread " << thread_;
     return work.Run();
   }
-
+  WaitableEvent done(false, false);
   if (!BrowserThread::PostTask(
       thread_,
       FROM_HERE,
-      base::Bind(&BrowserThreadModelWorker::CallDoWorkAndSignalTask,
-                 this, work,
-                 work_done_or_stopped(), &error))) {
-    DLOG(WARNING) << "Failed to post task to thread " << thread_;
-    error = syncer::CANNOT_DO_WORK;
+      base::Bind(&BrowserThreadModelWorker::CallDoWorkAndSignalTask, this,
+                 work, &done, &error))) {
+    NOTREACHED() << "Failed to post task to thread " << thread_;
     return error;
   }
-  work_done_or_stopped()->Wait();
+  done.Wait();
   return error;
 }
 
-syncer::ModelSafeGroup BrowserThreadModelWorker::GetModelSafeGroup() {
-  return group_;
-}
-
-BrowserThreadModelWorker::~BrowserThreadModelWorker() {}
-
-void BrowserThreadModelWorker::RegisterForLoopDestruction() {
-  if (BrowserThread::CurrentlyOn(thread_)) {
-    base::MessageLoop::current()->AddDestructionObserver(this);
-    SetWorkingLoopToCurrent();
-  } else {
-    BrowserThread::PostTask(
-        thread_, FROM_HERE,
-        Bind(&BrowserThreadModelWorker::RegisterForLoopDestruction, this));
-  }
-}
-
 void BrowserThreadModelWorker::CallDoWorkAndSignalTask(
-    const syncer::WorkCallback& work,
+    const WorkCallback& work,
     WaitableEvent* done,
-    syncer::SyncerError* error) {
+    SyncerError* error) {
   DCHECK(BrowserThread::CurrentlyOn(thread_));
-  if (!IsStopped())
-    *error = work.Run();
+  *error = work.Run();
   done->Signal();
 }
 
-DatabaseModelWorker::DatabaseModelWorker(
-    syncer::WorkerLoopDestructionObserver* observer)
-    : BrowserThreadModelWorker(BrowserThread::DB, syncer::GROUP_DB, observer) {
+ModelSafeGroup BrowserThreadModelWorker::GetModelSafeGroup() {
+  return group_;
 }
 
-void DatabaseModelWorker::CallDoWorkAndSignalTask(
-    const syncer::WorkCallback& work,
-    WaitableEvent* done,
-    syncer::SyncerError* error) {
-  BrowserThreadModelWorker::CallDoWorkAndSignalTask(work, done, error);
-}
+DatabaseModelWorker::DatabaseModelWorker()
+    : BrowserThreadModelWorker(BrowserThread::DB, GROUP_DB) {}
 
 DatabaseModelWorker::~DatabaseModelWorker() {}
 
-FileModelWorker::FileModelWorker(
-    syncer::WorkerLoopDestructionObserver* observer)
-    : BrowserThreadModelWorker(BrowserThread::FILE, syncer::GROUP_FILE,
-                               observer) {
-}
-
-void FileModelWorker::CallDoWorkAndSignalTask(
-    const syncer::WorkCallback& work,
+void DatabaseModelWorker::CallDoWorkAndSignalTask(
+    const WorkCallback& work,
     WaitableEvent* done,
-    syncer::SyncerError* error) {
+    SyncerError* error) {
   BrowserThreadModelWorker::CallDoWorkAndSignalTask(work, done, error);
 }
 
+FileModelWorker::FileModelWorker()
+    : BrowserThreadModelWorker(BrowserThread::FILE, GROUP_FILE) {}
+
 FileModelWorker::~FileModelWorker() {}
+
+void FileModelWorker::CallDoWorkAndSignalTask(
+    const WorkCallback& work,
+    WaitableEvent* done,
+    SyncerError* error) {
+  BrowserThreadModelWorker::CallDoWorkAndSignalTask(work, done, error);
+}
 
 }  // namespace browser_sync

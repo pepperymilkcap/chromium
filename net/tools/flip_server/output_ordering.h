@@ -11,8 +11,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "net/tools/epoll_server/epoll_server.h"
 #include "net/tools/flip_server/constants.h"
+#include "net/tools/flip_server/epoll_server.h"
 #include "net/tools/flip_server/mem_cache.h"
 
 namespace net {
@@ -25,8 +25,7 @@ class OutputOrdering {
   typedef std::map<uint32, PriorityRing> PriorityMap;
 
   struct PriorityMapPointer {
-    PriorityMapPointer();
-    ~PriorityMapPointer();
+    PriorityMapPointer(): ring(NULL), alarm_enabled(false) {}
     PriorityRing* ring;
     PriorityRing::iterator it;
     bool alarm_enabled;
@@ -46,7 +45,7 @@ class OutputOrdering {
   explicit OutputOrdering(SMConnectionInterface* connection);
   ~OutputOrdering();
   void Reset();
-  bool ExistsInPriorityMaps(uint32 stream_id) const;
+  bool ExistsInPriorityMaps(uint32 stream_id);
 
   struct BeginOutputtingAlarm : public EpollAlarmCallbackInterface {
    public:
@@ -87,3 +86,4 @@ class OutputOrdering {
 }  // namespace net
 
 #endif  // NET_TOOLS_FLIP_SERVER_OUTPUT_ORDERING_H_
+

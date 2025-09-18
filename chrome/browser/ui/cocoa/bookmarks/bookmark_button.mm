@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,13 @@
 #include <cmath>
 
 #include "base/logging.h"
-#include "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
+#import "base/memory/scoped_nsobject.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_window.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "content/public/browser/user_metrics.h"
-#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 using content::UserMetricsAction;
 
@@ -205,7 +203,7 @@ BookmarkButton* gDraggedButton = nil; // Weak
     content::RecordAction(UserMetricsAction("BookmarkBar_DragStart"));
   }
 
-  dragMouseOffset_ = [self convertPoint:[event locationInWindow] fromView:nil];
+  dragMouseOffset_ = [self convertPointFromBase:[event locationInWindow]];
   dragPending_ = YES;
   gDraggedButton = self;
 
@@ -357,32 +355,11 @@ BookmarkButton* gDraggedButton = nil; // Weak
     [id(delegate_) mouseDragged:theEvent];
 }
 
-- (void)rightMouseDown:(NSEvent*)event {
-  // Ensure that right-clicking on a button while a context menu is open
-  // highlights the new button.
-  GradientButtonCell* cell =
-      base::mac::ObjCCastStrict<GradientButtonCell>([self cell]);
-  [delegate_ mouseEnteredButton:self event:event];
-  [cell setMouseInside:YES animate:YES];
-
-  // Keep a ref to |self|, in case -rightMouseDown: deletes this bookmark.
-  base::scoped_nsobject<BookmarkButton> keepAlive([self retain]);
-  [super rightMouseDown:event];
-
-  if (![cell isMouseReallyInside]) {
-    [cell setMouseInside:NO animate:YES];
-    [delegate_ mouseExitedButton:self event:event];
-  }
-}
-
 + (BookmarkButton*)draggedButton {
   return gDraggedButton;
 }
 
 - (BOOL)canBecomeKeyView {
-  if (![super canBecomeKeyView])
-    return NO;
-
   // If button is an item in a folder menu, don't become key.
   return ![[self cell] isFolderButtonCell];
 }
@@ -401,29 +378,6 @@ BookmarkButton* gDraggedButton = nil; // Weak
                           operation:NSDragOperationNone];
   }
   return kDraggableButtonMixinDidWork;
-}
-
-- (BOOL)isOpaque {
-  // Make this control opaque so that sub pixel anti aliasing works when core
-  // animation is enabled.
-  return YES;
-}
-
-- (void)drawRect:(NSRect)rect {
-  // Draw the toolbar background.
-  {
-    gfx::ScopedNSGraphicsContextSaveGState scopedGSState;
-    NSView* toolbarView = [[self superview] superview];
-    NSRect frame = [self convertRect:[self bounds] toView:toolbarView];
-
-    NSAffineTransform* transform = [NSAffineTransform transform];
-    [transform translateXBy:-NSMinX(frame) yBy:-NSMinY(frame)];
-    [transform concat];
-
-    [toolbarView drawRect:[toolbarView bounds]];
-  }
-
-  [super drawRect:rect];
 }
 
 @end
@@ -452,24 +406,35 @@ BookmarkButton* gDraggedButton = nil; // Weak
 
 - (NSImage*)dragImage {
   NSRect bounds = [self bounds];
-  base::scoped_nsobject<NSImage> image(
-      [[NSImage alloc] initWithSize:bounds.size]);
-  [image lockFocusFlipped:[self isFlipped]];
 
-  NSGraphicsContext* context = [NSGraphicsContext currentContext];
-  CGContextRef cgContext = static_cast<CGContextRef>([context graphicsPort]);
-  CGContextBeginTransparencyLayer(cgContext, 0);
-  CGContextSetAlpha(cgContext, kDragImageOpacity);
+  // Grab the image from the screen and put it in an |NSImage|. We can't use
+  // this directly since we need to clip it and set its opacity. This won't work
+  // if the source view is clipped. Fortunately, we don't display clipped
+  // bookmark buttons.
+  [self lockFocus];
+  scoped_nsobject<NSBitmapImageRep>
+      bitmap([[NSBitmapImageRep alloc] initWithFocusedViewRect:bounds]);
+  [self unlockFocus];
+  scoped_nsobject<NSImage> image([[NSImage alloc] initWithSize:[bitmap size]]);
+  [image addRepresentation:bitmap];
 
-  GradientButtonCell* cell =
-      base::mac::ObjCCastStrict<GradientButtonCell>([self cell]);
+  // Make an autoreleased |NSImage|, which will be returned, and draw into it.
+  // By default, the |NSImage| will be completely transparent.
+  NSImage* dragImage =
+      [[[NSImage alloc] initWithSize:[bitmap size]] autorelease];
+  [dragImage lockFocus];
+
+  // Draw the image with the appropriate opacity, clipping it tightly.
+  GradientButtonCell* cell = static_cast<GradientButtonCell*>([self cell]);
+  DCHECK([cell isKindOfClass:[GradientButtonCell class]]);
   [[cell clipPathForFrame:bounds inView:self] setClip];
-  [cell drawWithFrame:bounds inView:self];
+  [image drawAtPoint:NSMakePoint(0, 0)
+            fromRect:NSMakeRect(0, 0, NSWidth(bounds), NSHeight(bounds))
+           operation:NSCompositeSourceOver
+            fraction:kDragImageOpacity];
 
-  CGContextEndTransparencyLayer(cgContext);
-  [image unlockFocus];
-
-  return image.autorelease();
+  [dragImage unlockFocus];
+  return dragImage;
 }
 
 @end  // @implementation BookmarkButton(Private)

@@ -1,33 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_RUNNER_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_RUNNER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 
-namespace ui {
-class MenuModel;
-}
-
 namespace views {
 
 class MenuButton;
-class MenuModelAdapter;
-class MenuRunnerHandler;
 class Widget;
 
 namespace internal {
-class DisplayChangeListener;
 class MenuRunnerImpl;
-}
-
-namespace test {
-class MenuRunnerTestAPI;
 }
 
 // MenuRunner is responsible for showing (running) the menu and additionally
@@ -63,14 +53,6 @@ class VIEWS_EXPORT MenuRunner {
     // caller, instead the delegate is notified when the menu closes via the
     // DropMenuClosed method.
     FOR_DROP      = 1 << 2,
-
-    // The menu is a context menu (not necessarily nested), for example right
-    // click on a link on a website in the browser.
-    CONTEXT_MENU  = 1 << 3,
-
-    // The menu should behave like a Windows native Combobox dropdow menu.
-    // This behavior includes accepting the pending item and closing on F4.
-    COMBOBOX  = 1 << 4,
   };
 
   enum RunResult {
@@ -81,8 +63,7 @@ class VIEWS_EXPORT MenuRunner {
     NORMAL_EXIT
   };
 
-  // Creates a new MenuRunner.
-  explicit MenuRunner(ui::MenuModel* menu_model);
+  // Creates a new MenuRunner. MenuRunner owns the supplied menu.
   explicit MenuRunner(MenuItemView* menu);
   ~MenuRunner();
 
@@ -98,62 +79,20 @@ class VIEWS_EXPORT MenuRunner {
   // MENU_DELETED the method is returning because the MenuRunner was deleted.
   // Typically callers should NOT do any processing if this returns
   // MENU_DELETED.
-  // If |anchor| uses a |BUBBLE_..| type, the bounds will get determined by
-  // using |bounds| as the thing to point at in screen coordinates.
   RunResult RunMenuAt(Widget* parent,
                       MenuButton* button,
                       const gfx::Rect& bounds,
                       MenuItemView::AnchorPosition anchor,
-                      ui::MenuSourceType source_type,
                       int32 types) WARN_UNUSED_RESULT;
-
-  // Returns true if we're in a nested message loop running the menu.
-  bool IsRunning() const;
 
   // Hides and cancels the menu. This does nothing if the menu is not open.
   void Cancel();
 
-  // Returns the time from the event which closed the menu - or 0.
-  base::TimeDelta closing_event_time() const;
-
  private:
-  friend class test::MenuRunnerTestAPI;
-
-  // Sets an implementation of RunMenuAt. This is intended to be used at test.
-  void SetRunnerHandler(scoped_ptr<MenuRunnerHandler> runner_handler);
-
-  scoped_ptr<MenuModelAdapter> menu_model_adapter_;
-
   internal::MenuRunnerImpl* holder_;
-
-  // An implementation of RunMenuAt. This is usually NULL and ignored. If this
-  // is not NULL, this implementation will be used.
-  scoped_ptr<MenuRunnerHandler> runner_handler_;
-
-  scoped_ptr<internal::DisplayChangeListener> display_change_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuRunner);
 };
-
-namespace internal {
-
-// DisplayChangeListener is intended to listen for changes in the display size
-// and cancel the menu. DisplayChangeListener is created when the menu is
-// shown.
-class DisplayChangeListener {
- public:
-  virtual ~DisplayChangeListener() {}
-
-  // Creates the platform specified DisplayChangeListener, or NULL if there
-  // isn't one. Caller owns the returned value.
-  static DisplayChangeListener* Create(Widget* parent,
-                                       MenuRunner* runner);
-
- protected:
-  DisplayChangeListener() {}
-};
-
-}
 
 }  // namespace views
 

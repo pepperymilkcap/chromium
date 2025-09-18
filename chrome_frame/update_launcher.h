@@ -4,6 +4,7 @@
 
 #ifndef CHROME_FRAME_UPDATE_LAUNCHER_H_
 #define CHROME_FRAME_UPDATE_LAUNCHER_H_
+#pragma once
 
 #include <string>
 

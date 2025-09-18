@@ -4,21 +4,21 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_HISTORY_MENU_BRIDGE_H_
 #define CHROME_BROWSER_UI_COCOA_HISTORY_MENU_BRIDGE_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 #include <map>
 #include <vector>
 
-#include "base/mac/scoped_nsobject.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/common/cancelable_request.h"
+#include "base/memory/scoped_nsobject.h"
+#include "chrome/browser/cancelable_request.h"
 #import "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/history/history_service.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
 #import "chrome/browser/ui/cocoa/main_menu_item.h"
-#include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/notification_observer.h"
 
 class NotificationRegistrar;
@@ -28,12 +28,10 @@ class TabRestoreService;
 @class HistoryMenuCocoaController;
 
 namespace {
-class HistoryMenuBridgeTest;
-}
 
-namespace chrome {
-struct FaviconImageResult;
-}
+class HistoryMenuBridgeTest;
+
+}  // namespace
 
 // C++ bridge for the history menu; one per AppController (means there
 // is only one). This class observes various data sources, namely the
@@ -71,25 +69,25 @@ class HistoryMenuBridge : public content::NotificationObserver,
     ~HistoryItem();
 
     // The title for the menu item.
-    base::string16 title;
+    string16 title;
     // The URL that will be navigated to if the user selects this item.
     GURL url;
     // Favicon for the URL.
-    base::scoped_nsobject<NSImage> icon;
+    scoped_nsobject<NSImage> icon;
 
     // If the icon is being requested from the FaviconService, |icon_requested|
-    // will be true and |icon_task_id| will be valid. If this is false, then
-    // |icon_task_id| will be CancelableTaskTracker::kBadTaskId.
+    // will be true and |icon_handle| will be non-NULL. If this is false, then
+    // |icon_handle| will be NULL.
     bool icon_requested;
     // The Handle given to us by the FaviconService for the icon fetch request.
-    CancelableTaskTracker::TaskId icon_task_id;
+    FaviconService::Handle icon_handle;
 
     // The pointer to the item after it has been created. Strong; NSMenu also
     // retains this. During a rebuild flood (if the user closes a lot of tabs
     // quickly), the NSMenu can release the item before the HistoryItem has
     // been fully deleted. If this were a weak pointer, it would result in a
     // zombie.
-    base::scoped_nsobject<NSMenuItem> menu_item;
+    scoped_nsobject<NSMenuItem> menu_item;
 
     // This ID is unique for a browser session and can be passed to the
     // TabRestoreService to re-open the closed window or tab that this
@@ -193,8 +191,8 @@ class HistoryMenuBridge : public content::NotificationObserver,
   // request it. This decodes the raw data, updates the HistoryItem, and then
   // sets the image on the menu. Called on the same same thread that
   // GetFaviconForHistoryItem() was called on (UI thread).
-  void GotFaviconData(HistoryItem* item,
-                      const chrome::FaviconImageResult& image_result);
+  void GotFaviconData(FaviconService::Handle handle,
+                      history::FaviconData favicon);
 
   // Cancels a favicon load request for a given HistoryItem, if one is in
   // progress.
@@ -204,7 +202,7 @@ class HistoryMenuBridge : public content::NotificationObserver,
   friend class ::HistoryMenuBridgeTest;
   friend class HistoryMenuCocoaControllerTest;
 
-  base::scoped_nsobject<HistoryMenuCocoaController> controller_;  // strong
+  scoped_nsobject<HistoryMenuCocoaController> controller_;  // strong
 
   Profile* profile_;  // weak
   HistoryService* history_service_;  // weak
@@ -212,7 +210,6 @@ class HistoryMenuBridge : public content::NotificationObserver,
 
   content::NotificationRegistrar registrar_;
   CancelableRequestConsumer cancelable_request_consumer_;
-  CancelableTaskTracker cancelable_task_tracker_;
 
   // Mapping of NSMenuItems to HistoryItems. This owns the HistoryItems until
   // they are removed and deleted via ClearMenuSection().
@@ -229,7 +226,7 @@ class HistoryMenuBridge : public content::NotificationObserver,
   bool need_recreate_;
 
   // The default favicon if a HistoryItem does not have one.
-  base::scoped_nsobject<NSImage> default_favicon_;
+  scoped_nsobject<NSImage> default_favicon_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryMenuBridge);
 };

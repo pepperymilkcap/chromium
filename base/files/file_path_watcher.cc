@@ -8,9 +8,10 @@
 #include "base/files/file_path_watcher.h"
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 
 namespace base {
+namespace files {
 
 FilePathWatcher::~FilePathWatcher() {
   impl_->Cancel();
@@ -22,6 +23,11 @@ void FilePathWatcher::CancelWatch(
   delegate->CancelOnMessageLoopThread();
 }
 
+bool FilePathWatcher::Watch(const FilePath& path, Delegate* delegate) {
+  DCHECK(path.IsAbsolute());
+  return impl_->Watch(path, delegate);
+}
+
 FilePathWatcher::PlatformDelegate::PlatformDelegate(): cancelled_(false) {
 }
 
@@ -29,11 +35,5 @@ FilePathWatcher::PlatformDelegate::~PlatformDelegate() {
   DCHECK(is_cancelled());
 }
 
-bool FilePathWatcher::Watch(const FilePath& path,
-                            bool recursive,
-                            const Callback& callback) {
-  DCHECK(path.IsAbsolute());
-  return impl_->Watch(path, recursive, callback);
-}
-
+}  // namespace files
 }  // namespace base

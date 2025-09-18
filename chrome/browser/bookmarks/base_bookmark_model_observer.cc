@@ -4,8 +4,9 @@
 
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 
-void BaseBookmarkModelObserver::BookmarkModelLoaded(BookmarkModel* model,
-                                                    bool ids_reassigned) {}
+void BaseBookmarkModelObserver::Loaded(BookmarkModel* model,
+                                       bool ids_reassigned) {
+}
 
 void BaseBookmarkModelObserver::BookmarkModelBeingDeleted(
     BookmarkModel* model) {
@@ -31,10 +32,6 @@ void BaseBookmarkModelObserver::BookmarkNodeRemoved(BookmarkModel* model,
                                                     const BookmarkNode* parent,
                                                     int old_index,
                                                     const BookmarkNode* node) {
-  BookmarkModelChanged();
-}
-
-void BaseBookmarkModelObserver::BookmarkAllNodesRemoved(BookmarkModel* model) {
   BookmarkModelChanged();
 }
 

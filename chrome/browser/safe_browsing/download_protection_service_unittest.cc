@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,99 +10,59 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/run_loop.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/safe_browsing/database_manager.h"
-#include "chrome/browser/safe_browsing/download_feedback_service.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/signature_util.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
-#include "content/public/browser/render_process_host.h"
-#include "content/public/test/mock_download_item.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "net/cert/x509_certificate.h"
-#include "net/http/http_status_code.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_fetcher_delegate.h"
-#include "net/url_request/url_request_status.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/common/url_fetcher_delegate.h"
+#include "content/test/test_browser_thread.h"
+#include "content/test/test_url_fetcher_factory.h"
+#include "googleurl/src/gurl.h"
+#include "net/base/x509_certificate.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/zlib/google/zip.h"
-#include "url/gurl.h"
 
-using ::testing::Assign;
 using ::testing::ContainerEq;
 using ::testing::DoAll;
 using ::testing::ElementsAre;
 using ::testing::Mock;
 using ::testing::NotNull;
 using ::testing::Return;
-using ::testing::ReturnRef;
 using ::testing::SaveArg;
 using ::testing::StrictMock;
 using ::testing::_;
-using base::MessageLoop;
 using content::BrowserThread;
+
 namespace safe_browsing {
 namespace {
-// A SafeBrowsingDatabaseManager implementation that returns a fixed result for
-// a given URL.
-class MockSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
+class MockSafeBrowsingService : public SafeBrowsingService {
  public:
-  explicit MockSafeBrowsingDatabaseManager(SafeBrowsingService* service)
-      : SafeBrowsingDatabaseManager(service) { }
+  MockSafeBrowsingService() {}
+  virtual ~MockSafeBrowsingService() {}
 
   MOCK_METHOD1(MatchDownloadWhitelistUrl, bool(const GURL&));
   MOCK_METHOD1(MatchDownloadWhitelistString, bool(const std::string&));
-  MOCK_METHOD2(CheckDownloadUrl, bool(
-      const std::vector<GURL>& url_chain,
-      SafeBrowsingDatabaseManager::Client* client));
+  MOCK_METHOD2(CheckDownloadUrl, bool(const std::vector<GURL>& url_chain,
+                                      Client* client));
+  MOCK_METHOD2(CheckDownloadHash, bool(const std::string&, Client* client));
 
  private:
-  virtual ~MockSafeBrowsingDatabaseManager() {}
-  DISALLOW_COPY_AND_ASSIGN(MockSafeBrowsingDatabaseManager);
-};
-
-class FakeSafeBrowsingService : public SafeBrowsingService {
- public:
-  FakeSafeBrowsingService() { }
-
-  // Returned pointer has the same lifespan as the database_manager_ refcounted
-  // object.
-  MockSafeBrowsingDatabaseManager* mock_database_manager() {
-    return mock_database_manager_;
-  }
-
- protected:
-  virtual ~FakeSafeBrowsingService() { }
-
-  virtual SafeBrowsingDatabaseManager* CreateDatabaseManager() OVERRIDE {
-    mock_database_manager_ = new MockSafeBrowsingDatabaseManager(this);
-    return mock_database_manager_;
-  }
-
- private:
-  MockSafeBrowsingDatabaseManager* mock_database_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeSafeBrowsingService);
+  DISALLOW_COPY_AND_ASSIGN(MockSafeBrowsingService);
 };
 
 class MockSignatureUtil : public SignatureUtil {
  public:
   MockSignatureUtil() {}
-  MOCK_METHOD2(CheckSignature, void (const base::FilePath&,
-                                     ClientDownloadRequest_SignatureInfo*));
-
- protected:
   virtual ~MockSignatureUtil() {}
+  MOCK_METHOD2(CheckSignature,
+               void(const FilePath&, ClientDownloadRequest_SignatureInfo*));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSignatureUtil);
@@ -118,7 +78,7 @@ ACTION_P(TrustSignature, certificate_file) {
   // Add a certificate chain.  Note that we add the certificate twice so that
   // it appears as its own issuer.
   std::string cert_data;
-  ASSERT_TRUE(base::ReadFileToString(certificate_file, &cert_data));
+  ASSERT_TRUE(file_util::ReadFileToString(certificate_file, &cert_data));
   ClientDownloadRequest_CertificateChain* chain =
       arg1->add_certificate_chain();
   chain->add_element()->set_certificate(cert_data);
@@ -129,21 +89,31 @@ ACTION_P(TrustSignature, certificate_file) {
 // not have any copy constructor which means it can't be stored in a callback
 // easily.  Note: check will be deleted automatically when the callback is
 // deleted.
-void OnSafeBrowsingResult(
-    SafeBrowsingDatabaseManager::SafeBrowsingCheck* check) {
+void OnSafeBrowsingResult(SafeBrowsingService::SafeBrowsingCheck* check) {
   check->client->OnSafeBrowsingResult(*check);
 }
 
-ACTION_P(CheckDownloadUrlDone, threat_type) {
-  SafeBrowsingDatabaseManager::SafeBrowsingCheck* check =
-      new SafeBrowsingDatabaseManager::SafeBrowsingCheck(
-          arg0,
-          std::vector<SBFullHash>(),
-          arg1,
-          safe_browsing_util::BINURL,
-          std::vector<SBThreatType>(1, SB_THREAT_TYPE_BINARY_MALWARE_URL));
-  for (size_t i = 0; i < check->url_results.size(); ++i)
-    check->url_results[i] = threat_type;
+ACTION_P(CheckDownloadUrlDone, result) {
+  SafeBrowsingService::SafeBrowsingCheck* check =
+      new SafeBrowsingService::SafeBrowsingCheck();
+  check->urls = arg0;
+  check->is_download = true;
+  check->result = result;
+  check->client = arg1;
+  BrowserThread::PostTask(BrowserThread::IO,
+                          FROM_HERE,
+                          base::Bind(&OnSafeBrowsingResult,
+                                     base::Owned(check)));
+}
+
+ACTION_P(CheckDownloadHashDone, result) {
+  SafeBrowsingService::SafeBrowsingCheck* check =
+      new SafeBrowsingService::SafeBrowsingCheck();
+  check->full_hash.reset(new SBFullHash());
+  CHECK_EQ(arg0.size(), sizeof(check->full_hash->full_hash));
+  memcpy(check->full_hash->full_hash, arg0.data(), arg0.size());
+  check->result = result;
+  check->client = arg1;
   BrowserThread::PostTask(BrowserThread::IO,
                           FROM_HERE,
                           base::Bind(&OnSafeBrowsingResult,
@@ -152,24 +122,23 @@ ACTION_P(CheckDownloadUrlDone, threat_type) {
 
 class DownloadProtectionServiceTest : public testing::Test {
  protected:
-  DownloadProtectionServiceTest()
-      : test_browser_thread_bundle_(
-            content::TestBrowserThreadBundle::IO_MAINLOOP) {
-  }
   virtual void SetUp() {
-    content::RenderProcessHost::SetRunRendererInProcess(true);
+    ui_thread_.reset(new content::TestBrowserThread(BrowserThread::UI,
+                                                    &msg_loop_));
     // Start real threads for the IO and File threads so that the DCHECKs
     // to test that we're on the correct thread work.
-    sb_service_ = new StrictMock<FakeSafeBrowsingService>();
-    sb_service_->Initialize();
+    io_thread_.reset(new content::TestBrowserThread(BrowserThread::IO));
+    ASSERT_TRUE(io_thread_->Start());
+    file_thread_.reset(new content::TestBrowserThread(BrowserThread::FILE));
+    ASSERT_TRUE(file_thread_->Start());
+    sb_service_ = new StrictMock<MockSafeBrowsingService>();
     signature_util_ = new StrictMock<MockSignatureUtil>();
     download_service_ = sb_service_->download_protection_service();
     download_service_->signature_util_ = signature_util_;
     download_service_->SetEnabled(true);
-    base::RunLoop().RunUntilIdle();
-    has_result_ = false;
+    msg_loop_.RunAllPending();
 
-    base::FilePath source_path;
+    FilePath source_path;
     ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &source_path));
     testdata_path_ = source_path
         .AppendASCII("chrome")
@@ -180,12 +149,13 @@ class DownloadProtectionServiceTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    sb_service_->ShutDown();
     // Flush all of the thread message loops to ensure that there are no
     // tasks currently running.
     FlushThreadMessageLoops();
     sb_service_ = NULL;
-    content::RenderProcessHost::SetRunRendererInProcess(false);
+    io_thread_.reset();
+    file_thread_.reset();
+    ui_thread_.reset();
   }
 
   bool RequestContainsResource(const ClientDownloadRequest& request,
@@ -219,9 +189,9 @@ class DownloadProtectionServiceTest : public testing::Test {
 
   // Flushes any pending tasks in the message loops of all threads.
   void FlushThreadMessageLoops() {
-    BrowserThread::GetBlockingPool()->FlushForTesting();
+    FlushMessageLoop(BrowserThread::FILE);
     FlushMessageLoop(BrowserThread::IO);
-    base::RunLoop().RunUntilIdle();
+    msg_loop_.RunAllPending();
   }
 
   // Proxy for private method.
@@ -238,8 +208,8 @@ class DownloadProtectionServiceTest : public testing::Test {
   scoped_refptr<net::X509Certificate> ReadTestCertificate(
       const std::string& filename) {
     std::string cert_data;
-    if (!base::ReadFileToString(testdata_path_.AppendASCII(filename),
-                                &cert_data)) {
+    if (!file_util::ReadFileToString(testdata_path_.AppendASCII(filename),
+                                     &cert_data)) {
       return NULL;
     }
     net::CertificateList certs =
@@ -253,7 +223,7 @@ class DownloadProtectionServiceTest : public testing::Test {
  private:
   // Helper functions for FlushThreadMessageLoops.
   void RunAllPendingAndQuitUI() {
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
@@ -262,7 +232,7 @@ class DownloadProtectionServiceTest : public testing::Test {
   }
 
   void QuitMessageLoop() {
-    base::MessageLoop::current()->Quit();
+    MessageLoop::current()->Quit();
   }
 
   void PostRunMessageLoopTask(BrowserThread::ID thread) {
@@ -279,578 +249,228 @@ class DownloadProtectionServiceTest : public testing::Test {
         FROM_HERE,
         base::Bind(&DownloadProtectionServiceTest::PostRunMessageLoopTask,
                    base::Unretained(this), thread));
-    MessageLoop::current()->Run();
+    msg_loop_.Run();
   }
 
  public:
   void CheckDoneCallback(
       DownloadProtectionService::DownloadCheckResult result) {
-    result_ = result;
-    has_result_ = true;
-    MessageLoop::current()->Quit();
+    result_.reset(new DownloadProtectionService::DownloadCheckResult(result));
+    msg_loop_.Quit();
   }
 
-  void SyncCheckDoneCallback(
-      DownloadProtectionService::DownloadCheckResult result) {
-    result_ = result;
-    has_result_ = true;
-  }
-
-  void SendURLFetchComplete(net::TestURLFetcher* fetcher) {
+  void SendURLFetchComplete(TestURLFetcher* fetcher) {
     fetcher->delegate()->OnURLFetchComplete(fetcher);
   }
 
-  testing::AssertionResult IsResult(
-      DownloadProtectionService::DownloadCheckResult expected) {
-    if (!has_result_)
-      return testing::AssertionFailure() << "No result";
-    has_result_ = false;
-    return result_ == expected ?
-        testing::AssertionSuccess() :
-        testing::AssertionFailure() << "Expected " << expected <<
-                                       ", got " << result_;
+  void ExpectResult(DownloadProtectionService::DownloadCheckResult expected) {
+    ASSERT_TRUE(result_.get());
+    EXPECT_EQ(expected, *result_);
   }
 
  protected:
-  scoped_refptr<FakeSafeBrowsingService> sb_service_;
+  scoped_refptr<MockSafeBrowsingService> sb_service_;
   scoped_refptr<MockSignatureUtil> signature_util_;
   DownloadProtectionService* download_service_;
-  DownloadProtectionService::DownloadCheckResult result_;
-  bool has_result_;
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
-  base::FilePath testdata_path_;
+  MessageLoop msg_loop_;
+  scoped_ptr<DownloadProtectionService::DownloadCheckResult> result_;
+  scoped_ptr<content::TestBrowserThread> io_thread_;
+  scoped_ptr<content::TestBrowserThread> file_thread_;
+  scoped_ptr<content::TestBrowserThread> ui_thread_;
+  FilePath testdata_path_;
 };
 
 TEST_F(DownloadProtectionServiceTest, CheckClientDownloadInvalidUrl) {
-  base::FilePath a_tmp(FILE_PATH_LITERAL("a.tmp"));
-  base::FilePath a_exe(FILE_PATH_LITERAL("a.exe"));
-  std::vector<GURL> url_chain;
-  GURL referrer("http://www.google.com/");
-
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_));
-  EXPECT_CALL(item, RemoveObserver(_));
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_exe));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
+  DownloadProtectionService::DownloadInfo info;
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-  Mock::VerifyAndClearExpectations(&item);
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
 
-  url_chain.push_back(GURL("file://www.google.com/"));
-  EXPECT_CALL(item, AddObserver(_));
-  EXPECT_CALL(item, RemoveObserver(_));
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_exe));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
+  // Only https is not supported for now for privacy reasons.
+  info.local_file = FilePath(FILE_PATH_LITERAL("a.tmp"));
+  info.target_file = FilePath(FILE_PATH_LITERAL("a.exe"));
+  info.download_url_chain.push_back(GURL("https://www.google.com/"));
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+
+  info.download_url_chain.push_back(GURL("file://www.google.com/"));
+  download_service_->CheckClientDownload(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
 }
 
 TEST_F(DownloadProtectionServiceTest, CheckClientDownloadWhitelistedUrl) {
-  base::FilePath a_tmp(FILE_PATH_LITERAL("a.tmp"));
-  base::FilePath a_exe(FILE_PATH_LITERAL("a.exe"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/bla.exe"));
-  url_chain.push_back(GURL("http://www.google.com/a.exe"));
-  GURL referrer("http://www.google.com/");
+  DownloadProtectionService::DownloadInfo info;
+  info.local_file = FilePath(FILE_PATH_LITERAL("a.tmp"));
+  info.target_file = FilePath(FILE_PATH_LITERAL("a.exe"));
+  info.download_url_chain.push_back(GURL("http://www.evil.com/bla.exe"));
+  info.download_url_chain.push_back(GURL("http://www.google.com/a.exe"));
+  info.referrer_url = GURL("http://www.google.com/");
 
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(2);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(2);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_exe));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
+  EXPECT_CALL(*sb_service_, MatchDownloadWhitelistUrl(_))
       .WillRepeatedly(Return(false));
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
+  EXPECT_CALL(*sb_service_,
               MatchDownloadWhitelistUrl(GURL("http://www.google.com/a.exe")))
       .WillRepeatedly(Return(true));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(a_tmp, _)).Times(2);
+  EXPECT_CALL(*signature_util_, CheckSignature(info.local_file, _)).Times(2);
 
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
 
   // Check that the referrer is matched against the whitelist.
-  url_chain.pop_back();
-  referrer = GURL("http://www.google.com/a.exe");
+  info.download_url_chain.pop_back();
+  info.referrer_url = GURL("http://www.google.com/a.exe");
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
 }
 
 TEST_F(DownloadProtectionServiceTest, CheckClientDownloadFetchFailed) {
-  net::FakeURLFetcherFactory factory(NULL);
+  FakeURLFetcherFactory factory;
   // HTTP request will fail.
   factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(), std::string(),
-      net::HTTP_INTERNAL_SERVER_ERROR, net::URLRequestStatus::FAILED);
+      DownloadProtectionService::kDownloadRequestUrl, "", false);
 
-  base::FilePath a_tmp(FILE_PATH_LITERAL("a.tmp"));
-  base::FilePath a_exe(FILE_PATH_LITERAL("a.exe"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/a.exe"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
+  DownloadProtectionService::DownloadInfo info;
+  info.local_file = FilePath(FILE_PATH_LITERAL("a.tmp"));
+  info.target_file = FilePath(FILE_PATH_LITERAL("a.exe"));
+  info.download_url_chain.push_back(GURL("http://www.evil.com/a.exe"));
+  info.referrer_url = GURL("http://www.google.com/");
 
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_));
-  EXPECT_CALL(item, RemoveObserver(_));
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_exe));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(""));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
+  EXPECT_CALL(*sb_service_, MatchDownloadWhitelistUrl(_))
       .WillRepeatedly(Return(false));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(a_tmp, _));
+  EXPECT_CALL(*signature_util_, CheckSignature(info.local_file, _));
 
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
 }
 
 TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
   ClientDownloadResponse response;
   response.set_verdict(ClientDownloadResponse::SAFE);
-  net::FakeURLFetcherFactory factory(NULL);
+  FakeURLFetcherFactory factory;
   // Empty response means SAFE.
   factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
+      DownloadProtectionService::kDownloadRequestUrl,
       response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
+      true);
 
-  base::FilePath a_tmp(FILE_PATH_LITERAL("a.tmp"));
-  base::FilePath a_exe(FILE_PATH_LITERAL("a.exe"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/a.exe"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
+  DownloadProtectionService::DownloadInfo info;
+  info.local_file = FilePath(FILE_PATH_LITERAL("a.tmp"));
+  info.target_file = FilePath(FILE_PATH_LITERAL("a.exe"));
+  info.download_url_chain.push_back(GURL("http://www.evil.com/a.exe"));
+  info.referrer_url = GURL("http://www.google.com/");
 
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(6);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(6);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_exe));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(""));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
+  EXPECT_CALL(*sb_service_, MatchDownloadWhitelistUrl(_))
       .WillRepeatedly(Return(false));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(a_tmp, _)).Times(6);
+  EXPECT_CALL(*signature_util_, CheckSignature(info.local_file, _)).Times(3);
 
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
 
   // Invalid response should be safe too.
   response.Clear();
   factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
+      DownloadProtectionService::kDownloadRequestUrl,
       response.SerializePartialAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
+      true);
 
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-  std::string feedback_ping;
-  std::string feedback_response;
-  EXPECT_FALSE(DownloadFeedbackService::GetPingsForDownloadForTesting(
-      item, &feedback_ping, &feedback_response));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
 
   // If the response is dangerous the result should also be marked as dangerous.
   response.set_verdict(ClientDownloadResponse::DANGEROUS);
   factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
+      DownloadProtectionService::kDownloadRequestUrl,
       response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
+      true);
 
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_FALSE(DownloadFeedbackService::GetPingsForDownloadForTesting(
-      item, &feedback_ping, &feedback_response));
+  msg_loop_.Run();
 #if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
+  ExpectResult(DownloadProtectionService::DANGEROUS);
 #else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
+  ExpectResult(DownloadProtectionService::SAFE);
 #endif
-
-  // If the response is uncommon the result should also be marked as uncommon.
-  response.set_verdict(ClientDownloadResponse::UNCOMMON);
-  factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
-      response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNCOMMON));
-  EXPECT_TRUE(DownloadFeedbackService::GetPingsForDownloadForTesting(
-      item, &feedback_ping, &feedback_response));
-  ClientDownloadRequest decoded_request;
-  EXPECT_TRUE(decoded_request.ParseFromString(feedback_ping));
-  EXPECT_EQ(url_chain.back().spec(), decoded_request.url());
-  EXPECT_EQ(response.SerializeAsString(), feedback_response);
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-#endif
-
-  // If the response is dangerous_host the result should also be marked as
-  // dangerous_host.
-  response.set_verdict(ClientDownloadResponse::DANGEROUS_HOST);
-  factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
-      response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS_HOST));
-  EXPECT_TRUE(DownloadFeedbackService::GetPingsForDownloadForTesting(
-      item, &feedback_ping, &feedback_response));
-  EXPECT_EQ(response.SerializeAsString(), feedback_response);
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-#endif
-
-  // If the response is POTENTIALLY_UNWANTED the result should also be marked as
-  // POTENTIALLY_UNWANTED.
-  response.set_verdict(ClientDownloadResponse::POTENTIALLY_UNWANTED);
-  factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
-      response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::POTENTIALLY_UNWANTED));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-#endif
-}
-
-TEST_F(DownloadProtectionServiceTest, CheckClientDownloadHTTPS) {
-  ClientDownloadResponse response;
-  response.set_verdict(ClientDownloadResponse::DANGEROUS);
-  net::FakeURLFetcherFactory factory(NULL);
-  factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
-      response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
-
-  base::FilePath a_tmp(FILE_PATH_LITERAL("a.tmp"));
-  base::FilePath a_exe(FILE_PATH_LITERAL("a.exe"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/a.exe"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
-
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(1);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(1);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_exe));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(""));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
-      .WillRepeatedly(Return(false));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(a_tmp, _)).Times(1);
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-#endif
-}
-
-TEST_F(DownloadProtectionServiceTest, CheckClientDownloadZip) {
-  ClientDownloadResponse response;
-  response.set_verdict(ClientDownloadResponse::SAFE);
-  net::FakeURLFetcherFactory factory(NULL);
-  // Empty response means SAFE.
-  factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
-      response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
-
-  base::ScopedTempDir download_dir;
-  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
-
-  base::FilePath a_tmp(download_dir.path().Append(FILE_PATH_LITERAL("a.tmp")));
-  base::FilePath a_zip(FILE_PATH_LITERAL("a.zip"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/a.zip"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
-
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(3);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(3);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_zip));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(""));
-
-  // Write out a zip archive to the temporary file.  In this case, it
-  // only contains a text file.
-  base::ScopedTempDir zip_source_dir;
-  ASSERT_TRUE(zip_source_dir.CreateUniqueTempDir());
-  std::string file_contents = "dummy file";
-  ASSERT_EQ(static_cast<int>(file_contents.size()), file_util::WriteFile(
-      zip_source_dir.path().Append(FILE_PATH_LITERAL("file.txt")),
-      file_contents.data(), file_contents.size()));
-  ASSERT_TRUE(zip::Zip(zip_source_dir.path(), a_tmp, false));
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-  Mock::VerifyAndClearExpectations(sb_service_.get());
-  Mock::VerifyAndClearExpectations(signature_util_.get());
-
-  // Now check with an executable in the zip file as well.
-  ASSERT_EQ(static_cast<int>(file_contents.size()), file_util::WriteFile(
-      zip_source_dir.path().Append(FILE_PATH_LITERAL("file.exe")),
-      file_contents.data(), file_contents.size()));
-  ASSERT_TRUE(zip::Zip(zip_source_dir.path(), a_tmp, false));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
-      .WillRepeatedly(Return(false));
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-  Mock::VerifyAndClearExpectations(signature_util_.get());
-
-  // If the response is dangerous the result should also be marked as
-  // dangerous.
-  response.set_verdict(ClientDownloadResponse::DANGEROUS);
-  factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
-      response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-#endif
-  Mock::VerifyAndClearExpectations(signature_util_.get());
-}
-
-TEST_F(DownloadProtectionServiceTest, CheckClientDownloadCorruptZip) {
-  base::ScopedTempDir download_dir;
-  ASSERT_TRUE(download_dir.CreateUniqueTempDir());
-
-  base::FilePath a_tmp(download_dir.path().Append(FILE_PATH_LITERAL("a.tmp")));
-  base::FilePath a_zip(FILE_PATH_LITERAL("a.zip"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/a.zip"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
-
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(1);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(1);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_zip));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(""));
-
-  std::string file_contents = "corrupt zip file";
-  ASSERT_EQ(static_cast<int>(file_contents.size()), file_util::WriteFile(
-      a_tmp, file_contents.data(), file_contents.size()));
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-  Mock::VerifyAndClearExpectations(sb_service_.get());
-  Mock::VerifyAndClearExpectations(signature_util_.get());
-}
-
-TEST_F(DownloadProtectionServiceTest, CheckClientCrxDownloadSuccess) {
-  ClientDownloadResponse response;
-  // Even if the server verdict is dangerous we should return SAFE because
-  // DownloadProtectionService::IsSupportedDownload() will return false
-  // for crx downloads.
-  response.set_verdict(ClientDownloadResponse::DANGEROUS);
-  net::FakeURLFetcherFactory factory(NULL);
-  // Empty response means SAFE.
-  factory.SetFakeResponse(
-      DownloadProtectionService::GetDownloadRequestUrl(),
-      response.SerializeAsString(),
-      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
-
-  base::FilePath a_tmp(FILE_PATH_LITERAL("a.tmp"));
-  base::FilePath a_crx(FILE_PATH_LITERAL("a.crx"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/a.crx"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
-
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(1);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(1);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(a_tmp));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(a_crx));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(""));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
-      .WillRepeatedly(Return(false));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(a_tmp, _)).Times(1);
-
-  EXPECT_FALSE(download_service_->IsSupportedDownload(item, a_crx));
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
 }
 
 TEST_F(DownloadProtectionServiceTest, CheckClientDownloadValidateRequest) {
-  net::TestURLFetcherFactory factory;
+  TestURLFetcherFactory factory;
 
-  base::FilePath tmp_path(FILE_PATH_LITERAL("bla.tmp"));
-  base::FilePath final_path(FILE_PATH_LITERAL("bla.exe"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.google.com/"));
-  url_chain.push_back(GURL("http://www.google.com/bla.exe"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
-  std::string remote_address = "10.11.12.13";
+  DownloadProtectionService::DownloadInfo info;
+  info.local_file = FilePath(FILE_PATH_LITERAL("bla.tmp"));
+  info.target_file = FilePath(FILE_PATH_LITERAL("bla.exe"));
+  info.download_url_chain.push_back(GURL("http://www.google.com/"));
+  info.download_url_chain.push_back(GURL("http://www.google.com/bla.exe"));
+  info.referrer_url = GURL("http://www.google.com/");
+  info.sha256_hash = "hash";
+  info.total_bytes = 100;
+  info.user_initiated = true;
+  info.remote_address = "10.11.12.13";
 
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(1);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(1);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(tmp_path));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(final_path));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(remote_address));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
+  EXPECT_CALL(*sb_service_, MatchDownloadWhitelistUrl(_))
       .WillRepeatedly(Return(false));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(tmp_path, _))
+  EXPECT_CALL(*signature_util_, CheckSignature(info.local_file, _))
       .WillOnce(SetCertificateContents("dummy cert data"));
+#if !defined(OS_WIN)
+  // If we're not on windows we won't be sending any request but instead
+  // we'll be looking up the download hash.
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(Return(true));
+#endif
+
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-
-#if !defined(OS_WIN)
-  // SendRequest is not called.  Wait for FinishRequest to call our callback.
-  MessageLoop::current()->Run();
-  net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
-  EXPECT_EQ(NULL, fetcher);
-#else
   // Run the message loop(s) until SendRequest is called.
   FlushThreadMessageLoops();
-  net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
+
+  TestURLFetcher* fetcher = factory.GetFetcherByID(0);
+#if !defined(OS_WIN)
+  EXPECT_EQ(NULL, fetcher);
+#else
   ASSERT_TRUE(fetcher);
   ClientDownloadRequest request;
   EXPECT_TRUE(request.ParseFromString(fetcher->upload_data()));
   EXPECT_EQ("http://www.google.com/bla.exe", request.url());
-  EXPECT_EQ(hash, request.digests().sha256());
-  EXPECT_EQ(item.GetReceivedBytes(), request.length());
-  EXPECT_EQ(item.HasUserGesture(), request.user_initiated());
-  EXPECT_TRUE(RequestContainsServerIp(request, remote_address));
+  EXPECT_EQ(info.sha256_hash, request.digests().sha256());
+  EXPECT_EQ(info.total_bytes, request.length());
+  EXPECT_EQ(info.user_initiated, request.user_initiated());
+  EXPECT_TRUE(RequestContainsServerIp(request, info.remote_address));
   EXPECT_EQ(2, request.resources_size());
   EXPECT_TRUE(RequestContainsResource(request,
                                       ClientDownloadRequest::DOWNLOAD_REDIRECT,
@@ -858,7 +478,7 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadValidateRequest) {
   EXPECT_TRUE(RequestContainsResource(request,
                                       ClientDownloadRequest::DOWNLOAD_URL,
                                       "http://www.google.com/bla.exe",
-                                      referrer.spec()));
+                                      info.referrer_url.spec()));
   EXPECT_TRUE(request.has_signature());
   ASSERT_EQ(1, request.signature().certificate_chain_size());
   const ClientDownloadRequest_CertificateChain& chain =
@@ -867,65 +487,58 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadValidateRequest) {
   EXPECT_EQ("dummy cert data", chain.element(0).certificate());
 
   // Simulate the request finishing.
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&DownloadProtectionServiceTest::SendURLFetchComplete,
                  base::Unretained(this), fetcher));
-  MessageLoop::current()->Run();
+  msg_loop_.Run();
 #endif
 }
 
 // Similar to above, but with an unsigned binary.
 TEST_F(DownloadProtectionServiceTest,
        CheckClientDownloadValidateRequestNoSignature) {
-  net::TestURLFetcherFactory factory;
+  TestURLFetcherFactory factory;
 
-  base::FilePath tmp_path(FILE_PATH_LITERAL("bla.tmp"));
-  base::FilePath final_path(FILE_PATH_LITERAL("bla.exe"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.google.com/"));
-  url_chain.push_back(GURL("ftp://www.google.com/bla.exe"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
-  std::string remote_address = "10.11.12.13";
+  DownloadProtectionService::DownloadInfo info;
+  info.local_file = FilePath(FILE_PATH_LITERAL("bla.tmp"));
+  info.target_file = FilePath(FILE_PATH_LITERAL("bla.exe"));
+  info.download_url_chain.push_back(GURL("http://www.google.com/"));
+  info.download_url_chain.push_back(GURL("ftp://www.google.com/bla.exe"));
+  info.referrer_url = GURL("http://www.google.com/");
+  info.sha256_hash = "hash";
+  info.total_bytes = 100;
+  info.user_initiated = false;
 
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(1);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(1);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(tmp_path));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(final_path));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(remote_address));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
+  EXPECT_CALL(*sb_service_, MatchDownloadWhitelistUrl(_))
       .WillRepeatedly(Return(false));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(tmp_path, _));
+  EXPECT_CALL(*signature_util_, CheckSignature(info.local_file, _));
+#if !defined(OS_WIN)
+  // If we're not on windows we won't be sending any request but instead
+  // we'll be looking up the download hash.
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(Return(true));
+#endif
+
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-
-#if !defined(OS_WIN)
-  // SendRequest is not called.  Wait for FinishRequest to call our callback.
-  MessageLoop::current()->Run();
-  net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
-  EXPECT_EQ(NULL, fetcher);
-#else
   // Run the message loop(s) until SendRequest is called.
   FlushThreadMessageLoops();
-  net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
+
+  TestURLFetcher* fetcher = factory.GetFetcherByID(0);
+#if !defined(OS_WIN)
+  EXPECT_EQ(NULL, fetcher);
+#else
   ASSERT_TRUE(fetcher);
   ClientDownloadRequest request;
   EXPECT_TRUE(request.ParseFromString(fetcher->upload_data()));
   EXPECT_EQ("ftp://www.google.com/bla.exe", request.url());
-  EXPECT_EQ(hash, request.digests().sha256());
-  EXPECT_EQ(item.GetReceivedBytes(), request.length());
-  EXPECT_EQ(item.HasUserGesture(), request.user_initiated());
+  EXPECT_EQ(info.sha256_hash, request.digests().sha256());
+  EXPECT_EQ(info.total_bytes, request.length());
+  EXPECT_EQ(info.user_initiated, request.user_initiated());
   EXPECT_EQ(2, request.resources_size());
   EXPECT_TRUE(RequestContainsResource(request,
                                       ClientDownloadRequest::DOWNLOAD_REDIRECT,
@@ -933,162 +546,234 @@ TEST_F(DownloadProtectionServiceTest,
   EXPECT_TRUE(RequestContainsResource(request,
                                       ClientDownloadRequest::DOWNLOAD_URL,
                                       "ftp://www.google.com/bla.exe",
-                                      referrer.spec()));
+                                      info.referrer_url.spec()));
   EXPECT_TRUE(request.has_signature());
   EXPECT_EQ(0, request.signature().certificate_chain_size());
 
   // Simulate the request finishing.
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&DownloadProtectionServiceTest::SendURLFetchComplete,
                  base::Unretained(this), fetcher));
-  MessageLoop::current()->Run();
+  msg_loop_.Run();
 #endif
 }
 
-TEST_F(DownloadProtectionServiceTest, TestCheckDownloadUrl) {
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.google.com/"));
-  url_chain.push_back(GURL("http://www.google.com/bla.exe"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
+TEST_F(DownloadProtectionServiceTest, CheckClientDownloadDigestList) {
+  DownloadProtectionService::DownloadInfo info;
+  info.local_file = FilePath(FILE_PATH_LITERAL("a.tmp"));
+  info.target_file = FilePath(FILE_PATH_LITERAL("a.exe"));
 
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
+  // HTTPs URLs never result in a server ping for privacy reasons.  However,
+  // we do lookup the bad binary digest list.
+  info.download_url_chain.push_back(GURL("https://www.evil.com/a.exe"));
+  info.referrer_url = GURL("http://www.google.com/");
+  info.sha256_hash = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+  // CheckDownloadHash returns immediately which means the hash is not
+  // malicious.
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(Return(true));
+  download_service_->CheckClientDownload(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
+
+  // The hash does not match the bad binary digest list.
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(DoAll(CheckDownloadHashDone(SafeBrowsingService::SAFE),
+                      Return(false)));
+  download_service_->CheckClientDownload(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
+
+  // The hash matches the bad binary URL list but not the bad binary digest
+  // list.  This is an artificial example to make sure we really check the
+  // result value in the code.
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(DoAll(
+          CheckDownloadHashDone(SafeBrowsingService::BINARY_MALWARE_URL),
+          Return(false)));
+  download_service_->CheckClientDownload(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
+
+  // A match is found with the bad binary digest list.  We currently do not
+  // warn based on the digest list.  Hence we should always return SAFE.
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(DoAll(
+          CheckDownloadHashDone(SafeBrowsingService::BINARY_MALWARE_HASH),
+          Return(false)));
+  download_service_->CheckClientDownload(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
+
+  // If the download is not an executable we do not send a server ping but we
+  // still want to lookup the binary digest list.
+  info.target_file = FilePath(FILE_PATH_LITERAL("a.pdf"));
+  info.download_url_chain[0] = GURL("http://www.evil.com/a.pdf");
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(DoAll(
+          CheckDownloadHashDone(SafeBrowsingService::BINARY_MALWARE_HASH),
+          Return(false)));
+  download_service_->CheckClientDownload(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
+
+  // If the URL or the referrer matches the download whitelist we cannot send
+  // a server ping for privacy reasons but we still match the digest against
+  // the bad binary digest list.
+  info.target_file = FilePath(FILE_PATH_LITERAL("a.exe"));
+  info.download_url_chain[0] = GURL("http://www.evil.com/a.exe");
+  EXPECT_CALL(*sb_service_, MatchDownloadWhitelistUrl(_))
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*signature_util_, CheckSignature(info.local_file, _));
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(DoAll(
+          CheckDownloadHashDone(SafeBrowsingService::BINARY_MALWARE_HASH),
+          Return(false)));
+  download_service_->CheckClientDownload(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
+
+  // If the binary is a trusted executable we will not ping the server but
+  // we will still lookup the digest list.
+  EXPECT_CALL(*sb_service_, MatchDownloadWhitelistUrl(_))
+      .WillRepeatedly(Return(false));
+  EXPECT_CALL(*signature_util_, CheckSignature(info.local_file, _))
+      .WillOnce(TrustSignature(
+          testdata_path_.AppendASCII("signature_util_test.cer")));
+  EXPECT_CALL(*sb_service_,
+              MatchDownloadWhitelistString(
+                  "cert/58AFF702772EB67BDD412571BA40AAC07F0D936C/"
+                  "CN=Joe's-Software-Emporium"))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadHash(info.sha256_hash, NotNull()))
+      .WillOnce(DoAll(CheckDownloadHashDone(SafeBrowsingService::SAFE),
+                      Return(false)));
+  download_service_->CheckClientDownload(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+}
+
+TEST_F(DownloadProtectionServiceTest, TestCheckDownloadUrl) {
+  DownloadProtectionService::DownloadInfo info;
+  info.download_url_chain.push_back(GURL("http://www.google.com/"));
+  info.download_url_chain.push_back(GURL("http://www.google.com/bla.exe"));
+  info.referrer_url = GURL("http://www.google.com/");
 
   // CheckDownloadURL returns immediately which means the client object callback
   // will never be called.  Nevertheless the callback provided to
   // CheckClientDownload must still be called.
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              CheckDownloadUrl(ContainerEq(url_chain), NotNull()))
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadUrl(ContainerEq(info.download_url_chain),
+                               NotNull()))
       .WillOnce(Return(true));
   download_service_->CheckDownloadUrl(
-      item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-  Mock::VerifyAndClearExpectations(sb_service_.get());
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
 
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              CheckDownloadUrl(ContainerEq(url_chain), NotNull()))
-      .WillOnce(DoAll(CheckDownloadUrlDone(SB_THREAT_TYPE_SAFE),
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadUrl(ContainerEq(info.download_url_chain),
+                               NotNull()))
+      .WillOnce(DoAll(CheckDownloadUrlDone(SafeBrowsingService::SAFE),
                       Return(false)));
   download_service_->CheckDownloadUrl(
-      item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-  Mock::VerifyAndClearExpectations(sb_service_.get());
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
 
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              CheckDownloadUrl(ContainerEq(url_chain), NotNull()))
-      .WillOnce(DoAll(
-          CheckDownloadUrlDone(SB_THREAT_TYPE_URL_MALWARE),
-          Return(false)));
-  download_service_->CheckDownloadUrl(
-      item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-  Mock::VerifyAndClearExpectations(sb_service_.get());
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              CheckDownloadUrl(ContainerEq(url_chain),
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadUrl(ContainerEq(info.download_url_chain),
                                NotNull()))
       .WillOnce(DoAll(
-          CheckDownloadUrlDone(SB_THREAT_TYPE_BINARY_MALWARE_URL),
+          CheckDownloadUrlDone(SafeBrowsingService::URL_MALWARE),
           Return(false)));
   download_service_->CheckDownloadUrl(
-      item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
+  Mock::VerifyAndClearExpectations(sb_service_);
+
+  EXPECT_CALL(*sb_service_,
+              CheckDownloadUrl(ContainerEq(info.download_url_chain),
+                               NotNull()))
+      .WillOnce(DoAll(
+          CheckDownloadUrlDone(SafeBrowsingService::BINARY_MALWARE_URL),
+          Return(false)));
+  download_service_->CheckDownloadUrl(
+      info,
+      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                 base::Unretained(this)));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::DANGEROUS);
 }
 
 TEST_F(DownloadProtectionServiceTest, TestDownloadRequestTimeout) {
-  net::TestURLFetcherFactory factory;
+  TestURLFetcherFactory factory;
 
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/bla.exe"));
-  GURL referrer("http://www.google.com/");
-  base::FilePath tmp_path(FILE_PATH_LITERAL("a.tmp"));
-  base::FilePath final_path(FILE_PATH_LITERAL("a.exe"));
-  std::string hash = "hash";
+  DownloadProtectionService::DownloadInfo info;
+  info.download_url_chain.push_back(GURL("http://www.evil.com/bla.exe"));
+  info.referrer_url = GURL("http://www.google.com/");
+  info.local_file = FilePath(FILE_PATH_LITERAL("a.tmp"));
+  info.target_file = FilePath(FILE_PATH_LITERAL("a.exe"));
 
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, AddObserver(_)).Times(1);
-  EXPECT_CALL(item, RemoveObserver(_)).Times(1);
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(tmp_path));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(final_path));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(""));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
+  EXPECT_CALL(*sb_service_, MatchDownloadWhitelistUrl(_))
       .WillRepeatedly(Return(false));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(tmp_path, _));
+  EXPECT_CALL(*signature_util_, CheckSignature(info.local_file, _));
 
   download_service_->download_request_timeout_ms_ = 10;
   download_service_->CheckClientDownload(
-      &item,
+      info,
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
 
   // The request should time out because the HTTP request hasn't returned
   // anything yet.
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-}
-
-TEST_F(DownloadProtectionServiceTest, TestDownloadItemDestroyed) {
-  net::TestURLFetcherFactory factory;
-
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.evil.com/bla.exe"));
-  GURL referrer("http://www.google.com/");
-  base::FilePath tmp_path(FILE_PATH_LITERAL("a.tmp"));
-  base::FilePath final_path(FILE_PATH_LITERAL("a.exe"));
-  std::string hash = "hash";
-
-  content::MockDownloadItem item;
-  content::DownloadItem::Observer* observer = NULL;
-  EXPECT_CALL(item, AddObserver(_)).WillOnce(SaveArg<0>(&observer));
-  EXPECT_CALL(item, RemoveObserver(_)).WillOnce(Assign(
-      &observer, static_cast<content::DownloadItem::Observer*>(NULL)));
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(tmp_path));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(final_path));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(""));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
-      .WillRepeatedly(Return(false));
-  EXPECT_CALL(*signature_util_.get(), CheckSignature(tmp_path, _));
-
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::SyncCheckDoneCallback,
-                 base::Unretained(this)));
-
-  ASSERT_TRUE(observer != NULL);
-  observer->OnDownloadDestroyed(&item);
-
-  EXPECT_TRUE(observer == NULL);
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
+  msg_loop_.Run();
+  ExpectResult(DownloadProtectionService::SAFE);
 }
 
 TEST_F(DownloadProtectionServiceTest, GetCertificateWhitelistStrings) {
@@ -1105,8 +790,7 @@ TEST_F(DownloadProtectionServiceTest, GetCertificateWhitelistStrings) {
   scoped_refptr<net::X509Certificate> cert(ReadTestCertificate("test_cn.pem"));
   ASSERT_TRUE(cert.get());
   std::vector<std::string> whitelist_strings;
-  GetCertificateWhitelistStrings(
-      *cert.get(), *issuer_cert.get(), &whitelist_strings);
+  GetCertificateWhitelistStrings(*cert, *issuer_cert, &whitelist_strings);
   // This also tests escaping of characters in the certificate attributes.
   EXPECT_THAT(whitelist_strings, ElementsAre(
       cert_base + "/CN=subject%2F%251"));
@@ -1114,66 +798,59 @@ TEST_F(DownloadProtectionServiceTest, GetCertificateWhitelistStrings) {
   cert = ReadTestCertificate("test_cn_o.pem");
   ASSERT_TRUE(cert.get());
   whitelist_strings.clear();
-  GetCertificateWhitelistStrings(
-      *cert.get(), *issuer_cert.get(), &whitelist_strings);
-  EXPECT_THAT(whitelist_strings,
-              ElementsAre(cert_base + "/CN=subject",
-                          cert_base + "/CN=subject/O=org",
-                          cert_base + "/O=org"));
+  GetCertificateWhitelistStrings(*cert, *issuer_cert, &whitelist_strings);
+  EXPECT_THAT(whitelist_strings, ElementsAre(
+      cert_base + "/CN=subject",
+      cert_base + "/CN=subject/O=org",
+      cert_base + "/O=org"));
 
   cert = ReadTestCertificate("test_cn_o_ou.pem");
   ASSERT_TRUE(cert.get());
   whitelist_strings.clear();
-  GetCertificateWhitelistStrings(
-      *cert.get(), *issuer_cert.get(), &whitelist_strings);
-  EXPECT_THAT(whitelist_strings,
-              ElementsAre(cert_base + "/CN=subject",
-                          cert_base + "/CN=subject/O=org",
-                          cert_base + "/CN=subject/O=org/OU=unit",
-                          cert_base + "/CN=subject/OU=unit",
-                          cert_base + "/O=org",
-                          cert_base + "/O=org/OU=unit",
-                          cert_base + "/OU=unit"));
+  GetCertificateWhitelistStrings(*cert, *issuer_cert, &whitelist_strings);
+  EXPECT_THAT(whitelist_strings, ElementsAre(
+      cert_base + "/CN=subject",
+      cert_base + "/CN=subject/O=org",
+      cert_base + "/CN=subject/O=org/OU=unit",
+      cert_base + "/CN=subject/OU=unit",
+      cert_base + "/O=org",
+      cert_base + "/O=org/OU=unit",
+      cert_base + "/OU=unit"));
 
   cert = ReadTestCertificate("test_cn_ou.pem");
   ASSERT_TRUE(cert.get());
   whitelist_strings.clear();
-  GetCertificateWhitelistStrings(
-      *cert.get(), *issuer_cert.get(), &whitelist_strings);
-  EXPECT_THAT(whitelist_strings,
-              ElementsAre(cert_base + "/CN=subject",
-                          cert_base + "/CN=subject/OU=unit",
-                          cert_base + "/OU=unit"));
+  GetCertificateWhitelistStrings(*cert, *issuer_cert, &whitelist_strings);
+  EXPECT_THAT(whitelist_strings, ElementsAre(
+      cert_base + "/CN=subject",
+      cert_base + "/CN=subject/OU=unit",
+      cert_base + "/OU=unit"));
 
   cert = ReadTestCertificate("test_o.pem");
   ASSERT_TRUE(cert.get());
   whitelist_strings.clear();
-  GetCertificateWhitelistStrings(
-      *cert.get(), *issuer_cert.get(), &whitelist_strings);
+  GetCertificateWhitelistStrings(*cert, *issuer_cert, &whitelist_strings);
   EXPECT_THAT(whitelist_strings, ElementsAre(cert_base + "/O=org"));
 
   cert = ReadTestCertificate("test_o_ou.pem");
   ASSERT_TRUE(cert.get());
   whitelist_strings.clear();
-  GetCertificateWhitelistStrings(
-      *cert.get(), *issuer_cert.get(), &whitelist_strings);
-  EXPECT_THAT(whitelist_strings,
-              ElementsAre(cert_base + "/O=org",
-                          cert_base + "/O=org/OU=unit",
-                          cert_base + "/OU=unit"));
+  GetCertificateWhitelistStrings(*cert, *issuer_cert, &whitelist_strings);
+  EXPECT_THAT(whitelist_strings, ElementsAre(
+      cert_base + "/O=org",
+      cert_base + "/O=org/OU=unit",
+      cert_base + "/OU=unit"));
 
   cert = ReadTestCertificate("test_ou.pem");
   ASSERT_TRUE(cert.get());
   whitelist_strings.clear();
-  GetCertificateWhitelistStrings(
-      *cert.get(), *issuer_cert.get(), &whitelist_strings);
+  GetCertificateWhitelistStrings(*cert, *issuer_cert, &whitelist_strings);
   EXPECT_THAT(whitelist_strings, ElementsAre(cert_base + "/OU=unit"));
 
   cert = ReadTestCertificate("test_c.pem");
   ASSERT_TRUE(cert.get());
   whitelist_strings.clear();
-  GetCertificateWhitelistStrings(
-      *cert.get(), *issuer_cert.get(), &whitelist_strings);
+  GetCertificateWhitelistStrings(*cert, *issuer_cert, &whitelist_strings);
   EXPECT_THAT(whitelist_strings, ElementsAre());
 }
 }  // namespace safe_browsing

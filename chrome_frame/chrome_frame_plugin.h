@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,12 @@
 
 #define IDC_ABOUT_CHROME_FRAME 40018
 
+// Helper so that this file doesn't include the messages header.
+void ChromeFramePluginGetParamsCoordinates(
+    const MiniContextMenuParams& params,
+    int* x,
+    int* y);
+
 // A class to implement common functionality for all types of
 // plugins: ActiveX and ActiveDoc
 template <typename T>
@@ -35,6 +41,7 @@ class ChromeFramePlugin
 
 BEGIN_MSG_MAP(T)
   MESSAGE_HANDLER(WM_SETFOCUS, OnSetFocus)
+  MESSAGE_HANDLER(WM_SIZE, OnSize)
   MESSAGE_HANDLER(WM_PARENTNOTIFY, OnParentNotify)
 END_MSG_MAP()
 
@@ -67,12 +74,12 @@ END_MSG_MAP()
     // We don't want to do incognito when privileged, since we're
     // running in browser chrome or some other privileged context.
     bool incognito_mode = !is_privileged() && incognito;
-    base::FilePath profile_path;
+    FilePath profile_path;
     GetProfilePath(profile_name, &profile_path);
     // The profile name could change based on the browser version. For e.g. for
     // IE6/7 the profile is created in a different folder whose last component
     // is Google Chrome Frame.
-    base::FilePath actual_profile_name = profile_path.BaseName();
+    FilePath actual_profile_name = profile_path.BaseName();
     launch_params_ = new ChromeFrameLaunchParams(url, referrer, profile_path,
         actual_profile_name.value(), SimpleResourceLoader::GetLanguage(),
         incognito_mode, is_widget_mode, route_all_top_level_navigations);
@@ -101,9 +108,68 @@ END_MSG_MAP()
     return automation_client_.get() != NULL;
   }
 
+  virtual void OnHostMoved() {
+    if (IsValid())
+      automation_client_->OnChromeFrameHostMoved();
+  }
+
  protected:
+  virtual void OnNavigationFailed(int error_code, const GURL& gurl) {
+    OnLoadFailed(error_code, gurl.spec());
+  }
+
+  virtual void OnHandleContextMenu(const ContextMenuModel& menu_model,
+                                   int align_flags,
+                                   const MiniContextMenuParams& params) {
+    if (!automation_client_.get()) {
+      NOTREACHED();
+      return;
+    }
+
+    HMENU menu = BuildContextMenu(menu_model);
+    if (!menu)
+      return;
+
+    T* self = static_cast<T*>(this);
+    if (self->PreProcessContextMenu(menu)) {
+      // In order for the context menu to handle keyboard input, give the
+      // ActiveX window focus.
+      ignore_setfocus_ = true;
+      SetFocus(GetWindow());
+      ignore_setfocus_ = false;
+      UINT flags = align_flags | TPM_LEFTBUTTON | TPM_RETURNCMD | TPM_RECURSE;
+      int x, y;
+      ChromeFramePluginGetParamsCoordinates(params, &x, &y);
+      UINT selected = TrackPopupMenuEx(menu, flags, x, y, GetWindow(), NULL);
+      // Menu is over now give focus back to chrome
+      GiveFocusToChrome(false);
+      if (IsValid() && selected != 0 &&
+          !self->HandleContextMenuCommand(selected, params)) {
+        automation_client_->SendContextMenuCommandToChromeFrame(selected);
+      }
+    }
+
+    DestroyMenu(menu);
+  }
+
   LRESULT OnSetFocus(UINT message, WPARAM wparam, LPARAM lparam,
                      BOOL& handled) {  // NO_LINT
+    if (!ignore_setfocus_ && IsValid()) {
+      // Pass false to |restore_focus_view|, because we do not want Chrome
+      // to focus the first focusable element in the current view, only the
+      // view itself.
+      GiveFocusToChrome(false);
+    }
+    return 0;
+  }
+
+  LRESULT OnSize(UINT message, WPARAM wparam, LPARAM lparam,
+                 BOOL& handled) {  // NO_LINT
+    handled = FALSE;
+    // When we get resized, we need to resize the external tab window too.
+    if (IsValid())
+      automation_client_->Resize(LOWORD(lparam), HIWORD(lparam),
+                                 SWP_NOACTIVATE | SWP_NOZORDER);
     return 0;
   }
 
@@ -148,14 +214,34 @@ END_MSG_MAP()
     return true;
   }
 
+  // Return true if menu command is processed, otherwise the command will be
+  // passed to Chrome for execution. Override in most-derived class if needed.
+  bool HandleContextMenuCommand(UINT cmd,
+                                const MiniContextMenuParams& params) {
+    return false;
+  }
+
   // Allow overriding the type of automation client used, for unit tests.
   virtual ChromeFrameAutomationClient* CreateAutomationClient() {
     return new ChromeFrameAutomationClient;
   }
 
+  void GiveFocusToChrome(bool restore_focus_to_view) {
+    if (IsValid()) {
+      TabProxy* tab = automation_client_->tab();
+      HWND chrome_window = automation_client_->tab_window();
+      if (tab && ::IsWindow(chrome_window)) {
+        DVLOG(1) << "Setting initial focus";
+        tab->SetInitialFocus(base::win::IsShiftPressed(), restore_focus_to_view);
+      }
+    }
+  }
+
   virtual void GetProfilePath(const std::wstring& profile_name,
-                              base::FilePath* profile_path) {
-    return GetChromeFrameProfilePath(profile_name, profile_path);
+                              FilePath* profile_path) {
+    chrome::GetChromeFrameUserDataDirectory(profile_path);
+    *profile_path = profile_path->Append(profile_name);
+    DVLOG(1) << __FUNCTION__ << ": " << profile_path->value();
   }
 
  protected:

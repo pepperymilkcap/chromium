@@ -15,14 +15,10 @@ namespace {
 
 const wchar_t kModChrome[] = L"-chrome";
 const wchar_t kModChromeFrame[] = L"-chromeframe";
-// TODO(huangs): Remove by M27.
-const wchar_t kModAppHostDeprecated[] = L"-apphost";
-const wchar_t kModAppLauncher[] = L"-applauncher";
 const wchar_t kModMultiInstall[] = L"-multi";
 const wchar_t kModReadyMode[] = L"-readymode";
 const wchar_t kModStage[] = L"-stage:";
 const wchar_t kSfxFull[] = L"-full";
-const wchar_t kSfxMigrating[] = L"-migrating";
 const wchar_t kSfxMultiFail[] = L"-multifail";
 
 const wchar_t* const kChannels[] = {
@@ -35,12 +31,9 @@ const wchar_t* const kModifiers[] = {
   kModMultiInstall,
   kModChrome,
   kModChromeFrame,
-  kModAppHostDeprecated,  // TODO(huangs): Remove by M27.
-  kModAppLauncher,
   kModReadyMode,
   kSfxMultiFail,
-  kSfxMigrating,
-  kSfxFull,
+  kSfxFull
 };
 
 enum ModifierIndex {
@@ -48,11 +41,8 @@ enum ModifierIndex {
   MOD_MULTI_INSTALL,
   MOD_CHROME,
   MOD_CHROME_FRAME,
-  MOD_APP_HOST_DEPRECATED,  // TODO(huangs): Remove by M27.
-  MOD_APP_LAUNCHER,
   MOD_READY_MODE,
   SFX_MULTI_FAIL,
-  SFX_MIGRATING,
   SFX_FULL,
   NUM_MODIFIERS
 };
@@ -203,17 +193,6 @@ bool ChannelInfo::SetChromeFrame(bool value) {
   return SetModifier(MOD_CHROME_FRAME, value, &value_);
 }
 
-bool ChannelInfo::IsAppLauncher() const {
-  return HasModifier(MOD_APP_LAUNCHER, value_);
-}
-
-bool ChannelInfo::SetAppLauncher(bool value) {
-  // Unconditionally remove -apphost since it has been deprecated.
-  bool changed_app_host = SetModifier(MOD_APP_HOST_DEPRECATED, false, &value_);
-  bool changed_app_launcher = SetModifier(MOD_APP_LAUNCHER, value, &value_);
-  return changed_app_host || changed_app_launcher;
-}
-
 bool ChannelInfo::IsMultiInstall() const {
   return HasModifier(MOD_MULTI_INSTALL, value_);
 }
@@ -282,25 +261,6 @@ bool ChannelInfo::HasMultiFailSuffix() const {
 
 bool ChannelInfo::SetMultiFailSuffix(bool value) {
   return SetModifier(SFX_MULTI_FAIL, value, &value_);
-}
-
-bool ChannelInfo::SetMigratingSuffix(bool value) {
-  return SetModifier(SFX_MIGRATING, value, &value_);
-}
-
-bool ChannelInfo::HasMigratingSuffix() const {
-  return HasModifier(SFX_MIGRATING, value_);
-}
-
-bool ChannelInfo::RemoveAllModifiersAndSuffixes() {
-  bool modified = false;
-
-  for (int scan = 0; scan < NUM_MODIFIERS; ++scan) {
-    ModifierIndex index = static_cast<ModifierIndex>(scan);
-    modified = SetModifier(index, false, &value_) || modified;
-  }
-
-  return modified;
 }
 
 }  // namespace installer

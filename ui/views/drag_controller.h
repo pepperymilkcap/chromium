@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_DRAG_CONTROLLER_H_
 #define UI_VIEWS_DRAG_CONTROLLER_H_
+#pragma once
 
 #include "ui/views/views_export.h"
 

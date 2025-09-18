@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,11 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome_frame/test/win_event_receiver.h"
@@ -186,14 +186,15 @@ bool AccObject::GetRoleText(std::wstring* role_text) {
         *role_text = role_text_array;
         return true;
       } else {
-        LOG(ERROR) << "GetRoleText failed for role: " << V_I4(&role_variant);
+        DLOG(ERROR) << "GetRoleText failed for role: "
+                    << V_I4(&role_variant);
       }
     } else if (role_variant.type() == VT_BSTR) {
       *role_text = V_BSTR(&role_variant);
       return true;
     } else {
-      LOG(ERROR) << "Role was unexpected variant type: "
-                 << role_variant.type();
+      DLOG(ERROR) << "Role was unexpected variant type: "
+                  << role_variant.type();
     }
   }
   return false;
@@ -241,9 +242,8 @@ bool AccObject::GetLocationInClient(gfx::Rect* client_location) {
     return false;
   POINT offset = {0, 0};
   if (!::ScreenToClient(container_window, &offset)) {
-    LOG(ERROR) << "Could not convert from screen to client coordinates for "
-                  "window containing accessibility object: "
-               << GetDescription();
+    DLOG(ERROR) << "Could not convert from screen to client coordinates for "
+        << "window containing accessibility object: " << GetDescription();
     return false;
   }
   location.Offset(offset.x, offset.y);
@@ -272,7 +272,7 @@ bool AccObject::GetChildren(RefCountedAccObjectVector* client_objects) {
 
   RefCountedAccObjectVector objects;
   // Find children using |AccessibleChildren|.
-  scoped_ptr<VARIANT[]> children(new VARIANT[child_count]);
+  scoped_array<VARIANT> children(new VARIANT[child_count]);
   long found_child_count;  // NOLINT
   if (FAILED(AccessibleChildren(accessible_, 0L, child_count,
                                 children.get(),
@@ -512,7 +512,7 @@ AccObject* AccObject::CreateFromVariant(AccObject* object,
     }
     VLOG(1) << "Failed to determine if child id refers to a full "
             << "object. Error: " << result << std::endl
-            << "Parent object: " << base::WideToUTF8(object->GetDescription())
+            << "Parent object: " << WideToUTF8(object->GetDescription())
             << std::endl << "Child ID: " << V_I4(&variant);
     return NULL;
   } else if (V_VT(&variant) == VT_DISPATCH) {
@@ -525,8 +525,8 @@ AccObject* AccObject::CreateFromVariant(AccObject* object,
 bool AccObject::PostMouseClickAtCenter(int button_down, int button_up) {
    std::wstring class_name;
   if (!GetWindowClassName(&class_name)) {
-    LOG(ERROR) << "Could not get class name of window for accessibility "
-               << "object: " << GetDescription();
+    DLOG(ERROR) << "Could not get class name of window for accessibility "
+                << "object: " << GetDescription();
     return false;
   }
   gfx::Rect location;
@@ -638,7 +638,7 @@ std::wstring AccObjectMatcher::GetDescription() const {
 
 // AccEventObserver methods
 AccEventObserver::AccEventObserver()
-    : event_handler_(new EventHandler(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(event_handler_(new EventHandler(this))),
       is_watching_(false) {
   event_receiver_.SetListenerForEvents(this, EVENT_SYSTEM_MENUPOPUPSTART,
                                        EVENT_OBJECT_VALUECHANGE);
@@ -658,8 +658,8 @@ void AccEventObserver::OnEventReceived(DWORD event,
                                        LONG object_id,
                                        LONG child_id) {
   // Process events in a separate task to stop reentrancy problems.
-  DCHECK(base::MessageLoop::current());
-  base::MessageLoop::current()->PostTask(
+  DCHECK(MessageLoop::current());
+  MessageLoop::current()->PostTask(
       FROM_HERE,  base::Bind(&EventHandler::Handle, event_handler_.get(), event,
                              hwnd, object_id, child_id));
 }
@@ -739,8 +739,8 @@ bool IsDesktopUnlocked() {
   return desk;
 }
 
-base::FilePath GetIAccessible2ProxyStubPath() {
-  base::FilePath path;
+FilePath GetIAccessible2ProxyStubPath() {
+  FilePath path;
   PathService::Get(chrome::DIR_APP, &path);
   return path.AppendASCII("IAccessible2Proxy.dll");
 }

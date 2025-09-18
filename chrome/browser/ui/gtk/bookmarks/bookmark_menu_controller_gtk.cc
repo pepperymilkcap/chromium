@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,12 @@
 
 #include <gtk/gtk.h>
 
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
-#include "chrome/browser/ui/gtk/event_utils.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -27,8 +22,8 @@
 #include "grit/ui_resources.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/gtk_util.h"
+#include "webkit/glue/window_open_disposition.h"
 
 using content::OpenURLParams;
 using content::PageNavigator;
@@ -38,7 +33,7 @@ namespace {
 void SetImageMenuItem(GtkWidget* menu_item,
                       const BookmarkNode* node,
                       BookmarkModel* model) {
-  GdkPixbuf* pixbuf = GetPixbufForNode(node, model, true);
+  GdkPixbuf* pixbuf = bookmark_utils::GetPixbufForNode(node, model, true);
   gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(menu_item),
                                 gtk_image_new_from_pixbuf(pixbuf));
   g_object_unref(pixbuf);
@@ -69,15 +64,15 @@ void OnContextMenuHide(GtkWidget* context_menu, GtkWidget* grab_menu) {
 
 }  // namespace
 
-BookmarkMenuController::BookmarkMenuController(Browser* browser,
+BookmarkMenuController::BookmarkMenuController(Profile* profile,
                                                PageNavigator* navigator,
                                                GtkWindow* window,
                                                const BookmarkNode* node,
                                                int start_child_index)
-    : browser_(browser),
+    : profile_(profile),
       page_navigator_(navigator),
       parent_window_(window),
-      model_(BookmarkModelFactory::GetForProfile(browser->profile())),
+      model_(profile->GetBookmarkModel()),
       node_(node),
       drag_icon_(NULL),
       ignore_button_release_(false),
@@ -123,9 +118,7 @@ void BookmarkMenuController::BookmarkNodeFaviconChanged(
     SetImageMenuItem(it->second, node, model);
 }
 
-void BookmarkMenuController::WillExecuteCommand(
-      int command_id,
-      const std::vector<const BookmarkNode*>& bookmarks) {
+void BookmarkMenuController::WillExecuteCommand() {
   gtk_menu_popdown(GTK_MENU(menu_));
 }
 
@@ -139,7 +132,6 @@ void BookmarkMenuController::NavigateToMenuItem(
   const BookmarkNode* node = GetNodeFromMenuItem(menu_item);
   DCHECK(node);
   DCHECK(page_navigator_);
-  RecordBookmarkLaunch(node, BOOKMARK_LAUNCH_LOCATION_BAR_SUBFOLDER);
   page_navigator_->OpenURL(OpenURLParams(
       node->url(), content::Referrer(), disposition,
       content::PAGE_TRANSITION_AUTO_BOOKMARK, false));
@@ -158,8 +150,8 @@ void BookmarkMenuController::BuildMenu(const BookmarkNode* parent,
   for (int i = start_child_index; i < parent->child_count(); ++i) {
     const BookmarkNode* node = parent->GetChild(i);
 
-    GtkWidget* menu_item =
-        gtk_image_menu_item_new_with_label(BuildMenuLabelFor(node).c_str());
+    GtkWidget* menu_item = gtk_image_menu_item_new_with_label(
+        bookmark_utils::BuildMenuLabelFor(node).c_str());
     g_object_set_data(G_OBJECT(menu_item), "bookmark-node", AsVoid(node));
     SetImageMenuItem(menu_item, node, model_);
     gtk_util::SetAlwaysShowImage(menu_item);
@@ -248,8 +240,9 @@ gboolean BookmarkMenuController::OnMenuButtonPressedOrReleased(
       menu_item ? GetNodeFromMenuItem(menu_item) : NULL;
 
   if (event->button == 2 && node && node->is_folder()) {
-    chrome::OpenAll(parent_window_, page_navigator_, node, NEW_BACKGROUND_TAB,
-                    browser_->profile());
+    bookmark_utils::OpenAll(parent_window_,
+                            profile_, page_navigator_,
+                            node, NEW_BACKGROUND_TAB);
     gtk_menu_popdown(GTK_MENU(menu_));
     return TRUE;
   } else if (event->button == 3) {
@@ -263,7 +256,7 @@ gboolean BookmarkMenuController::OnMenuButtonPressedOrReleased(
       nodes.push_back(node);
     context_menu_controller_.reset(
         new BookmarkContextMenuController(
-            parent_window_, this, browser_, browser_->profile(),
+            parent_window_, this, profile_,
             page_navigator_, parent, nodes));
     context_menu_.reset(
         new MenuGtk(NULL, context_menu_controller_->menu_model()));
@@ -347,9 +340,9 @@ void BookmarkMenuController::OnMenuItemDragBegin(GtkWidget* menu_item,
   // pressing.
   ignore_button_release_ = true;
 
-  const BookmarkNode* node = BookmarkNodeForWidget(menu_item);
-  drag_icon_ = GetDragRepresentationForNode(
-      node, model_, GtkThemeService::GetFrom(browser_->profile()));
+  const BookmarkNode* node = bookmark_utils::BookmarkNodeForWidget(menu_item);
+  drag_icon_ = bookmark_utils::GetDragRepresentationForNode(
+      node, model_, GtkThemeService::GetFrom(profile_));
   gint x, y;
   gtk_widget_get_pointer(menu_item, &x, &y);
   gtk_drag_set_icon_widget(drag_context, drag_icon_, x, y);
@@ -367,12 +360,11 @@ void BookmarkMenuController::OnMenuItemDragEnd(GtkWidget* menu_item,
   drag_icon_ = NULL;
 }
 
-void BookmarkMenuController::OnMenuItemDragGet(GtkWidget* widget,
-                                               GdkDragContext* context,
-                                               GtkSelectionData* selection_data,
-                                               guint target_type,
-                                               guint time) {
-  const BookmarkNode* node = BookmarkNodeForWidget(widget);
-  WriteBookmarkToSelection(
-      node, selection_data, target_type, browser_->profile());
+void BookmarkMenuController::OnMenuItemDragGet(
+    GtkWidget* widget, GdkDragContext* context,
+    GtkSelectionData* selection_data,
+    guint target_type, guint time) {
+  const BookmarkNode* node = bookmark_utils::BookmarkNodeForWidget(widget);
+  bookmark_utils::WriteBookmarkToSelection(node, selection_data, target_type,
+                                           profile_);
 }

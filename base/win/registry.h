@@ -1,17 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_WIN_REGISTRY_H_
 #define BASE_WIN_REGISTRY_H_
+#pragma once
 
 #include <windows.h>
 #include <string>
-#include <vector>
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
-#include "base/stl_util.h"
 
 namespace base {
 namespace win {
@@ -26,7 +25,6 @@ namespace win {
 class BASE_EXPORT RegKey {
  public:
   RegKey();
-  explicit RegKey(HKEY key);
   RegKey(HKEY rootkey, const wchar_t* subkey, REGSAM access);
   ~RegKey();
 
@@ -47,17 +45,11 @@ class BASE_EXPORT RegKey {
   // Closes this reg key.
   void Close();
 
-  // Replaces the handle of the registry key and takes ownership of the handle.
-  void Set(HKEY key);
-
-  // Transfers ownership away from this object.
-  HKEY Take();
-
-  // Returns false if this key does not have the specified value, or if an error
+  // Returns false if this key does not have the specified value, of if an error
   // occurrs while attempting to access it.
   bool HasValue(const wchar_t* value_name) const;
 
-  // Returns the number of values for this key, or 0 if the number cannot be
+  // Returns the number of values for this key, of 0 if the number cannot be
   // determined.
   DWORD GetValueCount() const;
 
@@ -87,11 +79,6 @@ class BASE_EXPORT RegKey {
   // Returns a string value. If |name| is NULL or empty, returns the default
   // value, if any.
   LONG ReadValue(const wchar_t* name, std::wstring* out_value) const;
-
-  // Reads a REG_MULTI_SZ registry field into a vector of strings. Clears
-  // |values| initially and adds further strings to the list. Returns
-  // ERROR_CANTREAD if type is not REG_MULTI_SZ.
-  LONG ReadValues(const wchar_t* name, std::vector<std::wstring>* values);
 
   // Returns raw data. If |name| is NULL or empty, returns the default
   // value, if any.
@@ -139,6 +126,9 @@ class BASE_EXPORT RegKey {
 };
 
 // Iterates the entries found in a particular folder on the registry.
+// For this application I happen to know I wont need data size larger
+// than MAX_PATH, but in real life this wouldn't neccessarily be
+// adequate.
 class BASE_EXPORT RegistryValueIterator {
  public:
   RegistryValueIterator(HKEY root_key, const wchar_t* folder_key);
@@ -153,9 +143,8 @@ class BASE_EXPORT RegistryValueIterator {
   // Advances to the next registry entry.
   void operator++();
 
-  const wchar_t* Name() const { return name_.c_str(); }
-  const wchar_t* Value() const { return vector_as_array(&value_); }
-  // ValueSize() is in bytes.
+  const wchar_t* Name() const { return name_; }
+  const wchar_t* Value() const { return value_; }
   DWORD ValueSize() const { return value_size_; }
   DWORD Type() const { return type_; }
 
@@ -172,8 +161,8 @@ class BASE_EXPORT RegistryValueIterator {
   int index_;
 
   // Current values.
-  std::wstring name_;
-  std::vector<wchar_t> value_;
+  wchar_t name_[MAX_PATH];
+  wchar_t value_[MAX_PATH];
   DWORD value_size_;
   DWORD type_;
 

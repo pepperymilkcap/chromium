@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,67 +26,18 @@ bool Addr::SetFileNumber(int file_number) {
   return true;
 }
 
-bool Addr::SanityCheckV2() const {
+bool Addr::SanityCheck() const {
   if (!is_initialized())
     return !value_;
 
-  if (file_type() > BLOCK_4K)
+  if (((value_ & kFileTypeMask) >> kFileTypeOffset) > 4)
     return false;
 
   if (is_separate_file())
     return true;
 
-  return !reserved_bits();
-}
-
-bool Addr::SanityCheckV3() const {
-  if (!is_initialized())
-    return !value_;
-
-  // For actual entries, SanityCheckForEntryV3 should be used.
-  if (file_type() > BLOCK_FILES)
-    return false;
-
-  if (is_separate_file())
-    return true;
-
-  return !reserved_bits();
-}
-
-bool Addr::SanityCheckForEntryV2() const {
-  if (!SanityCheckV2() || !is_initialized())
-    return false;
-
-  if (is_separate_file() || file_type() != BLOCK_256)
-    return false;
-
-  return true;
-}
-
-bool Addr::SanityCheckForEntryV3() const {
-  if (!is_initialized())
-    return false;
-
-  if (reserved_bits())
-    return false;
-
-  if (file_type() != BLOCK_ENTRIES && file_type() != BLOCK_EVICTED)
-    return false;
-
-  if (num_blocks() != 1)
-    return false;
-
-  return true;
-}
-
-bool Addr::SanityCheckForRankings() const {
-  if (!SanityCheckV2() || !is_initialized())
-    return false;
-
-  if (is_separate_file() || file_type() != RANKINGS || num_blocks() != 1)
-    return false;
-
-  return true;
+  const uint32 kReservedBitsMask = 0x0c000000;
+  return !(value_ & kReservedBitsMask);
 }
 
 }  // namespace disk_cache

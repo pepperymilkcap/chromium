@@ -6,7 +6,6 @@
 #define PPAPI_CPP_MOUSE_LOCK_H_
 
 #include "ppapi/c/pp_stdint.h"
-#include "ppapi/cpp/instance_handle.h"
 
 /// @file
 /// This file defines the API for locking the target of mouse events to a
@@ -26,16 +25,16 @@ class Instance;
 /// composition.
 ///
 /// <strong>Example (inheritance):</strong>
-/// @code
+/// <code>
 ///   class MyInstance : public pp::Instance, public pp::MouseLock {
 ///     class MyInstance() : pp::MouseLock(this) {
 ///     }
 ///     ...
 ///   };
-/// @endcode
+/// </code>
 ///
 /// <strong>Example (composition):</strong>
-/// @code
+/// <code>
 ///   class MyMouseLock : public pp::MouseLock {
 ///     ...
 ///   };
@@ -46,13 +45,13 @@ class Instance;
 ///
 ///     MyMouseLock mouse_lock_;
 ///   };
-/// @endcode
+/// </code>
 class MouseLock {
  public:
   /// A constructor for creating a <code>MouseLock</code>.
   ///
-  /// @param[in] instance The instance with which this resource will be
-  /// associated.
+  /// @param[in] instance The instance that will own the new
+  /// <code>MouseLock</code>.
   explicit MouseLock(Instance* instance);
 
   /// Destructor.
@@ -61,7 +60,8 @@ class MouseLock {
   /// PPP_MouseLock functions exposed as virtual functions for you to override.
   virtual void MouseLockLost() = 0;
 
-  /// LockMouse() requests the mouse to be locked.
+  /// LockMouse() requests the mouse to be locked. The browser will permit
+  /// mouse lock only while the tab is in fullscreen mode.
   ///
   /// While the mouse is locked, the cursor is implicitly hidden from the user.
   /// Any movement of the mouse will generate a
@@ -90,7 +90,7 @@ class MouseLock {
   void UnlockMouse();
 
  private:
-  InstanceHandle associated_instance_;
+  Instance* associated_instance_;
 };
 
 }  // namespace pp

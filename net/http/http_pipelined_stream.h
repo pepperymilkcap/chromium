@@ -1,13 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_PIPELINED_STREAM_H_
 #define NET_HTTP_HTTP_PIPELINED_STREAM_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/memory/scoped_ptr.h"
 #include "net/base/net_log.h"
 #include "net/http/http_stream.h"
 #include "net/socket/ssl_client_socket.h"
@@ -22,6 +24,7 @@ struct HttpRequestInfo;
 class IOBuffer;
 class ProxyInfo;
 struct SSLConfig;
+class UploadDataStream;
 
 // HttpPipelinedStream is the pipelined implementation of HttpStream. It has
 // very little code in it. Instead, it serves as the client's interface to the
@@ -38,15 +41,15 @@ class HttpPipelinedStream : public HttpStream {
 
   // HttpStream methods:
   virtual int InitializeStream(const HttpRequestInfo* request_info,
-                               RequestPriority priority,
                                const BoundNetLog& net_log,
                                const CompletionCallback& callback) OVERRIDE;
 
   virtual int SendRequest(const HttpRequestHeaders& headers,
+                          UploadDataStream* request_body,
                           HttpResponseInfo* response,
                           const CompletionCallback& callback) OVERRIDE;
 
-  virtual UploadProgress GetUploadProgress() const OVERRIDE;
+  virtual uint64 GetUploadProgress() const OVERRIDE;
 
   virtual int ReadResponseHeaders(const CompletionCallback& callback) OVERRIDE;
 
@@ -63,16 +66,13 @@ class HttpPipelinedStream : public HttpStream {
 
   virtual bool CanFindEndOfResponse() const OVERRIDE;
 
+  virtual bool IsMoreDataBuffered() const OVERRIDE;
+
   virtual bool IsConnectionReused() const OVERRIDE;
 
   virtual void SetConnectionReused() OVERRIDE;
 
   virtual bool IsConnectionReusable() const OVERRIDE;
-
-  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
-
-  virtual bool GetLoadTimingInfo(
-      LoadTimingInfo* load_timing_info) const OVERRIDE;
 
   virtual void GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
 
@@ -81,9 +81,9 @@ class HttpPipelinedStream : public HttpStream {
 
   virtual bool IsSpdyHttpStream() const OVERRIDE;
 
-  virtual void Drain(HttpNetworkSession* session) OVERRIDE;
+  virtual void LogNumRttVsBytesMetrics() const OVERRIDE;
 
-  virtual void SetPriority(RequestPriority priority) OVERRIDE;
+  virtual void Drain(HttpNetworkSession* session) OVERRIDE;
 
   // The SSLConfig used to establish this stream's pipeline.
   const SSLConfig& used_ssl_config() const;
@@ -98,7 +98,7 @@ class HttpPipelinedStream : public HttpStream {
   bool was_npn_negotiated() const;
 
   // Protocol negotiated with the server.
-  NextProto protocol_negotiated() const;
+  SSLClientSocket::NextProto protocol_negotiated() const;
 
  private:
   HttpPipelinedConnectionImpl* pipeline_;

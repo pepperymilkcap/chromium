@@ -5,13 +5,15 @@
 var assertEq = chrome.test.assertEq;
 var assertFalse = chrome.test.assertFalse;
 var assertTrue = chrome.test.assertTrue;
-var assertThrows = chrome.test.assertThrows;
 var fail = chrome.test.callbackFail;
 var pass = chrome.test.callbackPass;
 var listenOnce = chrome.test.listenOnce;
 
 var NOT_OPTIONAL_ERROR =
     "Optional permissions must be listed in extension manifest.";
+
+var NO_TABS_PERMISSION =
+    "You do not have permission to use 'windows.getAll'.";
 
 var REQUIRED_ERROR =
     "You cannot remove required permissions.";
@@ -29,8 +31,8 @@ var initialPermissions = {
   origins: ['http://a.com/*']
 };
 
-var permissionsWithBookmarks = {
-  permissions: ['management', 'bookmarks'],
+var permissionsWithTabs = {
+  permissions: ['management', 'tabs'],
   origins: ['http://a.com/*']
 }
 
@@ -60,7 +62,7 @@ chrome.test.getConfig(function(config) {
 
   function doReq(domain, callback) {
     var req = new XMLHttpRequest();
-    var url = domain + ":PORT/extensions/test_file.txt";
+    var url = domain + ":PORT/files/extensions/test_file.txt";
     url = url.replace(/PORT/, config.testServer.port);
 
     chrome.test.log("Requesting url: " + url);
@@ -114,33 +116,41 @@ chrome.test.getConfig(function(config) {
     // defined in "optional_permissions".
     function requestNonOptional() {
       chrome.permissions.request(
-          {permissions: ['history']}, fail(NOT_OPTIONAL_ERROR));
+          {permissions: ['bookmarks']}, fail(NOT_OPTIONAL_ERROR));
       chrome.permissions.request(
           {origins: ['http://*.b.com/*']}, fail(NOT_OPTIONAL_ERROR));
       chrome.permissions.request(
-          {permissions: ['history'], origins: ['http://*.b.com/*']},
+          {permissions: ['tabs'], origins: ['http://*.b.com/*']},
           fail(NOT_OPTIONAL_ERROR));
     },
 
-    // We should be able to request the bookmarks API since it's in the granted
+    // We should be able to request the tabs API since it's in the granted
     // permissions list (see permissions_apitest.cc).
-    function requestBookmarks() {
-      assertEq(undefined, chrome.bookmarks);
+    function requestTabs() {
+      // chrome.windows is a optional permission, so the API definition should
+      // exist but its use disallowed.
+      assertTrue(!!chrome.windows);
+      try {
+        chrome.windows.getAll({populate: true}, function() {
+          chrome.test.fail("Should not have tabs API permission.");
+        });
+      } catch (e) {
+        assertTrue(e.message.indexOf(NO_TABS_PERMISSION) == 0);
+      }
       listenOnce(chrome.permissions.onAdded,
                  function(permissions) {
         assertTrue(permissions.permissions.length == 1);
-        assertTrue(permissions.permissions[0] == 'bookmarks');
+        assertTrue(permissions.permissions[0] == 'tabs');
       });
       chrome.permissions.request(
-          {permissions:['bookmarks']},
+          {permissions:['tabs']},
           pass(function(granted) {
             assertTrue(granted);
-            chrome.bookmarks.getTree(pass(function(result) {
+            chrome.windows.getAll({populate: true}, pass(function(windows) {
               assertTrue(true);
             }));
             chrome.permissions.getAll(pass(function(permissions) {
-              assertTrue(checkPermSetsEq(permissionsWithBookmarks,
-                                         permissions));
+              assertTrue(checkPermSetsEq(permissionsWithTabs, permissions));
             }));
       }));
     },
@@ -162,7 +172,7 @@ chrome.test.getConfig(function(config) {
       chrome.permissions.remove(
           {origins: ['http://a.com/*']}, fail(REQUIRED_ERROR));
       chrome.permissions.remove(
-          {permissions: ['bookmarks'], origins: ['http://a.com/*']},
+          {permissions: ['tabs'], origins: ['http://a.com/*']},
           fail(REQUIRED_ERROR));
     },
 
@@ -179,28 +189,29 @@ chrome.test.getConfig(function(config) {
           pass(function(removed) { assertTrue(removed); }));
     },
 
-    function removeBookmarks() {
-      chrome.bookmarks.getTree(pass(function(result) {
+    function removeTabs() {
+      chrome.windows.getAll({populate: true}, pass(function(windows) {
         assertTrue(true);
       }));
       listenOnce(chrome.permissions.onRemoved,
                  function(permissions) {
         assertTrue(permissions.permissions.length == 1);
-        assertTrue(permissions.permissions[0] == 'bookmarks');
+        assertTrue(permissions.permissions[0] == 'tabs');
       });
       chrome.permissions.remove(
-          {permissions:['bookmarks']},
+          {permissions:['tabs']},
           pass(function() {
             chrome.permissions.getAll(pass(function(permissions) {
               assertTrue(checkPermSetsEq(initialPermissions, permissions));
             }));
-            assertTrue(typeof chrome.bookmarks == 'object' &&
-                       chrome.bookmarks != null);
-            assertThrows(
-              chrome.bookmarks.getTree, [function(){}],
-              "'bookmarks' requires a different Feature that is not present.");
-          }
-      ));
+            try {
+              chrome.windows.getAll({populate: true}, function() {
+                chrome.test.fail("Should not have tabs API permission.");
+              });
+            } catch (e) {
+              assertTrue(e.message.indexOf(NO_TABS_PERMISSION) == 0);
+            }
+      }));
     },
 
     // The user shouldn't have to approve permissions that have no warnings.
@@ -219,11 +230,11 @@ chrome.test.getConfig(function(config) {
 
     // Make sure you can only access the white listed permissions.
     function whitelist() {
-      var error_msg = NOT_WHITE_LISTED_ERROR.replace('*', 'cloudPrintPrivate');
+      var error_msg = NOT_WHITE_LISTED_ERROR.replace('*', 'chromeAuthPrivate');
       chrome.permissions.request(
-          {permissions: ['cloudPrintPrivate']}, fail(error_msg));
+          {permissions: ['chromeAuthPrivate']}, fail(error_msg));
       chrome.permissions.remove(
-          {permissions: ['cloudPrintPrivate']}, fail(error_msg));
+          {permissions: ['chromeAuthPrivate']}, fail(error_msg));
     },
 
     function unknownPermission() {
@@ -287,24 +298,26 @@ chrome.test.getConfig(function(config) {
     function eventListenerPermissions() {
       listenOnce(chrome.permissions.onAdded,
                  function(permissions) {
-        chrome.bookmarks.getTree(pass(function() {
+        chrome.windows.getAll({populate: true}, pass(function() {
           assertTrue(true);
         }));
       });
       listenOnce(chrome.permissions.onRemoved,
                  function(permissions) {
-        assertTrue(typeof chrome.bookmarks == 'object' &&
-                   chrome.bookmarks != null);
-        assertThrows(
-          chrome.bookmarks.getTree, [function(){}],
-          "'bookmarks' requires a different Feature that is not present.");
+        try {
+          chrome.windows.getAll({populate: true}, function() {
+            chrome.test.fail("Should not have tabs API permission.");
+          });
+        } catch (e) {
+          assertTrue(e.message.indexOf(NO_TABS_PERMISSION) == 0);
+        }
       });
 
       chrome.permissions.request(
-          {permissions: ['bookmarks', 'management']}, pass(function(granted) {
+          {permissions: ['tabs', 'management']}, pass(function(granted) {
         assertTrue(granted);
         chrome.permissions.remove(
-            {permissions: ['bookmarks']}, pass(function() {
+            {permissions: ['tabs']}, pass(function() {
           assertTrue(true);
         }));
       }));

@@ -11,32 +11,17 @@
 
 namespace installer {
 
-// static
-// Associate bool member variables with registry entries.
-const AppCommand::NamedBoolVar AppCommand::kNameBoolVars[] = {
-  {&AppCommand::sends_pings_,
-       google_update::kRegSendsPingsField},
-  {&AppCommand::is_web_accessible_,
-       google_update::kRegWebAccessibleField},
-  {&AppCommand::is_auto_run_on_os_upgrade_,
-       google_update::kRegAutoRunOnOSUpgradeField},
-  {&AppCommand::is_run_as_user_,
-       google_update::kRegRunAsUserField},
-};
-
 AppCommand::AppCommand()
     : sends_pings_(false),
-      is_web_accessible_(false),
-      is_auto_run_on_os_upgrade_(false),
-      is_run_as_user_(false) {
+      is_web_accessible_(false) {
 }
 
-AppCommand::AppCommand(const base::string16& command_line)
+AppCommand::AppCommand(const std::wstring& command_line,
+                       bool sends_pings,
+                       bool is_web_accessible)
     : command_line_(command_line),
-      sends_pings_(false),
-      is_web_accessible_(false),
-      is_auto_run_on_os_upgrade_(false),
-      is_run_as_user_(false) {
+      sends_pings_(sends_pings),
+      is_web_accessible_(is_web_accessible) {
 }
 
 bool AppCommand::Initialize(const base::win::RegKey& key) {
@@ -46,7 +31,9 @@ bool AppCommand::Initialize(const base::win::RegKey& key) {
   }
 
   LONG result = ERROR_SUCCESS;
-  base::string16 cmd_line;
+  std::wstring cmd_line;
+  DWORD sends_pings = 0;
+  DWORD is_web_acc = 0;
 
   result = key.ReadValue(google_update::kRegCommandLineField, &cmd_line);
   if (result != ERROR_SUCCESS) {
@@ -55,46 +42,47 @@ bool AppCommand::Initialize(const base::win::RegKey& key) {
     return false;
   }
 
-  command_line_.swap(cmd_line);
-
-  for (int i = 0; i < arraysize(kNameBoolVars); ++i) {
-    DWORD value = 0;  // Set default to false.
-    // Note: ReadValueDW only modifies out param on success.
-    key.ReadValueDW(kNameBoolVars[i].name, &value);
-    this->*(kNameBoolVars[i].data) = (value != 0);
+  result = key.ReadValueDW(google_update::kRegSendsPingsField, &sends_pings);
+  if (result != ERROR_SUCCESS) {
+    LOG(WARNING) << "Error reading " << google_update::kRegSendsPingsField
+                 << " value from registry: " << result;
+    return false;
   }
+
+  result = key.ReadValueDW(google_update::kRegWebAccessibleField, &is_web_acc);
+  if (result != ERROR_SUCCESS) {
+    LOG(WARNING) << "Error reading " << google_update::kRegWebAccessibleField
+                 << " value from registry: " << result;
+    return false;
+  }
+
+  command_line_.swap(cmd_line);
+  sends_pings_ = (sends_pings != 0);
+  is_web_accessible_ = (is_web_acc != 0);
 
   return true;
 }
 
 void AppCommand::AddWorkItems(HKEY predefined_root,
-                              const base::string16& command_path,
+                              const std::wstring& command_path,
                               WorkItemList* item_list) const {
+  const DWORD sends_pings = sends_pings_ ? 1U : 0U;
+  const DWORD is_web_accessible = is_web_accessible_ ? 1U : 0U;
+
   item_list->AddCreateRegKeyWorkItem(predefined_root, command_path)
-      ->set_log_message("creating AppCommand registry key");
+      ->set_log_message("creating quick-enable-cf command registry key");
   item_list->AddSetRegValueWorkItem(predefined_root, command_path,
                                     google_update::kRegCommandLineField,
                                     command_line_, true)
-      ->set_log_message("setting AppCommand CommandLine registry value");
-
-  for (int i = 0; i < arraysize(kNameBoolVars); ++i) {
-    const wchar_t* var_name = kNameBoolVars[i].name;
-    bool var_data = this->*(kNameBoolVars[i].data);
-
-    // Adds a work item to set |var_name| to DWORD 1 if |var_data| is true;
-    // adds a work item to remove |var_name| otherwise.
-    if (var_data) {
-      item_list->AddSetRegValueWorkItem(predefined_root,
-                                        command_path,
-                                        var_name,
-                                        static_cast<DWORD>(1),
-                                        true);
-    } else {
-      item_list->AddDeleteRegValueWorkItem(predefined_root,
-                                           command_path,
-                                           var_name);
-    }
-  }
+      ->set_log_message("setting quick-enable-cf CommandLine registry value");
+  item_list->AddSetRegValueWorkItem(predefined_root, command_path,
+                                    google_update::kRegSendsPingsField,
+                                    sends_pings, true)
+      ->set_log_message("setting quick-enable-cf SendsPings registry value");
+  item_list->AddSetRegValueWorkItem(predefined_root, command_path,
+                                    google_update::kRegWebAccessibleField,
+                                    is_web_accessible, true)
+      ->set_log_message("setting quick-enable-cf WebAccessible registry value");
 }
 
 }  // namespace installer

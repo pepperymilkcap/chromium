@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include <limits>
 
-#include "base/callback.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "third_party/libjingle/source/talk/p2p/base/transportchannel.h"
@@ -17,7 +16,7 @@ namespace jingle_glue {
 
 TransportChannelSocketAdapter::TransportChannelSocketAdapter(
     cricket::TransportChannel* channel)
-    : message_loop_(base::MessageLoop::current()),
+    : message_loop_(MessageLoop::current()),
       channel_(channel),
       closed_error_code_(net::OK) {
   DCHECK(channel_);
@@ -31,20 +30,13 @@ TransportChannelSocketAdapter::TransportChannelSocketAdapter(
 }
 
 TransportChannelSocketAdapter::~TransportChannelSocketAdapter() {
-  if (!destruction_callback_.is_null())
-    destruction_callback_.Run();
-}
-
-void TransportChannelSocketAdapter::SetOnDestroyedCallback(
-    const base::Closure& callback) {
-  destruction_callback_ = callback;
 }
 
 int TransportChannelSocketAdapter::Read(
     net::IOBuffer* buf,
     int buffer_size,
     const net::CompletionCallback& callback) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK(buf);
   DCHECK(!callback.is_null());
   CHECK(read_callback_.is_null());
@@ -65,7 +57,7 @@ int TransportChannelSocketAdapter::Write(
     net::IOBuffer* buffer,
     int buffer_size,
     const net::CompletionCallback& callback) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK(buffer);
   DCHECK(!callback.is_null());
   CHECK(write_callback_.is_null());
@@ -77,8 +69,7 @@ int TransportChannelSocketAdapter::Write(
 
   int result;
   if (channel_->writable()) {
-    result = channel_->SendPacket(buffer->data(), buffer_size,
-                                  talk_base::DSCP_NO_CHANGE);
+    result = channel_->SendPacket(buffer->data(), buffer_size);
     if (result < 0) {
       result = net::MapSystemError(channel_->GetError());
 
@@ -100,17 +91,17 @@ int TransportChannelSocketAdapter::Write(
 }
 
 bool TransportChannelSocketAdapter::SetReceiveBufferSize(int32 size) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   return channel_->SetOption(talk_base::Socket::OPT_RCVBUF, size) == 0;
 }
 
 bool TransportChannelSocketAdapter::SetSendBufferSize(int32 size) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   return channel_->SetOption(talk_base::Socket::OPT_SNDBUF, size) == 0;
 }
 
 void TransportChannelSocketAdapter::Close(int error_code) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   if (!channel_)  // Already closed.
     return;
@@ -137,15 +128,11 @@ void TransportChannelSocketAdapter::Close(int error_code) {
 }
 
 void TransportChannelSocketAdapter::OnNewPacket(
-    cricket::TransportChannel* channel,
-    const char* data,
-    size_t data_size,
-    const talk_base::PacketTime& packet_time,
-    int flags) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+    cricket::TransportChannel* channel, const char* data, size_t data_size) {
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK_EQ(channel, channel_);
   if (!read_callback_.is_null()) {
-    DCHECK(read_buffer_.get());
+    DCHECK(read_buffer_);
     CHECK_LT(data_size, static_cast<size_t>(std::numeric_limits<int>::max()));
 
     if (read_buffer_size_ < static_cast<int>(data_size)) {
@@ -169,12 +156,11 @@ void TransportChannelSocketAdapter::OnNewPacket(
 
 void TransportChannelSocketAdapter::OnWritableState(
     cricket::TransportChannel* channel) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   // Try to send the packet if there is a pending write.
   if (!write_callback_.is_null()) {
     int result = channel_->SendPacket(write_buffer_->data(),
-                                      write_buffer_size_,
-                                      talk_base::DSCP_NO_CHANGE);
+                                      write_buffer_size_);
     if (result < 0)
       result = net::MapSystemError(channel_->GetError());
 
@@ -189,7 +175,7 @@ void TransportChannelSocketAdapter::OnWritableState(
 
 void TransportChannelSocketAdapter::OnChannelDestroyed(
     cricket::TransportChannel* channel) {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_);
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK_EQ(channel, channel_);
   Close(net::ERR_CONNECTION_ABORTED);
 }

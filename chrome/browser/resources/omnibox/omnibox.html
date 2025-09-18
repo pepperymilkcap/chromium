@@ -5,7 +5,6 @@
   <title>Omnibox Debug Page</title>
   <link rel="stylesheet" href="omnibox.css">
   <script src="chrome://resources/js/cr.js"></script>
-  <script src="chrome://resources/js/util.js"></script>
   <script src="omnibox.js"></script>
 </head>
 <body>
@@ -16,20 +15,6 @@
         <input id="input-text" type="text" size="40" autofocus>
         <input type="submit">
       </p>
-      <p>Input parameters:</p>
-      <p>
-        <label>
-          <input id="prevent-inline-autocomplete" type="checkbox">
-          Prevent inline autocomplete
-        </label>
-      </p>
-      <p>
-        <label>
-          <input id="prefer-keyword" type="checkbox">
-          In keyword mode
-        </label>
-      </p>
-      <p>Display parameters:</p>
       <p>
         <label>
           <input id="show-incomplete-results" type="checkbox">
@@ -40,12 +25,6 @@
         <label>
           <input id="show-details" type="checkbox">
           Show all details
-        </label>
-      </p>
-      <p>
-        <label>
-          <input id="show-all-providers" type="checkbox">
-          Show results per provider, not just merged results
         </label>
       </p>
     </form>

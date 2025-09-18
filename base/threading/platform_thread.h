@@ -8,10 +8,11 @@
 
 #ifndef BASE_THREADING_PLATFORM_THREAD_H_
 #define BASE_THREADING_PLATFORM_THREAD_H_
+#pragma once
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -23,66 +24,27 @@
 
 namespace base {
 
+// PlatformThreadHandle should not be assumed to be a numeric type, since the
+// standard intends to allow pthread_t to be a structure.  This means you
+// should not initialize it to a value, like 0.  If it's a member variable, the
+// constructor can safely "value initialize" using () in the initializer list.
 #if defined(OS_WIN)
 typedef DWORD PlatformThreadId;
+typedef void* PlatformThreadHandle;  // HANDLE
+const PlatformThreadHandle kNullThreadHandle = NULL;
 #elif defined(OS_POSIX)
+typedef pthread_t PlatformThreadHandle;
+const PlatformThreadHandle kNullThreadHandle = 0;
 typedef pid_t PlatformThreadId;
 #endif
 
-class PlatformThreadHandle {
- public:
-#if defined(OS_WIN)
-  typedef void* Handle;
-#elif defined(OS_POSIX)
-  typedef pthread_t Handle;
-#endif
-
-  PlatformThreadHandle()
-      : handle_(0),
-        id_(0) {
-  }
-
-  explicit PlatformThreadHandle(Handle handle)
-      : handle_(handle),
-        id_(0) {
-  }
-
-  PlatformThreadHandle(Handle handle,
-                       PlatformThreadId id)
-      : handle_(handle),
-        id_(id) {
-  }
-
-  bool is_equal(const PlatformThreadHandle& other) {
-    return handle_ == other.handle_;
-  }
-
-  bool is_null() {
-    return !handle_;
-  }
-
-  Handle platform_handle() {
-    return handle_;
-  }
-
- private:
-  friend class PlatformThread;
-
-  Handle handle_;
-  PlatformThreadId id_;
-};
-
-const PlatformThreadId kInvalidThreadId(0);
+const PlatformThreadId kInvalidThreadId = 0;
 
 // Valid values for SetThreadPriority()
 enum ThreadPriority{
   kThreadPriority_Normal,
   // Suitable for low-latency, glitch-resistant audio.
-  kThreadPriority_RealtimeAudio,
-  // Suitable for threads which generate data for the display (at ~60Hz).
-  kThreadPriority_Display,
-  // Suitable for threads that shouldn't disrupt high priority work.
-  kThreadPriority_Background
+  kThreadPriority_RealtimeAudio
 };
 
 // A namespace for low-level thread functions.
@@ -92,20 +54,18 @@ class BASE_EXPORT PlatformThread {
   // ThreadMain method will be called on the newly created thread.
   class BASE_EXPORT Delegate {
    public:
-    virtual void ThreadMain() = 0;
-
-   protected:
     virtual ~Delegate() {}
+    virtual void ThreadMain() = 0;
   };
 
   // Gets the current thread id, which may be useful for logging purposes.
   static PlatformThreadId CurrentId();
 
-  // Get the current handle.
-  static PlatformThreadHandle CurrentHandle();
-
   // Yield the current thread so another thread can be scheduled.
   static void YieldCurrentThread();
+
+  // Sleeps for the specified duration (units are milliseconds).
+  static void Sleep(int duration_ms);
 
   // Sleeps for the specified duration.
   static void Sleep(base::TimeDelta duration);
@@ -128,15 +88,6 @@ class BASE_EXPORT PlatformThread {
   // the Delegate object outlives the thread.
   static bool Create(size_t stack_size, Delegate* delegate,
                      PlatformThreadHandle* thread_handle);
-
-  // CreateWithPriority() does the same thing as Create() except the priority of
-  // the thread is set based on |priority|.  Can be used in place of Create()
-  // followed by SetThreadPriority().  SetThreadPriority() has not been
-  // implemented on the Linux platform yet, this is the only way to get a high
-  // priority thread on Linux.
-  static bool CreateWithPriority(size_t stack_size, Delegate* delegate,
-                                 PlatformThreadHandle* thread_handle,
-                                 ThreadPriority priority);
 
   // CreateNonJoinable() does the same thing as Create() except the thread
   // cannot be Join()'d.  Therefore, it also does not output a

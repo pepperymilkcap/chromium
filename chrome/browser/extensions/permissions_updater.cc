@@ -7,27 +7,30 @@
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api_helpers.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/permissions.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "chrome/common/extensions/extension_permission_set.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
-#include "extensions/browser/event_router.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/permissions/permissions_data.h"
 
 using content::RenderProcessHost;
 using extensions::permissions_api_helpers::PackPermissionSet;
 
 namespace extensions {
 
-namespace permissions = api::permissions;
+namespace {
+
+const char kOnAdded[] = "permissions.onAdded";
+const char kOnRemoved[] = "permissions.onRemoved";
+
+}
 
 PermissionsUpdater::PermissionsUpdater(Profile* profile)
     : profile_(profile) {}
@@ -35,13 +38,13 @@ PermissionsUpdater::PermissionsUpdater(Profile* profile)
 PermissionsUpdater::~PermissionsUpdater() {}
 
 void PermissionsUpdater::AddPermissions(
-    const Extension* extension, const PermissionSet* permissions) {
-  scoped_refptr<const PermissionSet> existing(
+    const Extension* extension, const ExtensionPermissionSet* permissions) {
+  scoped_refptr<const ExtensionPermissionSet> existing(
       extension->GetActivePermissions());
-  scoped_refptr<PermissionSet> total(
-      PermissionSet::CreateUnion(existing.get(), permissions));
-  scoped_refptr<PermissionSet> added(
-      PermissionSet::CreateDifference(total.get(), existing.get()));
+  scoped_refptr<ExtensionPermissionSet> total(
+      ExtensionPermissionSet::CreateUnion(existing, permissions));
+  scoped_refptr<ExtensionPermissionSet> added(
+      ExtensionPermissionSet::CreateDifference(total.get(), existing));
 
   UpdateActivePermissions(extension, total.get());
 
@@ -52,13 +55,13 @@ void PermissionsUpdater::AddPermissions(
 }
 
 void PermissionsUpdater::RemovePermissions(
-    const Extension* extension, const PermissionSet* permissions) {
-  scoped_refptr<const PermissionSet> existing(
+    const Extension* extension, const ExtensionPermissionSet* permissions) {
+  scoped_refptr<const ExtensionPermissionSet> existing(
       extension->GetActivePermissions());
-  scoped_refptr<PermissionSet> total(
-      PermissionSet::CreateDifference(existing.get(), permissions));
-  scoped_refptr<PermissionSet> removed(
-      PermissionSet::CreateDifference(existing.get(), total.get()));
+  scoped_refptr<ExtensionPermissionSet> total(
+      ExtensionPermissionSet::CreateDifference(existing, permissions));
+  scoped_refptr<ExtensionPermissionSet> removed(
+      ExtensionPermissionSet::CreateDifference(existing, total.get()));
 
   // We update the active permissions, and not the granted permissions, because
   // the extension, not the user, removed the permissions. This allows the
@@ -73,43 +76,41 @@ void PermissionsUpdater::GrantActivePermissions(const Extension* extension) {
 
   // We only maintain the granted permissions prefs for INTERNAL and LOAD
   // extensions.
-  if (!Manifest::IsUnpackedLocation(extension->location()) &&
-      extension->location() != Manifest::INTERNAL)
+  if (extension->location() != Extension::LOAD &&
+      extension->location() != Extension::INTERNAL)
     return;
 
-  ExtensionPrefs::Get(profile_)->AddGrantedPermissions(
-      extension->id(), extension->GetActivePermissions().get());
+  GetExtensionPrefs()->AddGrantedPermissions(
+      extension->id(), extension->GetActivePermissions());
 }
 
 void PermissionsUpdater::UpdateActivePermissions(
-    const Extension* extension, const PermissionSet* permissions) {
-  ExtensionPrefs::Get(profile_)->SetActivePermissions(
-      extension->id(), permissions);
-  PermissionsData::SetActivePermissions(extension, permissions);
+    const Extension* extension, const ExtensionPermissionSet* permissions) {
+  GetExtensionPrefs()->SetActivePermissions(extension->id(), permissions);
+  extension->SetActivePermissions(permissions);
 }
 
 void PermissionsUpdater::DispatchEvent(
     const std::string& extension_id,
     const char* event_name,
-    const PermissionSet* changed_permissions) {
-  if (!profile_ ||
-      !ExtensionSystem::Get(profile_)->event_router())
+    const ExtensionPermissionSet* changed_permissions) {
+  if (!profile_ || !profile_->GetExtensionEventRouter())
     return;
 
-  scoped_ptr<base::ListValue> value(new base::ListValue());
+  ListValue value;
   scoped_ptr<api::permissions::Permissions> permissions =
-      PackPermissionSet(changed_permissions);
-  value->Append(permissions->ToValue().release());
-  scoped_ptr<Event> event(new Event(event_name, value.Pass()));
-  event->restrict_to_browser_context = profile_;
-  ExtensionSystem::Get(profile_)->event_router()->
-      DispatchEventToExtension(extension_id, event.Pass());
+    PackPermissionSet(changed_permissions);
+  value.Append(permissions->ToValue());
+  std::string json_value;
+  base::JSONWriter::Write(&value, false, &json_value);
+  profile_->GetExtensionEventRouter()->DispatchEventToExtension(
+      extension_id, event_name, json_value, profile_, GURL());
 }
 
 void PermissionsUpdater::NotifyPermissionsUpdated(
     EventType event_type,
     const Extension* extension,
-    const PermissionSet* changed) {
+    const ExtensionPermissionSet* changed) {
   if (!changed || changed->IsEmpty())
     return;
 
@@ -118,11 +119,11 @@ void PermissionsUpdater::NotifyPermissionsUpdated(
 
   if (event_type == REMOVED) {
     reason = UpdatedExtensionPermissionsInfo::REMOVED;
-    event_name = permissions::OnRemoved::kEventName;
+    event_name = kOnRemoved;
   } else {
     CHECK_EQ(ADDED, event_type);
     reason = UpdatedExtensionPermissionsInfo::ADDED;
-    event_name = permissions::OnAdded::kEventName;
+    event_name = kOnAdded;
   }
 
   // Notify other APIs or interested parties.
@@ -138,20 +139,21 @@ void PermissionsUpdater::NotifyPermissionsUpdated(
        !i.IsAtEnd(); i.Advance()) {
     RenderProcessHost* host = i.GetCurrentValue();
     Profile* profile = Profile::FromBrowserContext(host->GetBrowserContext());
-    if (profile_->IsSameProfile(profile)) {
-      ExtensionMsg_UpdatePermissions_Params info;
-      info.reason_id = static_cast<int>(reason);
-      info.extension_id = extension->id();
-      info.apis = changed->apis();
-      info.manifest_permissions = changed->manifest_permissions();
-      info.explicit_hosts = changed->explicit_hosts();
-      info.scriptable_hosts = changed->scriptable_hosts();
-      host->Send(new ExtensionMsg_UpdatePermissions(info));
-    }
+    if (profile_->IsSameProfile(profile))
+      host->Send(new ExtensionMsg_UpdatePermissions(
+          static_cast<int>(reason),
+          extension->id(),
+          changed->apis(),
+          changed->explicit_hosts(),
+          changed->scriptable_hosts()));
   }
 
   // Trigger the onAdded and onRemoved events in the extension.
   DispatchEvent(extension->id(), event_name, changed);
+}
+
+ExtensionPrefs* PermissionsUpdater::GetExtensionPrefs() {
+  return profile_->GetExtensionService()->extension_prefs();
 }
 
 }  // namespace extensions

@@ -1,9 +1,10 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_USER_IMAGE_LOADER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_USER_IMAGE_LOADER_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -13,39 +14,25 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/image_decoder.h"
 
+class MessageLoop;
 class SkBitmap;
-
-namespace base {
-class SequencedTaskRunner;
-}
 
 namespace chromeos {
 
-class UserImage;
-
-// Helper that reads, decodes and optionally resizes an image on a background
+// A facility to read a file containing user image asynchronously in the IO
 // thread. Returns the image in the form of an SkBitmap.
 class UserImageLoader : public base::RefCountedThreadSafe<UserImageLoader>,
                         public ImageDecoder::Delegate {
  public:
-  // Callback used to return the result of an image load operation.
-  typedef base::Callback<void(const UserImage& user_image)> LoadedCallback;
+  // Callback used to inidicate that image has been loaded.
+  typedef base::Callback<void(const SkBitmap& image)> LoadedCallback;
 
-  // All file I/O, decoding and resizing are done via |background_task_runner|.
-  UserImageLoader(
-      ImageDecoder::ImageCodec image_codec,
-      scoped_refptr<base::SequencedTaskRunner> background_task_runner);
+  UserImageLoader();
 
-  // Load an image in the background and call |loaded_cb| with the result. If
-  // |size| is positive, the image is cropped to a square and shrunk so that it
-  // does not exceed |size|x|size|. The first variant of this method reads the
-  // image from |filepath| on disk, the second processes |data| read into memory
-  // already.
-  void Start(const std::string& filepath,
-             int size,
-             const LoadedCallback& loaded_cb);
-  void Start(scoped_ptr<std::string> data,
-             int size,
+  // Start reading the image from |filepath| on the file thread. Calls
+  // |loaded_cb| when image has been successfully loaded.
+  // If |size| is positive, image is resized to |size|x|size| pixels.
+  void Start(const std::string& filepath, int size,
              const LoadedCallback& loaded_cb);
 
  private:
@@ -56,43 +43,28 @@ class UserImageLoader : public base::RefCountedThreadSafe<UserImageLoader>,
     ImageInfo(int size, const LoadedCallback& loaded_cb);
     ~ImageInfo();
 
-    const int size;
-    const LoadedCallback loaded_cb;
+    int size;
+    LoadedCallback loaded_cb;
   };
 
   typedef std::map<const ImageDecoder*, ImageInfo> ImageInfoMap;
 
   virtual ~UserImageLoader();
 
-  // Reads the image from |filepath| and starts the decoding process. This
-  // method may only be invoked via the |background_task_runner_|.
-  void ReadAndDecodeImage(const std::string& filepath,
-                          const ImageInfo& image_info);
+  // Method that reads the file on the file thread and starts decoding it in
+  // sandboxed process.
+  void LoadImage(const std::string& filepath, const ImageInfo& image_info);
 
-  // Decodes the image |data|. This method may only be invoked via the
-  // |background_task_runner_|.
-  void DecodeImage(const scoped_ptr<std::string> data,
-                   const ImageInfo& image_info);
-
-  // ImageDecoder::Delegate implementation. These callbacks will only be invoked
-  // via the |background_task_runner_|.
+  // ImageDecoder::Delegate implementation.
   virtual void OnImageDecoded(const ImageDecoder* decoder,
                               const SkBitmap& decoded_image) OVERRIDE;
   virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE;
 
-  // The foreground task runner on which |this| is instantiated, Start() is
-  // called and LoadedCallbacks are invoked.
-  scoped_refptr<base::SequencedTaskRunner> foreground_task_runner_;
+  // The message loop object of the thread in which we notify the delegate.
+  MessageLoop* target_message_loop_;
 
-  // The background task runner on which file I/O, image decoding and resizing
-  // are done.
-  scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
-
-  // Specify how the file should be decoded in the utility process.
-  const ImageDecoder::ImageCodec image_codec_;
-
-  // Holds information about the images currently being decoded. Accessed via
-  // |background_task_runner_| only.
+  // Holds info structures about all images we're trying to decode.
+  // Accessed only on FILE thread.
   ImageInfoMap image_info_map_;
 
   DISALLOW_COPY_AND_ASSIGN(UserImageLoader);

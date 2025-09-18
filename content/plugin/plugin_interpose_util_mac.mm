@@ -7,11 +7,9 @@
 #import <AppKit/AppKit.h>
 #import <objc/runtime.h>
 
-#include "content/child/npapi/webplugin_delegate_impl.h"
-#include "content/common/plugin_process_messages.h"
+#include "content/common/plugin_messages.h"
 #include "content/plugin/plugin_thread.h"
-
-using content::PluginThread;
+#include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 
 namespace mac_plugin_interposing {
 
@@ -34,7 +32,7 @@ void SwitchToPluginProcess() {
 
 __attribute__((visibility("default")))
 OpaquePluginRef GetActiveDelegate() {
-  return content::WebPluginDelegateImpl::GetActiveDelegate();
+  return webkit::npapi::WebPluginDelegateImpl::GetActiveDelegate();
 }
 
 __attribute__((visibility("default")))
@@ -71,12 +69,32 @@ void NotifyBrowserOfPluginHideWindow(uint32 window_id, CGRect bounds) {
   }
 }
 
+__attribute__((visibility("default")))
+void NotifyPluginOfSetThemeCursor(OpaquePluginRef delegate,
+                                  ThemeCursor cursor) {
+  static_cast<webkit::npapi::WebPluginDelegateImpl*>(delegate)->SetThemeCursor(
+      cursor);
+}
+
+__attribute__((visibility("default")))
+void NotifyPluginOfSetCursor(OpaquePluginRef delegate,
+                             const Cursor* cursor) {
+  static_cast<webkit::npapi::WebPluginDelegateImpl*>(delegate)->SetCarbonCursor(
+      cursor);
+}
+
 void NotifyPluginOfSetCursorVisibility(bool visibility) {
   PluginThread* plugin_thread = PluginThread::current();
   if (plugin_thread) {
     plugin_thread->Send(
         new PluginProcessHostMsg_PluginSetCursorVisibility(visibility));
   }
+}
+
+__attribute__((visibility("default")))
+bool GetPluginWindowHasFocus(const OpaquePluginRef delegate) {
+  return static_cast<webkit::npapi::WebPluginDelegateImpl*>(
+      delegate)->GetWindowHasFocus();
 }
 
 }  // namespace mac_plugin_interposing
@@ -125,6 +143,10 @@ static void OnPluginWindowShown(const WindowInfo& window_info, BOOL is_modal) {
 @interface NSWindow (ChromePluginUtilities)
 // Returns YES if the window is visible and actually on the screen.
 - (BOOL)chromePlugin_isWindowOnScreen;
+// Returns YES if the window is the dummy window we use for popup menus;
+// see PluginInstance::PopUpContextMenu.
+// This can be removed once 10.5 is no longer supported.
+- (BOOL)chromePlugin_isPopupMenuWindow;
 @end
 
 @implementation NSWindow (ChromePluginUtilities)
@@ -138,6 +160,10 @@ static void OnPluginWindowShown(const WindowInfo& window_info, BOOL is_modal) {
       return YES;
   }
   return NO;
+}
+
+- (BOOL)chromePlugin_isPopupMenuWindow {
+  return [[self title] isEqualToString:@"PopupMenuDummy"];
 }
 
 @end
@@ -159,14 +185,16 @@ static void OnPluginWindowShown(const WindowInfo& window_info, BOOL is_modal) {
 
 - (void)chromePlugin_orderFront:(id)sender {
   [self chromePlugin_orderFront:sender];
-  if ([self chromePlugin_isWindowOnScreen])
+  if ([self chromePlugin_isWindowOnScreen] &&
+      ![self chromePlugin_isPopupMenuWindow])
     mac_plugin_interposing::SwitchToPluginProcess();
   OnPluginWindowShown(WindowInfo(self), NO);
 }
 
 - (void)chromePlugin_makeKeyAndOrderFront:(id)sender {
   [self chromePlugin_makeKeyAndOrderFront:sender];
-  if ([self chromePlugin_isWindowOnScreen])
+  if ([self chromePlugin_isWindowOnScreen] &&
+      ![self chromePlugin_isPopupMenuWindow])
     mac_plugin_interposing::SwitchToPluginProcess();
   OnPluginWindowShown(WindowInfo(self), NO);
 }
@@ -176,7 +204,8 @@ static void OnPluginWindowShown(const WindowInfo& window_info, BOOL is_modal) {
     [self chromePlugin_setWindowNumber:num];
     return;
   }
-  mac_plugin_interposing::SwitchToPluginProcess();
+  if (![self chromePlugin_isPopupMenuWindow])
+    mac_plugin_interposing::SwitchToPluginProcess();
   [self chromePlugin_setWindowNumber:num];
   OnPluginWindowShown(WindowInfo(self), NO);
 }
@@ -211,7 +240,8 @@ static void OnPluginWindowShown(const WindowInfo& window_info, BOOL is_modal) {
 - (void)chromePlugin_set {
   OpaquePluginRef delegate = mac_plugin_interposing::GetActiveDelegate();
   if (delegate) {
-    static_cast<content::WebPluginDelegateImpl*>(delegate)->SetNSCursor(self);
+    static_cast<webkit::npapi::WebPluginDelegateImpl*>(delegate)->SetNSCursor(
+        self);
     return;
   }
   [self chromePlugin_set];

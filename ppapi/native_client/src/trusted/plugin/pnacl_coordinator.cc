@@ -2,52 +2,195 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ppapi/native_client/src/trusted/plugin/pnacl_coordinator.h"
+#include "native_client/src/trusted/plugin/pnacl_coordinator.h"
 
 #include <utility>
 #include <vector>
 
-#include "native_client/src/include/checked_cast.h"
 #include "native_client/src/include/portability_io.h"
 #include "native_client/src/shared/platform/nacl_check.h"
-#include "native_client/src/trusted/service_runtime/include/sys/stat.h"
+#include "native_client/src/shared/platform/nacl_sync_raii.h"
+#include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
+#include "native_client/src/trusted/plugin/browser_interface.h"
+#include "native_client/src/trusted/plugin/manifest.h"
+#include "native_client/src/trusted/plugin/nacl_subprocess.h"
+#include "native_client/src/trusted/plugin/nexe_arch.h"
+#include "native_client/src/trusted/plugin/plugin.h"
+#include "native_client/src/trusted/plugin/plugin_error.h"
+#include "native_client/src/trusted/plugin/pnacl_srpc_lib.h"
+#include "native_client/src/trusted/plugin/utility.h"
 
-#include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/c/private/ppb_uma_private.h"
-
-#include "ppapi/native_client/src/trusted/plugin/manifest.h"
-#include "ppapi/native_client/src/trusted/plugin/nacl_http_response_headers.h"
-#include "ppapi/native_client/src/trusted/plugin/plugin.h"
-#include "ppapi/native_client/src/trusted/plugin/plugin_error.h"
-#include "ppapi/native_client/src/trusted/plugin/pnacl_translate_thread.h"
-#include "ppapi/native_client/src/trusted/plugin/service_runtime.h"
-#include "ppapi/native_client/src/trusted/plugin/temporary_file.h"
+#include "ppapi/c/ppb_file_io.h"
+#include "ppapi/cpp/file_io.h"
 
 namespace plugin {
+
+class Plugin;
+
+namespace {
+
+const char kLlcUrl[] = "llc";
+const char kLdUrl[] = "ld";
+
+nacl::string ExtensionUrl() {
+  // TODO(sehr,jvoung): Find a better way to express the URL for the pnacl
+  // extension than a constant string here.
+  const nacl::string kPnaclExtensionOrigin =
+      "chrome-extension://gcodniebolpnpaiggndmcmmfpldlknih/";
+  return kPnaclExtensionOrigin + GetSandboxISA() + "/";
+}
+
+nacl::string Random32CharHexString(struct NaClDescRng* rng) {
+  struct NaClDesc* desc = reinterpret_cast<struct NaClDesc*>(rng);
+  const struct NaClDescVtbl* vtbl =
+      reinterpret_cast<const struct NaClDescVtbl*>(desc->base.vtbl);
+
+  nacl::string hex_string;
+  const int32_t kTempFileNameWords = 4;
+  for (int32_t i = 0; i < kTempFileNameWords; ++i) {
+    int32_t num;
+    CHECK(sizeof num == vtbl->Read(desc,
+                                   reinterpret_cast<char*>(&num),
+                                   sizeof num));
+    char frag[16];
+    SNPRINTF(frag, sizeof frag, "%08x", num);
+    hex_string += nacl::string(frag);
+  }
+  return hex_string;
+}
+
+// Some constants for PnaclFileDescPair::GetFD readability.
+const bool kReadOnly = false;
+const bool kWriteable = true;
+
+}  // namespace
+
+//////////////////////////////////////////////////////////////////////
+//  Temporary file descriptors.
+//////////////////////////////////////////////////////////////////////
+PnaclFileDescPair::PnaclFileDescPair(Plugin* plugin,
+                                     pp::FileSystem* file_system,
+                                     PnaclCoordinator* coordinator)
+    : plugin_(plugin),
+      file_system_(file_system),
+      coordinator_(coordinator) {
+  PLUGIN_PRINTF(("PnaclFileDescPair::PnaclFileDescPair (plugin=%p, "
+                 "file_system=%p, coordinator=%p)\n",
+                 static_cast<void*>(plugin), static_cast<void*>(file_system),
+                 static_cast<void*>(coordinator)));
+  callback_factory_.Initialize(this);
+  rng_desc_ = (struct NaClDescRng *) malloc(sizeof *rng_desc_);
+  CHECK(rng_desc_ != NULL);
+  CHECK(NaClDescRngCtor(rng_desc_));
+  file_io_trusted_ = static_cast<const PPB_FileIOTrusted*>(
+      pp::Module::Get()->GetBrowserInterface(PPB_FILEIOTRUSTED_INTERFACE));
+  // Get a random temp file name.
+  filename_ = "/" + Random32CharHexString(rng_desc_);
+}
+
+PnaclFileDescPair::~PnaclFileDescPair() {
+  PLUGIN_PRINTF(("PnaclFileDescPair::~PnaclFileDescPair\n"));
+  NaClDescUnref(reinterpret_cast<NaClDesc*>(rng_desc_));
+}
+
+void PnaclFileDescPair::Open(const pp::CompletionCallback& cb) {
+  PLUGIN_PRINTF(("PnaclFileDescPair::Open\n"));
+  done_callback_ = cb;
+
+  write_ref_.reset(new pp::FileRef(*file_system_, filename_.c_str()));
+  write_io_.reset(new pp::FileIO(plugin_));
+  read_ref_.reset(new pp::FileRef(*file_system_, filename_.c_str()));
+  read_io_.reset(new pp::FileIO(plugin_));
+
+  pp::CompletionCallback open_write_cb =
+      callback_factory_.NewCallback(&PnaclFileDescPair::WriteFileDidOpen);
+  // Open the writeable file.
+  write_io_->Open(*write_ref_,
+                  PP_FILEOPENFLAG_WRITE | PP_FILEOPENFLAG_CREATE,
+                  open_write_cb);
+}
+
+int32_t PnaclFileDescPair::GetFD(int32_t pp_error,
+                                 const pp::Resource& resource,
+                                 bool is_writable) {
+  PLUGIN_PRINTF(("PnaclFileDescPair::GetFD (pp_error=%"NACL_PRId32
+                 ", is_writable=%d)\n", pp_error, is_writable));
+  if (pp_error != PP_OK) {
+    PLUGIN_PRINTF(("PnaclFileDescPair::GetFD pp_error != PP_OK\n"));
+    return -1;
+  }
+  int32_t file_desc =
+      file_io_trusted_->GetOSFileDescriptor(resource.pp_resource());
+#if NACL_WINDOWS
+  // Convert the Windows HANDLE from Pepper to a POSIX file descriptor.
+  int32_t open_flags = ((is_writable ? _O_RDWR : _O_RDONLY) | _O_BINARY);
+  int32_t posix_desc = _open_osfhandle(file_desc, open_flags);
+  if (posix_desc == -1) {
+    // Close the Windows HANDLE if it can't be converted.
+    CloseHandle(reinterpret_cast<HANDLE>(file_desc));
+    PLUGIN_PRINTF(("PnaclFileDescPair::GetFD _open_osfhandle failed.\n"));
+    return NACL_NO_FILE_DESC;
+  }
+  file_desc = posix_desc;
+#endif
+  int32_t file_desc_ok_to_close = DUP(file_desc);
+  if (file_desc_ok_to_close == NACL_NO_FILE_DESC) {
+    PLUGIN_PRINTF(("PnaclFileDescPair::GetFD dup failed.\n"));
+    return -1;
+  }
+  return file_desc_ok_to_close;
+}
+
+void PnaclFileDescPair::WriteFileDidOpen(int32_t pp_error) {
+  PLUGIN_PRINTF(("PnaclFileDescPair::WriteFileDidOpen (pp_error=%"
+                 NACL_PRId32")\n", pp_error));
+  // Remember the object temporary file descriptor.
+  int32_t fd = GetFD(pp_error, *write_io_, kWriteable);
+  if (fd < 0) {
+    coordinator_->ReportNonPpapiError("could not open write temp file.");
+    return;
+  }
+  write_wrapper_.reset(plugin_->wrapper_factory()->MakeFileDesc(fd, O_RDWR));
+  pp::CompletionCallback open_read_cb =
+      callback_factory_.NewCallback(&PnaclFileDescPair::ReadFileDidOpen);
+  // Open the read only file.
+  read_io_->Open(*read_ref_, PP_FILEOPENFLAG_READ, open_read_cb);
+}
+
+void PnaclFileDescPair::ReadFileDidOpen(int32_t pp_error) {
+  PLUGIN_PRINTF(("PnaclFileDescPair::ReadFileDidOpen (pp_error=%"
+                 NACL_PRId32")\n", pp_error));
+  // Remember the object temporary file descriptor.
+  int32_t fd = GetFD(pp_error, *read_io_, kReadOnly);
+  if (fd < 0) {
+    coordinator_->ReportNonPpapiError("could not open read temp file.");
+    return;
+  }
+  read_wrapper_.reset(plugin_->wrapper_factory()->MakeFileDesc(fd, O_RDONLY));
+  // Run the client's completion callback.
+  pp::Core* core = pp::Module::Get()->core();
+  core->CallOnMainThread(0, done_callback_, PP_OK);
+}
 
 //////////////////////////////////////////////////////////////////////
 //  Pnacl-specific manifest support.
 //////////////////////////////////////////////////////////////////////
-
-// The PNaCl linker gets file descriptors via the service runtime's
-// reverse service lookup.  The reverse service lookup requires a manifest.
-// Normally, that manifest is an NMF containing mappings for shared libraries.
-// Here, we provide a manifest that redirects to PNaCl component files
-// that are part of Chrome.
-class PnaclManifest : public Manifest {
+class ExtensionManifest : public Manifest {
  public:
-  PnaclManifest() : manifest_base_url_(PnaclUrls::GetBaseUrl()) { }
-  virtual ~PnaclManifest() { }
+  explicit ExtensionManifest(const pp::URLUtil_Dev* url_util)
+      : url_util_(url_util),
+        manifest_base_url_(ExtensionUrl()) { }
+  virtual ~ExtensionManifest() { }
 
   virtual bool GetProgramURL(nacl::string* full_url,
-                             PnaclOptions* pnacl_options,
-                             ErrorInfo* error_info) const {
+                             ErrorInfo* error_info,
+                             bool* is_portable) const {
     // Does not contain program urls.
     UNREFERENCED_PARAMETER(full_url);
-    UNREFERENCED_PARAMETER(pnacl_options);
     UNREFERENCED_PARAMETER(error_info);
-    PLUGIN_PRINTF(("PnaclManifest does not contain a program\n"));
+    UNREFERENCED_PARAMETER(is_portable);
+    PLUGIN_PRINTF(("ExtensionManifest does not contain a program\n"));
     error_info->SetReport(ERROR_MANIFEST_GET_NEXE_URL,
                           "pnacl manifest does not contain a program.");
     return false;
@@ -55,27 +198,32 @@ class PnaclManifest : public Manifest {
 
   virtual bool ResolveURL(const nacl::string& relative_url,
                           nacl::string* full_url,
+                          bool* permit_extension_url,
                           ErrorInfo* error_info) const {
     // Does not do general URL resolution, simply appends relative_url to
     // the end of manifest_base_url_.
     UNREFERENCED_PARAMETER(error_info);
     *full_url = manifest_base_url_ + relative_url;
+    // Since the pnacl coordinator manifest provides access to resources
+    // in the chrome extension, lookups will need to access resources in their
+    // extension origin rather than the plugin's origin.
+    *permit_extension_url = true;
     return true;
   }
 
   virtual bool GetFileKeys(std::set<nacl::string>* keys) const {
     // Does not support enumeration.
-    PLUGIN_PRINTF(("PnaclManifest does not support key enumeration\n"));
+    PLUGIN_PRINTF(("ExtensionManifest does not support key enumeration\n"));
     UNREFERENCED_PARAMETER(keys);
     return false;
   }
 
   virtual bool ResolveKey(const nacl::string& key,
                           nacl::string* full_url,
-                          PnaclOptions* pnacl_options,
-                          ErrorInfo* error_info) const {
-    // All of the component files are native (do not require pnacl translate).
-    pnacl_options->set_translate(false);
+                          bool* permit_extension_url,
+                          ErrorInfo* error_info,
+                          bool* is_portable) const {
+    *is_portable = false;
     // We can only resolve keys in the files/ namespace.
     const nacl::string kFilesPrefix = "files/";
     size_t files_prefix_pos = key.find(kFilesPrefix);
@@ -84,225 +232,187 @@ class PnaclManifest : public Manifest {
                             "key did not start with files/");
       return false;
     }
-    // Resolve the full URL to the file. Provide it with a platform-specific
-    // prefix.
+    // Append what follows files to the pnacl URL prefix.
     nacl::string key_basename = key.substr(kFilesPrefix.length());
-    return ResolveURL(PnaclUrls::PrependPlatformPrefix(key_basename),
-                      full_url, error_info);
+    return ResolveURL(key_basename, full_url, permit_extension_url, error_info);
   }
 
  private:
-  NACL_DISALLOW_COPY_AND_ASSIGN(PnaclManifest);
+  NACL_DISALLOW_COPY_AND_ASSIGN(ExtensionManifest);
 
+  const pp::URLUtil_Dev* url_util_;
   nacl::string manifest_base_url_;
 };
 
-//////////////////////////////////////////////////////////////////////
-//  UMA stat helpers.
-//////////////////////////////////////////////////////////////////////
-
-namespace {
-
-// Assume translation time metrics *can be* large.
-// Up to 12 minutes.
-const int64_t kTimeLargeMin = 10;          // in ms
-const int64_t kTimeLargeMax = 720000;      // in ms
-const uint32_t kTimeLargeBuckets = 100;
-
-const int32_t kSizeKBMin = 1;
-const int32_t kSizeKBMax = 512*1024;       // very large .pexe / .nexe.
-const uint32_t kSizeKBBuckets = 100;
-
-const int32_t kRatioMin = 10;
-const int32_t kRatioMax = 10*100;          // max of 10x difference.
-const uint32_t kRatioBuckets = 100;
-
-const int32_t kKBPSMin = 1;
-const int32_t kKBPSMax = 30*1000;          // max of 30 MB / sec.
-const uint32_t kKBPSBuckets = 100;
-
-const PPB_UMA_Private* uma_interface = NULL;
-
-const PPB_UMA_Private* GetUMAInterface() {
-  if (uma_interface != NULL) {
-    return uma_interface;
+// TEMPORARY: ld needs to look up dynamic libraries in the nexe's manifest
+// until metadata is complete in pexes.  This manifest lookup allows looking
+// for whether a resource requested by ld is in the nexe manifest first, and
+// if not, then consults the extension manifest.
+// TODO(sehr,jvoung,pdox): remove this when metadata is correct.
+class PnaclLDManifest : public Manifest {
+ public:
+  PnaclLDManifest(const Manifest* nexe_manifest,
+                  const Manifest* extension_manifest)
+      : nexe_manifest_(nexe_manifest),
+        extension_manifest_(extension_manifest) {
+    CHECK(nexe_manifest != NULL);
+    CHECK(extension_manifest != NULL);
   }
-  pp::Module *module = pp::Module::Get();
-  DCHECK(module);
-  uma_interface = static_cast<const PPB_UMA_Private*>(
-      module->GetBrowserInterface(PPB_UMA_PRIVATE_INTERFACE));
-  return uma_interface;
-}
+  virtual ~PnaclLDManifest() { }
 
-void HistogramTime(const std::string& name, int64_t ms) {
-  if (ms < 0) return;
-
-  const PPB_UMA_Private* ptr = GetUMAInterface();
-  if (ptr == NULL) return;
-
-  ptr->HistogramCustomTimes(pp::Var(name).pp_var(),
-                            ms,
-                            kTimeLargeMin, kTimeLargeMax,
-                            kTimeLargeBuckets);
-}
-
-void HistogramSizeKB(const std::string& name, int32_t kb) {
-  if (kb < 0) return;
-
-  const PPB_UMA_Private* ptr = GetUMAInterface();
-  if (ptr == NULL) return;
-
-  ptr->HistogramCustomCounts(pp::Var(name).pp_var(),
-                             kb,
-                             kSizeKBMin, kSizeKBMax,
-                             kSizeKBBuckets);
-}
-
-void HistogramRatio(const std::string& name, int64_t a, int64_t b) {
-  if (a < 0 || b <= 0) return;
-
-  const PPB_UMA_Private* ptr = GetUMAInterface();
-  if (ptr == NULL) return;
-
-  ptr->HistogramCustomCounts(pp::Var(name).pp_var(),
-                             100 * a / b,
-                             kRatioMin, kRatioMax,
-                             kRatioBuckets);
-}
-
-void HistogramKBPerSec(const std::string& name, double kb, double s) {
-  if (kb < 0.0 || s <= 0.0) return;
-
-  const PPB_UMA_Private* ptr = GetUMAInterface();
-  if (ptr == NULL) return;
-
-  ptr->HistogramCustomCounts(pp::Var(name).pp_var(),
-                             static_cast<int64_t>(kb / s),
-                             kKBPSMin, kKBPSMax,
-                             kKBPSBuckets);
-}
-
-void HistogramEnumerateTranslationCache(bool hit) {
-  const PPB_UMA_Private* ptr = GetUMAInterface();
-  if (ptr == NULL) return;
-  ptr->HistogramEnumeration(pp::Var("NaCl.Perf.PNaClCache.IsHit").pp_var(),
-                            hit, 2);
-}
-
-// Opt level is expected to be 0 to 3.  Treating 4 as unknown.
-const int8_t kOptUnknown = 4;
-
-void HistogramOptLevel(int8_t opt_level) {
-  const PPB_UMA_Private* ptr = GetUMAInterface();
-  if (ptr == NULL) return;
-  if (opt_level < 0 || opt_level > 3) {
-    opt_level = kOptUnknown;
+  virtual bool GetProgramURL(nacl::string* full_url,
+                             ErrorInfo* error_info,
+                             bool* is_portable) const {
+    if (nexe_manifest_->GetProgramURL(full_url, error_info, is_portable)) {
+      return true;
+    }
+    return extension_manifest_->GetProgramURL(full_url, error_info,
+                                              is_portable);
   }
-  ptr->HistogramEnumeration(pp::Var("NaCl.Options.PNaCl.OptLevel").pp_var(),
-                            opt_level, kOptUnknown+1);
-}
 
-}  // namespace
+  virtual bool ResolveURL(const nacl::string& relative_url,
+                          nacl::string* full_url,
+                          bool* permit_extension_url,
+                          ErrorInfo* error_info) const {
+    if (nexe_manifest_->ResolveURL(relative_url, full_url,
+                                   permit_extension_url, error_info)) {
+      return true;
+    }
+    return extension_manifest_->ResolveURL(relative_url, full_url,
+                                           permit_extension_url, error_info);
+  }
 
+  virtual bool GetFileKeys(std::set<nacl::string>* keys) const {
+    if (nexe_manifest_->GetFileKeys(keys)) {
+      return true;
+    }
+    return extension_manifest_->GetFileKeys(keys);
+  }
+
+  virtual bool ResolveKey(const nacl::string& key,
+                          nacl::string* full_url,
+                          bool* permit_extension_url,
+                          ErrorInfo* error_info,
+                          bool* is_portable) const {
+    if (nexe_manifest_->ResolveKey(key, full_url, permit_extension_url,
+                                   error_info, is_portable)) {
+      return true;
+    }
+    return extension_manifest_->ResolveKey(key, full_url, permit_extension_url,
+                                           error_info, is_portable);
+  }
+
+ private:
+  NACL_DISALLOW_COPY_AND_ASSIGN(PnaclLDManifest);
+
+  const Manifest* nexe_manifest_;
+  const Manifest* extension_manifest_;
+};
 
 //////////////////////////////////////////////////////////////////////
 //  The coordinator class.
 //////////////////////////////////////////////////////////////////////
-
-// Out-of-line destructor to keep it from getting put in every .o where
-// callback_source.h is included
-template<>
-CallbackSource<FileStreamData>::~CallbackSource() {}
-
 PnaclCoordinator* PnaclCoordinator::BitcodeToNative(
     Plugin* plugin,
     const nacl::string& pexe_url,
-    const PnaclOptions& pnacl_options,
     const pp::CompletionCallback& translate_notify_callback) {
   PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (plugin=%p, pexe=%s)\n",
                  static_cast<void*>(plugin), pexe_url.c_str()));
   PnaclCoordinator* coordinator =
-      new PnaclCoordinator(plugin, pexe_url,
-                           pnacl_options,
-                           translate_notify_callback);
-  coordinator->pnacl_init_time_ = NaClGetTimeOfDayMicroseconds();
-  PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (manifest=%p, ",
+      new PnaclCoordinator(plugin, pexe_url, translate_notify_callback);
+  PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (manifest=%p)\n",
                  reinterpret_cast<const void*>(coordinator->manifest_.get())));
-
-  // First start a network request for the pexe, to tickle the component
-  // updater's On-Demand resource throttler, and to get Last-Modified/ETag
-  // cache information. We can cancel the request later if there's
-  // a bitcode->nexe cache hit.
-  coordinator->OpenBitcodeStream();
+  // Load llc and ld.
+  std::vector<nacl::string> resource_urls;
+  resource_urls.push_back(kLlcUrl);
+  resource_urls.push_back(kLdUrl);
+  pp::CompletionCallback resources_cb =
+      coordinator->callback_factory_.NewCallback(
+          &PnaclCoordinator::ResourcesDidLoad);
+  coordinator->resources_.reset(
+      new PnaclResources(plugin,
+                         coordinator,
+                         coordinator->manifest_.get(),
+                         resource_urls,
+                         resources_cb));
+  CHECK(coordinator->resources_ != NULL);
+  coordinator->resources_->StartDownloads();
+  // ResourcesDidLoad will be invoked when all resources have been received.
   return coordinator;
+}
+
+int32_t PnaclCoordinator::GetLoadedFileDesc(int32_t pp_error,
+                                            const nacl::string& url,
+                                            const nacl::string& component) {
+  PLUGIN_PRINTF(("PnaclCoordinator::GetLoadedFileDesc (pp_error=%"
+                 NACL_PRId32", url=%s, component=%s)\n", pp_error,
+                 url.c_str(), component.c_str()));
+  PLUGIN_PRINTF(("PnaclCoordinator::GetLoadedFileDesc (pp_error=%d\n"));
+  ErrorInfo error_info;
+  int32_t file_desc = plugin_->GetPOSIXFileDesc(url);
+  if (pp_error != PP_OK || file_desc == NACL_NO_FILE_DESC) {
+    if (pp_error == PP_ERROR_ABORTED) {
+      plugin_->ReportLoadAbort();
+    } else {
+      ReportPpapiError(pp_error, component + " load failed.");
+    }
+    return -1;
+  }
+  int32_t file_desc_ok_to_close = DUP(file_desc);
+  if (file_desc_ok_to_close == NACL_NO_FILE_DESC) {
+    ReportPpapiError(PP_ERROR_FAILED, component + " could not dup fd.");
+    return -1;
+  }
+  return file_desc_ok_to_close;
 }
 
 PnaclCoordinator::PnaclCoordinator(
     Plugin* plugin,
     const nacl::string& pexe_url,
-    const PnaclOptions& pnacl_options,
     const pp::CompletionCallback& translate_notify_callback)
-  : translate_finish_error_(PP_OK),
-    plugin_(plugin),
+  : plugin_(plugin),
     translate_notify_callback_(translate_notify_callback),
-    translation_finished_reported_(false),
-    manifest_(new PnaclManifest()),
+    subprocesses_should_die_(false),
+    file_system_(new pp::FileSystem(plugin, PP_FILESYSTEMTYPE_LOCALTEMPORARY)),
+    manifest_(new ExtensionManifest(plugin->url_util())),
     pexe_url_(pexe_url),
-    pnacl_options_(pnacl_options),
-    is_cache_hit_(PP_FALSE),
-    error_already_reported_(false),
-    pnacl_init_time_(0),
-    pexe_size_(0),
-    pexe_bytes_compiled_(0),
-    expected_pexe_size_(-1) {
+    error_already_reported_(false) {
   PLUGIN_PRINTF(("PnaclCoordinator::PnaclCoordinator (this=%p, plugin=%p)\n",
                  static_cast<void*>(this), static_cast<void*>(plugin)));
   callback_factory_.Initialize(this);
+  NaClXMutexCtor(&subprocess_mu_);
+  ld_manifest_.reset(new PnaclLDManifest(plugin_->manifest(), manifest_.get()));
 }
 
 PnaclCoordinator::~PnaclCoordinator() {
-  PLUGIN_PRINTF(("PnaclCoordinator::~PnaclCoordinator (this=%p, "
-                 "translate_thread=%p\n",
-                 static_cast<void*>(this), translate_thread_.get()));
-  // Stopping the translate thread will cause the translate thread to try to
-  // run translation_complete_callback_ on the main thread.  This destructor is
-  // running from the main thread, and by the time it exits, callback_factory_
-  // will have been destroyed.  This will result in the cancellation of
-  // translation_complete_callback_, so no notification will be delivered.
+  PLUGIN_PRINTF(("PnaclCoordinator::~PnaclCoordinator (this=%p)\n",
+                 static_cast<void*>(this)));
+  // Join helper thread which will block the page from refreshing while a
+  // translation is happening.
   if (translate_thread_.get() != NULL) {
-    translate_thread_->AbortSubprocesses();
+    SetSubprocessesShouldDie(true);
+    NaClThreadJoin(translate_thread_.get());
   }
-  if (!translation_finished_reported_) {
-    plugin_->nacl_interface()->ReportTranslationFinished(
-        plugin_->pp_instance(),
-        PP_FALSE);
-  }
+  NaClMutexDtor(&subprocess_mu_);
 }
 
-nacl::DescWrapper* PnaclCoordinator::ReleaseTranslatedFD() {
-  DCHECK(temp_nexe_file_ != NULL);
-  return temp_nexe_file_->release_read_wrapper();
+void PnaclCoordinator::ReportNonPpapiError(const nacl::string& message) {
+  error_info_.SetReport(ERROR_UNKNOWN,
+                        nacl::string("PnaclCoordinator: ") + message);
+  ReportPpapiError(PP_ERROR_FAILED);
 }
 
-void PnaclCoordinator::ReportNonPpapiError(enum PluginErrorCode err_code,
-                                           const nacl::string& message) {
-  error_info_.SetReport(err_code, message);
-  ExitWithError();
-}
-
-void PnaclCoordinator::ReportPpapiError(enum PluginErrorCode err_code,
-                                        int32_t pp_error,
+void PnaclCoordinator::ReportPpapiError(int32_t pp_error,
                                         const nacl::string& message) {
-  nacl::stringstream ss;
-  ss << "PnaclCoordinator: " << message << " (pp_error=" << pp_error << ").";
-  error_info_.SetReport(err_code, ss.str());
-  ExitWithError();
+  error_info_.SetReport(ERROR_UNKNOWN,
+                        nacl::string("PnaclCoordinator: ") + message);
+  ReportPpapiError(pp_error);
 }
 
-void PnaclCoordinator::ExitWithError() {
-  PLUGIN_PRINTF(("PnaclCoordinator::ExitWithError (error_code=%d, "
-                 "message='%s')\n",
-                 error_info_.error_code(),
+void PnaclCoordinator::ReportPpapiError(int32_t pp_error) {
+  PLUGIN_PRINTF(("PnaclCoordinator::ReportPpappiError (pp_error=%"
+                 NACL_PRId32", error_code=%d, message=%s)\n",
+                 pp_error, error_info_.error_code(),
                  error_info_.message().c_str()));
   plugin_->ReportLoadError(error_info_);
   // Free all the intermediate callbacks we ever created.
@@ -314,382 +424,219 @@ void PnaclCoordinator::ExitWithError() {
   callback_factory_.CancelAll();
   if (!error_already_reported_) {
     error_already_reported_ = true;
-    translation_finished_reported_ = true;
-    plugin_->nacl_interface()->ReportTranslationFinished(
-        plugin_->pp_instance(),
-        PP_FALSE);
-    translate_notify_callback_.Run(PP_ERROR_FAILED);
+    translate_notify_callback_.Run(pp_error);
   } else {
-    PLUGIN_PRINTF(("PnaclCoordinator::ExitWithError an earlier error was "
+    PLUGIN_PRINTF(("PnaclCoordinator::ReportPpapiError an earlier error was "
                    "already reported -- Skipping.\n"));
   }
 }
 
-// Signal that Pnacl translation completed normally.
 void PnaclCoordinator::TranslateFinished(int32_t pp_error) {
   PLUGIN_PRINTF(("PnaclCoordinator::TranslateFinished (pp_error=%"
-                 NACL_PRId32 ")\n", pp_error));
-  // Bail out if there was an earlier error (e.g., pexe load failure),
-  // or if there is an error from the translation thread.
-  if (translate_finish_error_ != PP_OK || pp_error != PP_OK) {
-    ExitWithError();
-    return;
-  }
-  // Send out one last progress event, to finish up the progress events
-  // that were delayed (see the delay inserted in BitcodeGotCompiled).
-  if (ExpectedProgressKnown()) {
-    pexe_bytes_compiled_ = expected_pexe_size_;
-    plugin_->EnqueueProgressEvent(PP_NACL_EVENT_PROGRESS,
-                                  pexe_url_,
-                                  plugin::Plugin::LENGTH_IS_COMPUTABLE,
-                                  pexe_bytes_compiled_,
-                                  expected_pexe_size_);
-  }
-
-  // If there are no errors, report stats from this thread (the main thread).
-  HistogramOptLevel(pnacl_options_.opt_level());
-  const plugin::PnaclTimeStats& time_stats = translate_thread_->GetTimeStats();
-  HistogramTime("NaCl.Perf.PNaClLoadTime.LoadCompiler",
-                time_stats.pnacl_llc_load_time / NACL_MICROS_PER_MILLI);
-  HistogramTime("NaCl.Perf.PNaClLoadTime.CompileTime",
-                time_stats.pnacl_compile_time / NACL_MICROS_PER_MILLI);
-  HistogramKBPerSec("NaCl.Perf.PNaClLoadTime.CompileKBPerSec",
-                    pexe_size_ / 1024.0,
-                    time_stats.pnacl_compile_time / 1000000.0);
-  HistogramTime("NaCl.Perf.PNaClLoadTime.LoadLinker",
-                time_stats.pnacl_ld_load_time / NACL_MICROS_PER_MILLI);
-  HistogramTime("NaCl.Perf.PNaClLoadTime.LinkTime",
-                time_stats.pnacl_link_time / NACL_MICROS_PER_MILLI);
-  HistogramSizeKB("NaCl.Perf.Size.Pexe",
-                  static_cast<int64_t>(pexe_size_ / 1024));
-
-  struct nacl_abi_stat stbuf;
-  struct NaClDesc* desc = temp_nexe_file_->read_wrapper()->desc();
-  int stat_ret;
-  if (0 != (stat_ret = (*((struct NaClDescVtbl const *) desc->base.vtbl)->
-                        Fstat)(desc, &stbuf))) {
-    PLUGIN_PRINTF(("PnaclCoordinator::TranslateFinished can't stat nexe.\n"));
-  } else {
-    size_t nexe_size = stbuf.nacl_abi_st_size;
-    HistogramSizeKB("NaCl.Perf.Size.PNaClTranslatedNexe",
-                    static_cast<int64_t>(nexe_size / 1024));
-    HistogramRatio("NaCl.Perf.Size.PexeNexeSizePct", pexe_size_, nexe_size);
-  }
-
-  int64_t total_time = NaClGetTimeOfDayMicroseconds() - pnacl_init_time_;
-  HistogramTime("NaCl.Perf.PNaClLoadTime.TotalUncachedTime",
-                total_time / NACL_MICROS_PER_MILLI);
-  HistogramKBPerSec("NaCl.Perf.PNaClLoadTime.TotalUncachedKBPerSec",
-                    pexe_size_ / 1024.0,
-                    total_time / 1000000.0);
-
-  // The nexe is written to the temp_nexe_file_.  We must Reset() the file
-  // pointer to be able to read it again from the beginning.
-  temp_nexe_file_->Reset();
-
-  // Report to the browser that translation finished. The browser will take
-  // care of storing the nexe in the cache.
-  translation_finished_reported_ = true;
-  plugin_->nacl_interface()->ReportTranslationFinished(
-      plugin_->pp_instance(), PP_TRUE);
-
-  NexeReadDidOpen(PP_OK);
-}
-
-void PnaclCoordinator::NexeReadDidOpen(int32_t pp_error) {
-  PLUGIN_PRINTF(("PnaclCoordinator::NexeReadDidOpen (pp_error=%"
-                 NACL_PRId32 ")\n", pp_error));
+                 NACL_PRId32")\n", pp_error));
   if (pp_error != PP_OK) {
-    if (pp_error == PP_ERROR_FILENOTFOUND) {
-      ReportPpapiError(ERROR_PNACL_CACHE_FETCH_NOTFOUND,
-                       pp_error,
-                       "Failed to open translated nexe (not found).");
-      return;
-    }
-    if (pp_error == PP_ERROR_NOACCESS) {
-      ReportPpapiError(ERROR_PNACL_CACHE_FETCH_NOACCESS,
-                       pp_error,
-                       "Failed to open translated nexe (no access).");
-      return;
-    }
-    ReportPpapiError(ERROR_PNACL_CACHE_FETCH_OTHER,
-                     pp_error,
-                     "Failed to open translated nexe.");
+    ReportPpapiError(pp_error);
     return;
   }
-
+  // Transfer ownership of the nexe wrapper to the coordinator.
+  // TODO(sehr): figure out when/how to delete/reap these temporary files.
+  translated_fd_.reset(nexe_file_->release_read_wrapper());
+  plugin_->EnqueueProgressEvent(Plugin::kProgressEventProgress);
   translate_notify_callback_.Run(pp_error);
 }
 
-void PnaclCoordinator::OpenBitcodeStream() {
-  // Now open the pexe stream.
-  streaming_downloader_.reset(new FileDownloader());
-  streaming_downloader_->Initialize(plugin_);
-  // Mark the request as requesting a PNaCl bitcode file,
-  // so that component updater can detect this user action.
-  streaming_downloader_->set_request_headers(
-      "Accept: application/x-pnacl, */*");
-
-  // Even though we haven't started downloading, create the translation
-  // thread object immediately. This ensures that any pieces of the file
-  // that get downloaded before the compilation thread is accepting
-  // SRPCs won't get dropped.
-  translate_thread_.reset(new PnaclTranslateThread());
-  if (translate_thread_ == NULL) {
-    ReportNonPpapiError(
-        ERROR_PNACL_THREAD_CREATE,
-        "PnaclCoordinator: could not allocate translation thread.");
-    return;
-  }
-
-  pp::CompletionCallback cb =
-      callback_factory_.NewCallback(&PnaclCoordinator::BitcodeStreamDidOpen);
-  if (!streaming_downloader_->OpenStream(pexe_url_, cb, this)) {
-    ReportNonPpapiError(
-        ERROR_PNACL_PEXE_FETCH_OTHER,
-        nacl::string("PnaclCoordinator: failed to open stream ") + pexe_url_);
-    return;
-  }
-}
-
-void PnaclCoordinator::BitcodeStreamDidOpen(int32_t pp_error) {
-  if (pp_error != PP_OK) {
-    BitcodeStreamDidFinish(pp_error);
-    // We have not spun up the translation process yet, so we need to call
-    // TranslateFinished here.
-    TranslateFinished(pp_error);
-    return;
-  }
-
-  // The component updater's resource throttles + OnDemand update/install
-  // should block the URL request until the compiler is present. Now we
-  // can load the resources (e.g. llc and ld nexes).
-  resources_.reset(new PnaclResources(plugin_, this, this->manifest_.get()));
-  CHECK(resources_ != NULL);
-
-  // The first step of loading resources: read the resource info file.
-  pp::CompletionCallback resource_info_read_cb =
-      callback_factory_.NewCallback(&PnaclCoordinator::ResourceInfoWasRead);
-  resources_->ReadResourceInfo(PnaclUrls::GetResourceInfoUrl(),
-                               resource_info_read_cb);
-}
-
-void PnaclCoordinator::ResourceInfoWasRead(int32_t pp_error) {
-  PLUGIN_PRINTF(("PluginCoordinator::ResourceInfoWasRead (pp_error=%"
-                NACL_PRId32 ")\n", pp_error));
-  // Second step of loading resources: call StartLoad to load pnacl-llc
-  // and pnacl-ld, based on the filenames found in the resource info file.
-  pp::CompletionCallback resources_cb =
-      callback_factory_.NewCallback(&PnaclCoordinator::ResourcesDidLoad);
-  resources_->StartLoad(resources_cb);
+void PnaclCoordinator::TranslateFailed(const nacl::string& error_string) {
+  PLUGIN_PRINTF(("PnaclCoordinator::TranslateFailed (error_string=%"
+                 NACL_PRId32")\n", error_string.c_str()));
+  pp::Core* core = pp::Module::Get()->core();
+  error_info_.SetReport(ERROR_UNKNOWN,
+                        nacl::string("PnaclCoordinator: ") + error_string);
+  core->CallOnMainThread(0, translate_done_cb_, PP_ERROR_FAILED);
+  NaClThreadExit(1);
 }
 
 void PnaclCoordinator::ResourcesDidLoad(int32_t pp_error) {
   PLUGIN_PRINTF(("PnaclCoordinator::ResourcesDidLoad (pp_error=%"
-                 NACL_PRId32 ")\n", pp_error));
+                 NACL_PRId32")\n", pp_error));
   if (pp_error != PP_OK) {
-    // Finer-grained error code should have already been reported by
-    // the PnaclResources class.
+    ReportPpapiError(pp_error, "resources failed to load.");
     return;
   }
-
-  // Okay, now that we've started the HTTP request for the pexe
-  // and we've ensured that the PNaCl compiler + metadata is installed,
-  // get the cache key from the response headers and from the
-  // compiler's version metadata.
-  nacl::string headers = streaming_downloader_->GetResponseHeaders();
-  NaClHttpResponseHeaders parser;
-  parser.Parse(headers);
-
-  temp_nexe_file_.reset(new TempFile(plugin_));
+  // Open the local temporary file system to create the temporary files
+  // for the object and nexe.
   pp::CompletionCallback cb =
-      callback_factory_.NewCallback(&PnaclCoordinator::NexeFdDidOpen);
-  int32_t nexe_fd_err =
-      plugin_->nacl_interface()->GetNexeFd(
-          plugin_->pp_instance(),
-          streaming_downloader_->url().c_str(),
-          // TODO(dschuff): Get this value from the pnacl json file after it
-          // rolls in from NaCl.
-          1,
-          pnacl_options_.opt_level(),
-          parser.GetHeader("last-modified").c_str(),
-          parser.GetHeader("etag").c_str(),
-          PP_FromBool(parser.CacheControlNoStore()),
-          &is_cache_hit_,
-          temp_nexe_file_->existing_handle(),
-          cb.pp_completion_callback());
-  if (nexe_fd_err < PP_OK_COMPLETIONPENDING) {
-    ReportPpapiError(ERROR_PNACL_CREATE_TEMP, nexe_fd_err,
-                     nacl::string("Call to GetNexeFd failed"));
+      callback_factory_.NewCallback(&PnaclCoordinator::FileSystemDidOpen);
+  if (!file_system_->Open(0, cb)) {
+    ReportNonPpapiError("failed to open file system.");
   }
 }
 
-void PnaclCoordinator::NexeFdDidOpen(int32_t pp_error) {
-  PLUGIN_PRINTF(("PnaclCoordinator::NexeFdDidOpen (pp_error=%"
-                 NACL_PRId32 ", hit=%d, handle=%d)\n", pp_error,
-                 is_cache_hit_ == PP_TRUE,
-                 *temp_nexe_file_->existing_handle()));
-  if (pp_error < PP_OK) {
-    ReportPpapiError(ERROR_PNACL_CREATE_TEMP, pp_error,
-                     nacl::string("GetNexeFd failed"));
-    return;
-  }
-
-  if (*temp_nexe_file_->existing_handle() == PP_kInvalidFileHandle) {
-    ReportNonPpapiError(
-        ERROR_PNACL_CREATE_TEMP,
-        nacl::string(
-            "PnaclCoordinator: Got bad temp file handle from GetNexeFd"));
-    return;
-  }
-  HistogramEnumerateTranslationCache(is_cache_hit_);
-
-  if (is_cache_hit_ == PP_TRUE) {
-    // Cache hit -- no need to stream the rest of the file.
-    streaming_downloader_.reset(NULL);
-    // Open it for reading as the cached nexe file.
-    pp::CompletionCallback cb =
-        callback_factory_.NewCallback(&PnaclCoordinator::NexeReadDidOpen);
-    temp_nexe_file_->Open(cb, false);
-  } else {
-    // Open an object file first so the translator can start writing to it
-    // during streaming translation.
-    obj_file_.reset(new TempFile(plugin_));
-    pp::CompletionCallback obj_cb =
-        callback_factory_.NewCallback(&PnaclCoordinator::ObjectFileDidOpen);
-    obj_file_->Open(obj_cb, true);
-
-    // Meanwhile, a miss means we know we need to stream the bitcode, so stream
-    // the rest of it now. (Calling FinishStreaming means that the downloader
-    // will begin handing data to the coordinator, which is safe any time after
-    // the translate_thread_ object has been initialized).
-    pp::CompletionCallback finish_cb = callback_factory_.NewCallback(
-        &PnaclCoordinator::BitcodeStreamDidFinish);
-    streaming_downloader_->FinishStreaming(finish_cb);
-  }
-}
-
-void PnaclCoordinator::BitcodeStreamDidFinish(int32_t pp_error) {
-  PLUGIN_PRINTF(("PnaclCoordinator::BitcodeStreamDidFinish (pp_error=%"
-                 NACL_PRId32 ")\n", pp_error));
+void PnaclCoordinator::FileSystemDidOpen(int32_t pp_error) {
+  PLUGIN_PRINTF(("PnaclCoordinator::FileSystemDidOpen (pp_error=%"
+                 NACL_PRId32")\n", pp_error));
   if (pp_error != PP_OK) {
-    // Defer reporting the error and cleanup until after the translation
-    // thread returns, because it may be accessing the coordinator's
-    // objects or writing to the files.
-    translate_finish_error_ = pp_error;
-    if (pp_error == PP_ERROR_ABORTED) {
-      error_info_.SetReport(ERROR_PNACL_PEXE_FETCH_ABORTED,
-                            "PnaclCoordinator: pexe load failed (aborted).");
-    }
-    if (pp_error == PP_ERROR_NOACCESS) {
-      error_info_.SetReport(ERROR_PNACL_PEXE_FETCH_NOACCESS,
-                            "PnaclCoordinator: pexe load failed (no access).");
-    } else {
-      nacl::stringstream ss;
-      ss << "PnaclCoordinator: pexe load failed (pp_error=" << pp_error << ").";
-      error_info_.SetReport(ERROR_PNACL_PEXE_FETCH_OTHER, ss.str());
-    }
-    translate_thread_->AbortSubprocesses();
-  } else {
-    // Compare download completion pct (100% now), to compile completion pct.
-    HistogramRatio("NaCl.Perf.PNaClLoadTime.PctCompiledWhenFullyDownloaded",
-                   pexe_bytes_compiled_, pexe_size_);
-  }
-}
-
-void PnaclCoordinator::BitcodeStreamGotData(int32_t pp_error,
-                                            FileStreamData data) {
-  PLUGIN_PRINTF(("PnaclCoordinator::BitcodeStreamGotData (pp_error=%"
-                 NACL_PRId32 ", data=%p)\n", pp_error, data ? &(*data)[0] : 0));
-  DCHECK(translate_thread_.get());
-
-  translate_thread_->PutBytes(data, pp_error);
-  // If pp_error > 0, then it represents the number of bytes received.
-  if (data && pp_error > 0) {
-    pexe_size_ += pp_error;
-  }
-}
-
-StreamCallback PnaclCoordinator::GetCallback() {
-  return callback_factory_.NewCallbackWithOutput(
-      &PnaclCoordinator::BitcodeStreamGotData);
-}
-
-void PnaclCoordinator::BitcodeGotCompiled(int32_t pp_error,
-                                          int64_t bytes_compiled) {
-  pexe_bytes_compiled_ += bytes_compiled;
-  // If we don't know the expected total yet, ask.
-  if (!ExpectedProgressKnown()) {
-    int64_t amount_downloaded;  // dummy variable.
-    streaming_downloader_->GetDownloadProgress(&amount_downloaded,
-                                               &expected_pexe_size_);
-  }
-  // Hold off reporting the last few bytes of progress, since we don't know
-  // when they are actually completely compiled.  "bytes_compiled" only means
-  // that bytes were sent to the compiler.
-  if (ExpectedProgressKnown()) {
-    if (!ShouldDelayProgressEvent()) {
-      plugin_->EnqueueProgressEvent(PP_NACL_EVENT_PROGRESS,
-                                    pexe_url_,
-                                    plugin::Plugin::LENGTH_IS_COMPUTABLE,
-                                    pexe_bytes_compiled_,
-                                    expected_pexe_size_);
-    }
-  } else {
-    plugin_->EnqueueProgressEvent(PP_NACL_EVENT_PROGRESS,
-                                  pexe_url_,
-                                  plugin::Plugin::LENGTH_IS_NOT_COMPUTABLE,
-                                  pexe_bytes_compiled_,
-                                  expected_pexe_size_);
-  }
-}
-
-pp::CompletionCallback PnaclCoordinator::GetCompileProgressCallback(
-    int64_t bytes_compiled) {
-  return callback_factory_.NewCallback(&PnaclCoordinator::BitcodeGotCompiled,
-                                       bytes_compiled);
-}
-
-void PnaclCoordinator::GetCurrentProgress(int64_t* bytes_loaded,
-                                          int64_t* bytes_total) {
-  *bytes_loaded = pexe_bytes_compiled_;
-  *bytes_total = expected_pexe_size_;
-}
-
-void PnaclCoordinator::ObjectFileDidOpen(int32_t pp_error) {
-  PLUGIN_PRINTF(("PnaclCoordinator::ObjectFileDidOpen (pp_error=%"
-                 NACL_PRId32 ")\n", pp_error));
-  if (pp_error != PP_OK) {
-    ReportPpapiError(ERROR_PNACL_CREATE_TEMP,
-                     pp_error,
-                     "Failed to open scratch object file.");
+    ReportPpapiError(pp_error, "file system didn't open.");
     return;
   }
-  // Open the nexe file for connecting ld and sel_ldr.
-  // Start translation when done with this last step of setup!
+  // Create the object file pair for connecting llc and ld.
+  obj_file_.reset(new PnaclFileDescPair(plugin_, file_system_.get(), this));
+  pp::CompletionCallback cb =
+      callback_factory_.NewCallback(&PnaclCoordinator::ObjectPairDidOpen);
+  obj_file_->Open(cb);
+}
+
+void PnaclCoordinator::ObjectPairDidOpen(int32_t pp_error) {
+  PLUGIN_PRINTF(("PnaclCoordinator::ObjectPairDidOpen (pp_error=%"
+                 NACL_PRId32")\n", pp_error));
+  if (pp_error != PP_OK) {
+    ReportPpapiError(pp_error);
+    return;
+  }
+  // Create the nexe file pair for connecting ld and sel_ldr.
+  nexe_file_.reset(new PnaclFileDescPair(plugin_, file_system_.get(), this));
+  pp::CompletionCallback cb =
+      callback_factory_.NewCallback(&PnaclCoordinator::NexePairDidOpen);
+  nexe_file_->Open(cb);
+}
+
+void PnaclCoordinator::NexePairDidOpen(int32_t pp_error) {
+  PLUGIN_PRINTF(("PnaclCoordinator::NexePairDidOpen (pp_error=%"
+                 NACL_PRId32")\n", pp_error));
+  if (pp_error != PP_OK) {
+    ReportPpapiError(pp_error);
+    return;
+  }
+  // Load the pexe file and get the translation started.
   pp::CompletionCallback cb =
       callback_factory_.NewCallback(&PnaclCoordinator::RunTranslate);
-  temp_nexe_file_->Open(cb, true);
+
+  // "false" here indicates the pexe must be in user's manifest file origin.
+  if (!plugin_->StreamAsFile(pexe_url_, false, cb.pp_completion_callback())) {
+    ReportNonPpapiError(nacl::string("failed to download ") + pexe_url_ + ".");
+  }
 }
 
 void PnaclCoordinator::RunTranslate(int32_t pp_error) {
   PLUGIN_PRINTF(("PnaclCoordinator::RunTranslate (pp_error=%"
-                 NACL_PRId32 ")\n", pp_error));
+                 NACL_PRId32")\n", pp_error));
+  int32_t fd = GetLoadedFileDesc(pp_error, pexe_url_, "pexe");
+  if (fd < 0) {
+    return;
+  }
+  pexe_wrapper_.reset(plugin_->wrapper_factory()->MakeFileDesc(fd, O_RDONLY));
   // Invoke llc followed by ld off the main thread.  This allows use of
   // blocking RPCs that would otherwise block the JavaScript main thread.
-  pp::CompletionCallback report_translate_finished =
+  translate_done_cb_ =
       callback_factory_.NewCallback(&PnaclCoordinator::TranslateFinished);
+  translate_thread_.reset(new NaClThread);
+  if (translate_thread_ == NULL) {
+    ReportNonPpapiError("could not allocate thread struct.");
+    return;
+  }
+  const int32_t kArbitraryStackSize = 128 * 1024;
+  if (!NaClThreadCreateJoinable(translate_thread_.get(),
+                                DoTranslateThread,
+                                this,
+                                kArbitraryStackSize)) {
+    ReportNonPpapiError("could not create thread.");
+  }
+}
 
-  CHECK(translate_thread_ != NULL);
-  translate_thread_->RunTranslate(report_translate_finished,
-                                  manifest_.get(),
-                                  obj_file_.get(),
-                                  temp_nexe_file_.get(),
-                                  &error_info_,
-                                  resources_.get(),
-                                  &pnacl_options_,
-                                  this,
-                                  plugin_);
+NaClSubprocess* PnaclCoordinator::StartSubprocess(
+    const nacl::string& url_for_nexe,
+    const Manifest* manifest) {
+  PLUGIN_PRINTF(("PnaclCoordinator::StartSubprocess (url_for_nexe=%s)\n",
+                 url_for_nexe.c_str()));
+  nacl::DescWrapper* wrapper = resources_->WrapperForUrl(url_for_nexe);
+  NaClSubprocessId id =
+      plugin_->LoadHelperNaClModule(wrapper, manifest, &error_info_);
+  if (kInvalidNaClSubprocessId == id) {
+    PLUGIN_PRINTF((
+        "PnaclCoordinator::StartSubprocess: invalid subprocess id\n"));
+    return NULL;
+  }
+  return plugin_->nacl_subprocess(id);
+}
+
+// TODO(sehr): the thread body should be in a class by itself with a delegate
+// class for interfacing with the rest of the coordinator.
+void WINAPI PnaclCoordinator::DoTranslateThread(void* arg) {
+  PnaclCoordinator* coordinator = reinterpret_cast<PnaclCoordinator*>(arg);
+  Plugin* plugin = coordinator->plugin_;
+  BrowserInterface* browser_interface = plugin->browser_interface();
+
+  nacl::scoped_ptr<NaClSubprocess> llc_subprocess(
+      coordinator->StartSubprocess(kLlcUrl, coordinator->manifest_.get()));
+  if (llc_subprocess == NULL) {
+    coordinator->TranslateFailed("Compile process could not be created.");
+  }
+  // Run LLC.
+  SrpcParams params;
+  nacl::DescWrapper* llc_out_file = coordinator->obj_file_->write_wrapper();
+  if (!PnaclSrpcLib::InvokeSrpcMethod(browser_interface,
+                                      llc_subprocess.get(),
+                                      "RunWithDefaultCommandLine",
+                                      "hh",
+                                      &params,
+                                      coordinator->pexe_wrapper_->desc(),
+                                      llc_out_file->desc())) {
+    coordinator->TranslateFailed("compile failed.");
+  }
+  // LLC returns values that are used to determine how linking is done.
+  int is_shared_library = (params.outs()[0]->u.ival != 0);
+  nacl::string soname = params.outs()[1]->arrays.str;
+  nacl::string lib_dependencies = params.outs()[2]->arrays.str;
+  PLUGIN_PRINTF(("PnaclCoordinator: compile (coordinator=%p) succeeded"
+                 " is_shared_library=%d, soname='%s', lib_dependencies='%s')\n",
+                 arg, is_shared_library, soname.c_str(),
+                 lib_dependencies.c_str()));
+  // Shut down the llc subprocess.
+  llc_subprocess.release();
+  if (coordinator->SubprocessesShouldDie()) {
+    PLUGIN_PRINTF((
+        "PnaclCoordinator::DoTranslateThread: killed by coordinator.\n"));
+    NaClThreadExit(1);
+  }
+  nacl::scoped_ptr<NaClSubprocess> ld_subprocess(
+      coordinator->StartSubprocess(kLdUrl, coordinator->ld_manifest_.get()));
+  if (ld_subprocess == NULL) {
+    coordinator->TranslateFailed("Link process could not be created.");
+  }
+  nacl::DescWrapper* ld_in_file = coordinator->obj_file_->read_wrapper();
+  nacl::DescWrapper* ld_out_file = coordinator->nexe_file_->write_wrapper();
+  if (!PnaclSrpcLib::InvokeSrpcMethod(browser_interface,
+                                      ld_subprocess.get(),
+                                      "RunWithDefaultCommandLine",
+                                      "hhiCC",
+                                      &params,
+                                      ld_in_file->desc(),
+                                      ld_out_file->desc(),
+                                      is_shared_library,
+                                      soname.c_str(),
+                                      lib_dependencies.c_str())) {
+    coordinator->TranslateFailed("link failed.");
+  }
+  PLUGIN_PRINTF(("PnaclCoordinator: link (coordinator=%p) succeeded\n", arg));
+  // Shut down the ld subprocess.
+  ld_subprocess.release();
+  if (coordinator->SubprocessesShouldDie()) {
+    PLUGIN_PRINTF((
+        "PnaclCoordinator::DoTranslateThread: killed by coordinator.\n"));
+    NaClThreadExit(1);
+  }
+  pp::Core* core = pp::Module::Get()->core();
+  core->CallOnMainThread(0, coordinator->translate_done_cb_, PP_OK);
+  NaClThreadExit(0);
+}
+
+bool PnaclCoordinator::SubprocessesShouldDie() {
+  nacl::MutexLocker ml(&subprocess_mu_);
+  return subprocesses_should_die_;
+}
+
+void PnaclCoordinator::SetSubprocessesShouldDie(bool subprocesses_should_die) {
+  nacl::MutexLocker ml(&subprocess_mu_);
+  subprocesses_should_die_ = subprocesses_should_die;
 }
 
 }  // namespace plugin

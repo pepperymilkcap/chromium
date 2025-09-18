@@ -1,99 +1,66 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/message_box_view.h"
 
 #include "base/i18n/rtl.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_split.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/controls/link.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/client_view.h"
-#include "ui/views/window/dialog_delegate.h"
-
-namespace {
 
 const int kDefaultMessageWidth = 320;
-
-// Paragraph separators are defined in
-// http://www.unicode.org/Public/6.0.0/ucd/extracted/DerivedBidiClass.txt
-//
-// # Bidi_Class=Paragraph_Separator
-//
-// 000A          ; B # Cc       <control-000A>
-// 000D          ; B # Cc       <control-000D>
-// 001C..001E    ; B # Cc   [3] <control-001C>..<control-001E>
-// 0085          ; B # Cc       <control-0085>
-// 2029          ; B # Zp       PARAGRAPH SEPARATOR
-bool IsParagraphSeparator(base::char16 c) {
-  return ( c == 0x000A || c == 0x000D || c == 0x001C || c == 0x001D ||
-           c == 0x001E || c == 0x0085 || c == 0x2029);
-}
-
-// Splits |text| into a vector of paragraphs.
-// Given an example "\nabc\ndef\n\n\nhij\n", the split results should be:
-// "", "abc", "def", "", "", "hij", and "".
-void SplitStringIntoParagraphs(const base::string16& text,
-                               std::vector<base::string16>* paragraphs) {
-  paragraphs->clear();
-
-  size_t start = 0;
-  for (size_t i = 0; i < text.length(); ++i) {
-    if (IsParagraphSeparator(text[i])) {
-      paragraphs->push_back(text.substr(start, i - start));
-      start = i + 1;
-    }
-  }
-  paragraphs->push_back(text.substr(start, text.length() - start));
-}
-
-}  // namespace
 
 namespace views {
 
 ///////////////////////////////////////////////////////////////////////////////
 // MessageBoxView, public:
 
-MessageBoxView::InitParams::InitParams(const base::string16& message)
-    : options(NO_OPTIONS),
-      message(message),
-      message_width(kDefaultMessageWidth),
-      inter_row_vertical_spacing(kRelatedControlVerticalSpacing) {}
-
-MessageBoxView::InitParams::~InitParams() {
-}
-
-MessageBoxView::MessageBoxView(const InitParams& params)
-    : prompt_field_(NULL),
+MessageBoxView::MessageBoxView(int options,
+                               const string16& message,
+                               const string16& default_prompt,
+                               int message_width)
+    : message_label_(new Label(message)),
+      prompt_field_(NULL),
       icon_(NULL),
       checkbox_(NULL),
-      link_(NULL),
-      message_width_(params.message_width) {
-  Init(params);
+      message_width_(message_width) {
+  Init(options, default_prompt);
+}
+
+MessageBoxView::MessageBoxView(int options,
+                               const string16& message,
+                               const string16& default_prompt)
+    : message_label_(new Label(message)),
+      prompt_field_(NULL),
+      icon_(NULL),
+      checkbox_(NULL),
+      message_width_(kDefaultMessageWidth) {
+  Init(options, default_prompt);
 }
 
 MessageBoxView::~MessageBoxView() {}
 
-base::string16 MessageBoxView::GetInputText() {
-  return prompt_field_ ? prompt_field_->text() : base::string16();
+string16 MessageBoxView::GetInputText() {
+  return prompt_field_ ? prompt_field_->text() : string16();
 }
 
 bool MessageBoxView::IsCheckBoxSelected() {
   return checkbox_ ? checkbox_->checked() : false;
 }
 
-void MessageBoxView::SetIcon(const gfx::ImageSkia& icon) {
+void MessageBoxView::SetIcon(const SkBitmap& icon) {
   if (!icon_)
     icon_ = new ImageView();
   icon_->SetImage(icon);
@@ -101,7 +68,7 @@ void MessageBoxView::SetIcon(const gfx::ImageSkia& icon) {
   ResetLayoutManager();
 }
 
-void MessageBoxView::SetCheckBoxLabel(const base::string16& label) {
+void MessageBoxView::SetCheckBoxLabel(const string16& label) {
   if (!checkbox_)
     checkbox_ = new Checkbox(label);
   else
@@ -115,24 +82,6 @@ void MessageBoxView::SetCheckBoxSelected(bool selected) {
   checkbox_->SetChecked(selected);
 }
 
-void MessageBoxView::SetLink(const base::string16& text,
-                             LinkListener* listener) {
-  if (text.empty()) {
-    DCHECK(!listener);
-    delete link_;
-    link_ = NULL;
-  } else {
-    DCHECK(listener);
-    if (!link_) {
-      link_ = new Link();
-      link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    }
-    link_->SetText(text);
-    link_->set_listener(listener);
-  }
-  ResetLayoutManager();
-}
-
 void MessageBoxView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_ALERT;
 }
@@ -140,13 +89,15 @@ void MessageBoxView::GetAccessibleState(ui::AccessibleViewState* state) {
 ///////////////////////////////////////////////////////////////////////////////
 // MessageBoxView, View overrides:
 
-void MessageBoxView::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
-  if (details.child == this && details.is_add) {
+void MessageBoxView::ViewHierarchyChanged(bool is_add,
+                                          View* parent,
+                                          View* child) {
+  if (child == this && is_add) {
     if (prompt_field_)
-      prompt_field_->SelectAll(true);
+      prompt_field_->SelectAll();
 
-    NotifyAccessibilityEvent(ui::AccessibilityTypes::EVENT_ALERT, true);
+    GetWidget()->NotifyAccessibilityEvent(
+        this, ui::AccessibilityTypes::EVENT_ALERT, true);
   }
 }
 
@@ -158,56 +109,49 @@ bool MessageBoxView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   if (prompt_field_ && prompt_field_->HasFocus())
     return false;
 
-  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  if (!ViewsDelegate::views_delegate)
+    return false;
+
+  ui::Clipboard* clipboard = ViewsDelegate::views_delegate->GetClipboard();
   if (!clipboard)
     return false;
 
-  ui::ScopedClipboardWriter scw(clipboard, ui::CLIPBOARD_TYPE_COPY_PASTE);
-  base::string16 text = message_labels_[0]->text();
-  for (size_t i = 1; i < message_labels_.size(); ++i)
-    text += message_labels_[i]->text();
-  scw.WriteText(text);
+  ui::ScopedClipboardWriter scw(clipboard);
+  scw.WriteText(message_label_->GetText());
   return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // MessageBoxView, private:
 
-void MessageBoxView::Init(const InitParams& params) {
-  if (params.options & DETECT_DIRECTIONALITY) {
-    std::vector<base::string16> texts;
-    SplitStringIntoParagraphs(params.message, &texts);
-    // If the text originates from a web page, its alignment is based on its
-    // first character with strong directionality.
-    base::i18n::TextDirection message_direction =
-        base::i18n::GetFirstStrongCharacterDirection(params.message);
-    gfx::HorizontalAlignment alignment =
-        (message_direction == base::i18n::RIGHT_TO_LEFT) ?
-        gfx::ALIGN_RIGHT : gfx::ALIGN_LEFT;
-    for (size_t i = 0; i < texts.size(); ++i) {
-      Label* message_label = new Label(texts[i]);
-      // Don't set multi-line to true if the text is empty, else the label will
-      // have a height of 0.
-      message_label->SetMultiLine(!texts[i].empty());
-      message_label->SetAllowCharacterBreak(true);
-      message_label->set_directionality_mode(Label::AUTO_DETECT_DIRECTIONALITY);
-      message_label->SetHorizontalAlignment(alignment);
-      message_labels_.push_back(message_label);
-    }
+void MessageBoxView::Init(int options,
+                          const string16& default_prompt) {
+  message_label_->SetMultiLine(true);
+  message_label_->SetAllowCharacterBreak(true);
+  if (options & DETECT_ALIGNMENT) {
+    // Determine the alignment and directionality based on the first character
+    // with strong directionality.
+    base::i18n::TextDirection direction =
+        base::i18n::GetFirstStrongCharacterDirection(
+            message_label_->GetText());
+    Label::Alignment alignment;
+    if (direction == base::i18n::RIGHT_TO_LEFT)
+      alignment = Label::ALIGN_RIGHT;
+    else
+      alignment = Label::ALIGN_LEFT;
+    // In addition, we should set the RTL alignment mode as
+    // AUTO_DETECT_ALIGNMENT so that the alignment will not be flipped around
+    // in RTL locales.
+    message_label_->set_rtl_alignment_mode(Label::AUTO_DETECT_ALIGNMENT);
+    message_label_->SetHorizontalAlignment(alignment);
   } else {
-    Label* message_label = new Label(params.message);
-    message_label->SetMultiLine(true);
-    message_label->SetAllowCharacterBreak(true);
-    message_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    message_labels_.push_back(message_label);
+    message_label_->SetHorizontalAlignment(Label::ALIGN_LEFT);
   }
 
-  if (params.options & HAS_PROMPT_FIELD) {
+  if (options & HAS_PROMPT_FIELD) {
     prompt_field_ = new Textfield;
-    prompt_field_->SetText(params.default_prompt);
+    prompt_field_->SetText(default_prompt);
   }
-
-  inter_row_vertical_spacing_ = params.inter_row_vertical_spacing;
 
   ResetLayoutManager();
 }
@@ -234,10 +178,10 @@ void MessageBoxView::ResetLayoutManager() {
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::FIXED, message_width_, 0);
 
-  // Column set for extra elements, if any.
-  const int extra_column_view_set_id = 1;
-  if (prompt_field_ || checkbox_ || link_) {
-    column_set = layout->AddColumnSet(extra_column_view_set_id);
+  // Column set for prompt Textfield, if one has been set.
+  const int textfield_column_view_set_id = 1;
+  if (prompt_field_) {
+    column_set = layout->AddColumnSet(textfield_column_view_set_id);
     if (icon_) {
       column_set->AddPaddingColumn(
           0, icon_size.width() + kUnrelatedControlHorizontalSpacing);
@@ -246,34 +190,37 @@ void MessageBoxView::ResetLayoutManager() {
                           GridLayout::USE_PREF, 0, 0);
   }
 
-  for (size_t i = 0; i < message_labels_.size(); ++i) {
-    layout->StartRow(i, message_column_view_set_id);
+  // Column set for checkbox, if one has been set.
+  const int checkbox_column_view_set_id = 2;
+  if (checkbox_) {
+    column_set = layout->AddColumnSet(checkbox_column_view_set_id);
     if (icon_) {
-      if (i == 0)
-        layout->AddView(icon_);
-      else
-        layout->SkipColumns(1);
+      column_set->AddPaddingColumn(
+          0, icon_size.width() + kUnrelatedControlHorizontalSpacing);
     }
-    layout->AddView(message_labels_[i]);
+    column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
+                          GridLayout::USE_PREF, 0, 0);
   }
 
+  layout->StartRow(0, message_column_view_set_id);
+  if (icon_)
+    layout->AddView(icon_);
+
+  layout->AddView(message_label_);
+
   if (prompt_field_) {
-    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
-    layout->StartRow(0, extra_column_view_set_id);
+    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+    layout->StartRow(0, textfield_column_view_set_id);
     layout->AddView(prompt_field_);
   }
 
   if (checkbox_) {
-    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
-    layout->StartRow(0, extra_column_view_set_id);
+    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+    layout->StartRow(0, checkbox_column_view_set_id);
     layout->AddView(checkbox_);
   }
 
-  if (link_) {
-    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
-    layout->StartRow(0, extra_column_view_set_id);
-    layout->AddView(link_);
-  }
+  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 }
 
 }  // namespace views

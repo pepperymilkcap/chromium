@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,7 @@ void EstablishInitialContext(test::MockGSSAPILibrary* library) {
       "localhost",                         // Source name
       "example.com",                       // Target name
       23,                                  // Lifetime
-      *CHROME_GSS_SPNEGO_MECH_OID_DESC,    // Mechanism
+      *CHROME_GSS_C_NT_HOSTBASED_SERVICE,  // Mechanism
       0,                                   // Context flags
       1,                                   // Locally initiated
       0);                                  // Open
@@ -76,7 +76,7 @@ TEST(HttpAuthGSSAPIPOSIXTest, GSSAPIStartup) {
   // TODO(ahendrickson): Manipulate the libraries and paths to test each of the
   // libraries we expect, and also whether or not they have the interface
   // functions we want.
-  scoped_ptr<GSSAPILibrary> gssapi(new GSSAPISharedLibrary(std::string()));
+  scoped_ptr<GSSAPILibrary> gssapi(new GSSAPISharedLibrary(""));
   DCHECK(gssapi.get());
   EXPECT_TRUE(gssapi.get()->Init());
 }
@@ -98,7 +98,7 @@ TEST(HttpAuthGSSAPIPOSIXTest, GSSAPICycle) {
       "localhost",                         // Source name
       "example.com",                       // Target name
       23,                                  // Lifetime
-      *CHROME_GSS_SPNEGO_MECH_OID_DESC,    // Mechanism
+      *CHROME_GSS_C_NT_HOSTBASED_SERVICE,  // Mechanism
       0,                                   // Context flags
       1,                                   // Locally initiated
       0);                                  // Open
@@ -106,7 +106,7 @@ TEST(HttpAuthGSSAPIPOSIXTest, GSSAPICycle) {
       "localhost",                         // Source name
       "example.com",                       // Target name
       23,                                  // Lifetime
-      *CHROME_GSS_SPNEGO_MECH_OID_DESC,    // Mechanism
+      *CHROME_GSS_C_NT_HOSTBASED_SERVICE,  // Mechanism
       0,                                   // Context flags
       1,                                   // Locally initiated
       1);                                  // Open
@@ -179,7 +179,7 @@ TEST(HttpAuthGSSAPITest, ParseChallenge_FirstRound) {
   // The first round should just consist of an unadorned "Negotiate" header.
   test::MockGSSAPILibrary mock_library;
   HttpAuthGSSAPI auth_gssapi(&mock_library, "Negotiate",
-                             CHROME_GSS_SPNEGO_MECH_OID_DESC);
+                             CHROME_GSS_KRB5_MECH_OID_DESC);
   std::string challenge_text = "Negotiate";
   HttpAuth::ChallengeTokenizer challenge(challenge_text.begin(),
                                          challenge_text.end());
@@ -192,7 +192,7 @@ TEST(HttpAuthGSSAPITest, ParseChallenge_TwoRounds) {
   // have a valid base64 token associated with it.
   test::MockGSSAPILibrary mock_library;
   HttpAuthGSSAPI auth_gssapi(&mock_library, "Negotiate",
-                             CHROME_GSS_SPNEGO_MECH_OID_DESC);
+                             CHROME_GSS_KRB5_MECH_OID_DESC);
   std::string first_challenge_text = "Negotiate";
   HttpAuth::ChallengeTokenizer first_challenge(first_challenge_text.begin(),
                                                first_challenge_text.end());
@@ -202,7 +202,7 @@ TEST(HttpAuthGSSAPITest, ParseChallenge_TwoRounds) {
   // Generate an auth token and create another thing.
   EstablishInitialContext(&mock_library);
   std::string auth_token;
-  EXPECT_EQ(OK, auth_gssapi.GenerateAuthToken(NULL, "HTTP/intranet.google.com",
+  EXPECT_EQ(OK, auth_gssapi.GenerateAuthToken(NULL, L"HTTP/intranet.google.com",
                                               &auth_token));
 
   std::string second_challenge_text = "Negotiate Zm9vYmFy";
@@ -217,7 +217,7 @@ TEST(HttpAuthGSSAPITest, ParseChallenge_UnexpectedTokenFirstRound) {
   // should be treated as an invalid challenge from the server.
   test::MockGSSAPILibrary mock_library;
   HttpAuthGSSAPI auth_gssapi(&mock_library, "Negotiate",
-                             CHROME_GSS_SPNEGO_MECH_OID_DESC);
+                             CHROME_GSS_KRB5_MECH_OID_DESC);
   std::string challenge_text = "Negotiate Zm9vYmFy";
   HttpAuth::ChallengeTokenizer challenge(challenge_text.begin(),
                                          challenge_text.end());
@@ -230,7 +230,7 @@ TEST(HttpAuthGSSAPITest, ParseChallenge_MissingTokenSecondRound) {
   // an authentication challenge rejection from the server or proxy.
   test::MockGSSAPILibrary mock_library;
   HttpAuthGSSAPI auth_gssapi(&mock_library, "Negotiate",
-                             CHROME_GSS_SPNEGO_MECH_OID_DESC);
+                             CHROME_GSS_KRB5_MECH_OID_DESC);
   std::string first_challenge_text = "Negotiate";
   HttpAuth::ChallengeTokenizer first_challenge(first_challenge_text.begin(),
                                                first_challenge_text.end());
@@ -239,7 +239,7 @@ TEST(HttpAuthGSSAPITest, ParseChallenge_MissingTokenSecondRound) {
 
   EstablishInitialContext(&mock_library);
   std::string auth_token;
-  EXPECT_EQ(OK, auth_gssapi.GenerateAuthToken(NULL, "HTTP/intranet.google.com",
+  EXPECT_EQ(OK, auth_gssapi.GenerateAuthToken(NULL, L"HTTP/intranet.google.com",
                                               &auth_token));
   std::string second_challenge_text = "Negotiate";
   HttpAuth::ChallengeTokenizer second_challenge(second_challenge_text.begin(),
@@ -253,7 +253,7 @@ TEST(HttpAuthGSSAPITest, ParseChallenge_NonBase64EncodedToken) {
   // be treated as an invalid challenge.
   test::MockGSSAPILibrary mock_library;
   HttpAuthGSSAPI auth_gssapi(&mock_library, "Negotiate",
-                             CHROME_GSS_SPNEGO_MECH_OID_DESC);
+                             CHROME_GSS_KRB5_MECH_OID_DESC);
   std::string first_challenge_text = "Negotiate";
   HttpAuth::ChallengeTokenizer first_challenge(first_challenge_text.begin(),
                                                first_challenge_text.end());
@@ -262,7 +262,7 @@ TEST(HttpAuthGSSAPITest, ParseChallenge_NonBase64EncodedToken) {
 
   EstablishInitialContext(&mock_library);
   std::string auth_token;
-  EXPECT_EQ(OK, auth_gssapi.GenerateAuthToken(NULL, "HTTP/intranet.google.com",
+  EXPECT_EQ(OK, auth_gssapi.GenerateAuthToken(NULL, L"HTTP/intranet.google.com",
                                               &auth_token));
   std::string second_challenge_text = "Negotiate =happyjoy=";
   HttpAuth::ChallengeTokenizer second_challenge(second_challenge_text.begin(),

@@ -1,25 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/installer/util/helper.h"
 
-#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/file_path.h"
 #include "base/path_service.h"
-#include "base/win/windows_version.h"
-#include "chrome/common/chrome_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installation_state.h"
+#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/util_constants.h"
 
 namespace {
 
-base::FilePath GetChromeInstallBasePath(bool system,
-                                        BrowserDistribution* distribution,
-                                        const wchar_t* sub_path) {
-  base::FilePath install_path;
+FilePath GetChromeInstallBasePath(bool system,
+                                  BrowserDistribution* distribution,
+                                  const wchar_t* sub_path) {
+  FilePath install_path;
   if (system) {
     PathService::Get(base::DIR_PROGRAM_FILES, &install_path);
   } else {
@@ -38,31 +36,12 @@ base::FilePath GetChromeInstallBasePath(bool system,
 
 namespace installer {
 
-base::FilePath GetChromeInstallPath(bool system_install,
-                                    BrowserDistribution* dist) {
+FilePath GetChromeInstallPath(bool system_install, BrowserDistribution* dist) {
   return GetChromeInstallBasePath(system_install, dist, kInstallBinaryDir);
 }
 
-void GetChromeUserDataPaths(BrowserDistribution* dist,
-                            std::vector<base::FilePath>* paths) {
-  const bool has_metro_data =
-      base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-      dist->GetDefaultBrowserControlPolicy() !=
-          BrowserDistribution::DEFAULT_BROWSER_UNSUPPORTED;
-
-  base::FilePath data_dir(GetChromeInstallBasePath(false, dist,
-                                                   kInstallUserDataDir));
-  if (data_dir.empty()) {
-    paths->clear();
-  } else {
-    paths->resize(has_metro_data ? 2 : 1);
-    (*paths)[0] = data_dir;
-    if (has_metro_data) {
-      (*paths)[1] = data_dir.DirName().Append(
-          chrome::kMetroChromeUserDataSubDir);
-    }
-  }
-  DCHECK(!paths->empty());
+FilePath GetChromeUserDataPath(BrowserDistribution* dist) {
+  return GetChromeInstallBasePath(false, dist, kInstallUserDataDir);
 }
 
 BrowserDistribution* GetBinariesDistribution(bool system_install) {

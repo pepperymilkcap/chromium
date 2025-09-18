@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_TOOLS_HTTP_SESSION_H_
 #define NET_BASE_TOOLS_HTTP_SESSION_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "net/http/http_request_info.h"
@@ -19,7 +20,7 @@ class HttpSession : HttpListenSocket::Delegate {
                          HttpServerRequestInfo* info) OVERRIDE;
 
  private:
-  scoped_ptr<HttpListenSocket> socket_;
+  scoped_refptr<HttpListenSocket> socket_;
   DISALLOW_COPY_AND_ASSIGN(HttpSession);
 };
 

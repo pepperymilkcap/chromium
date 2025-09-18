@@ -4,6 +4,7 @@
 
 #ifndef SKIA_EXT_VECTOR_PLATFORM_DEVICE_EMF_WIN_H_
 #define SKIA_EXT_VECTOR_PLATFORM_DEVICE_EMF_WIN_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -17,15 +18,13 @@ namespace skia {
 // SkCanvas to draw into. This specific device is not not backed by a surface
 // and is thus unreadable. This is because the backend is completely vectorial.
 // This device is a simple wrapper over a Windows device context (HDC) handle.
-// TODO(robertphillips): Once Skia's SkBaseDevice is refactored to remove
-// the bitmap-specific entry points, this class should derive from it.
-class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
+class VectorPlatformDeviceEmf : public PlatformDevice, public SkDevice {
  public:
-  SK_API static SkBaseDevice* CreateDevice(int width, int height, bool isOpaque,
-                                           HANDLE shared_section);
+  SK_API static SkDevice* CreateDevice(int width, int height, bool isOpaque,
+                                       HANDLE shared_section);
 
   // Factory function. The DC is kept as the output context.
-  static SkBaseDevice* create(HDC dc, int width, int height);
+  static SkDevice* create(HDC dc, int width, int height);
 
   VectorPlatformDeviceEmf(HDC dc, const SkBitmap& bitmap);
   virtual ~VectorPlatformDeviceEmf();
@@ -34,7 +33,9 @@ class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
   virtual PlatformSurface BeginPlatformPaint() OVERRIDE;
   virtual void DrawToNativeContext(HDC dc, int x, int y,
                                    const RECT* src_rect) OVERRIDE;
-  // SkBaseDevice methods.
+  virtual bool AlphaBlendUsed() const OVERRIDE { return alpha_blend_used_; }
+
+  // SkDevice methods.
   virtual uint32_t getDeviceCapabilities();
   virtual void drawPaint(const SkDraw& draw, const SkPaint& paint) OVERRIDE;
   virtual void drawPoints(const SkDraw& draw, SkCanvas::PointMode mode,
@@ -42,17 +43,12 @@ class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
                           const SkPaint& paint) OVERRIDE;
   virtual void drawRect(const SkDraw& draw, const SkRect& r,
                         const SkPaint& paint) OVERRIDE;
-  virtual void drawRRect(const SkDraw&, const SkRRect& rr,
-                         const SkPaint& paint) OVERRIDE;
   virtual void drawPath(const SkDraw& draw, const SkPath& path,
                         const SkPaint& paint,
                         const SkMatrix* prePathMatrix = NULL,
                         bool pathIsMutable = false) OVERRIDE;
-  virtual void drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
-                              const SkRect* src, const SkRect& dst,
-                              const SkPaint& paint,
-                              SkCanvas::DrawBitmapRectFlags flags) SK_OVERRIDE;
   virtual void drawBitmap(const SkDraw& draw, const SkBitmap& bitmap,
+                          const SkIRect* srcRectOrNull,
                           const SkMatrix& matrix,
                           const SkPaint& paint) OVERRIDE;
   virtual void drawSprite(const SkDraw& draw, const SkBitmap& bitmap,
@@ -71,7 +67,7 @@ class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
                             const SkColor colors[], SkXfermode* xmode,
                             const uint16_t indices[], int indexCount,
                             const SkPaint& paint) OVERRIDE;
-  virtual void drawDevice(const SkDraw& draw, SkBaseDevice*, int x, int y,
+  virtual void drawDevice(const SkDraw& draw, SkDevice*, int x, int y,
                           const SkPaint&) OVERRIDE;
 
   virtual void setMatrixClip(const SkMatrix& transform, const SkRegion& region,
@@ -80,9 +76,9 @@ class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
   void LoadClipRegion();
 
  protected:
-  virtual SkBaseDevice* onCreateCompatibleDevice(SkBitmap::Config, int width,
-                                                 int height, bool isOpaque,
-                                                 Usage usage) OVERRIDE;
+  virtual SkDevice* onCreateCompatibleDevice(SkBitmap::Config, int width,
+                                             int height, bool isOpaque,
+                                             Usage usage) OVERRIDE;
 
  private:
   // Applies the SkPaint's painting properties in the current GDI context, if
@@ -131,14 +127,11 @@ class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
   // Previously selected pen before the current drawing.
   HGDIOBJ previous_pen_;
 
+  // True if AlphaBlend() was called during this print.
+  bool alpha_blend_used_;
+
   DISALLOW_COPY_AND_ASSIGN(VectorPlatformDeviceEmf);
 };
-
-typedef void (*SkiaEnsureTypefaceCharactersAccessible)
-    (const LOGFONT& font, const wchar_t* text, unsigned int text_length);
-
-SK_API void SetSkiaEnsureTypefaceCharactersAccessible(
-    SkiaEnsureTypefaceCharactersAccessible func);
 
 }  // namespace skia
 

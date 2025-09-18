@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_TEST_UTIL_H_
 #define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_TEST_UTIL_H_
+#pragma once
 
 #include <string>
 
@@ -16,6 +17,7 @@
 class MockNotificationDelegate : public NotificationDelegate {
  public:
   explicit MockNotificationDelegate(const std::string& id);
+  virtual ~MockNotificationDelegate();
 
   // NotificationDelegate interface.
   virtual void Display() OVERRIDE {}
@@ -23,11 +25,8 @@ class MockNotificationDelegate : public NotificationDelegate {
   virtual void Close(bool by_user) OVERRIDE {}
   virtual void Click() OVERRIDE {}
   virtual std::string id() const OVERRIDE;
-  virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE;
 
  private:
-  virtual ~MockNotificationDelegate();
-
   std::string id_;
 
   DISALLOW_COPY_AND_ASSIGN(MockNotificationDelegate);
@@ -47,35 +46,49 @@ class LoggingNotificationDelegate : public NotificationDelegate {
   }
 
   // NotificationObjectProxy override
-  virtual void Display() OVERRIDE {
+  virtual void Display() {
     Logger::log("notification displayed\n");
   }
-  virtual void Error() OVERRIDE {
+  virtual void Error() {
     Logger::log("notification error\n");
   }
-  virtual void Click() OVERRIDE {
+  virtual void Click() {
     Logger::log("notification clicked\n");
   }
-  virtual void ButtonClick(int index) OVERRIDE {
-    Logger::log("notification button clicked\n");
-  }
-  virtual void Close(bool by_user) OVERRIDE {
+  virtual void Close(bool by_user) {
     if (by_user)
       Logger::log("notification closed by user\n");
     else
       Logger::log("notification closed by script\n");
   }
-  virtual std::string id() const OVERRIDE {
+  virtual std::string id() const {
     return notification_id_;
   }
-  virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE {
-    return NULL;
-  }
-
  private:
   std::string notification_id_;
 
   DISALLOW_COPY_AND_ASSIGN(LoggingNotificationDelegate);
+};
+
+// Test version of a balloon view which doesn't do anything
+// viewable, but does know how to close itself the same as a regular
+// BalloonView.
+class MockBalloonView : public BalloonView {
+ public:
+  explicit MockBalloonView(Balloon * balloon) :
+      balloon_(balloon) {}
+
+  // BalloonView:
+  virtual void Show(Balloon* balloon) OVERRIDE {}
+  virtual void Update() OVERRIDE {}
+  virtual void RepositionToBalloon() OVERRIDE {}
+  virtual void Close(bool by_user) OVERRIDE;
+  virtual gfx::Size GetSize() const OVERRIDE;
+  virtual BalloonHost* GetHost() const OVERRIDE;
+
+ private:
+  // Non-owned pointer.
+  Balloon* balloon_;
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_TEST_UTIL_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,9 @@
 #define GPU_COMMAND_BUFFER_COMMON_CMD_BUFFER_COMMON_H_
 
 #include <stddef.h>
-
-#include "base/logging.h"
-#include "gpu/command_buffer/common/bitfield_helpers.h"
-#include "gpu/command_buffer/common/types.h"
-#include "gpu/gpu_export.h"
+#include "../common/types.h"
+#include "../common/bitfield_helpers.h"
+#include "../common/logging.h"
 
 namespace gpu {
 
@@ -40,10 +38,10 @@ struct CommandHeader {
   Uint32 size:21;
   Uint32 command:11;
 
-  GPU_EXPORT static const int32 kMaxSize = (1 << 21) - 1;
+  static const int32 kMaxSize = (1 << 21) - 1;
 
   void Init(uint32 _command, int32 _size) {
-    DCHECK_LE(_size, kMaxSize);
+    GPU_DCHECK_LE(_size, kMaxSize);
     command = _command;
     size = _size;
   }
@@ -68,7 +66,7 @@ struct CommandHeader {
   template <typename T>
   void SetCmdByTotalSize(uint32 size_in_bytes) {
     COMPILE_ASSERT(T::kArgFlags == cmd::kAtLeastN, Cmd_kArgFlags_not_kAtLeastN);
-    DCHECK_GE(size_in_bytes, sizeof(T));  // NOLINT
+    GPU_DCHECK_GE(size_in_bytes, sizeof(T));  // NOLINT
     Init(T::kCmdId, ComputeNumEntries(size_in_bytes));
   }
 };
@@ -133,7 +131,7 @@ void* NextImmediateCmdAddress(void* cmd, uint32 size_of_data_in_bytes) {
 template <typename T>
 void* NextImmediateCmdAddressTotalSize(void* cmd, uint32 total_size_in_bytes) {
   COMPILE_ASSERT(T::kArgFlags == cmd::kAtLeastN, Cmd_kArgFlags_not_kAtLeastN);
-  DCHECK_GE(total_size_in_bytes, sizeof(T));  // NOLINT
+  GPU_DCHECK_GE(total_size_in_bytes, sizeof(T));  // NOLINT
   return reinterpret_cast<char*>(cmd) +
       RoundSizeToMultipleOfEntries(total_size_in_bytes);
 }
@@ -150,11 +148,16 @@ namespace cmd {
 #define COMMON_COMMAND_BUFFER_CMDS(OP) \
   OP(Noop)                          /*  0 */ \
   OP(SetToken)                      /*  1 */ \
-  OP(SetBucketSize)                 /*  2 */ \
-  OP(SetBucketData)                 /*  3 */ \
-  OP(SetBucketDataImmediate)        /*  4 */ \
-  OP(GetBucketStart)                /*  5 */ \
-  OP(GetBucketData)                 /*  6 */ \
+  OP(Jump)                          /*  2 */ \
+  OP(JumpRelative)                  /*  3 */ \
+  OP(Call)                          /*  4 */ \
+  OP(CallRelative)                  /*  5 */ \
+  OP(Return)                        /*  6 */ \
+  OP(SetBucketSize)                 /*  7 */ \
+  OP(SetBucketData)                 /*  8 */ \
+  OP(SetBucketDataImmediate)        /*  9 */ \
+  OP(GetBucketSize)                 /* 10 */ \
+  OP(GetBucketData)                 /* 11 */ \
 
 // Common commands.
 enum CommandId {
@@ -179,7 +182,7 @@ struct Noop {
   static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
 
   void SetHeader(uint32 skip_count) {
-    DCHECK_GT(skip_count, 0u);
+    GPU_DCHECK_GT(skip_count, 0u);
     header.Init(kCmdId, skip_count);
   }
 
@@ -228,6 +231,152 @@ COMPILE_ASSERT(offsetof(SetToken, header) == 0,
                Offsetof_SetToken_header_not_0);
 COMPILE_ASSERT(offsetof(SetToken, token) == 4,
                Offsetof_SetToken_token_not_4);
+
+// The Jump command jumps to another place in the command buffer.
+struct Jump {
+  typedef Jump ValueType;
+  static const CommandId kCmdId = kJump;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(uint32 _offset) {
+    SetHeader();
+    offset = _offset;
+  }
+  static void* Set(
+      void* cmd, uint32 _offset) {
+    static_cast<ValueType*>(cmd)->Init(_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  CommandHeader header;
+  uint32 offset;
+};
+
+COMPILE_ASSERT(sizeof(Jump) == 8, Sizeof_Jump_is_not_8);
+COMPILE_ASSERT(offsetof(Jump, header) == 0,
+               Offsetof_Jump_header_not_0);
+COMPILE_ASSERT(offsetof(Jump, offset) == 4,
+               Offsetof_Jump_offset_not_4);
+
+// The JumpRelative command jumps to another place in the command buffer
+// relative to the end of this command. In other words. JumpRelative with an
+// offset of zero is effectively a noop.
+struct JumpRelative {
+  typedef JumpRelative ValueType;
+  static const CommandId kCmdId = kJumpRelative;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(int32 _offset) {
+    SetHeader();
+    offset = _offset;
+  }
+  static void* Set(void* cmd, int32 _offset) {
+    static_cast<ValueType*>(cmd)->Init(_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  CommandHeader header;
+  int32 offset;
+};
+
+COMPILE_ASSERT(sizeof(JumpRelative) == 8, Sizeof_JumpRelative_is_not_8);
+COMPILE_ASSERT(offsetof(JumpRelative, header) == 0,
+               Offsetof_JumpRelative_header_not_0);
+COMPILE_ASSERT(offsetof(JumpRelative, offset) == 4,
+               Offsetof_JumpRelative_offset_4);
+
+// The Call command jumps to a subroutine which can be returned from with the
+// Return command.
+struct Call {
+  typedef Call ValueType;
+  static const CommandId kCmdId = kCall;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(uint32 _offset) {
+    SetHeader();
+    offset = _offset;
+  }
+  static void* Set(void* cmd, uint32 _offset) {
+    static_cast<ValueType*>(cmd)->Init(_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  CommandHeader header;
+  uint32 offset;
+};
+
+COMPILE_ASSERT(sizeof(Call) == 8, Sizeof_Call_is_not_8);
+COMPILE_ASSERT(offsetof(Call, header) == 0,
+               Offsetof_Call_header_not_0);
+COMPILE_ASSERT(offsetof(Call, offset) == 4,
+               Offsetof_Call_offset_not_4);
+
+// The CallRelative command jumps to a subroutine using a relative offset. The
+// offset is relative to the end of this command..
+struct CallRelative {
+  typedef CallRelative ValueType;
+  static const CommandId kCmdId = kCallRelative;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(int32 _offset) {
+    SetHeader();
+    offset = _offset;
+  }
+  static void* Set(void* cmd, int32 _offset) {
+    static_cast<ValueType*>(cmd)->Init(_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  CommandHeader header;
+  int32 offset;
+};
+
+COMPILE_ASSERT(sizeof(CallRelative) == 8, Sizeof_CallRelative_is_not_8);
+COMPILE_ASSERT(offsetof(CallRelative, header) == 0,
+               Offsetof_CallRelative_header_not_0);
+COMPILE_ASSERT(offsetof(CallRelative, offset) == 4,
+               Offsetof_CallRelative_offset_4);
+
+// Returns from a subroutine called by the Call or CallRelative commands.
+struct Return {
+  typedef Return ValueType;
+  static const CommandId kCmdId = kReturn;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init() {
+    SetHeader();
+  }
+  static void* Set(void* cmd) {
+    static_cast<ValueType*>(cmd)->Init();
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  CommandHeader header;
+};
+
+COMPILE_ASSERT(sizeof(Return) == 4, Sizeof_Return_is_not_4);
+COMPILE_ASSERT(offsetof(Return, header) == 0,
+               Offsetof_Return_header_not_0);
 
 // Sets the size of a bucket for collecting data on the service side.
 // This is a utility for gathering data on the service side so it can be used
@@ -382,19 +531,14 @@ COMPILE_ASSERT(offsetof(SetBucketDataImmediate, offset) == 8,
 COMPILE_ASSERT(offsetof(SetBucketDataImmediate, size) == 12,
                Offsetof_SetBucketDataImmediate_size_not_12);
 
-// Gets the start of a bucket the service has available. Sending a variable size
-// result back to the client and the portion of that result that fits in the
-// supplied shared memory. If the size of the result is larger than the supplied
-// shared memory the rest of the bucket's contents can be retrieved with
-// GetBucketData.
-//
-// This is used for example for any API that returns a string. The problem is
-// the largest thing you can send back in 1 command is the size of your shared
-// memory. This command along with GetBucketData implements a way to get a
-// result a piece at a time to help solve that problem in a generic way.
-struct GetBucketStart {
-  typedef GetBucketStart ValueType;
-  static const CommandId kCmdId = kGetBucketStart;
+// Gets the size of a bucket the service has available. Sending a variable size
+// result back to the client, for example any API that returns a string, is
+// problematic since the largest thing you can send back is the size of your
+// shared memory. This command along with GetBucketData implements a way to get
+// a result a piece at a time to help solve that problem in a generic way.
+struct GetBucketSize {
+  typedef GetBucketSize ValueType;
+  static const CommandId kCmdId = kGetBucketSize;
   static const cmd::ArgFlags kArgFlags = cmd::kFixed;
 
   typedef uint32 Result;
@@ -404,60 +548,39 @@ struct GetBucketStart {
   }
 
   void Init(uint32 _bucket_id,
-            uint32 _result_memory_id,
-            uint32 _result_memory_offset,
-            uint32 _data_memory_size,
-            uint32 _data_memory_id,
-            uint32 _data_memory_offset) {
+            uint32 _shared_memory_id,
+            uint32 _shared_memory_offset) {
     SetHeader();
     bucket_id = _bucket_id;
-    result_memory_id = _result_memory_id;
-    result_memory_offset = _result_memory_offset;
-    data_memory_size = _data_memory_size;
-    data_memory_id = _data_memory_id;
-    data_memory_offset = _data_memory_offset;
+    shared_memory_id = _shared_memory_id;
+    shared_memory_offset = _shared_memory_offset;
   }
   static void* Set(void* cmd,
                    uint32 _bucket_id,
-                   uint32 _result_memory_id,
-                   uint32 _result_memory_offset,
-                   uint32 _data_memory_size,
-                   uint32 _data_memory_id,
-                   uint32 _data_memory_offset) {
+                   uint32 _shared_memory_id,
+                   uint32 _shared_memory_offset) {
     static_cast<ValueType*>(cmd)->Init(
         _bucket_id,
-        _result_memory_id,
-        _result_memory_offset,
-        _data_memory_size,
-        _data_memory_id,
-        _data_memory_offset);
+        _shared_memory_id,
+        _shared_memory_offset);
     return NextCmdAddress<ValueType>(cmd);
   }
 
   CommandHeader header;
   uint32 bucket_id;
-  uint32 result_memory_id;
-  uint32 result_memory_offset;
-  uint32 data_memory_size;
-  uint32 data_memory_id;
-  uint32 data_memory_offset;
+  uint32 shared_memory_id;
+  uint32 shared_memory_offset;
 };
 
-COMPILE_ASSERT(sizeof(GetBucketStart) == 28, Sizeof_GetBucketStart_is_not_28);
-COMPILE_ASSERT(offsetof(GetBucketStart, header) == 0,
-               Offsetof_GetBucketStart_header_not_0);
-COMPILE_ASSERT(offsetof(GetBucketStart, bucket_id) == 4,
-               Offsetof_GetBucketStart_bucket_id_not_4);
-COMPILE_ASSERT(offsetof(GetBucketStart, result_memory_id) == 8,
-               Offsetof_GetBucketStart_result_memory_id_not_8);
-COMPILE_ASSERT(offsetof(GetBucketStart, result_memory_offset) == 12,
-               Offsetof_GetBucketStart_result_memory_offset_not_12);
-COMPILE_ASSERT(offsetof(GetBucketStart, data_memory_size) == 16,
-               Offsetof_GetBucketStart_data_memory_size_not_16);
-COMPILE_ASSERT(offsetof(GetBucketStart, data_memory_id) == 20,
-               Offsetof_GetBucketStart_data_memory_id_not_20);
-COMPILE_ASSERT(offsetof(GetBucketStart, data_memory_offset) == 24,
-               Offsetof_GetBucketStart_data_memory_offset_not_24);
+COMPILE_ASSERT(sizeof(GetBucketSize) == 16, Sizeof_GetBucketSize_is_not_16);
+COMPILE_ASSERT(offsetof(GetBucketSize, header) == 0,
+               Offsetof_GetBucketSize_header_not_0);
+COMPILE_ASSERT(offsetof(GetBucketSize, bucket_id) == 4,
+               Offsetof_GetBucketSize_bucket_id_not_4);
+COMPILE_ASSERT(offsetof(GetBucketSize, shared_memory_id) == 8,
+               Offsetof_GetBucketSize_shared_memory_id_not_8);
+COMPILE_ASSERT(offsetof(GetBucketSize, shared_memory_offset) == 12,
+               Offsetof_GetBucketSize_shared_memory_offset_not_12);
 
 // Gets a piece of a result the service as available.
 // See GetBucketSize.

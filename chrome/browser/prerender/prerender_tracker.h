@@ -1,46 +1,61 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PRERENDER_PRERENDER_TRACKER_H_
 #define CHROME_BROWSER_PRERENDER_PRERENDER_TRACKER_H_
+#pragma once
 
 #include <map>
 #include <set>
-#include <utility>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/non_thread_safe.h"
-#include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace prerender {
 
 class PrerenderManager;
-class PrerenderPendingSwapThrottle;
-class PrerenderResourceThrottle;
 struct RenderViewInfo;
+
+// An URLCounter keeps track of the number of occurrences of a prerendered URL.
+class URLCounter : public base::NonThreadSafe {
+ public:
+  URLCounter();
+  ~URLCounter();
+
+  // Determines whether the URL is contained in the set.
+  bool MatchesURL(const GURL& url) const;
+
+  // Adds a URL to the set.
+  void AddURL(const GURL& url);
+
+  // Removes a number of URLs from the set.
+  void RemoveURLs(const std::vector<GURL>& urls);
+
+ private:
+  typedef std::map<GURL, int> URLCountMap;
+  URLCountMap url_count_map_;
+};
 
 // PrerenderTracker is responsible for keeping track of all prerendering
 // RenderViews and their statuses.  Its list is guaranteed to be up to date
 // and can be modified on any thread.
-class PrerenderTracker : public base::NonThreadSafe,
-                         public PrerenderContents::Observer {
+class PrerenderTracker {
  public:
-  typedef std::pair<int, int> ChildRouteIdPair;
-
   PrerenderTracker();
-  virtual ~PrerenderTracker();
+  ~PrerenderTracker();
 
   // Attempts to set the status of the specified RenderViewHost to
   // FINAL_STATUS_USED.  Returns true on success.  Returns false if it has
   // already been cancelled for any reason or is no longer prerendering.
-  // Can only be called only on the UI thread.  This method will not call
-  // PrerenderContents::SetFinalStatus() on the corresponding PrerenderContents.
+  // Can only be called only on the IO thread.  This method will not call
+  // PrerenderContents::set_final_status() on the corresponding
+  // PrerenderContents.
   //
   // If it returns true, all subsequent calls to TryCancel and TryUse for the
   // RenderView will return false.
@@ -62,6 +77,17 @@ class PrerenderTracker : public base::NonThreadSafe,
   bool TryCancelOnIOThread(int child_id, int route_id,
                            FinalStatus final_status);
 
+  // Potentially delay a resource request on the IO thread to prevent a double
+  // get.
+  bool PotentiallyDelayRequestOnIOThread(
+      const GURL& gurl,
+      int child_id,
+      int route_id,
+      int request_id);
+
+  void AddPrerenderURLOnUIThread(const GURL& url);
+  void RemovePrerenderURLsOnUIThread(const std::vector<GURL>& urls);
+
   // Gets the FinalStatus of the specified prerendered RenderView.  Returns
   // |true| and sets |final_status| to the status of the RenderView if it
   // is found, returns false otherwise.
@@ -73,34 +99,6 @@ class PrerenderTracker : public base::NonThreadSafe,
   // been displayed or destroyed is still prerendering.
   bool IsPrerenderingOnIOThread(int child_id, int route_id) const;
 
-  // Returns whether or not a RenderView and URL are regarding a pending
-  // prerender swap. Can only be called on the IO thread. Does not acquire a
-  // lock.
-  bool IsPendingSwapRequestOnIOThread(int child_id, int route_id,
-                                      const GURL& url) const;
-
-  // Called when a PrerenderResourceThrottle defers a request. Cancel
-  // or Resume will be called on |throttle| when the prerender is
-  // canceled or used, respectively.
-  void AddResourceThrottleOnIOThread(
-      int child_id, int route_id,
-      const base::WeakPtr<PrerenderResourceThrottle>& throttle);
-
-  // Called when a PrerenderResourceThrottle defers a request. Cancel
-  // or Resume will be called on |throttle| when the prerender is
-  // canceled or used, respectively.
-  void AddPendingSwapThrottleOnIOThread(
-      int child_id, int route_id, const GURL& url,
-      const base::WeakPtr<PrerenderPendingSwapThrottle>& throttle);
-
-  // Called to add throttles for a pending prerender swap.
-  void AddPrerenderPendingSwap(const ChildRouteIdPair& child_route_id_pair,
-                               const GURL& url);
-
-  // Called to remove the throttles for a pending prerender swap.
-  void RemovePrerenderPendingSwap(const ChildRouteIdPair& child_route_id_pair,
-                                  bool swap_successful);
-
  private:
   friend class PrerenderContents;
   FRIEND_TEST_ALL_PREFIXES(PrerenderTrackerTest, PrerenderTrackerNull);
@@ -110,26 +108,21 @@ class PrerenderTracker : public base::NonThreadSafe,
   FRIEND_TEST_ALL_PREFIXES(PrerenderTrackerTest, PrerenderTrackerCancelledFast);
   FRIEND_TEST_ALL_PREFIXES(PrerenderTrackerTest, PrerenderTrackerMultiple);
 
+  typedef std::pair<int, int> ChildRouteIdPair;
   // Map of child/route id pairs to final statuses.
   typedef std::map<ChildRouteIdPair, RenderViewInfo> FinalStatusMap;
-  // List of throttled requests.
-  typedef std::vector<base::WeakPtr<PrerenderResourceThrottle> >
-      ResourceThrottleList;
-  // Set of throttled requests.
-  typedef std::map<ChildRouteIdPair, ResourceThrottleList> ResourceThrottleMap;
-  struct PendingSwapThrottleData {
-    explicit PendingSwapThrottleData(const GURL& swap_url);
-    ~PendingSwapThrottleData();
-    GURL url;
-    std::vector<base::WeakPtr<PrerenderPendingSwapThrottle> > throttles;
-  };
-  // Set of throttles for pending swaps.
-  typedef std::map<ChildRouteIdPair, PendingSwapThrottleData>
-      PendingSwapThrottleMap;
+  // Set of child/route id pairs that may be prerendering.
+  typedef std::set<ChildRouteIdPair> PossiblyPrerenderingChildRouteIdPairs;
 
-  // From PrerenderContents::Observer:
-  virtual void OnPrerenderStart(PrerenderContents* prerender_contents) OVERRIDE;
-  virtual void OnPrerenderStop(PrerenderContents* prerender_contents) OVERRIDE;
+  // Must be called when a RenderView starts prerendering, before the first
+  // navigation starts to avoid any races.
+  void OnPrerenderingStarted(int child_id, int route_id,
+                             PrerenderManager* prerender_manager);
+
+  // Must be called when a RenderView stops prerendering, either because the
+  // RenderView was used or prerendering was cancelled and it is being
+  // destroyed.
+  void OnPrerenderingFinished(int child_id, int route_id);
 
   // Attempts to set the FinalStatus of the specified RenderView to
   // |desired_final_status|.  If non-NULL, |actual_final_status| is set to the
@@ -150,27 +143,13 @@ class PrerenderTracker : public base::NonThreadSafe,
   // Add/remove the specified pair to |possibly_prerendering_io_thread_set_| on
   // the IO Thread.
   void AddPrerenderOnIOThread(const ChildRouteIdPair& child_route_id_pair);
-  void RemovePrerenderOnIOThread(const ChildRouteIdPair& child_route_id_pair,
-                                 FinalStatus final_status);
-
-  // Add/remove prerenders pending swap on the IO Thread.
-  void AddPrerenderPendingSwapOnIOThread(
-      const ChildRouteIdPair& child_route_id_pair, const GURL& url);
-  void RemovePrerenderPendingSwapOnIOThread(
-      const ChildRouteIdPair& child_route_id_pair,
-      bool swap_successful);
+  void RemovePrerenderOnIOThread(const ChildRouteIdPair& child_route_id_pair);
 
   // Tasks posted to the IO Thread to call the above functions.
   static void AddPrerenderOnIOThreadTask(
       const ChildRouteIdPair& child_route_id_pair);
   static void RemovePrerenderOnIOThreadTask(
-      const ChildRouteIdPair& child_route_id_pair,
-      FinalStatus final_status);
-  static void AddPrerenderPendingSwapOnIOThreadTask(
-      const ChildRouteIdPair& child_route_id_pair, const GURL& url);
-  static void RemovePrerenderPendingSwapOnIOThreadTask(
-      const ChildRouteIdPair& child_route_id_pair,
-      bool swap_successful);
+      const ChildRouteIdPair& child_route_id_pair);
 
   static PrerenderTracker* GetDefault();
 
@@ -181,15 +160,14 @@ class PrerenderTracker : public base::NonThreadSafe,
   // date.
   FinalStatusMap final_status_map_;
 
-  // Resources that are throttled, pending a prerender use.  The keys are a
-  // superset of child/route id pairs that are prerendering.  Can only access on
-  // the IO thread.  May contain entries that have since been displayed.  Used
-  // to prevent locking when not needed.
-  ResourceThrottleMap resource_throttle_io_thread_map_;
+  // Superset of child/route id pairs that are prerendering.  Can only access on
+  // the IO thread.  May contain entries that have since been displayed.  Only
+  // used to prevent locking when not needed.
+  PossiblyPrerenderingChildRouteIdPairs possibly_prerendering_io_thread_set_;
 
-  // Map of pending prerender swaps and their associated throttles,
-  // maintained on the IO thread.
-  PendingSwapThrottleMap pending_swap_throttle_map_;
+  // |url_counter_| keeps track of the top-level URLs which are being
+  // prerendered. It must only be accessed on the IO thread.
+  URLCounter url_counter_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderTracker);
 };

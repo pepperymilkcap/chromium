@@ -9,40 +9,32 @@
 #include <map>
 
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "third_party/libjingle/source/talk/base/thread.h"
 
 namespace jingle_glue {
 
-// JingleThreadWrapper implements talk_base::Thread interface on top of
-// Chromium's SingleThreadTaskRunner interface. Currently only the bare minimum
-// that is used by P2P part of libjingle is implemented. There are two ways to
-// create this object:
-//
-// - Call EnsureForCurrentMessageLoop(). This approach works only on threads
-//   that have MessageLoop In this case JingleThreadWrapper deletes itself
-//   automatically when MessageLoop is destroyed.
-// - Using JingleThreadWrapper() constructor. In this case the creating code
-//   must pass a valid task runner for the current thread and also delete the
-//   wrapper later.
-class JingleThreadWrapper : public base::MessageLoop::DestructionObserver,
-                            public talk_base::Thread {
+// JingleThreadWrapper wraps Chromium threads using talk_base::Thread
+// interface. The object must be created by calling
+// EnsureForCurrentThread(). Each JingleThreadWrapper deletes itself
+// when MessageLoop is destroyed. Currently only the bare minimum that
+// is used by P2P part of libjingle is implemented.
+class JingleThreadWrapper
+    : public MessageLoop::DestructionObserver,
+      public talk_base::Thread {
  public:
-  // Create JingleThreadWrapper for the current thread if it hasn't been created
-  // yet. The thread wrapper is destroyed automatically when the current
-  // MessageLoop is destroyed.
-  static void EnsureForCurrentMessageLoop();
+  // Create JingleThreadWrapper for the current thread if it hasn't
+  // been created yet.
+  static void EnsureForCurrentThread();
 
   // Returns thread wrapper for the current thread. NULL is returned
-  // if EnsureForCurrentMessageLoop() has never been called for this
+  // if EnsureForCurrentThread() has never been called for this
   // thread.
   static JingleThreadWrapper* current();
 
-  explicit JingleThreadWrapper(
-     scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-  virtual ~JingleThreadWrapper();
+  JingleThreadWrapper(MessageLoop* message_loop);
 
   // Sets whether the thread can be used to send messages
   // synchronously to another thread using Send() method. Set to false
@@ -98,14 +90,16 @@ class JingleThreadWrapper : public base::MessageLoop::DestructionObserver,
   typedef std::map<int, talk_base::Message> MessagesQueue;
   struct PendingSend;
 
+  virtual ~JingleThreadWrapper();
+
   void PostTaskInternal(
       int delay_ms, talk_base::MessageHandler* handler,
       uint32 message_id, talk_base::MessageData* data);
   void RunTask(int task_id);
   void ProcessPendingSends();
 
-  // Task runner used to execute messages posted on this thread.
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  // Chromium thread used to execute messages posted on this thread.
+  MessageLoop* message_loop_;
 
   bool send_allowed_;
 
@@ -115,13 +109,8 @@ class JingleThreadWrapper : public base::MessageLoop::DestructionObserver,
   MessagesQueue messages_;
   std::list<PendingSend*> pending_send_messages_;
   base::WaitableEvent pending_send_event_;
-
-  base::WeakPtr<JingleThreadWrapper> weak_ptr_;
-  base::WeakPtrFactory<JingleThreadWrapper> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(JingleThreadWrapper);
 };
 
-}  // namespace jingle_glue
+}
 
 #endif  // JINGLE_GLUE_THREAD_WRAPPER_H_

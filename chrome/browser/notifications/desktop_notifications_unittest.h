@@ -4,32 +4,23 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATIONS_UNITTEST_H_
 #define CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATIONS_UNITTEST_H_
+#pragma once
 
 #include <deque>
 #include <string>
 
-#include "base/message_loop/message_loop.h"
-#include "base/prefs/testing_pref_service.h"
+#include "base/message_loop.h"
 #include "chrome/browser/notifications/balloon_collection_impl.h"
-#include "chrome/browser/notifications/balloon_notification_ui_manager.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_test_util.h"
-#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/browser/notifications/notification_ui_manager.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/render_view_test.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/test/render_view_test.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(USE_AURA)
-namespace views {
-namespace corewm {
-class WMState;
-}
-}
-#endif
-
-class ActiveDesktopMonitor;
 class DesktopNotificationsTest;
 typedef LoggingNotificationDelegate<DesktopNotificationsTest>
     LoggingNotificationProxy;
@@ -103,17 +94,13 @@ class DesktopNotificationsTest : public testing::Test {
   // Constructs a notification parameter structure for use in tests.
   content::ShowDesktopNotificationHostMsgParams StandardTestNotification();
 
-  // Must be first member. Because we're running a unit test in browser_tests
-  // we need to handle TestingBrowserProcess initialization ourselves.
-  TestingBrowserProcessInitializer initializer_;
-
   // Create a message loop to allow notifications code to post tasks,
   // and a thread so that notifications code runs on the expected thread.
-  base::MessageLoopForUI message_loop_;
+  MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
 
   // Local state mock.
-  TestingPrefServiceSimple local_state_;
+  TestingPrefService local_state_;
 
   // Test profile.
   scoped_ptr<TestingProfile> profile_;
@@ -122,20 +109,18 @@ class DesktopNotificationsTest : public testing::Test {
   MockBalloonCollection* balloon_collection_;
 
   // Real UI manager.
-  scoped_ptr<BalloonNotificationUIManager> ui_manager_;
+  scoped_ptr<NotificationUIManager> ui_manager_;
 
   // Real DesktopNotificationService
   scoped_ptr<DesktopNotificationService> service_;
 
-  // Contains the cumulative output of the unit test.
-  static std::string log_output_;
-
- private:
 #if defined(USE_AURA)
-  scoped_ptr<views::corewm::WMState> wm_state_;
+  content::RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox
+      webkit_platform_support_;
 #endif
 
-  DISALLOW_COPY_AND_ASSIGN(DesktopNotificationsTest);
+  // Contains the cumulative output of the unit test.
+  static std::string log_output_;
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_DESKTOP_NOTIFICATIONS_UNITTEST_H_

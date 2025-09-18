@@ -48,7 +48,11 @@ extern "C" {
 #endif
 
 #ifndef _ZLIB_H
+#if defined(USE_SYSTEM_ZLIB)
+#include <zlib.h>
+#else
 #include "third_party/zlib/zlib.h"
+#endif
 #endif
 
 #ifndef  _ZLIBIOAPI_H

@@ -14,19 +14,16 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/memory_purger.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_tree.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/browser/ui/gtk/menu_gtk.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "grit/chromium_strings.h"
@@ -38,6 +35,12 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
+
+#if defined(TOOLKIT_VIEWS)
+#include "ui/views/controls/menu/menu_2.h"
+#else
+#include "chrome/browser/ui/gtk/menu_gtk.h"
+#endif
 
 namespace {
 
@@ -56,7 +59,7 @@ const gint kTaskManagerPurgeMemory = 3;
 
 enum TaskManagerColumn {
   kTaskManagerIcon,
-  kTaskManagerTask,
+  kTaskManagerPage,
   kTaskManagerProfileName,
   kTaskManagerSharedMem,
   kTaskManagerPrivateMem,
@@ -67,20 +70,23 @@ enum TaskManagerColumn {
   kTaskManagerWebCoreImageCache,
   kTaskManagerWebCoreScriptsCache,
   kTaskManagerWebCoreCssCache,
-  kTaskManagerVideoMemory,
   kTaskManagerFPS,
   kTaskManagerSqliteMemoryUsed,
   kTaskManagerGoatsTeleported,
+  // Columns below this point are not visible in the task manager.
+  kTaskManagerBackgroundColor,
   kTaskManagerColumnCount,
 };
 
 const TaskManagerColumn kTaskManagerLastVisibleColumn =
     kTaskManagerGoatsTeleported;
 
+static const GdkColor kHighlightColor = GDK_COLOR_RGB(0xff, 0xfa, 0xcd);
+
 TaskManagerColumn TaskManagerResourceIDToColumnID(int id) {
   switch (id) {
-    case IDS_TASK_MANAGER_TASK_COLUMN:
-      return kTaskManagerTask;
+    case IDS_TASK_MANAGER_PAGE_COLUMN:
+      return kTaskManagerPage;
     case IDS_TASK_MANAGER_PROFILE_NAME_COLUMN:
       return kTaskManagerProfileName;
     case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
@@ -101,8 +107,6 @@ TaskManagerColumn TaskManagerResourceIDToColumnID(int id) {
       return kTaskManagerWebCoreScriptsCache;
     case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN:
       return kTaskManagerWebCoreCssCache;
-    case IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN:
-      return kTaskManagerVideoMemory;
     case IDS_TASK_MANAGER_FPS_COLUMN:
       return kTaskManagerFPS;
     case IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN:
@@ -117,8 +121,8 @@ TaskManagerColumn TaskManagerResourceIDToColumnID(int id) {
 
 int TaskManagerColumnIDToResourceID(int id) {
   switch (id) {
-    case kTaskManagerTask:
-      return IDS_TASK_MANAGER_TASK_COLUMN;
+    case kTaskManagerPage:
+      return IDS_TASK_MANAGER_PAGE_COLUMN;
     case kTaskManagerProfileName:
       return IDS_TASK_MANAGER_PROFILE_NAME_COLUMN;
     case kTaskManagerSharedMem:
@@ -139,8 +143,6 @@ int TaskManagerColumnIDToResourceID(int id) {
       return IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN;
     case kTaskManagerWebCoreCssCache:
       return IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN;
-    case kTaskManagerVideoMemory:
-      return IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN;
     case kTaskManagerFPS:
       return IDS_TASK_MANAGER_FPS_COLUMN;
     case kTaskManagerSqliteMemoryUsed:
@@ -158,7 +160,7 @@ int TaskManagerColumnIDToResourceID(int id) {
 //
 // We need colid - 1 because the gtk_tree_view function is asking for the
 // column index, not the column id, and both kTaskManagerIcon and
-// kTaskManagerTask are in the same column index, so all column IDs are off by
+// kTaskManagerPage are in the same column index, so all column IDs are off by
 // one.
 int TreeViewColumnIndexFromID(TaskManagerColumn colid) {
   return colid - 1;
@@ -178,9 +180,7 @@ bool TreeViewColumnIsVisible(GtkWidget* treeview, TaskManagerColumn colid) {
   return gtk_tree_view_column_get_visible(column);
 }
 
-// The task column is special because it has an icon and it gets special
-// treatment with respect to resizing the columns.
-void TreeViewInsertTaskColumn(GtkWidget* treeview, int resid) {
+void TreeViewInsertColumnWithPixbuf(GtkWidget* treeview, int resid) {
   int colid = TaskManagerResourceIDToColumnID(resid);
   GtkTreeViewColumn* column = gtk_tree_view_column_new();
   gtk_tree_view_column_set_title(column,
@@ -190,9 +190,15 @@ void TreeViewInsertTaskColumn(GtkWidget* treeview, int resid) {
   gtk_tree_view_column_pack_start(column, image_renderer, FALSE);
   gtk_tree_view_column_add_attribute(column, image_renderer,
                                      "pixbuf", kTaskManagerIcon);
+  gtk_tree_view_column_add_attribute(column, image_renderer,
+                                     "cell-background-gdk",
+                                     kTaskManagerBackgroundColor);
   GtkCellRenderer* text_renderer = gtk_cell_renderer_text_new();
   gtk_tree_view_column_pack_start(column, text_renderer, TRUE);
   gtk_tree_view_column_add_attribute(column, text_renderer, "markup", colid);
+  gtk_tree_view_column_add_attribute(column, text_renderer,
+                                     "cell-background-gdk",
+                                     kTaskManagerBackgroundColor);
   gtk_tree_view_column_set_resizable(column, TRUE);
   // This is temporary: we'll turn expanding off after getting the size.
   gtk_tree_view_column_set_expand(column, TRUE);
@@ -208,6 +214,7 @@ void TreeViewInsertColumnWithName(GtkWidget* treeview,
       GTK_TREE_VIEW(treeview), -1,
       name, renderer,
       "text", colid,
+      "cell-background-gdk", kTaskManagerBackgroundColor,
       NULL);
   GtkTreeViewColumn* column = gtk_tree_view_get_column(
       GTK_TREE_VIEW(treeview), TreeViewColumnIndexFromID(colid));
@@ -222,11 +229,9 @@ void TreeViewInsertColumn(GtkWidget* treeview, int resid) {
                                l10n_util::GetStringUTF8(resid).c_str());
 }
 
-// Set the current width of the column without forcing a fixed or maximum
-// width as gtk_tree_view_column_set_[fixed|maximum]_width() would. This would
-// basically be gtk_tree_view_column_set_width() except that there is no such
-// function. It turns out that other applications have done similar hacks to do
-// the same thing - search the web for that nonexistent function name! :)
+// Set the current width of the column without forcing a minimum width as
+// gtk_tree_view_column_set_fixed_width() would. This would basically be
+// gtk_tree_view_column_set_width() except that there is no such function.
 void TreeViewColumnSetWidth(GtkTreeViewColumn* column, gint width) {
   column->width = width;
   column->resized_width = width;
@@ -243,34 +248,46 @@ class TaskManagerGtk::ContextMenuController
   explicit ContextMenuController(TaskManagerGtk* task_manager)
       : task_manager_(task_manager) {
     menu_model_.reset(new ui::SimpleMenuModel(this));
-    for (int i = kTaskManagerTask; i <= kTaskManagerLastVisibleColumn; i++) {
+    for (int i = kTaskManagerPage; i <= kTaskManagerLastVisibleColumn; i++) {
       menu_model_->AddCheckItemWithStringId(
           i, TaskManagerColumnIDToResourceID(i));
     }
+#if defined(TOOLKIT_VIEWS)
+    menu_.reset(new views::Menu2(menu_model_.get()));
+#else
     menu_.reset(new MenuGtk(NULL, menu_model_.get()));
+#endif
   }
 
   virtual ~ContextMenuController() {}
 
   void RunMenu(const gfx::Point& point, guint32 event_time) {
+#if defined(TOOLKIT_VIEWS)
+    menu_->RunContextMenuAt(point);
+#else
     menu_->PopupAsContext(point, event_time);
+#endif
   }
 
   void Cancel() {
     task_manager_ = NULL;
+#if defined(TOOLKIT_VIEWS)
+    menu_->CancelMenu();
+#else
     menu_->Cancel();
+#endif
   }
 
  private:
   // ui::SimpleMenuModel::Delegate implementation:
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
+  virtual bool IsCommandIdEnabled(int command_id) const {
     if (!task_manager_)
       return false;
 
     return true;
   }
 
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
+  virtual bool IsCommandIdChecked(int command_id) const {
     if (!task_manager_)
       return false;
 
@@ -280,11 +297,11 @@ class TaskManagerGtk::ContextMenuController
 
   virtual bool GetAcceleratorForCommandId(
       int command_id,
-      ui::Accelerator* accelerator) OVERRIDE {
+      ui::Accelerator* accelerator) {
     return false;
   }
 
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {
+  virtual void ExecuteCommand(int command_id) {
     if (!task_manager_)
       return;
 
@@ -295,7 +312,11 @@ class TaskManagerGtk::ContextMenuController
 
   // The model and view for the right click context menu.
   scoped_ptr<ui::SimpleMenuModel> menu_model_;
+#if defined(TOOLKIT_VIEWS)
+  scoped_ptr<views::Menu2> menu_;
+#else
   scoped_ptr<MenuGtk> menu_;
+#endif
 
   // The TaskManager the context menu was brought up for. Set to NULL when the
   // menu is canceled.
@@ -304,14 +325,15 @@ class TaskManagerGtk::ContextMenuController
   DISALLOW_COPY_AND_ASSIGN(ContextMenuController);
 };
 
-TaskManagerGtk::TaskManagerGtk()
+TaskManagerGtk::TaskManagerGtk(bool highlight_background_resources)
   : task_manager_(TaskManager::GetInstance()),
     model_(TaskManager::GetInstance()->model()),
     dialog_(NULL),
     treeview_(NULL),
     process_list_(NULL),
     process_count_(0),
-    ignore_selection_changed_(false) {
+    ignore_selection_changed_(false),
+    highlight_background_resources_(highlight_background_resources) {
   Init();
 }
 
@@ -359,7 +381,7 @@ void TaskManagerGtk::OnItemsChanged(int start, int length) {
 }
 
 void TaskManagerGtk::OnItemsAdded(int start, int length) {
-  base::AutoReset<bool> autoreset(&ignore_selection_changed_, true);
+  AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
   GtkTreeIter iter;
   if (start == 0) {
@@ -385,7 +407,7 @@ void TaskManagerGtk::OnItemsAdded(int start, int length) {
 
 void TaskManagerGtk::OnItemsRemoved(int start, int length) {
   {
-    base::AutoReset<bool> autoreset(&ignore_selection_changed_, true);
+    AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
     GtkTreeIter iter;
     gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(process_list_), &iter,
@@ -415,12 +437,19 @@ void TaskManagerGtk::Close() {
 }
 
 // static
-void TaskManagerGtk::Show() {
+void TaskManagerGtk::Show(bool highlight_background_resources) {
+  if (instance_ &&
+      instance_->highlight_background_resources_ !=
+          highlight_background_resources) {
+    instance_->Close();
+    DCHECK(!instance_);
+  }
+
   if (instance_) {
     // If there's a Task manager window open already, just activate it.
     gtk_util::PresentWindow(instance_->dialog_, 0);
   } else {
-    instance_ = new TaskManagerGtk();
+    instance_ = new TaskManagerGtk(highlight_background_resources);
     instance_->model_->StartUpdating();
   }
 }
@@ -454,7 +483,8 @@ void TaskManagerGtk::Init() {
   }
 
   gtk_dialog_add_button(GTK_DIALOG(dialog_),
-      l10n_util::GetStringUTF8(IDS_TASK_MANAGER_KILL).c_str(),
+      gfx::ConvertAcceleratorsFromWindowsStyle(
+          l10n_util::GetStringUTF8(IDS_TASK_MANAGER_KILL)).c_str(),
       kTaskManagerResponseKill);
 
   // The response button should not be sensitive when the dialog is first opened
@@ -480,8 +510,15 @@ void TaskManagerGtk::Init() {
   destroy_handler_id_ = g_signal_connect(dialog_, "destroy",
                                          G_CALLBACK(OnDestroyThunk), this);
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
+  // GTK does menu on mouse-up while views does menu on mouse-down,
+  // so connect to different handlers.
+#if defined(TOOLKIT_VIEWS)
+  g_signal_connect(dialog_, "button-release-event",
+                   G_CALLBACK(OnButtonEventThunk), this);
+#else
   g_signal_connect(dialog_, "button-press-event",
                    G_CALLBACK(OnButtonEventThunk), this);
+#endif
   gtk_widget_add_events(dialog_,
                         GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 
@@ -492,14 +529,16 @@ void TaskManagerGtk::Init() {
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
                                  GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
 
-  gtk_container_add(GTK_CONTAINER(content_area), scrolled);
+  gtk_container_add(GTK_CONTAINER(GTK_DIALOG(dialog_)->vbox), scrolled);
 
   CreateTaskManagerTreeview();
   gtk_tree_view_set_headers_clickable(GTK_TREE_VIEW(treeview_), TRUE);
   g_signal_connect(treeview_, "row-activated",
                    G_CALLBACK(OnRowActivatedThunk), this);
+#if defined(TOOLKIT_GTK)
   g_signal_connect(treeview_, "button-press-event",
                    G_CALLBACK(OnButtonEventThunk), this);
+#endif
 
   // |selection| is owned by |treeview_|.
   GtkTreeSelection* selection = gtk_tree_view_get_selection(
@@ -522,13 +561,13 @@ void TaskManagerGtk::Init() {
 }
 
 void TaskManagerGtk::SetInitialDialogSize() {
-  // Hook up to the realize event so we can size the task column to the
+  // Hook up to the realize event so we can size the page column to the
   // size of the leftover space after packing the other columns.
   g_signal_connect(treeview_, "realize",
                    G_CALLBACK(OnTreeViewRealizeThunk), this);
   // If we previously saved the dialog's bounds, use them.
   if (g_browser_process->local_state()) {
-    const base::DictionaryValue* placement_pref =
+    const DictionaryValue* placement_pref =
         g_browser_process->local_state()->GetDictionary(
             prefs::kTaskManagerWindowPlacement);
     int top = 0, left = 0, bottom = 1, right = 1;
@@ -564,17 +603,17 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
   process_list_ = gtk_list_store_new(kTaskManagerColumnCount,
       GDK_TYPE_PIXBUF, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
       G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
-      G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
-      G_TYPE_STRING, G_TYPE_STRING);
+      G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
+      G_TYPE_STRING, G_TYPE_STRING, GDK_TYPE_COLOR);
 
   // Support sorting on all columns.
   process_list_sort_ = gtk_tree_model_sort_new_with_model(
       GTK_TREE_MODEL(process_list_));
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
-                                  kTaskManagerTask,
+                                  kTaskManagerPage,
                                   ComparePage, this, NULL);
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
-                                  kTaskManagerTask,
+                                  kTaskManagerPage,
                                   CompareProfileName, this, NULL);
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
                                   kTaskManagerSharedMem,
@@ -604,9 +643,6 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
                                   kTaskManagerWebCoreCssCache,
                                   CompareWebCoreCssCache, this, NULL);
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
-                                  kTaskManagerVideoMemory,
-                                  CompareVideoMemory, this, NULL);
-  gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
                                   kTaskManagerFPS,
                                   CompareFPS, this, NULL);
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
@@ -618,8 +654,9 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
   treeview_ = gtk_tree_view_new_with_model(process_list_sort_);
 
   // Insert all the columns.
-  TreeViewInsertTaskColumn(treeview_, IDS_TASK_MANAGER_TASK_COLUMN);
-  TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_PROFILE_NAME_COLUMN);
+  TreeViewInsertColumnWithPixbuf(treeview_, IDS_TASK_MANAGER_PAGE_COLUMN);
+  TreeViewInsertColumnWithPixbuf(treeview_,
+                                 IDS_TASK_MANAGER_PROFILE_NAME_COLUMN);
   TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_SHARED_MEM_COLUMN);
   TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN);
   TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_CPU_COLUMN);
@@ -631,7 +668,6 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
   TreeViewInsertColumn(treeview_,
                        IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN);
   TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN);
-  TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN);
   TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_FPS_COLUMN);
   TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN);
   TreeViewInsertColumn(treeview_, IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN);
@@ -639,11 +675,11 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
   // Hide some columns by default.
   TreeViewColumnSetVisible(treeview_, kTaskManagerProfileName, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerSharedMem, false);
+  TreeViewColumnSetVisible(treeview_, kTaskManagerProcessID, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerJavaScriptMemory, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerWebCoreImageCache, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerWebCoreScriptsCache, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerWebCoreCssCache, false);
-  TreeViewColumnSetVisible(treeview_, kTaskManagerVideoMemory, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerSqliteMemoryUsed, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerGoatsTeleported, false);
 
@@ -651,28 +687,93 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
   g_object_unref(process_list_sort_);
 }
 
+bool IsSharedByGroup(int col_id) {
+  switch (col_id) {
+    case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
+    case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
+    case IDS_TASK_MANAGER_CPU_COLUMN:
+    case IDS_TASK_MANAGER_PROCESS_ID_COLUMN:
+    case IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN:
+    case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
+    case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
+    case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN:
+      return true;
+    default:
+      return false;
+  }
+}
+
 std::string TaskManagerGtk::GetModelText(int row, int col_id) {
-  return base::UTF16ToUTF8(model_->GetResourceById(row, col_id));
+  if (IsSharedByGroup(col_id) && !model_->IsResourceFirstInGroup(row))
+    return std::string();
+
+  switch (col_id) {
+    case IDS_TASK_MANAGER_PAGE_COLUMN:  // Process
+      return UTF16ToUTF8(model_->GetResourceTitle(row));
+
+    case IDS_TASK_MANAGER_PROFILE_NAME_COLUMN:  // Profile name
+      return UTF16ToUTF8(model_->GetResourceProfileName(row));
+
+    case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:  // Memory
+      return UTF16ToUTF8(model_->GetResourcePrivateMemory(row));
+
+    case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:  // Memory
+      return UTF16ToUTF8(model_->GetResourceSharedMemory(row));
+
+    case IDS_TASK_MANAGER_CPU_COLUMN:  // CPU
+      return UTF16ToUTF8(model_->GetResourceCPUUsage(row));
+
+    case IDS_TASK_MANAGER_NET_COLUMN:  // Net
+      return UTF16ToUTF8(model_->GetResourceNetworkUsage(row));
+
+    case IDS_TASK_MANAGER_PROCESS_ID_COLUMN:  // Process ID
+      return UTF16ToUTF8(model_->GetResourceProcessId(row));
+
+    case IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN:
+      return UTF16ToUTF8(model_->GetResourceV8MemoryAllocatedSize(row));
+
+    case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
+      return UTF16ToUTF8(model_->GetResourceWebCoreImageCacheSize(row));
+
+    case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
+      return UTF16ToUTF8(model_->GetResourceWebCoreScriptsCacheSize(row));
+
+    case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN:
+      return UTF16ToUTF8(model_->GetResourceWebCoreCSSCacheSize(row));
+
+    case IDS_TASK_MANAGER_FPS_COLUMN:
+      return UTF16ToUTF8(model_->GetResourceFPS(row));
+
+    case IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN:
+      return UTF16ToUTF8(model_->GetResourceSqliteMemoryUsed(row));
+
+    case IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN:  // Goats Teleported!
+      return UTF16ToUTF8(model_->GetResourceGoatsTeleported(row));
+
+    default:
+      NOTREACHED();
+      return std::string();
+  }
 }
 
 GdkPixbuf* TaskManagerGtk::GetModelIcon(int row) {
-  SkBitmap icon = *model_->GetResourceIcon(row).bitmap();
+  SkBitmap icon = model_->GetResourceIcon(row);
   if (icon.pixelRef() ==
-      ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-          IDR_DEFAULT_FAVICON).AsBitmap().pixelRef()) {
+      ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
+          IDR_DEFAULT_FAVICON)->pixelRef()) {
     return static_cast<GdkPixbuf*>(g_object_ref(
-        GtkThemeService::GetDefaultFavicon(true).ToGdkPixbuf()));
+        GtkThemeService::GetDefaultFavicon(true)->ToGdkPixbuf()));
   }
 
-  return gfx::GdkPixbufFromSkBitmap(icon);
+  return gfx::GdkPixbufFromSkBitmap(&icon);
 }
 
 void TaskManagerGtk::SetRowDataFromModel(int row, GtkTreeIter* iter) {
   GdkPixbuf* icon = GetModelIcon(row);
-  std::string task = GetModelText(row, IDS_TASK_MANAGER_TASK_COLUMN);
+  std::string page = GetModelText(row, IDS_TASK_MANAGER_PAGE_COLUMN);
   std::string profile_name =
       GetModelText(row, IDS_TASK_MANAGER_PROFILE_NAME_COLUMN);
-  gchar* task_markup = g_markup_escape_text(task.c_str(), task.length());
+  gchar* page_markup = g_markup_escape_text(page.c_str(), page.length());
   std::string shared_mem =
       GetModelText(row, IDS_TASK_MANAGER_SHARED_MEM_COLUMN);
   std::string priv_mem = GetModelText(row, IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN);
@@ -702,9 +803,6 @@ void TaskManagerGtk::SetRowDataFromModel(int row, GtkTreeIter* iter) {
     wk_css_cache =
         GetModelText(row, IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN);
   }
-  std::string video_memory;
-  if (TreeViewColumnIsVisible(treeview_, kTaskManagerVideoMemory))
-    video_memory = GetModelText(row, IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN);
   std::string fps;
   if (TreeViewColumnIsVisible(treeview_, kTaskManagerFPS))
     fps = GetModelText(row, IDS_TASK_MANAGER_FPS_COLUMN);
@@ -717,9 +815,11 @@ void TaskManagerGtk::SetRowDataFromModel(int row, GtkTreeIter* iter) {
   std::string goats =
       GetModelText(row, IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN);
 
+  bool is_background = model_->IsBackgroundResource(row) &&
+      highlight_background_resources_;
   gtk_list_store_set(process_list_, iter,
                      kTaskManagerIcon, icon,
-                     kTaskManagerTask, task_markup,
+                     kTaskManagerPage, page_markup,
                      kTaskManagerProfileName, profile_name.c_str(),
                      kTaskManagerSharedMem, shared_mem.c_str(),
                      kTaskManagerPrivateMem, priv_mem.c_str(),
@@ -730,13 +830,14 @@ void TaskManagerGtk::SetRowDataFromModel(int row, GtkTreeIter* iter) {
                      kTaskManagerWebCoreImageCache, wk_img_cache.c_str(),
                      kTaskManagerWebCoreScriptsCache, wk_scripts_cache.c_str(),
                      kTaskManagerWebCoreCssCache, wk_css_cache.c_str(),
-                     kTaskManagerVideoMemory, video_memory.c_str(),
                      kTaskManagerFPS, fps.c_str(),
                      kTaskManagerSqliteMemoryUsed, sqlite_memory.c_str(),
                      kTaskManagerGoatsTeleported, goats.c_str(),
+                     kTaskManagerBackgroundColor,
+                     is_background ? &kHighlightColor : NULL,
                      -1);
   g_object_unref(icon);
-  g_free(task_markup);
+  g_free(page_markup);
 }
 
 void TaskManagerGtk::KillSelectedProcesses() {
@@ -766,7 +867,7 @@ void TaskManagerGtk::ShowContextMenu(const gfx::Point& point,
 }
 
 void TaskManagerGtk::OnLinkActivated() {
-  task_manager_->OpenAboutMemory(chrome::HOST_DESKTOP_TYPE_NATIVE);
+  task_manager_->OpenAboutMemory();
 }
 
 gint TaskManagerGtk::CompareImpl(GtkTreeModel* model, GtkTreeIter* a,
@@ -774,11 +875,14 @@ gint TaskManagerGtk::CompareImpl(GtkTreeModel* model, GtkTreeIter* a,
   int row1 = gtk_tree::GetRowNumForIter(model, b);
   int row2 = gtk_tree::GetRowNumForIter(model, a);
 
+  // When sorting by non-grouped attributes (e.g., Network), just do a normal
+  // sort.
+  if (!IsSharedByGroup(id))
+    return model_->CompareValues(row1, row2, id);
+
   // Otherwise, make sure grouped resources are shown together.
-  TaskManagerModel::GroupRange group_range1 =
-      model_->GetGroupRangeForResource(row1);
-  TaskManagerModel::GroupRange group_range2 =
-      model_->GetGroupRangeForResource(row2);
+  std::pair<int, int> group_range1 = model_->GetGroupRangeForResource(row1);
+  std::pair<int, int> group_range2 = model_->GetGroupRangeForResource(row2);
 
   if (group_range1 == group_range2) {
     // Sort within groups.
@@ -813,7 +917,7 @@ void TaskManagerGtk::OnResponse(GtkWidget* dialog, int response_id) {
 
       DictionaryPrefUpdate update(g_browser_process->local_state(),
                                   prefs::kTaskManagerWindowPlacement);
-      base::DictionaryValue* placement_pref = update.Get();
+      DictionaryValue* placement_pref = update.Get();
       // Note that we store left/top for consistency with Windows, but that we
       // *don't* restore them.
       placement_pref->SetInteger("left", dialog_bounds.x());
@@ -835,19 +939,17 @@ void TaskManagerGtk::OnResponse(GtkWidget* dialog, int response_id) {
 }
 
 void TaskManagerGtk::OnTreeViewRealize(GtkTreeView* treeview) {
-  // Five columns show by default: the task column, the memory column, the CPU
-  // column, the network column, and the FPS column. Initially we set the task
-  // tolumn to take all the extra space, with the other columns being sized to
-  // fit the column names. Here we turn off the expand property of the first
-  // column (to make the table behave sanely when the user resizes it), and set
-  // the effective sizes of all five default columns to the automatically chosen
-  // sizes before any rows are added. This causes them to stay at those sizes
-  // even if the data would overflow, preventing a horizontal scroll bar from
-  // appearing due to the row data.
-  static const TaskManagerColumn dfl_columns[] = {kTaskManagerPrivateMem,
-                                                  kTaskManagerCPU,
-                                                  kTaskManagerNetwork,
-                                                  kTaskManagerFPS};
+  // Four columns show by default: the page column, the memory column, the
+  // CPU column, and the network column. Initially we set the page column to
+  // take all the extra space, with the other columns being sized to fit the
+  // column names. Here we turn off the expand property of the first column
+  // (to make the table behave sanely when the user resizes columns) and set
+  // the effective sizes of all four default columns to the automatically
+  // chosen size before any rows are added. This causes them to stay at that
+  // size even if the data would overflow, preventing a horizontal scroll
+  // bar from appearing due to the row data.
+  const TaskManagerColumn dfl_columns[] = {kTaskManagerNetwork, kTaskManagerCPU,
+                                           kTaskManagerPrivateMem};
   GtkTreeViewColumn* column = NULL;
   gint width;
   for (size_t i = 0; i < arraysize(dfl_columns); ++i) {
@@ -856,9 +958,9 @@ void TaskManagerGtk::OnTreeViewRealize(GtkTreeView* treeview) {
     width = gtk_tree_view_column_get_width(column);
     TreeViewColumnSetWidth(column, width);
   }
-  // Do the task column separately since it's a little different.
+  // Do the page column separately since it's a little different.
   column = gtk_tree_view_get_column(treeview,
-      TreeViewColumnIndexFromID(kTaskManagerTask));
+      TreeViewColumnIndexFromID(kTaskManagerPage));
   width = gtk_tree_view_column_get_width(column);
   // Turn expanding back off to make resizing columns behave sanely.
   gtk_tree_view_column_set_expand(column, FALSE);
@@ -868,10 +970,10 @@ void TaskManagerGtk::OnTreeViewRealize(GtkTreeView* treeview) {
 void TaskManagerGtk::OnSelectionChanged(GtkTreeSelection* selection) {
   if (ignore_selection_changed_)
     return;
-  base::AutoReset<bool> autoreset(&ignore_selection_changed_, true);
+  AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
   // The set of groups that should be selected.
-  std::set<TaskManagerModel::GroupRange> ranges;
+  std::set<std::pair<int, int> > ranges;
   bool selection_contains_browser_process = false;
 
   GtkTreeModel* model;
@@ -889,7 +991,7 @@ void TaskManagerGtk::OnSelectionChanged(GtkTreeSelection* selection) {
   g_list_foreach(paths, reinterpret_cast<GFunc>(gtk_tree_path_free), NULL);
   g_list_free(paths);
 
-  for (std::set<TaskManagerModel::GroupRange>::iterator iter = ranges.begin();
+  for (std::set<std::pair<int, int> >::iterator iter = ranges.begin();
        iter != ranges.end(); ++iter) {
     for (int i = 0; i < iter->second; ++i) {
       GtkTreePath* child_path = gtk_tree_path_new_from_indices(iter->first + i,
@@ -942,12 +1044,3 @@ gboolean TaskManagerGtk::OnGtkAccelerator(GtkAccelGroup* accel_group,
 
   return TRUE;
 }
-
-namespace chrome {
-
-// Declared in browser_dialogs.h.
-void ShowTaskManager(Browser* browser) {
-  TaskManagerGtk::Show();
-}
-
-}  // namespace chrome

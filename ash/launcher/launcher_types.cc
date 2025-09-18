@@ -4,25 +4,21 @@
 
 #include "ash/launcher/launcher_types.h"
 
-#include "ash/shelf/shelf_constants.h"
-
 namespace ash {
 
 LauncherItem::LauncherItem()
-    : type(TYPE_UNDEFINED),
-      id(kInvalidShelfID),
-      status(STATUS_CLOSED) {
+    : type(TYPE_TABBED),
+      num_tabs(1),
+      id(0) {
+}
+
+LauncherItem::LauncherItem(LauncherItemType type)
+    : type(type),
+      num_tabs(0),
+      id(0) {
 }
 
 LauncherItem::~LauncherItem() {
-}
-
-LauncherItemDetails::LauncherItemDetails()
-    : type(TYPE_UNDEFINED),
-      image_resource_id(kInvalidImageResourceID) {
-}
-
-LauncherItemDetails::~LauncherItemDetails() {
 }
 
 }  // namespace ash

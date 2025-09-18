@@ -14,7 +14,8 @@ function openFromNormalShouldOpenInNormal() {
     chrome.test.assertFalse(windows[0].tabs[0].incognito);
 
     // The rest of the test continues in infobar.html.
-    chrome.infobars.show({tabId: windows[0].tabs[0].id, path: "infobar.html"});
+    chrome.experimental.infobars.show({tabId: windows[0].tabs[0].id,
+                                       path: "infobar.html"});
   });
 }
 
@@ -30,7 +31,8 @@ function openFromExtensionHostInIncognitoBrowserShouldOpenInNormalBrowser() {
         chrome.tabs.getAllInWindow(incognitoWin.id, function(tabs) {
           chrome.test.assertEq(1, tabs.length);
           // The rest of the test continues in infobar.html.
-          chrome.infobars.show({tabId: tabs[0].id, path: "infobar.html"});
+          chrome.experimental.infobars.show({tabId: tabs[0].id,
+                                             path: "infobar.html"});
         });
       });
     });

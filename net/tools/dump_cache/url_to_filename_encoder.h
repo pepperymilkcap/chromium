@@ -78,10 +78,11 @@
 
 #ifndef NET_TOOLS_DUMP_CACHE_URL_TO_FILENAME_ENCODER_H_
 #define NET_TOOLS_DUMP_CACHE_URL_TO_FILENAME_ENCODER_H_
+#pragma once
 
 #include <string>
 
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "net/tools/dump_cache/url_utilities.h"
 
 namespace net {

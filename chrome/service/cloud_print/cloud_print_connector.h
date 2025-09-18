@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_CONNECTOR_H_
 #define CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_CONNECTOR_H_
+#pragma once
 
 #include <list>
 #include <map>
@@ -11,80 +12,47 @@
 
 #include "base/threading/thread.h"
 #include "base/values.h"
-#include "chrome/service/cloud_print/connector_settings.h"
 #include "chrome/service/cloud_print/print_system.h"
 #include "chrome/service/cloud_print/printer_job_handler.h"
-
-namespace cloud_print {
 
 // CloudPrintConnector handles top printer management tasks.
 //  - Matching local and cloud printers
 //  - Registration of local printers
 //  - Deleting cloud printers
-// All tasks are posted to the common queue (PendingTasks) and executed
+// All tasks are posted to the commond queue (PendingTasks) and executed
 // one-by-one in FIFO order.
 // CloudPrintConnector will notify client over Client interface.
 class CloudPrintConnector
     : public base::RefCountedThreadSafe<CloudPrintConnector>,
-      private PrintSystem::PrintServerWatcher::Delegate,
-      private PrinterJobHandlerDelegate,
-      private CloudPrintURLFetcherDelegate {
+      public cloud_print::PrintServerWatcherDelegate,
+      public PrinterJobHandlerDelegate,
+      public CloudPrintURLFetcherDelegate {
  public:
   class Client {
    public:
     virtual void OnAuthFailed() = 0;
-    virtual void OnXmppPingUpdated(int ping_timeout) = 0;
    protected:
      virtual ~Client() {}
   };
 
-  CloudPrintConnector(Client* client, const ConnectorSettings& settings);
+  CloudPrintConnector(Client* client,
+                      const std::string& proxy_id,
+                      const GURL& cloud_print_server_url,
+                      const DictionaryValue* print_system_settings);
+  virtual ~CloudPrintConnector();
 
   bool Start();
   void Stop();
   bool IsRunning();
 
-  // Return list of printer ids registered with CloudPrint.
-  void GetPrinterIds(std::list<std::string>* printer_ids);
+  // Register printer from the list.
+  void RegisterPrinters(const printing::PrinterList& printers);
 
   // Check for jobs for specific printer. If printer id is empty
   // jobs will be checked for all available printers.
   void CheckForJobs(const std::string& reason, const std::string& printer_id);
 
-  // Update settings for specific printer.
-  void UpdatePrinterSettings(const std::string& printer_id);
-
- private:
-  friend class base::RefCountedThreadSafe<CloudPrintConnector>;
-
-  // Prototype for a response handler.
-  typedef CloudPrintURLFetcher::ResponseAction
-      (CloudPrintConnector::*ResponseHandler)(
-          const net::URLFetcher* source,
-          const GURL& url,
-          base::DictionaryValue* json_data,
-          bool succeeded);
-
-  enum PendingTaskType {
-    PENDING_PRINTERS_NONE,
-    PENDING_PRINTERS_AVAILABLE,
-    PENDING_PRINTER_REGISTER,
-    PENDING_PRINTER_DELETE
-  };
-
-  // TODO(vitalybuka): Consider delete pending_tasks_ and just use MessageLoop.
-  struct PendingTask {
-    PendingTaskType type;
-    // Optional members, depending on type.
-    std::string printer_id;  // For pending delete.
-    printing::PrinterBasicInfo printer_info;  // For pending registration.
-
-    PendingTask() : type(PENDING_PRINTERS_NONE) {}
-    ~PendingTask() {}
-  };
-
-  virtual ~CloudPrintConnector();
-  // PrintServerWatcherDelegate implementation
+  // cloud_print::PrintServerWatcherDelegate implementation
   virtual void OnPrinterAdded() OVERRIDE;
   // PrinterJobHandler::Delegate implementation
   virtual void OnPrinterDeleted(const std::string& printer_name) OVERRIDE;
@@ -92,40 +60,44 @@ class CloudPrintConnector
 
   // CloudPrintURLFetcher::Delegate implementation.
   virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
-      const net::URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
       const std::string& data) OVERRIDE;
+
   virtual CloudPrintURLFetcher::ResponseAction HandleJSONData(
-      const net::URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
       base::DictionaryValue* json_data,
       bool succeeded) OVERRIDE;
   virtual CloudPrintURLFetcher::ResponseAction OnRequestAuthError() OVERRIDE;
   virtual std::string GetAuthHeader() OVERRIDE;
 
+ private:
+  // Prototype for a response handler.
+  typedef CloudPrintURLFetcher::ResponseAction
+      (CloudPrintConnector::*ResponseHandler)(
+          const content::URLFetcher* source,
+          const GURL& url,
+          DictionaryValue* json_data,
+          bool succeeded);
+
   // Begin response handlers
   CloudPrintURLFetcher::ResponseAction HandlePrinterListResponse(
-      const net::URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
-      base::DictionaryValue* json_data,
-      bool succeeded);
-
-  CloudPrintURLFetcher::ResponseAction HandlePrinterListResponseSettingsUpdate(
-      const net::URLFetcher* source,
-      const GURL& url,
-      base::DictionaryValue* json_data,
+      DictionaryValue* json_data,
       bool succeeded);
 
   CloudPrintURLFetcher::ResponseAction HandlePrinterDeleteResponse(
-      const net::URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
-      base::DictionaryValue* json_data,
+      DictionaryValue* json_data,
       bool succeeded);
 
   CloudPrintURLFetcher::ResponseAction HandleRegisterPrinterResponse(
-      const net::URLFetcher* source,
+      const content::URLFetcher* source,
       const GURL& url,
-      base::DictionaryValue* json_data,
+      DictionaryValue* json_data,
       bool succeeded);
   // End response handlers
 
@@ -133,8 +105,7 @@ class CloudPrintConnector
   void StartGetRequest(const GURL& url,
                        int max_retries,
                        ResponseHandler handler);
-  void StartPostRequest(CloudPrintURLFetcher::RequestType type,
-                        const GURL& url,
+  void StartPostRequest(const GURL& url,
                         int max_retries,
                         const std::string& mime_type,
                         const std::string& post_data,
@@ -147,9 +118,25 @@ class CloudPrintConnector
   bool RemovePrinterFromList(const std::string& printer_name,
                              printing::PrinterList* printer_list);
 
-  void InitJobHandlerForPrinter(base::DictionaryValue* printer_data);
+  void InitJobHandlerForPrinter(DictionaryValue* printer_data);
 
-  void UpdateSettingsFromPrintersList(base::DictionaryValue* json_data);
+  enum PendingTaskType {
+    PENDING_PRINTERS_NONE,
+    PENDING_PRINTERS_AVAILABLE,
+    PENDING_PRINTER_REGISTER,
+    PENDING_PRINTER_DELETE
+  };
+
+  // TODO(jhawkins): This name conflicts with base::PendingTask.
+  struct PendingTask {
+    PendingTaskType type;
+    // Optional members, depending on type.
+    std::string printer_id;  // For pending delete.
+    printing::PrinterBasicInfo printer_info;  // For pending registration.
+
+    PendingTask() : type(PENDING_PRINTERS_NONE) {}
+    ~PendingTask() {}
+  };
 
   void AddPendingAvailableTask();
   void AddPendingDeleteTask(const std::string& id);
@@ -166,42 +153,36 @@ class CloudPrintConnector
       const std::string& printer_name,
       const printing::PrinterCapsAndDefaults& caps_and_defaults);
 
-  // Register printer from the list.
-  void RegisterPrinters(const printing::PrinterList& printers);
-
   bool IsSamePrinter(const std::string& name1, const std::string& name2) const;
-  bool InitPrintSystem();
-
-  void ScheduleStatsReport();
-  void ReportStats();
 
   // CloudPrintConnector client.
   Client* client_;
-  // Connector settings.
-  ConnectorSettings settings_;
+  // Print system settings.
+  scoped_ptr<DictionaryValue> print_system_settings_;
   // Pointer to current print system.
-  scoped_refptr<PrintSystem> print_system_;
+  scoped_refptr<cloud_print::PrintSystem> print_system_;
   // Watcher for print system updates.
-  scoped_refptr<PrintSystem::PrintServerWatcher>
+  scoped_refptr<cloud_print::PrintSystem::PrintServerWatcher>
       print_server_watcher_;
+  // Id of the Cloud Print proxy.
+  std::string proxy_id_;
+  // Cloud Print server url.
+  GURL cloud_print_server_url_;
   // A map of printer id to job handler.
   typedef std::map<std::string, scoped_refptr<PrinterJobHandler> >
       JobHandlerMap;
   JobHandlerMap job_handler_map_;
   // Next response handler.
   ResponseHandler next_response_handler_;
-  // The list of pending tasks to be done in the background.
+  // The list of peding tasks to be done in the background.
   std::list<PendingTask> pending_tasks_;
   // The CloudPrintURLFetcher instance for the current request.
   scoped_refptr<CloudPrintURLFetcher> request_;
   // The CloudPrintURLFetcher instance for the user message request.
   scoped_refptr<CloudPrintURLFetcher> user_message_request_;
-  base::WeakPtrFactory<CloudPrintConnector> stats_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CloudPrintConnector);
 };
-
-}  // namespace cloud_print
 
 #endif  // CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_CONNECTOR_H_
 

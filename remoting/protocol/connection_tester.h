@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 
-namespace base {
 class MessageLoop;
-}
 
 namespace net {
 class DrainableIOBuffer;
@@ -36,7 +34,6 @@ class StreamConnectionTester {
   ~StreamConnectionTester();
 
   void Start();
-  bool done() { return done_; }
   void CheckResults();
 
  protected:
@@ -50,10 +47,11 @@ class StreamConnectionTester {
   void HandleReadResult(int result);
 
  private:
-  base::MessageLoop* message_loop_;
+  MessageLoop* message_loop_;
   net::StreamSocket* host_socket_;
   net::StreamSocket* client_socket_;
   int message_size_;
+  int message_count_;
   int test_data_size_;
   bool done_;
 
@@ -85,7 +83,7 @@ class DatagramConnectionTester {
   void OnRead(int result);
   void HandleReadResult(int result);
 
-  base::MessageLoop* message_loop_;
+  MessageLoop* message_loop_;
   net::Socket* host_socket_;
   net::Socket* client_socket_;
   int message_size_;

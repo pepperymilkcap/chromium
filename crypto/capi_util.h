@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CRYPTO_CAPI_UTIL_H_
 #define CRYPTO_CAPI_UTIL_H_
+#pragma once
 
 #include <windows.h>
 #include <wincrypt.h>
@@ -27,12 +28,6 @@ CRYPTO_EXPORT BOOL CryptAcquireContextLocked(HCRYPTPROV* prov,
                                              LPCWSTR provider,
                                              DWORD prov_type,
                                              DWORD flags);
-
-// Wrappers of malloc and free for CryptoAPI routines that need memory
-// allocators, such as in CRYPT_DECODE_PARA. Such routines require WINAPI
-// calling conventions.
-CRYPTO_EXPORT void* WINAPI CryptAlloc(size_t size);
-CRYPTO_EXPORT void WINAPI CryptFree(void* p);
 
 }  // namespace crypto
 

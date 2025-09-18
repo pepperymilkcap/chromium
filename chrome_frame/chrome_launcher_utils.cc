@@ -10,12 +10,11 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome_frame/chrome_frame_automation.h"
-#include "chrome_frame/policy_settings.h"
 
 namespace {
 
@@ -29,12 +28,12 @@ bool CreateChromeLauncherCommandLine(scoped_ptr<CommandLine>* command_line) {
   bool success = false;
   // The launcher EXE will be in the same directory as the Chrome Frame DLL,
   // so create a full path to it based on this assumption.
-  base::FilePath module_path;
+  FilePath module_path;
   if (PathService::Get(base::FILE_MODULE, &module_path)) {
-    base::FilePath current_dir = module_path.DirName();
-    base::FilePath chrome_launcher = current_dir.Append(
+    FilePath current_dir = module_path.DirName();
+    FilePath chrome_launcher = current_dir.Append(
         chrome_launcher::kLauncherExeBaseName);
-    if (base::PathExists(chrome_launcher)) {
+    if (file_util::PathExists(chrome_launcher)) {
       command_line->reset(new CommandLine(chrome_launcher));
       success = true;
     }
@@ -74,23 +73,14 @@ bool CreateLaunchCommandLine(scoped_ptr<CommandLine>* command_line) {
   // Shortcut for OS versions that don't need the integrity broker.
   if (base::win::GetVersion() < base::win::VERSION_VISTA) {
     command_line->reset(new CommandLine(GetChromeExecutablePath()));
-
-    // When we do not use the Chrome Launcher, we need to add the optional extra
-    // parameters from the group policy here (this is normally done by the
-    // chrome launcher).  We don't do this when we use the launcher as the
-    // optional arguments could trip off sanitization checks and prevent Chrome
-    // from being launched.
-    const CommandLine& additional_params =
-        PolicySettings::GetInstance()->AdditionalLaunchParameters();
-    command_line->get()->AppendArguments(additional_params, false);
     return true;
   }
 
   return CreateChromeLauncherCommandLine(command_line);
 }
 
-base::FilePath GetChromeExecutablePath() {
-  base::FilePath cur_path;
+FilePath GetChromeExecutablePath() {
+  FilePath cur_path;
   PathService::Get(base::DIR_MODULE, &cur_path);
   cur_path = cur_path.Append(chrome::kBrowserProcessExecutableName);
 
@@ -98,7 +88,7 @@ base::FilePath GetChromeExecutablePath() {
   // sub-folder one down from the Chrome executable. If we fail to find
   // chrome.exe in the current path, try looking one up and launching that
   // instead.
-  if (!base::PathExists(cur_path)) {
+  if (!file_util::PathExists(cur_path)) {
     PathService::Get(base::DIR_MODULE, &cur_path);
     cur_path = cur_path.DirName().Append(chrome::kBrowserProcessExecutableName);
   }

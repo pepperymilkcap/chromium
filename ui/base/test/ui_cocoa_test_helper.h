@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_TEST_UI_COCOA_TEST_HELPER_H_
 #define UI_BASE_TEST_UI_COCOA_TEST_HELPER_H_
+#pragma once
 
 #include <set>
 
@@ -106,15 +107,15 @@ class CocoaTest : public PlatformTest {
 // displaying the view to make sure it won't crash, as well as removing it
 // from a window. All tests that work with NSView subclasses and/or
 // NSViewController subclasses should use it.
-#define TEST_VIEW(test_fixture, test_view)                      \
+#define TEST_VIEW(test_fixture, test_view) \
   TEST_F(test_fixture, test_fixture##_TestViewMacroAddRemove) { \
-    base::scoped_nsobject<NSView> view([test_view retain]);     \
-    EXPECT_EQ([test_window() contentView], [view superview]);   \
-    [view removeFromSuperview];                                 \
-    EXPECT_FALSE([view superview]);                             \
-  }                                                             \
-  TEST_F(test_fixture, test_fixture##_TestViewMacroDisplay) {   \
-    [test_view display];                                        \
+    scoped_nsobject<NSView> view([test_view retain]); \
+    EXPECT_EQ([test_window() contentView], [view superview]); \
+    [view removeFromSuperview]; \
+    EXPECT_FALSE([view superview]); \
+  } \
+  TEST_F(test_fixture, test_fixture##_TestViewMacroDisplay) { \
+    [test_view display]; \
   }
 
 // A macro which determines the proper float epsilon for a CGFloat.

@@ -16,7 +16,7 @@ namespace pp {
 
 class CompletionCallback;
 class ImageData;
-class InstanceHandle;
+class Instance;
 class Point;
 class Rect;
 
@@ -37,12 +37,9 @@ class Graphics2D : public Resource {
   /// in the browser, resulting object will be is_null() if the allocation
   /// failed.
   ///
-  /// @param[in] instance The instance with which this resource will be
-  /// associated.
-  ///
+  /// @param[in] instance The module instance.
   /// @param[in] size The size of the 2D graphics context in the browser,
-  /// measured in pixels. See <code>SetScale()</code> for more information.
-  ///
+  /// measured in device pixels.
   /// @param[in] is_always_opaque Set the <code>is_always_opaque</code> flag
   /// to true if you know that you will be painting only opaque data to this
   /// context. This option will disable blending when compositing the module
@@ -52,13 +49,11 @@ class Graphics2D : public Resource {
   /// always be set to 0xFF or there may be painting artifacts. The alpha values
   /// overwrite the destination alpha values without blending when
   /// <code>is_always_opaque</code> is true.
-  Graphics2D(const InstanceHandle& instance,
-             const Size& size,
-             bool is_always_opaque);
+  Graphics2D(Instance* instance, const Size& size, bool is_always_opaque);
 
   /// A destructor that decrements the reference count of a
   /// <code>Graphics2D</code> object made using the previous copy constructor.
-  /// It is possible that the destructor does not totally destroy the underlying
+  /// It is possible that the destructor does not toally destroy the underlying
   /// 2D context if there are outstanding references to it.
   virtual ~Graphics2D();
 
@@ -74,7 +69,7 @@ class Graphics2D : public Resource {
 
   /// Getter function for returning size of the 2D graphics context.
   ///
-  /// @return The size of the 2D graphics context measured in pixels.
+  /// @return The size of the 2D graphics context measured in device pixels.
   const Size& size() const { return size_; }
 
   /// PaintImageData() enqueues a paint command of the given image into
@@ -259,30 +254,6 @@ class Graphics2D : public Resource {
   // TODO(): Add back in the synchronous mode description once we have support
   // for it.
   int32_t Flush(const CompletionCallback& cc);
-
-  /// SetScale() sets the scale factor that will be applied when painting the
-  /// graphics context onto the output device. Typically, if rendering at device
-  /// resolution is desired, the context would be created with the width and
-  /// height scaled up by the view's GetDeviceScale and SetScale called with a
-  /// scale of 1.0 / GetDeviceScale(). For example, if the view resource passed
-  /// to DidChangeView has a rectangle of (w=200, h=100) and a device scale of
-  /// 2.0, one would call Create with a size of (w=400, h=200) and then call
-  /// SetScale with 0.5. One would then treat each pixel in the context as a
-  /// single device pixel.
-  ///
-  /// @param[in] scale The scale to apply when painting.
-  ///
-  /// @return Returns <code>true</code> on success or <code>false</code>
-  /// if the resource is invalid or the scale factor is 0 or less.
-  bool SetScale(float scale);
-
-  /// GetScale() gets the scale factor that will be applied when painting the
-  /// graphics context onto the output device.
-  ///
-  /// @return Returns the scale factor for the graphics context. If the resource
-  /// is invalid, 0.0 will be returned. The default scale for a graphics context
-  /// is 1.0.
-  float GetScale();
 
  private:
   Size size_;

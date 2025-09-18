@@ -4,18 +4,15 @@
 
 // Show a list of all tabs in the same process as this one.
 function init() {
-  chrome.windows.getCurrent({populate: true}, function(currentWindow) {
-    chrome.tabs.query({currentWindow: true, active: true}, function(tabs) {
-      var current = currentWindow.tabs.filter(function(tab) {
-        return tab.active;
-      })[0];
-      chrome.processes.getProcessIdForTab(current.id,
+  chrome.windows.getCurrent(function(currentWindow) {
+    chrome.tabs.getSelected(currentWindow.id, function(selectedTab) {
+      chrome.experimental.processes.getProcessIdForTab(selectedTab.id,
         function(pid) {
           var outputDiv = document.getElementById("tab-list");
           var titleDiv = document.getElementById("title");
           titleDiv.innerHTML = "<b>Tabs in Process " + pid + ":</b>";
-          displayTabInfo(currentWindow.id, current, outputDiv);
-          displaySameProcessTabs(current, pid, outputDiv);
+          displayTabInfo(currentWindow.id, selectedTab, outputDiv);
+          displaySameProcessTabs(selectedTab, pid, outputDiv);
         }
       );
 
@@ -38,7 +35,7 @@ function displaySameProcessTabs(selectedTab, processId, outputDiv) {
 
     // Display tab in list if it is in the same process
     tabs.forEach(function(tab) {
-      chrome.processes.getProcessIdForTab(tab.id,
+      chrome.experimental.processes.getProcessIdForTab(tab.id,
         function(pid) {
           if (pid == processId) {
             displayTabInfo(tab.windowId, tab, outputDiv);

@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
-#include "base/files/scoped_temp_dir.h"
+#include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "chrome/browser/sessions/session_backend.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -35,7 +35,7 @@ class SessionBackendTest : public testing::Test {
   virtual void SetUp() {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     path_ = temp_dir_.path().Append(FILE_PATH_LITERAL("SessionTestDirs"));
-    base::CreateDirectory(path_);
+    file_util::CreateDirectory(path_);
   }
 
   void AssertCommandEqualsData(const TestData& data, SessionCommand* command) {
@@ -46,8 +46,8 @@ class SessionBackendTest : public testing::Test {
   }
 
   // Path used in testing.
-  base::FilePath path_;
-  base::ScopedTempDir temp_dir_;
+  FilePath path_;
+  ScopedTempDir temp_dir_;
 };
 
 TEST_F(SessionBackendTest, SimpleReadWrite) {

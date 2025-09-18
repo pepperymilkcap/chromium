@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_TABS_HOVER_TAB_SELECTOR_H_
 #define CHROME_BROWSER_UI_TABS_HOVER_TAB_SELECTOR_H_
+#pragma once
 
 #include "base/memory/weak_ptr.h"
 

@@ -4,12 +4,15 @@
 
 #ifndef UI_VIEWS_EXAMPLES_THROBBER_EXAMPLE_H_
 #define UI_VIEWS_EXAMPLES_THROBBER_EXAMPLE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "ui/views/examples/example_base.h"
 
 namespace views {
+class View;
+
 namespace examples {
 
 class ThrobberExample : public ExampleBase {

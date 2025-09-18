@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,95 +7,51 @@
 #include <algorithm>
 #include <cmath>
 
-#include "base/strings/string16.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/string16.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system_factory.h"
-#include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
-#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/extension_set.h"
 #include "ui/base/l10n/l10n_util.h"
 
-ExtensionAppProvider::ExtensionAppProvider(
-    AutocompleteProviderListener* listener,
-    Profile* profile)
-    : AutocompleteProvider(listener, profile,
-          AutocompleteProvider::TYPE_EXTENSION_APP) {
-  // Notifications of extensions loading and unloading always come from the
-  // non-incognito profile, but we need to see them regardless, as the incognito
-  // windows can be affected.
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 content::Source<Profile>(profile_->GetOriginalProfile()));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
-                 content::Source<Profile>(profile_->GetOriginalProfile()));
+ExtensionAppProvider::ExtensionAppProvider(ACProviderListener* listener,
+                                           Profile* profile)
+    : AutocompleteProvider(listener, profile, "ExtensionApps") {
+  RegisterForNotifications();
   RefreshAppList();
 }
 
-// static.
-void ExtensionAppProvider::LaunchAppFromOmnibox(
-    const AutocompleteMatch& match,
-    Profile* profile,
-    WindowOpenDisposition disposition) {
-  ExtensionService* service =
-      extensions::ExtensionSystemFactory::GetForProfile(profile)->
-      extension_service();
-  const extensions::Extension* extension =
-      service->GetInstalledApp(match.destination_url);
-  // While the Omnibox popup is open, the extension can be updated, changing
-  // its URL and leaving us with no extension being found. In this case, we
-  // ignore the request.
-  if (!extension)
-    return;
-
-  CoreAppLauncherHandler::RecordAppLaunchType(
-      extension_misc::APP_LAUNCH_OMNIBOX_APP,
-      extension->GetType());
-
-  OpenApplication(AppLaunchParams(profile, extension, disposition));
-}
-
-void ExtensionAppProvider::AddExtensionAppForTesting(
-    const ExtensionApp& extension_app) {
-  extension_apps_.push_back(extension_app);
+void ExtensionAppProvider::AddExtensionAppForTesting(const string16& app_name,
+                                                     const string16& url) {
+  extension_apps_.push_back(std::make_pair(app_name, url));
 }
 
 AutocompleteMatch ExtensionAppProvider::CreateAutocompleteMatch(
     const AutocompleteInput& input,
-    const ExtensionApp& app,
+    const string16& name,
+    const string16& url,
     size_t name_match_index,
     size_t url_match_index) {
   // TODO(finnur): Figure out what type to return here, might want to have
   // the extension icon/a generic icon show up in the Omnibox.
   AutocompleteMatch match(this, 0, false,
-                          AutocompleteMatchType::EXTENSION_APP);
-  match.fill_into_edit =
-      app.should_match_against_launch_url ? app.launch_url : input.text();
-  match.destination_url = GURL(app.launch_url);
-  match.allowed_to_be_default_match = true;
-  match.contents = AutocompleteMatch::SanitizeString(app.name);
+                          AutocompleteMatch::EXTENSION_APP);
+  match.fill_into_edit = url;
+  match.destination_url = GURL(url);
+  match.inline_autocomplete_offset = string16::npos;
+  match.contents = AutocompleteMatch::SanitizeString(name);
   AutocompleteMatch::ClassifyLocationInString(name_match_index,
-      input.text().length(), app.name.length(), ACMatchClassification::NONE,
+      input.text().length(), name.length(), ACMatchClassification::NONE,
       &match.contents_class);
-  if (app.should_match_against_launch_url) {
-    match.description = app.launch_url;
-    AutocompleteMatch::ClassifyLocationInString(url_match_index,
-        input.text().length(), app.launch_url.length(),
-        ACMatchClassification::URL, &match.description_class);
-  }
-  match.relevance = CalculateRelevance(
-      input.type(),
-      input.text().length(),
-      name_match_index != base::string16::npos ?
-          app.name.length() : app.launch_url.length(),
+  match.description = url;
+  AutocompleteMatch::ClassifyLocationInString(url_match_index,
+      input.text().length(), url.length(), ACMatchClassification::URL,
+      &match.description_class);
+  match.relevance = CalculateRelevance(input.type(), input.text().length(),
+      (name_match_index != string16::npos ? name.length() : url.length()),
       match.destination_url);
   return match;
 }
@@ -104,43 +60,33 @@ void ExtensionAppProvider::Start(const AutocompleteInput& input,
                                  bool minimal_changes) {
   matches_.clear();
 
-  if ((input.type() == AutocompleteInput::INVALID) ||
-      (input.type() == AutocompleteInput::FORCED_QUERY))
+  if (input.type() == AutocompleteInput::INVALID)
     return;
 
-  if (input.text().empty())
-    return;
+  if (!input.text().empty()) {
+    for (ExtensionApps::const_iterator app = extension_apps_.begin();
+         app != extension_apps_.end(); ++app) {
+      // See if the input matches this extension application.
+      const string16& name = app->first;
+      string16::const_iterator name_iter = std::search(name.begin(), name.end(),
+          input.text().begin(), input.text().end(),
+          base::CaseInsensitiveCompare<char16>());
+      bool matches_name = name_iter != name.end();
+      const string16& url = app->second;
+      string16::const_iterator url_iter = std::search(url.begin(), url.end(),
+          input.text().begin(), input.text().end(),
+          base::CaseInsensitiveCompare<char16>());
+      bool matches_url = url_iter != url.end() &&
+                         input.type() != AutocompleteInput::FORCED_QUERY;
 
-  for (ExtensionApps::const_iterator app = extension_apps_.begin();
-       app != extension_apps_.end(); ++app) {
-    // See if the input matches this extension application.
-    const base::string16& name = app->name;
-    base::string16::const_iterator name_iter =
-        std::search(name.begin(), name.end(),
-                    input.text().begin(), input.text().end(),
-                    base::CaseInsensitiveCompare<base::char16>());
-    bool matches_name = name_iter != name.end();
-    size_t name_match_index = matches_name ?
-        static_cast<size_t>(name_iter - name.begin()) : base::string16::npos;
-
-    bool matches_url = false;
-    size_t url_match_index = base::string16::npos;
-    if (app->should_match_against_launch_url) {
-      const base::string16& url = app->launch_url;
-      base::string16::const_iterator url_iter =
-          std::search(url.begin(), url.end(),
-                      input.text().begin(), input.text().end(),
-                      base::CaseInsensitiveCompare<base::char16>());
-      matches_url = url_iter != url.end() &&
-          input.type() != AutocompleteInput::FORCED_QUERY;
-      url_match_index = matches_url ?
-          static_cast<size_t>(url_iter - url.begin()) : base::string16::npos;
-    }
-
-    if (matches_name || matches_url) {
-      // We have a match, might be a partial match.
-      matches_.push_back(CreateAutocompleteMatch(
-          input, *app, name_match_index, url_match_index));
+      if (matches_name || matches_url) {
+        // We have a match, might be a partial match.
+        matches_.push_back(CreateAutocompleteMatch(input, name, url,
+            matches_name ?
+                static_cast<size_t>(name_iter - name.begin()) : string16::npos,
+            matches_url ?
+                static_cast<size_t>(url_iter - url.begin()) : string16::npos));
+      }
     }
   }
 }
@@ -149,39 +95,33 @@ ExtensionAppProvider::~ExtensionAppProvider() {
 }
 
 void ExtensionAppProvider::RefreshAppList() {
-  ExtensionService* extension_service =
-      extensions::ExtensionSystemFactory::GetForProfile(profile_)->
-      extension_service();
+  ExtensionService* extension_service = profile_->GetExtensionService();
   if (!extension_service)
     return;  // During testing, there is no extension service.
-  const extensions::ExtensionSet* extensions = extension_service->extensions();
+  const ExtensionSet* extensions = extension_service->extensions();
   extension_apps_.clear();
-  for (extensions::ExtensionSet::const_iterator iter = extensions->begin();
-       iter != extensions->end(); ++iter) {
-    const extensions::Extension* app = iter->get();
-    if (!app->ShouldDisplayInAppLauncher())
-      continue;
-    // Note: Apps that appear in the NTP only are not added here since this
-    // provider is currently only used in the app launcher.
+  for (ExtensionSet::const_iterator app = extensions->begin();
+       app != extensions->end(); ++app) {
+    if ((*app)->is_app() && (*app)->GetFullLaunchURL().is_valid()) {
+      if (profile_->IsOffTheRecord() &&
+          !extension_service->CanLoadInIncognito((*app)))
+        continue;
 
-    if (profile_->IsOffTheRecord() &&
-        !extension_util::CanLoadInIncognito(app, extension_service))
-      continue;
-
-    GURL launch_url = app->is_platform_app() ?
-        app->url() : extensions::AppLaunchInfo::GetFullLaunchURL(app);
-    DCHECK(launch_url.is_valid());
-
-    ExtensionApp extension_app = {
-        base::UTF8ToUTF16(app->name()),
-        base::UTF8ToUTF16(launch_url.spec()),
-        // Only hosted apps have recognizable URLs that users might type in,
-        // packaged apps and hosted apps use chrome-extension:// URLs that are
-        // normally not shown to users.
-        app->is_hosted_app()
-    };
-    extension_apps_.push_back(extension_app);
+      extension_apps_.push_back(
+          std::make_pair(UTF8ToUTF16((*app)->name()),
+                         UTF8ToUTF16((*app)->GetFullLaunchURL().spec())));
+    }
   }
+}
+
+void ExtensionAppProvider::RegisterForNotifications() {
+  // Notifications of extensions loading and unloading always come from the
+  // non-incognito profile, but we need to see them regardless, as the incognito
+  // windows can be affected.
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+                 content::Source<Profile>(profile_->GetOriginalProfile()));
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
+                 content::Source<Profile>(profile_->GetOriginalProfile()));
 }
 
 void ExtensionAppProvider::Observe(int type,
@@ -212,7 +152,7 @@ int ExtensionAppProvider::CalculateRelevance(AutocompleteInput::Type type,
   // provider (boost is between 200-400).
   double type_count_boost = 0;
   HistoryService* const history_service =
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
   history::URLDatabase* url_db = history_service ?
       history_service->InMemoryDatabase() : NULL;
   if (url_db) {

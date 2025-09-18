@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
-#include "base/synchronization/waitable_event.h"
+#include "base/message_loop.h"
 #include "base/test/test_timeouts.h"
+#include "base/time.h"
 #include "base/threading/thread_checker_impl.h"
-#include "base/time/time.h"
+#include "base/synchronization/waitable_event.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -25,7 +24,8 @@ namespace {
 class PostTaskAndReplyTester
     : public base::RefCountedThreadSafe<PostTaskAndReplyTester> {
  public:
-  PostTaskAndReplyTester() : finished_(false), test_event_(false, false) {}
+  PostTaskAndReplyTester() : finished_(false), test_event_(false, false) {
+  }
 
   void RunTest() {
     ASSERT_TRUE(thread_checker_.CalledOnValidThread());
@@ -55,9 +55,6 @@ class PostTaskAndReplyTester
   }
 
  private:
-  friend class base::RefCountedThreadSafe<PostTaskAndReplyTester>;
-  ~PostTaskAndReplyTester() {}
-
   bool finished_;
   WaitableEvent test_event_;
 
@@ -84,27 +81,16 @@ TEST_F(WorkerPoolTest, PostTask) {
   long_test_event.Wait();
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX)
-// Flaky on Windows and Linux (http://crbug.com/130337)
-#define MAYBE_PostTaskAndReply DISABLED_PostTaskAndReply
-#else
-#define MAYBE_PostTaskAndReply PostTaskAndReply
-#endif
-
-TEST_F(WorkerPoolTest, MAYBE_PostTaskAndReply) {
+TEST_F(WorkerPoolTest, PostTaskAndReply) {
   MessageLoop message_loop;
   scoped_refptr<PostTaskAndReplyTester> tester(new PostTaskAndReplyTester());
   tester->RunTest();
 
-  const TimeDelta kMaxDuration = TestTimeouts::tiny_timeout();
+  const TimeDelta kMaxDuration =
+      TimeDelta::FromMilliseconds(TestTimeouts::tiny_timeout_ms());
   TimeTicks start = TimeTicks::Now();
   while (!tester->finished() && TimeTicks::Now() - start < kMaxDuration) {
-#if defined(OS_IOS)
-    // Ensure that the other thread has a chance to run even on a single-core
-    // device.
-    pthread_yield_np();
-#endif
-    RunLoop().RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
   EXPECT_TRUE(tester->finished());
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,14 @@
 #include "net/tools/fetch/http_server_response_info.h"
 
 HttpSession::HttpSession(const std::string& ip, int port)
-    : socket_(HttpListenSocket::CreateAndListen(ip, port, this)) {
+    : ALLOW_THIS_IN_INITIALIZER_LIST(
+          socket_(HttpListenSocket::Listen(ip, port, this))) {
 }
 
 HttpSession::~HttpSession() {
 }
 
-void HttpSession::OnRequest(HttpListenSocket* connection,
+void HttpSession::OnRequest(HttpListenSocket* connection, 
                             HttpServerRequestInfo* info) {
   // TODO(mbelshe):  Make this function more interesting.
 

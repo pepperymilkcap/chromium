@@ -1,22 +1,50 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_handle.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/pickle.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_hglobal.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/clipboard_util_win.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
-#include "url/gurl.h"
 
 namespace ui {
 
+namespace {
+
+OSExchangeData::Provider* CloneProvider(const OSExchangeData& data) {
+  return new OSExchangeDataProviderWin(
+      OSExchangeDataProviderWin::GetIDataObject(data));
+}
+
+}  // namespace
+
+// Test setting/getting using the OSExchangeData API
+TEST(OSExchangeDataTest, StringDataGetAndSet) {
+  OSExchangeData data;
+  std::wstring input = L"I can has cheezburger?";
+  data.SetString(input);
+
+  OSExchangeData data2(CloneProvider(data));
+  std::wstring output;
+  EXPECT_TRUE(data2.GetString(&output));
+  EXPECT_EQ(input, output);
+  std::string url_spec = "http://www.goats.com/";
+  GURL url(url_spec);
+  std::wstring title;
+  EXPECT_FALSE(data2.GetURLAndTitle(&url, &title));
+  // No URLs in |data|, so url should be untouched.
+  EXPECT_EQ(url_spec, url.spec());
+}
+
 // Test getting using the IDataObject COM API
-TEST(OSExchangeDataWinTest, StringDataAccessViaCOM) {
+TEST(OSExchangeDataTest, StringDataAccessViaCOM) {
   OSExchangeData data;
   std::wstring input = L"O hai googlz.";
   data.SetString(input);
@@ -36,7 +64,7 @@ TEST(OSExchangeDataWinTest, StringDataAccessViaCOM) {
 }
 
 // Test setting using the IDataObject COM API
-TEST(OSExchangeDataWinTest, StringDataWritingViaCOM) {
+TEST(OSExchangeDataTest, StringDataWritingViaCOM) {
   OSExchangeData data;
   std::wstring input = L"http://www.google.com/";
 
@@ -61,7 +89,7 @@ TEST(OSExchangeDataWinTest, StringDataWritingViaCOM) {
 
   // Construct a new object with the old object so that we can use our access
   // APIs.
-  OSExchangeData data2(data.provider().Clone());
+  OSExchangeData data2(CloneProvider(data));
   EXPECT_TRUE(data2.HasURL());
   GURL url_from_data;
   std::wstring title;
@@ -71,7 +99,7 @@ TEST(OSExchangeDataWinTest, StringDataWritingViaCOM) {
 }
 
 // Verifies SetData invoked twice with the same data clobbers existing data.
-TEST(OSExchangeDataWinTest, RemoveData) {
+TEST(OSExchangeDataTest, RemoveData) {
   OSExchangeData data;
   std::wstring input = L"http://www.google.com/";
   std::wstring input2 = L"http://www.google2.com/";
@@ -112,7 +140,7 @@ TEST(OSExchangeDataWinTest, RemoveData) {
 
   // Construct a new object with the old object so that we can use our access
   // APIs.
-  OSExchangeData data2(data.provider().Clone());
+  OSExchangeData data2(CloneProvider(data));
   EXPECT_TRUE(data2.HasURL());
   GURL url_from_data;
   std::wstring title;
@@ -120,7 +148,7 @@ TEST(OSExchangeDataWinTest, RemoveData) {
   EXPECT_EQ(GURL(input2).spec(), url_from_data.spec());
 }
 
-TEST(OSExchangeDataWinTest, URLDataAccessViaCOM) {
+TEST(OSExchangeDataTest, URLDataAccessViaCOM) {
   OSExchangeData data;
   GURL url("http://www.google.com/");
   data.SetURL(url, L"");
@@ -136,11 +164,11 @@ TEST(OSExchangeDataWinTest, URLDataAccessViaCOM) {
   EXPECT_EQ(S_OK, com_data->GetData(&format_etc, &medium));
   std::wstring output =
       base::win::ScopedHGlobal<wchar_t>(medium.hGlobal).get();
-  EXPECT_EQ(url.spec(), base::WideToUTF8(output));
+  EXPECT_EQ(url.spec(), WideToUTF8(output));
   ReleaseStgMedium(&medium);
 }
 
-TEST(OSExchangeDataWinTest, MultipleFormatsViaCOM) {
+TEST(OSExchangeDataTest, MultipleFormatsViaCOM) {
   OSExchangeData data;
   std::string url_spec = "http://www.google.com/";
   GURL url(url_spec);
@@ -163,7 +191,7 @@ TEST(OSExchangeDataWinTest, MultipleFormatsViaCOM) {
   EXPECT_EQ(S_OK, com_data->GetData(&url_format_etc, &medium));
   std::wstring output_url =
       base::win::ScopedHGlobal<wchar_t>(medium.hGlobal).get();
-  EXPECT_EQ(url.spec(), base::WideToUTF8(output_url));
+  EXPECT_EQ(url.spec(), WideToUTF8(output_url));
   ReleaseStgMedium(&medium);
 
   // The text is supposed to be the raw text of the URL, _NOT_ the value of
@@ -171,11 +199,11 @@ TEST(OSExchangeDataWinTest, MultipleFormatsViaCOM) {
   EXPECT_EQ(S_OK, com_data->GetData(&text_format_etc, &medium));
   std::wstring output_text =
       base::win::ScopedHGlobal<wchar_t>(medium.hGlobal).get();
-  EXPECT_EQ(url_spec, base::WideToUTF8(output_text));
+  EXPECT_EQ(url_spec, WideToUTF8(output_text));
   ReleaseStgMedium(&medium);
 }
 
-TEST(OSExchangeDataWinTest, EnumerationViaCOM) {
+TEST(OSExchangeDataTest, EnumerationViaCOM) {
   OSExchangeData data;
   data.SetURL(GURL("http://www.google.com/"), L"");
   data.SetString(L"O hai googlz.");
@@ -264,12 +292,27 @@ TEST(OSExchangeDataWinTest, EnumerationViaCOM) {
   }
 }
 
-TEST(OSExchangeDataWinTest, TestURLExchangeFormatsViaCOM) {
+TEST(OSExchangeDataTest, TestURLExchangeFormats) {
   OSExchangeData data;
   std::string url_spec = "http://www.google.com/";
   GURL url(url_spec);
-  std::wstring url_title = L"www.google.com";
+  std::wstring url_title = L"Google";
   data.SetURL(url, url_title);
+  std::wstring output;
+
+  OSExchangeData data2(CloneProvider(data));
+
+  // URL spec and title should match
+  GURL output_url;
+  std::wstring output_title;
+  EXPECT_TRUE(data2.GetURLAndTitle(&output_url, &output_title));
+  EXPECT_EQ(url_spec, output_url.spec());
+  EXPECT_EQ(url_title, output_title);
+  std::wstring output_string;
+
+  // URL should be the raw text response
+  EXPECT_TRUE(data2.GetString(&output_string));
+  EXPECT_EQ(url_spec, WideToUTF8(output_string));
 
   // File contents access via COM
   base::win::ScopedComPtr<IDataObject> com_data(
@@ -293,20 +336,42 @@ TEST(OSExchangeDataWinTest, TestURLExchangeFormatsViaCOM) {
   }
 }
 
-TEST(OSExchangeDataWinTest, FileContents) {
+TEST(OSExchangeDataTest, TestPickledData) {
+  CLIPFORMAT test_cf = RegisterClipboardFormat(L"chrome/test");
+
+  Pickle saved_pickle;
+  saved_pickle.WriteInt(1);
+  saved_pickle.WriteInt(2);
+  OSExchangeData data;
+  data.SetPickledData(test_cf, saved_pickle);
+
+  OSExchangeData copy(CloneProvider(data));
+  EXPECT_TRUE(copy.HasCustomFormat(test_cf));
+
+  Pickle restored_pickle;
+  EXPECT_TRUE(copy.GetPickledData(test_cf, &restored_pickle));
+  void* p_iterator = NULL;
+  int value;
+  EXPECT_TRUE(restored_pickle.ReadInt(&p_iterator, &value));
+  EXPECT_EQ(1, value);
+  EXPECT_TRUE(restored_pickle.ReadInt(&p_iterator, &value));
+  EXPECT_EQ(2, value);
+}
+
+TEST(OSExchangeDataTest, FileContents) {
   OSExchangeData data;
   std::string file_contents("data\0with\0nulls", 15);
-  data.SetFileContents(base::FilePath(L"filename.txt"), file_contents);
+  data.SetFileContents(FilePath(L"filename.txt"), file_contents);
 
-  OSExchangeData copy(data.provider().Clone());
-  base::FilePath filename;
+  OSExchangeData copy(CloneProvider(data));
+  FilePath filename;
   std::string read_contents;
   EXPECT_TRUE(copy.GetFileContents(&filename, &read_contents));
   EXPECT_EQ(L"filename.txt", filename.value());
   EXPECT_EQ(file_contents, read_contents);
 }
 
-TEST(OSExchangeDataWinTest, CFHtml) {
+TEST(OSExchangeDataTest, Html) {
   OSExchangeData data;
   GURL url("http://www.google.com/");
   std::wstring html(
@@ -315,36 +380,41 @@ TEST(OSExchangeDataWinTest, CFHtml) {
       L"</BODY>\n</HTML>");
   data.SetHtml(html, url);
 
+  OSExchangeData copy(CloneProvider(data));
+  std::wstring read_html;
+  EXPECT_TRUE(copy.GetHtml(&read_html, &url));
+  EXPECT_EQ(html, read_html);
+
   // Check the CF_HTML too.
   std::string expected_cf_html(
-      "Version:0.9\r\nStartHTML:0000000139\r\nEndHTML:0000000288\r\n"
-      "StartFragment:0000000175\r\nEndFragment:0000000252\r\n"
+      "Version:0.9\r\nStartHTML:0000000139\r\nEndHTML:0000000292\r\n"
+      "StartFragment:0000000177\r\nEndFragment:0000000254\r\n"
       "SourceURL:http://www.google.com/\r\n<html>\r\n<body>\r\n"
-      "<!--StartFragment-->");
-  expected_cf_html += base::WideToUTF8(html);
-  expected_cf_html.append("<!--EndFragment-->\r\n</body>\r\n</html>");
+      "<!--StartFragment-->\r\n");
+  expected_cf_html += WideToUTF8(html);
+  expected_cf_html.append("\r\n<!--EndFragment-->\r\n</body>\r\n</html>");
 
-  FORMATETC format = Clipboard::GetHtmlFormatType().ToFormatEtc();
   STGMEDIUM medium;
   IDataObject* data_object = OSExchangeDataProviderWin::GetIDataObject(data);
-  EXPECT_EQ(S_OK, data_object->GetData(&format, &medium));
+  EXPECT_EQ(S_OK,
+      data_object->GetData(ui::ClipboardUtil::GetHtmlFormat(), &medium));
   base::win::ScopedHGlobal<char> glob(medium.hGlobal);
   std::string output(glob.get(), glob.Size());
   EXPECT_EQ(expected_cf_html, output);
   ReleaseStgMedium(&medium);
 }
 
-TEST(OSExchangeDataWinTest, SetURLWithMaxPath) {
+TEST(OSExchangeDataTest, SetURLWithMaxPath) {
   OSExchangeData data;
   std::wstring long_title(L'a', MAX_PATH + 1);
   data.SetURL(GURL("http://google.com"), long_title);
 }
 
-TEST(OSExchangeDataWinTest, ProvideURLForPlainTextURL) {
+TEST(OSExchangeDataTest, ProvideURLForPlainTextURL) {
   OSExchangeData data;
   data.SetString(L"http://google.com");
 
-  OSExchangeData data2(data.provider().Clone());
+  OSExchangeData data2(CloneProvider(data));
   ASSERT_TRUE(data2.HasURL());
   GURL read_url;
   std::wstring title;

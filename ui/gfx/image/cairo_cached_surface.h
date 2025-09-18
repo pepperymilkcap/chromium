@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_IMAGE_CAIRO_CACHED_SURFACE_H_
 #define UI_GFX_IMAGE_CAIRO_CACHED_SURFACE_H_
+#pragma once
 
 #include <vector>
 
-#include "ui/gfx/gfx_export.h"
+#include "ui/base/ui_export.h"
 
 typedef struct _GdkDisplay GdkDisplay;
 typedef struct _GdkPixbuf GdkPixbuf;
@@ -27,7 +28,7 @@ namespace gfx {
 // them with a certain XDisplay. Some users of surfaces (CustomDrawButtonBase,
 // for example) own their surfaces instead since they interact with the
 // ResourceBundle instead of the GtkThemeService.
-class GFX_EXPORT CairoCachedSurface {
+class UI_EXPORT CairoCachedSurface {
  public:
   CairoCachedSurface();
   ~CairoCachedSurface();

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #include "base/file_util.h"
 #include "base/format_macros.h"
 #include "base/path_service.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/string_split.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
+#include "base/string_number_conversions.h"
+#include "base/string_tokenizer.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/ftp/ftp_directory_listing_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,7 +24,7 @@ class FtpDirectoryListingParserTest
 };
 
 TEST_P(FtpDirectoryListingParserTest, Parse) {
-  base::FilePath test_dir;
+  FilePath test_dir;
   PathService::Get(base::DIR_SOURCE_ROOT, &test_dir);
   test_dir = test_dir.AppendASCII("net");
   test_dir = test_dir.AppendASCII("data");
@@ -42,8 +42,8 @@ TEST_P(FtpDirectoryListingParserTest, Parse) {
   SCOPED_TRACE(base::StringPrintf("Test case: %s", GetParam()));
 
   std::string test_listing;
-  EXPECT_TRUE(base::ReadFileToString(test_dir.AppendASCII(GetParam()),
-                                     &test_listing));
+  EXPECT_TRUE(file_util::ReadFileToString(test_dir.AppendASCII(GetParam()),
+                                          &test_listing));
 
   std::vector<FtpDirectoryListingEntry> entries;
   EXPECT_EQ(OK, ParseFtpDirectoryListing(test_listing,
@@ -51,33 +51,31 @@ TEST_P(FtpDirectoryListingParserTest, Parse) {
                                          &entries));
 
   std::string expected_listing;
-  ASSERT_TRUE(base::ReadFileToString(
+  ASSERT_TRUE(file_util::ReadFileToString(
                   test_dir.AppendASCII(std::string(GetParam()) + ".expected"),
                   &expected_listing));
 
   std::vector<std::string> lines;
-  base::SplitStringUsingSubstr(expected_listing, "\r\n", &lines);
+  StringTokenizer tokenizer(expected_listing, "\r\n");
+  while (tokenizer.GetNext())
+    lines.push_back(tokenizer.token());
 
-  // Special case for empty listings.
-  if (lines.size() == 1 && lines[0].empty())
-    lines.clear();
+  ASSERT_EQ(8 * entries.size(), lines.size());
 
-  ASSERT_EQ(9 * entries.size(), lines.size());
-
-  for (size_t i = 0; i < lines.size() / 9; i++) {
-    std::string type(lines[9 * i]);
-    std::string name(lines[9 * i + 1]);
+  for (size_t i = 0; i < lines.size() / 8; i++) {
+    std::string type(lines[8 * i]);
+    std::string name(lines[8 * i + 1]);
     int64 size;
-    base::StringToInt64(lines[9 * i + 2], &size);
+    base::StringToInt64(lines[8 * i + 2], &size);
 
     SCOPED_TRACE(base::StringPrintf("Filename: %s", name.c_str()));
 
     int year, month, day_of_month, hour, minute;
-    base::StringToInt(lines[9 * i + 3], &year);
-    base::StringToInt(lines[9 * i + 4], &month);
-    base::StringToInt(lines[9 * i + 5], &day_of_month);
-    base::StringToInt(lines[9 * i + 6], &hour);
-    base::StringToInt(lines[9 * i + 7], &minute);
+    base::StringToInt(lines[8 * i + 3], &year);
+    base::StringToInt(lines[8 * i + 4], &month);
+    base::StringToInt(lines[8 * i + 5], &day_of_month);
+    base::StringToInt(lines[8 * i + 6], &hour);
+    base::StringToInt(lines[8 * i + 7], &minute);
 
     const FtpDirectoryListingEntry& entry = entries[i];
 
@@ -91,7 +89,7 @@ TEST_P(FtpDirectoryListingParserTest, Parse) {
       ADD_FAILURE() << "invalid gold test data: " << type;
     }
 
-    EXPECT_EQ(base::UTF8ToUTF16(name), entry.name);
+    EXPECT_EQ(UTF8ToUTF16(name), entry.name);
     EXPECT_EQ(size, entry.size);
 
     base::Time::Exploded time_exploded;
@@ -138,23 +136,15 @@ const char* kTestFiles[] = {
   "dir-listing-ls-27",  // windows-1251
 
   "dir-listing-ls-28",  // Hylafax FTP server
-  "dir-listing-ls-29",
-  "dir-listing-ls-30",
-  "dir-listing-ls-31",
-  "dir-listing-ls-32",  // busybox
 
   "dir-listing-netware-1",
   "dir-listing-netware-2",
-  "dir-listing-netware-3",  // Spaces in file names.
   "dir-listing-os2-1",
   "dir-listing-vms-1",
   "dir-listing-vms-2",
   "dir-listing-vms-3",
   "dir-listing-vms-4",
   "dir-listing-vms-5",
-  "dir-listing-vms-6",
-  "dir-listing-vms-7",
-  "dir-listing-vms-8",
   "dir-listing-windows-1",
   "dir-listing-windows-2",
 };

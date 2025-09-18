@@ -8,23 +8,96 @@
 
 #include <algorithm>
 
-#include "base/message_loop/message_loop.h"
-#include "ui/aura/client/cursor_client.h"
+#include "base/message_loop.h"
 #include "ui/aura/root_window.h"
-#include "ui/base/cursor/cursor_loader_win.h"
-#include "ui/events/event.h"
-#include "ui/base/view_prop.h"
-#include "ui/gfx/display.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/screen.h"
+#include "ui/aura/event.h"
 
 using std::max;
 using std::min;
 
 namespace aura {
+
 namespace {
 
-bool use_popup_as_root_window_for_test = false;
+const wchar_t* GetCursorId(gfx::NativeCursor native_cursor) {
+  switch (native_cursor) {
+    case kCursorNull:
+      return IDC_ARROW;
+    case kCursorPointer:
+      return IDC_ARROW;
+    case kCursorCross:
+      return IDC_CROSS;
+    case kCursorHand:
+      return IDC_HAND;
+    case kCursorIBeam:
+      return IDC_IBEAM;
+    case kCursorWait:
+      return IDC_WAIT;
+    case kCursorHelp:
+      return IDC_HELP;
+    case kCursorEastResize:
+      return IDC_SIZEWE;
+    case kCursorNorthResize:
+      return IDC_SIZENS;
+    case kCursorNorthEastResize:
+      return IDC_SIZENESW;
+    case kCursorNorthWestResize:
+      return IDC_SIZENWSE;
+    case kCursorSouthResize:
+      return IDC_SIZENS;
+    case kCursorSouthEastResize:
+      return IDC_SIZENWSE;
+    case kCursorSouthWestResize:
+      return IDC_SIZENESW;
+    case kCursorWestResize:
+      return IDC_SIZEWE;
+    case kCursorNorthSouthResize:
+      return IDC_SIZENS;
+    case kCursorEastWestResize:
+      return IDC_SIZEWE;
+    case kCursorNorthEastSouthWestResize:
+      return IDC_SIZENESW;
+    case kCursorNorthWestSouthEastResize:
+      return IDC_SIZENWSE;
+    case kCursorMove:
+      return IDC_SIZEALL;
+    case kCursorProgress:
+      return IDC_APPSTARTING;
+    case kCursorNoDrop:
+      return IDC_NO;
+    case kCursorNotAllowed:
+      return IDC_NO;
+    case kCursorColumnResize:
+    case kCursorRowResize:
+    case kCursorMiddlePanning:
+    case kCursorEastPanning:
+    case kCursorNorthPanning:
+    case kCursorNorthEastPanning:
+    case kCursorNorthWestPanning:
+    case kCursorSouthPanning:
+    case kCursorSouthEastPanning:
+    case kCursorSouthWestPanning:
+    case kCursorWestPanning:
+    case kCursorVerticalText:
+    case kCursorCell:
+    case kCursorContextMenu:
+    case kCursorAlias:
+    case kCursorCopy:
+    case kCursorNone:
+    case kCursorZoomIn:
+    case kCursorZoomOut:
+    case kCursorGrab:
+    case kCursorGrabbing:
+    case kCursorCustom:
+      // TODO(jamescook): Should we use WebKit glue resources for these?
+      // Or migrate those resources to someplace ui/aura can share?
+      NOTIMPLEMENTED();
+      return IDC_ARROW;
+    default:
+      NOTREACHED();
+      return IDC_ARROW;
+  }
+}
 
 }  // namespace
 
@@ -40,23 +113,26 @@ gfx::Size RootWindowHost::GetNativeScreenSize() {
 }
 
 RootWindowHostWin::RootWindowHostWin(const gfx::Rect& bounds)
-    : fullscreen_(false),
-      has_capture_(false),
+    : root_window_(NULL),
+      fullscreen_(false),
       saved_window_style_(0),
       saved_window_ex_style_(0) {
-  if (use_popup_as_root_window_for_test)
-    set_window_style(WS_POPUP);
   Init(NULL, bounds);
   SetWindowText(hwnd(), L"aura::RootWindow!");
-  CreateCompositor(GetAcceleratedWidget());
 }
 
 RootWindowHostWin::~RootWindowHostWin() {
   DestroyWindow(hwnd());
 }
 
-RootWindow* RootWindowHostWin::GetRootWindow() {
-  return delegate_->AsRootWindow();
+bool RootWindowHostWin::Dispatch(const MSG& msg) {
+  TranslateMessage(&msg);
+  DispatchMessage(&msg);
+  return true;
+}
+
+void RootWindowHostWin::SetRootWindow(RootWindow* root_window) {
+  root_window_ = root_window;
 }
 
 gfx::AcceleratedWidget RootWindowHostWin::GetAcceleratedWidget() {
@@ -65,10 +141,6 @@ gfx::AcceleratedWidget RootWindowHostWin::GetAcceleratedWidget() {
 
 void RootWindowHostWin::Show() {
   ShowWindow(hwnd(), SW_SHOWNORMAL);
-}
-
-void RootWindowHostWin::Hide() {
-  NOTIMPLEMENTED();
 }
 
 void RootWindowHostWin::ToggleFullScreen() {
@@ -87,12 +159,12 @@ void RootWindowHostWin::ToggleFullScreen() {
     MONITORINFO mi;
     mi.cbSize = sizeof(mi);
     GetMonitorInfo(MonitorFromWindow(hwnd(), MONITOR_DEFAULTTONEAREST), &mi);
-    target_rect = gfx::Rect(mi.rcMonitor);
+    target_rect = mi.rcMonitor;
   } else {
     fullscreen_ = false;
     SetWindowLong(hwnd(), GWL_STYLE, saved_window_style_);
     SetWindowLong(hwnd(), GWL_EXSTYLE, saved_window_ex_style_);
-    target_rect = gfx::Rect(saved_window_rect_);
+    target_rect = saved_window_rect_;
   }
   SetWindowPos(hwnd(),
                NULL,
@@ -103,23 +175,23 @@ void RootWindowHostWin::ToggleFullScreen() {
                SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
-gfx::Rect RootWindowHostWin::GetBounds() const {
+gfx::Size RootWindowHostWin::GetSize() const {
   RECT r;
   GetClientRect(hwnd(), &r);
-  return gfx::Rect(r);
+  return gfx::Rect(r).size();
 }
 
-void RootWindowHostWin::SetBounds(const gfx::Rect& bounds) {
+void RootWindowHostWin::SetSize(const gfx::Size& size) {
   if (fullscreen_) {
-    saved_window_rect_.right = saved_window_rect_.left + bounds.width();
-    saved_window_rect_.bottom = saved_window_rect_.top + bounds.height();
+    saved_window_rect_.right = saved_window_rect_.left + size.width();
+    saved_window_rect_.bottom = saved_window_rect_.top + size.height();
     return;
   }
   RECT window_rect;
-  window_rect.left = bounds.x();
-  window_rect.top = bounds.y();
-  window_rect.right = bounds.right() ;
-  window_rect.bottom = bounds.bottom();
+  window_rect.left = 0;
+  window_rect.top = 0;
+  window_rect.right = size.width();
+  window_rect.bottom = size.height();
   AdjustWindowRectEx(&window_rect,
                      GetWindowLong(hwnd(), GWL_STYLE),
                      FALSE,
@@ -127,27 +199,11 @@ void RootWindowHostWin::SetBounds(const gfx::Rect& bounds) {
   SetWindowPos(
       hwnd(),
       NULL,
-      window_rect.left,
-      window_rect.top,
+      0,
+      0,
       window_rect.right - window_rect.left,
       window_rect.bottom - window_rect.top,
       SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOREDRAW | SWP_NOREPOSITION);
-
-  // Explicity call NotifyHostResized when the scale has changed because
-  // the window size may not have changed.
-  float current_scale = compositor()->device_scale_factor();
-  float new_scale = gfx::Screen::GetScreenFor(
-      delegate_->AsRootWindow()->window())->GetDisplayNearestWindow(
-          delegate_->AsRootWindow()->window()).device_scale_factor();
-  if (current_scale != new_scale)
-    NotifyHostResized(bounds.size());
-}
-
-gfx::Insets RootWindowHostWin::GetInsets() const {
-  return gfx::Insets();
-}
-
-void RootWindowHostWin::SetInsets(const gfx::Insets& insets) {
 }
 
 gfx::Point RootWindowHostWin::GetLocationOnNativeScreen() const {
@@ -159,45 +215,25 @@ gfx::Point RootWindowHostWin::GetLocationOnNativeScreen() const {
 
 void RootWindowHostWin::SetCursor(gfx::NativeCursor native_cursor) {
   // Custom web cursors are handled directly.
-  if (native_cursor == ui::kCursorCustom)
+  if (native_cursor == kCursorCustom)
     return;
-
-  ui::CursorLoaderWin cursor_loader;
-  cursor_loader.SetPlatformCursor(&native_cursor);
-  ::SetCursor(native_cursor.platform());
+  const wchar_t* cursor_id = GetCursorId(native_cursor);
+  // TODO(jamescook): Support for non-system cursors will require finding
+  // the appropriate module to pass to LoadCursor().
+  ::SetCursor(LoadCursor(NULL, cursor_id));
 }
 
-void RootWindowHostWin::SetCapture() {
-  if (!has_capture_) {
-    has_capture_ = true;
-    ::SetCapture(hwnd());
-  }
+void RootWindowHostWin::ShowCursor(bool show) {
+  // NOTIMPLEMENTED();
 }
 
-void RootWindowHostWin::ReleaseCapture() {
-  if (has_capture_) {
-    has_capture_ = false;
-    ::ReleaseCapture();
-  }
-}
-
-bool RootWindowHostWin::QueryMouseLocation(gfx::Point* location_return) {
-  client::CursorClient* cursor_client =
-      client::GetCursorClient(GetRootWindow()->window());
-  if (cursor_client && !cursor_client->IsMouseEventsEnabled()) {
-    *location_return = gfx::Point(0, 0);
-    return false;
-  }
-
+gfx::Point RootWindowHostWin::QueryMouseLocation() {
   POINT pt;
   GetCursorPos(&pt);
   ScreenToClient(hwnd(), &pt);
-  const gfx::Size size = GetBounds().size();
-  *location_return =
-      gfx::Point(max(0, min(size.width(), static_cast<int>(pt.x))),
-                 max(0, min(size.height(), static_cast<int>(pt.y))));
-  return (pt.x >= 0 && static_cast<int>(pt.x) < size.width() &&
-          pt.y >= 0 && static_cast<int>(pt.y) < size.height());
+  const gfx::Size size = GetSize();
+  return gfx::Point(max(0, min(size.width(), static_cast<int>(pt.x))),
+                    max(0, min(size.height(), static_cast<int>(pt.y))));
 }
 
 bool RootWindowHostWin::ConfineCursorToRootWindow() {
@@ -210,12 +246,10 @@ void RootWindowHostWin::UnConfineCursor() {
   ClipCursor(NULL);
 }
 
-void RootWindowHostWin::OnCursorVisibilityChanged(bool show) {
-  NOTIMPLEMENTED();
-}
-
 void RootWindowHostWin::MoveCursorTo(const gfx::Point& location) {
-  // Deliberately not implemented.
+  POINT pt;
+  ClientToScreen(hwnd(), &pt);
+  SetCursorPos(pt.x, pt.y);
 }
 
 void RootWindowHostWin::PostNativeEvent(const base::NativeEvent& native_event) {
@@ -223,26 +257,17 @@ void RootWindowHostWin::PostNativeEvent(const base::NativeEvent& native_event) {
       hwnd(), native_event.message, native_event.wParam, native_event.lParam);
 }
 
-void RootWindowHostWin::OnDeviceScaleFactorChanged(
-    float device_scale_factor) {
-  NOTIMPLEMENTED();
-}
-
-void RootWindowHostWin::PrepareForShutdown() {
-  NOTIMPLEMENTED();
-}
-
 void RootWindowHostWin::OnClose() {
   // TODO: this obviously shouldn't be here.
-  base::MessageLoopForUI::current()->Quit();
+  MessageLoopForUI::current()->Quit();
 }
 
 LRESULT RootWindowHostWin::OnKeyEvent(UINT message,
                                       WPARAM w_param,
                                       LPARAM l_param) {
   MSG msg = { hwnd(), message, w_param, l_param };
-  ui::KeyEvent keyev(msg, message == WM_CHAR);
-  SetMsgHandled(delegate_->OnHostKeyEvent(&keyev));
+  KeyEvent keyev(msg, message == WM_CHAR);
+  SetMsgHandled(root_window_->DispatchKeyEvent(&keyev));
   return 0;
 }
 
@@ -251,60 +276,24 @@ LRESULT RootWindowHostWin::OnMouseRange(UINT message,
                                         LPARAM l_param) {
   MSG msg = { hwnd(), message, w_param, l_param, 0,
               { GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param) } };
-  ui::MouseEvent event(msg);
+  MouseEvent event(msg);
   bool handled = false;
   if (!(event.flags() & ui::EF_IS_NON_CLIENT))
-    handled = delegate_->OnHostMouseEvent(&event);
+    handled = root_window_->DispatchMouseEvent(&event);
   SetMsgHandled(handled);
   return 0;
 }
 
-LRESULT RootWindowHostWin::OnCaptureChanged(UINT message,
-                                            WPARAM w_param,
-                                            LPARAM l_param) {
-  if (has_capture_) {
-    has_capture_ = false;
-    delegate_->OnHostLostWindowCapture();
-  }
-  return 0;
-}
-
-LRESULT RootWindowHostWin::OnNCActivate(UINT message,
-                                        WPARAM w_param,
-                                        LPARAM l_param) {
-  if (!!w_param)
-    delegate_->OnHostActivated();
-  return DefWindowProc(hwnd(), message, w_param, l_param);
-}
-
-void RootWindowHostWin::OnMove(const CPoint& point) {
-  if (delegate_)
-    delegate_->OnHostMoved(gfx::Point(point.x, point.y));
-}
-
 void RootWindowHostWin::OnPaint(HDC dc) {
-  gfx::Rect damage_rect;
-  RECT update_rect = {0};
-  if (GetUpdateRect(hwnd(), &update_rect, FALSE))
-    damage_rect = gfx::Rect(update_rect);
-  compositor()->ScheduleRedrawRect(damage_rect);
+  root_window_->Draw();
   ValidateRect(hwnd(), NULL);
 }
 
 void RootWindowHostWin::OnSize(UINT param, const CSize& size) {
   // Minimizing resizes the window to 0x0 which causes our layout to go all
   // screwy, so we just ignore it.
-  if (delegate_ && param != SIZE_MINIMIZED)
-    NotifyHostResized(gfx::Size(size.cx, size.cy));
+  if (param != SIZE_MINIMIZED)
+    root_window_->OnHostResized(gfx::Size(size.cx, size.cy));
 }
-
-namespace test {
-
-// static
-void SetUsePopupAsRootWindowForTest(bool use) {
-  use_popup_as_root_window_for_test = use;
-}
-
-}  // namespace test
 
 }  // namespace aura

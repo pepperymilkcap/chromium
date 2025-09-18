@@ -1,21 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_SHORTCUTS_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_SHORTCUTS_DATABASE_H_
+#pragma once
 
 #include <map>
 #include <string>
 #include <vector>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/history/shortcuts_backend.h"
+#include "base/string16.h"
+#include "chrome/browser/autocomplete/shortcuts_provider_shortcut.h"
+#include "googleurl/src/gurl.h"
 #include "sql/connection.h"
-#include "url/gurl.h"
 
 namespace history {
 
@@ -39,17 +40,16 @@ namespace history {
 //   number_of_hits      Number of times that the entry has been selected.
 class ShortcutsDatabase : public base::RefCountedThreadSafe<ShortcutsDatabase> {
  public:
-  typedef std::map<std::string, ShortcutsBackend::Shortcut> GuidToShortcutMap;
-
-  explicit ShortcutsDatabase(const base::FilePath& database_path);
+  explicit ShortcutsDatabase(const FilePath& folder_path);
+  virtual ~ShortcutsDatabase();
 
   bool Init();
 
   // Adds the ShortcutsProvider::Shortcut to the database.
-  bool AddShortcut(const ShortcutsBackend::Shortcut& shortcut);
+  bool AddShortcut(const shortcuts_provider::Shortcut& shortcut);
 
   // Updates timing and selection count for the ShortcutsProvider::Shortcut.
-  bool UpdateShortcut(const ShortcutsBackend::Shortcut& shortcut);
+  bool UpdateShortcut(const shortcuts_provider::Shortcut& shortcut);
 
   // Deletes the ShortcutsProvider::Shortcuts with the id.
   bool DeleteShortcutsWithIds(const std::vector<std::string>& shortcut_ids);
@@ -61,10 +61,13 @@ class ShortcutsDatabase : public base::RefCountedThreadSafe<ShortcutsDatabase> {
   bool DeleteAllShortcuts();
 
   // Loads all of the shortcuts.
-  void LoadShortcuts(GuidToShortcutMap* shortcuts);
+  bool LoadShortcuts(
+      std::map<std::string, shortcuts_provider::Shortcut>* shortcuts);
 
  private:
-  friend class base::RefCountedThreadSafe<ShortcutsDatabase>;
+  // Ensures that the table is present.
+  bool EnsureTable();
+
   friend class ShortcutsDatabaseTest;
   FRIEND_TEST_ALL_PREFIXES(ShortcutsDatabaseTest, AddShortcut);
   FRIEND_TEST_ALL_PREFIXES(ShortcutsDatabaseTest, UpdateShortcut);
@@ -72,16 +75,11 @@ class ShortcutsDatabase : public base::RefCountedThreadSafe<ShortcutsDatabase> {
   FRIEND_TEST_ALL_PREFIXES(ShortcutsDatabaseTest, DeleteShortcutsWithUrl);
   FRIEND_TEST_ALL_PREFIXES(ShortcutsDatabaseTest, LoadShortcuts);
 
-  virtual ~ShortcutsDatabase();
-
-  // Ensures that the table is present.
-  bool EnsureTable();
-
   // The sql database. Not valid until Init is called.
   sql::Connection db_;
-  base::FilePath database_path_;
+  FilePath database_path_;
 
-  static const base::FilePath::CharType kShortcutsDatabaseName[];
+  static const FilePath::CharType kShortcutsDatabaseName[];
 
   DISALLOW_COPY_AND_ASSIGN(ShortcutsDatabase);
 };

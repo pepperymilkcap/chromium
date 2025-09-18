@@ -9,7 +9,7 @@
 namespace browser_sync {
 
 ChangeProcessorMock::ChangeProcessorMock()
-    : ChangeProcessor(this) {}
+    : ChangeProcessor(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
 
 ChangeProcessorMock::~ChangeProcessorMock() {}
 

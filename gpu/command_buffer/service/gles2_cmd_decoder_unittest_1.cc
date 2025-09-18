@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_base.h"
@@ -11,7 +12,6 @@
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gl/gl_mock.h"
 
 using ::gfx::MockGLInterface;
 using ::testing::_;
@@ -27,23 +27,18 @@ using ::testing::StrEq;
 namespace gpu {
 namespace gles2 {
 
-namespace {
-void ShaderCacheCb(const std::string& key, const std::string& shader) {
-}
-}  // namespace
-
 class GLES2DecoderTest1 : public GLES2DecoderTestBase {
  public:
   GLES2DecoderTest1() { }
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::GenerateMipmap, 0>(
+void GLES2DecoderTestBase::SpecializedSetup<GenerateMipmap, 0>(
     bool valid) {
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   DoTexImage2D(
       GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-      kSharedMemoryId, kSharedMemoryOffset);
+      0, 0);
   if (valid) {
     EXPECT_CALL(*gl_, TexParameteri(
         GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST))
@@ -53,15 +48,11 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::GenerateMipmap, 0>(
         GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR))
         .Times(1)
         .RetiresOnSaturation();
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
   }
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::CheckFramebufferStatus, 0>(
+void GLES2DecoderTestBase::SpecializedSetup<CheckFramebufferStatus, 0>(
     bool /* valid */) {
   // Give it a valid framebuffer.
   DoBindRenderbuffer(GL_RENDERBUFFER, client_renderbuffer_id_,
@@ -76,14 +67,14 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::CheckFramebufferStatus, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::Clear, 0>(bool valid) {
+void GLES2DecoderTestBase::SpecializedSetup<Clear, 0>(bool valid) {
   if (valid) {
     SetupExpectationsForApplyingDefaultDirtyState();
   }
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::ColorMask, 0>(
+void GLES2DecoderTestBase::SpecializedSetup<ColorMask, 0>(
     bool /* valid */) {
   // We bind a framebuffer color the colormask test since the framebuffer
   // will be considered RGB.
@@ -92,7 +83,7 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::ColorMask, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::CopyTexImage2D, 0>(
+void GLES2DecoderTestBase::SpecializedSetup<CopyTexImage2D, 0>(
     bool valid) {
   if (valid) {
     EXPECT_CALL(*gl_, GetError())
@@ -103,8 +94,7 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::CopyTexImage2D, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::CopyTexSubImage2D, 0>(
-    bool valid) {
+void GLES2DecoderTestBase::SpecializedSetup<CopyTexSubImage2D, 0>(bool valid) {
   if (valid) {
     DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
     DoTexImage2D(
@@ -114,20 +104,20 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::CopyTexSubImage2D, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::DetachShader, 0>(bool valid) {
+void GLES2DecoderTestBase::SpecializedSetup<DetachShader, 0>(bool valid) {
   if (valid) {
     EXPECT_CALL(*gl_,
                 AttachShader(kServiceProgramId, kServiceShaderId))
         .Times(1)
         .RetiresOnSaturation();
-    cmds::AttachShader attach_cmd;
+    AttachShader attach_cmd;
     attach_cmd.Init(client_program_id_, client_shader_id_);
     EXPECT_EQ(error::kNoError, ExecuteCmd(attach_cmd));
   }
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::FramebufferRenderbuffer, 0>(
+void GLES2DecoderTestBase::SpecializedSetup<FramebufferRenderbuffer, 0>(
     bool valid) {
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
@@ -140,7 +130,7 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::FramebufferRenderbuffer, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::FramebufferTexture2D, 0>(
+void GLES2DecoderTestBase::SpecializedSetup<FramebufferTexture2D, 0>(
     bool valid) {
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
@@ -153,43 +143,21 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::FramebufferTexture2D, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<
-    cmds::GetBufferParameteriv, 0>(bool /* valid */) {
-  DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
-};
-
-template <>
-void GLES2DecoderTestBase::SpecializedSetup<
-    cmds::GetFramebufferAttachmentParameteriv, 0>(bool /* valid */) {
+void GLES2DecoderTestBase::SpecializedSetup<GetFramebufferAttachmentParameteriv,
+                                            0>(bool /* valid */) {
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<
-    cmds::GetRenderbufferParameteriv, 0>(
-        bool /* valid */) {
+void GLES2DecoderTestBase::SpecializedSetup<GetRenderbufferParameteriv, 0>(
+    bool /* valid */) {
   DoBindRenderbuffer(GL_RENDERBUFFER, client_renderbuffer_id_,
                     kServiceRenderbufferId);
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::GetProgramiv, 0>(
-    bool valid) {
-  if (valid) {
-    // GetProgramiv calls ClearGLError then GetError to make sure
-    // it actually got a value so it can report correctly to the client.
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-  }
-}
-
-template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::GetProgramInfoLog, 0>(
+void GLES2DecoderTestBase::SpecializedSetup<GetProgramInfoLog, 0>(
     bool /* valid */) {
   const GLuint kClientVertexShaderId = 5001;
   const GLuint kServiceVertexShaderId = 6001;
@@ -201,8 +169,8 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::GetProgramInfoLog, 0>(
   DoCreateShader(
       GL_FRAGMENT_SHADER, kClientFragmentShaderId, kServiceFragmentShaderId);
 
-  GetShader(kClientVertexShaderId)->SetStatus(true, "", NULL);
-  GetShader(kClientFragmentShaderId)->SetStatus(true, "", NULL);
+  GetShaderInfo(kClientVertexShaderId)->SetStatus(true, "", NULL);
+  GetShaderInfo(kClientFragmentShaderId)->SetStatus(true, "", NULL);
 
   InSequence dummy;
   EXPECT_CALL(*gl_,
@@ -241,35 +209,21 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::GetProgramInfoLog, 0>(
       GetProgramiv(kServiceProgramId, GL_ACTIVE_UNIFORM_MAX_LENGTH, _))
       .WillOnce(SetArgumentPointee<2>(0));
 
-  Program* program = GetProgram(client_program_id_);
-  ASSERT_TRUE(program != NULL);
+  ProgramManager::ProgramInfo* info = GetProgramInfo(client_program_id_);
+  ASSERT_TRUE(info != NULL);
 
-  cmds::AttachShader attach_cmd;
+  AttachShader attach_cmd;
   attach_cmd.Init(client_program_id_, kClientVertexShaderId);
   EXPECT_EQ(error::kNoError, ExecuteCmd(attach_cmd));
 
   attach_cmd.Init(client_program_id_, kClientFragmentShaderId);
   EXPECT_EQ(error::kNoError, ExecuteCmd(attach_cmd));
 
-  program->Link(NULL, NULL, NULL, NULL, base::Bind(&ShaderCacheCb));
+  info->Link();
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::GetVertexAttribfv, 0>(
-    bool valid) {
-  DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
-  DoVertexAttribPointer(1, 1, GL_FLOAT, 0, 0);
-  if (valid) {
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-  }
-};
-
-template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::GetVertexAttribiv, 0>(
-    bool valid) {
+void GLES2DecoderTestBase::SpecializedSetup<GetVertexAttribfv, 0>(bool valid) {
   DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
   DoVertexAttribPointer(1, 1, GL_FLOAT, 0, 0);
   if (valid) {

@@ -6,8 +6,9 @@
 
 #ifndef CHROME_BROWSER_CONTENT_SETTINGS_CONTENT_SETTINGS_PROVIDER_H_
 #define CHROME_BROWSER_CONTENT_SETTINGS_CONTENT_SETTINGS_PROVIDER_H_
+#pragma once
 
-#define NO_RESOURCE_IDENTIFIER std::string()
+#define NO_RESOURCE_IDENTIFIER ""
 
 #include <string>
 #include <vector>
@@ -54,7 +55,7 @@ class ProviderInterface {
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
-      base::Value* value) = 0;
+      Value* value) = 0;
 
   // Resets all content settings for the given |content_type| and empty resource
   // identifier to CONTENT_SETTING_DEFAULT.

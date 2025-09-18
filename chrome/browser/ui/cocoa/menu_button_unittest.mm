@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/clickhold_button_cell.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
 
 @interface MenuButtonTestDelegate : NSObject<NSMenuDelegate> {
  @private
-  base::scoped_nsobject<NSMenu> menu_;
+  scoped_nsobject<NSMenu> menu_;
   BOOL open_;
   BOOL didOpen_;
 }
@@ -60,10 +61,10 @@ class MenuButtonTest : public CocoaTest {
  public:
   MenuButtonTest() {
     NSRect frame = NSMakeRect(0, 0, 50, 30);
-    base::scoped_nsobject<MenuButton> button(
+    scoped_nsobject<MenuButton> button(
         [[MenuButton alloc] initWithFrame:frame]);
     button_ = button.get();
-    base::scoped_nsobject<ClickHoldButtonCell> cell(
+    scoped_nsobject<ClickHoldButtonCell> cell(
         [[ClickHoldButtonCell alloc] initTextCell:@"Testing"]);
     [button_ setCell:cell.get()];
     [[test_window() contentView] addSubview:button_];
@@ -102,7 +103,7 @@ TEST_VIEW(MenuButtonTest, button_);
 
 // Test assigning a menu, again mostly to ensure nothing leaks or crashes.
 TEST_F(MenuButtonTest, MenuAssign) {
-  base::scoped_nsobject<NSMenu> menu(CreateMenu());
+  scoped_nsobject<NSMenu> menu(CreateMenu());
   ASSERT_TRUE(menu.get());
 
   [button_ setAttachedMenu:menu];
@@ -110,10 +111,10 @@ TEST_F(MenuButtonTest, MenuAssign) {
 }
 
 TEST_F(MenuButtonTest, OpenOnClick) {
-  base::scoped_nsobject<NSMenu> menu(CreateMenu());
+  scoped_nsobject<NSMenu> menu(CreateMenu());
   ASSERT_TRUE(menu.get());
 
-  base::scoped_nsobject<MenuButtonTestDelegate> delegate(
+  scoped_nsobject<MenuButtonTestDelegate> delegate(
       [[MenuButtonTestDelegate alloc] initWithMenu:menu.get()]);
   ASSERT_TRUE(delegate.get());
 
@@ -132,10 +133,10 @@ TEST_F(MenuButtonTest, OpenOnClick) {
 }
 
 TEST_F(MenuButtonTest, OpenOnRightClick) {
-  base::scoped_nsobject<NSMenu> menu(CreateMenu());
+  scoped_nsobject<NSMenu> menu(CreateMenu());
   ASSERT_TRUE(menu.get());
 
-  base::scoped_nsobject<MenuButtonTestDelegate> delegate(
+  scoped_nsobject<MenuButtonTestDelegate> delegate(
       [[MenuButtonTestDelegate alloc] initWithMenu:menu.get()]);
   ASSERT_TRUE(delegate.get());
 
@@ -157,10 +158,10 @@ TEST_F(MenuButtonTest, OpenOnRightClick) {
 }
 
 TEST_F(MenuButtonTest, DontOpenOnRightClickWithoutSetRightClick) {
-  base::scoped_nsobject<NSMenu> menu(CreateMenu());
+  scoped_nsobject<NSMenu> menu(CreateMenu());
   ASSERT_TRUE(menu.get());
 
-  base::scoped_nsobject<MenuButtonTestDelegate> delegate(
+  scoped_nsobject<MenuButtonTestDelegate> delegate(
       [[MenuButtonTestDelegate alloc] initWithMenu:menu.get()]);
   ASSERT_TRUE(delegate.get());
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,18 +53,12 @@ const char* kFinalStatusNames[] = {
   "Duplicate",
   "OpenURL",
   "WouldHaveBeenUsed",
-  "Register Protocol Handler",
-  "Creating Audio Stream",
-  "Page Being Captured",
-  "Bad Deferred Redirect",
-  "Navigation Uncommitted",
-  "New Navigation Entry",
   "Max",
 };
 COMPILE_ASSERT(arraysize(kFinalStatusNames) == FINAL_STATUS_MAX + 1,
                PrerenderFinalStatus_name_count_mismatch);
 
-}  // namespace
+}
 
 const char* NameFromFinalStatus(FinalStatus final_status) {
   DCHECK_LT(static_cast<unsigned int>(final_status),

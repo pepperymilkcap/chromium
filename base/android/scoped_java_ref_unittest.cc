@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,26 +15,24 @@ namespace {
 int g_local_refs = 0;
 int g_global_refs = 0;
 
-const JNINativeInterface* g_previous_functions;
-
 jobject NewGlobalRef(JNIEnv* env, jobject obj) {
   ++g_global_refs;
-  return g_previous_functions->NewGlobalRef(env, obj);
+  return AttachCurrentThread()->NewGlobalRef(obj);
 }
 
 void DeleteGlobalRef(JNIEnv* env, jobject obj) {
   --g_global_refs;
-  return g_previous_functions->DeleteGlobalRef(env, obj);
+  return AttachCurrentThread()->DeleteGlobalRef(obj);
 }
 
 jobject NewLocalRef(JNIEnv* env, jobject obj) {
   ++g_local_refs;
-  return g_previous_functions->NewLocalRef(env, obj);
+  return AttachCurrentThread()->NewLocalRef(obj);
 }
 
 void DeleteLocalRef(JNIEnv* env, jobject obj) {
   --g_local_refs;
-  return g_previous_functions->DeleteLocalRef(env, obj);
+  return AttachCurrentThread()->DeleteLocalRef(obj);
 }
 }  // namespace
 
@@ -44,30 +42,27 @@ class ScopedJavaRefTest : public testing::Test {
     g_local_refs = 0;
     g_global_refs = 0;
     JNIEnv* env = AttachCurrentThread();
-    g_previous_functions = env->functions;
-    hooked_functions = *g_previous_functions;
-    env->functions = &hooked_functions;
-    // We inject our own functions in JNINativeInterface so we can keep track
-    // of the reference counting ourselves.
-    hooked_functions.NewGlobalRef = &NewGlobalRef;
-    hooked_functions.DeleteGlobalRef = &DeleteGlobalRef;
-    hooked_functions.NewLocalRef = &NewLocalRef;
-    hooked_functions.DeleteLocalRef = &DeleteLocalRef;
+    counting_env = *env;
+    counting_functions = *counting_env.functions;
+    counting_functions.NewGlobalRef = &NewGlobalRef;
+    counting_functions.DeleteGlobalRef = &DeleteGlobalRef;
+    counting_functions.NewLocalRef = &NewLocalRef;
+    counting_functions.DeleteLocalRef = &DeleteLocalRef;
+    counting_env.functions = &counting_functions;
   }
 
-  virtual void TearDown() {
-    JNIEnv* env = AttachCurrentThread();
-    env->functions = g_previous_functions;
-  }
-  // From JellyBean release, the instance of this struct provided in JNIEnv is
-  // read-only, so we deep copy it to allow individual functions to be hooked.
-  JNINativeInterface hooked_functions;
+  // Special JNI env configured in SetUp to count in and out all local & global
+  // reference instances. Be careful to only use this with the ScopedJavaRef
+  // classes under test, else it's easy to get system references counted in
+  // here too.
+  JNIEnv counting_env;
+  JNINativeInterface counting_functions;
 };
 
 // The main purpose of this is testing the various conversions compile.
 TEST_F(ScopedJavaRefTest, Conversions) {
   JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> str = ConvertUTF8ToJavaString(env, "string");
+  ScopedJavaLocalRef<jstring> str(env, ConvertUTF8ToJavaString(env, "string"));
   ScopedJavaGlobalRef<jstring> global(str);
   {
     ScopedJavaGlobalRef<jobject> global_obj(str);
@@ -79,27 +74,24 @@ TEST_F(ScopedJavaRefTest, Conversions) {
   }
   global.Reset(str);
   const JavaRef<jstring>& str_ref = str;
-  EXPECT_EQ("string", ConvertJavaStringToUTF8(str_ref));
+  EXPECT_EQ("string", ConvertJavaStringToUTF8(env, str_ref.obj()));
   str.Reset();
 }
 
 TEST_F(ScopedJavaRefTest, RefCounts) {
-  JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> str;
-  // The ConvertJavaStringToUTF8 below creates a new string that would normally
-  // return a local ref. We simulate that by starting the g_local_refs count at
-  // 1.
-  g_local_refs = 1;
-  str.Reset(ConvertUTF8ToJavaString(env, "string"));
+  str.Reset(&counting_env, ConvertUTF8ToJavaString(AttachCurrentThread(),
+                                                   "string"));
   EXPECT_EQ(1, g_local_refs);
   EXPECT_EQ(0, g_global_refs);
+
   {
     ScopedJavaGlobalRef<jstring> global_str(str);
     ScopedJavaGlobalRef<jobject> global_obj(global_str);
     EXPECT_EQ(1, g_local_refs);
     EXPECT_EQ(2, g_global_refs);
 
-    ScopedJavaLocalRef<jstring> str2(env, str.Release());
+    ScopedJavaLocalRef<jstring> str2(&counting_env, str.Release());
     EXPECT_EQ(1, g_local_refs);
     {
       ScopedJavaLocalRef<jstring> str3(str2);

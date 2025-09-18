@@ -8,88 +8,78 @@
 #ifndef REMOTING_CLIENT_PLUGIN_PEPPER_VIEW_H_
 #define REMOTING_CLIENT_PLUGIN_PEPPER_VIEW_H_
 
-#include <list>
+#include <vector>
 
-#include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "media/base/video_frame.h"
 #include "ppapi/cpp/graphics_2d.h"
-#include "ppapi/cpp/view.h"
 #include "ppapi/cpp/point.h"
-#include "ppapi/utility/completion_callback_factory.h"
+#include "remoting/client/chromoting_view.h"
 #include "remoting/client/frame_consumer.h"
-#include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "third_party/webrtc/modules/desktop_capture/desktop_region.h"
-
-namespace base {
-class Time;
-}  // namespace base
-
-namespace webrtc {
-class DesktopFrame;
-}  // namespace webrtc
 
 namespace remoting {
 
 class ChromotingInstance;
 class ClientContext;
-class FrameProducer;
 
-class PepperView : public FrameConsumer {
+class PepperView : public ChromotingView,
+                   public FrameConsumer {
  public:
-  // Constructs a PepperView for the |instance|. The |instance| and |context|
-  // must outlive this class.
+  // Constructs a PepperView for the |instance|. The |instance| and
+  // |context| must outlive this class.
   PepperView(ChromotingInstance* instance, ClientContext* context);
   virtual ~PepperView();
 
-  // Allocates buffers and passes them to the FrameProducer to render into until
-  // the maximum number of buffers are in-flight.
-  void Initialize(FrameProducer* producer);
+  // ChromotingView implementation.
+  virtual bool Initialize() OVERRIDE;
+  virtual void TearDown() OVERRIDE;
+  virtual void Paint() OVERRIDE;
+  virtual void SetSolidFill(uint32 color) OVERRIDE;
+  virtual void UnsetSolidFill() OVERRIDE;
+  virtual void SetConnectionState(
+      protocol::ConnectionToHost::State state,
+      protocol::ConnectionToHost::Error error) OVERRIDE;
 
   // FrameConsumer implementation.
-  virtual void ApplyBuffer(const webrtc::DesktopSize& view_size,
-                           const webrtc::DesktopRect& clip_area,
-                           webrtc::DesktopFrame* buffer,
-                           const webrtc::DesktopRegion& region) OVERRIDE;
-  virtual void ReturnBuffer(webrtc::DesktopFrame* buffer) OVERRIDE;
-  virtual void SetSourceSize(const webrtc::DesktopSize& source_size,
-                             const webrtc::DesktopVector& dpi) OVERRIDE;
-  virtual PixelFormat GetPixelFormat() OVERRIDE;
+  virtual void AllocateFrame(media::VideoFrame::Format format,
+                             const SkISize& size,
+                             scoped_refptr<media::VideoFrame>* frame_out,
+                             const base::Closure& done) OVERRIDE;
+  virtual void ReleaseFrame(media::VideoFrame* frame) OVERRIDE;
+  virtual void OnPartialFrameOutput(media::VideoFrame* frame,
+                                    SkRegion* region,
+                                    const base::Closure& done) OVERRIDE;
 
-  // Updates the PepperView's size & clipping area, taking into account the
-  // DIP-to-device scale factor.
-  void SetView(const pp::View& view);
+  // Sets the display size of this view.  Returns true if plugin size has
+  // changed, false otherwise.
+  bool SetViewSize(const SkISize& plugin_size);
 
-  // Returns the dimensions of the most recently displayed frame, in pixels.
-  const webrtc::DesktopSize& get_source_size() const {
-    return source_size_;
+  // Return the client view and original host dimensions.
+  const SkISize& get_view_size() const {
+    return view_size_;
   }
-
-  // Return the dimensions of the view in Density Independent Pixels (DIPs).
-  // Note that there may be multiple device pixels per DIP.
-  const webrtc::DesktopSize& get_view_size_dips() const {
-    return dips_size_;
+  const SkISize& get_host_size() const {
+    return host_size_;
   }
 
  private:
-  // Allocates a new frame buffer to supply to the FrameProducer to render into.
-  // Returns NULL if the maximum number of buffers has already been allocated.
-  webrtc::DesktopFrame* AllocateBuffer();
+  void OnPaintDone(base::Time paint_start);
 
-  // Frees a frame buffer previously allocated by AllocateBuffer.
-  void FreeBuffer(webrtc::DesktopFrame* buffer);
+  // Set the dimension of the entire host screen.
+  void SetHostSize(const SkISize& host_size);
 
-  // Renders the parts of |buffer| identified by |region| to the view.  If the
-  // clip area of the view has changed since the buffer was generated then
-  // FrameProducer is supplied the missed parts of |region|.  The FrameProducer
-  // will be supplied a new buffer when FlushBuffer() completes.
-  void FlushBuffer(const webrtc::DesktopRect& clip_area,
-                   webrtc::DesktopFrame* buffer,
-                   const webrtc::DesktopRegion& region);
+  void PaintFrame(media::VideoFrame* frame, const SkRegion& region);
 
-  // Handles completion of FlushBuffer(), triggering a new buffer to be
-  // returned to FrameProducer for rendering.
-  void OnFlushDone(int result,
-                   const base::Time& paint_start,
-                   webrtc::DesktopFrame* buffer);
+  // Render the rectangle of |frame| to the backing store.
+  // Returns true if this rectangle is not clipped.
+  bool PaintRect(media::VideoFrame* frame, const SkIRect& rect);
+
+  // Blanks out a rectangle in an image.
+  void BlankRect(pp::ImageData& image_data, const pp::Rect& rect);
+
+  // Perform a flush on the graphics context.
+  void FlushGraphics(base::Time paint_start);
 
   // Reference to the creating plugin instance. Needed for interacting with
   // pepper.  Marking explicitly as const since it must be initialized at
@@ -101,49 +91,23 @@ class PepperView : public FrameConsumer {
 
   pp::Graphics2D graphics2d_;
 
-  FrameProducer* producer_;
+  // A backing store that saves the current desktop image.
+  scoped_ptr<pp::ImageData> backing_store_;
 
-  // List of allocated image buffers.
-  std::list<webrtc::DesktopFrame*> buffers_;
+  // True if there is pending paint commands in Pepper's queue. This is set to
+  // true if the last flush returns a PP_ERROR_INPROGRESS error.
+  bool flush_blocked_;
 
-  // Queued buffer to paint, with clip area and dirty region in device pixels.
-  webrtc::DesktopFrame* merge_buffer_;
-  webrtc::DesktopRect merge_clip_area_;
-  webrtc::DesktopRegion merge_region_;
+  // The size of the plugin element.
+  SkISize view_size_;
 
-  // View size in Density Independent Pixels (DIPs).
-  webrtc::DesktopSize dips_size_;
+  // The size of the host screen.
+  SkISize host_size_;
 
-  // Scale factor from DIPs to device pixels.
-  float dips_to_device_scale_;
+  bool is_static_fill_;
+  uint32 static_fill_color_;
 
-  // View size in output pixels. This is the size at which FrameProducer must
-  // render frames. It usually matches the DIPs size of the view, but may match
-  // the size in device pixels when scaling is in effect, to reduce artefacts.
-  webrtc::DesktopSize view_size_;
-
-  // Scale factor from output pixels to device pixels.
-  float dips_to_view_scale_;
-
-  // Visible area of the view, in output pixels.
-  webrtc::DesktopRect clip_area_;
-
-  // Size of the most recent source frame in pixels.
-  webrtc::DesktopSize source_size_;
-
-  // Resolution of the most recent source frame dots-per-inch.
-  webrtc::DesktopVector source_dpi_;
-
-  // True if there is already a Flush() pending on the Graphics2D context.
-  bool flush_pending_;
-
-  // True after Initialize() has been called, until TearDown().
-  bool is_initialized_;
-
-  // True after the first call to ApplyBuffer().
-  bool frame_received_;
-
-  pp::CompletionCallbackFactory<PepperView> callback_factory_;
+  base::WeakPtrFactory<PepperView> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperView);
 };

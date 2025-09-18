@@ -3,6 +3,23 @@
 // found in the LICENSE file.
 
 chrome.test.runTests([
+  // Tests that attaching and detaching to an event for which we don't have
+  // permission acts as expected (e.g. we don't DCHECK!).
+  function attachAndDetachNoPermisssions() {
+    function dummy() {};
+    try {
+      chrome.tabs.onUpdated.addListener(dummy);
+      chrome.test.fail();
+    } catch (e) {
+      chrome.test.assertTrue(
+          e.message.search("You do not have permission") >= 0,
+          e.message);
+    }
+    chrome.test.assertFalse(chrome.tabs.onUpdated.hasListeners());
+    chrome.tabs.onUpdated.removeListener(dummy);  // browser should not DCHECK
+    chrome.test.succeed();
+  },
+
   // Tests that attaching a named event twice will fail.
   function doubleAttach() {
     function dummy() {};

@@ -5,17 +5,16 @@
 #include "content/browser/plugin_loader_posix.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
-#include "content/browser/utility_process_host_impl.h"
 #include "content/common/child_process_host_impl.h"
-#include "content/common/plugin_list.h"
 #include "content/common/utility_messages.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/plugin_service.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 
-namespace content {
+using content::BrowserThread;
+using content::ChildProcessHost;
 
 PluginLoaderPosix::PluginLoaderPosix()
     : next_load_index_(0) {
@@ -23,7 +22,7 @@ PluginLoaderPosix::PluginLoaderPosix()
 
 void PluginLoaderPosix::LoadPlugins(
     scoped_refptr<base::MessageLoopProxy> target_loop,
-    const PluginService::GetPluginsCallback& callback) {
+    const content::PluginService::GetPluginsCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   callbacks_.push_back(PendingCallback(target_loop, callback));
@@ -59,7 +58,7 @@ void PluginLoaderPosix::OnProcessCrashed(int exit_code) {
 }
 
 bool PluginLoaderPosix::Send(IPC::Message* message) {
-  if (process_host_.get())
+  if (process_host_)
     return process_host_->Send(message);
   return false;
 }
@@ -76,12 +75,12 @@ void PluginLoaderPosix::GetPluginsToLoad() {
   next_load_index_ = 0;
 
   canonical_list_.clear();
-  PluginList::Singleton()->GetPluginPathsToLoad(
-      &canonical_list_,
-      PluginService::GetInstance()->NPAPIPluginsSupported());
+  PluginServiceImpl::GetInstance()->GetPluginList()->GetPluginPathsToLoad(
+      &canonical_list_);
 
   internal_plugins_.clear();
-  PluginList::Singleton()->GetInternalPlugins(&internal_plugins_);
+  PluginServiceImpl::GetInstance()->GetPluginList()->GetInternalPlugins(
+      &internal_plugins_);
 
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
       base::Bind(&PluginLoaderPosix::LoadPluginsInternal,
@@ -103,20 +102,18 @@ void PluginLoaderPosix::LoadPluginsInternal() {
   if (load_start_time_.is_null())
     load_start_time_ = base::TimeTicks::Now();
 
-  UtilityProcessHostImpl* host = new UtilityProcessHostImpl(
-      this,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get());
-  process_host_ = host->AsWeakPtr();
-  process_host_->DisableSandbox();
+  process_host_ =
+      (new UtilityProcessHost(this, BrowserThread::IO))->AsWeakPtr();
+  process_host_->set_no_sandbox(true);
 #if defined(OS_MACOSX)
-  host->set_child_flags(ChildProcessHost::CHILD_ALLOW_HEAP_EXECUTION);
+  process_host_->set_child_flags(ChildProcessHost::CHILD_ALLOW_HEAP_EXECUTION);
 #endif
 
   process_host_->Send(new UtilityMsg_LoadPlugins(canonical_list_));
 }
 
 void PluginLoaderPosix::OnPluginLoaded(uint32 index,
-                                       const WebPluginInfo& plugin) {
+                                       const webkit::WebPluginInfo& plugin) {
   if (index != next_load_index_) {
     LOG(ERROR) << "Received unexpected plugin load message for "
                << plugin.path.value() << "; index=" << index;
@@ -132,7 +129,7 @@ void PluginLoaderPosix::OnPluginLoaded(uint32 index,
 }
 
 void PluginLoaderPosix::OnPluginLoadFailed(uint32 index,
-                                           const base::FilePath& plugin_path) {
+                                           const FilePath& plugin_path) {
   if (index != next_load_index_) {
     LOG(ERROR) << "Received unexpected plugin load failure message for "
                << plugin_path.value() << "; index=" << index;
@@ -145,9 +142,9 @@ void PluginLoaderPosix::OnPluginLoadFailed(uint32 index,
   MaybeRunPendingCallbacks();
 }
 
-bool PluginLoaderPosix::MaybeAddInternalPlugin(
-    const base::FilePath& plugin_path) {
-  for (std::vector<WebPluginInfo>::iterator it = internal_plugins_.begin();
+bool PluginLoaderPosix::MaybeAddInternalPlugin(const FilePath& plugin_path) {
+  for (std::vector<webkit::WebPluginInfo>::iterator it =
+           internal_plugins_.begin();
        it != internal_plugins_.end();
        ++it) {
     if (it->path == plugin_path) {
@@ -163,39 +160,30 @@ bool PluginLoaderPosix::MaybeRunPendingCallbacks() {
   if (next_load_index_ < canonical_list_.size())
     return false;
 
-  PluginList::Singleton()->SetPlugins(loaded_plugins_);
-
-  // Only call the first callback with loaded plugins because there may be
-  // some extra plugin paths added since the first callback is added.
-  if (!callbacks_.empty()) {
-    PendingCallback callback = callbacks_.front();
-    callbacks_.pop_front();
-    callback.target_loop->PostTask(
-        FROM_HERE,
-        base::Bind(callback.callback, loaded_plugins_));
+  PluginServiceImpl::GetInstance()->GetPluginList()->SetPlugins(
+      loaded_plugins_);
+  for (std::vector<PendingCallback>::iterator it = callbacks_.begin();
+       it != callbacks_.end();
+       ++it) {
+    it->target_loop->PostTask(FROM_HERE,
+        base::Bind(it->callback, loaded_plugins_));
   }
+  callbacks_.clear();
 
   HISTOGRAM_TIMES("PluginLoaderPosix.LoadDone",
                   (base::TimeTicks::Now() - load_start_time_)
                       * base::Time::kMicrosecondsPerMillisecond);
   load_start_time_ = base::TimeTicks();
 
-  if (!callbacks_.empty()) {
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-        base::Bind(&PluginLoaderPosix::GetPluginsToLoad, this));
-    return false;
-  }
   return true;
 }
 
 PluginLoaderPosix::PendingCallback::PendingCallback(
     scoped_refptr<base::MessageLoopProxy> loop,
-    const PluginService::GetPluginsCallback& cb)
+    const content::PluginService::GetPluginsCallback& cb)
     : target_loop(loop),
       callback(cb) {
 }
 
 PluginLoaderPosix::PendingCallback::~PendingCallback() {
 }
-
-}  // namespace content

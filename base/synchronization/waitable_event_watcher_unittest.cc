@@ -1,14 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/synchronization/waitable_event_watcher.h"
-
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
+#include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/synchronization/waitable_event_watcher.h"
 #include "base/threading/platform_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -16,26 +12,18 @@ namespace base {
 
 namespace {
 
-// The message loops on which each waitable event timer should be tested.
-const MessageLoop::Type testing_message_loops[] = {
-  MessageLoop::TYPE_DEFAULT,
-  MessageLoop::TYPE_IO,
-#if !defined(OS_IOS)  // iOS does not allow direct running of the UI loop.
-  MessageLoop::TYPE_UI,
-#endif
+class QuitDelegate : public WaitableEventWatcher::Delegate {
+ public:
+  virtual void OnWaitableEventSignaled(WaitableEvent* event) {
+    MessageLoop::current()->Quit();
+  }
 };
 
-const int kNumTestingMessageLoops = arraysize(testing_message_loops);
-
-void QuitWhenSignaled(WaitableEvent* event) {
-  MessageLoop::current()->QuitWhenIdle();
-}
-
-class DecrementCountContainer {
+class DecrementCountDelegate : public WaitableEventWatcher::Delegate {
  public:
-  explicit DecrementCountContainer(int* counter) : counter_(counter) {
+  explicit DecrementCountDelegate(int* counter) : counter_(counter) {
   }
-  void OnWaitableEventSignaled(WaitableEvent* object) {
+  virtual void OnWaitableEventSignaled(WaitableEvent* object) {
     --(*counter_);
   }
  private:
@@ -51,7 +39,8 @@ void RunTest_BasicSignal(MessageLoop::Type message_loop_type) {
   WaitableEventWatcher watcher;
   EXPECT_TRUE(watcher.GetWatchedEvent() == NULL);
 
-  watcher.StartWatching(&event, Bind(&QuitWhenSignaled));
+  QuitDelegate delegate;
+  watcher.StartWatching(&event, &delegate);
   EXPECT_EQ(&event, watcher.GetWatchedEvent());
 
   event.Signal();
@@ -69,7 +58,8 @@ void RunTest_BasicCancel(MessageLoop::Type message_loop_type) {
 
   WaitableEventWatcher watcher;
 
-  watcher.StartWatching(&event, Bind(&QuitWhenSignaled));
+  QuitDelegate delegate;
+  watcher.StartWatching(&event, &delegate);
 
   watcher.StopWatching();
 }
@@ -83,11 +73,9 @@ void RunTest_CancelAfterSet(MessageLoop::Type message_loop_type) {
   WaitableEventWatcher watcher;
 
   int counter = 1;
-  DecrementCountContainer delegate(&counter);
-  WaitableEventWatcher::EventCallback callback =
-      Bind(&DecrementCountContainer::OnWaitableEventSignaled,
-           Unretained(&delegate));
-  watcher.StartWatching(&event, callback);
+  DecrementCountDelegate delegate(&counter);
+
+  watcher.StartWatching(&event, &delegate);
 
   event.Signal();
 
@@ -96,7 +84,7 @@ void RunTest_CancelAfterSet(MessageLoop::Type message_loop_type) {
 
   watcher.StopWatching();
 
-  RunLoop().RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
 
   // Our delegate should not have fired.
   EXPECT_EQ(1, counter);
@@ -112,7 +100,8 @@ void RunTest_OutlivesMessageLoop(MessageLoop::Type message_loop_type) {
     {
       MessageLoop message_loop(message_loop_type);
 
-      watcher.StartWatching(&event, Bind(&QuitWhenSignaled));
+      QuitDelegate delegate;
+      watcher.StartWatching(&event, &delegate);
     }
   }
 }
@@ -127,8 +116,8 @@ void RunTest_DeleteUnder(MessageLoop::Type message_loop_type) {
     WaitableEventWatcher watcher;
 
     WaitableEvent* event = new WaitableEvent(false, false);
-
-    watcher.StartWatching(event, Bind(&QuitWhenSignaled));
+    QuitDelegate delegate;
+    watcher.StartWatching(event, &delegate);
     delete event;
   }
 }
@@ -138,27 +127,27 @@ void RunTest_DeleteUnder(MessageLoop::Type message_loop_type) {
 //-----------------------------------------------------------------------------
 
 TEST(WaitableEventWatcherTest, BasicSignal) {
-  for (int i = 0; i < kNumTestingMessageLoops; i++) {
-    RunTest_BasicSignal(testing_message_loops[i]);
-  }
+  RunTest_BasicSignal(MessageLoop::TYPE_DEFAULT);
+  RunTest_BasicSignal(MessageLoop::TYPE_IO);
+  RunTest_BasicSignal(MessageLoop::TYPE_UI);
 }
 
 TEST(WaitableEventWatcherTest, BasicCancel) {
-  for (int i = 0; i < kNumTestingMessageLoops; i++) {
-    RunTest_BasicCancel(testing_message_loops[i]);
-  }
+  RunTest_BasicCancel(MessageLoop::TYPE_DEFAULT);
+  RunTest_BasicCancel(MessageLoop::TYPE_IO);
+  RunTest_BasicCancel(MessageLoop::TYPE_UI);
 }
 
 TEST(WaitableEventWatcherTest, CancelAfterSet) {
-  for (int i = 0; i < kNumTestingMessageLoops; i++) {
-    RunTest_CancelAfterSet(testing_message_loops[i]);
-  }
+  RunTest_CancelAfterSet(MessageLoop::TYPE_DEFAULT);
+  RunTest_CancelAfterSet(MessageLoop::TYPE_IO);
+  RunTest_CancelAfterSet(MessageLoop::TYPE_UI);
 }
 
 TEST(WaitableEventWatcherTest, OutlivesMessageLoop) {
-  for (int i = 0; i < kNumTestingMessageLoops; i++) {
-    RunTest_OutlivesMessageLoop(testing_message_loops[i]);
-  }
+  RunTest_OutlivesMessageLoop(MessageLoop::TYPE_DEFAULT);
+  RunTest_OutlivesMessageLoop(MessageLoop::TYPE_IO);
+  RunTest_OutlivesMessageLoop(MessageLoop::TYPE_UI);
 }
 
 #if defined(OS_WIN)
@@ -168,9 +157,9 @@ TEST(WaitableEventWatcherTest, OutlivesMessageLoop) {
 #define MAYBE_DeleteUnder DeleteUnder
 #endif
 TEST(WaitableEventWatcherTest, MAYBE_DeleteUnder) {
-  for (int i = 0; i < kNumTestingMessageLoops; i++) {
-    RunTest_DeleteUnder(testing_message_loops[i]);
-  }
+  RunTest_DeleteUnder(MessageLoop::TYPE_DEFAULT);
+  RunTest_DeleteUnder(MessageLoop::TYPE_IO);
+  RunTest_DeleteUnder(MessageLoop::TYPE_UI);
 }
 
 }  // namespace base

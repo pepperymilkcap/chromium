@@ -4,60 +4,40 @@
 
 #include "chrome/browser/mac/master_prefs.h"
 
-#include "base/file_util.h"
 #include "base/mac/foundation_util.h"
-#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_version_info.h"
+
+#if defined(GOOGLE_CHROME_BUILD)
 
 namespace {
 
-#if defined(GOOGLE_CHROME_BUILD)
-// This should be NSApplicationSupportDirectory, but it has already been
-// released using NSLibraryDirectory.
-const NSSearchPathDirectory kSearchPath = NSLibraryDirectory;
-const char kMasterPreferencesDirectory[] = "Google";
+const char kGoogleDirectory[] = "Google";
 const char kMasterPreferencesFileName[] = "Google Chrome Master Preferences";
-#else
-const NSSearchPathDirectory kSearchPath = NSApplicationSupportDirectory;
-const char kMasterPreferencesDirectory[] = "Chromium";
-const char kMasterPreferencesFileName[] = "Chromium Master Preferences";
-#endif  // GOOGLE_CHROME_BUILD
 
 }  // namespace
 
+#endif  // GOOGLE_CHROME_BUILD
 
 namespace master_prefs {
 
-base::FilePath MasterPrefsPath() {
+FilePath MasterPrefsPath() {
 #if defined(GOOGLE_CHROME_BUILD)
-  // Don't load master preferences for the canary.
+  // There is only a system-level master preferences file, and only for the
+  // official build, and not for the canary.
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+
   if (channel == chrome::VersionInfo::CHANNEL_CANARY)
-    return base::FilePath();
+    return FilePath();
+
+  FilePath library_path;
+  if (!base::mac::GetLocalDirectory(NSLibraryDirectory, &library_path))
+    return FilePath();
+
+  return library_path.Append(kGoogleDirectory)
+                     .Append(kMasterPreferencesFileName);
+#else
+  return FilePath();
 #endif  // GOOGLE_CHROME_BUILD
-
-  // On official builds, try
-  //~/Library/Application Support/Google/Chrome/Google Chrome Master Preferences
-  // On chromium builds, try
-  //~/Library/Application Support/Chromium/Chromium Master Preferences
-  // This intentionally doesn't use eventual --user-data-dir overrides.
-  base::FilePath user_application_support_path;
-  if (chrome::GetDefaultUserDataDirectory(&user_application_support_path)) {
-    user_application_support_path =
-        user_application_support_path.Append(kMasterPreferencesFileName);
-    if (base::PathExists(user_application_support_path))
-      return user_application_support_path;
-  }
-
-  // On official builds, try /Library/Google/Google Chrome Master Preferences
-  // On chromium builds, try
-  // /Library/Application Support/Chromium/Chromium Master Preferences
-  base::FilePath search_path;
-  if (!base::mac::GetLocalDirectory(kSearchPath, &search_path))
-    return base::FilePath();
-
-  return search_path.Append(kMasterPreferencesDirectory)
-                    .Append(kMasterPreferencesFileName);
 }
 
 }  // namespace master_prefs

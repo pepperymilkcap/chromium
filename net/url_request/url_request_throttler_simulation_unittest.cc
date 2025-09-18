@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,7 @@
 #include "base/environment.h"
 #include "base/memory/scoped_vector.h"
 #include "base/rand_util.h"
-#include "base/time/time.h"
-#include "net/base/request_priority.h"
-#include "net/url_request/url_request_test_util.h"
+#include "base/time.h"
 #include "net/url_request/url_request_throttler_manager.h"
 #include "net/url_request/url_request_throttler_test_support.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -117,14 +115,15 @@ class DiscreteTimeSimulation {
 // after all |Requester| objects.
 class Server : public DiscreteTimeSimulation::Actor {
  public:
-  Server(int max_queries_per_tick, double request_drop_ratio)
+  Server(int max_queries_per_tick,
+         double request_drop_ratio)
       : max_queries_per_tick_(max_queries_per_tick),
         request_drop_ratio_(request_drop_ratio),
         num_overloaded_ticks_remaining_(0),
         num_current_tick_queries_(0),
         num_overloaded_ticks_(0),
-        max_experienced_queries_per_tick_(0),
-        mock_request_(GURL(), DEFAULT_PRIORITY, NULL, &context_) {}
+        max_experienced_queries_per_tick_(0) {
+  }
 
   void SetDowntime(const TimeTicks& start_time, const TimeDelta& duration) {
     start_downtime_ = start_time;
@@ -160,7 +159,7 @@ class Server : public DiscreteTimeSimulation::Actor {
     ++num_current_tick_queries_;
     if (!start_downtime_.is_null() &&
         start_downtime_ < now_ && now_ < end_downtime_) {
-      // For the simulation measuring the increase in perceived
+      // TODO(joi): For the simulation measuring the increase in perceived
       // downtime, it might be interesting to count separately the
       // queries seen by the server (assuming a front-end reverse proxy
       // is what actually serves up the 503s in this case) so that we could
@@ -185,10 +184,6 @@ class Server : public DiscreteTimeSimulation::Actor {
 
   int max_experienced_queries_per_tick() const {
     return max_experienced_queries_per_tick_;
-  }
-
-  const URLRequest& mock_request() const {
-    return mock_request_;
   }
 
   std::string VisualizeASCII(int terminal_width) {
@@ -219,7 +214,7 @@ class Server : public DiscreteTimeSimulation::Actor {
     if (num_ticks % ticks_per_column)
       ++num_columns;
     DCHECK_LE(num_columns, terminal_width);
-    scoped_ptr<int[]> columns(new int[num_columns]);
+    scoped_array<int> columns(new int[num_columns]);
     for (int tx = 0; tx < num_ticks; ++tx) {
       int cx = tx / ticks_per_column;
       if (tx % ticks_per_column == 0)
@@ -287,18 +282,24 @@ class Server : public DiscreteTimeSimulation::Actor {
   int max_experienced_queries_per_tick_;
   std::vector<int> requests_per_tick_;
 
-  TestURLRequestContext context_;
-  TestURLRequest mock_request_;
-
   DISALLOW_COPY_AND_ASSIGN(Server);
+};
+
+class TestingURLRequestThrottlerManager : public URLRequestThrottlerManager {
+ public:
+  TestingURLRequestThrottlerManager() : URLRequestThrottlerManager() {
+  }
 };
 
 // Mock throttler entry used by Requester class.
 class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
  public:
-  explicit MockURLRequestThrottlerEntry(URLRequestThrottlerManager* manager)
-      : URLRequestThrottlerEntry(manager, std::string()),
-        mock_backoff_entry_(&backoff_policy_) {}
+  explicit MockURLRequestThrottlerEntry(
+      URLRequestThrottlerManager* manager)
+      : URLRequestThrottlerEntry(manager, ""),
+        mock_backoff_entry_(&backoff_policy_) {
+  }
+  virtual ~MockURLRequestThrottlerEntry() {}
 
   virtual const BackoffEntry* GetBackoffEntry() const OVERRIDE {
     return &mock_backoff_entry_;
@@ -320,9 +321,6 @@ class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
   TimeTicks fake_now() const {
     return fake_now_;
   }
-
- protected:
-  virtual ~MockURLRequestThrottlerEntry() {}
 
  private:
   TimeTicks fake_now_;
@@ -408,14 +406,14 @@ class Requester : public DiscreteTimeSimulation::Actor {
     DCHECK(server_);
   }
 
-  virtual void AdvanceTime(const TimeTicks& absolute_time) OVERRIDE {
+  void AdvanceTime(const TimeTicks& absolute_time) OVERRIDE {
     if (time_of_last_success_.is_null())
       time_of_last_success_ = absolute_time;
 
     throttler_entry_->SetFakeNow(absolute_time);
   }
 
-  virtual void PerformAction() OVERRIDE {
+  void PerformAction() OVERRIDE {
     TimeDelta effective_delay = time_between_requests_;
     TimeDelta current_jitter = TimeDelta::FromMilliseconds(
         request_jitter_.InMilliseconds() * base::RandDouble());
@@ -427,10 +425,10 @@ class Requester : public DiscreteTimeSimulation::Actor {
 
     if (throttler_entry_->fake_now() - time_of_last_attempt_ >
         effective_delay) {
-      if (!throttler_entry_->ShouldRejectRequest(server_->mock_request())) {
+      if (!throttler_entry_->ShouldRejectRequest(0)) {
         int status_code = server_->HandleRequest();
         MockURLRequestThrottlerHeaderAdapter response_headers(status_code);
-        throttler_entry_->UpdateWithResponse(std::string(), &response_headers);
+        throttler_entry_->UpdateWithResponse("", &response_headers);
 
         if (status_code == 200) {
           if (results_)
@@ -493,7 +491,7 @@ void SimulateAttack(Server* server,
   const size_t kNumAttackers = 50;
   const size_t kNumClients = 50;
   DiscreteTimeSimulation simulation;
-  URLRequestThrottlerManager manager;
+  TestingURLRequestThrottlerManager manager;
   ScopedVector<Requester> requesters;
   for (size_t i = 0; i < kNumAttackers; ++i) {
     // Use a tiny time_between_requests so the attackers will ping the
@@ -596,7 +594,7 @@ double SimulateDowntime(const TimeDelta& duration,
   Server server(std::numeric_limits<int>::max(), 1.0);
   server.SetDowntime(start_downtime, duration);
 
-  URLRequestThrottlerManager manager;
+  TestingURLRequestThrottlerManager manager;
   scoped_refptr<MockURLRequestThrottlerEntry> throttler_entry(
       new MockURLRequestThrottlerEntry(&manager));
   if (!enable_throttling)

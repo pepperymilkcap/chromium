@@ -1,32 +1,31 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_GPU_GPU_CHILD_THREAD_H_
 #define CONTENT_GPU_GPU_CHILD_THREAD_H_
+#pragma once
 
-#include <queue>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "build/build_config.h"
-#include "content/child/child_thread.h"
+#include "content/common/child_thread.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_config.h"
 #include "content/common/gpu/x_util.h"
-#include "gpu/config/gpu_info.h"
+#include "content/public/common/gpu_info.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace sandbox {
 class TargetServices;
 }
 
-namespace content {
 class GpuWatchdogThread;
 
 // The main thread of the GPU child process. There will only ever be one of
@@ -35,19 +34,12 @@ class GpuWatchdogThread;
 // commands to the GPU.
 class GpuChildThread : public ChildThread {
  public:
-  typedef std::queue<IPC::Message*> DeferredMessages;
-
-  explicit GpuChildThread(GpuWatchdogThread* gpu_watchdog_thread,
-                          bool dead_on_arrival,
-                          const gpu::GPUInfo& gpu_info,
-                          const DeferredMessages& deferred_messages);
+  explicit GpuChildThread(bool dead_on_arrival);
 
   // For single-process mode.
   explicit GpuChildThread(const std::string& channel_id);
 
   virtual ~GpuChildThread();
-
-  virtual void Shutdown() OVERRIDE;
 
   void Init(const base::Time& process_start_time);
   void StopWatchdog();
@@ -60,16 +52,14 @@ class GpuChildThread : public ChildThread {
   // Message handlers.
   void OnInitialize();
   void OnCollectGraphicsInfo();
-  void OnGetVideoMemoryUsageStats();
-  void OnSetVideoMemoryWindowCount(uint32 window_count);
-
   void OnClean();
   void OnCrash();
   void OnHang();
-  void OnDisableWatchdog();
 
-#if defined(USE_TCMALLOC)
-  void OnGetGpuTcmalloc();
+#if defined(OS_WIN)
+  static void CollectDxDiagnostics(GpuChildThread* thread);
+  static void SetDxDiagnostics(GpuChildThread* thread,
+                               const content::DxDiagNode& node);
 #endif
 
   // Set this flag to true if a fatal error occurred before we receive the
@@ -81,22 +71,17 @@ class GpuChildThread : public ChildThread {
 #if defined(OS_WIN)
   // Windows specific client sandbox interface.
   sandbox::TargetServices* target_services_;
+
+  // Indicates whether DirectX Diagnostics collection is ongoing.
+  bool collecting_dx_diagnostics_;
 #endif
 
   scoped_ptr<GpuChannelManager> gpu_channel_manager_;
 
   // Information about the GPU, such as device and vendor ID.
-  gpu::GPUInfo gpu_info_;
-
-  // Error messages collected in gpu_main() before the thread is created.
-  DeferredMessages deferred_messages_;
-
-  // Whether the GPU thread is running in the browser process.
-  bool in_browser_process_;
+  content::GPUInfo gpu_info_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChildThread);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_GPU_GPU_CHILD_THREAD_H_

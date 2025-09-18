@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "gpu/command_buffer/service/cmd_parser.h"
 
 #include "base/logging.h"
-#include "base/debug/trace_event.h"
 
 namespace gpu {
 
@@ -60,9 +59,6 @@ error::Error CommandParser::ProcessCommand() {
     return error::kOutOfBounds;
   }
 
-  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cb_command"),
-               handler_->GetCommandName(header.command));
-
   error::Error result = handler_->DoCommand(
       header.command, header.size - 1, buffer_ + get);
 
@@ -74,9 +70,8 @@ error::Error CommandParser::ProcessCommand() {
   }
 
   // If get was not set somewhere else advance it.
-  if (get == get_ && result != error::kDeferCommandUntilLater)
+  if (get == get_)
     get_ = (get + header.size) % entry_count_;
-
   return result;
 }
 

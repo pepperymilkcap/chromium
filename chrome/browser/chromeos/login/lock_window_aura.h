@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_LOCK_WINDOW_AURA_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_LOCK_WINDOW_AURA_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/login/lock_window.h"
@@ -15,7 +16,7 @@ class LockWindowAura : public views::Widget,
                        public LockWindow {
  public:
   // LockWindow implementation:
-  virtual void Grab() OVERRIDE;
+  virtual void Grab(DOMView* dom_view) OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
 
  private:

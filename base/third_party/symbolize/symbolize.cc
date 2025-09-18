@@ -236,7 +236,7 @@ bool GetSectionHeaderByName(int fd, const char *name, size_t name_len,
     }
     char header_name[kMaxSectionNameLen];
     if (sizeof(header_name) < name_len) {
-      RAW_LOG(WARNING, "Section name '%s' is too long (%" PRIuS "); "
+      RAW_LOG(WARNING, "Section name '%s' is too long (%"PRIuS"); "
               "section will not be found (even if present).", name, name_len);
       // No point in even trying.
       return false;
@@ -330,29 +330,31 @@ static bool GetSymbolFromObjectFile(const int fd, uint64_t pc,
   ElfW(Shdr) symtab, strtab;
 
   // Consult a regular symbol table first.
-  if (GetSectionHeaderByType(fd, elf_header.e_shnum, elf_header.e_shoff,
-                             SHT_SYMTAB, &symtab)) {
-    if (!ReadFromOffsetExact(fd, &strtab, sizeof(strtab), elf_header.e_shoff +
-                             symtab.sh_link * sizeof(symtab))) {
-      return false;
-    }
-    if (FindSymbol(pc, fd, out, out_size, symbol_offset,
-                   &strtab, &symtab)) {
-      return true;  // Found the symbol in a regular symbol table.
-    }
+  if (!GetSectionHeaderByType(fd, elf_header.e_shnum, elf_header.e_shoff,
+                              SHT_SYMTAB, &symtab)) {
+    return false;
+  }
+  if (!ReadFromOffsetExact(fd, &strtab, sizeof(strtab), elf_header.e_shoff +
+                           symtab.sh_link * sizeof(symtab))) {
+    return false;
+  }
+  if (FindSymbol(pc, fd, out, out_size, symbol_offset,
+                 &strtab, &symtab)) {
+    return true;  // Found the symbol in a regular symbol table.
   }
 
   // If the symbol is not found, then consult a dynamic symbol table.
-  if (GetSectionHeaderByType(fd, elf_header.e_shnum, elf_header.e_shoff,
-                             SHT_DYNSYM, &symtab)) {
-    if (!ReadFromOffsetExact(fd, &strtab, sizeof(strtab), elf_header.e_shoff +
-                             symtab.sh_link * sizeof(symtab))) {
-      return false;
-    }
-    if (FindSymbol(pc, fd, out, out_size, symbol_offset,
-                   &strtab, &symtab)) {
-      return true;  // Found the symbol in a dynamic symbol table.
-    }
+  if (!GetSectionHeaderByType(fd, elf_header.e_shnum, elf_header.e_shoff,
+                              SHT_DYNSYM, &symtab)) {
+    return false;
+  }
+  if (!ReadFromOffsetExact(fd, &strtab, sizeof(strtab), elf_header.e_shoff +
+                           symtab.sh_link * sizeof(symtab))) {
+    return false;
+  }
+  if (FindSymbol(pc, fd, out, out_size, symbol_offset,
+                 &strtab, &symtab)) {
+    return true;  // Found the symbol in a dynamic symbol table.
   }
 
   return false;

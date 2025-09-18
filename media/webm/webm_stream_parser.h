@@ -9,13 +9,11 @@
 #include "base/memory/ref_counted.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/buffers.h"
-#include "media/base/byte_queue.h"
 #include "media/base/stream_parser.h"
 #include "media/base/video_decoder_config.h"
+#include "media/webm/webm_cluster_parser.h"
 
 namespace media {
-
-class WebMClusterParser;
 
 class WebMStreamParser : public StreamParser {
  public:
@@ -23,22 +21,15 @@ class WebMStreamParser : public StreamParser {
   virtual ~WebMStreamParser();
 
   // StreamParser implementation.
-  virtual void Init(const InitCB& init_cb, const NewConfigCB& config_cb,
-                    const NewBuffersCB& new_buffers_cb,
-                    const NewTextBuffersCB& text_cb,
-                    const NeedKeyCB& need_key_cb,
-                    const NewMediaSegmentCB& new_segment_cb,
-                    const base::Closure& end_of_segment_cb,
-                    const LogCB& log_cb) OVERRIDE;
+  virtual void Init(const InitCB& init_cb, StreamParserHost* host) OVERRIDE;
   virtual void Flush() OVERRIDE;
-  virtual bool Parse(const uint8* buf, int size) OVERRIDE;
+  virtual int Parse(const uint8* buf, int size) OVERRIDE;
 
  private:
   enum State {
-    kWaitingForInit,
-    kParsingHeaders,
-    kParsingClusters,
-    kError
+    WAITING_FOR_INIT,
+    PARSING_HEADERS,
+    PARSING_CLUSTERS
   };
 
   void ChangeState(State new_state);
@@ -62,26 +53,11 @@ class WebMStreamParser : public StreamParser {
   // Returning > 0 indicates success & the number of bytes parsed.
   int ParseCluster(const uint8* data, int size);
 
-  // Fire needkey event through the |need_key_cb_|.
-  void FireNeedKey(const std::string& key_id);
-
   State state_;
   InitCB init_cb_;
-  NewConfigCB config_cb_;
-  NewBuffersCB new_buffers_cb_;
-  NewTextBuffersCB text_cb_;
-  NeedKeyCB need_key_cb_;
-
-  NewMediaSegmentCB new_segment_cb_;
-  base::Closure end_of_segment_cb_;
-  LogCB log_cb_;
-
-  // True if a new cluster id has been seen, but no audio or video buffers have
-  // been parsed yet.
-  bool waiting_for_buffers_;
+  StreamParserHost* host_;
 
   scoped_ptr<WebMClusterParser> cluster_parser_;
-  ByteQueue byte_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMStreamParser);
 };

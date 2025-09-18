@@ -1,24 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Defines base::PathProviderPosix, default path provider on POSIX OSes that
-// don't have their own base_paths_OS.cc implementation (i.e. all but Mac and
-// Android).
+#include "base/base_paths.h"
 
 #include <ostream>
 #include <string>
 
-#include "base/base_paths.h"
+#include "build/build_config.h"
 #include "base/environment.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/nix/xdg_util.h"
 #include "base/path_service.h"
-#include "base/process/process_metrics.h"
-#include "build/build_config.h"
+#include "base/nix/xdg_util.h"
 
 #if defined(OS_FREEBSD)
 #include <sys/param.h>
@@ -29,6 +25,14 @@
 
 namespace base {
 
+#if defined(OS_LINUX)
+const char kSelfExe[] = "/proc/self/exe";
+#endif
+
+// The name of this file relative to the source root. This is used for checking
+// that the source checkout is in the correct place.
+static const char kThisSourceFile[] = "base/base_paths_posix.cc";
+
 bool PathProviderPosix(int key, FilePath* result) {
   FilePath path;
   switch (key) {
@@ -36,8 +40,8 @@ bool PathProviderPosix(int key, FilePath* result) {
     case base::FILE_MODULE: {  // TODO(evanm): is this correct?
 #if defined(OS_LINUX)
       FilePath bin_dir;
-      if (!ReadSymbolicLink(FilePath(kProcSelfExe), &bin_dir)) {
-        NOTREACHED() << "Unable to resolve " << kProcSelfExe << ".";
+      if (!file_util::ReadSymbolicLink(FilePath(kSelfExe), &bin_dir)) {
+        NOTREACHED() << "Unable to resolve " << kSelfExe << ".";
         return false;
       }
       *result = bin_dir;
@@ -65,7 +69,7 @@ bool PathProviderPosix(int key, FilePath* result) {
       return true;
 #elif defined(OS_OPENBSD)
       // There is currently no way to get the executable path on OpenBSD
-      char* cpath;
+      char *cpath;
       if ((cpath = getenv("CHROME_EXE_PATH")) != NULL)
         *result = FilePath(cpath);
       else
@@ -80,37 +84,49 @@ bool PathProviderPosix(int key, FilePath* result) {
       std::string cr_source_root;
       if (env->GetVar("CR_SOURCE_ROOT", &cr_source_root)) {
         path = FilePath(cr_source_root);
-        if (base::PathExists(path)) {
+        if (file_util::PathExists(path.Append(kThisSourceFile))) {
           *result = path;
           return true;
         } else {
           DLOG(WARNING) << "CR_SOURCE_ROOT is set, but it appears to not "
-                        << "point to a directory.";
+                        << "point to the correct source root directory.";
         }
       }
       // On POSIX, unit tests execute two levels deep from the source root.
       // For example:  out/{Debug|Release}/net_unittest
       if (PathService::Get(base::DIR_EXE, &path)) {
-        *result = path.DirName().DirName();
+        path = path.DirName().DirName();
+        if (file_util::PathExists(path.Append(kThisSourceFile))) {
+          *result = path;
+          return true;
+        }
+      }
+      // In a case of WebKit-only checkout, executable files are put into
+      // <root of checkout>/out/{Debug|Release}, and we should return
+      // <root of checkout>/Source/WebKit/chromium for DIR_SOURCE_ROOT.
+      if (PathService::Get(base::DIR_EXE, &path)) {
+        path = path.DirName().DirName().Append("Source/WebKit/chromium");
+        if (file_util::PathExists(path.Append(kThisSourceFile))) {
+          *result = path;
+          return true;
+        }
+      }
+      // If that failed (maybe the build output is symlinked to a different
+      // drive) try assuming the current directory is the source root.
+      if (file_util::GetCurrentDirectory(&path) &&
+          file_util::PathExists(path.Append(kThisSourceFile))) {
+        *result = path;
         return true;
       }
-
       DLOG(ERROR) << "Couldn't find your source root.  "
                   << "Try running from your chromium/src directory.";
       return false;
     }
-    case base::DIR_USER_DESKTOP:
-      *result = base::nix::GetXDGUserDirectory("DESKTOP", "Desktop");
-      return true;
-    case base::DIR_CACHE: {
+    case base::DIR_CACHE:
       scoped_ptr<base::Environment> env(base::Environment::Create());
       FilePath cache_dir(base::nix::GetXDGDirectory(env.get(), "XDG_CACHE_HOME",
                                                     ".cache"));
       *result = cache_dir;
-      return true;
-    }
-    case base::DIR_HOME:
-      *result = GetHomeDir();
       return true;
   }
   return false;

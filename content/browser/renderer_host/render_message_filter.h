@@ -4,105 +4,83 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_MESSAGE_FILTER_H_
+#pragma once
 
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
 
-#include <set>
 #include <string>
 #include <vector>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/shared_memory.h"
-#include "base/sequenced_task_runner_helpers.h"
-#include "base/strings/string16.h"
+#include "base/message_loop_helpers.h"
+#include "base/shared_memory.h"
+#include "base/string16.h"
 #include "build/build_config.h"
-#include "content/common/pepper_renderer_instance_data.h"
+#include "content/browser/in_process_webkit/webkit_context.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "content/public/common/three_d_api_types.h"
-#include "media/audio/audio_parameters.h"
-#include "media/base/channel_layout.h"
-#include "net/cookies/canonical_cookie.h"
-#include "third_party/WebKit/public/web/WebPopupType.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/surface/transport_dib.h"
-
-#if defined(OS_MACOSX)
-#include "base/mac/scoped_cftyperef.h"
-#include "content/common/mac/font_loader.h"
-#endif
-
-#if defined(OS_ANDROID)
-#include "base/threading/worker_pool.h"
-#endif
+#include "ui/gfx/surface/transport_dib.h"
 
 struct FontDescriptor;
+class PluginServiceImpl;
+class RenderWidgetHelper;
 struct ViewHostMsg_CreateWindow_Params;
 
-namespace blink {
+namespace WebKit {
 struct WebScreenInfo;
+}
+
+namespace content {
+class BrowserContext;
+class ResourceContext;
 }
 
 namespace base {
 class ProcessMetrics;
 class SharedMemory;
-class TaskRunner;
 }
 
 namespace gfx {
 class Rect;
-struct GpuMemoryBufferHandle;
 }
 
 namespace media {
-class AudioManager;
 struct MediaLogEvent;
 }
 
 namespace net {
-class KeygenHandler;
-class URLRequestContext;
+class CookieList;
 class URLRequestContextGetter;
 }
 
-namespace content {
-class BrowserContext;
-class DOMStorageContextWrapper;
-class MediaInternals;
-class PluginServiceImpl;
-class RenderWidgetHelper;
-class ResourceContext;
-class ResourceDispatcherHostImpl;
-struct Referrer;
+namespace webkit {
 struct WebPluginInfo;
+}
 
 // This class filters out incoming IPC messages for the renderer process on the
 // IPC thread.
-class RenderMessageFilter : public BrowserMessageFilter {
+class RenderMessageFilter : public content::BrowserMessageFilter {
  public:
   // Create the filter.
   RenderMessageFilter(int render_process_id,
-                      bool is_guest,
                       PluginServiceImpl * plugin_service,
-                      BrowserContext* browser_context,
+                      content::BrowserContext* browser_context,
                       net::URLRequestContextGetter* request_context,
-                      RenderWidgetHelper* render_widget_helper,
-                      media::AudioManager* audio_manager,
-                      MediaInternals* media_internals,
-                      DOMStorageContextWrapper* dom_storage_context);
+                      RenderWidgetHelper* render_widget_helper);
 
   // IPC::ChannelProxy::MessageFilter methods:
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
-  // BrowserMessageFilter methods:
+  // content::BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
   virtual void OnDestruct() const OVERRIDE;
-  virtual base::TaskRunner* OverrideTaskRunnerForMessage(
-      const IPC::Message& message) OVERRIDE;
 
   bool OffTheRecord() const;
 
@@ -114,32 +92,29 @@ class RenderMessageFilter : public BrowserMessageFilter {
   net::URLRequestContext* GetRequestContextForURL(const GURL& url);
 
  private:
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class base::DeleteHelper<RenderMessageFilter>;
 
   class OpenChannelToNpapiPluginCallback;
 
   virtual ~RenderMessageFilter();
 
-  void OnGetProcessMemorySizes(size_t* private_bytes, size_t* shared_bytes);
-  void OnCreateWindow(const ViewHostMsg_CreateWindow_Params& params,
-                      int* route_id,
-                      int* main_frame_route_id,
-                      int* surface_id,
-                      int64* cloned_session_storage_namespace_id);
-  void OnCreateWidget(int opener_id,
-                      blink::WebPopupType popup_type,
-                      int* route_id,
-                      int* surface_id);
-  void OnCreateFullscreenWidget(int opener_id,
-                                int* route_id,
-                                int* surface_id);
-  void OnSetCookie(int render_frame_id,
+  void OnMsgCreateWindow(const ViewHostMsg_CreateWindow_Params& params,
+                         int* route_id,
+                         int* surface_id,
+                         int64* cloned_session_storage_namespace_id);
+  void OnMsgCreateWidget(int opener_id,
+                         WebKit::WebPopupType popup_type,
+                         int* route_id,
+                         int* surface_id);
+  void OnMsgCreateFullscreenWidget(int opener_id,
+                                   int* route_id,
+                                   int* surface_id);
+  void OnSetCookie(const IPC::Message& message,
                    const GURL& url,
                    const GURL& first_party_for_cookies,
                    const std::string& cookie);
-  void OnGetCookies(int render_frame_id,
-                    const GURL& url,
+  void OnGetCookies(const GURL& url,
                     const GURL& first_party_for_cookies,
                     IPC::Message* reply_msg);
   void OnGetRawCookies(const GURL& url,
@@ -152,60 +127,55 @@ class RenderMessageFilter : public BrowserMessageFilter {
                         bool* cookies_enabled);
 
 #if defined(OS_MACOSX)
-  // Messages for OOP font loading.
-  void OnLoadFont(const FontDescriptor& font, IPC::Message* reply_msg);
-  void SendLoadFontReply(IPC::Message* reply, FontLoader::Result* result);
+  void OnLoadFont(const FontDescriptor& font,
+                  uint32* handle_size,
+                  base::SharedMemoryHandle* handle,
+                  uint32* font_id);
 #endif
 
-#if defined(OS_WIN)
-  void OnPreCacheFontCharacters(const LOGFONT& log_font,
-                                const base::string16& characters);
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // On Windows, we handle these on the IO thread to avoid a deadlock with
+  // plugins.  On non-Windows systems, we need to handle them on the UI thread.
+  void OnGetScreenInfo(gfx::NativeViewId window,
+                       WebKit::WebScreenInfo* results);
+  void OnGetWindowRect(gfx::NativeViewId window, gfx::Rect* rect);
+  void OnGetRootWindowRect(gfx::NativeViewId window, gfx::Rect* rect);
 #endif
 
   void OnGetPlugins(bool refresh, IPC::Message* reply_msg);
   void GetPluginsCallback(IPC::Message* reply_msg,
-                          const std::vector<WebPluginInfo>& plugins);
-  void OnGetPluginInfo(int render_frame_id,
+                          const std::vector<webkit::WebPluginInfo>& plugins);
+  void OnGetPluginInfo(int routing_id,
                        const GURL& url,
                        const GURL& policy_url,
                        const std::string& mime_type,
                        bool* found,
-                       WebPluginInfo* info,
+                       webkit::WebPluginInfo* info,
                        std::string* actual_mime_type);
-  void OnOpenChannelToPlugin(int render_frame_id,
+  void OnOpenChannelToPlugin(int routing_id,
                              const GURL& url,
                              const GURL& policy_url,
                              const std::string& mime_type,
                              IPC::Message* reply_msg);
-  void OnOpenChannelToPepperPlugin(const base::FilePath& path,
+  void OnOpenChannelToPepperPlugin(const FilePath& path,
                                    IPC::Message* reply_msg);
-  void OnDidCreateOutOfProcessPepperInstance(
-      int plugin_child_id,
-      int32 pp_instance,
-      PepperRendererInstanceData instance_data,
-      bool is_external);
-  void OnDidDeleteOutOfProcessPepperInstance(int plugin_child_id,
-                                             int32 pp_instance,
-                                             bool is_external);
   void OnOpenChannelToPpapiBroker(int routing_id,
-                                  const base::FilePath& path);
+                                  int request_id,
+                                  const FilePath& path);
   void OnGenerateRoutingID(int* route_id);
   void OnDownloadUrl(const IPC::Message& message,
                      const GURL& url,
-                     const Referrer& referrer,
-                     const base::string16& suggested_name);
+                     const GURL& referrer,
+                     const string16& suggested_name);
   void OnCheckNotificationPermission(const GURL& source_origin,
                                      int* permission_level);
 
   void OnGetCPUUsage(int* cpu_usage);
 
-  void OnGetAudioHardwareConfig(media::AudioParameters* input_params,
-                                media::AudioParameters* output_params);
-
-#if defined(OS_WIN)
-  // Used to look up the monitor color profile.
-  void OnGetMonitorColorProfile(std::vector<char>* profile);
-#endif
+  void OnGetHardwareBufferSize(uint32* buffer_size);
+  void OnGetHardwareInputSampleRate(double* sample_rate);
+  void OnGetHardwareSampleRate(double* sample_rate);
+  void OnGetHardwareInputChannelCount(uint32* channels);
 
   // Used to ask the browser to allocate a block of shared memory for the
   // renderer to send back data in, since shared memory can't be created
@@ -215,7 +185,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
 
   // Browser side transport DIB allocation
-  void OnAllocTransportDIB(uint32 size,
+  void OnAllocTransportDIB(size_t size,
                            bool cache_in_browser,
                            TransportDIB::Handle* result);
   void OnFreeTransportDIB(TransportDIB::Id dib_id);
@@ -224,15 +194,23 @@ class RenderMessageFilter : public BrowserMessageFilter {
                                     const std::vector<char>& data);
   void OnKeygen(uint32 key_size_index, const std::string& challenge_string,
                 const GURL& url, IPC::Message* reply_msg);
-  void PostKeygenToWorkerThread(IPC::Message* reply_msg,
-                                scoped_ptr<net::KeygenHandler> keygen_handler);
-  void OnKeygenOnWorkerThread(scoped_ptr<net::KeygenHandler> keygen_handler,
-                              IPC::Message* reply_msg);
-  void OnMediaLogEvents(const std::vector<media::MediaLogEvent>&);
+  void OnKeygenOnWorkerThread(
+      int key_size_in_bits,
+      const std::string& challenge_string,
+      const GURL& url,
+      IPC::Message* reply_msg);
+  void OnAsyncOpenFile(const IPC::Message& msg,
+                       const FilePath& path,
+                       int flags,
+                       int message_id);
+  void AsyncOpenFileOnFileThread(const FilePath& path,
+                                 int flags,
+                                 int message_id,
+                                 int routing_id);
+  void OnMediaLogEvent(const media::MediaLogEvent&);
 
   // Check the policy for getting cookies. Gets the cookies if allowed.
-  void CheckPolicyForCookies(int render_frame_id,
-                             const GURL& url,
+  void CheckPolicyForCookies(const GURL& url,
                              const GURL& first_party_for_cookies,
                              IPC::Message* reply_msg,
                              const net::CookieList& cookie_list);
@@ -250,52 +228,34 @@ class RenderMessageFilter : public BrowserMessageFilter {
       OpenChannelToNpapiPluginCallback* client);
 
   void OnUpdateIsDelayed(const IPC::Message& msg);
-  void OnAre3DAPIsBlocked(int render_view_id,
-                          const GURL& top_origin_url,
-                          ThreeDAPIType requester,
-                          bool* blocked);
-  void OnDidLose3DContext(const GURL& top_origin_url,
-                          ThreeDAPIType context_type,
-                          int arb_robustness_status_code);
-
-#if defined(OS_ANDROID)
-  void OnWebAudioMediaCodec(base::SharedMemoryHandle encoded_data_handle,
-                            base::FileDescriptor pcm_output,
-                            uint32_t data_size);
-#endif
-
-  void OnAllocateGpuMemoryBuffer(uint32 width,
-                                 uint32 height,
-                                 uint32 internalformat,
-                                 gfx::GpuMemoryBufferHandle* handle);
 
   // Cached resource request dispatcher host and plugin service, guaranteed to
   // be non-null if Init succeeds. We do not own the objects, they are managed
   // by the BrowserProcess, which has a wider scope than we do.
-  ResourceDispatcherHostImpl* resource_dispatcher_host_;
+  ResourceDispatcherHost* resource_dispatcher_host_;
   PluginServiceImpl* plugin_service_;
-  base::FilePath profile_data_directory_;
+
+  // The browser context associated with our renderer process.  This should only
+  // be accessed on the UI thread!
+  content::BrowserContext* browser_context_;
 
   // Contextual information to be used for requests created here.
   scoped_refptr<net::URLRequestContextGetter> request_context_;
 
   // The ResourceContext which is to be used on the IO thread.
-  ResourceContext* resource_context_;
+  const content::ResourceContext& resource_context_;
 
   scoped_refptr<RenderWidgetHelper> render_widget_helper_;
 
-  // Whether this process is used for incognito contents.
-  // This doesn't belong here; http://crbug.com/89628
+  // Whether this process is used for incognito tabs.
   bool incognito_;
 
   // Initialized to 0, accessed on FILE thread only.
   base::TimeTicks last_plugin_refresh_time_;
 
-  scoped_refptr<DOMStorageContextWrapper> dom_storage_context_;
+  scoped_refptr<WebKitContext> webkit_context_;
 
   int render_process_id_;
-
-  bool is_guest_;
 
   std::set<OpenChannelToNpapiPluginCallback*> plugin_host_clients_;
 
@@ -306,16 +266,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   // Used for sampling CPU usage of the renderer process.
   scoped_ptr<base::ProcessMetrics> process_metrics_;
 
-  media::AudioManager* audio_manager_;
-  MediaInternals* media_internals_;
-
-#if defined(OS_MACOSX)
-  base::ScopedCFTypeRef<CFTypeRef> last_io_surface_;
-#endif
-
   DISALLOW_COPY_AND_ASSIGN(RenderMessageFilter);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_RENDER_MESSAGE_FILTER_H_

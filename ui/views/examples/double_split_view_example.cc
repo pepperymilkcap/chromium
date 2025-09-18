@@ -1,27 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/examples/double_split_view_example.h"
 
-#include "ui/views/background.h"
 #include "ui/views/controls/single_split_view.h"
 #include "ui/views/layout/grid_layout.h"
-
-namespace views {
-namespace examples {
 
 namespace {
 
 // DoubleSplitViews's content, which draws gradient color on background.
-class SplittedView : public View {
+class SplittedView : public views::View {
  public:
   SplittedView();
   virtual ~SplittedView();
 
   void SetColor(SkColor from, SkColor to);
 
-  // Overridden from View.
+  // Overridden from views::View.
   virtual gfx::Size GetMinimumSize() OVERRIDE;
 
  private:
@@ -36,7 +32,8 @@ SplittedView::~SplittedView() {
 }
 
 void SplittedView::SetColor(SkColor from, SkColor to) {
-  set_background(Background::CreateVerticalGradientBackground(from, to));
+  set_background(
+      views::Background::CreateVerticalGradientBackground(from, to));
 }
 
 gfx::Size SplittedView::GetMinimumSize() {
@@ -44,6 +41,9 @@ gfx::Size SplittedView::GetMinimumSize() {
 }
 
 }  // namespace
+
+namespace views {
+namespace examples {
 
 DoubleSplitViewExample::DoubleSplitViewExample()
     : ExampleBase("Double Split View") {

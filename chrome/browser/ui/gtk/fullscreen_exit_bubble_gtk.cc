@@ -4,15 +4,12 @@
 
 #include "chrome/browser/ui/gtk/fullscreen_exit_bubble_gtk.h"
 
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/rounded_window.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/render_widget_host_view.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_strings.h"
 #include "ui/base/gtk/gtk_floating_container.h"
@@ -20,10 +17,8 @@
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
-
-const GdkColor kBackgroundColor = GDK_COLOR_RGB(0xff, 0xff, 0xff);
 const GdkColor kFrameColor = GDK_COLOR_RGB(0x63, 0x63, 0x63);
-
+const int kMiddlePaddingPx = 30;
 }  // namespace
 
 FullscreenExitBubbleGtk::FullscreenExitBubbleGtk(
@@ -32,8 +27,6 @@ FullscreenExitBubbleGtk::FullscreenExitBubbleGtk(
     const GURL& url,
     FullscreenExitBubbleType bubble_type)
     : FullscreenExitBubble(browser, url, bubble_type),
-      theme_service_(NULL),
-      bubble_(NULL),
       container_(container) {
   InitWidgets();
 }
@@ -53,20 +46,18 @@ void FullscreenExitBubbleGtk::UpdateContent(
   bubble_type_ = bubble_type;
 
   gtk_label_set_text(GTK_LABEL(message_label_),
-                     base::UTF16ToUTF8(GetCurrentMessageText()).c_str());
+                     UTF16ToUTF8(GetCurrentMessageText()).c_str());
   if (fullscreen_bubble::ShowButtonsForType(bubble_type)) {
     gtk_widget_hide(link_);
     gtk_widget_hide(instruction_label_);
     gtk_widget_show(allow_button_);
     gtk_button_set_label(GTK_BUTTON(deny_button_),
-                         base::UTF16ToUTF8(GetCurrentDenyButtonText()).c_str());
+                         UTF16ToUTF8(GetCurrentDenyButtonText()).c_str());
     gtk_widget_show(deny_button_);
   } else {
     bool link_visible = true;
-    base::string16 accelerator;
-    if (bubble_type == FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION ||
-        bubble_type ==
-            FEB_TYPE_BROWSER_EXTENSION_FULLSCREEN_EXIT_INSTRUCTION) {
+    string16 accelerator;
+    if (bubble_type == FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION) {
       accelerator = l10n_util::GetStringUTF16(IDS_APP_F11_KEY);
     } else if (bubble_type == FEB_TYPE_FULLSCREEN_EXIT_INSTRUCTION) {
       accelerator = l10n_util::GetStringUTF16(IDS_APP_ESC_KEY);
@@ -96,12 +87,9 @@ void FullscreenExitBubbleGtk::UpdateContent(
 }
 
 void FullscreenExitBubbleGtk::InitWidgets() {
-  theme_service_ = GtkThemeService::GetFrom(browser_->profile());
-
   hbox_ = gtk_hbox_new(false, ui::kControlSpacing);
 
-  message_label_ = theme_service_->BuildLabel(GetMessage(url_).c_str(),
-                                              ui::kGdkBlack);
+  message_label_ = gtk_label_new(GetMessage(url_).c_str());
   gtk_box_pack_start(GTK_BOX(hbox_), message_label_, FALSE, FALSE, 0);
 
   allow_button_ = gtk_button_new_with_label(
@@ -123,19 +111,18 @@ void FullscreenExitBubbleGtk::InitWidgets() {
                                            FALSE);
   gtk_box_pack_start(GTK_BOX(hbox_), link_, FALSE, FALSE, 0);
 
-  instruction_label_ =
-      gtk_label_new(base::UTF16ToUTF8(GetInstructionText()).c_str());
+  instruction_label_ = gtk_label_new(UTF16ToUTF8(GetInstructionText()).c_str());
   gtk_widget_set_no_show_all(instruction_label_, FALSE);
   gtk_box_pack_start(GTK_BOX(hbox_), instruction_label_, FALSE, FALSE, 0);
 
-  bubble_ = gtk_util::CreateGtkBorderBin(
+  GtkWidget* bubble = gtk_util::CreateGtkBorderBin(
       hbox_, &ui::kGdkWhite,
       kPaddingPx, kPaddingPx, kPaddingPx, kPaddingPx);
-  gtk_util::ActAsRoundedWindow(bubble_, kFrameColor, 3,
+  gtk_util::ActAsRoundedWindow(bubble, kFrameColor, 3,
       gtk_util::ROUNDED_ALL, gtk_util::BORDER_ALL);
   GtkWidget* alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 5, 0, 0, 0);
-  gtk_container_add(GTK_CONTAINER(alignment), bubble_);
+  gtk_container_add(GTK_CONTAINER(alignment), bubble);
   ui_container_.Own(alignment);
 
   slide_widget_.reset(new SlideAnimatorGtk(ui_container_.get(),
@@ -157,20 +144,17 @@ void FullscreenExitBubbleGtk::InitWidgets() {
                    G_CALLBACK(&OnDenyClickedThunk), this);
 
   UpdateContent(url_, bubble_type_);
-
-  theme_service_->InitThemesFor(this);
-  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 content::Source<ThemeService>(theme_service_));
 }
 
 std::string FullscreenExitBubbleGtk::GetMessage(const GURL& url) {
-  if (url.is_empty())
-    return l10n_util::GetStringUTF8(IDS_FULLSCREEN_USER_ENTERED_FULLSCREEN);
-
+  if (url.is_empty()) {
+    return l10n_util::GetStringUTF8(
+        IDS_FULLSCREEN_USER_ENTERED_FULLSCREEN);
+  }
   if (url.SchemeIsFile())
     return l10n_util::GetStringUTF8(IDS_FULLSCREEN_ENTERED_FULLSCREEN);
   return l10n_util::GetStringFUTF8(IDS_FULLSCREEN_SITE_ENTERED_FULLSCREEN,
-      base::UTF8ToUTF16(url.host()));
+      UTF8ToUTF16(url.host()));
 }
 
 gfx::Rect FullscreenExitBubbleGtk::GetPopupRect(
@@ -225,10 +209,6 @@ bool FullscreenExitBubbleGtk::IsAnimating() {
   return slide_widget_->IsAnimating();
 }
 
-bool FullscreenExitBubbleGtk::CanMouseTriggerSlideIn() const {
-  return true;
-}
-
 void FullscreenExitBubbleGtk::StartWatchingMouseIfNecessary() {
   if (!fullscreen_bubble::ShowButtonsForType(bubble_type_))
     StartWatchingMouse();
@@ -259,19 +239,8 @@ void FullscreenExitBubbleGtk::OnLinkClicked(GtkWidget* link) {
 
 void FullscreenExitBubbleGtk::OnAllowClicked(GtkWidget* button) {
   Accept();
+  UpdateContent(url_, bubble_type_);
 }
-
 void FullscreenExitBubbleGtk::OnDenyClicked(GtkWidget* button) {
   Cancel();
-}
-
-void FullscreenExitBubbleGtk::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(type, chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
-  if (theme_service_->UsingNativeTheme())
-    gtk_widget_modify_bg(bubble_, GTK_STATE_NORMAL, NULL);
-  else
-    gtk_widget_modify_bg(bubble_, GTK_STATE_NORMAL, &kBackgroundColor);
 }

@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
 #include "net/socket/client_socket_factory.h"
@@ -21,14 +21,16 @@ namespace net {
 SOCKSSocketParams::SOCKSSocketParams(
     const scoped_refptr<TransportSocketParams>& proxy_server,
     bool socks_v5,
-    const HostPortPair& host_port_pair)
+    const HostPortPair& host_port_pair,
+    RequestPriority priority)
     : transport_params_(proxy_server),
       destination_(host_port_pair),
       socks_v5_(socks_v5) {
-  if (transport_params_.get())
+  if (transport_params_)
     ignore_limits_ = transport_params_->ignore_limits();
   else
     ignore_limits_ = false;
+  destination_.set_priority(priority);
 }
 
 SOCKSSocketParams::~SOCKSSocketParams() {}
@@ -39,20 +41,19 @@ static const int kSOCKSConnectJobTimeoutInSeconds = 30;
 
 SOCKSConnectJob::SOCKSConnectJob(
     const std::string& group_name,
-    RequestPriority priority,
     const scoped_refptr<SOCKSSocketParams>& socks_params,
     const base::TimeDelta& timeout_duration,
     TransportClientSocketPool* transport_pool,
     HostResolver* host_resolver,
     Delegate* delegate,
     NetLog* net_log)
-    : ConnectJob(group_name, timeout_duration, priority, delegate,
+    : ConnectJob(group_name, timeout_duration, delegate,
                  BoundNetLog::Make(net_log, NetLog::SOURCE_CONNECT_JOB)),
       socks_params_(socks_params),
       transport_pool_(transport_pool),
       resolver_(host_resolver),
-      callback_(base::Bind(&SOCKSConnectJob::OnIOComplete,
-                           base::Unretained(this))) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(callback_(
+          base::Bind(&SOCKSConnectJob::OnIOComplete, base::Unretained(this)))) {
 }
 
 SOCKSConnectJob::~SOCKSConnectJob() {
@@ -116,12 +117,10 @@ int SOCKSConnectJob::DoLoop(int result) {
 int SOCKSConnectJob::DoTransportConnect() {
   next_state_ = STATE_TRANSPORT_CONNECT_COMPLETE;
   transport_socket_handle_.reset(new ClientSocketHandle());
-  return transport_socket_handle_->Init(group_name(),
-                                        socks_params_->transport_params(),
-                                        priority(),
-                                        callback_,
-                                        transport_pool_,
-                                        net_log());
+  return transport_socket_handle_->Init(
+      group_name(), socks_params_->transport_params(),
+      socks_params_->destination().priority(), callback_, transport_pool_,
+      net_log());
 }
 
 int SOCKSConnectJob::DoTransportConnectComplete(int result) {
@@ -141,12 +140,11 @@ int SOCKSConnectJob::DoSOCKSConnect() {
 
   // Add a SOCKS connection on top of the tcp socket.
   if (socks_params_->is_socks_v5()) {
-    socket_.reset(new SOCKS5ClientSocket(transport_socket_handle_.Pass(),
+    socket_.reset(new SOCKS5ClientSocket(transport_socket_handle_.release(),
                                          socks_params_->destination()));
   } else {
-    socket_.reset(new SOCKSClientSocket(transport_socket_handle_.Pass(),
+    socket_.reset(new SOCKSClientSocket(transport_socket_handle_.release(),
                                         socks_params_->destination(),
-                                        priority(),
                                         resolver_));
   }
   return socket_->Connect(
@@ -159,7 +157,7 @@ int SOCKSConnectJob::DoSOCKSConnectComplete(int result) {
     return result;
   }
 
-  SetSocket(socket_.Pass());
+  set_socket(socket_.release());
   return result;
 }
 
@@ -168,19 +166,17 @@ int SOCKSConnectJob::ConnectInternal() {
   return DoLoop(OK);
 }
 
-scoped_ptr<ConnectJob>
-SOCKSClientSocketPool::SOCKSConnectJobFactory::NewConnectJob(
+ConnectJob* SOCKSClientSocketPool::SOCKSConnectJobFactory::NewConnectJob(
     const std::string& group_name,
     const PoolBase::Request& request,
     ConnectJob::Delegate* delegate) const {
-  return scoped_ptr<ConnectJob>(new SOCKSConnectJob(group_name,
-                                                    request.priority(),
-                                                    request.params(),
-                                                    ConnectionTimeout(),
-                                                    transport_pool_,
-                                                    host_resolver_,
-                                                    delegate,
-                                                    net_log_));
+  return new SOCKSConnectJob(group_name,
+                             request.params(),
+                             ConnectionTimeout(),
+                             transport_pool_,
+                             host_resolver_,
+                             delegate,
+                             net_log_);
 }
 
 base::TimeDelta
@@ -197,19 +193,15 @@ SOCKSClientSocketPool::SOCKSClientSocketPool(
     TransportClientSocketPool* transport_pool,
     NetLog* net_log)
     : transport_pool_(transport_pool),
-      base_(this, max_sockets, max_sockets_per_group, histograms,
+      base_(max_sockets, max_sockets_per_group, histograms,
             ClientSocketPool::unused_idle_socket_timeout(),
             ClientSocketPool::used_idle_socket_timeout(),
             new SOCKSConnectJobFactory(transport_pool,
                                        host_resolver,
                                        net_log)) {
-  // We should always have a |transport_pool_| except in unit tests.
-  if (transport_pool_)
-    base_.AddLowerLayeredPool(transport_pool_);
 }
 
-SOCKSClientSocketPool::~SOCKSClientSocketPool() {
-}
+SOCKSClientSocketPool::~SOCKSClientSocketPool() {}
 
 int SOCKSClientSocketPool::RequestSocket(
     const std::string& group_name, const void* socket_params,
@@ -239,13 +231,12 @@ void SOCKSClientSocketPool::CancelRequest(const std::string& group_name,
 }
 
 void SOCKSClientSocketPool::ReleaseSocket(const std::string& group_name,
-                                          scoped_ptr<StreamSocket> socket,
-                                          int id) {
-  base_.ReleaseSocket(group_name, socket.Pass(), id);
+                                          StreamSocket* socket, int id) {
+  base_.ReleaseSocket(group_name, socket, id);
 }
 
-void SOCKSClientSocketPool::FlushWithError(int error) {
-  base_.FlushWithError(error);
+void SOCKSClientSocketPool::Flush() {
+  base_.Flush();
 }
 
 void SOCKSClientSocketPool::CloseIdleSockets() {
@@ -266,13 +257,13 @@ LoadState SOCKSClientSocketPool::GetLoadState(
   return base_.GetLoadState(group_name, handle);
 }
 
-base::DictionaryValue* SOCKSClientSocketPool::GetInfoAsValue(
+DictionaryValue* SOCKSClientSocketPool::GetInfoAsValue(
     const std::string& name,
     const std::string& type,
     bool include_nested_pools) const {
-  base::DictionaryValue* dict = base_.GetInfoAsValue(name, type);
+  DictionaryValue* dict = base_.GetInfoAsValue(name, type);
   if (include_nested_pools) {
-    base::ListValue* list = new base::ListValue();
+    ListValue* list = new ListValue();
     list->Append(transport_pool_->GetInfoAsValue("transport_socket_pool",
                                                  "transport_socket_pool",
                                                  false));
@@ -288,25 +279,5 @@ base::TimeDelta SOCKSClientSocketPool::ConnectionTimeout() const {
 ClientSocketPoolHistograms* SOCKSClientSocketPool::histograms() const {
   return base_.histograms();
 };
-
-bool SOCKSClientSocketPool::IsStalled() const {
-  return base_.IsStalled();
-}
-
-void SOCKSClientSocketPool::AddHigherLayeredPool(
-    HigherLayeredPool* higher_pool) {
-  base_.AddHigherLayeredPool(higher_pool);
-}
-
-void SOCKSClientSocketPool::RemoveHigherLayeredPool(
-    HigherLayeredPool* higher_pool) {
-  base_.RemoveHigherLayeredPool(higher_pool);
-}
-
-bool SOCKSClientSocketPool::CloseOneIdleConnection() {
-  if (base_.CloseOneIdleSocket())
-    return true;
-  return base_.CloseOneIdleConnectionInHigherLayeredPool();
-}
 
 }  // namespace net

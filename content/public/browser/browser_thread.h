@@ -4,30 +4,28 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_BROWSER_THREAD_H_
 #define CONTENT_PUBLIC_BROWSER_BROWSER_THREAD_H_
-
-#include <string>
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/location.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/task_runner_util.h"
-#include "base/time/time.h"
+#include "base/message_loop_proxy.h"
+#include "base/tracked_objects.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_thread_delegate.h"
 
 #if defined(UNIT_TEST)
 #include "base/logging.h"
 #endif  // UNIT_TEST
 
-namespace base {
 class MessageLoop;
+
+namespace base {
 class SequencedWorkerPool;
 class Thread;
 }
 
 namespace content {
 
-class BrowserThreadDelegate;
 class BrowserThreadImpl;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -63,6 +61,12 @@ class CONTENT_EXPORT BrowserThread {
 
     // This is the thread that interacts with the database.
     DB,
+
+    // This is the "main" thread for WebKit within the browser process when
+    // NOT in --single-process mode.
+    // Deprecated: Do not design new code to use this thread; see
+    // http://crbug.com/106839
+    WEBKIT_DEPRECATED,
 
     // This is the thread that interacts with the file system.
     FILE,
@@ -102,7 +106,7 @@ class CONTENT_EXPORT BrowserThread {
   static bool PostDelayedTask(ID identifier,
                               const tracked_objects::Location& from_here,
                               const base::Closure& task,
-                              base::TimeDelta delay);
+                              int64 delay_ms);
   static bool PostNonNestableTask(ID identifier,
                                   const tracked_objects::Location& from_here,
                                   const base::Closure& task);
@@ -110,25 +114,13 @@ class CONTENT_EXPORT BrowserThread {
       ID identifier,
       const tracked_objects::Location& from_here,
       const base::Closure& task,
-      base::TimeDelta delay);
+      int64 delay_ms);
 
   static bool PostTaskAndReply(
       ID identifier,
       const tracked_objects::Location& from_here,
       const base::Closure& task,
       const base::Closure& reply);
-
-  template <typename ReturnType, typename ReplyArgType>
-  static bool PostTaskAndReplyWithResult(
-      ID identifier,
-      const tracked_objects::Location& from_here,
-      const base::Callback<ReturnType(void)>& task,
-      const base::Callback<void(ReplyArgType)>& reply) {
-    scoped_refptr<base::MessageLoopProxy> message_loop_proxy =
-        GetMessageLoopProxyForThread(identifier);
-    return base::PostTaskAndReplyWithResult(
-        message_loop_proxy.get(), from_here, task, reply);
-  }
 
   template <class T>
   static bool DeleteSoon(ID identifier,
@@ -150,10 +142,9 @@ class CONTENT_EXPORT BrowserThread {
   // for doing things like blocking I/O.
   //
   // The first variant will run the task in the pool with no sequencing
-  // semantics, so may get run in parallel with other posted tasks. The second
-  // variant will all post a task with no sequencing semantics, and will post a
-  // reply task to the origin TaskRunner upon completion.  The third variant
-  // provides sequencing between tasks with the same sequence token name.
+  // semantics, so may get run in parallel with other posted tasks. The
+  // second variant provides sequencing between tasks with the same
+  // sequence token name.
   //
   // These tasks are guaranteed to run before shutdown.
   //
@@ -163,16 +154,8 @@ class CONTENT_EXPORT BrowserThread {
   // lookup and is guaranteed unique without you having to come up with a
   // unique string), you can access the sequenced worker pool directly via
   // GetBlockingPool().
-  //
-  // If you need to PostTaskAndReplyWithResult, use
-  // base::PostTaskAndReplyWithResult() with GetBlockingPool() as the task
-  // runner.
   static bool PostBlockingPoolTask(const tracked_objects::Location& from_here,
                                    const base::Closure& task);
-  static bool PostBlockingPoolTaskAndReply(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task,
-      const base::Closure& reply);
   static bool PostBlockingPoolSequencedTask(
       const std::string& sequence_token_name,
       const tracked_objects::Location& from_here,
@@ -183,9 +166,9 @@ class CONTENT_EXPORT BrowserThread {
   // Windows registry.
   static base::SequencedWorkerPool* GetBlockingPool();
 
-  // Callable on any thread.  Returns whether the given well-known thread is
-  // initialized.
-  static bool IsThreadInitialized(ID identifier);
+  // Callable on any thread.  Returns whether the given ID corresponds to a well
+  // known thread.
+  static bool IsWellKnownThread(ID identifier);
 
   // Callable on any thread.  Returns whether you're currently on a particular
   // thread.
@@ -213,7 +196,7 @@ class CONTENT_EXPORT BrowserThread {
   //
   // Ownership remains with the BrowserThread implementation, so you
   // must not delete the pointer.
-  static base::MessageLoop* UnsafeGetMessageLoopForThread(ID identifier);
+  static MessageLoop* UnsafeGetMessageLoopForThread(ID identifier);
 
   // Sets the delegate for the specified BrowserThread.
   //
@@ -258,13 +241,14 @@ class CONTENT_EXPORT BrowserThread {
   // ...
   //  private:
   //   friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
-  //   friend class base::DeleteHelper<Foo>;
+  //   friend class DeleteTask<Foo>;
   //
   //   ~Foo();
   struct DeleteOnUIThread : public DeleteOnThread<UI> { };
   struct DeleteOnIOThread : public DeleteOnThread<IO> { };
   struct DeleteOnFileThread : public DeleteOnThread<FILE> { };
   struct DeleteOnDBThread : public DeleteOnThread<DB> { };
+  struct DeleteOnWebKitThread : public DeleteOnThread<WEBKIT_DEPRECATED> { };
 
  private:
   friend class BrowserThreadImpl;

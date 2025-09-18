@@ -4,45 +4,45 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_APP_LAUNCHER_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_APP_LAUNCHER_HANDLER_H_
+#pragma once
 
-#include <set>
 #include <string>
 
-#include "apps/metrics_names.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
+#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
-#include "chrome/common/cancelable_task_tracker.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/string_ordinal.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "extensions/common/extension.h"
-#include "sync/api/string_ordinal.h"
 
-class ExtensionEnableFlow;
+class AppNotification;
 class ExtensionService;
 class PrefChangeRegistrar;
 class Profile;
 
-namespace chrome {
-struct FaviconImageResult;
-}
-
 // The handler for Javascript messages related to the "apps" view.
 class AppLauncherHandler : public content::WebUIMessageHandler,
                            public ExtensionUninstallDialog::Delegate,
-                           public ExtensionEnableFlowDelegate,
+                           public ExtensionInstallUI::Delegate,
                            public content::NotificationObserver {
  public:
   explicit AppLauncherHandler(ExtensionService* extension_service);
   virtual ~AppLauncherHandler();
 
+  // Whether the app should be excluded from the "apps" list because
+  // it is special (such as the Web Store app).
+  static bool IsAppExcludedFromList(const Extension* extension);
+
   // Populate a dictionary with the information from an extension.
   static void CreateAppInfo(
-      const extensions::Extension* extension,
+      const Extension* extension,
+      const AppNotification* notification,
       ExtensionService* service,
       base::DictionaryValue* value);
 
@@ -60,51 +60,57 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // Create a dictionary value for the given extension. May return NULL, e.g. if
   // the given extension is not an app. If non-NULL, the caller assumes
   // ownership of the pointer.
-  base::DictionaryValue* GetAppInfo(const extensions::Extension* extension);
+  base::DictionaryValue* GetAppInfo(const Extension* extension);
 
   // Populate the given dictionary with the web store promo content.
   void FillPromoDictionary(base::DictionaryValue* value);
 
-  // Handles the "launchApp" message with unused |args|.
+  // Callback for the "getApps" message.
   void HandleGetApps(const base::ListValue* args);
 
-  // Handles the "launchApp" message with |args| containing [extension_id,
-  // source] with optional [url, disposition], |disposition| defaulting to
-  // CURRENT_TAB.
+  // Callback for the "launchApp" message.
   void HandleLaunchApp(const base::ListValue* args);
 
-  // Handles the "setLaunchType" message with args containing [extension_id,
-  // launch_type].
+  // Callback for the "setLaunchType" message.
   void HandleSetLaunchType(const base::ListValue* args);
 
-  // Handles the "uninstallApp" message with |args| containing [extension_id]
-  // and an optional bool to not confirm the uninstall when true, defaults to
-  // false.
+  // Callback for the "uninstallApp" message.
   void HandleUninstallApp(const base::ListValue* args);
 
-  // Handles the "createAppShortcut" message with |args| containing
-  // [extension_id].
+  // Callback for the "hideAppPromo" message.
+  void HandleHideAppsPromo(const base::ListValue* args);
+
+  // Callback for the "createAppShortcut" message.
   void HandleCreateAppShortcut(const base::ListValue* args);
 
-  // Handles the "reorderApps" message with |args| containing [dragged_app_id,
-  // app_order].
+  // Callback for the "reorderApps" message.
   void HandleReorderApps(const base::ListValue* args);
 
-  // Handles the "setPageIndex" message with |args| containing [extension_id,
-  // page_index].
+  // Callback for the "setPageIndex" message.
   void HandleSetPageIndex(const base::ListValue* args);
 
-  // Handles "saveAppPageName" message with |args| containing [name,
-  // page_index].
+  // Callback for the "promoSeen" message.
+  void HandlePromoSeen(const base::ListValue* args);
+
+  // Callback for the "saveAppPageName" message.
   void HandleSaveAppPageName(const base::ListValue* args);
 
-  // Handles "generateAppForLink" message with |args| containing [url, title,
-  // page_index].
+  // Callback for the "generateAppForLink" message.
   void HandleGenerateAppForLink(const base::ListValue* args);
 
-  // Other registered message callbacks with unused |args|.
-  void StopShowingAppLauncherPromo(const base::ListValue* args);
-  void OnLearnMore(const base::ListValue* args);
+  // Callback for the "recordAppLaunchByURL" message. Takes an escaped URL and a
+  // launch source (integer), and if the URL represents an app, records the
+  // action for UMA.
+  void HandleRecordAppLaunchByURL(const base::ListValue* args);
+
+  // Callback for "closeNotification" message.
+  void HandleNotificationClose(const base::ListValue* args);
+
+  // Callback for "setNotificationsDisabled" message.
+  void HandleSetNotificationsDisabled(const base::ListValue* args);
+
+  // Register app launcher preferences.
+  static void RegisterUserPrefs(PrefService* pref_service);
 
  private:
   struct AppInstallInfo {
@@ -112,13 +118,27 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
     ~AppInstallInfo();
 
     bool is_bookmark_app;
-    base::string16 title;
+    string16 title;
     GURL app_url;
-    syncer::StringOrdinal page_ordinal;
+    StringOrdinal page_ordinal;
   };
 
   // Reset some instance flags we use to track the currently uninstalling app.
   void CleanupAfterUninstall();
+
+  // Records a web store launch in the appropriate histograms. |promo_active|
+  // specifies if the web store promotion was active.
+  static void RecordWebStoreLaunch(bool promo_active);
+
+  // Records an app launch in the corresponding |bucket| of the app launch
+  // histogram. |promo_active| specifies if the web store promotion was active.
+  static void RecordAppLaunchByID(extension_misc::AppLaunchBucket bucket);
+
+  // Records an app launch in the corresponding |bucket| of the app launch
+  // histogram if the |escaped_url| corresponds to an installed app.
+  static void RecordAppLaunchByURL(Profile* profile,
+                                   std::string escaped_url,
+                                   extension_misc::AppLaunchBucket bucket);
 
   // Prompts the user to re-enable the app for |extension_id|.
   void PromptToEnableApp(const std::string& extension_id);
@@ -127,24 +147,27 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   virtual void ExtensionUninstallAccepted() OVERRIDE;
   virtual void ExtensionUninstallCanceled() OVERRIDE;
 
-  // ExtensionEnableFlowDelegate:
-  virtual void ExtensionEnableFlowFinished() OVERRIDE;
-  virtual void ExtensionEnableFlowAborted(bool user_initiated) OVERRIDE;
+  // ExtensionInstallUI::Delegate:
+  virtual void InstallUIProceed() OVERRIDE;
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.
   ExtensionUninstallDialog* GetExtensionUninstallDialog();
 
+  // Returns the ExtensionInstallUI object for this class, creating it if
+  // needed.
+  ExtensionInstallUI* GetExtensionInstallUI();
+
+  // Helper that uninstalls all the default apps.
+  void UninstallDefaultApps();
+
   // Continuation for installing a bookmark app after favicon lookup.
-  void OnFaviconForApp(scoped_ptr<AppInstallInfo> install_info,
-                       const chrome::FaviconImageResult& image_result);
+  void OnFaviconForApp(FaviconService::Handle handle,
+                       history::FaviconData data);
 
   // Sends |highlight_app_id_| to the js.
   void SetAppToBeHighlighted();
-
-  void OnExtensionPreferenceChanged();
-
-  void OnLocalStatePreferenceChanged();
 
   // The apps are represented in the extensions model, which
   // outlives us since it's owned by our containing profile.
@@ -155,22 +178,15 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   content::NotificationRegistrar registrar_;
 
   // Monitor extension preference changes so that the Web UI can be notified.
-  PrefChangeRegistrar extension_pref_change_registrar_;
-
-  // Monitor the local state pref to control the app launcher promo.
-  PrefChangeRegistrar local_state_pref_change_registrar_;
+  PrefChangeRegistrar pref_change_registrar_;
 
   // Used to show confirmation UI for uninstalling extensions in incognito mode.
   scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;
 
-  // Used to show confirmation UI for enabling extensions.
-  scoped_ptr<ExtensionEnableFlow> extension_enable_flow_;
+  // Used to show confirmation UI for enabling extensions in incognito mode.
+  scoped_ptr<ExtensionInstallUI> extension_install_ui_;
 
-  // The ids of apps to show on the NTP.
-  std::set<std::string> visible_apps_;
-
-  // The id of the extension we are prompting the user about (either enable or
-  // uninstall).
+  // The id of the extension we are prompting the user about.
   std::string extension_id_prompting_;
 
   // When true, we ignore changes to the underlying data rather than immediately
@@ -189,8 +205,8 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // when the app is added to the page (via getAppsCallback or appAdded).
   std::string highlight_app_id_;
 
-  // Used for favicon loading tasks.
-  CancelableTaskTracker cancelable_task_tracker_;
+  // Hold state for favicon requests.
+  CancelableRequestConsumerTSimple<AppInstallInfo*> favicon_consumer_;
 
   DISALLOW_COPY_AND_ASSIGN(AppLauncherHandler);
 };

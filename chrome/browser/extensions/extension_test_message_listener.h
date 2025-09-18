@@ -4,17 +4,15 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_TEST_MESSAGE_LISTENER_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_TEST_MESSAGE_LISTENER_H_
+#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-namespace extensions {
-class TestSendMessageFunction;
-}
+class ExtensionTestSendMessageFunction;
 
 // This class helps us wait for incoming messages sent from javascript via
 // chrome.test.sendMessage(). A sample usage would be:
@@ -52,10 +50,6 @@ class ExtensionTestMessageListener : public content::NotificationObserver {
                                bool will_reply);
   virtual ~ExtensionTestMessageListener();
 
-  void AlsoListenForFailureMessage(const std::string& failure_message) {
-    failure_message_ = failure_message;
-  }
-
   // This returns true immediately if we've already gotten the expected
   // message, or waits until it arrives. Returns false if the wait is
   // interrupted and we still haven't gotten the message.
@@ -92,14 +86,8 @@ class ExtensionTestMessageListener : public content::NotificationObserver {
   // we send an automatic empty reply to the extension.
   bool will_reply_;
 
-  // The message that signals failure.
-  std::string failure_message_;
-
-  // If we received a message that was the failure message.
-  bool failed_;
-
   // The function we need to reply to.
-  scoped_refptr<extensions::TestSendMessageFunction> function_;
+  ExtensionTestSendMessageFunction* function_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_TEST_MESSAGE_LISTENER_H_

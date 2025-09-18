@@ -1,31 +1,28 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MAC_H_
 #define CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MAC_H_
+#pragma once
 
 #include <map>
 #include <utility>
 #include <vector>
 
+#include "base/memory/scoped_nsobject.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 
 @class BrowserAccessibilityCocoa;
-
-namespace content {
 
 class BrowserAccessibilityMac : public BrowserAccessibility {
  public:
   // Implementation of BrowserAccessibility.
   virtual void PreInitialize() OVERRIDE;
   virtual void NativeReleaseReference() OVERRIDE;
-  virtual bool IsNative() const OVERRIDE;
 
   // Overrides from BrowserAccessibility.
   virtual void DetachTree(std::vector<BrowserAccessibility*>* nodes) OVERRIDE;
-  virtual void SwapChildren(std::vector<BrowserAccessibility*>& children)
-      OVERRIDE;
 
   // The BrowserAccessibilityCocoa associated with us.
   BrowserAccessibilityCocoa* native_view() const {
@@ -45,7 +42,5 @@ class BrowserAccessibilityMac : public BrowserAccessibility {
   BrowserAccessibilityCocoa* browser_accessibility_cocoa_;
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityMac);
 };
-
-}  // namespace content
 
 #endif // CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MAC_H_

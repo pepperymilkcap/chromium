@@ -2,41 +2,67 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom binding for the tabs API.
+// Custom bindings for the tabs API.
 
-var binding = require('binding').Binding.create('tabs');
+(function() {
 
-var messaging = require('messaging');
-var tabsNatives = requireNative('tabs');
-var OpenChannelToTab = tabsNatives.OpenChannelToTab;
-var sendRequestIsDisabled = requireNative('process').IsSendRequestDisabled();
+native function GetChromeHidden();
+native function OpenChannelToTab();
 
-binding.registerCustomHook(function(bindingsAPI, extensionId) {
+var chromeHidden = GetChromeHidden();
+
+chromeHidden.registerCustomHook('tabs', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
-  var tabs = bindingsAPI.compiledApi;
 
-  apiFunctions.setHandleRequest('connect', function(tabId, connectInfo) {
+  apiFunctions.setHandleRequest('tabs.connect', function(tabId, connectInfo) {
     var name = '';
     if (connectInfo) {
       name = connectInfo.name || name;
     }
-    var portId = OpenChannelToTab(tabId, extensionId, name);
-    return messaging.createPort(portId, name);
+    var portId = OpenChannelToTab(tabId, chromeHidden.extensionId, name);
+    return chromeHidden.Port.createPort(portId, name);
   });
 
-  apiFunctions.setHandleRequest('sendRequest',
-                                function(tabId, request, responseCallback) {
-    if (sendRequestIsDisabled)
-      throw new Error(sendRequestIsDisabled);
-    var port = tabs.connect(tabId, {name: messaging.kRequestChannel});
-    messaging.sendMessageImpl(port, request, responseCallback);
+  apiFunctions.setHandleRequest('tabs.sendRequest',
+      function(tabId, request, responseCallback) {
+    var port = chrome.tabs.connect(tabId,
+                                   {name: chromeHidden.kRequestChannel});
+    port.postMessage(request);
+    port.onDisconnect.addListener(function() {
+      // For onDisconnects, we only notify the callback if there was an error.
+      if (chrome.extension.lastError && responseCallback)
+        responseCallback();
+    });
+    port.onMessage.addListener(function(response) {
+      try {
+        if (responseCallback)
+          responseCallback(response);
+      } finally {
+        port.disconnect();
+        port = null;
+      }
+    });
   });
 
-  apiFunctions.setHandleRequest('sendMessage',
-                                function(tabId, message, responseCallback) {
-    var port = tabs.connect(tabId, {name: messaging.kMessageChannel});
-    messaging.sendMessageImpl(port, message, responseCallback);
+  // TODO(skerner,mtytel): The next step to omitting optional arguments is the
+  // replacement of this code with code that matches arguments by type.
+  // Once this is working for captureVisibleTab() it can be enabled for
+  // the rest of the API. See crbug/29215 .
+  apiFunctions.setUpdateArgumentsPreValidate('tabs.captureVisibleTab',
+                                             function() {
+    // Old signature:
+    //    captureVisibleTab(int windowId, function callback);
+    // New signature:
+    //    captureVisibleTab(int windowId, object details, function callback);
+    var newArgs;
+    if (arguments.length == 2 && typeof(arguments[1]) == 'function') {
+      // If the old signature is used, add a null details object.
+      newArgs = [arguments[0], null, arguments[1]];
+    } else {
+      newArgs = arguments;
+    }
+    return newArgs;
   });
 });
 
-exports.binding = binding.generate();
+})();

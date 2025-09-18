@@ -4,22 +4,16 @@
 
 #include "ui/views/examples/text_example.h"
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/font_list.h"
-#include "ui/views/border.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/examples/example_combobox_model.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/view.h"
-
-using base::ASCIIToUTF16;
-
-namespace views {
-namespace examples {
 
 namespace {
 
@@ -52,8 +46,11 @@ const char* kTextExamples[] = {
 const char* kElidingBehaviors[] = {
     "Ellipsis",
     "None",
+#if defined(OS_WIN)
     "Fade Tail",
     "Fade Head",
+    "Fade Head and Tail",
+#endif
 };
 
 const char* kPrefixOptions[] = {
@@ -69,8 +66,15 @@ const char* kHorizontalAligments[] = {
     "Right",
 };
 
+const char* kVerticalAlignments[] = {
+    "Default",
+    "Top",
+    "Middle",
+    "Bottom",
+};
+
 // Toggles bit |flag| on |flags| based on state of |checkbox|.
-void SetFlagFromCheckbox(Checkbox* checkbox, int* flags, int flag) {
+void SetFlagFromCheckbox(views::Checkbox* checkbox, int* flags, int flag) {
   if (checkbox->checked())
     *flags |= flag;
   else
@@ -79,39 +83,49 @@ void SetFlagFromCheckbox(Checkbox* checkbox, int* flags, int flag) {
 
 }  // namespace
 
+namespace views {
+namespace examples {
+
 // TextExample's content view, which is responsible for drawing a string with
 // the specified style.
 class TextExample::TextExampleView : public View {
  public:
   TextExampleView()
-    : text_(ASCIIToUTF16(kShortText)),
+    : font_(ResourceBundle::GetSharedInstance().GetFont(
+          ResourceBundle::BaseFont)),
+      text_(ASCIIToUTF16(kShortText)),
       text_flags_(0),
       halo_(false),
       fade_(false),
-      fade_mode_(gfx::Canvas::TruncateFadeTail) {
+      fade_mode_(gfx::CanvasSkia::TruncateFadeTail) {
   }
 
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    View::OnPaint(canvas);
-    const gfx::Rect bounds = GetContentsBounds();
-
+#if defined(OS_WIN)
     if (fade_) {
-      canvas->DrawFadeTruncatingStringRect(text_, fade_mode_, font_list_,
-                                           SK_ColorDKGRAY, bounds);
-    } else if (halo_) {
-      canvas->DrawStringRectWithHalo(text_, font_list_, SK_ColorDKGRAY,
-                                     SK_ColorWHITE, bounds, text_flags_);
+      gfx::Rect rect(0, 0, width(), height());
+      size_t characters_to_truncate_from_head =
+          gfx::CanvasSkia::TruncateFadeHeadAndTail ? 10 : 0;
+      canvas->AsCanvasSkia()->DrawFadeTruncatingString(text_, fade_mode_,
+          characters_to_truncate_from_head, font_, SK_ColorDKGRAY, rect);
+      return;
+    }
+#endif
+
+    if (halo_) {
+      canvas->AsCanvasSkia()->DrawStringWithHalo(text_, font_, SK_ColorDKGRAY,
+          SK_ColorWHITE, 0, 0, width(), height(), text_flags_);
     } else {
-      canvas->DrawStringRectWithFlags(text_, font_list_, SK_ColorDKGRAY, bounds,
-                                      text_flags_);
+      canvas->DrawStringInt(text_, font_, SK_ColorDKGRAY, 0, 0, width(),
+          height(), text_flags_);
     }
   }
 
   int text_flags() const { return text_flags_; }
   void set_text_flags(int text_flags) { text_flags_ = text_flags; }
 
-  const base::string16& text() const { return text_; }
-  void set_text(const base::string16& text) { text_ = text; }
+  const string16& text() const { return text_; }
+  void set_text(const string16& text) { text_ = text; }
 
   bool halo() const { return halo_; }
   void set_halo(bool halo) { halo_ = halo; }
@@ -119,22 +133,24 @@ class TextExample::TextExampleView : public View {
   bool fade() const { return fade_; }
   void set_fade(bool fade) { fade_ = fade; }
 
-  gfx::Canvas::TruncateFadeMode fade_mode() const { return fade_mode_; }
-  void set_fade_mode(gfx::Canvas::TruncateFadeMode mode) { fade_mode_ = mode; }
+  gfx::CanvasSkia::TruncateFadeMode fade_mode() const { return fade_mode_; }
+  void set_fade_mode(gfx::CanvasSkia::TruncateFadeMode fade_mode) {
+    fade_mode_ = fade_mode;
+  }
 
   int GetFontStyle() const {
-    return font_list_.GetFontStyle();
+    return font_.GetStyle();
   }
   void SetFontStyle(int style) {
-    font_list_ = font_list_.DeriveFontList(style);
+    font_ = font_.DeriveFont(0, style);
   }
 
  private:
   // The font used for drawing the text.
-  gfx::FontList font_list_;
+  gfx::Font font_;
 
   // The text to draw.
-  base::string16 text_;
+  string16 text_;
 
   // Text flags for passing to |DrawStringInt()|.
   int text_flags_;
@@ -148,7 +164,7 @@ class TextExample::TextExampleView : public View {
   bool fade_;
 
   // If |fade_| is |true|, fade mode parameter to |DrawFadeTruncatingString()|.
-  gfx::Canvas::TruncateFadeMode fade_mode_;
+  gfx::CanvasSkia::TruncateFadeMode fade_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(TextExampleView);
 };
@@ -157,9 +173,6 @@ TextExample::TextExample() : ExampleBase("Text Styles") {
 }
 
 TextExample::~TextExample() {
-  // Remove all the views first as some reference models in
-  // |example_combobox_model_|.
-  container()->RemoveAllChildViews(true);
 }
 
 Checkbox* TextExample::AddCheckbox(GridLayout* layout, const char* name) {
@@ -175,19 +188,15 @@ Combobox* TextExample::AddCombobox(GridLayout* layout,
                                    int count) {
   layout->StartRow(0, 0);
   layout->AddView(new Label(ASCIIToUTF16(name)));
-  ExampleComboboxModel* combobox_model = new ExampleComboboxModel(strings,
-                                                                  count);
-  example_combobox_model_.push_back(combobox_model);
-  Combobox* combobox = new Combobox(combobox_model);
-  combobox->SetSelectedIndex(0);
-  combobox->set_listener(this);
-  layout->AddView(combobox, kNumColumns - 1, 1);
-  return combobox;
+  Combobox* combo_box = new Combobox(new ExampleComboboxModel(strings, count));
+  combo_box->SetSelectedItem(0);
+  combo_box->set_listener(this);
+  layout->AddView(combo_box, kNumColumns - 1, 1);
+  return combo_box;
 }
 
 void TextExample::CreateExampleView(View* container) {
   text_view_ = new TextExampleView;
-  text_view_->set_border(Border::CreateSolidBorder(1, SK_ColorGRAY));
 
   GridLayout* layout = new GridLayout(container);
   container->SetLayoutManager(layout);
@@ -207,6 +216,10 @@ void TextExample::CreateExampleView(View* container) {
                             "H-Align",
                             kHorizontalAligments,
                             arraysize(kHorizontalAligments));
+  v_align_cb_ = AddCombobox(layout,
+                            "V-Align",
+                            kVerticalAlignments,
+                            arraysize(kVerticalAlignments));
   eliding_cb_ = AddCombobox(layout,
                             "Eliding",
                             kElidingBehaviors,
@@ -241,27 +254,30 @@ void TextExample::CreateExampleView(View* container) {
   layout->AddPaddingRow(0, 8);
 }
 
-void TextExample::ButtonPressed(Button* button, const ui::Event& event) {
+void TextExample::ButtonPressed(Button* button,
+                                const Event& event) {
   int flags = text_view_->text_flags();
   int style = text_view_->GetFontStyle();
   SetFlagFromCheckbox(multiline_checkbox_, &flags, gfx::Canvas::MULTI_LINE);
   SetFlagFromCheckbox(break_checkbox_, &flags, gfx::Canvas::CHARACTER_BREAK);
   SetFlagFromCheckbox(bold_checkbox_, &style, gfx::Font::BOLD);
   SetFlagFromCheckbox(italic_checkbox_, &style, gfx::Font::ITALIC);
-  SetFlagFromCheckbox(underline_checkbox_, &style, gfx::Font::UNDERLINE);
+  SetFlagFromCheckbox(underline_checkbox_, &style, gfx::Font::UNDERLINED);
   text_view_->set_halo(halo_checkbox_->checked());
   text_view_->set_text_flags(flags);
   text_view_->SetFontStyle(style);
   text_view_->SchedulePaint();
 }
 
-void TextExample::OnSelectedIndexChanged(Combobox* combobox) {
+void TextExample::ItemChanged(Combobox* combo_box,
+                              int prev_index,
+                              int new_index) {
   int text_flags = text_view_->text_flags();
-  if (combobox == h_align_cb_) {
+  if (combo_box == h_align_cb_) {
     text_flags &= ~(gfx::Canvas::TEXT_ALIGN_LEFT |
                     gfx::Canvas::TEXT_ALIGN_CENTER |
                     gfx::Canvas::TEXT_ALIGN_RIGHT);
-    switch (combobox->selected_index()) {
+    switch (new_index) {
       case 0:
         break;
       case 1:
@@ -274,8 +290,25 @@ void TextExample::OnSelectedIndexChanged(Combobox* combobox) {
         text_flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
         break;
     }
-  } else if (combobox == text_cb_) {
-    switch (combobox->selected_index()) {
+  } else if (combo_box == v_align_cb_) {
+    text_flags &= ~(gfx::Canvas::TEXT_VALIGN_TOP |
+                    gfx::Canvas::TEXT_VALIGN_MIDDLE |
+                    gfx::Canvas::TEXT_VALIGN_BOTTOM);
+    switch (new_index) {
+      case 0:
+        break;
+      case 1:
+        text_flags |= gfx::Canvas::TEXT_VALIGN_TOP;
+        break;
+      case 2:
+        text_flags |= gfx::Canvas::TEXT_VALIGN_MIDDLE;
+        break;
+      case 3:
+        text_flags |= gfx::Canvas::TEXT_VALIGN_BOTTOM;
+        break;
+    }
+  } else if (combo_box == text_cb_) {
+    switch (new_index) {
       case 0:
         text_view_->set_text(ASCIIToUTF16(kShortText));
         break;
@@ -292,8 +325,8 @@ void TextExample::OnSelectedIndexChanged(Combobox* combobox) {
         text_view_->set_text(ASCIIToUTF16(kNewlineText));
         break;
     }
-  } else if (combobox == eliding_cb_) {
-    switch (combobox->selected_index()) {
+  } else if (combo_box == eliding_cb_) {
+    switch (new_index) {
       case 0:
         text_flags &= ~gfx::Canvas::NO_ELLIPSIS;
         text_view_->set_fade(false);
@@ -302,18 +335,24 @@ void TextExample::OnSelectedIndexChanged(Combobox* combobox) {
         text_flags |= gfx::Canvas::NO_ELLIPSIS;
         text_view_->set_fade(false);
         break;
+#if defined(OS_WIN)
       case 2:
-        text_view_->set_fade_mode(gfx::Canvas::TruncateFadeTail);
+        text_view_->set_fade_mode(gfx::CanvasSkia::TruncateFadeTail);
         text_view_->set_fade(true);
         break;
       case 3:
-        text_view_->set_fade_mode(gfx::Canvas::TruncateFadeHead);
+        text_view_->set_fade_mode(gfx::CanvasSkia::TruncateFadeHead);
         text_view_->set_fade(true);
         break;
+      case 4:
+        text_view_->set_fade_mode(gfx::CanvasSkia::TruncateFadeHeadAndTail);
+        text_view_->set_fade(true);
+        break;
+#endif
     }
-  } else if (combobox == prefix_cb_) {
+  } else if (combo_box == prefix_cb_) {
     text_flags &= ~(gfx::Canvas::SHOW_PREFIX | gfx::Canvas::HIDE_PREFIX);
-    switch (combobox->selected_index()) {
+    switch (new_index) {
       case 0:
         break;
       case 1:

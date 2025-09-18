@@ -4,48 +4,25 @@
 
 #include "ash/wm/stacking_controller.h"
 
-#include "ash/root_window_controller.h"
-#include "ash/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/always_on_top_controller.h"
-#include "ash/wm/coordinate_conversion.h"
-#include "ash/wm/window_state.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
 
 namespace ash {
+namespace internal {
 namespace {
 
-// Find a root window that matches the |bounds|. If the virtual screen
-// coordinates is enabled and the bounds is specified, the root window
-// that matches the window's bound will be used. Otherwise, it'll
-// return the active root window.
-aura::Window* FindContainerRoot(const gfx::Rect& bounds) {
-  if (bounds.x() == 0 && bounds.y() == 0 && bounds.IsEmpty())
-    return Shell::GetTargetRootWindow();
-  return wm::GetRootWindowMatching(bounds);
-}
-
-aura::Window* GetContainerById(aura::Window* root, int id) {
-  return Shell::GetContainer(root, id);
+aura::Window* GetContainer(int id) {
+  return Shell::GetInstance()->GetContainer(id);
 }
 
 bool IsSystemModal(aura::Window* window) {
-  return window->GetProperty(aura::client::kModalKey) == ui::MODAL_TYPE_SYSTEM;
-}
-
-bool HasTransientParentWindow(aura::Window* window) {
   return window->transient_parent() &&
-         window->transient_parent()->type() != ui::wm::WINDOW_TYPE_UNKNOWN;
-}
-
-internal::AlwaysOnTopController*
-GetAlwaysOnTopController(aura::Window* root_window) {
-  return internal::GetRootWindowController(root_window)->
-      always_on_top_controller();
+      window->GetIntProperty(aura::client::kModalKey) == ui::MODAL_TYPE_SYSTEM;
 }
 
 }  // namespace
@@ -54,49 +31,33 @@ GetAlwaysOnTopController(aura::Window* root_window) {
 // StackingController, public:
 
 StackingController::StackingController() {
+  aura::client::SetStackingClient(this);
+  always_on_top_controller_.reset(new internal::AlwaysOnTopController);
+  always_on_top_controller_->SetContainers(
+      GetContainer(internal::kShellWindowId_DefaultContainer),
+      GetContainer(internal::kShellWindowId_AlwaysOnTopContainer));
 }
 
 StackingController::~StackingController() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// StackingController, aura::client::WindowTreeClient implementation:
+// StackingController, aura::StackingClient implementation:
 
-aura::Window* StackingController::GetDefaultParent(aura::Window* context,
-                                                   aura::Window* window,
-                                                   const gfx::Rect& bounds) {
-  aura::Window* target_root = NULL;
-  if (window->transient_parent()) {
-    // Transient window should use the same root as its transient parent.
-    target_root = window->transient_parent()->GetRootWindow();
-  } else {
-    target_root = FindContainerRoot(bounds);
-  }
-
+aura::Window* StackingController::GetDefaultParent(aura::Window* window) {
   switch (window->type()) {
-    case ui::wm::WINDOW_TYPE_NORMAL:
-    case ui::wm::WINDOW_TYPE_POPUP:
+    case aura::client::WINDOW_TYPE_NORMAL:
+    case aura::client::WINDOW_TYPE_POPUP:
       if (IsSystemModal(window))
-        return GetSystemModalContainer(target_root, window);
-      else if (HasTransientParentWindow(window))
-        return internal::RootWindowController::GetContainerForWindow(
-            window->transient_parent());
-      return GetAlwaysOnTopController(target_root)->GetContainer(window);
-    case ui::wm::WINDOW_TYPE_CONTROL:
-      return GetContainerById(
-          target_root, internal::kShellWindowId_UnparentedControlContainer);
-    case ui::wm::WINDOW_TYPE_PANEL:
-      if (wm::GetWindowState(window)->panel_attached())
-        return GetContainerById(target_root,
-                                internal::kShellWindowId_PanelContainer);
-      else
-        return GetAlwaysOnTopController(target_root)->GetContainer(window);
-    case ui::wm::WINDOW_TYPE_MENU:
-      return GetContainerById(
-          target_root, internal::kShellWindowId_MenuContainer);
-    case ui::wm::WINDOW_TYPE_TOOLTIP:
-      return GetContainerById(
-          target_root, internal::kShellWindowId_DragImageAndTooltipContainer);
+        return GetSystemModalContainer(window);
+      return always_on_top_controller_->GetContainer(window);
+    case aura::client::WINDOW_TYPE_PANEL:
+      return GetContainer(internal::kShellWindowId_PanelContainer);
+    case aura::client::WINDOW_TYPE_MENU:
+    case aura::client::WINDOW_TYPE_TOOLTIP:
+      return GetContainer(internal::kShellWindowId_MenuAndTooltipContainer);
+    case aura::client::WINDOW_TYPE_CONTROL:
+      return GetContainer(internal::kShellWindowId_UnparentedControlContainer);
     default:
       NOTREACHED() << "Window " << window->id()
                    << " has unhandled type " << window->type();
@@ -109,35 +70,30 @@ aura::Window* StackingController::GetDefaultParent(aura::Window* context,
 // StackingController, private:
 
 aura::Window* StackingController::GetSystemModalContainer(
-    aura::Window* root,
     aura::Window* window) const {
-  DCHECK(IsSystemModal(window));
+  if (!IsSystemModal(window))
+    return NULL;
 
-  // If screen lock is not active and user session is active,
-  // all modal windows are placed into the normal modal container.
-  // In case of missing transient parent (it could happen for alerts from
-  // background pages) assume that the window belongs to user session.
-  SessionStateDelegate* session_state_delegate =
-      Shell::GetInstance()->session_state_delegate();
-  if (!session_state_delegate->IsUserSessionBlocked() ||
-      !window->transient_parent()) {
-    return GetContainerById(root,
-                            internal::kShellWindowId_SystemModalContainer);
-  }
+  // If screen lock is not active, all modal windows are placed into the
+  // normal modal container.
+  aura::Window* lock_container =
+      GetContainer(internal::kShellWindowId_LockScreenContainer);
+  if (!lock_container->children().size())
+    return GetContainer(internal::kShellWindowId_SystemModalContainer);
 
   // Otherwise those that originate from LockScreen container and above are
   // placed in the screen lock modal container.
+  int lock_container_id = lock_container->id();
   int window_container_id = window->transient_parent()->parent()->id();
+
   aura::Window* container = NULL;
-  if (window_container_id < internal::kShellWindowId_LockScreenContainer) {
-    container = GetContainerById(
-        root, internal::kShellWindowId_SystemModalContainer);
-  } else {
-    container = GetContainerById(
-        root, internal::kShellWindowId_LockSystemModalContainer);
-  }
+  if (window_container_id < lock_container_id)
+    container = GetContainer(internal::kShellWindowId_SystemModalContainer);
+  else
+    container = GetContainer(internal::kShellWindowId_LockSystemModalContainer);
 
   return container;
 }
 
+}  // namespace internal
 }  // namespace ash

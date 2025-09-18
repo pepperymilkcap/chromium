@@ -1,14 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/pickle.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
 #include "chrome/test/base/testing_profile.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
-#include "url/gurl.h"
 
 namespace {
 
@@ -42,7 +42,7 @@ TEST_F(BrowserActionDragDataTest, BrowserActionDragDataFormat) {
   Pickle pickle;
   pickle.WriteBytes(&profile_ptr, sizeof(&profile));
   pickle.WriteString(extension_id);
-  pickle.WriteUInt64(42);
+  pickle.WriteInt(42);
 
   ui::OSExchangeData data;
   data.SetPickledData(BrowserActionDragData::GetBrowserActionCustomFormat(),

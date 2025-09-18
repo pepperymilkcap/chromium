@@ -1,19 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_BROWSER_ACTION_OVERFLOW_MENU_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_BROWSER_ACTION_OVERFLOW_MENU_CONTROLLER_H_
+#pragma once
 
 #include <set>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/sequenced_task_runner_helpers.h"
+#include "base/message_loop_helpers.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 
-class Browser;
 class BrowserActionsContainer;
 class BrowserActionView;
 
@@ -35,7 +35,6 @@ class BrowserActionOverflowMenuController : public views::MenuDelegate {
 
   BrowserActionOverflowMenuController(
       BrowserActionsContainer* owner,
-      Browser* browser,
       views::MenuButton* menu_button,
       const std::vector<BrowserActionView*>& views,
       int start_index);
@@ -49,12 +48,11 @@ class BrowserActionOverflowMenuController : public views::MenuDelegate {
   void CancelMenu();
 
   // Overridden from views::MenuDelegate:
-  virtual bool IsCommandEnabled(int id) const OVERRIDE;
   virtual void ExecuteCommand(int id) OVERRIDE;
   virtual bool ShowContextMenu(views::MenuItemView* source,
                                int id,
                                const gfx::Point& p,
-                               ui::MenuSourceType source_type) OVERRIDE;
+                               bool is_mouse_gesture) OVERRIDE;
   virtual void DropMenuClosed(views::MenuItemView* menu) OVERRIDE;
   // These drag functions offer support for dragging icons into the overflow
   // menu.
@@ -66,11 +64,11 @@ class BrowserActionOverflowMenuController : public views::MenuDelegate {
   virtual bool CanDrop(views::MenuItemView* menu,
                        const ui::OSExchangeData& data) OVERRIDE;
   virtual int GetDropOperation(views::MenuItemView* item,
-                               const ui::DropTargetEvent& event,
+                               const views::DropTargetEvent& event,
                                DropPosition* position) OVERRIDE;
   virtual int OnPerformDrop(views::MenuItemView* menu,
                             DropPosition position,
-                            const ui::DropTargetEvent& event) OVERRIDE;
+                            const views::DropTargetEvent& event) OVERRIDE;
   // These three drag functions offer support for dragging icons out of the
   // overflow menu.
   virtual bool CanDrag(views::MenuItemView* menu) OVERRIDE;
@@ -89,8 +87,6 @@ class BrowserActionOverflowMenuController : public views::MenuDelegate {
 
   // A pointer to the browser action container that owns the overflow menu.
   BrowserActionsContainer* owner_;
-
-  Browser* browser_;
 
   // The observer, may be null.
   Observer* observer_;

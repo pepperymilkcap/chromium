@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #ifndef CHROME_BROWSER_HISTORY_IN_MEMORY_HISTORY_BACKEND_H_
 #define CHROME_BROWSER_HISTORY_IN_MEMORY_HISTORY_BACKEND_H_
+#pragma once
 
 #include <string>
 
@@ -21,19 +22,15 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
+class FilePath;
 class GURL;
 class Profile;
-
-namespace base {
-class FilePath;
-}
 
 namespace history {
 
 class InMemoryDatabase;
 class InMemoryURLIndex;
-struct KeywordSearchUpdatedDetails;
-struct KeywordSearchDeletedDetails;
+struct KeywordSearchTermDetails;
 class URLDatabase;
 struct URLsDeletedDetails;
 struct URLsModifiedDetails;
@@ -44,9 +41,16 @@ class InMemoryHistoryBackend : public content::NotificationObserver {
   virtual ~InMemoryHistoryBackend();
 
   // Initializes the backend from the history database pointed to by the
-  // full path in |history_filename|. |db| is used for setting up the
-  // InMemoryDatabase.
-  bool Init(const base::FilePath& history_filename, URLDatabase* db);
+  // full path in |history_filename|. |history_dir| is the path to the
+  // directory containing the history database and is also used
+  // as the directory where the InMemoryURLIndex's cache is kept. |db| is
+  // used for building the InMemoryURLIndex. |languages| gives the
+  // preferred user languages with which URLs and page titles are
+  // interpreted while decomposing into words and characters during indexing.
+  bool Init(const FilePath& history_filename,
+            const FilePath& history_dir,
+            URLDatabase* db,
+            const std::string& languages);
 
   // Does initialization work when this object is attached to the history
   // system on the main thread. The argument is the profile with which the
@@ -65,6 +69,9 @@ class InMemoryHistoryBackend : public content::NotificationObserver {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Return the quick history index.
+  history::InMemoryURLIndex* InMemoryIndex() const { return index_.get(); }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAll);
 
@@ -75,10 +82,7 @@ class InMemoryHistoryBackend : public content::NotificationObserver {
   void OnURLsDeleted(const URLsDeletedDetails& details);
 
   // Handler for HISTORY_KEYWORD_SEARCH_TERM_UPDATED.
-  void OnKeywordSearchTermUpdated(const KeywordSearchUpdatedDetails& details);
-
-  // Handler for HISTORY_KEYWORD_SEARCH_TERM_DELETED.
-  void OnKeywordSearchTermDeleted(const KeywordSearchDeletedDetails& details);
+  void OnKeywordSearchTermUpdated(const KeywordSearchTermDetails& details);
 
   // Returns true if there is a keyword associated with the specified url.
   bool HasKeyword(const GURL& url);
@@ -90,6 +94,9 @@ class InMemoryHistoryBackend : public content::NotificationObserver {
   // The profile that this object is attached. May be NULL before
   // initialization.
   Profile* profile_;
+
+  // The index used for quick history lookups.
+  scoped_ptr<history::InMemoryURLIndex> index_;
 
   DISALLOW_COPY_AND_ASSIGN(InMemoryHistoryBackend);
 };

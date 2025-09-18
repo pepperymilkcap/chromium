@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,19 +11,21 @@
 #include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/stl_util.h"
-#include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/tabs/drag_data.h"
 #include "chrome/browser/ui/gtk/tabs/tab_renderer_gtk.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "content/public/browser/render_view_host.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "content/browser/renderer_host/backing_store_gtk.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/skia/include/core/SkShader.h"
-#include "ui/base/gtk/gtk_screen_util.h"
+#include "ui/base/gtk/gtk_screen_utils.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/gtk_util.h"
 
@@ -70,10 +72,12 @@ DraggedViewGtk::DraggedViewGtk(DragData* drag_data,
   }
 
   for (size_t i = 0; i < drag_data_->size(); i++) {
-    WebContents* web_contents = drag_data_->get(i)->contents_;
+    TabContentsWrapper* wrapper =
+        TabContentsWrapper::GetCurrentWrapperForContents(
+            drag_data_->get(i)->contents_->web_contents());
     renderers_[i]->UpdateData(
-        web_contents,
-        extensions::TabHelper::FromWebContents(web_contents)->is_app(),
+        drag_data_->get(i)->contents_->web_contents(),
+        wrapper->extension_tab_helper()->is_app(),
         false); // loading_only
     renderers_[i]->set_is_active(
         static_cast<int>(i) == drag_data_->source_tab_index());
@@ -139,10 +143,8 @@ void DraggedViewGtk::Attach(
 
   Resize(dragged_tab_width);
 
-  if (ui::IsScreenComposited()) {
-    GdkWindow* gdk_window = gtk_widget_get_window(container_);
-    gdk_window_set_opacity(gdk_window, kOpaqueAlpha);
-  }
+  if (ui::IsScreenComposited())
+    gdk_window_set_opacity(container_->window, kOpaqueAlpha);
 }
 
 void DraggedViewGtk::Resize(int width) {
@@ -154,10 +156,8 @@ void DraggedViewGtk::Detach() {
   attached_ = false;
   ResizeContainer();
 
-  if (ui::IsScreenComposited()) {
-    GdkWindow* gdk_window = gtk_widget_get_window(container_);
-    gdk_window_set_opacity(gdk_window, kTransparentAlpha);
-  }
+  if (ui::IsScreenComposited())
+    gdk_window_set_opacity(container_->window, kTransparentAlpha);
 }
 
 void DraggedViewGtk::Update() {
@@ -207,16 +207,15 @@ void DraggedViewGtk::AnimateToBounds(const gfx::Rect& bounds,
   animation_callback_ = callback;
 
   gint x, y, width, height;
-  GdkWindow* gdk_window = gtk_widget_get_window(container_);
-  gdk_window_get_origin(gdk_window, &x, &y);
-  gdk_window_get_geometry(gdk_window, NULL, NULL,
+  gdk_window_get_origin(container_->window, &x, &y);
+  gdk_window_get_geometry(container_->window, NULL, NULL,
                           &width, &height, NULL);
 
   animation_start_bounds_ = gfx::Rect(x, y, width, height);
   animation_end_bounds_ = bounds;
 
   close_animation_.SetSlideDuration(kAnimateToBoundsDurationMs);
-  close_animation_.SetTweenType(gfx::Tween::EASE_OUT);
+  close_animation_.SetTweenType(ui::Tween::EASE_OUT);
   if (!close_animation_.IsShowing()) {
     close_animation_.Reset();
     close_animation_.Show();
@@ -224,22 +223,21 @@ void DraggedViewGtk::AnimateToBounds(const gfx::Rect& bounds,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DraggedViewGtk, gfx::AnimationDelegate implementation:
+// DraggedViewGtk, ui::AnimationDelegate implementation:
 
-void DraggedViewGtk::AnimationProgressed(const gfx::Animation* animation) {
+void DraggedViewGtk::AnimationProgressed(const ui::Animation* animation) {
   int delta_x = (animation_end_bounds_.x() - animation_start_bounds_.x());
   int x = animation_start_bounds_.x() +
       static_cast<int>(delta_x * animation->GetCurrentValue());
   int y = animation_end_bounds_.y();
-  GdkWindow* gdk_window = gtk_widget_get_window(container_);
-  gdk_window_move(gdk_window, x, y);
+  gdk_window_move(container_->window, x, y);
 }
 
-void DraggedViewGtk::AnimationEnded(const gfx::Animation* animation) {
+void DraggedViewGtk::AnimationEnded(const ui::Animation* animation) {
   animation_callback_.Run();
 }
 
-void DraggedViewGtk::AnimationCanceled(const gfx::Animation* animation) {
+void DraggedViewGtk::AnimationCanceled(const ui::Animation* animation) {
   AnimationEnded(animation);
 }
 
@@ -315,7 +313,7 @@ void DraggedViewGtk::SetContainerColorMap() {
 }
 
 void DraggedViewGtk::SetContainerTransparency() {
-  cairo_t* cairo_context = gdk_cairo_create(gtk_widget_get_window(container_));
+  cairo_t* cairo_context = gdk_cairo_create(container_->window);
   if (!cairo_context)
     return;
 
@@ -374,8 +372,7 @@ void DraggedViewGtk::SetContainerShapeMask() {
   cairo_destroy(cairo_context);
 
   // Set the shape mask.
-  GdkWindow* gdk_window = gtk_widget_get_window(container_);
-  gdk_window_shape_combine_mask(gdk_window, pixmap, 0, 0);
+  gdk_window_shape_combine_mask(container_->window, pixmap, 0, 0);
   g_object_unref(pixmap);
 }
 
@@ -395,20 +392,19 @@ gboolean DraggedViewGtk::OnExpose(GtkWidget* widget, GdkEventExpose* event) {
   gtk_widget_get_allocation(widget, &allocation);
 
   // Draw the render area.
-  if (!attached_) {
-    content::RenderWidgetHost* render_widget_host =
-        drag_data_->GetSourceWebContents()->GetRenderViewHost();
-
+  BackingStore* backing_store = drag_data_->GetSourceWebContents()->
+      GetRenderViewHost()->GetBackingStore(false);
+  if (backing_store && !attached_) {
     // This leaves room for the border.
-    gfx::Rect dest_rect(kDragFrameBorderSize, tab_height,
-                        allocation.width - kTwiceDragFrameBorderSize,
-                        allocation.height - tab_height -
-                        kDragFrameBorderSize);
-    render_widget_host->CopyFromBackingStoreToGtkWindow(
-        dest_rect, GDK_DRAWABLE(gtk_widget_get_window(widget)));
+    static_cast<BackingStoreGtk*>(backing_store)->PaintToRect(
+        gfx::Rect(kDragFrameBorderSize, tab_height,
+                  allocation.width - kTwiceDragFrameBorderSize,
+                  allocation.height - tab_height -
+                  kDragFrameBorderSize),
+        GDK_DRAWABLE(widget->window));
   }
 
-  cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(widget));
+  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(widget->window));
   // Draw the border.
   if (!attached_) {
     cairo_set_line_width(cr, kDragFrameBorderSize);

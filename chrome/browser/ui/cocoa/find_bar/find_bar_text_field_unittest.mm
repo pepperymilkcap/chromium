@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field_cell.h"
+#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -23,7 +24,7 @@ class FindBarTextFieldTest : public CocoaTest {
     // Make sure this is wide enough to play games with the cell
     // decorations.
     NSRect frame = NSMakeRect(0, 0, kWidth, 30);
-    base::scoped_nsobject<FindBarTextField> field(
+    scoped_nsobject<FindBarTextField> field(
         [[FindBarTextField alloc] initWithFrame:frame]);
     field_ = field.get();
 

@@ -8,12 +8,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
-using content::RenderViewHost;
 using content::SiteInstance;
 using content::WebContents;
 
@@ -26,25 +26,33 @@ content::WebContents* GetWebContentsByID(int render_process_id,
   if (!render_view_host)
     return NULL;
 
-  return WebContents::FromRenderViewHost(render_view_host);
+  return render_view_host->delegate()->GetAsWebContents();
 }
 
-SiteInstance* GetSiteInstanceForNewTab(Profile* profile,
+SiteInstance* GetSiteInstanceForNewTab(WebContents* source_contents,
+                                       Profile* profile,
                                        const GURL& url) {
-  // If |url| is a WebUI or extension, we set the SiteInstance up front so that
-  // we don't end up with an extra process swap on the first navigation.
+  // If url is a WebUI or extension, we need to be sure to use the right type
+  // of renderer process up front.  Otherwise, we create a normal SiteInstance
+  // as part of creating the tab.
   ExtensionService* service = profile->GetExtensionService();
   if (ChromeWebUIControllerFactory::GetInstance()->UseWebUIForURL(
           profile, url) ||
       (service &&
-       service->extensions()->GetHostedAppByURL(url))) {
+       service->extensions()->GetHostedAppByURL(ExtensionURLInfo(url)))) {
     return SiteInstance::CreateForURL(profile, url);
   }
 
-  // We used to share the SiteInstance for same-site links opened in new tabs,
-  // to leverage the in-memory cache and reduce process creation.  It now
-  // appears that it is more useful to have such links open in a new process,
-  // so we create new tabs in a new BrowsingInstance.
+  if (!source_contents)
+    return NULL;
+
+  // Don't use this logic when "--process-per-tab" is specified.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kProcessPerTab) &&
+      SiteInstance::IsSameWebSite(source_contents->GetBrowserContext(),
+                                  source_contents->GetURL(),
+                                  url)) {
+    return source_contents->GetSiteInstance();
+  }
   return NULL;
 }
 

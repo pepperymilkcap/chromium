@@ -5,7 +5,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -35,10 +35,9 @@ int main(int argc, char**argv) {
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
 
   // Do work here.
-  base::MessageLoop loop;
-  HttpServer server(std::string(),
-                    80);  // TODO(mbelshe): make port configurable
-  base::MessageLoop::current()->Run();
+  MessageLoop loop;
+  HttpServer server("", 80);   // TODO(mbelshe): make port configurable
+  MessageLoop::current()->Run();
 
   if (parsed_command_line.HasSwitch("stats")) {
     // Dump the stats table.

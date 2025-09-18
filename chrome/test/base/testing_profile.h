@@ -4,22 +4,16 @@
 
 #ifndef CHROME_TEST_BASE_TESTING_PROFILE_H_
 #define CHROME_TEST_BASE_TESTING_PROFILE_H_
+#pragma once
 
 #include <string>
 
-#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/scoped_temp_dir.h"
+#include "base/timer.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
-
-namespace content {
-class MockResourceContext;
-}
-
-namespace extensions {
-class ExtensionPrefs;
-}
+#include "content/browser/appcache/chrome_appcache_service.h"
 
 namespace history {
 class TopSites;
@@ -27,112 +21,37 @@ class TopSites;
 
 namespace net {
 class CookieMonster;
-class URLRequestContextGetter;
-}
-
-namespace policy {
-class PolicyService;
-class ProfilePolicyConnector;
-class SchemaRegistryService;
 }
 
 namespace quota {
 class SpecialStoragePolicy;
 }
 
-class BrowserContextDependencyManager;
+class AutocompleteClassifier;
+class BookmarkModel;
 class CommandLine;
+class ExtensionPrefs;
+class ExtensionPrefValueMap;
 class ExtensionSpecialStoragePolicy;
+class FaviconService;
+class HistoryService;
 class HostContentSettingsMap;
-class PrefServiceSyncable;
+class PrefService;
+class ProfileDependencyManager;
 class ProfileSyncService;
+class SpeechInputPreferences;
 class TemplateURLService;
-class TestingPrefServiceSyncable;
+class TestingPrefService;
+class WebKitContext;
+
+namespace net {
+class URLRequestContextGetter;
+}
 
 class TestingProfile : public Profile {
  public:
-  // Profile directory name for the test user. This is "Default" on most
-  // platforms but must be different on ChromeOS because a logged-in user cannot
-  // use "Default" as profile directory.
-  // Browser- and UI tests should always use this to get to the user's profile
-  // directory. Unit-tests, though, should use |kInitialProfile|, which is
-  // always "Default", because they are runnining without logged-in user.
-  static const char kTestUserProfileDir[];
-
   // Default constructor that cannot be used with multi-profiles.
   TestingProfile();
-
-  typedef std::vector<std::pair<
-              BrowserContextKeyedServiceFactory*,
-              BrowserContextKeyedServiceFactory::TestingFactoryFunction> >
-      TestingFactories;
-
-  // Helper class for building an instance of TestingProfile (allows injecting
-  // mocks for various services prior to profile initialization).
-  // TODO(atwilson): Remove non-default constructors and various setters in
-  // favor of using the Builder API.
-  class Builder {
-   public:
-    Builder();
-    ~Builder();
-
-    // Sets a Delegate to be called back during profile init. This causes the
-    // final initialization to be performed via a task so the caller must run
-    // a MessageLoop. Caller maintains ownership of the Delegate
-    // and must manage its lifetime so it continues to exist until profile
-    // initialization is complete.
-    void SetDelegate(Delegate* delegate);
-
-    // Adds a testing factory to the TestingProfile. These testing factories
-    // are applied before the ProfileKeyedServices are created.
-    void AddTestingFactory(
-        BrowserContextKeyedServiceFactory* service_factory,
-        BrowserContextKeyedServiceFactory::TestingFactoryFunction callback);
-
-    // Sets the ExtensionSpecialStoragePolicy to be returned by
-    // GetExtensionSpecialStoragePolicy().
-    void SetExtensionSpecialStoragePolicy(
-        scoped_refptr<ExtensionSpecialStoragePolicy> policy);
-
-    // Sets the path to the directory to be used to hold profile data.
-    void SetPath(const base::FilePath& path);
-
-    // Sets the PrefService to be used by this profile.
-    void SetPrefService(scoped_ptr<PrefServiceSyncable> prefs);
-
-    // Makes the Profile being built an incognito profile.
-    void SetIncognito();
-
-    // Makes the Profile being built a guest profile.
-    void SetGuestSession();
-
-    // Sets the managed user ID (which is empty by default). If it is set to a
-    // non-empty string, the profile is managed.
-    void SetManagedUserId(const std::string& managed_user_id);
-
-    // Sets the PolicyService to be used by this profile.
-    void SetPolicyService(scoped_ptr<policy::PolicyService> policy_service);
-
-    // Creates the TestingProfile using previously-set settings.
-    scoped_ptr<TestingProfile> Build();
-
-   private:
-    // If true, Build() has already been called.
-    bool build_called_;
-
-    // Various staging variables where values are held until Build() is invoked.
-    scoped_ptr<PrefServiceSyncable> pref_service_;
-    scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy_;
-    base::FilePath path_;
-    Delegate* delegate_;
-    bool incognito_;
-    bool guest_session_;
-    std::string managed_user_id_;
-    scoped_ptr<policy::PolicyService> policy_service_;
-    TestingFactories testing_factories_;
-
-    DISALLOW_COPY_AND_ASSIGN(Builder);
-  };
 
   // Multi-profile aware constructor that takes the path to a directory managed
   // for this profile. This constructor is meant to be used by
@@ -140,24 +59,12 @@ class TestingProfile : public Profile {
   // profile profiles, use that factory method instead of this directly.
   // Exception: if you need to create multi-profile profiles for testing the
   // ProfileManager, then use the constructor below instead.
-  explicit TestingProfile(const base::FilePath& path);
+  explicit TestingProfile(const FilePath& path);
 
   // Multi-profile aware constructor that takes the path to a directory managed
   // for this profile and a delegate. This constructor is meant to be used
   // for unittesting the ProfileManager.
-  TestingProfile(const base::FilePath& path, Delegate* delegate);
-
-  // Full constructor allowing the setting of all possible instance data.
-  // Callers should use Builder::Build() instead of invoking this constructor.
-  TestingProfile(const base::FilePath& path,
-                 Delegate* delegate,
-                 scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy,
-                 scoped_ptr<PrefServiceSyncable> prefs,
-                 bool incognito,
-                 bool guest_session,
-                 const std::string& managed_user_id,
-                 scoped_ptr<policy::PolicyService> policy_service,
-                 const TestingFactories& factories);
+  TestingProfile(const FilePath& path, Delegate* delegate);
 
   virtual ~TestingProfile();
 
@@ -169,8 +76,8 @@ class TestingProfile : public Profile {
   // deletes the directory containing the files used by HistoryService, this
   // only matters if you're recreating the HistoryService.  If |no_db| is true,
   // the history backend will fail to initialize its database; this is useful
-  // for testing error conditions. Returns true on success.
-  bool CreateHistoryService(bool delete_file, bool no_db) WARN_UNUSED_RESULT;
+  // for testing error conditions.
+  void CreateHistoryService(bool delete_file, bool no_db);
 
   // Shuts down and nulls out the reference to HistoryService.
   void DestroyHistoryService();
@@ -190,106 +97,141 @@ class TestingProfile : public Profile {
   // recreating the BookmarkModel.
   //
   // NOTE: this does not block until the bookmarks are loaded. For that use
-  // WaitForBookmarkModelToLoad().
+  // BlockUntilBookmarkModelLoaded.
   void CreateBookmarkModel(bool delete_file);
 
-  // Creates a WebDataService. If not invoked, the web data service is NULL.
-  void CreateWebDataService();
+  // Creates an AutocompleteClassifier. If not invoked the
+  // AutocompleteClassifier is NULL.
+  void CreateAutocompleteClassifier();
 
-  // Blocks until the HistoryService finishes restoring its in-memory cache.
-  // This is NOT invoked from CreateHistoryService.
-  void BlockUntilHistoryIndexIsRefreshed();
+  // Creates a ProtocolHandlerRegistry. If not invoked the protocol handler
+  // registry is NULL.
+  void CreateProtocolHandlerRegistry();
+
+  // Creates the webdata service.  If |delete_file| is true, the webdata file is
+  // deleted first, then the WebDataService is created.  As TestingProfile
+  // deletes the directory containing the files used by WebDataService, this
+  // only matters if you're recreating the WebDataService.
+  void CreateWebDataService(bool delete_file);
+
+  // Blocks until the BookmarkModel finishes loaded. This is NOT invoked from
+  // CreateBookmarkModel.
+  void BlockUntilBookmarkModelLoaded();
 
   // Blocks until TopSites finishes loading.
   void BlockUntilTopSitesLoaded();
 
-  TestingPrefServiceSyncable* GetTestingPrefService();
+  // Creates a TemplateURLService. If not invoked the TemplateURLService is
+  // NULL.  Creates a TemplateURLFetcher. If not invoked, the
+  // TemplateURLFetcher is NULL.
+  void CreateTemplateURLFetcher();
 
-  // content::BrowserContext
-  virtual base::FilePath GetPath() const OVERRIDE;
-  virtual scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() OVERRIDE;
-  virtual bool IsOffTheRecord() const OVERRIDE;
-  virtual content::DownloadManagerDelegate*
-      GetDownloadManagerDelegate() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* CreateRequestContext(
-      content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
-  virtual content::ResourceContext* GetResourceContext() OVERRIDE;
-  virtual content::GeolocationPermissionContext*
-      GetGeolocationPermissionContext() OVERRIDE;
-  virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
+  // Creates a TemplateURLService. If not invoked, the TemplateURLService is
+  // NULL.
+  void CreateTemplateURLService();
+
+  // Blocks until TempalteURLService finishes loading.
+  void BlockUntilTemplateURLServiceLoaded();
+
+  // Creates an ExtensionProcessManager. If not invoked, the
+  // ExtensionProcessManager is NULL.
+  void CreateExtensionProcessManager();
+
+  // Creates an ExtensionService initialized with the testing profile and
+  // returns it. The profile keeps its own copy of a scoped_refptr to the
+  // ExtensionService to make sure that is still alive to be notified when the
+  // profile is destroyed.
+  ExtensionService* CreateExtensionService(const CommandLine* command_line,
+                                           const FilePath& install_directory,
+                                           bool autoupdate_enabled);
+
+  TestingPrefService* GetTestingPrefService();
 
   virtual TestingProfile* AsTestingProfile() OVERRIDE;
   virtual std::string GetProfileName() OVERRIDE;
-
-  // DEPRECATED, because it's fragile to change a profile from non-incognito
-  // to incognito after the ProfileKeyedServices have been created (some
-  // ProfileKeyedServices either should not exist in incognito mode, or will
-  // crash when they try to get references to other services they depend on,
-  // but do not exist in incognito mode).
-  // TODO(atwilson): Remove this API (http://crbug.com/277296).
-  //
-  // Changes a profile's to/from incognito mode temporarily - profile will be
-  // returned to non-incognito before destruction to allow services to
-  // properly shutdown. This is only supported for legacy tests - new tests
-  // should create a true incognito profile using Builder::SetIncognito() or
-  // by using the TestingProfile constructor that allows setting the incognito
-  // flag.
-  void ForceIncognito(bool force_incognito) {
-    force_incognito_ = force_incognito;
-  }
-
+  virtual FilePath GetPath() OVERRIDE;
+  void set_incognito(bool incognito) { incognito_ = incognito; }
+  virtual bool IsOffTheRecord() OVERRIDE;
   // Assumes ownership.
-  virtual void SetOffTheRecordProfile(scoped_ptr<Profile> profile);
-  virtual void SetOriginalProfile(Profile* profile);
+  virtual void SetOffTheRecordProfile(Profile* profile);
   virtual Profile* GetOffTheRecordProfile() OVERRIDE;
   virtual void DestroyOffTheRecordProfile() OVERRIDE {}
+  virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
   virtual bool HasOffTheRecordProfile() OVERRIDE;
   virtual Profile* GetOriginalProfile() OVERRIDE;
-  virtual bool IsManaged() OVERRIDE;
+  void SetAppCacheService(ChromeAppCacheService* appcache_service);
+  virtual ChromeAppCacheService* GetAppCacheService() OVERRIDE;
+  virtual webkit_database::DatabaseTracker* GetDatabaseTracker() OVERRIDE;
+  virtual VisitedLinkMaster* GetVisitedLinkMaster() OVERRIDE;
   virtual ExtensionService* GetExtensionService() OVERRIDE;
+  virtual UserScriptMaster* GetUserScriptMaster() OVERRIDE;
+  virtual ExtensionDevToolsManager* GetExtensionDevToolsManager() OVERRIDE;
+  virtual ExtensionProcessManager* GetExtensionProcessManager() OVERRIDE;
+  virtual ExtensionMessageService* GetExtensionMessageService() OVERRIDE;
+  virtual ExtensionEventRouter* GetExtensionEventRouter() OVERRIDE;
   void SetExtensionSpecialStoragePolicy(
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
-  // TODO(ajwong): Remove this API in favor of directly retrieving the
-  // CookieStore from the StoragePartition after ExtensionURLRequestContext
-  // has been removed.
+  virtual SSLHostState* GetSSLHostState() OVERRIDE;
+  virtual FaviconService* GetFaviconService(ServiceAccessType access) OVERRIDE;
+  virtual HistoryService* GetHistoryService(ServiceAccessType access) OVERRIDE;
+  virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
+  // The CookieMonster will only be returned if a Context has been created. Do
+  // this by calling CreateRequestContext(). See the note at GetRequestContext
+  // for more information.
   net::CookieMonster* GetCookieMonster();
-
+  virtual AutocompleteClassifier* GetAutocompleteClassifier() OVERRIDE;
+  virtual history::ShortcutsBackend* GetShortcutsBackend() OVERRIDE;
+  virtual WebDataService* GetWebDataService(ServiceAccessType access) OVERRIDE;
+  virtual WebDataService* GetWebDataServiceWithoutCreating() OVERRIDE;
+  virtual PasswordStore* GetPasswordStore(ServiceAccessType access) OVERRIDE;
+  // Sets the profile's PrefService. If a pref service hasn't been explicitly
+  // set GetPrefs creates one, so normally you need not invoke this. If you need
+  // to set a pref service you must invoke this before GetPrefs.
+  // TestingPrefService takes ownership of |prefs|.
+  void SetPrefService(PrefService* prefs);
   virtual PrefService* GetPrefs() OVERRIDE;
-
+  virtual TemplateURLFetcher* GetTemplateURLFetcher() OVERRIDE;
   virtual history::TopSites* GetTopSites() OVERRIDE;
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
+  virtual content::DownloadManager* GetDownloadManager() OVERRIDE;
+  virtual fileapi::FileSystemContext* GetFileSystemContext() OVERRIDE;
+  virtual void SetQuotaManager(quota::QuotaManager* manager);
+  virtual quota::QuotaManager* GetQuotaManager() OVERRIDE;
 
-  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+  // Returns a testing ContextGetter (if one has been created via
+  // CreateRequestContext) or NULL. This is not done on-demand for two reasons:
+  // (1) Some tests depend on GetRequestContext() returning NULL. (2) Because
+  // of the special memory management considerations for the
+  // TestURLRequestContextGetter class, many tests would find themseleves
+  // leaking if they called this method without the necessary IO thread. This
+  // getter is currently only capable of returning a Context that helps test
+  // the CookieMonster. See implementation comments for more details.
+  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
+  void CreateRequestContext();
+  // Clears out the created request context (which must be done before shutting
+  // down the IO thread to avoid leaks).
+  void ResetRequestContext();
+
+  virtual net::URLRequestContextGetter* GetRequestContextForMedia() OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetRequestContextForExtensions() OVERRIDE;
-  virtual net::URLRequestContextGetter*
-      GetMediaRequestContextForStoragePartition(
-          const base::FilePath& partition_path,
-          bool in_memory) OVERRIDE;
-  virtual void RequestMIDISysExPermission(
-      int render_process_id,
-      int render_view_id,
-      int bridge_id,
-      const GURL& requesting_frame,
-      const MIDISysExPermissionCallback& callback) OVERRIDE;
-  virtual void CancelMIDISysExPermissionRequest(
-        int render_process_id,
-        int render_view_id,
-        int bridge_id,
-        const GURL& requesting_frame) OVERRIDE;
-  virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
-      const base::FilePath& partition_path,
-      bool in_memory,
-      content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
+  virtual net::URLRequestContextGetter* GetRequestContextForIsolatedApp(
+      const std::string& app_id) OVERRIDE;
+
+  virtual const content::ResourceContext& GetResourceContext() OVERRIDE;
+
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
+  virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
+  virtual content::GeolocationPermissionContext*
+      GetGeolocationPermissionContext() OVERRIDE;
+  virtual SpeechInputPreferences* GetSpeechInputPreferences() OVERRIDE;
+  virtual content::HostZoomMap* GetHostZoomMap() OVERRIDE;
+  virtual bool HasProfileSyncService() OVERRIDE;
   virtual std::wstring GetName();
   virtual void SetName(const std::wstring& name) {}
   virtual std::wstring GetID();
@@ -297,25 +239,33 @@ class TestingProfile : public Profile {
   void set_last_session_exited_cleanly(bool value) {
     last_session_exited_cleanly_ = value;
   }
+  virtual bool DidLastSessionExitCleanly() OVERRIDE;
   virtual void MergeResourceString(int message_id,
                                    std::wstring* output_string) {}
   virtual void MergeResourceInteger(int message_id, int* output_value) {}
   virtual void MergeResourceBoolean(int message_id, bool* output_value) {}
+  virtual BookmarkModel* GetBookmarkModel() OVERRIDE;
   virtual bool IsSameProfile(Profile *p) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
-  virtual base::FilePath last_selected_directory() OVERRIDE;
-  virtual void set_last_selected_directory(const base::FilePath& path) OVERRIDE;
-  virtual bool WasCreatedByVersionOrLater(const std::string& version) OVERRIDE;
-  virtual bool IsGuestSession() const OVERRIDE;
-  virtual void SetExitType(ExitType exit_type) OVERRIDE {}
-  virtual ExitType GetLastSessionExitType() OVERRIDE;
+  virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
+  virtual WebKitContext* GetWebKitContext() OVERRIDE;
+  virtual WebKitContext* GetOffTheRecordWebKitContext();
+  virtual void MarkAsCleanShutdown() OVERRIDE {}
+  virtual void InitExtensions(bool extensions_enabled) OVERRIDE {}
+  virtual void InitPromoResources() OVERRIDE {}
+  virtual void InitRegisteredProtocolHandlers() OVERRIDE {}
+
+  virtual FilePath last_selected_directory() OVERRIDE;
+  virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
 #if defined(OS_CHROMEOS)
+  virtual void SetupChromeOSEnterpriseExtensionObserver() OVERRIDE {
+  }
+  virtual void InitChromeOSPreferences() OVERRIDE {
+  }
   virtual void ChangeAppLocale(const std::string&,
                                AppLocaleChangedVia) OVERRIDE {
   }
   virtual void OnLogin() OVERRIDE {
-  }
-  virtual void InitChromeOSPreferences() OVERRIDE {
   }
 #endif  // defined(OS_CHROMEOS)
 
@@ -326,63 +276,118 @@ class TestingProfile : public Profile {
   // history service processes all pending requests.
   void BlockUntilHistoryProcessesPendingRequests();
 
+  virtual TokenService* GetTokenService() OVERRIDE;
+  // Creates and initializes a profile sync service if the tests require one.
+  virtual ProfileSyncService* GetProfileSyncService() OVERRIDE;
+  virtual ChromeBlobStorageContext* GetBlobStorageContext() OVERRIDE;
+  virtual ExtensionInfoMap* GetExtensionInfoMap() OVERRIDE;
+  virtual PromoCounter* GetInstantPromoCounter() OVERRIDE;
+  virtual ChromeURLDataManager* GetChromeURLDataManager() OVERRIDE;
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
-  virtual void ClearNetworkingHistorySince(
-      base::Time time,
-      const base::Closure& completion) OVERRIDE;
+  virtual void ClearNetworkingHistorySince(base::Time time) OVERRIDE;
   virtual GURL GetHomePage() OVERRIDE;
 
   virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
 
-  void set_profile_name(const std::string& profile_name) {
-    profile_name_ = profile_name;
-  }
+  // TODO(jam): remove me once webkit_context_unittest.cc doesn't use Profile
+  // and gets the quota::SpecialStoragePolicy* from whatever ends up replacing
+  // it in the content module.
+  quota::SpecialStoragePolicy* GetSpecialStoragePolicy();
 
  protected:
   base::Time start_time_;
-  scoped_ptr<PrefServiceSyncable> prefs_;
+  scoped_ptr<PrefService> prefs_;
   // ref only for right type, lifecycle is managed by prefs_
-  TestingPrefServiceSyncable* testing_prefs_;
+  TestingPrefService* testing_prefs_;
 
  private:
-  // Creates a temporary directory for use by this profile.
-  void CreateTempProfileDir();
-
   // Common initialization between the two constructors.
   void Init();
 
   // Finishes initialization when a profile is created asynchronously.
   void FinishInit();
 
+  // Destroys favicon service if it has been created.
+  void DestroyFaviconService();
+
+  // If the webdata service has been created, it is destroyed.  This is invoked
+  // from the destructor.
+  void DestroyWebDataService();
+
   // Creates a TestingPrefService and associates it with the TestingProfile.
   void CreateTestingPrefService();
 
-  // Creates a ProfilePolicyConnector that the ProfilePolicyConnectorFactory
-  // maps to this profile.
-  void CreateProfilePolicyConnector();
+  // The favicon service. Only created if CreateFaviconService is invoked.
+  scoped_ptr<FaviconService> favicon_service_;
+
+  // The history service. Only created if CreateHistoryService is invoked.
+  scoped_refptr<HistoryService> history_service_;
+
+  // The BookmarkModel. Only created if CreateBookmarkModel is invoked.
+  scoped_ptr<BookmarkModel> bookmark_bar_model_;
+
+  // The ProtocolHandlerRegistry. Only created if CreateProtocolHandlerRegistry
+  // is invoked.
+  scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
+
+  // The TokenService. Created by CreateTokenService. Filled with dummy data.
+  scoped_ptr<TokenService> token_service_;
+
+  // The ProfileSyncService.  Created by CreateProfileSyncService.
+  scoped_ptr<ProfileSyncService> profile_sync_service_;
+
+  // The AutocompleteClassifier.  Only created if CreateAutocompleteClassifier
+  // is invoked.
+  scoped_ptr<AutocompleteClassifier> autocomplete_classifier_;
+
+  // The WebDataService.  Only created if CreateWebDataService is invoked.
+  scoped_refptr<WebDataService> web_data_service_;
+
+  // The TemplateURLFetcher. Only created if CreateTemplateURLFetcher is
+  // invoked.
+  scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
 
   // Internally, this is a TestURLRequestContextGetter that creates a dummy
   // request context. Currently, only the CookieMonster is hooked up.
+  scoped_refptr<net::URLRequestContextGetter> request_context_;
   scoped_refptr<net::URLRequestContextGetter> extensions_request_context_;
 
   std::wstring id_;
 
   bool incognito_;
-  bool force_incognito_;
   scoped_ptr<Profile> incognito_profile_;
-  Profile* original_profile_;
-
-  bool guest_session_;
-
-  std::string managed_user_id_;
 
   // Did the last session exit cleanly? Default is true.
   bool last_session_exited_cleanly_;
 
-  scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
+  // FileSystemContext.  Created lazily by GetFileSystemContext().
+  scoped_refptr<fileapi::FileSystemContext> file_system_context_;
 
-  base::FilePath last_selected_directory_;
+  // WebKitContext, lazily initialized by GetWebKitContext().
+  scoped_refptr<WebKitContext> webkit_context_;
+
+  // The main database tracker for this profile.
+  // Should be used only on the file thread.
+  scoped_refptr<webkit_database::DatabaseTracker> db_tracker_;
+
+  scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
+  scoped_refptr<content::GeolocationPermissionContext>
+      geolocation_permission_context_;
+
+  scoped_refptr<SpeechInputPreferences> speech_input_preferences_;
+
+  FilePath last_selected_directory_;
   scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.
+
+  // The Extension Preferences. Only created if CreateExtensionService is
+  // invoked.
+  scoped_ptr<ExtensionPrefs> extension_prefs_;
+
+  scoped_ptr<ExtensionService> extension_service_;
+
+  scoped_ptr<ExtensionProcessManager> extension_process_manager_;
+
+  scoped_ptr<ExtensionPrefValueMap> extension_pref_value_map_;
 
   scoped_refptr<ExtensionSpecialStoragePolicy>
       extension_special_storage_policy_;
@@ -393,31 +398,25 @@ class TestingProfile : public Profile {
   // We use a temporary directory to store testing profile data. In a multi-
   // profile environment, this is invalid and the directory is managed by the
   // TestingProfileManager.
-  base::ScopedTempDir temp_dir_;
+  ScopedTempDir temp_dir_;
   // The path to this profile. This will be valid in either of the two above
   // cases.
-  base::FilePath profile_path_;
+  FilePath profile_path_;
+
+  scoped_ptr<ChromeURLDataManager> chrome_url_data_manager_;
 
   // We keep a weak pointer to the dependency manager we want to notify on our
   // death. Defaults to the Singleton implementation but overridable for
   // testing.
-  BrowserContextDependencyManager* browser_context_dependency_manager_;
+  ProfileDependencyManager* profile_dependency_manager_;
 
-  // Owned, but must be deleted on the IO thread so not placing in a
-  // scoped_ptr<>.
-  content::MockResourceContext* resource_context_;
+  scoped_refptr<ChromeAppCacheService> appcache_service_;
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
-  scoped_ptr<policy::SchemaRegistryService> schema_registry_service_;
-#endif
-  scoped_ptr<policy::ProfilePolicyConnector> profile_policy_connector_;
+  // The QuotaManager, only available if set explicitly via SetQuotaManager.
+  scoped_refptr<quota::QuotaManager> quota_manager_;
 
   // Weak pointer to a delegate for indicating that a profile was created.
   Delegate* delegate_;
-
-  std::string profile_name_;
-
-  scoped_ptr<policy::PolicyService> policy_service_;
 };
 
 #endif  // CHROME_TEST_BASE_TESTING_PROFILE_H_

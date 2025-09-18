@@ -4,10 +4,11 @@
 
 #ifndef IPC_IPC_PLATFORM_FILE_H_
 #define IPC_IPC_PLATFORM_FILE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/platform_file.h"
-#include "base/process/process.h"
+#include "base/process.h"
 #include "ipc/ipc_export.h"
 
 #if defined(OS_POSIX)

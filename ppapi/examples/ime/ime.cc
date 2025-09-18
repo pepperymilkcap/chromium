@@ -1,16 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
-#include "ppapi/c/ppb_console.h"
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/dev/font_dev.h"
+#include "ppapi/cpp/dev/ime_input_event_dev.h"
+#include "ppapi/cpp/dev/text_input_dev.h"
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/input_event.h"
@@ -18,11 +19,10 @@
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/rect.h"
 #include "ppapi/cpp/size.h"
-#include "ppapi/cpp/text_input_controller.h"
 
 namespace {
 
-// Extracted from: ui/events/keycodes/keyboard_codes.h
+// Extracted from: ui/base/keycodes/keyboard_codes.h
 enum {
   VKEY_BACK = 0x08,
   VKEY_SHIFT = 0x10,
@@ -90,33 +90,29 @@ size_t GetNthCharOffsetUtf8(const std::string& str, size_t n) {
 class TextFieldStatusHandler {
  public:
   virtual ~TextFieldStatusHandler() {}
-  virtual void FocusIn(const pp::Rect& caret) {}
+  virtual void FocusIn(const pp::Rect& caret, const pp::Rect& bounding_box) {}
   virtual void FocusOut() {}
-  virtual void UpdateSelection(const std::string& text) {}
 };
 
-class TextFieldStatusNotifyingHandler : public TextFieldStatusHandler {
+class TextFieldStatusNotifyingHanlder : public TextFieldStatusHandler {
  public:
-  explicit TextFieldStatusNotifyingHandler(pp::Instance* instance)
-      : textinput_control_(instance) {
-  }
+  explicit TextFieldStatusNotifyingHanlder(pp::Instance* instance)
+      : instance_(instance),
+        textinput_control_(instance) {}
 
  protected:
-  // Implement TextFieldStatusHandler.
-  virtual void FocusIn(const pp::Rect& caret) {
+  virtual void FocusIn(const pp::Rect& caret, const pp::Rect& bounding_box) {
     textinput_control_.SetTextInputType(PP_TEXTINPUT_TYPE_TEXT);
-    textinput_control_.UpdateCaretPosition(caret);
+    textinput_control_.UpdateCaretPosition(caret, bounding_box);
   }
   virtual void FocusOut() {
     textinput_control_.CancelCompositionText();
     textinput_control_.SetTextInputType(PP_TEXTINPUT_TYPE_NONE);
   }
-  virtual void UpdateSelection(const std::string& text) {
-    textinput_control_.UpdateSurroundingText(text, 0, text.size());
-  }
 
  private:
-  pp::TextInputController textinput_control_;
+  pp::Instance* instance_;
+  pp::TextInput_Dev textinput_control_;
 };
 
 // Hand-made text field for demonstrating text input API.
@@ -129,8 +125,7 @@ class MyTextField {
         area_(x, y, width, height),
         font_size_(height - 2),
         caret_pos_(std::string::npos),
-        anchor_pos_(std::string::npos),
-        target_segment_(0) {
+        anchor_pos_(std::string::npos) {
     pp::FontDescription_Dev desc;
     desc.set_family(PP_FONTFAMILY_SANSSERIF);
     desc.set_size(font_size_);
@@ -236,7 +231,7 @@ class MyTextField {
       int32_t target_segment,
       const std::pair<uint32_t, uint32_t>& selection) {
     if (HasSelection() && !text.empty())
-      InsertText(std::string());
+      InsertText("");
     composition_ = text;
     segments_ = segments;
     target_segment_ = target_segment;
@@ -335,7 +330,7 @@ class MyTextField {
     if (!Focused())
       return;
     if (HasSelection()) {
-      InsertText(std::string());
+      InsertText("");
     } else {
       size_t i = GetNextCharOffsetUtf8(utf8_text_, caret_pos_);
       utf8_text_.erase(caret_pos_, i - caret_pos_);
@@ -347,7 +342,7 @@ class MyTextField {
     if (!Focused())
       return;
     if (HasSelection()) {
-      InsertText(std::string());
+      InsertText("");
     } else if (caret_pos_ != 0) {
       size_t i = GetPrevCharOffsetUtf8(utf8_text_, caret_pos_);
       utf8_text_.erase(i, caret_pos_ - i);
@@ -365,10 +360,7 @@ class MyTextField {
         str += composition_.substr(0, composition_selection_.first);
       int px = font_.MeasureSimpleText(str);
       pp::Rect caret(area_.x() + px, area_.y(), 0, area_.height() + 2);
-      status_handler_->FocusIn(caret);
-      status_handler_->UpdateSelection(
-          utf8_text_.substr(SelectionLeft(),
-                            SelectionRight() - SelectionLeft()));
+      status_handler_->FocusIn(caret, area_);
     }
   }
   size_t SelectionLeft() const {
@@ -419,8 +411,7 @@ class MyInstance : public pp::Instance {
           //
           // When a plugin never wants to accept text input, at initialization
           // explicitly turn off the text input feature by calling:
-          pp::TextInputController(this).SetTextInputType(
-              PP_TEXTINPUT_TYPE_NONE);
+          pp::TextInput_Dev(this).SetTextInputType(PP_TEXTINPUT_TYPE_NONE);
         } else if (argv[i] == std::string("unaware")) {
           // Demonstrating the behavior of IME-unaware plugins.
           // Never call any text input related APIs.
@@ -439,14 +430,14 @@ class MyInstance : public pp::Instance {
           // say, show virtual keyboards or IMEs only at appropriate timing
           // that the plugin does need to accept text input.
           delete status_handler_;
-          status_handler_ = new TextFieldStatusNotifyingHandler(this);
+          status_handler_ = new TextFieldStatusNotifyingHanlder(this);
         } else if (argv[i] == std::string("full")) {
           // Demonstrating the behavior of plugins fully supporting IME.
           //
           // It notifies updates of caret positions to the browser,
           // and handles all text input events by itself.
           delete status_handler_;
-          status_handler_ = new TextFieldStatusNotifyingHandler(this);
+          status_handler_ = new TextFieldStatusNotifyingHanlder(this);
           RequestInputEvents(PP_INPUTEVENT_CLASS_IME);
         }
         break;
@@ -494,25 +485,25 @@ class MyInstance : public pp::Instance {
         break;
       }
       case PP_INPUTEVENT_TYPE_IME_COMPOSITION_START: {
-        const pp::IMEInputEvent imeEvent(event);
+        const pp::IMEInputEvent_Dev imeEvent(event);
         Log("CompositionStart [" + imeEvent.GetText().AsString() + "]");
         ret = true;
         break;
       }
       case PP_INPUTEVENT_TYPE_IME_COMPOSITION_UPDATE: {
-        const pp::IMEInputEvent imeEvent(event);
+        const pp::IMEInputEvent_Dev imeEvent(event);
         Log("CompositionUpdate [" + imeEvent.GetText().AsString() + "]");
         ret = OnCompositionUpdate(imeEvent);
         break;
       }
       case PP_INPUTEVENT_TYPE_IME_COMPOSITION_END: {
-        const pp::IMEInputEvent imeEvent(event);
+        const pp::IMEInputEvent_Dev imeEvent(event);
         Log("CompositionEnd [" + imeEvent.GetText().AsString() + "]");
         ret = OnCompositionEnd(imeEvent);
         break;
       }
       case PP_INPUTEVENT_TYPE_IME_TEXT: {
-        const pp::IMEInputEvent imeEvent(event);
+        const pp::IMEInputEvent_Dev imeEvent(event);
         Log("ImeText [" + imeEvent.GetText().AsString() + "]");
         ret = OnImeText(imeEvent);
         break;
@@ -533,7 +524,7 @@ class MyInstance : public pp::Instance {
   }
 
  private:
-  bool OnCompositionUpdate(const pp::IMEInputEvent& ev) {
+  bool OnCompositionUpdate(const pp::IMEInputEvent_Dev& ev) {
     for (std::vector<MyTextField>::iterator it = textfield_.begin();
          it != textfield_.end();
          ++it) {
@@ -542,28 +533,23 @@ class MyInstance : public pp::Instance {
         for (uint32_t i = 0; i < ev.GetSegmentNumber(); ++i)
           segs.push_back(std::make_pair(ev.GetSegmentOffset(i),
                                         ev.GetSegmentOffset(i + 1)));
-        uint32_t selection_start;
-        uint32_t selection_end;
-        ev.GetSelection(&selection_start, &selection_end);
         it->SetComposition(ev.GetText().AsString(),
                            segs,
                            ev.GetTargetSegment(),
-                           std::make_pair(selection_start, selection_end));
+                           ev.GetSelection());
         return true;
       }
     }
     return false;
   }
 
-  bool OnCompositionEnd(const pp::IMEInputEvent& ev) {
+  bool OnCompositionEnd(const pp::IMEInputEvent_Dev& ev) {
     for (std::vector<MyTextField>::iterator it = textfield_.begin();
          it != textfield_.end();
          ++it) {
       if (it->Focused()) {
-        it->SetComposition(std::string(),
-                           std::vector<std::pair<uint32_t, uint32_t> >(),
-                           0,
-                           std::make_pair(0, 0));
+        it->SetComposition("", std::vector< std::pair<uint32_t, uint32_t> >(),
+                           0, std::make_pair(0, 0));
         return true;
       }
     }
@@ -662,7 +648,7 @@ class MyInstance : public pp::Instance {
     return false;
   }
 
-  bool OnImeText(const pp::IMEInputEvent ev) {
+  bool OnImeText(const pp::IMEInputEvent_Dev ev) {
     for (std::vector<MyTextField>::iterator it = textfield_.begin();
          it != textfield_.end();
          ++it) {
@@ -698,8 +684,8 @@ class MyInstance : public pp::Instance {
 
   // Prints a debug message.
   void Log(const pp::Var& value) {
-    const PPB_Console* console = reinterpret_cast<const PPB_Console*>(
-        pp::Module::Get()->GetBrowserInterface(PPB_CONSOLE_INTERFACE));
+    const PPB_Console_Dev* console = reinterpret_cast<const PPB_Console_Dev*>(
+        pp::Module::Get()->GetBrowserInterface(PPB_CONSOLE_DEV_INTERFACE));
     if (!console)
       return;
     console->Log(pp_instance(), PP_LOGLEVEL_LOG, value.pp_var());

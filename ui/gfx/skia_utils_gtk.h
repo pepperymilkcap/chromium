@@ -4,19 +4,20 @@
 
 #ifndef UI_GFX_SKIA_UTILS_GTK_H_
 #define UI_GFX_SKIA_UTILS_GTK_H_
+#pragma once
 
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/gfx/gfx_export.h"
+#include "ui/base/ui_export.h"
 
 typedef struct _GdkColor GdkColor;
 
 namespace gfx {
 
 // Converts GdkColors to the ARGB layout Skia expects.
-GFX_EXPORT SkColor GdkColorToSkColor(GdkColor color);
+UI_EXPORT SkColor GdkColorToSkColor(GdkColor color);
 
 // Converts ARGB to GdkColor.
-GFX_EXPORT GdkColor SkColorToGdkColor(SkColor color);
+UI_EXPORT GdkColor SkColorToGdkColor(SkColor color);
 
 }  // namespace gfx
 

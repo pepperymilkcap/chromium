@@ -7,91 +7,48 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/metrics/metrics_service.h"
 
+using base::Time;
 using base::TimeDelta;
 
-namespace {
-
 // The delay, in seconds, after startup before sending the first log message.
-#if defined(OS_ANDROID) || defined(OS_IOS)
-// Sessions are more likely to be short on a mobile device, so handle the
-// initial log quickly.
-const int kInitialUploadIntervalSeconds = 15;
-#else
-const int kInitialUploadIntervalSeconds = 60;
-#endif
+static const int kInitialUploadIntervalSeconds = 60;
 
 // The delay, in seconds, between uploading when there are queued logs from
 // previous sessions to send.
-#if defined(OS_ANDROID) || defined(OS_IOS)
-// Sending in a burst is better on a mobile device, since keeping the radio on
-// is very expensive.
-const int kUnsentLogsIntervalSeconds = 3;
-#else
-const int kUnsentLogsIntervalSeconds = 15;
-#endif
+static const int kUnsentLogsIntervalSeconds = 15;
 
 // Standard interval between log uploads, in seconds.
-#if defined(OS_ANDROID) || defined(OS_IOS)
-const int kStandardUploadIntervalSeconds = 5 * 60;  // Five minutes.
-#else
-const int kStandardUploadIntervalSeconds = 30 * 60;  // Thirty minutes.
-#endif
+static const int kStandardUploadIntervalSeconds = 30 * 60;  // Thirty minutes.
 
 // When uploading metrics to the server fails, we progressively wait longer and
 // longer before sending the next log. This backoff process helps reduce load
 // on a server that is having issues.
 // The following is the multiplier we use to expand that inter-log duration.
-const double kBackoffMultiplier = 1.1;
+static const double kBackoffMultiplier = 1.1;
 
 // The maximum backoff multiplier.
-const int kMaxBackoffMultiplier = 10;
+static const int kMaxBackoffMultiplier = 10;
 
-enum InitSequence {
-  TIMER_FIRED_FIRST,
-  INIT_TASK_COMPLETED_FIRST,
-  INIT_SEQUENCE_ENUM_SIZE,
-};
-
-void LogMetricsInitSequence(InitSequence sequence) {
-  UMA_HISTOGRAM_ENUMERATION("UMA.InitSequence", sequence,
-                            INIT_SEQUENCE_ENUM_SIZE);
-}
-
-}  // anonymous namespace
 
 MetricsReportingScheduler::MetricsReportingScheduler(
     const base::Closure& upload_callback)
     : upload_callback_(upload_callback),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
       upload_interval_(TimeDelta::FromSeconds(kInitialUploadIntervalSeconds)),
       running_(false),
-      callback_pending_(false),
-      init_task_complete_(false),
-      waiting_for_init_task_complete_(false) {
+      timer_pending_(false),
+      callback_pending_(false) {
 }
 
 MetricsReportingScheduler::~MetricsReportingScheduler() {}
 
 void MetricsReportingScheduler::Start() {
   running_ = true;
-  ScheduleNextUpload();
+  ScheduleNextCallback();
 }
 
 void MetricsReportingScheduler::Stop() {
   running_ = false;
-  if (upload_timer_.IsRunning())
-    upload_timer_.Stop();
-}
-
-// Callback from MetricsService when the startup init task has completed.
-void MetricsReportingScheduler::InitTaskComplete() {
-  DCHECK(!init_task_complete_);
-  init_task_complete_ = true;
-  if (waiting_for_init_task_complete_) {
-    waiting_for_init_task_complete_ = false;
-    TriggerUpload();
-  } else {
-    LogMetricsInitSequence(INIT_TASK_COMPLETED_FIRST);
-  }
 }
 
 void MetricsReportingScheduler::UploadFinished(bool server_is_healthy,
@@ -110,44 +67,38 @@ void MetricsReportingScheduler::UploadFinished(bool server_is_healthy,
   }
 
   if (running_)
-    ScheduleNextUpload();
+    ScheduleNextCallback();
 }
 
 void MetricsReportingScheduler::UploadCancelled() {
   DCHECK(callback_pending_);
   callback_pending_ = false;
   if (running_)
-    ScheduleNextUpload();
-}
-
-void MetricsReportingScheduler::SetUploadIntervalForTesting(
-    base::TimeDelta interval) {
-  upload_interval_ = interval;
+    ScheduleNextCallback();
 }
 
 void MetricsReportingScheduler::TriggerUpload() {
-  // If the timer fired before the init task has completed, don't trigger the
-  // upload yet - wait for the init task to complete and do it then.
-  if (!init_task_complete_) {
-    LogMetricsInitSequence(TIMER_FIRED_FIRST);
-    waiting_for_init_task_complete_ = true;
-    return;
-  }
+  timer_pending_ = false;
   callback_pending_ = true;
   upload_callback_.Run();
 }
 
-void MetricsReportingScheduler::ScheduleNextUpload() {
+void MetricsReportingScheduler::ScheduleNextCallback() {
   DCHECK(running_);
-  if (upload_timer_.IsRunning() || callback_pending_)
+  if (timer_pending_ || callback_pending_)
     return;
 
-  upload_timer_.Start(FROM_HERE, upload_interval_, this,
-                      &MetricsReportingScheduler::TriggerUpload);
+  timer_pending_ = true;
+
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&MetricsReportingScheduler::TriggerUpload,
+                 weak_ptr_factory_.GetWeakPtr()),
+      upload_interval_);
 }
 
 void MetricsReportingScheduler::BackOffUploadInterval() {
-  DCHECK_GT(kBackoffMultiplier, 1.0);
+  DCHECK(kBackoffMultiplier > 1.0);
   upload_interval_ = TimeDelta::FromMicroseconds(
       static_cast<int64>(kBackoffMultiplier *
                          upload_interval_.InMicroseconds()));

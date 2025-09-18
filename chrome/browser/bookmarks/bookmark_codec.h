@@ -2,16 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// BookmarkCodec is responsible for encoding and decoding the BookmarkModel
+// into JSON values. The encoded values are written to disk via the
+// BookmarkService.
+
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_CODEC_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_CODEC_H_
+#pragma once
 
 #include <set>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/md5.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "base/string16.h"
 
 class BookmarkModel;
 class BookmarkNode;
@@ -22,9 +26,9 @@ class ListValue;
 class Value;
 }
 
-// BookmarkCodec is responsible for encoding and decoding the BookmarkModel
-// into JSON values. The encoded values are written to disk via the
-// BookmarkStorage.
+// BookmarkCodec is responsible for encoding/decoding bookmarks into JSON
+// values. BookmarkCodec is used by BookmarkService.
+
 class BookmarkCodec {
  public:
   // Creates an instance of the codec. During decoding, if the IDs in the file
@@ -42,11 +46,11 @@ class BookmarkCodec {
 
   // Encodes the bookmark bar and other folders returning the JSON value. It's
   // up to the caller to delete the returned object.
+  // This method is public for use by StarredURLDatabase in migrating the
+  // bookmarks out of the database.
   base::Value* Encode(const BookmarkNode* bookmark_bar_node,
-                      const BookmarkNode* other_folder_node,
-                      const BookmarkNode* mobile_folder_node,
-                      const BookmarkNode::MetaInfoMap* model_meta_info_map,
-                      int64 sync_transaction_version);
+                const BookmarkNode* other_folder_node,
+                const BookmarkNode* mobile_folder_node);
 
   // Decodes the previously encoded value to the specified nodes as well as
   // setting |max_node_id| to the greatest node id. Returns true on success,
@@ -69,16 +73,6 @@ class BookmarkCodec {
   // user.
   const std::string& stored_checksum() const { return stored_checksum_; }
 
-  // Return meta info of bookmark model root.
-  const BookmarkNode::MetaInfoMap& model_meta_info_map() const {
-    return model_meta_info_map_;
-  }
-
-  // Return the sync transaction version of the bookmark model root.
-  int64 model_sync_transaction_version() const {
-    return model_sync_transaction_version_;
-  }
-
   // Returns whether the IDs were reassigned during decoding. Always returns
   // false after encoding.
   bool ids_reassigned() const { return ids_reassigned_; }
@@ -97,8 +91,6 @@ class BookmarkCodec {
   static const char* kURLKey;
   static const char* kDateModifiedKey;
   static const char* kChildrenKey;
-  static const char* kMetaInfo;
-  static const char* kSyncTransactionVersion;
 
   // Possible values for kTypeKey.
   static const char* kTypeURL;
@@ -108,10 +100,6 @@ class BookmarkCodec {
   // Encodes node and all its children into a Value object and returns it.
   // The caller takes ownership of the returned object.
   base::Value* EncodeNode(const BookmarkNode* node);
-
-  // Encodes the given meta info into a Value object and returns it. The caller
-  // takes ownership of the returned object.
-  base::Value* EncodeMetaInfo(const BookmarkNode::MetaInfoMap& meta_info_map);
 
   // Helper to perform decoding.
   bool DecodeHelper(BookmarkNode* bb_node,
@@ -139,25 +127,9 @@ class BookmarkCodec {
                   BookmarkNode* parent,
                   BookmarkNode* node);
 
-  // Decodes the meta info from the supplied value. If the meta info contains
-  // a "sync.transaction_version" key, the value of that field will be stored
-  // in the sync_transaction_version variable, then deleted. This is for
-  // backward-compatibility reasons.
-  // meta_info_map and sync_transaction_version must not be NULL.
-  bool DecodeMetaInfo(const base::DictionaryValue& value,
-                      BookmarkNode::MetaInfoMap* meta_info_map,
-                      int64* sync_transaction_version);
-
-  // Decodes the meta info from the supplied sub-node dictionary. The values
-  // found will be inserted in meta_info_map with the given prefix added to the
-  // start of their keys.
-  void DecodeMetaInfoHelper(const base::DictionaryValue& dict,
-                            const std::string& prefix,
-                            BookmarkNode::MetaInfoMap* meta_info_map);
-
   // Updates the check-sum with the given string.
   void UpdateChecksum(const std::string& str);
-  void UpdateChecksum(const base::string16& str);
+  void UpdateChecksum(const string16& str);
 
   // Updates the check-sum with the given contents of URL/folder bookmark node.
   // NOTE: These functions take in individual properties of a bookmark node
@@ -166,10 +138,10 @@ class BookmarkCodec {
   // and once for computing the check-sum.
   // The url parameter should be a valid UTF8 string.
   void UpdateChecksumWithUrlNode(const std::string& id,
-                                 const base::string16& title,
+                                 const string16& title,
                                  const std::string& url);
   void UpdateChecksumWithFolderNode(const std::string& id,
-                                    const base::string16& title);
+                                    const string16& title);
 
   // Initializes/Finalizes the checksum.
   void InitializeChecksum();
@@ -195,12 +167,6 @@ class BookmarkCodec {
 
   // Maximum ID assigned when decoding data.
   int64 maximum_id_;
-
-  // Meta info set on bookmark model root.
-  BookmarkNode::MetaInfoMap model_meta_info_map_;
-
-  // Sync transaction version set on bookmark model root.
-  int64 model_sync_transaction_version_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkCodec);
 };

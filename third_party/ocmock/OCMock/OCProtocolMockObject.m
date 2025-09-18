@@ -7,6 +7,7 @@
 #import "NSMethodSignature+OCMAdditions.h"
 #import "OCProtocolMockObject.h"
 
+
 @implementation OCProtocolMockObject
 
 #pragma mark  Initialisers, description, accessors, etc.
@@ -20,9 +21,10 @@
 
 - (NSString *)description
 {
-    const char* name = protocol_getName(mockedProtocol);
-    return [NSString stringWithFormat:@"OCMockObject[%s]", name];
+	return [NSString stringWithFormat:@"OCMockObject[%s]", [mockedProtocol name]];
 }
+
+
 
 #pragma mark  Proxy API
 
@@ -49,5 +51,6 @@
 {
     return ([self methodSignatureForSelector:selector] != nil);
 }
+
 
 @end

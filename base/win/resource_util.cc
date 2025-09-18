@@ -7,12 +7,8 @@
 
 namespace base {
 namespace win {
-
-bool GetResourceFromModule(HMODULE module,
-                           int resource_id,
-                           LPCTSTR resource_type,
-                           void** data,
-                           size_t* length) {
+bool GetDataResourceFromModule(HMODULE module, int resource_id,
+                               void** data, size_t* length) {
   if (!module)
     return false;
 
@@ -22,7 +18,7 @@ bool GetResourceFromModule(HMODULE module,
   }
 
   HRSRC hres_info = FindResource(module, MAKEINTRESOURCE(resource_id),
-                                 resource_type);
+                                 L"BINDATA");
   if (NULL == hres_info)
     return false;
 
@@ -39,13 +35,5 @@ bool GetResourceFromModule(HMODULE module,
   *length = static_cast<size_t>(data_size);
   return true;
 }
-
-bool GetDataResourceFromModule(HMODULE module,
-                               int resource_id,
-                               void** data,
-                               size_t* length) {
-  return GetResourceFromModule(module, resource_id, L"BINDATA", data, length);
-}
-
 }  // namespace win
 }  // namespace base

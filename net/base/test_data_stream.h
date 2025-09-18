@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_TEST_DATA_STREAM_H_
 #define NET_BASE_TEST_DATA_STREAM_H_
+#pragma once
 
 #include <string.h>  // for memcpy().
 #include <algorithm>

@@ -4,50 +4,94 @@
 
 #include "media/base/filter_collection.h"
 
-#include "media/base/audio_renderer.h"
-#include "media/base/demuxer.h"
-#include "media/base/text_renderer.h"
-#include "media/base/video_renderer.h"
+#include "base/logging.h"
 
 namespace media {
 
-FilterCollection::FilterCollection() : demuxer_(NULL) {}
+FilterCollection::FilterCollection() {}
 
 FilterCollection::~FilterCollection() {}
 
-void FilterCollection::SetDemuxer(Demuxer* demuxer) {
-  demuxer_ = demuxer;
+void FilterCollection::SetDemuxerFactory(scoped_ptr<DemuxerFactory> factory) {
+  DCHECK(factory.get());
+  demuxer_factory_ = factory.Pass();
 }
 
-Demuxer* FilterCollection::GetDemuxer() {
-  return demuxer_;
+DemuxerFactory* FilterCollection::GetDemuxerFactory() {
+  return demuxer_factory_.get();
 }
 
-void FilterCollection::SetAudioRenderer(
-    scoped_ptr<AudioRenderer> audio_renderer) {
-  audio_renderer_ = audio_renderer.Pass();
+void FilterCollection::AddVideoDecoder(VideoDecoder* filter) {
+  AddFilter(VIDEO_DECODER, filter);
 }
 
-scoped_ptr<AudioRenderer> FilterCollection::GetAudioRenderer() {
-  return audio_renderer_.Pass();
+void FilterCollection::AddAudioDecoder(AudioDecoder* filter) {
+  AddFilter(AUDIO_DECODER, filter);
 }
 
-void FilterCollection::SetVideoRenderer(
-    scoped_ptr<VideoRenderer> video_renderer) {
-  video_renderer_ = video_renderer.Pass();
+void FilterCollection::AddVideoRenderer(VideoRenderer* filter) {
+  AddFilter(VIDEO_RENDERER, filter);
 }
 
-scoped_ptr<VideoRenderer> FilterCollection::GetVideoRenderer() {
-  return video_renderer_.Pass();
+void FilterCollection::AddAudioRenderer(AudioRenderer* filter) {
+  AddFilter(AUDIO_RENDERER, filter);
 }
 
-void FilterCollection::SetTextRenderer(
-    scoped_ptr<TextRenderer> text_renderer) {
-  text_renderer_ = text_renderer.Pass();
+bool FilterCollection::IsEmpty() const {
+  return filters_.empty();
 }
 
-scoped_ptr<TextRenderer> FilterCollection::GetTextRenderer() {
-  return text_renderer_.Pass();
+void FilterCollection::Clear() {
+  filters_.clear();
+}
+
+void FilterCollection::SelectVideoDecoder(
+    scoped_refptr<VideoDecoder>* filter_out) {
+  SelectFilter<VIDEO_DECODER>(filter_out);
+}
+
+void FilterCollection::SelectAudioDecoder(
+    scoped_refptr<AudioDecoder>* filter_out) {
+  SelectFilter<AUDIO_DECODER>(filter_out);
+}
+
+void FilterCollection::SelectVideoRenderer(
+    scoped_refptr<VideoRenderer>* filter_out) {
+  SelectFilter<VIDEO_RENDERER>(filter_out);
+}
+
+void FilterCollection::SelectAudioRenderer(
+    scoped_refptr<AudioRenderer>* filter_out) {
+  SelectFilter<AUDIO_RENDERER>(filter_out);
+}
+
+void FilterCollection::AddFilter(FilterType filter_type,
+                                 Filter* filter) {
+  filters_.push_back(FilterListElement(filter_type, filter));
+}
+
+template<FilterCollection::FilterType filter_type, typename F>
+void FilterCollection::SelectFilter(scoped_refptr<F>* filter_out) {
+  scoped_refptr<Filter> filter;
+  SelectFilter(filter_type, &filter);
+  *filter_out = reinterpret_cast<F*>(filter.get());
+}
+
+void FilterCollection::SelectFilter(
+    FilterType filter_type,
+    scoped_refptr<Filter>* filter_out)  {
+
+  FilterList::iterator it = filters_.begin();
+  while (it != filters_.end()) {
+    if (it->first == filter_type)
+      break;
+    ++it;
+  }
+
+  if (it != filters_.end()) {
+    *filter_out = it->second.get();
+    filters_.erase(it);
+  }
 }
 
 }  // namespace media

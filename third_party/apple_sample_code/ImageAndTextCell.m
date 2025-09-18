@@ -122,15 +122,15 @@
       NSRectFill(imageFrame);
     }
     imageFrame.origin.x += 3;
-    imageFrame.origin.y += ceil((cellFrame.size.height - imageSize.height) / 2);
     imageFrame.size = imageSize;
 
-    [image drawInRect:imageFrame
-             fromRect:NSZeroRect
-            operation:NSCompositeSourceOver
-             fraction:1.0
-       respectFlipped:YES
-                hints:nil];
+    if ([controlView isFlipped]) {
+      imageFrame.origin.y += ceil((cellFrame.size.height + imageFrame.size.height) / 2);
+    } else {
+      imageFrame.origin.y += ceil((cellFrame.size.height - imageFrame.size.height) / 2);
+    }
+
+    [image compositeToPoint:imageFrame.origin operation:NSCompositeSourceOver];
   }
   [super drawWithFrame:cellFrame inView:controlView];
 }

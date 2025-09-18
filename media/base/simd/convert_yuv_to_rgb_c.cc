@@ -5,102 +5,52 @@
 #include "media/base/simd/convert_yuv_to_rgb.h"
 #include "media/base/simd/yuv_to_rgb_table.h"
 
-namespace media {
-
 #define packuswb(x) ((x) < 0 ? 0 : ((x) > 255 ? 255 : (x)))
 #define paddsw(x, y) (((x) + (y)) < -32768 ? -32768 : \
     (((x) + (y)) > 32767 ? 32767 : ((x) + (y))))
-
-// On Android, pixel layout is RGBA (see skia/include/core/SkColorPriv.h);
-// however, other Chrome platforms use BGRA (see skia/config/SkUserConfig.h).
-// Ideally, android should not use the functions here due to performance issue
-// (http://crbug.com/249980).
-#if defined(OS_ANDROID)
-#define SK_R32_SHIFT    0
-#define SK_G32_SHIFT    8
-#define SK_B32_SHIFT    16
-#define SK_A32_SHIFT    24
-#define R_INDEX         0
-#define G_INDEX         1
-#define B_INDEX         2
-#define A_INDEX         3
-#else
-#define SK_B32_SHIFT    0
-#define SK_G32_SHIFT    8
-#define SK_R32_SHIFT    16
-#define SK_A32_SHIFT    24
-#define B_INDEX         0
-#define G_INDEX         1
-#define R_INDEX         2
-#define A_INDEX         3
-#endif
 
 static inline void ConvertYUVToRGB32_C(uint8 y,
                                        uint8 u,
                                        uint8 v,
                                        uint8* rgb_buf) {
-  int b = kCoefficientsRgbY[256+u][B_INDEX];
-  int g = kCoefficientsRgbY[256+u][G_INDEX];
-  int r = kCoefficientsRgbY[256+u][R_INDEX];
-  int a = kCoefficientsRgbY[256+u][A_INDEX];
+  int b = kCoefficientsRgbY[256+u][0];
+  int g = kCoefficientsRgbY[256+u][1];
+  int r = kCoefficientsRgbY[256+u][2];
+  int a = kCoefficientsRgbY[256+u][3];
 
-  b = paddsw(b, kCoefficientsRgbY[512+v][B_INDEX]);
-  g = paddsw(g, kCoefficientsRgbY[512+v][G_INDEX]);
-  r = paddsw(r, kCoefficientsRgbY[512+v][R_INDEX]);
-  a = paddsw(a, kCoefficientsRgbY[512+v][A_INDEX]);
+  b = paddsw(b, kCoefficientsRgbY[512+v][0]);
+  g = paddsw(g, kCoefficientsRgbY[512+v][1]);
+  r = paddsw(r, kCoefficientsRgbY[512+v][2]);
+  a = paddsw(a, kCoefficientsRgbY[512+v][3]);
 
-  b = paddsw(b, kCoefficientsRgbY[y][B_INDEX]);
-  g = paddsw(g, kCoefficientsRgbY[y][G_INDEX]);
-  r = paddsw(r, kCoefficientsRgbY[y][R_INDEX]);
-  a = paddsw(a, kCoefficientsRgbY[y][A_INDEX]);
+  b = paddsw(b, kCoefficientsRgbY[y][0]);
+  g = paddsw(g, kCoefficientsRgbY[y][1]);
+  r = paddsw(r, kCoefficientsRgbY[y][2]);
+  a = paddsw(a, kCoefficientsRgbY[y][3]);
 
   b >>= 6;
   g >>= 6;
   r >>= 6;
   a >>= 6;
 
-  *reinterpret_cast<uint32*>(rgb_buf) = (packuswb(b) << SK_B32_SHIFT) |
-                                        (packuswb(g) << SK_G32_SHIFT) |
-                                        (packuswb(r) << SK_R32_SHIFT) |
-                                        (packuswb(a) << SK_A32_SHIFT);
+  *reinterpret_cast<uint32*>(rgb_buf) = (packuswb(b)) |
+                                        (packuswb(g) << 8) |
+                                        (packuswb(r) << 16) |
+                                        (packuswb(a) << 24);
 }
 
-static inline void ConvertYUVAToARGB_C(uint8 y,
-                                       uint8 u,
-                                       uint8 v,
-                                       uint8 a,
-                                       uint8* rgb_buf) {
-  int b = kCoefficientsRgbY[256+u][0];
-  int g = kCoefficientsRgbY[256+u][1];
-  int r = kCoefficientsRgbY[256+u][2];
+// 16.16 fixed point arithmetic
+const int kFractionBits = 16;
+const int kFractionMax = 1 << kFractionBits;
+const int kFractionMask = ((1 << kFractionBits) - 1);
 
-  b = paddsw(b, kCoefficientsRgbY[512+v][0]);
-  g = paddsw(g, kCoefficientsRgbY[512+v][1]);
-  r = paddsw(r, kCoefficientsRgbY[512+v][2]);
-
-  b = paddsw(b, kCoefficientsRgbY[y][0]);
-  g = paddsw(g, kCoefficientsRgbY[y][1]);
-  r = paddsw(r, kCoefficientsRgbY[y][2]);
-
-  b >>= 6;
-  g >>= 6;
-  r >>= 6;
-
-  b = packuswb(b) * a >> 8;
-  g = packuswb(g) * a >> 8;
-  r = packuswb(r) * a >> 8;
-
-  *reinterpret_cast<uint32*>(rgb_buf) = (b << SK_B32_SHIFT) |
-                                        (g << SK_G32_SHIFT) |
-                                        (r << SK_R32_SHIFT) |
-                                        (a << SK_A32_SHIFT);
-}
+extern "C" {
 
 void ConvertYUVToRGB32Row_C(const uint8* y_buf,
                             const uint8* u_buf,
                             const uint8* v_buf,
                             uint8* rgb_buf,
-                            ptrdiff_t width) {
+                            int width) {
   for (int x = 0; x < width; x += 2) {
     uint8 u = u_buf[x >> 1];
     uint8 v = v_buf[x >> 1];
@@ -114,27 +64,6 @@ void ConvertYUVToRGB32Row_C(const uint8* y_buf,
   }
 }
 
-void ConvertYUVAToARGBRow_C(const uint8* y_buf,
-                            const uint8* u_buf,
-                            const uint8* v_buf,
-                            const uint8* a_buf,
-                            uint8* rgba_buf,
-                            ptrdiff_t width) {
-  for (int x = 0; x < width; x += 2) {
-    uint8 u = u_buf[x >> 1];
-    uint8 v = v_buf[x >> 1];
-    uint8 y0 = y_buf[x];
-    uint8 a0 = a_buf[x];
-    ConvertYUVAToARGB_C(y0, u, v, a0, rgba_buf);
-    if ((x + 1) < width) {
-      uint8 y1 = y_buf[x + 1];
-      uint8 a1 = a_buf[x + 1];
-      ConvertYUVAToARGB_C(y1, u, v, a1, rgba_buf + 4);
-    }
-    rgba_buf += 8;  // Advance 2 pixels.
-  }
-}
-
 // 16.16 fixed point is used.  A shift by 16 isolates the integer.
 // A shift by 17 is used to further subsample the chrominence channels.
 // & 0xffff isolates the fixed point fraction.  >> 2 to get the upper 2 bits,
@@ -143,8 +72,8 @@ void ScaleYUVToRGB32Row_C(const uint8* y_buf,
                           const uint8* u_buf,
                           const uint8* v_buf,
                           uint8* rgb_buf,
-                          ptrdiff_t width,
-                          ptrdiff_t source_dx) {
+                          int width,
+                          int source_dx) {
   int x = 0;
   for (int i = 0; i < width; i += 2) {
     int y = y_buf[x >> 16];
@@ -165,8 +94,8 @@ void LinearScaleYUVToRGB32Row_C(const uint8* y_buf,
                                 const uint8* u_buf,
                                 const uint8* v_buf,
                                 uint8* rgb_buf,
-                                ptrdiff_t width,
-                                ptrdiff_t source_dx) {
+                                int width,
+                                int source_dx) {
   // Avoid point-sampling for down-scaling by > 2:1.
   int source_x = 0;
   if (source_dx >= 0x20000)
@@ -208,6 +137,10 @@ void LinearScaleYUVToRGB32RowWithRange_C(const uint8* y_buf,
   }
 }
 
+}
+
+namespace media {
+
 void ConvertYUVToRGB32_C(const uint8* yplane,
                          const uint8* uplane,
                          const uint8* vplane,
@@ -229,35 +162,6 @@ void ConvertYUVToRGB32_C(const uint8* yplane,
                            u_ptr,
                            v_ptr,
                            rgb_row,
-                           width);
-  }
-}
-
-void ConvertYUVAToARGB_C(const uint8* yplane,
-                         const uint8* uplane,
-                         const uint8* vplane,
-                         const uint8* aplane,
-                         uint8* rgbaframe,
-                         int width,
-                         int height,
-                         int ystride,
-                         int uvstride,
-                         int astride,
-                         int rgbastride,
-                         YUVType yuv_type) {
-  unsigned int y_shift = yuv_type;
-  for (int y = 0; y < height; y++) {
-    uint8* rgba_row = rgbaframe + y * rgbastride;
-    const uint8* y_ptr = yplane + y * ystride;
-    const uint8* u_ptr = uplane + (y >> y_shift) * uvstride;
-    const uint8* v_ptr = vplane + (y >> y_shift) * uvstride;
-    const uint8* a_ptr = aplane + y * astride;
-
-    ConvertYUVAToARGBRow_C(y_ptr,
-                           u_ptr,
-                           v_ptr,
-                           a_ptr,
-                           rgba_row,
                            width);
   }
 }

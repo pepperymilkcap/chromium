@@ -1,67 +1,81 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/audio/fake_audio_output_stream.h"
 
-#include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/at_exit.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "media/audio/audio_manager_base.h"
 
-namespace media {
+bool FakeAudioOutputStream::has_created_fake_stream_ = false;
+FakeAudioOutputStream* FakeAudioOutputStream::last_fake_stream_ = NULL;
 
 // static
 AudioOutputStream* FakeAudioOutputStream::MakeFakeStream(
-    AudioManagerBase* manager, const AudioParameters& params) {
-  return new FakeAudioOutputStream(manager, params);
+    const AudioParameters& params) {
+  if (!has_created_fake_stream_)
+    base::AtExitManager::RegisterCallback(&DestroyLastFakeStream, NULL);
+  has_created_fake_stream_ = true;
+
+  FakeAudioOutputStream* new_stream = new FakeAudioOutputStream(params);
+
+  if (last_fake_stream_) {
+    DCHECK(last_fake_stream_->closed_);
+    delete last_fake_stream_;
+  }
+  last_fake_stream_ = new_stream;
+
+  return new_stream;
 }
 
-FakeAudioOutputStream::FakeAudioOutputStream(AudioManagerBase* manager,
-                                             const AudioParameters& params)
-    : audio_manager_(manager),
-      callback_(NULL),
-      fake_consumer_(manager->GetWorkerLoop(), params) {
-}
-
-FakeAudioOutputStream::~FakeAudioOutputStream() {
-  DCHECK(!callback_);
+// static
+FakeAudioOutputStream* FakeAudioOutputStream::GetLastFakeStream() {
+  return last_fake_stream_;
 }
 
 bool FakeAudioOutputStream::Open() {
-  DCHECK(audio_manager_->GetMessageLoop()->BelongsToCurrentThread());
+  if (packet_size_ < sizeof(int16))
+    return false;
+  buffer_.reset(new uint8[packet_size_]);
   return true;
 }
 
 void FakeAudioOutputStream::Start(AudioSourceCallback* callback)  {
-  DCHECK(audio_manager_->GetMessageLoop()->BelongsToCurrentThread());
   callback_ = callback;
-  fake_consumer_.Start(base::Bind(
-      &FakeAudioOutputStream::CallOnMoreData, base::Unretained(this)));
+  memset(buffer_.get(), 0, packet_size_);
+  callback_->OnMoreData(this, buffer_.get(), packet_size_,
+                        AudioBuffersState(0, 0));
 }
 
 void FakeAudioOutputStream::Stop() {
-  DCHECK(audio_manager_->GetMessageLoop()->BelongsToCurrentThread());
-  fake_consumer_.Stop();
   callback_ = NULL;
 }
 
-void FakeAudioOutputStream::Close() {
-  DCHECK(!callback_);
-  DCHECK(audio_manager_->GetMessageLoop()->BelongsToCurrentThread());
-  audio_manager_->ReleaseOutputStream(this);
+void FakeAudioOutputStream::SetVolume(double volume) {
+  volume_ = volume;
 }
-
-void FakeAudioOutputStream::SetVolume(double volume) {};
 
 void FakeAudioOutputStream::GetVolume(double* volume) {
-  *volume = 0;
-};
-
-void FakeAudioOutputStream::CallOnMoreData(AudioBus* audio_bus) {
-  DCHECK(audio_manager_->GetWorkerLoop()->BelongsToCurrentThread());
-  callback_->OnMoreData(audio_bus, AudioBuffersState());
+  *volume = volume_;
 }
 
-}  // namespace media
+void FakeAudioOutputStream::Close() {
+  closed_ = true;
+}
+
+FakeAudioOutputStream::FakeAudioOutputStream(const AudioParameters& params)
+    : volume_(0),
+      callback_(NULL),
+      packet_size_(params.GetPacketSize()),
+      closed_(false) {
+}
+
+FakeAudioOutputStream::~FakeAudioOutputStream() {}
+
+// static
+void FakeAudioOutputStream::DestroyLastFakeStream(void* param) {
+  if (last_fake_stream_) {
+    DCHECK(last_fake_stream_->closed_);
+    delete last_fake_stream_;
+  }
+}

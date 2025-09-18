@@ -4,24 +4,23 @@
 
 #ifndef NET_HTTP_HTTP_PROXY_CLIENT_SOCKET_POOL_H_
 #define NET_HTTP_HTTP_PROXY_CLIENT_SOCKET_POOL_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_response_info.h"
 #include "net/http/proxy_client_socket.h"
-#include "net/socket/client_socket_pool.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_histograms.h"
+#include "net/socket/client_socket_pool.h"
 #include "net/socket/ssl_client_socket.h"
-#include "net/spdy/spdy_session.h"
 
 namespace net {
 
@@ -96,7 +95,6 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
 class HttpProxyConnectJob : public ConnectJob {
  public:
   HttpProxyConnectJob(const std::string& group_name,
-                      RequestPriority priority,
                       const scoped_refptr<HttpProxySocketParams>& params,
                       const base::TimeDelta& timeout_duration,
                       TransportClientSocketPool* transport_pool,
@@ -152,7 +150,6 @@ class HttpProxyConnectJob : public ConnectJob {
   // a standard net error code will be returned.
   virtual int ConnectInternal() OVERRIDE;
 
-  base::WeakPtrFactory<HttpProxyConnectJob> weak_ptr_factory_;
   scoped_refptr<HttpProxySocketParams> params_;
   TransportClientSocketPool* const transport_pool_;
   SSLClientSocketPool* const ssl_pool_;
@@ -164,21 +161,17 @@ class HttpProxyConnectJob : public ConnectJob {
   scoped_ptr<ProxyClientSocket> transport_socket_;
   bool using_spdy_;
   // Protocol negotiated with the server.
-  NextProto protocol_negotiated_;
+  SSLClientSocket::NextProto protocol_negotiated_;
 
   HttpResponseInfo error_response_info_;
 
-  SpdyStreamRequest spdy_stream_request_;
+  scoped_refptr<SpdyStream> spdy_stream_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpProxyConnectJob);
 };
 
-class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
-    : public ClientSocketPool,
-      public HigherLayeredPool {
+class NET_EXPORT_PRIVATE HttpProxyClientSocketPool : public ClientSocketPool {
  public:
-  typedef HttpProxySocketParams SocketParams;
-
   HttpProxyClientSocketPool(
       int max_sockets,
       int max_sockets_per_group,
@@ -207,10 +200,10 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
                              ClientSocketHandle* handle) OVERRIDE;
 
   virtual void ReleaseSocket(const std::string& group_name,
-                             scoped_ptr<StreamSocket> socket,
+                             StreamSocket* socket,
                              int id) OVERRIDE;
 
-  virtual void FlushWithError(int error) OVERRIDE;
+  virtual void Flush() OVERRIDE;
 
   virtual void CloseIdleSockets() OVERRIDE;
 
@@ -232,16 +225,6 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
 
   virtual ClientSocketPoolHistograms* histograms() const OVERRIDE;
 
-  // LowerLayeredPool implementation.
-  virtual bool IsStalled() const OVERRIDE;
-
-  virtual void AddHigherLayeredPool(HigherLayeredPool* higher_pool) OVERRIDE;
-
-  virtual void RemoveHigherLayeredPool(HigherLayeredPool* higher_pool) OVERRIDE;
-
-  // HigherLayeredPool implementation.
-  virtual bool CloseOneIdleConnection() OVERRIDE;
-
  private:
   typedef ClientSocketPoolBase<HttpProxySocketParams> PoolBase;
 
@@ -254,12 +237,14 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
         NetLog* net_log);
 
     // ClientSocketPoolBase::ConnectJobFactory methods.
-    virtual scoped_ptr<ConnectJob> NewConnectJob(
+    virtual ConnectJob* NewConnectJob(
         const std::string& group_name,
         const PoolBase::Request& request,
         ConnectJob::Delegate* delegate) const OVERRIDE;
 
-    virtual base::TimeDelta ConnectionTimeout() const OVERRIDE;
+    virtual base::TimeDelta ConnectionTimeout() const OVERRIDE {
+      return timeout_;
+    }
 
    private:
     TransportClientSocketPool* const transport_pool_;
@@ -277,6 +262,9 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
 
   DISALLOW_COPY_AND_ASSIGN(HttpProxyClientSocketPool);
 };
+
+REGISTER_SOCKET_PARAMS_FOR_POOL(HttpProxyClientSocketPool,
+                                HttpProxySocketParams);
 
 }  // namespace net
 

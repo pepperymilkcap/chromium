@@ -11,13 +11,15 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
+#include "base/process_util.h"
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/plugin_process_host.h"
+#include "content/common/plugin_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "ui/gfx/rect.h"
 
-namespace content {
+using content::BrowserThread;
 
 void PluginProcessHost::OnPluginSelectWindow(uint32 window_id,
                                              gfx::Rect window_rect,
@@ -110,5 +112,3 @@ void PluginProcessHost::OnPluginSetCursorVisibility(bool visible) {
                                        visible));
   }
 }
-
-}  // namespace content

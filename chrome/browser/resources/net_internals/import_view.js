@@ -34,18 +34,28 @@ var ImportView = (function() {
     dropTarget.ondragenter = this.onDrag.bind(this);
     dropTarget.ondragover = this.onDrag.bind(this);
     dropTarget.ondrop = this.onDrop.bind(this);
+
+    $(ImportView.RELOAD_LINK_ID).onclick = this.clickedReload_.bind(this);
+
+    this.loadedInfoBuildName_ = $(ImportView.LOADED_INFO_BUILD_NAME_ID);
+    this.loadedInfoExportDate_ = $(ImportView.LOADED_INFO_EXPORT_DATE_ID);
+    this.loadedInfoOsType_ = $(ImportView.LOADED_INFO_OS_TYPE_ID);
+    this.loadedInfoCommandLine_ = $(ImportView.LOADED_INFO_COMMAND_LINE_ID);
+    this.loadedInfoUserComments_ = $(ImportView.LOADED_INFO_USER_COMMENTS_ID);
   }
 
-  ImportView.TAB_ID = 'tab-handle-import';
-  ImportView.TAB_NAME = 'Import';
-  ImportView.TAB_HASH = '#import';
+  ImportView.TAB_HANDLE_ID = 'tab-handle-import';
 
-  // IDs for special HTML elements in import_view.html.
+  // IDs for special HTML elements in import_view.html
   ImportView.MAIN_BOX_ID = 'import-view-tab-content';
   ImportView.LOADED_DIV_ID = 'import-view-loaded-div';
   ImportView.LOAD_LOG_FILE_ID = 'import-view-load-log-file';
   ImportView.LOAD_STATUS_TEXT_ID = 'import-view-load-status-text';
-  // Used in tests.
+  ImportView.RELOAD_LINK_ID = 'import-view-reloaded-link';
+  ImportView.LOADED_INFO_EXPORT_DATE_ID = 'import-view-export-date';
+  ImportView.LOADED_INFO_BUILD_NAME_ID = 'import-view-build-name';
+  ImportView.LOADED_INFO_OS_TYPE_ID = 'import-view-os-type';
+  ImportView.LOADED_INFO_COMMAND_LINE_ID = 'import-view-command-line';
   ImportView.LOADED_INFO_USER_COMMENTS_ID = 'import-view-user-comments';
 
   cr.addSingletonGetter(ImportView);
@@ -59,12 +69,18 @@ var ImportView = (function() {
      * loading the new ones.  Returns true to indicate the view should
      * still be visible.
      */
-    onLoadLogFinish: function(polledData, unused, logDump) {
-      var input = new JsEvalContext(logDump);
-      jstProcess(input, $(ImportView.LOADED_DIV_ID));
-
+    onLoadLogFinish: function(data, unused, logDump) {
       setNodeDisplay(this.loadedDiv_, true);
+      this.updateLoadedClientInfo(logDump.userComments);
       return true;
+    },
+
+    /**
+     * Called when the user clicks the "reloaded" link.
+     */
+    clickedReload_: function() {
+      window.location.reload();
+      return false;
     },
 
     /**
@@ -75,13 +91,7 @@ var ImportView = (function() {
      * security reasons, which is why we allow the |files| array to be empty.
      */
     onDrag: function(event) {
-      // NOTE: Use Array.prototype.indexOf here is necessary while WebKit
-      // decides which type of data structure dataTransfer.types will be
-      // (currently between DOMStringList and Array). These have different APIs
-      // so assuming one type or the other was breaking things. See
-      // http://crbug.com/115433. TODO(dbeam): Remove when standardized more.
-      var indexOf = Array.prototype.indexOf;
-      return indexOf.call(event.dataTransfer.types, 'Files') == -1 ||
+      return event.dataTransfer.types.indexOf('Files') == -1 ||
              event.dataTransfer.files.length > 1;
     },
 
@@ -90,8 +100,7 @@ var ImportView = (function() {
      * file, tries to load it as a log file.
      */
     onDrop: function(event) {
-      var indexOf = Array.prototype.indexOf;
-      if (indexOf.call(event.dataTransfer.types, 'Files') == -1 ||
+      if (event.dataTransfer.types.indexOf('Files') == -1 ||
           event.dataTransfer.files.length != 1) {
         return;
       }
@@ -141,7 +150,7 @@ var ImportView = (function() {
     },
 
     onLoadLogFile: function(logFile, event) {
-      var result = log_util.loadLogFile(event.target.result, logFile.name);
+      var result = log_util.loadLogFile(event.target.result, logFile.fileName);
       this.setLoadFileStatus(result, false);
     },
 
@@ -166,23 +175,54 @@ var ImportView = (function() {
         this.loadFileElement_ = $(loadFileElementId);
         this.loadFileElement_.onchange = loadFileElementOnChange;
       }
-
-      // Style the log output differently depending on what just happened.
-      var pos = text.indexOf('Log loaded.');
-      if (isLoading) {
-        this.loadStatusText_.className = 'import-view-pending-log';
-      } else if (pos == 0) {
-        this.loadStatusText_.className = 'import-view-success-log';
-      } else if (pos != -1) {
-        this.loadStatusText_.className = 'import-view-warning-log';
-      } else {
-        this.loadStatusText_.className = 'import-view-error-log';
-      }
     },
 
     enableLoadFileElement_: function(enabled) {
       this.loadFileElement_.disabled = !enabled;
     },
+
+    /**
+     * Prints some basic information about the environment when the log was
+     * made.
+     */
+    updateLoadedClientInfo: function(userComments) {
+      // Reset all the fields (in case we early-return).
+      this.loadedInfoExportDate_.innerText = '';
+      this.loadedInfoBuildName_.innerText = '';
+      this.loadedInfoOsType_.innerText = '';
+      this.loadedInfoCommandLine_.innerText = '';
+      this.loadedInfoUserComments_.innerText = '';
+
+      if (typeof(ClientInfo) != 'object')
+        return;
+
+      var dateString = '';
+      // Dumps made with the command line option don't have a date, and older
+      // versions of Chrome use a formatted string.
+      // TODO(mmenke):  At some point, after Chrome 17 hits stable, remove the
+      //                ClientInfo.date case.
+      if (ClientInfo.numericDate) {
+        dateString = (new Date(ClientInfo.numericDate)).toLocaleString();
+      } else if (ClientInfo.date) {
+        dateString = ClientInfo.date;
+      }
+      this.loadedInfoExportDate_.innerText = dateString;
+
+      var buildName =
+          ClientInfo.name +
+          ' ' + ClientInfo.version +
+          ' (' + ClientInfo.official +
+          ' ' + ClientInfo.cl +
+          ') ' + ClientInfo.version_mod;
+
+      this.loadedInfoBuildName_.innerText = buildName;
+
+      this.loadedInfoOsType_.innerText = ClientInfo.os_type;
+      this.loadedInfoCommandLine_.innerText = ClientInfo.command_line;
+
+      // User comments will not be available when dumped from command line.
+      this.loadedInfoUserComments_.innerText = userComments || '';
+    }
   };
 
   return ImportView;

@@ -10,11 +10,9 @@
 #include <atlbase.h>
 #include <atlcom.h>
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
-namespace base {
 class FilePath;
-}
 
 extern const wchar_t kChromeFrameDllName[];
 extern const wchar_t kChromeLauncherExeName[];
@@ -52,7 +50,7 @@ class ScopedChromeFrameRegistrar {
   static void UnregisterAtPath(const std::wstring& path,
                                RegistrationType registration_type);
   static void RegisterDefaults();
-  static base::FilePath GetReferenceChromeFrameDllPath();
+  static FilePath GetReferenceChromeFrameDllPath();
 
   // Registers or unregisters a COM DLL and exits the process if the process's
   // command line is:
@@ -71,7 +69,7 @@ class ScopedChromeFrameRegistrar {
   // The string "--call-registration-entrypoint".
   static const wchar_t kCallRegistrationEntrypointSwitch[];
 
-  static void DoRegistration(const base::string16& path,
+  static void DoRegistration(const string16& path,
                              RegistrationType registration_type,
                              RegistrationOperation registration_operation);
 
@@ -91,7 +89,7 @@ class ScopedChromeFrameRegistrar {
 // Returns the path to the Chrome Frame DLL in the build directory. Assumes
 // that the test executable is running from the build folder or a similar
 // folder structure.
-base::FilePath GetChromeFrameBuildPath();
+FilePath GetChromeFrameBuildPath();
 
 // Callback description for onload, onloaderror, onmessage
 static _ATL_FUNC_INFO g_single_param = {CC_STDCALL, VT_EMPTY, 1, {VT_VARIANT}};
@@ -127,6 +125,12 @@ class DispCallback
   T* owner_;
   Method method_;
 };
+
+// Kills all running processes named |process_name| that have the string
+// |argument| on their command line. Useful for killing all Chrome Frame
+// instances of Chrome that all have --chrome-frame in their command line.
+bool KillAllNamedProcessesWithArgument(const std::wstring& process_name,
+                                       const std::wstring& argument);
 
 // If the workstation is locked and cannot receive user input.
 bool IsWorkstationLocked();

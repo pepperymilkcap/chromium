@@ -4,10 +4,11 @@
 
 #ifndef NET_PROXY_PROXY_RETRY_INFO_H_
 #define NET_PROXY_PROXY_RETRY_INFO_H_
+#pragma once
 
 #include <map>
 
-#include "base/time/time.h"
+#include "base/time.h"
 
 namespace net {
 

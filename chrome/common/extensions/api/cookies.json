@@ -1,11 +1,6 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 [
   {
     "namespace": "cookies",
-    "description": "Use the <code>chrome.cookies</code> API to query and modify cookies, and to be notified when they change.",
     "types": [
       {
         "id": "Cookie",
@@ -119,7 +114,7 @@
             "min_version": "11.0.674.0",
             "parameters": [
               {
-                "name": "cookie", "$ref": "Cookie", "optional": true, "description": "Contains details about the cookie that's been set.  If setting failed for any reason, this will be \"null\", and \"chrome.runtime.lastError\" will be set."
+                "name": "cookie", "$ref": "Cookie", "optional": true, "description": "Contains details about the cookie that's been set.  If setting failed for any reason, this will be \"null\", and \"chrome.extension.lastError\" will be set."
               }
             ]
           }
@@ -149,7 +144,7 @@
               {
                 "name": "details",
                 "type": "object",
-                "description": "Contains details about the cookie that's been removed.  If removal failed for any reason, this will be \"null\", and \"chrome.runtime.lastError\" will be set.",
+                "description": "Contains details about the cookie that's been removed.  If removal failed for any reason, this will be \"null\", and \"chrome.extension.lastError\" will be set.",
                 "optional": true,
                 "properties": {
                   "url": {"type": "string", "description": "The URL associated with the cookie that's been removed."},

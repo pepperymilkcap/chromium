@@ -1,24 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
 
-#import "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
-
 #include "base/logging.h"
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/cocoa/confirm_quit.h"
-#include "chrome/common/pref_names.h"
+#include "base/sys_string_conversions.h"
+#import "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
 #include "grit/generated_resources.h"
-#import "ui/base/accelerators/platform_accelerator_cocoa.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 // Constants ///////////////////////////////////////////////////////////////////
@@ -45,10 +37,6 @@ void RecordHistogram(ConfirmQuitMetric sample) {
   UMA_HISTOGRAM_ENUMERATION("OSX.ConfirmToQuit", sample, kSampleCount);
 }
 
-void RegisterLocalState(PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(prefs::kConfirmToQuitEnabled, false);
-}
-
 }  // namespace confirm_quit
 
 // Custom Content View /////////////////////////////////////////////////////////
@@ -65,9 +53,9 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
 
 - (id)initWithFrame:(NSRect)frameRect {
   if ((self = [super initWithFrame:frameRect])) {
-    base::scoped_nsobject<NSTextField> message(
+    scoped_nsobject<NSTextField> message(
         // The frame will be fixed up when |-setMessageText:| is called.
-        [[NSTextField alloc] initWithFrame:NSZeroRect]);
+        [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 0, 0)]);
     message_ = message.get();
     [message_ setEditable:NO];
     [message_ setSelectable:NO];
@@ -95,9 +83,9 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   const CGFloat kHorizontalPadding = 30;  // In view coordinates.
 
   // Style the string.
-  base::scoped_nsobject<NSMutableAttributedString> attrString(
+  scoped_nsobject<NSMutableAttributedString> attrString(
       [[NSMutableAttributedString alloc] initWithString:text]);
-  base::scoped_nsobject<NSShadow> textShadow([[NSShadow alloc] init]);
+  scoped_nsobject<NSShadow> textShadow([[NSShadow alloc] init]);
   [textShadow.get() setShadowColor:[NSColor colorWithCalibratedWhite:0
                                                                alpha:0.6]];
   [textShadow.get() setShadowOffset:NSMakeSize(0, -1)];
@@ -172,8 +160,6 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
 - (NSEvent*)pumpEventQueueForKeyUp:(NSApplication*)app untilDate:(NSDate*)date;
 - (void)hideAllWindowsForApplication:(NSApplication*)app
                         withDuration:(NSTimeInterval)duration;
-// Returns the Accelerator for the Quit menu item.
-+ (scoped_ptr<ui::PlatformAcceleratorCocoa>)quitAccelerator;
 @end
 
 ConfirmQuitPanelController* g_confirmQuitPanelController = nil;
@@ -192,7 +178,7 @@ ConfirmQuitPanelController* g_confirmQuitPanelController = nil;
 
 - (id)init {
   const NSRect kWindowFrame = NSMakeRect(0, 0, 350, 70);
-  base::scoped_nsobject<NSWindow> window(
+  scoped_nsobject<NSWindow> window(
       [[NSWindow alloc] initWithContentRect:kWindowFrame
                                   styleMask:NSBorderlessWindowMask
                                     backing:NSBackingStoreBuffered
@@ -205,7 +191,7 @@ ConfirmQuitPanelController* g_confirmQuitPanelController = nil;
 
     // Create the content view. Take the frame from the existing content view.
     NSRect frame = [[window contentView] frame];
-    base::scoped_nsobject<ConfirmQuitFrameView> frameView(
+    scoped_nsobject<ConfirmQuitFrameView> frameView(
         [[ConfirmQuitFrameView alloc] initWithFrame:frame]);
     contentView_ = frameView.get();
     [window setContentView:contentView_];
@@ -221,16 +207,13 @@ ConfirmQuitPanelController* g_confirmQuitPanelController = nil;
 + (BOOL)eventTriggersFeature:(NSEvent*)event {
   if ([event type] != NSKeyDown)
     return NO;
-  ui::PlatformAcceleratorCocoa eventAccelerator(
-      [event charactersIgnoringModifiers],
+  ui::AcceleratorCocoa eventAccelerator([event charactersIgnoringModifiers],
       [event modifierFlags] & NSDeviceIndependentModifierFlagsMask);
-  scoped_ptr<ui::PlatformAcceleratorCocoa> quitAccelerator(
-      [self quitAccelerator]);
-  return quitAccelerator->Equals(eventAccelerator);
+  return [self quitAccelerator] == eventAccelerator;
 }
 
 - (NSApplicationTerminateReply)runModalLoopForApplication:(NSApplication*)app {
-  base::scoped_nsobject<ConfirmQuitPanelController> keepAlive([self retain]);
+  scoped_nsobject<ConfirmQuitPanelController> keepAlive([self retain]);
 
   // If this is the second of two such attempts to quit within a certain time
   // interval, then just quit.
@@ -327,7 +310,7 @@ ConfirmQuitPanelController* g_confirmQuitPanelController = nil;
 - (void)showWindow:(id)sender {
   // If a panel that is fading out is going to be reused here, make sure it
   // does not get released when the animation finishes.
-  base::scoped_nsobject<ConfirmQuitPanelController> keepAlive([self retain]);
+  scoped_nsobject<ConfirmQuitPanelController> keepAlive([self retain]);
   [[self window] setAnimations:[NSDictionary dictionary]];
   [[self window] center];
   [[self window] setAlphaValue:1.0];
@@ -342,7 +325,7 @@ ConfirmQuitPanelController* g_confirmQuitPanelController = nil;
 
 - (void)animateFadeOut {
   NSWindow* window = [self window];
-  base::scoped_nsobject<CAAnimation> animation(
+  scoped_nsobject<CAAnimation> animation(
       [[window animationForKey:@"alphaValue"] copy]);
   [animation setDelegate:self];
   [animation setDuration:0.2];
@@ -358,11 +341,29 @@ ConfirmQuitPanelController* g_confirmQuitPanelController = nil;
 }
 
 // This looks at the Main Menu and determines what the user has set as the
+// key combination for quit. It then gets the modifiers and builds an object
+// to hold the data.
++ (ui::AcceleratorCocoa)quitAccelerator {
+  NSMenu* mainMenu = [NSApp mainMenu];
+  // Get the application menu (i.e. Chromium).
+  NSMenu* appMenu = [[mainMenu itemAtIndex:0] submenu];
+  for (NSMenuItem* item in [appMenu itemArray]) {
+    // Find the Quit item.
+    if ([item action] == @selector(terminate:)) {
+      return ui::AcceleratorCocoa([item keyEquivalent],
+                                  [item keyEquivalentModifierMask]);
+    }
+  }
+  // Default to Cmd+Q.
+  return ui::AcceleratorCocoa(@"q", NSCommandKeyMask);
+}
+
+// This looks at the Main Menu and determines what the user has set as the
 // key combination for quit. It then gets the modifiers and builds a string
 // to display them.
 + (NSString*)keyCommandString {
-  scoped_ptr<ui::PlatformAcceleratorCocoa> accelerator([self quitAccelerator]);
-  return [[self class] keyCombinationForAccelerator:*accelerator];
+  ui::AcceleratorCocoa accelerator = [[self class] quitAccelerator];
+  return [[self class] keyCombinationForAccelerator:accelerator];
 }
 
 // Runs a nested loop that pumps the event queue until the next KeyUp event.
@@ -383,30 +384,9 @@ ConfirmQuitPanelController* g_confirmQuitPanelController = nil;
   [animation startAnimation];
 }
 
-// This looks at the Main Menu and determines what the user has set as the
-// key combination for quit. It then gets the modifiers and builds an object
-// to hold the data.
-+ (scoped_ptr<ui::PlatformAcceleratorCocoa>)quitAccelerator {
-  NSMenu* mainMenu = [NSApp mainMenu];
-  // Get the application menu (i.e. Chromium).
-  NSMenu* appMenu = [[mainMenu itemAtIndex:0] submenu];
-  for (NSMenuItem* item in [appMenu itemArray]) {
-    // Find the Quit item.
-    if ([item action] == @selector(terminate:)) {
-      return scoped_ptr<ui::PlatformAcceleratorCocoa>(
-          new ui::PlatformAcceleratorCocoa([item keyEquivalent],
-                                           [item keyEquivalentModifierMask]));
-    }
-  }
-  // Default to Cmd+Q.
-  return scoped_ptr<ui::PlatformAcceleratorCocoa>(
-      new ui::PlatformAcceleratorCocoa(@"q", NSCommandKeyMask));
-}
-
-+ (NSString*)keyCombinationForAccelerator:
-    (const ui::PlatformAcceleratorCocoa&)item {
++ (NSString*)keyCombinationForAccelerator:(const ui::AcceleratorCocoa&)item {
   NSMutableString* string = [NSMutableString string];
-  NSUInteger modifiers = item.modifier_mask();
+  NSUInteger modifiers = item.modifiers();
 
   if (modifiers & NSCommandKeyMask)
     [string appendString:@"\u2318"];

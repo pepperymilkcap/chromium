@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_MAC_KEYSTONE_REGISTRATION_H_
 #define CHROME_BROWSER_MAC_KEYSTONE_REGISTRATION_H_
+#pragma once
 
 #import <Foundation/Foundation.h>
 #include <Security/Authorization.h>

@@ -1,35 +1,27 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_CERTIFICATE_MANAGER_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_CERTIFICATE_MANAGER_HANDLER_H_
+#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/certificate_manager_model.h"
+#include "chrome/browser/ui/select_file_dialog.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
-#include "chrome/common/cancelable_task_tracker.h"
-#include "net/cert/nss_cert_database.h"
+#include "net/base/cert_database.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/shell_dialogs/select_file_dialog.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/dbus/cryptohome_client.h"
-#endif
-
-namespace options {
-
-class CertIdMap;
 class FileAccessProvider;
 
-class CertificateManagerHandler
-    : public OptionsPageUIHandler,
-      public CertificateManagerModel::Observer,
-      public ui::SelectFileDialog::Listener {
+class CertificateManagerHandler : public OptionsPageUIHandler,
+    public CertificateManagerModel::Observer,
+    public SelectFileDialog::Listener {
  public:
   CertificateManagerHandler();
   virtual ~CertificateManagerHandler();
@@ -43,7 +35,7 @@ class CertificateManagerHandler
   virtual void CertificatesRefreshed() OVERRIDE;
 
   // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
+  virtual void FileSelected(const FilePath& path,
                             int index,
                             void* params) OVERRIDE;
   virtual void FileSelectionCanceled(void* params) OVERRIDE;
@@ -79,11 +71,10 @@ class CertificateManagerHandler
   //  5. write finishes (or fails) -> ExportPersonalFileWritten
   void ExportPersonal(const base::ListValue* args);
   void ExportAllPersonal(const base::ListValue* args);
-  void ExportPersonalFileSelected(const base::FilePath& path);
+  void ExportPersonalFileSelected(const FilePath& path);
   void ExportPersonalPasswordSelected(const base::ListValue* args);
   void ExportPersonalSlotsUnlocked();
-  void ExportPersonalFileWritten(const int* write_errno,
-                                 const int* bytes_written);
+  void ExportPersonalFileWritten(int write_errno, int bytes_written);
 
   // Import from PKCS #12 file.  The sequence goes like:
   //  1. user click on import button -> StartImportPersonal -> launches file
@@ -99,9 +90,9 @@ class CertificateManagerHandler
   //  6b. if import fails -> show error, ImportExportCleanup
   //  TODO(mattm): allow retrying with different password
   void StartImportPersonal(const base::ListValue* args);
-  void ImportPersonalFileSelected(const base::FilePath& path);
+  void ImportPersonalFileSelected(const FilePath& path);
   void ImportPersonalPasswordSelected(const base::ListValue* args);
-  void ImportPersonalFileRead(const int* read_errno, const std::string* data);
+  void ImportPersonalFileRead(int read_errno, std::string data);
   void ImportPersonalSlotUnlocked();
 
   // Import Server certificates from file.  Sequence goes like:
@@ -111,8 +102,8 @@ class CertificateManagerHandler
   //  4a. if import succeeds -> ImportExportCleanup
   //  4b. if import fails -> show error, ImportExportCleanup
   void ImportServer(const base::ListValue* args);
-  void ImportServerFileSelected(const base::FilePath& path);
-  void ImportServerFileRead(const int* read_errno, const std::string* data);
+  void ImportServerFileSelected(const FilePath& path);
+  void ImportServerFileRead(int read_errno, std::string data);
 
   // Import Certificate Authorities from file.  Sequence goes like:
   //  1. user clicks on import button -> ImportCA -> launches file selector
@@ -123,8 +114,8 @@ class CertificateManagerHandler
   //  5a. if import succeeds -> ImportExportCleanup
   //  5b. if import fails -> show error, ImportExportCleanup
   void ImportCA(const base::ListValue* args);
-  void ImportCAFileSelected(const base::FilePath& path);
-  void ImportCAFileRead(const int* read_errno, const std::string* data);
+  void ImportCAFileSelected(const FilePath& path);
+  void ImportCAFileRead(int read_errno, std::string data);
   void ImportCATrustSelected(const base::ListValue* args);
 
   // Export a certificate.
@@ -137,14 +128,7 @@ class CertificateManagerHandler
   void Populate(const base::ListValue* args);
 
   // Populate the given tab's tree.
-  void PopulateTree(const std::string& tab_name,
-                    net::CertType type,
-                    const net::CertificateList& web_trust_certs);
-
-  // Populate the tree after retrieving the list of policy-installed
-  // web-trusted certificates.
-  void OnPolicyWebTrustCertsRetrieved(
-      const net::CertificateList& web_trust_certs);
+  void PopulateTree(const std::string& tab_name, net::CertType type);
 
   // Display a WebUI error message box.
   void ShowError(const std::string& title, const std::string& error) const;
@@ -154,14 +138,11 @@ class CertificateManagerHandler
   // attempted to import.
   void ShowImportErrors(
       const std::string& title,
-      const net::NSSCertDatabase::ImportCertFailureList& not_imported) const;
+      const net::CertDatabase::ImportCertFailureList& not_imported) const;
 
 #if defined(OS_CHROMEOS)
   // Check whether Tpm token is ready and notifiy JS side.
   void CheckTpmTokenReady(const base::ListValue* args);
-  void CheckTpmTokenReadyInternal(
-      chromeos::DBusMethodCallStatus call_status,
-      bool is_tpm_token_ready);
 #endif
 
   gfx::NativeWindow GetParentWindow() const;
@@ -172,25 +153,19 @@ class CertificateManagerHandler
   // For multi-step import or export processes, we need to store the path,
   // password, etc the user chose while we wait for them to enter a password,
   // wait for file to be read, etc.
-  base::FilePath file_path_;
-  base::string16 password_;
+  FilePath file_path_;
+  string16 password_;
   bool use_hardware_backed_;
   std::string file_data_;
   net::CertificateList selected_cert_list_;
-  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+  scoped_refptr<SelectFileDialog> select_file_dialog_;
   scoped_refptr<net::CryptoModule> module_;
 
   // Used in reading and writing certificate files.
-  CancelableTaskTracker tracker_;
+  CancelableRequestConsumer consumer_;
   scoped_refptr<FileAccessProvider> file_access_provider_;
-
-  scoped_ptr<CertIdMap> cert_id_map_;
-
-  base::WeakPtrFactory<CertificateManagerHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CertificateManagerHandler);
 };
-
-}  // namespace options
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_CERTIFICATE_MANAGER_HANDLER_H_

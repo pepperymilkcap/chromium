@@ -4,26 +4,27 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_CONFIRM_BUBBLE_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_CONFIRM_BUBBLE_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/memory/scoped_ptr.h"
+#import "base/mac/cocoa_protocols.h"
 
 class ConfirmBubbleModel;
 
 // A view controller that manages a bubble view and becomes a proxy between
 // the view and the ConfirmBubbleModel object. This class is internally used
-// in ShowConfirmBubble() and users do not have to change this class directly.
+// in ConfirmBubbleView::Show() and users do not have to change this class
+// directly.
 @interface ConfirmBubbleController :
     NSViewController<NSTextViewDelegate> {
  @private
   NSView* parent_;  // weak
   CGPoint origin_;
-  scoped_ptr<ConfirmBubbleModel> model_;
+  ConfirmBubbleModel* model_;  // weak
 }
 
-// Creates a ConfirmBubbleController object. The ConfirmBubbleController
-// controller takes the ownership of the passed-in ConfirmBubbleModel.
+// Creates a ConfirmBubbleController object.
 - (id)initWithParent:(NSView*)parent
               origin:(CGPoint)origin
                model:(ConfirmBubbleModel*)model;
@@ -41,7 +42,7 @@ class ConfirmBubbleModel;
 - (BOOL)hasCancelButton;
 - (NSImage*)icon;
 
-// Handle actions from the ConfirmBubbleCocoa objet.
+// Handle actions from from the ConfirmBubbleView objet.
 - (void)accept;
 - (void)cancel;
 - (void)linkClicked;

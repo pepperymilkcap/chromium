@@ -4,41 +4,38 @@
 
 #include "chrome/browser/ui/views/extensions/extension_dialog.h"
 
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_view_host.h"
-#include "chrome/browser/extensions/extension_view_host_factory.h"
+#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/extensions/extension_dialog_observer.h"
+#include "chrome/browser/ui/views/window.h"  // CreateViewsWindow
+#include "chrome/common/chrome_notification_types.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
-#include "ui/base/base_window.h"
-#include "ui/gfx/screen.h"
+#include "googleurl/src/gurl.h"
 #include "ui/views/background.h"
 #include "ui/views/widget/widget.h"
-#include "url/gurl.h"
 
-using content::BrowserContext;
 using content::WebContents;
 
-ExtensionDialog::ExtensionDialog(extensions::ExtensionViewHost* host,
+ExtensionDialog::ExtensionDialog(ExtensionHost* host,
                                  ExtensionDialogObserver* observer)
-    : host_(host),
+    : window_(NULL),
+      extension_host_(host),
       observer_(observer) {
   AddRef();  // Balanced in DeleteDelegate();
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-                 content::Source<BrowserContext>(host->browser_context()));
+                 content::Source<Profile>(host->profile()));
   // Listen for the containing view calling window.close();
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-                 content::Source<BrowserContext>(host->browser_context()));
-  // Listen for a crash or other termination of the extension process.
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
-                 content::Source<BrowserContext>(host->browser_context()));
+                 content::Source<Profile>(host->profile()));
 }
 
 ExtensionDialog::~ExtensionDialog() {
@@ -47,29 +44,21 @@ ExtensionDialog::~ExtensionDialog() {
 // static
 ExtensionDialog* ExtensionDialog::Show(
     const GURL& url,
-    ui::BaseWindow* base_window,
-    Profile* profile,
+    Browser* browser,
     WebContents* web_contents,
     int width,
     int height,
-    int min_width,
-    int min_height,
-    const base::string16& title,
+    const string16& title,
     ExtensionDialogObserver* observer) {
-  extensions::ExtensionViewHost* host =
-      extensions::ExtensionViewHostFactory::CreateDialogHost(url, profile);
+  CHECK(browser);
+  ExtensionHost* host = CreateExtensionHost(url, browser);
   if (!host)
     return NULL;
-  // Preferred size must be set before views::Widget::CreateWindowWithParent
-  // is called because CreateWindowWithParent refers the result of CanResize().
-  host->view()->SetPreferredSize(gfx::Size(width, height));
-  host->view()->set_minimum_size(gfx::Size(min_width, min_height));
-  host->SetAssociatedWebContents(web_contents);
+  host->set_associated_web_contents(web_contents);
 
-  CHECK(base_window);
   ExtensionDialog* dialog = new ExtensionDialog(host, observer);
   dialog->set_title(title);
-  dialog->InitWindow(base_window, width, height);
+  dialog->InitWindow(browser, width, height);
 
   // Show a white background while the extension loads.  This is prettier than
   // flashing a black unfilled window frame.
@@ -78,67 +67,58 @@ ExtensionDialog* ExtensionDialog::Show(
   host->view()->SetVisible(true);
 
   // Ensure the DOM JavaScript can respond immediately to keyboard shortcuts.
-  host->host_contents()->GetView()->Focus();
+  host->host_contents()->Focus();
   return dialog;
 }
 
-void ExtensionDialog::InitWindow(ui::BaseWindow* base_window,
-                                 int width,
-                                 int height) {
-  gfx::NativeWindow parent = base_window->GetNativeWindow();
-  views::Widget* window = CreateBrowserModalDialogViews(this, parent);
+// static
+ExtensionHost* ExtensionDialog::CreateExtensionHost(const GURL& url,
+                                                    Browser* browser) {
+  ExtensionProcessManager* manager =
+      browser->profile()->GetExtensionProcessManager();
+  DCHECK(manager);
+  if (!manager)
+    return NULL;
+  return manager->CreateDialogHost(url, browser);
+}
+
+void ExtensionDialog::InitWindow(Browser* browser, int width, int height) {
+  gfx::NativeWindow parent = browser->window()->GetNativeHandle();
+#if defined(OS_CHROMEOS)
+  DialogStyle style = STYLE_FLUSH;
+#else
+  DialogStyle style = STYLE_GENERIC;
+#endif
+  window_ = browser::CreateViewsWindow(parent, this, style);
 
   // Center the window over the browser.
-  gfx::Point center = base_window->GetBounds().CenterPoint();
+  gfx::Point center = browser->window()->GetBounds().CenterPoint();
   int x = center.x() - width / 2;
   int y = center.y() - height / 2;
-  // Ensure the top left and top right of the window are on screen, with
-  // priority given to the top left.
-  gfx::Rect screen_rect = gfx::Screen::GetScreenFor(parent)->
-      GetDisplayNearestPoint(center).bounds();
-  gfx::Rect bounds_rect = gfx::Rect(x, y, width, height);
-  bounds_rect.AdjustToFit(screen_rect);
-  window->SetBounds(bounds_rect);
+  window_->SetBounds(gfx::Rect(x, y, width, height));
 
-  window->Show();
+  window_->Show();
   // TODO(jamescook): Remove redundant call to Activate()?
-  window->Activate();
+  window_->Activate();
 }
 
 void ExtensionDialog::ObserverDestroyed() {
   observer_ = NULL;
 }
 
-void ExtensionDialog::MaybeFocusRenderView() {
-  views::FocusManager* focus_manager = GetWidget()->GetFocusManager();
-  DCHECK(focus_manager != NULL);
-
-  // Already there's a focused view, so no need to switch the focus.
-  if (focus_manager->GetFocusedView())
+void ExtensionDialog::Close() {
+  if (!window_)
     return;
 
-  content::RenderWidgetHostView* view = host()->render_view_host()->GetView();
-  if (!view)
-    return;
-
-  view->Focus();
+  window_->Close();
+  window_ = NULL;
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// views::DialogDelegate overrides.
-
-int ExtensionDialog::GetDialogButtons() const {
-  // The only user, SelectFileDialogExtension, provides its own buttons.
-  return ui::DIALOG_BUTTON_NONE;
-}
+// views::WidgetDelegate overrides.
 
 bool ExtensionDialog::CanResize() const {
-  // Can resize only if minimum contents size set.
-  return host_->view()->GetPreferredSize() != gfx::Size();
-}
-
-void ExtensionDialog::SetMinimumContentsSize(int width, int height) {
-  host_->view()->SetPreferredSize(gfx::Size(width, height));
+  return false;
 }
 
 ui::ModalType ExtensionDialog::GetModalType() const {
@@ -149,7 +129,7 @@ bool ExtensionDialog::ShouldShowWindowTitle() const {
   return !window_title_.empty();
 }
 
-base::string16 ExtensionDialog::GetWindowTitle() const {
+string16 ExtensionDialog::GetWindowTitle() const {
   return window_title_;
 }
 
@@ -164,19 +144,15 @@ void ExtensionDialog::DeleteDelegate() {
 }
 
 views::Widget* ExtensionDialog::GetWidget() {
-  return host_->view()->GetWidget();
+  return extension_host_->view()->GetWidget();
 }
 
 const views::Widget* ExtensionDialog::GetWidget() const {
-  return host_->view()->GetWidget();
+  return extension_host_->view()->GetWidget();
 }
 
 views::View* ExtensionDialog::GetContentsView() {
-  return host_->view();
-}
-
-bool ExtensionDialog::UseNewStyleForThisDialog() const {
-  return false;
+  return extension_host_->view();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -189,23 +165,13 @@ void ExtensionDialog::Observe(int type,
     case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
       // Avoid potential overdraw by removing the temporary background after
       // the extension finishes loading.
-      host_->view()->set_background(NULL);
-      // The render view is created during the LoadURL(), so we should
-      // set the focus to the view if nobody else takes the focus.
-      if (content::Details<extensions::ExtensionHost>(host()) == details)
-        MaybeFocusRenderView();
+      extension_host_->view()->set_background(NULL);
       break;
     case chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE:
       // If we aren't the host of the popup, then disregard the notification.
-      if (content::Details<extensions::ExtensionHost>(host()) != details)
+      if (content::Details<ExtensionHost>(host()) != details)
         return;
-      GetWidget()->Close();
-      break;
-    case chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED:
-      if (content::Details<extensions::ExtensionHost>(host()) != details)
-        return;
-      if (observer_)
-        observer_->ExtensionTerminated(this);
+      Close();
       break;
     default:
       NOTREACHED() << L"Received unexpected notification";

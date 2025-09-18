@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,18 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_util.h"
+#include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/version.h"
+#include "chrome/common/libxml_utils.h"
 #include "libxml/tree.h"
-#include "third_party/libxml/chromium/libxml_utils.h"
 
 static const char* kExpectedGupdateProtocol = "2.0";
 static const char* kExpectedGupdateXmlns =
     "http://www.google.com/update2/response";
 
-UpdateManifest::Result::Result()
-    : size(0),
-      diff_size(0) {}
+UpdateManifest::Result::Result() {}
 
 UpdateManifest::Result::~Result() {}
 
@@ -156,7 +154,7 @@ static bool ParseSingleAppTag(xmlNode* app_node, xmlNs* xml_namespace,
   result->crx_url = GURL(GetAttribute(updatecheck, "codebase"));
   if (!result->crx_url.is_valid()) {
     *error_detail = "Invalid codebase url: '";
-    *error_detail += result->crx_url.possibly_invalid_spec();
+    *error_detail += GetAttribute(updatecheck, "codebase");
     *error_detail += "'.";
     return false;
   }
@@ -167,8 +165,8 @@ static bool ParseSingleAppTag(xmlNode* app_node, xmlNs* xml_namespace,
     *error_detail = "Missing version for updatecheck.";
     return false;
   }
-  Version version(result->version);
-  if (!version.IsValid()) {
+  scoped_ptr<Version> version(Version::GetVersionFromString(result->version));
+  if (!version.get()) {
     *error_detail = "Invalid version: '";
     *error_detail += result->version;
     *error_detail += "'.";
@@ -178,8 +176,9 @@ static bool ParseSingleAppTag(xmlNode* app_node, xmlNs* xml_namespace,
   // Get the minimum browser version (not required).
   result->browser_min_version = GetAttribute(updatecheck, "prodversionmin");
   if (result->browser_min_version.length()) {
-    Version browser_min_version(result->browser_min_version);
-    if (!browser_min_version.IsValid()) {
+    scoped_ptr<Version> browser_min_version(
+      Version::GetVersionFromString(result->browser_min_version));
+    if (!browser_min_version.get()) {
       *error_detail = "Invalid prodversionmin: '";
       *error_detail += result->browser_min_version;
       *error_detail += "'.";
@@ -190,23 +189,6 @@ static bool ParseSingleAppTag(xmlNode* app_node, xmlNs* xml_namespace,
   // package_hash is optional. It is only required for blacklist. It is a
   // sha256 hash of the package in hex format.
   result->package_hash = GetAttribute(updatecheck, "hash");
-
-  int size = 0;
-  if (base::StringToInt(GetAttribute(updatecheck, "size"), &size)) {
-    result->size = size;
-  }
-
-  // package_fingerprint is optional. It identifies the package, preferably
-  // with a modified sha256 hash of the package in hex format.
-  result->package_fingerprint = GetAttribute(updatecheck, "fp");
-
-  // Differential update information is optional.
-  result->diff_crx_url = GURL(GetAttribute(updatecheck, "codebasediff"));
-  result->diff_package_hash = GetAttribute(updatecheck, "hashdiff");
-  int sizediff = 0;
-  if (base::StringToInt(GetAttribute(updatecheck, "sizediff"), &sizediff)) {
-    result->diff_size = sizediff;
-  }
 
   return true;
 }

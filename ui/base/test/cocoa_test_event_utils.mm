@@ -30,9 +30,6 @@ NSEvent* MouseEventAtPoint(NSPoint point, NSEventType type,
     CGEventRef cg_event = CGEventCreateMouseEvent(NULL, kCGEventOtherMouseUp,
                                                   location,
                                                   kCGMouseButtonCenter);
-    // Also specify the modifiers for the middle click case. This makes this
-    // test resilient to external modifiers being pressed.
-    CGEventSetFlags(cg_event, modifiers);
     NSEvent* event = [NSEvent eventWithCGEvent:cg_event];
     CFRelease(cg_event);
     return event;
@@ -49,7 +46,7 @@ NSEvent* MouseEventAtPoint(NSPoint point, NSEventType type,
 }
 
 NSEvent* MouseEventWithType(NSEventType type, NSUInteger modifiers) {
-  return MouseEventAtPoint(NSZeroPoint, type, modifiers);
+  return MouseEventAtPoint(NSMakePoint(0, 0), type, modifiers);
 }
 
 static NSEvent* MouseEventAtPointInWindow(NSPoint point,
@@ -87,28 +84,30 @@ std::pair<NSEvent*,NSEvent*> MouseClickInView(NSView* view,
 }
 
 NSEvent* KeyEventWithCharacter(unichar c) {
-  return KeyEventWithKeyCode(0, c, NSKeyDown, 0);
+  NSString* chars = [NSString stringWithCharacters:&c length:1];
+  return [NSEvent keyEventWithType:NSKeyDown
+                          location:NSZeroPoint
+                     modifierFlags:0
+                         timestamp:0.0
+                      windowNumber:0
+                           context:nil
+                        characters:chars
+       charactersIgnoringModifiers:chars
+                         isARepeat:NO
+                           keyCode:0];
 }
 
 NSEvent* KeyEventWithType(NSEventType event_type, NSUInteger modifiers) {
-  return KeyEventWithKeyCode(0x78, 'x', event_type, modifiers);
-}
-
-NSEvent* KeyEventWithKeyCode(unsigned short key_code,
-                             unichar c,
-                             NSEventType event_type,
-                             NSUInteger modifiers) {
-  NSString* chars = [NSString stringWithCharacters:&c length:1];
   return [NSEvent keyEventWithType:event_type
                           location:NSZeroPoint
                      modifierFlags:modifiers
                          timestamp:0
                       windowNumber:0
                            context:nil
-                        characters:chars
-       charactersIgnoringModifiers:chars
+                        characters:@"x"
+                  charactersIgnoringModifiers:@"x"
                          isARepeat:NO
-                           keyCode:key_code];
+                           keyCode:0x78];
 }
 
 NSEvent* EnterExitEventWithType(NSEventType event_type) {

@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_CUSTOMIZATION_DOCUMENT_H_
 #define CHROME_BROWSER_CHROMEOS_CUSTOMIZATION_DOCUMENT_H_
+#pragma once
 
 #include <string>
 
@@ -11,20 +12,16 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "base/values.h"
-#include "net/url_request/url_fetcher_delegate.h"
-#include "url/gurl.h"
+#include "content/public/common/url_fetcher_delegate.h"
+#include "googleurl/src/gurl.h"
 
-class PrefRegistrySimple;
+class FilePath;
+class PrefService;
 
 namespace base {
 class DictionaryValue;
-class FilePath;
-}
-
-namespace net {
-class URLFetcher;
 }
 
 namespace chromeos {
@@ -44,7 +41,7 @@ class CustomizationDocument {
  protected:
   explicit CustomizationDocument(const std::string& accepted_version);
 
-  virtual bool LoadManifestFromFile(const base::FilePath& manifest_path);
+  virtual bool LoadManifestFromFile(const FilePath& manifest_path);
   virtual bool LoadManifestFromString(const std::string& manifest);
 
   std::string GetLocaleSpecificString(const std::string& locale,
@@ -114,12 +111,12 @@ class StartupCustomizationDocument : public CustomizationDocument {
 // the manifest should be initiated outside this class by calling
 // StartFetching() method. User of the file should check IsReady before use it.
 class ServicesCustomizationDocument : public CustomizationDocument,
-                                      private net::URLFetcherDelegate {
+                                      private content::URLFetcherDelegate {
  public:
   static ServicesCustomizationDocument* GetInstance();
 
   // Registers preferences.
-  static void RegisterPrefs(PrefRegistrySimple* registry);
+  static void RegisterPrefs(PrefService* local_state);
 
   // Return true if the customization was applied. Customization is applied only
   // once per machine.
@@ -151,20 +148,20 @@ class ServicesCustomizationDocument : public CustomizationDocument,
   // Save applied state in machine settings.
   static void SetApplied(bool val);
 
-  // Overriden from net::URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  // Overriden from content::URLFetcherDelegate:
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // Initiate file fetching.
   void StartFileFetch();
 
   // Executes on FILE thread and reads file to string.
-  void ReadFileInBackground(const base::FilePath& file);
+  void ReadFileInBackground(const FilePath& file);
 
   // Services customization manifest URL.
   GURL url_;
 
   // URLFetcher instance.
-  scoped_ptr<net::URLFetcher> url_fetcher_;
+  scoped_ptr<content::URLFetcher> url_fetcher_;
 
   // Timer to retry fetching file if network is not available.
   base::OneShotTimer<ServicesCustomizationDocument> retry_timer_;

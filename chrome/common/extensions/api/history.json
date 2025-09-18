@@ -1,11 +1,6 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 [
   {
     "namespace": "history",
-    "description": "Use the <code>chrome.history</code> API to interact with the browser's record of visited pages. You can add, remove, and query for URLs in the browser's history. To override the history page with your own version, see <a href='override.html'>Override Pages</a>.",
     "types": [
       {
         "id": "HistoryItem",
@@ -31,7 +26,7 @@
           "referringVisitId": {"type": "string", "description": "The visit ID of the referrer."},
           "transition": {
             "type": "string",
-            "enum": ["link", "typed", "auto_bookmark", "auto_subframe", "manual_subframe", "generated", "auto_toplevel", "form_submit", "reload", "keyword", "keyword_generated"],
+            "enum": ["link", "typed", "auto_bookmark", "auto_subframe", "manual_subframe", "generated", "start_page", "form_submit", "reload", "keyword", "keyword_generated"],
             "description": "The <a href='#transition_types'>transition type</a> for this visit from its referrer."
           }
         }
@@ -94,12 +89,6 @@
             "properties": {
               "url": {"type": "string", "description": "The URL to add."}
             }
-          },
-          {
-            "name": "callback",
-            "type": "function",
-            "optional": true,
-            "parameters": []
           }
         ]
       },
@@ -114,12 +103,6 @@
             "properties": {
               "url": {"type": "string", "description": "The URL to remove."}
             }
-          },
-          {
-            "name": "callback",
-            "type": "function",
-            "optional": true,
-            "parameters": []
           }
         ]
       },

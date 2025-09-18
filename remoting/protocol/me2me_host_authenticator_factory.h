@@ -9,66 +9,48 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "remoting/protocol/authentication_method.h"
 #include "remoting/protocol/authenticator.h"
-#include "remoting/protocol/third_party_host_authenticator.h"
+
+namespace crypto {
+class RSAPrivateKey;
+}  // namespace crypto
 
 namespace remoting {
-
-class RsaKeyPair;
-
 namespace protocol {
 
-class PairingRegistry;
+// SharedSecretHash stores hash of a host secret paired with the type
+// of the hashing function.
+struct SharedSecretHash {
+  AuthenticationMethod::HashFunction hash_function;
+  std::string value;
+
+  // Parse string representation of a shared secret hash. The |as_string|
+  // must be in form "<hash_function>:<hash_value_base64>".
+  bool Parse(const std::string& as_string);
+};
 
 class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
  public:
-  // Create a factory that dispenses shared secret authenticators.
-  static scoped_ptr<AuthenticatorFactory> CreateWithSharedSecret(
-      const std::string& host_owner,
+  // Doesn't take ownership of |local_private_key|.
+  Me2MeHostAuthenticatorFactory(
+      const std::string& local_jid,
       const std::string& local_cert,
-      scoped_refptr<RsaKeyPair> key_pair,
-      const SharedSecretHash& shared_secret_hash,
-      scoped_refptr<PairingRegistry> pairing_registry);
-
-  // Create a factory that dispenses third party authenticators.
-  static scoped_ptr<AuthenticatorFactory> CreateWithThirdPartyAuth(
-      const std::string& host_owner,
-      const std::string& local_cert,
-      scoped_refptr<RsaKeyPair> key_pair,
-      scoped_ptr<ThirdPartyHostAuthenticator::TokenValidatorFactory>
-          token_validator_factory);
-
-  // Create a factory that dispenses rejecting authenticators (used when the
-  // host config/policy is inconsistent)
-  static scoped_ptr<AuthenticatorFactory> CreateRejecting();
-
-  Me2MeHostAuthenticatorFactory();
+      const crypto::RSAPrivateKey& local_private_key,
+      const SharedSecretHash& shared_secret_hash);
   virtual ~Me2MeHostAuthenticatorFactory();
 
   // AuthenticatorFactory interface.
   virtual scoped_ptr<Authenticator> CreateAuthenticator(
-      const std::string& local_jid,
       const std::string& remote_jid,
       const buzz::XmlElement* first_message) OVERRIDE;
 
  private:
-  // Used for all host authenticators.
-  std::string host_owner_;
+  std::string local_jid_prefix_;
   std::string local_cert_;
-  scoped_refptr<RsaKeyPair> key_pair_;
-
-  // Used only for shared secret host authenticators.
+  scoped_ptr<crypto::RSAPrivateKey> local_private_key_;
   SharedSecretHash shared_secret_hash_;
-
-  // Used only for third party host authenticators.
-  scoped_ptr<ThirdPartyHostAuthenticator::TokenValidatorFactory>
-      token_validator_factory_;
-
-  // Used only for pairing host authenticators.
-  scoped_refptr<PairingRegistry> pairing_registry_;
 
   DISALLOW_COPY_AND_ASSIGN(Me2MeHostAuthenticatorFactory);
 };

@@ -6,12 +6,12 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "chrome/browser/sync/glue/browser_thread_model_worker.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::OneShotTimer;
@@ -23,44 +23,43 @@ namespace browser_sync {
 
 namespace {
 
-class SyncBrowserThreadModelWorkerTest : public testing::Test {
+class BrowserThreadModelWorkerTest : public testing::Test {
  public:
-  SyncBrowserThreadModelWorkerTest() :
+  BrowserThreadModelWorkerTest() :
       did_do_work_(false),
-      thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP |
-                     content::TestBrowserThreadBundle::REAL_DB_THREAD),
-      weak_factory_(this) {}
+      db_thread_(BrowserThread::DB),
+      io_thread_(BrowserThread::IO, &io_loop_),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {}
 
   bool did_do_work() { return did_do_work_; }
   BrowserThreadModelWorker* worker() { return worker_.get(); }
-  OneShotTimer<SyncBrowserThreadModelWorkerTest>* timer() { return &timer_; }
-  base::WeakPtrFactory<SyncBrowserThreadModelWorkerTest>* factory() {
+  OneShotTimer<BrowserThreadModelWorkerTest>* timer() { return &timer_; }
+  base::WeakPtrFactory<BrowserThreadModelWorkerTest>* factory() {
     return &weak_factory_;
   }
 
   // Schedule DoWork to be executed on the DB thread and have the test fail if
-  // DoWork hasn't executed within action_timeout().
+  // DoWork hasn't executed within action_timeout_ms() ms.
   void ScheduleWork() {
    // We wait until the callback is done. So it is safe to use unretained.
-    syncer::WorkCallback c =
-        base::Bind(&SyncBrowserThreadModelWorkerTest::DoWork,
-                   base::Unretained(this));
+   WorkCallback c = base::Bind(&BrowserThreadModelWorkerTest::DoWork,
+                               base::Unretained(this));
     timer()->Start(
         FROM_HERE,
-        TestTimeouts::action_timeout(),
+        TimeDelta::FromMilliseconds(TestTimeouts::action_timeout_ms()),
         this,
-        &SyncBrowserThreadModelWorkerTest::Timeout);
+        &BrowserThreadModelWorkerTest::Timeout);
     worker()->DoWorkAndWaitUntilDone(c);
   }
 
   // This is the work that will be scheduled to be done on the DB thread.
-  syncer::SyncerError DoWork() {
+  SyncerError DoWork() {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
     timer_.Stop();  // Stop the failure timer so the test succeeds.
     BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE, base::MessageLoop::QuitClosure());
+        BrowserThread::IO, FROM_HERE, MessageLoop::QuitClosure());
     did_do_work_ = true;
-    return syncer::SYNCER_OK;
+    return SYNCER_OK;
   }
 
   // This will be called by the OneShotTimer and make the test fail unless
@@ -68,33 +67,37 @@ class SyncBrowserThreadModelWorkerTest : public testing::Test {
   void Timeout() {
     ADD_FAILURE() << "Timed out waiting for work to be done on the DB thread.";
     BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE, base::MessageLoop::QuitClosure());
+        BrowserThread::IO, FROM_HERE, MessageLoop::QuitClosure());
   }
 
  protected:
   virtual void SetUp() {
-    worker_ = new DatabaseModelWorker(NULL);
+    db_thread_.Start();
+    worker_ = new DatabaseModelWorker();
   }
 
   virtual void Teardown() {
-    worker_ = NULL;
+    worker_.release();
+    db_thread_.Stop();
   }
 
  private:
   bool did_do_work_;
   scoped_refptr<BrowserThreadModelWorker> worker_;
-  OneShotTimer<SyncBrowserThreadModelWorkerTest> timer_;
+  OneShotTimer<BrowserThreadModelWorkerTest> timer_;
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::TestBrowserThread db_thread_;
+  MessageLoopForIO io_loop_;
+  content::TestBrowserThread io_thread_;
 
-  base::WeakPtrFactory<SyncBrowserThreadModelWorkerTest> weak_factory_;
+  base::WeakPtrFactory<BrowserThreadModelWorkerTest> weak_factory_;
 };
 
-TEST_F(SyncBrowserThreadModelWorkerTest, DoesWorkOnDatabaseThread) {
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-      base::Bind(&SyncBrowserThreadModelWorkerTest::ScheduleWork,
+TEST_F(BrowserThreadModelWorkerTest, DoesWorkOnDatabaseThread) {
+  MessageLoop::current()->PostTask(FROM_HERE,
+      base::Bind(&BrowserThreadModelWorkerTest::ScheduleWork,
                  factory()->GetWeakPtr()));
-  base::MessageLoop::current()->Run();
+  MessageLoop::current()->Run();
   EXPECT_TRUE(did_do_work());
 }
 

@@ -1,17 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_SEARCH_ENGINES_KEYWORD_EDITOR_CONTROLLER_H_
 #define CHROME_BROWSER_UI_SEARCH_ENGINES_KEYWORD_EDITOR_CONTROLLER_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
-class PrefRegistrySimple;
+class PrefService;
 class Profile;
 class TemplateURL;
 class TemplateURLService;
@@ -22,20 +23,20 @@ class KeywordEditorController {
   explicit KeywordEditorController(Profile* profile);
   ~KeywordEditorController();
 
-  static void RegisterPrefs(PrefRegistrySimple* registry);
+  static void RegisterPrefs(PrefService* prefs);
 
   // Invoked when the user succesfully fills out the add keyword dialog.
   // Propagates the change to the TemplateURLService and updates the table
   // model.  Returns the index of the added URL.
-  int AddTemplateURL(const base::string16& title,
-                     const base::string16& keyword,
+  int AddTemplateURL(const string16& title,
+                     const string16& keyword,
                      const std::string& url);
 
   // Invoked when the user modifies a TemplateURL. Updates the
   // TemplateURLService and table model appropriately.
-  void ModifyTemplateURL(TemplateURL* template_url,
-                         const base::string16& title,
-                         const base::string16& keyword,
+  void ModifyTemplateURL(const TemplateURL* template_url,
+                         const string16& title,
+                         const string16& keyword,
                          const std::string& url);
 
   // Return true if the given |url| can be edited.
@@ -58,7 +59,7 @@ class KeywordEditorController {
   bool loaded() const;
 
   // Return the TemplateURL corresponding to the |index| in the model.
-  TemplateURL* GetTemplateURL(int index);
+  const TemplateURL* GetTemplateURL(int index) const;
 
   TemplateURLTableModel* table_model() {
     return table_model_.get();

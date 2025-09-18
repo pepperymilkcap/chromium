@@ -2,9 +2,7 @@
 ; Use of this source code is governed by a BSD-style license that can be
 ; found in the LICENSE file.
 
-%include "media/base/simd/media_export.asm"
-
-  EXPORT    SYMBOL
+  global    mangle(SYMBOL) PRIVATE
   align     function_align
 
 mangle(SYMBOL):

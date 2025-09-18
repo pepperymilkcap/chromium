@@ -4,11 +4,11 @@
 
 #ifndef NET_BASE_TEST_COMPLETION_CALLBACK_H_
 #define NET_BASE_TEST_COMPLETION_CALLBACK_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/tuple.h"
 #include "net/base/completion_callback.h"
-#include "net/base/net_errors.h"
 
 //-----------------------------------------------------------------------------
 // completion callback helper
@@ -22,72 +22,31 @@
 // reason, this class is probably not ideal for a general application.
 //
 
-namespace net {
-
-class IOBuffer;
-
-namespace internal {
-
-class TestCompletionCallbackBaseInternal {
+// Base class overridden by custom implementations of TestCompletionCallback.
+class TestCompletionCallbackBase {
  public:
+  void SetResult(int result);
+  int WaitForResult();
+  int GetResult(int result);
   bool have_result() const { return have_result_; }
 
  protected:
-  TestCompletionCallbackBaseInternal();
-  void DidSetResult();
-  void WaitForResult();
+  TestCompletionCallbackBase();
 
+  int result_;
   bool have_result_;
   bool waiting_for_result_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(TestCompletionCallbackBaseInternal);
+  DISALLOW_COPY_AND_ASSIGN(TestCompletionCallbackBase);
 };
 
-template <typename R>
-class TestCompletionCallbackTemplate
-    : public TestCompletionCallbackBaseInternal {
- public:
-  virtual ~TestCompletionCallbackTemplate() {}
-
-  R WaitForResult() {
-    TestCompletionCallbackBaseInternal::WaitForResult();
-    return result_;
-  }
-
-  R GetResult(R result) {
-    if (net::ERR_IO_PENDING != result)
-      return result;
-    return WaitForResult();
-  }
-
- protected:
-  // Override this method to gain control as the callback is running.
-  virtual void SetResult(R result) {
-    result_ = result;
-    DidSetResult();
-  }
-
-  TestCompletionCallbackTemplate() : result_(R()) {}
-  R result_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestCompletionCallbackTemplate);
-};
-
-}  // namespace internal
-
-// Base class overridden by custom implementations of TestCompletionCallback.
-typedef internal::TestCompletionCallbackTemplate<int>
-    TestCompletionCallbackBase;
-
-typedef internal::TestCompletionCallbackTemplate<int64>
-    TestInt64CompletionCallbackBase;
+namespace net {
 
 class TestCompletionCallback : public TestCompletionCallbackBase {
  public:
   TestCompletionCallback();
-  virtual ~TestCompletionCallback();
+  ~TestCompletionCallback();
 
   const CompletionCallback& callback() const { return callback_; }
 
@@ -95,32 +54,6 @@ class TestCompletionCallback : public TestCompletionCallbackBase {
   const CompletionCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(TestCompletionCallback);
-};
-
-class TestInt64CompletionCallback : public TestInt64CompletionCallbackBase {
- public:
-  TestInt64CompletionCallback();
-  virtual ~TestInt64CompletionCallback();
-
-  const Int64CompletionCallback& callback() const { return callback_; }
-
- private:
-  const Int64CompletionCallback callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestInt64CompletionCallback);
-};
-
-// Makes sure that the buffer is not referenced when the callback runs.
-class ReleaseBufferCompletionCallback: public TestCompletionCallback {
- public:
-  explicit ReleaseBufferCompletionCallback(IOBuffer* buffer);
-  virtual ~ReleaseBufferCompletionCallback();
-
- private:
-  virtual void SetResult(int result) OVERRIDE;
-
-  IOBuffer* buffer_;
-  DISALLOW_COPY_AND_ASSIGN(ReleaseBufferCompletionCallback);
 };
 
 }  // namespace net

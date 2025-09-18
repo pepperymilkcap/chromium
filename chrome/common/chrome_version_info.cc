@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,15 @@
 
 #include "base/basictypes.h"
 #include "base/file_version_info.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 namespace chrome {
-
-std::string VersionInfo::ProductNameAndVersionForUserAgent() const {
-  if (!is_valid())
-    return std::string();
-  return "Chrome/" + Version();
-}
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
 // On Windows and Mac, we get the Chrome version info by querying
@@ -42,19 +36,19 @@ bool VersionInfo::is_valid() const {
 std::string VersionInfo::Name() const {
   if (!is_valid())
     return std::string();
-  return base::UTF16ToUTF8(version_info_->product_name());
+  return UTF16ToUTF8(version_info_->product_name());
 }
 
 std::string VersionInfo::Version() const {
   if (!is_valid())
     return std::string();
-  return base::UTF16ToUTF8(version_info_->product_version());
+  return UTF16ToUTF8(version_info_->product_version());
 }
 
 std::string VersionInfo::LastChange() const {
   if (!is_valid())
     return std::string();
-  return base::UTF16ToUTF8(version_info_->last_change());
+  return UTF16ToUTF8(version_info_->last_change());
 }
 
 bool VersionInfo::IsOfficialBuild() const {
@@ -92,7 +86,7 @@ std::string VersionInfo::LastChange() const {
 }
 
 bool VersionInfo::IsOfficialBuild() const {
-  return IS_OFFICIAL_BUILD;
+  return OFFICIAL_BUILD;
 }
 
 #endif
@@ -123,13 +117,7 @@ std::string VersionInfo::OSType() const {
 #elif defined(OS_MACOSX)
   return "Mac OS X";
 #elif defined(OS_CHROMEOS)
-  #if defined(GOOGLE_CHROME_BUILD)
-    return "Chrome OS";
-  #else
-    return "Chromium OS";
-  #endif
-#elif defined(OS_ANDROID)
-  return "Android";
+  return UTF16ToASCII(l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME));
 #elif defined(OS_LINUX)
   return "Linux";
 #elif defined(OS_FREEBSD)

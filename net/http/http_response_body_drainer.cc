@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,12 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_network_session.h"
-#include "net/http/http_stream_base.h"
+#include "net/http/http_stream.h"
 
 namespace net {
 
-HttpResponseBodyDrainer::HttpResponseBodyDrainer(HttpStreamBase* stream)
-    : read_size_(0),
-      stream_(stream),
+HttpResponseBodyDrainer::HttpResponseBodyDrainer(HttpStream* stream)
+    : stream_(stream),
       next_state_(STATE_NONE),
       total_read_(0),
       session_(NULL) {}
@@ -87,8 +86,7 @@ int HttpResponseBodyDrainer::DoDrainResponseBody() {
   next_state_ = STATE_DRAIN_RESPONSE_BODY_COMPLETE;
 
   return stream_->ReadResponseBody(
-      read_buf_.get(),
-      read_size_ - total_read_,
+      read_buf_, read_size_ - total_read_,
       base::Bind(&HttpResponseBodyDrainer::OnIOComplete,
                  base::Unretained(this)));
 }
@@ -99,6 +97,9 @@ int HttpResponseBodyDrainer::DoDrainResponseBodyComplete(int result) {
   if (result < 0)
     return result;
 
+  if (result == 0)
+    return ERR_CONNECTION_CLOSED;
+
   total_read_ += result;
   if (stream_->IsResponseBodyComplete())
     return OK;
@@ -106,9 +107,6 @@ int HttpResponseBodyDrainer::DoDrainResponseBodyComplete(int result) {
   DCHECK_LE(total_read_, kDrainBodyBufferSize);
   if (total_read_ >= kDrainBodyBufferSize)
     return ERR_RESPONSE_BODY_TOO_BIG_TO_DRAIN;
-
-  if (result == 0)
-    return ERR_CONNECTION_CLOSED;
 
   next_state_ = STATE_DRAIN_RESPONSE_BODY;
   return OK;

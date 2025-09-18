@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_DOWNLOAD_DOWNLOAD_SHELF_GTK_H_
 #define CHROME_BROWSER_UI_GTK_DOWNLOAD_DOWNLOAD_SHELF_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -12,7 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 #include "content/public/browser/notification_observer.h"
@@ -21,14 +22,12 @@
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/native_widget_types.h"
 
+class BaseDownloadItemModel;
 class Browser;
 class CustomDrawButton;
 class DownloadItemGtk;
 class GtkThemeService;
-
-namespace content {
-class PageNavigator;
-}
+class SlideAnimatorGtk;
 
 namespace gfx {
 class Point;
@@ -37,14 +36,11 @@ class Point;
 class DownloadShelfGtk : public DownloadShelf,
                          public content::NotificationObserver,
                          public SlideAnimatorGtk::Delegate,
-                         public base::MessageLoopForUI::Observer {
+                         public MessageLoopForUI::Observer {
  public:
   DownloadShelfGtk(Browser* browser, gfx::NativeView view);
 
   virtual ~DownloadShelfGtk();
-
-  // Retrieves the navigator for loading pages.
-  content::PageNavigator* GetNavigator();
 
   // DownloadShelf implementation.
   virtual bool IsShowing() const OVERRIDE;
@@ -68,9 +64,9 @@ class DownloadShelfGtk : public DownloadShelf,
 
  protected:
   // DownloadShelf implementation.
-  virtual void DoAddDownload(content::DownloadItem* download) OVERRIDE;
+  virtual void DoAddDownload(BaseDownloadItemModel* download_model) OVERRIDE;
   virtual void DoShow() OVERRIDE;
-  virtual void DoClose(CloseReason reason) OVERRIDE;
+  virtual void DoClose() OVERRIDE;
 
  private:
   // Remove |download_item| from the download shelf and delete it.

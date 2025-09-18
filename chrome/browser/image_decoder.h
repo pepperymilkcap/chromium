@@ -1,22 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_IMAGE_DECODER_H_
 #define CHROME_BROWSER_IMAGE_DECODER_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "content/public/browser/utility_process_host_client.h"
+#include "content/browser/utility_process_host.h"
 
 class SkBitmap;
 
 // Decodes an image in a sandboxed process.
-class ImageDecoder : public content::UtilityProcessHostClient {
+class ImageDecoder : public UtilityProcessHost::Client {
  public:
   class Delegate {
    public:
@@ -34,30 +33,17 @@ class ImageDecoder : public content::UtilityProcessHostClient {
     virtual ~Delegate() {}
   };
 
-  enum ImageCodec {
-    DEFAULT_CODEC = 0,  // Uses WebKit image decoding (via WebImage).
-    ROBUST_JPEG_CODEC,  // Restrict decoding to robust jpeg codec.
-  };
-
   ImageDecoder(Delegate* delegate,
-               const std::string& image_data,
-               ImageCodec image_codec);
+               const std::string& image_data);
 
-  // Starts asynchronous image decoding. Once finished, the callback will be
-  // posted back to |task_runner|.
-  void Start(scoped_refptr<base::SequencedTaskRunner> task_runner);
-
-  const std::vector<unsigned char>& get_image_data() const {
-    return image_data_;
-  }
-
-  void set_delegate(Delegate* delegate) { delegate_ = delegate; }
+  // Starts image decoding.
+  void Start();
 
  private:
   // It's a reference counted object, so destructor is private.
   virtual ~ImageDecoder();
 
-  // Overidden from UtilityProcessHostClient:
+  // Overidden from UtilityProcessHost::Client:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // IPC message handlers.
@@ -69,8 +55,7 @@ class ImageDecoder : public content::UtilityProcessHostClient {
 
   Delegate* delegate_;
   std::vector<unsigned char> image_data_;
-  const ImageCodec image_codec_;
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+  content::BrowserThread::ID target_thread_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageDecoder);
 };

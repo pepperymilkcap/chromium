@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,21 @@
 
 #include "base/logging.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/printing/print_preview_dialog_controller.h"
+#include "chrome/browser/printing/print_preview_tab_controller.h"
 
 PrintPreviewContextMenuObserver::PrintPreviewContextMenuObserver(
-    content::WebContents* contents) : contents_(contents) {
+    TabContentsWrapper* tab) : tab_(tab) {
 }
 
 PrintPreviewContextMenuObserver::~PrintPreviewContextMenuObserver() {
 }
 
-bool PrintPreviewContextMenuObserver::IsPrintPreviewDialog() {
-  printing::PrintPreviewDialogController* controller =
-      printing::PrintPreviewDialogController::GetInstance();
+bool PrintPreviewContextMenuObserver::IsPrintPreviewTab() {
+  printing::PrintPreviewTabController* controller =
+      printing::PrintPreviewTabController::GetInstance();
   if (!controller)
     return false;
-  return (controller->GetPrintPreviewForContents(contents_) != NULL);
+  return !!controller->GetPrintPreviewForTab(tab_);
 }
 
 bool PrintPreviewContextMenuObserver::IsCommandIdSupported(int command_id) {
@@ -30,7 +30,7 @@ bool PrintPreviewContextMenuObserver::IsCommandIdSupported(int command_id) {
     case IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE:
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO:
     case IDC_CONTENT_CONTEXT_SEARCHWEBFOR:
-      return IsPrintPreviewDialog();
+      return IsPrintPreviewTab();
 
     default:
       return false;

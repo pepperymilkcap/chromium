@@ -1,26 +1,26 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_BEFORE_TRANSLATE_INFOBAR_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_BEFORE_TRANSLATE_INFOBAR_H_
+#pragma once
 
+#include "chrome/browser/translate/languages_menu_model.h"
+#include "chrome/browser/translate/options_menu_model.h"
 #include "chrome/browser/ui/views/infobars/translate_infobar_base.h"
-#include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
-class OptionsMenuModel;
 class TranslateInfoBarDelegate;
-class TranslateLanguageMenuModel;
-
 namespace views {
 class MenuButton;
 }
 
 class BeforeTranslateInfoBar : public TranslateInfoBarBase,
-                               public views::MenuButtonListener {
+                               public views::ViewMenuDelegate {
  public:
-  explicit BeforeTranslateInfoBar(
-      scoped_ptr<TranslateInfoBarDelegate> delegate);
+  BeforeTranslateInfoBar(InfoBarTabHelper* owner,
+                         TranslateInfoBarDelegate* delegate);
 
  private:
   virtual ~BeforeTranslateInfoBar();
@@ -28,18 +28,15 @@ class BeforeTranslateInfoBar : public TranslateInfoBarBase,
   // TranslateInfoBarBase:
   virtual void Layout() OVERRIDE;
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
-  virtual int ContentMinimumWidth() OVERRIDE;
+                             const views::Event& event) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
+  virtual int ContentMinimumWidth() const OVERRIDE;
+  virtual void OriginalLanguageChanged() OVERRIDE;
 
-  // views::MenuButtonListener:
-  virtual void OnMenuButtonClicked(views::View* source,
-                                   const gfx::Point& point) OVERRIDE;
-
-  // Returns the width of all content other than the labels.  Layout() uses this
-  // to determine how much space the labels can take.
-  int NonLabelWidth() const;
+  // views::ViewMenuDelegate:
+  virtual void RunMenu(View* source, const gfx::Point& pt) OVERRIDE;
 
   // The text displayed in the infobar is something like:
   // "The page is in <lang>. Would you like to translate it?"
@@ -49,14 +46,14 @@ class BeforeTranslateInfoBar : public TranslateInfoBarBase,
   views::Label* label_2_;
 
   views::MenuButton* language_menu_button_;
-  views::LabelButton* accept_button_;
-  views::LabelButton* deny_button_;
-  views::LabelButton* never_translate_button_;
-  views::LabelButton* always_translate_button_;
+  views::TextButton* accept_button_;
+  views::TextButton* deny_button_;
+  views::TextButton* never_translate_button_;
+  views::TextButton* always_translate_button_;
   views::MenuButton* options_menu_button_;
 
-  scoped_ptr<TranslateLanguageMenuModel> language_menu_model_;
-  scoped_ptr<OptionsMenuModel> options_menu_model_;
+  LanguagesMenuModel languages_menu_model_;
+  OptionsMenuModel options_menu_model_;
 
   DISALLOW_COPY_AND_ASSIGN(BeforeTranslateInfoBar);
 };

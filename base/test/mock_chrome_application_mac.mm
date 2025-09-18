@@ -21,7 +21,7 @@
 }
 
 - (void)sendEvent:(NSEvent*)event {
-  base::AutoReset<BOOL> scoper(&handlingSendEvent_, YES);
+  AutoReset<BOOL> scoper(&handlingSendEvent_, YES);
   [super sendEvent:event];
 }
 

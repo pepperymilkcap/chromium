@@ -1,113 +1,189 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
 
-#define XK_MISCELLANY
-#include <X11/keysymdef.h>
-#include <X11/X.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#undef FocusIn
-#undef FocusOut
-#undef RootWindow
 #include <map>
 
-#include "ash/shell.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chromeos/ime/candidate_window.h"
-#include "chromeos/ime/component_extension_ime_manager.h"
-#include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/ibus_keymap.h"
-#include "chromeos/ime/ibus_text.h"
-#include "chromeos/ime/input_method_manager.h"
-#include "ui/aura/root_window.h"
-#include "ui/aura/window.h"
-#include "ui/events/event.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
-#include "ui/events/keycodes/keyboard_code_conversion_x.h"
-#include "ui/keyboard/keyboard_controller.h"
+#include "base/string_util.h"
+#include "chrome/browser/chromeos/input_method/ibus_engine_controller.h"
+#include "chrome/browser/chromeos/input_method/ibus_keymap.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#include "chrome/browser/chromeos/input_method/input_method_util.h"
 
 namespace chromeos {
+
+const char* kExtensionImePrefix = "_ext_ime_";
 const char* kErrorNotActive = "IME is not active";
 const char* kErrorWrongContext = "Context is not active";
 const char* kCandidateNotFound = "Candidate not found";
-const char* kEngineBusPrefix = "org.freedesktop.IBus.";
 
-namespace {
-
-// Notifies InputContextHandler that the preedit is changed.
-void UpdatePreedit(const IBusText& ibus_text,
-                   uint32 cursor_pos,
-                   bool is_visible) {
-  IBusInputContextHandlerInterface* input_context =
-      IBusBridge::Get()->GetInputContextHandler();
-  if (input_context)
-    input_context->UpdatePreeditText(ibus_text, cursor_pos, is_visible);
+InputMethodEngine::KeyboardEvent::KeyboardEvent()
+    : alt_key(false),
+      ctrl_key(false),
+      shift_key(false) {
 }
 
-}  // namespace
-
-InputMethodEngine::InputMethodEngine()
-    : focused_(false),
-      active_(false),
-      context_id_(0),
-      next_context_id_(1),
-      observer_(NULL),
-      preedit_text_(new IBusText()),
-      preedit_cursor_(0),
-      candidate_window_(new input_method::CandidateWindow()),
-      window_visible_(false) {}
-
-InputMethodEngine::~InputMethodEngine() {
-  input_method::InputMethodManager::Get()->RemoveInputMethodExtension(ibus_id_);
+InputMethodEngine::KeyboardEvent::~KeyboardEvent() {
 }
 
-void InputMethodEngine::Initialize(
-    InputMethodEngineInterface::Observer* observer,
-    const char* engine_name,
-    const char* extension_id,
-    const char* engine_id,
-    const std::vector<std::string>& languages,
-    const std::vector<std::string>& layouts,
-    const GURL& options_page,
-    const GURL& input_view) {
-  DCHECK(observer) << "Observer must not be null.";
+InputMethodEngine::MenuItem::MenuItem() {
+}
+
+InputMethodEngine::MenuItem::~MenuItem() {
+}
+
+InputMethodEngine::Candidate::Candidate() {
+}
+
+InputMethodEngine::Candidate::~Candidate() {
+}
+
+InputMethodEngine::Observer::~Observer() {
+}
+
+class InputMethodEngineImpl
+    : public InputMethodEngine,
+      public input_method::IBusEngineController::Observer {
+ public:
+  InputMethodEngineImpl()
+      : observer_(NULL), active_(false), next_context_id_(1),
+        context_id_(-1) {}
+
+  ~InputMethodEngineImpl() {
+    input_method::InputMethodManager::GetInstance()->RemoveActiveIme(ibus_id_);
+  }
+
+  bool Init(InputMethodEngine::Observer* observer,
+            const char* engine_name,
+            const char* extension_id,
+            const char* engine_id,
+            const char* description,
+            const char* language,
+            const std::vector<std::string>& layouts,
+            std::string* error);
+
+  virtual bool SetComposition(int context_id,
+                              const char* text, int selection_start,
+                              int selection_end, int cursor,
+                              const std::vector<SegmentInfo>& segments,
+                              std::string* error);
+  virtual bool ClearComposition(int context_id,
+                                std::string* error);
+  virtual bool CommitText(int context_id,
+                          const char* text, std::string* error);
+  virtual bool SetCandidateWindowVisible(bool visible, std::string* error);
+  virtual void SetCandidateWindowCursorVisible(bool visible);
+  virtual void SetCandidateWindowVertical(bool vertical);
+  virtual void SetCandidateWindowPageSize(int size);
+  virtual void SetCandidateWindowAuxText(const char* text);
+  virtual void SetCandidateWindowAuxTextVisible(bool visible);
+  virtual bool SetCandidates(int context_id,
+                             const std::vector<Candidate>& candidates,
+                             std::string* error);
+  virtual bool SetCursorPosition(int context_id, int candidate_id,
+                                 std::string* error);
+  virtual bool SetMenuItems(const std::vector<MenuItem>& items);
+  virtual bool UpdateMenuItems(const std::vector<MenuItem>& items);
+  virtual bool IsActive() const {
+    return active_;
+  }
+  virtual void KeyEventDone(input_method::KeyEventHandle* key_data,
+                            bool handled);
+
+  virtual void OnReset();
+  virtual void OnEnable();
+  virtual void OnDisable();
+  virtual void OnFocusIn();
+  virtual void OnFocusOut();
+  virtual void OnKeyEvent(bool key_press, unsigned int keyval,
+                          unsigned int keycode, bool alt_key, bool ctrl_key,
+                          bool shift_key,
+                          input_method::KeyEventHandle* key_data);
+  virtual void OnPropertyActivate(const char* name, unsigned int state);
+  virtual void OnCandidateClicked(unsigned int index, unsigned int button,
+                                  unsigned int state);
+ private:
+  bool MenuItemToProperty(
+      const MenuItem& item,
+      input_method::IBusEngineController::EngineProperty* property);
+
+  // Pointer to the object recieving events for this IME.
+  InputMethodEngine::Observer* observer_;
+
+  // Connection to IBus.
+  scoped_ptr<input_method::IBusEngineController> connection_;
+
+  // True when this IME is active, false if deactive.
+  bool active_;
+
+  // Next id that will be assigned to a context.
+  int next_context_id_;
+
+  // ID that is used for the current input context.  False if there is no focus.
+  int context_id_;
+
+  // User specified id of this IME.
+  std::string engine_id_;
+
+  // ID used by ibus to reference this IME.
+  std::string ibus_id_;
+
+  // Mapping of candidate index to candidate id.
+  std::vector<int> candidate_ids_;
+
+  // Mapping of candidate id to index.
+  std::map<int, int> candidate_indexes_;
+};
+
+bool InputMethodEngineImpl::Init(InputMethodEngine::Observer* observer,
+                                 const char* engine_name,
+                                 const char* extension_id,
+                                 const char* engine_id,
+                                 const char* description,
+                                 const char* language,
+                                 const std::vector<std::string>& layouts,
+                                 std::string* error) {
+  ibus_id_ = kExtensionImePrefix;
+  ibus_id_ += extension_id;
+  ibus_id_ += engine_id;
+
+  std::string layout;
+  input_method::InputMethodManager* manager =
+      input_method::InputMethodManager::GetInstance();
+
+  if (!layouts.empty()) {
+    layout = JoinString(layouts, ',');
+  } else {
+    const std::string fallback_id =
+        manager->GetInputMethodUtil()->GetHardwareInputMethodId();
+    const input_method::InputMethodDescriptor* fallback_desc =
+        manager->GetInputMethodUtil()->GetInputMethodDescriptorFromId(
+            fallback_id);
+    layout = fallback_desc->keyboard_layout();
+  }
+
+  connection_.reset(input_method::IBusEngineController::Create(this,
+                                                               ibus_id_.c_str(),
+                                                               engine_name,
+                                                               description,
+                                                               language,
+                                                               layout.c_str()));
+  if (!connection_.get()) {
+    *error = "ConnectInputMethodExtension() failed.";
+    return false;
+  }
 
   observer_ = observer;
   engine_id_ = engine_id;
-
-  input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::Get();
-  ComponentExtensionIMEManager* comp_ext_ime_manager
-      = manager->GetComponentExtensionIMEManager();
-
-  if (comp_ext_ime_manager->IsInitialized() &&
-      comp_ext_ime_manager->IsWhitelistedExtension(extension_id)) {
-    ibus_id_ = comp_ext_ime_manager->GetId(extension_id, engine_id);
-  } else {
-    ibus_id_ = extension_ime_util::GetInputMethodID(extension_id, engine_id);
-  }
-
-  input_view_url_ = input_view;
-
-  manager->AddInputMethodExtension(ibus_id_, engine_name, layouts, languages,
-                                   options_page, input_view, this);
+  manager->AddActiveIme(ibus_id_, engine_name, layouts, language);
+  return true;
 }
 
-void InputMethodEngine::StartIme() {
-  input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::Get();
-  if (manager && ibus_id_ == manager->GetCurrentInputMethod().id())
-    Enable();
-}
-
-bool InputMethodEngine::SetComposition(
+bool InputMethodEngineImpl::SetComposition(
     int context_id,
     const char* text,
     int selection_start,
@@ -124,41 +200,30 @@ bool InputMethodEngine::SetComposition(
     return false;
   }
 
-  preedit_cursor_ = cursor;
-  preedit_text_.reset(new IBusText());
-  preedit_text_->set_text(text);
-
-  preedit_text_->set_selection_start(selection_start);
-  preedit_text_->set_selection_end(selection_end);
-
+  connection_->SetPreeditText(text, cursor);
   // TODO: Add support for displaying selected text in the composition string.
   for (std::vector<SegmentInfo>::const_iterator segment = segments.begin();
        segment != segments.end(); ++segment) {
-    IBusText::UnderlineAttribute underline;
-
+    int style;
     switch (segment->style) {
       case SEGMENT_STYLE_UNDERLINE:
-        underline.type = IBusText::IBUS_TEXT_UNDERLINE_SINGLE;
+        style = input_method::IBusEngineController::UNDERLINE_SINGLE;
         break;
       case SEGMENT_STYLE_DOUBLE_UNDERLINE:
-        underline.type = IBusText::IBUS_TEXT_UNDERLINE_DOUBLE;
+        style = input_method::IBusEngineController::UNDERLINE_DOUBLE;
         break;
+
       default:
         continue;
     }
 
-    underline.start_index = segment->start;
-    underline.end_index = segment->end;
-    preedit_text_->mutable_underline_attributes()->push_back(underline);
+    connection_->SetPreeditUnderline(segment->start, segment->end, style);
   }
-
-  // TODO(nona): Makes focus out mode configuable, if necessary.
-  UpdatePreedit(*preedit_text_, preedit_cursor_, true);
   return true;
 }
 
-bool InputMethodEngine::ClearComposition(int context_id,
-                                         std::string* error)  {
+bool InputMethodEngineImpl::ClearComposition(int context_id,
+                                             std::string* error) {
   if (!active_) {
     *error = kErrorNotActive;
     return false;
@@ -168,118 +233,59 @@ bool InputMethodEngine::ClearComposition(int context_id,
     return false;
   }
 
-  preedit_cursor_ = 0;
-  preedit_text_.reset(new IBusText());
-  UpdatePreedit(*preedit_text_, preedit_cursor_, false);
+  connection_->SetPreeditText("", 0);
   return true;
 }
 
-bool InputMethodEngine::CommitText(int context_id, const char* text,
-                                   std::string* error) {
+bool InputMethodEngineImpl::CommitText(int context_id,
+                                       const char* text, std::string* error) {
+  if (context_id != context_id_ || context_id_ == -1) {
+    *error = kErrorWrongContext;
+    return false;
+  }
   if (!active_) {
     // TODO: Commit the text anyways.
     *error = kErrorNotActive;
     return false;
   }
-  if (context_id != context_id_ || context_id_ == -1) {
-    *error = kErrorWrongContext;
-    return false;
-  }
 
-  IBusBridge::Get()->GetInputContextHandler()->CommitText(text);
+  connection_->CommitText(text);
   return true;
 }
 
-bool InputMethodEngine::SendKeyEvents(
-    int context_id,
-    const std::vector<KeyboardEvent>& events) {
-  if (!active_) {
-    return false;
-  }
-  if (context_id != context_id_ || context_id_ == -1) {
-    return false;
-  }
-
-  aura::WindowEventDispatcher* dispatcher =
-      ash::Shell::GetPrimaryRootWindow()->GetDispatcher();
-
-  for (size_t i = 0; i < events.size(); ++i) {
-    const KeyboardEvent& event = events[i];
-    const ui::EventType type =
-        (event.type == "keyup") ? ui::ET_KEY_RELEASED : ui::ET_KEY_PRESSED;
-
-    // KeyboardCodeFromXKyeSym assumes US keyboard layout.
-    ui::KeycodeConverter* conv = ui::KeycodeConverter::GetInstance();
-    DCHECK(conv);
-
-     // DOM code (KeyA) -> XKB -> XKeySym (XK_A) -> KeyboardCode (VKEY_A)
-    const uint16 native_keycode =
-        conv->CodeToNativeKeycode(event.code.c_str());
-    const uint xkeysym = ui::DefaultXKeysymFromHardwareKeycode(native_keycode);
-    const ui::KeyboardCode key_code = ui::KeyboardCodeFromXKeysym(xkeysym);
-
-    const std::string code = event.code;
-    int flags = ui::EF_NONE;
-    flags |= event.alt_key   ? ui::EF_ALT_DOWN       : ui::EF_NONE;
-    flags |= event.ctrl_key  ? ui::EF_CONTROL_DOWN   : ui::EF_NONE;
-    flags |= event.shift_key ? ui::EF_SHIFT_DOWN     : ui::EF_NONE;
-    flags |= event.caps_lock ? ui::EF_CAPS_LOCK_DOWN : ui::EF_NONE;
-
-    ui::KeyEvent ui_event(type, key_code, code, flags, false /* is_char */);
-    dispatcher->AsRootWindowHostDelegate()->OnHostKeyEvent(&ui_event);
-  }
-  return true;
-}
-
-const InputMethodEngine::CandidateWindowProperty&
-InputMethodEngine::GetCandidateWindowProperty() const {
-  return candidate_window_property_;
-}
-
-void InputMethodEngine::SetCandidateWindowProperty(
-    const CandidateWindowProperty& property) {
-  // Type conversion from InputMethodEngineInterface::CandidateWindowProperty to
-  // CandidateWindow::CandidateWindowProperty defined in chromeos/ime/.
-  input_method::CandidateWindow::CandidateWindowProperty dest_property;
-  dest_property.page_size = property.page_size;
-  dest_property.is_cursor_visible = property.is_cursor_visible;
-  dest_property.is_vertical = property.is_vertical;
-  dest_property.show_window_at_composition =
-      property.show_window_at_composition;
-  dest_property.cursor_position =
-      candidate_window_->GetProperty().cursor_position;
-  dest_property.auxiliary_text = property.auxiliary_text;
-  dest_property.is_auxiliary_text_visible = property.is_auxiliary_text_visible;
-
-  candidate_window_->SetProperty(dest_property);
-  candidate_window_property_ = property;
-
-  if (active_) {
-    IBusPanelCandidateWindowHandlerInterface* cw_handler =
-        IBusBridge::Get()->GetCandidateWindowHandler();
-    if (cw_handler)
-      cw_handler->UpdateLookupTable(*candidate_window_, window_visible_);
-  }
-}
-
-bool InputMethodEngine::SetCandidateWindowVisible(bool visible,
-                                                  std::string* error) {
+bool InputMethodEngineImpl::SetCandidateWindowVisible(bool visible,
+                                                      std::string* error) {
   if (!active_) {
     *error = kErrorNotActive;
     return false;
   }
 
-  window_visible_ = visible;
-  IBusPanelCandidateWindowHandlerInterface* cw_handler =
-    IBusBridge::Get()->GetCandidateWindowHandler();
-  if (cw_handler)
-    cw_handler->UpdateLookupTable(*candidate_window_, window_visible_);
+  connection_->SetTableVisible(visible);
   return true;
 }
 
-bool InputMethodEngine::SetCandidates(
-    int context_id,
-    const std::vector<Candidate>& candidates,
+void InputMethodEngineImpl::SetCandidateWindowCursorVisible(bool visible) {
+  connection_->SetCursorVisible(visible);
+}
+
+void InputMethodEngineImpl::SetCandidateWindowVertical(bool vertical) {
+  connection_->SetOrientationVertical(vertical);
+}
+
+void InputMethodEngineImpl::SetCandidateWindowPageSize(int size) {
+  connection_->SetPageSize(size);
+}
+
+void InputMethodEngineImpl::SetCandidateWindowAuxText(const char* text) {
+  connection_->SetCandidateAuxText(text);
+}
+
+void InputMethodEngineImpl::SetCandidateWindowAuxTextVisible(bool visible) {
+  connection_->SetCandidateAuxTextVisible(visible);
+}
+
+bool InputMethodEngineImpl::SetCandidates(
+    int context_id, const std::vector<Candidate>& candidates,
     std::string* error) {
   if (!active_) {
     *error = kErrorNotActive;
@@ -291,35 +297,26 @@ bool InputMethodEngine::SetCandidates(
   }
 
   // TODO: Nested candidates
+  std::vector<input_method::IBusEngineController::Candidate> ibus_candidates;
+
   candidate_ids_.clear();
-  candidate_indexes_.clear();
-  candidate_window_->mutable_candidates()->clear();
   for (std::vector<Candidate>::const_iterator ix = candidates.begin();
        ix != candidates.end(); ++ix) {
-    input_method::CandidateWindow::Entry entry;
-    entry.value = ix->value;
-    entry.label = ix->label;
-    entry.annotation = ix->annotation;
-    entry.description_title = ix->usage.title;
-    entry.description_body = ix->usage.body;
+    ibus_candidates.push_back(input_method::IBusEngineController::Candidate());
+    ibus_candidates.back().value = ix->value;
+    ibus_candidates.back().label = ix->label;
+    ibus_candidates.back().annotation = ix->annotation;
 
     // Store a mapping from the user defined ID to the candidate index.
     candidate_indexes_[ix->id] = candidate_ids_.size();
     candidate_ids_.push_back(ix->id);
-
-    candidate_window_->mutable_candidates()->push_back(entry);
   }
-  if (active_) {
-    IBusPanelCandidateWindowHandlerInterface* cw_handler =
-      IBusBridge::Get()->GetCandidateWindowHandler();
-    if (cw_handler)
-      cw_handler->UpdateLookupTable(*candidate_window_, window_visible_);
-  }
+  connection_->SetCandidates(ibus_candidates);
   return true;
 }
 
-bool InputMethodEngine::SetCursorPosition(int context_id, int candidate_id,
-                                          std::string* error) {
+bool InputMethodEngineImpl::SetCursorPosition(int context_id, int candidate_id,
+                                              std::string* error) {
   if (!active_) {
     *error = kErrorNotActive;
     return false;
@@ -336,274 +333,331 @@ bool InputMethodEngine::SetCursorPosition(int context_id, int candidate_id,
     return false;
   }
 
-  candidate_window_->set_cursor_position(position->second);
-  IBusPanelCandidateWindowHandlerInterface* cw_handler =
-    IBusBridge::Get()->GetCandidateWindowHandler();
-  if (cw_handler)
-    cw_handler->UpdateLookupTable(*candidate_window_, window_visible_);
+  connection_->SetCursorPosition(position->second);
   return true;
 }
 
-bool InputMethodEngine::SetMenuItems(const std::vector<MenuItem>& items) {
-  return UpdateMenuItems(items);
-}
+bool InputMethodEngineImpl::SetMenuItems(const std::vector<MenuItem>& items) {
+  std::vector<input_method::IBusEngineController::EngineProperty*> properties;
 
-bool InputMethodEngine::UpdateMenuItems(
-    const std::vector<MenuItem>& items) {
-  if (!active_)
-    return false;
-
-  input_method::InputMethodPropertyList property_list;
   for (std::vector<MenuItem>::const_iterator item = items.begin();
        item != items.end(); ++item) {
-    input_method::InputMethodProperty property;
-    MenuItemToProperty(*item, &property);
-    property_list.push_back(property);
+    input_method::IBusEngineController::EngineProperty* property =
+        new input_method::IBusEngineController::EngineProperty;
+    if (!MenuItemToProperty(*item, property)) {
+      delete property;
+      LOG(ERROR) << "Bad menu item";
+      return false;
+    }
+    properties.push_back(property);
+  }
+  return connection_->RegisterProperties(properties);
+}
+
+bool InputMethodEngineImpl::MenuItemToProperty(
+    const MenuItem& item,
+    input_method::IBusEngineController::EngineProperty* property) {
+  property->key = item.id;
+  property->label = item.label;
+  property->visible = item.visible;
+  property->sensitive = item.enabled;
+  property->checked = item.checked;
+
+  if (!item.children.empty()) {
+    property->type = input_method::IBusEngineController::PROPERTY_TYPE_MENU;
+  } else {
+    switch (item.style) {
+      case MENU_ITEM_STYLE_NONE:
+          property->type =
+              input_method::IBusEngineController::PROPERTY_TYPE_NORMAL;
+          break;
+      case MENU_ITEM_STYLE_CHECK:
+          property->type =
+              input_method::IBusEngineController::PROPERTY_TYPE_TOGGLE;
+          break;
+      case MENU_ITEM_STYLE_RADIO:
+          property->type =
+              input_method::IBusEngineController::PROPERTY_TYPE_RADIO;
+          break;
+      case MENU_ITEM_STYLE_SEPARATOR:
+          property->type =
+              input_method::IBusEngineController::PROPERTY_TYPE_SEPARATOR;
+          break;
+    }
   }
 
-  input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::Get();
-  if (manager)
-    manager->SetCurrentInputMethodProperties(property_list);
+  property->modified = 0;
+  if (item.modified & MENU_ITEM_MODIFIED_LABEL) {
+    property->modified |=
+        input_method::IBusEngineController::PROPERTY_MODIFIED_LABEL;
+  }
+  if (item.modified & MENU_ITEM_MODIFIED_STYLE) {
+    property->modified |=
+        input_method::IBusEngineController::PROPERTY_MODIFIED_TYPE;
+  }
+  if (item.modified & MENU_ITEM_MODIFIED_VISIBLE) {
+    property->modified |=
+        input_method::IBusEngineController::PROPERTY_MODIFIED_VISIBLE;
+  }
+  if (item.modified & MENU_ITEM_MODIFIED_ENABLED) {
+    property->modified |=
+        input_method::IBusEngineController::PROPERTY_MODIFIED_SENSITIVE;
+  }
+  if (item.modified & MENU_ITEM_MODIFIED_CHECKED) {
+    property->modified |=
+        input_method::IBusEngineController::PROPERTY_MODIFIED_CHECKED;
+  }
+
+  for (std::vector<MenuItem>::const_iterator child = item.children.begin();
+       child != item.children.end(); ++child) {
+    input_method::IBusEngineController::EngineProperty* new_property =
+        new input_method::IBusEngineController::EngineProperty;
+    if (!MenuItemToProperty(*child, new_property)) {
+      delete new_property;
+      LOG(ERROR) << "Bad menu item child";
+      return false;
+    }
+    property->children.push_back(new_property);
+  }
 
   return true;
 }
 
-bool InputMethodEngine::IsActive() const {
-  return active_;
-}
+bool InputMethodEngineImpl::UpdateMenuItems(
+    const std::vector<MenuItem>& items) {
+  std::vector<input_method::IBusEngineController::EngineProperty*> properties;
 
-void InputMethodEngine::KeyEventDone(input_method::KeyEventHandle* key_data,
-                                     bool handled) {
-  KeyEventDoneCallback* callback =
-      reinterpret_cast<KeyEventDoneCallback*>(key_data);
-  callback->Run(handled);
-  delete callback;
-}
-
-bool InputMethodEngine::DeleteSurroundingText(int context_id,
-                                              int offset,
-                                              size_t number_of_chars,
-                                              std::string* error) {
-  if (!active_) {
-    *error = kErrorNotActive;
-    return false;
+  for (std::vector<MenuItem>::const_iterator item = items.begin();
+       item != items.end(); ++item) {
+    input_method::IBusEngineController::EngineProperty* new_property =
+        new input_method::IBusEngineController::EngineProperty();
+    if (!MenuItemToProperty(*item, new_property)) {
+      LOG(ERROR) << "Bad menu item";
+      delete new_property;
+      return false;
+    }
+    properties.push_back(new_property);
   }
-  if (context_id != context_id_ || context_id_ == -1) {
-    *error = kErrorWrongContext;
-    return false;
-  }
-
-  if (offset < 0 && static_cast<size_t>(-1 * offset) != size_t(number_of_chars))
-    return false;  // Currently we can only support preceding text.
-
-  // TODO(nona): Return false if there is ongoing composition.
-
-  IBusInputContextHandlerInterface* input_context =
-      IBusBridge::Get()->GetInputContextHandler();
-  if (input_context)
-    input_context->DeleteSurroundingText(offset, number_of_chars);
-
-  return true;
+  return connection_->UpdateProperties(properties);
 }
 
-void InputMethodEngine::HideInputView() {
-  keyboard::KeyboardController* keyboard_controller =
-    ash::Shell::GetInstance()->keyboard_controller();
-  if (keyboard_controller) {
-    keyboard_controller->HideKeyboard(
-        keyboard::KeyboardController::HIDE_REASON_MANUAL);
-  }
+void InputMethodEngineImpl::KeyEventDone(input_method::KeyEventHandle* key_data,
+                                         bool handled) {
+  connection_->KeyEventDone(key_data, handled);
 }
 
-void InputMethodEngine::FocusIn(
-    const IBusEngineHandlerInterface::InputContext& input_context) {
-  focused_ = true;
-  if (!active_)
-    return;
+void InputMethodEngineImpl::OnReset() {
+  // Ignored
+}
+
+void InputMethodEngineImpl::OnEnable() {
+  active_ = true;
+  observer_->OnActivate(engine_id_);
+}
+
+void InputMethodEngineImpl::OnDisable() {
+  active_ = false;
+  observer_->OnDeactivated(engine_id_);
+}
+
+void InputMethodEngineImpl::OnFocusIn() {
   context_id_ = next_context_id_;
   ++next_context_id_;
 
-  InputMethodEngineInterface::InputContext context;
+  InputContext context;
   context.id = context_id_;
-  switch (input_context.type) {
-    case ui::TEXT_INPUT_TYPE_SEARCH:
-      context.type = "search";
-      break;
-    case ui::TEXT_INPUT_TYPE_TELEPHONE:
-      context.type = "tel";
-      break;
-    case ui::TEXT_INPUT_TYPE_URL:
-      context.type = "url";
-      break;
-    case ui::TEXT_INPUT_TYPE_EMAIL:
-      context.type = "email";
-      break;
-    case ui::TEXT_INPUT_TYPE_NUMBER:
-      context.type = "number";
-      break;
-    default:
-      context.type = "text";
-      break;
-  }
+  // TODO: Other types
+  context.type = "text";
 
   observer_->OnFocus(context);
 }
 
-void InputMethodEngine::FocusOut() {
-  focused_ = false;
-  if (!active_)
-    return;
+void InputMethodEngineImpl::OnFocusOut() {
   int context_id = context_id_;
   context_id_ = -1;
   observer_->OnBlur(context_id);
 }
 
-void InputMethodEngine::Enable() {
-  active_ = true;
-  observer_->OnActivate(engine_id_);
-  IBusEngineHandlerInterface::InputContext context(ui::TEXT_INPUT_TYPE_TEXT,
-                                                   ui::TEXT_INPUT_MODE_DEFAULT);
-  FocusIn(context);
-
-  keyboard::KeyboardController* keyboard_controller =
-      ash::Shell::GetInstance()->keyboard_controller();
-  if (keyboard_controller) {
-    keyboard_controller->SetOverrideContentUrl(input_view_url_);
-  }
+void InputMethodEngineImpl::OnKeyEvent(bool key_press, unsigned int keyval,
+                                       unsigned int keycode, bool alt_key,
+                                       bool ctrl_key, bool shift_key,
+                                       input_method::KeyEventHandle* key_data) {
+  KeyboardEvent event;
+  event.type = key_press ? "keydown" : "keyup";
+  event.key = input_method::GetIBusKey(keyval);
+  event.alt_key = alt_key;
+  event.ctrl_key = ctrl_key;
+  event.shift_key = shift_key;
+  observer_->OnKeyEvent(engine_id_, event, key_data);
 }
 
-void InputMethodEngine::Disable() {
-  active_ = false;
-  observer_->OnDeactivated(engine_id_);
-
-  keyboard::KeyboardController* keyboard_controller =
-      ash::Shell::GetInstance()->keyboard_controller();
-  if (keyboard_controller) {
-    GURL empty_url;
-    keyboard_controller->SetOverrideContentUrl(empty_url);
-  }
+void InputMethodEngineImpl::OnPropertyActivate(const char* name,
+                                               unsigned int state) {
+  observer_->OnMenuItemActivated(engine_id_, name);
 }
 
-void InputMethodEngine::PropertyActivate(const std::string& property_name) {
-  observer_->OnMenuItemActivated(engine_id_, property_name);
-}
-
-void InputMethodEngine::Reset() {
-  observer_->OnReset(engine_id_);
-}
-
-namespace {
-void GetExtensionKeyboardEventFromKeyEvent(
-    const ui::KeyEvent& event,
-    InputMethodEngine::KeyboardEvent* ext_event) {
-  DCHECK(event.type() == ui::ET_KEY_RELEASED ||
-         event.type() == ui::ET_KEY_PRESSED);
-  DCHECK(ext_event);
-  ext_event->type = (event.type() == ui::ET_KEY_RELEASED) ? "keyup" : "keydown";
-
-  ext_event->code = event.code();
-  ext_event->alt_key = event.IsAltDown();
-  ext_event->ctrl_key = event.IsControlDown();
-  ext_event->shift_key = event.IsShiftDown();
-  ext_event->caps_lock = event.IsCapsLockDown();
-
-  uint32 ibus_keyval = 0;
-  if (event.HasNativeEvent()) {
-    const base::NativeEvent& native_event = event.native_event();
-    DCHECK(native_event);
-
-    XKeyEvent* x_key = &(static_cast<XEvent*>(native_event)->xkey);
-    KeySym keysym = NoSymbol;
-    ::XLookupString(x_key, NULL, 0, &keysym, NULL);
-    ibus_keyval = keysym;
-  } else {
-    // Convert ui::KeyEvent.key_code to DOM UIEvent key.
-    // XKeysymForWindowsKeyCode converts key_code to XKeySym, but it
-    // assumes US layout and does not care about CapLock state.
-    //
-    // TODO(komatsu): Support CapsLock states.
-    // TODO(komatsu): Support non-us keyboard layouts.
-    ibus_keyval = ui::XKeysymForWindowsKeyCode(event.key_code(),
-                                               event.IsShiftDown());
-  }
-  ext_event->key = input_method::GetIBusKey(ibus_keyval);
-}
-}  // namespace
-
-void InputMethodEngine::ProcessKeyEvent(
-    const ui::KeyEvent& key_event,
-    const KeyEventDoneCallback& callback) {
-
-  KeyEventDoneCallback *handler = new KeyEventDoneCallback();
-  *handler = callback;
-
-  KeyboardEvent ext_event;
-  GetExtensionKeyboardEventFromKeyEvent(key_event, &ext_event);
-  observer_->OnKeyEvent(
-      engine_id_,
-      ext_event,
-      reinterpret_cast<input_method::KeyEventHandle*>(handler));
-}
-
-void InputMethodEngine::CandidateClicked(uint32 index) {
+void InputMethodEngineImpl::OnCandidateClicked(unsigned int index,
+                                               unsigned int button,
+                                               unsigned int state) {
   if (index > candidate_ids_.size()) {
     return;
   }
 
-  // Only left button click is supported at this moment.
+  MouseButtonEvent pressed_button;
+  if (button & input_method::IBusEngineController::MOUSE_BUTTON_1_MASK) {
+    pressed_button = MOUSE_BUTTON_LEFT;
+  } else if (button & input_method::IBusEngineController::MOUSE_BUTTON_2_MASK) {
+    pressed_button = MOUSE_BUTTON_MIDDLE;
+  } else if (button & input_method::IBusEngineController::MOUSE_BUTTON_3_MASK) {
+    pressed_button = MOUSE_BUTTON_RIGHT;
+  } else {
+    LOG(ERROR) << "Unknown button: " << button;
+    pressed_button = MOUSE_BUTTON_LEFT;
+  }
+
   observer_->OnCandidateClicked(
-      engine_id_, candidate_ids_.at(index), MOUSE_BUTTON_LEFT);
+      engine_id_, candidate_ids_.at(index), pressed_button);
 }
 
-void InputMethodEngine::SetSurroundingText(const std::string& text,
-                                           uint32 cursor_pos,
-                                           uint32 anchor_pos) {
-  observer_->OnSurroundingTextChanged(engine_id_,
-                                      text,
-                                      static_cast<int>(cursor_pos),
-                                      static_cast<int>(anchor_pos));
-}
+class InputMethodEngineStub : public InputMethodEngine {
+ public:
+  InputMethodEngineStub()
+      : observer_(NULL), active_(false), next_context_id_(1),
+        context_id_(-1) {}
 
-void InputMethodEngine::MenuItemToProperty(
-    const MenuItem& item,
-    input_method::InputMethodProperty* property) {
-  property->key = item.id;
-
-  if (item.modified & MENU_ITEM_MODIFIED_LABEL) {
-    property->label = item.label;
-  }
-  if (item.modified & MENU_ITEM_MODIFIED_VISIBLE) {
-    // TODO(nona): Implement it.
-  }
-  if (item.modified & MENU_ITEM_MODIFIED_CHECKED) {
-    property->is_selection_item_checked = item.checked;
-  }
-  if (item.modified & MENU_ITEM_MODIFIED_ENABLED) {
-    // TODO(nona): implement sensitive entry(crbug.com/140192).
-  }
-  if (item.modified & MENU_ITEM_MODIFIED_STYLE) {
-    if (!item.children.empty()) {
-      // TODO(nona): Implement it.
-    } else {
-      switch (item.style) {
-        case MENU_ITEM_STYLE_NONE:
-          NOTREACHED();
-          break;
-        case MENU_ITEM_STYLE_CHECK:
-          // TODO(nona): Implement it.
-          break;
-        case MENU_ITEM_STYLE_RADIO:
-          property->is_selection_item = true;
-          break;
-        case MENU_ITEM_STYLE_SEPARATOR:
-          // TODO(nona): Implement it.
-          break;
-      }
-    }
+  ~InputMethodEngineStub() {
   }
 
-  // TODO(nona): Support item.children.
+  bool Init(InputMethodEngine::Observer* observer,
+            const char* engine_name,
+            const char* extension_id,
+            const char* engine_id,
+            const char* description,
+            const char* language,
+            const std::vector<std::string>& layouts,
+            std::string* error) {
+    VLOG(0) << "Init";
+    return true;
+  }
+
+  virtual bool SetComposition(int context_id,
+                              const char* text, int selection_start,
+                              int selection_end, int cursor,
+                              const std::vector<SegmentInfo>& segments,
+                              std::string* error) {
+    VLOG(0) << "SetComposition";
+    return true;
+  }
+
+  virtual bool ClearComposition(int context_id, std::string* error) {
+    VLOG(0) << "ClearComposition";
+    return true;
+  }
+
+  virtual bool CommitText(int context_id,
+                          const char* text, std::string* error) {
+    VLOG(0) << "CommitText";
+    return true;
+  }
+
+  virtual bool SetCandidateWindowVisible(bool visible, std::string* error) {
+    VLOG(0) << "SetCandidateWindowVisible";
+    return true;
+  }
+
+  virtual void SetCandidateWindowCursorVisible(bool visible) {
+    VLOG(0) << "SetCandidateWindowCursorVisible";
+  }
+
+  virtual void SetCandidateWindowVertical(bool vertical) {
+    VLOG(0) << "SetCandidateWindowVertical";
+  }
+
+  virtual void SetCandidateWindowPageSize(int size) {
+    VLOG(0) << "SetCandidateWindowPageSize";
+  }
+
+  virtual void SetCandidateWindowAuxText(const char* text) {
+    VLOG(0) << "SetCandidateWindowAuxText";
+  }
+
+  virtual void SetCandidateWindowAuxTextVisible(bool visible) {
+    VLOG(0) << "SetCandidateWindowAuxTextVisible";
+  }
+
+  virtual bool SetCandidates(int context_id,
+                             const std::vector<Candidate>& candidates,
+                             std::string* error) {
+    VLOG(0) << "SetCandidates";
+    return true;
+  }
+
+  virtual bool SetCursorPosition(int context_id, int candidate_id,
+                                 std::string* error) {
+    VLOG(0) << "SetCursorPosition";
+    return true;
+  }
+
+  virtual bool SetMenuItems(const std::vector<MenuItem>& items) {
+    VLOG(0) << "SetMenuItems";
+    return true;
+  }
+
+  virtual bool UpdateMenuItems(const std::vector<MenuItem>& items) {
+    VLOG(0) << "UpdateMenuItems";
+    return true;
+  }
+
+  virtual bool IsActive() const {
+    VLOG(0) << "IsActive";
+    return active_;
+  }
+
+  virtual void KeyEventDone(input_method::KeyEventHandle* key_data,
+                            bool handled) {
+  }
+
+ private:
+  // Pointer to the object recieving events for this IME.
+  InputMethodEngine::Observer* observer_;
+
+  // True when this IME is active, false if deactive.
+  bool active_;
+
+  // Next id that will be assigned to a context.
+  int next_context_id_;
+
+  // ID that is used for the current input context.  False if there is no focus.
+  int context_id_;
+
+  // User specified id of this IME.
+  std::string engine_id_;
+};
+
+InputMethodEngine* InputMethodEngine::CreateEngine(
+    InputMethodEngine::Observer* observer,
+    const char* engine_name,
+    const char* extension_id,
+    const char* engine_id,
+    const char* description,
+    const char* language,
+    const std::vector<std::string>& layouts,
+    std::string* error) {
+
+#if defined(HAVE_IBUS)
+  InputMethodEngineImpl* new_engine = new InputMethodEngineImpl();
+#else
+  InputMethodEngineStub* new_engine = new InputMethodEngineStub();
+#endif
+
+  if (!new_engine->Init(observer, engine_name, extension_id, engine_id,
+                        description, language, layouts, error)) {
+    LOG(ERROR) << "Init() failed.";
+    delete new_engine;
+    new_engine = NULL;
+  }
+
+  return new_engine;
 }
 
 }  // namespace chromeos

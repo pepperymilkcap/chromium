@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 #include <list>
 
 #include "base/i18n/case_conversion.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_title_match.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/query_parser.h"
-#include "chrome/browser/history/url_database.h"
+#include "chrome/browser/profiles/profile.h"
+#include "ui/base/l10n/l10n_util.h"
 
 // Used when finding the set of bookmarks that match a query. Each match
 // represents a set of terms (as an interator into the Index) matching the
@@ -51,8 +51,7 @@ BookmarkIndex::NodeSet::const_iterator BookmarkIndex::Match::nodes_end() const {
   return nodes.empty() ? terms.front()->second.end() : nodes.end();
 }
 
-BookmarkIndex::BookmarkIndex(content::BrowserContext* browser_context)
-    : browser_context_(browser_context) {
+BookmarkIndex::BookmarkIndex(Profile* profile) : profile_(profile) {
 }
 
 BookmarkIndex::~BookmarkIndex() {
@@ -61,7 +60,7 @@ BookmarkIndex::~BookmarkIndex() {
 void BookmarkIndex::Add(const BookmarkNode* node) {
   if (!node->is_url())
     return;
-  std::vector<base::string16> terms = ExtractQueryWords(node->GetTitle());
+  std::vector<string16> terms = ExtractQueryWords(node->GetTitle());
   for (size_t i = 0; i < terms.size(); ++i)
     RegisterNode(terms[i], node);
 }
@@ -70,16 +69,16 @@ void BookmarkIndex::Remove(const BookmarkNode* node) {
   if (!node->is_url())
     return;
 
-  std::vector<base::string16> terms = ExtractQueryWords(node->GetTitle());
+  std::vector<string16> terms = ExtractQueryWords(node->GetTitle());
   for (size_t i = 0; i < terms.size(); ++i)
     UnregisterNode(terms[i], node);
 }
 
 void BookmarkIndex::GetBookmarksWithTitlesMatching(
-    const base::string16& query,
+    const string16& query,
     size_t max_count,
-    std::vector<BookmarkTitleMatch>* results) {
-  std::vector<base::string16> terms = ExtractQueryWords(query);
+    std::vector<bookmark_utils::TitleMatch>* results) {
+  std::vector<string16> terms = ExtractQueryWords(query);
   if (terms.empty())
     return;
 
@@ -111,10 +110,8 @@ void BookmarkIndex::GetBookmarksWithTitlesMatching(
 
 void BookmarkIndex::SortMatches(const Matches& matches,
                                 NodeTypedCountPairs* node_typed_counts) const {
-  HistoryService* const history_service = browser_context_ ?
-      HistoryServiceFactory::GetForProfile(
-          Profile::FromBrowserContext(browser_context_),
-          Profile::EXPLICIT_ACCESS) : NULL;
+  HistoryService* const history_service = profile_ ?
+      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS) : NULL;
 
   history::URLDatabase* url_db = history_service ?
       history_service->InMemoryDatabase() : NULL;
@@ -124,10 +121,6 @@ void BookmarkIndex::SortMatches(const Matches& matches,
 
   std::sort(node_typed_counts->begin(), node_typed_counts->end(),
             &NodeTypedCountPairSortFunc);
-  // Eliminate duplicates.
-  node_typed_counts->erase(std::unique(node_typed_counts->begin(),
-                                       node_typed_counts->end()),
-                           node_typed_counts->end());
 }
 
 void BookmarkIndex::ExtractBookmarkNodePairs(
@@ -149,8 +142,8 @@ void BookmarkIndex::AddMatchToResults(
     const BookmarkNode* node,
     QueryParser* parser,
     const std::vector<QueryNode*>& query_nodes,
-    std::vector<BookmarkTitleMatch>* results) {
-  BookmarkTitleMatch title_match;
+    std::vector<bookmark_utils::TitleMatch>* results) {
+  bookmark_utils::TitleMatch title_match;
   // Check that the result matches the query.  The previous search
   // was a simple per-word search, while the more complex matching
   // of QueryParser may filter it out.  For example, the query
@@ -163,7 +156,7 @@ void BookmarkIndex::AddMatchToResults(
   }
 }
 
-bool BookmarkIndex::GetBookmarksWithTitleMatchingTerm(const base::string16& term,
+bool BookmarkIndex::GetBookmarksWithTitleMatchingTerm(const string16& term,
                                                       bool first_term,
                                                       Matches* matches) {
   Index::const_iterator i = index_.lower_bound(term);
@@ -245,11 +238,10 @@ void BookmarkIndex::CombineMatches(const Index::const_iterator& index_i,
   }
 }
 
-std::vector<base::string16> BookmarkIndex::ExtractQueryWords(
-    const base::string16& query) {
-  std::vector<base::string16> terms;
+std::vector<string16> BookmarkIndex::ExtractQueryWords(const string16& query) {
+  std::vector<string16> terms;
   if (query.empty())
-    return std::vector<base::string16>();
+    return std::vector<string16>();
   QueryParser parser;
   // TODO(brettw): use ICU normalization:
   // http://userguide.icu-project.org/transforms/normalization
@@ -257,12 +249,17 @@ std::vector<base::string16> BookmarkIndex::ExtractQueryWords(
   return terms;
 }
 
-void BookmarkIndex::RegisterNode(const base::string16& term,
+void BookmarkIndex::RegisterNode(const string16& term,
                                  const BookmarkNode* node) {
+  if (std::find(index_[term].begin(), index_[term].end(), node) !=
+      index_[term].end()) {
+    // We've already added node for term.
+    return;
+  }
   index_[term].insert(node);
 }
 
-void BookmarkIndex::UnregisterNode(const base::string16& term,
+void BookmarkIndex::UnregisterNode(const string16& term,
                                    const BookmarkNode* node) {
   Index::iterator i = index_.find(term);
   if (i == index_.end()) {

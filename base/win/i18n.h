@@ -4,6 +4,7 @@
 
 #ifndef BASE_WIN_I18N_H_
 #define BASE_WIN_I18N_H_
+#pragma once
 
 #include <string>
 #include <vector>

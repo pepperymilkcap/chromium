@@ -8,17 +8,20 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/constrained_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/resource_dispatcher_host.h"
-#include "content/public/browser/resource_request_info.h"
+#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "net/base/auth.h"
@@ -27,16 +30,13 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/text_elider.h"
+#include "ui/base/text/text_elider.h"
 
-using autofill::PasswordForm;
 using content::BrowserThread;
 using content::NavigationController;
-using content::RenderViewHost;
 using content::RenderViewHostDelegate;
-using content::ResourceDispatcherHost;
-using content::ResourceRequestInfo;
 using content::WebContents;
+using webkit::forms::PasswordForm;
 
 class LoginHandlerImpl;
 
@@ -44,7 +44,12 @@ class LoginHandlerImpl;
 // Should only be called from the IO thread, since it accesses an
 // net::URLRequest.
 void ResetLoginHandlerForRequest(net::URLRequest* request) {
-  ResourceDispatcherHost::Get()->ClearLoginDelegateForRequest(request);
+  ResourceDispatcherHostRequestInfo* info =
+      ResourceDispatcherHost::InfoForRequest(request);
+  if (!info)
+    return;
+
+  info->set_login_delegate(NULL);
 }
 
 // Get the signon_realm under which this auth info should be stored.
@@ -77,6 +82,7 @@ std::string GetSignonRealm(const GURL& url,
 LoginHandler::LoginHandler(net::AuthChallengeInfo* auth_info,
                            net::URLRequest* request)
     : handled_auth_(false),
+      dialog_(NULL),
       auth_info_(auth_info),
       request_(request),
       http_network_session_(
@@ -87,7 +93,7 @@ LoginHandler::LoginHandler(net::AuthChallengeInfo* auth_info,
   // here. BuildViewForPasswordManager() will be invoked on the UI thread
   // later, so wait with loading the nib until then.
   DCHECK(request_) << "LoginHandler constructed with NULL request";
-  DCHECK(auth_info_.get()) << "LoginHandler constructed with NULL auth info";
+  DCHECK(auth_info_) << "LoginHandler constructed with NULL auth info";
 
   AddRef();  // matched by LoginHandler::ReleaseSoon().
 
@@ -95,24 +101,17 @@ LoginHandler::LoginHandler(net::AuthChallengeInfo* auth_info,
       BrowserThread::UI, FROM_HERE,
       base::Bind(&LoginHandler::AddObservers, this));
 
-  if (!ResourceRequestInfo::ForRequest(request_)->GetAssociatedRenderFrame(
-          &render_process_host_id_,  &render_frame_id_)) {
+  if (!ResourceDispatcherHost::RenderViewForRequest(
+          request_, &render_process_host_id_,  &tab_contents_id_)) {
     NOTREACHED();
   }
 }
 
-void LoginHandler::OnRequestCancelled() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO)) <<
-      "Why is OnRequestCancelled called from the UI thread?";
-
-  // Reference is no longer valid.
-  request_ = NULL;
-
-  // Give up on auth if the request was cancelled.
-  CancelAuth();
+LoginHandler::~LoginHandler() {
+  SetModel(NULL);
 }
 
-void LoginHandler::SetPasswordForm(const autofill::PasswordForm& form) {
+void LoginHandler::SetPasswordForm(const webkit::forms::PasswordForm& form) {
   password_form_ = form;
 }
 
@@ -123,15 +122,21 @@ void LoginHandler::SetPasswordManager(PasswordManager* password_manager) {
 WebContents* LoginHandler::GetWebContentsForLogin() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  content::RenderFrameHost* rfh = content::RenderFrameHost::FromID(
-      render_process_host_id_, render_frame_id_);
-  if (!rfh)
-    return NULL;
-  return WebContents::FromRenderFrameHost(rfh);
+  return tab_util::GetWebContentsByID(render_process_host_id_,
+                                      tab_contents_id_);
 }
 
-void LoginHandler::SetAuth(const base::string16& username,
-                           const base::string16& password) {
+RenderViewHostDelegate* LoginHandler::GetRenderViewHostDelegate() const {
+  RenderViewHost* rvh = RenderViewHost::FromID(render_process_host_id_,
+                                               tab_contents_id_);
+  if (!rvh)
+    return NULL;
+
+  return rvh->delegate();
+}
+
+void LoginHandler::SetAuth(const string16& username,
+                           const string16& password) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (TestAndSetAuthHandled())
@@ -181,6 +186,34 @@ void LoginHandler::CancelAuth() {
       base::Bind(&LoginHandler::CancelAuthDeferred, this));
 }
 
+void LoginHandler::OnRequestCancelled() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO)) <<
+      "Why is OnRequestCancelled called from the UI thread?";
+
+  // Reference is no longer valid.
+  request_ = NULL;
+
+  // Give up on auth if the request was cancelled.
+  CancelAuth();
+}
+
+void LoginHandler::AddObservers() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // This is probably OK; we need to listen to everything and we break out of
+  // the Observe() if we aren't handling the same auth_info().
+  registrar_.reset(new content::NotificationRegistrar);
+  registrar_->Add(this, chrome::NOTIFICATION_AUTH_SUPPLIED,
+                  content::NotificationService::AllBrowserContextsAndSources());
+  registrar_->Add(this, chrome::NOTIFICATION_AUTH_CANCELLED,
+                  content::NotificationService::AllBrowserContextsAndSources());
+}
+
+void LoginHandler::RemoveObservers() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  registrar_.reset();
+}
 
 void LoginHandler::Observe(int type,
                            const content::NotificationSource& source,
@@ -224,23 +257,16 @@ void LoginHandler::Observe(int type,
   }
 }
 
-// Returns whether authentication had been handled (SetAuth or CancelAuth).
-bool LoginHandler::WasAuthHandled() const {
-  base::AutoLock lock(handled_auth_lock_);
-  bool was_handled = handled_auth_;
-  return was_handled;
-}
-
-LoginHandler::~LoginHandler() {
-  SetModel(NULL);
-}
-
 void LoginHandler::SetModel(LoginModel* model) {
   if (login_model_)
-    login_model_->RemoveObserver(this);
+    login_model_->SetObserver(NULL);
   login_model_ = model;
   if (login_model_)
-    login_model_->AddObserver(this);
+    login_model_->SetObserver(this);
+}
+
+void LoginHandler::SetDialog(ConstrainedWindow* dialog) {
+  dialog_ = dialog;
 }
 
 void LoginHandler::NotifyAuthNeeded() {
@@ -263,63 +289,6 @@ void LoginHandler::NotifyAuthNeeded() {
                   content::Details<LoginNotificationDetails>(&details));
 }
 
-void LoginHandler::ReleaseSoon() {
-  if (!TestAndSetAuthHandled()) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(&LoginHandler::CancelAuthDeferred, this));
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&LoginHandler::NotifyAuthCancelled, this));
-  }
-
-  BrowserThread::PostTask(
-    BrowserThread::UI, FROM_HERE,
-    base::Bind(&LoginHandler::RemoveObservers, this));
-
-  // Delete this object once all InvokeLaters have been called.
-  BrowserThread::ReleaseSoon(BrowserThread::IO, FROM_HERE, this);
-}
-
-void LoginHandler::AddObservers() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  // This is probably OK; we need to listen to everything and we break out of
-  // the Observe() if we aren't handling the same auth_info().
-  registrar_.reset(new content::NotificationRegistrar);
-  registrar_->Add(this, chrome::NOTIFICATION_AUTH_SUPPLIED,
-                  content::NotificationService::AllBrowserContextsAndSources());
-  registrar_->Add(this, chrome::NOTIFICATION_AUTH_CANCELLED,
-                  content::NotificationService::AllBrowserContextsAndSources());
-}
-
-void LoginHandler::RemoveObservers() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  registrar_.reset();
-}
-
-void LoginHandler::NotifyAuthSupplied(const base::string16& username,
-                                      const base::string16& password) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(WasAuthHandled());
-
-  WebContents* requesting_contents = GetWebContentsForLogin();
-  if (!requesting_contents)
-    return;
-
-  content::NotificationService* service =
-      content::NotificationService::current();
-  NavigationController* controller =
-      &requesting_contents->GetController();
-  AuthSuppliedLoginNotificationDetails details(this, username, password);
-
-  service->Notify(
-      chrome::NOTIFICATION_AUTH_SUPPLIED,
-      content::Source<NavigationController>(controller),
-      content::Details<AuthSuppliedLoginNotificationDetails>(&details));
-}
-
 void LoginHandler::NotifyAuthCancelled() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(WasAuthHandled());
@@ -339,6 +308,52 @@ void LoginHandler::NotifyAuthCancelled() {
                   content::Details<LoginNotificationDetails>(&details));
 }
 
+void LoginHandler::NotifyAuthSupplied(const string16& username,
+                                      const string16& password) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(WasAuthHandled());
+
+  WebContents* requesting_contents = GetWebContentsForLogin();
+  if (!requesting_contents)
+    return;
+
+  content::NotificationService* service =
+      content::NotificationService::current();
+  NavigationController* controller =
+      &requesting_contents->GetController();
+  AuthSuppliedLoginNotificationDetails details(this, username, password);
+
+  service->Notify(
+      chrome::NOTIFICATION_AUTH_SUPPLIED,
+      content::Source<NavigationController>(controller),
+      content::Details<AuthSuppliedLoginNotificationDetails>(&details));
+}
+
+void LoginHandler::ReleaseSoon() {
+  if (!TestAndSetAuthHandled()) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&LoginHandler::CancelAuthDeferred, this));
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&LoginHandler::NotifyAuthCancelled, this));
+  }
+
+  BrowserThread::PostTask(
+    BrowserThread::UI, FROM_HERE,
+    base::Bind(&LoginHandler::RemoveObservers, this));
+
+  // Delete this object once all InvokeLaters have been called.
+  BrowserThread::ReleaseSoon(BrowserThread::IO, FROM_HERE, this);
+}
+
+// Returns whether authentication had been handled (SetAuth or CancelAuth).
+bool LoginHandler::WasAuthHandled() const {
+  base::AutoLock lock(handled_auth_lock_);
+  bool was_handled = handled_auth_;
+  return was_handled;
+}
+
 // Marks authentication as handled and returns the previous handled state.
 bool LoginHandler::TestAndSetAuthHandled() {
   base::AutoLock lock(handled_auth_lock_);
@@ -348,8 +363,8 @@ bool LoginHandler::TestAndSetAuthHandled() {
 }
 
 // Calls SetAuth from the IO loop.
-void LoginHandler::SetAuthDeferred(const base::string16& username,
-                                   const base::string16& password) {
+void LoginHandler::SetAuthDeferred(const string16& username,
+                                   const string16& password) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (request_) {
@@ -374,11 +389,13 @@ void LoginHandler::CancelAuthDeferred() {
 void LoginHandler::CloseContentsDeferred() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  CloseDialog();
+  // The hosting ConstrainedWindow may have been freed.
+  if (dialog_)
+    dialog_->CloseConstrainedWindow();
 }
 
 // Helper to create a PasswordForm and stuff it into a vector as input
-// for PasswordManager::PasswordFormsParsed, the hook into PasswordManager.
+// for PasswordManager::PasswordFormsFound, the hook into PasswordManager.
 void MakeInputForPasswordManager(
     const GURL& request_url,
     net::AuthChallengeInfo* auth_info,
@@ -427,28 +444,28 @@ void LoginDialogCallback(const GURL& request_url,
     return;
   }
 
-  PasswordManager* password_manager =
-      PasswordManager::FromWebContents(parent_contents);
-  if (!password_manager) {
+  TabContentsWrapper* wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(parent_contents);
+  if (!wrapper) {
     // Same logic as above.
     handler->CancelAuth();
     return;
   }
 
   // Tell the password manager to look for saved passwords.
+  PasswordManager* password_manager = wrapper->password_manager();
   std::vector<PasswordForm> v;
   MakeInputForPasswordManager(request_url, auth_info, handler, &v);
-  password_manager->OnPasswordFormsParsed(v);
+  password_manager->OnPasswordFormsFound(v);
   handler->SetPasswordManager(password_manager);
 
   // The realm is controlled by the remote server, so there is no reason
   // to believe it is of a reasonable length.
-  base::string16 elided_realm;
-  gfx::ElideString(base::UTF8ToUTF16(auth_info->realm), 120, &elided_realm);
+  string16 elided_realm;
+  ui::ElideString(UTF8ToUTF16(auth_info->realm), 120, &elided_realm);
 
-  base::string16 host_and_port = base::ASCIIToUTF16(
-      request_url.scheme() + "://" + auth_info->challenger.ToString());
-  base::string16 explanation = elided_realm.empty() ?
+  string16 host_and_port = ASCIIToUTF16(auth_info->challenger.ToString());
+  string16 explanation = elided_realm.empty() ?
       l10n_util::GetStringFUTF16(IDS_LOGIN_DIALOG_DESCRIPTION_NO_REALM,
                                  host_and_port) :
       l10n_util::GetStringFUTF16(IDS_LOGIN_DIALOG_DESCRIPTION,

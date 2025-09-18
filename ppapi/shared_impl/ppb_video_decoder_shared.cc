@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,28 +7,25 @@
 #include "base/logging.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/shared_impl/ppb_graphics_3d_shared.h"
 #include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/thunk/enter.h"
 
 namespace ppapi {
 
 PPB_VideoDecoder_Shared::PPB_VideoDecoder_Shared(PP_Instance instance)
-    : Resource(OBJECT_IS_IMPL, instance),
+    : Resource(instance),
       graphics_context_(0),
       gles2_impl_(NULL) {
 }
 
 PPB_VideoDecoder_Shared::PPB_VideoDecoder_Shared(
     const HostResource& host_resource)
-    : Resource(OBJECT_IS_PROXY, host_resource),
+    : Resource(host_resource),
       graphics_context_(0),
       gles2_impl_(NULL) {
 }
 
 PPB_VideoDecoder_Shared::~PPB_VideoDecoder_Shared() {
-  // Destroy() must be called before the object is destroyed.
-  DCHECK(graphics_context_ == 0);
 }
 
 thunk::PPB_VideoDecoder_API* PPB_VideoDecoder_Shared::AsPPB_VideoDecoder_API() {
@@ -46,43 +43,41 @@ void PPB_VideoDecoder_Shared::InitCommon(
 }
 
 void PPB_VideoDecoder_Shared::Destroy() {
-  if (graphics_context_) {
-    PpapiGlobals::Get()->GetResourceTracker()->ReleaseResource(
-        graphics_context_);
-    graphics_context_ = 0;
-  }
+  graphics_context_ = 0;
   gles2_impl_ = NULL;
+  PpapiGlobals::Get()->GetResourceTracker()->ReleaseResource(graphics_context_);
 }
 
-bool PPB_VideoDecoder_Shared::SetFlushCallback(
-    scoped_refptr<TrackedCallback> callback) {
-  if (TrackedCallback::IsPending(flush_callback_))
+bool PPB_VideoDecoder_Shared::SetFlushCallback(PP_CompletionCallback callback) {
+  CHECK(callback.func);
+  if (flush_callback_.get())
     return false;
-  flush_callback_ = callback;
+  flush_callback_ = new TrackedCallback(this, callback);
   return true;
 }
 
-bool PPB_VideoDecoder_Shared::SetResetCallback(
-    scoped_refptr<TrackedCallback> callback) {
+bool PPB_VideoDecoder_Shared::SetResetCallback(PP_CompletionCallback callback) {
+  CHECK(callback.func);
   if (TrackedCallback::IsPending(reset_callback_))
     return false;
-  reset_callback_ = callback;
+  reset_callback_ = new TrackedCallback(this, callback);
   return true;
 }
 
 bool PPB_VideoDecoder_Shared::SetBitstreamBufferCallback(
     int32 bitstream_buffer_id,
-    scoped_refptr<TrackedCallback> callback) {
+    PP_CompletionCallback callback) {
   return bitstream_buffer_callbacks_.insert(
-      std::make_pair(bitstream_buffer_id, callback)).second;
+      std::make_pair(bitstream_buffer_id,
+                     new TrackedCallback(this, callback))).second;
 }
 
 void PPB_VideoDecoder_Shared::RunFlushCallback(int32 result) {
-  flush_callback_->Run(result);
+  TrackedCallback::ClearAndRun(&flush_callback_, result);
 }
 
 void PPB_VideoDecoder_Shared::RunResetCallback(int32 result) {
-  reset_callback_->Run(result);
+  TrackedCallback::ClearAndRun(&reset_callback_, result);
 }
 
 void PPB_VideoDecoder_Shared::RunBitstreamBufferCallback(
@@ -96,14 +91,8 @@ void PPB_VideoDecoder_Shared::RunBitstreamBufferCallback(
 }
 
 void PPB_VideoDecoder_Shared::FlushCommandBuffer() {
-  // Ensure that graphics_context is still live before using gles2_impl_.
-  // Our "plugin reference" is not enough to keep graphics_context alive if
-  // DidDeleteInstance() has been called.
-  if (PpapiGlobals::Get()->GetResourceTracker()->GetResource(
-          graphics_context_)) {
-    if (gles2_impl_)
-      gles2_impl_->Flush();
-  }
+  if (gles2_impl_)
+    gles2_impl_->Flush();
 }
 
 }  // namespace ppapi

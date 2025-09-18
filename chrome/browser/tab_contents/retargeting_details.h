@@ -4,8 +4,9 @@
 
 #ifndef CHROME_BROWSER_TAB_CONTENTS_RETARGETING_DETAILS_H_
 #define CHROME_BROWSER_TAB_CONTENTS_RETARGETING_DETAILS_H_
+#pragma once
 
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
 namespace content {
 class WebContents;
@@ -25,7 +26,7 @@ struct RetargetingDetails {
   // The target tab contents.
   content::WebContents* target_web_contents;
 
-  // True if the target_web_contents is not yet inserted into a tab strip.
+  // True if the target_tab_contents is not yet inserted into a tab strip.
   bool not_yet_in_tabstrip;
 };
 

@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_all_tabs_controller.h"
 
-#include "base/strings/string16.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/string16.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -22,16 +22,12 @@ using content::WebContents;
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                    profile:(Profile*)profile
                     parent:(const BookmarkNode*)parent
-                       url:(const GURL&)url
-                     title:(const base::string16&)title
              configuration:(BookmarkEditor::Configuration)configuration {
   NSString* nibName = @"BookmarkAllTabs";
   if ((self = [super initWithParentWindow:parentWindow
                                   nibName:nibName
                                   profile:profile
                                    parent:parent
-                                      url:url
-                                    title:title
                             configuration:configuration])) {
   }
   return self;
@@ -47,11 +43,14 @@ using content::WebContents;
 
 - (void)UpdateActiveTabPairs {
   activeTabPairsVector_.clear();
-  Browser* browser = chrome::GetLastActiveBrowser();
-  const int tabCount = browser->tab_strip_model()->count();
+  Browser* browser = BrowserList::GetLastActive();
+  TabStripModel* tabstrip_model = browser->tabstrip_model();
+  const int tabCount = tabstrip_model->count();
   for (int i = 0; i < tabCount; ++i) {
-    WebContents* contents = browser->tab_strip_model()->GetWebContentsAt(i);
-    ActiveTabNameURLPair tabPair(contents->GetTitle(), contents->GetURL());
+    WebContents* wc = tabstrip_model->GetTabContentsAt(i)->web_contents();
+    const string16 tabTitle = wc->GetTitle();
+    const GURL& tabURL(wc->GetURL());
+    ActiveTabNameURLPair tabPair(tabTitle, tabURL);
     activeTabPairsVector_.push_back(tabPair);
   }
 }
@@ -60,13 +59,16 @@ using content::WebContents;
 // folder for the tabs and then the bookmarks in that new folder.
 // Returns a BOOL as an NSNumber indicating that the commit may proceed.
 - (NSNumber*)didCommit {
+  NSString* name = [[self displayName] stringByTrimmingCharactersInSet:
+                    [NSCharacterSet newlineCharacterSet]];
+  std::wstring newTitle = base::SysNSStringToWide(name);
   const BookmarkNode* newParentNode = [self selectedNode];
   if (!newParentNode)
     return [NSNumber numberWithBool:NO];
   int newIndex = newParentNode->child_count();
   // Create the new folder which will contain all of the tab URLs.
   NSString* newFolderName = [self displayName];
-  base::string16 newFolderString = base::SysNSStringToUTF16(newFolderName);
+  string16 newFolderString = base::SysNSStringToUTF16(newFolderName);
   BookmarkModel* model = [self bookmarkModel];
   const BookmarkNode* newFolder = model->AddFolder(newParentNode, newIndex,
                                                    newFolderString);

@@ -1,29 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "chrome/browser/ui/gtk/bookmarks/bookmark_editor_gtk.h"
 
 #include <gtk/gtk.h>
 
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
+#include "chrome/browser/ui/gtk/bookmarks/bookmark_editor_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_tree_model.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::ASCIIToUTF16;
-using base::UTF16ToUTF8;
 using base::Time;
 using base::TimeDelta;
+using bookmark_utils::GetTitleFromTreeIter;
 using content::BrowserThread;
 
 // Base class for bookmark editor tests. This class is a copy from
@@ -42,9 +37,9 @@ class BookmarkEditorGtkTest : public testing::Test {
   virtual void SetUp() OVERRIDE {
     profile_.reset(new TestingProfile());
     profile_->CreateBookmarkModel(true);
+    profile_->BlockUntilBookmarkModelLoaded();
 
-    model_ = BookmarkModelFactory::GetForProfile(profile_.get());
-    test::WaitForBookmarkModelToLoad(model_);
+    model_ = profile_->GetBookmarkModel();
 
     AddTestData();
   }
@@ -101,7 +96,7 @@ class BookmarkEditorGtkTest : public testing::Test {
                    GURL(test_base + "sa"));
   }
 
-  base::MessageLoopForUI message_loop_;
+  MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 };
@@ -112,8 +107,7 @@ TEST_F(BookmarkEditorGtkTest, ModelsMatch) {
       NULL,
       profile_.get(),
       NULL,
-      BookmarkEditor::EditDetails::AddNodeInFolder(
-          NULL, -1, GURL(), base::string16()),
+      BookmarkEditor::EditDetails::AddNodeInFolder(NULL, -1),
       BookmarkEditor::SHOW_TREE);
 
   // The root should have two or three children, one for the bookmark bar node,
@@ -256,10 +250,12 @@ TEST_F(BookmarkEditorGtkTest, MoveToNewParent) {
   // Create two nodes: "F21" as a child of "F2" and "F211" as a child of "F21".
   GtkTreeIter f21_iter;
   editor.AddNewFolder(&f2_iter, &f21_iter);
-  gtk_tree_store_set(editor.tree_store_, &f21_iter, FOLDER_NAME, "F21", -1);
+  gtk_tree_store_set(editor.tree_store_, &f21_iter,
+                     bookmark_utils::FOLDER_NAME, "F21", -1);
   GtkTreeIter f211_iter;
   editor.AddNewFolder(&f21_iter, &f211_iter);
-  gtk_tree_store_set(editor.tree_store_, &f211_iter, FOLDER_NAME, "F211", -1);
+  gtk_tree_store_set(editor.tree_store_, &f211_iter,
+                     bookmark_utils::FOLDER_NAME, "F211", -1);
 
   ASSERT_EQ(1, gtk_tree_model_iter_n_children(store, &f2_iter));
 
@@ -287,8 +283,7 @@ TEST_F(BookmarkEditorGtkTest, NewURL) {
       NULL,
       profile_.get(),
       NULL,
-      BookmarkEditor::EditDetails::AddNodeInFolder(
-          NULL, -1, GURL(), base::string16()),
+      BookmarkEditor::EditDetails::AddNodeInFolder(NULL, -1),
       BookmarkEditor::SHOW_TREE);
 
   gtk_entry_set_text(GTK_ENTRY(editor.url_entry_),

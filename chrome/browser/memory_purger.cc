@@ -6,30 +6,26 @@
 
 #include <set>
 
-#include "base/allocator/allocator_extension.h"
 #include "base/bind.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/safe_browsing/database_manager.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/render_messages.h"
+#include "content/browser/in_process_webkit/webkit_context.h"
+#include "content/browser/renderer_host/backing_store_manager.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_widget_host.h"
-#include "content/public/browser/resource_context.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
 
-using content::BrowserContext;
 using content::BrowserThread;
-using content::ResourceContext;
 
 // PurgeMemoryHelper -----------------------------------------------------------
 
@@ -40,7 +36,6 @@ class PurgeMemoryIOHelper
     : public base::RefCountedThreadSafe<PurgeMemoryIOHelper> {
  public:
   PurgeMemoryIOHelper() {
-    safe_browsing_service_ = g_browser_process->safe_browsing_service();
   }
 
   void AddRequestContextGetter(
@@ -49,34 +44,32 @@ class PurgeMemoryIOHelper
   void PurgeMemoryOnIOThread();
 
  private:
-  friend class base::RefCountedThreadSafe<PurgeMemoryIOHelper>;
-
-  virtual ~PurgeMemoryIOHelper() {}
-
   typedef scoped_refptr<net::URLRequestContextGetter> RequestContextGetter;
-  std::vector<RequestContextGetter> request_context_getters_;
+  typedef std::set<RequestContextGetter> RequestContextGetters;
 
-  scoped_refptr<SafeBrowsingService> safe_browsing_service_;
+  RequestContextGetters request_context_getters_;
 
   DISALLOW_COPY_AND_ASSIGN(PurgeMemoryIOHelper);
 };
 
 void PurgeMemoryIOHelper::AddRequestContextGetter(
     scoped_refptr<net::URLRequestContextGetter> request_context_getter) {
-  request_context_getters_.push_back(request_context_getter);
+  request_context_getters_.insert(request_context_getter);
 }
 
 void PurgeMemoryIOHelper::PurgeMemoryOnIOThread() {
   // Ask ProxyServices to purge any memory they can (generally garbage in the
   // wrapped ProxyResolver's JS engine).
-  for (size_t i = 0; i < request_context_getters_.size(); ++i) {
-    request_context_getters_[i]->GetURLRequestContext()->proxy_service()->
-        PurgeMemory();
-  }
+  for (RequestContextGetters::const_iterator i(
+           request_context_getters_.begin());
+       i != request_context_getters_.end(); ++i)
+    (*i)->GetURLRequestContext()->proxy_service()->PurgeMemory();
 
-#if defined(FULL_SAFE_BROWSING)
-  safe_browsing_service_->database_manager()->PurgeMemory();
-#endif
+  // The appcache and safe browsing services listen for this notification.
+  content::NotificationService::current()->Notify(
+      content::NOTIFICATION_PURGE_MEMORY,
+      content::Source<void>(NULL),
+      content::NotificationService::NoDetails());
 }
 
 // -----------------------------------------------------------------------------
@@ -94,7 +87,7 @@ void MemoryPurger::PurgeAll() {
 // static
 void MemoryPurger::PurgeBrowser() {
   // Dump the backing stores.
-  content::RenderWidgetHost::RemoveAllBackingStores();
+  BackingStoreManager::RemoveAllBackingStores();
 
   // Per-profile cleanup.
   scoped_refptr<PurgeMemoryIOHelper> purge_memory_io_helper(
@@ -112,18 +105,20 @@ void MemoryPurger::PurgeBrowser() {
     // Spinning up the history service is expensive, so we avoid doing it if it
     // hasn't been done already.
     HistoryService* history_service =
-        HistoryServiceFactory::GetForProfileWithoutCreating(profiles[i]);
+        profiles[i]->GetHistoryServiceWithoutCreating();
     if (history_service)
       history_service->UnloadBackend();
 
     // Unload all web databases (freeing memory used to cache sqlite).
-    WebDataServiceWrapper* wds_wrapper =
-        WebDataServiceFactory::GetForProfileIfExists(
-            profiles[i], Profile::EXPLICIT_ACCESS);
-    if (wds_wrapper && wds_wrapper->GetWebData().get())
-      wds_wrapper->GetWebData()->UnloadDatabase();
+    WebDataService* web_data_service =
+        profiles[i]->GetWebDataServiceWithoutCreating();
+    if (web_data_service)
+      web_data_service->UnloadDatabase();
 
-    BrowserContext::PurgeMemory(profiles[i]);
+    // Ask all WebKitContexts to purge memory (freeing memory used to cache
+    // the LocalStorage sqlite DB).  WebKitContext creation is basically free so
+    // we don't bother with a "...WithoutCreating()" function.
+    profiles[i]->GetWebKitContext()->PurgeMemory();
   }
 
   BrowserThread::PostTask(
@@ -135,12 +130,14 @@ void MemoryPurger::PurgeBrowser() {
   // * Purge AppCache memory.  Not yet implemented sufficiently.
   // * Browser-side DatabaseTracker.  Not implemented sufficiently.
 
-  // Tell our allocator to release any free pages it's still holding.
+#if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
+  // Tell tcmalloc to release any free pages it's still holding.
   //
   // TODO(pkasting): A lot of the above calls kick off actions on other threads.
   // Maybe we should find a way to avoid calling this until those actions
   // complete?
-  base::allocator::ReleaseFreeMemory();
+  MallocExtension::instance()->ReleaseFreeMemory();
+#endif
 }
 
 // static

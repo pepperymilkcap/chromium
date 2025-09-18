@@ -4,17 +4,11 @@
 
 #include "net/tools/flip_server/output_ordering.h"
 
-#include <utility>
-
 #include "net/tools/flip_server/flip_config.h"
 #include "net/tools/flip_server/sm_connection.h"
 
+
 namespace net {
-
-OutputOrdering::PriorityMapPointer::PriorityMapPointer()
-    : ring(NULL), alarm_enabled(false) {}
-
-OutputOrdering::PriorityMapPointer::~PriorityMapPointer() {}
 
 // static
 double OutputOrdering::server_think_time_in_s_ = 0.0;
@@ -26,7 +20,7 @@ OutputOrdering::OutputOrdering(SMConnectionInterface* connection)
     epoll_server_ = connection->epoll_server();
 }
 
-OutputOrdering::~OutputOrdering() { Reset(); }
+OutputOrdering::~OutputOrdering() {}
 
 void OutputOrdering::Reset() {
   while (!stream_ids_.empty()) {
@@ -41,8 +35,8 @@ void OutputOrdering::Reset() {
   first_data_senders_.clear();
 }
 
-bool OutputOrdering::ExistsInPriorityMaps(uint32 stream_id) const {
-  StreamIdToPriorityMap::const_iterator sitpmi = stream_ids_.find(stream_id);
+bool OutputOrdering::ExistsInPriorityMaps(uint32 stream_id) {
+  StreamIdToPriorityMap::iterator sitpmi = stream_ids_.find(stream_id);
   return sitpmi != stream_ids_.end();
 }
 
@@ -50,7 +44,11 @@ OutputOrdering::BeginOutputtingAlarm::BeginOutputtingAlarm(
     OutputOrdering* oo,
     OutputOrdering::PriorityMapPointer* pmp,
     const MemCacheIter& mci)
-    : output_ordering_(oo), pmp_(pmp), mci_(mci), epoll_server_(NULL) {}
+    : output_ordering_(oo),
+      pmp_(pmp),
+      mci_(mci),
+      epoll_server_(NULL) {
+}
 
 OutputOrdering::BeginOutputtingAlarm::~BeginOutputtingAlarm() {
   if (epoll_server_ && pmp_->alarm_enabled)
@@ -75,7 +73,6 @@ void OutputOrdering::BeginOutputtingAlarm::OnRegistration(
 
 void OutputOrdering::BeginOutputtingAlarm::OnUnregistration() {
   pmp_->alarm_enabled = false;
-  delete this;
 }
 
 void OutputOrdering::BeginOutputtingAlarm::OnShutdown(EpollServer* eps) {
@@ -97,37 +94,41 @@ void OutputOrdering::AddToOutputOrder(const MemCacheIter& mci) {
 
   double think_time_in_s = server_think_time_in_s_;
   std::string x_server_latency =
-      mci.file_data->headers()->GetHeader("X-Server-Latency").as_string();
+    mci.file_data->headers->GetHeader("X-Server-Latency").as_string();
   if (!x_server_latency.empty()) {
     char* endp;
     double tmp_think_time_in_s = strtod(x_server_latency.c_str(), &endp);
     if (endp != x_server_latency.c_str() + x_server_latency.size()) {
       LOG(ERROR) << "Unable to understand X-Server-Latency of: "
-                 << x_server_latency
-                 << " for resource: " << mci.file_data->filename().c_str();
+                 << x_server_latency << " for resource: "
+                 <<  mci.file_data->filename.c_str();
     } else {
       think_time_in_s = tmp_think_time_in_s;
     }
   }
   StreamIdToPriorityMap::iterator sitpmi;
-  sitpmi = stream_ids_.insert(std::pair<uint32, PriorityMapPointer>(
-                                  mci.stream_id, PriorityMapPointer())).first;
+  sitpmi = stream_ids_.insert(
+      std::pair<uint32, PriorityMapPointer>(mci.stream_id,
+                                            PriorityMapPointer())).first;
   PriorityMapPointer& pmp = sitpmi->second;
 
   BeginOutputtingAlarm* boa = new BeginOutputtingAlarm(this, &pmp, mci);
   VLOG(1) << "Server think time: " << think_time_in_s;
-  epoll_server_->RegisterAlarmApproximateDelta(think_time_in_s * 1000000, boa);
+  epoll_server_->RegisterAlarmApproximateDelta(
+      think_time_in_s * 1000000, boa);
 }
 
 void OutputOrdering::SpliceToPriorityRing(PriorityRing::iterator pri) {
   MemCacheIter& mci = *pri;
   PriorityMap::iterator pmi = priority_map_.find(mci.priority);
   if (pmi == priority_map_.end()) {
-    pmi = priority_map_.insert(std::pair<uint32, PriorityRing>(
-                                   mci.priority, PriorityRing())).first;
+    pmi = priority_map_.insert(
+        std::pair<uint32, PriorityRing>(mci.priority, PriorityRing())).first;
   }
 
-  pmi->second.splice(pmi->second.end(), first_data_senders_, pri);
+  pmi->second.splice(pmi->second.end(),
+                     first_data_senders_,
+                     pri);
   StreamIdToPriorityMap::iterator sitpmi = stream_ids_.find(mci.stream_id);
   sitpmi->second.ring = &(pmi->second);
 }
@@ -139,8 +140,8 @@ MemCacheIter* OutputOrdering::GetIter() {
       SpliceToPriorityRing(first_data_senders_.begin());
     } else {
       first_data_senders_.splice(first_data_senders_.end(),
-                                 first_data_senders_,
-                                 first_data_senders_.begin());
+                                first_data_senders_,
+                                first_data_senders_.begin());
       mci.max_segment_size = kInitialDataSendersThreshold;
       return &mci;
     }
@@ -152,7 +153,9 @@ MemCacheIter* OutputOrdering::GetIter() {
       continue;
     }
     MemCacheIter& mci = first_ring.front();
-    first_ring.splice(first_ring.end(), first_ring, first_ring.begin());
+    first_ring.splice(first_ring.end(),
+                      first_ring,
+                      first_ring.begin());
     mci.max_segment_size = kSpdySegmentSize;
     return &mci;
   }
@@ -173,3 +176,4 @@ void OutputOrdering::RemoveStreamId(uint32 stream_id) {
 }
 
 }  // namespace net
+

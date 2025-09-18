@@ -4,9 +4,9 @@
 
 #include <windows.h>
 
-#include "base/files/file_path.h"
+#include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "base/win/registry.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/work_item.h"
@@ -41,15 +41,15 @@ class CreateRegKeyWorkItemTest : public testing::Test {
 TEST_F(CreateRegKeyWorkItemTest, CreateKey) {
   RegKey key;
 
-  base::FilePath parent_key(test_root);
+  FilePath parent_key(test_root);
   parent_key = parent_key.AppendASCII("a");
   ASSERT_EQ(ERROR_SUCCESS,
       key.Create(HKEY_CURRENT_USER, parent_key.value().c_str(), KEY_READ));
 
-  base::FilePath top_key_to_create(parent_key);
+  FilePath top_key_to_create(parent_key);
   top_key_to_create = top_key_to_create.AppendASCII("b");
 
-  base::FilePath key_to_create(top_key_to_create);
+  FilePath key_to_create(top_key_to_create);
   key_to_create = key_to_create.AppendASCII("c");
   key_to_create = key_to_create.AppendASCII("d");
 
@@ -74,7 +74,7 @@ TEST_F(CreateRegKeyWorkItemTest, CreateKey) {
 TEST_F(CreateRegKeyWorkItemTest, CreateExistingKey) {
   RegKey key;
 
-  base::FilePath key_to_create(test_root);
+  FilePath key_to_create(test_root);
   key_to_create = key_to_create.AppendASCII("aa");
   ASSERT_EQ(ERROR_SUCCESS,
       key.Create(HKEY_CURRENT_USER, key_to_create.value().c_str(), KEY_READ));
@@ -98,13 +98,13 @@ TEST_F(CreateRegKeyWorkItemTest, CreateExistingKey) {
 
 TEST_F(CreateRegKeyWorkItemTest, CreateSharedKey) {
   RegKey key;
-  base::FilePath key_to_create_1(test_root);
+  FilePath key_to_create_1(test_root);
   key_to_create_1 = key_to_create_1.AppendASCII("aaa");
 
-  base::FilePath key_to_create_2(key_to_create_1);
+  FilePath key_to_create_2(key_to_create_1);
   key_to_create_2 = key_to_create_2.AppendASCII("bbb");
 
-  base::FilePath key_to_create_3(key_to_create_2);
+  FilePath key_to_create_3(key_to_create_2);
   key_to_create_3 = key_to_create_3.AppendASCII("ccc");
 
   scoped_ptr<CreateRegKeyWorkItem> work_item(
@@ -117,7 +117,7 @@ TEST_F(CreateRegKeyWorkItemTest, CreateSharedKey) {
       key.Open(HKEY_CURRENT_USER, key_to_create_3.value().c_str(), KEY_READ));
 
   // Create another key under key_to_create_2
-  base::FilePath key_to_create_4(key_to_create_2);
+  FilePath key_to_create_4(key_to_create_2);
   key_to_create_4 = key_to_create_4.AppendASCII("ddd");
   ASSERT_EQ(ERROR_SUCCESS,
       key.Create(HKEY_CURRENT_USER, key_to_create_4.value().c_str(), KEY_READ));
@@ -137,13 +137,13 @@ TEST_F(CreateRegKeyWorkItemTest, CreateSharedKey) {
 
 TEST_F(CreateRegKeyWorkItemTest, RollbackWithMissingKey) {
   RegKey key;
-  base::FilePath key_to_create_1(test_root);
+  FilePath key_to_create_1(test_root);
   key_to_create_1 = key_to_create_1.AppendASCII("aaaa");
 
-  base::FilePath key_to_create_2(key_to_create_1);
+  FilePath key_to_create_2(key_to_create_1);
   key_to_create_2 = key_to_create_2.AppendASCII("bbbb");
 
-  base::FilePath key_to_create_3(key_to_create_2);
+  FilePath key_to_create_3(key_to_create_2);
   key_to_create_3 = key_to_create_3.AppendASCII("cccc");
 
   scoped_ptr<CreateRegKeyWorkItem> work_item(
@@ -173,7 +173,7 @@ TEST_F(CreateRegKeyWorkItemTest, RollbackWithMissingKey) {
 TEST_F(CreateRegKeyWorkItemTest, RollbackWithSetValue) {
   RegKey key;
 
-  base::FilePath key_to_create(test_root);
+  FilePath key_to_create(test_root);
   key_to_create = key_to_create.AppendASCII("aaaaa");
 
   scoped_ptr<CreateRegKeyWorkItem> work_item(

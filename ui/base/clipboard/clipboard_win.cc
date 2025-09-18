@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,24 +11,22 @@
 #include <shellapi.h>
 
 #include "base/basictypes.h"
-#include "base/bind.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/memory/shared_memory.h"
-#include "base/message_loop/message_loop.h"
-#include "base/safe_numerics.h"
+#include "base/message_loop.h"
+#include "base/shared_memory.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_offset_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/win/message_window.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_offset_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
+#include "base/win/wrapped_window_proc.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard_util_win.h"
 #include "ui/base/clipboard/custom_data_helper.h"
-#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/size.h"
 
 namespace ui {
@@ -95,10 +93,12 @@ class ScopedClipboard {
   bool opened_;
 };
 
-bool ClipboardOwnerWndProc(UINT message,
-                           WPARAM wparam,
-                           LPARAM lparam,
-                           LRESULT* result) {
+LRESULT CALLBACK ClipboardOwnerWndProc(HWND hwnd,
+                                       UINT message,
+                                       WPARAM wparam,
+                                       LPARAM lparam) {
+  LRESULT lresult = 0;
+
   switch (message) {
   case WM_RENDERFORMAT:
     // This message comes when SetClipboardData was sent a null data handle
@@ -118,11 +118,10 @@ bool ClipboardOwnerWndProc(UINT message,
   case WM_CHANGECBCHAIN:
     break;
   default:
-    return false;
+    lresult = DefWindowProc(hwnd, message, wparam, lparam);
+    break;
   }
-
-  *result = 0;
-  return true;
+  return lresult;
 }
 
 template <typename charT>
@@ -161,31 +160,18 @@ void MakeBitmapOpaque(const SkBitmap& bitmap) {
 
 }  // namespace
 
-Clipboard::FormatType::FormatType() : data_() {}
-
-Clipboard::FormatType::FormatType(UINT native_format) : data_() {
-  // There's no good way to actually initialize this in the constructor in
-  // C++03.
-  data_.cfFormat = native_format;
-  data_.dwAspect = DVASPECT_CONTENT;
-  data_.lindex = -1;
-  data_.tymed = TYMED_HGLOBAL;
+// '0' is not a valid clip board data format.
+Clipboard::FormatType::FormatType() : data_(0) {
 }
 
-Clipboard::FormatType::FormatType(UINT native_format, LONG index) : data_() {
-  // There's no good way to actually initialize this in the constructor in
-  // C++03.
-  data_.cfFormat = native_format;
-  data_.dwAspect = DVASPECT_CONTENT;
-  data_.lindex = index;
-  data_.tymed = TYMED_HGLOBAL;
+Clipboard::FormatType::FormatType(UINT native_format) : data_(native_format) {
 }
 
 Clipboard::FormatType::~FormatType() {
 }
 
 std::string Clipboard::FormatType::Serialize() const {
-  return base::IntToString(data_.cfFormat);
+  return base::IntToString(data_);
 }
 
 // static
@@ -199,21 +185,28 @@ Clipboard::FormatType Clipboard::FormatType::Deserialize(
   return FormatType(clipboard_format);
 }
 
-bool Clipboard::FormatType::operator<(const FormatType& other) const {
-  return ToUINT() < other.ToUINT();
-}
+Clipboard::Clipboard() : create_window_(false) {
+  if (MessageLoop::current()->type() == MessageLoop::TYPE_UI) {
+    // Make a dummy HWND to be the clipboard's owner.
+    WNDCLASSEX wcex = {0};
+    wcex.cbSize = sizeof(WNDCLASSEX);
+    wcex.lpfnWndProc = base::win::WrappedWindowProc<ClipboardOwnerWndProc>;
+    wcex.hInstance = GetModuleHandle(NULL);
+    wcex.lpszClassName = L"ClipboardOwnerWindowClass";
+    ::RegisterClassEx(&wcex);
+    create_window_ = true;
+  }
 
-Clipboard::Clipboard() {
-  if (base::MessageLoop::current()->type() == base::MessageLoop::TYPE_UI)
-    clipboard_owner_.reset(new base::win::MessageWindow());
+  clipboard_owner_ = NULL;
 }
 
 Clipboard::~Clipboard() {
+  if (clipboard_owner_)
+    ::DestroyWindow(clipboard_owner_);
+  clipboard_owner_ = NULL;
 }
 
-void Clipboard::WriteObjects(ClipboardType type, const ObjectMap& objects) {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
-
+void Clipboard::WriteObjects(const ObjectMap& objects) {
   ScopedClipboard clipboard;
   if (!clipboard.Acquire(GetClipboardWindow()))
     return;
@@ -227,8 +220,8 @@ void Clipboard::WriteObjects(ClipboardType type, const ObjectMap& objects) {
 }
 
 void Clipboard::WriteText(const char* text_data, size_t text_len) {
-  base::string16 text;
-  base::UTF8ToUTF16(text_data, text_len, &text);
+  string16 text;
+  UTF8ToUTF16(text_data, text_len, &text);
   HGLOBAL glob = CreateGlobalData(text);
 
   WriteToClipboard(CF_UNICODETEXT, glob);
@@ -247,11 +240,7 @@ void Clipboard::WriteHTML(const char* markup_data,
   std::string html_fragment = ClipboardUtil::HtmlToCFHtml(markup, url);
   HGLOBAL glob = CreateGlobalData(html_fragment);
 
-  WriteToClipboard(Clipboard::GetHtmlFormatType().ToUINT(), glob);
-}
-
-void Clipboard::WriteRTF(const char* rtf_data, size_t data_len) {
-  WriteData(GetRtfFormatType(), rtf_data, data_len);
+  WriteToClipboard(ClipboardUtil::GetHtmlFormat()->cfFormat, glob);
 }
 
 void Clipboard::WriteBookmark(const char* title_data,
@@ -262,18 +251,20 @@ void Clipboard::WriteBookmark(const char* title_data,
   bookmark.append(1, L'\n');
   bookmark.append(url_data, url_len);
 
-  base::string16 wide_bookmark = base::UTF8ToWide(bookmark);
+  string16 wide_bookmark = UTF8ToWide(bookmark);
   HGLOBAL glob = CreateGlobalData(wide_bookmark);
 
-  WriteToClipboard(GetUrlWFormatType().ToUINT(), glob);
+  WriteToClipboard(ClipboardUtil::GetUrlWFormat()->cfFormat, glob);
 }
 
 void Clipboard::WriteWebSmartPaste() {
-  DCHECK(clipboard_owner_->hwnd() != NULL);
-  ::SetClipboardData(GetWebKitSmartPasteFormatType().ToUINT(), NULL);
+  DCHECK(clipboard_owner_);
+  ::SetClipboardData(ClipboardUtil::GetWebKitSmartPasteFormat()->cfFormat,
+                     NULL);
 }
 
-void Clipboard::WriteBitmap(const SkBitmap& bitmap) {
+void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
+  const gfx::Size* size = reinterpret_cast<const gfx::Size*>(size_data);
   HDC dc = ::GetDC(NULL);
 
   // This doesn't actually cost us a memcpy when the bitmap comes from the
@@ -283,8 +274,8 @@ void Clipboard::WriteBitmap(const SkBitmap& bitmap) {
   // TODO(darin): share data in gfx/bitmap_header.cc somehow
   BITMAPINFO bm_info = {0};
   bm_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  bm_info.bmiHeader.biWidth = bitmap.width();
-  bm_info.bmiHeader.biHeight = -bitmap.height();  // sets vertical orientation
+  bm_info.bmiHeader.biWidth = size->width();
+  bm_info.bmiHeader.biHeight = -size->height();  // sets vertical orientation
   bm_info.bmiHeader.biPlanes = 1;
   bm_info.bmiHeader.biBitCount = 32;
   bm_info.bmiHeader.biCompression = BI_RGB;
@@ -297,15 +288,11 @@ void Clipboard::WriteBitmap(const SkBitmap& bitmap) {
       ::CreateDIBSection(dc, &bm_info, DIB_RGB_COLORS, &bits, NULL, 0);
 
   if (bits && source_hbitmap) {
-    {
-      SkAutoLockPixels bitmap_lock(bitmap);
-      // Copy the bitmap out of shared memory and into GDI
-      memcpy(bits, bitmap.getPixels(), bitmap.getSize());
-    }
+    // Copy the bitmap out of shared memory and into GDI
+    memcpy(bits, pixel_data, 4 * size->width() * size->height());
 
     // Now we have an HBITMAP, we can write it to the clipboard
-    WriteBitmapFromHandle(source_hbitmap,
-                          gfx::Size(bitmap.width(), bitmap.height()));
+    WriteBitmapFromHandle(source_hbitmap, *size);
   }
 
   ::DeleteObject(source_hbitmap);
@@ -367,50 +354,41 @@ void Clipboard::WriteData(const FormatType& format,
 }
 
 void Clipboard::WriteToClipboard(unsigned int format, HANDLE handle) {
-  DCHECK(clipboard_owner_->hwnd() != NULL);
+  DCHECK(clipboard_owner_);
   if (handle && !::SetClipboardData(format, handle)) {
     DCHECK(ERROR_CLIPBOARD_NOT_OPEN != GetLastError());
     FreeData(format, handle);
   }
 }
 
-uint64 Clipboard::GetSequenceNumber(ClipboardType type) {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
+uint64 Clipboard::GetSequenceNumber(Buffer buffer) {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
   return ::GetClipboardSequenceNumber();
 }
 
 bool Clipboard::IsFormatAvailable(const Clipboard::FormatType& format,
-                                  ClipboardType type) const {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
+                                  Clipboard::Buffer buffer) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
   return ::IsClipboardFormatAvailable(format.ToUINT()) != FALSE;
 }
 
-void Clipboard::Clear(ClipboardType type) {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
-  ScopedClipboard clipboard;
-  if (!clipboard.Acquire(GetClipboardWindow()))
-    return;
-
-  ::EmptyClipboard();
-}
-
-void Clipboard::ReadAvailableTypes(ClipboardType type,
-                                   std::vector<base::string16>* types,
+void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
+                                   std::vector<string16>* types,
                                    bool* contains_filenames) const {
   if (!types || !contains_filenames) {
     NOTREACHED();
     return;
   }
 
+  const FORMATETC* textFormat = ClipboardUtil::GetPlainTextFormat();
+  const FORMATETC* htmlFormat = ClipboardUtil::GetHtmlFormat();
   types->clear();
-  if (::IsClipboardFormatAvailable(GetPlainTextFormatType().ToUINT()))
-    types->push_back(base::UTF8ToUTF16(kMimeTypeText));
-  if (::IsClipboardFormatAvailable(GetHtmlFormatType().ToUINT()))
-    types->push_back(base::UTF8ToUTF16(kMimeTypeHTML));
-  if (::IsClipboardFormatAvailable(GetRtfFormatType().ToUINT()))
-    types->push_back(base::UTF8ToUTF16(kMimeTypeRTF));
+  if (::IsClipboardFormatAvailable(textFormat->cfFormat))
+    types->push_back(UTF8ToUTF16(kMimeTypeText));
+  if (::IsClipboardFormatAvailable(htmlFormat->cfFormat))
+    types->push_back(UTF8ToUTF16(kMimeTypeHTML));
   if (::IsClipboardFormatAvailable(CF_DIB))
-    types->push_back(base::UTF8ToUTF16(kMimeTypePNG));
+    types->push_back(UTF8ToUTF16(kMimeTypePNG));
   *contains_filenames = false;
 
   // Acquire the clipboard.
@@ -418,7 +396,8 @@ void Clipboard::ReadAvailableTypes(ClipboardType type,
   if (!clipboard.Acquire(GetClipboardWindow()))
     return;
 
-  HANDLE hdata = ::GetClipboardData(GetWebCustomDataFormatType().ToUINT());
+  HANDLE hdata = ::GetClipboardData(
+      ClipboardUtil::GetWebCustomDataFormat()->cfFormat);
   if (!hdata)
     return;
 
@@ -426,8 +405,8 @@ void Clipboard::ReadAvailableTypes(ClipboardType type,
   ::GlobalUnlock(hdata);
 }
 
-void Clipboard::ReadText(ClipboardType type, base::string16* result) const {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
+void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
   if (!result) {
     NOTREACHED();
     return;
@@ -444,12 +423,13 @@ void Clipboard::ReadText(ClipboardType type, base::string16* result) const {
   if (!data)
     return;
 
-  result->assign(static_cast<const base::char16*>(::GlobalLock(data)));
+  result->assign(static_cast<const char16*>(::GlobalLock(data)));
   ::GlobalUnlock(data);
 }
 
-void Clipboard::ReadAsciiText(ClipboardType type, std::string* result) const {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
+void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
+                              std::string* result) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
   if (!result) {
     NOTREACHED();
     return;
@@ -470,12 +450,10 @@ void Clipboard::ReadAsciiText(ClipboardType type, std::string* result) const {
   ::GlobalUnlock(data);
 }
 
-void Clipboard::ReadHTML(ClipboardType type,
-                         base::string16* markup,
-                         std::string* src_url,
-                         uint32* fragment_start,
+void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
+                         std::string* src_url, uint32* fragment_start,
                          uint32* fragment_end) const {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   markup->clear();
   // TODO(dcheng): Remove these checks, I don't think they should be optional.
@@ -490,7 +468,7 @@ void Clipboard::ReadHTML(ClipboardType type,
   if (!clipboard.Acquire(GetClipboardWindow()))
     return;
 
-  HANDLE data = ::GetClipboardData(GetHtmlFormatType().ToUINT());
+  HANDLE data = ::GetClipboardData(ClipboardUtil::GetHtmlFormat()->cfFormat);
   if (!data)
     return;
 
@@ -510,26 +488,22 @@ void Clipboard::ReadHTML(ClipboardType type,
       html_start == std::string::npos)
     return;
 
-  if (start_index < html_start || end_index < start_index)
-    return;
+  DCHECK_GE(start_index, html_start);
+  DCHECK_GE(end_index, html_start);
+  DCHECK((start_index - html_start) <= kuint32max);
+  DCHECK((end_index - html_start) <= kuint32max);
 
   std::vector<size_t> offsets;
   offsets.push_back(start_index - html_start);
   offsets.push_back(end_index - html_start);
-  markup->assign(base::UTF8ToUTF16AndAdjustOffsets(cf_html.data() + html_start,
-                                                   &offsets));
-  *fragment_start = base::checked_numeric_cast<uint32>(offsets[0]);
-  *fragment_end = base::checked_numeric_cast<uint32>(offsets[1]);
+  markup->assign(UTF8ToUTF16AndAdjustOffsets(cf_html.data() + html_start,
+                                             &offsets));
+  *fragment_start = static_cast<uint32>(offsets[0]);
+  *fragment_end = static_cast<uint32>(offsets[1]);
 }
 
-void Clipboard::ReadRTF(ClipboardType type, std::string* result) const {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
-
-  ReadData(GetRtfFormatType(), result);
-}
-
-SkBitmap Clipboard::ReadImage(ClipboardType type) const {
-  DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
+SkBitmap Clipboard::ReadImage(Buffer buffer) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   // Acquire the clipboard.
   ScopedClipboard clipboard;
@@ -564,10 +538,9 @@ SkBitmap Clipboard::ReadImage(ClipboardType type) const {
   const void* bitmap_bits = reinterpret_cast<const char*>(bitmap)
       + bitmap->bmiHeader.biSize + color_table_length * sizeof(RGBQUAD);
 
-  gfx::Canvas canvas(gfx::Size(bitmap->bmiHeader.biWidth,
-                               bitmap->bmiHeader.biHeight),
-                     1.0f,
-                     false);
+  gfx::CanvasSkia canvas(gfx::Size(bitmap->bmiHeader.biWidth,
+                                   bitmap->bmiHeader.biHeight),
+                         false);
   {
     skia::ScopedPlatformPaint scoped_platform_paint(canvas.sk_canvas());
     HDC dc = scoped_platform_paint.GetPlatformSurface();
@@ -595,20 +568,21 @@ SkBitmap Clipboard::ReadImage(ClipboardType type) const {
     }
   }
 
-  return canvas.ExtractImageRep().sk_bitmap();
+  return canvas.ExtractBitmap();
 }
 
-void Clipboard::ReadCustomData(ClipboardType clipboard_type,
-                               const base::string16& type,
-                               base::string16* result) const {
-  DCHECK_EQ(clipboard_type, CLIPBOARD_TYPE_COPY_PASTE);
+void Clipboard::ReadCustomData(Buffer buffer,
+                               const string16& type,
+                               string16* result) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
 
   // Acquire the clipboard.
   ScopedClipboard clipboard;
   if (!clipboard.Acquire(GetClipboardWindow()))
     return;
 
-  HANDLE hdata = ::GetClipboardData(GetWebCustomDataFormatType().ToUINT());
+  HANDLE hdata = ::GetClipboardData(
+      ClipboardUtil::GetWebCustomDataFormat()->cfFormat);
   if (!hdata)
     return;
 
@@ -616,7 +590,7 @@ void Clipboard::ReadCustomData(ClipboardType clipboard_type,
   ::GlobalUnlock(hdata);
 }
 
-void Clipboard::ReadBookmark(base::string16* title, std::string* url) const {
+void Clipboard::ReadBookmark(string16* title, std::string* url) const {
   if (title)
     title->clear();
 
@@ -628,14 +602,61 @@ void Clipboard::ReadBookmark(base::string16* title, std::string* url) const {
   if (!clipboard.Acquire(GetClipboardWindow()))
     return;
 
-  HANDLE data = ::GetClipboardData(GetUrlWFormatType().ToUINT());
+  HANDLE data = ::GetClipboardData(ClipboardUtil::GetUrlWFormat()->cfFormat);
   if (!data)
     return;
 
-  base::string16 bookmark(static_cast<const base::char16*>(::GlobalLock(data)));
+  string16 bookmark(static_cast<const char16*>(::GlobalLock(data)));
   ::GlobalUnlock(data);
 
   ParseBookmarkClipboardFormat(bookmark, title, url);
+}
+
+// Read a file in HDROP format from the clipboard.
+void Clipboard::ReadFile(FilePath* file) const {
+  if (!file) {
+    NOTREACHED();
+    return;
+  }
+
+  *file = FilePath();
+  std::vector<FilePath> files;
+  ReadFiles(&files);
+
+  // Take the first file, if available.
+  if (!files.empty())
+    *file = files[0];
+}
+
+// Read a set of files in HDROP format from the clipboard.
+void Clipboard::ReadFiles(std::vector<FilePath>* files) const {
+  if (!files) {
+    NOTREACHED();
+    return;
+  }
+
+  files->clear();
+
+  ScopedClipboard clipboard;
+  if (!clipboard.Acquire(GetClipboardWindow()))
+    return;
+
+  HDROP drop = static_cast<HDROP>(::GetClipboardData(CF_HDROP));
+  if (!drop)
+    return;
+
+  // Count of files in the HDROP.
+  int count = ::DragQueryFile(drop, 0xffffffff, NULL, 0);
+
+  if (count) {
+    for (int i = 0; i < count; ++i) {
+      UINT size = ::DragQueryFile(drop, i, NULL, 0) + 1;
+      DCHECK_GT(size, 1u);
+      std::wstring file;
+      ::DragQueryFile(drop, i, WriteInto(&file, size), size);
+      files->push_back(FilePath(file));
+    }
+  }
 }
 
 void Clipboard::ReadData(const FormatType& format, std::string* result) const {
@@ -658,10 +679,10 @@ void Clipboard::ReadData(const FormatType& format, std::string* result) const {
 }
 
 // static
-void Clipboard::ParseBookmarkClipboardFormat(const base::string16& bookmark,
-                                             base::string16* title,
+void Clipboard::ParseBookmarkClipboardFormat(const string16& bookmark,
+                                             string16* title,
                                              std::string* url) {
-  const base::string16 kDelim = base::ASCIIToUTF16("\r\n");
+  const string16 kDelim = ASCIIToUTF16("\r\n");
 
   const size_t title_end = bookmark.find_first_of(kDelim);
   if (title)
@@ -669,10 +690,8 @@ void Clipboard::ParseBookmarkClipboardFormat(const base::string16& bookmark,
 
   if (url) {
     const size_t url_start = bookmark.find_first_not_of(kDelim, title_end);
-    if (url_start != base::string16::npos) {
-      *url = base::UTF16ToUTF8(
-          bookmark.substr(url_start, base::string16::npos));
-    }
+    if (url_start != string16::npos)
+      *url = UTF16ToUTF8(bookmark.substr(url_start, string16::npos));
   }
 }
 
@@ -680,53 +699,70 @@ void Clipboard::ParseBookmarkClipboardFormat(const base::string16& bookmark,
 Clipboard::FormatType Clipboard::GetFormatType(
     const std::string& format_string) {
   return FormatType(
-      ::RegisterClipboardFormat(base::ASCIIToWide(format_string).c_str()));
+      ::RegisterClipboardFormat(ASCIIToWide(format_string).c_str()));
 }
 
 // static
+// TODO(dcheng): Just substitue the appropriate constants here.
 const Clipboard::FormatType& Clipboard::GetUrlFormatType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(CFSTR_INETURLA)));
+      FormatType,
+      type,
+      (ClipboardUtil::GetUrlFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetUrlWFormatType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(CFSTR_INETURLW)));
+      FormatType,
+      type,
+      (ClipboardUtil::GetUrlWFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetMozUrlFormatType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(L"text/x-moz-url")));
+      FormatType,
+      type,
+      (ClipboardUtil::GetMozUrlFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetPlainTextFormatType() {
-  CR_DEFINE_STATIC_LOCAL(FormatType, type, (CF_TEXT));
+  CR_DEFINE_STATIC_LOCAL(
+      FormatType,
+      type,
+      (ClipboardUtil::GetPlainTextFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetPlainTextWFormatType() {
-  CR_DEFINE_STATIC_LOCAL(FormatType, type, (CF_UNICODETEXT));
+  CR_DEFINE_STATIC_LOCAL(
+      FormatType,
+      type,
+      (ClipboardUtil::GetPlainTextWFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetFilenameFormatType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(CFSTR_FILENAMEA)));
+      FormatType,
+      type,
+      (ClipboardUtil::GetFilenameFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetFilenameWFormatType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(CFSTR_FILENAMEW)));
+      FormatType,
+      type,
+      (ClipboardUtil::GetFilenameWFormat()->cfFormat));
   return type;
 }
 
@@ -734,15 +770,9 @@ const Clipboard::FormatType& Clipboard::GetFilenameWFormatType() {
 // static
 const Clipboard::FormatType& Clipboard::GetHtmlFormatType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(L"HTML Format")));
-  return type;
-}
-
-// MS RTF Format
-// static
-const Clipboard::FormatType& Clipboard::GetRtfFormatType() {
-  CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(L"Rich Text Format")));
+      FormatType,
+      type,
+      (ClipboardUtil::GetHtmlFormat()->cfFormat));
   return type;
 }
 
@@ -756,34 +786,36 @@ const Clipboard::FormatType& Clipboard::GetBitmapFormatType() {
 // static
 const Clipboard::FormatType& Clipboard::GetTextHtmlFormatType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(L"text/html")));
+      FormatType,
+      type,
+      (ClipboardUtil::GetTextHtmlFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetCFHDropFormatType() {
-  CR_DEFINE_STATIC_LOCAL(FormatType, type, (CF_HDROP));
+  CR_DEFINE_STATIC_LOCAL(
+      FormatType,
+      type,
+      (ClipboardUtil::GetCFHDropFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetFileDescriptorFormatType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(CFSTR_FILEDESCRIPTOR)));
+      FormatType,
+      type,
+      (ClipboardUtil::GetFileDescriptorFormat()->cfFormat));
   return type;
 }
 
 // static
-const Clipboard::FormatType& Clipboard::GetFileContentZeroFormatType() {
+const Clipboard::FormatType& Clipboard::GetFileContentFormatZeroType() {
   CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(CFSTR_FILECONTENTS), 0));
-  return type;
-}
-
-// static
-const Clipboard::FormatType& Clipboard::GetIDListFormatType() {
-  CR_DEFINE_STATIC_LOCAL(
-      FormatType, type, (::RegisterClipboardFormat(CFSTR_SHELLIDLIST)));
+      FormatType,
+      type,
+      (ClipboardUtil::GetFileContentFormatZero()->cfFormat));
   return type;
 }
 
@@ -792,26 +824,16 @@ const Clipboard::FormatType& Clipboard::GetWebKitSmartPasteFormatType() {
   CR_DEFINE_STATIC_LOCAL(
       FormatType,
       type,
-      (::RegisterClipboardFormat(L"WebKit Smart Paste Format")));
+      (ClipboardUtil::GetWebKitSmartPasteFormat()->cfFormat));
   return type;
 }
 
 // static
 const Clipboard::FormatType& Clipboard::GetWebCustomDataFormatType() {
-  // TODO(dcheng): This name is temporary. See http://crbug.com/106449.
   CR_DEFINE_STATIC_LOCAL(
       FormatType,
       type,
-      (::RegisterClipboardFormat(L"Chromium Web Custom MIME Data Format")));
-  return type;
-}
-
-// static
-const Clipboard::FormatType& Clipboard::GetPepperCustomDataFormatType() {
-  CR_DEFINE_STATIC_LOCAL(
-      FormatType,
-      type,
-      (::RegisterClipboardFormat(L"Chromium Pepper MIME Data Format")));
+      (ClipboardUtil::GetWebCustomDataFormat()->cfFormat));
   return type;
 }
 
@@ -824,13 +846,14 @@ void Clipboard::FreeData(unsigned int format, HANDLE data) {
 }
 
 HWND Clipboard::GetClipboardWindow() const {
-  if (!clipboard_owner_)
-    return NULL;
-
-  if (clipboard_owner_->hwnd() == NULL)
-    clipboard_owner_->Create(base::Bind(&ClipboardOwnerWndProc));
-
-  return clipboard_owner_->hwnd();
+  if (!clipboard_owner_ && create_window_) {
+    clipboard_owner_ = ::CreateWindow(L"ClipboardOwnerWindowClass",
+                                      L"ClipboardOwnerWindow",
+                                      0, 0, 0, 0, 0,
+                                      HWND_MESSAGE,
+                                      0, 0, 0);
+  }
+  return clipboard_owner_;
 }
 
 }  // namespace ui

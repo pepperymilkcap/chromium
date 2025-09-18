@@ -1,10 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/template_util.h"
-
-#include "base/basictypes.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -17,114 +15,71 @@ enum AnEnum {};
 class Parent {};
 class Child : public Parent {};
 
-// is_pointer<Type>
-COMPILE_ASSERT(!is_pointer<int>::value, IsPointer);
-COMPILE_ASSERT(!is_pointer<int&>::value, IsPointer);
-COMPILE_ASSERT(is_pointer<int*>::value, IsPointer);
-COMPILE_ASSERT(is_pointer<const int*>::value, IsPointer);
+TEST(TemplateUtilTest, IsPointer) {
+  EXPECT_FALSE(is_pointer<int>::value);
+  EXPECT_FALSE(is_pointer<int&>::value);
+  EXPECT_TRUE(is_pointer<int*>::value);
+  EXPECT_TRUE(is_pointer<const int*>::value);
+}
 
-// is_array<Type>
-COMPILE_ASSERT(!is_array<int>::value, IsArray);
-COMPILE_ASSERT(!is_array<int*>::value, IsArray);
-COMPILE_ASSERT(!is_array<int(*)[3]>::value, IsArray);
-COMPILE_ASSERT(is_array<int[]>::value, IsArray);
-COMPILE_ASSERT(is_array<const int[]>::value, IsArray);
-COMPILE_ASSERT(is_array<int[3]>::value, IsArray);
+TEST(TemplateUtilTest, IsArray) {
+  EXPECT_FALSE(is_array<int>::value);
+  EXPECT_FALSE(is_array<int*>::value);
+  EXPECT_FALSE(is_array<int(*)[3]>::value);
+  EXPECT_TRUE(is_array<int[]>::value);
+  EXPECT_TRUE(is_array<const int[]>::value);
+  EXPECT_TRUE(is_array<int[3]>::value);
+}
 
-// is_non_const_reference<Type>
-COMPILE_ASSERT(!is_non_const_reference<int>::value, IsNonConstReference);
-COMPILE_ASSERT(!is_non_const_reference<const int&>::value, IsNonConstReference);
-COMPILE_ASSERT(is_non_const_reference<int&>::value, IsNonConstReference);
+TEST(TemplateUtilTest, IsNonConstReference) {
+  EXPECT_FALSE(is_non_const_reference<int>::value);
+  EXPECT_FALSE(is_non_const_reference<const int&>::value);
+  EXPECT_TRUE(is_non_const_reference<int&>::value);
+}
 
-// is_convertible<From, To>
+TEST(TemplateUtilTest, IsConvertible) {
+  // Extra parens needed to make EXPECT_*'s parsing happy. Otherwise,
+  // it sees the equivalent of
+  //
+  //  EXPECT_TRUE( (is_convertible < Child), (Parent > ::value));
+  //
+  // Silly C++.
+  EXPECT_TRUE( (is_convertible<Child, Parent>::value) );
+  EXPECT_FALSE( (is_convertible<Parent, Child>::value) );
+  EXPECT_FALSE( (is_convertible<Parent, AStruct>::value) );
 
-// Extra parens needed to make preprocessor macro parsing happy. Otherwise,
-// it sees the equivalent of:
-//
-//     (is_convertible < Child), (Parent > ::value)
-//
-// Silly C++.
-COMPILE_ASSERT( (is_convertible<Child, Parent>::value), IsConvertible);
-COMPILE_ASSERT(!(is_convertible<Parent, Child>::value), IsConvertible);
-COMPILE_ASSERT(!(is_convertible<Parent, AStruct>::value), IsConvertible);
-COMPILE_ASSERT( (is_convertible<int, double>::value), IsConvertible);
-COMPILE_ASSERT( (is_convertible<int*, void*>::value), IsConvertible);
-COMPILE_ASSERT(!(is_convertible<void*, int*>::value), IsConvertible);
+  EXPECT_TRUE( (is_convertible<int, double>::value) );
+  EXPECT_TRUE( (is_convertible<int*, void*>::value) );
+  EXPECT_FALSE( (is_convertible<void*, int*>::value) );
 
-// Array types are an easy corner case.  Make sure to test that
-// it does indeed compile.
-COMPILE_ASSERT(!(is_convertible<int[10], double>::value), IsConvertible);
-COMPILE_ASSERT(!(is_convertible<double, int[10]>::value), IsConvertible);
-COMPILE_ASSERT( (is_convertible<int[10], int*>::value), IsConvertible);
+  // Array types are an easy corner case.  Make sure to test that
+  // it does indeed compile.
+  EXPECT_FALSE( (is_convertible<int[10], double>::value) );
+  EXPECT_FALSE( (is_convertible<double, int[10]>::value) );
+  EXPECT_TRUE( (is_convertible<int[10], int*>::value) );
+}
 
-// is_same<Type1, Type2>
-COMPILE_ASSERT(!(is_same<Child, Parent>::value), IsSame);
-COMPILE_ASSERT(!(is_same<Parent, Child>::value), IsSame);
-COMPILE_ASSERT( (is_same<Parent, Parent>::value), IsSame);
-COMPILE_ASSERT( (is_same<int*, int*>::value), IsSame);
-COMPILE_ASSERT( (is_same<int, int>::value), IsSame);
-COMPILE_ASSERT( (is_same<void, void>::value), IsSame);
-COMPILE_ASSERT(!(is_same<int, double>::value), IsSame);
+TEST(TemplateUtilTest, IsSame) {
+  EXPECT_FALSE( (is_same<Child, Parent>::value) );
+  EXPECT_FALSE( (is_same<Parent, Child>::value) );
+  EXPECT_TRUE( (is_same<Parent, Parent>::value) );
 
+  EXPECT_TRUE( (is_same<int*, int*>::value) );
+  EXPECT_TRUE( (is_same<int, int>::value) );
+  EXPECT_TRUE( (is_same<void, void>::value) );
+  EXPECT_FALSE( (is_same<int, double>::value) );
+}
 
-// is_class<Type>
-COMPILE_ASSERT(is_class<AStruct>::value, IsClass);
-COMPILE_ASSERT(is_class<AClass>::value, IsClass);
-COMPILE_ASSERT(!is_class<AnEnum>::value, IsClass);
-COMPILE_ASSERT(!is_class<int>::value, IsClass);
-COMPILE_ASSERT(!is_class<char*>::value, IsClass);
-COMPILE_ASSERT(!is_class<int&>::value, IsClass);
-COMPILE_ASSERT(!is_class<char[3]>::value, IsClass);
+TEST(TemplateUtilTest, IsClass) {
+  EXPECT_TRUE(is_class<AStruct>::value);
+  EXPECT_TRUE(is_class<AClass>::value);
 
-
-COMPILE_ASSERT(!is_member_function_pointer<int>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(!is_member_function_pointer<int*>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(!is_member_function_pointer<void*>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(!is_member_function_pointer<AStruct>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(!is_member_function_pointer<AStruct*>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(!is_member_function_pointer<int(*)(int)>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(!is_member_function_pointer<int(*)(int, int)>::value,
-               IsMemberFunctionPointer);
-
-COMPILE_ASSERT(is_member_function_pointer<void (AStruct::*)()>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<void (AStruct::*)(int)>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<int (AStruct::*)(int)>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<int (AStruct::*)(int) const>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<int (AStruct::*)(int, int)>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<
-                 int (AStruct::*)(int, int) const>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<
-                 int (AStruct::*)(int, int, int)>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<
-                 int (AStruct::*)(int, int, int) const>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<
-                 int (AStruct::*)(int, int, int, int)>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(is_member_function_pointer<
-                 int (AStruct::*)(int, int, int, int) const>::value,
-               IsMemberFunctionPointer);
-
-// False because we don't have a specialization for 5 params yet.
-COMPILE_ASSERT(!is_member_function_pointer<
-                 int (AStruct::*)(int, int, int, int, int)>::value,
-               IsMemberFunctionPointer);
-COMPILE_ASSERT(!is_member_function_pointer<
-                 int (AStruct::*)(int, int, int, int, int) const>::value,
-               IsMemberFunctionPointer);
+  EXPECT_FALSE(is_class<AnEnum>::value);
+  EXPECT_FALSE(is_class<int>::value);
+  EXPECT_FALSE(is_class<char*>::value);
+  EXPECT_FALSE(is_class<int&>::value);
+  EXPECT_FALSE(is_class<char[3]>::value);
+}
 
 }  // namespace
 }  // namespace base

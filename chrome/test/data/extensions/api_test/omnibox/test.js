@@ -24,14 +24,9 @@ chrome.omnibox.onInputChanged.addListener(
   });
 
 chrome.omnibox.onInputEntered.addListener(
-  function(text, disposition) {
-    if (disposition == "newForegroundTab") {
-      chrome.test.assertEq("newtab" + incognitoSuffix, text);
-      chrome.test.notifyPass();
-    } else {
-      chrome.test.assertEq("command" + incognitoSuffix, text);
-      chrome.test.notifyPass();
-    }
+  function(text) {
+    chrome.test.assertEq("command" + incognitoSuffix, text);
+    chrome.test.notifyPass();
   });
 
 // Now we wait for the input events to fire.

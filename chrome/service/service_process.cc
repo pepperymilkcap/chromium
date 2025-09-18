@@ -13,9 +13,8 @@
 #include "base/i18n/rtl.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
-#include "base/prefs/json_pref_store.h"
-#include "base/strings/string16.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string16.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -27,34 +26,30 @@
 #include "chrome/service/net/service_url_request_context.h"
 #include "chrome/service/service_ipc_server.h"
 #include "chrome/service/service_process_prefs.h"
+#include "content/public/common/url_fetcher.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/network_change_notifier.h"
-#include "net/url_request/url_fetcher.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
-#if defined(OS_LINUX) || defined(OS_OPENBSD)
-#include <glib-object.h>
-#endif
-
-#if defined(TOOLKIT_GTK)
-#include <gtk/gtk.h>
+#if defined(TOOLKIT_USES_GTK)
 #include "ui/gfx/gtk_util.h"
+#include <gtk/gtk.h>
 #endif
 
 ServiceProcess* g_service_process = NULL;
 
 namespace {
 
-// Delay in seconds after the last service is disabled before we attempt
+// Delay in millseconds after the last service is disabled before we attempt
 // a shutdown.
-const int kShutdownDelaySeconds = 60;
+const int64 kShutdownDelay = 60000;
 
-// Delay in hours between launching a browser process to check the
-// policy for us.
-const int64 kPolicyCheckDelayHours = 8;
+// Delay in milliseconds between launching a browser process to check the
+// policy for us. 8 hours * 60 * 60 * 1000
+const int64 kPolicyCheckDelay = 28800000;
 
 const char kDefaultServiceProcessLocale[] = "en-US";
 
@@ -64,7 +59,7 @@ class ServiceIOThread : public base::Thread {
   virtual ~ServiceIOThread();
 
  protected:
-  virtual void CleanUp() OVERRIDE;
+  virtual void CleanUp();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ServiceIOThread);
@@ -76,7 +71,7 @@ ServiceIOThread::~ServiceIOThread() {
 }
 
 void ServiceIOThread::CleanUp() {
-  net::URLFetcher::CancelAll();
+  content::URLFetcher::CancelAll();
 }
 
 // Prepares the localized strings that are going to be displayed to
@@ -101,19 +96,18 @@ void PrepareRestartOnCrashEnviroment(
   // The encoding we use for the info is "title|context|direction" where
   // direction is either env_vars::kRtlLocale or env_vars::kLtrLocale depending
   // on the current locale.
-  base::string16 dlg_strings(
-      l10n_util::GetStringUTF16(IDS_CRASH_RECOVERY_TITLE));
+  string16 dlg_strings(l10n_util::GetStringUTF16(IDS_CRASH_RECOVERY_TITLE));
   dlg_strings.push_back('|');
-  base::string16 adjusted_string(l10n_util::GetStringFUTF16(
-      IDS_SERVICE_CRASH_RECOVERY_CONTENT,
+  string16 adjusted_string(
+      l10n_util::GetStringFUTF16(IDS_SERVICE_CRASH_RECOVERY_CONTENT,
       l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT)));
   base::i18n::AdjustStringForLocaleDirection(&adjusted_string);
   dlg_strings.append(adjusted_string);
   dlg_strings.push_back('|');
-  dlg_strings.append(base::ASCIIToUTF16(
+  dlg_strings.append(ASCIIToUTF16(
       base::i18n::IsRTL() ? env_vars::kRtlLocale : env_vars::kLtrLocale));
 
-  env->SetVar(env_vars::kRestartInfo, base::UTF16ToUTF8(dlg_strings));
+  env->SetVar(env_vars::kRestartInfo, UTF16ToUTF8(dlg_strings));
 }
 
 }  // namespace
@@ -127,10 +121,10 @@ ServiceProcess::ServiceProcess()
   g_service_process = this;
 }
 
-bool ServiceProcess::Initialize(base::MessageLoopForUI* message_loop,
+bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
                                 const CommandLine& command_line,
                                 ServiceProcessState* state) {
-#if defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_USES_GTK)
   // TODO(jamiewalch): Calling GtkInitFromCommandLine here causes the process
   // to abort if run headless. The correct fix for this is to refactor the
   // service process to be more modular, a task that is currently underway.
@@ -138,24 +132,18 @@ bool ServiceProcess::Initialize(base::MessageLoopForUI* message_loop,
   // hack will have to do. Note that the situation with this hack in place is
   // no worse than it was when we weren't initializing GTK at all.
   int argc = 1;
-  scoped_ptr<char*[]> argv(new char*[2]);
+  scoped_array<char*> argv(new char*[2]);
   argv[0] = strdup(command_line.argv()[0].c_str());
   argv[1] = NULL;
   char **argv_pointer = argv.get();
   gtk_init_check(&argc, &argv_pointer);
   free(argv[0]);
-#elif defined(OS_LINUX) || defined(OS_OPENBSD)
-  // g_type_init has been deprecated since version 2.35.
-#if !GLIB_CHECK_VERSION(2, 35, 0)
-  // GLib type system initialization is needed for gconf.
-  g_type_init();
 #endif
-#endif // defined(OS_LINUX) || defined(OS_OPENBSD)
   main_message_loop_ = message_loop;
   service_process_state_.reset(state);
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   base::Thread::Options options;
-  options.message_loop_type = base::MessageLoop::TYPE_IO;
+  options.message_loop_type = MessageLoop::TYPE_IO;
   io_thread_.reset(new ServiceIOThread("ServiceProcess_IO"));
   file_thread_.reset(new base::Thread("ServiceProcess_File"));
   if (!io_thread_->StartWithOptions(options) ||
@@ -164,23 +152,20 @@ bool ServiceProcess::Initialize(base::MessageLoopForUI* message_loop,
     Teardown();
     return false;
   }
-  blocking_pool_ = new base::SequencedWorkerPool(3, "ServiceBlocking");
 
   request_context_getter_ = new ServiceURLRequestContextGetter();
 
-  base::FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  base::FilePath pref_path =
-      user_data_dir.Append(chrome::kServiceStateFileName);
-  service_prefs_.reset(new ServiceProcessPrefs(
-      pref_path,
-      JsonPrefStore::GetTaskRunnerForFile(pref_path, blocking_pool_.get())
-          .get()));
-  service_prefs_->ReadPrefs();
+  // See if we have been suppiled an LSID in the command line. This LSID will
+  // override the credentials we use for Cloud Print.
+  std::string lsid = command_line.GetSwitchValueASCII(
+          switches::kServiceAccountLsid);
 
-  // This switch it required to run connector with test gaia.
-  if (command_line.HasSwitch(switches::kIgnoreUrlFetcherCertRequests))
-    net::URLFetcher::SetIgnoreCertificateRequests(true);
+  FilePath user_data_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  FilePath pref_path = user_data_dir.Append(chrome::kServiceStateFileName);
+  service_prefs_.reset(
+      new ServiceProcessPrefs(pref_path, file_thread_->message_loop_proxy()));
+  service_prefs_->ReadPrefs();
 
   // Check if a locale override has been specified on the command-line.
   std::string locale = command_line.GetSwitchValueASCII(switches::kLang);
@@ -190,21 +175,36 @@ bool ServiceProcess::Initialize(base::MessageLoopForUI* message_loop,
   } else {
     // If no command-line value was specified, read the last used locale from
     // the prefs.
-    locale =
-        service_prefs_->GetString(prefs::kApplicationLocale, std::string());
+    service_prefs_->GetString(prefs::kApplicationLocale, &locale);
     // If no locale was specified anywhere, use the default one.
     if (locale.empty())
       locale = kDefaultServiceProcessLocale;
   }
-  ResourceBundle::InitSharedInstanceWithLocale(locale, NULL);
+  ResourceBundle::InitSharedInstanceWithLocale(locale);
 
   PrepareRestartOnCrashEnviroment(command_line);
 
   // Enable Cloud Print if needed. First check the command-line.
-  // Then check if the cloud print proxy was previously enabled.
-  if (command_line.HasSwitch(switches::kEnableCloudPrintProxy) ||
-      service_prefs_->GetBoolean(prefs::kCloudPrintProxyEnabled, false)) {
-    GetCloudPrintProxy()->EnableForUser();
+  bool cloud_print_proxy_enabled =
+      command_line.HasSwitch(switches::kEnableCloudPrintProxy);
+  if (!cloud_print_proxy_enabled) {
+    // Then check if the cloud print proxy was previously enabled.
+    service_prefs_->GetBoolean(prefs::kCloudPrintProxyEnabled,
+                               &cloud_print_proxy_enabled);
+  }
+
+  if (cloud_print_proxy_enabled) {
+    GetCloudPrintProxy()->EnableForUser(lsid);
+  }
+  // Enable Virtual Printer Driver if needed.
+  bool virtual_printer_driver_enabled = false;
+  service_prefs_->GetBoolean(prefs::kVirtualPrinterDriverEnabled,
+                             &virtual_printer_driver_enabled);
+
+  if (virtual_printer_driver_enabled) {
+    // Register the fact that there is at least one
+    // service needing the process.
+    OnServiceEnabled();
   }
 
   VLOG(1) << "Starting Service Process IPC Server";
@@ -215,8 +215,8 @@ bool ServiceProcess::Initialize(base::MessageLoopForUI* message_loop,
   // After the IPC server has started we signal that the service process is
   // ready.
   if (!service_process_state_->SignalReady(
-          io_thread_->message_loop_proxy().get(),
-          base::Bind(&ServiceProcess::Terminate, base::Unretained(this)))) {
+      io_thread_->message_loop_proxy(),
+      base::Bind(&ServiceProcess::Terminate, base::Unretained(this)))) {
     return false;
   }
 
@@ -239,17 +239,6 @@ bool ServiceProcess::Teardown() {
   shutdown_event_.Signal();
   io_thread_.reset();
   file_thread_.reset();
-
-  if (blocking_pool_.get()) {
-    // The goal is to make it impossible for chrome to 'infinite loop' during
-    // shutdown, but to reasonably expect that all BLOCKING_SHUTDOWN tasks
-    // queued during shutdown get run. There's nothing particularly scientific
-    // about the number chosen.
-    const int kMaxNewShutdownBlockingTasks = 1000;
-    blocking_pool_->Shutdown(kMaxNewShutdownBlockingTasks);
-    blocking_pool_ = NULL;
-  }
-
   // The NetworkChangeNotifier must be destroyed after all other threads that
   // might use it have been shut down.
   network_change_notifier_.reset();
@@ -278,7 +267,7 @@ void ServiceProcess::Shutdown() {
 }
 
 void ServiceProcess::Terminate() {
-  main_message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  main_message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 bool ServiceProcess::HandleClientDisconnect() {
@@ -292,9 +281,9 @@ bool ServiceProcess::HandleClientDisconnect() {
   return true;
 }
 
-cloud_print::CloudPrintProxy* ServiceProcess::GetCloudPrintProxy() {
+CloudPrintProxy* ServiceProcess::GetCloudPrintProxy() {
   if (!cloud_print_proxy_.get()) {
-    cloud_print_proxy_.reset(new cloud_print::CloudPrintProxy());
+    cloud_print_proxy_.reset(new CloudPrintProxy());
     cloud_print_proxy_->Initialize(service_prefs_.get(), this);
   }
   return cloud_print_proxy_.get();
@@ -316,6 +305,20 @@ void ServiceProcess::OnCloudPrintProxyDisabled(bool persist_state) {
     service_prefs_->WritePrefs();
   }
   OnServiceDisabled();
+}
+
+void ServiceProcess::EnableVirtualPrintDriver() {
+  OnServiceEnabled();
+  // Save the preference that we have enabled the virtual driver.
+  service_prefs_->SetBoolean(prefs::kVirtualPrinterDriverEnabled, true);
+  service_prefs_->WritePrefs();
+}
+
+void ServiceProcess::DisableVirtualPrintDriver() {
+  OnServiceDisabled();
+  // Save the preference that we have disabled the virtual driver.
+  service_prefs_->SetBoolean(prefs::kVirtualPrinterDriverEnabled, false);
+  service_prefs_->WritePrefs();
 }
 
 ServiceURLRequestContextGetter*
@@ -350,10 +353,10 @@ void ServiceProcess::OnServiceDisabled() {
 }
 
 void ServiceProcess::ScheduleShutdownCheck() {
-  base::MessageLoop::current()->PostDelayedTask(
+  MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ServiceProcess::ShutdownIfNeeded, base::Unretained(this)),
-      base::TimeDelta::FromSeconds(kShutdownDelaySeconds));
+      kShutdownDelay);
 }
 
 void ServiceProcess::ShutdownIfNeeded() {
@@ -371,11 +374,11 @@ void ServiceProcess::ShutdownIfNeeded() {
 }
 
 void ServiceProcess::ScheduleCloudPrintPolicyCheck() {
-  base::MessageLoop::current()->PostDelayedTask(
+  MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ServiceProcess::CloudPrintPolicyCheckIfNeeded,
                  base::Unretained(this)),
-      base::TimeDelta::FromHours(kPolicyCheckDelayHours));
+      kPolicyCheckDelay);
 }
 
 void ServiceProcess::CloudPrintPolicyCheckIfNeeded() {

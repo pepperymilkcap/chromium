@@ -41,6 +41,7 @@
 #include <google/protobuf/message_lite.h>
 #include <google/protobuf/repeated_field.h>
 #include <google/protobuf/wire_format_lite.h>
+#include <google/protobuf/generated_message_util.h>
 #include <google/protobuf/io/coded_stream.h>
 
 
@@ -299,12 +300,12 @@ inline bool WireFormatLite::ReadRepeatedPrimitive<                             \
       tag_size, tag, input, values);                                           \
 }
 
-READ_REPEATED_FIXED_SIZE_PRIMITIVE(uint32, TYPE_FIXED32)
-READ_REPEATED_FIXED_SIZE_PRIMITIVE(uint64, TYPE_FIXED64)
-READ_REPEATED_FIXED_SIZE_PRIMITIVE(int32, TYPE_SFIXED32)
-READ_REPEATED_FIXED_SIZE_PRIMITIVE(int64, TYPE_SFIXED64)
-READ_REPEATED_FIXED_SIZE_PRIMITIVE(float, TYPE_FLOAT)
-READ_REPEATED_FIXED_SIZE_PRIMITIVE(double, TYPE_DOUBLE)
+READ_REPEATED_FIXED_SIZE_PRIMITIVE(uint32, TYPE_FIXED32);
+READ_REPEATED_FIXED_SIZE_PRIMITIVE(uint64, TYPE_FIXED64);
+READ_REPEATED_FIXED_SIZE_PRIMITIVE(int32, TYPE_SFIXED32);
+READ_REPEATED_FIXED_SIZE_PRIMITIVE(int64, TYPE_SFIXED64);
+READ_REPEATED_FIXED_SIZE_PRIMITIVE(float, TYPE_FLOAT);
+READ_REPEATED_FIXED_SIZE_PRIMITIVE(double, TYPE_DOUBLE);
 
 #undef READ_REPEATED_FIXED_SIZE_PRIMITIVE
 
@@ -748,7 +749,8 @@ inline int WireFormatLite::GroupSize(const MessageLite& value) {
   return value.ByteSize();
 }
 inline int WireFormatLite::MessageSize(const MessageLite& value) {
-  return LengthDelimitedSize(value.ByteSize());
+  int size = value.ByteSize();
+  return io::CodedOutputStream::VarintSize32(size) + size;
 }
 
 // See comment on ReadGroupNoVirtual to understand the need for this template
@@ -761,12 +763,8 @@ inline int WireFormatLite::GroupSizeNoVirtual(
 template<typename MessageType_WorkAroundCppLookupDefect>
 inline int WireFormatLite::MessageSizeNoVirtual(
     const MessageType_WorkAroundCppLookupDefect& value) {
-  return LengthDelimitedSize(
-      value.MessageType_WorkAroundCppLookupDefect::ByteSize());
-}
-
-inline int WireFormatLite::LengthDelimitedSize(int length) {
-  return io::CodedOutputStream::VarintSize32(length) + length;
+  int size = value.MessageType_WorkAroundCppLookupDefect::ByteSize();
+  return io::CodedOutputStream::VarintSize32(size) + size;
 }
 
 }  // namespace internal

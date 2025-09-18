@@ -10,7 +10,6 @@
 #else
 #define OS_POSIX 1
 #include <errno.h>
-#include <unistd.h>
 #endif
 
 #include <cstdio>
@@ -58,26 +57,13 @@ PlatformFile IntToPlatformFile(int32_t handle) {
 }
 
 #if defined(OS_POSIX)
-
 #define HANDLE_EINTR(x) ({ \
-  typeof(x) eintr_wrapper_result; \
+  typeof(x) __eintr_result__; \
   do { \
-    eintr_wrapper_result = (x); \
-  } while (eintr_wrapper_result == -1 && errno == EINTR); \
-  eintr_wrapper_result; \
+    __eintr_result__ = x; \
+  } while (__eintr_result__ == -1 && errno == EINTR); \
+  __eintr_result__;\
 })
-
-#define IGNORE_EINTR(x) ({ \
-  typeof(x) eintr_wrapper_result; \
-  do { \
-    eintr_wrapper_result = (x); \
-    if (eintr_wrapper_result == -1 && errno == EINTR) { \
-      eintr_wrapper_result = 0; \
-    } \
-  } while (0); \
-  eintr_wrapper_result; \
-})
-
 #endif
 
 bool ReadMessage(PlatformFile file, size_t message_len, char* message) {
@@ -134,7 +120,7 @@ bool ClosePlatformFile(PlatformFile file) {
 #if defined(OS_WIN)
   return !!::CloseHandle(file);
 #elif defined(OS_POSIX)
-  return !IGNORE_EINTR(::close(file));
+  return !HANDLE_EINTR(::close(file));
 #endif
 }
 
@@ -160,7 +146,7 @@ bool VerifyIsUnsandboxed() {
   if (-1 == fd)
     return false;
 
-  if (IGNORE_EINTR(::close(fd))) {
+  if (HANDLE_EINTR(::close(fd))) {
     ::remove(file_name);
     return false;
   }
@@ -225,23 +211,12 @@ void TestBroker::RunTests(const std::string& filter) {
   RUN_TEST(Create, filter);
   RUN_TEST(Create, filter);
   RUN_TEST(GetHandleFailure, filter);
-  RUN_TEST_FORCEASYNC_AND_NOT(ConnectFailure, filter);
-  RUN_TEST_FORCEASYNC_AND_NOT(ConnectAndPipe, filter);
-
-  // The following tests require special setup, so only run them if they're
-  // explicitly specified by the filter.
-  if (!ShouldRunAllTests(filter)) {
-    RUN_TEST(ConnectPermissionDenied, filter);
-    RUN_TEST(ConnectPermissionGranted, filter);
-    RUN_TEST(IsAllowedPermissionDenied, filter);
-    RUN_TEST(IsAllowedPermissionGranted, filter);
-  }
+  RUN_TEST(ConnectFailure, filter);
+  RUN_TEST(ConnectAndPipe, filter);
 }
 
 std::string TestBroker::TestCreate() {
   // Very simplistic test to make sure we can create a broker interface.
-  // TODO(raymes): All of the resources created in this file are leaked. Write
-  // a C++ wrapper for PPB_Broker_Trusted to avoid these leaks.
   PP_Resource broker = broker_interface_->CreateTrusted(
       instance_->pp_instance());
   ASSERT_TRUE(broker);
@@ -254,11 +229,20 @@ std::string TestBroker::TestCreate() {
 
 // Test connection on invalid resource.
 std::string TestBroker::TestConnectFailure() {
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
-  callback.WaitForResult(broker_interface_->Connect(0,
-      callback.GetCallback().pp_completion_callback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_ERROR_BADRESOURCE, callback.result());
+  // Callback NOT force async. Connect should fail.  The callback will not be
+  // posted so there's no need to wait for the callback to complete.
+  TestCompletionCallback cb_1(instance_->pp_instance(), false);
+  ASSERT_EQ(PP_ERROR_BADRESOURCE,
+            broker_interface_->Connect(
+                0, pp::CompletionCallback(cb_1).pp_completion_callback()));
+
+  // Callback force async. Connect will return PP_OK_COMPLETIONPENDING and the
+  // callback will be posted.  However, the callback should fail.
+  TestCompletionCallback cb_2(instance_->pp_instance(), true);
+  ASSERT_EQ(PP_OK_COMPLETIONPENDING,
+            broker_interface_->Connect(
+                0, pp::CompletionCallback(cb_2).pp_completion_callback()));
+  ASSERT_EQ(PP_ERROR_BADRESOURCE, cb_2.WaitForResult());
 
   PASS();
 }
@@ -283,11 +267,11 @@ std::string TestBroker::TestConnectAndPipe() {
       instance_->pp_instance());
   ASSERT_TRUE(broker);
 
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
-  callback.WaitForResult(broker_interface_->Connect(broker,
-      callback.GetCallback().pp_completion_callback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
+  TestCompletionCallback cb_3(instance_->pp_instance());
+  ASSERT_EQ(PP_OK_COMPLETIONPENDING,
+            broker_interface_->Connect(
+                broker, pp::CompletionCallback(cb_3).pp_completion_callback()));
+  ASSERT_EQ(PP_OK, cb_3.WaitForResult());
 
   int32_t handle = kInvalidHandle;
   ASSERT_EQ(PP_OK, broker_interface_->GetHandle(broker, &handle));
@@ -299,54 +283,6 @@ std::string TestBroker::TestConnectAndPipe() {
                             kBrokerUnsandboxed));
 
   ASSERT_TRUE(ClosePlatformFile(file));
-
-  PASS();
-}
-
-std::string TestBroker::TestConnectPermissionDenied() {
-  // This assumes that the browser side is set up to deny access to the broker.
-  PP_Resource broker = broker_interface_->CreateTrusted(
-      instance_->pp_instance());
-  ASSERT_TRUE(broker);
-
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
-  callback.WaitForResult(broker_interface_->Connect(broker,
-      callback.GetCallback().pp_completion_callback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_ERROR_NOACCESS, callback.result());
-
-  PASS();
-}
-
-std::string TestBroker::TestConnectPermissionGranted() {
-  // This assumes that the browser side is set up to allow access to the broker.
-  PP_Resource broker = broker_interface_->CreateTrusted(
-      instance_->pp_instance());
-  ASSERT_TRUE(broker);
-
-  TestCompletionCallback callback(instance_->pp_instance(), callback_type());
-  callback.WaitForResult(broker_interface_->Connect(broker,
-      callback.GetCallback().pp_completion_callback()));
-  CHECK_CALLBACK_BEHAVIOR(callback);
-  ASSERT_EQ(PP_OK, callback.result());
-
-  PASS();
-}
-
-std::string TestBroker::TestIsAllowedPermissionDenied() {
-  PP_Resource broker = broker_interface_->CreateTrusted(
-      instance_->pp_instance());
-  ASSERT_TRUE(broker);
-  ASSERT_EQ(PP_FALSE, broker_interface_->IsAllowed(broker));
-
-  PASS();
-}
-
-std::string TestBroker::TestIsAllowedPermissionGranted() {
-  PP_Resource broker = broker_interface_->CreateTrusted(
-      instance_->pp_instance());
-  ASSERT_TRUE(broker);
-  ASSERT_EQ(PP_TRUE, broker_interface_->IsAllowed(broker));
 
   PASS();
 }

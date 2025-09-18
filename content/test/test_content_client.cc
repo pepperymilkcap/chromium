@@ -5,45 +5,72 @@
 #include "content/test/test_content_client.h"
 
 #include "base/base_paths.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 
-namespace content {
-
-TestContentClient::TestContentClient()
-    : data_pack_(ui::SCALE_FACTOR_100P) {
-  // content_resources.pak is not built on iOS as it is not required.
-#if !defined(OS_IOS)
-  base::FilePath content_resources_pack_path;
-#if defined(OS_ANDROID)
-  // on Android all pak files are inside the paks folder.
-  PathService::Get(base::DIR_ANDROID_APP_DATA, &content_resources_pack_path);
-  content_resources_pack_path = content_resources_pack_path.Append(
-      FILE_PATH_LITERAL("paks"));
-#else
+TestContentClient::TestContentClient() {
+  FilePath content_resources_pack_path;
   PathService::Get(base::DIR_MODULE, &content_resources_pack_path);
-#endif
   content_resources_pack_path = content_resources_pack_path.Append(
       FILE_PATH_LITERAL("content_resources.pak"));
-  data_pack_.LoadFromPath(content_resources_pack_path);
-#endif
+  data_pack_.Load(content_resources_pack_path);
 }
 
 TestContentClient::~TestContentClient() {
 }
 
-std::string TestContentClient::GetUserAgent() const {
+void TestContentClient::SetActiveURL(const GURL& url) {
+}
+
+void TestContentClient::SetGpuInfo(const content::GPUInfo& gpu_info) {
+}
+
+void TestContentClient::AddPepperPlugins(
+    std::vector<content::PepperPluginInfo>* plugins) {
+}
+
+void TestContentClient::AddNPAPIPlugins(
+    webkit::npapi::PluginList* plugin_list) {
+}
+
+bool TestContentClient::CanSendWhileSwappedOut(const IPC::Message* msg) {
+  // TestContentClient does not need to send any additional messages.
+  return false;
+}
+
+bool TestContentClient::CanHandleWhileSwappedOut(const IPC::Message& msg) {
+  // TestContentClient does not need to handle any additional messages.
+  return false;
+}
+
+std::string TestContentClient::GetUserAgent(bool* overriding) const {
+  *overriding = false;
   return std::string("TestContentClient");
 }
 
-base::StringPiece TestContentClient::GetDataResource(
-    int resource_id,
-    ui::ScaleFactor scale_factor) const {
+string16 TestContentClient::GetLocalizedString(int message_id) const {
+  return string16();
+}
+
+base::StringPiece TestContentClient::GetDataResource(int resource_id) const {
   base::StringPiece resource;
   data_pack_.GetStringPiece(resource_id, &resource);
   return resource;
 }
 
-}  // namespace content
+#if defined(OS_WIN)
+bool TestContentClient::SandboxPlugin(CommandLine* command_line,
+                                      sandbox::TargetPolicy* policy) {
+  return false;
+}
+#endif
+
+#if defined(OS_MACOSX)
+bool TestContentClient::GetSandboxProfileForSandboxType(
+    int sandbox_type,
+    int* sandbox_profile_resource_id) const {
+  return false;
+}
+#endif

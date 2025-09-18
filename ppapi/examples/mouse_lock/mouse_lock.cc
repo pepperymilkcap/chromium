@@ -6,7 +6,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "ppapi/c/ppb_console.h"
+#include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/ppb_input_event.h"
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
@@ -15,7 +15,6 @@
 #include "ppapi/cpp/logging.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/mouse_lock.h"
-#include "ppapi/cpp/private/flash_fullscreen.h"
 #include "ppapi/cpp/rect.h"
 #include "ppapi/cpp/var.h"
 #include "ppapi/utility/completion_callback_factory.h"
@@ -31,14 +30,13 @@ class MyInstance : public pp::Instance, public pp::MouseLock {
         pending_paint_(false),
         waiting_for_flush_completion_(false),
         callback_factory_(this),
-        console_(NULL),
-        flash_fullscreen_(this) {
+        console_(NULL) {
   }
   virtual ~MyInstance() {}
 
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]) {
-    console_ = reinterpret_cast<const PPB_Console*>(
-        pp::Module::Get()->GetBrowserInterface(PPB_CONSOLE_INTERFACE));
+    console_ = reinterpret_cast<const PPB_Console_Dev*>(
+        pp::Module::Get()->GetBrowserInterface(PPB_CONSOLE_DEV_INTERFACE));
     if (!console_)
       return false;
 
@@ -53,7 +51,8 @@ class MyInstance : public pp::Instance, public pp::MouseLock {
         pp::MouseInputEvent mouse_event(event);
         if (mouse_event.GetButton() == PP_INPUTEVENT_MOUSEBUTTON_LEFT &&
             !mouse_locked_) {
-          LockMouse(callback_factory_.NewCallback(&MyInstance::DidLockMouse));
+          LockMouse(
+              callback_factory_.NewRequiredCallback(&MyInstance::DidLockMouse));
         }
         return true;
       }
@@ -68,17 +67,14 @@ class MyInstance : public pp::Instance, public pp::MouseLock {
       }
       case PP_INPUTEVENT_TYPE_KEYDOWN: {
         pp::KeyboardInputEvent key_event(event);
+        // Lock the mouse when the Enter key is pressed.
         if (key_event.GetKeyCode() == 13) {
-          // Lock the mouse when the Enter key is pressed.
-          if (mouse_locked_)
+          if (mouse_locked_) {
             UnlockMouse();
-          else
-            LockMouse(callback_factory_.NewCallback(&MyInstance::DidLockMouse));
-          return true;
-        } else if (key_event.GetKeyCode() == 70) {
-          // Enter Flash fullscreen mode when the 'f' key is pressed.
-          if (!flash_fullscreen_.IsFullscreen())
-            flash_fullscreen_.SetFullscreen(true);
+          } else {
+            LockMouse(callback_factory_.NewRequiredCallback(
+                &MyInstance::DidLockMouse));
+          }
           return true;
         }
         return false;
@@ -139,7 +135,7 @@ class MyInstance : public pp::Instance, public pp::MouseLock {
       device_context_.ReplaceContents(&image);
       waiting_for_flush_completion_ = true;
       device_context_.Flush(
-          callback_factory_.NewCallback(&MyInstance::DidFlush));
+          callback_factory_.NewRequiredCallback(&MyInstance::DidFlush));
     }
   }
 
@@ -206,7 +202,7 @@ class MyInstance : public pp::Instance, public pp::MouseLock {
               (direction == UP && y < center_y) ||
               (direction == DOWN && y > center_y) ||
               (direction == LEFT && x < center_x) ||
-              (direction == RIGHT && x > center_x);
+              (direction == RIGHT && x > center_y);
 
           if (within_bound_1 && within_bound_2 && within_bound_3) {
             *image.GetAddr32(pp::Point(x, y)) = foreground_color;
@@ -226,7 +222,7 @@ class MyInstance : public pp::Instance, public pp::MouseLock {
                 pow(static_cast<double>(point_1_y - point_2_y), 2));
   }
 
-  void Log(PP_LogLevel level, const char* format, ...) {
+  void Log(PP_LogLevel_Dev level, const char* format, ...) {
     va_list args;
     va_start(args, format);
     char buf[512];
@@ -249,9 +245,7 @@ class MyInstance : public pp::Instance, public pp::MouseLock {
 
   pp::CompletionCallbackFactory<MyInstance> callback_factory_;
 
-  const PPB_Console* console_;
-
-  pp::FlashFullscreen flash_fullscreen_;
+  const PPB_Console_Dev* console_;
 
   pp::Graphics2D device_context_;
 };

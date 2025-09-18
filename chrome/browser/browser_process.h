@@ -9,63 +9,49 @@
 
 #ifndef CHROME_BROWSER_BROWSER_PROCESS_H_
 #define CHROME_BROWSER_BROWSER_PROCESS_H_
+#pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
-#include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/ui/host_desktop.h"
+#include "base/memory/ref_counted.h"
+#include "ipc/ipc_message.h"
 
+class AudioManager;
 class AutomationProviderList;
 class BackgroundModeManager;
-class BookmarkPromptController;
 class ChromeNetLog;
 class CRLSetFetcher;
 class ComponentUpdateService;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
-class GLStringManager;
-class GpuModeManager;
+class ExtensionEventRouterForwarder;
+class GoogleURLTracker;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
-class MediaFileSystemRegistry;
 class MetricsService;
+class MHTMLGenerationManager;
 class NotificationUIManager;
-class PnaclComponentInstaller;
-class PrefRegistrySimple;
 class PrefService;
 class Profile;
 class ProfileManager;
-class RenderWidgetSnapshotTaker;
+class ResourceDispatcherHost;
 class SafeBrowsingService;
 class StatusTray;
-class StorageMonitor;
+class TabCloseableStateWatcher;
+class ThumbnailGenerator;
 class WatchDogThread;
-#if defined(ENABLE_WEBRTC)
-class WebRtcLogUploader;
-#endif
 
-namespace chrome_variations {
-class VariationsService;
+#if defined(OS_CHROMEOS)
+namespace browser {
+class OomPriorityManager;
 }
-
-namespace extensions {
-class EventRouterForwarder;
-}
-
-namespace message_center {
-class MessageCenter;
-}
+#endif  // defined(OS_CHROMEOS)
 
 namespace net {
 class URLRequestContextGetter;
-}
-
-namespace policy {
-class BrowserPolicyConnector;
-class PolicyService;
 }
 
 namespace prerender {
@@ -75,11 +61,19 @@ class PrerenderTracker;
 namespace printing {
 class BackgroundPrintingManager;
 class PrintJobManager;
-class PrintPreviewDialogController;
+class PrintPreviewTabController;
+}
+
+namespace policy {
+class BrowserPolicyConnector;
 }
 
 namespace safe_browsing {
 class ClientSideDetectionService;
+}
+
+namespace ui {
+class Clipboard;
 }
 
 // NOT THREAD SAFE, call only from the main thread.
@@ -102,19 +96,19 @@ class BrowserProcess {
   virtual MetricsService* metrics_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
+  virtual ui::Clipboard* clipboard() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
-  virtual chrome_variations::VariationsService* variations_service() = 0;
 
-  virtual BrowserProcessPlatformPart* platform_part() = 0;
+#if defined(OS_CHROMEOS)
+  // Returns the out-of-memory priority manager.
+  virtual browser::OomPriorityManager* oom_priority_manager() = 0;
+#endif  // defined(OS_CHROMEOS)
 
-  virtual extensions::EventRouterForwarder*
+  virtual ExtensionEventRouterForwarder*
       extension_event_router_forwarder() = 0;
 
   // Returns the manager for desktop notifications.
   virtual NotificationUIManager* notification_ui_manager() = 0;
-
-  // MessageCenter is a global list of currently displayed notifications.
-  virtual message_center::MessageCenter* message_center() = 0;
 
   // Returns the state object for the thread that we perform I/O
   // coordination on (network requests, communication with renderers,
@@ -129,25 +123,16 @@ class BrowserProcess {
   // Returns the thread that is used for health check of all browser threads.
   virtual WatchDogThread* watchdog_thread() = 0;
 
-  // Starts and manages the policy system.
   virtual policy::BrowserPolicyConnector* browser_policy_connector() = 0;
-
-  // This is the main interface for chromium components to retrieve policy
-  // information from the policy system.
-  virtual policy::PolicyService* policy_service() = 0;
 
   virtual IconManager* icon_manager() = 0;
 
-  virtual GLStringManager* gl_string_manager() = 0;
-
-  virtual GpuModeManager* gpu_mode_manager() = 0;
-
-  virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() = 0;
+  virtual ThumbnailGenerator* GetThumbnailGenerator() = 0;
 
   virtual AutomationProviderList* GetAutomationProviderList() = 0;
 
-  virtual void CreateDevToolsHttpProtocolHandler(
-      chrome::HostDesktopType host_desktop_type,
+  virtual void InitDevToolsHttpProtocolHandler(
+      Profile* profile,
       const std::string& ip,
       int port,
       const std::string& frontend_url) = 0;
@@ -158,11 +143,12 @@ class BrowserProcess {
   virtual bool IsShuttingDown() = 0;
 
   virtual printing::PrintJobManager* print_job_manager() = 0;
-  virtual printing::PrintPreviewDialogController*
-      print_preview_dialog_controller() = 0;
+  virtual printing::PrintPreviewTabController*
+      print_preview_tab_controller() = 0;
   virtual printing::BackgroundPrintingManager*
       background_printing_manager() = 0;
 
+  virtual GoogleURLTracker* google_url_tracker() = 0;
   virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;
 
   // Returns the locale used by the application.
@@ -172,10 +158,11 @@ class BrowserProcess {
   virtual DownloadStatusUpdater* download_status_updater() = 0;
   virtual DownloadRequestLimiter* download_request_limiter() = 0;
 
+  // Returns the object that watches for changes in the closeable state of tab.
+  virtual TabCloseableStateWatcher* tab_closeable_state_watcher() = 0;
+
   // Returns the object that manages background applications.
   virtual BackgroundModeManager* background_mode_manager() = 0;
-  virtual void set_background_mode_manager_for_test(
-      scoped_ptr<BackgroundModeManager> manager) = 0;
 
   // Returns the StatusTray, which provides an API for displaying status icons
   // in the system status tray. Returns NULL if status icons are not supported
@@ -189,6 +176,10 @@ class BrowserProcess {
   // client-side detection servers.
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service() = 0;
+
+  // Returns the state of the disable plugin finder policy. Callable only on
+  // the IO thread.
+  virtual bool plugin_finder_disabled() const = 0;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   // This will start a timer that, if Chrome is in persistent mode, will check
@@ -205,23 +196,13 @@ class BrowserProcess {
 
   virtual prerender::PrerenderTracker* prerender_tracker() = 0;
 
+  virtual MHTMLGenerationManager* mhtml_generation_manager() = 0;
+
   virtual ComponentUpdateService* component_updater() = 0;
 
   virtual CRLSetFetcher* crl_set_fetcher() = 0;
 
-  virtual PnaclComponentInstaller* pnacl_component_installer() = 0;
-
-  virtual BookmarkPromptController* bookmark_prompt_controller() = 0;
-
-  virtual MediaFileSystemRegistry* media_file_system_registry() = 0;
-
-  virtual StorageMonitor* storage_monitor() = 0;
-
-  virtual bool created_local_state() const = 0;
-
-#if defined(ENABLE_WEBRTC)
-  virtual WebRtcLogUploader* webrtc_log_uploader() = 0;
-#endif
+  virtual AudioManager* audio_manager() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

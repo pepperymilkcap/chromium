@@ -1,28 +1,30 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_APP_PANEL_BROWSER_FRAME_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_APP_PANEL_BROWSER_FRAME_VIEW_H_
+#pragma once
 
+#include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
-#include "chrome/browser/ui/views/tab_icon_view_model.h"
+#include "chrome/browser/ui/views/tab_icon_view.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/window/non_client_view.h"
 
-class BrowserFrame;
 class BrowserView;
-class TabIconView;
-
+namespace gfx {
+class Font;
+}
 namespace views {
 class ImageButton;
 }
-
 // The frame view which is used for Application Panels.
 // TODO(rafaelw): Refactor. This shares much duplicated code with
 // OpaqueBrowserFrameView.
 class AppPanelBrowserFrameView : public BrowserNonClientFrameView,
                                  public views::ButtonListener,
-                                 public chrome::TabIconViewModel {
+                                 public TabIconView::TabIconViewModel {
  public:
   // Constructs a non-client view for an BrowserFrame.
   AppPanelBrowserFrameView(BrowserFrame* frame, BrowserView* browser_view);
@@ -30,8 +32,7 @@ class AppPanelBrowserFrameView : public BrowserNonClientFrameView,
 
   // Overridden from BrowserNonClientFrameView:
   virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const OVERRIDE;
-  virtual int GetTopInset() const OVERRIDE;
-  virtual int GetThemeBackgroundXInset() const OVERRIDE;
+  virtual int GetHorizontalTabStripVerticalOffset(bool restored) const OVERRIDE;
   virtual void UpdateThrobber(bool running) OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
 
@@ -41,8 +42,8 @@ class AppPanelBrowserFrameView : public BrowserNonClientFrameView,
   virtual gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const OVERRIDE;
   virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
-  virtual void GetWindowMask(const gfx::Size& size,
-                             gfx::Path* window_mask) OVERRIDE;
+  virtual void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask)
+      OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
 
@@ -51,12 +52,12 @@ class AppPanelBrowserFrameView : public BrowserNonClientFrameView,
   virtual void Layout() OVERRIDE;
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event)
+      OVERRIDE;
 
-  // Overridden from chrome::TabIconViewModel:
+  // Overridden from TabIconView::TabIconViewModel:
   virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
-  virtual gfx::ImageSkia GetFaviconForTabIconView() OVERRIDE;
+  virtual SkBitmap GetFaviconForTabIconView() OVERRIDE;
 
  private:
   // Returns the thickness of the border that makes up the window frame edges.
@@ -107,6 +108,12 @@ class AppPanelBrowserFrameView : public BrowserNonClientFrameView,
 
   // The bounds of the ClientView.
   gfx::Rect client_view_bounds_;
+
+  // The accessible name of this view.
+  std::wstring accessible_name_;
+
+  static void InitAppWindowResources();
+  static gfx::Font* title_font_;
 
   DISALLOW_COPY_AND_ASSIGN(AppPanelBrowserFrameView);
 };

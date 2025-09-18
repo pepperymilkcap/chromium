@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_STATUS_BUBBLE_GTK_H_
 #define CHROME_BROWSER_UI_GTK_STATUS_BUBBLE_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -11,20 +12,20 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "googleurl/src/gurl.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
-#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/point.h"
-#include "url/gurl.h"
 
 class GtkThemeService;
 class Profile;
 
-namespace gfx {
+namespace ui {
 class SlideAnimation;
 }
 
@@ -34,7 +35,7 @@ class SlideAnimation;
 // We therefore position it absolutely in a GtkFixed, that we don't own.
 class StatusBubbleGtk : public StatusBubble,
                         public content::NotificationObserver,
-                        public gfx::AnimationDelegate {
+                        public ui::AnimationDelegate {
  public:
   explicit StatusBubbleGtk(Profile* profile);
   virtual ~StatusBubbleGtk();
@@ -43,15 +44,15 @@ class StatusBubbleGtk : public StatusBubble,
   int y_offset() const { return y_offset_; }
 
   // StatusBubble implementation.
-  virtual void SetStatus(const base::string16& status) OVERRIDE;
+  virtual void SetStatus(const string16& status) OVERRIDE;
   virtual void SetURL(const GURL& url, const std::string& languages) OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual void MouseMoved(const gfx::Point& location,
                           bool left_content) OVERRIDE;
 
-  // gfx::AnimationDelegate implementation.
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  // ui::AnimationDelegate implementation.
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
   // Called when the download shelf becomes visible or invisible.
   // This is used by to ensure that the status bubble does not obscure
@@ -146,7 +147,7 @@ class StatusBubbleGtk : public StatusBubble,
   base::OneShotTimer<StatusBubbleGtk> expand_timer_;
 
   // The animation for resizing the status bubble on long hovers.
-  scoped_ptr<gfx::SlideAnimation> expand_animation_;
+  scoped_ptr<ui::SlideAnimation> expand_animation_;
 
   // The start and end width of the current resize animation.
   int start_width_;

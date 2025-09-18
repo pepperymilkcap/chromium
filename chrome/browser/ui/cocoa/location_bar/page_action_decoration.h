@@ -1,20 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_LOCATION_BAR_PAGE_ACTION_DECORATION_H_
 #define CHROME_BROWSER_UI_COCOA_LOCATION_BAR_PAGE_ACTION_DECORATION_H_
+#pragma once
 
-#include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_action_icon_factory.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #import "chrome/browser/ui/cocoa/location_bar/image_decoration.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "url/gurl.h"
+#include "googleurl/src/gurl.h"
 
-@class ExtensionActionContextMenuController;
-class Browser;
+class ExtensionAction;
+@class ExtensionActionContextMenu;
 class LocationBarViewMac;
+class Profile;
 
 namespace content {
 class WebContents;
@@ -24,12 +23,11 @@ class WebContents;
 // Action and notify the extension when the icon is clicked.
 
 class PageActionDecoration : public ImageDecoration,
-                             public ExtensionActionIconFactory::Observer,
-                             public content::NotificationObserver,
-                             public ExtensionAction::IconAnimation::Observer {
+                             public ImageLoadingTracker::Observer,
+                             public content::NotificationObserver {
  public:
   PageActionDecoration(LocationBarViewMac* owner,
-                       Browser* browser,
+                       Profile* profile,
                        ExtensionAction* page_action);
   virtual ~PageActionDecoration();
 
@@ -38,8 +36,9 @@ class PageActionDecoration : public ImageDecoration,
   void set_preview_enabled(bool enabled) { preview_enabled_ = enabled; }
   bool preview_enabled() const { return preview_enabled_; }
 
-  // Overridden from |ExtensionActionIconFactory::Observer|.
-  virtual void OnIconUpdated() OVERRIDE;
+  // Overridden from |ImageLoadingTracker::Observer|.
+  virtual void OnImageLoaded(
+      SkBitmap* image, const ExtensionResource& resource, int index) OVERRIDE;
 
   // Called to notify the Page Action that it should determine whether
   // to be visible or hidden. |contents| is the WebContents that is
@@ -56,24 +55,12 @@ class PageActionDecoration : public ImageDecoration,
 
   // Overridden from |LocationBarDecoration|
   virtual CGFloat GetWidthForSpace(CGFloat width) OVERRIDE;
-  virtual void DrawWithBackgroundInFrame(NSRect background_frame,
-                                         NSRect frame,
-                                         NSView* control_view) OVERRIDE;
   virtual bool AcceptsMousePress() OVERRIDE;
   virtual bool OnMousePressed(NSRect frame) OVERRIDE;
   virtual NSString* GetToolTip() OVERRIDE;
   virtual NSMenu* GetMenu() OVERRIDE;
 
  private:
-  // Activate the page action in the given |frame|.
-  bool ActivatePageAction(NSRect frame);
-
-  // Show the popup in the frame, with the given URL.
-  void ShowPopup(const NSRect& frame, const GURL& popup_url);
-
-  // Overridden from ExtensionAction::IconAnimation::Observer.
-  virtual void OnIconChanged() OVERRIDE;
-
   // Overridden from NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
@@ -82,20 +69,22 @@ class PageActionDecoration : public ImageDecoration,
   // The location bar view that owns us.
   LocationBarViewMac* owner_;
 
-  // The current browser (not owned by us).
-  Browser* browser_;
+  // The current profile (not owned by us).
+  Profile* profile_;
 
   // The Page Action that this view represents. The Page Action is not
   // owned by us, it resides in the extension of this particular
   // profile.
   ExtensionAction* page_action_;
 
+  // A cache of images the Page Actions might need to show, mapped by
+  // path.
+  typedef std::map<std::string, SkBitmap> PageActionMap;
+  PageActionMap page_action_icons_;
 
-  // The object that will be used to get the page action icon for us.
-  // It may load the icon asynchronously (in which case the initial icon
-  // returned by the factory will be transparent), so we have to observe it for
-  // updates to the icon.
-  scoped_ptr<ExtensionActionIconFactory> icon_factory_;
+  // The object that is waiting for the image loading to complete
+  // asynchronously.
+  ImageLoadingTracker tracker_;
 
   // The tab id we are currently showing the icon for.
   int current_tab_id_;
@@ -104,20 +93,15 @@ class PageActionDecoration : public ImageDecoration,
   GURL current_url_;
 
   // The string to show for a tooltip.
-  base::scoped_nsobject<NSString> tooltip_;
+  scoped_nsobject<NSString> tooltip_;
 
-  // The context menu controller for the Page Action.
-  base::scoped_nsobject<
-      ExtensionActionContextMenuController> contextMenuController_;
+  // The context menu for the Page Action.
+  scoped_nsobject<ExtensionActionContextMenu> menu_;
 
   // This is used for post-install visual feedback. The page_action
   // icon is briefly shown even if it hasn't been enabled by its
   // extension.
   bool preview_enabled_;
-
-  // Fade-in animation for the icon with observer scoped to this.
-  ExtensionAction::IconAnimation::ScopedObserver
-      scoped_icon_animation_observer_;
 
   // Used to register for notifications received by
   // NotificationObserver.

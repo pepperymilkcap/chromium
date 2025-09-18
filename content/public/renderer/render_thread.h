@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,15 @@
 #define CONTENT_PUBLIC_RENDERER_RENDER_THREAD_H_
 
 #include "base/basictypes.h"
-#include "base/callback.h"
-#include "base/memory/shared_memory.h"
+#include "base/shared_memory.h"
 #include "content/common/content_export.h"
-#include "content/public/common/user_metrics_action.h"
 #include "ipc/ipc_channel_proxy.h"
-#include "ipc/ipc_sender.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
 
-class GURL;
-
-namespace base {
 class MessageLoop;
-class MessageLoopProxy;
-}
 
 namespace IPC {
 class SyncChannel;
@@ -38,7 +30,7 @@ namespace content {
 class RenderProcessObserver;
 class ResourceDispatcherDelegate;
 
-class CONTENT_EXPORT RenderThread : public IPC::Sender {
+class CONTENT_EXPORT RenderThread : public IPC::Message::Sender {
  public:
   // Returns the one render thread for this process.  Note that this can only
   // be accessed when running on the render thread itself.
@@ -47,21 +39,22 @@ class CONTENT_EXPORT RenderThread : public IPC::Sender {
   RenderThread();
   virtual ~RenderThread();
 
-  virtual base::MessageLoop* GetMessageLoop() = 0;
+  virtual MessageLoop* GetMessageLoop() = 0;
   virtual IPC::SyncChannel* GetChannel() = 0;
   virtual std::string GetLocale() = 0;
   virtual IPC::SyncMessageFilter* GetSyncMessageFilter() = 0;
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() = 0;
 
   // Called to add or remove a listener for a particular message routing ID.
   // These methods normally get delegated to a MessageRouter.
-  virtual void AddRoute(int32 routing_id, IPC::Listener* listener) = 0;
+  virtual void AddRoute(int32 routing_id, IPC::Channel::Listener* listener) = 0;
   virtual void RemoveRoute(int32 routing_id) = 0;
   virtual int GenerateRoutingID() = 0;
 
   // These map to IPC::ChannelProxy methods.
   virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter) = 0;
   virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) = 0;
+  virtual void SetOutgoingMessageFilter(
+      IPC::ChannelProxy::OutgoingMessageFilter* filter) = 0;
 
   // Add/remove observers for the process.
   virtual void AddObserver(RenderProcessObserver* observer) = 0;
@@ -79,30 +72,20 @@ class CONTENT_EXPORT RenderThread : public IPC::Sender {
   // initialization.
   virtual void EnsureWebKitInitialized() = 0;
 
-  // Sends over a UserMetricsAction to be recorded by user metrics as an action.
-  // Once a new user metric is added, run
-  //   tools/metrics/actions/extract_actions.py --hash
-  // to generate a new mapping of [action hashes -> metric names] and send it
-  // out for review to be updated.
-  // WARNING: When using UserMetricsAction, UserMetricsAction and a string
-  // literal parameter must be on the same line, e.g.
-  //   RenderThread::Get()->RecordAction(
-  //       UserMetricsAction("my extremely long action name"));
-  // because otherwise our processing scripts won't pick up on new actions.
-  virtual void RecordAction(const UserMetricsAction& action) = 0;
-
-  // Sends over a string to be recorded by user metrics as a computed action.
-  // When you use this you need to also update the rules for extracting known
-  // actions in chrome/tools/extract_actions.py.
-  virtual void RecordComputedAction(const std::string& action) = 0;
+  // Helper function to send over a string to be recorded by user metrics
+  virtual void RecordUserMetrics(const std::string& action) = 0;
 
   // Asks the host to create a block of shared memory for the renderer.
-  // The shared memory allocated by the host is returned back.
-  virtual scoped_ptr<base::SharedMemory> HostAllocateSharedMemoryBuffer(
-      size_t buffer_size) = 0;
+  // The shared memory handle allocated by the host is returned back.
+  virtual base::SharedMemoryHandle HostAllocateSharedMemoryBuffer(
+      uint32 buffer_size) = 0;
 
   // Registers the given V8 extension with WebKit.
   virtual void RegisterExtension(v8::Extension* extension) = 0;
+
+  // Returns true iff the extension is registered.
+  virtual bool IsRegisteredExtension(
+      const std::string& v8_extension_name) const = 0;
 
   // Schedule a call to IdleHandler with the given initial delay.
   virtual void ScheduleIdleHandler(int64 initial_delay_ms) = 0;
@@ -114,19 +97,6 @@ class CONTENT_EXPORT RenderThread : public IPC::Sender {
   virtual int64 GetIdleNotificationDelayInMs() const = 0;
   virtual void SetIdleNotificationDelayInMs(
       int64 idle_notification_delay_in_ms) = 0;
-
-  // Suspend/resume the webkit timer for this renderer.
-  virtual void ToggleWebKitSharedTimer(bool suspend) = 0;
-
-  virtual void UpdateHistograms(int sequence_number) = 0;
-
-  // Post task to all worker threads. Returns number of workers.
-  virtual int PostTaskToAllWebWorkers(const base::Closure& closure) = 0;
-
-  // Resolve the proxy servers to use for a given url. On success true is
-  // returned and |proxy_list| is set to a PAC string containing a list of
-  // proxy servers.
-  virtual bool ResolveProxy(const GURL& url, std::string* proxy_list) = 0;
 
 #if defined(OS_WIN)
   // Request that the given font be loaded by the browser so it's cached by the

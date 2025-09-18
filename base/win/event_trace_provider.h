@@ -6,6 +6,7 @@
 // Windows Event Tracing for logging transport and control.
 #ifndef BASE_WIN_EVENT_TRACE_PROVIDER_H_
 #define BASE_WIN_EVENT_TRACE_PROVIDER_H_
+#pragma once
 
 #include <windows.h>
 #include <wmistr.h>
@@ -33,11 +34,6 @@ template <size_t N> struct EtwMofEventBase {
 template <size_t N> class EtwMofEvent: public EtwMofEventBase<N> {
  public:
   typedef EtwMofEventBase<N> Super;
-
-  // Clang and the C++ standard don't allow unqualified lookup into dependent
-  // bases, hence these using decls to explicitly pull the names out.
-  using EtwMofEventBase<N>::header;
-  using EtwMofEventBase<N>::fields;
 
   EtwMofEvent() {
     memset(static_cast<Super*>(this), 0, sizeof(Super));

@@ -2,8 +2,7 @@
 ; Use of this source code is governed by a BSD-style license that can be
 ; found in the LICENSE file.
 
-%include "media/base/simd/media_export.asm"
-%include "third_party/x86inc/x86inc.asm"
+%include "x86inc.asm"
 
 ;
 ; This file uses SSE, SSE2, SSE3, and SSSE3, which are supported by all ATOM
@@ -244,7 +243,7 @@
 ;                                           uint8* y,
 ;                                           uint8* u,
 ;                                           uint8* v,
-;                                           ptrdiff_t width);
+;                                           int width);
 ;
 %define SYMBOL          ConvertARGBToYUVRow_SSSE3
 %define PIXELSIZE       4
@@ -257,7 +256,7 @@
 ;                                          uint8* y,
 ;                                          uint8* u,
 ;                                          uint8* v,
-;                                          ptrdiff_t width);
+;                                          int width);
 ;
 %define SYMBOL          ConvertRGBToYUVRow_SSSE3
 %define PIXELSIZE       3
@@ -270,7 +269,7 @@
 ;                                            uint8* y,
 ;                                            uint8* u,
 ;                                            uint8* v,
-;                                            ptrdiff_t width);
+;                                            int width);
 ;
 %define SYMBOL          ConvertARGBToYUVEven_SSSE3
 %define PIXELSIZE       4
@@ -283,7 +282,7 @@
 ;                                           uint8* y,
 ;                                           uint8* u,
 ;                                           uint8* v,
-;                                           ptrdiff_t width);
+;                                           int width);
 ;
 %define SYMBOL          ConvertARGBToYUVOdd_SSSE3
 %define PIXELSIZE       4
@@ -296,7 +295,7 @@
 ;                                           uint8* y,
 ;                                           uint8* u,
 ;                                           uint8* v,
-;                                           ptrdiff_t width);
+;                                           int width);
 ;
 %define SYMBOL          ConvertRGBToYUVEven_SSSE3
 %define PIXELSIZE       3
@@ -309,7 +308,7 @@
 ;                                          uint8* y,
 ;                                          uint8* u,
 ;                                          uint8* v,
-;                                          ptrdiff_t width);
+;                                          int width);
 ;
 %define SYMBOL          ConvertRGBToYUVOdd_SSSE3
 %define PIXELSIZE       3

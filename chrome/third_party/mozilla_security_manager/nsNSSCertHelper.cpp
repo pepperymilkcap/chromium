@@ -40,29 +40,20 @@
 
 #include "chrome/third_party/mozilla_security_manager/nsNSSCertHelper.h"
 
-#include <certdb.h>
 #include <keyhi.h>
 #include <prprf.h>
 #include <unicode/uidna.h>
 
 #include "base/i18n/number_formatting.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "crypto/scoped_nss_types.h"
 #include "grit/generated_resources.h"
-#include "net/base/ip_endpoint.h"
 #include "net/base/net_util.h"
+#include "net/third_party/mozilla_security_manager/nsNSSCertTrust.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if !defined(CERTDB_TERMINAL_RECORD)
-/* NSS 3.13 renames CERTDB_VALID_PEER to CERTDB_TERMINAL_RECORD
- * and marks CERTDB_VALID_PEER as deprecated.
- * If we're using an older version, rename it ourselves.
- */
-#define CERTDB_TERMINAL_RECORD CERTDB_VALID_PEER
-#endif
 
 namespace {
 
@@ -446,7 +437,7 @@ std::string ProcessBasicConstraints(SECItem* extension_data) {
     rv = l10n_util::GetStringUTF8(IDS_CERT_X509_BASIC_CONSTRAINT_IS_NOT_CA);
   rv += '\n';
   if (value.pathLenConstraint != -1) {
-    base::string16 depth;
+    string16 depth;
     if (value.pathLenConstraint == CERT_UNLIMITED_PATH_CONSTRAINT) {
       depth = l10n_util::GetStringUTF16(
           IDS_CERT_X509_BASIC_CONSTRAINT_PATH_LEN_UNLIMITED);
@@ -537,10 +528,26 @@ std::string ProcessGeneralName(PRArenaPool* arena,
       break;
     case certIPAddress: {
       key = l10n_util::GetStringUTF8(IDS_CERT_GENERAL_NAME_IP_ADDRESS);
-      net::IPAddressNumber ip(
-          current->name.other.data,
-          current->name.other.data + current->name.other.len);
-      value = net::IPEndPoint(ip, 0).ToStringWithoutPort();
+      struct addrinfo addr = {0};
+      if (current->name.other.len == 4) {
+        struct sockaddr_in addr4 = {0};
+        addr.ai_addr = reinterpret_cast<sockaddr*>(&addr4);
+        addr.ai_addrlen = sizeof(addr4);
+        addr.ai_family = AF_INET;
+        addr4.sin_family = addr.ai_family;
+        memcpy(&addr4.sin_addr, current->name.other.data,
+               current->name.other.len);
+        value = net::NetAddressToString(&addr);
+      } else if (current->name.other.len == 16) {
+        struct sockaddr_in6 addr6 = {0};
+        addr.ai_addr = reinterpret_cast<sockaddr*>(&addr6);
+        addr.ai_addrlen = sizeof(addr6);
+        addr.ai_family = AF_INET6;
+        addr6.sin6_family = addr.ai_family;
+        memcpy(&addr6.sin6_addr, current->name.other.data,
+               current->name.other.len);
+        value = net::NetAddressToString(&addr);
+      }
       if (value.empty()) {
         // Invalid IP address.
         value = ProcessRawBytes(&current->name.other);
@@ -553,8 +560,8 @@ std::string ProcessGeneralName(PRArenaPool* arena,
       break;
   }
   std::string rv(l10n_util::GetStringFUTF8(IDS_CERT_UNKNOWN_OID_INFO_FORMAT,
-                                           base::UTF8ToUTF16(key),
-                                           base::UTF8ToUTF16(value)));
+                                           UTF8ToUTF16(key),
+                                           UTF8ToUTF16(value)));
   rv += '\n';
   return rv;
 }
@@ -601,7 +608,7 @@ std::string ProcessSubjectKeyId(SECItem* extension_data) {
   }
 
   rv = l10n_util::GetStringFUTF8(IDS_CERT_KEYID_FORMAT,
-                                 base::ASCIIToUTF16(ProcessRawBytes(&decoded)));
+                                 ASCIIToUTF16(ProcessRawBytes(&decoded)));
   return rv;
 }
 
@@ -616,23 +623,21 @@ std::string ProcessAuthKeyId(SECItem* extension_data) {
 
   if (ret->keyID.len > 0) {
     rv += l10n_util::GetStringFUTF8(IDS_CERT_KEYID_FORMAT,
-                                    base::ASCIIToUTF16(
-                                        ProcessRawBytes(&ret->keyID)));
+                                    ASCIIToUTF16(ProcessRawBytes(&ret->keyID)));
     rv += '\n';
   }
 
   if (ret->authCertIssuer) {
     rv += l10n_util::GetStringFUTF8(
         IDS_CERT_ISSUER_FORMAT,
-        base::UTF8ToUTF16(
-            ProcessGeneralNames(arena.get(), ret->authCertIssuer)));
+        UTF8ToUTF16(ProcessGeneralNames(arena.get(), ret->authCertIssuer)));
     rv += '\n';
   }
 
   if (ret->authCertSerialNumber.len > 0) {
     rv += l10n_util::GetStringFUTF8(
         IDS_CERT_SERIAL_NUMBER_FORMAT,
-        base::ASCIIToUTF16(ProcessRawBytes(&ret->authCertSerialNumber)));
+        ASCIIToUTF16(ProcessRawBytes(&ret->authCertSerialNumber)));
     rv += '\n';
   }
 
@@ -668,7 +673,7 @@ std::string ProcessUserNotice(SECItem* der_notice) {
         if (itemList != notice->noticeReference.noticeNumbers)
           rv += ", ";
         rv += '#';
-        rv += base::UTF16ToUTF8(base::UintToString16(number));
+        rv += UTF16ToUTF8(base::UintToString16(number));
       }
       itemList++;
     }
@@ -713,7 +718,7 @@ std::string ProcessCertificatePolicies(SECItem* extension_data) {
     // complicated, since we don't want to do the EV check synchronously.)
     if (policyInfo->policyQualifiers) {
       rv += l10n_util::GetStringFUTF8(IDS_CERT_MULTILINE_INFO_START_FORMAT,
-                                      base::UTF8ToUTF16(key));
+                                      UTF8ToUTF16(key));
     } else {
       rv += key;
     }
@@ -728,7 +733,7 @@ std::string ProcessCertificatePolicies(SECItem* extension_data) {
         CERTPolicyQualifier* policyQualifier = *policyQualifiers++;
         rv += l10n_util::GetStringFUTF8(
             IDS_CERT_MULTILINE_INFO_START_FORMAT,
-            base::UTF8ToUTF16(GetOIDText(&policyQualifier->qualifierID)));
+            UTF8ToUTF16(GetOIDText(&policyQualifier->qualifierID)));
         switch(policyQualifier->oid) {
           case SEC_OID_PKIX_CPS_POINTER_QUALIFIER:
             rv += "    ";
@@ -810,8 +815,7 @@ std::string ProcessCrlDistPoints(SECItem* extension_data) {
     if (point->crlIssuer) {
       rv += l10n_util::GetStringFUTF8(
           IDS_CERT_ISSUER_FORMAT,
-          base::UTF8ToUTF16(
-              ProcessGeneralNames(arena.get(), point->crlIssuer)));
+          UTF8ToUTF16(ProcessGeneralNames(arena.get(), point->crlIssuer)));
     }
   }
   return rv;
@@ -830,8 +834,8 @@ std::string ProcessAuthInfoAccess(SECItem* extension_data) {
 
   while (*aia != NULL) {
     desc = *aia++;
-    base::string16 location_str =
-        base::UTF8ToUTF16(ProcessGeneralName(arena.get(), desc->location));
+    string16 location_str = UTF8ToUTF16(ProcessGeneralName(arena.get(),
+                                                           desc->location));
     switch (SECOID_FindOIDTag(&desc->method)) {
     case SEC_OID_PKIX_OCSP:
       rv += l10n_util::GetStringFUTF8(IDS_CERT_OCSP_RESPONDER_FORMAT,
@@ -843,8 +847,7 @@ std::string ProcessAuthInfoAccess(SECItem* extension_data) {
       break;
     default:
       rv += l10n_util::GetStringFUTF8(IDS_CERT_UNKNOWN_OID_INFO_FORMAT,
-                                      base::UTF8ToUTF16(
-                                          GetOIDText(&desc->method)),
+                                      UTF8ToUTF16(GetOIDText(&desc->method)),
                                       location_str);
       break;
     }
@@ -966,16 +969,16 @@ std::string ProcessExtKeyUsage(SECItem* extension_data) {
     std::string oid_dump = DumpOidString(oid);
     std::string oid_text = GetOIDText(oid);
 
-    // If oid is one we recognize, oid_text will have a text description of the
-    // OID, which we display along with the oid_dump.  If we don't recognize the
-    // OID, GetOIDText will return the same value as DumpOidString, so just
-    // display the OID alone.
+    // If oid is one we recognize, oid_text will have a text description of the OID,
+    // which we display along with the oid_dump.  If we don't recognize the OID,
+    // GetOIDText will return the same value as DumpOidString, so just display
+    // the OID alone.
     if (oid_dump == oid_text)
       rv += oid_dump;
     else
       rv += l10n_util::GetStringFUTF8(IDS_CERT_EXT_KEY_USAGE_FORMAT,
-                                      base::UTF8ToUTF16(oid_text),
-                                      base::UTF8ToUTF16(oid_dump));
+                                      UTF8ToUTF16(oid_text),
+                                      UTF8ToUTF16(oid_dump));
     rv += '\n';
   }
   CERT_DestroyOidSequence(extension_key_usage);
@@ -1034,9 +1037,9 @@ std::string ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo* spki) {
         rv = l10n_util::GetStringFUTF8(
             IDS_CERT_RSA_PUBLIC_KEY_DUMP_FORMAT,
             base::UintToString16(key->u.rsa.modulus.len * 8),
-            base::UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.modulus)),
+            UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.modulus)),
             base::UintToString16(key->u.rsa.publicExponent.len * 8),
-            base::UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.publicExponent)));
+            UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.publicExponent)));
         break;
       }
       default:
@@ -1050,20 +1053,16 @@ std::string ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo* spki) {
 }
 
 net::CertType GetCertType(CERTCertificate *cert) {
-  CERTCertTrust trust = {0};
-  CERT_GetCertTrust(cert, &trust);
-
-  unsigned all_flags = trust.sslFlags | trust.emailFlags |
-      trust.objectSigningFlags;
-
-  if (cert->nickname && (all_flags & CERTDB_USER))
+  nsNSSCertTrust trust(cert->trust);
+  if (cert->nickname && trust.HasAnyUser())
     return net::USER_CERT;
-  if ((all_flags & CERTDB_VALID_CA) || CERT_IsCACert(cert, NULL))
+  if (trust.HasAnyCA())
     return net::CA_CERT;
-  // TODO(mattm): http://crbug.com/128633.
-  if (trust.sslFlags & CERTDB_TERMINAL_RECORD)
+  if (trust.HasPeer(PR_TRUE, PR_FALSE, PR_FALSE))
     return net::SERVER_CERT;
-  return net::OTHER_CERT;
+  if (CERT_IsCACert(cert, NULL))
+    return net::CA_CERT;
+  return net::UNKNOWN_CERT;
 }
 
 }  // namespace mozilla_security_manager

@@ -1,14 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_COMMON_SANDBOX_MAC_UNITTEST_HELPER_H_
 #define CONTENT_COMMON_SANDBOX_MAC_UNITTEST_HELPER_H_
+#pragma once
 
 #include "base/test/multiprocess_test.h"
 #include "content/common/sandbox_mac.h"
 
-namespace content {
+namespace sandboxtest {
 
 // Helpers for writing unit tests that runs in the context of the Mac sandbox.
 //
@@ -22,7 +23,8 @@ namespace content {
 // one of its helper functions to launch the test.
 //
 // Example:
-//  class TestCaseThatRunsInSandboxedSubprocess : public MacSandboxTestCase {
+//  class TestCaseThatRunsInSandboxedSubprocess :
+//      public sandboxtest::MacSandboxTestCase {
 //   public:
 //    virtual bool SandboxedTest() {
 //      .. test code that runs in sandbox goes here ..
@@ -60,7 +62,7 @@ class MacSandboxTest : public base::MultiProcessTest {
   // processes.
   //
   // DANGER DANGER DANGER:
-  // Additional sandbox types defined by the embedder (e.g. the NaCl sandbox)
+  // Additional sandbox types defined by the embedder (e.g. the NaCL sandbox)
   // won't be covered by these tests.
   bool RunTestInAllSandboxTypes(const char* test_name,
                                 const char* test_data);
@@ -109,12 +111,12 @@ template <class T> struct RegisterSandboxTest {
 
 #define REGISTER_SANDBOX_TEST_CASE(class_name) \
   namespace { \
-    content::internal::RegisterSandboxTest<class_name> \
+    sandboxtest::internal::RegisterSandboxTest<class_name> \
       register_test##class_name(#class_name); \
   }  // namespace
 
 }  // namespace internal
 
-}  // namespace content
+}  // namespace sandboxtest
 
 #endif  // CONTENT_COMMON_SANDBOX_MAC_UNITTEST_HELPER_H_

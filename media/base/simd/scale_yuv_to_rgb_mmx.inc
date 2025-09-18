@@ -2,9 +2,7 @@
 ; Use of this source code is governed by a BSD-style license that can be
 ; found in the LICENSE file.
 
-%include "media/base/simd/media_export.asm"
-
-  EXPORT    SYMBOL
+  global    mangle(SYMBOL) PRIVATE
   align     function_align
 
 mangle(SYMBOL):
@@ -39,7 +37,7 @@ PROLOGUE  6, 7, 3, Y, U, V, ARGB, R1, R2, TEMP
 %ifdef PIC
   LOAD_SYM  R1q, mangle(kCoefficientsRgbY)
 %define     WIDTH       WORD_SIZE [rsp + gprsize]
-%define     TABLE       R1q
+%define     TABLE       R1q  
 %define     Xq           R2q
 
 ; Non-PIC code.

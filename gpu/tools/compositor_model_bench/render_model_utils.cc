@@ -15,6 +15,8 @@
 
 TextureGenerator::TextureGenerator(RenderNode* root)
     : stage_(DiscoveryStage),
+      tex_ids_(NULL),
+      image_data_(NULL),
       images_generated_(0) {
   DiscoverInputIDs(root);
   GenerateGLTexIDs();

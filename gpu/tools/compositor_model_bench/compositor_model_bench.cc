@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,12 +25,11 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_enumerator.h"
-#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/time/time.h"
+#include "base/message_loop.h"
+#include "base/time.h"
 
 #include "gpu/tools/compositor_model_bench/render_model_utils.h"
 #include "gpu/tools/compositor_model_bench/render_models.h"
@@ -38,14 +37,17 @@
 
 
 using base::TimeTicks;
-using base::DirectoryExists;
-using base::PathExists;
+using file_util::CloseFile;
+using file_util::DirectoryExists;
+using file_util::FileEnumerator;
+using file_util::OpenFile;
+using file_util::PathExists;
 using std::queue;
 using std::string;
 
 struct SimulationSpecification {
   string simulation_name;
-  base::FilePath input_path;
+  FilePath input_path;
   RenderModel model_under_test;
   TimeTicks simulation_start_time;
   int frames_rendered;
@@ -58,11 +60,12 @@ void _update_loop(Simulator* sim);
 
 class Simulator {
  public:
-  Simulator(int seconds_per_test, const base::FilePath& output_path)
-     : current_sim_(NULL),
+  Simulator(int seconds_per_test, const FilePath& output_path)
+     : running_(false),
+       current_sim_(NULL),
        output_path_(output_path),
        seconds_per_test_(seconds_per_test),
-       weak_factory_(this),
+       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
        display_(NULL),
        window_(0),
        gl_context_(NULL),
@@ -80,7 +83,7 @@ class Simulator {
     XCloseDisplay(display_);
   }
 
-  void QueueTest(const base::FilePath& path) {
+  void QueueTest(const FilePath& path) {
     SimulationSpecification spec;
 
     // To get a std::string, we'll try to get an ASCII simulation name.
@@ -111,7 +114,7 @@ class Simulator {
     }
 
     base::AtExitManager at_exit;
-    base::MessageLoop loop;
+    MessageLoop loop;
     if (!InitX11() || !InitGLContext()) {
       LOG(FATAL) << "Failed to set up GUI.";
     }
@@ -223,7 +226,7 @@ class Simulator {
     SimulationSpecification& spec = sims_remaining_.front();
     LOG(INFO) << "Initializing test for " << spec.simulation_name <<
         "(" << ModelToString(spec.model_under_test) << ")";
-    const base::FilePath& path = spec.input_path;
+    const FilePath& path = spec.input_path;
 
     RenderNode* root = NULL;
     if (!(root = BuildRenderTreeFromFile(path))) {
@@ -265,7 +268,7 @@ class Simulator {
       ExposureMask,
       reinterpret_cast<XEvent*>(&ev));
 
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&Simulator::UpdateLoop, weak_factory_.GetWeakPtr()));
   }
@@ -273,7 +276,7 @@ class Simulator {
   void DumpOutput() {
     LOG(INFO) << "Successfully ran " << sims_completed_.size() << " tests";
 
-    FILE* f = base::OpenFile(output_path_, "w");
+    FILE* f = OpenFile(output_path_, "w");
 
     if (!f) {
       LOG(ERROR) << "Failed to open output file " <<
@@ -299,7 +302,7 @@ class Simulator {
     }
 
     fputs("\t]\n}", f);
-    base::CloseFile(f);
+    CloseFile(f);
   }
 
   bool UpdateTestStatus() {
@@ -323,7 +326,7 @@ class Simulator {
 
     if (!sims_remaining_.size()) {
       DumpOutput();
-      base::MessageLoop::current()->Quit();
+      MessageLoop::current()->Quit();
       return false;
     }
 
@@ -338,10 +341,11 @@ class Simulator {
   }
 
   // Simulation task list for this execution
+  bool running_;
   RenderModelSimulator* current_sim_;
   queue<SimulationSpecification> sims_remaining_;
   queue<SimulationSpecification> sims_completed_;
-  base::FilePath output_path_;
+  FilePath output_path_;
   // Amount of time to run each simulation
   int seconds_per_test_;
   // GUI data
@@ -378,7 +382,7 @@ int main(int argc, char* argv[]) {
   }
 
   Simulator sim(seconds_per_test, cl->GetSwitchValuePath("out"));
-  base::FilePath inPath = cl->GetSwitchValuePath("in");
+  FilePath inPath = cl->GetSwitchValuePath("in");
 
   if (!PathExists(inPath)) {
     LOG(FATAL) << "Path does not exist: " << inPath.LossyDisplayName();
@@ -387,8 +391,8 @@ int main(int argc, char* argv[]) {
 
   if (DirectoryExists(inPath)) {
     LOG(INFO) << "(input path is a directory)";
-    base::FileEnumerator dirItr(inPath, true, base::FileEnumerator::FILES);
-    for (base::FilePath f = dirItr.Next(); !f.empty(); f = dirItr.Next()) {
+    FileEnumerator dirItr(inPath, true, FileEnumerator::FILES);
+    for (FilePath f = dirItr.Next(); !f.empty(); f = dirItr.Next()) {
       sim.QueueTest(f);
     }
   } else {

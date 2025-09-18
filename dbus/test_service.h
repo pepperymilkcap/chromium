@@ -1,25 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef DBUS_TEST_SERVICE_H_
 #define DBUS_TEST_SERVICE_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
-#include "dbus/bus.h"
 #include "dbus/exported_object.h"
 
 namespace base {
-class SequencedTaskRunner;
+class MessageLoopProxy;
 }
 
 namespace dbus {
 
+class Bus;
 class MethodCall;
-class MessageWriter;
 class Response;
 
 // The test service is used for end-to-end tests.  The service runs in a
@@ -36,16 +36,13 @@ class TestService : public base::Thread {
     ~Options();
 
     // NULL by default (i.e. don't use the D-Bus thread).
-    scoped_refptr<base::SequencedTaskRunner> dbus_task_runner;
-
-    // Flags governing parameters of service ownership request.
-    Bus::ServiceOwnershipOptions request_ownership_options;
+    scoped_refptr<base::MessageLoopProxy> dbus_thread_message_loop_proxy;
   };
 
   // The number of methods we'll export.
   static const int kNumMethodsToExport;
 
-  explicit TestService(const Options& options);
+  TestService(const Options& options);
   virtual ~TestService();
 
   // Starts the service in a separate thread.
@@ -69,14 +66,6 @@ class TestService : public base::Thread {
   // This function emulates dbus-send's behavior.
   void SendTestSignalFromRoot(const std::string& message);
 
-  // Request the ownership of a well-known name "TestService".
-  // |callback| will be called with the result when an ownership request is
-  // completed.
-  void RequestOwnership(base::Callback<void(bool)> callback);
-
-  // Returns whether this instance has the name ownership or not.
-  bool has_ownership() const { return has_ownership_; }
-
  private:
   // Helper function for SendTestSignal().
   void SendTestSignalInternal(const std::string& message);
@@ -87,22 +76,13 @@ class TestService : public base::Thread {
   // Helper function for ShutdownAndBlock().
   void ShutdownAndBlockInternal();
 
-  // Called when an ownership request is completed.
-  // |callback| is the callback to be called with the result. |service_name| is
-  // the requested well-known bus name. |callback| and |service_name| are bound
-  // when the service requests the ownership. |success| is the result of the
-  // completed request, and is propagated to |callback|.
-  void OnOwnership(base::Callback<void(bool)> callback,
-                   const std::string& service_name,
-                   bool success);
-
   // Called when a method is exported.
   void OnExported(const std::string& interface_name,
                   const std::string& method_name,
                   bool success);
 
   // base::Thread override.
-  virtual void Run(base::MessageLoop* message_loop) OVERRIDE;
+  virtual void Run(MessageLoop* message_loop) OVERRIDE;
 
   //
   // Exported methods.
@@ -126,60 +106,13 @@ class TestService : public base::Thread {
   void BrokenMethod(MethodCall* method_call,
                     dbus::ExportedObject::ResponseSender response_sender);
 
-  // Returns a set of property values for testing.
-  void GetAllProperties(MethodCall* method_call,
-                        dbus::ExportedObject::ResponseSender response_sender);
-
-  // Returns a new value of 20 for the Version property when called.
-  void GetProperty(MethodCall* method_call,
-                   dbus::ExportedObject::ResponseSender response_sender);
-
-  // Allows the name property to be changed, errors otherwise.
-  void SetProperty(MethodCall* method_call,
-                   dbus::ExportedObject::ResponseSender response_sender);
-
-  // Performs an action for testing.
-  void PerformAction(MethodCall* method_call,
-                     dbus::ExportedObject::ResponseSender response_sender);
-
-  // Object Manager: returns the set of objects and properties.
-  void GetManagedObjects(MethodCall* method_call,
-                         dbus::ExportedObject::ResponseSender response_sender);
-
-  // Add a properties dictionary to a message writer.
-  void AddPropertiesToWriter(MessageWriter* writer);
-
-  // Add a new object to the manager.
-  void AddObject(const dbus::ObjectPath& object_path);
-  void AddObjectInternal(const dbus::ObjectPath& object_path);
-
-  // Remove an object from the manager.
-  void RemoveObject(const dbus::ObjectPath& object_path);
-  void RemoveObjectInternal(const dbus::ObjectPath& object_path);
-
-  // Sends a property changed signal for the name property.
-  void SendPropertyChangedSignal(const std::string& name);
-
-  // Helper function for SendPropertyChangedSignal().
-  void SendPropertyChangedSignalInternal(const std::string& name);
-
-  // Helper function for RequestOwnership().
-  void RequestOwnershipInternal(base::Callback<void(bool)> callback);
-
-  // Options to use when requesting service ownership.
-  Bus::ServiceOwnershipOptions request_ownership_options_;
-
-  scoped_refptr<base::SequencedTaskRunner> dbus_task_runner_;
+  scoped_refptr<base::MessageLoopProxy> dbus_thread_message_loop_proxy_;
   base::WaitableEvent on_all_methods_exported_;
   // The number of methods actually exported.
   int num_exported_methods_;
 
-  // True iff this instance has successfully acquired the name ownership.
-  bool has_ownership_;
-
   scoped_refptr<Bus> bus_;
   ExportedObject* exported_object_;
-  ExportedObject* exported_object_manager_;
 };
 
 }  // namespace dbus

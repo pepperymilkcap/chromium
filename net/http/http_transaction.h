@@ -4,24 +4,21 @@
 
 #ifndef NET_HTTP_HTTP_TRANSACTION_H_
 #define NET_HTTP_HTTP_TRANSACTION_H_
+#pragma once
 
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
-#include "net/base/request_priority.h"
-#include "net/base/upload_progress.h"
-#include "net/websockets/websocket_handshake_stream_base.h"
 
 namespace net {
 
 class AuthCredentials;
 class BoundNetLog;
-class HttpRequestHeaders;
 struct HttpRequestInfo;
 class HttpResponseInfo;
 class IOBuffer;
-struct LoadTimingInfo;
 class X509Certificate;
+class SSLHostInfo;
 
 // Represents a single HTTP transaction (i.e., a single request/response pair).
 // HTTP redirects are not followed and authentication challenges are not
@@ -98,24 +95,10 @@ class NET_EXPORT_PRIVATE HttpTransaction {
   // Stops further caching of this request by the HTTP cache, if there is any.
   virtual void StopCaching() = 0;
 
-  // Gets the full request headers sent to the server.  This is guaranteed to
-  // work only if Start returns success and the underlying transaction supports
-  // it.  (Right now, this is only network transactions, not cache ones.)
-  //
-  // Returns true and overwrites headers if it can get the request headers;
-  // otherwise, returns false and does not modify headers.
-  virtual bool GetFullRequestHeaders(HttpRequestHeaders* headers) const = 0;
-
-  // Get the number of bytes received from network.
-  virtual int64 GetTotalReceivedBytes() const = 0;
-
   // Called to tell the transaction that we have successfully reached the end
   // of the stream. This is equivalent to performing an extra Read() at the end
   // that should return 0 bytes. This method should not be called if the
   // transaction is busy processing a previous operation (like a pending Read).
-  //
-  // DoneReading may also be called before the first Read() to notify that the
-  // entire response body is to be ignored (e.g., in a redirect).
   virtual void DoneReading() = 0;
 
   // Returns the response info for this transaction or NULL if the response
@@ -127,23 +110,12 @@ class NET_EXPORT_PRIVATE HttpTransaction {
 
   // Returns the upload progress in bytes.  If there is no upload data,
   // zero will be returned.  This does not include the request headers.
-  virtual UploadProgress GetUploadProgress() const = 0;
+  virtual uint64 GetUploadProgress() const = 0;
 
-  // Populates all of load timing, except for request start times and receive
-  // headers time.
-  // |load_timing_info| must have all null times when called.  Returns false and
-  // does not modify |load_timing_info| if there's no timing information to
-  // provide.
-  virtual bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const = 0;
-
-  // Called when the priority of the parent job changes.
-  virtual void SetPriority(RequestPriority priority) = 0;
-
-  // Set the WebSocketHandshakeStreamBase::CreateHelper to be used for the
-  // request.  Only relevant to WebSocket transactions. Must be called before
-  // Start(). Ownership of |create_helper| remains with the caller.
-  virtual void SetWebSocketHandshakeStreamCreateHelper(
-      WebSocketHandshakeStreamBase::CreateHelper* create_helper) = 0;
+  // SetSSLHostInfo sets a object which reads and writes public information
+  // about an SSL server. It's used to implement Snap Start.
+  // TODO(agl): remove this.
+  virtual void SetSSLHostInfo(SSLHostInfo*) { };
 };
 
 }  // namespace net

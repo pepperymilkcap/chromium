@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,8 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/ui/cocoa/drag_util.h"
+#include "googleurl/src/gurl.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
-#include "url/gurl.h"
-
-namespace {
-
-// Mac WebKit uses this type, declared in
-// WebKit/mac/History/WebURLsWithTitles.h.
-NSString* const kCrWebURLsWithTitlesPboardType =
-    @"WebURLsWithTitlesPboardType";
-
-}  // namespace
 
 @interface URLDropTargetHandler(Private)
 
@@ -31,7 +22,7 @@ NSString* const kCrWebURLsWithTitlesPboardType =
 @implementation URLDropTargetHandler
 
 + (NSArray*)handledDragTypes {
-  return [NSArray arrayWithObjects:kCrWebURLsWithTitlesPboardType,
+  return [NSArray arrayWithObjects:kWebURLsWithTitlesPboardType,
                                    NSURLPboardType,
                                    NSStringPboardType,
                                    NSFilenamesPboardType,

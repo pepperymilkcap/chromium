@@ -1,10 +1,8 @@
-// Copyright 2010 Google Inc. All Rights Reserved.
+// Copyright 2010 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 // Coding trees and probas
@@ -61,8 +59,8 @@ static const int8_t kMVRef[8] = {
 };
 
 static const int8_t kMVRef4[6] = {
-  -LEFT4, 1,
-    -ABOVE4, 2,
+  -LEFT4, 1
+    -ABOVE4, 2
       -ZERO4, -NEW4
 };
 #endif

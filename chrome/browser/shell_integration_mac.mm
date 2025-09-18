@@ -10,21 +10,16 @@
 #include "chrome/common/chrome_version_info.h"
 #import "third_party/mozilla/NSWorkspace+Utils.h"
 
-ShellIntegration::DefaultWebClientSetPermission
-    ShellIntegration::CanSetAsDefaultBrowser() {
-  if (chrome::VersionInfo::GetChannel() !=
-          chrome::VersionInfo::CHANNEL_CANARY) {
-    return SET_DEFAULT_UNATTENDED;
-  }
-
-  return SET_DEFAULT_NOT_ALLOWED;
+bool ShellIntegration::CanSetAsDefaultBrowser() {
+  return chrome::VersionInfo::GetChannel() !=
+      chrome::VersionInfo::CHANNEL_CANARY;
 }
 
 // Sets Chromium as default browser to be used by the operating system. This
 // applies only for the current user. Returns false if this cannot be done, or
 // if the operation fails.
 bool ShellIntegration::SetAsDefaultBrowser() {
-  if (CanSetAsDefaultBrowser() != SET_DEFAULT_UNATTENDED)
+  if (!CanSetAsDefaultBrowser())
     return false;
 
   // We really do want the outer bundle here, not the main bundle since setting
@@ -44,7 +39,7 @@ bool ShellIntegration::SetAsDefaultProtocolClient(const std::string& protocol) {
   if (protocol.empty())
     return false;
 
-  if (CanSetAsDefaultProtocolClient() != SET_DEFAULT_UNATTENDED)
+  if (!CanSetAsDefaultProtocolClient())
     return false;
 
   // We really do want the main bundle here since it makes sense to set an
@@ -100,14 +95,15 @@ bool IsIdentifierDefaultProtocolClient(NSString* identifier,
 // return the appropriate state. (Defined as being the handler for HTTP/HTTPS
 // protocols; we don't want to report "no" here if the user has simply chosen
 // to open HTML files in a text editor and FTP links with an FTP client.)
-ShellIntegration::DefaultWebClientState ShellIntegration::GetDefaultBrowser() {
+ShellIntegration::DefaultWebClientState ShellIntegration::IsDefaultBrowser() {
   // We really do want the outer bundle here, since this we want to know the
   // status of the main Chrome bundle and not a shortcut.
   NSString* my_identifier = [base::mac::OuterBundle() bundleIdentifier];
   if (!my_identifier)
-    return UNKNOWN_DEFAULT;
+    return UNKNOWN_DEFAULT_WEB_CLIENT;
 
-  return IsIdentifierDefaultBrowser(my_identifier) ? IS_DEFAULT : NOT_DEFAULT;
+  return IsIdentifierDefaultBrowser(my_identifier) ? IS_DEFAULT_WEB_CLIENT
+                                                   : NOT_DEFAULT_WEB_CLIENT;
 }
 
 // Returns true if Firefox is the default browser for the current user.
@@ -120,15 +116,15 @@ bool ShellIntegration::IsFirefoxDefaultBrowser() {
 ShellIntegration::DefaultWebClientState
     ShellIntegration::IsDefaultProtocolClient(const std::string& protocol) {
   if (protocol.empty())
-    return UNKNOWN_DEFAULT;
+    return UNKNOWN_DEFAULT_WEB_CLIENT;
 
   // We really do want the main bundle here since it makes sense to set an
   // app shortcut as a default protocol handler.
   NSString* my_identifier = [base::mac::MainBundle() bundleIdentifier];
   if (!my_identifier)
-    return UNKNOWN_DEFAULT;
+    return UNKNOWN_DEFAULT_WEB_CLIENT;
 
   NSString* protocol_ns = [NSString stringWithUTF8String:protocol.c_str()];
   return IsIdentifierDefaultProtocolClient(my_identifier, protocol_ns) ?
-      IS_DEFAULT : NOT_DEFAULT;
+      IS_DEFAULT_WEB_CLIENT : NOT_DEFAULT_WEB_CLIENT;
 }

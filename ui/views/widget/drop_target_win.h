@@ -4,8 +4,9 @@
 
 #ifndef UI_VIEWS_WIDGET_DROP_TARGET_WIN_H_
 #define UI_VIEWS_WIDGET_DROP_TARGET_WIN_H_
+#pragma once
 
-#include "ui/base/dragdrop/drop_target_win.h"
+#include "ui/base/dragdrop/drop_target.h"
 #include "ui/views/widget/drop_helper.h"
 
 namespace views {
@@ -20,7 +21,7 @@ class RootView;
 //
 // DropTargetWin uses DropHelper to manage the appropriate view to target
 // drop messages at.
-class DropTargetWin : public ui::DropTargetWin {
+class DropTargetWin : public ui::DropTarget {
  public:
   explicit DropTargetWin(internal::RootView* root_view);
   virtual ~DropTargetWin();

@@ -1,15 +1,27 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "base/utf_string_conversions.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_model_observer_for_cocoa.h"
 #import "chrome/browser/ui/cocoa/cocoa_profile_test.h"
-#include "chrome/test/base/testing_profile.h"
+
+// Keep track of bookmark pings.
+@interface ObserverPingTracker : NSObject {
+ @public
+  int pings;
+}
+@end
+
+@implementation ObserverPingTracker
+- (void)pingMe:(id)sender {
+  pings++;
+}
+@end
 
 namespace {
 
@@ -18,44 +30,31 @@ class BookmarkModelObserverForCocoaTest : public CocoaProfileTest {
 
 
 TEST_F(BookmarkModelObserverForCocoaTest, TestCallback) {
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  BookmarkModel* model = profile()->GetBookmarkModel();
   const BookmarkNode* node = model->AddURL(model->bookmark_bar_node(),
-                                           0, base::ASCIIToUTF16("super"),
+                                           0, ASCIIToUTF16("super"),
                                            GURL("http://www.google.com"));
 
-  __block size_t pings = 0U;
-  __block size_t deletions = 0U;
-
-  BookmarkModelObserverForCocoa::ChangeCallback callback =
-      ^(BOOL nodeWasDeleted) {
-          ++pings;
-          if (nodeWasDeleted)
-            ++deletions;
-      };
+  scoped_nsobject<ObserverPingTracker>
+      pingCount([[ObserverPingTracker alloc] init]);
 
   scoped_ptr<BookmarkModelObserverForCocoa>
-      observer(new BookmarkModelObserverForCocoa(model,
-                                                 callback));
-  observer->StartObservingNode(node);
+      observer(new BookmarkModelObserverForCocoa(node, model,
+                                                 pingCount,
+                                                 @selector(pingMe:)));
 
-  EXPECT_EQ(0U, pings);
-  EXPECT_EQ(0U, deletions);
+  EXPECT_EQ(0, pingCount.get()->pings);
 
-  model->SetTitle(node, base::ASCIIToUTF16("duper"));
-  EXPECT_EQ(1U, pings);
-  EXPECT_EQ(0U, deletions);
-
+  model->SetTitle(node, ASCIIToUTF16("duper"));
+  EXPECT_EQ(1, pingCount.get()->pings);
   model->SetURL(node, GURL("http://www.google.com/reader"));
-  EXPECT_EQ(2U, pings);
-  EXPECT_EQ(0U, deletions);
+  EXPECT_EQ(2, pingCount.get()->pings);
 
   model->Move(node, model->other_node(), 0);
-  EXPECT_EQ(3U, pings);
-  EXPECT_EQ(0U, deletions);
+  EXPECT_EQ(3, pingCount.get()->pings);
 
   model->Remove(node->parent(), 0);
-  EXPECT_EQ(4U, pings);
-  EXPECT_EQ(1U, deletions);
+  EXPECT_EQ(4, pingCount.get()->pings);
 }
 
 }  // namespace

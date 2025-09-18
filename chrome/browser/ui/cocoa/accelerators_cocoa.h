@@ -4,14 +4,15 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_ACCELERATORS_COCOA_H_
 #define CHROME_BROWSER_UI_COCOA_ACCELERATORS_COCOA_H_
+#pragma once
 
 #include <map>
 
-#include "ui/base/accelerators/accelerator.h"
+#include "ui/base/accelerators/accelerator_cocoa.h"
 
 template <typename T> struct DefaultSingletonTraits;
 
-// This class maintains a map of command_ids to Accelerator objects (see
+// This class maintains a map of command_ids to AcceleratorCocoa objects (see
 // chrome/app/chrome_command_ids.h). Currently, this only lists the commands
 // that are used in the Wrench menu.
 //
@@ -25,14 +26,10 @@ template <typename T> struct DefaultSingletonTraits;
 //
 class AcceleratorsCocoa {
  public:
-  typedef std::map<int, ui::Accelerator> AcceleratorMap;
-  typedef AcceleratorMap::const_iterator const_iterator;
-
-  const_iterator const begin() { return accelerators_.begin(); }
-  const_iterator const end() { return accelerators_.end(); }
+  typedef std::map<int, ui::AcceleratorCocoa> AcceleratorCocoaMap;
 
   // Returns NULL if there is no accelerator for the command.
-  const ui::Accelerator* GetAcceleratorForCommand(int command_id);
+  const ui::AcceleratorCocoa* GetAcceleratorForCommand(int command_id);
 
   // Returns the singleton instance.
   static AcceleratorsCocoa* GetInstance();
@@ -43,7 +40,7 @@ class AcceleratorsCocoa {
   AcceleratorsCocoa();
   ~AcceleratorsCocoa();
 
-  AcceleratorMap accelerators_;
+  AcceleratorCocoaMap accelerators_;
 
   DISALLOW_COPY_AND_ASSIGN(AcceleratorsCocoa);
 };

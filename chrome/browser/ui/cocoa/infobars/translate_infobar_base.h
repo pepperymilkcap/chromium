@@ -1,18 +1,45 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_INFOBARS_TRANSLATE_INFOBAR_BASE_H_
 #define CHROME_BROWSER_UI_COCOA_INFOBARS_TRANSLATE_INFOBAR_BASE_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#import "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/translate/languages_menu_model.h"
 #include "chrome/browser/translate/options_menu_model.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_controller.h"
-#include "chrome/common/translate/translate_errors.h"
+#include "chrome/common/translate_errors.h"
+
+#pragma mark TranslateInfoBarUtilities helper functions.
+namespace TranslateInfoBarUtilities {
+
+// Move the |toMove| view |spacing| pixels before/after the |anchor| view.
+// |after| signifies the side of |anchor| on which to place |toMove|.
+void MoveControl(NSView* anchor, NSView* toMove, int spacing, bool after);
+
+// Vertically center |toMove| in its container.
+void VerticallyCenterView(NSView *toMove);
+// Check that the control |before| is ordered visually before the |after|
+// control.
+// Also, check that there is space between them.
+bool VerifyControlOrderAndSpacing(id before, id after);
+
+// Creates a label control in the style we need for the translate infobar's
+// labels within |bounds|.
+NSTextField* CreateLabel(NSRect bounds);
+
+// Adds an item with the specified properties to |menu|.
+void AddMenuItem(NSMenu *menu, id target, SEL selector, NSString* title,
+    int tag, bool enabled, bool checked);
+
+}  // namespace
 
 // The base class for the three translate infobars.  This class does all of the
 // heavy UI lifting, while deferring to the subclass to tell it what views
@@ -23,17 +50,17 @@
 // - (bool)verifyLayout; // For testing.
 @interface TranslateInfoBarControllerBase : InfoBarController<NSMenuDelegate> {
  @protected
-  base::scoped_nsobject<NSTextField> label1_;
-  base::scoped_nsobject<NSTextField> label2_;
-  base::scoped_nsobject<NSTextField> label3_;
-  base::scoped_nsobject<NSPopUpButton> fromLanguagePopUp_;
-  base::scoped_nsobject<NSPopUpButton> toLanguagePopUp_;
-  base::scoped_nsobject<NSPopUpButton> optionsPopUp_;
-  base::scoped_nsobject<NSButton> showOriginalButton_;
+  scoped_nsobject<NSTextField> label1_;
+  scoped_nsobject<NSTextField> label2_;
+  scoped_nsobject<NSTextField> label3_;
+  scoped_nsobject<NSPopUpButton> fromLanguagePopUp_;
+  scoped_nsobject<NSPopUpButton> toLanguagePopUp_;
+  scoped_nsobject<NSPopUpButton> optionsPopUp_;
+  scoped_nsobject<NSButton> showOriginalButton_;
   // This is the button used in the translate message infobar.  It can either be
   // a "Try Again" button, or a "Show Original" button in the case that the
   // page was translated from an unknown language.
-  base::scoped_nsobject<NSButton> translateMessageButton_;
+  scoped_nsobject<NSButton> translateMessageButton_;
 
   // In the current locale, are the "from" and "to" language popup menu
   // flipped from what they'd appear in English.
@@ -42,6 +69,8 @@
   // Space between controls in pixels - read from the NIB.
   CGFloat spaceBetweenControls_;
 
+  scoped_ptr<LanguagesMenuModel> originalLanguageMenuModel_;
+  scoped_ptr<LanguagesMenuModel> targetLanguageMenuModel_;
   scoped_ptr<OptionsMenuModel> optionsMenuModel_;
 }
 

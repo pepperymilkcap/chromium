@@ -1,23 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/infobars/before_translate_infobar.h"
 
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/translate/options_menu_model.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
-#include "chrome/browser/ui/views/infobars/translate_language_menu_model.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 
 BeforeTranslateInfoBar::BeforeTranslateInfoBar(
-    scoped_ptr<TranslateInfoBarDelegate> delegate)
-    : TranslateInfoBarBase(delegate.Pass()),
+    InfoBarTabHelper* owner,
+    TranslateInfoBarDelegate* delegate)
+    : TranslateInfoBarBase(owner, delegate),
       label_1_(NULL),
       label_2_(NULL),
       language_menu_button_(NULL),
@@ -25,7 +23,9 @@ BeforeTranslateInfoBar::BeforeTranslateInfoBar(
       deny_button_(NULL),
       never_translate_button_(NULL),
       always_translate_button_(NULL),
-      options_menu_button_(NULL) {
+      options_menu_button_(NULL),
+      languages_menu_model_(delegate, LanguagesMenuModel::ORIGINAL),
+      options_menu_model_(delegate) {
 }
 
 BeforeTranslateInfoBar::~BeforeTranslateInfoBar() {
@@ -34,89 +34,96 @@ BeforeTranslateInfoBar::~BeforeTranslateInfoBar() {
 void BeforeTranslateInfoBar::Layout() {
   TranslateInfoBarBase::Layout();
 
-  int x = StartX();
-  Labels labels;
-  labels.push_back(label_1_);
-  labels.push_back(label_2_);
-  AssignWidths(&labels, std::max(0, EndX() - x - NonLabelWidth()));
+  int available_width = std::max(0, EndX() - StartX() - ContentMinimumWidth());
+  gfx::Size label_1_size = label_1_->GetPreferredSize();
+  label_1_->SetBounds(StartX(), OffsetY(label_1_size),
+      std::min(label_1_size.width(), available_width), label_1_size.height());
+  available_width = std::max(0, available_width - label_1_size.width());
 
-  label_1_->SetPosition(gfx::Point(x, OffsetY(label_1_)));
-  if (!label_1_->text().empty())
-     x = label_1_->bounds().right() + kButtonInLabelSpacing;
+  gfx::Size language_button_size = language_menu_button_->GetPreferredSize();
+  language_menu_button_->SetBounds(
+      label_1_->bounds().right() + kButtonInLabelSpacing,
+      OffsetY(language_button_size), language_button_size.width(),
+      language_button_size.height());
 
-  language_menu_button_->SetPosition(
-      gfx::Point(x, OffsetY(language_menu_button_)));
-  x = language_menu_button_->bounds().right();
+  gfx::Size label_2_size = label_2_->GetPreferredSize();
+  label_2_->SetBounds(
+      language_menu_button_->bounds().right() + kButtonInLabelSpacing,
+      OffsetY(label_2_size), std::min(label_2_size.width(), available_width),
+      label_2_size.height());
 
-  label_2_->SetPosition(
-      gfx::Point(x + kButtonInLabelSpacing, OffsetY(label_2_)));
-  x = (label_2_->text().empty() ? x : label_2_->bounds().right()) +
-      kEndOfLabelSpacing;
+  gfx::Size accept_button_size = accept_button_->GetPreferredSize();
+  accept_button_->SetBounds(label_2_->bounds().right() + kEndOfLabelSpacing,
+      OffsetY(accept_button_size), accept_button_size.width(),
+      accept_button_size.height());
 
-  accept_button_->SetPosition(gfx::Point(x, OffsetY(accept_button_)));
-  x = accept_button_->bounds().right() + kButtonButtonSpacing;
-
-  deny_button_->SetPosition(gfx::Point(x, OffsetY(deny_button_)));
-  x = deny_button_->bounds().right() + kButtonButtonSpacing;
+  gfx::Size deny_button_size = deny_button_->GetPreferredSize();
+  deny_button_->SetBounds(
+        accept_button_->bounds().right() + kButtonButtonSpacing,
+        OffsetY(deny_button_size), deny_button_size.width(),
+        deny_button_size.height());
 
   if (never_translate_button_) {
-    never_translate_button_->SetPosition(
-        gfx::Point(x, OffsetY(never_translate_button_)));
-    x = never_translate_button_->bounds().right() + kButtonButtonSpacing;
+    gfx::Size never_button_size = never_translate_button_->GetPreferredSize();
+    never_translate_button_->SetBounds(
+          deny_button_->bounds().right() + kButtonButtonSpacing,
+          OffsetY(never_button_size), never_button_size.width(),
+          never_button_size.height());
   }
 
   if (always_translate_button_) {
-    always_translate_button_->SetPosition(
-        gfx::Point(x, OffsetY(always_translate_button_)));
+    gfx::Size always_button_size = always_translate_button_->GetPreferredSize();
+    always_translate_button_->SetBounds(
+          deny_button_->bounds().right() + kButtonButtonSpacing,
+          OffsetY(always_button_size), always_button_size.width(),
+          always_button_size.height());
   }
 
-  options_menu_button_->SetPosition(gfx::Point(
-      EndX() - options_menu_button_->width(), OffsetY(options_menu_button_)));
+  gfx::Size options_size = options_menu_button_->GetPreferredSize();
+  options_menu_button_->SetBounds(EndX() - options_size.width(),
+      OffsetY(options_size), options_size.width(), options_size.height());
 }
 
-void BeforeTranslateInfoBar::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
-  if (!details.is_add || (details.child != this) || (label_1_ != NULL)) {
-    TranslateInfoBarBase::ViewHierarchyChanged(details);
+void BeforeTranslateInfoBar::ViewHierarchyChanged(bool is_add,
+                                                  View* parent,
+                                                  View* child) {
+  if (!is_add || (child != this) || (label_1_ != NULL)) {
+    TranslateInfoBarBase::ViewHierarchyChanged(is_add, parent, child);
     return;
   }
 
   size_t offset = 0;
-  base::string16 text(
-      l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_BEFORE_MESSAGE,
-                                 base::string16(), &offset));
+  string16 text(l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_BEFORE_MESSAGE,
+                                           string16(), &offset));
 
   label_1_ = CreateLabel(text.substr(0, offset));
   AddChildView(label_1_);
 
-  language_menu_button_ = CreateMenuButton(base::string16(), this);
-  TranslateInfoBarDelegate* delegate = GetDelegate();
-  language_menu_model_.reset(new TranslateLanguageMenuModel(
-      TranslateLanguageMenuModel::ORIGINAL, delegate, this,
-      language_menu_button_, false));
+  language_menu_button_ = CreateMenuButton(string16(), this);
   AddChildView(language_menu_button_);
 
   label_2_ = CreateLabel(text.substr(offset));
   AddChildView(label_2_);
 
-  accept_button_ = CreateLabelButton(this,
+  accept_button_ = CreateTextButton(this,
       l10n_util::GetStringUTF16(IDS_TRANSLATE_INFOBAR_ACCEPT), false);
   AddChildView(accept_button_);
 
-  deny_button_ = CreateLabelButton(this,
+  deny_button_ = CreateTextButton(this,
       l10n_util::GetStringUTF16(IDS_TRANSLATE_INFOBAR_DENY), false);
   AddChildView(deny_button_);
 
-  const base::string16& language(
-      delegate->language_name_at(delegate->original_language_index()));
-  if (delegate->ShouldShowNeverTranslateShortcut()) {
-    DCHECK(!delegate->ShouldShowAlwaysTranslateShortcut());
-    never_translate_button_ = CreateLabelButton(this,
+  TranslateInfoBarDelegate* delegate = GetDelegate();
+  const string16& language(delegate->GetLanguageDisplayableNameAt(
+      delegate->original_language_index()));
+  if (delegate->ShouldShowNeverTranslateButton()) {
+    DCHECK(!delegate->ShouldShowAlwaysTranslateButton());
+    never_translate_button_ = CreateTextButton(this,
         l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_NEVER_TRANSLATE,
                                    language), false);
     AddChildView(never_translate_button_);
-  } else if (delegate->ShouldShowAlwaysTranslateShortcut()) {
-    always_translate_button_ = CreateLabelButton(this,
+  } else if (delegate->ShouldShowAlwaysTranslateButton()) {
+    always_translate_button_ = CreateTextButton(this,
         l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_ALWAYS_TRANSLATE,
                                    language), false);
     AddChildView(always_translate_button_);
@@ -124,28 +131,37 @@ void BeforeTranslateInfoBar::ViewHierarchyChanged(
 
   options_menu_button_ = CreateMenuButton(
       l10n_util::GetStringUTF16(IDS_TRANSLATE_INFOBAR_OPTIONS), this);
-  options_menu_model_.reset(new OptionsMenuModel(delegate));
   AddChildView(options_menu_button_);
 
   // This must happen after adding all other children so InfoBarView can ensure
   // the close button is the last child.
-  TranslateInfoBarBase::ViewHierarchyChanged(details);
+  TranslateInfoBarBase::ViewHierarchyChanged(is_add, parent, child);
 
   // This must happen after adding all children because it triggers layout,
   // which assumes that particular children (e.g. the close button) have already
   // been added.
-  UpdateLanguageButtonText(language_menu_button_,
-      delegate->language_name_at(delegate->original_language_index()));
+  OriginalLanguageChanged();
 }
 
-int BeforeTranslateInfoBar::ContentMinimumWidth() {
-  return label_1_->GetMinimumSize().width() +
-      label_2_->GetMinimumSize().width() + NonLabelWidth();
+int BeforeTranslateInfoBar::ContentMinimumWidth() const {
+  return
+      (kButtonInLabelSpacing +
+          language_menu_button_->GetPreferredSize().width() +
+          kButtonInLabelSpacing) +
+      (kEndOfLabelSpacing + accept_button_->GetPreferredSize().width()) +
+      (kButtonButtonSpacing + deny_button_->GetPreferredSize().width()) +
+      ((never_translate_button_ == NULL) ? 0 :
+          (kButtonButtonSpacing +
+              never_translate_button_->GetPreferredSize().width())) +
+      ((always_translate_button_ == NULL) ? 0 :
+          (kButtonButtonSpacing +
+              always_translate_button_->GetPreferredSize().width())) +
+      (kEndOfLabelSpacing + options_menu_button_->GetPreferredSize().width());
 }
 
 void BeforeTranslateInfoBar::ButtonPressed(views::Button* sender,
-                                           const ui::Event& event) {
-  if (!owner())
+                                           const views::Event& event) {
+  if (!owned())
     return;  // We're closing; don't call anything, it might access the owner.
   TranslateInfoBarDelegate* delegate = GetDelegate();
   if (sender == accept_button_) {
@@ -162,29 +178,29 @@ void BeforeTranslateInfoBar::ButtonPressed(views::Button* sender,
   }
 }
 
-void BeforeTranslateInfoBar::OnMenuButtonClicked(views::View* source,
-                                                 const gfx::Point& point) {
-  if (!owner())
-    return;  // We're closing; don't call anything, it might access the owner.
-  if (source == language_menu_button_) {
-    RunMenuAt(language_menu_model_.get(), language_menu_button_,
-              views::MenuItemView::TOPLEFT);
-  } else {
-    DCHECK_EQ(options_menu_button_, source);
-    RunMenuAt(options_menu_model_.get(), options_menu_button_,
-              views::MenuItemView::TOPRIGHT);
+void BeforeTranslateInfoBar::OriginalLanguageChanged() {
+  // Tests can call this function when the infobar has never been added to a
+  // view hierarchy and thus there is no button.
+  if (language_menu_button_) {
+    UpdateLanguageButtonText(language_menu_button_,
+                             LanguagesMenuModel::ORIGINAL);
   }
 }
 
-int BeforeTranslateInfoBar::NonLabelWidth() const {
-  return (label_1_->text().empty() ? 0 : kButtonInLabelSpacing) +
-      language_menu_button_->width() +
-      (label_2_->text().empty() ? 0 : kButtonInLabelSpacing) +
-      kEndOfLabelSpacing + accept_button_->width() + kButtonButtonSpacing +
-      deny_button_->width() +
-      (never_translate_button_ ?
-          (kButtonButtonSpacing + never_translate_button_->width()) : 0) +
-      (always_translate_button_ ?
-          (kButtonButtonSpacing + always_translate_button_->width()) : 0) +
-      kEndOfLabelSpacing + options_menu_button_->width();
+void BeforeTranslateInfoBar::RunMenu(View* source, const gfx::Point& pt) {
+  if (!owned())
+    return;  // We're closing; don't call anything, it might access the owner.
+  ui::MenuModel* menu_model = NULL;
+  views::MenuButton* button = NULL;
+  views::MenuItemView::AnchorPosition anchor = views::MenuItemView::TOPLEFT;
+  if (source == language_menu_button_) {
+    menu_model = &languages_menu_model_;
+    button = language_menu_button_;
+  } else {
+    DCHECK_EQ(options_menu_button_, source);
+    menu_model = &options_menu_model_;
+    button = options_menu_button_;
+    anchor = views::MenuItemView::TOPRIGHT;
+  }
+  RunMenuAt(menu_model, button, anchor);
 }

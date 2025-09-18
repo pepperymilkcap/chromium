@@ -1,19 +1,20 @@
 {
   "name": "chrome.socket",
   "version": "0.1",
-  "description": "end-to-end browser test for chrome.socket API",
+  "manifest_version": 2,
+  "description": "end-to-end browser test for chrome.experimental.socket API",
+  "platform_app": true,
+  "background": {
+    "scripts": ["background.js"]
+  },
   "app": {
-    "background": {
-      "scripts": ["multicast.js", "background.js"]
+    "launch": {
+      "container": "shell",
+      "local_path": "main.html"
     }
   },
   "permissions": [
-    {"socket": [
-      "tcp-connect",
-      "tcp-listen",
-      "udp-send-to",
-      "udp-bind",
-      "udp-multicast-membership"
-    ]}
+    "experimental",
+    "socket"
   ]
 }

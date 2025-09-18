@@ -17,10 +17,10 @@
 
 #include "media/base/yuv_convert.h"
 
-#include "base/cpu.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
+#include "media/base/cpu_features.h"
 #include "media/base/simd/convert_rgb_to_yuv.h"
 #include "media/base/simd/convert_yuv_to_rgb.h"
 #include "media/base/simd/filter_yuv.h"
@@ -33,155 +33,71 @@
 #endif
 #endif
 
-// Assembly functions are declared without namespace.
-extern "C" { void EmptyRegisterState_MMX(); }  // extern "C"
-
 namespace media {
 
-typedef void (*FilterYUVRowsProc)(uint8*, const uint8*, const uint8*, int, int);
-
-typedef void (*ConvertRGBToYUVProc)(const uint8*,
-                                    uint8*,
-                                    uint8*,
-                                    uint8*,
-                                    int,
-                                    int,
-                                    int,
-                                    int,
-                                    int);
-
-typedef void (*ConvertYUVToRGB32Proc)(const uint8*,
-                                      const uint8*,
-                                      const uint8*,
-                                      uint8*,
-                                      int,
-                                      int,
-                                      int,
-                                      int,
-                                      int,
-                                      YUVType);
-
-typedef void (*ConvertYUVAToARGBProc)(const uint8*,
-                                      const uint8*,
-                                      const uint8*,
-                                      const uint8*,
-                                      uint8*,
-                                      int,
-                                      int,
-                                      int,
-                                      int,
-                                      int,
-                                      int,
-                                      YUVType);
-
-typedef void (*ConvertYUVToRGB32RowProc)(const uint8*,
-                                         const uint8*,
-                                         const uint8*,
-                                         uint8*,
-                                         ptrdiff_t);
-
-typedef void (*ConvertYUVAToARGBRowProc)(const uint8*,
-                                         const uint8*,
-                                         const uint8*,
-                                         const uint8*,
-                                         uint8*,
-                                         ptrdiff_t);
-
-typedef void (*ScaleYUVToRGB32RowProc)(const uint8*,
-                                       const uint8*,
-                                       const uint8*,
-                                       uint8*,
-                                       ptrdiff_t,
-                                       ptrdiff_t);
-
-static FilterYUVRowsProc g_filter_yuv_rows_proc_ = NULL;
-static ConvertYUVToRGB32RowProc g_convert_yuv_to_rgb32_row_proc_ = NULL;
-static ScaleYUVToRGB32RowProc g_scale_yuv_to_rgb32_row_proc_ = NULL;
-static ScaleYUVToRGB32RowProc g_linear_scale_yuv_to_rgb32_row_proc_ = NULL;
-static ConvertRGBToYUVProc g_convert_rgb32_to_yuv_proc_ = NULL;
-static ConvertRGBToYUVProc g_convert_rgb24_to_yuv_proc_ = NULL;
-static ConvertYUVToRGB32Proc g_convert_yuv_to_rgb32_proc_ = NULL;
-static ConvertYUVAToARGBProc g_convert_yuva_to_argb_proc_ = NULL;
-
-// Empty SIMD registers state after using them.
-void EmptyRegisterStateStub() {}
-#if defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
-void EmptyRegisterStateIntrinsic() { _mm_empty(); }
-#endif
-typedef void (*EmptyRegisterStateProc)();
-static EmptyRegisterStateProc g_empty_register_state_proc_ = NULL;
-
-void InitializeCPUSpecificYUVConversions() {
-  CHECK(!g_filter_yuv_rows_proc_);
-  CHECK(!g_convert_yuv_to_rgb32_row_proc_);
-  CHECK(!g_scale_yuv_to_rgb32_row_proc_);
-  CHECK(!g_linear_scale_yuv_to_rgb32_row_proc_);
-  CHECK(!g_convert_rgb32_to_yuv_proc_);
-  CHECK(!g_convert_rgb24_to_yuv_proc_);
-  CHECK(!g_convert_yuv_to_rgb32_proc_);
-  CHECK(!g_convert_yuva_to_argb_proc_);
-  CHECK(!g_empty_register_state_proc_);
-
-  g_filter_yuv_rows_proc_ = FilterYUVRows_C;
-  g_convert_yuv_to_rgb32_row_proc_ = ConvertYUVToRGB32Row_C;
-  g_scale_yuv_to_rgb32_row_proc_ = ScaleYUVToRGB32Row_C;
-  g_linear_scale_yuv_to_rgb32_row_proc_ = LinearScaleYUVToRGB32Row_C;
-  g_convert_rgb32_to_yuv_proc_ = ConvertRGB32ToYUV_C;
-  g_convert_rgb24_to_yuv_proc_ = ConvertRGB24ToYUV_C;
-  g_convert_yuv_to_rgb32_proc_ = ConvertYUVToRGB32_C;
-  g_convert_yuva_to_argb_proc_ = ConvertYUVAToARGB_C;
-  g_empty_register_state_proc_ = EmptyRegisterStateStub;
-
+static FilterYUVRowsProc ChooseFilterYUVRowsProc() {
 #if defined(ARCH_CPU_X86_FAMILY)
-  base::CPU cpu;
-  if (cpu.has_mmx()) {
-    g_convert_yuv_to_rgb32_row_proc_ = ConvertYUVToRGB32Row_MMX;
-    g_scale_yuv_to_rgb32_row_proc_ = ScaleYUVToRGB32Row_MMX;
-    g_convert_yuv_to_rgb32_proc_ = ConvertYUVToRGB32_MMX;
-    g_convert_yuva_to_argb_proc_ = ConvertYUVAToARGB_MMX;
-    g_linear_scale_yuv_to_rgb32_row_proc_ = LinearScaleYUVToRGB32Row_MMX;
-
-#if defined(MEDIA_MMX_INTRINSICS_AVAILABLE)
-    g_filter_yuv_rows_proc_ = FilterYUVRows_MMX;
-    g_empty_register_state_proc_ = EmptyRegisterStateIntrinsic;
-#else
-    g_empty_register_state_proc_ = EmptyRegisterState_MMX;
+  if (hasSSE2())
+    return &FilterYUVRows_SSE2;
+  if (hasMMX())
+    return &FilterYUVRows_MMX;
 #endif
-  }
+  return &FilterYUVRows_C;
+}
 
-  if (cpu.has_sse()) {
-    g_convert_yuv_to_rgb32_row_proc_ = ConvertYUVToRGB32Row_SSE;
-    g_scale_yuv_to_rgb32_row_proc_ = ScaleYUVToRGB32Row_SSE;
-    g_linear_scale_yuv_to_rgb32_row_proc_ = LinearScaleYUVToRGB32Row_SSE;
-    g_convert_yuv_to_rgb32_proc_ = ConvertYUVToRGB32_SSE;
-  }
+static ConvertYUVToRGB32RowProc ChooseConvertYUVToRGB32RowProc() {
+#if defined(ARCH_CPU_X86_FAMILY)
+  if (hasSSE())
+    return &ConvertYUVToRGB32Row_SSE;
+  if (hasMMX())
+    return &ConvertYUVToRGB32Row_MMX;
+#endif
+  return &ConvertYUVToRGB32Row_C;
+}
 
-  if (cpu.has_sse2()) {
-    g_filter_yuv_rows_proc_ = FilterYUVRows_SSE2;
-    g_convert_rgb32_to_yuv_proc_ = ConvertRGB32ToYUV_SSE2;
-
+static ScaleYUVToRGB32RowProc ChooseScaleYUVToRGB32RowProc() {
+#if defined(ARCH_CPU_X86_FAMILY)
 #if defined(ARCH_CPU_X86_64)
-    g_scale_yuv_to_rgb32_row_proc_ = ScaleYUVToRGB32Row_SSE2_X64;
-
-    // Technically this should be in the MMX section, but MSVC will optimize out
-    // the export of LinearScaleYUVToRGB32Row_MMX, which is required by the unit
-    // tests, if that decision can be made at compile time.  Since all X64 CPUs
-    // have SSE2, we can hack around this by making the selection here.
-    g_linear_scale_yuv_to_rgb32_row_proc_ = LinearScaleYUVToRGB32Row_MMX_X64;
+  // Use 64-bits version if possible.
+  return &ScaleYUVToRGB32Row_SSE2_X64;
 #endif
-  }
-
-  if (cpu.has_ssse3()) {
-    g_convert_rgb24_to_yuv_proc_ = &ConvertRGB24ToYUV_SSSE3;
-
-    // TODO(hclam): Add ConvertRGB32ToYUV_SSSE3 when the cyan problem is solved.
-    // See: crbug.com/100462
-  }
+  // Choose the best one on 32-bits system.
+  if (hasSSE())
+    return &ScaleYUVToRGB32Row_SSE;
+  if (hasMMX())
+    return &ScaleYUVToRGB32Row_MMX;
 #endif
+  return &ScaleYUVToRGB32Row_C;
+}
+
+static ScaleYUVToRGB32RowProc ChooseLinearScaleYUVToRGB32RowProc() {
+#if defined(ARCH_CPU_X86_FAMILY)
+#if defined(ARCH_CPU_X86_64)
+  // Use 64-bits version if possible.
+  return &LinearScaleYUVToRGB32Row_MMX_X64;
+#endif
+  // 32-bits system.
+  if (hasSSE())
+    return &LinearScaleYUVToRGB32Row_SSE;
+  if (hasMMX())
+    return &LinearScaleYUVToRGB32Row_MMX;
+#endif
+  return &LinearScaleYUVToRGB32Row_C;
 }
 
 // Empty SIMD registers state after using them.
-void EmptyRegisterState() { g_empty_register_state_proc_(); }
+void EmptyRegisterState() {
+#if defined(ARCH_CPU_X86_FAMILY)
+  static bool checked = false;
+  static bool has_mmx = false;
+  if (!checked) {
+    has_mmx = hasMMX();
+    checked = true;
+  }
+  if (has_mmx)
+    _mm_empty();
+#endif
+}
 
 // 16.16 fixed point arithmetic
 const int kFractionBits = 16;
@@ -203,6 +119,20 @@ void ScaleYUVToRGB32(const uint8* y_buf,
                      YUVType yuv_type,
                      Rotate view_rotate,
                      ScaleFilter filter) {
+  static FilterYUVRowsProc filter_proc = NULL;
+  static ConvertYUVToRGB32RowProc convert_proc = NULL;
+  static ScaleYUVToRGB32RowProc scale_proc = NULL;
+  static ScaleYUVToRGB32RowProc linear_scale_proc = NULL;
+
+  if (!filter_proc)
+    filter_proc = ChooseFilterYUVRowsProc();
+  if (!convert_proc)
+    convert_proc = ChooseConvertYUVToRGB32RowProc();
+  if (!scale_proc)
+    scale_proc = ChooseScaleYUVToRGB32RowProc();
+  if (!linear_scale_proc)
+    linear_scale_proc = ChooseLinearScaleYUVToRGB32RowProc();
+
   // Handle zero sized sources and destinations.
   if ((yuv_type == YV12 && (source_width < 2 || source_height < 2)) ||
       (yuv_type == YV16 && (source_width < 2 || source_height < 1)) ||
@@ -228,16 +158,20 @@ void ScaleYUVToRGB32(const uint8* y_buf,
   // 6       5
   // ->1   2<-
   // Rotations that start at right side of image.
-  if ((view_rotate == ROTATE_180) || (view_rotate == ROTATE_270) ||
-      (view_rotate == MIRROR_ROTATE_0) || (view_rotate == MIRROR_ROTATE_90)) {
+  if ((view_rotate == ROTATE_180) ||
+      (view_rotate == ROTATE_270) ||
+      (view_rotate == MIRROR_ROTATE_0) ||
+      (view_rotate == MIRROR_ROTATE_90)) {
     y_buf += source_width - 1;
     u_buf += source_width / 2 - 1;
     v_buf += source_width / 2 - 1;
     source_width = -source_width;
   }
   // Rotations that start at bottom of image.
-  if ((view_rotate == ROTATE_90) || (view_rotate == ROTATE_180) ||
-      (view_rotate == MIRROR_ROTATE_90) || (view_rotate == MIRROR_ROTATE_180)) {
+  if ((view_rotate == ROTATE_90) ||
+      (view_rotate == ROTATE_180) ||
+      (view_rotate == MIRROR_ROTATE_90) ||
+      (view_rotate == MIRROR_ROTATE_180)) {
     y_buf += (source_height - 1) * y_pitch;
     u_buf += ((source_height >> y_shift) - 1) * uv_pitch;
     v_buf += ((source_height >> y_shift) - 1) * uv_pitch;
@@ -245,16 +179,20 @@ void ScaleYUVToRGB32(const uint8* y_buf,
   }
 
   int source_dx = source_width * kFractionMax / width;
+  int source_dy = source_height * kFractionMax / height;
 
-  if ((view_rotate == ROTATE_90) || (view_rotate == ROTATE_270)) {
+  if ((view_rotate == ROTATE_90) ||
+      (view_rotate == ROTATE_270)) {
     int tmp = height;
     height = width;
     width = tmp;
     tmp = source_height;
     source_height = source_width;
     source_width = tmp;
-    int source_dy = source_height * kFractionMax / height;
-    source_dx = ((source_dy >> kFractionBits) * y_pitch) << kFractionBits;
+    int original_dx = source_dx;
+    int original_dy = source_dy;
+    source_dx = ((original_dy >> kFractionBits) * y_pitch) << kFractionBits;
+    source_dy = original_dx;
     if (view_rotate == ROTATE_90) {
       y_pitch = -1;
       uv_pitch = -1;
@@ -272,99 +210,72 @@ void ScaleYUVToRGB32(const uint8* y_buf,
       reinterpret_cast<uint8*>(reinterpret_cast<uintptr_t>(yuvbuf + 15) & ~15);
   uint8* ubuf = ybuf + kFilterBufferSize;
   uint8* vbuf = ubuf + kFilterBufferSize;
-
   // TODO(fbarchard): Fixed point math is off by 1 on negatives.
-
-  // We take a y-coordinate in [0,1] space in the source image space, and
-  // transform to a y-coordinate in [0,1] space in the destination image space.
-  // Note that the coordinate endpoints lie on pixel boundaries, not on pixel
-  // centers: e.g. a two-pixel-high image will have pixel centers at 0.25 and
-  // 0.75.  The formula is as follows (in fixed-point arithmetic):
-  //   y_dst = dst_height * ((y_src + 0.5) / src_height)
-  //   dst_pixel = clamp([0, dst_height - 1], floor(y_dst - 0.5))
-  // Implement this here as an accumulator + delta, to avoid expensive math
-  // in the loop.
-  int source_y_subpixel_accum =
-      ((kFractionMax / 2) * source_height) / height - (kFractionMax / 2);
-  int source_y_subpixel_delta = ((1 << kFractionBits) * source_height) / height;
+  int yscale_fixed = (source_height << kFractionBits) / height;
 
   // TODO(fbarchard): Split this into separate function for better efficiency.
   for (int y = 0; y < height; ++y) {
     uint8* dest_pixel = rgb_buf + y * rgb_pitch;
-    int source_y_subpixel = source_y_subpixel_accum;
-    source_y_subpixel_accum += source_y_subpixel_delta;
-    if (source_y_subpixel < 0)
-      source_y_subpixel = 0;
-    else if (source_y_subpixel > ((source_height - 1) << kFractionBits))
-      source_y_subpixel = (source_height - 1) << kFractionBits;
+    int source_y_subpixel = (y * yscale_fixed);
+    if (yscale_fixed >= (kFractionMax * 2)) {
+      source_y_subpixel += kFractionMax / 2;  // For 1/2 or less, center filter.
+    }
+    int source_y = source_y_subpixel >> kFractionBits;
 
-    const uint8* y_ptr = NULL;
-    const uint8* u_ptr = NULL;
-    const uint8* v_ptr = NULL;
+    const uint8* y0_ptr = y_buf + source_y * y_pitch;
+    const uint8* y1_ptr = y0_ptr + y_pitch;
+
+    const uint8* u0_ptr = u_buf + (source_y >> y_shift) * uv_pitch;
+    const uint8* u1_ptr = u0_ptr + uv_pitch;
+    const uint8* v0_ptr = v_buf + (source_y >> y_shift) * uv_pitch;
+    const uint8* v1_ptr = v0_ptr + uv_pitch;
+
+    // vertical scaler uses 16.8 fixed point
+    int source_y_fraction = (source_y_subpixel & kFractionMask) >> 8;
+    int source_uv_fraction =
+        ((source_y_subpixel >> y_shift) & kFractionMask) >> 8;
+
+    const uint8* y_ptr = y0_ptr;
+    const uint8* u_ptr = u0_ptr;
+    const uint8* v_ptr = v0_ptr;
     // Apply vertical filtering if necessary.
     // TODO(fbarchard): Remove memcpy when not necessary.
     if (filter & media::FILTER_BILINEAR_V) {
-      int source_y = source_y_subpixel >> kFractionBits;
-      y_ptr = y_buf + source_y * y_pitch;
-      u_ptr = u_buf + (source_y >> y_shift) * uv_pitch;
-      v_ptr = v_buf + (source_y >> y_shift) * uv_pitch;
-
-      // Vertical scaler uses 16.8 fixed point.
-      int source_y_fraction = (source_y_subpixel & kFractionMask) >> 8;
-      if (source_y_fraction != 0) {
-        g_filter_yuv_rows_proc_(
-            ybuf, y_ptr, y_ptr + y_pitch, source_width, source_y_fraction);
+      if (yscale_fixed != kFractionMax &&
+          source_y_fraction && ((source_y + 1) < source_height)) {
+        filter_proc(ybuf, y0_ptr, y1_ptr, source_width, source_y_fraction);
       } else {
-        memcpy(ybuf, y_ptr, source_width);
+        memcpy(ybuf, y0_ptr, source_width);
       }
       y_ptr = ybuf;
-      ybuf[source_width] = ybuf[source_width - 1];
-
+      ybuf[source_width] = ybuf[source_width-1];
       int uv_source_width = (source_width + 1) / 2;
-      int source_uv_fraction;
-
-      // For formats with half-height UV planes, each even-numbered pixel row
-      // should not interpolate, since the next row to interpolate from should
-      // be a duplicate of the current row.
-      if (y_shift && (source_y & 0x1) == 0)
-        source_uv_fraction = 0;
-      else
-        source_uv_fraction = source_y_fraction;
-
-      if (source_uv_fraction != 0) {
-        g_filter_yuv_rows_proc_(
-            ubuf, u_ptr, u_ptr + uv_pitch, uv_source_width, source_uv_fraction);
-        g_filter_yuv_rows_proc_(
-            vbuf, v_ptr, v_ptr + uv_pitch, uv_source_width, source_uv_fraction);
+      if (yscale_fixed != kFractionMax &&
+          source_uv_fraction &&
+          (((source_y >> y_shift) + 1) < (source_height >> y_shift))) {
+        filter_proc(ubuf, u0_ptr, u1_ptr, uv_source_width, source_uv_fraction);
+        filter_proc(vbuf, v0_ptr, v1_ptr, uv_source_width, source_uv_fraction);
       } else {
-        memcpy(ubuf, u_ptr, uv_source_width);
-        memcpy(vbuf, v_ptr, uv_source_width);
+        memcpy(ubuf, u0_ptr, uv_source_width);
+        memcpy(vbuf, v0_ptr, uv_source_width);
       }
       u_ptr = ubuf;
       v_ptr = vbuf;
       ubuf[uv_source_width] = ubuf[uv_source_width - 1];
       vbuf[uv_source_width] = vbuf[uv_source_width - 1];
-    } else {
-      // Offset by 1/2 pixel for center sampling.
-      int source_y = (source_y_subpixel + (kFractionMax / 2)) >> kFractionBits;
-      y_ptr = y_buf + source_y * y_pitch;
-      u_ptr = u_buf + (source_y >> y_shift) * uv_pitch;
-      v_ptr = v_buf + (source_y >> y_shift) * uv_pitch;
     }
     if (source_dx == kFractionMax) {  // Not scaled
-      g_convert_yuv_to_rgb32_row_proc_(y_ptr, u_ptr, v_ptr, dest_pixel, width);
+      convert_proc(y_ptr, u_ptr, v_ptr, dest_pixel, width);
     } else {
       if (filter & FILTER_BILINEAR_H) {
-        g_linear_scale_yuv_to_rgb32_row_proc_(
-            y_ptr, u_ptr, v_ptr, dest_pixel, width, source_dx);
+        linear_scale_proc(y_ptr, u_ptr, v_ptr, dest_pixel, width, source_dx);
       } else {
-        g_scale_yuv_to_rgb32_row_proc_(
-            y_ptr, u_ptr, v_ptr, dest_pixel, width, source_dx);
+        scale_proc(y_ptr, u_ptr, v_ptr, dest_pixel, width, source_dx);
       }
     }
   }
 
-  g_empty_register_state_proc_();
+  EmptyRegisterState();
 }
 
 // Scale a frame of YV12 to 32 bit ARGB for a specific rectangle.
@@ -383,9 +294,12 @@ void ScaleYUVToRGB32WithRect(const uint8* y_buf,
                              int y_pitch,
                              int uv_pitch,
                              int rgb_pitch) {
+  static FilterYUVRowsProc filter_proc = NULL;
+  if (!filter_proc)
+    filter_proc = ChooseFilterYUVRowsProc();
+
   // This routine doesn't currently support up-scaling.
-  CHECK_LE(dest_width, source_width);
-  CHECK_LE(dest_height, source_height);
+  CHECK(dest_width <= source_width && dest_height <= source_height);
 
   // Sanity-check the destination rectangle.
   DCHECK(dest_rect_left >= 0 && dest_rect_right <= dest_width);
@@ -421,12 +335,13 @@ void ScaleYUVToRGB32WithRect(const uint8* y_buf,
 
   // Determine the parts of the Y, U and V buffers to interpolate.
   int source_y_left = source_left >> kFractionBits;
-  int source_y_right =
-      std::min((source_right >> kFractionBits) + 2, source_width + 1);
+  int source_y_right = (source_right >> kFractionBits) + 2;
+  DCHECK(source_y_right <= source_width);
 
   int source_uv_left = source_y_left / 2;
-  int source_uv_right = std::min((source_right >> (kFractionBits + 1)) + 2,
-                                 (source_width + 1) / 2);
+  int source_uv_right = std::min(
+      (source_right >> (kFractionBits + 1)) + 2,
+      (source_width + 1) / 2);
 
   int source_y_width = source_y_right - source_y_left;
   int source_uv_width = source_uv_right - source_uv_left;
@@ -441,10 +356,12 @@ void ScaleYUVToRGB32WithRect(const uint8* y_buf,
   // FilterYUVRowProcs have alignment requirements, and the SSE version can
   // write up to 16 bytes past the end of the buffer.
   const int kFilterBufferSize = 4096;
-  const bool kAvoidUsingOptimizedFilter = source_width > kFilterBufferSize;
+  if (source_width > kFilterBufferSize)
+    filter_proc = NULL;
   uint8 yuv_temp[16 + kFilterBufferSize * 3 + 16];
-  uint8* y_temp = reinterpret_cast<uint8*>(
-      reinterpret_cast<uintptr_t>(yuv_temp + 15) & ~15);
+  uint8* y_temp =
+      reinterpret_cast<uint8*>(
+          reinterpret_cast<uintptr_t>(yuv_temp + 15) & ~15);
   uint8* u_temp = y_temp + kFilterBufferSize;
   uint8* v_temp = u_temp + kFilterBufferSize;
 
@@ -482,34 +399,26 @@ void ScaleYUVToRGB32WithRect(const uint8* y_buf,
       v1_ptr = v0_ptr + uv_pitch;
     }
 
-    if (!kAvoidUsingOptimizedFilter) {
+    if (filter_proc) {
       // Vertical scaler uses 16.8 fixed point.
       int fraction = (source_top & kFractionMask) >> 8;
-      g_filter_yuv_rows_proc_(
-          y_temp + source_y_left, y0_ptr, y1_ptr, source_y_width, fraction);
-      g_filter_yuv_rows_proc_(
-          u_temp + source_uv_left, u0_ptr, u1_ptr, source_uv_width, fraction);
-      g_filter_yuv_rows_proc_(
-          v_temp + source_uv_left, v0_ptr, v1_ptr, source_uv_width, fraction);
+      filter_proc(y_temp + source_y_left, y0_ptr, y1_ptr,
+                  source_y_width, fraction);
+      filter_proc(u_temp + source_uv_left, u0_ptr, u1_ptr,
+                  source_uv_width, fraction);
+      filter_proc(v_temp + source_uv_left, v0_ptr, v1_ptr,
+                  source_uv_width, fraction);
 
       // Perform horizontal interpolation and color space conversion.
       // TODO(hclam): Use the MMX version after more testing.
-      LinearScaleYUVToRGB32RowWithRange_C(y_temp,
-                                          u_temp,
-                                          v_temp,
-                                          rgb_buf,
-                                          dest_rect_width,
-                                          source_left,
-                                          x_step);
+      LinearScaleYUVToRGB32RowWithRange_C(
+          y_temp, u_temp, v_temp, rgb_buf,
+          dest_rect_width, source_left, x_step);
     } else {
       // If the frame is too large then we linear scale a single row.
-      LinearScaleYUVToRGB32RowWithRange_C(y0_ptr,
-                                          u0_ptr,
-                                          v0_ptr,
-                                          rgb_buf,
-                                          dest_rect_width,
-                                          source_left,
-                                          x_step);
+      LinearScaleYUVToRGB32RowWithRange_C(
+          y0_ptr, u0_ptr, v0_ptr, rgb_buf,
+          dest_rect_width, source_left, x_step);
     }
 
     // Advance vertically in the source and destination image.
@@ -517,7 +426,7 @@ void ScaleYUVToRGB32WithRect(const uint8* y_buf,
     rgb_buf += rgb_pitch;
   }
 
-  g_empty_register_state_proc_();
+  EmptyRegisterState();
 }
 
 void ConvertRGB32ToYUV(const uint8* rgbframe,
@@ -529,15 +438,25 @@ void ConvertRGB32ToYUV(const uint8* rgbframe,
                        int rgbstride,
                        int ystride,
                        int uvstride) {
-  g_convert_rgb32_to_yuv_proc_(rgbframe,
-                               yplane,
-                               uplane,
-                               vplane,
-                               width,
-                               height,
-                               rgbstride,
-                               ystride,
-                               uvstride);
+  static void (*convert_proc)(const uint8*, uint8*, uint8*, uint8*,
+                              int, int, int, int, int) = NULL;
+  if (!convert_proc) {
+#if defined(ARCH_CPU_ARM_FAMILY)
+    // For ARM processors, always use C version.
+    // TODO(hclam): Implement a NEON version.
+    convert_proc = &ConvertRGB32ToYUV_C;
+#else
+    // TODO(hclam): Switch to SSSE3 version when the cyan problem is solved.
+    // See: crbug.com/100462
+      if (hasSSE2())
+      convert_proc = &ConvertRGB32ToYUV_SSE2;
+    else
+      convert_proc = &ConvertRGB32ToYUV_C;
+#endif
+  }
+
+  convert_proc(rgbframe, yplane, uplane, vplane, width, height,
+               rgbstride, ystride, uvstride);
 }
 
 void ConvertRGB24ToYUV(const uint8* rgbframe,
@@ -549,15 +468,21 @@ void ConvertRGB24ToYUV(const uint8* rgbframe,
                        int rgbstride,
                        int ystride,
                        int uvstride) {
-  g_convert_rgb24_to_yuv_proc_(rgbframe,
-                               yplane,
-                               uplane,
-                               vplane,
-                               width,
-                               height,
-                               rgbstride,
-                               ystride,
-                               uvstride);
+#if defined(ARCH_CPU_ARM_FAMILY)
+  ConvertRGB24ToYUV_C(rgbframe, yplane, uplane, vplane, width, height,
+                      rgbstride, ystride, uvstride);
+#else
+  static void (*convert_proc)(const uint8*, uint8*, uint8*, uint8*,
+                              int, int, int, int, int) = NULL;
+  if (!convert_proc) {
+    if (hasSSSE3())
+      convert_proc = &ConvertRGB24ToYUV_SSSE3;
+    else
+      convert_proc = &ConvertRGB24ToYUV_C;
+  }
+  convert_proc(rgbframe, yplane, uplane, vplane, width, height,
+               rgbstride, ystride, uvstride);
+#endif
 }
 
 void ConvertYUY2ToYUV(const uint8* src,
@@ -586,23 +511,6 @@ void ConvertYUY2ToYUV(const uint8* src,
   }
 }
 
-void ConvertNV21ToYUV(const uint8* src,
-                      uint8* yplane,
-                      uint8* uplane,
-                      uint8* vplane,
-                      int width,
-                      int height) {
-  int y_plane_size = width * height;
-  memcpy(yplane, src, y_plane_size);
-
-  src += y_plane_size;
-  int u_plane_size = y_plane_size >> 2;
-  for (int i = 0; i < u_plane_size; ++i) {
-    *vplane++ = *src++;
-    *uplane++ = *src++;
-  }
-}
-
 void ConvertYUVToRGB32(const uint8* yplane,
                        const uint8* uplane,
                        const uint8* vplane,
@@ -613,42 +521,23 @@ void ConvertYUVToRGB32(const uint8* yplane,
                        int uvstride,
                        int rgbstride,
                        YUVType yuv_type) {
-  g_convert_yuv_to_rgb32_proc_(yplane,
-                               uplane,
-                               vplane,
-                               rgbframe,
-                               width,
-                               height,
-                               ystride,
-                               uvstride,
-                               rgbstride,
-                               yuv_type);
-}
+#if defined(ARCH_CPU_ARM_FAMILY)
+  ConvertYUVToRGB32_C(yplane, uplane, vplane, rgbframe,
+                      width, height, ystride, uvstride, rgbstride, yuv_type);
+#else
+  static ConvertYUVToRGB32Proc convert_proc = NULL;
+  if (!convert_proc) {
+    if (hasSSE())
+      convert_proc = &ConvertYUVToRGB32_SSE;
+    else if (hasMMX())
+      convert_proc = &ConvertYUVToRGB32_MMX;
+    else
+      convert_proc = &ConvertYUVToRGB32_C;
+  }
 
-void ConvertYUVAToARGB(const uint8* yplane,
-                       const uint8* uplane,
-                       const uint8* vplane,
-                       const uint8* aplane,
-                       uint8* rgbframe,
-                       int width,
-                       int height,
-                       int ystride,
-                       int uvstride,
-                       int astride,
-                       int rgbstride,
-                       YUVType yuv_type) {
-  g_convert_yuva_to_argb_proc_(yplane,
-                               uplane,
-                               vplane,
-                               aplane,
-                               rgbframe,
-                               width,
-                               height,
-                               ystride,
-                               uvstride,
-                               astride,
-                               rgbstride,
-                               yuv_type);
+  convert_proc(yplane, uplane, vplane, rgbframe,
+               width, height, ystride, uvstride, rgbstride, yuv_type);
+#endif
 }
 
 }  // namespace media

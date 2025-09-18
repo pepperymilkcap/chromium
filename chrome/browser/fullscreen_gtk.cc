@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,13 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/rect.h"
 
 namespace {
 
-// TODO (jianli): Merge with ui::EnumerateTopLevelWindows.
+// TODO (jianli): Merge with gtk_util::EnumerateTopLevelWindows.
 void EnumerateAllChildWindows(ui::EnumerateWindowsDelegate* delegate,
                               XID window) {
   std::vector<XID> windows;
@@ -26,7 +27,7 @@ void EnumerateAllChildWindows(ui::EnumerateWindowsDelegate* delegate,
     // to old school enumeration of all X windows.
     XID root, parent, *children;
     unsigned int num_children;
-    int status = XQueryTree(gfx::GetXDisplay(), window, &root, &parent,
+    int status = XQueryTree(ui::GetXDisplay(), window, &root, &parent,
                             &children, &num_children);
     if (status) {
       for (long i = static_cast<long>(num_children) - 1; i >= 0; i--)
@@ -60,7 +61,7 @@ class WindowManagerWindowFinder : public ui::EnumerateWindowsDelegate {
   XID window() const { return window_; }
 
  protected:
-  virtual bool ShouldStopIterating(XID window) OVERRIDE {
+  virtual bool ShouldStopIterating(XID window) {
     if (ui::PropertyExists(window, "WM_STATE")) {
       window_ = window;
       return true;
@@ -82,7 +83,7 @@ class TopMostWindowFinder : public ui::EnumerateWindowsDelegate {
   XID top_most_window() const { return top_most_window_; }
 
  protected:
-   virtual bool ShouldStopIterating(XID window) OVERRIDE {
+   virtual bool ShouldStopIterating(XID window) {
      if (!ui::IsWindowVisible(window))
        return false;
      if (ui::PropertyExists(window, "WM_STATE")) {

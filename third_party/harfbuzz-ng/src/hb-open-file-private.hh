@@ -1,6 +1,5 @@
 /*
  * Copyright © 2007,2008,2009  Red Hat, Inc.
- * Copyright © 2012  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -23,7 +22,6 @@
  * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  *
  * Red Hat Author(s): Behdad Esfahbod
- * Google Author(s): Behdad Esfahbod
  */
 
 #ifndef HB_OPEN_FILE_PRIVATE_HH
@@ -31,8 +29,6 @@
 
 #include "hb-open-type-private.hh"
 
-
-namespace OT {
 
 
 /*
@@ -54,8 +50,8 @@ struct TTCHeader;
 typedef struct TableRecord
 {
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (c->check_struct (this));
+    TRACE_SANITIZE ();
+    return c->check_struct (this);
   }
 
   Tag		tag;		/* 4-byte identifier. */
@@ -103,11 +99,12 @@ typedef struct OffsetTable
 
   public:
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (c->check_struct (this) && c->check_array (tables, TableRecord::static_size, numTables));
+    TRACE_SANITIZE ();
+    return c->check_struct (this)
+	&& c->check_array (tables, TableRecord::static_size, numTables);
   }
 
-  protected:
+  private:
   Tag		sfnt_version;	/* '\0\001\0\00' if TrueType / 'OTTO' if CFF */
   USHORT	numTables;	/* Number of tables. */
   USHORT	searchRange;	/* (Maximum power of 2 <= numTables) x 16 */
@@ -131,11 +128,11 @@ struct TTCHeaderVersion1
   inline const OpenTypeFontFace& get_face (unsigned int i) const { return this+table[i]; }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    return TRACE_RETURN (table.sanitize (c, this));
+    TRACE_SANITIZE ();
+    return table.sanitize (c, this);
   }
 
-  protected:
+  private:
   Tag		ttcTag;		/* TrueType Collection ID string: 'ttcf' */
   FixedVersion	version;	/* Version of the TTC Header (1.0),
 				 * 0x00010000 */
@@ -170,16 +167,16 @@ struct TTCHeader
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    if (unlikely (!u.header.version.sanitize (c))) return TRACE_RETURN (false);
+    TRACE_SANITIZE ();
+    if (unlikely (!u.header.version.sanitize (c))) return false;
     switch (u.header.version.major) {
     case 2: /* version 2 is compatible with version 1 */
-    case 1: return TRACE_RETURN (u.version1.sanitize (c));
-    default:return TRACE_RETURN (true);
+    case 1: return u.version1.sanitize (c);
+    default:return true;
     }
   }
 
-  protected:
+  private:
   union {
   struct {
   Tag		ttcTag;		/* TrueType Collection ID string: 'ttcf' */
@@ -232,19 +229,19 @@ struct OpenTypeFontFile
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE (this);
-    if (unlikely (!u.tag.sanitize (c))) return TRACE_RETURN (false);
+    TRACE_SANITIZE ();
+    if (unlikely (!u.tag.sanitize (c))) return false;
     switch (u.tag) {
     case CFFTag:	/* All the non-collection tags */
     case TrueTag:
     case Typ1Tag:
-    case TrueTypeTag:	return TRACE_RETURN (u.fontFace.sanitize (c));
-    case TTCTag:	return TRACE_RETURN (u.ttcHeader.sanitize (c));
-    default:		return TRACE_RETURN (true);
+    case TrueTypeTag:	return u.fontFace.sanitize (c);
+    case TTCTag:	return u.ttcHeader.sanitize (c);
+    default:		return true;
     }
   }
 
-  protected:
+  private:
   union {
   Tag			tag;		/* 4-byte identifier. */
   OpenTypeFontFace	fontFace;
@@ -254,8 +251,6 @@ struct OpenTypeFontFile
   DEFINE_SIZE_UNION (4, tag);
 };
 
-
-} /* namespace OT */
 
 
 #endif /* HB_OPEN_FILE_PRIVATE_HH */

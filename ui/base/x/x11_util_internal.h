@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_X_X11_UTIL_INTERNAL_H_
 #define UI_BASE_X_X11_UTIL_INTERNAL_H_
+#pragma once
 
 // This file declares utility functions for X11 (Linux only).
 //

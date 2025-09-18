@@ -1,15 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/status_icons/status_icon_gtk.h"
 
-#include "base/strings/string16.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string16.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/gtk_util.h"
-#include "ui/gfx/image/image_skia.h"
 
 StatusIconGtk::StatusIconGtk() {
   icon_ = gtk_status_icon_new();
@@ -22,31 +21,30 @@ StatusIconGtk::StatusIconGtk() {
 }
 
 StatusIconGtk::~StatusIconGtk() {
-  gtk_status_icon_set_visible(icon_, FALSE);
   g_object_unref(icon_);
 }
 
-void StatusIconGtk::SetImage(const gfx::ImageSkia& image) {
+void StatusIconGtk::SetImage(const SkBitmap& image) {
   if (image.isNull())
     return;
 
-  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(*image.bitmap());
+  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&image);
   gtk_status_icon_set_from_pixbuf(icon_, pixbuf);
   g_object_unref(pixbuf);
 }
 
-void StatusIconGtk::SetPressedImage(const gfx::ImageSkia& image) {
+void StatusIconGtk::SetPressedImage(const SkBitmap& image) {
   // Ignore pressed images, since the standard on Linux is to not highlight
   // pressed status icons.
 }
 
-void StatusIconGtk::SetToolTip(const base::string16& tool_tip) {
-  gtk_status_icon_set_tooltip_text(icon_, base::UTF16ToUTF8(tool_tip).c_str());
+void StatusIconGtk::SetToolTip(const string16& tool_tip) {
+  gtk_status_icon_set_tooltip_text(icon_, UTF16ToUTF8(tool_tip).c_str());
 }
 
-void StatusIconGtk::DisplayBalloon(const gfx::ImageSkia& icon,
-                                   const base::string16& title,
-                                   const base::string16& contents) {
+void StatusIconGtk::DisplayBalloon(const SkBitmap& icon,
+                                   const string16& title,
+                                   const string16& contents) {
   notification_.DisplayBalloon(icon, title, contents);
 }
 
@@ -54,7 +52,7 @@ void StatusIconGtk::OnClick(GtkWidget* widget) {
   DispatchClickEvent();
 }
 
-void StatusIconGtk::UpdatePlatformContextMenu(StatusIconMenuModel* model) {
+void StatusIconGtk::UpdatePlatformContextMenu(ui::MenuModel* model) {
   if (!model)
     menu_.reset();
   else

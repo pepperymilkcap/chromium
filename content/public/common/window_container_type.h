@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_WINDOW_CONTAINER_TYPE_H_
 #define CONTENT_PUBLIC_COMMON_WINDOW_CONTAINER_TYPE_H_
+#pragma once
 
-namespace blink {
+namespace WebKit {
 
 struct WebWindowFeatures;
 
@@ -30,6 +31,6 @@ enum WindowContainerType {
 
 // Conversion function:
 WindowContainerType WindowFeaturesToContainerType(
-    const blink::WebWindowFeatures& window_features);
+    const WebKit::WebWindowFeatures& window_features);
 
 #endif  // CONTENT_PUBLIC_COMMON_WINDOW_CONTAINER_TYPE_H_

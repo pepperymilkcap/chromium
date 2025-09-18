@@ -1,41 +1,40 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/worker/websharedworker_stub.h"
 
-#include "base/compiler_specific.h"
-#include "content/child/child_process.h"
-#include "content/child/child_thread.h"
-#include "content/child/fileapi/file_system_dispatcher.h"
-#include "content/child/webmessageportchannel_impl.h"
+#include "content/common/child_process.h"
+#include "content/common/child_thread.h"
+#include "content/common/file_system/file_system_dispatcher.h"
+#include "content/common/webmessageportchannel_impl.h"
 #include "content/common/worker_messages.h"
-#include "content/worker/shared_worker_devtools_agent.h"
+#include "base/compiler_specific.h"
 #include "content/worker/worker_thread.h"
-#include "third_party/WebKit/public/web/WebSharedWorker.h"
-#include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/platform/WebURL.h"
-
-namespace content {
+#include "content/worker/shared_worker_devtools_agent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorker.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 
 WebSharedWorkerStub::WebSharedWorkerStub(
-    const base::string16& name,
-    int route_id,
+    const string16& name, int route_id,
     const WorkerAppCacheInitInfo& appcache_init_info)
     : route_id_(route_id),
       appcache_init_info_(appcache_init_info),
-      client_(route_id, this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(client_(route_id, this)),
       name_(name),
-      started_(false) {
+      started_(false),
+      worker_devtools_agent_(NULL) {
 
   WorkerThread* worker_thread = WorkerThread::current();
   DCHECK(worker_thread);
   worker_thread->AddWorkerStub(this);
   // Start processing incoming IPCs for this worker.
   worker_thread->AddRoute(route_id_, this);
+  ChildProcess::current()->AddRefProcess();
 
   // TODO(atwilson): Add support for NaCl when they support MessagePorts.
-  impl_ = blink::WebSharedWorker::create(client());
+  impl_ = WebKit::WebSharedWorker::create(client());
   worker_devtools_agent_.reset(new SharedWorkerDevToolsAgent(route_id, impl_));
   client()->set_devtools_agent(worker_devtools_agent_.get());
 }
@@ -46,6 +45,7 @@ WebSharedWorkerStub::~WebSharedWorkerStub() {
   DCHECK(worker_thread);
   worker_thread->RemoveWorkerStub(this);
   worker_thread->RemoveRoute(route_id_);
+  ChildProcess::current()->ReleaseProcess();
 }
 
 void WebSharedWorkerStub::Shutdown() {
@@ -81,10 +81,9 @@ const GURL& WebSharedWorkerStub::url() {
 }
 
 void WebSharedWorkerStub::OnStartWorkerContext(
-    const GURL& url, const base::string16& user_agent,
-    const base::string16& source_code,
-    const base::string16& content_security_policy,
-    blink::WebContentSecurityPolicyType policy_type) {
+    const GURL& url, const string16& user_agent, const string16& source_code,
+    const string16& content_security_policy,
+    WebKit::WebContentSecurityPolicyType policy_type) {
   // Ignore multiple attempts to start this worker (can happen if two pages
   // try to start it simultaneously).
   if (started_)
@@ -106,11 +105,9 @@ void WebSharedWorkerStub::OnStartWorkerContext(
 
 void WebSharedWorkerStub::OnConnect(int sent_message_port_id, int routing_id) {
   if (started_) {
-    blink::WebMessagePortChannel* channel =
-        new WebMessagePortChannelImpl(routing_id,
-                                      sent_message_port_id,
-                                      base::MessageLoopProxy::current().get());
-    impl_->connect(channel);
+    WebKit::WebMessagePortChannel* channel =
+        new WebMessagePortChannelImpl(routing_id, sent_message_port_id);
+    impl_->connect(channel, NULL);
   } else {
     // If two documents try to load a SharedWorker at the same time, the
     // WorkerMsg_Connect for one of the documents can come in before the
@@ -128,5 +125,3 @@ void WebSharedWorkerStub::OnTerminateWorkerContext() {
   EnsureWorkerContextTerminates();
   started_ = false;
 }
-
-}  // namespace content

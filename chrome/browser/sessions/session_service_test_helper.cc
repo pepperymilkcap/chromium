@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,6 @@
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_types.h"
-#include "components/sessions/serialized_navigation_entry_test_helper.h"
-#include "content/public/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -21,6 +19,12 @@ SessionServiceTestHelper::SessionServiceTestHelper(SessionService* service)
     : service_(service) {}
 
 SessionServiceTestHelper::~SessionServiceTestHelper() {}
+
+void SessionServiceTestHelper::RestoreSessionFromCommands(
+    const std::vector<SessionCommand*>& commands,
+    std::vector<SessionWindow*>* valid_windows) {
+  service()->RestoreSessionFromCommands(commands, valid_windows);
+}
 
 void SessionServiceTestHelper::PrepareTabInWindow(const SessionID& window_id,
                                                   const SessionID& tab_id,
@@ -39,28 +43,13 @@ void SessionServiceTestHelper::SetTabExtensionAppID(
   service()->SetTabExtensionAppID(window_id, tab_id, extension_app_id);
 }
 
-void SessionServiceTestHelper::SetTabUserAgentOverride(
-    const SessionID& window_id,
-    const SessionID& tab_id,
-    const std::string& user_agent_override) {
-  service()->SetTabUserAgentOverride(window_id, tab_id, user_agent_override);
-}
-
-void SessionServiceTestHelper::SetForceBrowserNotAliveWithNoWindows(
-    bool force_browser_not_alive_with_no_windows) {
-  service()->force_browser_not_alive_with_no_windows_ =
-      force_browser_not_alive_with_no_windows;
-}
-
 // Be sure and null out service to force closing the file.
 void SessionServiceTestHelper::ReadWindows(
-    std::vector<SessionWindow*>* windows,
-    SessionID::id_type* active_window_id) {
+    std::vector<SessionWindow*>* windows) {
   Time last_time;
   ScopedVector<SessionCommand> read_commands;
   backend()->ReadLastSessionCommandsImpl(&(read_commands.get()));
-  service()->RestoreSessionFromCommands(
-      read_commands.get(), windows, active_window_id);
+  RestoreSessionFromCommands(read_commands.get(), windows);
 }
 
 void SessionServiceTestHelper::AssertTabEquals(SessionID& window_id,
@@ -84,13 +73,16 @@ void SessionServiceTestHelper::AssertTabEquals(
   ASSERT_EQ(nav_count, session_tab.navigations.size());
 }
 
-// TODO(sky): nuke this and change to call directly into
-// SerializedNavigationEntryTestHelper.
 void SessionServiceTestHelper::AssertNavigationEquals(
-    const sessions::SerializedNavigationEntry& expected,
-    const sessions::SerializedNavigationEntry& actual) {
-  sessions::SerializedNavigationEntryTestHelper::ExpectNavigationEquals(
-      expected, actual);
+    const TabNavigation& expected,
+    const TabNavigation& actual) {
+  EXPECT_TRUE(expected.virtual_url() == actual.virtual_url());
+  EXPECT_EQ(expected.referrer().url, actual.referrer().url);
+  EXPECT_EQ(expected.referrer().policy, actual.referrer().policy);
+  EXPECT_EQ(expected.title(), actual.title());
+  EXPECT_EQ(expected.state(), actual.state());
+  EXPECT_EQ(expected.transition(), actual.transition());
+  EXPECT_EQ(expected.type_mask(), actual.type_mask());
 }
 
 void SessionServiceTestHelper::AssertSingleWindowWithSingleTab(
@@ -104,10 +96,3 @@ void SessionServiceTestHelper::AssertSingleWindowWithSingleTab(
 SessionBackend* SessionServiceTestHelper::backend() {
   return service_->backend();
 }
-
-void SessionServiceTestHelper::SetService(SessionService* service) {
-  service_.reset(service);
-  // Execute IO tasks posted by the SessionService.
-  content::BrowserThread::GetBlockingPool()->FlushForTesting();
-}
-

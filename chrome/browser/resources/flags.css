@@ -1,14 +1,14 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
+/*
+ * Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file. */
+ * found in the LICENSE file.
+ */
 
 body {
-  margin: 10px 10px 0;
-<if expr="not is_android">
+  margin: 10px;
   min-width: 47em;
-</if>
-  /* Should match needs-restart.height + 5 */
-  padding-bottom: 75px;
+  /* Should match needs-restart.(height + padding-top + padding-bottom + 5) */
+  padding-bottom: 65px;
 }
 
 a {
@@ -16,44 +16,41 @@ a {
   font-size: 103%;
 }
 
-.permalink {
-  color: #A0A0A0;
-}
-
-#header {
-  -webkit-padding-start: 75px;
-  background: -webkit-image-set(
-      url('../../app/theme/default_100_percent/flags_section.png') 1x,
-      url('../../app/theme/default_200_percent/flags_section.png') 2x)
-      no-repeat left center;
-  box-sizing: border-box;
-  display: table;
+div#header {
   margin-bottom: 1.05em;
-  /* 67px is the height of the header's image. */
+  /* 67px is the height of the header's background image. */
   min-height: 67px;
   overflow: hidden;
+  padding-bottom: 20px;
+  -webkit-padding-start: 0;
+  padding-top: 20px;
   position: relative;
+  box-sizing: border-box;
 }
 
-#title-spacer {
-  display: table-cell;
-  vertical-align: middle;
+#header h1 {
+  background: url('../../app/theme/flags_section.png') 0 20px no-repeat;
+  display: inline;
+  margin: 0;
+  padding-bottom: 20px;
+  -webkit-padding-start: 75px;
+  padding-top: 40px;
 }
 
-html[dir=rtl] #header {
-  background-position: right center;
+html[dir=rtl] #header h1 {
+  background: url('../../app/theme/flags_section.png') right no-repeat;
 }
 
 h1 {
   font-size: 156%;
   font-weight: bold;
-  margin: 0;
   padding: 0;
+  margin: 0;
 }
 
-.blurb-container {
-  font-size: 120%;
+#blurb-container {
   padding-bottom: 1.5em;
+  font-size: 120%;
 }
 
 #blurb-warning {
@@ -63,18 +60,16 @@ h1 {
 
 div.content {
   font-size: 88%;
-  margin: 5px auto 10px;
-}
-
-div.content:last-of-type {
-  margin-bottom: 0;
+  margin-top: 5px;
 }
 
 .section-header {
-  background: rgb(235, 239, 249);
-  border-top: 1px solid rgb(181, 199, 222);
+  background: #ebeff9;
+  border-top: 1px solid #b5c7de;
   font-size: 99%;
-  padding: 2px 5px 3px;
+  padding-bottom: 2px;
+  -webkit-padding-start: 5px;
+  padding-top: 3px;
   width: 100%;
 }
 
@@ -88,26 +83,17 @@ div.content:last-of-type {
 
 .section-header-title {
   font-weight: bold;
-  line-height: 200%;
-}
-
-#experiment-reset-all {
-  float: right;
-}
-
-html[dir=rtl] #experiment-reset-all {
-  float: left;
 }
 
 .vbox-container {
-  -webkit-box-orient: vertical;
   display: -webkit-box;
+  -webkit-box-orient: vertical;
 }
 
 .wbox {
+  display: -webkit-box;
   -webkit-box-align: stretch;
   -webkit-box-flex: 1;
-  display: -webkit-box;
 }
 
 #top {
@@ -146,34 +132,30 @@ html[dir=rtl] #experiment-reset-all {
   font-weight: bold;
 }
 
-.referenced .experiment-name {
-  background-color: rgb(255, 255, 0);
-}
-
 .no-experiments {
-  font-size: 1.2em;
-  margin: 6em 0;
+  margin: 6em 0 0;
   text-align: center;
+  font-size: 1.2em;
 }
 
 /* Match the indentation of .experiment-text. */
 .experiment-actions {
   -webkit-padding-start: 5px;
-  margin-bottom: 0.2em;
   margin-top: 0.2em;
+  margin-bottom: 0.2em;
 }
 
 div.needs-restart {
   background: #FFF;
-  border-top: 1px solid rgb(181, 199, 222);
+  border-top: 1px solid #b5c7de;
   bottom: 0;
-  box-sizing: border-box;
   /* If you change this, update body.padding-bottom */
-  height: 70px;
+  height: 30px;
   left: 0;
+  /* If you change this, update body.padding-bottom */
   padding-bottom: 25px;
   padding-left: 15px;
-  padding-right: 15px;
+  /* If you change this, update body.padding-bottom */
   padding-top: 15px;
   position: fixed;
   width: 100%;

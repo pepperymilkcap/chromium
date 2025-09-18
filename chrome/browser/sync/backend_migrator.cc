@@ -1,38 +1,40 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/backend_migrator.h"
 
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/message_loop.h"
+#include "base/string_number_conversions.h"
 #include "base/tracked_objects.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/sync/internal_api/configure_reason.h"
+#include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/protocol/sync.pb.h"
+#include "chrome/browser/sync/sessions/session_state.h"
+#include "chrome/browser/sync/syncable/directory_manager.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "sync/internal_api/public/configure_reason.h"
-#include "sync/internal_api/public/read_transaction.h"
-#include "sync/protocol/sync.pb.h"
-#include "sync/syncable/directory.h" // TODO(tim): Bug 131130.
 
-using syncer::ModelTypeSet;
+using syncable::ModelTypeSet;
 
 namespace browser_sync {
 
-using syncer::ModelTypeToString;
+using sessions::SyncSessionSnapshot;
+using syncable::ModelTypeToString;
 
 MigrationObserver::~MigrationObserver() {}
 
 BackendMigrator::BackendMigrator(const std::string& name,
-                                 syncer::UserShare* user_share,
+                                 sync_api::UserShare* user_share,
                                  ProfileSyncService* service,
-                                 DataTypeManager* manager,
-                                 const base::Closure &migration_done_callback)
+                                 DataTypeManager* manager)
     : name_(name), user_share_(user_share), service_(service),
       manager_(manager), state_(IDLE),
-      migration_done_callback_(migration_done_callback),
-      weak_ptr_factory_(this) {
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+  registrar_.Add(this, chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
+                 content::Source<DataTypeManager>(manager_));
 }
 
 BackendMigrator::~BackendMigrator() {
@@ -45,7 +47,7 @@ BackendMigrator::~BackendMigrator() {
 
 #define SDVLOG(verbose_level) DVLOG(verbose_level) << name_ << ": "
 
-void BackendMigrator::MigrateTypes(syncer::ModelTypeSet types) {
+void BackendMigrator::MigrateTypes(syncable::ModelTypeSet types) {
   const ModelTypeSet old_to_migrate = to_migrate_;
   to_migrate_.PutAll(types);
   SDVLOG(1) << "MigrateTypes called with " << ModelTypeSetToString(types)
@@ -101,36 +103,52 @@ bool BackendMigrator::TryStart() {
 void BackendMigrator::RestartMigration() {
   // We'll now disable any running types that need to be migrated.
   ChangeState(DISABLING_TYPES);
+  const ModelTypeSet full_set = service_->GetPreferredDataTypes();
+  const ModelTypeSet difference = Difference(full_set, to_migrate_);
+  bool configure_with_nigori = !to_migrate_.Has(syncable::NIGORI);
   SDVLOG(1) << "BackendMigrator disabling types "
-            << ModelTypeSetToString(to_migrate_);
+            << ModelTypeSetToString(to_migrate_) << "; configuring "
+            << ModelTypeSetToString(difference)
+            << (configure_with_nigori ? " with nigori" : " without nigori");
 
-  manager_->PurgeForMigration(to_migrate_, syncer::CONFIGURE_REASON_MIGRATION);
+  // Add nigori for config or not based upon if the server told us to migrate
+  // nigori or not.
+  if (configure_with_nigori) {
+    manager_->Configure(difference, sync_api::CONFIGURE_REASON_MIGRATION);
+  } else {
+    manager_->ConfigureWithoutNigori(difference,
+                                     sync_api::CONFIGURE_REASON_MIGRATION);
+  }
 }
 
-void BackendMigrator::OnConfigureDone(
-    const DataTypeManager::ConfigureResult& result) {
+void BackendMigrator::Observe(int type,
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
+  DCHECK_EQ(chrome::NOTIFICATION_SYNC_CONFIGURE_DONE, type);
   if (state_ == IDLE)
     return;
 
   // |manager_|'s methods aren't re-entrant, and we're notified from
   // them, so post a task to avoid problems.
-  SDVLOG(1) << "Posting OnConfigureDoneImpl";
-  base::MessageLoop::current()->PostTask(
+  SDVLOG(1) << "Posting OnConfigureDone from Observer";
+  MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(&BackendMigrator::OnConfigureDoneImpl,
-                 weak_ptr_factory_.GetWeakPtr(), result));
+      base::Bind(&BackendMigrator::OnConfigureDone,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 *content::Details<DataTypeManager::ConfigureResult>(
+                     details).ptr()));
 }
 
 namespace {
 
-syncer::ModelTypeSet GetUnsyncedDataTypes(syncer::UserShare* user_share) {
-  syncer::ReadTransaction trans(FROM_HERE, user_share);
-  syncer::ModelTypeSet unsynced_data_types;
-  for (int i = syncer::FIRST_REAL_MODEL_TYPE;
-       i < syncer::MODEL_TYPE_COUNT; ++i) {
-    syncer::ModelType type = syncer::ModelTypeFromInt(i);
+syncable::ModelTypeSet GetUnsyncedDataTypes(sync_api::UserShare* user_share) {
+  sync_api::ReadTransaction trans(FROM_HERE, user_share);
+  syncable::ModelTypeSet unsynced_data_types;
+  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
+       i < syncable::MODEL_TYPE_COUNT; ++i) {
+    syncable::ModelType type = syncable::ModelTypeFromInt(i);
     sync_pb::DataTypeProgressMarker progress_marker;
-    trans.GetDirectory()->GetDownloadProgress(type, &progress_marker);
+    trans.GetLookup()->GetDownloadProgress(type, &progress_marker);
     if (progress_marker.token().empty()) {
       unsynced_data_types.Put(type);
     }
@@ -140,7 +158,7 @@ syncer::ModelTypeSet GetUnsyncedDataTypes(syncer::UserShare* user_share) {
 
 }  // namespace
 
-void BackendMigrator::OnConfigureDoneImpl(
+void BackendMigrator::OnConfigureDone(
     const DataTypeManager::ConfigureResult& result) {
   SDVLOG(1) << "OnConfigureDone with requested types "
             << ModelTypeSetToString(result.requested_types)
@@ -179,13 +197,13 @@ void BackendMigrator::OnConfigureDoneImpl(
   }
 
   if (state_ == DISABLING_TYPES) {
-    const syncer::ModelTypeSet unsynced_types =
+    const syncable::ModelTypeSet unsynced_types =
         GetUnsyncedDataTypes(user_share_);
     if (!unsynced_types.HasAll(to_migrate_)) {
       SLOG(WARNING) << "Set of unsynced types: "
-                    << syncer::ModelTypeSetToString(unsynced_types)
+                    << syncable::ModelTypeSetToString(unsynced_types)
                     << " does not contain types to migrate: "
-                    << syncer::ModelTypeSetToString(to_migrate_)
+                    << syncable::ModelTypeSetToString(to_migrate_)
                     << "; not re-enabling yet";
       return;
     }
@@ -195,18 +213,15 @@ void BackendMigrator::OnConfigureDoneImpl(
     // may have chosen to disable types during the migration.
     const ModelTypeSet full_set = service_->GetPreferredDataTypes();
     SDVLOG(1) << "BackendMigrator re-enabling types: "
-              << syncer::ModelTypeSetToString(full_set);
-    manager_->Configure(full_set, syncer::CONFIGURE_REASON_MIGRATION);
+              << syncable::ModelTypeSetToString(full_set);
+    manager_->Configure(full_set, sync_api::CONFIGURE_REASON_MIGRATION);
   } else if (state_ == REENABLING_TYPES) {
     // We're done!
     ChangeState(IDLE);
 
     SDVLOG(1) << "BackendMigrator: Migration complete for: "
-              << syncer::ModelTypeSetToString(to_migrate_);
+              << syncable::ModelTypeSetToString(to_migrate_);
     to_migrate_.Clear();
-
-    if (!migration_done_callback_.is_null())
-      migration_done_callback_.Run();
   }
 }
 
@@ -214,7 +229,8 @@ BackendMigrator::State BackendMigrator::state() const {
   return state_;
 }
 
-syncer::ModelTypeSet BackendMigrator::GetPendingMigrationTypesForTest() const {
+syncable::ModelTypeSet
+    BackendMigrator::GetPendingMigrationTypesForTest() const {
   return to_migrate_;
 }
 

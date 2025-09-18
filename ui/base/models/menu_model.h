@@ -1,20 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_MODELS_MENU_MODEL_H_
 #define UI_BASE_MODELS_MENU_MODEL_H_
+#pragma once
 
-#include "base/strings/string16.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/string16.h"
 #include "ui/base/models/menu_model_delegate.h"
-#include "ui/base/models/menu_separator_types.h"
 #include "ui/base/ui_export.h"
-#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
+
+class SkBitmap;
 
 namespace gfx {
 class Font;
-class Image;
 }
 
 namespace ui {
@@ -42,37 +43,35 @@ class UI_EXPORT MenuModel {
   // triggering a custom rendering mode.
   virtual bool HasIcons() const = 0;
 
+  // Returns the index of the first item. This is 0 for most menus except the
+  // system menu on Windows. |native_menu| is the menu to locate the start index
+  // within. It is guaranteed to be reset to a clean default state.  Some
+  // callers of this method may pass NULL for native_menu.
+  // IMPORTANT: If the model implementation returns something _other_ than 0
+  //            here, it must offset the values for |index| it passes to the
+  //            methods below by this number - this is NOT done automatically!
+  virtual int GetFirstItemIndex(gfx::NativeMenu native_menu) const;
+
   // Returns the number of items in the menu.
   virtual int GetItemCount() const = 0;
 
   // Returns the type of item at the specified index.
   virtual ItemType GetTypeAt(int index) const = 0;
 
-  // Returns the separator type at the specified index.
-  virtual ui::MenuSeparatorType GetSeparatorTypeAt(int index) const = 0;
-
   // Returns the command id of the item at the specified index.
   virtual int GetCommandIdAt(int index) const = 0;
 
   // Returns the label of the item at the specified index.
-  virtual base::string16 GetLabelAt(int index) const = 0;
+  virtual string16 GetLabelAt(int index) const = 0;
 
-  // Returns the sublabel of the item at the specified index. The sublabel
-  // is rendered beneath the label and using the font GetLabelFontAt().
-  virtual base::string16 GetSublabelAt(int index) const;
-
-  // Returns the minor text of the item at the specified index. The minor text
-  // is rendered to the right of the label and using the font GetLabelFontAt().
-  virtual base::string16 GetMinorTextAt(int index) const;
-
-  // Returns true if the menu item (label/sublabel/icon) at the specified
-  // index can change over the course of the menu's lifetime. If this function
-  // returns true, the label, sublabel and icon of the menu item will be
-  // updated each time the menu is shown.
+  // Returns true if the menu item (label/icon) at the specified index can
+  // change over the course of the menu's lifetime. If this function returns
+  // true, the label and icon of the menu item will be updated each time the
+  // menu is shown.
   virtual bool IsItemDynamicAt(int index) const = 0;
 
-  // Returns the font used for the label at the specified index.
-  // If NULL, then the default font should be used.
+  // Returns the font use for the label at the specified index.
+  // If NULL, then use default font.
   virtual const gfx::Font* GetLabelFontAt(int index) const;
 
   // Gets the acclerator information for the specified index, returning true if
@@ -89,7 +88,7 @@ class UI_EXPORT MenuModel {
 
   // Gets the icon for the item at the specified index, returning true if there
   // is an icon, false otherwise.
-  virtual bool GetIconAt(int index, gfx::Image* icon) = 0;
+  virtual bool GetIconAt(int index, SkBitmap* icon) = 0;
 
   // Returns the model for a menu item with a line of buttons at |index|.
   virtual ButtonMenuItemModel* GetButtonMenuItemAt(int index) const = 0;
@@ -124,14 +123,10 @@ class UI_EXPORT MenuModel {
   // Set the MenuModelDelegate. Owned by the caller of this function.
   virtual void SetMenuModelDelegate(MenuModelDelegate* delegate) = 0;
 
-  // Gets the MenuModelDelegate.
-  virtual MenuModelDelegate* GetMenuModelDelegate() const = 0;
-
   // Retrieves the model and index that contains a specific command id. Returns
   // true if an item with the specified command id is found. |model| is inout,
   // and specifies the model to start searching from.
-  static bool GetModelAndIndexForCommandId(int command_id,
-                                           MenuModel** model,
+  static bool GetModelAndIndexForCommandId(int command_id, MenuModel** model,
                                            int* index);
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 
 #include "chrome/browser/process_singleton.h"
 
+#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/posix/eintr_wrapper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
@@ -61,14 +61,13 @@ class ProcessSingletonMacTest : public PlatformTest {
     return false;
   }
 
-  base::ScopedTempDir temp_dir_;
-  base::FilePath lock_path_;
+  ScopedTempDir temp_dir_;
+  FilePath lock_path_;
 };
 
 // Test that the base case doesn't blow up.
 TEST_F(ProcessSingletonMacTest, Basic) {
-  ProcessSingleton ps(temp_dir_.path(),
-                      ProcessSingleton::NotificationCallback());
+  ProcessSingleton ps(temp_dir_.path());
   EXPECT_FALSE(IsLocked());
   EXPECT_TRUE(ps.Create());
   EXPECT_TRUE(IsLocked());
@@ -80,8 +79,7 @@ TEST_F(ProcessSingletonMacTest, Basic) {
 TEST_F(ProcessSingletonMacTest, DestructorReleases) {
   EXPECT_FALSE(IsLocked());
   {
-    ProcessSingleton ps(temp_dir_.path(),
-                        ProcessSingleton::NotificationCallback());
+    ProcessSingleton ps(temp_dir_.path());
     EXPECT_TRUE(ps.Create());
     EXPECT_TRUE(IsLocked());
   }
@@ -90,10 +88,8 @@ TEST_F(ProcessSingletonMacTest, DestructorReleases) {
 
 // Multiple singletons should interlock appropriately.
 TEST_F(ProcessSingletonMacTest, Interlock) {
-  ProcessSingleton ps1(temp_dir_.path(),
-                       ProcessSingleton::NotificationCallback());
-  ProcessSingleton ps2(temp_dir_.path(),
-                       ProcessSingleton::NotificationCallback());
+  ProcessSingleton ps1(temp_dir_.path());
+  ProcessSingleton ps2(temp_dir_.path());
 
   // Windows and Linux use a command-line flag to suppress this, but
   // it is on a sub-process so the scope is contained.  Rather than
@@ -119,10 +115,8 @@ TEST_F(ProcessSingletonMacTest, Interlock) {
 
 // Like |Interlock| test, but via |NotifyOtherProcessOrCreate()|.
 TEST_F(ProcessSingletonMacTest, NotifyOtherProcessOrCreate) {
-  ProcessSingleton ps1(temp_dir_.path(),
-                       ProcessSingleton::NotificationCallback());
-  ProcessSingleton ps2(temp_dir_.path(),
-                       ProcessSingleton::NotificationCallback());
+  ProcessSingleton ps1(temp_dir_.path());
+  ProcessSingleton ps2(temp_dir_.path());
 
   // Windows and Linux use a command-line flag to suppress this, but
   // it is on a sub-process so the scope is contained.  Rather than
@@ -132,24 +126,16 @@ TEST_F(ProcessSingletonMacTest, NotifyOtherProcessOrCreate) {
 
   // When |ps1| has the lock, |ps2| cannot get it.
   EXPECT_FALSE(IsLocked());
-  EXPECT_EQ(
-      ProcessSingleton::PROCESS_NONE,
-      ps1.NotifyOtherProcessOrCreate());
+  EXPECT_EQ(ProcessSingleton::PROCESS_NONE, ps1.NotifyOtherProcessOrCreate());
   EXPECT_TRUE(IsLocked());
-  EXPECT_EQ(
-      ProcessSingleton::PROFILE_IN_USE,
-      ps2.NotifyOtherProcessOrCreate());
+  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE, ps2.NotifyOtherProcessOrCreate());
   ps1.Cleanup();
 
   // And when |ps2| has the lock, |ps1| cannot get it.
   EXPECT_FALSE(IsLocked());
-  EXPECT_EQ(
-      ProcessSingleton::PROCESS_NONE,
-      ps2.NotifyOtherProcessOrCreate());
+  EXPECT_EQ(ProcessSingleton::PROCESS_NONE, ps2.NotifyOtherProcessOrCreate());
   EXPECT_TRUE(IsLocked());
-  EXPECT_EQ(
-      ProcessSingleton::PROFILE_IN_USE,
-      ps1.NotifyOtherProcessOrCreate());
+  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE, ps1.NotifyOtherProcessOrCreate());
   ps2.Cleanup();
   EXPECT_FALSE(IsLocked());
 }

@@ -5,39 +5,24 @@
 #ifndef PPAPI_CPP_DEV_RESOURCE_ARRAY_DEV_H_
 #define PPAPI_CPP_DEV_RESOURCE_ARRAY_DEV_H_
 
-#include "ppapi/c/pp_array_output.h"
-#include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/cpp/resource.h"
 
 namespace pp {
 
-class InstanceHandle;
+class Instance;
 
 class ResourceArray_Dev : public Resource {
  public:
-  // Heap-allocated data passed to ArrayOutputCallbackConverter(). Please see
-  // the comment of ArrayOutputCallbackConverter() for more details.
-  struct ArrayOutputCallbackData {
-    ArrayOutputCallbackData(const PP_ArrayOutput& array_output,
-                            const PP_CompletionCallback& callback)
-        : resource_array_output(0),
-          output(array_output),
-          original_callback(callback) {
-    }
-
-    PP_Resource resource_array_output;
-    PP_ArrayOutput output;
-    PP_CompletionCallback original_callback;
-  };
-
   ResourceArray_Dev();
+
+  struct PassRef {};
 
   ResourceArray_Dev(PassRef, PP_Resource resource);
 
   ResourceArray_Dev(const ResourceArray_Dev& other);
 
-  ResourceArray_Dev(const InstanceHandle& instance,
+  ResourceArray_Dev(Instance* instance,
                     const PP_Resource elements[],
                     uint32_t size);
 
@@ -48,22 +33,6 @@ class ResourceArray_Dev : public Resource {
   uint32_t size() const;
 
   PP_Resource operator[](uint32_t index) const;
-
-  // This is an adapter for backward compatibility. It works with those APIs
-  // which take a PPB_ResourceArray_Dev resource as output parameter, and
-  // returns results using PP_ArrayOutput. For example:
-  //
-  //   ResourceArray_Dev::ArrayOutputCallbackData* data =
-  //       new ResourceArray_Dev::ArrayOutputCallbackData(
-  //           pp_array_output, callback);
-  //   ppb_foo->Bar(
-  //       foo_resource, &data->resource_array_output,
-  //       PP_MakeCompletionCallback(
-  //           &ResourceArray_Dev::ArrayOutputCallbackConverter, data));
-  //
-  // It takes a heap-allocated ArrayOutputCallbackData struct passed as the user
-  // data, and deletes it when the call completes.
-  static void ArrayOutputCallbackConverter(void* user_data, int32_t result);
 };
 
 }  // namespace pp

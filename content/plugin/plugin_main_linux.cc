@@ -13,8 +13,6 @@
 // This whole file is only useful on 64-bit architectures.
 #if defined(ARCH_CPU_64_BITS)
 
-namespace content {
-
 namespace {
 
 // Signal handler for SIGILL; see WorkaroundFlashLAHF().
@@ -68,7 +66,5 @@ void WorkaroundFlashLAHF() {
 
   sigaction(SIGILL, &action, NULL);
 }
-
-}  // namespace content
 
 #endif  // defined(ARCH_CPU_64_BITS)

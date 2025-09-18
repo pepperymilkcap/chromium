@@ -27,7 +27,6 @@
 #include <string>
 
 #include "base/logging.h"
-#include "third_party/libjingle/source/talk/base/scoped_ref_ptr.h"
 
 namespace talk_base {
 
@@ -95,31 +94,24 @@ enum LogErrorContext {
   ERRCTX_OS = ERRCTX_OSSTATUS,  // LOG_E(sev, OS, x)
 };
 
-// Class that writes a log message to the logging delegate ("WebRTC logging
-// stream" in Chrome) and to Chrome's logging stream.
-class DiagnosticLogMessage {
+// Class that makes it possible describe a LOG_E message as a single string.
+// I.e. the format that VLOG is expecting.
+class LogEHelper {
  public:
-  DiagnosticLogMessage(const char* file, int line, LoggingSeverity severity,
-                       bool log_to_chrome, LogErrorContext err_ctx, int err);
-  DiagnosticLogMessage(const char* file, int line, LoggingSeverity severity,
-                       bool log_to_chrome, LogErrorContext err_ctx, int err,
-                       const char* module);
-  ~DiagnosticLogMessage();
-
-  void CreateTimestamp();
+  LogEHelper(const char* file, int line, LoggingSeverity severity,
+             LogErrorContext err_ctx, int err, const char* module = NULL);
+  ~LogEHelper();
 
   std::ostream& stream() { return print_stream_; }
 
  private:
-  const char* file_name_;
+  const std::string file_name_;
   const int line_;
-  const LoggingSeverity severity_;
-  const bool log_to_chrome_;
 
   std::string extra_;
+  const LoggingSeverity severity_;
 
   std::ostringstream print_stream_;
-  std::ostringstream print_stream_with_timestamp_;
 };
 
 // This class is used to explicitly ignore values in the conditional
@@ -151,14 +143,6 @@ void LogMultiline(LoggingSeverity level, const char* label, bool input,
                   const void* data, size_t len, bool hex_mode,
                   LogMultilineState* state);
 
-// TODO(grunell): Change name to InitDiagnosticLoggingDelegate or
-// InitDiagnosticLogging. Change also in init_webrtc.h/cc.
-// TODO(grunell): typedef the delegate function.
-void InitDiagnosticLoggingDelegateFunction(
-    void (*delegate)(const std::string&));
-
-void SetExtraLoggingInit(
-    void (*function)(void (*delegate)(const std::string&)));
 }  // namespace talk_base
 
 //////////////////////////////////////////////////////////////////////
@@ -168,17 +152,12 @@ void SetExtraLoggingInit(
 
 #if defined(LOGGING_INSIDE_LIBJINGLE)
 
-#define DIAGNOSTIC_LOG(sev, ctx, err, ...) \
-  talk_base::DiagnosticLogMessage( \
-      __FILE__, __LINE__, sev, VLOG_IS_ON(sev), \
-      talk_base::ERRCTX_ ## ctx, err, ##__VA_ARGS__).stream()
-
 #define LOG_CHECK_LEVEL(sev) VLOG_IS_ON(talk_base::sev)
 #define LOG_CHECK_LEVEL_V(sev) VLOG_IS_ON(sev)
 
-#define LOG_V(sev) DIAGNOSTIC_LOG(sev, NONE, 0)
+#define LOG_V(sev) VLOG(sev)
 #undef LOG
-#define LOG(sev) DIAGNOSTIC_LOG(talk_base::sev, NONE, 0)
+#define LOG(sev) LOG_V(talk_base::sev)
 
 // The _F version prefixes the message with the current function name.
 #if defined(__GNUC__) && defined(_DEBUG)
@@ -187,8 +166,18 @@ void SetExtraLoggingInit(
 #define LOG_F(sev) LOG(sev) << __FUNCTION__ << ": "
 #endif
 
+// This macro wrapps the LAZY_STREAM macro from base/logging.h but flips the
+// order of the parameters. This is necessary since some compilers will fail
+// unless __VA_ARGS__ is at the end.
+// TODO(hellner): find reference for this.
+#define LAZY_STREAM_REVERSE(condition, stream) LAZY_STREAM(stream, condition)
 #define LOG_E(sev, ctx, err, ...) \
-  DIAGNOSTIC_LOG(talk_base::sev, ctx, err, ##__VA_ARGS__)
+  LAZY_STREAM_REVERSE(LOG_CHECK_LEVEL_V(talk_base::sev), \
+                      talk_base::LogEHelper(__FILE__, __LINE__, \
+                                            talk_base::sev, \
+                                            talk_base::ERRCTX_ ## ctx, \
+                                            err, \
+                                            ##__VA_ARGS__).stream())
 
 #undef LOG_ERRNO_EX
 #define LOG_ERRNO_EX(sev, err) LOG_E(sev, ERRNO, err)

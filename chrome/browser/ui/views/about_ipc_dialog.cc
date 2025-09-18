@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,7 @@
 #include "ipc/ipc_message.h"
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
-#include "content/public/common/content_ipc_logging.h"
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
-#define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger) \
-    content::RegisterIPCLogger(msg_id, logger)
 
 // We need to do this real early to be sure IPC_MESSAGE_MACROS_LOG_ENABLED
 // doesn't get undefined.
@@ -22,19 +19,18 @@
 
 #include <set>
 
-#include "base/memory/singleton.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
 #include "base/threading/thread.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/public/browser/browser_ipc_logging.h"
+#include "content/public/browser/content_ipc_logging.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
@@ -58,9 +54,19 @@ enum {
   kParamsColumn,
 };
 
+// This class registers the browser IPC logger functions with IPC::Logging.
+class RegisterLoggerFuncs {
+ public:
+  RegisterLoggerFuncs() {
+    IPC::Logging::set_log_function_map(&g_log_function_mapping);
+  }
+};
+
+RegisterLoggerFuncs g_register_logger_funcs;
+
 // The singleton dialog box. This is non-NULL when a dialog is active so we
 // know not to create a new one.
-AboutIPCDialog* g_dialog = NULL;
+AboutIPCDialog* g_active_dialog = NULL;
 
 std::set<int> disabled_messages;
 
@@ -90,13 +96,13 @@ void InitDialog(HWND hwnd) {
   messages->InsertColumn(0, L"id", LVCFMT_LEFT, 230);
 
   LogFunctionMap* log_functions = IPC::Logging::log_function_map();
-  for (LogFunctionMap::iterator i(log_functions->begin());
+  for (LogFunctionMap::iterator i = log_functions->begin();
        i != log_functions->end(); ++i) {
     std::string name;
     (*i->second)(&name, NULL, NULL);
     if (name.empty())
       continue;  // Will happen if the message file isn't included above.
-    std::wstring wname = base::UTF8ToWide(name);
+    std::wstring wname = UTF8ToWide(name);
 
     int index = messages->InsertItem(
         LVIF_TEXT | LVIF_PARAM, 0, wname.c_str(), 0, 0, 0, i->first);
@@ -128,12 +134,12 @@ void CloseDialog() {
   PrefService* prefs = current_profile->GetPrefs();
   if (!prefs->FindPreference(prefs::kIpcDisabledMessages))
     return;
-  base::ListValue* list = prefs->GetMutableList(prefs::kIpcDisabledMessages);
+  ListValue* list = prefs->GetMutableList(prefs::kIpcDisabledMessages);
   list->Clear();
   for (std::set<int>::const_iterator itr = disabled_messages_.begin();
        itr != disabled_messages_.end();
        ++itr) {
-    list->Append(new base::FundamentalValue(*itr));
+    list->Append(Value::CreateIntegerValue(*itr));
   }
   */
 }
@@ -200,15 +206,15 @@ AboutIPCDialog::AboutIPCDialog()
 }
 
 AboutIPCDialog::~AboutIPCDialog() {
-  g_dialog = NULL;
+  g_active_dialog = NULL;
   IPC::Logging::GetInstance()->SetConsumer(NULL);
 }
 
 // static
 void AboutIPCDialog::RunDialog() {
-  if (!g_dialog) {
-    g_dialog = new AboutIPCDialog;
-    views::DialogDelegate::CreateDialogWidget(g_dialog, NULL, NULL)->Show();
+  if (!g_active_dialog) {
+    g_active_dialog = new AboutIPCDialog;
+    views::Widget::CreateWindow(g_active_dialog)->Show();
   } else {
     // TODO(brettw) it would be nice to focus the existing window.
   }
@@ -218,9 +224,9 @@ void AboutIPCDialog::SetupControls() {
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
-  track_toggle_ = new views::LabelButton(this, kStartTrackingLabel);
-  clear_button_ = new views::LabelButton(this, kClearLabel);
-  filter_button_ = new views::LabelButton(this, kFilterLabel);
+  track_toggle_ = new views::TextButton(this, kStartTrackingLabel);
+  clear_button_ = new views::TextButton(this, kClearLabel);
+  filter_button_ = new views::TextButton(this, kFilterLabel);
 
   table_ = new views::NativeViewHost;
 
@@ -251,12 +257,17 @@ gfx::Size AboutIPCDialog::GetPreferredSize() {
   return gfx::Size(800, 400);
 }
 
-int AboutIPCDialog::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
+views::View* AboutIPCDialog::GetContentsView() {
+  return this;
 }
 
-base::string16 AboutIPCDialog::GetWindowTitle() const {
-  return base::ASCIIToUTF16("about:ipc");
+int AboutIPCDialog::GetDialogButtons() const {
+  // Don't want OK or Cancel.
+  return 0;
+}
+
+string16 AboutIPCDialog::GetWindowTitle() const {
+  return ASCIIToUTF16("about:ipc");
 }
 
 void AboutIPCDialog::Layout() {
@@ -296,7 +307,7 @@ void AboutIPCDialog::Log(const IPC::LogData& data) {
   if (exploded.hour > 12)
     exploded.hour -= 12;
 
-  std::wstring sent_str = base::StringPrintf(L"%02d:%02d:%02d.%03d",
+  std::wstring sent_str = StringPrintf(L"%02d:%02d:%02d.%03d",
       exploded.hour, exploded.minute, exploded.second, exploded.millisecond);
 
   int count = message_list_.GetItemCount();
@@ -304,30 +315,30 @@ void AboutIPCDialog::Log(const IPC::LogData& data) {
 
   message_list_.SetItemText(index, kTimeColumn, sent_str.c_str());
   message_list_.SetItemText(index, kChannelColumn,
-                            base::ASCIIToWide(data.channel).c_str());
+                            ASCIIToWide(data.channel).c_str());
 
   std::string message_name;
   IPC::Logging::GetMessageText(data.type, &message_name, NULL, NULL);
   message_list_.SetItemText(index, kMessageColumn,
-                            base::UTF8ToWide(message_name).c_str());
+                            UTF8ToWide(message_name).c_str());
   message_list_.SetItemText(index, kFlagsColumn,
-                            base::UTF8ToWide(data.flags).c_str());
+                            UTF8ToWide(data.flags).c_str());
 
   int64 time_to_send = (base::Time::FromInternalValue(data.receive) -
       sent).InMilliseconds();
   // time can go backwards by a few ms (see Time), don't show that.
   time_to_send = std::max(static_cast<int>(time_to_send), 0);
-  std::wstring temp = base::StringPrintf(L"%d", time_to_send);
+  std::wstring temp = StringPrintf(L"%d", time_to_send);
   message_list_.SetItemText(index, kDispatchColumn, temp.c_str());
 
   int64 time_to_process = (base::Time::FromInternalValue(data.dispatch) -
       base::Time::FromInternalValue(data.receive)).InMilliseconds();
   time_to_process = std::max(static_cast<int>(time_to_process), 0);
-  temp = base::StringPrintf(L"%d", time_to_process);
+  temp = StringPrintf(L"%d", time_to_process);
   message_list_.SetItemText(index, kProcessColumn, temp.c_str());
 
   message_list_.SetItemText(index, kParamsColumn,
-                            base::UTF8ToWide(data.params).c_str());
+                            UTF8ToWide(data.params).c_str());
   message_list_.EnsureVisible(index, FALSE);
 }
 
@@ -335,12 +346,8 @@ bool AboutIPCDialog::CanResize() const {
   return true;
 }
 
-bool AboutIPCDialog::UseNewStyleForThisDialog() const {
-  return false;
-}
-
 void AboutIPCDialog::ButtonPressed(
-    views::Button* button, const ui::Event& event) {
+    views::Button* button, const views::Event& event) {
   if (button == track_toggle_) {
     if (tracking_) {
       track_toggle_->SetText(kStartTrackingLabel);
@@ -359,12 +366,12 @@ void AboutIPCDialog::ButtonPressed(
   }
 }
 
-namespace chrome {
+namespace browser {
 
 void ShowAboutIPCDialog() {
   AboutIPCDialog::RunDialog();
 }
 
-}  // namespace chrome
+} // namespace browser
 
 #endif  // IPC_MESSAGE_LOG_ENABLED

@@ -4,36 +4,26 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_ICON_MANAGER_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_ICON_MANAGER_H_
+#pragma once
 
 #include <map>
 #include <set>
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/weak_ptr.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/insets.h"
 
-namespace content {
-class BrowserContext;
-}
-
-namespace extensions {
 class Extension;
-}
 
-namespace gfx {
-class Image;
-}
-
-class ExtensionIconManager {
+class ExtensionIconManager : public ImageLoadingTracker::Observer {
  public:
   ExtensionIconManager();
   virtual ~ExtensionIconManager();
 
   // Start loading the icon for the given extension.
-  void LoadIcon(content::BrowserContext* context,
-                const extensions::Extension* extension);
+  void LoadIcon(const Extension* extension);
 
   // This returns a bitmap of width/height kFaviconSize, loaded either from an
   // entry specified in the extension's 'icon' section of the manifest, or a
@@ -43,12 +33,12 @@ class ExtensionIconManager {
   // Removes the extension's icon from memory.
   void RemoveIcon(const std::string& extension_id);
 
+  // Implements the ImageLoadingTracker::Observer interface.
+  virtual void OnImageLoaded(SkBitmap* image, const ExtensionResource& resource,
+                             int index) OVERRIDE;
+
   void set_monochrome(bool value) { monochrome_ = value; }
   void set_padding(const gfx::Insets& value) { padding_ = value; }
-
- protected:
-  virtual void OnImageLoaded(const std::string& extension_id,
-                             const gfx::Image& image);
 
  private:
   // Makes sure we've done one-time initialization of the default extension icon
@@ -58,6 +48,9 @@ class ExtensionIconManager {
   // Helper function to return a copy of |src| with the proper scaling and
   // coloring.
   SkBitmap ApplyTransforms(const SkBitmap& src);
+
+  // Used for loading extension icons.
+  ImageLoadingTracker image_tracker_;
 
   // Maps extension id to an SkBitmap with the icon for that extension.
   std::map<std::string, SkBitmap> icons_;
@@ -73,8 +66,6 @@ class ExtensionIconManager {
 
   // Specifies the amount of empty padding to place around the icon.
   gfx::Insets padding_;
-
-  base::WeakPtrFactory<ExtensionIconManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionIconManager);
 };

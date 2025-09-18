@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/thunk/enter.h"
+#include "ppapi/thunk/ppb_buffer_trusted_api.h"
 #include "ppapi/thunk/resource_creation_api.h"
 #include "ppapi/thunk/thunk.h"
 
@@ -25,9 +26,10 @@ namespace proxy {
 Buffer::Buffer(const HostResource& resource,
                const base::SharedMemoryHandle& shm_handle,
                uint32_t size)
-    : Resource(OBJECT_IS_PROXY, resource),
+    : Resource(resource),
       shm_(shm_handle, false),
       size_(size),
+      mapped_data_(NULL),
       map_count_(0) {
 }
 
@@ -45,7 +47,7 @@ PP_Bool Buffer::Describe(uint32_t* size_in_bytes) {
 }
 
 PP_Bool Buffer::IsMapped() {
-  return PP_FromBool(map_count_ > 0);
+  return PP_FromBool(!!mapped_data_);
 }
 
 void* Buffer::Map() {
@@ -57,11 +59,6 @@ void* Buffer::Map() {
 void Buffer::Unmap() {
   if (--map_count_ == 0)
     shm_.Unmap();
-}
-
-int32_t Buffer::GetSharedMemory(int* out_handle) {
-  NOTREACHED();
-  return PP_ERROR_NOTSUPPORTED;
 }
 
 PPB_Buffer_Proxy::PPB_Buffer_Proxy(Dispatcher* dispatcher)
@@ -79,14 +76,14 @@ PP_Resource PPB_Buffer_Proxy::CreateProxyResource(PP_Instance instance,
     return 0;
 
   HostResource result;
-  ppapi::proxy::SerializedHandle shm_handle;
+  base::SharedMemoryHandle shm_handle = base::SharedMemory::NULLHandle();
   dispatcher->Send(new PpapiHostMsg_PPBBuffer_Create(
-      API_ID_PPB_BUFFER, instance, size, &result, &shm_handle));
-  if (result.is_null() || !shm_handle.IsHandleValid() ||
-      !shm_handle.is_shmem())
+      API_ID_PPB_BUFFER, instance, size,
+      &result, &shm_handle));
+  if (result.is_null() || !base::SharedMemory::IsHandleValid(shm_handle))
     return 0;
 
-  return AddProxyResource(result, shm_handle.shmem(), size);
+  return AddProxyResource(result, shm_handle, size);
 }
 
 // static
@@ -111,13 +108,11 @@ void PPB_Buffer_Proxy::OnMsgCreate(
     PP_Instance instance,
     uint32_t size,
     HostResource* result_resource,
-    ppapi::proxy::SerializedHandle* result_shm_handle) {
+    base::SharedMemoryHandle* result_shm_handle) {
   // Overwritten below on success.
-  result_shm_handle->set_null_shmem();
+  *result_shm_handle = base::SharedMemory::NULLHandle();
   HostDispatcher* dispatcher = HostDispatcher::GetForInstance(instance);
   if (!dispatcher)
-    return;
-  if (!dispatcher->permissions().HasPermission(ppapi::PERMISSION_DEV))
     return;
 
   thunk::EnterResourceCreation enter(instance);
@@ -128,7 +123,7 @@ void PPB_Buffer_Proxy::OnMsgCreate(
   if (local_buffer_resource == 0)
     return;
 
-  thunk::EnterResourceNoLock<thunk::PPB_Buffer_API> trusted_buffer(
+  thunk::EnterResourceNoLock<thunk::PPB_BufferTrusted_API> trusted_buffer(
       local_buffer_resource, false);
   if (trusted_buffer.failed())
     return;
@@ -148,8 +143,7 @@ void PPB_Buffer_Proxy::OnMsgCreate(
 #else
   #error Not implemented.
 #endif
-  result_shm_handle->set_shmem(
-      dispatcher->ShareHandleWithRemote(platform_file, false), size);
+  *result_shm_handle = dispatcher->ShareHandleWithRemote(platform_file, false);
 }
 
 }  // namespace proxy

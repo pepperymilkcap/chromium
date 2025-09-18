@@ -4,12 +4,13 @@
 
 #ifndef NET_PROXY_PROXY_BYPASS_RULES_H_
 #define NET_PROXY_PROXY_BYPASS_RULES_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
+#include "googleurl/src/gurl.h"
 #include "net/base/net_export.h"
-#include "url/gurl.h"
 
 namespace net {
 

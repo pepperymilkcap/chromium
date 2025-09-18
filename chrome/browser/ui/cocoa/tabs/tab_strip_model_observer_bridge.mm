@@ -1,12 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
 
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
-
-using content::WebContents;
+#include "chrome/browser/tabs/tab_strip_model.h"
 
 TabStripModelObserverBridge::TabStripModelObserverBridge(TabStripModel* model,
                                                          id controller)
@@ -22,7 +20,7 @@ TabStripModelObserverBridge::~TabStripModelObserverBridge() {
   model_->RemoveObserver(this);
 }
 
-void TabStripModelObserverBridge::TabInsertedAt(WebContents* contents,
+void TabStripModelObserverBridge::TabInsertedAt(TabContentsWrapper* contents,
                                                 int index,
                                                 bool foreground) {
   if ([controller_ respondsToSelector:
@@ -34,7 +32,7 @@ void TabStripModelObserverBridge::TabInsertedAt(WebContents* contents,
 }
 
 void TabStripModelObserverBridge::TabClosingAt(TabStripModel* tab_strip_model,
-                                               WebContents* contents,
+                                               TabContentsWrapper* contents,
                                                int index) {
   if ([controller_ respondsToSelector:
           @selector(tabClosingWithContents:atIndex:)]) {
@@ -42,7 +40,7 @@ void TabStripModelObserverBridge::TabClosingAt(TabStripModel* tab_strip_model,
   }
 }
 
-void TabStripModelObserverBridge::TabDetachedAt(WebContents* contents,
+void TabStripModelObserverBridge::TabDetachedAt(TabContentsWrapper* contents,
                                                 int index) {
   if ([controller_ respondsToSelector:
           @selector(tabDetachedWithContents:atIndex:)]) {
@@ -50,25 +48,22 @@ void TabStripModelObserverBridge::TabDetachedAt(WebContents* contents,
   }
 }
 
-void TabStripModelObserverBridge::TabDeactivated(WebContents* contents) {
-  if ([controller_ respondsToSelector:@selector(tabDeactivatedWithContents:)])
-    [controller_ tabDeactivatedWithContents:contents];
-}
-
-void TabStripModelObserverBridge::ActiveTabChanged(WebContents* old_contents,
-                                                   WebContents* new_contents,
-                                                   int index,
-                                                   int reason) {
-  if ([controller_ respondsToSelector:@selector(
-          activateTabWithContents:previousContents:atIndex:reason:)]) {
+void TabStripModelObserverBridge::ActiveTabChanged(
+    TabContentsWrapper* old_contents,
+    TabContentsWrapper* new_contents,
+    int index,
+    bool user_gesture) {
+  if ([controller_ respondsToSelector:
+          @selector(activateTabWithContents:previousContents:atIndex:
+                    userGesture:)]) {
     [controller_ activateTabWithContents:new_contents
                         previousContents:old_contents
                                  atIndex:index
-                                  reason:reason];
+                             userGesture:user_gesture];
   }
 }
 
-void TabStripModelObserverBridge::TabMoved(WebContents* contents,
+void TabStripModelObserverBridge::TabMoved(TabContentsWrapper* contents,
                                            int from_index,
                                            int to_index) {
   if ([controller_ respondsToSelector:
@@ -79,7 +74,7 @@ void TabStripModelObserverBridge::TabMoved(WebContents* contents,
   }
 }
 
-void TabStripModelObserverBridge::TabChangedAt(WebContents* contents,
+void TabStripModelObserverBridge::TabChangedAt(TabContentsWrapper* contents,
                                                int index,
                                                TabChangeType change_type) {
   if ([controller_ respondsToSelector:
@@ -90,10 +85,11 @@ void TabStripModelObserverBridge::TabChangedAt(WebContents* contents,
   }
 }
 
-void TabStripModelObserverBridge::TabReplacedAt(TabStripModel* tab_strip_model,
-                                                WebContents* old_contents,
-                                                WebContents* new_contents,
-                                                int index) {
+void TabStripModelObserverBridge::TabReplacedAt(
+    TabStripModel* tab_strip_model,
+    TabContentsWrapper* old_contents,
+    TabContentsWrapper* new_contents,
+    int index) {
   if ([controller_ respondsToSelector:
           @selector(tabReplacedWithContents:previousContents:atIndex:)]) {
     [controller_ tabReplacedWithContents:new_contents
@@ -104,12 +100,11 @@ void TabStripModelObserverBridge::TabReplacedAt(TabStripModel* tab_strip_model,
   }
 }
 
-void TabStripModelObserverBridge::TabMiniStateChanged(WebContents* contents,
-                                                      int index) {
+void TabStripModelObserverBridge::TabMiniStateChanged(
+    TabContentsWrapper* contents, int index) {
   if ([controller_ respondsToSelector:
           @selector(tabMiniStateChangedWithContents:atIndex:)]) {
-    [controller_ tabMiniStateChangedWithContents:contents
-                                         atIndex:index];
+    [controller_ tabMiniStateChangedWithContents:contents atIndex:index];
   }
 }
 

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_EXTENSIONS_EXTENSION_VIEW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_EXTENSIONS_EXTENSION_VIEW_GTK_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -11,25 +12,19 @@
 #include "ui/gfx/size.h"
 
 class Browser;
-class SkBitmap;
-
-namespace content {
-class RenderViewHost;
-}
-
-namespace extensions {
 class ExtensionHost;
-}
+class RenderViewHost;
+class SkBitmap;
 
 class ExtensionViewGtk {
  public:
-  ExtensionViewGtk(extensions::ExtensionHost* extension_host, Browser* browser);
+  ExtensionViewGtk(ExtensionHost* extension_host, Browser* browser);
 
   class Container {
    public:
     virtual ~Container() {}
-    virtual void OnExtensionSizeChanged(ExtensionViewGtk* view,
-                                        const gfx::Size& new_size) {}
+    virtual void OnExtensionPreferredSizeChanged(ExtensionViewGtk* view,
+                                                 const gfx::Size& new_size) {}
   };
 
   void Init();
@@ -44,20 +39,20 @@ class ExtensionViewGtk {
 
   // Method for the ExtensionHost to notify us about the correct size for
   // extension contents.
-  void ResizeDueToAutoResize(const gfx::Size& new_size);
+  void UpdatePreferredSize(const gfx::Size& new_size);
 
   // Method for the ExtensionHost to notify us when the RenderViewHost has a
   // connection.
   void RenderViewCreated();
 
-  content::RenderViewHost* render_view_host() const;
+  RenderViewHost* render_view_host() const;
 
  private:
   void CreateWidgetHostView();
 
   Browser* browser_;
 
-  extensions::ExtensionHost* extension_host_;
+  ExtensionHost* extension_host_;
 
   // The background the view should have once it is initialized. This is set
   // when the view has a custom background, but hasn't been initialized yet.

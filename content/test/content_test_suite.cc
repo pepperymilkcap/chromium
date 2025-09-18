@@ -4,58 +4,64 @@
 
 #include "content/test/content_test_suite.h"
 
-#include "base/base_paths.h"
 #include "base/logging.h"
-#include "base/path_service.h"
-#include "content/public/test/test_content_client_initializer.h"
+#include "base/memory/scoped_ptr.h"
+#include "content/browser/mock_content_browser_client.h"
+#include "content/browser/notification_service_impl.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/content_paths.h"
 #include "content/test/test_content_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_paths.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
+#include "ui/gfx/compositor/compositor_setup.h"
 
 namespace {
 
-class TestInitializationListener : public testing::EmptyTestEventListener {
+class TestContentClientInitializer : public testing::EmptyTestEventListener {
  public:
-  TestInitializationListener() : test_content_client_initializer_(NULL) {
+  TestContentClientInitializer() {
   }
 
   virtual void OnTestStart(const testing::TestInfo& test_info) OVERRIDE {
-    test_content_client_initializer_ =
-        new content::TestContentClientInitializer();
+    notification_service_.reset(new NotificationServiceImpl());
+
+    DCHECK(!content::GetContentClient());
+    content_client_.reset(new TestContentClient);
+    content::SetContentClient(content_client_.get());
+
+    content_browser_client_.reset(new content::MockContentBrowserClient());
+    content_client_->set_browser(content_browser_client_.get());
   }
 
   virtual void OnTestEnd(const testing::TestInfo& test_info) OVERRIDE {
-    delete test_content_client_initializer_;
+    notification_service_.reset();
+
+    DCHECK_EQ(content_client_.get(), content::GetContentClient());
+    content::SetContentClient(NULL);
+    content_client_.reset();
+
+    content_browser_client_.reset();
   }
 
  private:
-  content::TestContentClientInitializer* test_content_client_initializer_;
+  scoped_ptr<NotificationServiceImpl> notification_service_;
+  scoped_ptr<content::ContentClient> content_client_;
+  scoped_ptr<content::ContentBrowserClient> content_browser_client_;
 
-  DISALLOW_COPY_AND_ASSIGN(TestInitializationListener);
+  DISALLOW_COPY_AND_ASSIGN(TestContentClientInitializer);
 };
 
 }  // namespace
 
-namespace content {
-
 ContentTestSuite::ContentTestSuite(int argc, char** argv)
-    : ContentTestSuiteBase(argc, argv) {
-#if defined(USE_AURA)
-  base::FilePath pak_file;
-  PathService::Get(base::DIR_MODULE, &pak_file);
-  pak_file = pak_file.AppendASCII("ui_test.pak");
-  ui::ResourceBundle::InitSharedInstanceWithPakPath(pak_file);
-#endif
+    : base::TestSuite(argc, argv) {
 }
 
 ContentTestSuite::~ContentTestSuite() {
-#if defined(USE_AURA)
-  ui::ResourceBundle::CleanupSharedInstance();
-#endif
 }
 
 void ContentTestSuite::Initialize() {
@@ -63,15 +69,16 @@ void ContentTestSuite::Initialize() {
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
 #endif
 
-  ContentTestSuiteBase::Initialize();
+  base::TestSuite::Initialize();
+
+  content::RegisterPathProvider();
+  ui::RegisterPathProvider();
+
+  // Mock out the compositor on platforms that use it.
+  ui::SetupTestCompositor();
 
   testing::TestEventListeners& listeners =
       testing::UnitTest::GetInstance()->listeners();
-  listeners.Append(new TestInitializationListener);
+  listeners.Append(new TestContentClientInitializer);
 }
 
-ContentClient* ContentTestSuite::CreateClientForInitialization() {
-  return new TestContentClient();
-}
-
-}  // namespace content

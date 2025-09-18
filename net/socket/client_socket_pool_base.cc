@@ -4,22 +4,22 @@
 
 #include "net/socket/client_socket_pool_base.h"
 
+#include <math.h>
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "base/stl_util.h"
-#include "base/strings/string_util.h"
-#include "base/time/time.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/time.h"
 #include "base/values.h"
-#include "net/base/net_errors.h"
 #include "net/base/net_log.h"
+#include "net/base/net_errors.h"
 #include "net/socket/client_socket_handle.h"
 
 using base::TimeDelta;
-
-namespace net {
 
 namespace {
 
@@ -39,31 +39,57 @@ const int kCleanupInterval = 10;  // DO NOT INCREASE THIS TIMEOUT.
 // after a certain timeout has passed without receiving an ACK.
 bool g_connect_backup_jobs_enabled = true;
 
+double g_socket_reuse_policy_penalty_exponent = -1;
+int g_socket_reuse_policy = -1;
+
 }  // namespace
+
+namespace net {
+
+int GetSocketReusePolicy() {
+  return g_socket_reuse_policy;
+}
+
+void SetSocketReusePolicy(int policy) {
+  DCHECK_GE(policy, 0);
+  DCHECK_LE(policy, 2);
+  if (policy > 2 || policy < 0) {
+    LOG(ERROR) << "Invalid socket reuse policy";
+    return;
+  }
+
+  double exponents[] = { 0, 0.25, -1 };
+  g_socket_reuse_policy_penalty_exponent = exponents[policy];
+  g_socket_reuse_policy = policy;
+
+  VLOG(1) << "Setting g_socket_reuse_policy_penalty_exponent = "
+          << g_socket_reuse_policy_penalty_exponent;
+}
 
 ConnectJob::ConnectJob(const std::string& group_name,
                        base::TimeDelta timeout_duration,
-                       RequestPriority priority,
                        Delegate* delegate,
                        const BoundNetLog& net_log)
     : group_name_(group_name),
       timeout_duration_(timeout_duration),
-      priority_(priority),
       delegate_(delegate),
       net_log_(net_log),
-      idle_(true) {
+      idle_(true),
+      preconnect_state_(NOT_PRECONNECT) {
   DCHECK(!group_name.empty());
   DCHECK(delegate);
-  net_log.BeginEvent(NetLog::TYPE_SOCKET_POOL_CONNECT_JOB,
-                     NetLog::StringCallback("group_name", &group_name_));
+  net_log.BeginEvent(NetLog::TYPE_SOCKET_POOL_CONNECT_JOB, NULL);
 }
 
 ConnectJob::~ConnectJob() {
-  net_log().EndEvent(NetLog::TYPE_SOCKET_POOL_CONNECT_JOB);
+  net_log().EndEvent(NetLog::TYPE_SOCKET_POOL_CONNECT_JOB, NULL);
 }
 
-scoped_ptr<StreamSocket> ConnectJob::PassSocket() {
-  return socket_.Pass();
+void ConnectJob::Initialize(bool is_preconnect) {
+  if (is_preconnect)
+    preconnect_state_ = UNUSED_PRECONNECT;
+  else
+    preconnect_state_ = NOT_PRECONNECT;
 }
 
 int ConnectJob::Connect() {
@@ -84,17 +110,23 @@ int ConnectJob::Connect() {
   return rv;
 }
 
-void ConnectJob::SetSocket(scoped_ptr<StreamSocket> socket) {
+void ConnectJob::UseForNormalRequest() {
+  DCHECK_EQ(UNUSED_PRECONNECT, preconnect_state_);
+  preconnect_state_ = USED_PRECONNECT;
+}
+
+void ConnectJob::set_socket(StreamSocket* socket) {
   if (socket) {
-    net_log().AddEvent(NetLog::TYPE_CONNECT_JOB_SET_SOCKET,
-                       socket->NetLog().source().ToEventParametersCallback());
+    net_log().AddEvent(NetLog::TYPE_CONNECT_JOB_SET_SOCKET, make_scoped_refptr(
+          new NetLogSourceParameter("source_dependency",
+                                    socket->NetLog().source())));
   }
-  socket_ = socket.Pass();
+  socket_.reset(socket);
 }
 
 void ConnectJob::NotifyDelegateOfCompletion(int rv) {
-  // The delegate will own |this|.
-  Delegate* delegate = delegate_;
+  // The delegate will delete |this|.
+  Delegate *delegate = delegate_;
   delegate_ = NULL;
 
   LogConnectCompletion(rv);
@@ -107,21 +139,20 @@ void ConnectJob::ResetTimer(base::TimeDelta remaining_time) {
 }
 
 void ConnectJob::LogConnectStart() {
-  connect_timing_.connect_start = base::TimeTicks::Now();
-  net_log().BeginEvent(NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_CONNECT);
+  net_log().BeginEvent(NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_CONNECT,
+      make_scoped_refptr(new NetLogStringParameter("group_name", group_name_)));
 }
 
 void ConnectJob::LogConnectCompletion(int net_error) {
-  connect_timing_.connect_end = base::TimeTicks::Now();
   net_log().EndEventWithNetErrorCode(
       NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_CONNECT, net_error);
 }
 
 void ConnectJob::OnTimeout() {
   // Make sure the socket is NULL before calling into |delegate|.
-  SetSocket(scoped_ptr<StreamSocket>());
+  set_socket(NULL);
 
-  net_log_.AddEvent(NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_TIMED_OUT);
+  net_log_.AddEvent(NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_TIMED_OUT, NULL);
 
   NotifyDelegateOfCompletion(ERR_TIMED_OUT);
 }
@@ -140,15 +171,11 @@ ClientSocketPoolBaseHelper::Request::Request(
       priority_(priority),
       ignore_limits_(ignore_limits),
       flags_(flags),
-      net_log_(net_log) {
-  if (ignore_limits_)
-    DCHECK_EQ(priority_, MAXIMUM_PRIORITY);
-}
+      net_log_(net_log) {}
 
 ClientSocketPoolBaseHelper::Request::~Request() {}
 
 ClientSocketPoolBaseHelper::ClientSocketPoolBaseHelper(
-    HigherLayeredPool* pool,
     int max_sockets,
     int max_sockets_per_group,
     base::TimeDelta unused_idle_socket_timeout,
@@ -165,8 +192,7 @@ ClientSocketPoolBaseHelper::ClientSocketPoolBaseHelper(
       connect_job_factory_(connect_job_factory),
       connect_backup_jobs_enabled_(false),
       pool_generation_number_(0),
-      pool_(pool),
-      weak_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK_LE(0, max_sockets_per_group);
   DCHECK_LE(max_sockets_per_group, max_sockets);
 
@@ -177,87 +203,44 @@ ClientSocketPoolBaseHelper::~ClientSocketPoolBaseHelper() {
   // Clean up any idle sockets and pending connect jobs.  Assert that we have no
   // remaining active sockets or pending requests.  They should have all been
   // cleaned up prior to |this| being destroyed.
-  FlushWithError(ERR_ABORTED);
+  Flush();
   DCHECK(group_map_.empty());
   DCHECK(pending_callback_map_.empty());
   DCHECK_EQ(0, connecting_socket_count_);
-  CHECK(higher_pools_.empty());
 
   NetworkChangeNotifier::RemoveIPAddressObserver(this);
-
-  // Remove from lower layer pools.
-  for (std::set<LowerLayeredPool*>::iterator it = lower_pools_.begin();
-       it != lower_pools_.end();
-       ++it) {
-    (*it)->RemoveHigherLayeredPool(pool_);
-  }
-}
-
-ClientSocketPoolBaseHelper::CallbackResultPair::CallbackResultPair()
-    : result(OK) {
-}
-
-ClientSocketPoolBaseHelper::CallbackResultPair::CallbackResultPair(
-    const CompletionCallback& callback_in, int result_in)
-    : callback(callback_in),
-      result(result_in) {
 }
 
 ClientSocketPoolBaseHelper::CallbackResultPair::~CallbackResultPair() {}
 
-bool ClientSocketPoolBaseHelper::IsStalled() const {
-  // If a lower layer pool is stalled, consider |this| stalled as well.
-  for (std::set<LowerLayeredPool*>::const_iterator it = lower_pools_.begin();
-       it != lower_pools_.end();
-       ++it) {
-    if ((*it)->IsStalled())
-      return true;
-  }
-
-  // If fewer than |max_sockets_| are in use, then clearly |this| is not
-  // stalled.
-  if ((handed_out_socket_count_ + connecting_socket_count_) < max_sockets_)
-    return false;
-  // So in order to be stalled, |this| must be using at least |max_sockets_| AND
-  // |this| must have a request that is actually stalled on the global socket
-  // limit.  To find such a request, look for a group that has more requests
-  // than jobs AND where the number of sockets is less than
-  // |max_sockets_per_group_|.  (If the number of sockets is equal to
-  // |max_sockets_per_group_|, then the request is stalled on the group limit,
-  // which does not count.)
-  for (GroupMap::const_iterator it = group_map_.begin();
-       it != group_map_.end(); ++it) {
-    if (it->second->IsStalledOnPoolMaxSockets(max_sockets_per_group_))
-      return true;
-  }
-  return false;
+// InsertRequestIntoQueue inserts the request into the queue based on
+// priority.  Highest priorities are closest to the front.  Older requests are
+// prioritized over requests of equal priority.
+//
+// static
+void ClientSocketPoolBaseHelper::InsertRequestIntoQueue(
+    const Request* r, RequestQueue* pending_requests) {
+  RequestQueue::iterator it = pending_requests->begin();
+  while (it != pending_requests->end() && r->priority() >= (*it)->priority())
+    ++it;
+  pending_requests->insert(it, r);
 }
 
-void ClientSocketPoolBaseHelper::AddLowerLayeredPool(
-    LowerLayeredPool* lower_pool) {
-  DCHECK(pool_);
-  CHECK(!ContainsKey(lower_pools_, lower_pool));
-  lower_pools_.insert(lower_pool);
-  lower_pool->AddHigherLayeredPool(pool_);
-}
-
-void ClientSocketPoolBaseHelper::AddHigherLayeredPool(
-    HigherLayeredPool* higher_pool) {
-  CHECK(higher_pool);
-  CHECK(!ContainsKey(higher_pools_, higher_pool));
-  higher_pools_.insert(higher_pool);
-}
-
-void ClientSocketPoolBaseHelper::RemoveHigherLayeredPool(
-    HigherLayeredPool* higher_pool) {
-  CHECK(higher_pool);
-  CHECK(ContainsKey(higher_pools_, higher_pool));
-  higher_pools_.erase(higher_pool);
+// static
+const ClientSocketPoolBaseHelper::Request*
+ClientSocketPoolBaseHelper::RemoveRequestFromQueue(
+    const RequestQueue::iterator& it, Group* group) {
+  const Request* req = *it;
+  group->mutable_pending_requests()->erase(it);
+  // If there are no more requests, we kill the backup timer.
+  if (group->pending_requests().empty())
+    group->CleanupBackupJob();
+  return req;
 }
 
 int ClientSocketPoolBaseHelper::RequestSocket(
     const std::string& group_name,
-    scoped_ptr<const Request> request) {
+    const Request* request) {
   CHECK(!request->callback().is_null());
   CHECK(request->handle());
 
@@ -265,27 +248,16 @@ int ClientSocketPoolBaseHelper::RequestSocket(
   if (!use_cleanup_timer_)
     CleanupIdleSockets(false);
 
-  request->net_log().BeginEvent(NetLog::TYPE_SOCKET_POOL);
+  request->net_log().BeginEvent(NetLog::TYPE_SOCKET_POOL, NULL);
   Group* group = GetOrCreateGroup(group_name);
 
-  int rv = RequestSocketInternal(group_name, *request);
+  int rv = RequestSocketInternal(group_name, request);
   if (rv != ERR_IO_PENDING) {
     request->net_log().EndEventWithNetErrorCode(NetLog::TYPE_SOCKET_POOL, rv);
     CHECK(!request->handle()->is_initialized());
-    request.reset();
+    delete request;
   } else {
-    group->InsertPendingRequest(request.Pass());
-    // Have to do this asynchronously, as closing sockets in higher level pools
-    // call back in to |this|, which will cause all sorts of fun and exciting
-    // re-entrancy issues if the socket pool is doing something else at the
-    // time.
-    if (group->IsStalledOnPoolMaxSockets(max_sockets_per_group_)) {
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(
-              &ClientSocketPoolBaseHelper::TryToCloseSocketsInLayeredPools,
-              weak_factory_.GetWeakPtr()));
-    }
+    InsertRequestIntoQueue(request, group->mutable_pending_requests());
   }
   return rv;
 }
@@ -307,7 +279,8 @@ void ClientSocketPoolBaseHelper::RequestSockets(
 
   request.net_log().BeginEvent(
       NetLog::TYPE_SOCKET_POOL_CONNECTING_N_SOCKETS,
-      NetLog::IntegerCallback("num_sockets", num_sockets));
+      make_scoped_refptr(new NetLogIntegerParameter(
+          "num_sockets", num_sockets)));
 
   Group* group = GetOrCreateGroup(group_name);
 
@@ -318,7 +291,7 @@ void ClientSocketPoolBaseHelper::RequestSockets(
   for (int num_iterations_left = num_sockets;
        group->NumActiveSocketSlots() < num_sockets &&
        num_iterations_left > 0 ; num_iterations_left--) {
-    rv = RequestSocketInternal(group_name, request);
+    rv = RequestSocketInternal(group_name, &request);
     if (rv < 0 && rv != ERR_IO_PENDING) {
       // We're encountering a synchronous error.  Give up.
       if (!ContainsKey(group_map_, group_name))
@@ -345,91 +318,80 @@ void ClientSocketPoolBaseHelper::RequestSockets(
 
 int ClientSocketPoolBaseHelper::RequestSocketInternal(
     const std::string& group_name,
-    const Request& request) {
-  ClientSocketHandle* const handle = request.handle();
+    const Request* request) {
+  DCHECK_GE(request->priority(), 0);
+  ClientSocketHandle* const handle = request->handle();
   const bool preconnecting = !handle;
   Group* group = GetOrCreateGroup(group_name);
 
-  if (!(request.flags() & NO_IDLE_SOCKETS)) {
+  if (!(request->flags() & NO_IDLE_SOCKETS)) {
     // Try to reuse a socket.
-    if (AssignIdleSocketToRequest(request, group))
+    if (AssignIdleSocketToGroup(request, group))
       return OK;
   }
 
-  // If there are more ConnectJobs than pending requests, don't need to do
-  // anything.  Can just wait for the extra job to connect, and then assign it
-  // to the request.
-  if (!preconnecting && group->TryToUseUnassignedConnectJob())
+  if (!preconnecting && group->TryToUsePreconnectConnectJob())
     return ERR_IO_PENDING;
 
   // Can we make another active socket now?
   if (!group->HasAvailableSocketSlot(max_sockets_per_group_) &&
-      !request.ignore_limits()) {
-    // TODO(willchan): Consider whether or not we need to close a socket in a
-    // higher layered group. I don't think this makes sense since we would just
-    // reuse that socket then if we needed one and wouldn't make it down to this
-    // layer.
-    request.net_log().AddEvent(
-        NetLog::TYPE_SOCKET_POOL_STALLED_MAX_SOCKETS_PER_GROUP);
+      !request->ignore_limits()) {
+    request->net_log().AddEvent(
+        NetLog::TYPE_SOCKET_POOL_STALLED_MAX_SOCKETS_PER_GROUP, NULL);
     return ERR_IO_PENDING;
   }
 
-  if (ReachedMaxSocketsLimit() && !request.ignore_limits()) {
-    // NOTE(mmenke):  Wonder if we really need different code for each case
-    // here.  Only reason for them now seems to be preconnects.
+  if (ReachedMaxSocketsLimit() && !request->ignore_limits()) {
     if (idle_socket_count() > 0) {
-      // There's an idle socket in this pool. Either that's because there's
-      // still one in this group, but we got here due to preconnecting bypassing
-      // idle sockets, or because there's an idle socket in another group.
       bool closed = CloseOneIdleSocketExceptInGroup(group);
       if (preconnecting && !closed)
         return ERR_PRECONNECT_MAX_SOCKET_LIMIT;
     } else {
       // We could check if we really have a stalled group here, but it requires
       // a scan of all groups, so just flip a flag here, and do the check later.
-      request.net_log().AddEvent(NetLog::TYPE_SOCKET_POOL_STALLED_MAX_SOCKETS);
+      request->net_log().AddEvent(
+          NetLog::TYPE_SOCKET_POOL_STALLED_MAX_SOCKETS, NULL);
       return ERR_IO_PENDING;
     }
   }
 
-  // We couldn't find a socket to reuse, and there's space to allocate one,
-  // so allocate and connect a new one.
+  // We couldn't find a socket to reuse, so allocate and connect a new one.
   scoped_ptr<ConnectJob> connect_job(
-      connect_job_factory_->NewConnectJob(group_name, request, this));
+      connect_job_factory_->NewConnectJob(group_name, *request, this));
 
+  connect_job->Initialize(preconnecting);
   int rv = connect_job->Connect();
   if (rv == OK) {
     LogBoundConnectJobToRequest(connect_job->net_log().source(), request);
     if (!preconnecting) {
-      HandOutSocket(connect_job->PassSocket(), false /* not reused */,
-                    connect_job->connect_timing(), handle, base::TimeDelta(),
-                    group, request.net_log());
+      HandOutSocket(connect_job->ReleaseSocket(), false /* not reused */,
+                    handle, base::TimeDelta(), group, request->net_log());
     } else {
-      AddIdleSocket(connect_job->PassSocket(), group);
+      AddIdleSocket(connect_job->ReleaseSocket(), group);
     }
   } else if (rv == ERR_IO_PENDING) {
     // If we don't have any sockets in this group, set a timer for potentially
     // creating a new one.  If the SYN is lost, this backup socket may complete
     // before the slow socket, improving end user latency.
-    if (connect_backup_jobs_enabled_ && group->IsEmpty()) {
-      group->StartBackupJobTimer(group_name, this);
+    if (connect_backup_jobs_enabled_ &&
+        group->IsEmpty() && !group->HasBackupJob()) {
+      group->StartBackupSocketTimer(group_name, this);
     }
 
     connecting_socket_count_++;
 
-    group->AddJob(connect_job.Pass(), preconnecting);
+    group->AddJob(connect_job.release());
   } else {
     LogBoundConnectJobToRequest(connect_job->net_log().source(), request);
-    scoped_ptr<StreamSocket> error_socket;
+    StreamSocket* error_socket = NULL;
     if (!preconnecting) {
       DCHECK(handle);
       connect_job->GetAdditionalErrorState(handle);
-      error_socket = connect_job->PassSocket();
+      error_socket = connect_job->ReleaseSocket();
     }
     if (error_socket) {
-      HandOutSocket(error_socket.Pass(), false /* not reused */,
-                    connect_job->connect_timing(), handle, base::TimeDelta(),
-                    group, request.net_log());
+      HandOutSocket(error_socket, false /* not reused */, handle,
+                    base::TimeDelta(), group, request->net_log());
     } else if (group->IsEmpty()) {
       RemoveGroup(group_name);
     }
@@ -438,10 +400,11 @@ int ClientSocketPoolBaseHelper::RequestSocketInternal(
   return rv;
 }
 
-bool ClientSocketPoolBaseHelper::AssignIdleSocketToRequest(
-    const Request& request, Group* group) {
+bool ClientSocketPoolBaseHelper::AssignIdleSocketToGroup(
+    const Request* request, Group* group) {
   std::list<IdleSocket>* idle_sockets = group->mutable_idle_sockets();
   std::list<IdleSocket>::iterator idle_socket_it = idle_sockets->end();
+  double max_score = -1;
 
   // Iterate through the idle sockets forwards (oldest to newest)
   //   * Delete any disconnected ones.
@@ -458,7 +421,22 @@ bool ClientSocketPoolBaseHelper::AssignIdleSocketToRequest(
 
     if (it->socket->WasEverUsed()) {
       // We found one we can reuse!
-      idle_socket_it = it;
+      double score = 0;
+      int64 bytes_read = it->socket->NumBytesRead();
+      double num_kb = static_cast<double>(bytes_read) / 1024.0;
+      int idle_time_sec = (base::TimeTicks::Now() - it->start_time).InSeconds();
+      idle_time_sec = std::max(1, idle_time_sec);
+
+      if (g_socket_reuse_policy_penalty_exponent >= 0 && num_kb >= 0) {
+        score = num_kb / pow(idle_time_sec,
+                             g_socket_reuse_policy_penalty_exponent);
+      }
+
+      // Equality to prefer recently used connection.
+      if (score >= max_score) {
+        idle_socket_it = it;
+        max_score = score;
+      }
     }
 
     ++it;
@@ -477,13 +455,12 @@ bool ClientSocketPoolBaseHelper::AssignIdleSocketToRequest(
     IdleSocket idle_socket = *idle_socket_it;
     idle_sockets->erase(idle_socket_it);
     HandOutSocket(
-        scoped_ptr<StreamSocket>(idle_socket.socket),
+        idle_socket.socket,
         idle_socket.socket->WasEverUsed(),
-        LoadTimingInfo::ConnectTiming(),
-        request.handle(),
+        request->handle(),
         idle_time,
         group,
-        request.net_log());
+        request->net_log());
     return true;
   }
 
@@ -492,9 +469,11 @@ bool ClientSocketPoolBaseHelper::AssignIdleSocketToRequest(
 
 // static
 void ClientSocketPoolBaseHelper::LogBoundConnectJobToRequest(
-    const NetLog::Source& connect_job_source, const Request& request) {
-  request.net_log().AddEvent(NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
-                             connect_job_source.ToEventParametersCallback());
+    const NetLog::Source& connect_job_source, const Request* request) {
+  request->net_log().AddEvent(
+      NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
+      make_scoped_refptr(new NetLogSourceParameter(
+          "source_dependency", connect_job_source)));
 }
 
 void ClientSocketPoolBaseHelper::CancelRequest(
@@ -503,11 +482,11 @@ void ClientSocketPoolBaseHelper::CancelRequest(
   if (callback_it != pending_callback_map_.end()) {
     int result = callback_it->second.result;
     pending_callback_map_.erase(callback_it);
-    scoped_ptr<StreamSocket> socket = handle->PassSocket();
+    StreamSocket* socket = handle->release_socket();
     if (socket) {
       if (result != OK)
         socket->Disconnect();
-      ReleaseSocket(handle->group_name(), socket.Pass(), handle->id());
+      ReleaseSocket(handle->group_name(), socket, handle->id());
     }
     return;
   }
@@ -517,18 +496,19 @@ void ClientSocketPoolBaseHelper::CancelRequest(
   Group* group = GetOrCreateGroup(group_name);
 
   // Search pending_requests for matching handle.
-  scoped_ptr<const Request> request =
-      group->FindAndRemovePendingRequest(handle);
-  if (request) {
-    request->net_log().AddEvent(NetLog::TYPE_CANCELLED);
-    request->net_log().EndEvent(NetLog::TYPE_SOCKET_POOL);
+  RequestQueue::iterator it = group->mutable_pending_requests()->begin();
+  for (; it != group->pending_requests().end(); ++it) {
+    if ((*it)->handle() == handle) {
+      scoped_ptr<const Request> req(RemoveRequestFromQueue(it, group));
+      req->net_log().AddEvent(NetLog::TYPE_CANCELLED, NULL);
+      req->net_log().EndEvent(NetLog::TYPE_SOCKET_POOL, NULL);
 
-    // We let the job run, unless we're at the socket limit and there is
-    // not another request waiting on the job.
-    if (group->jobs().size() > group->pending_request_count() &&
-        ReachedMaxSocketsLimit()) {
-      RemoveConnectJob(*group->jobs().begin(), group);
-      CheckForStalledSocketGroups();
+      // We let the job run, unless we're at the socket limit.
+      if (group->jobs().size() && ReachedMaxSocketsLimit()) {
+        RemoveConnectJob(*group->jobs().begin(), group);
+        CheckForStalledSocketGroups();
+      }
+      break;
     }
   }
 }
@@ -565,25 +545,32 @@ LoadState ClientSocketPoolBaseHelper::GetLoadState(
   // Can't use operator[] since it is non-const.
   const Group& group = *group_map_.find(group_name)->second;
 
-  if (group.HasConnectJobForHandle(handle)) {
-    // Just return the state  of the farthest along ConnectJob for the first
-    // group.jobs().size() pending requests.
-    LoadState max_state = LOAD_STATE_IDLE;
-    for (ConnectJobSet::const_iterator job_it = group.jobs().begin();
-         job_it != group.jobs().end(); ++job_it) {
-      max_state = std::max(max_state, (*job_it)->GetLoadState());
+  // Search pending_requests for matching handle.
+  RequestQueue::const_iterator it = group.pending_requests().begin();
+  for (size_t i = 0; it != group.pending_requests().end(); ++it, ++i) {
+    if ((*it)->handle() == handle) {
+      if (i < group.jobs().size()) {
+        LoadState max_state = LOAD_STATE_IDLE;
+        for (ConnectJobSet::const_iterator job_it = group.jobs().begin();
+             job_it != group.jobs().end(); ++job_it) {
+          max_state = std::max(max_state, (*job_it)->GetLoadState());
+        }
+        return max_state;
+      } else {
+        // TODO(wtc): Add a state for being on the wait list.
+        // See http://www.crbug.com/5077.
+        return LOAD_STATE_IDLE;
+      }
     }
-    return max_state;
   }
 
-  if (group.IsStalledOnPoolMaxSockets(max_sockets_per_group_))
-    return LOAD_STATE_WAITING_FOR_STALLED_SOCKET_POOL;
-  return LOAD_STATE_WAITING_FOR_AVAILABLE_SOCKET;
+  NOTREACHED();
+  return LOAD_STATE_IDLE;
 }
 
-base::DictionaryValue* ClientSocketPoolBaseHelper::GetInfoAsValue(
+DictionaryValue* ClientSocketPoolBaseHelper::GetInfoAsValue(
     const std::string& name, const std::string& type) const {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  DictionaryValue* dict = new DictionaryValue();
   dict->SetString("name", name);
   dict->SetString("type", type);
   dict->SetInteger("handed_out_socket_count", handed_out_socket_count_);
@@ -596,45 +583,42 @@ base::DictionaryValue* ClientSocketPoolBaseHelper::GetInfoAsValue(
   if (group_map_.empty())
     return dict;
 
-  base::DictionaryValue* all_groups_dict = new base::DictionaryValue();
+  DictionaryValue* all_groups_dict = new DictionaryValue();
   for (GroupMap::const_iterator it = group_map_.begin();
        it != group_map_.end(); it++) {
     const Group* group = it->second;
-    base::DictionaryValue* group_dict = new base::DictionaryValue();
+    DictionaryValue* group_dict = new DictionaryValue();
 
     group_dict->SetInteger("pending_request_count",
-                           group->pending_request_count());
-    if (group->has_pending_requests()) {
-      group_dict->SetString(
-          "top_pending_priority",
-          RequestPriorityToString(group->TopPendingPriority()));
+                           group->pending_requests().size());
+    if (!group->pending_requests().empty()) {
+      group_dict->SetInteger("top_pending_priority",
+                             group->TopPendingPriority());
     }
 
     group_dict->SetInteger("active_socket_count", group->active_socket_count());
 
-    base::ListValue* idle_socket_list = new base::ListValue();
+    ListValue* idle_socket_list = new ListValue();
     std::list<IdleSocket>::const_iterator idle_socket;
     for (idle_socket = group->idle_sockets().begin();
          idle_socket != group->idle_sockets().end();
          idle_socket++) {
       int source_id = idle_socket->socket->NetLog().source().id;
-      idle_socket_list->Append(new base::FundamentalValue(source_id));
+      idle_socket_list->Append(Value::CreateIntegerValue(source_id));
     }
     group_dict->Set("idle_sockets", idle_socket_list);
 
-    base::ListValue* connect_jobs_list = new base::ListValue();
+    ListValue* connect_jobs_list = new ListValue();
     std::set<ConnectJob*>::const_iterator job = group->jobs().begin();
     for (job = group->jobs().begin(); job != group->jobs().end(); job++) {
       int source_id = (*job)->net_log().source().id;
-      connect_jobs_list->Append(new base::FundamentalValue(source_id));
+      connect_jobs_list->Append(Value::CreateIntegerValue(source_id));
     }
     group_dict->Set("connect_jobs", connect_jobs_list);
 
     group_dict->SetBoolean("is_stalled",
-                           group->IsStalledOnPoolMaxSockets(
-                               max_sockets_per_group_));
-    group_dict->SetBoolean("backup_job_timer_is_running",
-                           group->BackupJobTimerIsRunning());
+                           group->IsStalled(max_sockets_per_group_));
+    group_dict->SetBoolean("has_backup_job", group->HasBackupJob());
 
     all_groups_dict->SetWithoutPathExpansion(it->first, group_dict);
   }
@@ -754,7 +738,7 @@ void ClientSocketPoolBaseHelper::StartIdleSocketTimer() {
 }
 
 void ClientSocketPoolBaseHelper::ReleaseSocket(const std::string& group_name,
-                                               scoped_ptr<StreamSocket> socket,
+                                               StreamSocket* socket,
                                                int id) {
   GroupMap::iterator i = group_map_.find(group_name);
   CHECK(i != group_map_.end());
@@ -771,10 +755,10 @@ void ClientSocketPoolBaseHelper::ReleaseSocket(const std::string& group_name,
       id == pool_generation_number_;
   if (can_reuse) {
     // Add it to the idle list.
-    AddIdleSocket(socket.Pass(), group);
+    AddIdleSocket(socket, group);
     OnAvailableSocketSlot(group_name, group);
   } else {
-    socket.reset();
+    delete socket;
   }
 
   CheckForStalledSocketGroups();
@@ -784,18 +768,8 @@ void ClientSocketPoolBaseHelper::CheckForStalledSocketGroups() {
   // If we have idle sockets, see if we can give one to the top-stalled group.
   std::string top_group_name;
   Group* top_group = NULL;
-  if (!FindTopStalledGroup(&top_group, &top_group_name)) {
-    // There may still be a stalled group in a lower level pool.
-    for (std::set<LowerLayeredPool*>::iterator it = lower_pools_.begin();
-         it != lower_pools_.end();
-         ++it) {
-       if ((*it)->IsStalled()) {
-         CloseOneIdleSocket();
-         break;
-       }
-    }
+  if (!FindTopStalledGroup(&top_group, &top_group_name))
     return;
-  }
 
   if (ReachedMaxSocketsLimit()) {
     if (idle_socket_count() > 0) {
@@ -818,24 +792,21 @@ void ClientSocketPoolBaseHelper::CheckForStalledSocketGroups() {
 // are not at the |max_sockets_per_group_| limit. Note: for requests with
 // the same priority, the winner is based on group hash ordering (and not
 // insertion order).
-bool ClientSocketPoolBaseHelper::FindTopStalledGroup(
-    Group** group,
-    std::string* group_name) const {
-  CHECK((group && group_name) || (!group && !group_name));
+bool ClientSocketPoolBaseHelper::FindTopStalledGroup(Group** group,
+                                                     std::string* group_name) {
   Group* top_group = NULL;
   const std::string* top_group_name = NULL;
   bool has_stalled_group = false;
-  for (GroupMap::const_iterator i = group_map_.begin();
+  for (GroupMap::iterator i = group_map_.begin();
        i != group_map_.end(); ++i) {
     Group* curr_group = i->second;
-    if (!curr_group->has_pending_requests())
+    const RequestQueue& queue = curr_group->pending_requests();
+    if (queue.empty())
       continue;
-    if (curr_group->IsStalledOnPoolMaxSockets(max_sockets_per_group_)) {
-      if (!group)
-        return true;
+    if (curr_group->IsStalled(max_sockets_per_group_)) {
       has_stalled_group = true;
       bool has_higher_priority = !top_group ||
-          curr_group->TopPendingPriority() > top_group->TopPendingPriority();
+          curr_group->TopPendingPriority() < top_group->TopPendingPriority();
       if (has_higher_priority) {
         top_group = curr_group;
         top_group_name = &i->first;
@@ -844,11 +815,8 @@ bool ClientSocketPoolBaseHelper::FindTopStalledGroup(
   }
 
   if (top_group) {
-    CHECK(group);
     *group = top_group;
     *group_name = *top_group_name;
-  } else {
-    CHECK(!has_stalled_group);
   }
   return has_stalled_group;
 }
@@ -861,29 +829,24 @@ void ClientSocketPoolBaseHelper::OnConnectJobComplete(
   CHECK(group_it != group_map_.end());
   Group* group = group_it->second;
 
-  scoped_ptr<StreamSocket> socket = job->PassSocket();
+  scoped_ptr<StreamSocket> socket(job->ReleaseSocket());
 
-  // Copies of these are needed because |job| may be deleted before they are
-  // accessed.
   BoundNetLog job_log = job->net_log();
-  LoadTimingInfo::ConnectTiming connect_timing = job->connect_timing();
-
-  // RemoveConnectJob(job, _) must be called by all branches below;
-  // otherwise, |job| will be leaked.
 
   if (result == OK) {
     DCHECK(socket.get());
     RemoveConnectJob(job, group);
-    scoped_ptr<const Request> request = group->PopNextPendingRequest();
-    if (request) {
-      LogBoundConnectJobToRequest(job_log.source(), *request);
+    if (!group->pending_requests().empty()) {
+      scoped_ptr<const Request> r(RemoveRequestFromQueue(
+          group->mutable_pending_requests()->begin(), group));
+      LogBoundConnectJobToRequest(job_log.source(), r.get());
       HandOutSocket(
-          socket.Pass(), false /* unused socket */, connect_timing,
-          request->handle(), base::TimeDelta(), group, request->net_log());
-      request->net_log().EndEvent(NetLog::TYPE_SOCKET_POOL);
-      InvokeUserCallbackLater(request->handle(), request->callback(), result);
+          socket.release(), false /* unused socket */, r->handle(),
+          base::TimeDelta(), group, r->net_log());
+      r->net_log().EndEvent(NetLog::TYPE_SOCKET_POOL, NULL);
+      InvokeUserCallbackLater(r->handle(), r->callback(), result);
     } else {
-      AddIdleSocket(socket.Pass(), group);
+      AddIdleSocket(socket.release(), group);
       OnAvailableSocketSlot(group_name, group);
       CheckForStalledSocketGroups();
     }
@@ -891,20 +854,20 @@ void ClientSocketPoolBaseHelper::OnConnectJobComplete(
     // If we got a socket, it must contain error information so pass that
     // up so that the caller can retrieve it.
     bool handed_out_socket = false;
-    scoped_ptr<const Request> request = group->PopNextPendingRequest();
-    if (request) {
-      LogBoundConnectJobToRequest(job_log.source(), *request);
-      job->GetAdditionalErrorState(request->handle());
+    if (!group->pending_requests().empty()) {
+      scoped_ptr<const Request> r(RemoveRequestFromQueue(
+          group->mutable_pending_requests()->begin(), group));
+      LogBoundConnectJobToRequest(job_log.source(), r.get());
+      job->GetAdditionalErrorState(r->handle());
       RemoveConnectJob(job, group);
       if (socket.get()) {
         handed_out_socket = true;
-        HandOutSocket(socket.Pass(), false /* unused socket */,
-                      connect_timing, request->handle(), base::TimeDelta(),
-                      group, request->net_log());
+        HandOutSocket(socket.release(), false /* unused socket */, r->handle(),
+                      base::TimeDelta(), group, r->net_log());
       }
-      request->net_log().EndEventWithNetErrorCode(
-          NetLog::TYPE_SOCKET_POOL, result);
-      InvokeUserCallbackLater(request->handle(), request->callback(), result);
+      r->net_log().EndEventWithNetErrorCode(NetLog::TYPE_SOCKET_POOL,
+                                            result);
+      InvokeUserCallbackLater(r->handle(), r->callback(), result);
     } else {
       RemoveConnectJob(job, group);
     }
@@ -916,14 +879,14 @@ void ClientSocketPoolBaseHelper::OnConnectJobComplete(
 }
 
 void ClientSocketPoolBaseHelper::OnIPAddressChanged() {
-  FlushWithError(ERR_NETWORK_CHANGED);
+  Flush();
 }
 
-void ClientSocketPoolBaseHelper::FlushWithError(int error) {
+void ClientSocketPoolBaseHelper::Flush() {
   pool_generation_number_++;
   CancelAllConnectJobs();
   CloseIdleSockets();
-  CancelAllRequestsWithError(error);
+  AbortAllRequests();
 }
 
 void ClientSocketPoolBaseHelper::RemoveConnectJob(ConnectJob* job,
@@ -932,27 +895,34 @@ void ClientSocketPoolBaseHelper::RemoveConnectJob(ConnectJob* job,
   connecting_socket_count_--;
 
   DCHECK(group);
+  DCHECK(ContainsKey(group->jobs(), job));
   group->RemoveJob(job);
+
+  // If we've got no more jobs for this group, then we no longer need a
+  // backup job either.
+  if (group->jobs().empty())
+    group->CleanupBackupJob();
+
+  DCHECK(job);
+  delete job;
 }
 
 void ClientSocketPoolBaseHelper::OnAvailableSocketSlot(
     const std::string& group_name, Group* group) {
   DCHECK(ContainsKey(group_map_, group_name));
-  if (group->IsEmpty()) {
+  if (group->IsEmpty())
     RemoveGroup(group_name);
-  } else if (group->has_pending_requests()) {
+  else if (!group->pending_requests().empty())
     ProcessPendingRequest(group_name, group);
-  }
 }
 
 void ClientSocketPoolBaseHelper::ProcessPendingRequest(
     const std::string& group_name, Group* group) {
-  const Request* next_request = group->GetNextPendingRequest();
-  DCHECK(next_request);
-  int rv = RequestSocketInternal(group_name, *next_request);
+  int rv = RequestSocketInternal(group_name,
+                                 *group->pending_requests().begin());
   if (rv != ERR_IO_PENDING) {
-    scoped_ptr<const Request> request = group->PopNextPendingRequest();
-    DCHECK(request);
+    scoped_ptr<const Request> request(RemoveRequestFromQueue(
+          group->mutable_pending_requests()->begin(), group));
     if (group->IsEmpty())
       RemoveGroup(group_name);
 
@@ -962,41 +932,38 @@ void ClientSocketPoolBaseHelper::ProcessPendingRequest(
 }
 
 void ClientSocketPoolBaseHelper::HandOutSocket(
-    scoped_ptr<StreamSocket> socket,
+    StreamSocket* socket,
     bool reused,
-    const LoadTimingInfo::ConnectTiming& connect_timing,
     ClientSocketHandle* handle,
     base::TimeDelta idle_time,
     Group* group,
     const BoundNetLog& net_log) {
   DCHECK(socket);
-  handle->SetSocket(socket.Pass());
+  handle->set_socket(socket);
   handle->set_is_reused(reused);
   handle->set_idle_time(idle_time);
   handle->set_pool_id(pool_generation_number_);
-  handle->set_connect_timing(connect_timing);
 
   if (reused) {
     net_log.AddEvent(
         NetLog::TYPE_SOCKET_POOL_REUSED_AN_EXISTING_SOCKET,
-        NetLog::IntegerCallback(
-            "idle_ms", static_cast<int>(idle_time.InMilliseconds())));
+        make_scoped_refptr(new NetLogIntegerParameter(
+            "idle_ms", static_cast<int>(idle_time.InMilliseconds()))));
   }
 
-  net_log.AddEvent(
-      NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET,
-      handle->socket()->NetLog().source().ToEventParametersCallback());
+  net_log.AddEvent(NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET,
+                   make_scoped_refptr(new NetLogSourceParameter(
+                       "source_dependency", socket->NetLog().source())));
 
   handed_out_socket_count_++;
   group->IncrementActiveSocketCount();
 }
 
 void ClientSocketPoolBaseHelper::AddIdleSocket(
-    scoped_ptr<StreamSocket> socket,
-    Group* group) {
+    StreamSocket* socket, Group* group) {
   DCHECK(socket);
   IdleSocket idle_socket;
-  idle_socket.socket = socket.release();
+  idle_socket.socket = socket;
   idle_socket.start_time = base::TimeTicks::Now();
 
   group->mutable_idle_sockets()->push_back(idle_socket);
@@ -1022,15 +989,17 @@ void ClientSocketPoolBaseHelper::CancelAllConnectJobs() {
   DCHECK_EQ(0, connecting_socket_count_);
 }
 
-void ClientSocketPoolBaseHelper::CancelAllRequestsWithError(int error) {
+void ClientSocketPoolBaseHelper::AbortAllRequests() {
   for (GroupMap::iterator i = group_map_.begin(); i != group_map_.end();) {
     Group* group = i->second;
 
-    while (true) {
-      scoped_ptr<const Request> request = group->PopNextPendingRequest();
-      if (!request)
-        break;
-      InvokeUserCallbackLater(request->handle(), request->callback(), error);
+    RequestQueue pending_requests;
+    pending_requests.swap(*group->mutable_pending_requests());
+    for (RequestQueue::iterator it2 = pending_requests.begin();
+         it2 != pending_requests.end(); ++it2) {
+      scoped_ptr<const Request> request(*it2);
+      InvokeUserCallbackLater(
+          request->handle(), request->callback(), ERR_ABORTED);
     }
 
     // Delete group if no longer needed.
@@ -1056,10 +1025,8 @@ bool ClientSocketPoolBaseHelper::ReachedMaxSocketsLimit() const {
   return true;
 }
 
-bool ClientSocketPoolBaseHelper::CloseOneIdleSocket() {
-  if (idle_socket_count() == 0)
-    return false;
-  return CloseOneIdleSocketExceptInGroup(NULL);
+void ClientSocketPoolBaseHelper::CloseOneIdleSocket() {
+  CloseOneIdleSocketExceptInGroup(NULL);
 }
 
 bool ClientSocketPoolBaseHelper::CloseOneIdleSocketExceptInGroup(
@@ -1083,18 +1050,9 @@ bool ClientSocketPoolBaseHelper::CloseOneIdleSocketExceptInGroup(
     }
   }
 
-  return false;
-}
+  if (!exception_group)
+    LOG(DFATAL) << "No idle socket found to close!.";
 
-bool ClientSocketPoolBaseHelper::CloseOneIdleConnectionInHigherLayeredPool() {
-  // This pool doesn't have any idle sockets. It's possible that a pool at a
-  // higher layer is holding one of this sockets active, but it's actually idle.
-  // Query the higher layers.
-  for (std::set<HigherLayeredPool*>::const_iterator it = higher_pools_.begin();
-       it != higher_pools_.end(); ++it) {
-    if ((*it)->CloseOneIdleConnection())
-      return true;
-  }
   return false;
 }
 
@@ -1102,7 +1060,7 @@ void ClientSocketPoolBaseHelper::InvokeUserCallbackLater(
     ClientSocketHandle* handle, const CompletionCallback& callback, int rv) {
   CHECK(!ContainsKey(pending_callback_map_, handle));
   pending_callback_map_[handle] = CallbackResultPair(callback, rv);
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&ClientSocketPoolBaseHelper::InvokeUserCallback,
                  weak_factory_.GetWeakPtr(), handle));
@@ -1123,82 +1081,41 @@ void ClientSocketPoolBaseHelper::InvokeUserCallback(
   callback.Run(result);
 }
 
-void ClientSocketPoolBaseHelper::TryToCloseSocketsInLayeredPools() {
-  while (IsStalled()) {
-    // Closing a socket will result in calling back into |this| to use the freed
-    // socket slot, so nothing else is needed.
-    if (!CloseOneIdleConnectionInHigherLayeredPool())
-      return;
-  }
-}
-
 ClientSocketPoolBaseHelper::Group::Group()
-    : unassigned_job_count_(0),
-      pending_requests_(NUM_PRIORITIES),
-      active_socket_count_(0) {}
+    : active_socket_count_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {}
 
 ClientSocketPoolBaseHelper::Group::~Group() {
-  DCHECK_EQ(0u, unassigned_job_count_);
+  CleanupBackupJob();
 }
 
-void ClientSocketPoolBaseHelper::Group::StartBackupJobTimer(
+void ClientSocketPoolBaseHelper::Group::StartBackupSocketTimer(
     const std::string& group_name,
     ClientSocketPoolBaseHelper* pool) {
-  // Only allow one timer to run at a time.
-  if (BackupJobTimerIsRunning())
+  // Only allow one timer pending to create a backup socket.
+  if (weak_factory_.HasWeakPtrs())
     return;
 
-  // Unretained here is okay because |backup_job_timer_| is
-  // automatically cancelled when it's destroyed.
-  backup_job_timer_.Start(
-      FROM_HERE, pool->ConnectRetryInterval(),
-      base::Bind(&Group::OnBackupJobTimerFired, base::Unretained(this),
-                 group_name, pool));
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&Group::OnBackupSocketTimerFired, weak_factory_.GetWeakPtr(),
+                 group_name, pool),
+      pool->ConnectRetryInterval());
 }
 
-bool ClientSocketPoolBaseHelper::Group::BackupJobTimerIsRunning() const {
-  return backup_job_timer_.IsRunning();
-}
-
-bool ClientSocketPoolBaseHelper::Group::TryToUseUnassignedConnectJob() {
-  SanityCheck();
-
-  if (unassigned_job_count_ == 0)
-    return false;
-  --unassigned_job_count_;
-  return true;
-}
-
-void ClientSocketPoolBaseHelper::Group::AddJob(scoped_ptr<ConnectJob> job,
-                                               bool is_preconnect) {
-  SanityCheck();
-
-  if (is_preconnect)
-    ++unassigned_job_count_;
-  jobs_.insert(job.release());
-}
-
-void ClientSocketPoolBaseHelper::Group::RemoveJob(ConnectJob* job) {
-  scoped_ptr<ConnectJob> owned_job(job);
-  SanityCheck();
-
-  std::set<ConnectJob*>::iterator it = jobs_.find(job);
-  if (it != jobs_.end()) {
-    jobs_.erase(it);
-  } else {
-    NOTREACHED();
+bool ClientSocketPoolBaseHelper::Group::TryToUsePreconnectConnectJob() {
+  for (std::set<ConnectJob*>::iterator it = jobs_.begin();
+       it != jobs_.end(); ++it) {
+    ConnectJob* job = *it;
+    if (job->is_unused_preconnect()) {
+      job->UseForNormalRequest();
+      return true;
+    }
   }
-  size_t job_count = jobs_.size();
-  if (job_count < unassigned_job_count_)
-    unassigned_job_count_ = job_count;
-
-  // If we've got no more jobs for this group, then we no longer need a
-  // backup job either.
-  if (jobs_.empty())
-    backup_job_timer_.Stop();
+  return false;
 }
 
-void ClientSocketPoolBaseHelper::Group::OnBackupJobTimerFired(
+void ClientSocketPoolBaseHelper::Group::OnBackupSocketTimerFired(
     std::string group_name,
     ClientSocketPoolBaseHelper* pool) {
   // If there are no more jobs pending, there is no work to do.
@@ -1208,112 +1125,35 @@ void ClientSocketPoolBaseHelper::Group::OnBackupJobTimerFired(
     return;
   }
 
-  // If our old job is waiting on DNS, or if we can't create any sockets
+  // If our backup job is waiting on DNS, or if we can't create any sockets
   // right now due to limits, just reset the timer.
   if (pool->ReachedMaxSocketsLimit() ||
       !HasAvailableSocketSlot(pool->max_sockets_per_group_) ||
       (*jobs_.begin())->GetLoadState() == LOAD_STATE_RESOLVING_HOST) {
-    StartBackupJobTimer(group_name, pool);
+    StartBackupSocketTimer(group_name, pool);
     return;
   }
 
   if (pending_requests_.empty())
     return;
 
-  scoped_ptr<ConnectJob> backup_job =
-      pool->connect_job_factory_->NewConnectJob(
-          group_name, *pending_requests_.FirstMax().value(), pool);
-  backup_job->net_log().AddEvent(NetLog::TYPE_BACKUP_CONNECT_JOB_CREATED);
+  ConnectJob* backup_job = pool->connect_job_factory_->NewConnectJob(
+      group_name, **pending_requests_.begin(), pool);
+  backup_job->net_log().AddEvent(NetLog::TYPE_SOCKET_BACKUP_CREATED, NULL);
   SIMPLE_STATS_COUNTER("socket.backup_created");
   int rv = backup_job->Connect();
   pool->connecting_socket_count_++;
-  ConnectJob* raw_backup_job = backup_job.get();
-  AddJob(backup_job.Pass(), false);
+  AddJob(backup_job);
   if (rv != ERR_IO_PENDING)
-    pool->OnConnectJobComplete(rv, raw_backup_job);
-}
-
-void ClientSocketPoolBaseHelper::Group::SanityCheck() {
-  DCHECK_LE(unassigned_job_count_, jobs_.size());
+    pool->OnConnectJobComplete(rv, backup_job);
 }
 
 void ClientSocketPoolBaseHelper::Group::RemoveAllJobs() {
-  SanityCheck();
-
   // Delete active jobs.
   STLDeleteElements(&jobs_);
-  unassigned_job_count_ = 0;
 
-  // Stop backup job timer.
-  backup_job_timer_.Stop();
-}
-
-const ClientSocketPoolBaseHelper::Request*
-ClientSocketPoolBaseHelper::Group::GetNextPendingRequest() const {
-  return
-      pending_requests_.empty() ? NULL : pending_requests_.FirstMax().value();
-}
-
-bool ClientSocketPoolBaseHelper::Group::HasConnectJobForHandle(
-    const ClientSocketHandle* handle) const {
-  // Search the first |jobs_.size()| pending requests for |handle|.
-  // If it's farther back in the deque than that, it doesn't have a
-  // corresponding ConnectJob.
-  size_t i = 0;
-  for (RequestQueue::Pointer pointer = pending_requests_.FirstMax();
-       !pointer.is_null() && i < jobs_.size();
-       pointer = pending_requests_.GetNextTowardsLastMin(pointer), ++i) {
-    if (pointer.value()->handle() == handle)
-      return true;
-  }
-  return false;
-}
-
-void ClientSocketPoolBaseHelper::Group::InsertPendingRequest(
-    scoped_ptr<const Request> request) {
-  // This value must be cached before we release |request|.
-  RequestPriority priority = request->priority();
-  if (request->ignore_limits()) {
-    // Put requests with ignore_limits == true (which should have
-    // priority == MAXIMUM_PRIORITY) ahead of other requests with
-    // MAXIMUM_PRIORITY.
-    DCHECK_EQ(priority, MAXIMUM_PRIORITY);
-    pending_requests_.InsertAtFront(request.release(), priority);
-  } else {
-    pending_requests_.Insert(request.release(), priority);
-  }
-}
-
-scoped_ptr<const ClientSocketPoolBaseHelper::Request>
-ClientSocketPoolBaseHelper::Group::PopNextPendingRequest() {
-  if (pending_requests_.empty())
-    return scoped_ptr<const ClientSocketPoolBaseHelper::Request>();
-  return RemovePendingRequest(pending_requests_.FirstMax());
-}
-
-scoped_ptr<const ClientSocketPoolBaseHelper::Request>
-ClientSocketPoolBaseHelper::Group::FindAndRemovePendingRequest(
-    ClientSocketHandle* handle) {
-  for (RequestQueue::Pointer pointer = pending_requests_.FirstMax();
-       !pointer.is_null();
-       pointer = pending_requests_.GetNextTowardsLastMin(pointer)) {
-    if (pointer.value()->handle() == handle) {
-      scoped_ptr<const Request> request = RemovePendingRequest(pointer);
-      return request.Pass();
-    }
-  }
-  return scoped_ptr<const ClientSocketPoolBaseHelper::Request>();
-}
-
-scoped_ptr<const ClientSocketPoolBaseHelper::Request>
-ClientSocketPoolBaseHelper::Group::RemovePendingRequest(
-    const RequestQueue::Pointer& pointer) {
-  scoped_ptr<const Request> request(pointer.value());
-  pending_requests_.Erase(pointer);
-  // If there are no more requests, kill the backup timer.
-  if (pending_requests_.empty())
-    backup_job_timer_.Stop();
-  return request.Pass();
+  // Cancel pending backup job.
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 }  // namespace internal

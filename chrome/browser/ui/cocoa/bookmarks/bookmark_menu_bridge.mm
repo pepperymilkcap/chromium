@@ -4,12 +4,10 @@
 
 #import <AppKit/AppKit.h>
 
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -17,10 +15,11 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
+#include "skia/ext/skia_utils_mac.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 BookmarkMenuBridge::BookmarkMenuBridge(Profile* profile, NSMenu* menu)
     : menuIsValid_(false),
@@ -42,8 +41,7 @@ NSMenu* BookmarkMenuBridge::BookmarkMenu() {
   return [controller_ menu];
 }
 
-void BookmarkMenuBridge::BookmarkModelLoaded(BookmarkModel* model,
-                                             bool ids_reassigned) {
+void BookmarkMenuBridge::Loaded(BookmarkModel* model, bool ids_reassigned) {
   InvalidateMenu();
 }
 
@@ -62,13 +60,13 @@ void BookmarkMenuBridge::UpdateMenuInternal(NSMenu* bookmark_menu,
     return;
 
   BookmarkModel* model = GetBookmarkModel();
-  if (!model || !model->loaded())
+  if (!model || !model->IsLoaded())
     return;
 
   if (!folder_image_) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     folder_image_.reset(
-        rb.GetNativeImageNamed(IDR_BOOKMARK_BAR_FOLDER).CopyNSImage());
+        [rb.GetNativeImageNamed(IDR_BOOKMARK_BAR_FOLDER) retain]);
   }
 
   ClearBookmarkMenu(bookmark_menu);
@@ -135,10 +133,6 @@ void BookmarkMenuBridge::BookmarkNodeRemoved(BookmarkModel* model,
   InvalidateMenu();
 }
 
-void BookmarkMenuBridge::BookmarkAllNodesRemoved(BookmarkModel* model) {
-  InvalidateMenu();
-}
-
 void BookmarkMenuBridge::BookmarkNodeChanged(BookmarkModel* model,
                                              const BookmarkNode* node) {
   NSMenuItem* item = MenuItemForNode(node);
@@ -170,14 +164,14 @@ void BookmarkMenuBridge::BuildMenu() {
 void BookmarkMenuBridge::ObserveBookmarkModel() {
   BookmarkModel* model = GetBookmarkModel();
   model->AddObserver(this);
-  if (model->loaded())
-    BookmarkModelLoaded(model, false);
+  if (model->IsLoaded())
+    Loaded(model, false);
 }
 
 BookmarkModel* BookmarkMenuBridge::GetBookmarkModel() {
   if (!profile_)
     return NULL;
-  return BookmarkModelFactory::GetForProfile(profile_);
+  return profile_->GetBookmarkModel();
 }
 
 Profile* BookmarkMenuBridge::GetProfile() {
@@ -258,12 +252,6 @@ void BookmarkMenuBridge::AddNodeToMenu(const BookmarkNode* node, NSMenu* menu,
     // Add menus for 'Open All Bookmarks'.
     [menu addItem:[NSMenuItem separatorItem]];
     bool enabled = child_count != 0;
-
-    IncognitoModePrefs::Availability incognito_availability =
-        IncognitoModePrefs::GetAvailability(profile_->GetPrefs());
-    bool incognito_enabled =
-        enabled && incognito_availability != IncognitoModePrefs::DISABLED;
-
     AddItemToMenu(IDC_BOOKMARK_BAR_OPEN_ALL,
                   IDS_BOOKMARK_BAR_OPEN_ALL,
                   node, menu, enabled);
@@ -272,7 +260,7 @@ void BookmarkMenuBridge::AddNodeToMenu(const BookmarkNode* node, NSMenu* menu,
                   node, menu, enabled);
     AddItemToMenu(IDC_BOOKMARK_BAR_OPEN_ALL_INCOGNITO,
                   IDS_BOOKMARK_BAR_OPEN_ALL_INCOGNITO,
-                  node, menu, incognito_enabled);
+                  node, menu, enabled);
   }
 }
 
@@ -317,15 +305,14 @@ void BookmarkMenuBridge::ConfigureMenuItem(const BookmarkNode* node,
   NSImage* favicon = nil;
   BookmarkModel* model = GetBookmarkModel();
   if (model) {
-    const gfx::Image& image = model->GetFavicon(node);
-    if (!image.IsEmpty())
-      favicon = image.ToNSImage();
+    const SkBitmap& bitmap = model->GetFavicon(node);
+    if (!bitmap.isNull())
+      favicon = gfx::SkBitmapToNSImage(bitmap);
   }
-  // If we do not have a loaded favicon, use the default site image instead.
-  if (!favicon) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    favicon = rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).ToNSImage();
-  }
+  // Either we do not have a loaded favicon or the conversion from SkBitmap
+  // failed. Use the default site image instead.
+  if (!favicon)
+    favicon = gfx::GetCachedImageWithName(@"nav.pdf");
   [item setImage:favicon];
 }
 

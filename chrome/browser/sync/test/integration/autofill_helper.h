@@ -1,28 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_AUTOFILL_HELPER_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_AUTOFILL_HELPER_H_
+#pragma once
 
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 
-namespace autofill {
 class AutofillEntry;
 class AutofillKey;
 class AutofillProfile;
 class AutofillType;
-class AutofillWebDataService;
-class CreditCard;
 class PersonalDataManager;
-}  // namespace autofill
+class WebDataService;
 
 namespace autofill_helper {
 
@@ -34,26 +31,21 @@ enum ProfileType {
 };
 
 // Used to access the web data service within a particular sync profile.
-scoped_refptr<autofill::AutofillWebDataService> GetWebDataService(
-    int index) WARN_UNUSED_RESULT;
+WebDataService* GetWebDataService(int index) WARN_UNUSED_RESULT;
 
 // Used to access the personal data manager within a particular sync profile.
-autofill::PersonalDataManager* GetPersonalDataManager(
-    int index) WARN_UNUSED_RESULT;
+PersonalDataManager* GetPersonalDataManager(int index) WARN_UNUSED_RESULT;
 
 // Adds the form fields in |keys| to the WebDataService of sync profile
 // |profile|.
-void AddKeys(int profile, const std::set<autofill::AutofillKey>& keys);
+void AddKeys(int profile, const std::set<AutofillKey>& keys);
 
 // Removes the form field in |key| from the WebDataService of sync profile
 // |profile|.
-void RemoveKey(int profile, const autofill::AutofillKey& key);
-
-// Removes all of the keys from the WebDataService of sync profile |profile|.
-void RemoveKeys(int profile);
+void RemoveKey(int profile, const AutofillKey& key);
 
 // Gets all the form fields in the WebDataService of sync profile |profile|.
-std::set<autofill::AutofillEntry> GetAllKeys(int profile) WARN_UNUSED_RESULT;
+std::set<AutofillEntry> GetAllKeys(int profile) WARN_UNUSED_RESULT;
 
 // Compares the form fields in the WebDataServices of sync profiles
 // |profile_a| and |profile_b|. Returns true if they match.
@@ -61,16 +53,10 @@ bool KeysMatch(int profile_a, int profile_b) WARN_UNUSED_RESULT;
 
 // Replaces the Autofill profiles in sync profile |profile| with
 // |autofill_profiles|.
-void SetProfiles(int profile,
-                 std::vector<autofill::AutofillProfile>* autofill_profiles);
-
-// Replaces the CreditCard profiles in sync profile |profile| with
-// |credit_cards|.
-void SetCreditCards(int profile,
-                    std::vector<autofill::CreditCard>* credit_cards);
+void SetProfiles(int profile, std::vector<AutofillProfile>* autofill_profiles);
 
 // Adds the autofill profile |autofill_profile| to sync profile |profile|.
-void AddProfile(int profile, const autofill::AutofillProfile& autofill_profile);
+void AddProfile(int profile, const AutofillProfile& autofill_profile);
 
 // Removes the autofill profile with guid |guid| from sync profile
 // |profile|.
@@ -80,12 +66,12 @@ void RemoveProfile(int profile, const std::string& guid);
 // to |type| and |value|.
 void UpdateProfile(int profile,
                    const std::string& guid,
-                   const autofill::AutofillType& type,
-                   const base::string16& value);
+                   const AutofillType& type,
+                   const string16& value);
 
 // Gets all the Autofill profiles in the PersonalDataManager of sync profile
 // |profile|.
-const std::vector<autofill::AutofillProfile*>& GetAllProfiles(
+const std::vector<AutofillProfile*>& GetAllProfiles(
     int profile) WARN_UNUSED_RESULT;
 
 // Returns the number of autofill profiles contained by sync profile
@@ -104,7 +90,7 @@ bool ProfilesMatch(int profile_a, int profile_b) WARN_UNUSED_RESULT;
 bool AllProfilesMatch() WARN_UNUSED_RESULT;
 
 // Creates a test autofill profile based on the persona specified in |type|.
-autofill::AutofillProfile CreateAutofillProfile(ProfileType type);
+AutofillProfile CreateAutofillProfile(ProfileType type);
 
 }  // namespace autofill_helper
 

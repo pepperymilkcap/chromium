@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,15 +12,13 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 
-namespace content {
 MockLocationProvider* MockLocationProvider::instance_ = NULL;
 
 MockLocationProvider::MockLocationProvider(MockLocationProvider** self_ref)
     : state_(STOPPED),
-      is_permission_granted_(false),
       self_ref_(self_ref),
       provider_loop_(base::MessageLoopProxy::current()) {
   CHECK(self_ref_);
@@ -38,7 +36,7 @@ void MockLocationProvider::HandlePositionChanged(const Geoposition& position) {
     // The location arbitrator unit tests rely on this method running
     // synchronously.
     position_ = position;
-    NotifyCallback(position_);
+    UpdateListeners();
   } else {
     provider_loop_->PostTask(
         FROM_HERE,
@@ -60,11 +58,11 @@ void MockLocationProvider::GetPosition(Geoposition* position) {
   *position = position_;
 }
 
-void MockLocationProvider::OnPermissionGranted() {
-  is_permission_granted_ = true;
+void MockLocationProvider::OnPermissionGranted(const GURL& requesting_frame) {
+  permission_granted_url_ = requesting_frame;
 }
 
-// Mock location provider that automatically calls back its client at most
+// Mock location provider that automatically calls back it's client at most
 // once, when StartProvider or OnPermissionGranted is called. Use
 // |requires_permission_to_start| to select which event triggers the callback.
 class AutoMockLocationProvider : public MockLocationProvider {
@@ -72,7 +70,7 @@ class AutoMockLocationProvider : public MockLocationProvider {
   AutoMockLocationProvider(bool has_valid_location,
                            bool requires_permission_to_start)
       : MockLocationProvider(&instance_),
-        weak_factory_(this),
+        ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
         requires_permission_to_start_(requires_permission_to_start),
         listeners_updated_(false) {
     if (has_valid_location) {
@@ -86,7 +84,7 @@ class AutoMockLocationProvider : public MockLocationProvider {
       position_.error_code = Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
     }
   }
-  virtual bool StartProvider(bool high_accuracy) OVERRIDE {
+  virtual bool StartProvider(bool high_accuracy) {
     MockLocationProvider::StartProvider(high_accuracy);
     if (!requires_permission_to_start_) {
       UpdateListenersIfNeeded();
@@ -94,8 +92,8 @@ class AutoMockLocationProvider : public MockLocationProvider {
     return true;
   }
 
-  virtual void OnPermissionGranted() OVERRIDE {
-    MockLocationProvider::OnPermissionGranted();
+  void OnPermissionGranted(const GURL& requesting_frame) {
+    MockLocationProvider::OnPermissionGranted(requesting_frame);
     if (requires_permission_to_start_) {
       UpdateListenersIfNeeded();
     }
@@ -104,11 +102,10 @@ class AutoMockLocationProvider : public MockLocationProvider {
   void UpdateListenersIfNeeded() {
     if (!listeners_updated_) {
       listeners_updated_ = true;
-      base::MessageLoop::current()->PostTask(
+      MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(&MockLocationProvider::HandlePositionChanged,
-                     weak_factory_.GetWeakPtr(),
-                     position_));
+                     weak_factory_.GetWeakPtr(), position_));
     }
   }
 
@@ -117,20 +114,18 @@ class AutoMockLocationProvider : public MockLocationProvider {
   bool listeners_updated_;
 };
 
-LocationProvider* NewMockLocationProvider() {
+LocationProviderBase* NewMockLocationProvider() {
   return new MockLocationProvider(&MockLocationProvider::instance_);
 }
 
-LocationProvider* NewAutoSuccessMockLocationProvider() {
+LocationProviderBase* NewAutoSuccessMockLocationProvider() {
   return new AutoMockLocationProvider(true, false);
 }
 
-LocationProvider* NewAutoFailMockLocationProvider() {
+LocationProviderBase* NewAutoFailMockLocationProvider() {
   return new AutoMockLocationProvider(false, false);
 }
 
-LocationProvider* NewAutoSuccessMockNetworkLocationProvider() {
+LocationProviderBase* NewAutoSuccessMockNetworkLocationProvider() {
   return new AutoMockLocationProvider(true, true);
 }
-
-}  // namespace content

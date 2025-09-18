@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,8 +8,8 @@
 
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/strings/string_split.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
+#include "base/string_split.h"
 #include "base/sys_byteorder.h"
 #include "build/build_config.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
@@ -33,7 +33,7 @@ bool GetLine(const char* input, int input_len, std::string* line) {
   }
   return false;
 }
-}  // namespace
+}
 
 //------------------------------------------------------------------------------
 // SafeBrowsingParser implementation
@@ -44,6 +44,8 @@ SafeBrowsingProtocolParser::SafeBrowsingProtocolParser() {
 bool SafeBrowsingProtocolParser::ParseGetHash(
     const char* chunk_data,
     int chunk_len,
+    const std::string& key,
+    bool* re_key,
     std::vector<SBFullHashResult>* full_hashes) {
   full_hashes->clear();
   int length = chunk_len;
@@ -51,6 +53,23 @@ bool SafeBrowsingProtocolParser::ParseGetHash(
 
   int offset;
   std::string line;
+  if (!key.empty()) {
+    if (!GetLine(data, length, &line))
+      return false;  // Error! Bad GetHash result.
+
+    if (line == "e:pleaserekey") {
+      *re_key = true;
+      return true;
+    }
+
+    offset = static_cast<int>(line.size()) + 1;
+    data += offset;
+    length -= offset;
+
+    if (!safe_browsing_util::VerifyMAC(key, line, data, length))
+      return false;
+  }
+
   while (length > 0) {
     if (!GetLine(data, length, &line))
       return false;
@@ -106,7 +125,9 @@ void SafeBrowsingProtocolParser::FormatGetHash(
 bool SafeBrowsingProtocolParser::ParseUpdate(
     const char* chunk_data,
     int chunk_len,
+    const std::string& key,
     int* next_update_sec,
+    bool* re_key,
     bool* reset,
     std::vector<SBChunkDelete>* deletes,
     std::vector<ChunkUrl>* chunk_urls) {
@@ -157,9 +178,22 @@ bool SafeBrowsingProtocolParser::ParseUpdate(
         break;
       }
 
+      case 'e':
+        if (cmd_parts[1] != "pleaserekey")
+          return false;
+        *re_key = true;
+        break;
+
       case 'i':
         // The line providing the name of the list (i.e. 'goog-phish-shavar').
         list_name = cmd_parts[1];
+        break;
+
+      case 'm':
+        // Verify that the MAC of the remainer of this chunk is what we expect.
+        if (!key.empty() &&
+            !safe_browsing_util::VerifyMAC(key, cmd_parts[1], data, length))
+          return false;
         break;
 
       case 'n':
@@ -168,9 +202,26 @@ bool SafeBrowsingProtocolParser::ParseUpdate(
         break;
 
       case 'u': {
+        // The redirect command is of the form: u:<url>,<mac> where <url> can
+        // contain multiple colons, commas or any valid URL characters. We scan
+        // backwards in the string looking for the first ',' we encounter and
+        // assume that everything before that is the URL and everything after
+        // is the MAC (if the MAC was requested).
+        std::string mac;
+        std::string redirect_url(cmd_line, 2);  // Skip the initial "u:".
+        if (!key.empty()) {
+          std::string::size_type mac_pos = redirect_url.rfind(',');
+          if (mac_pos == std::string::npos)
+            return false;
+          mac = redirect_url.substr(mac_pos + 1);
+          redirect_url = redirect_url.substr(0, mac_pos);
+        }
+
         ChunkUrl chunk_url;
-        chunk_url.url = cmd_line.substr(2);  // Skip the initial "u:".
+        chunk_url.url = redirect_url;
         chunk_url.list_name = list_name;
+        if (!key.empty())
+          chunk_url.mac = mac;
         chunk_urls->push_back(chunk_url);
         break;
       }
@@ -193,13 +244,21 @@ bool SafeBrowsingProtocolParser::ParseUpdate(
 bool SafeBrowsingProtocolParser::ParseChunk(const std::string& list_name,
                                             const char* data,
                                             int length,
+                                            const std::string& key,
+                                            const std::string& mac,
+                                            bool* re_key,
                                             SBChunkList* chunks) {
   int remaining = length;
   const char* chunk_data = data;
 
+  if (!key.empty() &&
+      !safe_browsing_util::VerifyMAC(key, mac, data, length)) {
+    return false;
+  }
+
   while (remaining > 0) {
     std::string cmd_line;
-    if (!GetLine(chunk_data, remaining, &cmd_line))
+    if (!GetLine(chunk_data, length, &cmd_line))
       return false;  // Error: bad chunk format!
 
     const int line_len = static_cast<int>(cmd_line.length()) + 1;
@@ -207,7 +266,15 @@ bool SafeBrowsingProtocolParser::ParseChunk(const std::string& list_name,
     remaining -= line_len;
     std::vector<std::string> cmd_parts;
     base::SplitString(cmd_line, ':', &cmd_parts);
+
+    // Handle a possible re-key command.
     if (cmd_parts.size() != 4) {
+      if (cmd_parts.size() == 2 &&
+          cmd_parts[0] == "e" &&
+          cmd_parts[1] == "pleaserekey") {
+        *re_key = true;
+        continue;
+      }
       return false;
     }
 
@@ -264,9 +331,7 @@ bool SafeBrowsingProtocolParser::ParseAddChunk(const std::string& list_name,
       SBEntry::ADD_PREFIX : SBEntry::ADD_FULL_HASH;
 
   if (list_name == safe_browsing_util::kBinHashList ||
-      list_name == safe_browsing_util::kDownloadWhiteList ||
-      list_name == safe_browsing_util::kExtensionBlacklist ||
-      list_name == safe_browsing_util::kIPBlacklist) {
+      list_name == safe_browsing_util::kDownloadWhiteList) {
     // These lists only contain prefixes, no HOSTKEY and COUNT.
     DCHECK_EQ(0, remaining % hash_len);
     prefix_count = remaining / hash_len;
@@ -274,11 +339,8 @@ bool SafeBrowsingProtocolParser::ParseAddChunk(const std::string& list_name,
     chunk_host.host = 0;
     chunk_host.entry = SBEntry::Create(type, prefix_count);
     hosts->push_back(chunk_host);
-    if (!ReadPrefixes(&chunk_data, &remaining, chunk_host.entry,
-                      prefix_count)) {
-      DVLOG(2) << "Unable to read chunk data for list: " << list_name;
+    if (!ReadPrefixes(&chunk_data, &remaining, chunk_host.entry, prefix_count))
       return false;
-    }
     DCHECK_GE(remaining, 0);
   } else {
     SBPrefix host;
@@ -314,9 +376,7 @@ bool SafeBrowsingProtocolParser::ParseSubChunk(const std::string& list_name,
       SBEntry::SUB_PREFIX : SBEntry::SUB_FULL_HASH;
 
   if (list_name == safe_browsing_util::kBinHashList ||
-      list_name == safe_browsing_util::kDownloadWhiteList ||
-      list_name == safe_browsing_util::kExtensionBlacklist ||
-      list_name == safe_browsing_util::kIPBlacklist) {
+      list_name == safe_browsing_util::kDownloadWhiteList) {
     SBChunkHost chunk_host;
     // Set host to 0 and it won't be used for kBinHashList.
     chunk_host.host = 0;
@@ -386,7 +446,7 @@ bool SafeBrowsingProtocolParser::ReadChunkId(
   memcpy(chunk_id, *data, sizeof(*chunk_id));
   *data += sizeof(*chunk_id);
   *remaining -= sizeof(*chunk_id);
-  *chunk_id = base::HostToNet32(*chunk_id);
+  *chunk_id = htonl(*chunk_id);
   DCHECK_GE(*remaining, 0);
   return true;
 }
@@ -406,20 +466,58 @@ bool SafeBrowsingProtocolParser::ReadPrefixes(
     if (*remaining < hash_len)
       return false;
     if (entry->IsPrefix()) {
-      SBPrefix prefix;
-      DCHECK_EQ(hash_len, (int)sizeof(prefix));
-      memcpy(&prefix, *data, sizeof(prefix));
-      entry->SetPrefixAt(i, prefix);
+      DCHECK_EQ(hash_len, (int)sizeof(SBPrefix));
+      entry->SetPrefixAt(i, *reinterpret_cast<const SBPrefix*>(*data));
     } else {
-      SBFullHash hash;
-      DCHECK_EQ(hash_len, (int)sizeof(hash));
-      memcpy(&hash, *data, sizeof(hash));
-      entry->SetFullHashAt(i, hash);
+      DCHECK_EQ(hash_len, (int)sizeof(SBFullHash));
+      entry->SetFullHashAt(i, *reinterpret_cast<const SBFullHash*>(*data));
     }
     *data += hash_len;
     *remaining -= hash_len;
     DCHECK_GE(*remaining, 0);
   }
+
+  return true;
+}
+
+bool SafeBrowsingProtocolParser::ParseNewKey(const char* chunk_data,
+                                             int chunk_length,
+                                             std::string* client_key,
+                                             std::string* wrapped_key) {
+  DCHECK(client_key && wrapped_key);
+  client_key->clear();
+  wrapped_key->clear();
+
+  const char* data = chunk_data;
+  int remaining = chunk_length;
+
+  while (remaining > 0) {
+    std::string line;
+    if (!GetLine(data, remaining, &line))
+      return false;
+
+    std::vector<std::string> cmd_parts;
+    base::SplitString(line, ':', &cmd_parts);
+    if (cmd_parts.size() != 3)
+      return false;
+
+    if (static_cast<int>(cmd_parts[2].size()) != atoi(cmd_parts[1].c_str()))
+      return false;
+
+    if (cmd_parts[0] == "clientkey") {
+      client_key->assign(cmd_parts[2]);
+    } else if (cmd_parts[0] == "wrappedkey") {
+      wrapped_key->assign(cmd_parts[2]);
+    } else {
+      return false;
+    }
+
+    data += line.size() + 1;
+    remaining -= static_cast<int>(line.size()) + 1;
+  }
+
+  if (client_key->empty() || wrapped_key->empty())
+    return false;
 
   return true;
 }

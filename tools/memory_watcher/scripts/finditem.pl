@@ -1,7 +1,4 @@
 #!/usr/bin/perl
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
 
 sub process_raw($$) {
   my $file = shift;
@@ -19,7 +16,7 @@ sub process_raw($$) {
   open (LOGFILE, "$file") or die("could not open $file");
   while(<LOGFILE>) {
     my $line = $_;
-    if ($line =~ m/([0-9]*) bytes, ([0-9]*) allocs/) {
+    if ($line =~ m/([0-9]*) bytes, ([0-9]*) items/) {
       $save = "";
       $print = 0;
       $bytes = $1;

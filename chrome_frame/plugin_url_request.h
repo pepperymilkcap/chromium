@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome_frame/chrome_frame_delegate.h"
 #include "chrome_frame/urlmon_upload_data_stream.h"
@@ -17,7 +17,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/upload_data.h"
 #include "net/url_request/url_request_status.h"
-#include "webkit/common/resource_type.h"
+#include "webkit/glue/resource_type.h"
 
 class PluginUrlRequest;
 class PluginUrlRequestDelegate;
@@ -25,9 +25,19 @@ class PluginUrlRequestManager;
 
 class DECLSPEC_NOVTABLE PluginUrlRequestDelegate {  // NOLINT
  public:
+  virtual void OnResponseStarted(int request_id, const char* mime_type,
+    const char* headers, int size, base::Time last_modified,
+    const std::string& redirect_url, int redirect_status,
+    const net::HostPortPair& socket_address) = 0;
+  virtual void OnReadComplete(int request_id, const std::string& data) = 0;
+  virtual void OnResponseEnd(int request_id,
+                             const net::URLRequestStatus& status) = 0;
   virtual void AddPrivacyDataForUrl(const std::string& url,
                                     const std::string& policy_ref,
                                     int32 flags) {}
+  virtual void OnCookiesRetrieved(bool success, const GURL& url,
+                                  const std::string& cookie_string,
+                                  int cookie_id) = 0;
  protected:
   PluginUrlRequestDelegate() {}
   ~PluginUrlRequestDelegate() {}
@@ -56,9 +66,52 @@ class DECLSPEC_NOVTABLE PluginUrlRequestManager {  // NOLINT
   };
   virtual ThreadSafeFlags GetThreadSafeFlags() = 0;
 
+  // These are called directly from Automation Client when network related
+  // automation messages are received from Chrome.
+  // Strip 'tab' handle and forward to the virtual methods implemented by
+  // derived classes.
+  void StartUrlRequest(int request_id,
+                       const AutomationURLRequest& request_info) {
+    StartRequest(request_id, request_info);
+  }
+
+  void ReadUrlRequest(int request_id, int bytes_to_read) {
+    ReadRequest(request_id, bytes_to_read);
+  }
+
+  void EndUrlRequest(int request_id, const net::URLRequestStatus& s) {
+    EndRequest(request_id);
+  }
+
+  void DownloadUrlRequestInHost(int request_id) {
+    DownloadRequestInHost(request_id);
+  }
+
+  void StopAllRequests() {
+    StopAll();
+  }
+
+  void GetCookiesFromHost(const GURL& url, int cookie_id) {
+    GetCookiesForUrl(url, cookie_id);
+  }
+
+  void SetCookiesInHost(const GURL& url, const std::string& cookie) {
+    SetCookiesForUrl(url, cookie);
+  }
+
  protected:
   PluginUrlRequestDelegate* delegate_;
   bool enable_frame_busting_;
+
+ private:
+  virtual void StartRequest(
+      int request_id, const AutomationURLRequest& request_info) = 0;
+  virtual void ReadRequest(int request_id, int bytes_to_read) = 0;
+  virtual void EndRequest(int request_id) = 0;
+  virtual void DownloadRequestInHost(int request_id) = 0;
+  virtual void StopAll() = 0;
+  virtual void GetCookiesForUrl(const GURL& url, int cookie_id) = 0;
+  virtual void SetCookiesForUrl(const GURL& url, const std::string& cookie) = 0;
 };
 
 // Used as base class. Holds Url request properties (url, method, referrer..)
@@ -114,6 +167,11 @@ class PluginUrlRequest {
 
   void set_url(const std::string& url) {
     url_ = url;
+  }
+
+  void ClearPostData() {
+    upload_data_.Release();
+    post_data_len_ = 0;
   }
 
   void SendData();

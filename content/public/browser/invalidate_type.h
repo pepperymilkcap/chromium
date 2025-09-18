@@ -4,6 +4,7 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_INVALIDATE_TYPE_H_
 #define CONTENT_PUBLIC_BROWSER_INVALIDATE_TYPE_H_
+#pragma once
 
 namespace content {
 

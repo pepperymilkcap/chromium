@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,8 +37,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg,
   return result;
 }
 }  // namespace.
-
-extern "C" {
 
 GTFbool GTFNativeCreateDisplay(EGLNativeDisplayType *pNativeDisplay) {
   *pNativeDisplay = EGL_DEFAULT_DISPLAY;
@@ -113,5 +111,3 @@ EGLImageKHR GTFCreateEGLImage(int width, int height,
 
 void GTFDestroyEGLImage(EGLImageKHR image) {
 }
-
-}  // extern "C"

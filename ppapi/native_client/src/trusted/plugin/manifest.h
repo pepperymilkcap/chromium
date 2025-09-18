@@ -24,7 +24,6 @@ class URLUtil_Dev;
 namespace plugin {
 
 class ErrorInfo;
-class PnaclOptions;
 
 class Manifest {
  public:
@@ -39,15 +38,16 @@ class Manifest {
   // a resource in the extension origin.
 
   // Gets the full program URL for the current sandbox ISA from the
-  // manifest file.  Fills in |pnacl_options| if the program requires
-  // PNaCl translation.
+  // manifest file. Sets |is_portable| to |true| if the program is
+  // portable bitcode.
   virtual bool GetProgramURL(nacl::string* full_url,
-                             PnaclOptions* pnacl_options,
-                             ErrorInfo* error_info) const = 0;
+                             ErrorInfo* error_info,
+                             bool* is_portable) const = 0;
 
   // Resolves a URL relative to the manifest base URL
   virtual bool ResolveURL(const nacl::string& relative_url,
                           nacl::string* full_url,
+                          bool* permit_extension_url,
                           ErrorInfo* error_info) const = 0;
 
   // Gets the file names from the "files" section of the manifest.  No
@@ -58,14 +58,15 @@ class Manifest {
 
   // Resolves a key from the "files" section to a fully resolved URL,
   // i.e., relative URL values are fully expanded relative to the
-  // manifest's URL (via ResolveURL).  Fills in |pnacl_options| if
-  // the resolved key requires a pnacl translation step to obtain
-  // the final requested resource.
-  // If there was an error, details are reported via error_info.
+  // manifest's URL (via ResolveURL).  If there was an error, details
+  // are reported via error_info, and is_portable, if non-NULL, tells
+  // the caller whether the resolution used the portable
+  // representation or an ISA-specific version of the file.
   virtual bool ResolveKey(const nacl::string& key,
                           nacl::string* full_url,
-                          PnaclOptions* pnacl_options,
-                          ErrorInfo* error_info) const = 0;
+                          bool* permit_extension_url,
+                          ErrorInfo* error_info,
+                          bool* is_portable) const = 0;
 
  protected:
   NACL_DISALLOW_COPY_AND_ASSIGN(Manifest);

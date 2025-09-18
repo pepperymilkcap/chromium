@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,9 @@
 #define PPAPI_CPP_INPUT_EVENT_H_
 
 #include <string>
-#include <vector>
 
 #include "ppapi/c/ppb_input_event.h"
 #include "ppapi/cpp/resource.h"
-#include "ppapi/cpp/touch_point.h"
 
 /// @file
 /// This file defines the API used to handle mouse and keyboard input events.
@@ -18,7 +16,7 @@
 namespace pp {
 
 class FloatPoint;
-class InstanceHandle;
+class Instance;
 class Point;
 class Var;
 
@@ -30,11 +28,11 @@ class Var;
 /// appropriate event-specific object to query the properties.
 ///
 /// <strong>Example:</strong>
-/// @code
+/// <code>
 ///
 /// bool MyInstance::HandleInputEvent(const pp::InputEvent& event) {
 ///   switch (event.GetType()) {
-///     case PP_INPUTEVENT_TYPE_MOUSEDOWN {
+///     case PP_INPUTEVENT_TYPE_MOUSE_DOWN {
 ///       pp::MouseInputEvent mouse_event(event);
 ///       return HandleMouseDown(mouse_event.GetMousePosition());
 ///     }
@@ -42,7 +40,7 @@ class Var;
 ///       return false;
 /// }
 ///
-/// @endcode
+/// </code>
 class InputEvent : public Resource {
  public:
   /// Default constructor that creates an is_null() InputEvent object.
@@ -104,13 +102,13 @@ class MouseInputEvent : public InputEvent {
   /// This constructor manually constructs a mouse event from the provided
   /// parameters.
   ///
-  /// @param[in] instance The instance for which this event occurred.
+  /// @param[in] instance The instance for which this event occured.
   ///
   /// @param[in] type A <code>PP_InputEvent_Type</code> identifying the type of
   /// input event.
   ///
   /// @param[in] time_stamp A <code>PP_TimeTicks</code> indicating the time
-  /// when the event occurred.
+  /// when the event occured.
   ///
   /// @param[in] modifiers A bit field combination of the
   /// <code>PP_InputEvent_Modifier</code> flags.
@@ -120,13 +118,13 @@ class MouseInputEvent : public InputEvent {
   /// mouse move, enter, and leave events.
   ///
   /// @param[in] mouse_position A <code>Point</code> containing the x and y
-  /// position of the mouse when the event occurred.
+  /// position of the mouse when the eent occurred.
   ///
   /// @param[in] click_count
-  // TODO(brettw) figure out exactly what this means.
+  /// TODO(brettw) figure out exactly what this means.
   ///
   /// @param[in] mouse_movement The change in position of the mouse.
-  MouseInputEvent(const InstanceHandle& instance,
+  MouseInputEvent(Instance* instance,
                   PP_InputEvent_Type type,
                   PP_TimeTicks time_stamp,
                   uint32_t modifiers,
@@ -161,6 +159,10 @@ class MouseInputEvent : public InputEvent {
   ///
   /// @return The change in position of the mouse, relative to the previous
   /// position.
+  ///
+  /// TODO(yzshen): This feature hasn't been fully supported yet. For now,
+  /// movement information is provided only if the mouse is locked. If the mouse
+  /// is not locked, the returned value is (0, 0).
   Point GetMovement() const;
 };
 
@@ -179,10 +181,10 @@ class WheelInputEvent : public InputEvent {
 
   /// Constructs a wheel input even from the given parameters.
   ///
-  /// @param[in] instance The instance for which this event occurred.
+  /// @param[in] instance The instance for which this event occured.
   ///
   /// @param[in] time_stamp A <code>PP_TimeTicks</code> indicating the time
-  /// when the event occurred.
+  /// when the event occured.
   ///
   /// @param[in] modifiers A bit field combination of the
   /// <code>PP_InputEvent_Modifier</code> flags.
@@ -195,7 +197,7 @@ class WheelInputEvent : public InputEvent {
   ///
   /// @param[in] scroll_by_page When true, the user is requesting to scroll
   /// by pages. When false, the user is requesting to scroll by lines.
-  WheelInputEvent(const InstanceHandle& instance,
+  WheelInputEvent(Instance* instance,
                   PP_TimeTicks time_stamp,
                   uint32_t modifiers,
                   const FloatPoint& wheel_delta,
@@ -217,7 +219,7 @@ class WheelInputEvent : public InputEvent {
   /// possible, for example, on some trackpads and newer mice that don't have
   /// "clicks".
   ///
-  /// @return The vertical and horizontal scroll values. The units are either in
+  /// @return The vertial and horizontal scroll values. The units are either in
   /// pixels (when scroll_by_page is false) or pages (when scroll_by_page is
   /// true). For example, y = -3 means scroll up 3 pixels when scroll_by_page
   /// is false, and scroll up 3 pages when scroll_by_page is true.
@@ -264,13 +266,13 @@ class KeyboardInputEvent : public InputEvent {
 
   /// Constructs a keyboard input even from the given parameters.
   ///
-  /// @param[in] instance The instance for which this event occurred.
+  /// @param[in] instance The instance for which this event occured.
   ///
   /// @param[in] type A <code>PP_InputEvent_Type</code> identifying the type of
   /// input event.
   ///
   /// @param[in] time_stamp A <code>PP_TimeTicks</code> indicating the time
-  /// when the event occurred.
+  /// when the event occured.
   ///
   /// @param[in]  modifiers A bit field combination of the
   /// <code>PP_InputEvent_Modifier</code> flags.
@@ -281,7 +283,7 @@ class KeyboardInputEvent : public InputEvent {
   ///
   /// @param[in] character_text This value represents the typed character as a
   /// UTF-8 string.
-  KeyboardInputEvent(const InstanceHandle& instance,
+  KeyboardInputEvent(Instance* instance,
                      PP_InputEvent_Type type,
                      PP_TimeTicks time_stamp,
                      uint32_t modifiers,
@@ -300,133 +302,6 @@ class KeyboardInputEvent : public InputEvent {
   Var GetCharacterText() const;
 };
 
-class TouchInputEvent : public InputEvent {
- public:
-  /// Constructs an is_null() touch input event object.
-  TouchInputEvent();
-
-  /// Constructs a touch input event object from the given generic input event.
-  /// If the given event is itself is_null() or is not a touch input event, the
-  /// touch object will be is_null().
-  explicit TouchInputEvent(const InputEvent& event);
-
-  /// Constructs a touch input even from the given parameters.
-  ///
-  /// @param[in] instance The instance for which this event occurred.
-  ///
-  /// @param[in] type A <code>PP_InputEvent_Type</code> identifying the type of
-  /// input event.
-  ///
-  /// @param[in] time_stamp A <code>PP_TimeTicks</code> indicating the time
-  /// when the event occurred.
-  ///
-  /// @param[in]  modifiers A bit field combination of the
-  /// <code>PP_InputEvent_Modifier</code> flags.
-  TouchInputEvent(const InstanceHandle& instance,
-                  PP_InputEvent_Type type,
-                  PP_TimeTicks time_stamp,
-                  uint32_t modifiers);
-
-  /// Adds the touch-point to the specified TouchList.
-  void AddTouchPoint(PP_TouchListType list, PP_TouchPoint point);
-
-  /// @return The number of TouchPoints in this TouchList.
-  uint32_t GetTouchCount(PP_TouchListType list) const;
-
-  /// @return The TouchPoint at the given index of the given list, or an empty
-  /// TouchPoint if the index is out of range.
-  TouchPoint GetTouchByIndex(PP_TouchListType list, uint32_t index) const;
-
-  /// @return The TouchPoint in the given list with the given identifier, or an
-  /// empty TouchPoint if the list does not contain a TouchPoint with that
-  /// identifier.
-  TouchPoint GetTouchById(PP_TouchListType list, uint32_t id) const;
-};
-
-class IMEInputEvent : public InputEvent {
- public:
-  /// Constructs an is_null() IME input event object.
-  IMEInputEvent();
-
-  /// Constructs an IME input event object from the provided generic input
-  /// event. If the given event is itself is_null() or is not an IME input
-  /// event, the object will be is_null().
-  ///
-  /// @param[in] event A generic input event.
-  explicit IMEInputEvent(const InputEvent& event);
-
-  /// This constructor manually constructs an IME event from the provided
-  /// parameters.
-  ///
-  /// @param[in] instance The instance for which this event occurred.
-  ///
-  /// @param[in] type A <code>PP_InputEvent_Type</code> identifying the type of
-  /// input event. The type must be one of the ime event types.
-  ///
-  /// @param[in] time_stamp A <code>PP_TimeTicks</code> indicating the time
-  /// when the event occurred.
-  ///
-  /// @param[in] text The string returned by <code>GetText</code>.
-  ///
-  /// @param[in] segment_offsets The array of numbers returned by
-  /// <code>GetSegmentOffset</code>.
-  ///
-  /// @param[in] target_segment The number returned by
-  /// <code>GetTargetSegment</code>.
-  ///
-  /// @param[in] selection The range returned by <code>GetSelection</code>.
-  IMEInputEvent(const InstanceHandle& instance,
-                PP_InputEvent_Type type,
-                PP_TimeTicks time_stamp,
-                const Var& text,
-                const std::vector<uint32_t>& segment_offsets,
-                int32_t target_segment,
-                const std::pair<uint32_t, uint32_t>& selection);
-
-  /// Returns the composition text as a UTF-8 string for the given IME event.
-  ///
-  /// @return A string var representing the composition text. For non-IME
-  /// input events the return value will be an undefined var.
-  Var GetText() const;
-
-  /// Returns the number of segments in the composition text.
-  ///
-  /// @return The number of segments. For events other than COMPOSITION_UPDATE,
-  /// returns 0.
-  uint32_t GetSegmentNumber() const;
-
-  /// Returns the position of the index-th segmentation point in the composition
-  /// text. The position is given by a byte-offset (not a character-offset) of
-  /// the string returned by GetText(). It always satisfies
-  /// 0=GetSegmentOffset(0) < ... < GetSegmentOffset(i) < GetSegmentOffset(i+1)
-  /// < ... < GetSegmentOffset(GetSegmentNumber())=(byte-length of GetText()).
-  /// Note that [GetSegmentOffset(i), GetSegmentOffset(i+1)) represents the
-  /// range of the i-th segment, and hence GetSegmentNumber() can be a valid
-  /// argument to this function instead of an off-by-1 error.
-  ///
-  /// @param[in] ime_event A <code>PP_Resource</code> corresponding to an IME
-  /// event.
-  ///
-  /// @param[in] index An integer indicating a segment.
-  ///
-  /// @return The byte-offset of the segmentation point. If the event is not
-  /// COMPOSITION_UPDATE or index is out of range, returns 0.
-  uint32_t GetSegmentOffset(uint32_t index) const;
-
-  /// Returns the index of the current target segment of composition.
-  ///
-  /// @return An integer indicating the index of the target segment. When there
-  /// is no active target segment, or the event is not COMPOSITION_UPDATE,
-  /// returns -1.
-  int32_t GetTargetSegment() const;
-
-  /// Obtains the range selected by caret in the composition text.
-  ///
-  /// @param[out] start An integer indicating a start offset of selection range.
-  ///
-  /// @param[out] end An integer indicating an end offset of selection range.
-  void GetSelection(uint32_t* start, uint32_t* end) const;
-};
 }  // namespace pp
 
 #endif  // PPAPI_CPP_INPUT_EVENT_H_

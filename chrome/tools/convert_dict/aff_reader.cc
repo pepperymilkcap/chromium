@@ -8,9 +8,9 @@
 
 #include "base/file_util.h"
 #include "base/i18n/icu_string_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/stringprintf.h"
+#include "base/string_split.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/tools/convert_dict/hunspell_reader.h"
 
 namespace convert_dict {
@@ -45,22 +45,11 @@ void CollapseDuplicateSpaces(std::string* str) {
   }
 }
 
-// Print an error message and terminate execution
-void Panic(const char* fmt, ...) {
-  va_list ap;
-  printf("ERROR: ");
-  va_start(ap, fmt);
-  vprintf(fmt, ap);
-  va_end(ap);
-  printf("\n");
-  exit(1);
-}
-
 }  // namespace
 
-AffReader::AffReader(const base::FilePath& path)
+AffReader::AffReader(const FilePath& path)
     : has_indexed_affixes_(false) {
-  file_ = base::OpenFile(path, "r");
+  file_ = file_util::OpenFile(path, "r");
 
   // Default to Latin1 in case the file doesn't specify it.
   encoding_ = "ISO8859-1";
@@ -68,7 +57,7 @@ AffReader::AffReader(const base::FilePath& path)
 
 AffReader::~AffReader() {
   if (file_)
-    base::CloseFile(file_);
+    file_util::CloseFile(file_);
 }
 
 bool AffReader::Read() {
@@ -128,11 +117,13 @@ bool AffReader::Read() {
                StringBeginsWith(line, "MAP ")) {
       HandleEncodedCommand(line);
     } else if (StringBeginsWith(line, "IGNORE ")) {
-      Panic("We don't support the IGNORE command yet. This would change how "
-        "we would insert things in our lookup table.");
+      printf("We don't support the IGNORE command yet. This would change how "
+        "we would insert things in our lookup table.\n");
+      exit(1);
     } else if (StringBeginsWith(line, "COMPLEXPREFIXES ")) {
-      Panic("We don't support the COMPLEXPREFIXES command yet. This would "
-        "mean we have to insert words backwards as well (I think)");
+      printf("We don't support the COMPLEXPREFIXES command yet. This would "
+        "mean we have to insert words backwords as well (I think)\n");
+      exit(1);
     } else {
       // All other commands get stored in the other commands list.
       HandleRawCommand(line);
@@ -148,7 +139,7 @@ bool AffReader::EncodingToUTF8(const std::string& encoded,
   if (!base::CodepageToWide(encoded, encoding(),
                             base::OnStringConversionError::FAIL, &wide_word))
     return false;
-  *utf8 = base::WideToUTF8(wide_word);
+  *utf8 = WideToUTF8(wide_word);
   return true;
 }
 
@@ -250,7 +241,7 @@ void AffReader::AddAffix(std::string* rule) {
           // so that means that this prefix would be a compound one.
           //
           // It expects these rules to use the same alias rules as the .dic
-          // file. We've forced it to use aliases, which is a numerical index
+          // file. We've forced it to use aliases, which is a numberical index
           // instead of these character flags, and this needs to be consistent.
 
           std::string before_flags = part.substr(0, slash_index + 1);
@@ -259,20 +250,13 @@ void AffReader::AddAffix(std::string* rule) {
           // that tells us what to strip.
           std::vector<std::string> after_slash;
           base::SplitString(part.substr(slash_index + 1), ' ', &after_slash);
-          if (after_slash.size() == 0) {
-            Panic("Found 0 terms after slash in affix rule '%s', "
-                      "but need at least 2.",
-                   part.c_str());
+          if (after_slash.size() < 2) {
+            // Note that we may get a third term here which is the
+            // morphological description of this rule. This happens in the tests
+            // only, so we can just ignore it.
+            printf("ERROR: Didn't get enough after the slash\n");
+            return;
           }
-          if (after_slash.size() == 1) {
-            printf("WARNING: Found 1 term after slash in affix rule '%s', "
-                      "but expected at least 2. Adding '.'.\n",
-                   part.c_str());
-            after_slash.push_back(".");
-          }
-          // Note that we may get a third term here which is the morphological
-          // description of this rule. This happens in the tests only, so we can
-          // just ignore it.
 
           part = base::StringPrintf("%s%d %s",
                                     before_flags.c_str(),
@@ -283,7 +267,7 @@ void AffReader::AddAffix(std::string* rule) {
         // Reencode from here
         std::string reencoded;
         if (!EncodingToUTF8(part, &reencoded))
-          Panic("Cannot encode affix rule part '%s' to utf8.", part.c_str());
+          break;
 
         *rule = rule->substr(0, part_start) + reencoded;
         break;
@@ -299,22 +283,19 @@ void AffReader::AddAffix(std::string* rule) {
 
 void AffReader::AddReplacement(std::string* rule) {
   TrimLine(rule);
-  CollapseDuplicateSpaces(rule);
 
   std::string utf8rule;
   if (!EncodingToUTF8(*rule, &utf8rule))
-    Panic("Cannot encode replacement rule '%s' to utf8.", rule->c_str());
-
-  // The first space separates key and value.
-  size_t space_index = utf8rule.find(' ');
-  if (space_index == std::string::npos)
-    Panic("Did not find a space in '%s'.", utf8rule.c_str());
+    return;
 
   std::vector<std::string> split;
-  split.push_back(utf8rule.substr(0, space_index));
-  split.push_back(utf8rule.substr(space_index + 1));
+  base::SplitString(utf8rule, ' ', &split);
 
-  // Underscores are used to represent spaces in most aff files
+  // There should be two parts.
+  if (split.size() != 2)
+    return;
+
+  // Underscores are used to represent spaces
   // (since the line is parsed on spaces).
   std::replace(split[0].begin(), split[0].end(), '_', ' ');
   std::replace(split[1].begin(), split[1].end(), '_', ' ');
@@ -328,9 +309,8 @@ void AffReader::HandleRawCommand(const std::string& line) {
 
 void AffReader::HandleEncodedCommand(const std::string& line) {
   std::string utf8;
-  if (!EncodingToUTF8(line, &utf8))
-    Panic("Cannot encode command '%s' to utf8.", line.c_str());
-  other_commands_.push_back(utf8);
+  if (EncodingToUTF8(line, &utf8))
+    other_commands_.push_back(utf8);
 }
 
 }  // namespace convert_dict

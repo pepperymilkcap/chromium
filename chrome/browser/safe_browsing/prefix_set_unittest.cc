@@ -1,18 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/safe_browsing/prefix_set.h"
 
 #include <algorithm>
-#include <iterator>
 
 #include "base/file_util.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/rand_util.h"
+#include "base/scoped_temp_dir.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -29,25 +28,8 @@ class PrefixSetTest : public PlatformTest {
 
   // Generate a set of random prefixes to share between tests.  For
   // most tests this generation was a large fraction of the test time.
-  //
-  // The set should contain sparse areas where adjacent items are more
-  // than 2^16 apart, and dense areas where adjacent items are less
-  // than 2^16 apart.
   static void SetUpTestCase() {
-    // Distribute clusters of prefixes.
-    for (size_t i = 0; i < 250; ++i) {
-      // Unsigned for overflow characteristics.
-      const uint32 base = static_cast<uint32>(base::RandUint64());
-      for (size_t j = 0; j < 10; ++j) {
-        const uint32 delta = static_cast<uint32>(base::RandUint64() & 0xFFFF);
-        const SBPrefix prefix = static_cast<SBPrefix>(base + delta);
-        shared_prefixes_.push_back(prefix);
-      }
-    }
-
-    // Lay down a sparsely-distributed layer.
-    const size_t count = shared_prefixes_.size();
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < 50000; ++i) {
       const SBPrefix prefix = static_cast<SBPrefix>(base::RandUint64());
       shared_prefixes_.push_back(prefix);
     }
@@ -59,37 +41,37 @@ class PrefixSetTest : public PlatformTest {
   // Check that all elements of |prefixes| are in |prefix_set|, and
   // that nearby elements are not (for lack of a more sensible set of
   // items to check for absence).
-  static void CheckPrefixes(const safe_browsing::PrefixSet& prefix_set,
+  static void CheckPrefixes(safe_browsing::PrefixSet* prefix_set,
                             const std::vector<SBPrefix> &prefixes) {
     // The set can generate the prefixes it believes it has, so that's
     // a good starting point.
     std::set<SBPrefix> check(prefixes.begin(), prefixes.end());
     std::vector<SBPrefix> prefixes_copy;
-    prefix_set.GetPrefixes(&prefixes_copy);
+    prefix_set->GetPrefixes(&prefixes_copy);
     EXPECT_EQ(prefixes_copy.size(), check.size());
     EXPECT_TRUE(std::equal(check.begin(), check.end(), prefixes_copy.begin()));
 
     for (size_t i = 0; i < prefixes.size(); ++i) {
-      EXPECT_TRUE(prefix_set.Exists(prefixes[i]));
+      EXPECT_TRUE(prefix_set->Exists(prefixes[i]));
 
       const SBPrefix left_sibling = prefixes[i] - 1;
       if (check.count(left_sibling) == 0)
-        EXPECT_FALSE(prefix_set.Exists(left_sibling));
+        EXPECT_FALSE(prefix_set->Exists(left_sibling));
 
       const SBPrefix right_sibling = prefixes[i] + 1;
       if (check.count(right_sibling) == 0)
-        EXPECT_FALSE(prefix_set.Exists(right_sibling));
+        EXPECT_FALSE(prefix_set->Exists(right_sibling));
     }
   }
 
   // Generate a |PrefixSet| file from |shared_prefixes_|, store it in
   // a temporary file, and return the filename in |filenamep|.
   // Returns |true| on success.
-  bool GetPrefixSetFile(base::FilePath* filenamep) {
+  bool GetPrefixSetFile(FilePath* filenamep) {
     if (!temp_dir_.IsValid() && !temp_dir_.CreateUniqueTempDir())
       return false;
 
-    base::FilePath filename = temp_dir_.path().AppendASCII("PrefixSetTest");
+    FilePath filename = temp_dir_.path().AppendASCII("PrefixSetTest");
 
     safe_browsing::PrefixSet prefix_set(shared_prefixes_);
     if (!prefix_set.WriteFile(filename))
@@ -146,25 +128,24 @@ class PrefixSetTest : public PlatformTest {
 
   // Open |filename| and increment the int32 at |offset| by |inc|.
   // Then re-generate the checksum to account for the new contents.
-  void ModifyAndCleanChecksum(const base::FilePath& filename, long offset,
-                              int inc) {
+  void ModifyAndCleanChecksum(const FilePath& filename, long offset, int inc) {
     int64 size_64;
-    ASSERT_TRUE(base::GetFileSize(filename, &size_64));
+    ASSERT_TRUE(file_util::GetFileSize(filename, &size_64));
 
-    file_util::ScopedFILE file(base::OpenFile(filename, "r+b"));
+    file_util::ScopedFILE file(file_util::OpenFile(filename, "r+b"));
     IncrementIntAt(file.get(), offset, inc);
     CleanChecksum(file.get());
     file.reset();
 
     int64 new_size_64;
-    ASSERT_TRUE(base::GetFileSize(filename, &new_size_64));
+    ASSERT_TRUE(file_util::GetFileSize(filename, &new_size_64));
     ASSERT_EQ(new_size_64, size_64);
   }
 
   // Tests should not modify this shared resource.
   static std::vector<SBPrefix> shared_prefixes_;
 
-  base::ScopedTempDir temp_dir_;
+  ScopedTempDir temp_dir_;
 };
 
 std::vector<SBPrefix> PrefixSetTest::shared_prefixes_;
@@ -172,7 +153,7 @@ std::vector<SBPrefix> PrefixSetTest::shared_prefixes_;
 // Test that a small sparse random input works.
 TEST_F(PrefixSetTest, Baseline) {
   safe_browsing::PrefixSet prefix_set(shared_prefixes_);
-  CheckPrefixes(prefix_set, shared_prefixes_);
+  CheckPrefixes(&prefix_set, shared_prefixes_);
 }
 
 // Test that the empty set doesn't appear to have anything in it.
@@ -324,56 +305,26 @@ TEST_F(PrefixSetTest, EdgeCases) {
   }
 }
 
-// Test writing a prefix set to disk and reading it back in.
+// Similar to Baseline test, but write the set out to a file and read
+// it back in before testing.
 TEST_F(PrefixSetTest, ReadWrite) {
-  base::FilePath filename;
+  FilePath filename;
+  ASSERT_TRUE(GetPrefixSetFile(&filename));
 
-  // Write the sample prefix set out, read it back in, and check all
-  // the prefixes.  Leaves the path in |filename|.
-  {
-    ASSERT_TRUE(GetPrefixSetFile(&filename));
-    scoped_ptr<safe_browsing::PrefixSet>
-        prefix_set(safe_browsing::PrefixSet::LoadFile(filename));
-    ASSERT_TRUE(prefix_set.get());
-    CheckPrefixes(*prefix_set, shared_prefixes_);
-  }
+  scoped_ptr<safe_browsing::PrefixSet>
+      prefix_set(safe_browsing::PrefixSet::LoadFile(filename));
+  ASSERT_TRUE(prefix_set.get());
 
-  // Test writing and reading a very sparse set containing no deltas.
-  {
-    const SBPrefix kVeryPositive = 1000 * 1000 * 1000;
-    const SBPrefix kVeryNegative = -kVeryPositive;
-
-    std::vector<SBPrefix> prefixes;
-    prefixes.push_back(kVeryNegative);
-    prefixes.push_back(kVeryPositive);
-
-    safe_browsing::PrefixSet prefix_set_to_write(prefixes);
-    ASSERT_TRUE(prefix_set_to_write.WriteFile(filename));
-    scoped_ptr<safe_browsing::PrefixSet>
-        prefix_set(safe_browsing::PrefixSet::LoadFile(filename));
-    ASSERT_TRUE(prefix_set.get());
-    CheckPrefixes(*prefix_set, prefixes);
-  }
-
-  // Test writing and reading an empty set.
-  {
-    std::vector<SBPrefix> prefixes;
-    safe_browsing::PrefixSet prefix_set_to_write(prefixes);
-    ASSERT_TRUE(prefix_set_to_write.WriteFile(filename));
-    scoped_ptr<safe_browsing::PrefixSet>
-        prefix_set(safe_browsing::PrefixSet::LoadFile(filename));
-    ASSERT_TRUE(prefix_set.get());
-    CheckPrefixes(*prefix_set, prefixes);
-  }
+  CheckPrefixes(prefix_set.get(), shared_prefixes_);
 }
 
 // Check that |CleanChecksum()| makes an acceptable checksum.
 TEST_F(PrefixSetTest, CorruptionHelpers) {
-  base::FilePath filename;
+  FilePath filename;
   ASSERT_TRUE(GetPrefixSetFile(&filename));
 
   // This will modify data in |index_|, which will fail the digest check.
-  file_util::ScopedFILE file(base::OpenFile(filename, "r+b"));
+  file_util::ScopedFILE file(file_util::OpenFile(filename, "r+b"));
   IncrementIntAt(file.get(), kPayloadOffset, 1);
   file.reset();
   scoped_ptr<safe_browsing::PrefixSet>
@@ -382,7 +333,7 @@ TEST_F(PrefixSetTest, CorruptionHelpers) {
 
   // Fix up the checksum and it will read successfully (though the
   // data will be wrong).
-  file.reset(base::OpenFile(filename, "r+b"));
+  file.reset(file_util::OpenFile(filename, "r+b"));
   CleanChecksum(file.get());
   file.reset();
   prefix_set.reset(safe_browsing::PrefixSet::LoadFile(filename));
@@ -391,7 +342,7 @@ TEST_F(PrefixSetTest, CorruptionHelpers) {
 
 // Bad |index_| size is caught by the sanity check.
 TEST_F(PrefixSetTest, CorruptionMagic) {
-  base::FilePath filename;
+  FilePath filename;
   ASSERT_TRUE(GetPrefixSetFile(&filename));
 
   ASSERT_NO_FATAL_FAILURE(
@@ -403,7 +354,7 @@ TEST_F(PrefixSetTest, CorruptionMagic) {
 
 // Bad |index_| size is caught by the sanity check.
 TEST_F(PrefixSetTest, CorruptionVersion) {
-  base::FilePath filename;
+  FilePath filename;
   ASSERT_TRUE(GetPrefixSetFile(&filename));
 
   ASSERT_NO_FATAL_FAILURE(
@@ -415,7 +366,7 @@ TEST_F(PrefixSetTest, CorruptionVersion) {
 
 // Bad |index_| size is caught by the sanity check.
 TEST_F(PrefixSetTest, CorruptionIndexSize) {
-  base::FilePath filename;
+  FilePath filename;
   ASSERT_TRUE(GetPrefixSetFile(&filename));
 
   ASSERT_NO_FATAL_FAILURE(
@@ -427,7 +378,7 @@ TEST_F(PrefixSetTest, CorruptionIndexSize) {
 
 // Bad |deltas_| size is caught by the sanity check.
 TEST_F(PrefixSetTest, CorruptionDeltasSize) {
-  base::FilePath filename;
+  FilePath filename;
   ASSERT_TRUE(GetPrefixSetFile(&filename));
 
   ASSERT_NO_FATAL_FAILURE(
@@ -440,10 +391,10 @@ TEST_F(PrefixSetTest, CorruptionDeltasSize) {
 // Test that the digest catches corruption in the middle of the file
 // (in the payload between the header and the digest).
 TEST_F(PrefixSetTest, CorruptionPayload) {
-  base::FilePath filename;
+  FilePath filename;
   ASSERT_TRUE(GetPrefixSetFile(&filename));
 
-  file_util::ScopedFILE file(base::OpenFile(filename, "r+b"));
+  file_util::ScopedFILE file(file_util::OpenFile(filename, "r+b"));
   ASSERT_NO_FATAL_FAILURE(IncrementIntAt(file.get(), 666, 1));
   file.reset();
   scoped_ptr<safe_browsing::PrefixSet>
@@ -453,12 +404,12 @@ TEST_F(PrefixSetTest, CorruptionPayload) {
 
 // Test corruption in the digest itself.
 TEST_F(PrefixSetTest, CorruptionDigest) {
-  base::FilePath filename;
+  FilePath filename;
   ASSERT_TRUE(GetPrefixSetFile(&filename));
 
   int64 size_64;
-  ASSERT_TRUE(base::GetFileSize(filename, &size_64));
-  file_util::ScopedFILE file(base::OpenFile(filename, "r+b"));
+  ASSERT_TRUE(file_util::GetFileSize(filename, &size_64));
+  file_util::ScopedFILE file(file_util::OpenFile(filename, "r+b"));
   long digest_offset = static_cast<long>(size_64 - sizeof(base::MD5Digest));
   ASSERT_NO_FATAL_FAILURE(IncrementIntAt(file.get(), digest_offset, 1));
   file.reset();
@@ -469,17 +420,38 @@ TEST_F(PrefixSetTest, CorruptionDigest) {
 
 // Test excess data after the digest (fails the size test).
 TEST_F(PrefixSetTest, CorruptionExcess) {
-  base::FilePath filename;
+  FilePath filename;
   ASSERT_TRUE(GetPrefixSetFile(&filename));
 
   // Add some junk to the trunk.
-  file_util::ScopedFILE file(base::OpenFile(filename, "ab"));
+  file_util::ScopedFILE file(file_util::OpenFile(filename, "ab"));
   const char buf[] = "im in ur base, killing ur d00dz.";
   ASSERT_EQ(strlen(buf), fwrite(buf, 1, strlen(buf), file.get()));
   file.reset();
   scoped_ptr<safe_browsing::PrefixSet>
       prefix_set(safe_browsing::PrefixSet::LoadFile(filename));
   ASSERT_FALSE(prefix_set.get());
+}
+
+// TODO(shess): Remove once the problem is debugged.  But, until then,
+// make sure the accessors work!
+TEST_F(PrefixSetTest, DebuggingAccessors) {
+  std::vector<SBPrefix> prefixes;
+  std::unique_copy(shared_prefixes_.begin(), shared_prefixes_.end(),
+                   std::back_inserter(prefixes));
+  safe_browsing::PrefixSet prefix_set(prefixes);
+
+  EXPECT_EQ(prefixes.size(), prefix_set.GetSize());
+  EXPECT_FALSE(prefix_set.IsDeltaAt(0));
+  for (size_t i = 1; i < prefixes.size(); ++i) {
+    const int delta = prefixes[i] - prefixes[i - 1];
+    if (delta > 0xFFFF) {
+      EXPECT_FALSE(prefix_set.IsDeltaAt(i));
+    } else {
+      ASSERT_TRUE(prefix_set.IsDeltaAt(i));
+      EXPECT_EQ(delta, prefix_set.DeltaAt(i));
+    }
+  }
 }
 
 }  // namespace

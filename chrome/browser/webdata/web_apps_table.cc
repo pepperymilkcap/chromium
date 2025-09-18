@@ -6,43 +6,16 @@
 
 #include "base/logging.h"
 #include "chrome/browser/history/history_database.h"
-#include "components/webdata/common/web_database.h"
+#include "googleurl/src/gurl.h"
 #include "sql/statement.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "url/gurl.h"
 
-namespace {
-
-WebDatabaseTable::TypeKey GetKey() {
-  // We just need a unique constant. Use the address of a static that
-  // COMDAT folding won't touch in an optimizing linker.
-  static int table_key = 0;
-  return reinterpret_cast<void*>(&table_key);
-}
-
-}  // namespace
-
-WebAppsTable* WebAppsTable::FromWebDatabase(WebDatabase* db) {
-  return static_cast<WebAppsTable*>(db->GetTable(GetKey()));
-}
-
-WebDatabaseTable::TypeKey WebAppsTable::GetTypeKey() const {
-  return GetKey();
-}
-
-bool WebAppsTable::Init(sql::Connection* db, sql::MetaTable* meta_table) {
-  WebDatabaseTable::Init(db, meta_table);
-
+bool WebAppsTable::Init() {
   return (InitWebAppIconsTable() && InitWebAppsTable());
 }
 
 bool WebAppsTable::IsSyncable() {
-  return true;
-}
-
-bool WebAppsTable::MigrateToVersion(int version,
-                                    bool* update_compatible_version) {
   return true;
 }
 

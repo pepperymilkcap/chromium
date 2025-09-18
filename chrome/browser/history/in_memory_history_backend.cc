@@ -8,14 +8,16 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/in_memory_database.h"
+#include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 
@@ -25,16 +27,27 @@ InMemoryHistoryBackend::InMemoryHistoryBackend()
     : profile_(NULL) {
 }
 
-InMemoryHistoryBackend::~InMemoryHistoryBackend() {}
+InMemoryHistoryBackend::~InMemoryHistoryBackend() {
+  if (index_.get())
+    index_->ShutDown();
+}
 
-bool InMemoryHistoryBackend::Init(const base::FilePath& history_filename,
-                                  URLDatabase* db) {
+bool InMemoryHistoryBackend::Init(const FilePath& history_filename,
+                                  const FilePath& history_dir,
+                                  URLDatabase* db,
+                                  const std::string& languages) {
   db_.reset(new InMemoryDatabase);
-  return db_->InitFromDisk(history_filename);
+  bool success = db_->InitFromDisk(history_filename);
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableHistoryQuickProvider)) {
+    index_.reset(new InMemoryURLIndex(history_dir));
+    index_->Init(db, languages);
+  }
+  return success;
 }
 
 void InMemoryHistoryBackend::AttachToHistoryService(Profile* profile) {
-  if (!db_) {
+  if (!db_.get()) {
     NOTREACHED();
     return;
   }
@@ -51,13 +64,12 @@ void InMemoryHistoryBackend::AttachToHistoryService(Profile* profile) {
   // We only want notifications for the associated profile.
   content::Source<Profile> source(profile_);
   registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URL_VISITED, source);
-  registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
+  registrar_.Add(this, chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
                  source);
   registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED, source);
-  registrar_.Add(
-      this, chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED, source);
-  registrar_.Add(
-      this, chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_DELETED, source);
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
+                 source);
   registrar_.Add(this, chrome::NOTIFICATION_TEMPLATE_URL_REMOVED, source);
 }
 
@@ -81,15 +93,9 @@ void InMemoryHistoryBackend::Observe(
     }
     case chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED:
       OnKeywordSearchTermUpdated(
-          *content::Details<history::KeywordSearchUpdatedDetails>(
-              details).ptr());
+          *content::Details<history::KeywordSearchTermDetails>(details).ptr());
       break;
-    case chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_DELETED:
-      OnKeywordSearchTermDeleted(
-          *content::Details<history::KeywordSearchDeletedDetails>(
-              details).ptr());
-      break;
-    case chrome::NOTIFICATION_HISTORY_URLS_MODIFIED:
+    case chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED:
       OnTypedURLsModified(
           *content::Details<history::URLsModifiedDetails>(details).ptr());
       break;
@@ -110,28 +116,28 @@ void InMemoryHistoryBackend::Observe(
 
 void InMemoryHistoryBackend::OnTypedURLsModified(
     const URLsModifiedDetails& details) {
-  DCHECK(db_);
+  DCHECK(db_.get());
 
   // Add or update the URLs.
   //
   // TODO(brettw) currently the rows in the in-memory database don't match the
   // IDs in the main database. This sucks. Instead of Add and Remove, we should
   // have Sync(), which would take the ID if it's given and add it.
-  URLRows::const_iterator i;
+  std::vector<history::URLRow>::const_iterator i;
   for (i = details.changed_urls.begin();
-       i != details.changed_urls.end(); ++i) {
-    if (i->typed_count() > 0) {
-      URLID id = db_->GetRowForURL(i->url(), NULL);
-      if (id)
-        db_->UpdateURLRow(id, *i);
-      else
-        db_->AddURL(*i);
-    }
+       i != details.changed_urls.end(); i++) {
+    URLID id = db_->GetRowForURL(i->url(), NULL);
+    if (id)
+      db_->UpdateURLRow(id, *i);
+    else
+      id = db_->AddURL(*i);
+    if (index_.get())
+      index_->UpdateURL(id, *i);
   }
 }
 
 void InMemoryHistoryBackend::OnURLsDeleted(const URLsDeletedDetails& details) {
-  DCHECK(db_);
+  DCHECK(db_.get());
 
   if (details.all_history) {
     // When all history is deleted, the individual URLs won't be listed. Just
@@ -139,20 +145,27 @@ void InMemoryHistoryBackend::OnURLsDeleted(const URLsDeletedDetails& details) {
     db_.reset(new InMemoryDatabase);
     if (!db_->InitFromScratch())
       db_.reset();
+    if (index_.get())
+      index_->ReloadFromHistory(db_.get());
     return;
   }
 
   // Delete all matching URLs in our database.
-  for (URLRows::const_iterator row = details.rows.begin();
-       row != details.rows.end(); ++row) {
-    // We typically won't have most of them since we only have a subset of
-    // history, so ignore errors.
-    db_->DeleteURLRow(row->id());
+  for (std::set<GURL>::const_iterator i = details.urls.begin();
+       i != details.urls.end(); ++i) {
+    URLID id = db_->GetRowForURL(*i, NULL);
+    if (id) {
+      // We typically won't have most of them since we only have a subset of
+      // history, so ignore errors.
+      db_->DeleteURLRow(id);
+      if (index_.get())
+        index_->DeleteURL(id);
+    }
   }
 }
 
 void InMemoryHistoryBackend::OnKeywordSearchTermUpdated(
-    const KeywordSearchUpdatedDetails& details) {
+    const KeywordSearchTermDetails& details) {
   // The url won't exist for new search terms (as the user hasn't typed it), so
   // we force it to be added. If we end up adding a URL it won't be
   // autocompleted as the typed count is 0.
@@ -172,13 +185,6 @@ void InMemoryHistoryBackend::OnKeywordSearchTermUpdated(
   }
 
   db_->SetKeywordSearchTermsForURL(url_id, details.keyword_id, details.term);
-}
-
-void InMemoryHistoryBackend::OnKeywordSearchTermDeleted(
-    const KeywordSearchDeletedDetails& details) {
-  URLID url_id = db_->GetRowForURL(details.url, NULL);
-  if (url_id)
-    db_->DeleteKeywordSearchTermForURL(url_id);
 }
 
 bool InMemoryHistoryBackend::HasKeyword(const GURL& url) {

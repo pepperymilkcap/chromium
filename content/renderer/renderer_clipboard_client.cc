@@ -2,31 +2,35 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file provides the embedder's side of the Clipboard interface.
+// This file provides the embedder's side of random webkit glue functions.
 
 #include "content/renderer/renderer_clipboard_client.h"
 
-#include "base/memory/shared_memory.h"
-#include "base/strings/string16.h"
+#include "build/build_config.h"
+
+#include <string>
+#include <vector>
+
+#include "base/shared_memory.h"
+#include "base/string16.h"
 #include "content/common/clipboard_messages.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/render_thread_impl.h"
-#include "content/renderer/scoped_clipboard_writer_glue.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/size.h"
-
-namespace content {
+#include "webkit/glue/scoped_clipboard_writer_glue.h"
 
 namespace {
 
-class RendererClipboardWriteContext : public ClipboardClient::WriteContext {
+class RendererClipboardWriteContext :
+    public webkit_glue::ClipboardClient::WriteContext {
  public:
   RendererClipboardWriteContext();
   virtual ~RendererClipboardWriteContext();
   virtual void WriteBitmapFromPixels(ui::Clipboard::ObjectMap* objects,
                                      const void* pixels,
-                                     const gfx::Size& size) OVERRIDE;
-  virtual void Flush(const ui::Clipboard::ObjectMap& objects) OVERRIDE;
+                                     const gfx::Size& size);
+  virtual void FlushAndDestroy(const ui::Clipboard::ObjectMap& objects);
 
  private:
   scoped_ptr<base::SharedMemory> shared_buf_;
@@ -46,14 +50,14 @@ void RendererClipboardWriteContext::WriteBitmapFromPixels(
     const void* pixels,
     const gfx::Size& size) {
   // Do not try to write a bitmap more than once
-  if (shared_buf_)
+  if (shared_buf_.get())
     return;
 
   uint32 buf_size = 4 * size.width() * size.height();
 
   // Allocate a shared memory buffer to hold the bitmap bits.
   shared_buf_.reset(ChildThread::current()->AllocateSharedMemory(buf_size));
-  if (!shared_buf_)
+  if (!shared_buf_.get())
     return;
 
   // Copy the bits into shared memory
@@ -76,10 +80,13 @@ void RendererClipboardWriteContext::WriteBitmapFromPixels(
   (*objects)[ui::Clipboard::CBF_SMBITMAP] = params;
 }
 
-// Flushes the objects to the clipboard with an IPC.
-void RendererClipboardWriteContext::Flush(
+// Define a destructor that makes IPCs to flush the contents to the
+// system clipboard.
+void RendererClipboardWriteContext::FlushAndDestroy(
     const ui::Clipboard::ObjectMap& objects) {
-  if (shared_buf_) {
+  scoped_ptr<RendererClipboardWriteContext> delete_on_return(this);
+
+  if (shared_buf_.get()) {
     RenderThreadImpl::current()->Send(
         new ClipboardHostMsg_WriteObjectsSync(objects, shared_buf_->handle()));
   } else {
@@ -100,65 +107,59 @@ ui::Clipboard* RendererClipboardClient::GetClipboard() {
   return NULL;
 }
 
-uint64 RendererClipboardClient::GetSequenceNumber(ui::ClipboardType type) {
+uint64 RendererClipboardClient::GetSequenceNumber(
+    ui::Clipboard::Buffer buffer) {
   uint64 sequence_number = 0;
   RenderThreadImpl::current()->Send(
-      new ClipboardHostMsg_GetSequenceNumber(type, &sequence_number));
+      new ClipboardHostMsg_GetSequenceNumber(buffer,
+                                             &sequence_number));
   return sequence_number;
 }
 
 bool RendererClipboardClient::IsFormatAvailable(
     const ui::Clipboard::FormatType& format,
-    ui::ClipboardType type) {
+    ui::Clipboard::Buffer buffer) {
   bool result;
   RenderThreadImpl::current()->Send(
-      new ClipboardHostMsg_IsFormatAvailable(format, type, &result));
+      new ClipboardHostMsg_IsFormatAvailable(format, buffer, &result));
   return result;
 }
 
-void RendererClipboardClient::Clear(ui::ClipboardType type) {
-  RenderThreadImpl::current()->Send(new ClipboardHostMsg_Clear(type));
-}
-
 void RendererClipboardClient::ReadAvailableTypes(
-    ui::ClipboardType type,
-    std::vector<base::string16>* types,
+    ui::Clipboard::Buffer buffer,
+    std::vector<string16>* types,
     bool* contains_filenames) {
   RenderThreadImpl::current()->Send(new ClipboardHostMsg_ReadAvailableTypes(
-      type, types, contains_filenames));
+      buffer, types, contains_filenames));
 }
 
-void RendererClipboardClient::ReadText(ui::ClipboardType type,
-                                       base::string16* result) {
+void RendererClipboardClient::ReadText(ui::Clipboard::Buffer buffer,
+                                       string16* result) {
   RenderThreadImpl::current()->Send(
-      new ClipboardHostMsg_ReadText(type, result));
+      new ClipboardHostMsg_ReadText(buffer, result));
 }
 
-void RendererClipboardClient::ReadAsciiText(ui::ClipboardType type,
+void RendererClipboardClient::ReadAsciiText(ui::Clipboard::Buffer buffer,
                                             std::string* result) {
   RenderThreadImpl::current()->Send(
-      new ClipboardHostMsg_ReadAsciiText(type, result));
+      new ClipboardHostMsg_ReadAsciiText(buffer, result));
 }
 
-void RendererClipboardClient::ReadHTML(ui::ClipboardType type,
-                                       base::string16* markup,
+void RendererClipboardClient::ReadHTML(ui::Clipboard::Buffer buffer,
+                                       string16* markup,
                                        GURL* url, uint32* fragment_start,
                                        uint32* fragment_end) {
-  RenderThreadImpl::current()->Send(new ClipboardHostMsg_ReadHTML(
-      type, markup, url, fragment_start, fragment_end));
+  RenderThreadImpl::current()->Send(
+      new ClipboardHostMsg_ReadHTML(buffer, markup, url, fragment_start,
+                                    fragment_end));
 }
 
-void RendererClipboardClient::ReadRTF(ui::ClipboardType type,
-                                      std::string* result) {
-  RenderThreadImpl::current()->Send(new ClipboardHostMsg_ReadRTF(type, result));
-}
-
-void RendererClipboardClient::ReadImage(ui::ClipboardType type,
+void RendererClipboardClient::ReadImage(ui::Clipboard::Buffer buffer,
                                         std::string* data) {
   base::SharedMemoryHandle image_handle;
   uint32 image_size;
   RenderThreadImpl::current()->Send(
-      new ClipboardHostMsg_ReadImage(type, &image_handle, &image_size));
+      new ClipboardHostMsg_ReadImage(buffer, &image_handle, &image_size));
   if (base::SharedMemory::IsHandleValid(image_handle)) {
     base::SharedMemory buffer(image_handle, true);
     buffer.Map(image_size);
@@ -166,21 +167,14 @@ void RendererClipboardClient::ReadImage(ui::ClipboardType type,
   }
 }
 
-void RendererClipboardClient::ReadCustomData(ui::ClipboardType clipboard_type,
-                                             const base::string16& type,
-                                             base::string16* data) {
+void RendererClipboardClient::ReadCustomData(ui::Clipboard::Buffer buffer,
+                                             const string16& type,
+                                             string16* data) {
   RenderThreadImpl::current()->Send(
-      new ClipboardHostMsg_ReadCustomData(clipboard_type, type, data));
+      new ClipboardHostMsg_ReadCustomData(buffer, type, data));
 }
 
-void RendererClipboardClient::ReadData(const ui::Clipboard::FormatType& format,
-                                       std::string* data) {
-  RenderThreadImpl::current()->Send(
-      new ClipboardHostMsg_ReadData(format, data));
-}
-
-ClipboardClient::WriteContext* RendererClipboardClient::CreateWriteContext() {
+webkit_glue::ClipboardClient::WriteContext*
+RendererClipboardClient::CreateWriteContext() {
   return new RendererClipboardWriteContext;
 }
-
-}  // namespace content

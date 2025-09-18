@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,28 +15,22 @@ URLsModifiedDetails::URLsModifiedDetails() {}
 
 URLsModifiedDetails::~URLsModifiedDetails() {}
 
-URLsDeletedDetails::URLsDeletedDetails()
-    : all_history(false),
-      archived(false) {
-}
+URLsDeletedDetails::URLsDeletedDetails() : all_history(false) {}
 
 URLsDeletedDetails::~URLsDeletedDetails() {}
 
-KeywordSearchUpdatedDetails::KeywordSearchUpdatedDetails(
-    const GURL& url,
-    TemplateURLID keyword_id,
-    const base::string16& term)
-    : url(url),
-      keyword_id(keyword_id),
-      term(term) {
+URLsStarredDetails::URLsStarredDetails(bool being_starred)
+    : starred(being_starred) {
 }
 
-KeywordSearchUpdatedDetails::~KeywordSearchUpdatedDetails() {}
+URLsStarredDetails::~URLsStarredDetails() {}
 
-KeywordSearchDeletedDetails::KeywordSearchDeletedDetails(const GURL& url)
-    : url(url) {
-}
+FaviconChangeDetails::FaviconChangeDetails() {}
 
-KeywordSearchDeletedDetails::~KeywordSearchDeletedDetails() {}
+FaviconChangeDetails::~FaviconChangeDetails() {}
+
+KeywordSearchTermDetails::KeywordSearchTermDetails() : keyword_id(0) {}
+
+KeywordSearchTermDetails::~KeywordSearchTermDetails() {}
 
 }  // namespace history

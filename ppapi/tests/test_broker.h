@@ -24,10 +24,6 @@ class TestBroker : public TestCase {
   std::string TestConnectFailure();
   std::string TestGetHandleFailure();
   std::string TestConnectAndPipe();
-  std::string TestConnectPermissionDenied();
-  std::string TestConnectPermissionGranted();
-  std::string TestIsAllowedPermissionDenied();
-  std::string TestIsAllowedPermissionGranted();
 
   const PPB_BrokerTrusted* broker_interface_;
 };

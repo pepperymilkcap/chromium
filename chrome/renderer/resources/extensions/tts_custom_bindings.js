@@ -2,21 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom binding for the tts API.
+// Custom bindings for the tts API.
 
-var binding = require('binding').Binding.create('tts');
+(function() {
 
-var idGenerator = requireNative('id_generator');
-var sendRequest = require('sendRequest').sendRequest;
-var lazyBG = requireNative('lazy_background_page');
+native function GetChromeHidden();
+native function GetNextTTSEventId();
 
-binding.registerCustomHook(function(api) {
+var chromeHidden = GetChromeHidden();
+
+chromeHidden.registerCustomHook('tts', function(api) {
   var apiFunctions = api.apiFunctions;
-  var tts = api.compiledApi;
-  var handlers = {};
+  var sendRequest = api.sendRequest;
 
-  function ttsEventListener(event) {
-    var eventHandler = handlers[event.srcId];
+  chromeHidden.tts = {};
+  chromeHidden.tts.handlers = {};
+  chrome.tts.onEvent.addListener(function(event) {
+    var eventHandler = chromeHidden.tts.handlers[event.srcId];
     if (eventHandler) {
       eventHandler({
                      type: event.type,
@@ -24,34 +26,21 @@ binding.registerCustomHook(function(api) {
                      errorMessage: event.errorMessage
                    });
       if (event.isFinalEvent) {
-        delete handlers[event.srcId];
-        // Balanced in 'speak' handler.
-        lazyBG.DecrementKeepaliveCount();
+        delete chromeHidden.tts.handlers[event.srcId];
       }
     }
-  }
+  });
 
-  // This file will get run if an extension needs the ttsEngine permission, but
-  // it doesn't necessarily have the tts permission. If it doesn't, trying to
-  // add a listener to chrome.tts.onEvent will fail.
-  // See http://crbug.com/122474.
-  try {
-    tts.onEvent.addListener(ttsEventListener);
-  } catch (e) {}
-
-  apiFunctions.setHandleRequest('speak', function() {
+  apiFunctions.setHandleRequest("tts.speak", function() {
     var args = arguments;
     if (args.length > 1 && args[1] && args[1].onEvent) {
-      var id = idGenerator.GetNextId();
+      var id = GetNextTTSEventId();
       args[1].srcId = id;
-      handlers[id] = args[1].onEvent;
-      // Keep the page alive until the event finishes.
-      // Balanced in eventHandler.
-      lazyBG.IncrementKeepaliveCount();
+      chromeHidden.tts.handlers[id] = args[1].onEvent;
     }
     sendRequest(this.name, args, this.definition.parameters);
     return id;
   });
 });
 
-exports.binding = binding.generate();
+})();

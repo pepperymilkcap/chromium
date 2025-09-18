@@ -1,4 +1,3 @@
 skip_child_includes = [
-  "balsa",
   "flip_server",
 ]

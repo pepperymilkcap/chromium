@@ -1,17 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/foundation_util.h"
-#include "base/mac/scoped_nsobject.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_unittest_helper.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_decoration.h"
+#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "grit/theme_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -75,7 +75,7 @@ class AutocompleteTextFieldTest : public CocoaTest {
     // Make sure this is wide enough to play games with the cell
     // decorations.
     NSRect frame = NSMakeRect(0, 0, kWidth, 30);
-    base::scoped_nsobject<AutocompleteTextField> field(
+    scoped_nsobject<AutocompleteTextField> field(
         [[AutocompleteTextField alloc] initWithFrame:frame]);
     field_ = field.get();
     [field_ setStringValue:@"Test test"];
@@ -121,16 +121,10 @@ class AutocompleteTextFieldTest : public CocoaTest {
     }
   }
 
-  AutocompleteTextFieldEditor* FieldEditor() {
-    return base::mac::ObjCCastStrict<AutocompleteTextFieldEditor>(
-        [field_ currentEditor]);
-  }
-
   AutocompleteTextField* field_;
   MockDecoration mock_left_decoration_;
   MockDecoration mock_right_decoration_;
-  base::scoped_nsobject<AutocompleteTextFieldWindowTestDelegate>
-      window_delegate_;
+  scoped_nsobject<AutocompleteTextFieldWindowTestDelegate> window_delegate_;
 };
 
 TEST_VIEW(AutocompleteTextFieldTest, field_);
@@ -214,15 +208,6 @@ TEST_F(AutocompleteTextFieldTest, Display) {
 
   // Test focussed drawing.
   [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
-  [field_ display];
-}
-
-// Test setting gray text, mostly to ensure nothing leaks or crashes.
-TEST_F(AutocompleteTextFieldTest, GrayText) {
-  [field_ display];
-  EXPECT_FALSE([field_ needsDisplay]);
-  [field_ setGrayTextAutocompletion:@"foo" textColor:[NSColor redColor]];
-  EXPECT_TRUE([field_ needsDisplay]);
   [field_ display];
 }
 
@@ -623,9 +608,9 @@ TEST_F(AutocompleteTextFieldTest, DecorationMenu) {
 
   const CGFloat edge = NSHeight(bounds) - 4.0;
   const NSSize size = NSMakeSize(edge, edge);
-  base::scoped_nsobject<NSImage> image([[NSImage alloc] initWithSize:size]);
+  scoped_nsobject<NSImage> image([[NSImage alloc] initWithSize:size]);
 
-  base::scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@"Menu"]);
+  scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@"Menu"]);
 
   mock_left_decoration_.SetVisible(true);
   mock_right_decoration_.SetVisible(true);
@@ -675,7 +660,7 @@ TEST_F(AutocompleteTextFieldTest, SetAttributedStringBaseline) {
       [NSDictionary dictionaryWithObject:font
                                   forKey:NSFontAttributeName];
   NSString* const kString = @"This is a test";
-  base::scoped_nsobject<NSAttributedString> attributedString(
+  scoped_nsobject<NSAttributedString> attributedString(
       [[NSAttributedString alloc] initWithString:kString
                                       attributes:attributes]);
 
@@ -708,7 +693,7 @@ TEST_F(AutocompleteTextFieldTest, SetAttributedStringUndo) {
       [NSDictionary dictionaryWithObject:redColor
                                   forKey:NSForegroundColorAttributeName];
   NSString* const kString = @"This is a test";
-  base::scoped_nsobject<NSAttributedString> attributedString(
+  scoped_nsobject<NSAttributedString> attributedString(
       [[NSAttributedString alloc] initWithString:kString
                                       attributes:attributes]);
   [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
@@ -749,26 +734,6 @@ TEST_F(AutocompleteTextFieldTest, EditorGetsCorrectUndoManager) {
   NSTextView* editor = static_cast<NSTextView*>([field_ currentEditor]);
   EXPECT_TRUE(editor);
   EXPECT_EQ([field_ undoManagerForTextView:editor], [editor undoManager]);
-}
-
-// Verify that hideFocusState correctly hides the focus ring and insertion
-// pointer.
-TEST_F(AutocompleteTextFieldTest, HideFocusState) {
-  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
-  [[field_ cell] setShowsFirstResponder:YES];
-
-  EXPECT_TRUE([[field_ cell] showsFirstResponder]);
-  EXPECT_TRUE([FieldEditor() shouldDrawInsertionPoint]);
-
-  [[field_ cell] setHideFocusState:YES
-                            ofView:field_];
-  EXPECT_FALSE([[field_ cell] showsFirstResponder]);
-  EXPECT_FALSE([FieldEditor() shouldDrawInsertionPoint]);
-
-  [[field_ cell] setHideFocusState:NO
-                            ofView:field_];
-  EXPECT_TRUE([[field_ cell] showsFirstResponder]);
-  EXPECT_TRUE([FieldEditor() shouldDrawInsertionPoint]);
 }
 
 TEST_F(AutocompleteTextFieldObserverTest, SendsEditingMessages) {
@@ -817,7 +782,7 @@ TEST_F(AutocompleteTextFieldObserverTest, ClosePopupOnResignKey) {
   EXPECT_CALL(field_observer_, ClosePopup());
   [test_window() resignKeyWindow];
 
-  base::scoped_nsobject<AutocompleteTextField> pin([field_ retain]);
+  scoped_nsobject<AutocompleteTextField> pin([field_ retain]);
   [field_ removeFromSuperview];
   [test_window() resignKeyWindow];
 

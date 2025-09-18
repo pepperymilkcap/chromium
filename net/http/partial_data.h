@@ -4,6 +4,7 @@
 
 #ifndef NET_HTTP_PARTIAL_DATA_H_
 #define NET_HTTP_PARTIAL_DATA_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "net/base/completion_callback.h"

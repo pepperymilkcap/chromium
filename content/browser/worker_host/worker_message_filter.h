@@ -6,34 +6,34 @@
 #define CONTENT_BROWSER_WORKER_HOST_WORKER_MESSAGE_FILTER_H_
 
 #include "base/callback.h"
-#include "content/browser/worker_host/worker_storage_partition.h"
 #include "content/public/browser/browser_message_filter.h"
 
 class ResourceDispatcherHost;
 struct ViewHostMsg_CreateWorker_Params;
 
 namespace content {
-class MessagePortMessageFilter;
 class ResourceContext;
+}  // namespace content
 
-class WorkerMessageFilter : public BrowserMessageFilter {
+
+class WorkerMessageFilter : public content::BrowserMessageFilter {
  public:
-  WorkerMessageFilter(int render_process_id,
-                      ResourceContext* resource_context,
-                      const WorkerStoragePartition& partition,
-                      MessagePortMessageFilter* message_port_filter);
+  typedef base::Callback<int(void)> NextRoutingIDCallback;
 
-  // BrowserMessageFilter implementation.
+  // |next_routing_id| is owned by this object.  It can be used up until
+  // OnChannelClosing.
+  WorkerMessageFilter(
+      int render_process_id,
+      const content::ResourceContext* resource_context,
+      const NextRoutingIDCallback& callback);
+
+  // content::BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
   int GetNextRoutingID();
   int render_process_id() const { return render_process_id_; }
-
-  MessagePortMessageFilter* message_port_message_filter() const {
-    return message_port_message_filter_;
-  }
 
  private:
   virtual ~WorkerMessageFilter();
@@ -50,13 +50,13 @@ class WorkerMessageFilter : public BrowserMessageFilter {
   void OnCreateMessagePort(int* route_id, int* message_port_id);
 
   int render_process_id_;
-  ResourceContext* const resource_context_;
-  WorkerStoragePartition partition_;
+  const content::ResourceContext* const resource_context_;
 
-  MessagePortMessageFilter* message_port_message_filter_;
+  // This is guaranteed to be valid until OnChannelClosing is closed, and it's
+  // not used after.
+  NextRoutingIDCallback next_routing_id_;
+
   DISALLOW_IMPLICIT_CONSTRUCTORS(WorkerMessageFilter);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_WORKER_HOST_WORKER_MESSAGE_FILTER_H_

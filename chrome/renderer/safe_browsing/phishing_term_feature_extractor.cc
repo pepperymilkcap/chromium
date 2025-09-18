@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,22 +11,22 @@
 #include "base/compiler_specific.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
+#include "crypto/sha2.h"
 #include "chrome/renderer/safe_browsing/feature_extractor_clock.h"
 #include "chrome/renderer/safe_browsing/features.h"
 #include "chrome/renderer/safe_browsing/murmurhash3_util.h"
-#include "crypto/sha2.h"
-#include "third_party/icu/source/common/unicode/ubrk.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "unicode/ubrk.h"
 
 namespace safe_browsing {
 
 // This time should be short enough that it doesn't noticeably disrupt the
 // user's interaction with the page.
-const int PhishingTermFeatureExtractor::kMaxTimePerChunkMs = 10;
+const int PhishingTermFeatureExtractor::kMaxTimePerChunkMs = 20;
 
 // Experimenting shows that we get a reasonable gain in performance by
 // increasing this up to around 10, but there's not much benefit in
@@ -67,7 +67,7 @@ struct PhishingTermFeatureExtractor::ExtractionState {
   // The number of iterations we've done for the current extraction.
   int num_iterations;
 
-  ExtractionState(const base::string16& text, base::TimeTicks start_time_ticks)
+  ExtractionState(const string16& text, base::TimeTicks start_time_ticks)
       : position(-1),
         position_initialized(false),
         start_time(start_time_ticks),
@@ -102,7 +102,7 @@ PhishingTermFeatureExtractor::PhishingTermFeatureExtractor(
       murmurhash3_seed_(murmurhash3_seed),
       negative_word_cache_(kMaxNegativeWordCacheSize),
       clock_(clock),
-      weak_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   Clear();
 }
 
@@ -113,7 +113,7 @@ PhishingTermFeatureExtractor::~PhishingTermFeatureExtractor() {
 }
 
 void PhishingTermFeatureExtractor::ExtractFeatures(
-    const base::string16* page_text,
+    const string16* page_text,
     FeatureMap* features,
     const DoneCallback& done_callback) {
   // The RenderView should have called CancelPendingExtraction() before
@@ -128,7 +128,7 @@ void PhishingTermFeatureExtractor::ExtractFeatures(
   done_callback_ = done_callback;
 
   state_.reset(new ExtractionState(*page_text_, clock_->Now()));
-  base::MessageLoop::current()->PostTask(
+  MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&PhishingTermFeatureExtractor::ExtractFeaturesWithTimeout,
                  weak_factory_.GetWeakPtr()));
@@ -195,7 +195,7 @@ void PhishingTermFeatureExtractor::ExtractFeaturesWithTimeout() {
         // clock granularity.
         UMA_HISTOGRAM_TIMES("SBClientPhishing.TermFeatureChunkTime",
                             chunk_elapsed);
-        base::MessageLoop::current()->PostTask(
+        MessageLoop::current()->PostTask(
             FROM_HERE,
             base::Bind(
                 &PhishingTermFeatureExtractor::ExtractFeaturesWithTimeout,
@@ -221,7 +221,7 @@ void PhishingTermFeatureExtractor::HandleWord(
     return;
   }
 
-  std::string word_lower = base::UTF16ToUTF8(base::i18n::ToLower(word));
+  std::string word_lower = UTF16ToUTF8(base::i18n::ToLower(word));
   uint32 word_hash = MurmurHash3String(word_lower, murmurhash3_seed_);
 
   // Quick out if the word is not part of any term, which is the common case.

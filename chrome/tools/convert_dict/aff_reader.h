@@ -4,21 +4,20 @@
 
 #ifndef CHROME_TOOLS_CONVERT_DICT_AFF_READER_H__
 #define CHROME_TOOLS_CONVERT_DICT_AFF_READER_H__
+#pragma once
 
 #include <map>
 #include <stdio.h>
 #include <string>
 #include <vector>
 
-namespace base {
 class FilePath;
-}
 
 namespace convert_dict {
 
 class AffReader {
  public:
-  explicit AffReader(const base::FilePath& path);
+  explicit AffReader(const FilePath& path);
   ~AffReader();
 
   bool Read();

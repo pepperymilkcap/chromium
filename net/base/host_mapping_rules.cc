@@ -5,9 +5,9 @@
 #include "net/base/host_mapping_rules.h"
 
 #include "base/logging.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
+#include "base/string_split.h"
+#include "base/string_tokenizer.h"
+#include "base/string_util.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 
@@ -100,7 +100,7 @@ void HostMappingRules::SetRulesFromString(const std::string& rules_string) {
   exclusion_rules_.clear();
   map_rules_.clear();
 
-  base::StringTokenizer rules(rules_string, ",");
+  StringTokenizer rules(rules_string, ",");
   while (rules.GetNext()) {
     bool ok = AddRuleFromString(rules.token());
     LOG_IF(ERROR, !ok) << "Failed parsing rule: " << rules.token();

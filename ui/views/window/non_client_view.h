@@ -1,19 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_WINDOW_NON_CLIENT_VIEW_H_
 #define UI_VIEWS_WINDOW_NON_CLIENT_VIEW_H_
+#pragma once
 
 #include "ui/views/view.h"
+#include "ui/views/window/client_view.h"
 
 namespace gfx {
 class Path;
 }
 
 namespace views {
-
-class ClientView;
 
 ////////////////////////////////////////////////////////////////////////////////
 // NonClientFrameView
@@ -26,33 +26,18 @@ class VIEWS_EXPORT NonClientFrameView : public View {
  public:
   // Internal class name.
   static const char kViewClassName[];
-
-  enum {
-    // Various edges of the frame border have a 1 px shadow along their edges;
-    // in a few cases we shift elements based on this amount for visual appeal.
-    kFrameShadowThickness = 1,
-
-    // In restored mode, we draw a 1 px edge around the content area inside the
-    // frame border.
-    kClientEdgeThickness = 1,
-  };
+  // Various edges of the frame border have a 1 px shadow along their edges; in
+  // a few cases we shift elements based on this amount for visual appeal.
+  static const int kFrameShadowThickness;
+  // In restored mode, we draw a 1 px edge around the content area inside the
+  // frame border.
+  static const int kClientEdgeThickness;
 
   // Sets whether the window should be rendered as active regardless of the
   // actual active state. Used when bubbles become active to make their parent
   // appear active. A value of true makes the window render as active always,
   // false gives normal behavior.
   void SetInactiveRenderingDisabled(bool disable);
-
-  // Helper for non-client view implementations to determine which area of the
-  // window border the specified |point| falls within. The other parameters are
-  // the size of the sizing edges, and whether or not the window can be
-  // resized.
-  int GetHTComponentForFrame(const gfx::Point& point,
-                             int top_resize_border_height,
-                             int resize_border_thickness,
-                             int top_resize_corner_height,
-                             int resize_corner_width,
-                             bool can_resize);
 
   // Returns the bounds (in this View's parent's coordinates) that the client
   // view should be laid out within.
@@ -70,17 +55,27 @@ class VIEWS_EXPORT NonClientFrameView : public View {
                              gfx::Path* window_mask) = 0;
   virtual void ResetWindowControls() = 0;
   virtual void UpdateWindowIcon() = 0;
-  virtual void UpdateWindowTitle() = 0;
 
   // Overridden from View:
-  virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
+  virtual bool HitTest(const gfx::Point& l) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
  protected:
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
   NonClientFrameView() : paint_as_active_(false) {}
+
+  // Helper for non-client view implementations to determine which area of the
+  // window border the specified |point| falls within. The other parameters are
+  // the size of the sizing edges, and whether or not the window can be
+  // resized.
+  int GetHTComponentForFrame(const gfx::Point& point,
+                             int top_resize_border_height,
+                             int resize_border_thickness,
+                             int top_resize_corner_height,
+                             int resize_corner_width,
+                             bool can_resize);
 
   // Used to determine if the frame should be painted as active. Keyed off the
   // window's actual active state and the override, see
@@ -111,7 +106,7 @@ class VIEWS_EXPORT NonClientFrameView : public View {
 //  +- views::Widget ------------------------------------+
 //  | +- views::RootView ------------------------------+ |
 //  | | +- views::NonClientView ---------------------+ | |
-//  | | | +- views::NonClientFrameView subclass ---+ | | |
+//  | | | +- views::NonClientFrameView subclas  ---+ | | |
 //  | | | |                                        | | | |
 //  | | | | << all painting and event receiving >> | | | |
 //  | | | | << of the non-client areas of a     >> | | | |
@@ -149,9 +144,6 @@ class VIEWS_EXPORT NonClientView : public View {
   // Replaces the current NonClientFrameView (if any) with the specified one.
   void SetFrameView(NonClientFrameView* frame_view);
 
-  // Replaces the current |overlay_view_| (if any) with the specified one.
-  void SetOverlayView(View* view);
-
   // Returns true if the ClientView determines that the containing window can be
   // closed, false otherwise.
   bool CanClose();
@@ -159,8 +151,8 @@ class VIEWS_EXPORT NonClientView : public View {
   // Called by the containing Window when it is closed.
   void WindowClosing();
 
-  // Replaces the frame view with a new one. Used when switching window theme
-  // or frame style.
+  // Changes the frame from native to custom depending on the value of
+  // |use_native_frame|.
   void UpdateFrame();
 
   // Prevents the window from being rendered as deactivated when |disable| is
@@ -192,10 +184,6 @@ class VIEWS_EXPORT NonClientView : public View {
   // Tells the NonClientView to invalidate the NonClientFrameView's window icon.
   void UpdateWindowIcon();
 
-  // Tells the NonClientView to invalidate the NonClientFrameView's window
-  // title.
-  void UpdateWindowTitle();
-
   // Get/Set client_view property.
   ClientView* client_view() const { return client_view_; }
   void set_client_view(ClientView* client_view) {
@@ -208,24 +196,22 @@ class VIEWS_EXPORT NonClientView : public View {
   void LayoutFrameView();
 
   // Set the accessible name of this view.
-  void SetAccessibleName(const base::string16& name);
+  void SetAccessibleName(const string16& name);
 
   // NonClientView, View overrides:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
-  virtual gfx::Size GetMaximumSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
-  virtual views::View* GetEventHandlerForRect(const gfx::Rect& rect) OVERRIDE;
-  virtual views::View* GetTooltipHandlerForPoint(
-      const gfx::Point& point) OVERRIDE;
+  virtual views::View* GetEventHandlerForPoint(const gfx::Point& point)
+      OVERRIDE;
 
  protected:
   // NonClientView, View overrides:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child)
+      OVERRIDE;
 
  private:
   // A ClientView object or subclass, responsible for sizing the contents view
@@ -238,12 +224,8 @@ class VIEWS_EXPORT NonClientView : public View {
   // dynamically as the system settings change.
   scoped_ptr<NonClientFrameView> frame_view_;
 
-  // The overlay view, when non-NULL and visible, takes up the entire widget and
-  // is placed on top of the ClientView and NonClientFrameView.
-  View* overlay_view_;
-
   // The accessible name of this view.
-  base::string16 accessible_name_;
+  string16 accessible_name_;
 
   DISALLOW_COPY_AND_ASSIGN(NonClientView);
 };

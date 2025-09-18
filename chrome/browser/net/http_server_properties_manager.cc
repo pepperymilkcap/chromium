@@ -1,19 +1,14 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
 #include "chrome/browser/net/http_server_properties_manager.h"
 
 #include "base/bind.h"
-#include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -34,13 +29,6 @@ const int64 kUpdateCacheDelayMs = 1000;
 // period will reset the timer.
 const int64 kUpdatePrefsDelayMs = 5000;
 
-// "version" 0 indicates, http_server_properties doesn't have "version"
-// property.
-const int kMissingVersion = 0;
-
-// The version number of persisted http_server_properties.
-const int kVersionNumber = 2;
-
 typedef std::vector<std::string> StringVector;
 
 }  // namespace
@@ -60,21 +48,14 @@ HttpServerPropertiesManager::HttpServerPropertiesManager(
   ui_cache_update_timer_.reset(
       new base::OneShotTimer<HttpServerPropertiesManager>);
   pref_change_registrar_.Init(pref_service_);
-  pref_change_registrar_.Add(
-      prefs::kHttpServerProperties,
-      base::Bind(&HttpServerPropertiesManager::OnHttpServerPropertiesChanged,
-                 base::Unretained(this)));
+  pref_change_registrar_.Add(prefs::kHttpServerProperties, this);
 }
 
 HttpServerPropertiesManager::~HttpServerPropertiesManager() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  io_weak_ptr_factory_.reset();
 }
 
 void HttpServerPropertiesManager::InitializeOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  io_weak_ptr_factory_.reset(
-      new base::WeakPtrFactory<HttpServerPropertiesManager>(this));
   http_server_properties_impl_.reset(new net::HttpServerPropertiesImpl());
 
   io_prefs_update_timer_.reset(
@@ -96,40 +77,16 @@ void HttpServerPropertiesManager::ShutdownOnUIThread() {
 }
 
 // static
-void HttpServerPropertiesManager::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* prefs) {
-  prefs->RegisterDictionaryPref(
-      prefs::kHttpServerProperties,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-}
-
-// static
-void HttpServerPropertiesManager::SetVersion(
-    base::DictionaryValue* http_server_properties_dict,
-    int version_number) {
-  if (version_number < 0)
-    version_number =  kVersionNumber;
-  DCHECK_LE(version_number, kVersionNumber);
-  if (version_number <= kVersionNumber)
-    http_server_properties_dict->SetInteger("version", version_number);
-}
-
-// This is required for conformance with the HttpServerProperties interface.
-base::WeakPtr<net::HttpServerProperties>
-    HttpServerPropertiesManager::GetWeakPtr() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  return io_weak_ptr_factory_->GetWeakPtr();
+void HttpServerPropertiesManager::RegisterPrefs(PrefService* prefs) {
+  prefs->RegisterDictionaryPref(prefs::kHttpServerProperties,
+                                PrefService::UNSYNCABLE_PREF);
 }
 
 void HttpServerPropertiesManager::Clear() {
-  Clear(base::Closure());
-}
-
-void HttpServerPropertiesManager::Clear(const base::Closure& completion) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   http_server_properties_impl_->Clear();
-  UpdatePrefsFromCacheOnIO(completion);
+  ScheduleUpdatePrefsOnIO();
 }
 
 bool HttpServerPropertiesManager::SupportsSpdy(
@@ -183,36 +140,28 @@ HttpServerPropertiesManager::alternate_protocol_map() const {
   return http_server_properties_impl_->alternate_protocol_map();
 }
 
-const net::SettingsMap&
+const spdy::SpdySettings&
 HttpServerPropertiesManager::GetSpdySettings(
     const net::HostPortPair& host_port_pair) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   return http_server_properties_impl_->GetSpdySettings(host_port_pair);
 }
 
-bool HttpServerPropertiesManager::SetSpdySetting(
+// Saves settings for a host.
+bool HttpServerPropertiesManager::SetSpdySettings(
     const net::HostPortPair& host_port_pair,
-    net::SpdySettingsIds id,
-    net::SpdySettingsFlags flags,
-    uint32 value) {
+    const spdy::SpdySettings& settings) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  bool persist = http_server_properties_impl_->SetSpdySetting(
-      host_port_pair, id, flags, value);
+  bool persist = http_server_properties_impl_->SetSpdySettings(
+      host_port_pair, settings);
   if (persist)
     ScheduleUpdatePrefsOnIO();
   return persist;
 }
 
-void HttpServerPropertiesManager::ClearSpdySettings(
-    const net::HostPortPair& host_port_pair) {
+void HttpServerPropertiesManager::ClearSpdySettings() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  http_server_properties_impl_->ClearSpdySettings(host_port_pair);
-  ScheduleUpdatePrefsOnIO();
-}
-
-void HttpServerPropertiesManager::ClearAllSpdySettings() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  http_server_properties_impl_->ClearAllSpdySettings();
+  http_server_properties_impl_->ClearSpdySettings();
   ScheduleUpdatePrefsOnIO();
 }
 
@@ -275,45 +224,27 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
   if (!pref_service_->HasPrefPath(prefs::kHttpServerProperties))
     return;
 
+  // String is host/port pair of spdy server.
+  StringVector* spdy_servers = new StringVector;
+
+  // Parse the preferences into a SpdySettingsMap.
+  net::SpdySettingsMap* spdy_settings_map = new net::SpdySettingsMap;
+
+  // Parse the preferences into a AlternateProtocolMap.
+  net::AlternateProtocolMap* alternate_protocol_map =
+      new net::AlternateProtocolMap;
+
+  net::PipelineCapabilityMap* pipeline_capability_map =
+      new net::PipelineCapabilityMap;
+
   bool detected_corrupted_prefs = false;
   const base::DictionaryValue& http_server_properties_dict =
       *pref_service_->GetDictionary(prefs::kHttpServerProperties);
-
-  int version = kMissingVersion;
-  if (!http_server_properties_dict.GetIntegerWithoutPathExpansion(
-      "version", &version)) {
-    DVLOG(1) << "Missing version. Clearing all properties.";
-    return;
-  }
-
-  // The properties for a given server is in
-  // http_server_properties_dict["servers"][server].
-  const base::DictionaryValue* servers_dict = NULL;
-  if (!http_server_properties_dict.GetDictionaryWithoutPathExpansion(
-      "servers", &servers_dict)) {
-    DVLOG(1) << "Malformed http_server_properties for servers.";
-    return;
-  }
-
-  // TODO(rtenneti): Mark entries with an LRU sequence number (date of access?),
-  // and then truncate down deleting old stuff.
-  if (version != kVersionNumber && servers_dict->size() > 300) {
-    DVLOG(1) << "Size is too large. Clearing all properties.";
-    return;
-  }
-
-  // String is host/port pair of spdy server.
-  scoped_ptr<StringVector> spdy_servers(new StringVector);
-  scoped_ptr<net::SpdySettingsMap> spdy_settings_map(new net::SpdySettingsMap);
-  scoped_ptr<net::PipelineCapabilityMap> pipeline_capability_map(
-      new net::PipelineCapabilityMap);
-  scoped_ptr<net::AlternateProtocolMap> alternate_protocol_map(
-      new net::AlternateProtocolMap);
-
-  for (base::DictionaryValue::Iterator it(*servers_dict); !it.IsAtEnd();
-       it.Advance()) {
+  for (base::DictionaryValue::key_iterator it =
+       http_server_properties_dict.begin_keys();
+       it != http_server_properties_dict.end_keys(); ++it) {
     // Get server's host/pair.
-    const std::string& server_str = it.key();
+    const std::string& server_str = *it;
     net::HostPortPair server = net::HostPortPair::FromString(server_str);
     if (server.host().empty()) {
       DVLOG(1) << "Malformed http_server_properties for server: " << server_str;
@@ -321,8 +252,9 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
       continue;
     }
 
-    const base::DictionaryValue* server_pref_dict = NULL;
-    if (!it.value().GetAsDictionary(&server_pref_dict)) {
+    base::DictionaryValue* server_pref_dict = NULL;
+    if (!http_server_properties_dict.GetDictionaryWithoutPathExpansion(
+        server_str, &server_pref_dict)) {
       DVLOG(1) << "Malformed http_server_properties server: " << server_str;
       detected_corrupted_prefs = true;
       continue;
@@ -337,32 +269,47 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
 
     // Get SpdySettings.
     DCHECK(!ContainsKey(*spdy_settings_map, server));
-    const base::DictionaryValue* spdy_settings_dict = NULL;
-    if (server_pref_dict->GetDictionaryWithoutPathExpansion(
-        "settings", &spdy_settings_dict)) {
-      net::SettingsMap settings_map;
-      for (base::DictionaryValue::Iterator dict_it(*spdy_settings_dict);
-           !dict_it.IsAtEnd(); dict_it.Advance()) {
-        const std::string& id_str = dict_it.key();
-        int id = 0;
-        if (!base::StringToInt(id_str, &id)) {
-          DVLOG(1) << "Malformed id in SpdySettings for server: " <<
-              server_str;
-          NOTREACHED();
+    base::ListValue* spdy_settings_list = NULL;
+    if (server_pref_dict->GetListWithoutPathExpansion(
+        "settings", &spdy_settings_list)) {
+      spdy::SpdySettings spdy_settings;
+
+      for (base::ListValue::const_iterator list_it =
+           spdy_settings_list->begin();
+           list_it != spdy_settings_list->end(); ++list_it) {
+        if ((*list_it)->GetType() != Value::TYPE_DICTIONARY) {
+          DVLOG(1) << "Malformed SpdySettingsList for server: " << server_str;
+          detected_corrupted_prefs = true;
           continue;
         }
+
+        const base::DictionaryValue* spdy_setting_dict =
+            static_cast<const base::DictionaryValue*>(*list_it);
+
+        int id = 0;
+        if (!spdy_setting_dict->GetIntegerWithoutPathExpansion("id", &id)) {
+          DVLOG(1) << "Malformed id in SpdySettings for server: " << server_str;
+          detected_corrupted_prefs = true;
+          continue;
+        }
+
         int value = 0;
-        if (!dict_it.value().GetAsInteger(&value)) {
+        if (!spdy_setting_dict->GetIntegerWithoutPathExpansion("value",
+                                                               &value)) {
           DVLOG(1) << "Malformed value in SpdySettings for server: " <<
               server_str;
-          NOTREACHED();
+          detected_corrupted_prefs = true;
           continue;
         }
-        net::SettingsFlagsAndValue flags_and_value(
-            net::SETTINGS_FLAG_PERSISTED, value);
-        settings_map[static_cast<net::SpdySettingsIds>(id)] = flags_and_value;
+
+        spdy::SettingsFlagsAndId flags_and_id(0);
+        flags_and_id.set_id(id);
+        flags_and_id.set_flags(spdy::SETTINGS_FLAG_PERSISTED);
+
+        spdy_settings.push_back(spdy::SpdySetting(flags_and_id, value));
       }
-      (*spdy_settings_map)[server] = settings_map;
+
+      (*spdy_settings_map)[server] = spdy_settings;
     }
 
     int pipeline_capability = net::PIPELINE_UNKNOWN;
@@ -375,7 +322,7 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
 
     // Get alternate_protocol server.
     DCHECK(!ContainsKey(*alternate_protocol_map, server));
-    const base::DictionaryValue* port_alternate_protocol_dict = NULL;
+    base::DictionaryValue* port_alternate_protocol_dict = NULL;
     if (!server_pref_dict->GetDictionaryWithoutPathExpansion(
         "alternate_protocol", &port_alternate_protocol_dict)) {
       continue;
@@ -389,16 +336,10 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
         detected_corrupted_prefs = true;
         continue;
       }
-      std::string protocol_str;
-      if (!port_alternate_protocol_dict->GetStringWithoutPathExpansion(
-              "protocol_str", &protocol_str)) {
-        DVLOG(1) << "Malformed Alternate-Protocol server: " << server_str;
-        detected_corrupted_prefs = true;
-        continue;
-      }
-      net::AlternateProtocol protocol =
-          net::AlternateProtocolFromString(protocol_str);
-      if (!net::IsAlternateProtocolValid(protocol)) {
+      int protocol = 0;
+      if (!port_alternate_protocol_dict->GetIntegerWithoutPathExpansion(
+          "protocol", &protocol) || (protocol < 0) ||
+          (protocol > net::NUM_ALTERNATE_PROTOCOLS)) {
         DVLOG(1) << "Malformed Alternate-Protocol server: " << server_str;
         detected_corrupted_prefs = true;
         continue;
@@ -406,7 +347,8 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
 
       net::PortAlternateProtocolPair port_alternate_protocol;
       port_alternate_protocol.port = port;
-      port_alternate_protocol.protocol = protocol;
+      port_alternate_protocol.protocol = static_cast<net::AlternateProtocol>(
+          protocol);
 
       (*alternate_protocol_map)[server] = port_alternate_protocol;
     } while (false);
@@ -418,10 +360,10 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
       base::Bind(&HttpServerPropertiesManager::
                  UpdateCacheFromPrefsOnIO,
                  base::Unretained(this),
-                 base::Owned(spdy_servers.release()),
-                 base::Owned(spdy_settings_map.release()),
-                 base::Owned(alternate_protocol_map.release()),
-                 base::Owned(pipeline_capability_map.release()),
+                 base::Owned(spdy_servers),
+                 base::Owned(spdy_settings_map),
+                 base::Owned(alternate_protocol_map),
+                 base::Owned(pipeline_capability_map),
                  detected_corrupted_prefs));
 }
 
@@ -435,23 +377,17 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnIO(
   // preferences. Update the cached data with new data from preferences.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  UMA_HISTOGRAM_COUNTS("Net.CountOfSpdyServers", spdy_servers->size());
   http_server_properties_impl_->InitializeSpdyServers(spdy_servers, true);
 
   // Clear the cached data and use the new spdy_settings from preferences.
-  UMA_HISTOGRAM_COUNTS("Net.CountOfSpdySettings", spdy_settings_map->size());
   http_server_properties_impl_->InitializeSpdySettingsServers(
       spdy_settings_map);
 
   // Clear the cached data and use the new Alternate-Protocol server list from
   // preferences.
-  UMA_HISTOGRAM_COUNTS("Net.CountOfAlternateProtocolServers",
-                       alternate_protocol_map->size());
   http_server_properties_impl_->InitializeAlternateProtocolServers(
       alternate_protocol_map);
 
-  UMA_HISTOGRAM_COUNTS("Net.CountOfPipelineCapableServers",
-                       pipeline_capability_map->size());
   http_server_properties_impl_->InitializePipelineCapabilities(
       pipeline_capability_map);
 
@@ -481,13 +417,7 @@ void HttpServerPropertiesManager::StartPrefsUpdateTimerOnIO(
       &HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO);
 }
 
-// This is required so we can set this as the callback for a timer.
 void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO() {
-  UpdatePrefsFromCacheOnIO(base::Closure());
-}
-
-void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO(
-    const base::Closure& completion) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   base::ListValue* spdy_server_list = new base::ListValue;
@@ -515,8 +445,7 @@ void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO(
                  base::Owned(spdy_server_list),
                  base::Owned(spdy_settings_map),
                  base::Owned(alternate_protocol_map),
-                 base::Owned(pipeline_capability_map),
-                 completion));
+                 base::Owned(pipeline_capability_map)));
 }
 
 // A local or temporary data structure to hold |supports_spdy|, SpdySettings,
@@ -525,20 +454,20 @@ void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO(
 struct ServerPref {
   ServerPref()
       : supports_spdy(false),
-        settings_map(NULL),
+        settings(NULL),
         alternate_protocol(NULL),
         pipeline_capability(net::PIPELINE_UNKNOWN) {
   }
   ServerPref(bool supports_spdy,
-             const net::SettingsMap* settings_map,
+             const spdy::SpdySettings* settings,
              const net::PortAlternateProtocolPair* alternate_protocol)
       : supports_spdy(supports_spdy),
-        settings_map(settings_map),
+        settings(settings),
         alternate_protocol(alternate_protocol),
         pipeline_capability(net::PIPELINE_UNKNOWN) {
   }
   bool supports_spdy;
-  const net::SettingsMap* settings_map;
+  const spdy::SpdySettings* settings;
   const net::PortAlternateProtocolPair* alternate_protocol;
   net::HttpPipelinedHostCapability pipeline_capability;
 };
@@ -547,8 +476,7 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
     base::ListValue* spdy_server_list,
     net::SpdySettingsMap* spdy_settings_map,
     net::AlternateProtocolMap* alternate_protocol_map,
-    net::PipelineCapabilityMap* pipeline_capability_map,
-    const base::Closure& completion) {
+    net::PipelineCapabilityMap* pipeline_capability_map) {
 
   typedef std::map<net::HostPortPair, ServerPref> ServerPrefMap;
   ServerPrefMap server_pref_map;
@@ -583,7 +511,7 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
       ServerPref server_pref(false, &map_it->second, NULL);
       server_pref_map[server] = server_pref;
     } else {
-      it->second.settings_map = &map_it->second;
+      it->second.settings = &map_it->second;
     }
   }
 
@@ -594,7 +522,8 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
     const net::HostPortPair& server = map_it->first;
     const net::PortAlternateProtocolPair& port_alternate_protocol =
         map_it->second;
-    if (!net::IsAlternateProtocolValid(port_alternate_protocol.protocol)) {
+    if (port_alternate_protocol.protocol < 0 ||
+        port_alternate_protocol.protocol >= net::NUM_ALTERNATE_PROTOCOLS) {
       continue;
     }
 
@@ -626,7 +555,6 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
 
   // Persist the prefs::kHttpServerProperties.
   base::DictionaryValue http_server_properties_dict;
-  base::DictionaryValue* servers_dict = new base::DictionaryValue;
   for (ServerPrefMap::const_iterator map_it =
        server_pref_map.begin();
        map_it != server_pref_map.end(); ++map_it) {
@@ -638,18 +566,20 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
     // Save supports_spdy.
     server_pref_dict->SetBoolean("supports_spdy", server_pref.supports_spdy);
 
-    // Save SPDY settings.
-    if (server_pref.settings_map) {
-      base::DictionaryValue* spdy_settings_dict = new base::DictionaryValue;
-      for (net::SettingsMap::const_iterator it =
-           server_pref.settings_map->begin();
-           it != server_pref.settings_map->end(); ++it) {
-        net::SpdySettingsIds id = it->first;
-        uint32 value = it->second.second;
-        std::string key = base::StringPrintf("%u", id);
-        spdy_settings_dict->SetInteger(key, value);
+    // Save SpdySettings.
+    if (server_pref.settings) {
+      base::ListValue* spdy_settings_list = new ListValue();
+      for (spdy::SpdySettings::const_iterator it =
+           server_pref.settings->begin();
+           it != server_pref.settings->end(); ++it) {
+        uint32 id = it->first.id();
+        uint32 value = it->second;
+        base::DictionaryValue* spdy_setting_dict = new base::DictionaryValue;
+        spdy_setting_dict->SetInteger("id", id);
+        spdy_setting_dict->SetInteger("value", value);
+        spdy_settings_list->Append(spdy_setting_dict);
       }
-      server_pref_dict->SetWithoutPathExpansion("settings", spdy_settings_dict);
+      server_pref_dict->Set("settings", spdy_settings_list);
     }
 
     // Save alternate_protocol.
@@ -660,9 +590,8 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
           server_pref.alternate_protocol;
       port_alternate_protocol_dict->SetInteger(
           "port", port_alternate_protocol->port);
-      const char* protocol_str =
-          net::AlternateProtocolToString(port_alternate_protocol->protocol);
-      port_alternate_protocol_dict->SetString("protocol_str", protocol_str);
+      port_alternate_protocol_dict->SetInteger(
+          "protocol", port_alternate_protocol->protocol);
       server_pref_dict->SetWithoutPathExpansion(
           "alternate_protocol", port_alternate_protocol_dict);
     }
@@ -672,28 +601,31 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
                                    server_pref.pipeline_capability);
     }
 
-    servers_dict->SetWithoutPathExpansion(server.ToString(), server_pref_dict);
+    http_server_properties_dict.SetWithoutPathExpansion(server.ToString(),
+                                                        server_pref_dict);
   }
 
-  http_server_properties_dict.SetWithoutPathExpansion("servers", servers_dict);
-  SetVersion(&http_server_properties_dict, kVersionNumber);
   setting_prefs_ = true;
   pref_service_->Set(prefs::kHttpServerProperties,
                      http_server_properties_dict);
   setting_prefs_ = false;
-
-  // Note that |completion| will be fired after we have written everything to
-  // the Preferences, but likely before these changes are serialized to disk.
-  // This is not a problem though, as JSONPrefStore guarantees that this will
-  // happen, pretty soon, and even in the case we shut down immediately.
-  if (!completion.is_null())
-    completion.Run();
 }
 
-void HttpServerPropertiesManager::OnHttpServerPropertiesChanged() {
+void HttpServerPropertiesManager::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!setting_prefs_)
-    ScheduleUpdateCacheOnUI();
+  DCHECK(type == chrome::NOTIFICATION_PREF_CHANGED);
+  PrefService* prefs = content::Source<PrefService>(source).ptr();
+  DCHECK(prefs == pref_service_);
+  std::string* pref_name = content::Details<std::string>(details).ptr();
+  if (*pref_name == prefs::kHttpServerProperties) {
+    if (!setting_prefs_)
+      ScheduleUpdateCacheOnUI();
+  } else {
+    NOTREACHED();
+  }
 }
 
 }  // namespace chrome_browser_net

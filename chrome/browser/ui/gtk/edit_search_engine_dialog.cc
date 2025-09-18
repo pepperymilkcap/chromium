@@ -8,14 +8,15 @@
 
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/rtl.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/search_engines/edit_search_engine_controller.h"
-#include "chrome/common/net/url_fixer_upper.h"
+#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -23,18 +24,21 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
-#include "url/gurl.h"
 
 namespace {
+
+std::string GetDisplayURL(const TemplateURL& turl) {
+  return turl.url() ? UTF16ToUTF8(turl.url()->DisplayURL()) : std::string();
+}
 
 // Forces text to lowercase when connected to an editable's "insert-text"
 // signal.  (Like views Textfield::STYLE_LOWERCASE.)
 void LowercaseInsertTextHandler(GtkEditable *editable, const gchar *text,
                                 gint length, gint *position, gpointer data) {
-  base::string16 original_text = base::UTF8ToUTF16(text);
-  base::string16 lower_text = base::i18n::ToLower(original_text);
+  string16 original_text = UTF8ToUTF16(text);
+  string16 lower_text = base::i18n::ToLower(original_text);
   if (lower_text != original_text) {
-    std::string result = base::UTF16ToUTF8(lower_text);
+    std::string result = UTF16ToUTF8(lower_text);
     // Prevent ourselves getting called recursively about our own edit.
     g_signal_handlers_block_by_func(G_OBJECT(editable),
         reinterpret_cast<gpointer>(LowercaseInsertTextHandler), data);
@@ -67,7 +71,7 @@ void SetWidgetStyle(GtkWidget* entry, GtkStyle* label_style,
 
 EditSearchEngineDialog::EditSearchEngineDialog(
     GtkWindow* parent_window,
-    TemplateURL* template_url,
+    const TemplateURL* template_url,
     EditSearchEngineControllerDelegate* delegate,
     Profile* profile)
     : controller_(new EditSearchEngineController(template_url, delegate,
@@ -143,14 +147,13 @@ void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
   if (controller_->template_url()) {
     gtk_entry_set_text(
         GTK_ENTRY(title_entry_),
-        base::UTF16ToUTF8(controller_->template_url()->short_name()).c_str());
+        UTF16ToUTF8(controller_->template_url()->short_name()).c_str());
     gtk_entry_set_text(
         GTK_ENTRY(keyword_entry_),
-        base::UTF16ToUTF8(controller_->template_url()->keyword()).c_str());
+        UTF16ToUTF8(controller_->template_url()->keyword()).c_str());
     gtk_entry_set_text(
         GTK_ENTRY(url_entry_),
-        base::UTF16ToUTF8(controller_->template_url()->url_ref().DisplayURL()).
-            c_str());
+        GetDisplayURL(*controller_->template_url()).c_str());
     // We don't allow users to edit prepopulated URLs.
     gtk_editable_set_editable(
         GTK_EDITABLE(url_entry_),
@@ -215,12 +218,12 @@ void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
   g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroyThunk), this);
 }
 
-base::string16 EditSearchEngineDialog::GetTitleInput() const {
-  return base::UTF8ToUTF16(gtk_entry_get_text(GTK_ENTRY(title_entry_)));
+string16 EditSearchEngineDialog::GetTitleInput() const {
+  return UTF8ToUTF16(gtk_entry_get_text(GTK_ENTRY(title_entry_)));
 }
 
-base::string16 EditSearchEngineDialog::GetKeywordInput() const {
-  return base::UTF8ToUTF16(gtk_entry_get_text(GTK_ENTRY(keyword_entry_)));
+string16 EditSearchEngineDialog::GetKeywordInput() const {
+  return UTF8ToUTF16(gtk_entry_get_text(GTK_ENTRY(keyword_entry_)));
 }
 
 std::string EditSearchEngineDialog::GetURLInput() const {
@@ -243,16 +246,17 @@ void EditSearchEngineDialog::EnableControls() {
 void EditSearchEngineDialog::UpdateImage(GtkWidget* image,
                                          bool is_valid,
                                          int invalid_message_id) {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   if (is_valid) {
     gtk_widget_set_has_tooltip(image, FALSE);
     gtk_image_set_from_pixbuf(GTK_IMAGE(image),
-        rb.GetNativeImageNamed(IDR_INPUT_GOOD).ToGdkPixbuf());
+        ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+            IDR_INPUT_GOOD));
   } else {
     gtk_widget_set_tooltip_text(
         image, l10n_util::GetStringUTF8(invalid_message_id).c_str());
     gtk_image_set_from_pixbuf(GTK_IMAGE(image),
-        rb.GetNativeImageNamed(IDR_INPUT_ALERT).ToGdkPixbuf());
+        ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+            IDR_INPUT_ALERT));
   }
 }
 
@@ -272,5 +276,5 @@ void EditSearchEngineDialog::OnResponse(GtkWidget* dialog, int response_id) {
 }
 
 void EditSearchEngineDialog::OnWindowDestroy(GtkWidget* widget) {
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }

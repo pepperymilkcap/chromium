@@ -20,7 +20,7 @@ BaseScrollBarThumb::BaseScrollBarThumb(BaseScrollBar* scroll_bar)
     : scroll_bar_(scroll_bar),
       drag_start_position_(-1),
       mouse_offset_(-1),
-      state_(CustomButton::STATE_NORMAL) {
+      state_(CustomButton::BS_NORMAL) {
 }
 
 BaseScrollBarThumb::~BaseScrollBarThumb() {
@@ -65,22 +65,22 @@ int BaseScrollBarThumb::GetPosition() const {
   return y() - track_bounds.y();
 }
 
-void BaseScrollBarThumb::OnMouseEntered(const ui::MouseEvent& event) {
-  SetState(CustomButton::STATE_HOVERED);
+void BaseScrollBarThumb::OnMouseEntered(const MouseEvent& event) {
+  SetState(CustomButton::BS_HOT);
 }
 
-void BaseScrollBarThumb::OnMouseExited(const ui::MouseEvent& event) {
-  SetState(CustomButton::STATE_NORMAL);
+void BaseScrollBarThumb::OnMouseExited(const MouseEvent& event) {
+  SetState(CustomButton::BS_NORMAL);
 }
 
-bool BaseScrollBarThumb::OnMousePressed(const ui::MouseEvent& event) {
+bool BaseScrollBarThumb::OnMousePressed(const MouseEvent& event) {
   mouse_offset_ = scroll_bar_->IsHorizontal() ? event.x() : event.y();
   drag_start_position_ = GetPosition();
-  SetState(CustomButton::STATE_PRESSED);
+  SetState(CustomButton::BS_PUSHED);
   return true;
 }
 
-bool BaseScrollBarThumb::OnMouseDragged(const ui::MouseEvent& event) {
+bool BaseScrollBarThumb::OnMouseDragged(const MouseEvent& event) {
   // If the user moves the mouse more than |kScrollThumbDragOutSnap| outside
   // the bounds of the thumb, the scrollbar will snap the scroll back to the
   // point it was at before the drag began.
@@ -99,8 +99,6 @@ bool BaseScrollBarThumb::OnMouseDragged(const ui::MouseEvent& event) {
   }
   if (scroll_bar_->IsHorizontal()) {
     int thumb_x = event.x() - mouse_offset_;
-    if (base::i18n::IsRTL())
-      thumb_x *= -1;
     scroll_bar_->ScrollToThumbPosition(GetPosition() + thumb_x, false);
   } else {
     int thumb_y = event.y() - mouse_offset_;
@@ -109,13 +107,12 @@ bool BaseScrollBarThumb::OnMouseDragged(const ui::MouseEvent& event) {
   return true;
 }
 
-void BaseScrollBarThumb::OnMouseReleased(const ui::MouseEvent& event) {
-  SetState(HitTestPoint(event.location()) ?
-           CustomButton::STATE_HOVERED : CustomButton::STATE_NORMAL);
+void BaseScrollBarThumb::OnMouseReleased(const MouseEvent& event) {
+  OnMouseCaptureLost();
 }
 
 void BaseScrollBarThumb::OnMouseCaptureLost() {
-  SetState(CustomButton::STATE_HOVERED);
+  SetState(CustomButton::BS_HOT);
 }
 
 CustomButton::ButtonState BaseScrollBarThumb::GetState() const {
@@ -123,12 +120,7 @@ CustomButton::ButtonState BaseScrollBarThumb::GetState() const {
 }
 
 void BaseScrollBarThumb::SetState(CustomButton::ButtonState state) {
-  if (state_ == state)
-    return;
-
-  CustomButton::ButtonState old_state = state_;
   state_ = state;
-  scroll_bar_->OnThumbStateChanged(old_state, state);
   SchedulePaint();
 }
 

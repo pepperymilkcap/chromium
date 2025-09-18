@@ -6,7 +6,7 @@ function testExtensionApi() {
   try {
     chrome.tabs.getAllInWindow(null, function() {
       window.domAutomationController.send(
-          !chrome.runtime.lastError);
+          !chrome.extension.lastError);
     });
   } catch (e) {
     window.domAutomationController.send(false);

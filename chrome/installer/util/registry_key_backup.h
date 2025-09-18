@@ -4,6 +4,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_REGISTRY_KEY_BACKUP_H_
 #define CHROME_INSTALLER_UTIL_REGISTRY_KEY_BACKUP_H_
+#pragma once
 
 #include <windows.h>
 

@@ -1,12 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/safe_browsing/features.h"
 
 #include "base/format_macros.h"
-#include "base/strings/stringprintf.h"
-#include "chrome/renderer/safe_browsing/test_utils.h"
+#include "base/stringprintf.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace safe_browsing {
@@ -39,7 +39,8 @@ TEST(PhishingFeaturesTest, IllegalFeatureValue) {
   expected_features.AddRealFeature("zero", 0.0);
   expected_features.AddRealFeature("pointfive", 0.5);
   expected_features.AddRealFeature("one", 1.0);
-  ExpectFeatureMapsAreEqual(features, expected_features);
+  EXPECT_THAT(features.features(),
+              ::testing::ContainerEq(expected_features.features()));
 }
 
 }  // namespace safe_browsing

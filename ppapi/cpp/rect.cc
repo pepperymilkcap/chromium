@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -89,14 +89,14 @@ Rect Rect::Subtract(const Rect& rect) const {
   int32_t rb = bottom();
 
   if (rect.y() <= y() && rect.bottom() >= bottom()) {
-    // complete intersection in the y-direction
+    // complete int32_tersection in the y-direction
     if (rect.x() <= x()) {
       rx = rect.right();
     } else {
       rr = rect.x();
     }
   } else if (rect.x() <= x() && rect.right() >= right()) {
-    // complete intersection in the x-direction
+    // complete int32_tersection in the x-direction
     if (rect.y() <= y()) {
       ry = rect.bottom();
     } else {
@@ -127,4 +127,4 @@ bool Rect::SharesEdgeWith(const Rect& rect) const {
              (y() == rect.bottom() || bottom() == rect.y()));
 }
 
-}  // namespace pp
+}  // namespace gfx

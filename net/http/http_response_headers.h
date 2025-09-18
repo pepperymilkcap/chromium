@@ -1,23 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_RESPONSE_HEADERS_H_
 #define NET_HTTP_HTTP_RESPONSE_HEADERS_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/containers/hash_tables.h"
+#include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
-#include "net/base/net_log.h"
 #include "net/http/http_version.h"
 
 class Pickle;
-class PickleIterator;
 
 namespace base {
 class Time;
@@ -39,7 +37,6 @@ class NET_EXPORT HttpResponseHeaders
   static const PersistOptions PERSIST_SANS_HOP_BY_HOP = 1 << 2;
   static const PersistOptions PERSIST_SANS_NON_CACHEABLE = 1 << 3;
   static const PersistOptions PERSIST_SANS_RANGES = 1 << 4;
-  static const PersistOptions PERSIST_SANS_SECURITY_STATE = 1 << 5;
 
   // Parses the given raw_headers.  raw_headers should be formatted thus:
   // includes the http status response line, each line is \0-terminated, and
@@ -54,7 +51,7 @@ class NET_EXPORT HttpResponseHeaders
   // Initializes from the representation stored in the given pickle.  The data
   // for this object is found relative to the given pickle_iter, which should
   // be passed to the pickle's various Read* methods.
-  HttpResponseHeaders(const Pickle& pickle, PickleIterator* pickle_iter);
+  HttpResponseHeaders(const Pickle& pickle, void** pickle_iter);
 
   // Appends a representation of this object to the given pickle.
   // The options argument can be a combination of PersistOptions.
@@ -66,9 +63,9 @@ class NET_EXPORT HttpResponseHeaders
   // Removes all instances of a particular header.
   void RemoveHeader(const std::string& name);
 
-  // Removes a particular header line. The header name is compared
+  // Removes a particular header. The header name is compared
   // case-insensitively.
-  void RemoveHeaderLine(const std::string& name, const std::string& value);
+  void RemoveHeaderWithValue(const std::string& name, const std::string& value);
 
   // Adds a particular header.  |header| has to be a single header without any
   // EOL termination, just [<header-name>: <header-values>]
@@ -155,17 +152,16 @@ class NET_EXPORT HttpResponseHeaders
   // EnumerateHeader. Note that a header might have an empty value. Call
   // EnumerateHeader repeatedly until it returns false.
   bool EnumerateHeader(void** iter,
-                       const base::StringPiece& name,
+                       const std::string& name,
                        std::string* value) const;
 
   // Returns true if the response contains the specified header-value pair.
   // Both name and value are compared case insensitively.
-  bool HasHeaderValue(const base::StringPiece& name,
-                      const base::StringPiece& value) const;
+  bool HasHeaderValue(const std::string& name, const std::string& value) const;
 
   // Returns true if the response contains the specified header.
   // The name is compared case insensitively.
-  bool HasHeader(const base::StringPiece& name) const;
+  bool HasHeader(const std::string& name) const;
 
   // Get the mime type and charset values in lower case form from the headers.
   // Empty strings are returned if the values are not present.
@@ -232,10 +228,6 @@ class NET_EXPORT HttpResponseHeaders
   // no such header in the response.
   int64 GetContentLength() const;
 
-  // Extracts the value of the specified header or returns -1 if there is no
-  // such header in the response.
-  int64 GetInt64HeaderValue(const std::string& header) const;
-
   // Extracts the values in a Content-Range header and returns true if they are
   // valid for a 206 response; otherwise returns false.
   // The following values will be outputted:
@@ -249,40 +241,6 @@ class NET_EXPORT HttpResponseHeaders
 
   // Returns true if the response is chunk-encoded.
   bool IsChunkEncoded() const;
-
-#if defined (SPDY_PROXY_AUTH_ORIGIN)
-  // Contains instructions contained in the Chrome-Proxy header.
-  struct ChromeProxyInfo {
-    ChromeProxyInfo() : bypass_all(false) {}
-
-    // True if Chrome should bypass all available Chrome proxies. False if only
-    // the currently connected Chrome proxy should be bypassed.
-    bool bypass_all;
-
-    // Amount of time to bypass the Chrome proxy or proxies.
-    base::TimeDelta bypass_duration;
-  };
-
-  // Returns true if the Chrome-Proxy header is present and contains a bypass
-  // delay. Sets |proxy_info->bypass_duration| to the specified delay if greater
-  // than 0, and to 0 otherwise to indicate that the default proxy delay
-  // (as specified in |ProxyList::UpdateRetryInfoOnFallback|) should be used.
-  // If all available Chrome proxies should by bypassed, |bypass_all| is set to
-  // true. |proxy_info| must be non-NULL.
-  bool GetChromeProxyInfo(ChromeProxyInfo* proxy_info) const;
-#endif
-
-  // Creates a Value for use with the NetLog containing the response headers.
-  base::Value* NetLogCallback(NetLog::LogLevel log_level) const;
-
-  // Takes in a Value created by the above function, and attempts to create a
-  // copy of the original headers.  Returns true on success.  On failure,
-  // clears |http_response_headers|.
-  // TODO(mmenke):  Long term, we want to remove this, and migrate external
-  //                consumers to be NetworkDelegates.
-  static bool FromNetLogParam(
-      const base::Value* event_param,
-      scoped_refptr<HttpResponseHeaders>* http_response_headers);
 
   // Returns the HTTP response code.  This is 0 if the response code text seems
   // to exist but could not be parsed.  Otherwise, it defaults to 200 if the
@@ -327,7 +285,7 @@ class NET_EXPORT HttpResponseHeaders
 
   // Find the header in our list (case-insensitive) starting with parsed_ at
   // index |from|.  Returns string::npos if not found.
-  size_t FindHeader(size_t from, const base::StringPiece& name) const;
+  size_t FindHeader(size_t from, const std::string& name) const;
 
   // Add a header->value pair to our list.  If we already have header in our
   // list, append the value to it.
@@ -349,6 +307,16 @@ class NET_EXPORT HttpResponseHeaders
   void MergeWithHeaders(const std::string& raw_headers,
                         const HeaderSet& headers_to_remove);
 
+  // Replaces the current headers with the merged version of |raw_headers| and
+  // the current headers with out the header consisting of
+  // |header_to_remove_name| and |header_to_remove_value|. Note that
+  // |header_to_remove_name| is compared case-insensitively.
+  // Note that the header to remove is removed from the current headers (before
+  // the merge), not after the merge.
+  void MergeWithHeadersWithValue(const std::string& raw_headers,
+                                 const std::string& header_to_remove_name,
+                                 const std::string& header_to_remove_value);
+
   // Adds the values from any 'cache-control: no-cache="foo,bar"' headers.
   void AddNonCacheableHeaders(HeaderSet* header_names) const;
 
@@ -366,16 +334,6 @@ class NET_EXPORT HttpResponseHeaders
 
   // Adds the set of content range response headers.
   static void AddHopContentRangeHeaders(HeaderSet* header_names);
-
-  // Adds the set of transport security state headers.
-  static void AddSecurityStateHeaders(HeaderSet* header_names);
-
-#if defined(SPDY_PROXY_AUTH_ORIGIN)
-  // Searches for the specified Chrome-Proxy action, and if present interprets
-  // its value as a duration in seconds.
-  bool GetChromeProxyBypassDuration(const std::string& action_prefix,
-                                    base::TimeDelta* duration) const;
-#endif
 
   // We keep a list of ParsedHeader objects.  These tell us where to locate the
   // header-value pairs within raw_headers_.

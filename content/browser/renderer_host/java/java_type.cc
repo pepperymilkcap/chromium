@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 
-namespace content {
 namespace {
 
 JavaType JavaTypeFromJNIName(const std::string& jni_name) {
@@ -68,7 +67,7 @@ JavaType::~JavaType() {
 
 JavaType& JavaType::operator=(const JavaType& other) {
   type = other.type;
-  if (other.inner_type) {
+  if (other.inner_type.get()) {
     DCHECK_EQ(JavaType::TypeArray, type);
     inner_type.reset(new JavaType(*other.inner_type));
   } else {
@@ -110,5 +109,3 @@ JavaType JavaType::CreateFromBinaryName(const std::string& binary_name) {
   }
   return result;
 }
-
-}  // namespace content

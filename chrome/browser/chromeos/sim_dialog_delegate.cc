@@ -4,12 +4,16 @@
 
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
 
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/views/html_dialog_view.h"
+#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/url_constants.h"
-#include "ui/gfx/size.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 using content::WebContents;
 using content::WebUIMessageHandler;
@@ -44,9 +48,20 @@ namespace chromeos {
 // static
 void SimDialogDelegate::ShowDialog(gfx::NativeWindow owning_window,
                                    SimDialogMode mode) {
-  chrome::ShowWebDialog(owning_window,
-                        ProfileManager::GetActiveUserProfile(),
-                        new SimDialogDelegate(mode));
+  Profile* profile;
+  Browser* browser = NULL;
+  if (UserManager::Get()->user_is_logged_in()) {
+    browser = BrowserList::GetLastActive();
+    DCHECK(browser);
+    profile = browser->profile();
+  } else {
+    profile = ProfileManager::GetDefaultProfile();
+  }
+  HtmlDialogView* html_view =
+      new HtmlDialogView(profile, browser, new SimDialogDelegate(mode));
+  html_view->InitDialog();
+  browser::CreateViewsWindow(owning_window, html_view, STYLE_FLUSH);
+  html_view->GetWidget()->Show();
 }
 
 SimDialogDelegate::SimDialogDelegate(SimDialogMode dialog_mode)
@@ -60,8 +75,8 @@ ui::ModalType SimDialogDelegate::GetDialogModalType() const {
   return ui::MODAL_TYPE_SYSTEM;
 }
 
-base::string16 SimDialogDelegate::GetDialogTitle() const {
-  return base::string16();
+string16 SimDialogDelegate::GetDialogTitle() const {
+  return string16();
 }
 
 GURL SimDialogDelegate::GetDialogContentURL() const {
@@ -76,8 +91,7 @@ GURL SimDialogDelegate::GetDialogContentURL() const {
       mode_value = kSimDialogSetLockOnMode;
     else
       mode_value = kSimDialogSetLockOffMode;
-    return GURL(
-        base::StringPrintf(kSimDialogSpecialModeURL, mode_value.c_str()));
+    return GURL(StringPrintf(kSimDialogSpecialModeURL, mode_value.c_str()));
   }
 }
 
@@ -111,8 +125,7 @@ bool SimDialogDelegate::ShouldShowDialogTitle() const {
   return false;
 }
 
-bool SimDialogDelegate::HandleContextMenu(
-    const content::ContextMenuParams& params) {
+bool SimDialogDelegate::HandleContextMenu(const ContextMenuParams& params) {
   // Disable context menu.
   return true;
 }

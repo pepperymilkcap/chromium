@@ -11,7 +11,7 @@ option optimize_for = LITE_RUNTIME;
 
 package metrics;
 
-// Next tag: 18
+// Next tag: 9
 message SystemProfileProto {
   // The time when the client was compiled/linked, in seconds since the epoch.
   optional int64 build_timestamp = 1;
@@ -40,30 +40,8 @@ message SystemProfileProto {
   // specific.
   optional string app_version = 2;
 
-  // The brand code or distribution tag assigned to a partner, if available.
-  // Brand codes are only available on Windows.  Not every Windows install
-  // though will have a brand code.
-  optional string brand_code = 12;
-
-  // The possible channels for an installation, from least to most stable.
-  enum Channel {
-    CHANNEL_UNKNOWN = 0;  // Unknown channel -- perhaps an unofficial build?
-    CHANNEL_CANARY = 1;
-    CHANNEL_DEV = 2;
-    CHANNEL_BETA = 3;
-    CHANNEL_STABLE = 4;
-  }
-  optional Channel channel = 10;
-
-  // The date the user enabled UMA, in seconds since the epoch.
-  // If the user has toggled the UMA enabled state multiple times, this will
-  // be the most recent date on which UMA was enabled.
-  // For privacy, this is rounded to the nearest hour.
-  optional int64 uma_enabled_date = 3;
-
-  // The time when the client was installed, in seconds since the epoch.
-  // For privacy, this is rounded to the nearest hour.
-  optional int64 install_date = 16;
+  // The date the user installed the browser, in seconds since the epoch.
+  optional int64 install_date = 3;
 
   // The user's selected application locale, i.e. the user interface language.
   // The locale includes a language code and, possibly, also a country code,
@@ -77,13 +55,9 @@ message SystemProfileProto {
 
     // The version of the OS.  The meaning of this field is OS-dependent.
     optional string version = 2;
-
-    // The fingerprint of the build.  This field is used only on Android.
-    optional string fingerprint = 3;
   }
   optional OS os = 5;
 
-  // Next tag for Hardware: 14
   // Information on the user's hardware.
   message Hardware {
     // The CPU architecture (x86, PowerPC, x86_64, ...)
@@ -114,23 +88,6 @@ message SystemProfileProto {
     optional int32 primary_screen_width = 6;
     optional int32 primary_screen_height = 7;
 
-    // The device scale factor of the primary screen.
-    optional float primary_screen_scale_factor = 12;
-
-    // Max DPI for any attached screen. (Windows only)
-    optional float max_dpi_x = 9;
-    optional float max_dpi_y = 10;
-
-    // Information on the CPU obtained by CPUID.
-    message CPU {
-      // A 12 character string naming the vendor, e.g. "GeniuneIntel".
-      optional string vendor_name = 1;
-
-      // The signature reported by CPUID (from EAX).
-      optional uint32 signature = 2;
-    }
-    optional CPU cpu = 13;
-
     // Information on the GPU
     message Graphics {
       // The GPU manufacturer's vendor id.
@@ -146,7 +103,7 @@ message SystemProfileProto {
       optional string driver_date = 4;
 
       // The GPU performance statistics.
-      // See http://src.chromium.org/viewvc/chrome/trunk/src/content/public/common/gpu_performance_stats.h?view=markup
+      // See http://src.chromium.org/viewvc/chrome/trunk/src/content/browser/gpu/gpu_performance_stats.h?view=markup
       // for details.  Currently logged only on Windows.
       message PerformanceStatistics {
         optional float graphics_score = 1;
@@ -154,157 +111,10 @@ message SystemProfileProto {
         optional float overall_score = 3;
       }
       optional PerformanceStatistics performance_statistics = 5;
-
-      // The GL_VENDOR string. An example of a gl_vendor string is
-      // "Imagination Technologies". "" if we are not using OpenGL.
-      optional string gl_vendor = 6;
-
-      // The GL_RENDERER string. An example of a gl_renderer string is
-      // "PowerVR SGX 540". "" if we are not using OpenGL.
-      optional string gl_renderer = 7;
     }
     optional Graphics gpu = 8;
-
-    // Information about Bluetooth devices paired with the system.
-    message Bluetooth {
-      // Whether Bluetooth is present on this system.
-      optional bool is_present = 1;
-
-      // Whether Bluetooth is enabled on this system.
-      optional bool is_enabled = 2;
-
-      // Describes a paired device.
-      message PairedDevice {
-        // Assigned class of the device. This is a bitfield according to the
-        // Bluetooth specification available at the following URL:
-        // https://www.bluetooth.org/en-us/specification/assigned-numbers-overview/baseband
-        optional uint32 bluetooth_class = 1;
-
-        // Decoded device type.
-        enum Type {
-          DEVICE_UNKNOWN = 0;
-          DEVICE_COMPUTER = 1;
-          DEVICE_PHONE = 2;
-          DEVICE_MODEM = 3;
-          DEVICE_AUDIO = 4;
-          DEVICE_CAR_AUDIO = 5;
-          DEVICE_VIDEO = 6;
-          DEVICE_PERIPHERAL = 7;
-          DEVICE_JOYSTICK = 8;
-          DEVICE_GAMEPAD = 9;
-          DEVICE_KEYBOARD = 10;
-          DEVICE_MOUSE = 11;
-          DEVICE_TABLET = 12;
-          DEVICE_KEYBOARD_MOUSE_COMBO = 13;
-        }
-        optional Type type = 2;
-
-        // Vendor prefix of the Bluetooth address, these are OUI registered by
-        // the IEEE and are encoded with the first byte in bits 16-23, the
-        // second byte in bits 8-15 and the third byte in bits 0-7.
-        //
-        // ie. Google's OUI (00:1A:11) is encoded as 0x00001A11
-        optional uint32 vendor_prefix = 4;
-
-        // Vendor ID of the device, where available.
-        optional uint32 vendor_id = 5;
-
-        // Product ID of the device, where available.
-        optional uint32 product_id = 6;
-
-        // Device ID of the device, generally the release or version number in
-        // BCD format, where available.
-        optional uint32 device_id = 7;
-      }
-      repeated PairedDevice paired_device = 3;
-    }
-    optional Bluetooth bluetooth = 11;
   }
   optional Hardware hardware = 6;
-
-  // Information about the network connection.
-  message Network {
-    // Set to true if connection_type changed during the lifetime of the log.
-    optional bool connection_type_is_ambiguous = 1;
-
-    // See net::NetworkChangeNotifier::ConnectionType.
-    enum ConnectionType {
-      CONNECTION_UNKNOWN = 0;
-      CONNECTION_ETHERNET = 1;
-      CONNECTION_WIFI = 2;
-      CONNECTION_2G = 3;
-      CONNECTION_3G = 4;
-      CONNECTION_4G = 5;
-    }
-    // The connection type according to NetworkChangeNotifier.
-    optional ConnectionType connection_type = 2;
-
-    // Set to true if wifi_phy_layer_protocol changed during the lifetime of the log.
-    optional bool wifi_phy_layer_protocol_is_ambiguous = 3;
-
-    // See net::WifiPHYLayerProtocol.
-    enum WifiPHYLayerProtocol {
-      WIFI_PHY_LAYER_PROTOCOL_NONE = 0;
-      WIFI_PHY_LAYER_PROTOCOL_ANCIENT = 1;
-      WIFI_PHY_LAYER_PROTOCOL_A = 2;
-      WIFI_PHY_LAYER_PROTOCOL_B = 3;
-      WIFI_PHY_LAYER_PROTOCOL_G = 4;
-      WIFI_PHY_LAYER_PROTOCOL_N = 5;
-      WIFI_PHY_LAYER_PROTOCOL_UNKNOWN = 6;
-    }
-    // The physical layer mode of the associated wifi access point, if any.
-    optional WifiPHYLayerProtocol wifi_phy_layer_protocol = 4;
-  }
-  optional Network network = 13;
-
-  // Information on the Google Update install that is managing this client.
-  message GoogleUpdate {
-    // Whether the Google Update install is system-level or user-level.
-    optional bool is_system_install = 1;
-
-    // The date at which Google Update last started performing an automatic
-    // update check, in seconds since the Unix epoch.
-    optional int64 last_automatic_start_timestamp = 2;
-
-    // The date at which Google Update last successfully sent an update check
-    // and recieved an intact response from the server, in seconds since the
-    // Unix epoch. (The updates don't need to be successfully installed.)
-    optional int64 last_update_check_timestamp = 3;
-
-    // Describes a product being managed by Google Update. (This can also
-    // describe Google Update itself.)
-    message ProductInfo {
-      // The current version of the product that is installed.
-      optional string version = 1;
-
-      // The date at which Google Update successfully updated this product,
-      // stored in seconds since the Unix epoch.  This is updated when an update
-      // is successfully applied, or if the server reports that no update
-      // is available.
-      optional int64 last_update_success_timestamp = 2;
-
-      // The result reported by the product updater on its last run.
-      enum InstallResult {
-        INSTALL_RESULT_SUCCESS = 0;
-        INSTALL_RESULT_FAILED_CUSTOM_ERROR = 1;
-        INSTALL_RESULT_FAILED_MSI_ERROR = 2;
-        INSTALL_RESULT_FAILED_SYSTEM_ERROR = 3;
-        INSTALL_RESULT_EXIT_CODE = 4;
-      }
-      optional InstallResult last_result = 3;
-
-      // The error code reported by the product updater on its last run.  This
-      // will typically be a error code specific to the product installer.
-      optional int32 last_error = 4;
-
-      // The extra error code reported by the product updater on its last run.
-      // This will typically be a Win32 error code.
-      optional int32 last_extra_error = 5;
-    }
-    optional ProductInfo google_update_status = 4;
-    optional ProductInfo client_status = 5;
-  }
-  optional GoogleUpdate google_update = 11;
 
   // Information on all installed plugins.
   message Plugin {
@@ -319,9 +129,6 @@ message SystemProfileProto {
     // If a client has multiple local Chrome user accounts, this is logged based
     // on the first user account launched during the current session.
     optional bool is_disabled = 4;
-
-    // True if the plugin is PPAPI.
-    optional bool is_pepper = 5;
   }
   repeated Plugin plugin = 7;
 
@@ -415,31 +222,8 @@ message SystemProfileProto {
       // The number of times this plugin process crashed.
       // This value will be <= |launch_count|.
       optional int32 crash_count = 4;
-
-      // The number of times this plugin could not be loaded.
-      optional int32 loading_error_count = 5;
     }
     repeated PluginStability plugin_stability = 22;
   }
   optional Stability stability = 8;
-
-  // Description of a field trial or experiment that the user is currently
-  // enrolled in.
-  // All metrics reported in this upload can potentially be influenced by the
-  // field trial.
-  message FieldTrial {
-    // The name of the field trial, as a 32-bit identifier.
-    // Currently, the identifier is a hash of the field trial's name.
-    optional fixed32 name_id = 1;
-
-    // The user's group within the field trial, as a 32-bit identifier.
-    // Currently, the identifier is a hash of the group's name.
-    optional fixed32 group_id = 2;
-  }
-  repeated FieldTrial field_trial = 9;
-
-  // Number of users currently signed into a multiprofile session.
-  // A zero value indicates that the user count changed while the log is open.
-  // Logged only on ChromeOS.
-  optional uint32 multi_profile_user_count = 17;
 }

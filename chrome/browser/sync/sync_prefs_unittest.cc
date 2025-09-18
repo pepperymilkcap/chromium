@@ -1,16 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/sync_prefs.h"
 
-#include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
-#include "base/time/time.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service_syncable.h"
-#include "sync/internal_api/public/base/model_type.h"
+#include "base/message_loop.h"
+#include "base/time.h"
+#include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,15 +20,27 @@ using ::testing::StrictMock;
 
 class SyncPrefsTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
-    SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
-  }
-
-  TestingPrefServiceSyncable pref_service_;
+  TestingPrefService pref_service_;
 
  private:
-  base::MessageLoop loop_;
+  MessageLoop loop_;
 };
+
+// Get all types with a user-facing component.
+syncable::ModelTypeSet GetNonPassiveTypes() {
+  syncable::ModelTypeSet non_passive_types = syncable::ModelTypeSet::All();
+  non_passive_types.Remove(syncable::NIGORI);
+  return non_passive_types;
+}
+
+// Returns all types visible from the setup UI.
+syncable::ModelTypeSet GetUserVisibleTypes() {
+  syncable::ModelTypeSet user_visible_types(GetNonPassiveTypes());
+  user_visible_types.Remove(syncable::AUTOFILL_PROFILE);
+  user_visible_types.Remove(syncable::SEARCH_ENGINES);
+  user_visible_types.Remove(syncable::APP_NOTIFICATIONS);
+  return user_visible_types;
+}
 
 TEST_F(SyncPrefsTest, Basic) {
   SyncPrefs sync_prefs(&pref_service_);
@@ -62,65 +71,22 @@ TEST_F(SyncPrefsTest, Basic) {
   EXPECT_EQ("token", sync_prefs.GetEncryptionBootstrapToken());
 }
 
-TEST_F(SyncPrefsTest, DefaultTypes) {
-  SyncPrefs sync_prefs(&pref_service_);
-  sync_prefs.SetKeepEverythingSynced(false);
-
-  // Only bookmarks are enabled by default.
-  syncer::ModelTypeSet preferred_types = sync_prefs.GetPreferredDataTypes(
-      syncer::UserTypes());
-  EXPECT_TRUE(preferred_types.Equals(syncer::ModelTypeSet(syncer::BOOKMARKS)));
-
-  // Simulate an upgrade to delete directives + proxy tabs support. None of the
-  // new types or their pref group types should be registering, ensuring they
-  // don't have pref values.
-  syncer::ModelTypeSet registered_types = syncer::UserTypes();
-  registered_types.Remove(syncer::PROXY_TABS);
-  registered_types.Remove(syncer::TYPED_URLS);
-  registered_types.Remove(syncer::SESSIONS);
-  registered_types.Remove(syncer::HISTORY_DELETE_DIRECTIVES);
-
-  // Enable all other types.
-  sync_prefs.SetPreferredDataTypes(registered_types,
-                                   registered_types);
-
-  // Manually enable typed urls (to simulate the old world).
-  pref_service_.SetBoolean(prefs::kSyncTypedUrls, true);
-
-  // Proxy tabs should not be enabled (since sessions wasn't), but history
-  // delete directives should (since typed urls was).
-  preferred_types =
-      sync_prefs.GetPreferredDataTypes(syncer::UserTypes());
-  EXPECT_FALSE(preferred_types.Has(syncer::PROXY_TABS));
-  EXPECT_TRUE(preferred_types.Has(syncer::HISTORY_DELETE_DIRECTIVES));
-
-  // Now manually enable sessions, which should result in proxy tabs also being
-  // enabled. Also, manually disable typed urls, which should mean that history
-  // delete directives are not enabled.
-  pref_service_.SetBoolean(prefs::kSyncTypedUrls, false);
-  pref_service_.SetBoolean(prefs::kSyncSessions, true);
-  preferred_types =
-      sync_prefs.GetPreferredDataTypes(syncer::UserTypes());
-  EXPECT_TRUE(preferred_types.Has(syncer::PROXY_TABS));
-  EXPECT_FALSE(preferred_types.Has(syncer::HISTORY_DELETE_DIRECTIVES));
-}
-
 TEST_F(SyncPrefsTest, PreferredTypesKeepEverythingSynced) {
   SyncPrefs sync_prefs(&pref_service_);
 
   EXPECT_TRUE(sync_prefs.HasKeepEverythingSynced());
 
-  const syncer::ModelTypeSet user_types = syncer::UserTypes();
-  EXPECT_TRUE(user_types.Equals(
-      sync_prefs.GetPreferredDataTypes(user_types)));
-  const syncer::ModelTypeSet user_visible_types = syncer::UserSelectableTypes();
-  for (syncer::ModelTypeSet::Iterator it = user_visible_types.First();
+  const syncable::ModelTypeSet non_passive_types = GetNonPassiveTypes();
+  EXPECT_TRUE(non_passive_types.Equals(
+      sync_prefs.GetPreferredDataTypes(non_passive_types)));
+  const syncable::ModelTypeSet user_visible_types = GetUserVisibleTypes();
+  for (syncable::ModelTypeSet::Iterator it = user_visible_types.First();
        it.Good(); it.Inc()) {
-    syncer::ModelTypeSet preferred_types;
+    syncable::ModelTypeSet preferred_types;
     preferred_types.Put(it.Get());
-    sync_prefs.SetPreferredDataTypes(user_types, preferred_types);
-    EXPECT_TRUE(user_types.Equals(
-        sync_prefs.GetPreferredDataTypes(user_types)));
+    sync_prefs.SetPreferredDataTypes(non_passive_types, preferred_types);
+    EXPECT_TRUE(non_passive_types.Equals(
+        sync_prefs.GetPreferredDataTypes(non_passive_types)));
   }
 }
 
@@ -129,46 +95,51 @@ TEST_F(SyncPrefsTest, PreferredTypesNotKeepEverythingSynced) {
 
   sync_prefs.SetKeepEverythingSynced(false);
 
-  const syncer::ModelTypeSet user_types = syncer::UserTypes();
-  EXPECT_FALSE(user_types.Equals(
-      sync_prefs.GetPreferredDataTypes(user_types)));
-  const syncer::ModelTypeSet user_visible_types = syncer::UserSelectableTypes();
-  for (syncer::ModelTypeSet::Iterator it = user_visible_types.First();
+  const syncable::ModelTypeSet non_passive_types = GetNonPassiveTypes();
+  EXPECT_TRUE(non_passive_types.Equals(
+      sync_prefs.GetPreferredDataTypes(non_passive_types)));
+  const syncable::ModelTypeSet user_visible_types = GetUserVisibleTypes();
+  for (syncable::ModelTypeSet::Iterator it = user_visible_types.First();
        it.Good(); it.Inc()) {
-    syncer::ModelTypeSet preferred_types;
+    syncable::ModelTypeSet preferred_types;
     preferred_types.Put(it.Get());
-    syncer::ModelTypeSet expected_preferred_types(preferred_types);
-    if (it.Get() == syncer::AUTOFILL) {
-      expected_preferred_types.Put(syncer::AUTOFILL_PROFILE);
+    syncable::ModelTypeSet expected_preferred_types(preferred_types);
+    if (it.Get() == syncable::AUTOFILL) {
+      expected_preferred_types.Put(syncable::AUTOFILL_PROFILE);
     }
-    if (it.Get() == syncer::PREFERENCES) {
-      expected_preferred_types.Put(syncer::DICTIONARY);
-      expected_preferred_types.Put(syncer::PRIORITY_PREFERENCES);
-      expected_preferred_types.Put(syncer::SEARCH_ENGINES);
+    if (it.Get() == syncable::PREFERENCES) {
+      expected_preferred_types.Put(syncable::SEARCH_ENGINES);
     }
-    if (it.Get() == syncer::APPS) {
-      expected_preferred_types.Put(syncer::APP_LIST);
-      expected_preferred_types.Put(syncer::APP_NOTIFICATIONS);
-      expected_preferred_types.Put(syncer::APP_SETTINGS);
+    if (it.Get() == syncable::APPS) {
+      expected_preferred_types.Put(syncable::APP_NOTIFICATIONS);
     }
-    if (it.Get() == syncer::EXTENSIONS) {
-      expected_preferred_types.Put(syncer::EXTENSION_SETTINGS);
-    }
-    if (it.Get() == syncer::TYPED_URLS) {
-      expected_preferred_types.Put(syncer::HISTORY_DELETE_DIRECTIVES);
-      expected_preferred_types.Put(syncer::SESSIONS);
-      expected_preferred_types.Put(syncer::FAVICON_IMAGES);
-      expected_preferred_types.Put(syncer::FAVICON_TRACKING);
-    }
-    if (it.Get() == syncer::PROXY_TABS) {
-      expected_preferred_types.Put(syncer::SESSIONS);
-      expected_preferred_types.Put(syncer::FAVICON_IMAGES);
-      expected_preferred_types.Put(syncer::FAVICON_TRACKING);
-    }
-    sync_prefs.SetPreferredDataTypes(user_types, preferred_types);
+    sync_prefs.SetPreferredDataTypes(non_passive_types, preferred_types);
     EXPECT_TRUE(expected_preferred_types.Equals(
-        sync_prefs.GetPreferredDataTypes(user_types)));
+        sync_prefs.GetPreferredDataTypes(non_passive_types)));
   }
+}
+
+TEST_F(SyncPrefsTest, MaxInvalidationVersions) {
+  SyncPrefs sync_prefs(&pref_service_);
+
+  sync_notifier::InvalidationVersionMap expected_max_versions;
+  EXPECT_EQ(expected_max_versions, sync_prefs.GetAllMaxVersions());
+
+  expected_max_versions[syncable::BOOKMARKS] = 2;
+  sync_prefs.SetMaxVersion(syncable::BOOKMARKS, 2);
+  EXPECT_EQ(expected_max_versions, sync_prefs.GetAllMaxVersions());
+
+  expected_max_versions[syncable::PREFERENCES] = 5;
+  sync_prefs.SetMaxVersion(syncable::PREFERENCES, 5);
+  EXPECT_EQ(expected_max_versions, sync_prefs.GetAllMaxVersions());
+
+  expected_max_versions[syncable::APP_NOTIFICATIONS] = 3;
+  sync_prefs.SetMaxVersion(syncable::APP_NOTIFICATIONS, 3);
+  EXPECT_EQ(expected_max_versions, sync_prefs.GetAllMaxVersions());
+
+  expected_max_versions[syncable::APP_NOTIFICATIONS] = 4;
+  sync_prefs.SetMaxVersion(syncable::APP_NOTIFICATIONS, 4);
+  EXPECT_EQ(expected_max_versions, sync_prefs.GetAllMaxVersions());
 }
 
 class MockSyncPrefObserver : public SyncPrefObserver {
@@ -199,11 +170,12 @@ TEST_F(SyncPrefsTest, ObservedPrefs) {
 TEST_F(SyncPrefsTest, AcknowledgeSyncedTypes) {
   SyncPrefs sync_prefs(&pref_service_);
 
-  syncer::ModelTypeSet expected_acknowledge_synced_types =
+  syncable::ModelTypeSet expected_acknowledge_synced_types =
       sync_prefs.GetAcknowledgeSyncedTypesForTest();
-  for (int i = syncer::EXTENSION_SETTINGS; i < syncer::MODEL_TYPE_COUNT; ++i) {
-    const syncer::ModelType type = syncer::ModelTypeFromInt(i);
-    syncer::ModelTypeSet acknowledge_synced_types(type);
+  for (int i = syncable::EXTENSION_SETTINGS;
+       i < syncable::MODEL_TYPE_COUNT; ++i) {
+    const syncable::ModelType type = syncable::ModelTypeFromInt(i);
+    syncable::ModelTypeSet acknowledge_synced_types(type);
     expected_acknowledge_synced_types.Put(type);
     sync_prefs.AcknowledgeSyncedTypes(acknowledge_synced_types);
     EXPECT_TRUE(expected_acknowledge_synced_types.Equals(
@@ -217,6 +189,7 @@ TEST_F(SyncPrefsTest, ClearPreferences) {
   EXPECT_FALSE(sync_prefs.HasSyncSetupCompleted());
   EXPECT_EQ(base::Time(), sync_prefs.GetLastSyncedTime());
   EXPECT_TRUE(sync_prefs.GetEncryptionBootstrapToken().empty());
+  EXPECT_TRUE(sync_prefs.GetAllMaxVersions().empty());
 
   sync_prefs.SetSyncSetupCompleted();
   sync_prefs.SetLastSyncedTime(base::Time::Now());
@@ -225,12 +198,33 @@ TEST_F(SyncPrefsTest, ClearPreferences) {
   EXPECT_TRUE(sync_prefs.HasSyncSetupCompleted());
   EXPECT_NE(base::Time(), sync_prefs.GetLastSyncedTime());
   EXPECT_EQ("token", sync_prefs.GetEncryptionBootstrapToken());
+  {
+    sync_notifier::InvalidationVersionMap expected_max_versions;
+    expected_max_versions[syncable::APP_NOTIFICATIONS] = 3;
+    sync_prefs.SetMaxVersion(syncable::APP_NOTIFICATIONS, 3);
+    EXPECT_EQ(expected_max_versions, sync_prefs.GetAllMaxVersions());
+  }
 
   sync_prefs.ClearPreferences();
 
   EXPECT_FALSE(sync_prefs.HasSyncSetupCompleted());
   EXPECT_EQ(base::Time(), sync_prefs.GetLastSyncedTime());
   EXPECT_TRUE(sync_prefs.GetEncryptionBootstrapToken().empty());
+  EXPECT_TRUE(sync_prefs.GetAllMaxVersions().empty());
+}
+
+TEST_F(SyncPrefsTest, NullPrefService) {
+  SyncPrefs sync_prefs(NULL);
+
+  EXPECT_FALSE(sync_prefs.HasSyncSetupCompleted());
+  EXPECT_FALSE(sync_prefs.IsStartSuppressed());
+  EXPECT_EQ(base::Time(), sync_prefs.GetLastSyncedTime());
+  EXPECT_FALSE(sync_prefs.HasKeepEverythingSynced());
+  const syncable::ModelTypeSet non_passive_types = GetNonPassiveTypes();
+  EXPECT_TRUE(sync_prefs.GetPreferredDataTypes(non_passive_types).Empty());
+  EXPECT_FALSE(sync_prefs.IsManaged());
+  EXPECT_TRUE(sync_prefs.GetEncryptionBootstrapToken().empty());
+  EXPECT_TRUE(sync_prefs.GetAllMaxVersions().empty());
 }
 
 }  // namespace

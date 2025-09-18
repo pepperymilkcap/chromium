@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_TABS_DRAGGED_TAB_CONTROLLER_GTK_H_
 #define CHROME_BROWSER_UI_GTK_TABS_DRAGGED_TAB_CONTROLLER_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -13,7 +14,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "chrome/browser/ui/gtk/tabs/drag_data.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
 #include "content/public/browser/notification_observer.h"
@@ -25,6 +26,7 @@ class DraggedViewGtk;
 class TabGtk;
 class TabStripGtk;
 class TabStripModel;
+class TabContentsWrapper;
 
 class DraggedTabControllerGtk : public content::NotificationObserver,
                                 public content::WebContentsDelegate {
@@ -61,8 +63,8 @@ class DraggedTabControllerGtk : public content::NotificationObserver,
   // Returns true if |tab| matches any tab being dragged.
   bool IsDraggingTab(const TabGtk* tab);
 
-  // Returns true if |web_contents| matches any tab contents being dragged.
-  bool IsDraggingWebContents(const content::WebContents* web_contents);
+  // Returns true if |tab_contents| matches any tab contents being dragged.
+  bool IsDraggingTabContents(const TabContentsWrapper* tab_contents);
 
   // Returns true if the specified tab is detached.
   bool IsTabDetached(const TabGtk* tab);
@@ -92,15 +94,10 @@ class DraggedTabControllerGtk : public content::NotificationObserver,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
+                              bool user_gesture) OVERRIDE;
   virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
-  virtual content::JavaScriptDialogManager*
-      GetJavaScriptDialogManager() OVERRIDE;
-  virtual void RequestMediaAccessPermission(
-      content::WebContents* web_contents,
-      const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) OVERRIDE;
+  virtual content::JavaScriptDialogCreator*
+      GetJavaScriptDialogCreator() OVERRIDE;
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -147,7 +144,7 @@ class DraggedTabControllerGtk : public content::NotificationObserver,
   // TabStrip, given location of the dragged tab in screen coordinates.
   gfx::Rect GetDraggedViewTabStripBounds(const gfx::Point& screen_point);
 
-  // Returns the index where the dragged WebContents should be inserted into
+  // Returns the index where the dragged TabContents should be inserted into
   // the attached TabStripModel given the DraggedTabView's bounds
   // |dragged_bounds| in coordinates relative to the attached TabStrip.
   int GetInsertionIndexForDraggedBounds(const gfx::Rect& dragged_bounds);
@@ -157,12 +154,12 @@ class DraggedTabControllerGtk : public content::NotificationObserver,
   gfx::Point GetDraggedViewPoint(const gfx::Point& screen_point);
 
   // Finds the Tab within the specified TabStrip that corresponds to the
-  // dragged WebContents.
+  // dragged TabContents.
   TabGtk* GetTabMatchingDraggedContents(TabStripGtk* tabstrip,
-                                        content::WebContents* contents);
+                                        TabContentsWrapper* contents);
 
   // Finds all the tabs within the specified TabStrip that correspond to the
-  // dragged WebContents.
+  // dragged TabContents.
   std::vector<TabGtk*> GetTabsMatchingDraggedContents(TabStripGtk* tabstrip);
 
   // Sets the visible and draggging property of all dragged tabs. If |repaint|
@@ -180,7 +177,7 @@ class DraggedTabControllerGtk : public content::NotificationObserver,
   // be destroyed immediately, false otherwise.
   bool CompleteDrag();
 
-  // Resets the delegates of the WebContents.
+  // Resets the delegates of the TabContents.
   void ResetDelegates();
 
   // Create the DraggedViewGtk if it does not yet exist.

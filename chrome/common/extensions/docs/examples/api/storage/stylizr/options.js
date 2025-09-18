@@ -2,16 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Store CSS data in the "local" storage area.
-//
-// Usually we try to store settings in the "sync" area since a lot of the time
-// it will be a better user experience for settings to automatically sync
-// between browsers.
-//
-// However, "sync" is expensive with a strict quota (both in storage space and
-// bandwidth) so data that may be as large and updated as frequently as the CSS
-// may not be suitable.
-var storage = chrome.storage.local;
+// Store settings in the synchronized repository.
+var storage = chrome.experimental.storage.sync;
 
 // Get at the DOM controls used in the sample.
 var resetButton = document.querySelector('button.reset');
@@ -41,8 +33,6 @@ function saveChanges() {
 
 function loadChanges() {
   storage.get('css', function(items) {
-    // To avoid checking items.css we could specify storage.get({css: ''}) to
-    // return a default value of '' if there is no css value yet.
     if (items.css) {
       textarea.value = items.css;
       message('Loaded saved CSS.');
@@ -51,8 +41,7 @@ function loadChanges() {
 }
 
 function reset() {
-  // Remove the saved value from storage. storage.clear would achieve the same
-  // thing.
+  // Remove the saved value from storage
   storage.remove('css', function(items) {
     message('Reset stored CSS');
   });

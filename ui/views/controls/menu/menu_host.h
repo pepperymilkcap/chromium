@@ -1,12 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_HOST_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_HOST_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "ui/gfx/rect.h"
+#include "ui/views/controls/menu/native_menu_host_delegate.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -29,7 +31,6 @@ class MenuHost : public Widget {
   virtual ~MenuHost();
 
   // Initializes and shows the MenuHost.
-  // WARNING: |parent| may be NULL.
   void InitMenuHost(Widget* parent,
                     const gfx::Rect& bounds,
                     View* contents_view,
@@ -57,9 +58,9 @@ class MenuHost : public Widget {
  private:
   // Overridden from Widget:
   virtual internal::RootView* CreateRootView() OVERRIDE;
+  virtual bool ShouldReleaseCaptureOnMouseReleased() const OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
   virtual void OnNativeWidgetDestroyed() OVERRIDE;
-  virtual void OnOwnerClosing() OVERRIDE;
 
   // The view we contain.
   SubmenuView* submenu_;

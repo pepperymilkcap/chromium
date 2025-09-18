@@ -1,7 +1,3 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
-
 {
   'variables': {
     'chromium_code': 1,
@@ -42,18 +38,8 @@
       'targets': [{
         'target_name': 'ui_unittest_strings',
         'type': 'none',
-        'dependencies': [
-          'ui_strings',
-        ],
         'variables': {
           'repack_path': '<(DEPTH)/tools/grit/grit/format/repack.py',
-          'conditions': [
-            ['OS == "ios"', {
-              'pak_output': '<(PRODUCT_DIR)/ui_unittests_strings/en.lproj/locale.pak',
-            }, {
-              'pak_output': '<(PRODUCT_DIR)/ui_unittests_strings/en-US.pak',
-            }],
-          ],
         },
         'actions': [
           {
@@ -69,7 +55,7 @@
               '<@(pak_inputs)',
             ],
             'outputs': [
-              '<(pak_output)',
+              '<(PRODUCT_DIR)/ui_unittests_strings/en-US.pak',
             ],
             'action': ['python', '<(repack_path)', '<@(_outputs)',
                        '<@(pak_inputs)'],
@@ -79,7 +65,7 @@
           {
             'destination': '<(PRODUCT_DIR)/ui_unittests_strings',
             'files': [
-              '<(grit_base_out_dir)/ui_resources/ui_resources_100_percent.pak',
+              '<(grit_base_out_dir)/ui_resources/ui_resources.pak',
             ],
           },
         ],

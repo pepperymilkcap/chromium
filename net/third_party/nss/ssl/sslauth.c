@@ -1,13 +1,45 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* ***** BEGIN LICENSE BLOCK *****
+ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+ *
+ * The contents of this file are subject to the Mozilla Public License Version
+ * 1.1 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ * http://www.mozilla.org/MPL/
+ *
+ * Software distributed under the License is distributed on an "AS IS" basis,
+ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+ * for the specific language governing rights and limitations under the
+ * License.
+ *
+ * The Original Code is the Netscape security libraries.
+ *
+ * The Initial Developer of the Original Code is
+ * Netscape Communications Corporation.
+ * Portions created by the Initial Developer are Copyright (C) 1994-2000
+ * the Initial Developer. All Rights Reserved.
+ *
+ * Contributor(s):
+ *
+ * Alternatively, the contents of this file may be used under the terms of
+ * either the GNU General Public License Version 2 or later (the "GPL"), or
+ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+ * in which case the provisions of the GPL or the LGPL are applicable instead
+ * of those above. If you wish to allow use of your version of this file only
+ * under the terms of either the GPL or the LGPL, and not to allow others to
+ * use your version of this file under the terms of the MPL, indicate your
+ * decision by deleting the provisions above and replace them with the notice
+ * and other provisions required by the GPL or the LGPL. If you do not delete
+ * the provisions above, a recipient may use your version of this file under
+ * the terms of any one of the MPL, the GPL or the LGPL.
+ *
+ * ***** END LICENSE BLOCK ***** */
+/* $Id: sslauth.c,v 1.16.66.1 2010/08/03 18:52:13 wtc%google.com Exp $ */
 #include "cert.h"
 #include "secitem.h"
 #include "ssl.h"
 #include "sslimpl.h"
 #include "sslproto.h"
 #include "pk11func.h"
-#include "ocsp.h"
 
 /* NEED LOCKS IN HERE.  */
 CERTCertificate *
@@ -28,43 +60,79 @@ SSL_PeerCertificate(PRFileDesc *fd)
 }
 
 /* NEED LOCKS IN HERE.  */
-CERTCertList *
-SSL_PeerCertificateChain(PRFileDesc *fd)
+SECStatus
+SSL_PeerCertificateChain(PRFileDesc *fd, CERTCertificate **certs,
+			 unsigned int *certsSize)
 {
     sslSocket *ss;
-    CERTCertList *chain = NULL;
-    CERTCertificate *cert;
-    ssl3CertNode *cur;
+    unsigned int inSize = *certsSize;
+    ssl3CertNode* cur;
 
     ss = ssl_FindSocket(fd);
     if (!ss) {
 	SSL_DBG(("%d: SSL[%d]: bad socket in PeerCertificateChain",
 		 SSL_GETPID(), fd));
-	return NULL;
+	return SECFailure;
     }
-    if (!ss->opt.useSecurity || !ss->sec.peerCert) {
-	PORT_SetError(SSL_ERROR_NO_CERTIFICATE);
-	return NULL;
-    }
-    chain = CERT_NewCertList();
-    if (!chain) {
-	return NULL;
-    }
-    cert = CERT_DupCertificate(ss->sec.peerCert);
-    if (CERT_AddCertToListTail(chain, cert) != SECSuccess) {
-	goto loser;
-    }
-    for (cur = ss->ssl3.peerCertChain; cur; cur = cur->next) {
-	cert = CERT_DupCertificate(cur->cert);
-	if (CERT_AddCertToListTail(chain, cert) != SECSuccess) {
-	    goto loser;
-	}
-    }
-    return chain;
+    if (!ss->opt.useSecurity)
+	return SECFailure;
 
-loser:
-    CERT_DestroyCertList(chain);
-    return NULL;
+    if (ss->sec.peerCert == NULL) {
+      *certsSize = 0;
+      return SECSuccess;
+    }
+
+    *certsSize = 1;  /* for the leaf certificate */
+    if (inSize > 0)
+	certs[0] = CERT_DupCertificate(ss->sec.peerCert);
+
+    for (cur = ss->ssl3.peerCertChain; cur; cur = cur->next) {
+	if (*certsSize < inSize)
+	    certs[*certsSize] = CERT_DupCertificate(cur->cert);
+	(*certsSize)++;
+    }
+
+    return SECSuccess;
+}
+
+SECStatus
+SSL_SetPredictedPeerCertificates(PRFileDesc *fd, CERTCertificate **certs,
+				 unsigned int numCerts)
+{
+    sslSocket *ss;
+    unsigned int i;
+
+    ss = ssl_FindSocket(fd);
+    if (!ss) {
+	SSL_DBG(("%d: SSL[%d]: bad socket in SSL_SetPredictedPeerCertificates",
+		 SSL_GETPID(), fd));
+	return SECFailure;
+    }
+
+    ss->ssl3.predictedCertChain =
+	PORT_NewArray(CERTCertificate*, numCerts + 1);
+    if (!ss->ssl3.predictedCertChain)
+	return SECFailure;	/* error code was set */
+    for (i = 0; i < numCerts; i++)
+	ss->ssl3.predictedCertChain[i] = CERT_DupCertificate(certs[i]);
+    ss->ssl3.predictedCertChain[numCerts] = NULL;
+
+    return SECSuccess;
+}
+
+PRBool
+SSL_CertChainDigestReceived(PRFileDesc *fd)
+{
+    sslSocket *ss;
+
+    ss = ssl_FindSocket(fd);
+    if (!ss) {
+	SSL_DBG(("%d: SSL[%d]: bad socket in SSL_CertChainDigestReceived",
+		 SSL_GETPID(), fd));
+	return SECFailure;
+    }
+
+    return ss->ssl3.cachedInfoCertChainDigestReceived;
 }
 
 /* NEED LOCKS IN HERE.  */
@@ -100,6 +168,7 @@ SSL_SecurityStatus(PRFileDesc *fd, int *op, char **cp, int *kp0, int *kp1,
     sslSocket *ss;
     const char *cipherName;
     PRBool isDes = PR_FALSE;
+    PRBool enoughFirstHsDone = PR_FALSE;
 
     ss = ssl_FindSocket(fd);
     if (!ss) {
@@ -117,7 +186,14 @@ SSL_SecurityStatus(PRFileDesc *fd, int *op, char **cp, int *kp0, int *kp1,
 	*op = SSL_SECURITY_STATUS_OFF;
     }
 
-    if (ss->opt.useSecurity && ss->enoughFirstHsDone) {
+    if (ss->firstHsDone) {
+	enoughFirstHsDone = PR_TRUE;
+    } else if (ss->version >= SSL_LIBRARY_VERSION_3_0 &&
+	       ssl3_CanFalseStart(ss)) {
+	enoughFirstHsDone = PR_TRUE;
+    }
+
+    if (ss->opt.useSecurity && enoughFirstHsDone) {
 	if (ss->version < SSL_LIBRARY_VERSION_3_0) {
 	    cipherName = ssl_cipherName[ss->sec.cipherType];
 	} else {
@@ -216,24 +292,6 @@ SSL_GetClientAuthDataHook(PRFileDesc *s, SSLGetClientAuthData func,
     return SECSuccess;
 }
 
-SECStatus
-SSL_SetClientChannelIDCallback(PRFileDesc *fd,
-			       SSLClientChannelIDCallback callback,
-			       void *arg) {
-    sslSocket *ss = ssl_FindSocket(fd);
-
-    if (!ss) {
-	SSL_DBG(("%d: SSL[%d]: bad socket in SSL_SetClientChannelIDCallback",
-		 SSL_GETPID(), fd));
-	return SECFailure;
-    }
-
-    ss->getChannelID = callback;
-    ss->getChannelIDArg = arg;
-
-    return SECSuccess;
-}
-
 #ifdef NSS_PLATFORM_CLIENT_AUTH
 /* NEED LOCKS IN HERE.  */
 SECStatus 
@@ -285,9 +343,7 @@ SSL_AuthCertificate(void *arg, PRFileDesc *fd, PRBool checkSig, PRBool isServer)
     CERTCertDBHandle * handle;
     sslSocket *        ss;
     SECCertUsage       certUsage;
-    const char *       hostname    = NULL;
-    PRTime             now = PR_Now();
-    SECItemArray *     certStatusArray;
+    const char *             hostname    = NULL;
     
     ss = ssl_FindSocket(fd);
     PORT_Assert(ss != NULL);
@@ -296,19 +352,12 @@ SSL_AuthCertificate(void *arg, PRFileDesc *fd, PRBool checkSig, PRBool isServer)
     }
 
     handle = (CERTCertDBHandle *)arg;
-    certStatusArray = &ss->sec.ci.sid->peerCertStatus;
-
-    if (certStatusArray->len) {
-        CERT_CacheOCSPResponseFromSideChannel(handle, ss->sec.peerCert,
-					now, &certStatusArray->items[0],
-					ss->pkcs11PinArg);
-    }
 
     /* this may seem backwards, but isn't. */
     certUsage = isServer ? certUsageSSLClient : certUsageSSLServer;
 
-    rv = CERT_VerifyCert(handle, ss->sec.peerCert, checkSig, certUsage,
-			 now, ss->pkcs11PinArg, NULL);
+    rv = CERT_VerifyCertNow(handle, ss->sec.peerCert, checkSig, certUsage,
+			    ss->pkcs11PinArg);
 
     if ( rv != SECSuccess || isServer )
 	return rv;

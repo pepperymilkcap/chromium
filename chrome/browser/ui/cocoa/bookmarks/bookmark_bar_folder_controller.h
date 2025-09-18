@@ -4,34 +4,34 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_FOLDER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_FOLDER_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
-#import "ui/base/cocoa/tracking_area.h"
-
-class Profile;
+#import "chrome/browser/ui/cocoa/tracking_area.h"
 
 @class BookmarkBarController;
 @class BookmarkBarFolderView;
+@class BookmarkFolderTarget;
 @class BookmarkBarFolderHoverState;
 @class BookmarkBarFolderWindow;
 @class BookmarkBarFolderWindowContentView;
-@class BookmarkFolderTarget;
 
 // A controller for the pop-up windows from bookmark folder buttons
 // which look sort of like menus.
 @interface BookmarkBarFolderController :
     NSWindowController<BookmarkButtonDelegate,
-                       BookmarkButtonControllerProtocol> {
+                       BookmarkButtonControllerProtocol,
+                       NSUserInterfaceValidations> {
  @private
   // The button whose click opened us.
-  base::scoped_nsobject<BookmarkButton> parentButton_;
+  scoped_nsobject<BookmarkButton> parentButton_;
 
   // Bookmark bar folder controller chains are torn down in two ways:
-  // 1. Clicking "outside" the folder (see use of the NSEvent local event
-  //    monitor in the bookmark bar controller).
+  // 1. Clicking "outside" the folder (see use of
+  // CrApplicationEventHookProtocol in the bookmark bar controller).
   // 2. Engaging a different folder (via hover over or explicit click).
   //
   // In either case, the BookmarkButtonControllerProtocol method
@@ -57,13 +57,13 @@ class Profile;
 
   // Our parent controller, if we are a nested folder, otherwise nil.
   // Strong to insure the object lives as long as we need it.
-  base::scoped_nsobject<BookmarkBarFolderController> parentController_;
+  scoped_nsobject<BookmarkBarFolderController> parentController_;
 
   // The main bar controller from whence we or a parent sprang.
   BookmarkBarController* barController_;  // WEAK: It owns us.
 
   // Our buttons.  We do not have buttons for nested folders.
-  base::scoped_nsobject<NSMutableArray> buttons_;
+  scoped_nsobject<NSMutableArray> buttons_;
 
   // The scroll view that contains our main button view (below).
   IBOutlet NSScrollView* scrollView_;
@@ -99,13 +99,19 @@ class Profile;
   // setShowsBorderOnlyWhileMouseInside bug.
   BookmarkButton* buttonThatMouseIsIn_;
 
+  // The context menu for a bookmark button which represents an URL.
+  IBOutlet NSMenu* buttonMenu_;
+
+  // The context menu for a bookmark button which represents a folder.
+  IBOutlet NSMenu* folderMenu_;
+
   // We model hover state as a state machine with specific allowable
   // transitions.  |hoverState_| is the state of this machine at any
   // given time.
-  base::scoped_nsobject<BookmarkBarFolderHoverState> hoverState_;
+  scoped_nsobject<BookmarkBarFolderHoverState> hoverState_;
 
   // Logic for dealing with a click on a bookmark folder button.
-  base::scoped_nsobject<BookmarkFolderTarget> folderTarget_;
+  scoped_nsobject<BookmarkFolderTarget> folderTarget_;
 
   // A controller for a pop-up bookmark folder window (custom menu).
   // We (self) are the parentController_ for our folderController_.
@@ -114,7 +120,7 @@ class Profile;
   BookmarkBarFolderController* folderController_;
 
   // Implement basic menu scrolling through this tracking area.
-  ui::ScopedCrTrackingArea scrollTrackingArea_;
+  ScopedCrTrackingArea scrollTrackingArea_;
 
   // Timer to continue scrolling as needed.  We own the timer but
   // don't release it when done (we invalidate it).
@@ -136,20 +142,14 @@ class Profile;
   // incomplete animations do not cause valgrind complaints.
   BOOL ignoreAnimations_;
 
-  // The screen to which the menu should be restricted.
-  NSScreen* screen_;
-
   int selectedIndex_;
   NSString* typedPrefix_;
-
-  Profile* profile_;
 }
 
 // Designated initializer.
 - (id)initWithParentButton:(BookmarkButton*)button
           parentController:(BookmarkBarFolderController*)parentController
-             barController:(BookmarkBarController*)barController
-                   profile:(Profile*)profile;
+             barController:(BookmarkBarController*)barController;
 
 // Return the parent button that owns the bookmark folder we represent.
 - (BookmarkButton*)parentButton;
@@ -178,10 +178,29 @@ class Profile;
 // and altering the contents of the off-the-side folder.
 - (void)reconfigureMenu;
 
+// Actions from a context menu over a button or folder.
+- (IBAction)cutBookmark:(id)sender;
+- (IBAction)copyBookmark:(id)sender;
+- (IBAction)pasteBookmark:(id)sender;
+- (IBAction)deleteBookmark:(id)sender;
+
 // Passed up by a child view to tell us of a desire to scroll.
 - (void)scrollWheel:(NSEvent *)theEvent;
 
 - (void)mouseDragged:(NSEvent*)theEvent;
+
+
+// Forwarded to the associated BookmarkBarController.
+- (IBAction)addFolder:(id)sender;
+- (IBAction)addPage:(id)sender;
+- (IBAction)editBookmark:(id)sender;
+- (IBAction)openBookmark:(id)sender;
+- (IBAction)openAllBookmarks:(id)sender;
+- (IBAction)openAllBookmarksIncognitoWindow:(id)sender;
+- (IBAction)openAllBookmarksNewWindow:(id)sender;
+- (IBAction)openBookmarkInIncognitoWindow:(id)sender;
+- (IBAction)openBookmarkInNewForegroundTab:(id)sender;
+- (IBAction)openBookmarkInNewWindow:(id)sender;
 
 @property(assign, nonatomic) BOOL subFolderGrowthToRight;
 
@@ -206,8 +225,6 @@ class Profile;
 - (NSView*)visibleView;
 - (NSScrollView*)scrollView;
 - (NSView*)folderView;
-
-- (IBAction)openBookmarkFolderFromButton:(id)sender;
 
 - (BookmarkButton*)buttonForDroppingOnAtPoint:(NSPoint)point;
 @end

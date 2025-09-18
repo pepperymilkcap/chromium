@@ -5,17 +5,17 @@
 #ifndef CONTENT_BROWSER_GAMEPAD_GAMEPAD_STANDARD_MAPPINGS_H_
 #define CONTENT_BROWSER_GAMEPAD_GAMEPAD_STANDARD_MAPPINGS_H_
 
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 
-namespace blink {
+namespace WebKit {
 class WebGamepad;
 }
 
 namespace content {
 
 typedef void (*GamepadStandardMappingFunction)(
-    const blink::WebGamepad& original,
-    blink::WebGamepad* mapped);
+    const WebKit::WebGamepad& original,
+    WebKit::WebGamepad* mapped);
 
 GamepadStandardMappingFunction GetGamepadStandardMappingFunction(
     const base::StringPiece& vendor_id,

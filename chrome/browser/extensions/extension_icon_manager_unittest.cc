@@ -1,23 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/json/json_file_value_serializer.h"
-#include "base/message_loop/message_loop.h"
+#include "base/json/json_value_serializer.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/id_util.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_resource.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/skia_util.h"
 
 using content::BrowserThread;
-using extensions::Extension;
-using extensions::Manifest;
 
 // Our test class that takes care of managing the necessary threads for loading
 // extension icons, and waiting for those loads to happen.
@@ -35,14 +32,14 @@ class ExtensionIconManagerTest : public testing::Test {
   void ImageLoadObserved() {
     unwaited_image_loads_++;
     if (waiting_) {
-      base::MessageLoop::current()->Quit();
+      MessageLoop::current()->Quit();
     }
   }
 
   void WaitForImageLoad() {
     if (unwaited_image_loads_ == 0) {
       waiting_ = true;
-      base::MessageLoop::current()->Run();
+      MessageLoop::current()->Run();
       waiting_ = false;
     }
     ASSERT_GT(unwaited_image_loads_, 0);
@@ -61,7 +58,7 @@ class ExtensionIconManagerTest : public testing::Test {
   // Whether we are currently waiting for an image load.
   bool waiting_;
 
-  base::MessageLoop ui_loop_;
+  MessageLoop ui_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
   content::TestBrowserThread io_thread_;
@@ -76,11 +73,12 @@ class TestIconManager : public ExtensionIconManager {
   explicit TestIconManager(ExtensionIconManagerTest* test) : test_(test) {}
   virtual ~TestIconManager() {}
 
-  // Overrides the ImageLoader callback, and calls through to the base class'
-  // implementation. Then it lets the test know that an image load was observed.
-  virtual void OnImageLoaded(const std::string& extension_id,
-                             const gfx::Image& image) OVERRIDE {
-    ExtensionIconManager::OnImageLoaded(extension_id, image);
+  // Implements the ImageLoadingTracker::Observer interface, and calls through
+  // to the base class' implementation. Then it lets the test know that an
+  // image load was observed.
+  virtual void OnImageLoaded(SkBitmap* image, const ExtensionResource& resource,
+                             int index) {
+    ExtensionIconManager::OnImageLoaded(image, resource, index);
     test_->ImageLoadObserved();
   }
 
@@ -93,35 +91,35 @@ class TestIconManager : public ExtensionIconManager {
 // Returns the default icon that ExtensionIconManager gives when an extension
 // doesn't have an icon.
 SkBitmap GetDefaultIcon() {
-  std::string dummy_id = extensions::id_util::GenerateId("whatever");
+  std::string dummy_id;
+  EXPECT_TRUE(Extension::GenerateId(std::string("whatever"), &dummy_id));
   ExtensionIconManager manager;
   return manager.GetIcon(dummy_id);
 }
 
 // Tests loading an icon for an extension, removing it, then re-loading it.
 TEST_F(ExtensionIconManagerTest, LoadRemoveLoad) {
-  scoped_ptr<Profile> profile(new TestingProfile());
   SkBitmap default_icon = GetDefaultIcon();
 
-  base::FilePath test_dir;
+  FilePath test_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
-  base::FilePath manifest_path = test_dir.AppendASCII(
+  FilePath manifest_path = test_dir.AppendASCII(
       "extensions/image_loading_tracker/app.json");
 
   JSONFileValueSerializer serializer(manifest_path);
-  scoped_ptr<base::DictionaryValue> manifest(
-      static_cast<base::DictionaryValue*>(serializer.Deserialize(NULL, NULL)));
+  scoped_ptr<DictionaryValue> manifest(
+      static_cast<DictionaryValue*>(serializer.Deserialize(NULL, NULL)));
   ASSERT_TRUE(manifest.get() != NULL);
 
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
-      manifest_path.DirName(), Manifest::INVALID_LOCATION, *manifest.get(),
-      Extension::NO_FLAGS, &error));
+      manifest_path.DirName(), Extension::INVALID, *manifest.get(),
+      Extension::STRICT_ERROR_CHECKS, &error));
   ASSERT_TRUE(extension.get());
   TestIconManager icon_manager(this);
 
   // Load the icon and grab the bitmap.
-  icon_manager.LoadIcon(profile.get(), extension.get());
+  icon_manager.LoadIcon(extension.get());
   WaitForImageLoad();
   SkBitmap first_icon = icon_manager.GetIcon(extension->id());
   EXPECT_FALSE(gfx::BitmapsAreEqual(first_icon, default_icon));
@@ -131,53 +129,10 @@ TEST_F(ExtensionIconManagerTest, LoadRemoveLoad) {
 
   // Now re-load the icon - we should get the same result bitmap (and not the
   // default icon).
-  icon_manager.LoadIcon(profile.get(), extension.get());
+  icon_manager.LoadIcon(extension.get());
   WaitForImageLoad();
   SkBitmap second_icon = icon_manager.GetIcon(extension->id());
   EXPECT_FALSE(gfx::BitmapsAreEqual(second_icon, default_icon));
 
   EXPECT_TRUE(gfx::BitmapsAreEqual(first_icon, second_icon));
 }
-
-#if defined(FILE_MANAGER_EXTENSION)
-// Tests loading an icon for a component extension.
-TEST_F(ExtensionIconManagerTest, LoadComponentExtensionResource) {
-  scoped_ptr<Profile> profile(new TestingProfile());
-  SkBitmap default_icon = GetDefaultIcon();
-
-  base::FilePath test_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
-  base::FilePath manifest_path = test_dir.AppendASCII(
-      "extensions/file_manager/app.json");
-
-  JSONFileValueSerializer serializer(manifest_path);
-  scoped_ptr<base::DictionaryValue> manifest(
-      static_cast<base::DictionaryValue*>(serializer.Deserialize(NULL, NULL)));
-  ASSERT_TRUE(manifest.get() != NULL);
-
-  std::string error;
-  scoped_refptr<Extension> extension(Extension::Create(
-      manifest_path.DirName(), Manifest::COMPONENT, *manifest.get(),
-      Extension::NO_FLAGS, &error));
-  ASSERT_TRUE(extension.get());
-
-  TestIconManager icon_manager(this);
-  // Load the icon and grab the bitmap.
-  icon_manager.LoadIcon(profile.get(), extension.get());
-  WaitForImageLoad();
-  SkBitmap first_icon = icon_manager.GetIcon(extension->id());
-  EXPECT_FALSE(gfx::BitmapsAreEqual(first_icon, default_icon));
-
-  // Remove the icon from the manager.
-  icon_manager.RemoveIcon(extension->id());
-
-  // Now re-load the icon - we should get the same result bitmap (and not the
-  // default icon).
-  icon_manager.LoadIcon(profile.get(), extension.get());
-  WaitForImageLoad();
-  SkBitmap second_icon = icon_manager.GetIcon(extension->id());
-  EXPECT_FALSE(gfx::BitmapsAreEqual(second_icon, default_icon));
-
-  EXPECT_TRUE(gfx::BitmapsAreEqual(first_icon, second_icon));
-}
-#endif

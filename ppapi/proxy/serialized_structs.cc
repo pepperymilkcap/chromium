@@ -1,16 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/serialized_structs.h"
 
-#include "base/pickle.h"
-#include "build/build_config.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_rect.h"
-#include "ppapi/c/trusted/ppb_browser_font_trusted.h"
-#include "ppapi/shared_impl/var.h"
 
 namespace ppapi {
 namespace proxy {
@@ -29,23 +25,13 @@ SerializedFontDescription::SerializedFontDescription()
 SerializedFontDescription::~SerializedFontDescription() {}
 
 void SerializedFontDescription::SetFromPPFontDescription(
-    const PP_FontDescription_Dev& desc) {
-  StringVar* string_var = StringVar::FromPPVar(desc.face);
-  face = string_var ? string_var->value() : std::string();
-
-  family = desc.family;
-  size = desc.size;
-  weight = desc.weight;
-  italic = desc.italic;
-  small_caps = desc.small_caps;
-  letter_spacing = desc.letter_spacing;
-  word_spacing = desc.word_spacing;
-}
-
-void SerializedFontDescription::SetFromPPBrowserFontDescription(
-    const PP_BrowserFont_Trusted_Description& desc) {
-  StringVar* string_var = StringVar::FromPPVar(desc.face);
-  face = string_var ? string_var->value() : std::string();
+    Dispatcher* dispatcher,
+    const PP_FontDescription_Dev& desc,
+    bool source_owns_ref) {
+  if (source_owns_ref)
+    face = SerializedVarSendInput(dispatcher, desc.face);
+  else
+    SerializedVarReturnValue(&face).Return(dispatcher, desc.face);
 
   family = desc.family;
   size = desc.size;
@@ -57,8 +43,17 @@ void SerializedFontDescription::SetFromPPBrowserFontDescription(
 }
 
 void SerializedFontDescription::SetToPPFontDescription(
-    PP_FontDescription_Dev* desc) const {
-  desc->face = StringVar::StringToPPVar(face);
+    Dispatcher* dispatcher,
+    PP_FontDescription_Dev* desc,
+    bool dest_owns_ref) const {
+  if (dest_owns_ref) {
+    ReceiveSerializedVarReturnValue face_return_value;
+    *static_cast<SerializedVar*>(&face_return_value) = face;
+    desc->face = face_return_value.Return(dispatcher);
+  } else {
+    desc->face = SerializedVarReceiveInput(face).Get(dispatcher);
+  }
+
   desc->family = static_cast<PP_FontFamily_Dev>(family);
   desc->size = size;
   desc->weight = static_cast<PP_FontWeight_Dev>(weight);
@@ -66,60 +61,6 @@ void SerializedFontDescription::SetToPPFontDescription(
   desc->small_caps = small_caps;
   desc->letter_spacing = letter_spacing;
   desc->word_spacing = word_spacing;
-}
-
-void SerializedFontDescription::SetToPPBrowserFontDescription(
-    PP_BrowserFont_Trusted_Description* desc) const {
-  desc->face = StringVar::StringToPPVar(face);
-  desc->family = static_cast<PP_BrowserFont_Trusted_Family>(family);
-  desc->size = size;
-  desc->weight = static_cast<PP_BrowserFont_Trusted_Weight>(weight);
-  desc->italic = italic;
-  desc->small_caps = small_caps;
-  desc->letter_spacing = letter_spacing;
-  desc->word_spacing = word_spacing;
-}
-
-SerializedNetworkInfo::SerializedNetworkInfo()
-    : type(PP_NETWORKLIST_TYPE_UNKNOWN),
-      state(PP_NETWORKLIST_STATE_DOWN),
-      mtu(0) {
-}
-
-SerializedNetworkInfo::~SerializedNetworkInfo() {}
-
-SerializedTrueTypeFontDesc::SerializedTrueTypeFontDesc()
-    : family(),
-      generic_family(),
-      style(),
-      weight(),
-      width(),
-      charset() {
-}
-
-SerializedTrueTypeFontDesc::~SerializedTrueTypeFontDesc() {}
-
-void SerializedTrueTypeFontDesc::SetFromPPTrueTypeFontDesc(
-    const PP_TrueTypeFontDesc_Dev& desc) {
-  StringVar* string_var = StringVar::FromPPVar(desc.family);
-  family = string_var ? string_var->value() : std::string();
-
-  generic_family = desc.generic_family;
-  style = desc.style;
-  weight = desc.weight;
-  width = desc.width;
-  charset = desc.charset;
-}
-
-void SerializedTrueTypeFontDesc::CopyToPPTrueTypeFontDesc(
-    PP_TrueTypeFontDesc_Dev* desc) const {
-  desc->family = StringVar::StringToPPVar(family);
-
-  desc->generic_family = generic_family;
-  desc->style = style;
-  desc->weight = weight;
-  desc->width = width;
-  desc->charset = charset;
 }
 
 PPBFlash_DrawGlyphs_Params::PPBFlash_DrawGlyphs_Params()

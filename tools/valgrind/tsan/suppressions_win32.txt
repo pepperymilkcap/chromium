@@ -1,4 +1,22 @@
 ############################
+# Chromium
+
+{
+  Benign race durung InitializeClock
+  ThreadSanitizer:Race
+  ...
+  fun:*InitializeClock*
+}
+
+{
+  bug_62560
+  ThreadSanitizer:Race
+  ...
+  fun:_initterm
+  fun:doexit
+}
+
+############################
 # Reports on the guts of Windows
 {
   UuidCreate
@@ -27,38 +45,11 @@
   ThreadSanitizer:InvalidLock
   fun:unnamedImageEntryPoint
 }
-
 {
   accessing an invalid lock in CoFreeAllLibraries
   ThreadSanitizer:InvalidLock
   fun:CoFreeAllLibraries
 }
-
-{
-  bug_158099_mmdevice_endpoint_shutdown_too_fast
-  ThreadSanitizer:Race
-  fun:GetLocalIdFromEndpointId
-  ...
-}
-
-############################
-# Chromium
-
-{
-  Benign race durung InitializeClock
-  ThreadSanitizer:Race
-  ...
-  fun:*InitializeClock*
-}
-
-{
-  bug_62560
-  ThreadSanitizer:Race
-  ...
-  fun:_initterm
-  fun:doexit
-}
-
 {
   accessing an invalid lock under exit/doexit
   ThreadSanitizer:InvalidLock
@@ -77,19 +68,20 @@
   bug_81793b
   ThreadSanitizer:Race
   ...
-  fun:base::MessageLoop::CalculateDelayedRuntime
-  fun:base::MessageLoop::Post*Task
+  fun:MessageLoop::CalculateDelayedRuntime
+  fun:MessageLoop::Post*Task
 }
 {
   bug_93932a
   ThreadSanitizer:Race
-  fun:avcodec_default_release_buffer
+  fun:avcodec_default_release_buffer 
   fun:ff_mpeg4video_split
 }
 {
   bug_93932b
   ThreadSanitizer:Race
   ...
+  fun:ff_mpeg4video_split
   fun:avcodec_close
   fun:media::FFmpegVideoDecoder::ReleaseFFmpegResources
 }
@@ -116,206 +108,34 @@
   fun:media::FFmpegVideoDecoder::Flush
 }
 {
-  bug_93932g
-  ThreadSanitizer:Race
-  ...
-  fun:av_parser_close
-  ...
-  fun:BaseThreadInitThunk
-}
-{
-  bug_93932h
-  ThreadSanitizer:Race
-  ...
-  fun:av_parser_close
-  ...
-  fun:base::internal::RunnableAdapter::Run
-}
-{
-  bug_93932i
-  ThreadSanitizer:Race
-  fun:ff_simple_idct_add_mmx
-  ...
-  fun:BaseThreadInitThunk
-}
-{
-  bug_144928_a
-  ThreadSanitizer:Race
-  fun:google_breakpad::CrashGenerationServer::Handle*
-  fun:google_breakpad::CrashGenerationServer::OnPipeConnected
-  fun:RtlSetTimer
-  fun:RtlSetTimer
-  fun:TpReleaseTimer
-  fun:TpReleaseTimer
-  fun:RtlMultiByteToUnicodeSize
-  fun:TpCallbackMayRunLong
-  fun:TpCallbackMayRunLong
-  fun:BaseThreadInitThunk
-}
-{
-  bug_144928_b
-  ThreadSanitizer:Race
-  fun:google_breakpad::CrashGenerationServer::~CrashGenerationServer
-  fun:google_breakpad::CrashGenerationServer::`scalar deleting destructor'
-  fun:base::DefaultDeleter*
-  fun:base::internal::scoped_ptr_impl::~scoped_ptr_impl
-  fun:remoting::BreakpadWinDeathTest::~BreakpadWinDeathTest
-  fun:remoting::BreakpadWinDeathTest_TestAccessViolation_Test::`scalar deleting destructor'
-  fun:testing::Test::DeleteSelf_
-  fun:testing::internal::HandleExceptionsInMethodIfSupported
-}
-
-{
-  bug_146119
-  ThreadSanitizer:Race
-  ...
-  fun:GetAdaptersAddresses
-  ...
-  fun:base::internal::RunnableAdapter::Run
-}
-
-{
-  bug_157076_a
-  ThreadSanitizer:Race
-  fun:win32thread_worker
-  fun:_callthreadstartex
-  fun:_threadstartex
-  fun:BaseThreadInitThunk
-}
-
-{
-  bug_157076_b
+  bug_110514_a
   ThreadSanitizer:Race
   fun:memset
-  fun:_free_dbg_nolock
-  fun:_free_dbg
-  fun:_aligned_free_dbg
-  fun:_aligned_free
-}
-
-{
-  bug_157076_c
-  ThreadSanitizer:Race
-  fun:memset
-  fun:_heap_alloc_dbg_impl
-  fun:_nh_malloc_dbg_impl
-  fun:_nh_malloc_dbg
   fun:_malloc_dbg
-  fun:_aligned_offset_malloc_dbg
-  fun:_aligned_malloc
-  fun:base::AlignedAlloc
+  ...
+  fun:??2@YAPAXIABU_DebugHeapTag_t@std@@PADH@Z
+  fun:??0?$basic_streambuf@DU?$char_traits@D@std@@@std@@IAE@XZ
+}
+{
+  bug_110514_b
+  ThreadSanitizer:Race
+  fun:memset
+  fun:_malloc_dbg
+  ...
+  fun:??2@YAPAXIABU_DebugHeapTag_t@std@@PADH@Z
+  fun:?_Init@ios_base@std@@IAEXXZ
+}
+{
+  bug_110514_c
+  ThreadSanitizer:Race
+  fun:memset
+  fun:_free_dbg
+  ...
+  fun:??3@YAXPAX@Z
+  fun:??_V@YAXPAX@Z
+  fun:scoped_array::reset
+  fun:media::DataBuffer::DataBuffer
+  ...
+  fun:media::FFmpegAudioDecoder::DoDecodeBuffer
 }
 
-{
-   bug_170334
-   ThreadSanitizer:Race
-   ...
-   fun:net::NetworkChangeNotifierWinTest::~NetworkChangeNotifierWinTest
-}
-
-{
-  bug_239350
-  ThreadSanitizer:Race
-  ...
-  fun:av_freep
-  fun:av_buffer_unref
-  fun:av_frame_unref
-  ...
-}
-{
-  bug_287796
-  ThreadSanitizer:Race
-  fun:ServerLicensingOpenW
-  fun:NdrPointerFree
-  fun:NdrPointerFree
-  fun:NdrPointerFree
-  fun:NdrPointerFree
-  fun:NdrPointerFree
-  fun:NdrUserMarshalMemorySize
-  fun:NdrPointerFree
-  fun:I_RpcReceive
-  fun:I_RpcReceive
-  fun:I_RpcReceive
-  fun:NdrRpcSsDefaultFree
-  fun:NdrRpcSsDefaultFree
-  fun:NdrOleFree
-  fun:NdrNonEncapsulatedUnionBufferSize
-  fun:NdrNonEncapsulatedUnionBufferSize
-}
-{
-  bug_314654_a
-  ThreadSanitizer:Race
-  ...
-  fun:CoCreateInstanceEx
-  fun:CoCreateInstanceEx
-  fun:CoCreateInstanceEx
-  fun:CoCreateInstance
-  fun:base::win::ScopedComPtr::CreateInstance
-  fun:media::CoreAudioUtil::CreateDeviceEnumerator
-}
-{
-  bug_314654_b
-  ThreadSanitizer:Race
-  fun:.text
-  fun:.text
-  fun:CoSetState
-  fun:CoSetState
-  fun:CoGetComCatalog
-  fun:CoGetComCatalog
-  fun:CoGetComCatalog
-  fun:CoInitializeSecurity
-  fun:CoTaskMemFree
-  fun:CoCreateInstanceEx
-  fun:CoCreateInstanceEx
-  fun:CoCreateInstanceEx
-  fun:CoCreateInstanceEx
-  fun:CoCreateInstanceEx
-  fun:CoCreateInstance
-  fun:base::win::ScopedComPtr::CreateInstance
-}
-{
-  bug_326282
-  ThreadSanitizer:Race
-  ...
-  fun:file_util::OpenFile
-  fun:base::ReadFileToString
-}
-{
-  bug_328521_a
-  ThreadSanitizer:Race
-  fun:PR_Lock
-  fun:pk11_getKeyFromList
-  fun:pk11_CreateSymKey
-  fun:pk11_ImportSymKeyWithTempl
-  fun:PK11_ImportSymKey
-  fun:crypto::HMAC::Init
-  fun:crypto::HMAC::Init
-  fun:crypto::HMAC::Init
-  fun:crypto::HMAC::Init
-  fun:remoting::protocol::AuthenticationMethod::ApplyHashFunction
-  fun:remoting::MakeHostPinHash
-  fun:`anonymous namespace'::VerifyGetPinHashResponse
-  fun:`anonymous namespace'::VerifyGetPinHashResponse
-  fun:`anonymous namespace'::VerifyGetPinHashResponse
-  fun:`anonymous namespace'::VerifyGetPinHashResponse
-  fun:remoting::NativeMessagingHostTest_All_Test::TestBody
-}
-{
-  bug_328521_b
-  ThreadSanitizer:Race
-  fun:PR_Lock
-  fun:sftk_SessionFromHandle
-  fun:NSC_GenerateKeyPair
-  fun:PK11_GenerateKeyPairWithOpFlags
-  fun:PK11_GenerateKeyPairWithFlags
-  fun:PK11_GenerateKeyPair
-  fun:crypto::RSAPrivateKey::CreateWithParams
-  fun:crypto::RSAPrivateKey::CreateWithParams
-  fun:crypto::RSAPrivateKey::Create
-  fun:crypto::RSAPrivateKey::Create
-  fun:remoting::RsaKeyPair::Generate
-  fun:remoting::NativeMessagingHost::ProcessGenerateKeyPair
-  fun:remoting::NativeMessagingHost::ProcessMessage
-  fun:remoting::NativeMessagingHost::ProcessMessage
-  fun:base::internal::RunnableAdapter::Run
-}

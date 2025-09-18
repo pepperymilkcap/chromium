@@ -5,27 +5,24 @@
 #ifndef REMOTING_HOST_CHROMOTING_HOST_H_
 #define REMOTING_HOST_CHROMOTING_HOST_H_
 
-#include <list>
 #include <string>
+#include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/threading/non_thread_safe.h"
 #include "base/threading/thread.h"
-#include "net/base/backoff_entry.h"
+#include "remoting/base/encoder.h"
+#include "remoting/host/capturer.h"
 #include "remoting/host/client_session.h"
-#include "remoting/host/host_status_monitor.h"
+#include "remoting/host/desktop_environment.h"
+#include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_status_observer.h"
+#include "remoting/host/ui_strings.h"
+#include "remoting/jingle_glue/jingle_thread.h"
+#include "remoting/jingle_glue/signal_strategy.h"
 #include "remoting/protocol/authenticator.h"
-#include "remoting/protocol/connection_to_client.h"
-#include "remoting/protocol/pairing_registry.h"
 #include "remoting/protocol/session_manager.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
+#include "remoting/protocol/connection_to_client.h"
 
 namespace remoting {
 
@@ -35,7 +32,11 @@ class SessionConfig;
 class CandidateSessionConfig;
 }  // namespace protocol
 
-class DesktopEnvironmentFactory;
+class Capturer;
+class ChromotingHostContext;
+class DesktopEnvironment;
+class Encoder;
+class ScreenRecorder;
 
 // A class to implement the functionality of a host process.
 //
@@ -47,7 +48,7 @@ class DesktopEnvironmentFactory;
 //
 // 2. We listen for incoming connection using libjingle. We will create
 //    a ConnectionToClient object that wraps around linjingle for transport.
-//    A VideoScheduler is created with an Encoder and a webrtc::ScreenCapturer.
+//    A ScreenRecorder is created with an Encoder and a Capturer.
 //    A ConnectionToClient is added to the ScreenRecorder for transporting
 //    the screen captures. An InputStub is created and registered with the
 //    ConnectionToClient to receive mouse / keyboard events from the remote
@@ -60,38 +61,35 @@ class DesktopEnvironmentFactory;
 //    all pending tasks to complete. After all of that completed we
 //    return to the idle state. We then go to step (2) if there a new
 //    incoming connection.
-class ChromotingHost : public base::NonThreadSafe,
+class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
                        public ClientSession::EventHandler,
-                       public protocol::SessionManager::Listener,
-                       public HostStatusMonitor {
+                       public protocol::SessionManager::Listener {
  public:
-  // Both |signal_strategy| and |desktop_environment_factory| should outlive
-  // this object.
-  ChromotingHost(
-      SignalStrategy* signal_strategy,
-      DesktopEnvironmentFactory* desktop_environment_factory,
-      scoped_ptr<protocol::SessionManager> session_manager,
-      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
-  virtual ~ChromotingHost();
+  // The caller must ensure that |context|, |signal_strategy| and
+  // |environment| out-live the host.
+  ChromotingHost(ChromotingHostContext* context,
+                 SignalStrategy* signal_strategy,
+                 DesktopEnvironment* environment,
+                 const protocol::NetworkSettings& network_settings);
 
-  // Asynchronously starts the host.
+  // Asynchronously start the host process.
   //
   // After this is invoked, the host process will connect to the talk
   // network and start listening for incoming connections.
   //
   // This method can only be called once during the lifetime of this object.
-  void Start(const std::string& host_owner);
+  void Start();
 
-  // HostStatusMonitor interface.
-  virtual void AddStatusObserver(HostStatusObserver* observer) OVERRIDE;
-  virtual void RemoveStatusObserver(HostStatusObserver* observer) OVERRIDE;
+  // Asynchronously shutdown the host process. |shutdown_task| is
+  // called after shutdown is completed.
+  void Shutdown(const base::Closure& shutdown_task);
 
-  // This method may be called only from
+  // Add/Remove |observer| to/from the list of status observers. Both
+  // methods can be called on the network thread only.
+  void AddStatusObserver(HostStatusObserver* observer);
+  void RemoveStatusObserver(HostStatusObserver* observer);
+
+  // This method may be called only form
   // HostStatusObserver::OnClientAuthenticated() to reject the new
   // client.
   void RejectAuthenticatingClient();
@@ -105,26 +103,16 @@ class ChromotingHost : public base::NonThreadSafe,
   void SetAuthenticatorFactory(
       scoped_ptr<protocol::AuthenticatorFactory> authenticator_factory);
 
-  // Enables/disables curtaining when one or more clients are connected.
-  // Takes immediate effect if clients are already connected.
-  void SetEnableCurtaining(bool enable);
-
-  // Sets the maximum duration of any session. By default, a session has no
-  // maximum duration.
-  void SetMaximumSessionDuration(const base::TimeDelta& max_session_duration);
-
   ////////////////////////////////////////////////////////////////////////////
   // ClientSession::EventHandler implementation.
-  virtual bool OnSessionAuthenticated(ClientSession* client) OVERRIDE;
-  virtual void OnSessionChannelsConnected(ClientSession* client) OVERRIDE;
+  virtual void OnSessionAuthenticated(ClientSession* client) OVERRIDE;
   virtual void OnSessionAuthenticationFailed(ClientSession* client) OVERRIDE;
   virtual void OnSessionClosed(ClientSession* session) OVERRIDE;
   virtual void OnSessionSequenceNumber(ClientSession* session,
                                        int64 sequence_number) OVERRIDE;
-  virtual void OnSessionRouteChange(
-      ClientSession* session,
-      const std::string& channel_name,
-      const protocol::TransportRoute& route) OVERRIDE;
+  virtual void OnSessionIpAddress(ClientSession* session,
+                                  const std::string& channel_name,
+                                  const net::IPEndPoint& end_point) OVERRIDE;
 
   // SessionManager::Listener implementation.
   virtual void OnSessionManagerReady() OVERRIDE;
@@ -132,48 +120,73 @@ class ChromotingHost : public base::NonThreadSafe,
       protocol::Session* session,
       protocol::SessionManager::IncomingSessionResponse* response) OVERRIDE;
 
-  // Sets desired configuration for the protocol. Must be called before Start().
-  void set_protocol_config(scoped_ptr<protocol::CandidateSessionConfig> config);
+  // Sets desired configuration for the protocol. Ownership of the
+  // |config| is transferred to the object. Must be called before Start().
+  void set_protocol_config(protocol::CandidateSessionConfig* config);
 
-  base::WeakPtr<ChromotingHost> AsWeakPtr() {
-    return weak_factory_.GetWeakPtr();
-  }
+  // Notify all active client sessions that local input has been detected, and
+  // that remote input should be ignored for a short time.
+  void LocalMouseMoved(const SkIPoint& new_pos);
 
-  // The host uses a pairing registry to generate and store pairing information
-  // for clients for PIN-less authentication.
-  scoped_refptr<protocol::PairingRegistry> pairing_registry() const {
-    return pairing_registry_;
-  }
-  void set_pairing_registry(
-      scoped_refptr<protocol::PairingRegistry> pairing_registry) {
-    pairing_registry_ = pairing_registry;
-  }
+  // Pause or unpause the session. While the session is paused, remote input
+  // is ignored.
+  void PauseSession(bool pause);
+
+  const UiStrings& ui_strings() { return ui_strings_; }
+
+  // Set localized strings. Must be called before host is started.
+  void SetUiStrings(const UiStrings& ui_strings);
 
  private:
+  friend class base::RefCountedThreadSafe<ChromotingHost>;
   friend class ChromotingHostTest;
 
-  typedef std::list<ClientSession*> ClientList;
+  typedef std::vector<ClientSession*> ClientList;
 
-  // Immediately disconnects all active clients. Host-internal components may
-  // shutdown asynchronously, but the caller is guaranteed not to receive
-  // callbacks for disconnected clients after this call returns.
-  void DisconnectAllClients();
+  enum State {
+    kInitial,
+    kStarted,
+    kStopping,
+    kStopped,
+  };
+
+  // Creates encoder for the specified configuration.
+  static Encoder* CreateEncoder(const protocol::SessionConfig& config);
+
+  virtual ~ChromotingHost();
+
+  std::string GenerateHostAuthToken(const std::string& encoded_client_token);
+
+  void AddAuthenticatedClient(ClientSession* client,
+                              const protocol::SessionConfig& config,
+                              const std::string& jid);
+
+  void StopScreenRecorder();
+  void OnScreenRecorderStopped();
+
+  // Called from Shutdown() or OnScreenRecorderStopped() to finish shutdown.
+  void ShutdownFinish();
 
   // Unless specified otherwise all members of this class must be
   // used on the network thread only.
 
   // Parameters specified when the host was created.
-  DesktopEnvironmentFactory* desktop_environment_factory_;
-  scoped_ptr<protocol::SessionManager> session_manager_;
-  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> input_task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
+  ChromotingHostContext* context_;
+  DesktopEnvironment* desktop_environment_;
+  protocol::NetworkSettings network_settings_;
+
+  // TODO(lambroslambrou): The following is a temporary fix for Me2Me
+  // (crbug.com/105995), pending the AuthenticatorFactory work.
+  // Cache the shared secret, in case SetSharedSecret() is called before the
+  // session manager has been created.
+  // The |have_shared_secret_| flag is to distinguish SetSharedSecret() not
+  // being called at all, from being called with an empty string.
+  std::string shared_secret_;
+  bool have_shared_secret_;
 
   // Connection objects.
   SignalStrategy* signal_strategy_;
+  scoped_ptr<protocol::SessionManager> session_manager_;
 
   // Must be used on the network thread only.
   ObserverList<HostStatusObserver> status_observers_;
@@ -181,29 +194,33 @@ class ChromotingHost : public base::NonThreadSafe,
   // The connections to remote clients.
   ClientList clients_;
 
-  // True if the host has been started.
-  bool started_;
+  // Session manager for the host process.
+  // TODO(sergeyu): Do we need to have one screen recorder per client?
+  scoped_refptr<ScreenRecorder> recorder_;
+
+  // Number of screen recorders that are currently being
+  // stopped. Normally set to 0 or 1, but in some cases it may be
+  // greater than 1, particularly if when second client can connect
+  // immediately after previous one disconnected.
+  int stopping_recorders_;
+
+  // Tracks the internal state of the host.
+  State state_;
 
   // Configuration of the protocol.
   scoped_ptr<protocol::CandidateSessionConfig> protocol_config_;
-
-  // Login backoff state.
-  net::BackoffEntry login_backoff_;
 
   // Flags used for RejectAuthenticatingClient().
   bool authenticating_client_;
   bool reject_authenticating_client_;
 
-  // True if the curtain mode is enabled.
-  bool enable_curtaining_;
+  // Stores list of tasks that should be executed when we finish
+  // shutdown. Used only while |state_| is set to kStopping.
+  std::vector<base::Closure> shutdown_tasks_;
 
-  // The maximum duration of any session.
-  base::TimeDelta max_session_duration_;
-
-  // The pairing registry for PIN-less authentication.
-  scoped_refptr<protocol::PairingRegistry> pairing_registry_;
-
-  base::WeakPtrFactory<ChromotingHost> weak_factory_;
+  // TODO(sergeyu): The following members do not belong to
+  // ChromotingHost and should be moved elsewhere.
+  UiStrings ui_strings_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHost);
 };

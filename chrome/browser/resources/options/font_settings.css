@@ -1,29 +1,8 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file. */
-
 #font-settings > section {
   overflow: hidden;
 }
 
-#font-settings .action-area {
-  -webkit-box-pack: start;
-}
-
-#font-settings .action-area .spacer {
-  -webkit-box-flex: 1;
-  display: -webkit-box;
-}
-
-#font-settings .button-strip {
-  width: 100%;
-}
-
-.font-setting-container {
-  display: -webkit-box;
-}
-
-#font-settings input[type='range'] {
+#font-settings input[type="range"] {
   width: 100%;
 }
 
@@ -47,10 +26,10 @@
 }
 
 .font-sample-div {
-  direction: ltr;
   height: 70px;
   overflow: hidden;
   width: 270px;
+  direction: ltr;
 }
 
 .font-settings-huge {

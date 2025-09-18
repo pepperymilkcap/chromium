@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,30 +6,11 @@
 
 #include <windows.h>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/stringprintf.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/stringprintf.h"
 #include "base/win/windows_version.h"
-
-namespace {
-
-int64 AmountOfMemory(DWORDLONG MEMORYSTATUSEX::* memory_field) {
-  MEMORYSTATUSEX memory_info;
-  memory_info.dwLength = sizeof(memory_info);
-  if (!GlobalMemoryStatusEx(&memory_info)) {
-    NOTREACHED();
-    return 0;
-  }
-
-  int64 rv = static_cast<int64>(memory_info.*memory_field);
-  if (rv < 0)
-    rv = kint64max;
-  return rv;
-}
-
-}  // namespace
 
 namespace base {
 
@@ -40,18 +21,21 @@ int SysInfo::NumberOfProcessors() {
 
 // static
 int64 SysInfo::AmountOfPhysicalMemory() {
-  return AmountOfMemory(&MEMORYSTATUSEX::ullTotalPhys);
-}
+  MEMORYSTATUSEX memory_info;
+  memory_info.dwLength = sizeof(memory_info);
+  if (!GlobalMemoryStatusEx(&memory_info)) {
+    NOTREACHED();
+    return 0;
+  }
 
-// static
-int64 SysInfo::AmountOfAvailablePhysicalMemory() {
-  return AmountOfMemory(&MEMORYSTATUSEX::ullAvailPhys);
+  int64 rv = static_cast<int64>(memory_info.ullTotalPhys);
+  if (rv < 0)
+    rv = kint64max;
+  return rv;
 }
 
 // static
 int64 SysInfo::AmountOfFreeDiskSpace(const FilePath& path) {
-  base::ThreadRestrictions::AssertIOAllowed();
-
   ULARGE_INTEGER available, total, free;
   if (!GetDiskFreeSpaceExW(path.value().c_str(), &available, &total, &free)) {
     return -1;
@@ -84,27 +68,12 @@ std::string SysInfo::OperatingSystemVersion() {
 
 // TODO: Implement OperatingSystemVersionComplete, which would include
 // patchlevel/service pack number.
-// See chrome/browser/feedback/feedback_util.h, FeedbackUtil::SetOSVersion.
+// See chrome/browser/ui/views/bug_report_view.cc, BugReportView::SetOSVersion.
 
 // static
-std::string SysInfo::OperatingSystemArchitecture() {
-  win::OSInfo::WindowsArchitecture arch =
-      win::OSInfo::GetInstance()->architecture();
-  switch (arch) {
-    case win::OSInfo::X86_ARCHITECTURE:
-      return "x86";
-    case win::OSInfo::X64_ARCHITECTURE:
-      return "x86_64";
-    case win::OSInfo::IA64_ARCHITECTURE:
-      return "ia64";
-    default:
-      return "";
-  }
-}
-
-// static
-std::string SysInfo::CPUModelName() {
-  return win::OSInfo::GetInstance()->processor_model_name();
+std::string SysInfo::CPUArchitecture() {
+  // TODO: Make this vary when we support any other architectures.
+  return "x86";
 }
 
 // static

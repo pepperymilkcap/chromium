@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
 #include "chrome/browser/ui/cocoa/history_menu_cocoa_controller.h"
-#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 @interface FakeHistoryMenuController : HistoryMenuCocoaController {
@@ -29,7 +28,7 @@
   return self;
 }
 
-- (void)openURLForItem:(const HistoryMenuBridge::HistoryItem*)item {
+- (void)openURLForItem:(HistoryMenuBridge::HistoryItem*)item {
   opened_[item->session_id] = YES;
 }
 
@@ -72,7 +71,7 @@ class HistoryMenuCocoaControllerTest : public CocoaProfileTest {
 };
 
 TEST_F(HistoryMenuCocoaControllerTest, OpenURLForItem) {
-  base::scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@"History"]);
+  scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@"History"]);
   CreateItems(menu.get());
 
   std::map<NSMenuItem*, HistoryMenuBridge::HistoryItem*>& items =

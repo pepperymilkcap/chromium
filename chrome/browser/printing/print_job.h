@@ -1,14 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PRINTING_PRINT_JOB_H_
 #define CHROME_BROWSER_PRINTING_PRINT_JOB_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "chrome/browser/printing/print_job_worker_owner.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -27,14 +27,14 @@ class PrintJobWorker;
 class PrinterQuery;
 
 // Manages the print work for a specific document. Talks to the printer through
-// PrintingContext through PrintJobWorker. Hides access to PrintingContext in a
+// PrintingContext though PrintJob::Worker. Hides access to PrintingContext in a
 // worker thread so the caller never blocks. PrintJob will send notifications on
 // any state change. While printing, the PrintJobManager instance keeps a
 // reference to the job to be sure it is kept alive. All the code in this class
 // runs in the UI thread.
 class PrintJob : public PrintJobWorkerOwner,
                  public content::NotificationObserver,
-                 public base::MessageLoop::DestructionObserver {
+                 public MessageLoop::DestructionObserver {
  public:
   // Create a empty PrintJob. When initializing with this constructor,
   // post-constructor initialization must be done with Initialize().
@@ -54,7 +54,7 @@ class PrintJob : public PrintJobWorkerOwner,
   virtual void GetSettingsDone(const PrintSettings& new_settings,
                                PrintingContext::Result result) OVERRIDE;
   virtual PrintJobWorker* DetachWorker(PrintJobWorkerOwner* new_owner) OVERRIDE;
-  virtual base::MessageLoop* message_loop() OVERRIDE;
+  virtual MessageLoop* message_loop() OVERRIDE;
   virtual const PrintSettings& settings() const OVERRIDE;
   virtual int cookie() const OVERRIDE;
 
@@ -65,11 +65,10 @@ class PrintJob : public PrintJobWorkerOwner,
   // spool as soon as data is available.
   void StartPrinting();
 
-  // Asks for the worker thread to finish its queued tasks and disconnects the
-  // delegate object. The PrintJobManager will remove its reference. This may
+  // Waits for the worker thread to finish its queued tasks and disconnects the
+  // delegate object. The PrintJobManager will remove it reference. This may
   // have the side-effect of destroying the object if the caller doesn't have a
-  // handle to the object. Use PrintJob::is_stopped() to check whether the
-  // worker thread has actually stopped.
+  // handle to the object.
   void Stop();
 
   // Cancels printing job and stops the worker thread. Takes effect immediately.
@@ -78,7 +77,7 @@ class PrintJob : public PrintJobWorkerOwner,
   // Synchronously wait for the job to finish. It is mainly useful when the
   // process is about to be shut down and we're waiting for the spooler to eat
   // our data.
-  bool FlushJob(base::TimeDelta timeout);
+  bool FlushJob(int timeout_ms);
 
   // Disconnects the PrintedPage source (PrintedPagesSource). It is done when
   // the source is being destroyed.
@@ -87,12 +86,6 @@ class PrintJob : public PrintJobWorkerOwner,
   // Returns true if the print job is pending, i.e. between a StartPrinting()
   // and the end of the spooling.
   bool is_job_pending() const;
-
-  // Returns true if the worker thread is in the process of stopping.
-  bool is_stopping() const;
-
-  // Returns true if the worker thread has stopped.
-  bool is_stopped() const;
 
   // Access the current printed document. Warning: may be NULL.
   PrintedDocument* document() const;
@@ -115,18 +108,13 @@ class PrintJob : public PrintJobWorkerOwner,
   // eventual deadlock.
   void ControlledWorkerShutdown();
 
-  // Called at shutdown when running a nested message loop.
-  void Quit();
-
-  void HoldUntilStopIsCalled(const scoped_refptr<PrintJob>& job);
-
   content::NotificationRegistrar registrar_;
 
   // Main message loop reference. Used to send notifications in the right
   // thread.
-  base::MessageLoop* const ui_message_loop_;
+  MessageLoop* const ui_message_loop_;
 
-  // Source that generates the PrintedPage's (i.e. a WebContents). It will be
+  // Source that generates the PrintedPage's (i.e. a TabContents). It will be
   // set back to NULL if the source is deleted before this object.
   PrintedPagesSource* source_;
 
@@ -147,17 +135,6 @@ class PrintJob : public PrintJobWorkerOwner,
   // Is Canceling? If so, try to not cause recursion if on FAILED notification,
   // the notified calls Cancel() again.
   bool is_canceling_;
-
-  // Is the worker thread stopping.
-  bool is_stopping_;
-
-  // Is the worker thread stopped.
-  bool is_stopped_;
-
-  // Used at shutdown so that we can quit a nested message loop.
-  base::WeakPtrFactory<PrintJob> quit_factory_;
-
-  base::WeakPtrFactory<PrintJob> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintJob);
 };

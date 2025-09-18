@@ -10,18 +10,14 @@
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
-#include "net/base/request_priority.h"
+#include "net/base/ssl_config_service.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_controller.h"
-#include "net/http/http_pipelined_host.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_stream_factory_impl.h"
 #include "net/proxy/proxy_service.h"
-#include "net/quic/quic_stream_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
-#include "net/spdy/spdy_session_key.h"
-#include "net/ssl/ssl_config_service.h"
 
 namespace net {
 
@@ -29,8 +25,6 @@ class ClientSocketHandle;
 class HttpAuthController;
 class HttpNetworkSession;
 class HttpStream;
-class SpdySessionPool;
-class QuicHttpStream;
 
 // An HttpStreamRequestImpl exists for each stream which is in progress of being
 // created for the StreamFactory.
@@ -39,7 +33,6 @@ class HttpStreamFactoryImpl::Job {
   Job(HttpStreamFactoryImpl* stream_factory,
       HttpNetworkSession* session,
       const HttpRequestInfo& request_info,
-      RequestPriority priority,
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       NetLog* net_log);
@@ -58,10 +51,8 @@ class HttpStreamFactoryImpl::Job {
 
   // Marks this Job as the "alternate" job, from Alternate-Protocol. Tracks the
   // original url so we can mark the Alternate-Protocol as broken if
-  // we fail to connect.  |alternate| specifies the alternate protocol to use
-  // and alternate port to connect to.
-  void MarkAsAlternate(const GURL& original_url,
-                       PortAlternateProtocolPair alternate);
+  // we fail to connect.
+  void MarkAsAlternate(const GURL& original_url);
 
   // Tells |this| to wait for |job| to resume it.
   void WaitFor(Job* job);
@@ -74,11 +65,8 @@ class HttpStreamFactoryImpl::Job {
   // Used to detach the Job from |request|.
   void Orphan(const Request* request);
 
-  void SetPriority(RequestPriority priority);
-
-  RequestPriority priority() const { return priority_; }
   bool was_npn_negotiated() const;
-  NextProto protocol_negotiated() const;
+  SSLClientSocket::NextProto protocol_negotiated() const;
   bool using_spdy() const;
   const BoundNetLog& net_log() const { return net_log_; }
 
@@ -130,9 +118,7 @@ class HttpStreamFactoryImpl::Job {
   };
 
   void OnStreamReadyCallback();
-  void OnWebSocketHandshakeStreamReadyCallback();
-  // This callback function is called when a new SPDY session is created.
-  void OnNewSpdySessionReadyCallback();
+  void OnSpdySessionReadyCallback();
   void OnStreamFailedCallback(int result);
   void OnCertificateErrorCallback(int result, const SSLInfo& ssl_info);
   void OnNeedsProxyAuthCallback(const HttpResponseInfo& response_info,
@@ -170,23 +156,20 @@ class HttpStreamFactoryImpl::Job {
   // Set the motivation for this request onto the underlying socket.
   void SetSocketMotivation();
 
-  bool IsHttpsProxyAndHttpUrl() const;
+  bool IsHttpsProxyAndHttpUrl();
 
-  // Sets several fields of ssl_config for the given origin_server based on the
-  // proxy info and other factors.
+// Sets several fields of ssl_config for the given origin_server based on the
+// proxy info and other factors.
   void InitSSLConfig(const HostPortPair& origin_server,
-                     SSLConfig* ssl_config,
-                     bool is_proxy) const;
+                     SSLConfig* ssl_config) const;
+
+  // AlternateProtocol API
+  void MarkBrokenAlternateProtocolAndFallback();
 
   // Retrieve SSLInfo from our SSL Socket.
   // This must only be called when we are using an SSLSocket.
   // After calling, the caller can use ssl_info_.
   void GetSSLInfo();
-
-  SpdySessionKey GetSpdySessionKey() const;
-
-  // Returns true if the current request can use an existing spdy session.
-  bool CanUseExistingSpdySession() const;
 
   // Called when we encounter a network error that could be resolved by trying
   // a new proxy configuration.  If there is another proxy configuration to try
@@ -213,27 +196,14 @@ class HttpStreamFactoryImpl::Job {
   // Should we force SPDY to run without SSL for this stream request.
   bool ShouldForceSpdyWithoutSSL() const;
 
-  // Should we force QUIC for this stream request.
-  bool ShouldForceQuic() const;
-
   bool IsRequestEligibleForPipelining();
 
   // Record histograms of latency until Connect() completes.
   static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);
 
-  // Invoked by the transport socket pool after host resolution is complete
-  // to allow the connection to be aborted, if a matching SPDY session can
-  // be found.  Will return ERR_SPDY_SESSION_ALREADY_EXISTS if such a
-  // session is found, and OK otherwise.
-  static int OnHostResolution(SpdySessionPool* spdy_session_pool,
-                              const SpdySessionKey& spdy_session_key,
-                              const AddressList& addresses,
-                              const BoundNetLog& net_log);
-
   Request* request_;
 
   const HttpRequestInfo request_info_;
-  RequestPriority priority_;
   ProxyInfo proxy_info_;
   SSLConfig server_ssl_config_;
   SSLConfig proxy_ssl_config_;
@@ -273,18 +243,11 @@ class HttpStreamFactoryImpl::Job {
   // True if this network transaction is using SPDY instead of HTTP.
   bool using_spdy_;
 
-  // True if this network transaction is using QUIC instead of HTTP.
-  bool using_quic_;
-  QuicStreamRequest quic_request_;
-
   // Force spdy for all connections.
   bool force_spdy_always_;
 
   // Force spdy only for SSL connections.
   bool force_spdy_over_ssl_;
-
-  // Force quic for a specific port.
-  int force_quic_port_;
 
   // The certificate error while using SPDY over SSL for insecure URLs.
   int spdy_certificate_error_;
@@ -297,29 +260,25 @@ class HttpStreamFactoryImpl::Job {
   bool establishing_tunnel_;
 
   scoped_ptr<HttpStream> stream_;
-  scoped_ptr<WebSocketHandshakeStreamBase> websocket_stream_;
 
   // True if we negotiated NPN.
   bool was_npn_negotiated_;
 
   // Protocol negotiated with the server.
-  NextProto protocol_negotiated_;
+  SSLClientSocket::NextProto protocol_negotiated_;
 
   // 0 if we're not preconnecting. Otherwise, the number of streams to
   // preconnect.
   int num_streams_;
 
   // Initialized when we create a new SpdySession.
-  base::WeakPtr<SpdySession> new_spdy_session_;
+  scoped_refptr<SpdySession> new_spdy_session_;
 
   // Initialized when we have an existing SpdySession.
-  base::WeakPtr<SpdySession> existing_spdy_session_;
+  scoped_refptr<SpdySession> existing_spdy_session_;
 
   // Only used if |new_spdy_session_| is non-NULL.
   bool spdy_session_direct_;
-
-  // Key used to identify the HttpPipelinedHost for |request_|.
-  scoped_ptr<HttpPipelinedHost::Key> http_pipelining_key_;
 
   // True if an existing pipeline can handle this job's request.
   bool existing_available_pipeline_;

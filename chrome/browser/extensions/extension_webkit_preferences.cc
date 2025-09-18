@@ -4,16 +4,13 @@
 
 #include "chrome/browser/extensions/extension_webkit_preferences.h"
 
-#include "base/command_line.h"
-#include "chrome/common/chrome_switches.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/manifest.h"
-#include "webkit/common/webpreferences.h"
+#include "chrome/common/extensions/extension.h"
+#include "webkit/glue/webpreferences.h"
 
 namespace extension_webkit_preferences {
 
-void SetPreferences(const extensions::Extension* extension,
-                    extensions::ViewType render_view_type,
+void SetPreferences(const Extension* extension,
+                    content::ViewType render_view_type,
                     WebPreferences* webkit_prefs) {
   if (!extension)
     return;
@@ -28,19 +25,18 @@ void SetPreferences(const extensions::Extension* extension,
     // be subject to that.
     webkit_prefs->allow_scripts_to_close_windows = true;
 
-    // Disable gpu acceleration for extension background pages to avoid
-    // unecessarily creating a compositor context for them.
-    if (render_view_type == extensions::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
+    // Disable anything that requires the GPU process for background pages.
+    // See http://crbug.com/64512 and http://crbug.com/64841.
+    if (render_view_type == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
+      webkit_prefs->experimental_webgl_enabled = false;
       webkit_prefs->accelerated_compositing_enabled = false;
-      webkit_prefs->force_compositing_mode = false;
+      webkit_prefs->accelerated_2d_canvas_enabled = false;
     }
   }
 
   if (extension->is_platform_app()) {
     webkit_prefs->databases_enabled = false;
     webkit_prefs->local_storage_enabled = false;
-    webkit_prefs->sync_xhr_in_documents_enabled = false;
-    webkit_prefs->cookie_enabled = false;
   }
 
   // Enable WebGL features that regular pages can't access, since they add
@@ -48,4 +44,4 @@ void SetPreferences(const extensions::Extension* extension,
   webkit_prefs->privileged_webgl_extensions_enabled = true;
 }
 
-}  // namespace extension_webkit_preferences
+}  // extension_webkit_preferences

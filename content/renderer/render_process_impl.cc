@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/renderer/render_process_impl.h"
-
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -12,42 +10,36 @@
 #include <mlang.h>
 #endif
 
+#include "content/renderer/render_process_impl.h"
+
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
 #include "base/sys_info.h"
-#include "content/child/child_thread.h"
-#include "content/child/npapi/plugin_instance.h"
-#include "content/child/npapi/plugin_lib.h"
-#include "content/child/site_isolation_policy.h"
+#include "base/utf_string_conversions.h"
+#include "content/common/child_thread.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message_utils.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
-#include "ui/surface/transport_dib.h"
+#include "ui/gfx/surface/transport_dib.h"
+#include "webkit/plugins/npapi/plugin_instance.h"
+#include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "base/android/sys_utils.h"
-#endif
-
-namespace content {
-
 RenderProcessImpl::RenderProcessImpl()
-    : shared_mem_cache_cleaner_(
+    : ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
           FROM_HERE, base::TimeDelta::FromSeconds(5),
-          this, &RenderProcessImpl::ClearTransportDIBCache),
-      transport_dib_next_sequence_number_(0),
-      enabled_bindings_(0) {
+          this, &RenderProcessImpl::ClearTransportDIBCache)),
+      transport_dib_next_sequence_number_(0) {
+  in_process_plugins_ = InProcessPlugins();
   for (size_t i = 0; i < arraysize(shared_mem_cache_); ++i)
     shared_mem_cache_[i] = NULL;
 
@@ -69,12 +61,10 @@ RenderProcessImpl::RenderProcessImpl()
 #endif
 
   // Out of process dev tools rely upon auto break behavior.
-  webkit_glue::SetJavaScriptFlags("--debugger-auto-break");
-
-#if defined(OS_ANDROID)
-  if (base::android::SysUtils::IsLowEndDevice())
-    webkit_glue::SetJavaScriptFlags("--optimize-for-size");
-#endif
+  webkit_glue::SetJavaScriptFlags(
+      "--debugger-auto-break"
+      // Enable on-demand profiling.
+      " --prof --prof-lazy");
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kJavaScriptFlags)) {
@@ -82,36 +72,47 @@ RenderProcessImpl::RenderProcessImpl()
         command_line.GetSwitchValueASCII(switches::kJavaScriptFlags));
   }
 
-  // Turn on cross-site document blocking for renderer processes.
-  SiteIsolationPolicy::SetPolicyEnabled(
-      GetContentClient()->renderer()->ShouldEnableSiteIsolationPolicy());
+  if (command_line.HasSwitch(switches::kDartFlags)) {
+    webkit_glue::SetDartFlags(
+        command_line.GetSwitchValueASCII(switches::kDartFlags));
+  }
 }
 
 RenderProcessImpl::~RenderProcessImpl() {
+  // TODO(port): Try and limit what we pull in for our non-Win unit test bundle.
 #ifndef NDEBUG
-  int count = blink::WebFrame::instanceCount();
-  if (count)
-    DLOG(ERROR) << "WebFrame LEAKED " << count << " TIMES";
+  // log important leaked objects
+  webkit_glue::CheckForLeaks();
 #endif
 
   GetShutDownEvent()->Signal();
   ClearTransportDIBCache();
 }
 
-void RenderProcessImpl::AddBindings(int bindings) {
-  enabled_bindings_ |= bindings;
-}
-
-int RenderProcessImpl::GetEnabledBindings() const {
-  return enabled_bindings_;
+bool RenderProcessImpl::InProcessPlugins() {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+#if defined(OS_LINUX) || defined(OS_OPENBSD)
+  // Plugin processes require a UI message loop, and the Linux message loop
+  // implementation only allows one UI loop per process.
+  if (command_line.HasSwitch(switches::kInProcessPlugins))
+    NOTIMPLEMENTED() << ": in process plugins not supported on Linux";
+  return command_line.HasSwitch(switches::kInProcessPlugins);
+#else
+  return command_line.HasSwitch(switches::kInProcessPlugins) ||
+         command_line.HasSwitch(switches::kSingleProcess);
+#endif
 }
 
 // -----------------------------------------------------------------------------
 // Platform specific code for dealing with bitmap transport...
 
 TransportDIB* RenderProcessImpl::CreateTransportDIB(size_t size) {
-#if defined(OS_POSIX) && !defined(TOOLKIT_GTK) && !defined(OS_ANDROID)
-  // POSIX creates transport DIBs in the browser, so we need to do a sync IPC to
+#if defined(OS_WIN) || defined(OS_LINUX) || \
+    defined(OS_OPENBSD) || defined(OS_ANDROID)
+  // Windows and Linux create transport DIBs inside the renderer
+  return TransportDIB::Create(size, transport_dib_next_sequence_number_++);
+#elif defined(OS_MACOSX)
+  // Mac creates transport DIBs in the browser, so we need to do a sync IPC to
   // get one.  The TransportDIB is cached in the browser.
   TransportDIB::Handle handle;
   IPC::Message* msg = new ViewHostMsg_AllocTransportDIB(size, true, &handle);
@@ -120,19 +121,15 @@ TransportDIB* RenderProcessImpl::CreateTransportDIB(size_t size) {
   if (handle.fd < 0)
     return NULL;
   return TransportDIB::Map(handle);
-#else
-  // Windows, legacy GTK and Android create transport DIBs inside the
-  // renderer.
-  return TransportDIB::Create(size, transport_dib_next_sequence_number_++);
-#endif
+#endif  // defined(OS_MACOSX)
 }
 
 void RenderProcessImpl::FreeTransportDIB(TransportDIB* dib) {
   if (!dib)
     return;
 
-#if defined(OS_POSIX) && !defined(TOOLKIT_GTK) && !defined(OS_ANDROID)
-  // On POSIX we need to tell the browser that it can drop a reference to the
+#if defined(OS_MACOSX)
+  // On Mac we need to tell the browser that it can drop a reference to the
   // shared memory.
   IPC::Message* msg = new ViewHostMsg_FreeTransportDIB(dib->id());
   main_thread()->Send(msg);
@@ -148,7 +145,7 @@ skia::PlatformCanvas* RenderProcessImpl::GetDrawingCanvas(
     TransportDIB** memory, const gfx::Rect& rect) {
   int width = rect.width();
   int height = rect.height();
-  const size_t stride = skia::PlatformCanvasStrideForWidth(rect.width());
+  const size_t stride = skia::PlatformCanvas::StrideForWidth(rect.width());
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
   const size_t max_size = base::SysInfo::MaxSharedMemorySize();
 #else
@@ -179,6 +176,10 @@ void RenderProcessImpl::ReleaseTransportDIB(TransportDIB* mem) {
   }
 
   FreeTransportDIB(mem);
+}
+
+bool RenderProcessImpl::UseInProcessPlugins() const {
+  return in_process_plugins_;
 }
 
 bool RenderProcessImpl::GetTransportDIBFromCache(TransportDIB** mem,
@@ -241,5 +242,3 @@ void RenderProcessImpl::ClearTransportDIBCache() {
     }
   }
 }
-
-}  // namespace content

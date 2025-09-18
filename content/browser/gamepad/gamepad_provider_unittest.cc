@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "content/browser/gamepad/gamepad_data_fetcher.h"
+#include "base/process_util.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/system_monitor/system_monitor.h"
 #include "content/browser/gamepad/gamepad_provider.h"
-#include "content/browser/gamepad/gamepad_test_helpers.h"
-#include "content/common/gamepad_hardware_buffer.h"
 #include "content/common/gamepad_messages.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -15,39 +14,35 @@ namespace content {
 
 namespace {
 
-using blink::WebGamepads;
+using WebKit::WebGamepads;
 
-// Helper class to generate and record user gesture callbacks.
-class UserGestureListener {
+class MockDataFetcher : public GamepadDataFetcher {
  public:
-  UserGestureListener()
-      : weak_factory_(this),
-        has_user_gesture_(false) {
+  MockDataFetcher(WebGamepads& test_data) : read_data_(false, false) {
+    test_data_ = test_data;
+  }
+  virtual void GetGamepadData(WebGamepads* pads,
+                              bool devices_changed_hint) OVERRIDE {
+    *pads = test_data_;
+    read_data_.Signal();
   }
 
-  base::Closure GetClosure() {
-    return base::Bind(&UserGestureListener::GotUserGesture,
-                      weak_factory_.GetWeakPtr());
-  }
+  void WaitForDataRead() { return read_data_.Wait(); }
 
-  bool has_user_gesture() const { return has_user_gesture_; }
-
- private:
-  void GotUserGesture() {
-    has_user_gesture_ = true;
-  }
-
-  base::WeakPtrFactory<UserGestureListener> weak_factory_;
-  bool has_user_gesture_;
+  WebGamepads test_data_;
+  base::WaitableEvent read_data_;
 };
 
 // Main test fixture
-class GamepadProviderTest : public testing::Test, public GamepadTestHelper {
+class GamepadProviderTest : public testing::Test {
  public:
-  GamepadProvider* CreateProvider(const WebGamepads& test_data) {
-    mock_data_fetcher_ = new MockGamepadDataFetcher(test_data);
-    provider_.reset(new GamepadProvider(
-        scoped_ptr<GamepadDataFetcher>(mock_data_fetcher_)));
+  GamepadProvider* CreateProvider(WebGamepads& test_data) {
+#if defined(OS_MACOSX)
+    base::SystemMonitor::AllocateSystemIOPorts();
+#endif
+    system_monitor_.reset(new base::SystemMonitor);
+    mock_data_fetcher_ = new MockDataFetcher(test_data);
+    provider_ = new GamepadProvider(mock_data_fetcher_);
     return provider_.get();
   }
 
@@ -55,16 +50,14 @@ class GamepadProviderTest : public testing::Test, public GamepadTestHelper {
   GamepadProviderTest() {
   }
 
-  scoped_ptr<GamepadProvider> provider_;
-
-  // Pointer owned by the provider.
-  MockGamepadDataFetcher* mock_data_fetcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(GamepadProviderTest);
+  MessageLoop main_message_loop_;
+  scoped_ptr<base::SystemMonitor> system_monitor_;
+  MockDataFetcher* mock_data_fetcher_;
+  scoped_refptr<GamepadProvider> provider_;
 };
 
 // Crashes. http://crbug.com/106163
-TEST_F(GamepadProviderTest, PollingAccess) {
+TEST_F(GamepadProviderTest, DISABLED_PollingAccess) {
   WebGamepads test_data;
   test_data.length = 1;
   test_data.items[0].connected = true;
@@ -76,15 +69,14 @@ TEST_F(GamepadProviderTest, PollingAccess) {
   test_data.items[0].axes[1] = .5f;
 
   GamepadProvider* provider = CreateProvider(test_data);
-  provider->Resume();
 
-  message_loop().RunUntilIdle();
+  main_message_loop_.RunAllPending();
 
   mock_data_fetcher_->WaitForDataRead();
 
   // Renderer-side, pull data out of poll buffer.
-  base::SharedMemoryHandle handle = provider->GetSharedMemoryHandleForProcess(
-      base::GetCurrentProcessHandle());
+  base::SharedMemoryHandle handle =
+      provider->GetRendererSharedMemoryHandle(base::GetCurrentProcessHandle());
   scoped_ptr<base::SharedMemory> shared_memory(
       new base::SharedMemory(handle, true));
   EXPECT_TRUE(shared_memory->Map(sizeof(GamepadHardwareBuffer)));
@@ -108,51 +100,6 @@ TEST_F(GamepadProviderTest, PollingAccess) {
   EXPECT_EQ(0.5f, output.items[0].axes[1]);
 }
 
-// Tests that waiting for a user gesture works properly.
-TEST_F(GamepadProviderTest, UserGesture) {
-  WebGamepads no_button_data;
-  no_button_data.length = 1;
-  no_button_data.items[0].connected = true;
-  no_button_data.items[0].timestamp = 0;
-  no_button_data.items[0].buttonsLength = 1;
-  no_button_data.items[0].axesLength = 2;
-  no_button_data.items[0].buttons[0] = 0.f;
-  no_button_data.items[0].axes[0] = -1.f;
-  no_button_data.items[0].axes[1] = .5f;
-
-  WebGamepads button_down_data = no_button_data;
-  button_down_data.items[0].buttons[0] = 1.f;
-
-  UserGestureListener listener;
-  GamepadProvider* provider = CreateProvider(no_button_data);
-  provider->Resume();
-
-  // Register for a user gesture and make sure the provider reads it twice
-  // see below for why).
-  provider->RegisterForUserGesture(listener.GetClosure());
-  mock_data_fetcher_->WaitForDataRead();
-  mock_data_fetcher_->WaitForDataRead();
-
-  // It should not have issued our callback.
-  message_loop().RunUntilIdle();
-  EXPECT_FALSE(listener.has_user_gesture());
-
-  // Set a button down and wait for it to be read twice.
-  //
-  // We wait for two reads before calling RunAllPending because the provider
-  // will read the data on the background thread (setting the event) and *then*
-  // will issue the callback on our thread. Waiting for it to read twice
-  // ensures that it was able to issue callbacks for the first read (if it
-  // issued one) before we try to check for it.
-  mock_data_fetcher_->SetTestData(button_down_data);
-  mock_data_fetcher_->WaitForDataRead();
-  mock_data_fetcher_->WaitForDataRead();
-
-  // It should have issued our callback.
-  message_loop().RunUntilIdle();
-  EXPECT_TRUE(listener.has_user_gesture());
-}
-
 }  // namespace
 
-}  // namespace content
+} // namespace content

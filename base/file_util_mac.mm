@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,32 +8,28 @@
 #include <copyfile.h>
 
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
-#include "base/mac/foundation_util.h"
-#include "base/strings/string_util.h"
+#include "base/file_path.h"
+#include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
 
-namespace base {
-namespace internal {
+namespace file_util {
 
-bool CopyFileUnsafe(const FilePath& from_path, const FilePath& to_path) {
-  ThreadRestrictions::AssertIOAllowed();
+bool GetTempDir(FilePath* path) {
+  NSString* tmp = NSTemporaryDirectory();
+  if (tmp == nil)
+    return false;
+  *path = FilePath([tmp fileSystemRepresentation]);
+  return true;
+}
+
+bool GetShmemTempDir(FilePath* path, bool executable) {
+  return GetTempDir(path);
+}
+
+bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
+  base::ThreadRestrictions::AssertIOAllowed();
   return (copyfile(from_path.value().c_str(),
                    to_path.value().c_str(), NULL, COPYFILE_ALL) == 0);
 }
 
-}  // namespace internal
-
-bool GetTempDir(base::FilePath* path) {
-  NSString* tmp = NSTemporaryDirectory();
-  if (tmp == nil)
-    return false;
-  *path = base::mac::NSStringToFilePath(tmp);
-  return true;
-}
-
-bool GetShmemTempDir(bool executable, base::FilePath* path) {
-  return GetTempDir(path);
-}
-
-}  // namespace base
+}  // namespace

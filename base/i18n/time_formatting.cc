@@ -6,13 +6,14 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
-#include "third_party/icu/source/i18n/unicode/datefmt.h"
-#include "third_party/icu/source/i18n/unicode/dtptngen.h"
-#include "third_party/icu/source/i18n/unicode/smpdtfmt.h"
+#include "base/utf_string_conversions.h"
+#include "base/time.h"
+#include "unicode/datefmt.h"
+#include "unicode/dtptngen.h"
+#include "unicode/smpdtfmt.h"
 
-namespace base {
+using base::Time;
+
 namespace {
 
 string16 TimeFormat(const icu::DateFormat* formatter,
@@ -46,6 +47,8 @@ string16 TimeFormatWithoutAmPm(const icu::DateFormat* formatter,
 }
 
 }  // namespace
+
+namespace base {
 
 string16 TimeFormatTimeOfDay(const Time& time) {
   // We can omit the locale parameter because the default should match

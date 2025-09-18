@@ -4,10 +4,11 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_THROTTLER_TEST_SUPPORT_H_
 #define NET_URL_REQUEST_URL_REQUEST_THROTTLER_TEST_SUPPORT_H_
+#pragma once
 
 #include <string>
 
-#include "base/time/time.h"
+#include "base/time.h"
 #include "net/base/backoff_entry.h"
 #include "net/url_request/url_request_throttler_header_interface.h"
 

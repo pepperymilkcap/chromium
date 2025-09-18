@@ -8,9 +8,9 @@
 #include "base/bind_helpers.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_response_headers.h"
@@ -24,6 +24,19 @@ namespace {
 const char kLengthHeader[] = "Content-Length";
 const char kRangeHeader[] = "Content-Range";
 const int kDataStream = 1;
+
+void AddRangeHeader(int64 start, int64 end, HttpRequestHeaders* headers) {
+  DCHECK(start >= 0 || end >= 0);
+  std::string my_start, my_end;
+  if (start >= 0)
+    my_start = base::Int64ToString(start);
+  if (end >= 0)
+    my_end = base::Int64ToString(end);
+
+  headers->SetHeader(
+      HttpRequestHeaders::kRange,
+      base::StringPrintf("bytes=%s-%s", my_start.c_str(), my_end.c_str()));
+}
 
 }  // namespace
 
@@ -143,17 +156,8 @@ void PartialData::RestoreHeaders(HttpRequestHeaders* headers) const {
               byte_range_.suffix_length() : byte_range_.last_byte_position();
 
   headers->CopyFrom(extra_headers_);
-  if (truncated_ || !byte_range_.IsValid())
-    return;
-
-  if (current_range_start_ < 0) {
-    headers->SetHeader(HttpRequestHeaders::kRange,
-                       HttpByteRange::Suffix(end).GetHeaderValue());
-  } else {
-    headers->SetHeader(HttpRequestHeaders::kRange,
-                       HttpByteRange::Bounded(
-                           current_range_start_, end).GetHeaderValue());
-  }
+  if (!truncated_ && byte_range_.IsValid())
+    AddRangeHeader(current_range_start_, end, headers);
 }
 
 int PartialData::ShouldValidateCache(disk_cache::Entry* entry,
@@ -218,17 +222,11 @@ void PartialData::PrepareCacheValidation(disk_cache::Entry* entry,
     range_present_ = true;
     if (len == cached_min_len_)
       final_range_ = true;
-    headers->SetHeader(
-        HttpRequestHeaders::kRange,
-        net::HttpByteRange::Bounded(
-            current_range_start_,
-            cached_start_ + cached_min_len_ - 1).GetHeaderValue());
+    AddRangeHeader(current_range_start_, cached_start_ + cached_min_len_ - 1,
+                   headers);
   } else {
     // This range is not in the cache.
-    headers->SetHeader(
-        HttpRequestHeaders::kRange,
-        net::HttpByteRange::Bounded(
-            current_range_start_, cached_start_ - 1).GetHeaderValue());
+    AddRangeHeader(current_range_start_, cached_start_ - 1, headers);
   }
 }
 
@@ -244,14 +242,14 @@ bool PartialData::UpdateFromStoredHeaders(const HttpResponseHeaders* headers,
                                           disk_cache::Entry* entry,
                                           bool truncated) {
   resource_size_ = 0;
+  if (!headers->HasStrongValidators())
+    return false;
+
   if (truncated) {
     DCHECK_EQ(headers->response_code(), 200);
     // We don't have the real length and the user may be trying to create a
     // sparse entry so let's not write to this entry.
     if (byte_range_.IsValid())
-      return false;
-
-    if (!headers->HasStrongValidators())
       return false;
 
     // Now we avoid resume if there is no content length, but that was not
@@ -272,7 +270,7 @@ bool PartialData::UpdateFromStoredHeaders(const HttpResponseHeaders* headers,
     return true;
   }
 
-  if (headers->response_code() != 206) {
+  if (headers->response_code() == 200) {
     DCHECK(byte_range_.IsValid());
     sparse_entry_ = false;
     resource_size_ = entry->GetDataSize(kDataStream);
@@ -339,12 +337,8 @@ bool PartialData::ResponseHeadersOK(const HttpResponseHeaders* headers) {
   if (total_length <= 0)
     return false;
 
-  DCHECK_EQ(headers->response_code(), 206);
-
-  // A server should return a valid content length with a 206 (per the standard)
-  // but relax the requirement because some servers don't do that.
   int64 content_length = headers->GetContentLength();
-  if (content_length > 0 && content_length != end - start + 1)
+  if (content_length < 0 || content_length != end - start + 1)
     return false;
 
   if (!resource_size_) {

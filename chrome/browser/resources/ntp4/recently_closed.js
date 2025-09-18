@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
  * @fileoverview The recently closed menu: button, model data, and menu.
  */
 
-cr.define('ntp', function() {
+cr.define('ntp4', function() {
   'use strict';
+
+  var localStrings = new LocalStrings();
 
   /**
    * Returns the text used for a recently closed window.
@@ -16,8 +18,8 @@ cr.define('ntp', function() {
    */
   function formatTabsText(numTabs) {
     if (numTabs == 1)
-      return loadTimeData.getString('closedwindowsingle');
-    return loadTimeData.getStringF('closedwindowmultiple', numTabs);
+      return localStrings.getString('closedwindowsingle');
+    return localStrings.getStringF('closedwindowmultiple', numTabs);
   }
 
   var Menu = cr.ui.Menu;
@@ -32,10 +34,11 @@ cr.define('ntp', function() {
       MenuButton.prototype.decorate.call(this);
       this.menu = new Menu;
       cr.ui.decorate(this.menu, Menu);
-      this.menu.classList.add('footer-menu');
+      this.menu.classList.add('recent-menu');
       document.body.appendChild(this.menu);
 
       this.needsRebuild_ = true;
+      this.classList.add('invisible');
       this.anchorType = cr.ui.AnchorType.ABOVE;
       this.invertLeftRight = true;
     },
@@ -46,14 +49,14 @@ cr.define('ntp', function() {
      * button.
      * @override
      */
-    showMenu: function(shouldSetFocus) {
+    showMenu: function() {
       if (this.needsRebuild_) {
         this.menu.textContent = '';
         this.dataItems_.forEach(this.addItem_, this);
         this.needsRebuild_ = false;
       }
 
-      MenuButton.prototype.showMenu.apply(this, arguments);
+      MenuButton.prototype.showMenu.call(this);
     },
 
     /**
@@ -63,7 +66,10 @@ cr.define('ntp', function() {
     set dataItems(dataItems) {
       this.dataItems_ = dataItems;
       this.needsRebuild_ = true;
-      this.hidden = !dataItems.length;
+      if (dataItems.length)
+        this.classList.remove('invisible');
+      else
+        this.classList.add('invisible');
     },
 
     /**
@@ -74,42 +80,29 @@ cr.define('ntp', function() {
     addItem_: function(data) {
       var isWindow = data.type == 'window';
       var a = this.ownerDocument.createElement('a');
-      a.className = 'footer-menu-item';
+      a.className = 'recent-menu-item';
       if (isWindow) {
         a.href = '';
         a.classList.add('recent-window');
         a.textContent = formatTabsText(data.tabs.length);
-        a.title = data.tabs.map(function(tab) { return tab.title; }).join('\n');
       } else {
         a.href = data.url;
-        a.style.backgroundImage = getFaviconImageSet(data.url);
+        a.style.backgroundImage = 'url(chrome://favicon/' + data.url + ')';
         a.textContent = data.title;
       }
 
-      function onActivated(e) {
-        ntp.logTimeToClick('RecentlyClosed');
+      function onClick(e) {
         chrome.send('recordAppLaunchByURL',
                     [encodeURIComponent(data.url),
-                     ntp.APP_LAUNCH.NTP_RECENTLY_CLOSED]);
+                     ntp4.APP_LAUNCH.NTP_RECENTLY_CLOSED]);
         var index = Array.prototype.indexOf.call(a.parentNode.children, a);
-        var orig = e.originalEvent;
-        var button = 0;
-        if (orig instanceof MouseEvent)
-          button = orig.button;
-        var params = [data.sessionId,
-                      index,
-                      button,
-                      orig.altKey,
-                      orig.ctrlKey,
-                      orig.metaKey,
-                      orig.shiftKey];
-        chrome.send('reopenTab', params);
+        chrome.send('reopenTab', [data.sessionId, index,
+            e.button, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey]);
+        // We are likely deleted by this point!
 
         e.preventDefault();
-        e.stopPropagation();
       }
-      a.addEventListener('activate', onActivated);
-      a.addEventListener('click', function(e) { e.preventDefault(); });
+      a.addEventListener('click', onClick);
 
       this.menu.appendChild(a);
       cr.ui.decorate(a, MenuItem);

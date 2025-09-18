@@ -4,12 +4,11 @@
 
 #ifndef CHROME_BROWSER_PARSERS_METADATA_PARSER_H_
 #define CHROME_BROWSER_PARSERS_METADATA_PARSER_H_
+#pragma once
 
 #include <string>
 
-namespace base {
 class FilePath;
-}
 
 // Allows for Iteration on the Properties of a given file.
 class MetadataPropertyIterator {
@@ -32,7 +31,7 @@ class MetadataPropertyIterator {
 // Represents a single instance of parsing on a particular file.
 class MetadataParser {
  public:
-  explicit MetadataParser(const base::FilePath& path) {}
+  explicit MetadataParser(const FilePath& path) {}
   virtual ~MetadataParser() {}
 
 

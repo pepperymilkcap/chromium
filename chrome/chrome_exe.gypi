@@ -13,6 +13,8 @@
         'enable_wexit_time_destructors': 1,
       },
       'sources': [
+        'app/breakpad_win.cc',
+        'app/breakpad_win.h',
         'app/chrome_exe_main_aura.cc',
         'app/chrome_exe_main_gtk.cc',
         'app/chrome_exe_main_mac.cc',
@@ -20,12 +22,11 @@
         'app/chrome_exe_resource.h',
         'app/client_util.cc',
         'app/client_util.h',
-        'app/metro_driver_win.cc',
-        'app/metro_driver_win.h',
-        'app/signature_validator_win.cc',
-        'app/signature_validator_win.h',
-        '<(DEPTH)/content/app/startup_helper_win.cc',
-        '<(DEPTH)/content/public/common/content_switches.cc',
+        'app/hard_error_handler_win.cc',
+        'app/hard_error_handler_win.h',
+        'app/scoped_ole_initializer.h',
+        '../content/app/startup_helper_win.cc',
+        '../content/public/common/content_switches.cc',
       ],
       'mac_bundle_resources': [
         'app/app-Info.plist',
@@ -41,16 +42,6 @@
         'INFOPLIST_FILE': 'app/app-Info.plist',
       },
       'conditions': [
-        ['component == "shared_library"', {
-          'variables': {
-            'win_use_external_manifest': 1,
-          },
-        }],
-        ['order_profiling!=0 and (chromeos==1 or OS=="linux")', {
-          'dependencies' : [
-            '../tools/cygprofile/cygprofile.gyp:cygprofile',
-          ],
-        }],
         ['order_text_section!=""', {
           'target_conditions' : [
             ['_toolset=="target"', {
@@ -59,20 +50,11 @@
             }],
           ]
         }],
-        ['OS == "win" and use_aura==1', {
-          'sources!': [
-            # We still want the _win entry point for sandbox, etc.
-            'app/chrome_exe_main_aura.cc',
-          ],
-          'dependencies': [
-            '../ui/gfx/gfx.gyp:gfx',
-          ],
-        }],
         ['OS == "android"', {
           # Don't put the 'chrome' target in 'all' on android
           'suppress_wildcard': 1,
         }],
-        ['os_posix == 1 and OS != "mac" and OS != "android"', {
+        ['os_posix == 1 and OS != "mac"', {
           'actions': [
             {
               'action_name': 'manpage',
@@ -116,9 +98,16 @@
                 ],
               },
             ],
-            ['profiling==0 and linux_disable_pie==0', {
-              'ldflags': [
-                '-pie',
+            # TODO(rkc): Remove once crosbug.com/15266 is fixed.
+            ['profiling==1', {
+              'ldflags': ['-nopie'],
+            }, {
+              # Building with -pie needs investigating on ARM.
+              # For now, at least use it on Linux Intel.
+              'conditions': [
+                ['(target_arch=="x64" or target_arch=="ia32") and linux_disable_pie!=1', {
+                  'ldflags': ['-pie'],
+                }],
               ],
             }],
             ['use_system_xdg_utils==0', {
@@ -146,9 +135,7 @@
               'dependencies': [
                 # On Linux, link the dependencies (libraries) that make up actual
                 # Chromium functionality directly into the executable.
-                '<@(chromium_browser_dependencies)',
-                '<@(chromium_child_dependencies)',
-                '../content/content.gyp:content_app_both',
+                '<@(chromium_dependencies)',
                 # Needed for chrome_main.cc initialization of libraries.
                 '../build/linux/system.gyp:gtk',
                 # Needed to use the master_preferences functions
@@ -158,9 +145,7 @@
               'dependencies': [
                 # On Linux, link the dependencies (libraries) that make up actual
                 # Chromium functionality directly into the executable.
-                '<@(chromium_browser_dependencies)',
-                '<@(chromium_child_dependencies)',
-                '../content/content.gyp:content_app_both',
+                '<@(chromium_dependencies)',
                 # Needed for chrome_main.cc initialization of libraries.
                 '../build/linux/system.gyp:x11',
                 '../build/linux/system.gyp:pangocairo',
@@ -256,13 +241,10 @@
             'CHROMIUM_SHORT_NAME': '<(branding)',
           },
           'dependencies': [
-            '../components/components.gyp:chrome_manifest_bundle',
             'helper_app',
             'infoplist_strings_tool',
             'interpose_dependency_shim',
-            # On Mac, make sure we've built chrome_dll, which contains all of
-            # the library code with Chromium functionality.
-            'chrome_dll',
+            'chrome_manifest_bundle',
           ],
           'mac_bundle_resources': [
             '<(PRODUCT_DIR)/<(mac_bundle_id).manifest',
@@ -324,7 +306,7 @@
             {
               'postbuild_name': 'Copy <(mac_product_name) Framework.framework',
               'action': [
-                '../build/mac/copy_framework_unversioned.sh',
+                'tools/build/mac/copy_framework_unversioned',
                 '${BUILT_PRODUCTS_DIR}/<(mac_product_name) Framework.framework',
                 '${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Versions/<(version_full)',
               ],
@@ -337,17 +319,18 @@
               # Keystone information is included if Keystone is enabled.  The
               # application reads Keystone keys from this plist and not the
               # framework's, and the ticket will reference this Info.plist to
-              # determine the tag of the installed product.  Use --scm=1 to
-              # include SCM information.  The --pdf flag controls whether
+              # determine the tag of the installed product.  Use -s1 to
+              # include Subversion information.  The -p flag controls whether
               # to insert PDF as a supported type identifier that can be
               # opened.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
                          '--breakpad=0',
-                         '--keystone=<(mac_keystone)',
-                         '--scm=1',
-                         '--pdf=<(internal_pdf)',
-                         '--bundle_id=<(mac_bundle_id)'],
+                         '-k<(mac_keystone)',
+                         '-s1',
+                         '-p<(internal_pdf)',
+                         '<(branding)',
+                         '<(mac_bundle_id)'],
             },
             {
               'postbuild_name': 'Clean up old versions',
@@ -384,8 +367,8 @@
               # prepare their Breakpad symbol files.
               'postbuild_name': 'Make More Helpers',
               'action': [
-                '../build/mac/make_more_helpers.sh',
-                'Versions/<(version_full)',
+                'tools/build/mac/make_more_helpers.sh',
+                '<(version_full)',
                 '<(mac_product_name)',
               ],
             },
@@ -394,11 +377,26 @@
               # executable.
               'postbuild_name': 'Verify No Objective-C',
               'action': [
-                '../build/mac/verify_no_objc.sh',
+                'tools/build/mac/verify_no_objc.sh',
               ],
             },
           ],  # postbuilds
-        }, {  # OS != "mac"
+        }],
+        ['OS=="linux"', {
+          'conditions': [
+            ['branding=="Chrome"', {
+              'dependencies': [
+                'linux_installer_configs',
+              ],
+            }],
+            ['selinux==0', {
+              'dependencies': [
+                '../sandbox/sandbox.gyp:sandbox',
+              ],
+            }],
+          ],
+        }],
+        ['OS != "mac"', {
           'conditions': [
             # TODO:  add a:
             #   'product_name': 'chromium'
@@ -413,32 +411,36 @@
               'dependencies': [
                 '../pdf/pdf.gyp:pdf',
               ],
-              'conditions': [
-                # CrOS does this in a separate build step.
-                ['OS=="linux" and chromeos==0 and linux_dump_symbols==1', {
-                  'dependencies': [
-                    '../pdf/pdf.gyp:pdf_linux_symbols',
-                  ],
-                }], # OS=="linux" and chromeos==0 and linux_dump_symbols==1
-              ],
-            }], # internal_pdf
+            }],
           ],
           'dependencies': [
-            '../components/components.gyp:startup_metric_utils',
             'chrome_resources.gyp:packed_extra_resources',
             'chrome_resources.gyp:packed_resources',
             # Copy Flash Player files to PRODUCT_DIR if applicable. Let the .gyp
             # file decide what to do on a per-OS basis; on Mac, internal plugins
             # go inside the framework, so this dependency is in chrome_dll.gypi.
-            '../third_party/adobe/flash/flash_player.gyp:flapper_binaries',
-            # Copy CDM files to PRODUCT_DIR if applicable. Let the .gyp
-            # file decide what to do on a per-OS basis; on Mac, internal plugins
-            # go inside the framework, so this dependency is in chrome_dll.gypi.
-            '../third_party/widevine/cdm/widevine_cdm.gyp:widevinecdmadapter',
+            '../third_party/adobe/flash/flash_player.gyp:flash_player',
           ],
         }],
-        ['chrome_multiple_dll', {
-          'defines': ['CHROME_MULTIPLE_DLL'],
+        ['OS=="linux"', {
+          'conditions': [
+            # For now, do not build nacl_helper when disable_nacl=1
+            # or when arm is enabled
+            # http://code.google.com/p/gyp/issues/detail?id=239
+            ['disable_nacl==0 and target_arch!="arm"', {
+              'dependencies': [
+                '../native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap',
+                'nacl_helper',
+                ],
+            }],
+          ],
+        }],
+        ['OS=="mac"', {
+          'dependencies': [
+            # On Mac, make sure we've built chrome_dll, which contains all of
+            # the library code with Chromium functionality.
+            'chrome_dll',
+          ],
         }],
         ['OS=="mac" and asan==1', {
           'xcode_settings': {
@@ -446,54 +448,26 @@
             'CHROMIUM_STRIP_SAVE_FILE': 'app/app_asan.saves',
           },
         }],
-        ['OS=="linux"', {
-          'conditions': [
-            ['branding=="Chrome"', {
-              'dependencies': [
-                'linux_installer_configs',
-              ],
-            }],
-            # For now, do not build nacl_helper when disable_nacl=1
-            # http://code.google.com/p/gyp/issues/detail?id=239
-            ['disable_nacl==0', {
-              'dependencies': [
-                '../native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap',
-                '../components/nacl.gyp:nacl_helper',
-                ],
-            }],
-          ],
-          'dependencies': [
-            '../sandbox/sandbox.gyp:sandbox',
-          ],
-        }],
         ['OS=="win"', {
           'dependencies': [
-            # Note that chrome_elf must be listed first. Do not reorder it.
-            '../chrome_elf/chrome_elf.gyp:chrome_elf',
             'chrome_dll',
-            'chrome_nacl_win64',
-            'chrome_process_finder',
             'chrome_version_resources',
             'installer_util',
-            'image_pre_reader',
+            'installer_util_strings',
             '../base/base.gyp:base',
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../breakpad/breakpad.gyp:breakpad_sender',
-            '../components/components.gyp:breakpad_component',
-            '../components/components.gyp:policy',
             '../sandbox/sandbox.gyp:sandbox',
+            'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'sources': [
-            'app/chrome_breakpad_client.cc',
-            'app/chrome_breakpad_client.h',
             'app/chrome_exe.rc',
-            'common/crash_keys.cc',
-            'common/crash_keys.h',
             '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_exe_version.rc',
           ],
           'msvs_settings': {
             'VCLinkerTool': {
               'ImportLibrary': '$(OutDir)\\lib\\chrome_exe.lib',
+              'ProgramDatabaseFile': '$(OutDir)\\chrome_exe.pdb',
               'DelayLoadDLLs': [
                 'dbghelp.dll',
                 'dwmapi.dll',
@@ -501,15 +475,11 @@
                 'ole32.dll',
                 'oleaut32.dll',
               ],
-              'AdditionalDependencies': [ 'wintrust.lib' ],
               # Set /SUBSYSTEM:WINDOWS for chrome.exe itself.
               'SubSystem': '2',
             },
             'VCManifestTool': {
-              'AdditionalManifestFiles': [
-                '$(ProjectDir)\\app\\chrome.exe.manifest',
-                '<(SHARED_INTERMEDIATE_DIR)/chrome_elf/version_assembly.manifest',
-              ],
+              'AdditionalManifestFiles': '$(ProjectDir)\\app\\chrome.exe.manifest',
             },
           },
           'actions': [
@@ -523,19 +493,6 @@
               ],
               'action': ['cp', '-f', '<@(_inputs)', '<@(_outputs)'],
               'message': 'Copy first run complete sentinel file',
-              'msvs_cygwin_shell': 1,
-            },
-            {
-              'action_name': 'chrome_exe_manifest',
-              'includes': [
-                  '../chrome_elf/chrome_exe_manifest_action.gypi',
-              ],
-            },
-            {
-              'action_name': 'version_assembly_manifest',
-              'includes': [
-                  '../chrome_elf/version_assembly_manifest_action.gypi',
-              ],
             },
           ],
         }, {  # 'OS!="win"
@@ -545,13 +502,7 @@
         }],
         ['OS=="win" and component=="shared_library"', {
           'defines': ['COMPILE_CONTENT_STATICALLY'],
-        }],
-        ['OS=="win"', {
-          'dependencies': [
-            '../win8/metro_driver/metro_driver.gyp:metro_driver',
-            '../win8/delegate_execute/delegate_execute.gyp:*',
-          ],
-        }],
+        }]
       ],
     },
   ],
@@ -559,104 +510,55 @@
     ['OS=="win"', {
       'targets': [
         {
-          'target_name': 'image_pre_reader',
-          'type': 'static_library',
+          'target_name': 'chrome_nacl_win64',
+          'type': 'executable',
+          'product_name': 'nacl64',
           'sources': [
-            'app/image_pre_reader_win.cc',
-            'app/image_pre_reader_win.h',
+            'app/breakpad_win.cc',
+            'app/hard_error_handler_win.cc',
+            'nacl/nacl_exe_win_64.cc',
+            '../content/app/startup_helper_win.cc',
+            '../content/common/debug_flags.cc',  # Needed for sandbox_policy.cc
+            '../content/common/hi_res_timer_manager_win.cc',
+            '../content/common/sandbox_init_win.cc',
+            '../content/common/sandbox_policy.cc',
+            '../content/public/common/content_switches.cc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/nacl64_exe_version.rc',
           ],
           'dependencies': [
-             '../base/base.gyp:base',
+            'app/policy/cloud_policy_codegen.gyp:policy_win64',
+            'chrome_version_resources',
+            'common_constants_win64',
+            'installer_util_nacl_win64',
+            'nacl_win64',
+            '../breakpad/breakpad.gyp:breakpad_handler_win64',
+            '../breakpad/breakpad.gyp:breakpad_sender_win64',
+            '../base/base.gyp:base_i18n_nacl_win64',
+            '../base/base.gyp:base_nacl_win64',
+            '../base/base.gyp:base_static_win64',
+            '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
+            '../ipc/ipc.gyp:ipc_win64',
+            '../sandbox/sandbox.gyp:sandbox_win64',
           ],
-        },
-      ],
-      'conditions': [
-        ['disable_nacl!=1 and target_arch=="ia32"', {
-          'targets': [
-            {
-              'target_name': 'chrome_nacl_win64',
-              'type': 'executable',
-              'product_name': 'nacl64',
-              'sources': [
-                'app/chrome_breakpad_client.cc',
-                'common/crash_keys.cc',
-                'nacl/nacl_exe_win_64.cc',
-                '../content/app/startup_helper_win.cc',
-                '../content/common/sandbox_init_win.cc',
-                '../content/common/sandbox_win.cc',
-                '../content/public/common/content_switches.cc',
-                '<(SHARED_INTERMEDIATE_DIR)/chrome_version/nacl64_exe_version.rc',
-              ],
-              'dependencies': [
-                'chrome_version_resources',
-                'installer_util_nacl_win64',
-                '../base/base.gyp:base_i18n_nacl_win64',
-                '../base/base.gyp:base_nacl_win64',
-                '../base/base.gyp:base_static_win64',
-                '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
-                '../breakpad/breakpad.gyp:breakpad_handler_win64',
-                '../breakpad/breakpad.gyp:breakpad_sender_win64',
-                '../components/components.gyp:breakpad_win64',
-                '../chrome/common_constants.gyp:common_constants_win64',
-                '../components/components.gyp:policy_win64',
-                '../components/nacl.gyp:nacl_win64',
-                '../crypto/crypto.gyp:crypto_nacl_win64',
-                '../ipc/ipc.gyp:ipc_win64',
-                '../sandbox/sandbox.gyp:sandbox_win64',
-              ],
-              'defines': [
-                '<@(nacl_win64_defines)',
-                'COMPILE_CONTENT_STATICALLY',
-              ],
-              'include_dirs': [
-                '<(SHARED_INTERMEDIATE_DIR)/chrome',
-              ],
-              'msvs_settings': {
-                'VCLinkerTool': {
-                  'ImportLibrary': '$(OutDir)\\lib\\nacl64_exe.lib',
-                  'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
-                },
-              },
-              'configurations': {
-                'Common_Base': {
-                  'msvs_target_platform': 'x64',
-                },
-              },
+          'defines': [
+            '<@(nacl_win64_defines)',
+            'COMPILE_CONTENT_STATICALLY',
+          ],
+          'include_dirs': [
+            '<(SHARED_INTERMEDIATE_DIR)/chrome',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'ImportLibrary': '$(OutDir)\\lib\\nacl64_exe.lib',
+              'ProgramDatabaseFile': '$(OutDir)\\nacl64_exe.pdb',
+              'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
             },
-          ],
-        }, {  # else (disable_nacl==1)
-          'targets': [
-            {
-              'target_name': 'chrome_nacl_win64',
-              'type': 'none',
-              'sources': [],
+          },
+          'configurations': {
+            'Common_Base': {
+              'msvs_target_platform': 'x64',
             },
-          ],
-        }],
-      ],
-    }],
-    ['test_isolation_mode != "noop"', {
-      'targets': [
-        {
-          'target_name': 'chrome_run',
-          'type': 'none',
-          'dependencies': [
-            'chrome',
-          ],
-          'includes': [
-            '../build/isolate.gypi',
-            'chrome.isolate',
-          ],
-          'sources': [
-            'chrome.isolate',
-          ],
-          'conditions': [
-            ['OS=="win"', {
-              'dependencies': [
-                'chrome_nacl_win64',
-              ],
-            }],
-          ],
+          },
         },
       ],
     }],

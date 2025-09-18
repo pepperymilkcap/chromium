@@ -4,40 +4,24 @@
 
 #include "chrome/test/base/view_event_test_base.h"
 
+#if defined(OS_WIN)
+#include <ole2.h>
+#endif
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_number_conversions.h"
-#include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/base/testing_browser_process.h"
+#include "base/message_loop.h"
+#include "base/string_number_conversions.h"
+#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
-#include "ui/base/ime/input_method_initializer.h"
-#include "ui/base/test/ui_controls.h"
-#include "ui/compositor/test/context_factories_for_test.h"
-#include "ui/message_center/message_center.h"
+#include "ui/gfx/compositor/test/compositor_test_support.h"
 #include "ui/views/view.h"
-#include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(USE_ASH)
-#include "ash/shell.h"
-#include "ash/test/test_session_state_delegate.h"
-#include "ash/test/test_shell_delegate.h"
-#endif
-
 #if defined(USE_AURA)
-#include "ui/aura/client/event_client.h"
-#include "ui/aura/env.h"
+#include "ash/shell.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/test/aura_test_helper.h"
-#include "ui/views/corewm/wm_state.h"
-#endif
-
-#if defined(OS_CHROMEOS)
-#include "chromeos/audio/cras_audio_handler.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/network/network_handler.h"
 #endif
 
 namespace {
@@ -52,13 +36,13 @@ class TestView : public views::View {
     PreferredSizeChanged();
   }
 
-  virtual gfx::Size GetPreferredSize() OVERRIDE {
+  gfx::Size GetPreferredSize() {
     if (!preferred_size_.IsEmpty())
       return preferred_size_;
     return View::GetPreferredSize();
   }
 
-  virtual void Layout() OVERRIDE {
+  virtual void Layout() {
     View* child_view = child_at(0);
     child_view->SetBounds(0, 0, width(), height());
   }
@@ -76,112 +60,55 @@ const int kMouseMoveDelayMS = 200;
 
 ViewEventTestBase::ViewEventTestBase()
   : window_(NULL),
-    content_view_(NULL) {
-  // The TestingBrowserProcess must be created in the constructor because there
-  // are tests that require it before SetUp() is called.
-  TestingBrowserProcess::CreateInstance();
+    content_view_(NULL),
+    ui_thread_(content::BrowserThread::UI, &message_loop_) {
 }
 
 void ViewEventTestBase::Done() {
-  base::MessageLoop::current()->Quit();
+  MessageLoop::current()->Quit();
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
   // We need to post a message to tickle the Dispatcher getting called and
   // exiting out of the nested loop. Without this the quit never runs.
-  if (window_)
-    PostMessage(window_->GetNativeWindow(), WM_USER, 0, 0);
+  PostMessage(window_->GetNativeWindow(), WM_USER, 0, 0);
 #endif
 
   // If we're in a nested message loop, as is the case with menus, we
   // need to quit twice. The second quit does that for us. Finish all
   // pending UI events before posting closure because events it may be
   // executed before UI events are executed.
-  ui_controls::RunClosureAfterAllPendingUIEvents(
-      base::MessageLoop::QuitClosure());
+  ui_controls::RunClosureAfterAllPendingUIEvents(MessageLoop::QuitClosure());
 }
 
 void ViewEventTestBase::SetUp() {
-#if defined(USE_AURA)
-  wm_state_.reset(new views::corewm::WMState);
-#endif
-
-  views::ViewsDelegate::views_delegate = &views_delegate_;
-  ui::InitializeInputMethodForTesting();
-  gfx::NativeView context = NULL;
-
-#if defined(USE_ASH)
-  // The ContextFactory must exist before any Compositors are created.
-  bool allow_test_contexts = true;
-  ui::InitializeContextFactoryForTests(allow_test_contexts);
 #if defined(OS_WIN)
-  // http://crbug.com/154081 use ash::Shell code path below on win_ash bots when
-  // interactive_ui_tests is brought up on that platform.
-  gfx::Screen::SetScreenInstance(
-      gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
-
-#else  // !OS_WIN
-  // Ash Shell can't just live on its own without a browser process, we need to
-  // also create the message center.
-  message_center::MessageCenter::Initialize();
-#if defined(OS_CHROMEOS)
-  chromeos::DBusThreadManager::InitializeWithStub();
-  chromeos::CrasAudioHandler::InitializeForTesting();
-  chromeos::NetworkHandler::Initialize();
-#endif  // OS_CHROMEOS
-  ash::test::TestShellDelegate* shell_delegate =
-      new ash::test::TestShellDelegate();
-  ash::Shell::CreateInstance(shell_delegate);
-  shell_delegate->test_session_state_delegate()
-      ->SetActiveUserSessionStarted(true);
-  context = ash::Shell::GetPrimaryRootWindow();
-#endif  // !OS_WIN
-  aura::Env::CreateInstance();
-#elif defined(USE_AURA)
-  // Instead of using the ash shell, use an AuraTestHelper to create and manage
-  // the test screen.
-  aura_test_helper_.reset(
-      new aura::test::AuraTestHelper(base::MessageLoopForUI::current()));
-  aura_test_helper_->SetUp();
-  context = aura_test_helper_->root_window();
-#endif  // !USE_ASH && USE_AURA
-
-  window_ = views::Widget::CreateWindowWithContext(this, context);
+  OleInitialize(NULL);
+#endif
+  ui::CompositorTestSupport::Initialize();
+#if defined(USE_AURA)
+  aura::RootWindow::GetInstance();
+  ash::Shell::CreateInstance(NULL);
+#endif
+  window_ = views::Widget::CreateWindow(this);
 }
 
 void ViewEventTestBase::TearDown() {
   if (window_) {
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
     DestroyWindow(window_->GetNativeWindow());
 #else
     window_->Close();
-    content::RunAllPendingInMessageLoop();
+    ui_test_utils::RunAllPendingInMessageLoop();
 #endif
     window_ = NULL;
   }
-
-#if defined(USE_ASH)
-#if !defined(OS_WIN)
-  ash::Shell::DeleteInstance();
-#if defined(OS_CHROMEOS)
-  chromeos::NetworkHandler::Shutdown();
-  chromeos::CrasAudioHandler::Shutdown();
-  chromeos::DBusThreadManager::Shutdown();
-#endif
-  // Ash Shell can't just live on its own without a browser process, we need to
-  // also shut down the message center.
-  message_center::MessageCenter::Shutdown();
-#endif  // !OS_WIN
-  aura::Env::DeleteInstance();
-  ui::TerminateContextFactoryForTests();
-#elif defined(USE_AURA)
-  aura_test_helper_->TearDown();
-#endif  // !USE_ASH && USE_AURA
-
-  ui::ShutdownInputMethodForTesting();
-  views::ViewsDelegate::views_delegate = NULL;
-
 #if defined(USE_AURA)
-  wm_state_.reset();
+  ash::Shell::DeleteInstance();
+  aura::RootWindow::DeleteInstance();
+#endif
+  ui::CompositorTestSupport::Terminate();
+#if defined(OS_WIN)
+  OleUninitialize();
 #endif
 }
 
@@ -210,22 +137,26 @@ views::Widget* ViewEventTestBase::GetWidget() {
 }
 
 ViewEventTestBase::~ViewEventTestBase() {
-  TestingBrowserProcess::DeleteInstance();
 }
 
 void ViewEventTestBase::StartMessageLoopAndRunTest() {
-  ASSERT_TRUE(
-      ui_test_utils::ShowAndFocusNativeWindow(window_->GetNativeWindow()));
+  window_->Show();
+  // Make sure the window is the foreground window, otherwise none of the
+  // mouse events are going to be targeted correctly.
+#if defined(OS_WIN)
+  SetForegroundWindow(window_->GetNativeWindow());
+#endif
 
   // Flush any pending events to make sure we start with a clean slate.
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
 
   // Schedule a task that starts the test. Need to do this as we're going to
   // run the message loop.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(&ViewEventTestBase::DoTestOnMessageLoop, this));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&ViewEventTestBase::DoTestOnMessageLoop, this));
 
-  content::RunMessageLoop();
+  ui_test_utils::RunMessageLoop();
 }
 
 gfx::Size ViewEventTestBase::GetPreferredSize() {
@@ -240,7 +171,7 @@ void ViewEventTestBase::ScheduleMouseMoveInBackground(int x, int y) {
   dnd_thread_->message_loop()->PostDelayedTask(
       FROM_HERE,
       base::Bind(base::IgnoreResult(&ui_controls::SendMouseMove), x, y),
-      base::TimeDelta::FromMilliseconds(kMouseMoveDelayMS));
+      kMouseMoveDelayMS);
 }
 
 void ViewEventTestBase::StopBackgroundThread() {

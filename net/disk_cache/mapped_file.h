@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,14 @@
 
 #ifndef NET_DISK_CACHE_MAPPED_FILE_H_
 #define NET_DISK_CACHE_MAPPED_FILE_H_
+#pragma once
 
 #include "net/base/net_export.h"
+#include "net/disk_cache/disk_format.h"
 #include "net/disk_cache/file.h"
 #include "net/disk_cache/file_block.h"
 
-namespace base {
 class FilePath;
-}
 
 namespace disk_cache {
 
@@ -26,9 +26,9 @@ class NET_EXPORT_PRIVATE MappedFile : public File {
   MappedFile() : File(true), init_(false) {}
 
   // Performs object initialization. name is the file to use, and size is the
-  // amount of data to memory map from the file. If size is 0, the whole file
+  // ammount of data to memory map from th efile. If size is 0, the whole file
   // will be mapped in memory.
-  void* Init(const base::FilePath& name, size_t size);
+  void* Init(const FilePath& name, size_t size);
 
   void* buffer() const {
     return buffer_;
@@ -37,14 +37,6 @@ class NET_EXPORT_PRIVATE MappedFile : public File {
   // Loads or stores a given block from the backing file (synchronously).
   bool Load(const FileBlock* block);
   bool Store(const FileBlock* block);
-
-  // Asynchronous versions of Load/Store, following the semantics of File::Read
-  // and File::Write.
-  bool Load(const FileBlock* block, FileIOCallback* callback, bool* completed);
-  bool Store(const FileBlock* block, FileIOCallback* callback, bool* completed);
-
-  // Flush the memory-mapped section to disk (synchronously).
-  void Flush();
 
  private:
   virtual ~MappedFile();
@@ -55,22 +47,8 @@ class NET_EXPORT_PRIVATE MappedFile : public File {
 #endif
   void* buffer_;  // Address of the memory mapped buffer.
   size_t view_size_;  // Size of the memory pointed by buffer_.
-#if defined(POSIX_AVOID_MMAP)
-  void* snapshot_;  // Copy of the buffer taken when it was last flushed.
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(MappedFile);
-};
-
-// Helper class for calling Flush() on exit from the current scope.
-class ScopedFlush {
- public:
-  explicit ScopedFlush(MappedFile* file) : file_(file) {}
-  ~ScopedFlush() {
-    file_->Flush();
-  }
- private:
-  MappedFile* file_;
 };
 
 }  // namespace disk_cache

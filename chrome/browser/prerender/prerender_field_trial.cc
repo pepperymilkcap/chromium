@@ -8,160 +8,90 @@
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/predictors/autocomplete_action_predictor.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "components/variations/variations_associated_data.h"
-
-using base::FieldTrial;
-using base::FieldTrialList;
-using base::SplitStringUsingSubstr;
-using base::StringToInt;
-using std::string;
-using std::vector;
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
 
 namespace prerender {
 
 namespace {
 
-const char kOmniboxTrialName[] = "PrerenderFromOmnibox";
-int g_omnibox_trial_default_group_number = kint32min;
+const char kPrerenderFromOmniboxTrialName[] = "PrerenderFromOmnibox";
 
-const char kDisabledGroup[] = "Disabled";
-const char kEnabledGroup[] = "Enabled";
-
-const char kLocalPredictorSpecTrialName[] = "PrerenderLocalPredictorSpec";
-const char kLocalPredictorKeyName[] = "LocalPredictor";
-const char kLocalPredictorUnencryptedSyncOnlyKeyName[] =
-    "LocalPredictorUnencryptedSyncOnly";
-const char kSideEffectFreeWhitelistKeyName[] = "SideEffectFreeWhitelist";
-const char kPrerenderLaunchKeyName[] = "PrerenderLaunch";
-const char kPrerenderAlwaysControlKeyName[] = "PrerenderAlwaysControl";
-const char kPrerenderQueryPrerenderServiceKeyName[] =
-    "PrerenderQueryPrerenderService";
-const char kPrerenderQueryPrerenderServiceCurrentURLKeyName[] =
-    "PrerenderQueryPrerenderServiceCurrentURL";
-const char kPrerenderQueryPrerenderServiceCandidateURLsKeyName[] =
-    "PrerenderQueryPrerenderServiceCandidateURLs";
-const char kPrerenderServiceBehaviorIDKeyName[] = "PrerenderServiceBehaviorID";
-const char kPrerenderServiceFetchTimeoutKeyName[] =
-    "PrerenderServiceFetchTimeoutMs";
-const char kPrerenderTTLKeyName[] = "PrerenderTTLSeconds";
-const char kPrerenderPriorityHalfLifeTimeKeyName[] =
-    "PrerenderPriorityHalfLifeTimeSeconds";
-const char kMaxConcurrentPrerenderKeyName[] = "MaxConcurrentPrerenders";
-const char kSkipFragment[] = "SkipFragment";
-const char kSkipHTTPS[] = "SkipHTTPS";
-const char kSkipWhitelist[] = "SkipWhitelist";
-const char kSkipServiceWhitelist[] = "SkipServiceWhitelist";
-const char kSkipLoggedIn[] = "SkipLoggedIn";
-const char kSkipDefaultNoPrerender[] = "SkipDefaultNoPrerender";
-const char kPrerenderServiceURLPrefixParameterName[] =
-    "PrerenderServiceURLPrefix";
-const char kDefaultPrerenderServiceURLPrefix[] =
-    "https://clients4.google.com/prerenderservice/?q=";
-const int kMinPrerenderServiceTimeoutMs = 1;
-const int kMaxPrerenderServiceTimeoutMs = 10000;
-const int kDefaultPrerenderServiceTimeoutMs = 1000;
-const char kSkipPrerenderLocalCanadidates[] = "SkipPrerenderLocalCandidates";
-const char kSkipPrerenderServiceCanadidates[] =
-    "SkipPrerenderServiceCandidates";
-const char kDisableSessionStorageNamespaceMerging[] =
-    "DisableSessionStorageNamespaceMerging";
-
-void SetupPrerenderFieldTrial() {
-  const FieldTrial::Probability divisor = 1000;
-
-  FieldTrial::Probability control_probability;
-  FieldTrial::Probability experiment_multi_prerender_probability;
-  FieldTrial::Probability experiment_15min_ttl_probability;
-  FieldTrial::Probability experiment_no_use_probability;
-
+void SetupPrefetchFieldTrial() {
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
   if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
       channel == chrome::VersionInfo::CHANNEL_BETA) {
-    // Use very conservatives and stable settings in beta and stable.
-    const FieldTrial::Probability release_prerender_enabled_probability = 980;
-    const FieldTrial::Probability release_control_probability = 10;
-    const FieldTrial::Probability
-        release_experiment_multi_prerender_probability = 0;
-    const FieldTrial::Probability release_experiment_15min_ttl_probability = 10;
-    const FieldTrial::Probability release_experiment_no_use_probability = 0;
-    COMPILE_ASSERT(
-        release_prerender_enabled_probability + release_control_probability +
-        release_experiment_multi_prerender_probability +
-        release_experiment_15min_ttl_probability +
-        release_experiment_no_use_probability == divisor,
-        release_experiment_probabilities_must_equal_divisor);
-
-    control_probability = release_control_probability;
-    experiment_multi_prerender_probability =
-        release_experiment_multi_prerender_probability;
-    experiment_15min_ttl_probability = release_experiment_15min_ttl_probability;
-    experiment_no_use_probability = release_experiment_no_use_probability;
-  } else {
-    // In testing channels, use more experiments and a larger control group to
-    // improve quality of data.
-    const FieldTrial::Probability dev_prerender_enabled_probability = 250;
-    const FieldTrial::Probability dev_control_probability = 250;
-    const FieldTrial::Probability
-        dev_experiment_multi_prerender_probability = 250;
-    const FieldTrial::Probability dev_experiment_15min_ttl_probability = 125;
-    const FieldTrial::Probability dev_experiment_no_use_probability = 125;
-    COMPILE_ASSERT(dev_prerender_enabled_probability + dev_control_probability +
-                   dev_experiment_multi_prerender_probability +
-                   dev_experiment_15min_ttl_probability +
-                   dev_experiment_no_use_probability == divisor,
-                   dev_experiment_probabilities_must_equal_divisor);
-
-    control_probability = dev_control_probability;
-    experiment_multi_prerender_probability =
-        dev_experiment_multi_prerender_probability;
-    experiment_15min_ttl_probability = dev_experiment_15min_ttl_probability;
-    experiment_no_use_probability = dev_experiment_no_use_probability;
+    return;
   }
 
-  int prerender_enabled_group = -1;
-  scoped_refptr<FieldTrial> trial(
-      FieldTrialList::FactoryGetFieldTrial(
-          "Prerender", divisor, "PrerenderEnabled",
-          2014, 12, 31, FieldTrial::SESSION_RANDOMIZED,
-          &prerender_enabled_group));
-  const int control_group =
-      trial->AppendGroup("PrerenderControl",
-                         control_probability);
-  const int experiment_multi_prerender_group =
-      trial->AppendGroup("PrerenderMulti",
-                         experiment_multi_prerender_probability);
-  const int experiment_15_min_TTL_group =
-      trial->AppendGroup("Prerender15minTTL",
-                         experiment_15min_ttl_probability);
-  const int experiment_no_use_group =
-      trial->AppendGroup("PrerenderNoUse",
-                         experiment_no_use_probability);
+  const base::FieldTrial::Probability divisor = 1000;
+  const base::FieldTrial::Probability prefetch_probability = 500;
+  scoped_refptr<base::FieldTrial> trial(
+      new base::FieldTrial("Prefetch", divisor,
+                           "ContentPrefetchPrefetchOff", 2012, 6, 30));
+  const int kPrefetchOnGroup = trial->AppendGroup("ContentPrefetchPrefetchOn",
+                                                  prefetch_probability);
+  ResourceDispatcherHost::set_is_prefetch_enabled(
+      trial->group() == kPrefetchOnGroup);
+}
 
+void SetupPrerenderFieldTrial() {
+  base::FieldTrial::Probability divisor = 1000;
+  base::FieldTrial::Probability exp1_probability = 200;
+  base::FieldTrial::Probability control1_probability = 200;
+  base::FieldTrial::Probability no_use1_probability = 100;
+  base::FieldTrial::Probability exp2_probability = 200;
+  base::FieldTrial::Probability control2_probability = 200;
+  base::FieldTrial::Probability no_use2_probability = 100;
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
+      channel == chrome::VersionInfo::CHANNEL_BETA) {
+    exp1_probability = 495;
+    control1_probability = 5;
+    no_use1_probability = 0;
+    exp2_probability = 495;
+    control2_probability = 5;
+    no_use2_probability = 0;
+  }
+  CHECK_EQ(divisor, exp1_probability + control1_probability +
+           no_use1_probability + exp2_probability +
+           control2_probability + no_use2_probability);
+  scoped_refptr<base::FieldTrial> trial(
+      new base::FieldTrial("Prerender", divisor,
+                           "ContentPrefetchPrerender1", 2012, 6, 30));
+
+  const int kPrerenderExperiment1Group = trial->kDefaultGroupNumber;
+  const int kPrerenderControl1Group =
+      trial->AppendGroup("ContentPrefetchPrerenderControl1",
+                         control1_probability);
+  const int kPrerenderNoUse1Group =
+      trial->AppendGroup("ContentPrefetchPrerenderNoUse1",
+                         no_use1_probability);
+  const int kPrerenderExperiment2Group =
+      trial->AppendGroup("ContentPrefetchPrerender2",
+                         exp2_probability);
+  const int kPrerenderControl2Group =
+      trial->AppendGroup("ContentPrefetchPrerenderControl2",
+                         control2_probability);
+  const int kPrerenderNoUse2Group =
+      trial->AppendGroup("ContentPrefetchPrerenderNoUse2",
+                         no_use2_probability);
   const int trial_group = trial->group();
-  if (trial_group == prerender_enabled_group) {
+  if (trial_group == kPrerenderExperiment1Group ||
+      trial_group == kPrerenderExperiment2Group) {
     PrerenderManager::SetMode(
         PrerenderManager::PRERENDER_MODE_EXPERIMENT_PRERENDER_GROUP);
-  } else if (trial_group == control_group) {
+  } else if (trial_group == kPrerenderControl1Group ||
+             trial_group == kPrerenderControl2Group) {
     PrerenderManager::SetMode(
         PrerenderManager::PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP);
-  } else if (trial_group == experiment_multi_prerender_group) {
-    PrerenderManager::SetMode(
-        PrerenderManager::PRERENDER_MODE_EXPERIMENT_MULTI_PRERENDER_GROUP);
-  } else if (trial_group == experiment_15_min_TTL_group) {
-    PrerenderManager::SetMode(
-        PrerenderManager::PRERENDER_MODE_EXPERIMENT_15MIN_TTL_GROUP);
-  } else if (trial_group == experiment_no_use_group) {
+  } else if (trial_group == kPrerenderNoUse1Group ||
+             trial_group == kPrerenderNoUse2Group) {
     PrerenderManager::SetMode(
         PrerenderManager::PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP);
   } else {
@@ -171,18 +101,19 @@ void SetupPrerenderFieldTrial() {
 
 }  // end namespace
 
-void ConfigureOmniboxPrerender();
+void ConfigurePrerenderFromOmnibox();
 
-void ConfigurePrerender(const CommandLine& command_line) {
+void ConfigurePrefetchAndPrerender(const CommandLine& command_line) {
   enum PrerenderOption {
     PRERENDER_OPTION_AUTO,
     PRERENDER_OPTION_DISABLED,
     PRERENDER_OPTION_ENABLED,
+    PRERENDER_OPTION_PREFETCH_ONLY,
   };
 
   PrerenderOption prerender_option = PRERENDER_OPTION_AUTO;
   if (command_line.HasSwitch(switches::kPrerenderMode)) {
-    const string switch_value =
+    const std::string switch_value =
         command_line.GetSwitchValueASCII(switches::kPrerenderMode);
 
     if (switch_value == switches::kPrerenderModeSwitchValueAuto) {
@@ -194,6 +125,9 @@ void ConfigurePrerender(const CommandLine& command_line) {
       // The empty string means the option was provided with no value, and that
       // means enable.
       prerender_option = PRERENDER_OPTION_ENABLED;
+    } else if (switch_value ==
+               switches::kPrerenderModeSwitchValuePrefetchOnly) {
+      prerender_option = PRERENDER_OPTION_PREFETCH_ONLY;
     } else {
       prerender_option = PRERENDER_OPTION_DISABLED;
       LOG(ERROR) << "Invalid --prerender option received on command line: "
@@ -204,42 +138,50 @@ void ConfigurePrerender(const CommandLine& command_line) {
 
   switch (prerender_option) {
     case PRERENDER_OPTION_AUTO:
+      SetupPrefetchFieldTrial();
       SetupPrerenderFieldTrial();
       break;
     case PRERENDER_OPTION_DISABLED:
+      ResourceDispatcherHost::set_is_prefetch_enabled(false);
       PrerenderManager::SetMode(PrerenderManager::PRERENDER_MODE_DISABLED);
       break;
     case PRERENDER_OPTION_ENABLED:
+      ResourceDispatcherHost::set_is_prefetch_enabled(true);
       PrerenderManager::SetMode(PrerenderManager::PRERENDER_MODE_ENABLED);
+      break;
+    case PRERENDER_OPTION_PREFETCH_ONLY:
+      ResourceDispatcherHost::set_is_prefetch_enabled(true);
+      PrerenderManager::SetMode(PrerenderManager::PRERENDER_MODE_DISABLED);
       break;
     default:
       NOTREACHED();
   }
 
-  ConfigureOmniboxPrerender();
+  UMA_HISTOGRAM_ENUMERATION("Prerender.Sessions",
+                            PrerenderManager::GetMode(),
+                            PrerenderManager::PRERENDER_MODE_MAX);
+
+  ConfigurePrerenderFromOmnibox();
 }
 
-void ConfigureOmniboxPrerender() {
+void ConfigurePrerenderFromOmnibox() {
   // Field trial to see if we're enabled.
-  const FieldTrial::Probability kDivisor = 100;
+  const base::FieldTrial::Probability kDivisor = 100;
 
-  FieldTrial::Probability kDisabledProbability = 10;
+  base::FieldTrial::Probability kEnabledProbability = 90;
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
   if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
       channel == chrome::VersionInfo::CHANNEL_BETA) {
-    kDisabledProbability = 1;
+    kEnabledProbability = 99;
   }
-  scoped_refptr<FieldTrial> omnibox_prerender_trial(
-      FieldTrialList::FactoryGetFieldTrial(
-          kOmniboxTrialName, kDivisor, "OmniboxPrerenderEnabled",
-          2014, 12, 31, FieldTrial::SESSION_RANDOMIZED,
-          &g_omnibox_trial_default_group_number));
-  omnibox_prerender_trial->AppendGroup("OmniboxPrerenderDisabled",
-                                       kDisabledProbability);
+  scoped_refptr<base::FieldTrial> enabled_trial(
+      new base::FieldTrial(kPrerenderFromOmniboxTrialName, kDivisor,
+                           "OmniboxPrerenderDisabled", 2012, 8, 30));
+  enabled_trial->AppendGroup("OmniboxPrerenderEnabled", kEnabledProbability);
 }
 
 bool IsOmniboxEnabled(Profile* profile) {
-  if (!profile)
+  if (!profile || profile->IsOffTheRecord())
     return false;
 
   if (!PrerenderManager::IsPrerenderingPossible())
@@ -248,7 +190,7 @@ bool IsOmniboxEnabled(Profile* profile) {
   // Override any field trial groups if the user has set a command line flag.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPrerenderFromOmnibox)) {
-    const string switch_value =
+    const std::string switch_value =
         CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kPrerenderFromOmnibox);
 
@@ -261,196 +203,10 @@ bool IsOmniboxEnabled(Profile* profile) {
     DCHECK(switch_value == switches::kPrerenderFromOmniboxSwitchValueAuto);
   }
 
-  const int group = FieldTrialList::FindValue(kOmniboxTrialName);
-  return group == FieldTrial::kNotFinalized ||
-         group == g_omnibox_trial_default_group_number;
-}
-
-/*
-PrerenderLocalPredictorSpec is a field trial, and its value must have the
-following format:
-key1=value1:key2=value2:key3=value3
-eg "LocalPredictor=Enabled:SideEffectFreeWhitelist=Enabled"
-The function below extracts the value corresponding to a key provided from the
-LocalPredictorSpec.
-*/
-string GetLocalPredictorSpecValue(string spec_key) {
-  vector<string> elements;
-  SplitStringUsingSubstr(
-      FieldTrialList::FindFullName(kLocalPredictorSpecTrialName),
-      ":",
-      &elements);
-  for (int i = 0; i < static_cast<int>(elements.size()); i++) {
-    vector<string> key_value;
-    SplitStringUsingSubstr(elements[i], "=", &key_value);
-    if (key_value.size() == 2 && key_value[0] == spec_key)
-      return key_value[1];
-  }
-  return string();
-}
-
-bool IsUnencryptedSyncEnabled(Profile* profile) {
-  ProfileSyncService* service = ProfileSyncServiceFactory::GetInstance()->
-      GetForProfile(profile);
-  return service && service->GetOpenTabsUIDelegate() &&
-      !service->EncryptEverythingEnabled();
-}
-
-// Indicates whether the Local Predictor is enabled based on field trial
-// selection.
-bool IsLocalPredictorEnabled() {
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  return false;
-#endif
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisablePrerenderLocalPredictor)) {
-    return false;
-  }
-  return GetLocalPredictorSpecValue(kLocalPredictorKeyName) == kEnabledGroup;
-}
-
-bool DisableLocalPredictorBasedOnSyncAndConfiguration(Profile* profile) {
-  return
-      GetLocalPredictorSpecValue(kLocalPredictorUnencryptedSyncOnlyKeyName) ==
-      kEnabledGroup &&
-      !IsUnencryptedSyncEnabled(profile);
-}
-
-bool IsLoggedInPredictorEnabled() {
-  return IsLocalPredictorEnabled();
-}
-
-bool IsSideEffectFreeWhitelistEnabled() {
-  return IsLocalPredictorEnabled() &&
-      GetLocalPredictorSpecValue(kSideEffectFreeWhitelistKeyName) !=
-      kDisabledGroup;
-}
-
-bool IsLocalPredictorPrerenderLaunchEnabled() {
-  return GetLocalPredictorSpecValue(kPrerenderLaunchKeyName) != kDisabledGroup;
-}
-
-bool IsLocalPredictorPrerenderAlwaysControlEnabled() {
-  return GetLocalPredictorSpecValue(kPrerenderAlwaysControlKeyName) ==
-      kEnabledGroup;
-}
-
-bool ShouldQueryPrerenderService(Profile* profile) {
-  return IsUnencryptedSyncEnabled(profile) &&
-      GetLocalPredictorSpecValue(kPrerenderQueryPrerenderServiceKeyName) ==
-      kEnabledGroup;
-}
-
-bool ShouldQueryPrerenderServiceForCurrentURL() {
-  return GetLocalPredictorSpecValue(
-      kPrerenderQueryPrerenderServiceCurrentURLKeyName) != kDisabledGroup;
-}
-
-bool ShouldQueryPrerenderServiceForCandidateURLs() {
-  return GetLocalPredictorSpecValue(
-      kPrerenderQueryPrerenderServiceCandidateURLsKeyName) != kDisabledGroup;
-}
-
-string GetPrerenderServiceURLPrefix() {
-  string prefix = chrome_variations::GetVariationParamValue(
-      kLocalPredictorSpecTrialName,
-      kPrerenderServiceURLPrefixParameterName);
-  if (prefix.empty())
-    prefix = kDefaultPrerenderServiceURLPrefix;
-  return prefix;
-}
-
-int GetPrerenderServiceBehaviorID() {
-  int id;
-  StringToInt(GetLocalPredictorSpecValue(kPrerenderServiceBehaviorIDKeyName),
-              &id);
-  // The behavior ID must be non-negative.
-  if (id < 0)
-    id = 0;
-  return id;
-}
-
-int GetPrerenderServiceFetchTimeoutMs() {
-  int result;
-  StringToInt(GetLocalPredictorSpecValue(kPrerenderServiceFetchTimeoutKeyName),
-              &result);
-  // The behavior ID must be non-negative.
-  if (result < kMinPrerenderServiceTimeoutMs ||
-      result > kMaxPrerenderServiceTimeoutMs) {
-    result = kDefaultPrerenderServiceTimeoutMs;
-  }
-  return result;
-}
-
-int GetLocalPredictorTTLSeconds() {
-  int ttl;
-  StringToInt(GetLocalPredictorSpecValue(kPrerenderTTLKeyName), &ttl);
-  // If the value is outside of 10s or 600s, use a default value of 180s.
-  if (ttl < 10 || ttl > 600)
-    ttl = 180;
-  return ttl;
-}
-
-int GetLocalPredictorPrerenderPriorityHalfLifeTimeSeconds() {
-  int half_life_time;
-  StringToInt(GetLocalPredictorSpecValue(kPrerenderPriorityHalfLifeTimeKeyName),
-              &half_life_time);
-  // Sanity check: Ensure the half life time is non-negative.
-  if (half_life_time < 0)
-    half_life_time = 0;
-  return half_life_time;
-}
-
-int GetLocalPredictorMaxConcurrentPrerenders() {
-  int num_prerenders;
-  StringToInt(GetLocalPredictorSpecValue(kMaxConcurrentPrerenderKeyName),
-              &num_prerenders);
-  // Sanity check: Ensure the number of prerenders is at least 1.
-  if (num_prerenders < 1)
-    num_prerenders = 1;
-  // Sanity check: Ensure the number of prerenders is at most 10.
-  if (num_prerenders > 10)
-    num_prerenders = 10;
-  return num_prerenders;
-};
-
-bool SkipLocalPredictorFragment() {
-  return GetLocalPredictorSpecValue(kSkipFragment) == kEnabledGroup;
-}
-
-bool SkipLocalPredictorHTTPS() {
-  return GetLocalPredictorSpecValue(kSkipHTTPS) == kEnabledGroup;
-}
-
-bool SkipLocalPredictorWhitelist() {
-  return GetLocalPredictorSpecValue(kSkipWhitelist) == kEnabledGroup;
-}
-
-bool SkipLocalPredictorServiceWhitelist() {
-  return GetLocalPredictorSpecValue(kSkipServiceWhitelist) == kEnabledGroup;
-}
-
-bool SkipLocalPredictorLoggedIn() {
-  return GetLocalPredictorSpecValue(kSkipLoggedIn) == kEnabledGroup;
-}
-
-bool SkipLocalPredictorDefaultNoPrerender() {
-  return GetLocalPredictorSpecValue(kSkipDefaultNoPrerender) == kEnabledGroup;
-}
-
-bool SkipLocalPredictorLocalCandidates() {
-  return GetLocalPredictorSpecValue(kSkipPrerenderLocalCanadidates) ==
-      kEnabledGroup;
-}
-
-bool SkipLocalPredictorServiceCandidates() {
-  return GetLocalPredictorSpecValue(kSkipPrerenderServiceCanadidates) ==
-      kEnabledGroup;
-}
-
-bool ShouldMergeSessionStorageNamespaces() {
-  return GetLocalPredictorSpecValue(kDisableSessionStorageNamespaceMerging) !=
-      kDisabledGroup;
+  const int group =
+      base::FieldTrialList::FindValue(kPrerenderFromOmniboxTrialName);
+  return group != base::FieldTrial::kNotFinalized &&
+         group != base::FieldTrial::kDefaultGroupNumber;
 }
 
 }  // namespace prerender

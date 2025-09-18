@@ -4,15 +4,16 @@
 
 #include "chrome/browser/profiles/gaia_info_update_service.h"
 
-#include "base/prefs/pref_service.h"
+#include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
 #include "content/public/browser/notification_details.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
@@ -31,9 +32,7 @@ const int kMinUpdateIntervalSeconds = 5;
 GAIAInfoUpdateService::GAIAInfoUpdateService(Profile* profile)
     : profile_(profile) {
   PrefService* prefs = profile_->GetPrefs();
-  username_pref_.Init(prefs::kGoogleServicesUsername, prefs,
-                      base::Bind(&GAIAInfoUpdateService::OnUsernameChanged,
-                                 base::Unretained(this)));
+  username_pref_.Init(prefs::kGoogleServicesUsername, prefs, this);
 
   last_updated_ = base::Time::FromInternalValue(
       prefs->GetInt64(prefs::kProfileGAIAInfoUpdateTime));
@@ -50,7 +49,7 @@ void GAIAInfoUpdateService::Update() {
   if (username.empty())
     return;
 
-  if (profile_image_downloader_)
+  if (profile_image_downloader_.get())
     return;
   profile_image_downloader_.reset(new ProfileDownloader(this));
   profile_image_downloader_->Start();
@@ -66,16 +65,22 @@ bool GAIAInfoUpdateService::ShouldUseGAIAProfileInfo(Profile* profile) {
   if (!profile->GetOriginalProfile()->IsSyncAccessible())
     return false;
 
-  // To enable this feature for testing pass "--google-profile-info".
-  if (switches::IsGoogleProfileInfo())
+  // To enable this feature for testing pass "--gaia-profile-info".
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kGaiaProfileInfo)) {
     return true;
+  }
 
   // This feature is disable by default.
   return false;
 }
 
-bool GAIAInfoUpdateService::NeedsProfilePicture() const {
-  return true;
+// static
+void GAIAInfoUpdateService::RegisterUserPrefs(PrefService* prefs) {
+  prefs->RegisterInt64Pref(
+      prefs::kProfileGAIAInfoUpdateTime, 0, PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterStringPref(
+      prefs::kProfileGAIAInfoPictureURL, "", PrefService::UNSYNCABLE_PREF);
 }
 
 int GAIAInfoUpdateService::GetDesiredImageSideLength() const {
@@ -90,24 +95,25 @@ std::string GAIAInfoUpdateService::GetCachedPictureURL() const {
   return profile_->GetPrefs()->GetString(prefs::kProfileGAIAInfoPictureURL);
 }
 
-void GAIAInfoUpdateService::OnProfileDownloadSuccess(
-    ProfileDownloader* downloader) {
-  // Make sure that |ProfileDownloader| gets deleted after return.
-  scoped_ptr<ProfileDownloader> profile_image_downloader(
-      profile_image_downloader_.release());
-
+void GAIAInfoUpdateService::OnDownloadComplete(ProfileDownloader* downloader,
+                                               bool success) {
   // Save the last updated time.
   last_updated_ = base::Time::Now();
   profile_->GetPrefs()->SetInt64(prefs::kProfileGAIAInfoUpdateTime,
                                  last_updated_.ToInternalValue());
   ScheduleNextUpdate();
 
-  base::string16 full_name = downloader->GetProfileFullName();
-  base::string16 given_name = downloader->GetProfileGivenName();
+  if (!success) {
+    profile_image_downloader_.reset();
+    return;
+  }
+
+  string16 full_name = downloader->GetProfileFullName();
   SkBitmap bitmap = downloader->GetProfilePicture();
   ProfileDownloader::PictureStatus picture_status =
       downloader->GetProfilePictureStatus();
   std::string picture_url = downloader->GetProfilePictureURL();
+  profile_image_downloader_.reset();
 
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
@@ -116,8 +122,6 @@ void GAIAInfoUpdateService::OnProfileDownloadSuccess(
     return;
 
   cache.SetGAIANameOfProfileAtIndex(profile_index, full_name);
-  cache.SetGAIAGivenNameOfProfileAtIndex(profile_index, given_name);
-
   // The profile index may have changed.
   profile_index = cache.GetIndexOfProfileWithPath(profile_->GetPath());
   if (profile_index == std::string::npos)
@@ -125,7 +129,7 @@ void GAIAInfoUpdateService::OnProfileDownloadSuccess(
   if (picture_status == ProfileDownloader::PICTURE_SUCCESS) {
     profile_->GetPrefs()->SetString(prefs::kProfileGAIAInfoPictureURL,
                                     picture_url);
-    gfx::Image gfx_image = gfx::Image::CreateFrom1xBitmap(bitmap);
+    gfx::Image gfx_image(new SkBitmap(bitmap));
     cache.SetGAIAPictureOfProfileAtIndex(profile_index, &gfx_image);
   } else if (picture_status == ProfileDownloader::PICTURE_DEFAULT) {
     cache.SetGAIAPictureOfProfileAtIndex(profile_index, NULL);
@@ -147,16 +151,17 @@ void GAIAInfoUpdateService::OnProfileDownloadSuccess(
   }
 }
 
-void GAIAInfoUpdateService::OnProfileDownloadFailure(
-    ProfileDownloader* downloader,
-    ProfileDownloaderDelegate::FailureReason reason) {
-  profile_image_downloader_.reset();
-
-  // Save the last updated time.
-  last_updated_ = base::Time::Now();
-  profile_->GetPrefs()->SetInt64(prefs::kProfileGAIAInfoUpdateTime,
-                                 last_updated_.ToInternalValue());
-  ScheduleNextUpdate();
+void GAIAInfoUpdateService::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
+    std::string* name = content::Details<std::string>(details).ptr();
+    if (prefs::kGoogleServicesUsername == *name)
+      OnUsernameChanged();
+  } else {
+    NOTREACHED();
+  }
 }
 
 void GAIAInfoUpdateService::OnUsernameChanged() {
@@ -170,7 +175,7 @@ void GAIAInfoUpdateService::OnUsernameChanged() {
       prefs::kGoogleServicesUsername);
   if (username.empty()) {
     // Unset the old user's GAIA info.
-    cache.SetGAIANameOfProfileAtIndex(profile_index, base::string16());
+    cache.SetGAIANameOfProfileAtIndex(profile_index, string16());
     // The profile index may have changed.
     profile_index = cache.GetIndexOfProfileWithPath(profile_->GetPath());
     if (profile_index == std::string::npos)

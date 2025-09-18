@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_BROWSER_ACTION_DRAG_DATA_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_BROWSER_ACTION_DRAG_DATA_H_
+#pragma once
 
 #include <string>
 
@@ -35,7 +36,7 @@ class BrowserActionDragData {
   bool Read(const ui::OSExchangeData& data);
 
   // Returns the Custom Format this class supports (for Browser Actions).
-  static const ui::OSExchangeData::CustomFormat& GetBrowserActionCustomFormat();
+  static ui::OSExchangeData::CustomFormat GetBrowserActionCustomFormat();
 #endif
 
  private:

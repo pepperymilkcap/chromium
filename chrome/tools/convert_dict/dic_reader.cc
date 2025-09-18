@@ -8,7 +8,7 @@
 #include <set>
 
 #include "base/file_util.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "chrome/tools/convert_dict/aff_reader.h"
 #include "chrome/tools/convert_dict/hunspell_reader.h"
 
@@ -20,7 +20,7 @@ namespace {
 typedef std::map<std::string, std::set<int> > WordSet;
 
 void SplitDicLine(const std::string& line, std::vector<std::string>* output) {
-  // We split the line on a slash not preceded by a backslash. A slash at the
+  // We split the line on a slash not preceeded by a backslash. A slash at the
   // beginning of the line is not a separator either.
   size_t slash_index = line.size();
   for (size_t i = 0; i < line.size(); i++) {
@@ -114,13 +114,13 @@ bool PopulateWordSet(WordSet* word_set, FILE* file, AffReader* aff_reader,
       utf8word = utf8word.substr(0, word_tab_offset);
 
     WordSet::iterator found = word_set->find(utf8word);
-    std::set<int> affix_vector;
-    affix_vector.insert(affix_index);
-
-    if (found == word_set->end())
+    if (found == word_set->end()) {
+      std::set<int> affix_vector;
+      affix_vector.insert(affix_index);
       word_set->insert(std::make_pair(utf8word, affix_vector));
-    else
+    } else {
       found->second.insert(affix_index);
+    }
   }
 
   return true;
@@ -128,12 +128,12 @@ bool PopulateWordSet(WordSet* word_set, FILE* file, AffReader* aff_reader,
 
 }  // namespace
 
-DicReader::DicReader(const base::FilePath& path) {
-  file_ = base::OpenFile(path, "r");
+DicReader::DicReader(const FilePath& path) {
+  file_ = file_util::OpenFile(path, "r");
 
-  base::FilePath additional_path =
+  FilePath additional_path =
       path.ReplaceExtension(FILE_PATH_LITERAL("dic_delta"));
-  additional_words_file_ = base::OpenFile(additional_path, "r");
+  additional_words_file_ = file_util::OpenFile(additional_path, "r");
 
   if (additional_words_file_)
     printf("Reading %" PRFilePath " ...\n", additional_path.value().c_str());
@@ -143,9 +143,9 @@ DicReader::DicReader(const base::FilePath& path) {
 
 DicReader::~DicReader() {
   if (file_)
-    base::CloseFile(file_);
+    file_util::CloseFile(file_);
   if (additional_words_file_)
-    base::CloseFile(additional_words_file_);
+    file_util::CloseFile(additional_words_file_);
 }
 
 bool DicReader::Read(AffReader* aff_reader) {
@@ -167,6 +167,7 @@ bool DicReader::Read(AffReader* aff_reader) {
     PopulateWordSet(&word_set, additional_words_file_, aff_reader, "dic delta",
                     "UTF-8", false);
   }
+
   // Make sure the words are sorted, they may be unsorted in the input.
   for (WordSet::iterator word = word_set.begin(); word != word_set.end();
        ++word) {
@@ -178,7 +179,6 @@ bool DicReader::Read(AffReader* aff_reader) {
     // Double check that the affixes are sorted. This isn't strictly necessary
     // but it's nice for the file to have a fixed layout.
     std::sort(affixes.begin(), affixes.end());
-    std::reverse(affixes.begin(), affixes.end());
     words_.push_back(std::make_pair(word->first, affixes));
   }
 

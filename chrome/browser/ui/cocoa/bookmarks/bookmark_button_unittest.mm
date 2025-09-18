@@ -1,15 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
-#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 #import "ui/base/test/cocoa_test_event_utils.h"
@@ -66,14 +64,14 @@ class BookmarkButtonTest : public CocoaProfileTest {
 
 // Make sure nothing leaks
 TEST_F(BookmarkButtonTest, Create) {
-  base::scoped_nsobject<BookmarkButton> button;
+  scoped_nsobject<BookmarkButton> button;
   button.reset([[BookmarkButton alloc] initWithFrame:NSMakeRect(0,0,500,500)]);
 }
 
 // Test folder and empty node queries.
 TEST_F(BookmarkButtonTest, FolderAndEmptyOrNot) {
-  base::scoped_nsobject<BookmarkButton> button;
-  base::scoped_nsobject<BookmarkButtonCell> cell;
+  scoped_nsobject<BookmarkButton> button;
+  scoped_nsobject<BookmarkButtonCell> cell;
 
   button.reset([[BookmarkButton alloc] initWithFrame:NSMakeRect(0,0,500,500)]);
   cell.reset([[BookmarkButtonCell alloc] initTextCell:@"hi mom"]);
@@ -88,14 +86,14 @@ TEST_F(BookmarkButtonTest, FolderAndEmptyOrNot) {
   // Since this returns (does not actually begin a modal drag), success!
   [button beginDrag:downEvent];
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  BookmarkModel* model = profile()->GetBookmarkModel();
   const BookmarkNode* node = model->bookmark_bar_node();
   [cell setBookmarkNode:node];
   EXPECT_FALSE([button isEmpty]);
   EXPECT_TRUE([button isFolder]);
   EXPECT_EQ([button bookmarkNode], node);
 
-  node = model->AddURL(node, 0, base::ASCIIToUTF16("hi mom"),
+  node = model->AddURL(node, 0, ASCIIToUTF16("hi mom"),
                        GURL("http://www.google.com"));
   [cell setBookmarkNode:node];
   EXPECT_FALSE([button isEmpty]);
@@ -108,10 +106,10 @@ TEST_F(BookmarkButtonTest, MouseEnterExitRedirect) {
       cocoa_test_event_utils::MouseEventAtPoint(NSMakePoint(10,10),
                                                 NSMouseMoved,
                                                 0);
-  base::scoped_nsobject<BookmarkButton> button;
-  base::scoped_nsobject<BookmarkButtonCell> cell;
-  base::scoped_nsobject<FakeButtonDelegate> delegate(
-      [[FakeButtonDelegate alloc] init]);
+  scoped_nsobject<BookmarkButton> button;
+  scoped_nsobject<BookmarkButtonCell> cell;
+  scoped_nsobject<FakeButtonDelegate>
+      delegate([[FakeButtonDelegate alloc] init]);
   button.reset([[BookmarkButton alloc] initWithFrame:NSMakeRect(0,0,500,500)]);
   cell.reset([[BookmarkButtonCell alloc] initTextCell:@"hi mom"]);
   [button setCell:cell];
@@ -131,20 +129,19 @@ TEST_F(BookmarkButtonTest, MouseEnterExitRedirect) {
 }
 
 TEST_F(BookmarkButtonTest, DragToTrash) {
-  base::scoped_nsobject<BookmarkButton> button;
-  base::scoped_nsobject<BookmarkButtonCell> cell;
-  base::scoped_nsobject<FakeButtonDelegate> delegate(
-      [[FakeButtonDelegate alloc] init]);
+  scoped_nsobject<BookmarkButton> button;
+  scoped_nsobject<BookmarkButtonCell> cell;
+  scoped_nsobject<FakeButtonDelegate>
+      delegate([[FakeButtonDelegate alloc] init]);
   button.reset([[BookmarkButton alloc] initWithFrame:NSMakeRect(0,0,500,500)]);
   cell.reset([[BookmarkButtonCell alloc] initTextCell:@"hi mom"]);
   [button setCell:cell];
   [button setDelegate:delegate];
 
   // Add a deletable bookmark to the button.
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  BookmarkModel* model = profile()->GetBookmarkModel();
   const BookmarkNode* barNode = model->bookmark_bar_node();
-  const BookmarkNode* node = model->AddURL(barNode, 0,
-                                           base::ASCIIToUTF16("hi mom"),
+  const BookmarkNode* node = model->AddURL(barNode, 0, ASCIIToUTF16("hi mom"),
                                            GURL("http://www.google.com"));
   [cell setBookmarkNode:node];
 

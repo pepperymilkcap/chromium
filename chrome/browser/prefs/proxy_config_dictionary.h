@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_PREFS_PROXY_CONFIG_DICTIONARY_H_
 #define CHROME_BROWSER_PREFS_PROXY_CONFIG_DICTIONARY_H_
+#pragma once
 
 #include <string>
 
@@ -36,8 +37,6 @@ class ProxyConfigDictionary {
   bool GetProxyServer(std::string* out) const;
   bool GetBypassList(std::string* out) const;
   bool HasBypassList() const;
-
-  const base::DictionaryValue& GetDictionary() const;
 
   static base::DictionaryValue* CreateDirect();
   static base::DictionaryValue* CreateAutoDetect();

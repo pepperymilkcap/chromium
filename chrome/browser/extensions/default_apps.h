@@ -1,23 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_DEFAULT_APPS_H_
 #define CHROME_BROWSER_EXTENSIONS_DEFAULT_APPS_H_
+#pragma once
 
 #include "base/basictypes.h"
-#include "chrome/browser/extensions/external_provider_impl.h"
-#include "extensions/common/manifest.h"
+#include "chrome/browser/extensions/external_extension_provider_impl.h"
 
+class PrefService;
 class Profile;
-
-namespace base {
-class DictionaryValue;
-}
-
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
 
 // Functions and types related to installing default apps.
 namespace default_apps {
@@ -26,40 +19,36 @@ namespace default_apps {
 // be changed.
 enum InstallState {
   kUnknown,
-  // Now unused, left for backward compatibility.
-  kProvideLegacyDefaultApps,
-  kNeverInstallDefaultApps,
-  kAlreadyInstalledDefaultApps
+  kAlwaysProvideDefaultApps,
+  kNeverProvideDefaultApps
 };
 
 // Register preference properties used by default apps to maintain
 // install state.
-void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+void RegisterUserPrefs(PrefService* prefs);
 
-// A specialization of the ExternalProviderImpl that conditionally installs apps
-// from the chrome::DIR_DEFAULT_APPS location based on a preference in the
-// profile.
-class Provider : public extensions::ExternalProviderImpl {
+
+// A specialization of the ExternalExtensionProviderImpl that conditionally
+// installs apps from the chrome::DIR_DEFAULT_APPS location based on a
+// preference in the profile.
+class Provider : public ExternalExtensionProviderImpl {
  public:
   Provider(Profile* profile,
            VisitorInterface* service,
-           extensions::ExternalLoader* loader,
-           extensions::Manifest::Location crx_location,
-           extensions::Manifest::Location download_location,
+           ExternalExtensionLoader* loader,
+           Extension::Location crx_location,
+           Extension::Location download_location,
            int creation_flags);
 
-  bool ShouldInstallInProfile();
-
-  // ExternalProviderImpl overrides:
+  // ExternalExtensionProviderImpl overrides:
   virtual void VisitRegisteredExtension() OVERRIDE;
-  virtual void SetPrefs(base::DictionaryValue* prefs) OVERRIDE;
 
  private:
   Profile* profile_;
-  bool is_migration_;
 
   DISALLOW_COPY_AND_ASSIGN(Provider);
 };
+
 
 }  // namespace default_apps
 

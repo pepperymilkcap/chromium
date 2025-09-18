@@ -5,19 +5,21 @@
 #include "chrome/browser/chromeos/external_protocol_dialog.h"
 
 #include "base/metrics/histogram.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/dialog_style.h"
+#include "chrome/browser/ui/views/window.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/text_elider.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/widget/widget.h"
-#include "url/gurl.h"
 
 using content::WebContents;
 
@@ -52,12 +54,12 @@ int ExternalProtocolDialog::GetDialogButtons() const {
   return ui::DIALOG_BUTTON_OK;
 }
 
-base::string16 ExternalProtocolDialog::GetDialogButtonLabel(
+string16 ExternalProtocolDialog::GetDialogButtonLabel(
     ui::DialogButton button) const {
   return l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_OK_BUTTON_TEXT);
 }
 
-base::string16 ExternalProtocolDialog::GetWindowTitle() const {
+string16 ExternalProtocolDialog::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_TITLE);
 }
 
@@ -94,16 +96,20 @@ ExternalProtocolDialog::ExternalProtocolDialog(WebContents* web_contents,
     : creation_time_(base::TimeTicks::Now()),
       scheme_(url.scheme()) {
   const int kMaxUrlWithoutSchemeSize = 256;
-  base::string16 elided_url_without_scheme;
-  gfx::ElideString(base::ASCIIToUTF16(url.possibly_invalid_spec()),
+  string16 elided_url_without_scheme;
+  ui::ElideString(ASCIIToUTF16(url.possibly_invalid_spec()),
       kMaxUrlWithoutSchemeSize, &elided_url_without_scheme);
 
-  views::MessageBoxView::InitParams params(
-      l10n_util::GetStringFUTF16(IDS_EXTERNAL_PROTOCOL_INFORMATION,
-      base::ASCIIToUTF16(url.scheme() + ":"),
-      elided_url_without_scheme) + base::ASCIIToUTF16("\n\n"));
-  params.message_width = kMessageWidth;
-  message_box_view_ = new views::MessageBoxView(params);
+  string16 message_text = l10n_util::GetStringFUTF16(
+      IDS_EXTERNAL_PROTOCOL_INFORMATION,
+      ASCIIToUTF16(url.scheme() + ":"),
+      elided_url_without_scheme) + ASCIIToUTF16("\n\n");
+
+  message_box_view_ = new views::MessageBoxView(
+      views::MessageBoxView::NO_OPTIONS,
+      message_text,
+      string16(),
+      kMessageWidth);
   message_box_view_->SetCheckBoxLabel(
       l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_CHECKBOX_TEXT));
 
@@ -114,5 +120,5 @@ ExternalProtocolDialog::ExternalProtocolDialog(WebContents* web_contents,
     // Dialog is top level if we don't have a web_contents associated with us.
     parent_window = NULL;
   }
-  views::DialogDelegate::CreateDialogWidget(this, NULL, parent_window)->Show();
+  browser::CreateViewsWindow(parent_window, this, STYLE_GENERIC)->Show();
 }

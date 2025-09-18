@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_X_ACTIVE_WINDOW_WATCHER_X_OBSERVER_H_
 #define UI_BASE_X_ACTIVE_WINDOW_WATCHER_X_OBSERVER_H_
+#pragma once
 
 #include <gdk/gdk.h>
 

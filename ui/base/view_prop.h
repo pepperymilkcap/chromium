@@ -4,14 +4,15 @@
 
 #ifndef UI_BASE_VIEW_PROP_H_
 #define UI_BASE_VIEW_PROP_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "ui/base/ui_export.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if defined(OS_MACOSX) || (defined(OS_LINUX) && !defined(USE_AURA))
-#error view_prop.h is only for windows and aura builds.
+#if defined(USE_AURA) || defined(OS_LINUX) || defined(OS_MACOSX)
+#error view_prop.h is only for win, non aura build
 #endif
 
 namespace ui {
@@ -27,12 +28,12 @@ class UI_EXPORT ViewProp {
   //
   // ViewProp does *not* make a copy of the char*, the pointer is used for
   // sorting.
-  ViewProp(gfx::AcceleratedWidget view, const char* key, void* data);
+  ViewProp(gfx::NativeView view, const char* key, void* data);
   ~ViewProp();
 
   // Returns the value associated with the view/key pair, or NULL if there is
   // none.
-  static void* GetValue(gfx::AcceleratedWidget view, const char* key);
+  static void* GetValue(gfx::NativeView view, const char* key);
 
   // Returns the key.
   const char* Key() const;

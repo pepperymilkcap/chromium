@@ -11,7 +11,7 @@ const assertEq = chrome.test.assertEq;
 const assertFalse = chrome.test.assertFalse;
 const assertTrue = chrome.test.assertTrue;
 const bookmarks = chrome.bookmarks;
-const bookmarkManager = chrome.bookmarkManagerPrivate;
+const bookmarkManager = chrome.experimental.bookmarkManager;
 
 var ERROR = "Bookmark editing is disabled.";
 

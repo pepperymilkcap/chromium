@@ -32,16 +32,10 @@ enum {
   //     restriction.
   //   - Most PC audio hardware is limited to 192 KHz.
   kMaxSampleRate = 192000,
-  kMinSampleRate = 3000,
+  kMinSampleRate = 8000,
   kMaxChannels = 32,
-  kMaxBytesPerSample = 4,
-  kMaxBitsPerSample = kMaxBytesPerSample * 8,
+  kMaxBitsPerSample = 64,
   kMaxSamplesPerPacket = kMaxSampleRate,
-  kMaxPacketSizeInBytes =
-      kMaxBytesPerSample * kMaxChannels * kMaxSamplesPerPacket,
-
-  // This limit is used by ParamTraits<VideoCaptureParams>.
-  kMaxFramesPerSecond = 1000,
 };
 
 }  // namespace limits

@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_TEST_MULTIPROCESS_TEST_H_
 #define BASE_TEST_MULTIPROCESS_TEST_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/process/launch.h"
-#include "base/process/process_handle.h"
+#include "base/process.h"
+#include "base/process_util.h"
 #include "build/build_config.h"
 #include "testing/platform_test.h"
 
@@ -56,18 +57,12 @@ class MultiProcessTest : public PlatformTest {
   // Returns the handle to the child, or NULL on failure
   ProcessHandle SpawnChild(const std::string& procname, bool debug_on_start);
 
-  // Run a child process using the given launch options.
-  //
-  // Note: On Windows, you probably want to set |options.start_hidden|.
-  ProcessHandle SpawnChildWithOptions(const std::string& procname,
-                                      const LaunchOptions& options,
-                                      bool debug_on_start);
-
 #if defined(OS_POSIX)
-  // TODO(vtl): Remove this in favor of |SpawnChildWithOptions()|. Probably keep
-  // the no-options |SpawnChild()| around for ease-of-use.
+  // TODO(evan): see if we can delete this via more refactoring.
+  // SpawnChild() should just take a base::LaunchOptions so that we don't
+  // need multiple versions of it.
   ProcessHandle SpawnChild(const std::string& procname,
-                           const FileHandleMappingVector& fds_to_map,
+                           const file_handle_mapping_vector& fds_to_map,
                            bool debug_on_start);
 #endif
 
@@ -76,6 +71,13 @@ class MultiProcessTest : public PlatformTest {
                                   bool debug_on_start);
 
  private:
+  // Shared implementation of SpawnChild.
+  // TODO: |fds_to_map| is unused on Windows; see above TODO about
+  // further refactoring.
+  ProcessHandle SpawnChildImpl(const std::string& procname,
+                               const file_handle_mapping_vector& fds_to_map,
+                               bool debug_on_start);
+
   DISALLOW_COPY_AND_ASSIGN(MultiProcessTest);
 };
 

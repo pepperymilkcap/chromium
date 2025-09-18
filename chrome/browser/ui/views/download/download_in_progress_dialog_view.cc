@@ -6,8 +6,13 @@
 
 #include <algorithm>
 
-#include "base/strings/string_number_conversions.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "content/public/browser/download_manager.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -15,117 +20,122 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/size.h"
 #include "ui/views/border.h"
-#include "ui/views/controls/message_box_view.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
 
-// static
-void DownloadInProgressDialogView::Show(
-    gfx::NativeWindow parent,
-    int download_count,
-    Browser::DownloadClosePreventionType dialog_type,
-    bool app_modal,
-    const base::Callback<void(bool)>& callback) {
-  DownloadInProgressDialogView* window = new DownloadInProgressDialogView(
-      download_count, dialog_type, app_modal, callback);
-  CreateBrowserModalDialogViews(window, parent)->Show();
-}
+DownloadInProgressDialogView::DownloadInProgressDialogView(Browser* browser)
+    : browser_(browser),
+      product_name_(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)) {
+  int download_count;
+  Browser::DownloadClosePreventionType type =
+      browser_->OkToCloseWithInProgressDownloads(&download_count);
 
-DownloadInProgressDialogView::DownloadInProgressDialogView(
-    int download_count,
-    Browser::DownloadClosePreventionType dialog_type,
-    bool app_modal,
-    const base::Callback<void(bool)>& callback)
-    : app_modal_(app_modal),
-      callback_(callback),
-      message_box_view_(NULL) {
-  base::string16 explanation_text;
-  switch (dialog_type) {
-    case Browser::DOWNLOAD_CLOSE_BROWSER_SHUTDOWN:
-      if (download_count == 1) {
-        title_text_ = l10n_util::GetStringUTF16(
-            IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_TITLE);
-        explanation_text = l10n_util::GetStringUTF16(
-            IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION);
-      } else {
-        title_text_ = l10n_util::GetStringUTF16(
-            IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_TITLE);
-        explanation_text = l10n_util::GetStringUTF16(
-            IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION);
-      }
-      ok_button_text_ = l10n_util::GetStringUTF16(
-          IDS_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
-      break;
-    case Browser::DOWNLOAD_CLOSE_LAST_WINDOW_IN_INCOGNITO_PROFILE:
-      if (download_count == 1) {
-        title_text_ = l10n_util::GetStringUTF16(
-            IDS_SINGLE_INCOGNITO_DOWNLOAD_REMOVE_CONFIRM_TITLE);
-        explanation_text = l10n_util::GetStringUTF16(
-            IDS_SINGLE_INCOGNITO_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION);
-      } else {
-        title_text_ = l10n_util::GetStringUTF16(
-            IDS_MULTIPLE_INCOGNITO_DOWNLOADS_REMOVE_CONFIRM_TITLE);
-        explanation_text = l10n_util::GetStringUTF16(
-            IDS_MULTIPLE_INCOGNITO_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION);
-      }
-      ok_button_text_ = l10n_util::GetStringUTF16(
-          IDS_INCOGNITO_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
-      break;
-    default:
-      // This dialog should have been created within the same thread invocation
-      // as the original test that lead to us, so it should always not be ok
-      // to close.
-      NOTREACHED();
+  // This dialog should have been created within the same thread invocation
+  // as the original test that lead to us, so it should always not be ok
+  // to close.
+  DCHECK_NE(Browser::DOWNLOAD_CLOSE_OK, type);
+
+  // TODO(rdsmith): This dialog should be different depending on whether we're
+  // closing the last incognito window of a profile or doing browser shutdown.
+  // See http://crbug.com/88421.
+
+  string16 warning_text;
+  string16 explanation_text;
+  if (download_count == 1) {
+    warning_text = l10n_util::GetStringUTF16(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING);
+    explanation_text = l10n_util::GetStringUTF16(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION);
+    ok_button_text_ = l10n_util::GetStringUTF16(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
+    cancel_button_text_ = l10n_util::GetStringUTF16(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
+  } else {
+    warning_text = l10n_util::GetStringFUTF16(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING,
+        UTF8ToUTF16(base::IntToString(download_count)));
+    explanation_text = l10n_util::GetStringUTF16(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION);
+    ok_button_text_ = l10n_util::GetStringUTF16(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL);
+    cancel_button_text_ = l10n_util::GetStringUTF16(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
   }
-  cancel_button_text_ = l10n_util::GetStringUTF16(
-      IDS_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
 
-  message_box_view_ = new views::MessageBoxView(
-      views::MessageBoxView::InitParams(explanation_text));
+  // There are two lines of text: the bold warning label and the text
+  // explanation label.
+  views::GridLayout* layout = new views::GridLayout(this);
+  SetLayoutManager(layout);
+  const int columnset_id = 0;
+  views::ColumnSet* column_set = layout->AddColumnSet(columnset_id);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::LEADING, 1,
+                        views::GridLayout::USE_PREF, 0, 0);
+
+  gfx::Font bold_font =
+      ResourceBundle::GetSharedInstance().GetFont(
+          ResourceBundle::BaseFont).DeriveFont(0, gfx::Font::BOLD);
+  warning_ = new views::Label(warning_text, bold_font);
+  warning_->SetMultiLine(true);
+  warning_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  warning_->set_border(views::Border::CreateEmptyBorder(10, 10, 10, 10));
+  layout->StartRow(0, columnset_id);
+  layout->AddView(warning_);
+
+  explanation_ = new views::Label(explanation_text);
+  explanation_->SetMultiLine(true);
+  explanation_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  explanation_->set_border(views::Border::CreateEmptyBorder(10, 10, 10, 10));
+  layout->StartRow(0, columnset_id);
+  layout->AddView(explanation_);
+
+  dialog_dimensions_ = views::Widget::GetLocalizedContentsSize(
+      IDS_DOWNLOAD_IN_PROGRESS_WIDTH_CHARS,
+      IDS_DOWNLOAD_IN_PROGRESS_MINIMUM_HEIGHT_LINES);
+  const int height =
+      warning_->GetHeightForWidth(dialog_dimensions_.width()) +
+      explanation_->GetHeightForWidth(dialog_dimensions_.width());
+  dialog_dimensions_.set_height(std::max(height,
+                                         dialog_dimensions_.height()));
 }
 
 DownloadInProgressDialogView::~DownloadInProgressDialogView() {}
+
+gfx::Size DownloadInProgressDialogView::GetPreferredSize() {
+  return dialog_dimensions_;
+}
+
+string16 DownloadInProgressDialogView::GetDialogButtonLabel(
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
+    return ok_button_text_;
+
+  DCHECK_EQ(ui::DIALOG_BUTTON_CANCEL, button);
+  return cancel_button_text_;
+}
 
 int DownloadInProgressDialogView::GetDefaultDialogButton() const {
   return ui::DIALOG_BUTTON_CANCEL;
 }
 
-base::string16 DownloadInProgressDialogView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return (button == ui::DIALOG_BUTTON_OK) ?
-      ok_button_text_ : cancel_button_text_;
-}
-
 bool DownloadInProgressDialogView::Cancel() {
-  callback_.Run(false);
+  browser_->InProgressDownloadResponse(false);
   return true;
 }
 
 bool DownloadInProgressDialogView::Accept() {
-  callback_.Run(true);
+  browser_->InProgressDownloadResponse(true);
   return true;
 }
 
 ui::ModalType DownloadInProgressDialogView::GetModalType() const {
-  return app_modal_ ? ui::MODAL_TYPE_SYSTEM : ui::MODAL_TYPE_WINDOW;
+  return ui::MODAL_TYPE_WINDOW;
 }
 
-base::string16 DownloadInProgressDialogView::GetWindowTitle() const {
-  return title_text_;
-}
-
-void DownloadInProgressDialogView::DeleteDelegate() {
-  delete this;
-}
-
-views::Widget* DownloadInProgressDialogView::GetWidget() {
-  return message_box_view_->GetWidget();
-}
-
-const views::Widget* DownloadInProgressDialogView::GetWidget() const {
-  return message_box_view_->GetWidget();
+string16 DownloadInProgressDialogView::GetWindowTitle() const {
+  return product_name_;
 }
 
 views::View* DownloadInProgressDialogView::GetContentsView() {
-  return message_box_view_;
+  return this;
 }

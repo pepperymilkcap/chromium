@@ -4,7 +4,6 @@
 
 #include "chrome/installer/util/work_item.h"
 
-#include "chrome/installer/util/callback_work_item.h"
 #include "chrome/installer/util/conditional_work_item_list.h"
 #include "chrome/installer/util/copy_reg_key_work_item.h"
 #include "chrome/installer/util/copy_tree_work_item.h"
@@ -24,11 +23,6 @@ WorkItem::WorkItem() : ignore_failure_(false) {
 WorkItem::~WorkItem() {
 }
 
-CallbackWorkItem* WorkItem::CreateCallbackWorkItem(
-    base::Callback<bool(const CallbackWorkItem&)> callback) {
-  return new CallbackWorkItem(callback);
-}
-
 CopyRegKeyWorkItem* WorkItem::CreateCopyRegKeyWorkItem(
     HKEY predefined_root,
     const std::wstring& source_key_path,
@@ -39,17 +33,16 @@ CopyRegKeyWorkItem* WorkItem::CreateCopyRegKeyWorkItem(
 }
 
 CopyTreeWorkItem* WorkItem::CreateCopyTreeWorkItem(
-    const base::FilePath& source_path,
-    const base::FilePath& dest_path,
-    const base::FilePath& temp_dir,
+    const FilePath& source_path,
+    const FilePath& dest_path,
+    const FilePath& temp_dir,
     CopyOverWriteOption overwrite_option,
-    const base::FilePath& alternative_path) {
+    const FilePath& alternative_path) {
   return new CopyTreeWorkItem(source_path, dest_path, temp_dir,
                               overwrite_option, alternative_path);
 }
 
-CreateDirWorkItem* WorkItem::CreateCreateDirWorkItem(
-    const base::FilePath& path) {
+CreateDirWorkItem* WorkItem::CreateCreateDirWorkItem(const FilePath& path) {
   return new CreateDirWorkItem(path);
 }
 
@@ -71,16 +64,16 @@ DeleteRegValueWorkItem* WorkItem::CreateDeleteRegValueWorkItem(
 }
 
 DeleteTreeWorkItem* WorkItem::CreateDeleteTreeWorkItem(
-    const base::FilePath& root_path,
-    const base::FilePath& temp_path,
-    const std::vector<base::FilePath>& key_paths) {
+    const FilePath& root_path,
+    const FilePath& temp_path,
+    const std::vector<FilePath>& key_paths) {
   return new DeleteTreeWorkItem(root_path, temp_path, key_paths);
 }
 
 MoveTreeWorkItem* WorkItem::CreateMoveTreeWorkItem(
-    const base::FilePath& source_path,
-    const base::FilePath& dest_path,
-    const base::FilePath& temp_dir,
+    const FilePath& source_path,
+    const FilePath& dest_path,
+    const FilePath& temp_dir,
     MoveTreeOption duplicate_option) {
   return new MoveTreeWorkItem(source_path,
                               dest_path,

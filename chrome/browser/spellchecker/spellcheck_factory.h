@@ -4,45 +4,49 @@
 
 #ifndef CHROME_BROWSER_SPELLCHECKER_SPELLCHECK_FACTORY_H_
 #define CHROME_BROWSER_SPELLCHECKER_SPELLCHECK_FACTORY_H_
+#pragma once
 
 #include "base/basictypes.h"
-#include "base/gtest_prod_util.h"
 #include "base/memory/singleton.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
-class SpellcheckService;
+class SpellCheckHost;
+class SpellCheckProfile;
 
 // Entry into the SpellCheck system.
 //
-// Internally, this owns all SpellcheckService objects.
-class SpellcheckServiceFactory : public BrowserContextKeyedServiceFactory {
+// Internally, this owns all SpellCheckProfile objects, but these aren't
+// exposed to the callers. Instead, the SpellCheckProfile may or may not hand
+// out SpellCheckHost objects for consumption outside the SpellCheck system.
+class SpellCheckFactory : public ProfileKeyedServiceFactory {
  public:
-  // Returns the spell check host. This will create the SpellcheckService
-  // if it does not already exist. This can return NULL.
-  static SpellcheckService* GetForContext(content::BrowserContext* context);
+  // Returns the spell check host. This may be NULL.
+  static SpellCheckHost* GetHostForProfile(Profile* profile);
 
-  static SpellcheckService* GetForRenderProcessId(int render_process_id);
+  // If |force| is false, and the spellchecker is already initialized (or is in
+  // the process of initializing), then do nothing. Otherwise clobber the
+  // current spellchecker and replace it with a new one.
+  static void ReinitializeSpellCheckHost(Profile* profile, bool force);
 
-  static SpellcheckServiceFactory* GetInstance();
+  static SpellCheckFactory* GetInstance();
 
  private:
-  friend struct DefaultSingletonTraits<SpellcheckServiceFactory>;
+  friend struct DefaultSingletonTraits<SpellCheckFactory>;
 
-  SpellcheckServiceFactory();
-  virtual ~SpellcheckServiceFactory();
+  SpellCheckFactory();
+  virtual ~SpellCheckFactory();
 
-  // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual void RegisterProfilePrefs(
-      user_prefs::PrefRegistrySyncable* registry) OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  // Fetches the internal object for |profile|.
+  SpellCheckProfile* GetSpellCheckProfile(Profile* profile);
 
-  FRIEND_TEST_ALL_PREFIXES(SpellcheckServiceBrowserTest, DeleteCorruptedBDICT);
+  // ProfileKeyedServiceFactory:
+  virtual ProfileKeyedService* BuildServiceInstanceFor(
+      Profile* profile) const OVERRIDE;
+  virtual void RegisterUserPrefs(PrefService* user_prefs) OVERRIDE;
+  virtual bool ServiceRedirectedInIncognito() OVERRIDE;
+  virtual bool ServiceIsNULLWhileTesting() OVERRIDE;
 
-  DISALLOW_COPY_AND_ASSIGN(SpellcheckServiceFactory);
+  DISALLOW_COPY_AND_ASSIGN(SpellCheckFactory);
 };
 
 #endif  // CHROME_BROWSER_SPELLCHECKER_SPELLCHECK_FACTORY_H_

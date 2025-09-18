@@ -1,17 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/disk_cache/mapped_file.h"
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/disk_cache/disk_cache.h"
 
 namespace disk_cache {
 
-void* MappedFile::Init(const base::FilePath& name, size_t size) {
+void* MappedFile::Init(const FilePath& name, size_t size) {
   DCHECK(!init_);
   if (init_ || !File::Init(name))
     return NULL;
@@ -29,7 +29,7 @@ void* MappedFile::Init(const base::FilePath& name, size_t size) {
 
   // Make sure we detect hardware failures reading the headers.
   size_t temp_len = size ? size : 4096;
-  scoped_ptr<char[]> temp(new char[temp_len]);
+  scoped_array<char> temp(new char[temp_len]);
   if (!Read(temp.get(), temp_len, 0))
     return NULL;
 
@@ -49,7 +49,14 @@ MappedFile::~MappedFile() {
     CloseHandle(section_);
 }
 
-void MappedFile::Flush() {
+bool MappedFile::Load(const FileBlock* block) {
+  size_t offset = block->offset() + view_size_;
+  return Read(block->buffer(), block->size(), offset);
+}
+
+bool MappedFile::Store(const FileBlock* block) {
+  size_t offset = block->offset() + view_size_;
+  return Write(block->buffer(), block->size(), offset);
 }
 
 }  // namespace disk_cache

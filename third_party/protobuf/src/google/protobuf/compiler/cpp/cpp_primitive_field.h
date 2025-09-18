@@ -46,8 +46,7 @@ namespace cpp {
 
 class PrimitiveFieldGenerator : public FieldGenerator {
  public:
-  explicit PrimitiveFieldGenerator(const FieldDescriptor* descriptor,
-                                   const Options& options);
+  explicit PrimitiveFieldGenerator(const FieldDescriptor* descriptor);
   ~PrimitiveFieldGenerator();
 
   // implements FieldGenerator ---------------------------------------
@@ -72,8 +71,7 @@ class PrimitiveFieldGenerator : public FieldGenerator {
 
 class RepeatedPrimitiveFieldGenerator : public FieldGenerator {
  public:
-  explicit RepeatedPrimitiveFieldGenerator(const FieldDescriptor* descriptor,
-                                           const Options& options);
+  explicit RepeatedPrimitiveFieldGenerator(const FieldDescriptor* descriptor);
   ~RepeatedPrimitiveFieldGenerator();
 
   // implements FieldGenerator ---------------------------------------

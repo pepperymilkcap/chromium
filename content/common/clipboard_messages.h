@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "base/memory/shared_memory.h"
+#include "base/shared_memory.h"
 #include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_param_traits.h"
@@ -24,7 +24,7 @@ template<>
 struct ParamTraits<ui::Clipboard::FormatType> {
   typedef ui::Clipboard::FormatType param_type;
   static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -32,7 +32,7 @@ struct ParamTraits<ui::Clipboard::FormatType> {
 
 #endif  // CONTENT_COMMON_CLIPBOARD_MESSAGES_H_
 
-IPC_ENUM_TRAITS(ui::ClipboardType)
+IPC_ENUM_TRAITS(ui::Clipboard::Buffer)
 
 // Clipboard IPC messages sent from the renderer to the browser.
 
@@ -46,46 +46,38 @@ IPC_SYNC_MESSAGE_CONTROL2_0(ClipboardHostMsg_WriteObjectsSync,
                             ui::Clipboard::ObjectMap /* objects */,
                             base::SharedMemoryHandle /* bitmap handle */)
 IPC_SYNC_MESSAGE_CONTROL1_1(ClipboardHostMsg_GetSequenceNumber,
-                            ui::ClipboardType /* type */,
+                            ui::Clipboard::Buffer /* buffer */,
                             uint64 /* result */)
 IPC_SYNC_MESSAGE_CONTROL2_1(ClipboardHostMsg_IsFormatAvailable,
                             ui::Clipboard::FormatType /* format */,
-                            ui::ClipboardType /* type */,
+                            ui::Clipboard::Buffer /* buffer */,
                             bool /* result */)
-IPC_MESSAGE_CONTROL1(ClipboardHostMsg_Clear,
-                     ui::ClipboardType /* type */)
 IPC_SYNC_MESSAGE_CONTROL1_2(ClipboardHostMsg_ReadAvailableTypes,
-                            ui::ClipboardType /* type */,
-                            std::vector<base::string16> /* types */,
+                            ui::Clipboard::Buffer /* buffer */,
+                            std::vector<string16> /* types */,
                             bool /* contains filenames */)
 IPC_SYNC_MESSAGE_CONTROL1_1(ClipboardHostMsg_ReadText,
-                            ui::ClipboardType /* type */,
-                            base::string16 /* result */)
+                            ui::Clipboard::Buffer /* buffer */,
+                            string16 /* result */)
 IPC_SYNC_MESSAGE_CONTROL1_1(ClipboardHostMsg_ReadAsciiText,
-                            ui::ClipboardType /* type */,
+                            ui::Clipboard::Buffer  /* buffer */,
                             std::string /* result */)
 IPC_SYNC_MESSAGE_CONTROL1_4(ClipboardHostMsg_ReadHTML,
-                            ui::ClipboardType /* type */,
-                            base::string16 /* markup */,
+                            ui::Clipboard::Buffer  /* buffer */,
+                            string16 /* markup */,
                             GURL /* url */,
                             uint32 /* fragment start */,
                             uint32 /* fragment end */)
-IPC_SYNC_MESSAGE_CONTROL1_1(ClipboardHostMsg_ReadRTF,
-                            ui::ClipboardType /* type */,
-                            std::string /* result */)
 IPC_SYNC_MESSAGE_CONTROL1_2(ClipboardHostMsg_ReadImage,
-                            ui::ClipboardType /* type */,
+                            ui::Clipboard::Buffer /* buffer */,
                             base::SharedMemoryHandle /* PNG-encoded image */,
                             uint32 /* image size */)
 IPC_SYNC_MESSAGE_CONTROL2_1(ClipboardHostMsg_ReadCustomData,
-                            ui::ClipboardType /* type */,
-                            base::string16 /* type */,
-                            base::string16 /* result */)
-IPC_SYNC_MESSAGE_CONTROL1_1(ClipboardHostMsg_ReadData,
-                            ui::Clipboard::FormatType /* format */,
-                            std::string /* result */)
+                            ui::Clipboard::Buffer /* buffer */,
+                            string16 /* type */,
+                            string16 /* result */)
 
 #if defined(OS_MACOSX)
 IPC_MESSAGE_CONTROL1(ClipboardHostMsg_FindPboardWriteStringAsync,
-                     base::string16 /* text */)
+                     string16 /* text */)
 #endif

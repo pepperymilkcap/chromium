@@ -4,26 +4,26 @@
 
 #ifndef UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_AURA_H_
 #define UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_AURA_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "ui/aura/window_observer.h"
 #include "ui/views/controls/native/native_view_host_wrapper.h"
-#include "ui/views/views_export.h"
 
 namespace views {
 
 class NativeViewHost;
 
 // Aura implementation of NativeViewHostWrapper.
-class VIEWS_EXPORT NativeViewHostAura : public NativeViewHostWrapper,
-                                        public aura::WindowObserver {
+class NativeViewHostAura : public NativeViewHostWrapper,
+                           public aura::WindowObserver {
  public:
   explicit NativeViewHostAura(NativeViewHost* host);
   virtual ~NativeViewHostAura();
 
   // Overridden from NativeViewHostWrapper:
-  virtual void NativeViewWillAttach() OVERRIDE;
+  virtual void NativeViewAttached() OVERRIDE;
   virtual void NativeViewDetaching(bool destroyed) OVERRIDE;
   virtual void AddedToWidget() OVERRIDE;
   virtual void RemovedFromWidget() OVERRIDE;

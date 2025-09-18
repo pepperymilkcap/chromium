@@ -20,7 +20,8 @@ remoting.wcs = null;
  * @constructor
  * @param {remoting.WcsIqClient} wcsIqClient The WCS client.
  * @param {string} token An OAuth2 access token.
- * @param {function(string): void} onReady Called with the WCS client's JID.
+ * @param {function(boolean): void} onReady A function called when the WCS
+ *     client has received a full JID.
  */
 remoting.Wcs = function(wcsIqClient, token, onReady) {
   /**
@@ -39,7 +40,7 @@ remoting.Wcs = function(wcsIqClient, token, onReady) {
 
   /**
    * The function called when the WCS client has received a full JID.
-   * @type {?function(string): void}
+   * @type {function(boolean): void}
    * @private
    */
   this.onReady_ = onReady;
@@ -51,6 +52,23 @@ remoting.Wcs = function(wcsIqClient, token, onReady) {
    */
   this.clientFullJid_ = '';
 
+  /** @type {remoting.Wcs} */
+  var that = this;
+  /**
+   * A timer that polls for an updated access token.
+   * @type {number}
+   * @private
+   */
+  this.pollForUpdatedToken_ = setInterval(
+      function() {
+        /** @param {string} token */
+        var updateAccessToken = function(token) {
+          that.updateAccessToken_(token);
+        }
+        remoting.oauth2.callWithToken(updateAccessToken);
+      },
+      60 * 1000);
+
   /**
    * A function called when an IQ stanza is received.
    * @param {string} stanza The IQ stanza.
@@ -59,7 +77,9 @@ remoting.Wcs = function(wcsIqClient, token, onReady) {
   this.onIq_ = function(stanza) {};
 
   // Handle messages from the WcsIqClient.
-  this.wcsIqClient_.setOnMessage(this.onMessage_.bind(this));
+  /** @param {Array.<string>} msg An array of message strings. */
+  var onMessage = function(msg) { that.onMessage_(msg); };
+  this.wcsIqClient_.setOnMessage(onMessage);
 
   // Start the WcsIqClient.
   this.wcsIqClient_.connectChannel();
@@ -70,8 +90,9 @@ remoting.Wcs = function(wcsIqClient, token, onReady) {
  *
  * @param {string} tokenNew A (possibly updated) access token.
  * @return {void} Nothing.
+ * @private
  */
-remoting.Wcs.prototype.updateAccessToken = function(tokenNew) {
+remoting.Wcs.prototype.updateAccessToken_ = function(tokenNew) {
   if (tokenNew != this.token_) {
     this.token_ = tokenNew;
     this.wcsIqClient_.updateAccessToken(this.token_);
@@ -90,11 +111,9 @@ remoting.Wcs.prototype.onMessage_ = function(msg) {
     this.onIq_(msg[1]);
   } else if (msg[0] == 'cfj') {
     this.clientFullJid_ = msg[1];
-    console.log('Received JID: ' + this.clientFullJid_);
-    if (this.onReady_) {
-      this.onReady_(this.clientFullJid_);
-      this.onReady_ = null;
-    }
+    remoting.debug.log('Received JID: ' + this.clientFullJid_);
+    this.onReady_(true);
+    this.onReady_ = function(success) {};
   }
 };
 

@@ -4,19 +4,16 @@
 
 #ifndef CONTENT_RENDERER_MEDIA_RENDER_MEDIA_LOG_H_
 #define CONTENT_RENDERER_MEDIA_RENDER_MEDIA_LOG_H_
+#pragma once
 
-#include <vector>
-#include "base/time/time.h"
 #include "media/base/media_log.h"
 
 namespace base {
 class MessageLoopProxy;
 }
 
-namespace content {
-
 // RenderMediaLog is an implementation of MediaLog that passes all events to the
-// browser process, throttling as necessary.
+// browser process.
 class RenderMediaLog : public media::MediaLog {
  public:
   RenderMediaLog();
@@ -28,12 +25,8 @@ class RenderMediaLog : public media::MediaLog {
   virtual ~RenderMediaLog();
 
   scoped_refptr<base::MessageLoopProxy> render_loop_;
-  base::Time last_ipc_send_time_;
-  std::vector<media::MediaLogEvent> queued_media_events_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderMediaLog);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_RENDERER_MEDIA_RENDER_MEDIA_LOG_H_

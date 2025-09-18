@@ -1,16 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_bridge.h"
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
-#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
 #include "testing/platform_test.h"
-#include "url/gurl.h"
 
 // TODO(jrg): use OCMock.
 
@@ -28,7 +25,7 @@ typedef std::pair<GURL,WindowOpenDisposition> OpenInfo;
 // Oddly, we are our own delegate.
 @interface FakeBookmarkBarController : BookmarkBarController {
  @public
-  base::scoped_nsobject<NSMutableArray> callbacks_;
+  scoped_nsobject<NSMutableArray> callbacks_;
   std::vector<OpenInfo> opens_;
 }
 @end
@@ -98,24 +95,23 @@ class BookmarkBarBridgeTest : public CocoaProfileTest {
 
 // Call all the callbacks; make sure they are all redirected to the objc object.
 TEST_F(BookmarkBarBridgeTest, TestRedirect) {
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  BookmarkModel* model = profile()->GetBookmarkModel();
 
-  base::scoped_nsobject<NSView> parentView(
-      [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)]);
-  base::scoped_nsobject<NSView> webView(
-      [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)]);
-  base::scoped_nsobject<NSView> infoBarsView(
-      [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)]);
+  scoped_nsobject<NSView> parentView([[NSView alloc]
+                                       initWithFrame:NSMakeRect(0,0,100,100)]);
+  scoped_nsobject<NSView> webView([[NSView alloc]
+                                       initWithFrame:NSMakeRect(0,0,100,100)]);
+  scoped_nsobject<NSView> infoBarsView(
+      [[NSView alloc] initWithFrame:NSMakeRect(0,0,100,100)]);
 
-  base::scoped_nsobject<FakeBookmarkBarController> controller(
-      [[FakeBookmarkBarController alloc] initWithBrowser:browser()]);
+  scoped_nsobject<FakeBookmarkBarController>
+      controller([[FakeBookmarkBarController alloc] initWithBrowser:browser()]);
   EXPECT_TRUE(controller.get());
-  scoped_ptr<BookmarkBarBridge> bridge(new BookmarkBarBridge(profile(),
-                                                             controller.get(),
+  scoped_ptr<BookmarkBarBridge> bridge(new BookmarkBarBridge(controller.get(),
                                                              model));
   EXPECT_TRUE(bridge.get());
 
-  bridge->BookmarkModelLoaded(NULL, false);
+  bridge->Loaded(NULL, false);
   bridge->BookmarkModelBeingDeleted(NULL);
   bridge->BookmarkNodeMoved(NULL, NULL, 0, NULL, 0);
   bridge->BookmarkNodeAdded(NULL, NULL, 0);

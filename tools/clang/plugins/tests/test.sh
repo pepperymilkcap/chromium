@@ -23,13 +23,9 @@ usage() {
 
 # Runs a single test case.
 do_testcase() {
-  local flags=""
-  if [ -e "${3}" ]; then
-    flags="$(cat "${3}")"
-  fi
   local output="$("${CLANG_DIR}"/bin/clang -c -Wno-c++11-extensions \
       -Xclang -load -Xclang "${CLANG_DIR}"/lib/libFindBadConstructs.${LIB} \
-      -Xclang -add-plugin -Xclang find-bad-constructs ${flags} ${1} 2>&1)"
+      -Xclang -plugin -Xclang find-bad-constructs ${1} 2>&1)"
   local diffout="$(echo "${output}" | diff - "${2}")"
   if [ "${diffout}" = "" ]; then
     echo "PASS: ${1}"
@@ -68,7 +64,7 @@ else
 fi
 
 for input in *.cpp; do
-  do_testcase "${input}" "${input%cpp}txt" "${input%cpp}flags"
+  do_testcase "${input}" "${input%cpp}txt"
 done
 
 if [[ "${failed_any_test}" ]]; then

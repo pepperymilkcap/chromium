@@ -1,35 +1,29 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 
 #include "base/path_service.h"
-#include "base/strings/string16.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
-#include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
+#include "base/string16.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/web_contents_tester.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 
-using base::ASCIIToUTF16;
-using content::WebContentsTester;
+using content::BrowserThread;
 
 namespace {
 
@@ -46,9 +40,9 @@ class FaviconDelegate : public ui::MenuModelDelegate {
  public:
   FaviconDelegate() : was_called_(false) {}
 
-  virtual void OnIconChanged(int model_index) OVERRIDE {
+  void OnIconChanged(int model_index) {
     was_called_ = true;
-    base::MessageLoop::current()->Quit();
+    MessageLoop::current()->Quit();
   }
 
   bool was_called() const { return was_called_; }
@@ -63,6 +57,10 @@ class FaviconDelegate : public ui::MenuModelDelegate {
 
 class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
  public:
+  BackFwdMenuModelTest()
+      : ui_thread_(BrowserThread::UI, &message_loop_) {
+  }
+
   void ValidateModel(BackForwardMenuModel* model, int history_items,
                      int chapter_stops) {
     int h = std::min(BackForwardMenuModel::kMaxHistoryItems, history_items);
@@ -78,41 +76,43 @@ class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
 
   void LoadURLAndUpdateState(const char* url, const char* title) {
     NavigateAndCommit(GURL(url));
-    controller().GetLastCommittedEntry()->SetTitle(base::UTF8ToUTF16(title));
+    controller().GetLastCommittedEntry()->SetTitle(UTF8ToUTF16(title));
   }
 
   // Navigate back or forward the given amount and commits the entry (which
   // will be pending after we ask to navigate there).
   void NavigateToOffset(int offset) {
     controller().GoToOffset(offset);
-    WebContentsTester::For(web_contents())->CommitPendingNavigation();
+    contents()->CommitPendingNavigation();
   }
 
   // Same as NavigateToOffset but goes to an absolute index.
   void NavigateToIndex(int index) {
     controller().GoToIndex(index);
-    WebContentsTester::For(web_contents())->CommitPendingNavigation();
+    contents()->CommitPendingNavigation();
   }
 
   // Goes back/forward and commits the load.
   void GoBack() {
     controller().GoBack();
-    WebContentsTester::For(web_contents())->CommitPendingNavigation();
+    contents()->CommitPendingNavigation();
   }
   void GoForward() {
     controller().GoForward();
-    WebContentsTester::For(web_contents())->CommitPendingNavigation();
+    contents()->CommitPendingNavigation();
   }
+
+  content::TestBrowserThread ui_thread_;
 };
 
 TEST_F(BackFwdMenuModelTest, BasicCase) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(web_contents());
+  back_model->set_test_web_contents(contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(web_contents());
+  forward_model->set_test_web_contents(contents());
 
   EXPECT_EQ(0, back_model->GetItemCount());
   EXPECT_EQ(0, forward_model->GetItemCount());
@@ -176,11 +176,11 @@ TEST_F(BackFwdMenuModelTest, BasicCase) {
 TEST_F(BackFwdMenuModelTest, MaxItemsTest) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(web_contents());
+  back_model->set_test_web_contents(contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(web_contents());
+  forward_model->set_test_web_contents(contents());
 
   // Seed the controller with 32 URLs
   LoadURLAndUpdateState("http://www.a.com/1", "A1");
@@ -258,11 +258,11 @@ TEST_F(BackFwdMenuModelTest, MaxItemsTest) {
 TEST_F(BackFwdMenuModelTest, ChapterStops) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
     NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(web_contents());
+  back_model->set_test_web_contents(contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(web_contents());
+  forward_model->set_test_web_contents(contents());
 
   // Seed the controller with 32 URLs.
   int i = 0;
@@ -346,7 +346,7 @@ TEST_F(BackFwdMenuModelTest, ChapterStops) {
   // Check to see if the chapter stops have the right labels.
   int index = BackForwardMenuModel::kMaxHistoryItems;
   // Empty string indicates item is a separator.
-  EXPECT_EQ(base::string16(), back_model->GetLabelAt(index++));
+  EXPECT_EQ(string16(), back_model->GetLabelAt(index++));
   EXPECT_EQ(ASCIIToUTF16("F3"), back_model->GetLabelAt(index++));
   EXPECT_EQ(ASCIIToUTF16("E3"), back_model->GetLabelAt(index++));
   EXPECT_EQ(ASCIIToUTF16("D3"), back_model->GetLabelAt(index++));
@@ -354,7 +354,7 @@ TEST_F(BackFwdMenuModelTest, ChapterStops) {
   // The menu should only show a maximum of 5 chapter stops.
   EXPECT_EQ(ASCIIToUTF16("B3"), back_model->GetLabelAt(index));
   // Empty string indicates item is a separator.
-  EXPECT_EQ(base::string16(), back_model->GetLabelAt(index + 1));
+  EXPECT_EQ(string16(), back_model->GetLabelAt(index + 1));
   EXPECT_EQ(back_model->GetShowFullHistoryLabel(),
             back_model->GetLabelAt(index + 2));
 
@@ -372,7 +372,7 @@ TEST_F(BackFwdMenuModelTest, ChapterStops) {
   EXPECT_EQ(ASCIIToUTF16("A3"), back_model->GetLabelAt(index));
   GoBack();
   // It is now a separator.
-  EXPECT_EQ(base::string16(), back_model->GetLabelAt(index));
+  EXPECT_EQ(string16(), back_model->GetLabelAt(index));
   // Undo our position change.
   NavigateToOffset(6);
 
@@ -395,7 +395,7 @@ TEST_F(BackFwdMenuModelTest, ChapterStops) {
   // Check to see if the chapter stops have the right labels.
   index = BackForwardMenuModel::kMaxHistoryItems;
   // Empty string indicates item is a separator.
-  EXPECT_EQ(base::string16(), forward_model->GetLabelAt(index++));
+  EXPECT_EQ(string16(), forward_model->GetLabelAt(index++));
   EXPECT_EQ(ASCIIToUTF16("E3"), forward_model->GetLabelAt(index++));
   EXPECT_EQ(ASCIIToUTF16("F3"), forward_model->GetLabelAt(index++));
   EXPECT_EQ(ASCIIToUTF16("G3"), forward_model->GetLabelAt(index++));
@@ -403,7 +403,7 @@ TEST_F(BackFwdMenuModelTest, ChapterStops) {
   // The menu should only show a maximum of 5 chapter stops.
   EXPECT_EQ(ASCIIToUTF16("I3"), forward_model->GetLabelAt(index));
   // Empty string indicates item is a separator.
-  EXPECT_EQ(base::string16(), forward_model->GetLabelAt(index + 1));
+  EXPECT_EQ(string16(), forward_model->GetLabelAt(index + 1));
   EXPECT_EQ(forward_model->GetShowFullHistoryLabel(),
       forward_model->GetLabelAt(index + 2));
 
@@ -469,7 +469,7 @@ TEST_F(BackFwdMenuModelTest, ChapterStops) {
 TEST_F(BackFwdMenuModelTest, EscapeLabel) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(web_contents());
+  back_model->set_test_web_contents(contents());
 
   EXPECT_EQ(0, back_model->GetItemCount());
   EXPECT_FALSE(back_model->ItemHasCommand(1));
@@ -498,19 +498,19 @@ TEST_F(BackFwdMenuModelTest, EscapeLabel) {
 
 // Test asynchronous loading of favicon from history service.
 TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
-  ASSERT_TRUE(profile()->CreateHistoryService(true, false));
+  profile()->CreateHistoryService(true, false);
   profile()->CreateFaviconService();
-  Browser::CreateParams native_params(profile(), chrome::GetActiveDesktop());
-  scoped_ptr<Browser> browser(
-      chrome::CreateBrowserWithTestWindowForParams(&native_params));
+  Browser browser(Browser::TYPE_TABBED, profile());
   FaviconDelegate favicon_delegate;
 
   BackForwardMenuModel back_model(
-      browser.get(), BackForwardMenuModel::BACKWARD_MENU);
+      &browser, BackForwardMenuModel::BACKWARD_MENU);
   back_model.set_test_web_contents(controller().GetWebContents());
   back_model.SetMenuModelDelegate(&favicon_delegate);
 
-  SkBitmap new_icon_bitmap(CreateBitmap(SK_ColorRED));
+  SkBitmap new_icon(CreateBitmap(SK_ColorRED));
+  std::vector<unsigned char> icon_data;
+  gfx::PNGCodec::EncodeBGRASkBitmap(new_icon, false, &icon_data);
 
   GURL url1 = GURL("http://www.a.com/1");
   GURL url2 = GURL("http://www.a.com/2");
@@ -521,48 +521,40 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   NavigateAndCommit(url2);
 
   // Set the desired favicon for url1.
-  HistoryServiceFactory::GetForProfile(
-      profile(), Profile::EXPLICIT_ACCESS)->AddPage(
-          url1, base::Time::Now(), history::SOURCE_BROWSED);
-  FaviconServiceFactory::GetForProfile(
-      profile(), Profile::EXPLICIT_ACCESS)->SetFavicons(
-          url1, url1_favicon, chrome::FAVICON,
-          gfx::Image::CreateFrom1xBitmap(new_icon_bitmap));
+  profile()->GetHistoryService(Profile::EXPLICIT_ACCESS)->AddPage(url1,
+      history::SOURCE_BROWSED);
+  profile()->GetFaviconService(Profile::EXPLICIT_ACCESS)->SetFavicon(url1,
+      url1_favicon, icon_data, history::FAVICON);
 
   // Will return the current icon (default) but start an anync call
   // to retrieve the favicon from the favicon service.
-  gfx::Image default_icon;
+  SkBitmap default_icon;
   back_model.GetIconAt(0, &default_icon);
 
   // Make the favicon service run GetFavIconForURL,
   // FaviconDelegate.OnIconChanged will be called.
-  base::MessageLoop::current()->Run();
+  MessageLoop::current()->Run();
 
   // Verify that the callback executed.
   EXPECT_TRUE(favicon_delegate.was_called());
 
   // Verify the bitmaps match.
-  gfx::Image valid_icon;
+  SkBitmap valid_icon;
   // This time we will get the new favicon returned.
   back_model.GetIconAt(0, &valid_icon);
-
-  SkBitmap default_icon_bitmap = *default_icon.ToSkBitmap();
-  SkBitmap valid_icon_bitmap = *valid_icon.ToSkBitmap();
-
-  SkAutoLockPixels a(new_icon_bitmap);
-  SkAutoLockPixels b(valid_icon_bitmap);
-  SkAutoLockPixels c(default_icon_bitmap);
+  SkAutoLockPixels a(new_icon);
+  SkAutoLockPixels b(valid_icon);
+  SkAutoLockPixels c(default_icon);
   // Verify we did not get the default favicon.
-  EXPECT_NE(0, memcmp(default_icon_bitmap.getPixels(),
-                      valid_icon_bitmap.getPixels(),
-                      default_icon_bitmap.getSize()));
+  EXPECT_NE(0, memcmp(default_icon.getPixels(), valid_icon.getPixels(),
+               default_icon.getSize()));
   // Verify we did get the expected favicon.
-  EXPECT_EQ(0, memcmp(new_icon_bitmap.getPixels(),
-                      valid_icon_bitmap.getPixels(),
-                      new_icon_bitmap.getSize()));
+  EXPECT_EQ(0, memcmp(new_icon.getPixels(), valid_icon.getPixels(),
+              new_icon.getSize()));
 
   // Make sure the browser deconstructor doesn't have problems.
-  browser->tab_strip_model()->CloseAllTabs();
+  browser.CloseAllTabs();
   // This is required to prevent the message loop from hanging.
   profile()->DestroyHistoryService();
 }
+

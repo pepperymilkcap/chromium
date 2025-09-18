@@ -1,14 +1,13 @@
-#!/usr/bin/env python
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import argparse
 from collections import defaultdict
 import os
 import re
-import subprocess
 import sys
+
+import path_utils
 
 import suppressions
 
@@ -47,70 +46,40 @@ def ReadReportsFromFile(filename):
   # The line at the end of the file is assumed to store the URL of the report.
   return reports,line
 
-def Demangle(names):
-  """ Demangle a list of C++ symbols, return a list of human-readable symbols.
-  """
-  # -n is not the default on Mac.
-  args = ['c++filt', '-n']
-  pipe = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-  stdout, _ = pipe.communicate(input='\n'.join(names))
-  demangled = stdout.split("\n")
-  # Each line ends with a newline, so the final entry of the split output
-  # will always be ''.
-  assert len(demangled) == len(names)
-  return demangled
-
-def GetSymbolsFromReport(report):
-  """Extract all symbols from a suppression report."""
-  symbols = []
-  prefix = "fun:"
-  prefix_len = len(prefix)
-  for line in report.splitlines():
-    index = line.find(prefix)
-    if index != -1:
-      symbols.append(line[index + prefix_len:])
-  return symbols
-
-def PrintTopSymbols(symbol_reports, top_count):
-  """Print the |top_count| symbols with the most occurrences."""
-  boring_symbols=['malloc', '_Znw*', 'TestBody']
-  sorted_reports = sorted(filter(lambda x:x[0] not in boring_symbols,
-                                 symbol_reports.iteritems()),
-                          key=lambda x:len(x[1]), reverse=True)
-  symbols = symbol_reports.keys()
-  demangled = Demangle(symbols)
-  assert len(demangled) == len(symbols)
-  symboltable = dict(zip(symbols, demangled))
-
-  print "\n"
-  print "Top %d symbols" % top_count
-  for (symbol, suppressions) in sorted_reports[:top_count]:
-    print "%4d occurrences : %s" % (len(suppressions), symboltable[symbol])
 
 def main(argv):
-  supp = suppressions.GetSuppressions()
+  suppressions_root = path_utils.ScriptDir()
+  JOIN = os.path.join
+
+  supp_filename = JOIN(suppressions_root, "memcheck", "suppressions.txt")
+  vg_common = suppressions.ReadSuppressionsFromFile(supp_filename)
+  supp_filename = JOIN(suppressions_root, "tsan", "suppressions.txt")
+  tsan_common = suppressions.ReadSuppressionsFromFile(supp_filename)
+  common_suppressions = vg_common + tsan_common
+
+  supp_filename = JOIN(suppressions_root, "memcheck", "suppressions_mac.txt")
+  vg_mac = suppressions.ReadSuppressionsFromFile(supp_filename)
+  supp_filename = JOIN(suppressions_root, "tsan", "suppressions_mac.txt")
+  tsan_mac = suppressions.ReadSuppressionsFromFile(supp_filename)
+  mac_suppressions = vg_mac + tsan_mac
+
+  supp_filename = JOIN(suppressions_root, "tsan", "suppressions_win32.txt")
+  tsan_win = suppressions.ReadSuppressionsFromFile(supp_filename)
+  win_suppressions = tsan_win
+
+  supp_filename = JOIN(suppressions_root, "..", "heapcheck", "suppressions.txt")
+  heapcheck_suppressions = suppressions.ReadSuppressionsFromFile(supp_filename)
+
+  supp_filename = JOIN(suppressions_root, "drmemory", "suppressions.txt")
+  drmem_suppressions = suppressions.ReadSuppressionsFromFile(supp_filename)
+  supp_filename = JOIN(suppressions_root, "drmemory", "suppressions_full.txt")
+  drmem_full_suppressions = suppressions.ReadSuppressionsFromFile(supp_filename)
 
   # all_reports is a map {report: list of urls containing this report}
   all_reports = defaultdict(list)
   report_hashes = {}
-  symbol_reports = defaultdict(list)
 
-  # Create argument parser.
-  parser = argparse.ArgumentParser()
-  parser.add_argument('--top-symbols', type=int, default=0,
-    help='Print a list of the top <n> symbols')
-  parser.add_argument('--symbol-filter', action='append',
-    help='Filter out all suppressions not containing the specified symbol(s). '
-         'Matches against the mangled names.')
-  parser.add_argument('--exclude-symbol', action='append',
-    help='Filter out all suppressions containing the specified symbol(s). '
-         'Matches against the mangled names.')
-
-  parser.add_argument('reports', metavar='report file', nargs='+',
-    help='List of report files')
-  args = parser.parse_args(argv)
-
-  for f in args.reports:
+  for f in argv:
     f_reports, url = ReadReportsFromFile(f)
     for (hash, report) in f_reports:
       all_reports[report] += [url]
@@ -118,39 +87,28 @@ def main(argv):
 
   reports_count = 0
   for r in all_reports:
-    cur_supp = supp['common_suppressions']
+    cur_supp = common_suppressions
     if all([re.search("%20Mac%20|mac_valgrind", url)
             for url in all_reports[r]]):
       # Include mac suppressions if the report is only present on Mac
-      cur_supp += supp['mac_suppressions']
+      cur_supp += mac_suppressions
     elif all([re.search("Windows%20", url) for url in all_reports[r]]):
       # Include win32 suppressions if the report is only present on Windows
-      cur_supp += supp['win_suppressions']
-    elif all([re.search("Linux%20", url) for url in all_reports[r]]):
-      cur_supp += supp['linux_suppressions']
-    # Separate from OS matches as we want to match "Linux%20Heapcheck" twice:
-    if all([re.search("%20Heapcheck", url)
+      cur_supp += win_suppressions
+    elif all([re.search("%20Heapcheck", url)
               for url in all_reports[r]]):
-      cur_supp += supp['heapcheck_suppressions']
-    if all(["DrMemory" in url for url in all_reports[r]]):
-      cur_supp += supp['drmem_suppressions']
-    if all(["DrMemory%20full" in url for url in all_reports[r]]):
-      cur_supp += supp['drmem_full_suppressions']
+      cur_supp += heapcheck_suppressions
+    elif all(["DrMemory%20full" in url for url in all_reports[r]]):
+      cur_supp += drmem_suppressions + drmem_full_suppressions
+    elif all(["DrMemory" in url for url in all_reports[r]]):
+      cur_supp += drmem_suppressions
 
-    # Test if this report is already suppressed
-    skip = False
+    match = False
     for s in cur_supp:
       if s.Match(r.split("\n")):
-        skip = True
+        match = True
         break
-
-    # Skip reports if none of the symbols are in the report.
-    if args.symbol_filter and all(not s in r for s in args.symbol_filter):
-        skip = True
-    if args.exclude_symbol and any(s in r for s in args.exclude_symbol):
-        skip = True
-
-    if not skip:
+    if not match:
       reports_count += 1
       print "==================================="
       print "This report observed at"
@@ -161,17 +119,9 @@ def main(argv):
       print r
       print "==================================="
 
-      if args.top_symbols > 0:
-        symbols = GetSymbolsFromReport(r)
-        for symbol in symbols:
-          symbol_reports[symbol].append(report_hashes[r])
-
   if reports_count > 0:
     print ("%d unique reports don't match any of the suppressions" %
            reports_count)
-    if args.top_symbols > 0:
-      PrintTopSymbols(symbol_reports, args.top_symbols)
-
   else:
     print "Congratulations! All reports are suppressed!"
     # TODO(timurrrr): also make sure none of the old suppressions

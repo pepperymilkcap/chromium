@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_SINGLE_SPLIT_VIEW_H_
 #define UI_VIEWS_CONTROLS_SINGLE_SPLIT_VIEW_H_
+#pragma once
 
 #include "base/gtest_prod_util.h"
 #include "ui/views/view.h"
@@ -32,7 +33,7 @@ class VIEWS_EXPORT SingleSplitView : public View {
                   SingleSplitViewListener* listener);
 
   virtual void Layout() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
@@ -41,7 +42,7 @@ class VIEWS_EXPORT SingleSplitView : public View {
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
   // Overriden to return a resize cursor when over the divider.
-  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
+  virtual gfx::NativeCursor GetCursor(const MouseEvent& event) OVERRIDE;
 
   Orientation orientation() const {
     return is_horizontal_ ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
@@ -55,13 +56,6 @@ class VIEWS_EXPORT SingleSplitView : public View {
     divider_offset_ = divider_offset;
   }
   int divider_offset() const { return divider_offset_; }
-
-  int GetDividerSize() const;
-
-  void set_resize_disabled(bool resize_disabled) {
-    resize_disabled_ = resize_disabled;
-  }
-  bool is_resize_disabled() const { return resize_disabled_; }
 
   // Sets whether the leading component is resized when the split views size
   // changes. The default is true. A value of false results in the trailing
@@ -77,12 +71,12 @@ class VIEWS_EXPORT SingleSplitView : public View {
                                gfx::Rect* leading_bounds,
                                gfx::Rect* trailing_bounds) const;
 
-  void SetAccessibleName(const base::string16& name);
+  void SetAccessibleName(const string16& name);
 
  protected:
   // View overrides.
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
@@ -130,14 +124,11 @@ class VIEWS_EXPORT SingleSplitView : public View {
 
   bool resize_leading_on_bounds_change_;
 
-  // Whether resizing is disabled.
-  bool resize_disabled_;
-
   // Listener to notify about user initiated handle movements. Not owned.
   SingleSplitViewListener* listener_;
 
   // The accessible name of this view.
-  base::string16 accessible_name_;
+  string16 accessible_name_;
 
   DISALLOW_COPY_AND_ASSIGN(SingleSplitView);
 };

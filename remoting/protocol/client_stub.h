@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,30 +11,17 @@
 #define REMOTING_PROTOCOL_CLIENT_STUB_H_
 
 #include "base/basictypes.h"
-#include "remoting/protocol/clipboard_stub.h"
-#include "remoting/protocol/cursor_shape_stub.h"
 
 namespace remoting {
 namespace protocol {
 
-class Capabilities;
-class ExtensionMessage;
-class PairingResponse;
-
-class ClientStub : public ClipboardStub,
-                   public CursorShapeStub {
+class ClientStub {
  public:
   ClientStub() {}
   virtual ~ClientStub() {}
 
-  // Passes the set of capabilities supported by the host to the client.
-  virtual void SetCapabilities(const Capabilities& capabilities) = 0;
-
-  // Passes a pairing response message to the client.
-  virtual void SetPairingResponse(const PairingResponse& pairing_response) = 0;
-
-  // Deliver an extension message from the host to the client.
-  virtual void DeliverHostMessage(const ExtensionMessage& message) = 0;
+  // Currently we don't use the control channel for anything. Add new
+  // message handlers here when necessary.
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ClientStub);

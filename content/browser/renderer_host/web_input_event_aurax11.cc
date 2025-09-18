@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // Portions based heavily on:
-// third_party/WebKit/public/web/gtk/WebInputEventFactory.cpp
+// third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.cpp
 //
 /*
  * Copyright (C) 2006-2011 Google Inc. All rights reserved.
@@ -37,18 +37,15 @@
 
 #include "content/browser/renderer_host/web_input_event_aura.h"
 
-#include <X11/keysym.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
 #include <cstdlib>
+#include <X11/Xlib.h>
 
 #include "base/event_types.h"
 #include "base/logging.h"
-#include "content/browser/renderer_host/ui_events_helper.h"
-#include "ui/events/event.h"
-#include "ui/events/event_constants.h"
-#include "ui/events/keycodes/keyboard_code_conversion_x.h"
-#include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/aura/event.h"
+#include "ui/base/events.h"
+#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/keycodes/keyboard_code_conversion_x.h"
 
 namespace content {
 
@@ -57,60 +54,224 @@ namespace content {
 
 namespace {
 
+// This matches Firefox behavior.
+const int kPixelsPerTick = 53;
+
+int EventFlagsToWebEventModifiers(int flags) {
+  int modifiers = 0;
+  if (flags & ui::EF_SHIFT_DOWN)
+    modifiers |= WebKit::WebInputEvent::ShiftKey;
+  if (flags & ui::EF_CONTROL_DOWN)
+    modifiers |= WebKit::WebInputEvent::ControlKey;
+  if (flags & ui::EF_ALT_DOWN)
+    modifiers |= WebKit::WebInputEvent::AltKey;
+  // TODO(beng): MetaKey/META_MASK
+  if (flags & ui::EF_LEFT_MOUSE_BUTTON)
+    modifiers |= WebKit::WebInputEvent::LeftButtonDown;
+  if (flags & ui::EF_MIDDLE_MOUSE_BUTTON)
+    modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
+  if (flags & ui::EF_RIGHT_MOUSE_BUTTON)
+    modifiers |= WebKit::WebInputEvent::RightButtonDown;
+  if (flags & ui::EF_CAPS_LOCK_DOWN)
+    modifiers |= WebKit::WebInputEvent::CapsLockOn;
+  return modifiers;
+}
+
+int XStateToWebEventModifiers(unsigned int state) {
+  int modifiers = 0;
+  if (state & ShiftMask)
+    modifiers |= WebKit::WebInputEvent::ShiftKey;
+  if (state & ControlMask)
+    modifiers |= WebKit::WebInputEvent::ControlKey;
+  if (state & Mod1Mask)
+    modifiers |= WebKit::WebInputEvent::AltKey;
+  // TODO(beng): MetaKey/META_MASK
+  if (state & Button1Mask)
+    modifiers |= WebKit::WebInputEvent::LeftButtonDown;
+  if (state & Button2Mask)
+    modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
+  if (state & Button3Mask)
+    modifiers |= WebKit::WebInputEvent::RightButtonDown;
+  if (state & LockMask)
+    modifiers |= WebKit::WebInputEvent::CapsLockOn;
+  if (state & Mod2Mask)
+    modifiers |= WebKit::WebInputEvent::NumLockOn;
+  return modifiers;
+}
+
 int XKeyEventToWindowsKeyCode(XKeyEvent* event) {
-  int windows_key_code =
-      ui::KeyboardCodeFromXKeyEvent(reinterpret_cast<XEvent*>(event));
-  if (windows_key_code == ui::VKEY_SHIFT ||
-      windows_key_code == ui::VKEY_CONTROL ||
-      windows_key_code == ui::VKEY_MENU) {
-    // To support DOM3 'location' attribute, we need to lookup an X KeySym and
-    // set ui::VKEY_[LR]XXX instead of ui::VKEY_XXX.
-    KeySym keysym = XK_VoidSymbol;
-    XLookupString(event, NULL, 0, &keysym, NULL);
-    switch (keysym) {
-      case XK_Shift_L:
-        return ui::VKEY_LSHIFT;
-      case XK_Shift_R:
-        return ui::VKEY_RSHIFT;
-      case XK_Control_L:
-        return ui::VKEY_LCONTROL;
-      case XK_Control_R:
-        return ui::VKEY_RCONTROL;
-      case XK_Meta_L:
-      case XK_Alt_L:
-        return ui::VKEY_LMENU;
-      case XK_Meta_R:
-      case XK_Alt_R:
-        return ui::VKEY_RMENU;
+  return ui::KeyboardCodeFromXKeyEvent((XEvent*)event);
+}
+
+// From
+// third_party/WebKit/Source/WebKit/chromium/src/gtk/WebInputEventFactory.cpp:
+WebKit::WebUChar GetControlCharacter(int windows_key_code, bool shift) {
+  if (windows_key_code >= ui::VKEY_A &&
+    windows_key_code <= ui::VKEY_Z) {
+    // ctrl-A ~ ctrl-Z map to \x01 ~ \x1A
+    return windows_key_code - ui::VKEY_A + 1;
+  }
+  if (shift) {
+    // following graphics chars require shift key to input.
+    switch (windows_key_code) {
+      // ctrl-@ maps to \x00 (Null byte)
+      case ui::VKEY_2:
+        return 0;
+      // ctrl-^ maps to \x1E (Record separator, Information separator two)
+      case ui::VKEY_6:
+        return 0x1E;
+      // ctrl-_ maps to \x1F (Unit separator, Information separator one)
+      case ui::VKEY_OEM_MINUS:
+        return 0x1F;
+      // Returns 0 for all other keys to avoid inputting unexpected chars.
+      default:
+        break;
+    }
+  } else {
+    switch (windows_key_code) {
+      // ctrl-[ maps to \x1B (Escape)
+      case ui::VKEY_OEM_4:
+        return 0x1B;
+      // ctrl-\ maps to \x1C (File separator, Information separator four)
+      case ui::VKEY_OEM_5:
+        return 0x1C;
+      // ctrl-] maps to \x1D (Group separator, Information separator three)
+      case ui::VKEY_OEM_6:
+        return 0x1D;
+      // ctrl-Enter maps to \x0A (Line feed)
+      case ui::VKEY_RETURN:
+        return 0x0A;
+      // Returns 0 for all other keys to avoid inputting unexpected chars.
+      default:
+        break;
     }
   }
-  return windows_key_code;
+  return 0;
+}
+
+WebKit::WebTouchPoint::State TouchPointStateFromEvent(
+    const aura::TouchEvent* event) {
+  switch (event->type()) {
+    case ui::ET_TOUCH_PRESSED:
+      return WebKit::WebTouchPoint::StatePressed;
+    case ui::ET_TOUCH_RELEASED:
+      return WebKit::WebTouchPoint::StateReleased;
+    case ui::ET_TOUCH_MOVED:
+      return WebKit::WebTouchPoint::StateMoved;
+    case ui::ET_TOUCH_CANCELLED:
+      return WebKit::WebTouchPoint::StateCancelled;
+    default:
+      return WebKit::WebTouchPoint::StateUndefined;
+  }
+}
+
+WebKit::WebInputEvent::Type TouchEventTypeFromEvent(
+    const aura::TouchEvent* event) {
+  switch (event->type()) {
+    case ui::ET_TOUCH_PRESSED:
+      return WebKit::WebInputEvent::TouchStart;
+    case ui::ET_TOUCH_RELEASED:
+      return WebKit::WebInputEvent::TouchEnd;
+    case ui::ET_TOUCH_MOVED:
+      return WebKit::WebInputEvent::TouchMove;
+    case ui::ET_TOUCH_CANCELLED:
+      return WebKit::WebInputEvent::TouchCancel;
+    default:
+      return WebKit::WebInputEvent::Undefined;
+  }
 }
 
 }  // namespace
 
-blink::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
-    ui::KeyEvent* event) {
+WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(aura::MouseEvent* event) {
+  WebKit::WebMouseEvent webkit_event;
+
+  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
+
+  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
+  if (event->flags() & ui::EF_LEFT_MOUSE_BUTTON)
+    webkit_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  if (event->flags() & ui::EF_MIDDLE_MOUSE_BUTTON)
+    webkit_event.button = WebKit::WebMouseEvent::ButtonMiddle;
+  if (event->flags() & ui::EF_RIGHT_MOUSE_BUTTON)
+    webkit_event.button = WebKit::WebMouseEvent::ButtonRight;
+
+  switch (event->type()) {
+    case ui::ET_MOUSE_PRESSED:
+      webkit_event.type = WebKit::WebInputEvent::MouseDown;
+      webkit_event.clickCount = event->GetClickCount();
+      break;
+    case ui::ET_MOUSE_RELEASED:
+      webkit_event.type = WebKit::WebInputEvent::MouseUp;
+      break;
+    case ui::ET_MOUSE_ENTERED:
+    case ui::ET_MOUSE_EXITED:
+    case ui::ET_MOUSE_MOVED:
+    case ui::ET_MOUSE_DRAGGED:
+      webkit_event.type = WebKit::WebInputEvent::MouseMove;
+      break;
+    default:
+      NOTIMPLEMENTED() << "Received unexpected event: " << event->type();
+      break;
+  }
+
+  return webkit_event;
+}
+
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
+    aura::MouseEvent* event) {
+  WebKit::WebMouseWheelEvent webkit_event;
+
+  webkit_event.type = WebKit::WebInputEvent::MouseWheel;
+  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
+  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
+  webkit_event.deltaY = ui::GetMouseWheelOffset(event->native_event());
+  webkit_event.wheelTicksY = webkit_event.deltaY / kPixelsPerTick;
+
+  return webkit_event;
+}
+
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
+    aura::ScrollEvent* event) {
+  WebKit::WebMouseWheelEvent webkit_event;
+
+  webkit_event.type = WebKit::WebInputEvent::MouseWheel;
+  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
+  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
+  webkit_event.hasPreciseScrollingDeltas = true;
+  webkit_event.deltaX = event->x_offset();
+  webkit_event.wheelTicksX = webkit_event.deltaX / kPixelsPerTick;
+  webkit_event.deltaY = event->y_offset();
+  webkit_event.wheelTicksY = webkit_event.deltaY / kPixelsPerTick;
+
+  return webkit_event;
+}
+
+WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
+    aura::KeyEvent* event) {
   base::NativeEvent native_event = event->native_event();
-  blink::WebKeyboardEvent webkit_event;
+  WebKit::WebKeyboardEvent webkit_event;
   XKeyEvent* native_key_event = &native_event->xkey;
 
   webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
-  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.modifiers = XStateToWebEventModifiers(native_key_event->state);
 
   switch (native_event->type) {
     case KeyPress:
-      webkit_event.type = event->is_char() ? blink::WebInputEvent::Char :
-          blink::WebInputEvent::RawKeyDown;
+      webkit_event.type = event->is_char() ? WebKit::WebInputEvent::Char :
+          WebKit::WebInputEvent::RawKeyDown;
       break;
     case KeyRelease:
-      webkit_event.type = blink::WebInputEvent::KeyUp;
+      webkit_event.type = WebKit::WebInputEvent::KeyUp;
       break;
     default:
       NOTREACHED();
   }
 
-  if (webkit_event.modifiers & blink::WebInputEvent::AltKey)
+  if (webkit_event.modifiers & WebKit::WebInputEvent::AltKey)
     webkit_event.isSystemKey = true;
 
   webkit_event.windowsKeyCode = XKeyEventToWindowsKeyCode(native_key_event);
@@ -121,11 +282,11 @@ blink::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
   else
     webkit_event.unmodifiedText[0] = ui::GetCharacterFromXEvent(native_event);
 
-  if (webkit_event.modifiers & blink::WebInputEvent::ControlKey) {
+  if (webkit_event.modifiers & WebKit::WebInputEvent::ControlKey) {
     webkit_event.text[0] =
         GetControlCharacter(
             webkit_event.windowsKeyCode,
-            webkit_event.modifiers & blink::WebInputEvent::ShiftKey);
+            webkit_event.modifiers & WebKit::WebInputEvent::ShiftKey);
   } else {
     webkit_event.text[0] = webkit_event.unmodifiedText[0];
   }
@@ -135,6 +296,109 @@ blink::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
   // TODO: IsAutoRepeat/IsKeyPad?
 
   return webkit_event;
+}
+
+WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
+    aura::GestureEvent* event) {
+  WebKit::WebGestureEvent gesture_event;
+
+  switch (event->type()) {
+    case ui::ET_GESTURE_TAP:
+      gesture_event.type = WebKit::WebInputEvent::GestureTap;
+      break;
+    case ui::ET_GESTURE_TAP_DOWN:
+      gesture_event.type = WebKit::WebInputEvent::GestureTapDown;
+      break;
+    case ui::ET_GESTURE_DOUBLE_TAP:
+      gesture_event.type = WebKit::WebInputEvent::GestureDoubleTap;
+      break;
+    case ui::ET_GESTURE_SCROLL_BEGIN:
+      gesture_event.type = WebKit::WebInputEvent::GestureScrollBegin;
+      break;
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      gesture_event.type = WebKit::WebInputEvent::GestureScrollUpdate;
+      break;
+    case ui::ET_GESTURE_SCROLL_END:
+      gesture_event.type = WebKit::WebInputEvent::GestureScrollEnd;
+      break;
+    default:
+      NOTREACHED() << "Unknown gesture type: " << event->type();
+  }
+
+  gesture_event.deltaX = event->delta_x();
+  gesture_event.deltaY = event->delta_y();
+
+  return gesture_event;
+}
+
+WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
+    aura::TouchEvent* event, WebKit::WebTouchEvent* web_event) {
+  WebKit::WebTouchPoint* point = NULL;
+  switch (event->type()) {
+    case ui::ET_TOUCH_PRESSED:
+      // Add a new touch point.
+      if (web_event->touchesLength < WebKit::WebTouchEvent::touchesLengthCap) {
+        point = &web_event->touches[web_event->touchesLength++];
+        point->id = event->touch_id();
+      }
+      break;
+    case ui::ET_TOUCH_RELEASED:
+    case ui::ET_TOUCH_CANCELLED:
+    case ui::ET_TOUCH_MOVED: {
+      // The touch point should have been added to the event from an earlier
+      // _PRESSED event. So find that.
+      // At the moment, only a maximum of 4 touch-points are allowed. So a
+      // simple loop should be sufficient.
+      for (unsigned i = 0; i < web_event->touchesLength; ++i) {
+        point = web_event->touches + i;
+        if (point->id == event->touch_id())
+          break;
+        point = NULL;
+      }
+      break;
+    }
+    default:
+      DLOG(WARNING) << "Unknown touch event " << event->type();
+      break;
+  }
+
+  if (!point)
+    return NULL;
+
+  point->radiusX = event->radius_x();
+  point->radiusY = event->radius_y();
+  point->rotationAngle = event->rotation_angle();
+  point->force = event->force();
+
+  // Update the location and state of the point.
+  point->state = TouchPointStateFromEvent(event);
+  if (point->state == WebKit::WebTouchPoint::StateMoved) {
+    // It is possible for badly written touch drivers to emit Move events even
+    // when the touch location hasn't changed. In such cases, consume the event
+    // and pretend nothing happened.
+    if (point->position.x == event->x() && point->position.y == event->y())
+      return NULL;
+  }
+  point->position.x = event->x();
+  point->position.y = event->y();
+
+  // TODO(sad): Convert to screen coordinates.
+  point->screenPosition.x = point->position.x;
+  point->screenPosition.y = point->position.y;
+
+  // Mark the rest of the points as stationary.
+  for (unsigned i = 0; i < web_event->touchesLength; ++i) {
+    WebKit::WebTouchPoint* iter = web_event->touches + i;
+    if (iter != point)
+      iter->state = WebKit::WebTouchPoint::StateStationary;
+  }
+
+  // Update the type of the touch event.
+  web_event->type = TouchEventTypeFromEvent(event);
+  web_event->timeStampSeconds = event->time_stamp().InSecondsF();
+  web_event->modifiers = EventFlagsToWebEventModifiers(event->flags());
+
+  return point;
 }
 
 }  // namespace content

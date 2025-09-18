@@ -4,6 +4,7 @@
 
 #ifndef UI_VIEWS_CONTROLS_NATIVE_CONTROL_WIN_H_
 #define UI_VIEWS_CONTROLS_NATIVE_CONTROL_WIN_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -39,8 +40,9 @@ class NativeControlWin : public ChildWindowMessageProcessor,
   virtual void OnEnabledChanged() OVERRIDE;
 
  protected:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
   virtual void VisibilityChanged(View* starting_from, bool is_visible) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
 

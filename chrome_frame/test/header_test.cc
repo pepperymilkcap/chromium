@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,11 +22,11 @@ class TestData {
   }
 
   std::wstring GetPath() const {
-    return base::ASCIIToWide("/" + name_);
+    return ASCIIToWide("/" + name_);
   }
 
   std::wstring GetUrl(MockWebServer* server_mock) const {
-    return server_mock->Resolve(base::ASCIIToWide(name_));
+    return server_mock->Resolve(ASCIIToWide(name_));
   }
 
   void ExpectOnServer(MockWebServer* server_mock) const {
@@ -39,8 +39,7 @@ class TestData {
     std::ostringstream headers;
     headers << "HTTP/1.1 200 OK\r\n"
             << "Connection: close\r\n"
-            << "Content-Type: text/html\r\n"
-            << "Cache-Control: no-cache\r\n";
+            << "Content-Type: text/html\r\n";
     if (in_header_) {
       headers << "X-UA-COMPATIBLE: " << value_ << "\r\n";
     }

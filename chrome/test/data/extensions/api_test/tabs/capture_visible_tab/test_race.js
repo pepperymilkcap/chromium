@@ -64,9 +64,9 @@ chrome.test.runTests([
             {'format': 'png'},
             function(imgDataUrl) {
               log('captured ' + windowId);
-              if (chrome.runtime.lastError) {
+              if (chrome.extension.lastError) {
                 chrome.test.fail('captureVisibleTab error: ' +
-                    chrome.runtime.lastError.message);
+                    chrome.extension.lastError.message);
               }
               testPixelsAreExpectedColor(
                   imgDataUrl, kWindowRect, expectedColor);

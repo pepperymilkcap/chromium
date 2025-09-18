@@ -4,10 +4,11 @@
 
 #ifndef UI_VIEWS_CONTROLS_NATIVE_CONTROL_H_
 #define UI_VIEWS_CONTROLS_NATIVE_CONTROL_H_
+#pragma once
 
 #include <windows.h>
 
-#include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -32,8 +33,7 @@ class VIEWS_EXPORT NativeControl : public View {
   NativeControl();
   virtual ~NativeControl();
 
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add, View *parent, View *child);
   virtual void Layout();
 
   // Overridden to properly set the native control state.

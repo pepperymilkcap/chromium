@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/scoped_temp_dir.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/history/url_database.h"
 #include "sql/connection.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -40,15 +41,15 @@ class URLDatabaseTest : public testing::Test,
 
  protected:
   // Provided for URL/VisitDatabase.
-  virtual sql::Connection& GetDB() OVERRIDE {
+  virtual sql::Connection& GetDB() {
     return db_;
   }
 
  private:
   // Test setup.
-  virtual void SetUp() {
+  void SetUp() {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    base::FilePath db_file = temp_dir_.path().AppendASCII("URLTest.db");
+    FilePath db_file = temp_dir_.path().AppendASCII("URLTest.db");
 
     EXPECT_TRUE(db_.Open(db_file));
 
@@ -58,11 +59,11 @@ class URLDatabaseTest : public testing::Test,
     InitKeywordSearchTermsTable();
     CreateKeywordSearchTermsIndices();
   }
-  virtual void TearDown() {
+  void TearDown() {
     db_.Close();
   }
 
-  base::ScopedTempDir temp_dir_;
+  ScopedTempDir temp_dir_;
   sql::Connection db_;
 };
 
@@ -71,7 +72,7 @@ TEST_F(URLDatabaseTest, AddURL) {
   // First, add two URLs.
   const GURL url1("http://www.google.com/");
   URLRow url_info1(url1);
-  url_info1.set_title(base::UTF8ToUTF16("Google"));
+  url_info1.set_title(UTF8ToUTF16("Google"));
   url_info1.set_visit_count(4);
   url_info1.set_typed_count(2);
   url_info1.set_last_visit(Time::Now() - TimeDelta::FromDays(1));
@@ -80,7 +81,7 @@ TEST_F(URLDatabaseTest, AddURL) {
 
   const GURL url2("http://mail.google.com/");
   URLRow url_info2(url2);
-  url_info2.set_title(base::UTF8ToUTF16("Google Mail"));
+  url_info2.set_title(UTF8ToUTF16("Google Mail"));
   url_info2.set_visit_count(3);
   url_info2.set_typed_count(0);
   url_info2.set_last_visit(Time::Now() - TimeDelta::FromDays(2));
@@ -96,7 +97,7 @@ TEST_F(URLDatabaseTest, AddURL) {
   EXPECT_TRUE(IsURLRowEqual(url_info2, info));
 
   // Update the second.
-  url_info2.set_title(base::UTF8ToUTF16("Google Mail Too"));
+  url_info2.set_title(UTF8ToUTF16("Google Mail Too"));
   url_info2.set_visit_count(4);
   url_info2.set_typed_count(1);
   url_info2.set_typed_count(91011);
@@ -124,17 +125,17 @@ TEST_F(URLDatabaseTest, AddURL) {
 // Tests adding, querying and deleting keyword visits.
 TEST_F(URLDatabaseTest, KeywordSearchTermVisit) {
   URLRow url_info1(GURL("http://www.google.com/"));
-  url_info1.set_title(base::UTF8ToUTF16("Google"));
+  url_info1.set_title(UTF8ToUTF16("Google"));
   url_info1.set_visit_count(4);
   url_info1.set_typed_count(2);
   url_info1.set_last_visit(Time::Now() - TimeDelta::FromDays(1));
   url_info1.set_hidden(false);
   URLID url_id = AddURL(url_info1);
-  ASSERT_NE(0, url_id);
+  ASSERT_TRUE(url_id != 0);
 
   // Add a keyword visit.
   TemplateURLID keyword_id = 100;
-  base::string16 keyword = base::UTF8ToUTF16("visit");
+  string16 keyword = UTF8ToUTF16("visit");
   ASSERT_TRUE(SetKeywordSearchTermsForURL(url_id, keyword_id, keyword));
 
   // Make sure we get it back.
@@ -163,24 +164,23 @@ TEST_F(URLDatabaseTest, KeywordSearchTermVisit) {
 // Make sure deleting a URL also deletes a keyword visit.
 TEST_F(URLDatabaseTest, DeleteURLDeletesKeywordSearchTermVisit) {
   URLRow url_info1(GURL("http://www.google.com/"));
-  url_info1.set_title(base::UTF8ToUTF16("Google"));
+  url_info1.set_title(UTF8ToUTF16("Google"));
   url_info1.set_visit_count(4);
   url_info1.set_typed_count(2);
   url_info1.set_last_visit(Time::Now() - TimeDelta::FromDays(1));
   url_info1.set_hidden(false);
   URLID url_id = AddURL(url_info1);
-  ASSERT_NE(0, url_id);
+  ASSERT_TRUE(url_id != 0);
 
   // Add a keyword visit.
-  ASSERT_TRUE(
-      SetKeywordSearchTermsForURL(url_id, 1, base::UTF8ToUTF16("visit")));
+  ASSERT_TRUE(SetKeywordSearchTermsForURL(url_id, 1, UTF8ToUTF16("visit")));
 
   // Delete the url.
   ASSERT_TRUE(DeleteURLRow(url_id));
 
   // Make sure the keyword visit was deleted.
   std::vector<KeywordSearchTermVisit> matches;
-  GetMostRecentKeywordSearchTerms(1, base::UTF8ToUTF16("visit"), 10, &matches);
+  GetMostRecentKeywordSearchTerms(1, UTF8ToUTF16("visit"), 10, &matches);
   ASSERT_EQ(0U, matches.size());
 }
 
@@ -221,80 +221,50 @@ TEST_F(URLDatabaseTest, EnumeratorForSignificant) {
   EXPECT_EQ(3, row_count);
 }
 
-// Test GetKeywordSearchTermRows and DeleteSearchTerm
-TEST_F(URLDatabaseTest, GetAndDeleteKeywordSearchTermByTerm) {
-  URLRow url_info1(GURL("http://www.google.com/"));
-  url_info1.set_title(base::UTF8ToUTF16("Google"));
+TEST_F(URLDatabaseTest, IconMappingEnumerator) {
+  const GURL url1("http://www.google.com/");
+  URLRow url_info1(url1);
+  url_info1.set_title(UTF8ToUTF16("Google"));
   url_info1.set_visit_count(4);
   url_info1.set_typed_count(2);
   url_info1.set_last_visit(Time::Now() - TimeDelta::FromDays(1));
   url_info1.set_hidden(false);
+
+  // Insert a row with favicon
   URLID url_id1 = AddURL(url_info1);
-  ASSERT_NE(0, url_id1);
+  ASSERT_TRUE(url_id1 != 0);
 
-  // Add a keyword visit.
-  TemplateURLID keyword_id = 100;
-  base::string16 keyword = base::UTF8ToUTF16("visit");
-  ASSERT_TRUE(SetKeywordSearchTermsForURL(url_id1, keyword_id, keyword));
+  FaviconID icon_id = 1;
+  sql::Statement statement(GetDB().GetCachedStatement(
+      SQL_FROM_HERE,
+      "UPDATE urls SET favicon_id =? WHERE id=?"));
 
-  URLRow url_info2(GURL("https://www.google.com/"));
-  url_info2.set_title(base::UTF8ToUTF16("Google"));
+  ASSERT_TRUE(statement.is_valid());
+
+  statement.BindInt64(0, icon_id);
+  statement.BindInt64(1, url_id1);
+  ASSERT_TRUE(statement.Run());
+
+  // Insert another row without favicon
+  const GURL url2("http://www.google.com/no_icon");
+  URLRow url_info2(url2);
+  url_info2.set_title(UTF8ToUTF16("Google"));
   url_info2.set_visit_count(4);
   url_info2.set_typed_count(2);
   url_info2.set_last_visit(Time::Now() - TimeDelta::FromDays(1));
   url_info2.set_hidden(false);
+
+  // Insert a row with favicon
   URLID url_id2 = AddURL(url_info2);
-  ASSERT_NE(0, url_id2);
-  // Add the same keyword for url_info2.
-  ASSERT_TRUE(SetKeywordSearchTermsForURL(url_id2, keyword_id, keyword));
+  ASSERT_TRUE(url_id2 != 0);
 
-  // Add another URL for different keyword.
-  URLRow url_info3(GURL("https://www.google.com/search"));
-  url_info3.set_title(base::UTF8ToUTF16("Google"));
-  url_info3.set_visit_count(4);
-  url_info3.set_typed_count(2);
-  url_info3.set_last_visit(Time::Now() - TimeDelta::FromDays(1));
-  url_info3.set_hidden(false);
-  URLID url_id3 = AddURL(url_info3);
-  ASSERT_NE(0, url_id3);
-  base::string16 keyword2 = base::UTF8ToUTF16("Search");
-
-  ASSERT_TRUE(SetKeywordSearchTermsForURL(url_id3, keyword_id, keyword2));
-
-  // We should get 2 rows for |keyword|.
-  std::vector<KeywordSearchTermRow> rows;
-  ASSERT_TRUE(GetKeywordSearchTermRows(keyword, &rows));
-  ASSERT_EQ(2u, rows.size());
-  if (rows[0].url_id == url_id1) {
-    EXPECT_EQ(keyword, rows[0].term);
-    EXPECT_EQ(keyword, rows[1].term);
-    EXPECT_EQ(url_id2, rows[1].url_id);
-  } else {
-    EXPECT_EQ(keyword, rows[0].term);
-    EXPECT_EQ(url_id1, rows[1].url_id);
-    EXPECT_EQ(keyword, rows[1].term);
-    EXPECT_EQ(url_id2, rows[0].url_id);
-  }
-
-  // We should get 1 row for |keyword2|.
-  rows.clear();
-  ASSERT_TRUE(GetKeywordSearchTermRows(keyword2, &rows));
-  ASSERT_EQ(1u, rows.size());
-  EXPECT_EQ(keyword2, rows[0].term);
-  EXPECT_EQ(url_id3, rows[0].url_id);
-
-  // Delete all rows have keyword.
-  ASSERT_TRUE(DeleteKeywordSearchTerm(keyword));
-  rows.clear();
-  // We should still find keyword2.
-  ASSERT_TRUE(GetKeywordSearchTermRows(keyword2, &rows));
-  ASSERT_EQ(1u, rows.size());
-  EXPECT_EQ(keyword2, rows[0].term);
-  EXPECT_EQ(url_id3, rows[0].url_id);
-  rows.clear();
-  // No row for keyword.
-  ASSERT_TRUE(GetKeywordSearchTermRows(keyword, &rows));
-  EXPECT_TRUE(rows.empty());
+  IconMappingEnumerator e;
+  InitIconMappingEnumeratorForEverything(&e);
+  IconMapping icon_mapping;
+  ASSERT_TRUE(e.GetNextIconMapping(&icon_mapping));
+  ASSERT_EQ(url1, icon_mapping.page_url);
+  ASSERT_EQ(icon_id, icon_mapping.icon_id);
+  ASSERT_FALSE(e.GetNextIconMapping(&icon_mapping));
 }
 
 }  // namespace history

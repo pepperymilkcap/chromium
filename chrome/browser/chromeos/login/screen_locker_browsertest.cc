@@ -1,39 +1,33 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/chromeos/login/screen_locker.h"
-
-#include "ash/wm/window_state.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/message_loop.h"
+#include "chrome/browser/automation/ui_controls.h"
+#include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
+#include "chrome/browser/chromeos/dbus/mock_dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/mock_power_manager_client.h"
 #include "chrome/browser/chromeos/login/mock_authenticator.h"
+#include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/screen_locker_tester.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/views/browser_dialogs.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chromeos/chromeos_switches.h"
-#include "chromeos/dbus/fake_dbus_thread_manager.h"
-#include "chromeos/dbus/fake_session_manager_client.h"
 #include "content/public/browser/notification_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/test/ui_controls.h"
-#include "ui/compositor/layer_animator.h"
-#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/views/widget/widget.h"
 
-using testing::_;
-using testing::AnyNumber;
-using testing::Return;
+#if defined(TOOLKIT_USES_GTK)
+#include "ui/views/widget/native_widget_gtk.h"
+#endif
 
 namespace {
 
@@ -46,21 +40,34 @@ class Waiter : public content::NotificationObserver {
     registrar_.Add(this,
                    chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
                    content::NotificationService::AllSources());
+#if defined(TOOLKIT_USES_GTK)
+    handler_id_ = g_signal_connect(
+        G_OBJECT(browser_->window()->GetNativeHandle()),
+        "window-state-event",
+        G_CALLBACK(OnWindowStateEventThunk),
+        this);
+#else
     registrar_.Add(this,
                    chrome::NOTIFICATION_FULLSCREEN_CHANGED,
                    content::NotificationService::AllSources());
+#endif
   }
 
   virtual ~Waiter() {
+#if defined(TOOLKIT_USES_GTK)
+    g_signal_handler_disconnect(
+        G_OBJECT(browser_->window()->GetNativeHandle()),
+        handler_id_);
+#endif
   }
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+                       const content::NotificationDetails& details) {
     DCHECK(type == chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED ||
            type == chrome::NOTIFICATION_FULLSCREEN_CHANGED);
     if (running_)
-      base::MessageLoop::current()->Quit();
+      MessageLoop::current()->Quit();
   }
 
   // Wait until the two conditions are met.
@@ -70,15 +77,23 @@ class Waiter : public content::NotificationObserver {
         tester(chromeos::ScreenLocker::GetTester());
     while (tester->IsLocked() != locker_state ||
            browser_->window()->IsFullscreen() != fullscreen) {
-      content::RunMessageLoop();
+      ui_test_utils::RunMessageLoop();
     }
     // Make sure all pending tasks are executed.
-    content::RunAllPendingInMessageLoop();
+    ui_test_utils::RunAllPendingInMessageLoop();
     running_ = false;
   }
 
+#if defined(TOOLKIT_USES_GTK)
+  CHROMEGTK_CALLBACK_1(Waiter, gboolean, OnWindowStateEvent,
+                       GdkEventWindowState*);
+#endif
+
  private:
   Browser* browser_;
+#if defined(TOOLKIT_USES_GTK)
+  gulong handler_id_;
+#endif
   content::NotificationRegistrar registrar_;
 
   // Are we currently running the message loop?
@@ -87,22 +102,64 @@ class Waiter : public content::NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(Waiter);
 };
 
+#if defined(TOOLKIT_USES_GTK)
+gboolean Waiter::OnWindowStateEvent(GtkWidget* widget,
+                                    GdkEventWindowState* event) {
+  MessageLoop::current()->Quit();
+  return false;
+}
+#endif
+
 }  // namespace
 
 namespace chromeos {
 
-class ScreenLockerTest : public InProcessBrowserTest {
+class ScreenLockerTest : public CrosInProcessBrowserTest {
  public:
-  ScreenLockerTest() : fake_session_manager_client_(NULL) {
+  ScreenLockerTest() : mock_power_manager_client_(NULL) {
   }
 
  protected:
-  FakeSessionManagerClient* fake_session_manager_client_;
+  MockPowerManagerClient* mock_power_manager_client_;
 
-  void LockScreen(test::ScreenLockerTester* tester) {
+  // Test the no password mode with different unlock scheme given by
+  // |unlock| function.
+  void TestNoPassword(void (unlock)(views::Widget*)) {
+    EXPECT_CALL(*mock_power_manager_client_, NotifyScreenUnlockRequested())
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*mock_power_manager_client_, NotifyScreenLockCompleted())
+        .Times(1)
+        .RetiresOnSaturation();
+    UserManager::Get()->GuestUserLoggedIn();
+    ScreenLocker::Show();
+    scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
+    tester->EmulateWindowManagerReady();
+    ui_test_utils::WindowedNotificationObserver lock_state_observer(
+        chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
+        content::NotificationService::AllSources());
+    if (!chromeos::ScreenLocker::GetTester()->IsLocked())
+      lock_state_observer.Wait();
+    EXPECT_TRUE(tester->IsLocked());
+    tester->InjectMockAuthenticator("", "");
+
+    unlock(tester->GetWidget());
+
+    ui_test_utils::RunAllPendingInMessageLoop();
+    EXPECT_TRUE(tester->IsLocked());
+
+    // Emulate LockScreen request from PowerManager (via SessionManager).
+    ScreenLocker::Hide();
+    ui_test_utils::RunAllPendingInMessageLoop();
+    EXPECT_FALSE(tester->IsLocked());
+  }
+
+  void LockScreenWithUser(test::ScreenLockerTester* tester,
+                          const std::string& user) {
+    UserManager::Get()->UserLoggedIn(user);
     ScreenLocker::Show();
     tester->EmulateWindowManagerReady();
-    content::WindowedNotificationObserver lock_state_observer(
+    ui_test_utils::WindowedNotificationObserver lock_state_observer(
         chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
         content::NotificationService::AllSources());
     if (!tester->IsLocked())
@@ -110,40 +167,48 @@ class ScreenLockerTest : public InProcessBrowserTest {
     EXPECT_TRUE(tester->IsLocked());
   }
 
-  // Verifies if LockScreenDismissed() was called once.
-  bool VerifyLockScreenDismissed() {
-    return 1 == fake_session_manager_client_->
-                    notify_lock_screen_dismissed_call_count();
-  }
-
  private:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    FakeDBusThreadManager* fake_dbus_thread_manager = new FakeDBusThreadManager;
-    fake_dbus_thread_manager->SetFakeClients();
-    fake_session_manager_client_ = new FakeSessionManagerClient;
-    fake_dbus_thread_manager->SetSessionManagerClient(
-        scoped_ptr<SessionManagerClient>(fake_session_manager_client_));
-    DBusThreadManager::SetInstanceForTesting(fake_dbus_thread_manager);
-
-    InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
-    zero_duration_mode_.reset(new ui::ScopedAnimationDurationScaleMode(
-        ui::ScopedAnimationDurationScaleMode::ZERO_DURATION));
+  virtual void SetUpInProcessBrowserTestFixture() {
+    MockDBusThreadManager* mock_dbus_thread_manager =
+        new MockDBusThreadManager;
+    DBusThreadManager::InitializeForTesting(mock_dbus_thread_manager);
+    mock_power_manager_client_ = static_cast<MockPowerManagerClient*>(
+        DBusThreadManager::Get()->GetPowerManagerClient());
+    cros_mock_->InitStatusAreaMocks();
+    EXPECT_CALL(*mock_power_manager_client_, AddObserver(testing::_))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*mock_power_manager_client_, NotifyScreenUnlockCompleted())
+        .Times(1)
+        .RetiresOnSaturation();
+    // Expectations for the status are on the screen lock window.
+    cros_mock_->SetStatusAreaMocksExpectations();
+    // Expectations for the status area on the browser window.
+    cros_mock_->SetStatusAreaMocksExpectations();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) {
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
+    command_line->AppendSwitch(switches::kNoFirstRun);
   }
-
-  scoped_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenLockerTest);
 };
 
+// Temporarily disabling all screen locker tests while investigating the
+// issue crbug.com/78764.
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestBasic) {
+  EXPECT_CALL(*mock_power_manager_client_, NotifyScreenUnlockRequested())
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_power_manager_client_, NotifyScreenLockCompleted())
+      .Times(1)
+      .RetiresOnSaturation();
+  UserManager::Get()->UserLoggedIn("user");
   ScreenLocker::Show();
   scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
   tester->EmulateWindowManagerReady();
-  content::WindowedNotificationObserver lock_state_observer(
+  ui_test_utils::WindowedNotificationObserver lock_state_observer(
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       content::NotificationService::AllSources());
   if (!chromeos::ScreenLocker::GetTester()->IsLocked())
@@ -152,99 +217,75 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestBasic) {
   // Test to make sure that the widget is actually appearing and is of
   // reasonable size, preventing a regression of
   // http://code.google.com/p/chromium-os/issues/detail?id=5987
-  gfx::Rect lock_bounds = tester->GetChildWidget()->GetWindowBoundsInScreen();
+  gfx::Rect lock_bounds = tester->GetChildWidget()->GetWindowScreenBounds();
   EXPECT_GT(lock_bounds.width(), 10);
   EXPECT_GT(lock_bounds.height(), 10);
 
-  tester->InjectMockAuthenticator(UserManager::kStubUser, "pass");
+  tester->InjectMockAuthenticator("user", "pass");
   EXPECT_TRUE(tester->IsLocked());
   tester->EnterPassword("fail");
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_TRUE(tester->IsLocked());
   tester->EnterPassword("pass");
-  content::RunAllPendingInMessageLoop();
-  // Successful authentication clears the lock screen and tells the
-  // SessionManager to announce this over DBus.
-  EXPECT_FALSE(tester->IsLocked());
-  EXPECT_EQ(
-      1,
-      fake_session_manager_client_->notify_lock_screen_shown_call_count());
+  ui_test_utils::RunAllPendingInMessageLoop();
+  // Successful authentication simply send a unlock request to PowerManager.
+  EXPECT_TRUE(tester->IsLocked());
 
-  EXPECT_TRUE(VerifyLockScreenDismissed());
+  // Emulate LockScreen request from PowerManager (via SessionManager).
+  // TODO(oshima): Find out better way to handle this in mock.
+  ScreenLocker::Hide();
+  ui_test_utils::RunAllPendingInMessageLoop();
+  EXPECT_FALSE(tester->IsLocked());
 }
 
-// Test how locking the screen affects an active fullscreen window.
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
-  // 1) If the active browser window is in fullscreen and the fullscreen window
-  // does not have all the pixels (e.g. the shelf is auto hidden instead of
-  // hidden), locking the screen should not exit fullscreen. The shelf is
-  // auto hidden when in immersive fullscreen.
+  EXPECT_CALL(*mock_power_manager_client_, NotifyScreenUnlockRequested())
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_power_manager_client_, NotifyScreenLockCompleted())
+      .Times(1)
+      .RetiresOnSaturation();
   scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
-  BrowserWindow* browser_window = browser()->window();
-  ash::wm::WindowState* window_state = ash::wm::GetWindowState(
-      browser_window->GetNativeWindow());
   {
     Waiter waiter(browser());
-    browser()->fullscreen_controller()->ToggleFullscreenMode();
+    browser()->ToggleFullscreenMode(false);
     waiter.Wait(false /* not locked */, true /* full screen */);
-    EXPECT_TRUE(browser_window->IsFullscreen());
-    EXPECT_FALSE(window_state->hide_shelf_when_fullscreen());
+    EXPECT_TRUE(browser()->window()->IsFullscreen());
     EXPECT_FALSE(tester->IsLocked());
   }
   {
     Waiter waiter(browser());
-    ScreenLocker::Show();
-    tester->EmulateWindowManagerReady();
-    waiter.Wait(true /* locked */, true /* full screen */);
-    EXPECT_TRUE(browser_window->IsFullscreen());
-    EXPECT_FALSE(window_state->hide_shelf_when_fullscreen());
-    EXPECT_TRUE(tester->IsLocked());
-  }
-  tester->InjectMockAuthenticator(UserManager::kStubUser, "pass");
-  tester->EnterPassword("pass");
-  content::RunAllPendingInMessageLoop();
-  EXPECT_FALSE(tester->IsLocked());
-  {
-    Waiter waiter(browser());
-    browser()->fullscreen_controller()->ToggleFullscreenMode();
-    waiter.Wait(false /* not locked */, false /* fullscreen */);
-    EXPECT_FALSE(browser_window->IsFullscreen());
-  }
-
-  // 2) If the active browser window is in fullscreen and the fullscreen window
-  // has all of the pixels, locking the screen should exit fullscreen. The
-  // fullscreen window has all of the pixels when in tab fullscreen.
-  {
-    Waiter waiter(browser());
-    content::WebContents* web_contents =
-        browser()->tab_strip_model()->GetActiveWebContents();
-    browser()->fullscreen_controller()->ToggleFullscreenModeForTab(
-        web_contents, true);
-    waiter.Wait(false /* not locked */, true /* fullscreen */);
-    EXPECT_TRUE(browser_window->IsFullscreen());
-    EXPECT_TRUE(window_state->hide_shelf_when_fullscreen());
-    EXPECT_FALSE(tester->IsLocked());
-  }
-  {
-    Waiter waiter(browser());
+    UserManager::Get()->UserLoggedIn("user");
     ScreenLocker::Show();
     tester->EmulateWindowManagerReady();
     waiter.Wait(true /* locked */, false /* full screen */);
-    EXPECT_FALSE(browser_window->IsFullscreen());
+    EXPECT_FALSE(browser()->window()->IsFullscreen());
     EXPECT_TRUE(tester->IsLocked());
   }
-
-  tester->InjectMockAuthenticator(UserManager::kStubUser, "pass");
+  tester->InjectMockAuthenticator("user", "pass");
   tester->EnterPassword("pass");
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
+  ScreenLocker::Hide();
+  ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_FALSE(tester->IsLocked());
+}
 
-  EXPECT_EQ(
-      2,
-      fake_session_manager_client_->notify_lock_screen_shown_call_count());
-  EXPECT_EQ(
-      2,
-      fake_session_manager_client_->notify_lock_screen_dismissed_call_count());
+void MouseMove(views::Widget* widget) {
+  ui_controls::SendMouseMove(10, 10);
+}
+
+IN_PROC_BROWSER_TEST_F(ScreenLockerTest,
+                       DISABLED_TestNoPasswordWithMouseMove) {
+  TestNoPassword(MouseMove);
+}
+
+void MouseClick(views::Widget* widget) {
+  ui_controls::SendMouseClick(ui_controls::RIGHT);
+}
+
+IN_PROC_BROWSER_TEST_F(ScreenLockerTest,
+                       DISABLED_TestNoPasswordWithMouseClick) {
+  TestNoPassword(MouseClick);
 }
 
 void SimulateKeyPress(views::Widget* widget, ui::KeyboardCode key_code) {
@@ -256,47 +297,51 @@ void UnlockKeyPress(views::Widget* widget) {
   SimulateKeyPress(widget, ui::VKEY_SPACE);
 }
 
+IN_PROC_BROWSER_TEST_F(ScreenLockerTest, DISABLED_TestNoPasswordWithKeyPress) {
+  TestNoPassword(UnlockKeyPress);
+}
+
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestShowTwice) {
+  EXPECT_CALL(*mock_power_manager_client_, NotifyScreenLockCompleted())
+      .Times(2)
+      .RetiresOnSaturation();
   scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
-  LockScreen(tester.get());
+  LockScreenWithUser(tester.get(), "user");
+
+  // Ensure there's a profile or this test crashes.
+  ProfileManager::GetDefaultProfile();
 
   // Calling Show again simply send LockCompleted signal.
   ScreenLocker::Show();
   EXPECT_TRUE(tester->IsLocked());
-  EXPECT_EQ(
-      2,
-      fake_session_manager_client_->notify_lock_screen_shown_call_count());
-
 
   // Close the locker to match expectations.
   ScreenLocker::Hide();
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_FALSE(tester->IsLocked());
-  EXPECT_TRUE(VerifyLockScreenDismissed());
 }
 
-// TODO(flackr): Find out why the RenderView isn't getting the escape press
-// and re-enable this test (currently this test is flaky).
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, DISABLED_TestEscape) {
+  EXPECT_CALL(*mock_power_manager_client_, NotifyScreenLockCompleted())
+      .Times(1)
+      .RetiresOnSaturation();
   scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
-  LockScreen(tester.get());
+  LockScreenWithUser(tester.get(), "user");
 
-  EXPECT_EQ(
-      1,
-      fake_session_manager_client_->notify_lock_screen_shown_call_count());
+  // Ensure there's a profile or this test crashes.
+  ProfileManager::GetDefaultProfile();
 
   tester->SetPassword("password");
   EXPECT_EQ("password", tester->GetPassword());
   // Escape clears the password.
   SimulateKeyPress(tester->GetWidget(), ui::VKEY_ESCAPE);
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_EQ("", tester->GetPassword());
 
   // Close the locker to match expectations.
   ScreenLocker::Hide();
-  content::RunAllPendingInMessageLoop();
+  ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_FALSE(tester->IsLocked());
-  EXPECT_TRUE(VerifyLockScreenDismissed());
 }
 
 }  // namespace chromeos

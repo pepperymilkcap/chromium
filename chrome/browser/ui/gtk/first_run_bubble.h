@@ -8,31 +8,32 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_FIRST_RUN_BUBBLE_H_
 #define CHROME_BROWSER_UI_GTK_FIRST_RUN_BUBBLE_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
 
-class Browser;
+class Profile;
 
 class FirstRunBubble : public BubbleDelegateGtk {
  public:
   // Shows the first run bubble, pointing at |rect|, transient for the toplevel
   // window of the |anchor| widget.
-  static void Show(Browser* browser, GtkWidget* anchor, const gfx::Rect& rect);
+  static void Show(Profile* profile, GtkWidget* anchor, const gfx::Rect& rect);
 
   // Overridden from BubbleDelegateGtk:
   virtual void BubbleClosing(BubbleGtk* bubble, bool closed_by_escape) OVERRIDE;
 
  private:
-  FirstRunBubble(Browser* browser, GtkWidget* anchor, const gfx::Rect& rect);
+  FirstRunBubble(Profile* profile, GtkWidget* anchor, const gfx::Rect& rect);
   virtual ~FirstRunBubble();
 
   CHROMEGTK_CALLBACK_0(FirstRunBubble, void, HandleDestroy);
   CHROMEGTK_CALLBACK_0(FirstRunBubble, void, HandleChangeLink);
 
-  Browser* browser_;
+  Profile* profile_;
   BubbleGtk* bubble_;
 
   DISALLOW_COPY_AND_ASSIGN(FirstRunBubble);

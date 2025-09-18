@@ -29,54 +29,10 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__),
-                                '..', 'python', 'google'))
-import path_utils
-
-
 ELLIPSIS = '...'
 
 
-def GetSuppressions():
-  suppressions_root = path_utils.ScriptDir()
-  JOIN = os.path.join
-
-  result = {}
-
-  supp_filename = JOIN(suppressions_root, "memcheck", "suppressions.txt")
-  vg_common = ReadSuppressionsFromFile(supp_filename)
-  supp_filename = JOIN(suppressions_root, "tsan", "suppressions.txt")
-  tsan_common = ReadSuppressionsFromFile(supp_filename)
-  result['common_suppressions'] = vg_common + tsan_common
-
-  supp_filename = JOIN(suppressions_root, "memcheck", "suppressions_linux.txt")
-  vg_linux = ReadSuppressionsFromFile(supp_filename)
-  supp_filename = JOIN(suppressions_root, "tsan", "suppressions_linux.txt")
-  tsan_linux = ReadSuppressionsFromFile(supp_filename)
-  result['linux_suppressions'] = vg_linux + tsan_linux
-
-  supp_filename = JOIN(suppressions_root, "memcheck", "suppressions_mac.txt")
-  vg_mac = ReadSuppressionsFromFile(supp_filename)
-  supp_filename = JOIN(suppressions_root, "tsan", "suppressions_mac.txt")
-  tsan_mac = ReadSuppressionsFromFile(supp_filename)
-  result['mac_suppressions'] = vg_mac + tsan_mac
-
-  supp_filename = JOIN(suppressions_root, "tsan", "suppressions_win32.txt")
-  tsan_win = ReadSuppressionsFromFile(supp_filename)
-  result['win_suppressions'] = tsan_win
-
-  supp_filename = JOIN(suppressions_root, "..", "heapcheck", "suppressions.txt")
-  result['heapcheck_suppressions'] = ReadSuppressionsFromFile(supp_filename)
-
-  supp_filename = JOIN(suppressions_root, "drmemory", "suppressions.txt")
-  result['drmem_suppressions'] = ReadSuppressionsFromFile(supp_filename)
-  supp_filename = JOIN(suppressions_root, "drmemory", "suppressions_full.txt")
-  result['drmem_full_suppressions'] = ReadSuppressionsFromFile(supp_filename)
-
-  return result
-
-
-def GlobToRegex(glob_pattern, ignore_case=False):
+def GlobToRegex(glob_pattern):
   """Translate glob wildcards (*?) into regex syntax.  Escape the rest."""
   regex = ''
   for char in glob_pattern:
@@ -84,8 +40,6 @@ def GlobToRegex(glob_pattern, ignore_case=False):
       regex += '.*'
     elif char == '?':
       regex += '.'
-    elif ignore_case and char.isalpha():
-      regex += '[%s%s]' % (char.lower(), char.upper())
     else:
       regex += re.escape(char)
   return ''.join(regex)
@@ -177,10 +131,6 @@ def ReadSuppressionsFromFile(filename):
   assert tool in tool_to_parser, (
       "unknown tool %s for filename %s" % (tool, filename))
   parse_func = tool_to_parser[tool]
-
-  # Consider non-existent files to be empty.
-  if not os.path.exists(filename):
-    return []
 
   input_file = file(filename, 'r')
   try:
@@ -415,14 +365,6 @@ class DrMemorySuppression(Suppression):
     for line in stack:
       if line == ELLIPSIS:
         regex += '(.*\n)*'
-      elif '!' in line:
-        (mod, func) = line.split('!')
-        if func == ELLIPSIS:  # mod!ellipsis frame
-          regex += '(%s\!.*\n)+' % GlobToRegex(mod, ignore_case=True)
-        else:  # mod!func frame
-          # Ignore case for the module match, but not the function match.
-          regex += '%s\!%s\n' % (GlobToRegex(mod, ignore_case=True),
-                                 GlobToRegex(func, ignore_case=False))
       else:
         regex += GlobToRegex(line)
         regex += '\n'
@@ -449,8 +391,6 @@ DRMEMORY_ERROR_TYPES = [
     'UNADDRESSABLE ACCESS',
     'UNINITIALIZED READ',
     'INVALID HEAP ARGUMENT',
-    'GDI USAGE ERROR',
-    'HANDLE LEAK',
     'LEAK',
     'POSSIBLE LEAK',
     'WARNING',
@@ -459,13 +399,12 @@ DRMEMORY_ERROR_TYPES = [
 
 # Regexes to match valid drmemory frames.
 DRMEMORY_FRAME_PATTERNS = [
-    re.compile(r"^.*\!.*$"),              # mod!func
-    re.compile(r"^.*!\.\.\.$"),           # mod!ellipsis
-    re.compile(r"^\<.*\+0x.*\>$"),        # <mod+0xoffs>
+    re.compile(r"^.*\!.*$"),
+    re.compile(r"^\<.*\+0x.*\>$"),
     re.compile(r"^\<not in a module\>$"),
     re.compile(r"^system call .*$"),
-    re.compile(r"^\*$"),                  # wildcard
-    re.compile(r"^\.\.\.$"),              # ellipsis
+    re.compile(r"^\*$"),
+    re.compile(r"^\.\.\.$"),
     ]
 
 
@@ -511,7 +450,6 @@ def ReadDrMemorySuppressions(lines, supp_descriptor):
               ('Unexpected stack frame pattern at line %d\n' +
                'Frames should be one of the following:\n' +
                ' module!function\n' +
-               ' module!...\n' +
                ' <module+0xhexoffset>\n' +
                ' <not in a module>\n' +
                ' system call Name\n' +
@@ -871,46 +809,6 @@ def SelfTest():
     *!foo
   }"""
   TestStack(stack_foo_leak, suppress_foo_leak, suppress_foo_possible,
-            suppression_parser=ReadDrMemorySuppressions)
-
-  # Test case insensitivity of module names.
-  stack_user32_mixed_case = """{
-    LEAK
-    name=<insert>
-    USER32.dll!foo
-    user32.DLL!bar
-    user32.dll!baz
-  }"""
-  suppress_user32 = [  # Module name case doesn't matter.
-      "LEAK\nuser32.dll!foo\nuser32.dll!bar\nuser32.dll!baz\n",
-      "LEAK\nUSER32.DLL!foo\nUSER32.DLL!bar\nUSER32.DLL!baz\n",
-      ]
-  no_suppress_user32 = [  # Function name case matters.
-      "LEAK\nuser32.dll!FOO\nuser32.dll!BAR\nuser32.dll!BAZ\n",
-      "LEAK\nUSER32.DLL!FOO\nUSER32.DLL!BAR\nUSER32.DLL!BAZ\n",
-      ]
-  TestStack(stack_user32_mixed_case, suppress_user32, no_suppress_user32,
-            suppression_parser=ReadDrMemorySuppressions)
-
-  # Test mod!... frames.
-  stack_kernel32_through_ntdll = """{
-    LEAK
-    name=<insert>
-    kernel32.dll!foo
-    KERNEL32.dll!bar
-    kernel32.DLL!baz
-    ntdll.dll!quux
-  }"""
-  suppress_mod_ellipsis = [
-      "LEAK\nkernel32.dll!...\nntdll.dll!quux\n",
-      "LEAK\nKERNEL32.DLL!...\nntdll.dll!quux\n",
-      ]
-  no_suppress_mod_ellipsis = [
-      # Need one or more matching frames, not zero, unlike regular ellipsis.
-      "LEAK\nuser32.dll!...\nkernel32.dll!...\nntdll.dll!quux\n",
-      ]
-  TestStack(stack_kernel32_through_ntdll, suppress_mod_ellipsis,
-            no_suppress_mod_ellipsis,
             suppression_parser=ReadDrMemorySuppressions)
 
   # Test that the presubmit checks work.

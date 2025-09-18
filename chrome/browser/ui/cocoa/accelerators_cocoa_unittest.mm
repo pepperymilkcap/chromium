@@ -9,24 +9,20 @@
 #import "chrome/browser/ui/cocoa/accelerators_cocoa.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
-#include "ui/base/accelerators/platform_accelerator_cocoa.h"
+#include "ui/base/accelerators/accelerator_cocoa.h"
 
 TEST(AcceleratorsCocoaTest, GetAccelerator) {
   AcceleratorsCocoa* keymap = AcceleratorsCocoa::GetInstance();
-  const ui::Accelerator* accelerator =
+  const ui::AcceleratorCocoa* accelerator =
       keymap->GetAcceleratorForCommand(IDC_COPY);
   ASSERT_TRUE(accelerator);
-  ASSERT_TRUE(accelerator->platform_accelerator());
-  const ui::PlatformAcceleratorCocoa* platform_accelerator =
-      static_cast<const ui::PlatformAcceleratorCocoa*>(
-          accelerator->platform_accelerator());
-  EXPECT_NSEQ(@"c", platform_accelerator->characters());
-  EXPECT_EQ(NSCommandKeyMask, platform_accelerator->modifier_mask());
+  EXPECT_NSEQ(@"c", accelerator->characters());
+  EXPECT_EQ(static_cast<int>(NSCommandKeyMask), accelerator->modifiers());
 }
 
 TEST(AcceleratorsCocoaTest, GetNullAccelerator) {
   AcceleratorsCocoa* keymap = AcceleratorsCocoa::GetInstance();
-  const ui::Accelerator* accelerator =
+  const ui::AcceleratorCocoa* accelerator =
       keymap->GetAcceleratorForCommand(314159265);
   EXPECT_FALSE(accelerator);
 }

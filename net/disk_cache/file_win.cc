@@ -1,12 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/disk_cache/file.h"
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
 
@@ -21,7 +21,7 @@ struct MyOverlapped {
     return &context_.overlapped;
   }
 
-  base::MessageLoopForIO::IOContext context_;
+  MessageLoopForIO::IOContext context_;
   scoped_refptr<disk_cache::File> file_;
   disk_cache::FileIOCallback* callback_;
 };
@@ -29,19 +29,16 @@ struct MyOverlapped {
 COMPILE_ASSERT(!offsetof(MyOverlapped, context_), starts_with_overlapped);
 
 // Helper class to handle the IO completion notifications from the message loop.
-class CompletionHandler : public base::MessageLoopForIO::IOHandler {
-  virtual void OnIOCompleted(base::MessageLoopForIO::IOContext* context,
-                             DWORD actual_bytes,
-                             DWORD error);
+class CompletionHandler : public MessageLoopForIO::IOHandler {
+  virtual void OnIOCompleted(MessageLoopForIO::IOContext* context,
+                             DWORD actual_bytes, DWORD error);
 };
 
 static base::LazyInstance<CompletionHandler> g_completion_handler =
     LAZY_INSTANCE_INITIALIZER;
 
-void CompletionHandler::OnIOCompleted(
-    base::MessageLoopForIO::IOContext* context,
-    DWORD actual_bytes,
-    DWORD error) {
+void CompletionHandler::OnIOCompleted(MessageLoopForIO::IOContext* context,
+                                      DWORD actual_bytes, DWORD error) {
   MyOverlapped* data = reinterpret_cast<MyOverlapped*>(context);
 
   if (error) {
@@ -74,7 +71,7 @@ File::File(base::PlatformFile file)
       sync_platform_file_(file) {
 }
 
-bool File::Init(const base::FilePath& name) {
+bool File::Init(const FilePath& name) {
   DCHECK(!init_);
   if (init_)
     return false;
@@ -87,7 +84,7 @@ bool File::Init(const base::FilePath& name) {
   if (INVALID_HANDLE_VALUE == platform_file_)
     return false;
 
-  base::MessageLoopForIO::current()->RegisterIOHandler(
+  MessageLoopForIO::current()->RegisterIOHandler(
       platform_file_, g_completion_handler.Pointer());
 
   init_ = true;
@@ -262,8 +259,8 @@ void File::WaitForPendingIO(int* num_pending_io) {
   while (*num_pending_io) {
     // Asynchronous IO operations may be in flight and the completion may end
     // up calling us back so let's wait for them.
-    base::MessageLoopForIO::IOHandler* handler = g_completion_handler.Pointer();
-    base::MessageLoopForIO::current()->WaitForIOCompletion(100, handler);
+    MessageLoopForIO::IOHandler* handler = g_completion_handler.Pointer();
+    MessageLoopForIO::current()->WaitForIOCompletion(100, handler);
   }
 }
 

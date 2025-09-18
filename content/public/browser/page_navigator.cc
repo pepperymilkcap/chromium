@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,45 +14,15 @@ OpenURLParams::OpenURLParams(
     bool is_renderer_initiated)
     : url(url),
       referrer(referrer),
-      uses_post(false),
-      source_frame_id(-1),
-      frame_tree_node_id(-1),
       disposition(disposition),
       transition(transition),
-      is_renderer_initiated(is_renderer_initiated),
-      should_replace_current_entry(false),
-      user_gesture(!is_renderer_initiated) {
-}
-
-OpenURLParams::OpenURLParams(
-    const GURL& url,
-    const Referrer& referrer,
-    int64 source_frame_id,
-    int64 frame_tree_node_id,
-    WindowOpenDisposition disposition,
-    PageTransition transition,
-    bool is_renderer_initiated)
-    : url(url),
-      referrer(referrer),
-      uses_post(false),
-      source_frame_id(source_frame_id),
-      frame_tree_node_id(frame_tree_node_id),
-      disposition(disposition),
-      transition(transition),
-      is_renderer_initiated(is_renderer_initiated),
-      should_replace_current_entry(false),
-      user_gesture(!is_renderer_initiated) {
+      is_renderer_initiated(is_renderer_initiated) {
 }
 
 OpenURLParams::OpenURLParams()
-    : uses_post(false),
-      source_frame_id(-1),
-      frame_tree_node_id(-1),
-      disposition(UNKNOWN),
+    : disposition(UNKNOWN),
       transition(PageTransitionFromInt(0)),
-      is_renderer_initiated(false),
-      should_replace_current_entry(false),
-      user_gesture(true) {
+      is_renderer_initiated(false) {
 }
 
 OpenURLParams::~OpenURLParams() {

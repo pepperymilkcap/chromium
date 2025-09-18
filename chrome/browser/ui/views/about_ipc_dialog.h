@@ -1,11 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_ABOUT_IPC_DIALOG_H_
 #define CHROME_BROWSER_UI_VIEWS_ABOUT_IPC_DIALOG_H_
-
-#include "ipc/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
+#pragma once
 
 #if defined(OS_WIN) && defined(IPC_MESSAGE_LOG_ENABLED)
 
@@ -14,16 +13,15 @@
 #include <atlctrls.h>
 #include <atlwin.h>
 
+#include "base/memory/singleton.h"
 #include "ipc/ipc_logging.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/window/dialog_delegate.h"
 
-template <typename T> struct DefaultSingletonTraits;
-
 namespace views {
-class LabelButton;
 class NativeViewHost;
-}
+class TextButton;
+}  // namespace views
 
 class AboutIPCDialog : public views::DialogDelegateView,
                        public views::ButtonListener,
@@ -45,8 +43,9 @@ class AboutIPCDialog : public views::DialogDelegateView,
 
   // views::View overrides.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void Layout() OVERRIDE;
 
   // IPC::Logging::Consumer implementation.
@@ -54,17 +53,16 @@ class AboutIPCDialog : public views::DialogDelegateView,
 
   // views::WidgetDelegate (via views::DialogDelegateView).
   virtual bool CanResize() const OVERRIDE;
-  virtual bool UseNewStyleForThisDialog() const OVERRIDE;
 
   // views::ButtonListener.
   virtual void ButtonPressed(views::Button* button,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   WTL::CListViewCtrl message_list_;
 
-  views::LabelButton* track_toggle_;
-  views::LabelButton* clear_button_;
-  views::LabelButton* filter_button_;
+  views::TextButton* track_toggle_;
+  views::TextButton* clear_button_;
+  views::TextButton* filter_button_;
   views::NativeViewHost* table_;
 
   // Set to true when we're tracking network status.

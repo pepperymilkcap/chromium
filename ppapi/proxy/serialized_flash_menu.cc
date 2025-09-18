@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,11 @@ namespace {
 // Maximum depth of submenus allowed (e.g., 1 indicates that submenus are
 // allowed, but not sub-submenus).
 const int kMaxMenuDepth = 2;
-const uint32_t kMaxMenuEntries = 1000;
 
 bool CheckMenu(int depth, const PP_Flash_Menu* menu);
 void FreeMenu(const PP_Flash_Menu* menu);
 void WriteMenu(IPC::Message* m, const PP_Flash_Menu* menu);
-PP_Flash_Menu* ReadMenu(int depth, const IPC::Message* m, PickleIterator* iter);
+PP_Flash_Menu* ReadMenu(int depth, const IPC::Message* m, void** iter);
 
 bool CheckMenuItem(int depth, const PP_Flash_MenuItem* item) {
   if (item->type == PP_FLASH_MENUITEM_TYPE_SUBMENU)
@@ -78,7 +77,7 @@ void FreeMenu(const PP_Flash_Menu* menu) {
 
 bool ReadMenuItem(int depth,
                   const IPC::Message* m,
-                  PickleIterator* iter,
+                  void** iter,
                   PP_Flash_MenuItem* menu_item) {
   uint32_t type;
   if (!m->ReadUInt32(iter, &type))
@@ -106,9 +105,7 @@ bool ReadMenuItem(int depth,
   return true;
 }
 
-PP_Flash_Menu* ReadMenu(int depth,
-                        const IPC::Message* m,
-                        PickleIterator* iter) {
+PP_Flash_Menu* ReadMenu(int depth, const IPC::Message* m, void** iter) {
   if (depth > kMaxMenuDepth)
     return NULL;
   ++depth;
@@ -123,11 +120,6 @@ PP_Flash_Menu* ReadMenu(int depth,
 
   if (menu->count == 0)
     return menu;
-
-  if (menu->count > kMaxMenuEntries) {
-    FreeMenu(menu);
-    return NULL;
-  }
 
   menu->items = new PP_Flash_MenuItem[menu->count];
   memset(menu->items, 0, sizeof(PP_Flash_MenuItem) * menu->count);
@@ -166,8 +158,7 @@ void SerializedFlashMenu::WriteToMessage(IPC::Message* m) const {
   WriteMenu(m, pp_menu_);
 }
 
-bool SerializedFlashMenu::ReadFromMessage(const IPC::Message* m,
-                                          PickleIterator* iter) {
+bool SerializedFlashMenu::ReadFromMessage(const IPC::Message* m, void** iter) {
   DCHECK(!pp_menu_);
   pp_menu_ = ReadMenu(0, m, iter);
   if (!pp_menu_)

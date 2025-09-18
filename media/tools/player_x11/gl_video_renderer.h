@@ -7,9 +7,9 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
-#include "ui/gl/gl_bindings.h"
+#include "ui/gfx/gl/gl_bindings.h"
+
+class MessageLoop;
 
 namespace media {
 class VideoFrame;
@@ -21,12 +21,13 @@ class GlVideoRenderer : public base::RefCountedThreadSafe<GlVideoRenderer> {
 
   void Paint(media::VideoFrame* video_frame);
 
- private:
+ protected:
   friend class base::RefCountedThreadSafe<GlVideoRenderer>;
   ~GlVideoRenderer();
 
+ private:
   // Initializes GL rendering for the given dimensions.
-  void Initialize(gfx::Size coded_size, gfx::Rect visible_rect);
+  void Initialize(int width, int height);
 
   Display* display_;
   Window window_;

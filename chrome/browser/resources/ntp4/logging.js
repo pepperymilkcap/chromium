@@ -1,9 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 /**
- * @fileoverview
+ * @fileOverview
  * Logging info for benchmarking purposes. Should be the first js file included.
  */
 
@@ -12,7 +12,7 @@ var eventLog = [];
 
 /**
  * Logs an event.
- * @param {string} name The name of the event (can be any string).
+ * @param {String} name The name of the event (can be any string).
  * @param {boolean} shouldLogTime If true, the event is used for benchmarking
  *     and the time is logged. Otherwise, just push the event on the event
  *     stack.

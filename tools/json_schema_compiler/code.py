@@ -14,17 +14,11 @@ class Code(object):
     self._indent_size = indent_size
     self._comment_length = comment_length
 
-  def Append(self, line='', substitute=True, indent_level=None):
+  def Append(self, line=''):
     """Appends a line of code at the current indent level or just a newline if
     line is not specified. Trailing whitespace is stripped.
-
-    substitute: indicated whether this line should be affected by
-    code.Substitute().
     """
-    if indent_level is None:
-      indent_level = self._indent_level
-    self._code.append(Line(((' ' * indent_level) + line).rstrip(),
-                      substitute=substitute))
+    self._code.append(((' ' * self._indent_level) + line).rstrip())
     return self
 
   def IsEmpty(self):
@@ -41,39 +35,24 @@ class Code(object):
     isolate any strings that haven't been substituted.
     """
     if not isinstance(obj, Code):
-      raise TypeError(type(obj))
+      raise TypeError()
     assert self is not obj
     for line in obj._code:
-      try:
-        # line % () will fail if any substitution tokens are left in line
-        if line.substitute:
-          line.value %= ()
-      except TypeError:
-        raise TypeError('Unsubstituted value when concatting\n' + line.value)
-      except ValueError:
-        raise ValueError('Stray % character when concatting\n' + line.value)
-      self.Append(line.value, line.substitute)
+      # line % () will fail if any substitution tokens are left in line
+      self._code.append(((' ' * self._indent_level) + line % ()).rstrip())
 
     return self
 
-  def Cblock(self, code):
-    """Concatenates another Code object |code| onto this one followed by a
-    blank line, if |code| is non-empty."""
-    if not code.IsEmpty():
-      self.Concat(code).Append()
-    return self
-
-  def Sblock(self, line=None):
+  def Sblock(self, line=''):
     """Starts a code block.
 
     Appends a line of code and then increases the indent level.
     """
-    if line is not None:
-      self.Append(line)
+    self.Append(line)
     self._indent_level += self._indent_size
     return self
 
-  def Eblock(self, line=None):
+  def Eblock(self, line=''):
     """Ends a code block by decreasing and then appending a line (or a blank
     line if not given).
     """
@@ -81,19 +60,19 @@ class Code(object):
     #if not isinstance(line, basestring):
     #  raise TypeError
     self._indent_level -= self._indent_size
-    if line is not None:
-      self.Append(line)
+    self.Append(line)
     return self
 
-  def Comment(self, comment, comment_prefix='// '):
+  # TODO(calamity): Make comment its own class or something and Render at
+  # self.Render() time
+  def Comment(self, comment):
     """Adds the given string as a comment.
 
     Will split the comment if it's too long. Use mainly for variable length
     comments. Otherwise just use code.Append('// ...') for comments.
-
-    Unaffected by code.Substitute().
     """
-    max_len = self._comment_length - self._indent_level - len(comment_prefix)
+    comment_symbol = '// '
+    max_len = self._comment_length - self._indent_level - len(comment_symbol)
     while len(comment) >= max_len:
       line = comment[0:max_len]
       last_space = line.rfind(' ')
@@ -102,8 +81,8 @@ class Code(object):
         comment = comment[last_space + 1:]
       else:
         comment = comment[max_len:]
-      self.Append(comment_prefix + line, substitute=False)
-    self.Append(comment_prefix + comment, substitute=False)
+      self.Append(comment_symbol + line)
+    self.Append(comment_symbol + comment)
     return self
 
   def Substitute(self, d):
@@ -118,25 +97,16 @@ class Code(object):
     if not isinstance(d, dict):
       raise TypeError('Passed argument is not a dictionary: ' + d)
     for i, line in enumerate(self._code):
-      if self._code[i].substitute:
-        # Only need to check %s because arg is a dict and python will allow
-        # '%s %(named)s' but just about nothing else
-        if '%s' in self._code[i].value or '%r' in self._code[i].value:
-          raise TypeError('"%s" or "%r" found in substitution. '
-                          'Named arguments only. Use "%" to escape')
-        self._code[i].value = line.value % d
-        self._code[i].substitute = False
+      # Only need to check %s because arg is a dict and python will allow
+      # '%s %(named)s' but just about nothing else
+      if '%s' in self._code[i] or '%r' in self._code[i]:
+        raise TypeError('"%s" or "%r" found in substitution. '
+                        'Named arguments only. Use "%" to escape')
+      self._code[i] = line % d
     return self
 
   def Render(self):
     """Renders Code as a string.
     """
-    return '\n'.join([l.value for l in self._code])
+    return '\n'.join(self._code)
 
-
-class Line(object):
-  """A line of code.
-  """
-  def __init__(self, value, substitute=True):
-    self.value = value
-    self.substitute = substitute

@@ -4,61 +4,47 @@
 
 #include "ui/views/controls/textfield/textfield.h"
 
+#if defined(TOOLKIT_USES_GTK)
+#include <gdk/gdkkeysyms.h>
+#endif
+
 #include <string>
 
-#include "base/command_line.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/ime/text_input_type.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/base/ui_base_switches.h"
-#include "ui/events/event.h"
-#include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/range/range.h"
 #include "ui/gfx/insets.h"
-#include "ui/gfx/range/range.h"
 #include "ui/gfx/selection_model.h"
-#include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/native/native_view_host.h"
-#include "ui/views/controls/textfield/native_textfield_views.h"
+#include "ui/views/controls/textfield/native_textfield_wrapper.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
-#include "ui/views/painter.h"
-#include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 
-namespace {
-
-// Default placeholder text color.
-const SkColor kDefaultPlaceholderTextColor = SK_ColorLTGRAY;
-
-gfx::FontList GetDefaultFontList() {
-  return ResourceBundle::GetSharedInstance().GetFontList(
-      ResourceBundle::BaseFont);
-}
-
-}  // namespace
+#if defined(OS_LINUX)
+#include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
+#elif defined(OS_WIN)
+#include "base/win/win_util.h"
+// TODO(beng): this should be removed when the OS_WIN hack from
+// ViewHierarchyChanged is removed.
+#include "ui/views/controls/textfield/native_textfield_views.h"
+#include "ui/views/controls/textfield/native_textfield_win.h"
+#endif
 
 namespace views {
 
 // static
-const char Textfield::kViewClassName[] = "Textfield";
+const char Textfield::kViewClassName[] = "views/Textfield";
 
-// static
-size_t Textfield::GetCaretBlinkMs() {
-  static const size_t default_value = 500;
-#if defined(OS_WIN)
-  static const size_t system_value = ::GetCaretBlinkTime();
-  if (system_value != 0)
-    return (system_value == INFINITE) ? 0 : system_value;
-#endif
-  return default_value;
-}
+/////////////////////////////////////////////////////////////////////////////
+// Textfield
 
 Textfield::Textfield()
-    : textfield_view_(NULL),
+    : native_wrapper_(NULL),
       controller_(NULL),
       style_(STYLE_DEFAULT),
-      font_list_(GetDefaultFontList()),
       read_only_(false),
       default_width_in_chars_(0),
       draw_border_(true),
@@ -66,27 +52,17 @@ Textfield::Textfield()
       use_default_text_color_(true),
       background_color_(SK_ColorWHITE),
       use_default_background_color_(true),
+      initialized_(false),
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false),
-      placeholder_text_color_(kDefaultPlaceholderTextColor),
-      text_input_type_(ui::TEXT_INPUT_TYPE_TEXT),
-      weak_ptr_factory_(this) {
-  SetFocusable(true);
-
-  if (ViewsDelegate::views_delegate) {
-    obscured_reveal_duration_ = ViewsDelegate::views_delegate->
-        GetDefaultTextfieldObscuredRevealDuration();
-  }
-
-  if (NativeViewHost::kRenderNativeControlFocus)
-    focus_painter_ = Painter::CreateDashedFocusPainter();
+      text_input_type_(ui::TEXT_INPUT_TYPE_TEXT) {
+  set_focusable(true);
 }
 
 Textfield::Textfield(StyleFlags style)
-    : textfield_view_(NULL),
+    : native_wrapper_(NULL),
       controller_(NULL),
       style_(style),
-      font_list_(GetDefaultFontList()),
       read_only_(false),
       default_width_in_chars_(0),
       draw_border_(true),
@@ -94,22 +70,13 @@ Textfield::Textfield(StyleFlags style)
       use_default_text_color_(true),
       background_color_(SK_ColorWHITE),
       use_default_background_color_(true),
+      initialized_(false),
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false),
-      placeholder_text_color_(kDefaultPlaceholderTextColor),
-      text_input_type_(ui::TEXT_INPUT_TYPE_TEXT),
-      weak_ptr_factory_(this) {
-  SetFocusable(true);
+      text_input_type_(ui::TEXT_INPUT_TYPE_TEXT) {
+  set_focusable(true);
   if (IsObscured())
     SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
-
-  if (ViewsDelegate::views_delegate) {
-    obscured_reveal_duration_ = ViewsDelegate::views_delegate->
-        GetDefaultTextfieldObscuredRevealDuration();
-  }
-
-  if (NativeViewHost::kRenderNativeControlFocus)
-    focus_painter_ = Painter::CreateDashedFocusPainter();
 }
 
 Textfield::~Textfield() {
@@ -124,12 +91,12 @@ TextfieldController* Textfield::GetController() const {
 }
 
 void Textfield::SetReadOnly(bool read_only) {
-  // Update read-only without changing the focusable state (or active, etc.).
   read_only_ = read_only;
-  if (textfield_view_) {
-    textfield_view_->UpdateReadOnly();
-    textfield_view_->UpdateTextColor();
-    textfield_view_->UpdateBackgroundColor();
+  set_focusable(!read_only);
+  if (native_wrapper_) {
+    native_wrapper_->UpdateReadOnly();
+    native_wrapper_->UpdateTextColor();
+    native_wrapper_->UpdateBackgroundColor();
   }
 }
 
@@ -145,9 +112,10 @@ void Textfield::SetObscured(bool obscured) {
     style_ = static_cast<StyleFlags>(style_ & ~STYLE_OBSCURED);
     SetTextInputType(ui::TEXT_INPUT_TYPE_TEXT);
   }
-  if (textfield_view_)
-    textfield_view_->UpdateIsObscured();
+  if (native_wrapper_)
+    native_wrapper_->UpdateIsObscured();
 }
+
 
 ui::TextInputType Textfield::GetTextInputType() const {
   if (read_only() || !enabled())
@@ -162,138 +130,87 @@ void Textfield::SetTextInputType(ui::TextInputType type) {
     SetObscured(should_be_obscured);
 }
 
-void Textfield::SetText(const base::string16& text) {
+void Textfield::SetText(const string16& text) {
   text_ = text;
-  if (textfield_view_)
-    textfield_view_->UpdateText();
+  if (native_wrapper_)
+    native_wrapper_->UpdateText();
 }
 
-void Textfield::AppendText(const base::string16& text) {
+void Textfield::AppendText(const string16& text) {
   text_ += text;
-  if (textfield_view_)
-    textfield_view_->AppendText(text);
+  if (native_wrapper_)
+    native_wrapper_->AppendText(text);
 }
 
-void Textfield::InsertOrReplaceText(const base::string16& text) {
-  if (textfield_view_) {
-    textfield_view_->InsertOrReplaceText(text);
-    text_ = textfield_view_->GetText();
-  }
+void Textfield::SelectAll() {
+  if (native_wrapper_)
+    native_wrapper_->SelectAll();
 }
 
-base::i18n::TextDirection Textfield::GetTextDirection() const {
-  return textfield_view_ ?
-      textfield_view_->GetTextDirection() : base::i18n::UNKNOWN_DIRECTION;
-}
-
-void Textfield::SelectAll(bool reversed) {
-  if (textfield_view_)
-    textfield_view_->SelectAll(reversed);
-}
-
-base::string16 Textfield::GetSelectedText() const {
-  return textfield_view_ ? textfield_view_->GetSelectedText() :
-                           base::string16();
+string16 Textfield::GetSelectedText() const {
+  if (native_wrapper_)
+    return native_wrapper_->GetSelectedText();
+  return string16();
 }
 
 void Textfield::ClearSelection() const {
-  if (textfield_view_)
-    textfield_view_->ClearSelection();
+  if (native_wrapper_)
+    native_wrapper_->ClearSelection();
 }
 
 bool Textfield::HasSelection() const {
-  return textfield_view_ && !textfield_view_->GetSelectedRange().is_empty();
-}
-
-SkColor Textfield::GetTextColor() const {
-  if (!use_default_text_color_)
-    return text_color_;
-
-  return GetNativeTheme()->GetSystemColor(read_only() ?
-      ui::NativeTheme::kColorId_TextfieldReadOnlyColor :
-      ui::NativeTheme::kColorId_TextfieldDefaultColor);
+  ui::Range range;
+  if (native_wrapper_)
+    native_wrapper_->GetSelectedRange(&range);
+  return !range.is_empty();
 }
 
 void Textfield::SetTextColor(SkColor color) {
   text_color_ = color;
   use_default_text_color_ = false;
-  if (textfield_view_)
-    textfield_view_->UpdateTextColor();
+  if (native_wrapper_)
+    native_wrapper_->UpdateTextColor();
 }
 
 void Textfield::UseDefaultTextColor() {
   use_default_text_color_ = true;
-  if (textfield_view_)
-    textfield_view_->UpdateTextColor();
-}
-
-SkColor Textfield::GetBackgroundColor() const {
-  if (!use_default_background_color_)
-    return background_color_;
-
-  return GetNativeTheme()->GetSystemColor(read_only() ?
-      ui::NativeTheme::kColorId_TextfieldReadOnlyBackground :
-      ui::NativeTheme::kColorId_TextfieldDefaultBackground);
+  if (native_wrapper_)
+    native_wrapper_->UpdateTextColor();
 }
 
 void Textfield::SetBackgroundColor(SkColor color) {
   background_color_ = color;
   use_default_background_color_ = false;
-  if (textfield_view_)
-    textfield_view_->UpdateBackgroundColor();
+  if (native_wrapper_)
+    native_wrapper_->UpdateBackgroundColor();
 }
 
 void Textfield::UseDefaultBackgroundColor() {
   use_default_background_color_ = true;
-  if (textfield_view_)
-    textfield_view_->UpdateBackgroundColor();
-}
-
-bool Textfield::GetCursorEnabled() const {
-  return textfield_view_ && textfield_view_->GetCursorEnabled();
-}
-
-void Textfield::SetCursorEnabled(bool enabled) {
-  if (textfield_view_)
-    textfield_view_->SetCursorEnabled(enabled);
-}
-
-void Textfield::SetFontList(const gfx::FontList& font_list) {
-  font_list_ = font_list;
-  if (textfield_view_)
-    textfield_view_->UpdateFont();
-  PreferredSizeChanged();
-}
-
-const gfx::Font& Textfield::GetPrimaryFont() const {
-  return font_list_.GetPrimaryFont();
+  if (native_wrapper_)
+    native_wrapper_->UpdateBackgroundColor();
 }
 
 void Textfield::SetFont(const gfx::Font& font) {
-  SetFontList(gfx::FontList(font));
+  font_ = font;
+  if (native_wrapper_)
+    native_wrapper_->UpdateFont();
+  PreferredSizeChanged();
 }
 
 void Textfield::SetHorizontalMargins(int left, int right) {
-  if (horizontal_margins_were_set_ &&
-      left == margins_.left() && right == margins_.right()) {
-    return;
-  }
   margins_.Set(margins_.top(), left, margins_.bottom(), right);
   horizontal_margins_were_set_ = true;
-  if (textfield_view_)
-    textfield_view_->UpdateHorizontalMargins();
+  if (native_wrapper_)
+    native_wrapper_->UpdateHorizontalMargins();
   PreferredSizeChanged();
 }
 
 void Textfield::SetVerticalMargins(int top, int bottom) {
-  if (vertical_margins_were_set_ &&
-      top == margins_.top() && bottom == margins_.bottom()) {
-    return;
-  }
   margins_.Set(top, margins_.left(), bottom, margins_.right());
   vertical_margins_were_set_ = true;
-  if (textfield_view_)
-    textfield_view_->UpdateVerticalMargins();
+  if (native_wrapper_)
+    native_wrapper_->UpdateVerticalMargins();
   PreferredSizeChanged();
 }
 
@@ -302,18 +219,13 @@ void Textfield::RemoveBorder() {
     return;
 
   draw_border_ = false;
-  if (textfield_view_)
-    textfield_view_->UpdateBorder();
-}
-
-base::string16 Textfield::GetPlaceholderText() const {
-  return placeholder_text_;
+  if (native_wrapper_)
+    native_wrapper_->UpdateBorder();
 }
 
 bool Textfield::GetHorizontalMargins(int* left, int* right) {
   if (!horizontal_margins_were_set_)
     return false;
-
   *left = margins_.left();
   *right = margins_.right();
   return true;
@@ -322,30 +234,29 @@ bool Textfield::GetHorizontalMargins(int* left, int* right) {
 bool Textfield::GetVerticalMargins(int* top, int* bottom) {
   if (!vertical_margins_were_set_)
     return false;
-
   *top = margins_.top();
   *bottom = margins_.bottom();
   return true;
 }
 
 void Textfield::UpdateAllProperties() {
-  if (textfield_view_) {
-    textfield_view_->UpdateText();
-    textfield_view_->UpdateTextColor();
-    textfield_view_->UpdateBackgroundColor();
-    textfield_view_->UpdateReadOnly();
-    textfield_view_->UpdateFont();
-    textfield_view_->UpdateEnabled();
-    textfield_view_->UpdateBorder();
-    textfield_view_->UpdateIsObscured();
-    textfield_view_->UpdateHorizontalMargins();
-    textfield_view_->UpdateVerticalMargins();
+  if (native_wrapper_) {
+    native_wrapper_->UpdateText();
+    native_wrapper_->UpdateTextColor();
+    native_wrapper_->UpdateBackgroundColor();
+    native_wrapper_->UpdateReadOnly();
+    native_wrapper_->UpdateFont();
+    native_wrapper_->UpdateEnabled();
+    native_wrapper_->UpdateBorder();
+    native_wrapper_->UpdateIsObscured();
+    native_wrapper_->UpdateHorizontalMargins();
+    native_wrapper_->UpdateVerticalMargins();
   }
 }
 
 void Textfield::SyncText() {
-  if (textfield_view_) {
-    base::string16 new_text = textfield_view_->GetText();
+  if (native_wrapper_) {
+    string16 new_text = native_wrapper_->GetText();
     if (new_text != text_) {
       text_ = new_text;
       if (controller_)
@@ -355,138 +266,136 @@ void Textfield::SyncText() {
 }
 
 bool Textfield::IsIMEComposing() const {
-  return textfield_view_ && textfield_view_->IsIMEComposing();
+  return native_wrapper_ && native_wrapper_->IsIMEComposing();
 }
 
-const gfx::Range& Textfield::GetSelectedRange() const {
-  return textfield_view_->GetSelectedRange();
+void Textfield::GetSelectedRange(ui::Range* range) const {
+  DCHECK(native_wrapper_);
+  native_wrapper_->GetSelectedRange(range);
 }
 
-void Textfield::SelectRange(const gfx::Range& range) {
-  textfield_view_->SelectRange(range);
+void Textfield::SelectRange(const ui::Range& range) {
+  DCHECK(native_wrapper_);
+  native_wrapper_->SelectRange(range);
 }
 
-const gfx::SelectionModel& Textfield::GetSelectionModel() const {
-  return textfield_view_->GetSelectionModel();
+void Textfield::GetSelectionModel(gfx::SelectionModel* sel) const {
+  DCHECK(native_wrapper_);
+  native_wrapper_->GetSelectionModel(sel);
 }
 
 void Textfield::SelectSelectionModel(const gfx::SelectionModel& sel) {
-  textfield_view_->SelectSelectionModel(sel);
+  DCHECK(native_wrapper_);
+  native_wrapper_->SelectSelectionModel(sel);
 }
 
 size_t Textfield::GetCursorPosition() const {
-  return textfield_view_->GetCursorPosition();
+  DCHECK(native_wrapper_);
+  return native_wrapper_->GetCursorPosition();
 }
 
-void Textfield::SetColor(SkColor value) {
-  return textfield_view_->SetColor(value);
+void Textfield::ApplyStyleRange(const gfx::StyleRange& style) {
+  DCHECK(native_wrapper_);
+  return native_wrapper_->ApplyStyleRange(style);
 }
 
-void Textfield::ApplyColor(SkColor value, const gfx::Range& range) {
-  return textfield_view_->ApplyColor(value, range);
-}
-
-void Textfield::SetStyle(gfx::TextStyle style, bool value) {
-  return textfield_view_->SetStyle(style, value);
-}
-
-void Textfield::ApplyStyle(gfx::TextStyle style,
-                           bool value,
-                           const gfx::Range& range) {
-  return textfield_view_->ApplyStyle(style, value, range);
+void Textfield::ApplyDefaultStyle() {
+  DCHECK(native_wrapper_);
+  native_wrapper_->ApplyDefaultStyle();
 }
 
 void Textfield::ClearEditHistory() {
-  textfield_view_->ClearEditHistory();
+  DCHECK(native_wrapper_);
+  native_wrapper_->ClearEditHistory();
 }
 
-void Textfield::SetAccessibleName(const base::string16& name) {
+void Textfield::SetAccessibleName(const string16& name) {
   accessible_name_ = name;
-}
-
-void Textfield::ExecuteCommand(int command_id) {
-  textfield_view_->ExecuteCommand(command_id, ui::EF_NONE);
-}
-
-void Textfield::SetFocusPainter(scoped_ptr<Painter> focus_painter) {
-  focus_painter_ = focus_painter.Pass();
-}
-
-bool Textfield::HasTextBeingDragged() {
-  return textfield_view_->HasTextBeingDragged();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Textfield, View overrides:
 
 void Textfield::Layout() {
-  if (textfield_view_) {
-    textfield_view_->SetBoundsRect(GetContentsBounds());
-    textfield_view_->Layout();
+  if (native_wrapper_) {
+    native_wrapper_->GetView()->SetBoundsRect(GetLocalBounds());
+    native_wrapper_->GetView()->Layout();
   }
 }
 
-int Textfield::GetBaseline() const {
-  gfx::Insets insets = GetTextInsets();
-  const int baseline = textfield_view_ ?
-      textfield_view_->GetTextfieldBaseline() : font_list_.GetBaseline();
-  return insets.top() + baseline;
-}
-
 gfx::Size Textfield::GetPreferredSize() {
-  gfx::Insets insets = GetTextInsets();
-
-  const int font_height = textfield_view_ ? textfield_view_->GetFontHeight() :
-                                            font_list_.GetHeight();
-  return gfx::Size(
-      GetPrimaryFont().GetExpectedTextWidth(default_width_in_chars_)
-      + insets.width(),
-      font_height + insets.height());
+  gfx::Insets insets;
+  if (draw_border_ && native_wrapper_)
+    insets = native_wrapper_->CalculateInsets();
+  // For NativeTextfieldViews, we might use a pre-defined font list (defined in
+  // IDS_UI_FONT_FAMILY_CROS) as the fonts to render text. The fonts in the
+  // list might be different (in name or in size) from |font_|, so we need to
+  // use GetFontHeight() to get the height of the first font in the list to
+  // guide textfield's height.
+  const int font_height = native_wrapper_ ? native_wrapper_->GetFontHeight() :
+                                            font_.GetHeight();
+  return gfx::Size(font_.GetExpectedTextWidth(default_width_in_chars_) +
+                       insets.width(), font_height + insets.height());
 }
 
 void Textfield::AboutToRequestFocusFromTabTraversal(bool reverse) {
-  SelectAll(false);
+  SelectAll();
 }
 
-bool Textfield::SkipDefaultKeyEventProcessing(const ui::KeyEvent& e) {
-  // Skip any accelerator handling of backspace; textfields handle this key.
-  // Also skip processing of [Alt]+<num-pad digit> Unicode alt key codes.
-  return e.key_code() == ui::VKEY_BACK || e.IsUnicodeKeyCode();
+bool Textfield::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
+  // TODO(hamaji): Figure out which keyboard combinations we need to add here,
+  //               similar to LocationBarView::SkipDefaultKeyEventProcessing.
+  ui::KeyboardCode key = e.key_code();
+  if (key == ui::VKEY_BACK)
+    return true;  // We'll handle BackSpace ourselves.
+
+#if defined(USE_AURA)
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
+  // We don't translate accelerators for ALT + NumPad digit on Windows, they are
+  // used for entering special characters.  We do translate alt-home.
+  if (e.IsAltDown() && (key != ui::VKEY_HOME) &&
+      NativeTextfieldWin::IsNumPadDigit(key,
+                                        (e.flags() & ui::EF_EXTENDED) != 0))
+    return true;
+#endif
+  return false;
 }
 
-void Textfield::OnPaint(gfx::Canvas* canvas) {
-  View::OnPaint(canvas);
+void Textfield::OnPaintBackground(gfx::Canvas* canvas) {
+  // Overridden to be public - gtk_views_entry.cc wants to call it.
+  View::OnPaintBackground(canvas);
+}
+
+void Textfield::OnPaintFocusBorder(gfx::Canvas* canvas) {
   if (NativeViewHost::kRenderNativeControlFocus)
-    Painter::PaintFocusPainter(this, canvas, focus_painter_.get());
+    View::OnPaintFocusBorder(canvas);
 }
 
-bool Textfield::OnKeyPressed(const ui::KeyEvent& e) {
-  return textfield_view_ && textfield_view_->HandleKeyPressed(e);
+bool Textfield::OnKeyPressed(const views::KeyEvent& e) {
+  return native_wrapper_ && native_wrapper_->HandleKeyPressed(e);
 }
 
-bool Textfield::OnKeyReleased(const ui::KeyEvent& e) {
-  return textfield_view_ && textfield_view_->HandleKeyReleased(e);
-}
-
-bool Textfield::OnMouseDragged(const ui::MouseEvent& e) {
-  if (!e.IsOnlyRightMouseButton())
-    return View::OnMouseDragged(e);
-  return true;
+bool Textfield::OnKeyReleased(const views::KeyEvent& e) {
+  return native_wrapper_ && native_wrapper_->HandleKeyReleased(e);
 }
 
 void Textfield::OnFocus() {
-  if (textfield_view_)
-    textfield_view_->HandleFocus();
-  View::OnFocus();
-  SchedulePaint();
+  if (native_wrapper_)
+    native_wrapper_->HandleFocus();
+
+  // Forward the focus to the wrapper if it exists.
+  if (!native_wrapper_ || !native_wrapper_->SetFocus()) {
+    // If there is no wrapper or the wrapper didn't take focus, call
+    // View::Focus to clear the native focus so that we still get
+    // keyboard messages.
+    View::OnFocus();
+  }
 }
 
 void Textfield::OnBlur() {
-  if (textfield_view_)
-    textfield_view_->HandleBlur();
-
-  // Border typically draws focus indicator.
-  SchedulePaint();
+  if (native_wrapper_)
+    native_wrapper_->HandleBlur();
 }
 
 void Textfield::GetAccessibleState(ui::AccessibleViewState* state) {
@@ -498,62 +407,51 @@ void Textfield::GetAccessibleState(ui::AccessibleViewState* state) {
     state->state |= ui::AccessibilityTypes::STATE_PROTECTED;
   state->value = text_;
 
-  const gfx::Range range = textfield_view_->GetSelectedRange();
+  DCHECK(native_wrapper_);
+  ui::Range range;
+  native_wrapper_->GetSelectedRange(&range);
   state->selection_start = range.start();
   state->selection_end = range.end();
-
-  if (!read_only()) {
-    state->set_value_callback =
-        base::Bind(&Textfield::AccessibilitySetValue,
-                   weak_ptr_factory_.GetWeakPtr());
-  }
 }
 
 ui::TextInputClient* Textfield::GetTextInputClient() {
-  return textfield_view_ ? textfield_view_->GetTextInputClient() : NULL;
-}
-
-gfx::Point Textfield::GetKeyboardContextMenuLocation() {
-  return textfield_view_ ? textfield_view_->GetContextMenuLocation() :
-                           View::GetKeyboardContextMenuLocation();
+  return native_wrapper_ ? native_wrapper_->GetTextInputClient() : NULL;
 }
 
 void Textfield::OnEnabledChanged() {
   View::OnEnabledChanged();
-  if (textfield_view_)
-    textfield_view_->UpdateEnabled();
+  if (native_wrapper_)
+    native_wrapper_->UpdateEnabled();
 }
 
-void Textfield::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
-  if (details.is_add && !textfield_view_ && GetWidget()) {
-    // The textfield view's lifetime is managed by the view hierarchy.
-    textfield_view_ = new NativeTextfieldViews(this);
-    AddChildViewAt(textfield_view_, 0);
-    Layout();
+void Textfield::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
+  if (is_add && !native_wrapper_ && GetWidget() && !initialized_) {
+    initialized_ = true;
+
+    // The native wrapper's lifetime will be managed by the view hierarchy after
+    // we call AddChildView.
+    native_wrapper_ = NativeTextfieldWrapper::CreateWrapper(this);
+    AddChildView(native_wrapper_->GetView());
+    // TODO(beng): Move this initialization to NativeTextfieldWin once it
+    //             subclasses NativeControlWin.
     UpdateAllProperties();
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+    if (!views::Widget::IsPureViews()) {
+      // TODO(beng): remove this once NativeTextfieldWin subclasses
+      // NativeControlWin. This is currently called to perform post-AddChildView
+      // initialization for the wrapper. The GTK version subclasses things
+      // correctly and doesn't need this.
+      //
+      // Remove the include for native_textfield_win.h above when you fix this.
+      static_cast<NativeTextfieldWin*>(native_wrapper_)->AttachHack();
+    }
+#endif
   }
 }
 
-const char* Textfield::GetClassName() const {
+std::string Textfield::GetClassName() const {
   return kViewClassName;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Textfield, private:
-
-gfx::Insets Textfield::GetTextInsets() const {
-  gfx::Insets insets = GetInsets();
-  if (draw_border_ && textfield_view_)
-    insets += textfield_view_->GetInsets();
-  return insets;
-}
-
-void Textfield::AccessibilitySetValue(const base::string16& new_value) {
-  if (!read_only()) {
-    SetText(new_value);
-    ClearSelection();
-  }
 }
 
 }  // namespace views

@@ -1,23 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 [
   {
     "namespace": "idle",
-    "description": "Use the <code>chrome.idle</code> API to detect when the machine's idle state changes.",
     "types": [],
     "functions": [
       {
         "name": "queryState",
         "type": "function",
-        "description": "Returns \"locked\" if the system is locked, \"idle\" if the user has not generated any input for a specified number of seconds, or \"active\" otherwise.",
+        "description": "Returns the current state of the browser.",
         "parameters": [
           {
-            "name": "detectionIntervalInSeconds",
+            "name": "thresholdSeconds",
             "type": "integer",
             "minimum": 15,
-            "description": "The system is considered idle if detectionIntervalInSeconds seconds have elapsed since the last user input detected."
+            "description": "Threshold, in seconds, used to determine when a machine is in the idle state."
           },
           {
             "name": "callback",
@@ -31,31 +26,18 @@
             ]
           }
         ]
-      },
-      {
-        "name": "setDetectionInterval",
-        "type": "function",
-        "description": "Sets the interval, in seconds, used to determine when the system is in an idle state for onStateChanged events. The default interval is 60 seconds.",
-        "parameters": [
-          {
-            "name": "intervalInSeconds",
-            "type": "integer",
-            "minimum": 15,
-            "description": "Threshold, in seconds, used to determine when the system is in an idle state."
-          }
-        ]
       }
     ],
     "events": [
       {
         "name": "onStateChanged",
         "type": "function",
-        "description": "Fired when the system changes to an active, idle or locked state. The event fires with \"locked\" if the screen is locked or the screensaver activates, \"idle\" if the system is unlocked and the user has not generated any input for a specified number of seconds, and \"active\" when the user generates input on an idle system.",
+        "description": "Fired when the browser changes to an active state.  Currently only reports the transition from idle to active.",
         "parameters": [
           {
             "name": "newState",
             "type": "string",
-            "enum": ["active", "idle", "locked"]
+            "enum": ["active"]
           }
         ]
       }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,24 +6,25 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "content/common/sandbox_mac.h"
 #include "content/common/sandbox_mac_unittest_helper.h"
-#include "crypto/nss_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace content {
+namespace {
+
+using sandboxtest::MacSandboxTest;
 
 //--------------------- Clipboard Sandboxing ----------------------
 // Test case for checking sandboxing of clipboard access.
-class MacSandboxedClipboardTestCase : public MacSandboxTestCase {
+class MacSandboxedClipboardTestCase : public sandboxtest::MacSandboxTestCase {
  public:
   MacSandboxedClipboardTestCase();
   virtual ~MacSandboxedClipboardTestCase();
 
-  virtual bool SandboxedTest() OVERRIDE;
+  virtual bool SandboxedTest();
 
-  virtual void SetTestData(const char* test_data) OVERRIDE;
+  virtual void SetTestData(const char* test_data);
  private:
   NSString* clipboard_name_;
 };
@@ -70,7 +71,7 @@ TEST_F(MacSandboxTest, ClipboardAccess) {
 
   std::string pasteboard_name = base::SysNSStringToUTF8([pb name]);
   EXPECT_TRUE(RunTestInAllSandboxTypes("MacSandboxedClipboardTestCase",
-                                       pasteboard_name.c_str()));
+                  pasteboard_name.c_str()));
 
   // After executing the test, the clipboard should still be empty.
   EXPECT_EQ([[pb types] count], 0U);
@@ -78,9 +79,9 @@ TEST_F(MacSandboxTest, ClipboardAccess) {
 
 //--------------------- File Access Sandboxing ----------------------
 // Test case for checking sandboxing of filesystem apis.
-class MacSandboxedFileAccessTestCase : public MacSandboxTestCase {
+class MacSandboxedFileAccessTestCase : public sandboxtest::MacSandboxTestCase {
  public:
-  virtual bool SandboxedTest() OVERRIDE;
+  virtual bool SandboxedTest();
 };
 
 REGISTER_SANDBOX_TEST_CASE(MacSandboxedFileAccessTestCase);
@@ -95,51 +96,4 @@ TEST_F(MacSandboxTest, FileAccess) {
   EXPECT_TRUE(RunTestInAllSandboxTypes("MacSandboxedFileAccessTestCase", NULL));
 }
 
-//--------------------- /dev/urandom Sandboxing ----------------------
-// /dev/urandom is available to any sandboxed process.
-class MacSandboxedUrandomTestCase : public MacSandboxTestCase {
- public:
-  virtual bool SandboxedTest() OVERRIDE;
-};
-
-REGISTER_SANDBOX_TEST_CASE(MacSandboxedUrandomTestCase);
-
-bool MacSandboxedUrandomTestCase::SandboxedTest() {
-  int fdes = open("/dev/urandom", O_RDONLY);
-  file_util::ScopedFD file_closer(&fdes);
-
-  // Opening /dev/urandom succeeds under the sandbox.
-  if (fdes == -1)
-    return false;
-
-  char buf[16];
-  int rc = read(fdes, buf, sizeof(buf));
-  return rc == sizeof(buf);
-}
-
-TEST_F(MacSandboxTest, UrandomAccess) {
-  EXPECT_TRUE(RunTestInAllSandboxTypes("MacSandboxedUrandomTestCase", NULL));
-}
-
-//--------------------- NSS Sandboxing ----------------------
-// Test case for checking sandboxing of NSS initialization.
-class MacSandboxedNSSTestCase : public MacSandboxTestCase {
- public:
-  virtual bool SandboxedTest() OVERRIDE;
-};
-
-REGISTER_SANDBOX_TEST_CASE(MacSandboxedNSSTestCase);
-
-bool MacSandboxedNSSTestCase::SandboxedTest() {
-  // If NSS cannot read from /dev/urandom, NSS initialization will call abort(),
-  // which will cause this test case to fail.
-  crypto::ForceNSSNoDBInit();
-  crypto::EnsureNSSInit();
-  return true;
-}
-
-TEST_F(MacSandboxTest, NSSAccess) {
-  EXPECT_TRUE(RunTestInAllSandboxTypes("MacSandboxedNSSTestCase", NULL));
-}
-
-}  // namespace content
+}  // namespace

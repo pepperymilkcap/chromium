@@ -26,22 +26,20 @@
 #ifndef HB_GRAPHITE2_H
 #define HB_GRAPHITE2_H
 
-#include "hb.h"
-
-#include <graphite2/Font.h>
+#include "hb-common.h"
+#include "hb-shape.h"
 
 HB_BEGIN_DECLS
 
 
-#define HB_GRAPHITE2_TAG_SILF HB_TAG('S','i','l','f')
+#define HB_GRAPHITE_TAG_Silf HB_TAG('S','i','l','f')
 
-
-gr_face *
-hb_graphite2_face_get_gr_face (hb_face_t *face);
-
-gr_font *
-hb_graphite2_font_get_gr_font (hb_font_t *font);
-
+hb_bool_t
+hb_graphite_shape (hb_font_t          *font,
+		   hb_buffer_t        *buffer,
+		   const hb_feature_t *features,
+		   unsigned int        num_features,
+		   const char * const *shaper_options);
 
 HB_END_DECLS
 

@@ -4,105 +4,65 @@
 
 #ifndef ASH_WM_WORKSPACE_WORKSPACE_LAYOUT_MANAGER_H_
 #define ASH_WM_WORKSPACE_WORKSPACE_LAYOUT_MANAGER_H_
+#pragma once
 
-#include <set>
-
-#include "ash/shell_observer.h"
-#include "ash/wm/base_layout_manager.h"
-#include "ash/wm/wm_types.h"
+#include "ash/ash_export.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "ui/aura/window_observer.h"
-#include "ui/gfx/rect.h"
+#include "ui/aura/layout_manager.h"
 
 namespace aura {
-class RootWindow;
+class MouseEvent;
 class Window;
 }
 
-namespace ui {
-class Layer;
+namespace gfx {
+class Rect;
 }
 
 namespace ash {
-
 namespace internal {
 
-class ShelfLayoutManager;
+class WorkspaceManager;
 
-// LayoutManager used on the window created for a workspace.
-class ASH_EXPORT WorkspaceLayoutManager : public BaseLayoutManager {
+// LayoutManager for top level windows when WorkspaceManager is enabled.
+class ASH_EXPORT WorkspaceLayoutManager : public aura::LayoutManager {
  public:
-  explicit WorkspaceLayoutManager(aura::Window* window);
+  explicit WorkspaceLayoutManager(WorkspaceManager* workspace_manager);
   virtual ~WorkspaceLayoutManager();
 
-  void SetShelf(internal::ShelfLayoutManager* shelf);
+  // Returns the workspace manager for this container.
+  WorkspaceManager* workspace_manager() {
+    return workspace_manager_;
+  }
+
+  // Invoked when a window receives drag event.
+  void PrepareForMoveOrResize(aura::Window* drag, aura::MouseEvent* event);
+
+  // Invoked when a drag event didn't start any drag operation.
+  void CancelMoveOrResize(aura::Window* drag, aura::MouseEvent* event);
+
+  // Invoked when a drag event moved the |window|.
+  void ProcessMove(aura::Window* window, aura::MouseEvent* event);
+
+  // Invoked when a user finished moving window.
+  void EndMove(aura::Window* drag, aura::MouseEvent* event);
+
+  // Invoked when a user finished resizing window.
+  void EndResize(aura::Window* drag, aura::MouseEvent* event);
 
   // Overridden from aura::LayoutManager:
-  virtual void OnWindowResized() OVERRIDE {}
+  virtual void OnWindowResized() OVERRIDE;
   virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE;
   virtual void OnWillRemoveWindowFromLayout(aura::Window* child) OVERRIDE;
-  virtual void OnWindowRemovedFromLayout(aura::Window* child) OVERRIDE;
   virtual void OnChildWindowVisibilityChanged(aura::Window* child,
                                               bool visibile) OVERRIDE;
   virtual void SetChildBounds(aura::Window* child,
                               const gfx::Rect& requested_bounds) OVERRIDE;
 
-  // ash::ShellObserver overrides:
-  virtual void OnDisplayWorkAreaInsetsChanged() OVERRIDE;
-
-  // Overriden from WindowObserver:
-  virtual void OnWindowPropertyChanged(aura::Window* window,
-                                       const void* key,
-                                       intptr_t old) OVERRIDE;
-  virtual void OnWindowStackingChanged(aura::Window* window) OVERRIDE;
-
-  // WindowStateObserver overrides:
-  virtual void OnWindowShowTypeChanged(wm::WindowState* window_state,
-                                       wm::WindowShowType old_type) OVERRIDE;
-
  private:
-  // Overridden from BaseLayoutManager:
-  virtual void AdjustAllWindowsBoundsForWorkAreaChange(
-      AdjustWindowReason reason) OVERRIDE;
-  virtual void AdjustWindowBoundsForWorkAreaChange(
-      wm::WindowState* window_state,
-      AdjustWindowReason reason) OVERRIDE;
-
-  void AdjustWindowBoundsWhenAdded(wm::WindowState* window_state);
-
-  // Updates the visibility state of the shelf.
-  void UpdateShelfVisibility();
-
-  // Updates the fullscreen state of the workspace and notifies Shell if it
-  // has changed.
-  void UpdateFullscreenState();
-
-  // Updates the bounds of the window for a show type change from
-  // |old_show_type|.
-  void UpdateBoundsFromShowType(wm::WindowState* window_state,
-                                wm::WindowShowType old_show_type);
-
-  // If |window_state| is maximized or fullscreen the bounds of the
-  // window are set and true is returned. Does nothing otherwise.
-  bool SetMaximizedOrFullscreenBounds(wm::WindowState* window_state);
-
-  // Adjusts the |bounds| so that they are flush with the edge of the
-  // workspace if the window represented by |window_state| is side snapped.
-  void AdjustSnappedBounds(wm::WindowState* window_state, gfx::Rect* bounds);
-
-  // Animates the window bounds to |bounds|.
-  void SetChildBoundsAnimated(aura::Window* child, const gfx::Rect& bounds);
-
-  internal::ShelfLayoutManager* shelf_;
-  aura::Window* window_;
-
-  // The work area. Cached to avoid unnecessarily moving windows during a
-  // workspace switch.
-  gfx::Rect work_area_in_parent_;
-
-  // True if this workspace is currently in fullscreen mode.
-  bool is_fullscreen_;
+  // Owned by WorkspaceController.
+  WorkspaceManager* workspace_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkspaceLayoutManager);
 };

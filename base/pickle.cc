@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,162 +10,18 @@
 
 //------------------------------------------------------------------------------
 
-using base::char16;
-using base::string16;
-
 // static
 const int Pickle::kPayloadUnit = 64;
 
 static const size_t kCapacityReadOnly = static_cast<size_t>(-1);
-
-PickleIterator::PickleIterator(const Pickle& pickle)
-    : read_ptr_(pickle.payload()),
-      read_end_ptr_(pickle.end_of_payload()) {
-}
-
-template <typename Type>
-inline bool PickleIterator::ReadBuiltinType(Type* result) {
-  const char* read_from = GetReadPointerAndAdvance<Type>();
-  if (!read_from)
-    return false;
-  if (sizeof(Type) > sizeof(uint32))
-    memcpy(result, read_from, sizeof(*result));
-  else
-    *result = *reinterpret_cast<const Type*>(read_from);
-  return true;
-}
-
-template<typename Type>
-inline const char* PickleIterator::GetReadPointerAndAdvance() {
-  const char* current_read_ptr = read_ptr_;
-  if (read_ptr_ + sizeof(Type) > read_end_ptr_)
-    return NULL;
-  if (sizeof(Type) < sizeof(uint32))
-    read_ptr_ += AlignInt(sizeof(Type), sizeof(uint32));
-  else
-    read_ptr_ += sizeof(Type);
-  return current_read_ptr;
-}
-
-const char* PickleIterator::GetReadPointerAndAdvance(int num_bytes) {
-  if (num_bytes < 0 || read_end_ptr_ - read_ptr_ < num_bytes)
-    return NULL;
-  const char* current_read_ptr = read_ptr_;
-  read_ptr_ += AlignInt(num_bytes, sizeof(uint32));
-  return current_read_ptr;
-}
-
-inline const char* PickleIterator::GetReadPointerAndAdvance(int num_elements,
-                                                          size_t size_element) {
-  // Check for int32 overflow.
-  int64 num_bytes = static_cast<int64>(num_elements) * size_element;
-  int num_bytes32 = static_cast<int>(num_bytes);
-  if (num_bytes != static_cast<int64>(num_bytes32))
-    return NULL;
-  return GetReadPointerAndAdvance(num_bytes32);
-}
-
-bool PickleIterator::ReadBool(bool* result) {
-  return ReadBuiltinType(result);
-}
-
-bool PickleIterator::ReadInt(int* result) {
-  return ReadBuiltinType(result);
-}
-
-bool PickleIterator::ReadLong(long* result) {
-  return ReadBuiltinType(result);
-}
-
-bool PickleIterator::ReadUInt16(uint16* result) {
-  return ReadBuiltinType(result);
-}
-
-bool PickleIterator::ReadUInt32(uint32* result) {
-  return ReadBuiltinType(result);
-}
-
-bool PickleIterator::ReadInt64(int64* result) {
-  return ReadBuiltinType(result);
-}
-
-bool PickleIterator::ReadUInt64(uint64* result) {
-  return ReadBuiltinType(result);
-}
-
-bool PickleIterator::ReadFloat(float* result) {
-  // crbug.com/315213
-  // The source data may not be properly aligned, and unaligned float reads
-  // cause SIGBUS on some ARM platforms, so force using memcpy to copy the data
-  // into the result.
-  const char* read_from = GetReadPointerAndAdvance<float>();
-  if (!read_from)
-    return false;
-  memcpy(result, read_from, sizeof(*result));
-  return true;
-}
-
-bool PickleIterator::ReadString(std::string* result) {
-  int len;
-  if (!ReadInt(&len))
-    return false;
-  const char* read_from = GetReadPointerAndAdvance(len);
-  if (!read_from)
-    return false;
-
-  result->assign(read_from, len);
-  return true;
-}
-
-bool PickleIterator::ReadWString(std::wstring* result) {
-  int len;
-  if (!ReadInt(&len))
-    return false;
-  const char* read_from = GetReadPointerAndAdvance(len, sizeof(wchar_t));
-  if (!read_from)
-    return false;
-
-  result->assign(reinterpret_cast<const wchar_t*>(read_from), len);
-  return true;
-}
-
-bool PickleIterator::ReadString16(string16* result) {
-  int len;
-  if (!ReadInt(&len))
-    return false;
-  const char* read_from = GetReadPointerAndAdvance(len, sizeof(char16));
-  if (!read_from)
-    return false;
-
-  result->assign(reinterpret_cast<const char16*>(read_from), len);
-  return true;
-}
-
-bool PickleIterator::ReadData(const char** data, int* length) {
-  *length = 0;
-  *data = 0;
-
-  if (!ReadInt(length))
-    return false;
-
-  return ReadBytes(data, *length);
-}
-
-bool PickleIterator::ReadBytes(const char** data, int length) {
-  const char* read_from = GetReadPointerAndAdvance(length);
-  if (!read_from)
-    return false;
-  *data = read_from;
-  return true;
-}
 
 // Payload is uint32 aligned.
 
 Pickle::Pickle()
     : header_(NULL),
       header_size_(sizeof(Header)),
-      capacity_after_header_(0),
-      write_offset_(0) {
+      capacity_(0),
+      variable_buffer_offset_(0) {
   Resize(kPayloadUnit);
   header_->payload_size = 0;
 }
@@ -173,8 +29,8 @@ Pickle::Pickle()
 Pickle::Pickle(int header_size)
     : header_(NULL),
       header_size_(AlignInt(header_size, sizeof(uint32))),
-      capacity_after_header_(0),
-      write_offset_(0) {
+      capacity_(0),
+      variable_buffer_offset_(0) {
   DCHECK_GE(static_cast<size_t>(header_size), sizeof(Header));
   DCHECK_LE(header_size, kPayloadUnit);
   Resize(kPayloadUnit);
@@ -184,8 +40,8 @@ Pickle::Pickle(int header_size)
 Pickle::Pickle(const char* data, int data_len)
     : header_(reinterpret_cast<Header*>(const_cast<char*>(data))),
       header_size_(0),
-      capacity_after_header_(kCapacityReadOnly),
-      write_offset_(0) {
+      capacity_(kCapacityReadOnly),
+      variable_buffer_offset_(0) {
   if (data_len >= static_cast<int>(sizeof(Header)))
     header_size_ = data_len - header_->payload_size;
 
@@ -203,15 +59,16 @@ Pickle::Pickle(const char* data, int data_len)
 Pickle::Pickle(const Pickle& other)
     : header_(NULL),
       header_size_(other.header_size_),
-      capacity_after_header_(0),
-      write_offset_(other.write_offset_) {
+      capacity_(0),
+      variable_buffer_offset_(other.variable_buffer_offset_) {
   size_t payload_size = header_size_ + other.header_->payload_size;
-  Resize(payload_size);
+  bool resized = Resize(payload_size);
+  CHECK(resized);  // Realloc failed.
   memcpy(header_, other.header_, payload_size);
 }
 
 Pickle::~Pickle() {
-  if (capacity_after_header_ != kCapacityReadOnly)
+  if (capacity_ != kCapacityReadOnly)
     free(header_);
 }
 
@@ -220,20 +77,224 @@ Pickle& Pickle::operator=(const Pickle& other) {
     NOTREACHED();
     return *this;
   }
-  if (capacity_after_header_ == kCapacityReadOnly) {
+  if (capacity_ == kCapacityReadOnly) {
     header_ = NULL;
-    capacity_after_header_ = 0;
+    capacity_ = 0;
   }
   if (header_size_ != other.header_size_) {
     free(header_);
     header_ = NULL;
     header_size_ = other.header_size_;
   }
-  Resize(other.header_->payload_size);
+  bool resized = Resize(other.header_size_ + other.header_->payload_size);
+  CHECK(resized);  // Realloc failed.
   memcpy(header_, other.header_,
          other.header_size_ + other.header_->payload_size);
-  write_offset_ = other.write_offset_;
+  variable_buffer_offset_ = other.variable_buffer_offset_;
   return *this;
+}
+
+bool Pickle::ReadBool(void** iter, bool* result) const {
+  DCHECK(iter);
+
+  int tmp;
+  if (!ReadInt(iter, &tmp))
+    return false;
+  DCHECK(0 == tmp || 1 == tmp);
+  *result = tmp ? true : false;
+  return true;
+}
+
+bool Pickle::ReadInt(void** iter, int* result) const {
+  DCHECK(iter);
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, sizeof(*result)))
+    return false;
+
+  // TODO(jar): http://crbug.com/13108 Pickle should be cleaned up, and not
+  // dependent on alignment.
+  // Next line is otherwise the same as: memcpy(result, *iter, sizeof(*result));
+  *result = *reinterpret_cast<int*>(*iter);
+
+  UpdateIter(iter, sizeof(*result));
+  return true;
+}
+
+bool Pickle::ReadLong(void** iter, long* result) const {
+  DCHECK(iter);
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, sizeof(*result)))
+    return false;
+
+  // TODO(jar): http://crbug.com/13108 Pickle should be cleaned up, and not
+  // dependent on alignment.
+  memcpy(result, *iter, sizeof(*result));
+
+  UpdateIter(iter, sizeof(*result));
+  return true;
+}
+
+bool Pickle::ReadSize(void** iter, size_t* result) const {
+  DCHECK(iter);
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, sizeof(*result)))
+    return false;
+
+  // TODO(jar): http://crbug.com/13108 Pickle should be cleaned up, and not
+  // dependent on alignment.
+  // Next line is otherwise the same as: memcpy(result, *iter, sizeof(*result));
+  *result = *reinterpret_cast<size_t*>(*iter);
+
+  UpdateIter(iter, sizeof(*result));
+  return true;
+}
+
+bool Pickle::ReadUInt16(void** iter, uint16* result) const {
+  DCHECK(iter);
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, sizeof(*result)))
+    return false;
+
+  memcpy(result, *iter, sizeof(*result));
+
+  UpdateIter(iter, sizeof(*result));
+  return true;
+}
+
+bool Pickle::ReadUInt32(void** iter, uint32* result) const {
+  DCHECK(iter);
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, sizeof(*result)))
+    return false;
+
+  memcpy(result, *iter, sizeof(*result));
+
+  UpdateIter(iter, sizeof(*result));
+  return true;
+}
+
+bool Pickle::ReadInt64(void** iter, int64* result) const {
+  DCHECK(iter);
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, sizeof(*result)))
+    return false;
+
+  memcpy(result, *iter, sizeof(*result));
+
+  UpdateIter(iter, sizeof(*result));
+  return true;
+}
+
+bool Pickle::ReadUInt64(void** iter, uint64* result) const {
+  DCHECK(iter);
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, sizeof(*result)))
+    return false;
+
+  memcpy(result, *iter, sizeof(*result));
+
+  UpdateIter(iter, sizeof(*result));
+  return true;
+}
+
+bool Pickle::ReadString(void** iter, std::string* result) const {
+  DCHECK(iter);
+
+  int len;
+  if (!ReadLength(iter, &len))
+    return false;
+  if (!IteratorHasRoomFor(*iter, len))
+    return false;
+
+  char* chars = reinterpret_cast<char*>(*iter);
+  result->assign(chars, len);
+
+  UpdateIter(iter, len);
+  return true;
+}
+
+bool Pickle::ReadWString(void** iter, std::wstring* result) const {
+  DCHECK(iter);
+
+  int len;
+  if (!ReadLength(iter, &len))
+    return false;
+  // Avoid integer overflow.
+  if (len > INT_MAX / static_cast<int>(sizeof(wchar_t)))
+    return false;
+  if (!IteratorHasRoomFor(*iter, len * sizeof(wchar_t)))
+    return false;
+
+  wchar_t* chars = reinterpret_cast<wchar_t*>(*iter);
+  result->assign(chars, len);
+
+  UpdateIter(iter, len * sizeof(wchar_t));
+  return true;
+}
+
+bool Pickle::ReadString16(void** iter, string16* result) const {
+  DCHECK(iter);
+
+  int len;
+  if (!ReadLength(iter, &len))
+    return false;
+  if (!IteratorHasRoomFor(*iter, len * sizeof(char16)))
+    return false;
+
+  char16* chars = reinterpret_cast<char16*>(*iter);
+  result->assign(chars, len);
+
+  UpdateIter(iter, len * sizeof(char16));
+  return true;
+}
+
+bool Pickle::ReadData(void** iter, const char** data, int* length) const {
+  DCHECK(iter);
+  DCHECK(data);
+  DCHECK(length);
+  *length = 0;
+  *data = 0;
+
+  if (!ReadLength(iter, length))
+    return false;
+
+  return ReadBytes(iter, data, *length);
+}
+
+bool Pickle::ReadBytes(void** iter, const char** data, int length) const {
+  DCHECK(iter);
+  DCHECK(data);
+  *data = 0;
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, length))
+    return false;
+
+  *data = reinterpret_cast<const char*>(*iter);
+
+  UpdateIter(iter, length);
+  return true;
+}
+
+bool Pickle::ReadLength(void** iter, int* result) const {
+  if (!ReadInt(iter, result))
+    return false;
+  return ((*result) >= 0);
 }
 
 bool Pickle::WriteString(const std::string& value) {
@@ -263,31 +324,91 @@ bool Pickle::WriteData(const char* data, int length) {
   return length >= 0 && WriteInt(length) && WriteBytes(data, length);
 }
 
-bool Pickle::WriteBytes(const void* data, int length) {
-  WriteBytesCommon(data, length);
+bool Pickle::WriteBytes(const void* data, int data_len) {
+  DCHECK_NE(kCapacityReadOnly, capacity_) << "oops: pickle is readonly";
+
+  char* dest = BeginWrite(data_len);
+  if (!dest)
+    return false;
+
+  memcpy(dest, data, data_len);
+
+  EndWrite(dest, data_len);
   return true;
 }
 
-void Pickle::Reserve(size_t length) {
-  size_t data_len = AlignInt(length, sizeof(uint32));
-  DCHECK_GE(data_len, length);
-#ifdef ARCH_CPU_64_BITS
-  DCHECK_LE(data_len, kuint32max);
-#endif
-  DCHECK_LE(write_offset_, kuint32max - data_len);
-  size_t new_size = write_offset_ + data_len;
-  if (new_size > capacity_after_header_)
-    Resize(capacity_after_header_ * 2 + new_size);
+char* Pickle::BeginWriteData(int length) {
+  DCHECK_EQ(variable_buffer_offset_, 0U) <<
+    "There can only be one variable buffer in a Pickle";
+
+  if (length < 0 || !WriteInt(length))
+    return NULL;
+
+  char *data_ptr = BeginWrite(length);
+  if (!data_ptr)
+    return NULL;
+
+  variable_buffer_offset_ =
+      data_ptr - reinterpret_cast<char*>(header_) - sizeof(int);
+
+  // EndWrite doesn't necessarily have to be called after the write operation,
+  // so we call it here to pad out what the caller will eventually write.
+  EndWrite(data_ptr, length);
+  return data_ptr;
 }
 
-void Pickle::Resize(size_t new_capacity) {
+void Pickle::TrimWriteData(int new_length) {
+  DCHECK_NE(variable_buffer_offset_, 0U);
+
+  // Fetch the the variable buffer size
+  int* cur_length = reinterpret_cast<int*>(
+      reinterpret_cast<char*>(header_) + variable_buffer_offset_);
+
+  if (new_length < 0 || new_length > *cur_length) {
+    NOTREACHED() << "Invalid length in TrimWriteData.";
+    return;
+  }
+
+  // Update the payload size and variable buffer size
+  header_->payload_size -= (*cur_length - new_length);
+  *cur_length = new_length;
+}
+
+char* Pickle::BeginWrite(size_t length) {
+  // write at a uint32-aligned offset from the beginning of the header
+  size_t offset = AlignInt(header_->payload_size, sizeof(uint32));
+
+  size_t new_size = offset + length;
+  size_t needed_size = header_size_ + new_size;
+  if (needed_size > capacity_ && !Resize(std::max(capacity_ * 2, needed_size)))
+    return NULL;
+
+#ifdef ARCH_CPU_64_BITS
+  DCHECK_LE(length, kuint32max);
+#endif
+
+  header_->payload_size = static_cast<uint32>(new_size);
+  return payload() + offset;
+}
+
+void Pickle::EndWrite(char* dest, int length) {
+  // Zero-pad to keep tools like valgrind from complaining about uninitialized
+  // memory.
+  if (length % sizeof(uint32))
+    memset(dest + length, 0, sizeof(uint32) - (length % sizeof(uint32)));
+}
+
+bool Pickle::Resize(size_t new_capacity) {
   new_capacity = AlignInt(new_capacity, kPayloadUnit);
 
-  CHECK_NE(capacity_after_header_, kCapacityReadOnly);
-  void* p = realloc(header_, header_size_ + new_capacity);
-  CHECK(p);
+  CHECK_NE(capacity_, kCapacityReadOnly);
+  void* p = realloc(header_, new_capacity);
+  if (!p)
+    return false;
+
   header_ = reinterpret_cast<Header*>(p);
-  capacity_after_header_ = new_capacity;
+  capacity_ = new_capacity;
+  return true;
 }
 
 // static
@@ -297,41 +418,14 @@ const char* Pickle::FindNext(size_t header_size,
   DCHECK_EQ(header_size, AlignInt(header_size, sizeof(uint32)));
   DCHECK_LE(header_size, static_cast<size_t>(kPayloadUnit));
 
-  size_t length = static_cast<size_t>(end - start);
-  if (length < sizeof(Header))
+  if (static_cast<size_t>(end - start) < sizeof(Header))
     return NULL;
 
   const Header* hdr = reinterpret_cast<const Header*>(start);
-  if (length < header_size || length - header_size < hdr->payload_size)
+  const char* payload_base = start + header_size;
+  const char* payload_end = payload_base + hdr->payload_size;
+  if (payload_end < payload_base)
     return NULL;
-  return start + header_size + hdr->payload_size;
-}
 
-template <size_t length> void Pickle::WriteBytesStatic(const void* data) {
-  WriteBytesCommon(data, length);
-}
-
-template void Pickle::WriteBytesStatic<2>(const void* data);
-template void Pickle::WriteBytesStatic<4>(const void* data);
-template void Pickle::WriteBytesStatic<8>(const void* data);
-
-inline void Pickle::WriteBytesCommon(const void* data, size_t length) {
-  DCHECK_NE(kCapacityReadOnly, capacity_after_header_)
-      << "oops: pickle is readonly";
-  size_t data_len = AlignInt(length, sizeof(uint32));
-  DCHECK_GE(data_len, length);
-#ifdef ARCH_CPU_64_BITS
-  DCHECK_LE(data_len, kuint32max);
-#endif
-  DCHECK_LE(write_offset_, kuint32max - data_len);
-  size_t new_size = write_offset_ + data_len;
-  if (new_size > capacity_after_header_) {
-    Resize(std::max(capacity_after_header_ * 2, new_size));
-  }
-
-  char* write = mutable_payload() + write_offset_;
-  memcpy(write, data, length);
-  memset(write + length, 0, data_len - length);
-  header_->payload_size = static_cast<uint32>(write_offset_ + length);
-  write_offset_ = new_size;
+  return (payload_end > end) ? NULL : payload_end;
 }

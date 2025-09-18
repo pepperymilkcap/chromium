@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,15 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/values.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/ui_resources.h"
@@ -22,22 +22,20 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_analysis.h"
-#include "ui/gfx/favicon_size.h"
 
 namespace {
 
-base::StringValue* SkColorToCss(SkColor color) {
-  return new base::StringValue(base::StringPrintf("rgb(%d, %d, %d)",
+StringValue* SkColorToCss(const SkColor& color) {
+  return new StringValue(base::StringPrintf("rgb(%d, %d, %d)",
                                             SkColorGetR(color),
                                             SkColorGetG(color),
                                             SkColorGetB(color)));
 }
 
 base::StringValue* GetDominantColorCssString(
-    scoped_refptr<base::RefCountedMemory> png) {
+    scoped_refptr<RefCountedMemory> png) {
   color_utils::GridSampler sampler;
-  SkColor color =
-      color_utils::CalculateKMeanColorOfPNG(png, 100, 665, &sampler);
+  SkColor color = color_utils::CalculateKMeanColorOfPNG(png, 100, 665, sampler);
   return SkColorToCss(color);
 }
 
@@ -52,10 +50,11 @@ class ExtensionIconColorManager : public ExtensionIconManager {
         handler_(handler) {}
   virtual ~ExtensionIconColorManager() {}
 
-  virtual void OnImageLoaded(const std::string& extension_id,
-                             const gfx::Image& image) OVERRIDE {
-    ExtensionIconManager::OnImageLoaded(extension_id, image);
-    handler_->NotifyAppIconReady(extension_id);
+  virtual void OnImageLoaded(SkBitmap* image,
+                             const ExtensionResource& resource,
+                             int index) OVERRIDE {
+    ExtensionIconManager::OnImageLoaded(image, resource, index);
+    handler_->NotifyAppIconReady(resource.extension_id());
   }
 
  private:
@@ -79,20 +78,18 @@ void FaviconWebUIHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void FaviconWebUIHandler::HandleGetFaviconDominantColor(
-    const base::ListValue* args) {
+void FaviconWebUIHandler::HandleGetFaviconDominantColor(const ListValue* args) {
   std::string path;
   CHECK(args->GetString(0, &path));
-  std::string prefix = "chrome://favicon/size/";
-  DCHECK(StartsWithASCII(path, prefix, false)) << "path is " << path;
-  size_t slash = path.find("/", prefix.length());
-  path = path.substr(slash + 1);
+  DCHECK(StartsWithASCII(path, "chrome://favicon/size/16/", false)) <<
+      "path is " << path;
+  path = path.substr(arraysize("chrome://favicon/size/16/") - 1);
 
   std::string dom_id;
   CHECK(args->GetString(1, &dom_id));
 
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()), Profile::EXPLICIT_ACCESS);
+  FaviconService* favicon_service =
+      Profile::FromWebUI(web_ui())->GetFaviconService(Profile::EXPLICIT_ACCESS);
   if (!favicon_service || path.empty())
     return;
 
@@ -101,56 +98,55 @@ void FaviconWebUIHandler::HandleGetFaviconDominantColor(
   for (size_t i = 0; i < arraysize(history::kPrepopulatedPages); i++) {
     if (url.spec() ==
         l10n_util::GetStringUTF8(history::kPrepopulatedPages[i].url_id)) {
-      base::StringValue dom_id_value(dom_id);
-      scoped_ptr<base::StringValue> color(
+      StringValue dom_id_value(dom_id);
+      scoped_ptr<StringValue> color(
           SkColorToCss(history::kPrepopulatedPages[i].color));
-      web_ui()->CallJavascriptFunction("ntp.setFaviconDominantColor",
+      web_ui()->CallJavascriptFunction("ntp4.setStripeColor",
                                        dom_id_value, *color);
       return;
     }
   }
 
   dom_id_map_[id_] = dom_id;
-  favicon_service->GetRawFaviconForURL(
-      FaviconService::FaviconForURLParams(
-          url,
-          chrome::FAVICON,
-          gfx::kFaviconSize),
-      ui::SCALE_FACTOR_100P,
+  FaviconService::Handle handle = favicon_service->GetFaviconForURL(
+      url,
+      history::FAVICON,
+      &consumer_,
       base::Bind(&FaviconWebUIHandler::OnFaviconDataAvailable,
-                 base::Unretained(this),
-                 id_++),
-      &cancelable_task_tracker_);
+                 base::Unretained(this)));
+  consumer_.SetClientData(favicon_service, handle, id_++);
 }
 
 void FaviconWebUIHandler::OnFaviconDataAvailable(
-    int id,
-    const chrome::FaviconBitmapResult& bitmap_result) {
-  scoped_ptr<base::StringValue> color_value;
+    FaviconService::Handle request_handle,
+    history::FaviconData favicon) {
+  FaviconService* favicon_service =
+      Profile::FromWebUI(web_ui())->GetFaviconService(Profile::EXPLICIT_ACCESS);
+  int id = consumer_.GetClientData(favicon_service, request_handle);
+  scoped_ptr<StringValue> color_value;
 
-  if (bitmap_result.is_valid())
-    color_value.reset(GetDominantColorCssString(bitmap_result.bitmap_data));
+  if (favicon.is_valid())
+    color_value.reset(GetDominantColorCssString(favicon.image_data));
   else
-    color_value.reset(new base::StringValue("#919191"));
+    color_value.reset(new StringValue("#919191"));
 
-  base::StringValue dom_id(dom_id_map_[id]);
-  web_ui()->CallJavascriptFunction("ntp.setFaviconDominantColor",
-                                   dom_id, *color_value);
+  StringValue dom_id(dom_id_map_[id]);
+  web_ui()->CallJavascriptFunction("ntp4.setStripeColor", dom_id, *color_value);
   dom_id_map_.erase(id);
 }
 
 void FaviconWebUIHandler::HandleGetAppIconDominantColor(
-    const base::ListValue* args) {
+    const ListValue* args) {
   std::string extension_id;
   CHECK(args->GetString(0, &extension_id));
 
   ExtensionService* extension_service =
       Profile::FromWebUI(web_ui())->GetExtensionService();
-  const extensions::Extension* extension = extension_service->GetExtensionById(
+  const Extension* extension = extension_service->GetExtensionById(
       extension_id, false);
   if (!extension)
     return;
-  app_icon_color_manager_->LoadIcon(extension_service->profile(), extension);
+  app_icon_color_manager_->LoadIcon(extension);
 }
 
 void FaviconWebUIHandler::NotifyAppIconReady(const std::string& extension_id) {
@@ -159,11 +155,10 @@ void FaviconWebUIHandler::NotifyAppIconReady(const std::string& extension_id) {
   std::vector<unsigned char> bits;
   if (!gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, true, &bits))
     return;
-  scoped_refptr<base::RefCountedStaticMemory> bits_mem(
-      new base::RefCountedStaticMemory(&bits.front(), bits.size()));
-  scoped_ptr<base::StringValue> color_value(
-      GetDominantColorCssString(bits_mem));
-  base::StringValue id(extension_id);
+  scoped_refptr<RefCountedStaticMemory> bits_mem(
+      new RefCountedStaticMemory(&bits.front(), bits.size()));
+  scoped_ptr<StringValue> color_value(GetDominantColorCssString(bits_mem));
+  StringValue id(extension_id);
   web_ui()->CallJavascriptFunction(
-      "ntp.setFaviconDominantColor", id, *color_value);
+      "ntp4.setStripeColor", id, *color_value);
 }

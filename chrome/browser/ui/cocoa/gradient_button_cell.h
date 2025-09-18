@@ -4,10 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_GRADIENT_BUTTON_CELL_H_
 #define CHROME_BROWSER_UI_COCOA_GRADIENT_BUTTON_CELL_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 
 namespace ui {
 class ThemeProvider;
@@ -55,15 +56,15 @@ typedef enum {
   // Custom drawing means we need to perform our own mouse tracking if
   // the cell is setShowsBorderOnlyWhileMouseInside:YES.
   BOOL isMouseInside_;
-  base::scoped_nsobject<NSTrackingArea> trackingArea_;
+  scoped_nsobject<NSTrackingArea> trackingArea_;
   BOOL shouldTheme_;
   CGFloat hoverAlpha_;  // 0-1. Controls the alpha during mouse hover
   NSTimeInterval lastHoverUpdate_;
-  base::scoped_nsobject<NSGradient> gradient_;
+  scoped_nsobject<NSGradient> gradient_;
   gradient_button_cell::PulseState pulseState_;
   CGFloat pulseMultiplier_;  // for selecting pulse direction when continuous.
   CGFloat outerStrokeAlphaMult_;  // For pulsing.
-  base::scoped_nsobject<NSImage> overlayImage_;
+  scoped_nsobject<NSImage> overlayImage_;
 }
 
 // Turn off theming.  Temporary work-around.

@@ -4,9 +4,8 @@
 
 #include "printing/print_settings_initializer_mac.h"
 
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "printing/print_settings.h"
-#include "printing/units.h"
 
 namespace printing {
 
@@ -14,13 +13,21 @@ namespace printing {
 void PrintSettingsInitializerMac::InitPrintSettings(
     PMPrinter printer,
     PMPageFormat page_format,
+    const PageRanges& new_ranges,
+    bool print_selection_only,
     PrintSettings* print_settings) {
+  DCHECK(print_settings);
+
+  print_settings->set_printer_name(
+      base::SysCFStringRefToUTF16(PMPrinterGetName(printer)));
   print_settings->set_device_name(
       base::SysCFStringRefToUTF16(PMPrinterGetID(printer)));
+  print_settings->ranges = new_ranges;
 
   PMOrientation orientation = kPMPortrait;
   PMGetOrientation(page_format, &orientation);
-  print_settings->SetOrientation(orientation == kPMLandscape);
+  print_settings->set_landscape(orientation == kPMLandscape);
+  print_settings->selection_only = print_selection_only;
 
   UInt32 resolution_count = 0;
   PMResolution best_resolution = { 72.0, 72.0 };
@@ -55,10 +62,9 @@ void PrintSettingsInitializerMac::InitPrintSettings(
       (page_rect.right - page_rect.left),
       (page_rect.bottom - page_rect.top));
 
-  DCHECK_EQ(print_settings->device_units_per_inch(), kPointsPerInch);
   print_settings->SetPrinterPrintableArea(physical_size_device_units,
                                           printable_area_device_units,
-                                          false);
+                                          72);
 }
 
 }  // namespace printing

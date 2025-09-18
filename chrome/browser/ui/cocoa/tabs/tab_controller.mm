@@ -1,26 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 
-#include <algorithm>
 #include <cmath>
 
-#include "base/i18n/rtl.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#include "base/strings/sys_string_conversions.h"
-#import "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/themes/theme_service.h"
-#import "chrome/browser/ui/cocoa/tabs/media_indicator_view.h"
+#import "chrome/browser/ui/cocoa/menu_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
-#import "extensions/common/extension.h"
+#import "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMFadeTruncatingTextFieldCell.h"
-#import "ui/base/cocoa/menu_controller.h"
+#import "third_party/GTM/AppKit/GTMFadeTruncatingTextFieldCell.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 @implementation TabController
@@ -32,6 +27,9 @@
 @synthesize pinned = pinned_;
 @synthesize target = target_;
 @synthesize url = url_;
+@synthesize iconView = iconView_;
+@synthesize titleView = titleView_;
+@synthesize closeButton = closeButton_;
 
 namespace TabControllerInternal {
 
@@ -45,18 +43,16 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
         owner_(owner) {}
 
   // Overridden from ui::SimpleMenuModel::Delegate
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
-    return false;
-  }
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
+  virtual bool IsCommandIdChecked(int command_id) const { return false; }
+  virtual bool IsCommandIdEnabled(int command_id) const {
     TabStripModel::ContextMenuCommand command =
         static_cast<TabStripModel::ContextMenuCommand>(command_id);
     return [target_ isCommandEnabled:command forController:owner_];
   }
   virtual bool GetAcceleratorForCommandId(
       int command_id,
-      ui::Accelerator* accelerator) OVERRIDE { return false; }
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {
+      ui::Accelerator* accelerator) { return false; }
+  virtual void ExecuteCommand(int command_id) {
     TabStripModel::ContextMenuCommand command =
         static_cast<TabStripModel::ContextMenuCommand>(command_id);
     [target_ commandDispatch:command forController:owner_];
@@ -69,14 +65,13 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
 }  // TabControllerInternal namespace
 
-// The min widths is the smallest number at which the right edge of the right
-// tab border image is not visibly clipped.  It is a bit smaller than the sum
-// of the two tab edge bitmaps because these bitmaps have a few transparent
-// pixels on the side.  The selected tab width includes the close button width.
-+ (CGFloat)minTabWidth { return 36; }
-+ (CGFloat)minSelectedTabWidth { return 52; }
-+ (CGFloat)maxTabWidth { return 214; }
-+ (CGFloat)miniTabWidth { return 58; }
+// The min widths match the windows values and are sums of left + right
+// padding, of which we have no comparable constants (we draw using paths, not
+// images). The selected tab width includes the close button width.
++ (CGFloat)minTabWidth { return 31; }
++ (CGFloat)minSelectedTabWidth { return 46; }
++ (CGFloat)maxTabWidth { return 220; }
++ (CGFloat)miniTabWidth { return 61; }
 + (CGFloat)appTabWidth { return 66; }
 
 - (TabView*)tabView {
@@ -85,66 +80,23 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 }
 
 - (id)init {
-  if ((self = [super init])) {
-    // Icon.
-    // Remember the icon's frame, so that if the icon is ever removed, a new
-    // one can later replace it in the proper location.
-    originalIconFrame_ = NSMakeRect(19, 5, 16, 16);
-    iconView_.reset([[NSImageView alloc] initWithFrame:originalIconFrame_]);
-    [iconView_ setAutoresizingMask:NSViewMaxXMargin];
-
-    // When the icon is removed, the title expands to the left to fill the
-    // space left by the icon.  When the close button is removed, the title
-    // expands to the right to fill its space.  These are the amounts to expand
-    // and contract titleView_ under those conditions. We don't have to
-    // explicilty save the offset between the title and the close button since
-    // we can just get that value for the close button's frame.
-    NSRect titleFrame = NSMakeRect(35, 6, 92, 14);
-
-    // Label.
-    titleView_.reset([[NSTextField alloc] initWithFrame:titleFrame]);
-    [titleView_ setAutoresizingMask:NSViewWidthSizable];
-    base::scoped_nsobject<GTMFadeTruncatingTextFieldCell> labelCell(
-        [[GTMFadeTruncatingTextFieldCell alloc] initTextCell:@"Label"]);
-    [labelCell setControlSize:NSSmallControlSize];
-    CGFloat fontSize = [NSFont systemFontSizeForControlSize:NSSmallControlSize];
-    NSFont* font = [NSFont fontWithName:
-        [[labelCell font] fontName] size:fontSize];
-    [labelCell setFont:font];
-    [titleView_ setCell:labelCell];
-    titleViewCell_ = labelCell;
-
-    // Close button.
-    closeButton_.reset([[HoverCloseButton alloc] initWithFrame:
-        NSMakeRect(127, 4, 18, 18)]);
-    [closeButton_ setAutoresizingMask:NSViewMinXMargin];
-    [closeButton_ setTarget:self];
-    [closeButton_ setAction:@selector(closeTab:)];
-
-    base::scoped_nsobject<TabView> view(
-        [[TabView alloc] initWithFrame:NSMakeRect(0, 0, 160, 25)
-                            controller:self
-                           closeButton:closeButton_]);
-    [view setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-    [view addSubview:iconView_];
-    [view addSubview:titleView_];
-    [view addSubview:closeButton_];
-    [super setView:view];
-
+  self = [super initWithNibName:@"TabView" bundle:base::mac::FrameworkBundle()];
+  if (self != nil) {
     isIconShowing_ = YES;
     NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
+    [defaultCenter addObserver:self
+                      selector:@selector(viewResized:)
+                          name:NSViewFrameDidChangeNotification
+                        object:[self view]];
     [defaultCenter addObserver:self
                       selector:@selector(themeChangedNotification:)
                           name:kBrowserThemeDidChangeNotification
                         object:nil];
-
-    [self internalSetSelected:selected_];
   }
   return self;
 }
 
 - (void)dealloc {
-  [mediaIndicatorView_ setAnimationDoneCallbackObject:nil withSelector:nil];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [[self tabView] setController:nil];
   [super dealloc];
@@ -154,13 +106,31 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 // backing variables. This updates the drawing state and marks self as needing
 // a re-draw.
 - (void)internalSetSelected:(BOOL)selected {
-  TabView* tabView = [self tabView];
+  TabView* tabView = static_cast<TabView*>([self view]);
   DCHECK([tabView isKindOfClass:[TabView class]]);
   [tabView setState:selected];
   if ([self active])
     [tabView cancelAlert];
   [self updateVisibility];
   [self updateTitleColor];
+}
+
+// Called when the tab's nib is done loading and all outlets are hooked up.
+- (void)awakeFromNib {
+  // Remember the icon's frame, so that if the icon is ever removed, a new
+  // one can later replace it in the proper location.
+  originalIconFrame_ = [iconView_ frame];
+
+  // When the icon is removed, the title expands to the left to fill the space
+  // left by the icon.  When the close button is removed, the title expands to
+  // the right to fill its space.  These are the amounts to expand and contract
+  // titleView_ under those conditions. We don't have to explicilty save the
+  // offset between the title and the close button since we can just get that
+  // value for the close button's frame.
+  NSRect titleFrame = [titleView_ frame];
+  iconTitleXOffset_ = NSMinX(titleFrame) - NSMinX(originalIconFrame_);
+
+  [self internalSetSelected:selected_];
 }
 
 // Called when Cocoa wants to display the context menu. Lazily instantiate
@@ -178,43 +148,21 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   return [contextMenuController_ menu];
 }
 
-- (void)closeTab:(id)sender {
+- (IBAction)closeTab:(id)sender {
   if ([[self target] respondsToSelector:@selector(closeTab:)]) {
     [[self target] performSelector:@selector(closeTab:)
                         withObject:[self view]];
   }
 }
 
-- (void)selectTab:(id)sender {
-  if ([[self tabView] isClosing])
-    return;
-  if ([[self target] respondsToSelector:[self action]]) {
-    [[self target] performSelector:[self action]
-                        withObject:[self view]];
-  }
-}
-
 - (void)setTitle:(NSString*)title {
-  if ([[self title] isEqualToString:title])
-    return;
-
-  [titleView_ setStringValue:title];
-  base::string16 title16 = base::SysNSStringToUTF16(title);
-  bool isRTL = base::i18n::GetFirstStrongCharacterDirection(title16) ==
-               base::i18n::RIGHT_TO_LEFT;
-  titleViewCell_.truncateMode = isRTL ? GTMFadeTruncatingHead
-                                      : GTMFadeTruncatingTail;
-
+  [[self view] setToolTip:title];
   if ([self mini] && ![self selected]) {
     TabView* tabView = static_cast<TabView*>([self view]);
     DCHECK([tabView isKindOfClass:[TabView class]]);
     [tabView startAlert];
   }
   [super setTitle:title];
-}
-
-- (void)setToolTip:(NSString*)toolTip {
-  [[self view] setToolTip:toolTip];
 }
 
 - (void)setActive:(BOOL)active {
@@ -239,14 +187,9 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   return selected_ || active_;
 }
 
-- (NSView*)iconView {
-  return iconView_;
-}
-
 - (void)setIconView:(NSView*)iconView {
   [iconView_ removeFromSuperview];
-  iconView_.reset([iconView retain]);
-
+  iconView_ = iconView;
   if ([self app] || [self mini]) {
     NSRect appIconFrame = [iconView frame];
     appIconFrame.origin = originalIconFrame_.origin;
@@ -269,31 +212,6 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
     [[self view] addSubview:iconView_];
 }
 
-- (NSTextField*)titleView {
-  return titleView_;
-}
-
-- (MediaIndicatorView*)mediaIndicatorView {
-  return mediaIndicatorView_;
-}
-
-- (void)setMediaIndicatorView:(MediaIndicatorView*)mediaIndicatorView {
-  [mediaIndicatorView_ removeFromSuperview];
-  mediaIndicatorView_.reset([mediaIndicatorView retain]);
-  [self updateVisibility];
-  if (mediaIndicatorView_) {
-    [[self view] addSubview:mediaIndicatorView_];
-    [mediaIndicatorView_
-      setAnimationDoneCallbackObject:self
-                        withSelector:@selector(updateVisibility)];
-
-  }
-}
-
-- (HoverCloseButton*)closeButton {
-  return closeButton_;
-}
-
 - (NSString*)toolTip {
   return [[self tabView] toolTipText];
 }
@@ -302,35 +220,35 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 // tab. We never actually do this, but it's a helpful guide for determining
 // how much space we have available.
 - (int)iconCapacity {
-  const CGFloat availableWidth = std::max<CGFloat>(
-      0, NSMaxX([closeButton_ frame]) - NSMinX(originalIconFrame_));
-  const CGFloat widthPerIcon = NSWidth(originalIconFrame_);
-  const int kPaddingBetweenIcons = 2;
-  if (availableWidth >= widthPerIcon &&
-      availableWidth < (widthPerIcon + kPaddingBetweenIcons)) {
-    return 1;
-  }
-  return availableWidth / (widthPerIcon + kPaddingBetweenIcons);
+  CGFloat width = NSMaxX([closeButton_ frame]) - NSMinX(originalIconFrame_);
+  CGFloat iconWidth = NSWidth(originalIconFrame_);
+
+  return width / iconWidth;
 }
 
+// Returns YES if we should show the icon. When tabs get too small, we clip
+// the favicon before the close button for selected tabs, and prefer the
+// favicon for unselected tabs.  The icon can also be suppressed more directly
+// by clearing iconView_.
 - (BOOL)shouldShowIcon {
-  return chrome::ShouldTabShowFavicon(
-      [self iconCapacity], [self mini], [self selected], iconView_ != nil,
-      !mediaIndicatorView_ ? TAB_MEDIA_STATE_NONE :
-          [mediaIndicatorView_ animatingMediaState]);
-}
-
-- (BOOL)shouldShowMediaIndicator {
-  if (!mediaIndicatorView_)
+  if (!iconView_)
     return NO;
-  return chrome::ShouldTabShowMediaIndicator(
-      [self iconCapacity], [self mini], [self selected], iconView_ != nil,
-      [mediaIndicatorView_ animatingMediaState]);
+
+  if ([self mini])
+    return YES;
+
+  int iconCapacity = [self iconCapacity];
+  if ([self selected])
+    return iconCapacity >= 2;
+  return iconCapacity >= 1;
 }
 
+// Returns YES if we should be showing the close button. The selected tab
+// always shows the close button.
 - (BOOL)shouldShowCloseButton {
-  return chrome::ShouldTabShowCloseButton(
-      [self iconCapacity], [self mini], [self selected]);
+  if ([self mini])
+    return NO;
+  return ([self selected] || [self iconCapacity] >= 3);
 }
 
 - (void)updateVisibility {
@@ -349,34 +267,6 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
   [closeButton_ setHidden:!newShowCloseButton];
 
-  BOOL newShowMediaIndicator = [self shouldShowMediaIndicator];
-
-  [mediaIndicatorView_ setHidden:!newShowMediaIndicator];
-
-  if (newShowMediaIndicator) {
-    NSRect newFrame = [mediaIndicatorView_ frame];
-    if ([self app] || [self mini]) {
-      // Tab is pinned: Position the media indicator in the center.
-      const CGFloat tabWidth = [self app] ?
-          [TabController appTabWidth] : [TabController miniTabWidth];
-      newFrame.origin.x = std::floor((tabWidth - NSWidth(newFrame)) / 2);
-      newFrame.origin.y = NSMinY(originalIconFrame_) -
-          std::floor((NSHeight(newFrame) - NSHeight(originalIconFrame_)) / 2);
-    } else {
-      // The Frame for the mediaIndicatorView_ depends on whether iconView_
-      // and/or closeButton_ are visible, and where they have been positioned.
-      const NSRect closeButtonFrame = [closeButton_ frame];
-      newFrame.origin.x = NSMinX(closeButtonFrame);
-      // Position to the left of the close button when it is showing.
-      if (newShowCloseButton)
-        newFrame.origin.x -= NSWidth(newFrame);
-      // Media indicator is centered vertically, with respect to closeButton_.
-      newFrame.origin.y = NSMinY(closeButtonFrame) -
-          std::floor((NSHeight(newFrame) - NSHeight(closeButtonFrame)) / 2);
-    }
-    [mediaIndicatorView_ setFrame:newFrame];
-  }
-
   // Adjust the title view based on changes to the icon's and close button's
   // visibility.
   NSRect oldTitleFrame = [titleView_ frame];
@@ -385,15 +275,12 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   newTitleFrame.origin.y = oldTitleFrame.origin.y;
 
   if (newShowIcon) {
-    newTitleFrame.origin.x = NSMaxX([iconView_ frame]);
+    newTitleFrame.origin.x = originalIconFrame_.origin.x + iconTitleXOffset_;
   } else {
     newTitleFrame.origin.x = originalIconFrame_.origin.x;
   }
 
-  if (newShowMediaIndicator) {
-    newTitleFrame.size.width = NSMinX([mediaIndicatorView_ frame]) -
-                               newTitleFrame.origin.x;
-  } else if (newShowCloseButton) {
+  if (newShowCloseButton) {
     newTitleFrame.size.width = NSMinX([closeButton_ frame]) -
                                newTitleFrame.origin.x;
   } else {
@@ -407,12 +294,25 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 - (void)updateTitleColor {
   NSColor* titleColor = nil;
   ui::ThemeProvider* theme = [[[self view] window] themeProvider];
-  if (theme && ![self selected])
-    titleColor = theme->GetNSColor(ThemeProperties::COLOR_BACKGROUND_TAB_TEXT);
+  if (theme && ![self selected]) {
+    titleColor =
+        theme->GetNSColor(ThemeService::COLOR_BACKGROUND_TAB_TEXT,
+                          true);
+  }
   // Default to the selected text color unless told otherwise.
-  if (theme && !titleColor)
-    titleColor = theme->GetNSColor(ThemeProperties::COLOR_TAB_TEXT);
+  if (theme && !titleColor) {
+    titleColor = theme->GetNSColor(ThemeService::COLOR_TAB_TEXT,
+                                   true);
+  }
   [titleView_ setTextColor:titleColor ? titleColor : [NSColor textColor]];
+}
+
+// Called when our view is resized. If it gets too small, start by hiding
+// the close button and only show it if tab is selected. Eventually, hide the
+// icon as well. We know that this is for our view because we only registered
+// for notifications from our specific view.
+- (void)viewResized:(NSNotification*)info {
+  [self updateVisibility];
 }
 
 - (void)themeChangedNotification:(NSNotification*)notification {

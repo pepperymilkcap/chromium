@@ -4,6 +4,7 @@
 
 #ifndef BASE_MAC_SCOPED_AEDESC_H_
 #define BASE_MAC_SCOPED_AEDESC_H_
+#pragma once
 
 #import <CoreServices/CoreServices.h>
 

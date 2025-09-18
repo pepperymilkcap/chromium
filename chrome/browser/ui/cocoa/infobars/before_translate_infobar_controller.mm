@@ -1,22 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/infobars/before_translate_infobar_controller.h"
 
-#include "base/strings/sys_string_conversions.h"
-#import "chrome/browser/ui/cocoa/infobars/infobar_utilities.h"
+#include "base/sys_string_conversions.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using InfoBarUtilities::MoveControl;
-using InfoBarUtilities::VerifyControlOrderAndSpacing;
+using TranslateInfoBarUtilities::MoveControl;
+using TranslateInfoBarUtilities::VerifyControlOrderAndSpacing;
 
 namespace {
 
 NSButton* CreateNSButtonWithResourceIDAndParameter(
-    int resourceId, const base::string16& param) {
-  base::string16 title = l10n_util::GetStringFUTF16(resourceId, param);
+    int resourceId, const string16& param) {
+  string16 title = l10n_util::GetStringFUTF16(resourceId, param);
   NSButton* button = [[NSButton alloc] init];
   [button setTitle:base::SysUTF16ToNSString(title)];
   [button setBezelStyle:NSTexturedRoundedBezelStyle];
@@ -37,8 +36,9 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
   [super dealloc];
 }
 
-- (id)initWithInfoBar:(InfoBarCocoa*)infobar {
-  if ((self = [super initWithInfoBar:infobar])) {
+- (id)initWithDelegate:(InfoBarDelegate*)delegate
+                  owner:(InfoBarTabHelper*)owner {
+  if ((self = [super initWithDelegate:delegate owner:owner])) {
     [self initializeExtraControls];
   }
   return self;
@@ -46,8 +46,8 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
 
 - (void)initializeExtraControls {
   TranslateInfoBarDelegate* delegate = [self delegate];
-  const base::string16& language =
-      delegate->language_name_at(delegate->original_language_index());
+  const string16& language = delegate->GetLanguageDisplayableNameAt(
+      delegate->original_language_index());
   neverTranslateButton_.reset(
       CreateNSButtonWithResourceIDAndParameter(
           IDS_TRANSLATE_INFOBAR_NEVER_TRANSLATE, language));
@@ -80,9 +80,9 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
 
 - (void)loadLabelText {
   size_t offset = 0;
-  base::string16 text =
+  string16 text =
       l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_BEFORE_MESSAGE,
-                                 base::string16(), &offset);
+                                 string16(), &offset);
   NSString* string1 = base::SysUTF16ToNSString(text.substr(0, offset));
   NSString* string2 = base::SysUTF16ToNSString(text.substr(offset));
   [label1_ setStringValue:string1];
@@ -95,10 +95,10 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
       label1_.get(), fromLanguagePopUp_.get(), label2_.get(),
       cancelButton_, okButton_, nil];
 
-  if ([self delegate]->ShouldShowNeverTranslateShortcut())
+  if ([self delegate]->ShouldShowNeverTranslateButton())
     [visibleControls addObject:neverTranslateButton_.get()];
 
-  if ([self delegate]->ShouldShowAlwaysTranslateShortcut())
+  if ([self delegate]->ShouldShowAlwaysTranslateButton())
     [visibleControls addObject:alwaysTranslateButton_.get()];
 
   return visibleControls;

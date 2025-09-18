@@ -5,7 +5,6 @@
 #import "chrome/browser/ui/cocoa/history_overlay_controller.h"
 
 #include "base/logging.h"
-#import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -25,9 +24,9 @@ const CGFloat kShieldWidth = kShieldRadius * 2;
 // The height of the shield.
 const CGFloat kShieldHeight = 140;
 
-// Additional height that is added to kShieldHeight when the gesture is
-// considered complete.
-const CGFloat kShieldHeightCompletionAdjust = 10;
+// The amount of |gestureAmount| at which AppKit considers the gesture
+// completed. This was derived more via art than science.
+const CGFloat kGestureCompleteProgress = 0.3;
 
 // HistoryOverlayView //////////////////////////////////////////////////////////
 
@@ -35,16 +34,16 @@ const CGFloat kShieldHeightCompletionAdjust = 10;
 @interface HistoryOverlayView : NSView {
  @private
   HistoryOverlayMode mode_;
-  CGFloat shieldAlpha_;
+  CGFloat progress_;
 }
-@property(nonatomic) CGFloat shieldAlpha;
+@property(nonatomic) CGFloat progress;
 - (id)initWithMode:(HistoryOverlayMode)mode
              image:(NSImage*)image;
 @end
 
 @implementation HistoryOverlayView
 
-@synthesize shieldAlpha = shieldAlpha_;
+@synthesize progress = progress_;
 
 - (id)initWithMode:(HistoryOverlayMode)mode
              image:(NSImage*)image {
@@ -58,18 +57,21 @@ const CGFloat kShieldHeightCompletionAdjust = 10;
     NSRect arrowRect = NSMakeRect(offset, 0, kShieldRadius, kShieldHeight);
     arrowRect = NSInsetRect(arrowRect, 10, 0);  // Give a little padding.
 
-    base::scoped_nsobject<NSImageView> imageView(
+    scoped_nsobject<NSImageView> imageView(
         [[NSImageView alloc] initWithFrame:arrowRect]);
     [imageView setImage:image];
-    [imageView setAutoresizingMask:NSViewMinYMargin | NSViewMaxYMargin];
     [self addSubview:imageView];
   }
   return self;
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
-  NSBezierPath* path = [NSBezierPath bezierPathWithOvalInRect:self.bounds];
-  NSColor* fillColor = [NSColor colorWithCalibratedWhite:0 alpha:shieldAlpha_];
+  NSRect ovalRect = NSMakeRect(0, 0, kShieldWidth, kShieldHeight);
+  NSBezierPath* path = [NSBezierPath bezierPathWithOvalInRect:ovalRect];
+  NSColor* fillColor =
+      // Clamp the minimum ligtness to be 0.666.
+      [NSColor colorWithCalibratedWhite:std::min(2.0/3.0 - progress_, 2.0/3.0)
+                                  alpha:0.85];
   [fillColor set];
   [path fill];
 }
@@ -100,26 +102,15 @@ const CGFloat kShieldHeightCompletionAdjust = 10;
   self.view = contentView_;
 }
 
-- (void)setProgress:(CGFloat)gestureAmount finished:(BOOL)finished {
+- (void)setProgress:(CGFloat)gestureAmount {
   NSRect parentFrame = [parent_ frame];
-  // When tracking the gesture, the height is constant and the alpha value
-  // changes from [0.25, 0.65].
-  CGFloat height = kShieldHeight;
-  CGFloat shieldAlpha = std::min(static_cast<CGFloat>(0.65),
-                                 std::max(gestureAmount,
-                                          static_cast<CGFloat>(0.25)));
-
-  // When the gesture is very likely to be completed (90% in this case), grow
-  // the semicircle's height and lock the alpha to 0.75.
-  if (finished) {
-    height += kShieldHeightCompletionAdjust;
-    shieldAlpha = 0.75;
-  }
+  // Scale the gesture amount so that the progress is indicative of the gesture
+  // being completed.
+  gestureAmount = std::abs(gestureAmount) / kGestureCompleteProgress;
 
   // Compute the new position based on the progress.
   NSRect frame = self.view.frame;
-  frame.size.height = height;
-  frame.origin.y = (NSHeight(parentFrame) / 2) - (height / 2);
+  frame.origin.y = (NSHeight(parentFrame) / 2) - (kShieldHeight / 2);
 
   CGFloat width = std::min(kShieldRadius * gestureAmount, kShieldRadius);
   if (mode_ == kHistoryOverlayModeForward)
@@ -128,28 +119,24 @@ const CGFloat kShieldHeightCompletionAdjust = 10;
     frame.origin.x = NSMinX(parentFrame) - kShieldWidth + width;
 
   self.view.frame = frame;
-  [contentView_ setShieldAlpha:shieldAlpha];
+  [contentView_ setProgress:gestureAmount];
   [contentView_ setNeedsDisplay:YES];
 }
 
 - (void)showPanelForView:(NSView*)view {
   parent_.reset([view retain]);
-  [self setProgress:0 finished:NO];  // Set initial view position.
+  [self setProgress:0];  // Set initial view position.
   [[parent_ superview] addSubview:self.view
                        positioned:NSWindowAbove
                        relativeTo:parent_];
-  [[BrowserWindowController
-      browserWindowControllerForView:[self view]] onOverlappedViewShown];
 }
 
 - (void)dismiss {
-  const CGFloat kFadeOutDurationSeconds = 0.4;
+  const CGFloat kFadeOutDurationSeconds = 0.2;
 
-  [NSAnimationContext beginGrouping];
-  [NSAnimationContext currentContext].duration = kFadeOutDurationSeconds;
   NSView* overlay = self.view;
 
-  base::scoped_nsobject<CAAnimation> animation(
+  scoped_nsobject<CAAnimation> animation(
       [[overlay animationForKey:@"alphaValue"] copy]);
   [animation setDelegate:self];
   [animation setDuration:kFadeOutDurationSeconds];
@@ -158,16 +145,10 @@ const CGFloat kShieldHeightCompletionAdjust = 10;
   [dictionary setObject:animation forKey:@"alphaValue"];
   [overlay setAnimations:dictionary];
   [[overlay animator] setAlphaValue:0.0];
-  [NSAnimationContext endGrouping];
 }
 
 - (void)animationDidStop:(CAAnimation*)theAnimation finished:(BOOL)finished {
-  [[BrowserWindowController
-      browserWindowControllerForView:[self view]] onOverlappedViewHidden];
   [self.view removeFromSuperview];
-  // Destroy the CAAnimation and its strong reference to its delegate (this
-  // class).
-  [self.view setAnimations:nil];
 }
 
 @end

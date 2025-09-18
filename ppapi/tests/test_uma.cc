@@ -4,6 +4,7 @@
 
 #include "ppapi/tests/test_uma.h"
 
+#include "ppapi/c/private/ppb_uma_private.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/tests/testing_instance.h"

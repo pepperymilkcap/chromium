@@ -4,7 +4,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 namespace cocoa_l10n_util {
 
@@ -23,13 +23,10 @@ NSSize WrapOrSizeToFit(NSView* view);
 // coordinates.
 CGFloat VerticallyReflowGroup(NSArray* views);
 
-// Like |ReplaceStringPlaceholders(const base::string16&,
-// const base::string16&, size_t*)|, but for a NSString formatString.
+// Like |ReplaceStringPlaceholders(const string16&, const string16&, size_t*)|,
+// but for a NSString formatString.
 NSString* ReplaceNSStringPlaceholders(NSString* formatString,
-                                      const base::string16& a,
+                                      const string16& a,
                                       size_t* offset);
-
-// Generates a tooltip string for a given URL and title.
-NSString* TooltipForURLAndTitle(NSString* url, NSString* title);
 
 }  // namespace cocoa_l10n_util

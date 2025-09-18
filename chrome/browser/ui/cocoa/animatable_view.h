@@ -1,13 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_ANIMATABLE_VIEW_H_
 #define CHROME_BROWSER_UI_COCOA_ANIMATABLE_VIEW_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/view_resizer.h"
 
@@ -24,7 +26,7 @@
   IBOutlet id delegate_;  // weak, used to send animation ended messages.
 
  @private
-  base::scoped_nsobject<NSAnimation> currentAnimation_;
+  scoped_nsobject<NSAnimation> currentAnimation_;
   id<ViewResizer> resizeDelegate_;  // weak, usually owns us
 }
 

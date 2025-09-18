@@ -6,23 +6,23 @@
 
 #include <vector>
 
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/time/time.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
+#include "base/time.h"
 #include "net/ftp/ftp_directory_listing_parser.h"
 #include "net/ftp/ftp_util.h"
 
 namespace net {
 
 bool ParseFtpDirectoryListingOS2(
-    const std::vector<base::string16>& lines,
+    const std::vector<string16>& lines,
     std::vector<FtpDirectoryListingEntry>* entries) {
   for (size_t i = 0; i < lines.size(); i++) {
     if (lines[i].empty())
       continue;
 
-    std::vector<base::string16> columns;
+    std::vector<string16> columns;
     base::SplitString(CollapseWhitespace(lines[i], false), ' ', &columns);
 
     // Every line of the listing consists of the following:

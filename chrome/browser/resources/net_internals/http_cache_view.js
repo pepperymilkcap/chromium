@@ -26,9 +26,8 @@ var HttpCacheView = (function() {
     g_browser.addHttpCacheInfoObserver(this, true);
   }
 
-  HttpCacheView.TAB_ID = 'tab-handle-http-cache';
-  HttpCacheView.TAB_NAME = 'Cache';
-  HttpCacheView.TAB_HASH = '#httpCache';
+  // ID for special HTML element in category_tabs.html
+  HttpCacheView.TAB_HANDLE_ID = 'tab-handle-http-cache';
 
   // IDs for special HTML elements in http_cache_view.html
   HttpCacheView.MAIN_BOX_ID = 'http-cache-view-tab-content';

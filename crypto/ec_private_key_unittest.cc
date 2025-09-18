@@ -9,14 +9,21 @@
 #include "base/memory/scoped_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-// TODO(mattm): Add some exported keys from each to test
+#if defined(USE_OPENSSL)
+// Once ECPrivateKey is implemented for OpenSSL, remove this #if block.
+// TODO(mattm): When that happens, also add some exported keys from each to test
 // interop between NSS and OpenSSL.
-
+TEST(ECPrivateKeyUnitTest, OpenSSLStub) {
+  scoped_ptr<crypto::ECPrivateKey> keypair1(
+      crypto::ECPrivateKey::Create());
+  ASSERT_FALSE(keypair1.get());
+}
+#else
 // Generate random private keys. Export, then re-import. We should get
 // back the same exact public key, and the private key should have the same
 // value and elliptic curve params.
 TEST(ECPrivateKeyUnitTest, InitRandomTest) {
-  const std::string password1;
+  const std::string password1 = "";
   const std::string password2 = "test";
 
   scoped_ptr<crypto::ECPrivateKey> keypair1(
@@ -79,7 +86,7 @@ TEST(ECPrivateKeyUnitTest, InitRandomTest) {
 }
 
 TEST(ECPrivateKeyUnitTest, BadPasswordTest) {
-  const std::string password1;
+  const std::string password1 = "";
   const std::string password2 = "test";
 
   scoped_ptr<crypto::ECPrivateKey> keypair1(
@@ -97,3 +104,4 @@ TEST(ECPrivateKeyUnitTest, BadPasswordTest) {
           password2, privkey1, pubkey1));
   ASSERT_FALSE(keypair2.get());
 }
+#endif  // !defined(USE_OPENSSL)

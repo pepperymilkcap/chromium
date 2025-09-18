@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // See net/disk_cache/disk_cache.h for the public interface.
 
-#ifndef NET_DISK_CACHE_STORAGE_BLOCK_H_
-#define NET_DISK_CACHE_STORAGE_BLOCK_H_
+#ifndef NET_DISK_CACHE_STORAGE_BLOCK_H__
+#define NET_DISK_CACHE_STORAGE_BLOCK_H__
+#pragma once
 
 #include "net/disk_cache/addr.h"
 #include "net/disk_cache/mapped_file.h"
@@ -54,9 +55,6 @@ class StorageBlock : public FileBlock {
   // Sets the object to lazily save the in-memory data on destruction.
   void set_modified();
 
-  // Forgets that the data was modified, so it's not lazily saved.
-  void clear_modified();
-
   // Gets a pointer to the internal storage (allocates storage if needed).
   T* Data();
 
@@ -74,8 +72,6 @@ class StorageBlock : public FileBlock {
   // Loads and store the data.
   bool Load();
   bool Store();
-  bool Load(FileIOCallback* callback, bool* completed);
-  bool Store(FileIOCallback* callback, bool* completed);
 
  private:
   void AllocateData();
@@ -92,6 +88,9 @@ class StorageBlock : public FileBlock {
   DISALLOW_COPY_AND_ASSIGN(StorageBlock);
 };
 
+typedef StorageBlock<EntryStore> CacheEntryBlock;
+typedef StorageBlock<RankingsNode> CacheRankingsBlock;
+
 }  // namespace disk_cache
 
-#endif  // NET_DISK_CACHE_STORAGE_BLOCK_H_
+#endif  // NET_DISK_CACHE_STORAGE_BLOCK_H__

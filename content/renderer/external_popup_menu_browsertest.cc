@@ -2,17 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "content/common/view_messages.h"
-#include "content/public/test/render_view_test.h"
 #include "content/renderer/render_view_impl.h"
+#include "content/test/render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebView.h"
-#include "third_party/WebKit/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 // Tests for the external select popup menu (Mac specific).
 
-namespace content {
 namespace {
 
 const char* const kSelectID = "mySelect";
@@ -20,7 +19,7 @@ const char* const kEmptySelectID = "myEmptySelect";
 
 }  // namespace
 
-class ExternalPopupMenuTest : public RenderViewTest {
+class ExternalPopupMenuTest : public content::RenderViewTest {
  public:
   ExternalPopupMenuTest() {}
 
@@ -29,9 +28,9 @@ class ExternalPopupMenuTest : public RenderViewTest {
   }
 
   virtual void SetUp() {
-    RenderViewTest::SetUp();
+    content::RenderViewTest::SetUp();
     // We need to set this explictly as RenderMain is not run.
-    blink::WebView::setUseExternalPopupMenus(true);
+    WebKit::WebView::setUseExternalPopupMenus(true);
 
     std::string html = "<select id='mySelect' onchange='selectChanged(this)'>"
                        "  <option>zero</option>"
@@ -52,13 +51,13 @@ class ExternalPopupMenuTest : public RenderViewTest {
     LoadHTML(html.c_str());
 
     // Set a minimum size and give focus so simulated events work.
-    view()->webwidget()->resize(blink::WebSize(500, 500));
+    view()->webwidget()->resize(WebKit::WebSize(500, 500));
     view()->webwidget()->setFocus(true);
   }
 
   int GetSelectedIndex() {
-    base::string16 script(base::ASCIIToUTF16(kSelectID));
-    script.append(base::ASCIIToUTF16(".selectedIndex"));
+    string16 script(ASCIIToUTF16(kSelectID));
+    script.append(ASCIIToUTF16(".selectedIndex"));
     int selected_index = -1;
     ExecuteJavaScriptAndReturnIntValue(script, &selected_index);
     return selected_index;
@@ -128,7 +127,7 @@ class ExternalPopupMenuRemoveTest : public ExternalPopupMenuTest {
   ExternalPopupMenuRemoveTest() {}
 
  protected:
-  virtual bool ShouldRemoveSelectOnChange() const OVERRIDE { return true; }
+  virtual bool ShouldRemoveSelectOnChange() const { return true; }
 };
 
 // Tests that nothing bad happen when the page removes the select when it
@@ -144,5 +143,3 @@ TEST_F(ExternalPopupMenuRemoveTest, RemoveOnChange) {
   // It should return false as the select has been removed.
   EXPECT_FALSE(SimulateElementClick(kSelectID));
 }
-
-}  // namespace content

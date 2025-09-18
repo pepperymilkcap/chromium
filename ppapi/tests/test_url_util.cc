@@ -28,7 +28,6 @@ void TestURLUtil::RunTests(const std::string& filter) {
   RUN_TEST(DocumentCanAccessDocument, filter);
   RUN_TEST(GetDocumentURL, filter);
   RUN_TEST(GetPluginInstanceURL, filter);
-  RUN_TEST(GetPluginReferrerURL, filter);
 }
 
 std::string TestURLUtil::TestCanonicalize() {
@@ -109,18 +108,18 @@ std::string TestURLUtil::TestIsSameSecurityOrigin() {
 std::string TestURLUtil::TestDocumentCanRequest() {
   // This is hard to test, but we can at least verify we can't request
   // some random domain.
-  ASSERT_FALSE(util_->DocumentCanRequest(instance_, "http://evil.com/"));
+  ASSERT_FALSE(util_->DocumentCanRequest(*instance_, "http://evil.com/"));
   PASS();
 }
 
 std::string TestURLUtil::TestDocumentCanAccessDocument() {
   // This is hard to test, but we can at least verify we can access ourselves.
-  ASSERT_TRUE(util_->DocumentCanAccessDocument(instance_, instance_));
+  ASSERT_TRUE(util_->DocumentCanAccessDocument(*instance_, *instance_));
   PASS();
 }
 
 std::string TestURLUtil::TestGetDocumentURL() {
-  pp::Var url = util_->GetDocumentURL(instance_);
+  pp::Var url = util_->GetDocumentURL(*instance_);
   ASSERT_TRUE(url.is_string());
   pp::VarPrivate window = instance_->GetWindowObject();
   pp::Var href = window.GetProperty("location").GetProperty("href");
@@ -131,20 +130,9 @@ std::string TestURLUtil::TestGetDocumentURL() {
 }
 
 std::string TestURLUtil::TestGetPluginInstanceURL() {
-  pp::Var url = util_->GetPluginInstanceURL(instance_);
+  pp::Var url = util_->GetPluginInstanceURL(*instance_);
   ASSERT_TRUE(url.is_string());
   // see test_case.html
   ASSERT_EQ(url.AsString(), "http://a.b.c/test");
   PASS();
 }
-
-std::string TestURLUtil::TestGetPluginReferrerURL() {
-  pp::Var url = util_->GetPluginReferrerURL(instance_);
-  ASSERT_TRUE(url.is_string());
-  pp::VarPrivate window = instance_->GetWindowObject();
-  pp::Var href = window.GetProperty("location").GetProperty("href");
-  ASSERT_TRUE(href.is_string());
-  ASSERT_EQ(url.AsString(), href.AsString());
-  PASS();
-}
-

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,16 @@
 
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_delegate.h"
+#include "net/url_request/url_request_about_job.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_data_job.h"
 #include "net/url_request/url_request_error_job.h"
+#include "net/url_request/url_request_file_job.h"
+#include "net/url_request/url_request_ftp_job.h"
 #include "net/url_request/url_request_http_job.h"
 #include "net/url_request/url_request_job_factory.h"
 
@@ -32,12 +36,10 @@ struct SchemeToFactory {
 static const SchemeToFactory kBuiltinFactories[] = {
   { "http", URLRequestHttpJob::Factory },
   { "https", URLRequestHttpJob::Factory },
-
-#if !defined(OS_IOS)
-  { "ws", URLRequestHttpJob::Factory },
-  { "wss", URLRequestHttpJob::Factory },
-#endif  // !defined(OS_IOS)
-
+  { "file", URLRequestFileJob::Factory },
+  { "ftp", URLRequestFtpJob::Factory },
+  { "about", URLRequestAboutJob::Factory },
+  { "data", URLRequestDataJob::Factory },
 };
 
 // static
@@ -46,26 +48,25 @@ URLRequestJobManager* URLRequestJobManager::GetInstance() {
 }
 
 URLRequestJob* URLRequestJobManager::CreateJob(
-    URLRequest* request, NetworkDelegate* network_delegate) const {
+    URLRequest* request) const {
   DCHECK(IsAllowedThread());
 
   // If we are given an invalid URL, then don't even try to inspect the scheme.
   if (!request->url().is_valid())
-    return new URLRequestErrorJob(request, network_delegate, ERR_INVALID_URL);
+    return new URLRequestErrorJob(request, ERR_INVALID_URL);
 
   // We do this here to avoid asking interceptors about unsupported schemes.
   const URLRequestJobFactory* job_factory = NULL;
-  job_factory = request->context()->job_factory();
+  if (request->context())
+    job_factory = request->context()->job_factory();
 
   const std::string& scheme = request->url().scheme();  // already lowercase
   if (job_factory) {
     if (!job_factory->IsHandledProtocol(scheme)) {
-      return new URLRequestErrorJob(
-          request, network_delegate, ERR_UNKNOWN_URL_SCHEME);
+      return new URLRequestErrorJob(request, ERR_UNKNOWN_URL_SCHEME);
     }
   } else if (!SupportsScheme(scheme)) {
-    return new URLRequestErrorJob(
-        request, network_delegate, ERR_UNKNOWN_URL_SCHEME);
+    return new URLRequestErrorJob(request, ERR_UNKNOWN_URL_SCHEME);
   }
 
   // THREAD-SAFETY NOTICE:
@@ -75,20 +76,25 @@ URLRequestJob* URLRequestJobManager::CreateJob(
   // See if the request should be intercepted.
   //
 
-  // TODO(pauljensen): Remove this when AppCacheInterceptor is a
-  // ProtocolHandler, see crbug.com/161547.
+  if (job_factory) {
+    URLRequestJob* job = job_factory->MaybeCreateJobWithInterceptor(request);
+    if (job)
+      return job;
+  }
+
+  // TODO(willchan): Remove this in favor of URLRequestJobFactory::Interceptor.
   if (!(request->load_flags() & LOAD_DISABLE_INTERCEPT)) {
     InterceptorList::const_iterator i;
     for (i = interceptors_.begin(); i != interceptors_.end(); ++i) {
-      URLRequestJob* job = (*i)->MaybeIntercept(request, network_delegate);
+      URLRequestJob* job = (*i)->MaybeIntercept(request);
       if (job)
         return job;
     }
   }
 
   if (job_factory) {
-    URLRequestJob* job = job_factory->MaybeCreateJobWithProtocolHandler(
-        scheme, request, network_delegate);
+    URLRequestJob* job =
+        job_factory->MaybeCreateJobWithProtocolHandler(scheme, request);
     if (job)
       return job;
   }
@@ -100,7 +106,7 @@ URLRequestJob* URLRequestJobManager::CreateJob(
   // built-in protocol factory.
   FactoryMap::const_iterator i = factories_.find(scheme);
   if (i != factories_.end()) {
-    URLRequestJob* job = i->second(request, network_delegate, scheme);
+    URLRequestJob* job = i->second(request, scheme);
     if (job)
       return job;
   }
@@ -108,8 +114,7 @@ URLRequestJob* URLRequestJobManager::CreateJob(
   // See if the request should be handled by a built-in protocol factory.
   for (size_t i = 0; i < arraysize(kBuiltinFactories); ++i) {
     if (scheme == kBuiltinFactories[i].scheme) {
-      URLRequestJob* job = (kBuiltinFactories[i].factory)(
-          request, network_delegate, scheme);
+      URLRequestJob* job = (kBuiltinFactories[i].factory)(request, scheme);
       DCHECK(job);  // The built-in factories are not expected to fail!
       return job;
     }
@@ -117,14 +122,13 @@ URLRequestJob* URLRequestJobManager::CreateJob(
 
   // If we reached here, then it means that a registered protocol factory
   // wasn't interested in handling the URL.  That is fairly unexpected, and we
-  // don't have a specific error to report here :-(
+  // don't know have a specific error to report here :-(
   LOG(WARNING) << "Failed to map: " << request->url().spec();
-  return new URLRequestErrorJob(request, network_delegate, ERR_FAILED);
+  return new URLRequestErrorJob(request, ERR_FAILED);
 }
 
 URLRequestJob* URLRequestJobManager::MaybeInterceptRedirect(
     URLRequest* request,
-    NetworkDelegate* network_delegate,
     const GURL& location) const {
   DCHECK(IsAllowedThread());
   if (!request->url().is_valid() ||
@@ -134,7 +138,8 @@ URLRequestJob* URLRequestJobManager::MaybeInterceptRedirect(
   }
 
   const URLRequestJobFactory* job_factory = NULL;
-  job_factory = request->context()->job_factory();
+  if (request->context())
+    job_factory = request->context()->job_factory();
 
   const std::string& scheme = request->url().scheme();  // already lowercase
   if (job_factory) {
@@ -145,11 +150,15 @@ URLRequestJob* URLRequestJobManager::MaybeInterceptRedirect(
     return NULL;
   }
 
+  URLRequestJob* job = NULL;
+  if (job_factory)
+    job = job_factory->MaybeInterceptRedirect(location, request);
+  if (job)
+    return job;
+
   InterceptorList::const_iterator i;
   for (i = interceptors_.begin(); i != interceptors_.end(); ++i) {
-    URLRequestJob* job = (*i)->MaybeInterceptRedirect(request,
-                                                      network_delegate,
-                                                      location);
+    job = (*i)->MaybeInterceptRedirect(request, location);
     if (job)
       return job;
   }
@@ -157,7 +166,7 @@ URLRequestJob* URLRequestJobManager::MaybeInterceptRedirect(
 }
 
 URLRequestJob* URLRequestJobManager::MaybeInterceptResponse(
-    URLRequest* request, NetworkDelegate* network_delegate) const {
+    URLRequest* request) const {
   DCHECK(IsAllowedThread());
   if (!request->url().is_valid() ||
       request->load_flags() & LOAD_DISABLE_INTERCEPT ||
@@ -166,7 +175,8 @@ URLRequestJob* URLRequestJobManager::MaybeInterceptResponse(
   }
 
   const URLRequestJobFactory* job_factory = NULL;
-  job_factory = request->context()->job_factory();
+  if (request->context())
+    job_factory = request->context()->job_factory();
 
   const std::string& scheme = request->url().scheme();  // already lowercase
   if (job_factory) {
@@ -177,10 +187,15 @@ URLRequestJob* URLRequestJobManager::MaybeInterceptResponse(
     return NULL;
   }
 
+  URLRequestJob* job = NULL;
+  if (job_factory)
+    job = job_factory->MaybeInterceptResponse(request);
+  if (job)
+    return job;
+
   InterceptorList::const_iterator i;
   for (i = interceptors_.begin(); i != interceptors_.end(); ++i) {
-    URLRequestJob* job = (*i)->MaybeInterceptResponse(request,
-                                                      network_delegate);
+    job = (*i)->MaybeInterceptResponse(request);
     if (job)
       return job;
   }
@@ -249,7 +264,8 @@ void URLRequestJobManager::UnregisterRequestInterceptor(
 
 URLRequestJobManager::URLRequestJobManager()
     : allowed_thread_(0),
-      allowed_thread_initialized_(false) {
+      allowed_thread_initialized_(false),
+      enable_file_access_(false) {
 }
 
 URLRequestJobManager::~URLRequestJobManager() {}

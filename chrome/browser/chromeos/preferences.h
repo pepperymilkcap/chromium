@@ -1,70 +1,77 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_PREFERENCES_H_
 #define CHROME_BROWSER_CHROMEOS_PREFERENCES_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
-#include "ash/shell_observer.h"
 #include "base/compiler_specific.h"
-#include "base/prefs/pref_member.h"
 #include "chrome/browser/chromeos/language_preferences.h"
-#include "chrome/browser/prefs/pref_service_syncable_observer.h"
+#include "chrome/browser/prefs/pref_member.h"
+#include "content/public/browser/notification_observer.h"
 
-class PrefRegistrySimple;
 class PrefService;
-class PrefServiceSyncable;
-
-class TracingManager;
-
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
 
 namespace chromeos {
-
-namespace input_method {
-class InputMethodManager;
-}
 
 // The Preferences class handles Chrome OS preferences. When the class
 // is first initialized, it will initialize the OS settings to what's stored in
 // the preferences. These include touchpad settings, etc.
 // When the preferences change, we change the settings to reflect the new value.
-class Preferences : public PrefServiceSyncableObserver,
-                    public ash::ShellObserver {
+class Preferences : public content::NotificationObserver {
  public:
   Preferences();
-  explicit Preferences(
-      input_method::InputMethodManager* input_method_manager);  // for testing
   virtual ~Preferences();
 
-  // These method will register the prefs associated with Chrome OS settings.
-  static void RegisterPrefs(PrefRegistrySimple* registry);
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  // This method will register the prefs associated with Chrome OS settings.
+  static void RegisterUserPrefs(PrefService* prefs);
+
+  // This method is called when kLanguagePreferredVirtualKeyboard is updated to
+  // change the virtual keyboard settings to reflect the new value.
+  static void UpdateVirturalKeyboardPreference(PrefService* prefs);
 
   // This method will initialize Chrome OS settings to values in user prefs.
-  // |is_primary_user| is true if preferences are initialized for primary user
-  // in multi-profile session.
-  void Init(PrefServiceSyncable* prefs, bool is_primary_user);
+  void Init(PrefService* prefs);
 
-  void InitUserPrefsForTesting(PrefServiceSyncable* prefs);
-  void SetInputMethodListForTesting();
+  // Overridden from content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
-  // Initializes all member prefs.
-  void InitUserPrefs(PrefServiceSyncable* prefs);
-
-  // Callback method for preference changes.
-  void OnPreferenceChanged(const std::string& pref_name);
-
   // This will set the OS settings when the preference changes.
   // If this method is called with NULL, it will set all OS settings to what's
   // stored in the preferences.
   void NotifyPrefChanged(const std::string* pref_name);
+
+  // Writes boolean |value| to the input method (IBus) configuration daemon.
+  // |section| (e.g. "general") and |name| (e.g. "use_global_engine") should
+  // not be NULL.
+  void SetLanguageConfigBoolean(const char* section,
+                                const char* name,
+                                bool value);
+
+  // Writes integer |value| to the input method (IBus) configuration daemon.
+  // |section| and |name| should not be NULL.
+  void SetLanguageConfigInteger(const char* section,
+                                const char* name,
+                                int value);
+
+  // Writes string |value| to the input method (IBus) configuration daemon.
+  // |section| and |name| should not be NULL.
+  void SetLanguageConfigString(const char* section,
+                               const char* name,
+                               const std::string& value);
+
+  // Writes a string list to the input method (IBus) configuration daemon.
+  // |section| and |name| should not be NULL.
+  void SetLanguageConfigStringList(const char* section,
+                                   const char* name,
+                                   const std::vector<std::string>& values);
 
   // A variant of SetLanguageConfigStringList. You can pass comma-separated
   // values. Examples of |value|: "", "Control+space,Hiragana"
@@ -72,66 +79,56 @@ class Preferences : public PrefServiceSyncableObserver,
                                         const char* name,
                                         const std::string& value);
 
-  // Restores the user's preferred input method / keyboard layout on signing in.
-  void SetInputMethodList();
+  // Updates the mapping of modifier keys following current prefs values.
+  void UpdateModifierKeyMapping();
 
   // Updates the initial key repeat delay and key repeat interval following
   // current prefs values. We set the delay and interval at once since an
   // underlying XKB API requires it.
   void UpdateAutoRepeatRate();
 
-  // Force natural scroll to on if --enable-natural-scroll-default is specified
-  // on the cmd line.
-  void ForceNaturalScrollDefault();
-
-  // PrefServiceSyncableObserver implementation.
-  virtual void OnIsSyncingChanged() OVERRIDE;
-
-  // Overriden from ash::ShellObserver.
-  virtual void OnTouchHudProjectionToggled(bool enabled) OVERRIDE;
-
-  PrefServiceSyncable* prefs_;
-
-  input_method::InputMethodManager* input_method_manager_;
-  scoped_ptr<TracingManager> tracing_manager_;
-
-  BooleanPrefMember performance_tracing_enabled_;
   BooleanPrefMember tap_to_click_enabled_;
-  BooleanPrefMember tap_dragging_enabled_;
-  BooleanPrefMember three_finger_click_enabled_;
-  BooleanPrefMember natural_scroll_;
   BooleanPrefMember vert_edge_scroll_enabled_;
-  BooleanPrefMember a11y_spoken_feedback_enabled_;
-  BooleanPrefMember a11y_high_contrast_enabled_;
-  BooleanPrefMember a11y_screen_magnifier_enabled_;
-  IntegerPrefMember a11y_screen_magnifier_type_;
-  DoublePrefMember a11y_screen_magnifier_scale_;
+  BooleanPrefMember accessibility_enabled_;
   IntegerPrefMember speed_factor_;
-  IntegerPrefMember mouse_sensitivity_;
-  IntegerPrefMember touchpad_sensitivity_;
-  BooleanPrefMember primary_mouse_button_right_;
+  IntegerPrefMember sensitivity_;
   BooleanPrefMember use_24hour_clock_;
-  BooleanPrefMember disable_drive_;
-  BooleanPrefMember disable_drive_over_cellular_;
-  BooleanPrefMember disable_drive_hosted_files_;
-  FilePathPrefMember download_default_directory_;
-  FilePathPrefMember select_file_last_directory_;
-  FilePathPrefMember save_file_default_directory_;
-  BooleanPrefMember touch_hud_projection_enabled_;
+  BooleanPrefMember primary_mouse_button_right_;
 
   // Input method preferences.
-  StringPrefMember preferred_languages_;
-  StringPrefMember preload_engines_;
-  StringPrefMember current_input_method_;
-  StringPrefMember previous_input_method_;
-  StringPrefMember enabled_extension_imes_;
+  StringPrefMember language_hotkey_next_engine_in_menu_;
+  StringPrefMember language_hotkey_previous_engine_;
+  StringPrefMember language_preferred_languages_;
+  StringPrefMember language_preload_engines_;
+  BooleanPrefMember language_chewing_boolean_prefs_[
+      language_prefs::kNumChewingBooleanPrefs];
+  StringPrefMember language_chewing_multiple_choice_prefs_[
+      language_prefs::kNumChewingMultipleChoicePrefs];
+  IntegerPrefMember language_chewing_hsu_sel_key_type_;
+  IntegerPrefMember language_chewing_integer_prefs_[
+      language_prefs::kNumChewingIntegerPrefs];
+  StringPrefMember language_hangul_keyboard_;
+  StringPrefMember language_hangul_hanja_binding_keys_;
+  StringPrefMember language_hangul_hanja_keys_;
+  BooleanPrefMember language_pinyin_boolean_prefs_[
+      language_prefs::kNumPinyinBooleanPrefs];
+  IntegerPrefMember language_pinyin_int_prefs_[
+      language_prefs::kNumPinyinIntegerPrefs];
+  IntegerPrefMember language_pinyin_double_pinyin_schema_;
+  BooleanPrefMember language_mozc_boolean_prefs_[
+      language_prefs::kNumMozcBooleanPrefs];
+  StringPrefMember language_mozc_multiple_choice_prefs_[
+      language_prefs::kNumMozcMultipleChoicePrefs];
+  IntegerPrefMember language_mozc_integer_prefs_[
+      language_prefs::kNumMozcIntegerPrefs];
+  IntegerPrefMember language_xkb_remap_search_key_to_;
+  IntegerPrefMember language_xkb_remap_control_key_to_;
+  IntegerPrefMember language_xkb_remap_alt_key_to_;
+  BooleanPrefMember language_xkb_auto_repeat_enabled_;
+  IntegerPrefMember language_xkb_auto_repeat_delay_pref_;
+  IntegerPrefMember language_xkb_auto_repeat_interval_pref_;
 
-  BooleanPrefMember xkb_auto_repeat_enabled_;
-  IntegerPrefMember xkb_auto_repeat_delay_pref_;
-  IntegerPrefMember xkb_auto_repeat_interval_pref_;
-
-  // True if this preferences instance is for primary user.
-  bool is_primary_user_prefs_;
+  BooleanPrefMember enable_screen_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(Preferences);
 };

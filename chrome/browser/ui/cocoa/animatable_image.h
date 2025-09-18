@@ -4,11 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_ANIMATABLE_IMAGE_H_
 #define CHROME_BROWSER_UI_COCOA_ANIMATABLE_IMAGE_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 
 // This class helps animate an NSImage's frame and opacity. It works by creating
 // a blank NSWindow in the size specified and giving it a layer on which the
@@ -20,7 +21,7 @@
 @interface AnimatableImage : NSWindow {
  @private
   // The image to animate.
-  base::scoped_nsobject<NSImage> image_;
+  scoped_nsobject<NSImage> image_;
 
   // The frame of the image before and after the animation. This is in this
   // window's coordinate system.

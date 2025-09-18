@@ -1,9 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_AUTH_GSSAPI_POSIX_H_
 #define NET_HTTP_HTTP_AUTH_GSSAPI_POSIX_H_
+#pragma once
+
+#include <gssapi.h>
 
 #include <string>
 
@@ -12,18 +15,11 @@
 #include "net/base/net_export.h"
 #include "net/http/http_auth.h"
 
-#if defined(OS_MACOSX) && defined(MAC_OS_X_VERSION_10_9) && \
-    MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_9
-// Including gssapi.h directly is deprecated in the 10.9 SDK.
-#include <GSS/gssapi.h>
-#else
-#include <gssapi.h>
-#endif
-
 namespace net {
 
-// Mechanism OID for GSSAPI. We always use SPNEGO.
-NET_EXPORT_PRIVATE extern gss_OID CHROME_GSS_SPNEGO_MECH_OID_DESC;
+NET_EXPORT_PRIVATE extern gss_OID CHROME_GSS_C_NT_HOSTBASED_SERVICE_X;
+NET_EXPORT_PRIVATE extern gss_OID CHROME_GSS_C_NT_HOSTBASED_SERVICE;
+NET_EXPORT_PRIVATE extern gss_OID CHROME_GSS_KRB5_MECH_OID_DESC;
 
 // GSSAPILibrary is introduced so unit tests can mock the calls to the GSSAPI
 // library. The default implementation attempts to load one of the standard
@@ -251,7 +247,7 @@ class NET_EXPORT_PRIVATE HttpAuthGSSAPI {
   // obtained using |*credentials|. If |credentials| is NULL, the default
   // credentials are used instead.
   int GenerateAuthToken(const AuthCredentials* credentials,
-                        const std::string& spn,
+                        const std::wstring& spn,
                         std::string* auth_token);
 
   // Delegation is allowed on the Kerberos ticket. This allows certain servers
@@ -260,7 +256,7 @@ class NET_EXPORT_PRIVATE HttpAuthGSSAPI {
   void Delegate();
 
  private:
-  int GetNextSecurityToken(const std::string& spn,
+  int GetNextSecurityToken(const std::wstring& spn,
                            gss_buffer_t in_token,
                            gss_buffer_t out_token);
 

@@ -9,7 +9,7 @@
 
 namespace pp {
 
-class InstanceHandle;
+class Instance;
 
 class Buffer_Dev : public Resource {
  public:
@@ -20,11 +20,7 @@ class Buffer_Dev : public Resource {
 
   // Creates & Maps a new Buffer in the browser with the given size. The
   // resulting object will be is_null() if either Create() or Map() fails.
-  Buffer_Dev(const InstanceHandle& instance, uint32_t size);
-
-  // Constructor used when the buffer resource already has a reference count
-  // assigned. No additional reference is taken.
-  Buffer_Dev(PassRef, PP_Resource resource);
+  Buffer_Dev(Instance* instance, uint32_t size);
 
   // Unmap the underlying shared memory.
   virtual ~Buffer_Dev();

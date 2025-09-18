@@ -1,14 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/gamepad/gamepad_service.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "content/browser/gamepad/gamepad_data_fetcher.h"
+#include "content/browser/gamepad/data_fetcher.h"
 #include "content/browser/gamepad/gamepad_provider.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 
 namespace content {
@@ -16,33 +19,43 @@ namespace content {
 GamepadService::GamepadService() : num_readers_(0) {
 }
 
-GamepadService::GamepadService(scoped_ptr<GamepadDataFetcher> fetcher)
-    : num_readers_(0),
-      provider_(new GamepadProvider(fetcher.Pass())) {
-  thread_checker_.DetachFromThread();
-}
-
 GamepadService::~GamepadService() {
 }
 
 GamepadService* GamepadService::GetInstance() {
-  return Singleton<GamepadService,
-                   LeakySingletonTraits<GamepadService> >::get();
+  return Singleton<GamepadService>::get();
 }
 
-void GamepadService::AddConsumer() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
+void GamepadService::Start(
+    GamepadDataFetcher* data_fetcher,
+    content::RenderProcessHost* associated_rph) {
   num_readers_++;
-  DCHECK(num_readers_ > 0);
   if (!provider_)
-    provider_.reset(new GamepadProvider);
+    provider_ = new GamepadProvider(data_fetcher);
+  DCHECK(num_readers_ > 0);
   provider_->Resume();
+
+  content::BrowserThread::PostTask(
+      content::BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&GamepadService::RegisterForCloseNotification,
+                 base::Unretained(this),
+                 associated_rph));
 }
 
-void GamepadService::RemoveConsumer() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+void GamepadService::RegisterForCloseNotification(
+    content::RenderProcessHost* rph) {
+  registrar_.Add(this,
+                 content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
+                 content::Source<content::RenderProcessHost>(rph));
+}
 
+base::SharedMemoryHandle GamepadService::GetSharedMemoryHandle(
+    base::ProcessHandle handle) {
+  return provider_->GetRendererSharedMemoryHandle(handle);
+}
+
+void GamepadService::Stop() {
   --num_readers_;
   DCHECK(num_readers_ >= 0);
 
@@ -50,20 +63,14 @@ void GamepadService::RemoveConsumer() {
     provider_->Pause();
 }
 
-void GamepadService::RegisterForUserGesture(const base::Closure& closure) {
-  DCHECK(num_readers_ > 0);
-  DCHECK(thread_checker_.CalledOnValidThread());
-  provider_->RegisterForUserGesture(closure);
+void GamepadService::Observe(int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_CLOSED);
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&GamepadService::Stop, base::Unretained(this)));
 }
 
-void GamepadService::Terminate() {
-  provider_.reset();
-}
-
-base::SharedMemoryHandle GamepadService::GetSharedMemoryHandleForProcess(
-    base::ProcessHandle handle) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return provider_->GetSharedMemoryHandleForProcess(handle);
-}
-
-}  // namespace content
+} // namespace content

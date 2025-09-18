@@ -4,8 +4,7 @@
 
 #ifndef CHROME_BROWSER_HISTORY_VISIT_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_VISIT_DATABASE_H_
-
-#include <vector>
+#pragma once
 
 #include "chrome/browser/history/history_types.h"
 
@@ -15,8 +14,6 @@ class Statement;
 }
 
 namespace history {
-
-class VisitFilter;
 
 // A visit database is one which stores visits for URLs, that is, times and
 // linking information. A visit database must also be a URLDatabase, as this
@@ -58,23 +55,10 @@ class VisitDatabase {
   // may still be no matches).
   bool GetVisitsForURL(URLID url_id, VisitVector* visits);
 
-  // Fills in the given vector with the visits for the given page ID which
-  // should be user-visible, which excludes things like redirects and subframes,
-  // and match the set of options passed, sorted in ascending order of date.
-  //
-  // Returns true if there are more results available, i.e. if the number of
-  // results was restricted by |options.max_count|.
-  bool GetVisibleVisitsForURL(URLID url_id,
-                              const QueryOptions& options,
-                              VisitVector* visits);
-
-  // Fills the vector with all visits with times in the given list.
-  //
-  // The results will be in no particular order.  Also, no duplicate
-  // detection is performed, so if |times| has duplicate times,
-  // |visits| may have duplicate visits.
-  bool GetVisitsForTimes(const std::vector<base::Time>& times,
-                         VisitVector* visits);
+  // Fills in the given vector with all of the visits for the given page ID that
+  // have the |is_indexed| field set to true, in no particular order.
+  // Returns true on success (although there may still be no matches).
+  bool GetIndexedVisitsForURL(URLID url_id, VisitVector* visits);
 
   // Fills all visits in the time range [begin, end) to the given vector. Either
   // time can be is_null(), in which case the times in that direction are
@@ -114,22 +98,9 @@ class VisitDatabase {
   //
   // Only one visit for each URL will be returned, and it will be the most
   // recent one in the time range.
-  //
-  // Returns true if there are more results available, i.e. if the number of
-  // results was restricted by |options.max_count|.
-  bool GetVisibleVisitsInRange(const QueryOptions& options,
+  void GetVisibleVisitsInRange(base::Time begin_time, base::Time end_time,
+                               int max_count,
                                VisitVector* visits);
-
-  // Fills all visits in the given time ranges into the given vector that are
-  // visits made directly by the user (typed or bookmarked visits only). The
-  // begin time is inclusive, the end time is exclusive.
-  //
-  // Up to |max_count| visits will be returned. If there are more visits than
-  // that, the most recent |max_count| will be returned. If 0, all visits in the
-  // range will be computed.
-  void GetDirectVisitsDuringTimes(const VisitFilter& time_filter,
-                                   int max_count,
-                                   VisitVector* visits);
 
   // Returns the visit ID for the most recent visit of the given URL ID, or 0
   // if there is no visit for the URL.
@@ -185,12 +156,6 @@ class VisitDatabase {
   void GetVisitsSource(const VisitVector& visits,
                        VisitSourceMap* sources);
 
-  // Obtains BriefVisitInfo for the specified number of most recent visits
-  // from the visit database.
-  void GetBriefVisitInfoOfMostRecentVisits(
-      int max_visits,
-      std::vector<BriefVisitInfo>* result_vector);
-
  protected:
   // Returns the database for the functions in this interface.
   virtual sql::Connection& GetDB() = 0;
@@ -207,27 +172,10 @@ class VisitDatabase {
   // hasn't happened yet.
   static bool FillVisitVector(sql::Statement& statement, VisitVector* visits);
 
-  // Convenience to fill a VisitVector while respecting the set of options.
-  // |statement| should order the query decending by visit_time to ensure
-  // correct duplicate management behavior. Assumes that statement.step()
-  // hasn't happened yet.
-  static bool FillVisitVectorWithOptions(sql::Statement& statement,
-                                         const QueryOptions& options,
-                                         VisitVector* visits);
-
-  // Called by the derived classes to migrate the older visits table which
-  // don't have visit_duration column yet.
-  bool MigrateVisitsWithoutDuration();
-
  private:
-
   DISALLOW_COPY_AND_ASSIGN(VisitDatabase);
 };
 
-// Rows, in order, of the visit table.
-#define HISTORY_VISIT_ROW_FIELDS \
-    " id,url,visit_time,from_visit,transition,segment_id,visit_duration "
-
-}  // namespace history
+}  // history
 
 #endif  // CHROME_BROWSER_HISTORY_VISIT_DATABASE_H_

@@ -4,13 +4,12 @@
  */
 
 /* From trusted/ppb_file_chooser_trusted.idl,
- *   modified Fri Mar 16 10:00:48 2012.
+ *   modified Wed Jan  4 11:09:00 2012.
  */
 
 #ifndef PPAPI_C_TRUSTED_PPB_FILE_CHOOSER_TRUSTED_H_
 #define PPAPI_C_TRUSTED_PPB_FILE_CHOOSER_TRUSTED_H_
 
-#include "ppapi/c/pp_array_output.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_macros.h"
@@ -19,8 +18,7 @@
 #include "ppapi/c/pp_var.h"
 
 #define PPB_FILECHOOSER_TRUSTED_INTERFACE_0_5 "PPB_FileChooserTrusted;0.5"
-#define PPB_FILECHOOSER_TRUSTED_INTERFACE_0_6 "PPB_FileChooserTrusted;0.6"
-#define PPB_FILECHOOSER_TRUSTED_INTERFACE PPB_FILECHOOSER_TRUSTED_INTERFACE_0_6
+#define PPB_FILECHOOSER_TRUSTED_INTERFACE PPB_FILECHOOSER_TRUSTED_INTERFACE_0_5
 
 /**
  * @file
@@ -32,7 +30,7 @@
  * @addtogroup Interfaces
  * @{
  */
-struct PPB_FileChooserTrusted_0_6 {
+struct PPB_FileChooserTrusted_0_5 {
   /**
    * This function displays a previously created file chooser resource as a
    * dialog box, prompting the user to choose a file or files to open, or a
@@ -54,18 +52,10 @@ struct PPB_FileChooserTrusted_0_6 {
   int32_t (*ShowWithoutUserGesture)(PP_Resource chooser,
                                     PP_Bool save_as,
                                     struct PP_Var suggested_file_name,
-                                    struct PP_ArrayOutput output,
                                     struct PP_CompletionCallback callback);
 };
 
-typedef struct PPB_FileChooserTrusted_0_6 PPB_FileChooserTrusted;
-
-struct PPB_FileChooserTrusted_0_5 {
-  int32_t (*ShowWithoutUserGesture)(PP_Resource chooser,
-                                    PP_Bool save_as,
-                                    struct PP_Var suggested_file_name,
-                                    struct PP_CompletionCallback callback);
-};
+typedef struct PPB_FileChooserTrusted_0_5 PPB_FileChooserTrusted;
 /**
  * @}
  */

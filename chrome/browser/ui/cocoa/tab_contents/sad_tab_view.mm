@@ -1,17 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/tab_contents/sad_tab_view.h"
 
 #include "base/logging.h"
-#include "base/strings/sys_string_conversions.h"
+#include "base/sys_string_conversions.h"
+#import "chrome/browser/ui/cocoa/hyperlink_button_cell.h"
 #import "chrome/browser/ui/cocoa/hyperlink_text_view.h"
 #include "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -33,7 +34,8 @@ static const CGFloat kTabHorzMargin = 13;
 - (void)awakeFromNib {
   // Load resource for image and set it.
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  NSImage* image = rb.GetNativeImageNamed(IDR_SAD_TAB).ToNSImage();
+  NSImage* image = rb.GetNativeImageNamed(IDR_SAD_TAB);
+  DCHECK(image);
   [image_ setImage:image];
 
   // Set font for title.
@@ -147,7 +149,7 @@ static const CGFloat kTabHorzMargin = 13;
   // Get the help text and link.
   size_t linkOffset = 0;
   NSString* helpMessage(base::SysUTF16ToNSString(l10n_util::GetStringFUTF16(
-      IDS_SAD_TAB_HELP_MESSAGE, base::string16(), &linkOffset)));
+      IDS_SAD_TAB_HELP_MESSAGE, string16(), &linkOffset)));
   NSString* helpLink = l10n_util::GetNSString(IDS_SAD_TAB_HELP_LINK);
   NSFont* font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
   [help_.get() setMessageAndLink:helpMessage

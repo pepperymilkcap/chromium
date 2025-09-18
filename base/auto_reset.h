@@ -4,19 +4,18 @@
 
 #ifndef BASE_AUTO_RESET_H_
 #define BASE_AUTO_RESET_H_
+#pragma once
 
 #include "base/basictypes.h"
 
-// base::AutoReset<> is useful for setting a variable to a new value only within
-// a particular scope. An base::AutoReset<> object resets a variable to its
-// original value upon destruction, making it an alternative to writing
-// "var = false;" or "var = old_val;" at all of a block's exit points.
+// AutoReset<> is useful for setting a variable to a new value only within a
+// particular scope. An AutoReset<> object resets a variable to its original
+// value upon destruction, making it an alternative to writing "var = false;"
+// or "var = old_val;" at all of a block's exit points.
 //
-// This should be obvious, but note that an base::AutoReset<> instance should
-// have a shorter lifetime than its scoped_variable, to prevent invalid memory
-// writes when the base::AutoReset<> object is destroyed.
-
-namespace base {
+// This should be obvious, but note that an AutoReset<> instance should have a
+// shorter lifetime than its scoped_variable, to prevent invalid memory writes
+// when the AutoReset<> object is destroyed.
 
 template<typename T>
 class AutoReset {
@@ -35,7 +34,5 @@ class AutoReset {
 
   DISALLOW_COPY_AND_ASSIGN(AutoReset);
 };
-
-}
 
 #endif  // BASE_AUTO_RESET_H_

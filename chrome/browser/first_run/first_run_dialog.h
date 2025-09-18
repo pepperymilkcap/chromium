@@ -4,14 +4,14 @@
 
 #ifndef CHROME_BROWSER_FIRST_RUN_FIRST_RUN_DIALOG_H_
 #define CHROME_BROWSER_FIRST_RUN_FIRST_RUN_DIALOG_H_
+#pragma once
 
 class Profile;
 
 namespace first_run {
 
 // Shows the first run dialog. Only called if IsOrganicFirstRun() is true.
-// Returns true if the dialog was shown.
-bool ShowFirstRunDialog(Profile* profile);
+void ShowFirstRunDialog(Profile* profile);
 
 }  // namespace first_run
 

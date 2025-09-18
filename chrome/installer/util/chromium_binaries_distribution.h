@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,6 +6,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_CHROMIUM_BINARIES_DISTRIBUTION_H_
 #define CHROME_INSTALLER_UTIL_CHROMIUM_BINARIES_DISTRIBUTION_H_
+#pragma once
 
 #include <string>
 
@@ -13,48 +14,41 @@
 
 class ChromiumBinariesDistribution : public BrowserDistribution {
  public:
-  virtual base::string16 GetAppGuid() OVERRIDE;
+  virtual std::wstring GetAppGuid() OVERRIDE;
 
-  virtual base::string16 GetBrowserProgIdPrefix() OVERRIDE;
+  virtual std::wstring GetApplicationName() OVERRIDE;
 
-  virtual base::string16 GetBrowserProgIdDesc() OVERRIDE;
+  virtual std::wstring GetAppShortCutName() OVERRIDE;
 
-  virtual base::string16 GetDisplayName() OVERRIDE;
+  virtual std::wstring GetAlternateApplicationName() OVERRIDE;
 
-  virtual base::string16 GetShortcutName(ShortcutType shortcut_type) OVERRIDE;
+  virtual std::wstring GetBrowserAppId() OVERRIDE;
 
-  virtual int GetIconIndex(ShortcutType shortcut_type) OVERRIDE;
+  virtual std::wstring GetInstallSubDir() OVERRIDE;
 
-  virtual base::string16 GetBaseAppName() OVERRIDE;
+  virtual std::wstring GetPublisherName() OVERRIDE;
 
-  virtual base::string16 GetBaseAppId() OVERRIDE;
+  virtual std::wstring GetAppDescription() OVERRIDE;
 
-  virtual base::string16 GetInstallSubDir() OVERRIDE;
-
-  virtual base::string16 GetPublisherName() OVERRIDE;
-
-  virtual base::string16 GetAppDescription() OVERRIDE;
-
-  virtual base::string16 GetLongAppDescription() OVERRIDE;
+  virtual std::wstring GetLongAppDescription() OVERRIDE;
 
   virtual std::string GetSafeBrowsingName() OVERRIDE;
 
-  virtual base::string16 GetStateKey() OVERRIDE;
+  virtual std::wstring GetStateKey() OVERRIDE;
 
-  virtual base::string16 GetStateMediumKey() OVERRIDE;
+  virtual std::wstring GetStateMediumKey() OVERRIDE;
 
-  virtual base::string16 GetUninstallLinkName() OVERRIDE;
+  virtual std::wstring GetUninstallLinkName() OVERRIDE;
 
-  virtual base::string16 GetUninstallRegPath() OVERRIDE;
+  virtual std::wstring GetUninstallRegPath() OVERRIDE;
 
-  virtual base::string16 GetVersionKey() OVERRIDE;
+  virtual std::wstring GetVersionKey() OVERRIDE;
 
-  virtual DefaultBrowserControlPolicy GetDefaultBrowserControlPolicy() OVERRIDE;
+  virtual bool CanSetAsDefault() OVERRIDE;
 
-  virtual bool GetChromeChannel(base::string16* channel) OVERRIDE;
+  virtual int GetIconIndex() OVERRIDE;
 
-  virtual bool GetCommandExecuteImplClsid(
-      base::string16* handler_class_uuid) OVERRIDE;
+  virtual bool GetChromeChannel(std::wstring* channel) OVERRIDE;
 
  protected:
   friend class BrowserDistribution;

@@ -1,13 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_FETCHER_H_
 #define CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_FETCHER_H_
+#pragma once
 
 #include "base/memory/scoped_vector.h"
-#include "base/strings/string16.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "base/string16.h"
 #include "ui/gfx/native_widget_types.h"
 
 class GURL;
@@ -15,54 +15,40 @@ class Profile;
 class TemplateURL;
 class TemplateURLFetcherCallbacks;
 
-namespace content {
-class WebContents;
-}
-
 // TemplateURLFetcher is responsible for downloading OpenSearch description
 // documents, creating a TemplateURL from the OSDD, and adding the TemplateURL
 // to the TemplateURLService. Downloading is done in the background.
 //
-class TemplateURLFetcher : public BrowserContextKeyedService {
+class TemplateURLFetcher {
  public:
   enum ProviderType {
     AUTODETECTED_PROVIDER,
-    EXPLICIT_PROVIDER  // Supplied by Javascript.
+    EXPLICIT_PROVIDER,  // Supplied by Javascript.
+    EXPLICIT_DEFAULT_PROVIDER  // Supplied by Javascript as default provider.
   };
 
   // Creates a TemplateURLFetcher with the specified Profile.
   explicit TemplateURLFetcher(Profile* profile);
-  virtual ~TemplateURLFetcher();
+  ~TemplateURLFetcher();
 
   // If TemplateURLFetcher is not already downloading the OSDD for osdd_url,
   // it is downloaded. If successful and the result can be parsed, a TemplateURL
   // is added to the TemplateURLService. Takes ownership of |callbacks|.
-  //
-  // If |provider_type| is AUTODETECTED_PROVIDER, |keyword| must be non-empty,
-  // and if there's already a non-replaceable TemplateURL in the model for
-  // |keyword|, or we're already downloading an OSDD for this keyword, no
-  // download is started.  If |provider_type| is EXPLICIT_PROVIDER, |keyword| is
-  // ignored.
-  //
-  // |web_contents| specifies which WebContents displays the page the OSDD is
-  // downloaded for. |web_contents| must not be NULL, except during tests.
-  void ScheduleDownload(const base::string16& keyword,
+  void ScheduleDownload(const string16& keyword,
                         const GURL& osdd_url,
                         const GURL& favicon_url,
-                        content::WebContents* web_contents,
                         TemplateURLFetcherCallbacks* callbacks,
                         ProviderType provider_type);
 
   // The current number of outstanding requests.
-  int requests_count() const { return requests_.size(); }
+  int requests_count() const { return requests_->size(); }
 
  private:
+  friend class RequestDelegate;
+
   // A RequestDelegate is created to download each OSDD. When done downloading
   // RequestCompleted is invoked back on the TemplateURLFetcher.
   class RequestDelegate;
-  friend class RequestDelegate;
-
-  typedef ScopedVector<RequestDelegate> Requests;
 
   Profile* profile() const { return profile_; }
 
@@ -72,7 +58,7 @@ class TemplateURLFetcher : public BrowserContextKeyedService {
   Profile* profile_;
 
   // In progress requests.
-  Requests requests_;
+  ScopedVector<RequestDelegate> requests_;
 
   DISALLOW_COPY_AND_ASSIGN(TemplateURLFetcher);
 };

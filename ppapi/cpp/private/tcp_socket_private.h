@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,16 @@
 
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/private/ppb_tcp_socket_private.h"
-#include "ppapi/cpp/pass_ref.h"
-#include "ppapi/cpp/private/x509_certificate_private.h"
 #include "ppapi/cpp/resource.h"
 
 namespace pp {
 
 class CompletionCallback;
-class InstanceHandle;
+class Instance;
 
 class TCPSocketPrivate : public Resource {
  public:
-  explicit TCPSocketPrivate(const InstanceHandle& instance);
-
-  TCPSocketPrivate(PassRef, PP_Resource resource);
+  explicit TCPSocketPrivate(Instance* instance);
 
   // Returns true if the required interface is available.
   static bool IsAvailable();
@@ -35,10 +31,6 @@ class TCPSocketPrivate : public Resource {
   int32_t SSLHandshake(const char* server_name,
                        uint16_t server_port,
                        const CompletionCallback& callback);
-  X509CertificatePrivate GetServerCertificate();
-  bool AddChainBuildingCertificate(const X509CertificatePrivate& cert,
-                                   bool trusted);
-
   int32_t Read(char* buffer,
                int32_t bytes_to_read,
                const CompletionCallback& callback);
@@ -46,9 +38,6 @@ class TCPSocketPrivate : public Resource {
                 int32_t bytes_to_write,
                 const CompletionCallback& callback);
   void Disconnect();
-  int32_t SetOption(PP_TCPSocketOption_Private name,
-                    const Var& value,
-                    const CompletionCallback& callback);
 };
 
 }  // namespace pp

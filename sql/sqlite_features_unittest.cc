@@ -1,12 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
-#include "base/bind.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/scoped_temp_dir.h"
+#include "base/path_service.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -16,48 +16,66 @@
 
 namespace {
 
-void CaptureErrorCallback(int* error_pointer, std::string* sql_text,
-                          int error, sql::Statement* stmt) {
-  *error_pointer = error;
-  const char* text = stmt ? stmt->GetSQLStatement() : NULL;
-  *sql_text = text ? text : "no statement available";
-}
+
+class StatementErrorHandler : public sql::ErrorDelegate {
+ public:
+  StatementErrorHandler() : error_(SQLITE_OK) {}
+
+  virtual int OnError(int error, sql::Connection* connection,
+                      sql::Statement* stmt) {
+    error_ = error;
+    const char* sql_txt = stmt ? stmt->GetSQLStatement() : NULL;
+    sql_text_ = sql_txt ? sql_txt : "no statement available";
+    return error;
+  }
+
+  int error() const { return error_; }
+
+  void reset_error() {
+    sql_text_.clear();
+    error_ = SQLITE_OK;
+  }
+
+  const char* sql_statement() const { return sql_text_.c_str(); }
+
+ private:
+  int error_;
+  std::string sql_text_;
+};
 
 class SQLiteFeaturesTest : public testing::Test {
  public:
-  SQLiteFeaturesTest() : error_(SQLITE_OK) {}
+  SQLiteFeaturesTest() : error_handler_(new StatementErrorHandler) {}
 
-  virtual void SetUp() {
-    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    ASSERT_TRUE(db_.Open(temp_dir_.path().AppendASCII("SQLStatementTest.db")));
-
-    // The error delegate will set |error_| and |sql_text_| when any sqlite
-    // statement operation returns an error code.
-    db_.set_error_callback(base::Bind(&CaptureErrorCallback,
-                                      &error_, &sql_text_));
+  void SetUp() {
+    ASSERT_TRUE(PathService::Get(base::DIR_TEMP, &path_));
+    path_ = path_.AppendASCII("SQLStatementTest.db");
+    file_util::Delete(path_, false);
+    ASSERT_TRUE(db_.Open(path_));
+    // The |error_handler_| will be called if any sqlite statement operation
+    // returns an error code.
+    db_.set_error_delegate(error_handler_);
   }
 
-  virtual void TearDown() {
+  void TearDown() {
     // If any error happened the original sql statement can be found in
-    // |sql_text_|.
-    EXPECT_EQ(SQLITE_OK, error_);
+    // error_handler_->sql_statement().
+    EXPECT_EQ(SQLITE_OK, error_handler_->error());
     db_.Close();
+    // If this fails something is going on with cleanup and later tests may
+    // fail, so we want to identify problems right away.
+    ASSERT_TRUE(file_util::Delete(path_, false));
   }
 
   sql::Connection& db() { return db_; }
 
-  int sqlite_error() const {
-    return error_;
-  }
+  int sqlite_error() const { return error_handler_->error(); }
+  void reset_error() const { error_handler_->reset_error(); }
 
  private:
-  base::ScopedTempDir temp_dir_;
+  FilePath path_;
   sql::Connection db_;
-
-  // The error code of the most recent error.
-  int error_;
-  // Original statement which has caused the error.
-  std::string sql_text_;
+  scoped_refptr<StatementErrorHandler> error_handler_;
 };
 
 // Do not include fts1 support, it is not useful, and nobody is
@@ -67,16 +85,13 @@ TEST_F(SQLiteFeaturesTest, NoFTS1) {
       "CREATE VIRTUAL TABLE foo USING fts1(x)"));
 }
 
-#if !defined(OS_IOS)
-// fts2 is used for older history files, so we're signed on for keeping our
-// version up-to-date.  iOS does not include fts2, so this test does not run on
-// iOS.
+// fts2 is used for older history files, so we're signed on for
+// keeping our version up-to-date.
 // TODO(shess): Think up a crazy way to get out from having to support
 // this forever.
 TEST_F(SQLiteFeaturesTest, FTS2) {
   ASSERT_TRUE(db().Execute("CREATE VIRTUAL TABLE foo USING fts2(x)"));
 }
-#endif
 
 // fts3 is used for current history files, and also for WebDatabase.
 TEST_F(SQLiteFeaturesTest, FTS3) {

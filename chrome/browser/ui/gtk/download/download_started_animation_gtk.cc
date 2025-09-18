@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,19 @@
 
 #include <gtk/gtk.h>
 
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
+#include "ui/base/animation/linear_animation.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/animation/linear_animation.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -25,9 +30,15 @@ const int kMoveTimeMs = 600;
 // The animation framerate.
 const int kFrameRateHz = 60;
 
-class DownloadStartedAnimationGtk : public gfx::LinearAnimation {
+// What fraction of the frame height to move downward from the frame center.
+// Note that setting this greater than 0.5 will mean moving past the bottom of
+// the frame.
+const double kMoveFraction = 1.0 / 3.0;
+
+class DownloadStartedAnimationGtk : public ui::LinearAnimation,
+                                    public content::NotificationObserver {
  public:
-  explicit DownloadStartedAnimationGtk(content::WebContents* web_contents);
+  explicit DownloadStartedAnimationGtk(WebContents* web_contents);
 
   // DownloadStartedAnimation will delete itself, but this is public so
   // that we can use DeleteSoon().
@@ -41,7 +52,12 @@ class DownloadStartedAnimationGtk : public gfx::LinearAnimation {
   void Close();
 
   // Animation implementation.
-  virtual void AnimateToState(double state) OVERRIDE;
+  virtual void AnimateToState(double state);
+
+  // NotificationObserver
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
 
   // The top level window that floats over the browser and displays the
   // image.
@@ -51,6 +67,9 @@ class DownloadStartedAnimationGtk : public gfx::LinearAnimation {
   int width_;
   int height_;
 
+  // The content area holding us.
+  WebContents* web_contents_;
+
   // The content area at the start of the animation. We store this so that the
   // download shelf's resizing of the content area doesn't cause the animation
   // to move around. This means that once started, the animation won't move
@@ -58,18 +77,21 @@ class DownloadStartedAnimationGtk : public gfx::LinearAnimation {
   // much heartbreak.
   gfx::Rect web_contents_bounds_;
 
+  // A scoped container for notification registries.
+  content::NotificationRegistrar registrar_;
+
   DISALLOW_COPY_AND_ASSIGN(DownloadStartedAnimationGtk);
 };
 
 DownloadStartedAnimationGtk::DownloadStartedAnimationGtk(
-    content::WebContents* web_contents)
-    : gfx::LinearAnimation(kMoveTimeMs, kFrameRateHz, NULL),
-      popup_(NULL) {
+    WebContents* web_contents)
+    : ui::LinearAnimation(kMoveTimeMs, kFrameRateHz, NULL),
+      popup_(NULL),
+      web_contents_(web_contents) {
   static GdkPixbuf* kDownloadImage = NULL;
   if (!kDownloadImage) {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    kDownloadImage = rb.GetNativeImageNamed(
-        IDR_DOWNLOAD_ANIMATION_BEGIN).ToGdkPixbuf();
+    kDownloadImage = rb.GetNativeImageNamed(IDR_DOWNLOAD_ANIMATION_BEGIN);
   }
 
   width_ = gdk_pixbuf_get_width(kDownloadImage);
@@ -77,9 +99,18 @@ DownloadStartedAnimationGtk::DownloadStartedAnimationGtk(
 
   // If we're too small to show the download image, then don't bother -
   // the shelf will be enough.
-  web_contents->GetView()->GetContainerBounds(&web_contents_bounds_);
+  web_contents_->GetContainerBounds(&web_contents_bounds_);
   if (web_contents_bounds_.height() < height_)
     return;
+
+  registrar_.Add(
+      this,
+      content::NOTIFICATION_WEB_CONTENTS_HIDDEN,
+      content::Source<WebContents>(web_contents_));
+  registrar_.Add(
+      this,
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+      content::Source<WebContents>(web_contents_));
 
   // TODO(estade): don't show up on the wrong virtual desktop.
 
@@ -109,6 +140,9 @@ DownloadStartedAnimationGtk::~DownloadStartedAnimationGtk() {
 }
 
 void DownloadStartedAnimationGtk::Reposition() {
+  if (!web_contents_)
+    return;
+
   DCHECK(popup_);
 
   // Align the image with the bottom left of the web contents (so that it
@@ -120,13 +154,29 @@ void DownloadStartedAnimationGtk::Reposition() {
 }
 
 void DownloadStartedAnimationGtk::Close() {
+  if (!web_contents_)
+    return;
+
   DCHECK(popup_);
 
+  registrar_.Remove(
+      this,
+      content::NOTIFICATION_WEB_CONTENTS_HIDDEN,
+      content::Source<WebContents>(web_contents_));
+  registrar_.Remove(
+      this,
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+      content::Source<WebContents>(web_contents_));
+
+  web_contents_ = NULL;
   gtk_widget_destroy(popup_);
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void DownloadStartedAnimationGtk::AnimateToState(double state) {
+  if (!web_contents_)
+    return;
+
   if (state >= 1.0) {
     Close();
   } else {
@@ -141,10 +191,17 @@ void DownloadStartedAnimationGtk::AnimateToState(double state) {
   }
 }
 
+void DownloadStartedAnimationGtk::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  Close();
+}
+
 }  // namespace
 
 // static
-void DownloadStartedAnimation::Show(content::WebContents* web_contents) {
+void DownloadStartedAnimation::Show(WebContents* web_contents) {
   // The animation will delete itself.
   new DownloadStartedAnimationGtk(web_contents);
 }

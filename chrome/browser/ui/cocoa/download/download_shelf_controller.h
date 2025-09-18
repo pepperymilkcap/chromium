@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/view_resizer.h"
-#include "ui/base/cocoa/tracking_area.h"
 
 @class AnimatableView;
+class BaseDownloadItemModel;
 class Browser;
 @class BrowserWindowController;
 @class DownloadItemController;
@@ -17,11 +18,6 @@ class DownloadShelf;
 @class DownloadShelfView;
 @class HyperlinkButtonCell;
 @class HoverButton;
-
-namespace content {
-class DownloadItem;
-class PageNavigator;
-}
 
 // A controller class that manages the download shelf for one window. It is
 // responsible for the behavior of the shelf itself (showing/hiding, handling
@@ -44,19 +40,9 @@ class PageNavigator;
  @private
   IBOutlet HoverButton* hoverCloseButton_;
 
-  // YES if the download shelf is intended to be displayed. The shelf animates
-  // out when it is closing. During this time, barIsVisible_ is NO although the
-  // shelf is still visible on screen.
   BOOL barIsVisible_;
 
-  // YES if the containing browser window is fullscreen.
   BOOL isFullscreen_;
-
-  // YES if the shelf should be closed when the mouse leaves the shelf.
-  BOOL shouldCloseOnMouseExit_;
-
-  // YES if the mouse is currently over the download shelf.
-  BOOL isMouseInsideView_;
 
   scoped_ptr<DownloadShelf> bridge_;
 
@@ -67,39 +53,25 @@ class PageNavigator;
   // out.
   CGFloat currentShelfHeight_;
 
-  // Used to autoclose the shelf when the mouse is moved off it.
-  ui::ScopedCrTrackingArea trackingArea_;
+  // Used to autoclose the shelf when the mouse is moved off it.  Is non-nil
+  // only when a subsequent mouseExited event can trigger autoclose or when a
+  // subsequent mouseEntered event will cancel autoclose.  Is nil otherwise.
+  scoped_nsobject<NSTrackingArea> trackingArea_;
 
   // The download items we have added to our shelf.
-  base::scoped_nsobject<NSMutableArray> downloadItemControllers_;
+  scoped_nsobject<NSMutableArray> downloadItemControllers_;
 
   // The container that contains (and clamps) all the download items.
   IBOutlet NSView* itemContainerView_;
 
   // Delegate that handles resizing our view.
   id<ViewResizer> resizeDelegate_;
-
-  // Used for loading pages.
-  content::PageNavigator* navigator_;
 };
 
 - (id)initWithBrowser:(Browser*)browser
        resizeDelegate:(id<ViewResizer>)resizeDelegate;
 
-// Run when the user clicks the 'Show All' button.
 - (IBAction)showDownloadsTab:(id)sender;
-
-// Run when the user clicks the close button on the right side of the shelf.
-- (IBAction)handleClose:(id)sender;
-
-// Shows or hides the download shelf based on the value of |show|.
-// |isUserAction| should be YES if the operation is being triggered based on a
-// user action (currently only relevant when hiding the shelf).
-// Note: This is intended to be invoked from DownloadShelfMac. If invoked
-// directly, the shelf visibility state maintained by DownloadShelf and the
-// owning Browser will not be updated.
-- (void)showDownloadShelf:(BOOL)show
-             isUserAction:(BOOL)isUserAction;
 
 // Returns our view cast as an AnimatableView.
 - (AnimatableView*)animatableView;
@@ -107,12 +79,12 @@ class PageNavigator;
 - (DownloadShelf*)bridge;
 - (BOOL)isVisible;
 
-// Add a new download item to the leftmost position of the download shelf. The
-// item should not have been already added to this shelf.
-- (void)addDownloadItem:(content::DownloadItem*)downloadItem;
+- (IBAction)show:(id)sender;
 
-// Similar to addDownloadItem above, but adds a DownloadItemController.
-- (void)add:(DownloadItemController*)download;
+// Run when the user clicks the close button on the right side of the shelf.
+- (IBAction)hide:(id)sender;
+
+- (void)addDownloadItem:(BaseDownloadItemModel*)model;
 
 // Remove a download, possibly via clearing browser data.
 - (void)remove:(DownloadItemController*)download;
@@ -120,8 +92,7 @@ class PageNavigator;
 // Called by individual item controllers when their downloads are opened.
 - (void)downloadWasOpened:(DownloadItemController*)download;
 
-// Notification that the download shelf is going to be destroyed and should
-// release the downloads.
+// Notification that we are closing and should release our downloads.
 - (void)exiting;
 
 // Return the height of the download shelf.

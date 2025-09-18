@@ -1,8 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/models/menu_model_delegate.h"
@@ -18,11 +18,14 @@ namespace {
 const int kRootIdBase = 100;
 const int kSubmenuIdBase = 200;
 
+// Offset to return for GetFirstItemIndex().  This is an arbitrary
+// number to ensure that we aren't assuming it is 0.
+const int kFirstItemIndex = 25;
+
 class MenuModelBase : public ui::MenuModel {
  public:
-  explicit MenuModelBase(int command_id_base)
-      : command_id_base_(command_id_base),
-        last_activation_(-1) {
+  MenuModelBase(int command_id_base) : command_id_base_(command_id_base),
+                                       last_activation_(-1) {
   }
 
   virtual ~MenuModelBase() {
@@ -34,25 +37,24 @@ class MenuModelBase : public ui::MenuModel {
     return false;
   }
 
+  virtual int GetFirstItemIndex(gfx::NativeMenu native_menu) const OVERRIDE {
+    return kFirstItemIndex;
+  }
+
   virtual int GetItemCount() const OVERRIDE {
     return static_cast<int>(items_.size());
   }
 
   virtual ItemType GetTypeAt(int index) const OVERRIDE {
-    return items_[index].type;
-  }
-
-  virtual ui::MenuSeparatorType GetSeparatorTypeAt(
-      int index) const OVERRIDE {
-    return ui::NORMAL_SEPARATOR;
+    return items_[index - GetFirstItemIndex(NULL)].type;
   }
 
   virtual int GetCommandIdAt(int index) const OVERRIDE {
-    return index + command_id_base_;
+    return index - GetFirstItemIndex(NULL) + command_id_base_;
   }
 
-  virtual base::string16 GetLabelAt(int index) const OVERRIDE {
-    return items_[index].label;
+  string16 GetLabelAt(int index) const OVERRIDE {
+    return items_[index - GetFirstItemIndex(NULL)].label;
   }
 
   virtual bool IsItemDynamicAt(int index) const OVERRIDE {
@@ -76,7 +78,7 @@ class MenuModelBase : public ui::MenuModel {
     return 0;
   }
 
-  virtual bool GetIconAt(int index, gfx::Image* icon) OVERRIDE {
+  virtual bool GetIconAt(int index, SkBitmap* icon) OVERRIDE {
     return false;
   }
 
@@ -94,7 +96,7 @@ class MenuModelBase : public ui::MenuModel {
   }
 
   virtual MenuModel* GetSubmenuModelAt(int index) const OVERRIDE {
-    return items_[index].submenu;
+    return items_[index - GetFirstItemIndex(NULL)].submenu;
   }
 
   virtual void HighlightChangedTo(int index) OVERRIDE {
@@ -118,22 +120,18 @@ class MenuModelBase : public ui::MenuModel {
       ui::MenuModelDelegate* delegate) OVERRIDE {
   }
 
-  virtual ui::MenuModelDelegate* GetMenuModelDelegate() const OVERRIDE {
-    return NULL;
-  }
-
   // Item definition.
   struct Item {
     Item(ItemType item_type,
          const std::string& item_label,
          ui::MenuModel* item_submenu)
         : type(item_type),
-          label(base::ASCIIToUTF16(item_label)),
+          label(ASCIIToUTF16(item_label)),
           submenu(item_submenu) {
     }
 
     ItemType type;
-    base::string16 label;
+    string16 label;
     ui::MenuModel* submenu;
   };
 
@@ -249,7 +247,7 @@ TEST_F(MenuModelAdapterTest, BasicTest) {
 
     // Check activation.
     static_cast<views::MenuDelegate*>(&delegate)->ExecuteCommand(id);
-    EXPECT_EQ(i, model.last_activation());
+    EXPECT_EQ(i + kFirstItemIndex, model.last_activation());
     model.set_last_activation(-1);
   }
 
@@ -260,7 +258,7 @@ TEST_F(MenuModelAdapterTest, BasicTest) {
 
   for (int i = 0; i < subitem_container->child_count(); ++i) {
     MenuModelBase* submodel = static_cast<MenuModelBase*>(
-        model.GetSubmenuModelAt(3));
+        model.GetSubmenuModelAt(3 + kFirstItemIndex));
     EXPECT_TRUE(submodel);
 
     const MenuModelBase::Item& model_item = submodel->GetItemDefinition(i);
@@ -296,7 +294,7 @@ TEST_F(MenuModelAdapterTest, BasicTest) {
 
     // Check activation.
     static_cast<views::MenuDelegate*>(&delegate)->ExecuteCommand(id);
-    EXPECT_EQ(i, submodel->last_activation());
+    EXPECT_EQ(i + kFirstItemIndex, submodel->last_activation());
     submodel->set_last_activation(-1);
   }
 

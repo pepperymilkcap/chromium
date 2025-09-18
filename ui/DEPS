@@ -1,4 +1,8 @@
 include_rules = [
-  # Components within ui must state their dependencies explicitly.
-  "-ui",
+  "+grit/app_locale_settings.h",
+  "+grit/ui_resources_standard.h",
+  "+grit/ui_strings.h",
+  "+net",
+  "+skia",
+  "+third_party/mozilla",
 ]

@@ -1,19 +1,28 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_RENDERER_DOCUMENT_STATE_H_
 #define CONTENT_PUBLIC_RENDERER_DOCUMENT_STATE_H_
+#pragma once
 
 #include <string>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/supports_user_data.h"
-#include "base/time/time.h"
-#include "content/common/content_export.h"
-#include "net/http/http_response_info.h"
-#include "third_party/WebKit/public/web/WebDataSource.h"
+#include "base/time.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+
+namespace webkit {
+namespace forms {
+struct PasswordForm;
+}
+}
+
+namespace webkit_glue {
+class AltErrorPageResourceFetcher;
+}
 
 namespace content {
 
@@ -21,9 +30,7 @@ class NavigationState;
 
 // The RenderView stores an instance of this class in the "extra data" of each
 // WebDataSource (see RenderView::DidCreateDataSource).
-class CONTENT_EXPORT DocumentState
-    : NON_EXPORTED_BASE(public blink::WebDataSource::ExtraData),
-      public base::SupportsUserData {
+class DocumentState : public WebKit::WebDataSource::ExtraData {
  public:
   // The exact values of this enum are used in histograms, so new values must be
   // added to the end.
@@ -43,7 +50,7 @@ class CONTENT_EXPORT DocumentState
   DocumentState();
   virtual ~DocumentState();
 
-  static DocumentState* FromDataSource(blink::WebDataSource* ds) {
+  static DocumentState* FromDataSource(WebKit::WebDataSource* ds) {
     return static_cast<DocumentState*>(ds->extraData());
   }
 
@@ -127,38 +134,54 @@ class CONTENT_EXPORT DocumentState
     web_timing_histograms_recorded_ = value;
   }
 
+  int http_status_code() const { return http_status_code_; }
+  void set_http_status_code(int http_status_code) {
+    http_status_code_ = http_status_code;
+  }
+
   // Indicator if SPDY was used as part of this page load.
-  bool was_fetched_via_spdy() const { return was_fetched_via_spdy_; }
   void set_was_fetched_via_spdy(bool value) { was_fetched_via_spdy_ = value; }
+  bool was_fetched_via_spdy() const { return was_fetched_via_spdy_; }
 
-  bool was_npn_negotiated() const { return was_npn_negotiated_; }
   void set_was_npn_negotiated(bool value) { was_npn_negotiated_ = value; }
+  bool was_npn_negotiated() const { return was_npn_negotiated_; }
 
-  const std::string& npn_negotiated_protocol() const {
-    return npn_negotiated_protocol_;
-  }
-  void set_npn_negotiated_protocol(const std::string& value) {
-    npn_negotiated_protocol_ = value;
-  }
-
-  bool was_alternate_protocol_available() const {
-    return was_alternate_protocol_available_;
-  }
   void set_was_alternate_protocol_available(bool value) {
     was_alternate_protocol_available_ = value;
   }
-
-  net::HttpResponseInfo::ConnectionInfo connection_info() const {
-    return connection_info_;
-  }
-  void set_connection_info(
-      net::HttpResponseInfo::ConnectionInfo connection_info) {
-    connection_info_ = connection_info;
+  bool was_alternate_protocol_available() const {
+    return was_alternate_protocol_available_;
   }
 
-  bool was_fetched_via_proxy() const { return was_fetched_via_proxy_; }
   void set_was_fetched_via_proxy(bool value) {
     was_fetched_via_proxy_ = value;
+  }
+  bool was_fetched_via_proxy() const { return was_fetched_via_proxy_; }
+
+  const GURL& searchable_form_url() const { return searchable_form_url_; }
+  void set_searchable_form_url(const GURL& url) { searchable_form_url_ = url; }
+  const std::string& searchable_form_encoding() const {
+    return searchable_form_encoding_;
+  }
+  void set_searchable_form_encoding(const std::string& encoding) {
+    searchable_form_encoding_ = encoding;
+  }
+
+  webkit::forms::PasswordForm* password_form_data() const {
+    return password_form_data_.get();
+  }
+  void set_password_form_data(webkit::forms::PasswordForm* data);
+
+  const std::string& security_info() const { return security_info_; }
+  void set_security_info(const std::string& security_info) {
+    security_info_ = security_info;
+  }
+
+  // True if an error page should be used, if the http status code also
+  // indicates an error.
+  bool use_error_page() const { return use_error_page_; }
+  void set_use_error_page(bool use_error_page) {
+    use_error_page_ = use_error_page;
   }
 
   void set_was_prefetcher(bool value) { was_prefetcher_ = value; }
@@ -171,22 +194,36 @@ class CONTENT_EXPORT DocumentState
     return was_referred_by_prefetcher_;
   }
 
-  void set_was_after_preconnect_request(bool value) {
-    was_after_preconnect_request_ = value;
-  }
-  bool was_after_preconnect_request() { return was_after_preconnect_request_; }
-
   // Record the nature of this load, for use when histogramming page load times.
   LoadType load_type() const { return load_type_; }
   void set_load_type(LoadType load_type) { load_type_ = load_type; }
 
+  // Sets the cache policy. The cache policy is only used if explicitly set and
+  // by default is not set. You can mark a NavigationState as not having a cache
+  // state by way of clear_cache_policy_override.
+  void set_cache_policy_override(
+      WebKit::WebURLRequest::CachePolicy cache_policy) {
+    cache_policy_override_ = cache_policy;
+    cache_policy_override_set_ = true;
+  }
+  WebKit::WebURLRequest::CachePolicy cache_policy_override() const {
+    return cache_policy_override_;
+  }
+  void clear_cache_policy_override() {
+    cache_policy_override_set_ = false;
+    cache_policy_override_ = WebKit::WebURLRequest::UseProtocolCachePolicy;
+  }
+  bool is_cache_policy_override_set() const {
+    return cache_policy_override_set_;
+  }
+
+  webkit_glue::AltErrorPageResourceFetcher* alt_error_page_fetcher() const {
+    return alt_error_page_fetcher_.get();
+  }
+  void set_alt_error_page_fetcher(webkit_glue::AltErrorPageResourceFetcher* f);
+
   NavigationState* navigation_state() { return navigation_state_.get(); }
   void set_navigation_state(NavigationState* navigation_state);
-
-  bool can_load_local_resources() const { return can_load_local_resources_; }
-  void set_can_load_local_resources(bool can_load) {
-    can_load_local_resources_ = can_load;
-  }
 
  private:
   base::Time request_time_;
@@ -198,23 +235,31 @@ class CONTENT_EXPORT DocumentState
   base::Time first_paint_after_load_time_;
   bool load_histograms_recorded_;
   bool web_timing_histograms_recorded_;
+  int http_status_code_;
   bool was_fetched_via_spdy_;
   bool was_npn_negotiated_;
-  std::string npn_negotiated_protocol_;
   bool was_alternate_protocol_available_;
-  net::HttpResponseInfo::ConnectionInfo connection_info_;
   bool was_fetched_via_proxy_;
+
+  GURL searchable_form_url_;
+  std::string searchable_form_encoding_;
+  scoped_ptr<webkit::forms::PasswordForm> password_form_data_;
+  std::string security_info_;
+
+  bool use_error_page_;
 
   // A prefetcher is a page that contains link rel=prefetch elements.
   bool was_prefetcher_;
   bool was_referred_by_prefetcher_;
-  bool was_after_preconnect_request_;
 
   LoadType load_type_;
 
-  scoped_ptr<NavigationState> navigation_state_;
+  bool cache_policy_override_set_;
+  WebKit::WebURLRequest::CachePolicy cache_policy_override_;
 
-  bool can_load_local_resources_;
+  scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_error_page_fetcher_;
+
+  scoped_ptr<NavigationState> navigation_state_;
 };
 
 #endif  // CONTENT_PUBLIC_RENDERER_DOCUMENT_STATE_H_

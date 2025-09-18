@@ -4,12 +4,12 @@
 
 #ifndef BASE_NATIVE_LIBRARY_H_
 #define BASE_NATIVE_LIBRARY_H_
+#pragma once
 
 // This file defines a cross-platform "NativeLibrary" type which represents
 // a loadable module.
 
 #include "base/base_export.h"
-#include "base/compiler_specific.h"
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -18,11 +18,18 @@
 #import <CoreFoundation/CoreFoundation.h>
 #endif  // OS_*
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
-namespace base {
+// Macro useful for writing cross-platform function pointers.
+#if defined(OS_WIN) && !defined(CDECL)
+#define CDECL __cdecl
+#else
+#define CDECL
+#endif
 
 class FilePath;
+
+namespace base {
 
 #if defined(OS_WIN)
 typedef HMODULE NativeLibrary;
@@ -31,15 +38,9 @@ enum NativeLibraryType {
   BUNDLE,
   DYNAMIC_LIB
 };
-enum NativeLibraryObjCStatus {
-  OBJC_UNKNOWN,
-  OBJC_PRESENT,
-  OBJC_NOT_PRESENT,
-};
 struct NativeLibraryStruct {
   NativeLibraryType type;
   CFBundleRefNum bundle_resource_ref;
-  NativeLibraryObjCStatus objc_status;
   union {
     CFBundleRef bundle;
     void* dylib;

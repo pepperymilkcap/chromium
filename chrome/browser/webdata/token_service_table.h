@@ -4,34 +4,24 @@
 
 #ifndef CHROME_BROWSER_WEBDATA_TOKEN_SERVICE_TABLE_H_
 #define CHROME_BROWSER_WEBDATA_TOKEN_SERVICE_TABLE_H_
+#pragma once
 
 #include <map>
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "components/webdata/common/web_database_table.h"
-
-class WebDatabase;
+#include "chrome/browser/webdata/web_database_table.h"
 
 class TokenServiceTable : public WebDatabaseTable {
  public:
-  TokenServiceTable() {}
+  TokenServiceTable(sql::Connection* db, sql::MetaTable* meta_table)
+      : WebDatabaseTable(db, meta_table) {}
   virtual ~TokenServiceTable() {}
-
-  // Retrieves the TokenServiceTable* owned by |database|.
-  static TokenServiceTable* FromWebDatabase(WebDatabase* db);
-
-  virtual WebDatabaseTable::TypeKey GetTypeKey() const OVERRIDE;
-  virtual bool Init(sql::Connection* db, sql::MetaTable* meta_table) OVERRIDE;
+  virtual bool Init() OVERRIDE;
   virtual bool IsSyncable() OVERRIDE;
-  virtual bool MigrateToVersion(int version,
-                                bool* update_compatible_version) OVERRIDE;
 
   // Remove all tokens previously set with SetTokenForService.
   bool RemoveAllTokens();
-
-  // Removes a token related to the service from the token_service table.
-  bool RemoveTokenForService(const std::string& service);
 
   // Retrieves all tokens previously set with SetTokenForService.
   // Returns true if there were tokens and we decrypted them,

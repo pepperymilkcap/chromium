@@ -1,39 +1,34 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <list>
-#include <set>
-#include <string>
-#include <vector>
-
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/json/json_string_value_serializer.h"
+#include "base/json/json_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
 #include "base/test/test_timeouts.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
-#include "url/gurl.h"
 
 namespace {
 
-const base::FilePath::CharType kBaseUrl[] =
+static const FilePath::CharType kBaseUrl[] =
     FILE_PATH_LITERAL("http://localhost:8000/");
 
-const base::FilePath::CharType kTestDirectory[] =
+static const FilePath::CharType kTestDirectory[] =
     FILE_PATH_LITERAL("dom_checker/");
 
-const base::FilePath::CharType kStartFile[] =
+static const FilePath::CharType kStartFile[] =
     FILE_PATH_LITERAL("dom_checker.html");
 
 const char kRunDomCheckerTest[] = "run-dom-checker-test";
@@ -108,17 +103,17 @@ class DomCheckerTest : public UITest {
   }
 
   // Return the path to the DOM checker directory on the local filesystem.
-  base::FilePath GetDomCheckerDir() {
-    base::FilePath test_dir;
+  FilePath GetDomCheckerDir() {
+    FilePath test_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
     return test_dir.AppendASCII("dom_checker");
   }
 
   bool ReadExpectedResults(const std::string& failures_file,
                            std::string* results) {
-    base::FilePath results_path = GetDomCheckerDir();
+    FilePath results_path = GetDomCheckerDir();
     results_path = results_path.AppendASCII(failures_file);
-    return base::ReadFileToString(results_path, results);
+    return file_util::ReadFileToString(results_path, results);
   }
 
   void ParseExpectedFailures(const std::string& input, ResultsSet* output) {
@@ -148,24 +143,20 @@ class DomCheckerTest : public UITest {
   }
 
   bool WaitUntilTestCompletes(TabProxy* tab) {
-    return WaitUntilJavaScriptCondition(
-        tab,
-        std::wstring(),
+    return WaitUntilJavaScriptCondition(tab, L"",
         L"window.domAutomationController.send(automation.IsDone());",
-        TestTimeouts::large_test_timeout());
+        TestTimeouts::large_test_timeout_ms());
   }
 
   bool GetTestCount(TabProxy* tab, int* test_count) {
-    return tab->ExecuteAndExtractInt(
-        std::wstring(),
+    return tab->ExecuteAndExtractInt(L"",
         L"window.domAutomationController.send(automation.GetTestCount());",
         test_count);
   }
 
   bool GetTestsFailed(TabProxy* tab, ResultsSet* tests_failed) {
     std::wstring json_wide;
-    bool succeeded = tab->ExecuteAndExtractString(
-        std::wstring(),
+    bool succeeded = tab->ExecuteAndExtractString(L"",
         L"window.domAutomationController.send("
         L"    JSON.stringify(automation.GetFailures()));",
         &json_wide);
@@ -176,26 +167,26 @@ class DomCheckerTest : public UITest {
     if (!succeeded)
       return false;
 
-    std::string json = base::WideToUTF8(json_wide);
+    std::string json = WideToUTF8(json_wide);
     JSONStringValueSerializer deserializer(json);
-    scoped_ptr<base::Value> value(deserializer.Deserialize(NULL, NULL));
+    scoped_ptr<Value> value(deserializer.Deserialize(NULL, NULL));
 
     EXPECT_TRUE(value.get());
     if (!value.get())
       return false;
 
-    EXPECT_TRUE(value->IsType(base::Value::TYPE_LIST));
-    if (!value->IsType(base::Value::TYPE_LIST))
+    EXPECT_TRUE(value->IsType(Value::TYPE_LIST));
+    if (!value->IsType(Value::TYPE_LIST))
       return false;
 
-    base::ListValue* list_value = static_cast<base::ListValue*>(value.get());
+    ListValue* list_value = static_cast<ListValue*>(value.get());
 
     // The parsed JSON object will be an array of strings, each of which is a
     // test failure. Add those strings to the results set.
-    base::ListValue::const_iterator it = list_value->begin();
+    ListValue::const_iterator it = list_value->begin();
     for (; it != list_value->end(); ++it) {
-      EXPECT_TRUE((*it)->IsType(base::Value::TYPE_STRING));
-      if ((*it)->IsType(base::Value::TYPE_STRING)) {
+      EXPECT_TRUE((*it)->IsType(Value::TYPE_STRING));
+      if ((*it)->IsType(Value::TYPE_STRING)) {
         std::string test_name;
         succeeded = (*it)->GetAsString(&test_name);
         EXPECT_TRUE(succeeded);
@@ -209,15 +200,15 @@ class DomCheckerTest : public UITest {
 
   void RunDomChecker(bool use_http, int* test_count, ResultsSet* tests_failed) {
     GURL test_url;
-    base::FilePath::StringType start_file(kStartFile);
+    FilePath::StringType start_file(kStartFile);
     if (use_http) {
-      base::FilePath::StringType test_directory(kTestDirectory);
-      base::FilePath::StringType url_string(kBaseUrl);
+      FilePath::StringType test_directory(kTestDirectory);
+      FilePath::StringType url_string(kBaseUrl);
       url_string.append(test_directory);
       url_string.append(start_file);
       test_url = GURL(url_string);
     } else {
-      base::FilePath test_path = GetDomCheckerDir();
+      FilePath test_path = GetDomCheckerDir();
       test_path = test_path.Append(start_file);
       test_url = net::FilePathToFileURL(test_path);
     }
@@ -238,8 +229,7 @@ class DomCheckerTest : public UITest {
   DISALLOW_COPY_AND_ASSIGN(DomCheckerTest);
 };
 
-// Always fails, see but http://crbug.com/21321
-TEST_F(DomCheckerTest, DISABLED_File) {
+TEST_F(DomCheckerTest, File) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDomCheckerTest))
     return;
 
@@ -252,7 +242,7 @@ TEST_F(DomCheckerTest, DISABLED_File) {
 // expected results file that didn't exist.  Fixing that bug revealed
 // that the expected results weren't correct anyway.
 // http://crbug.com/21321
-TEST_F(DomCheckerTest, DISABLED_Http) {
+TEST_F(DomCheckerTest, FAILS_Http) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDomCheckerTest))
     return;
 

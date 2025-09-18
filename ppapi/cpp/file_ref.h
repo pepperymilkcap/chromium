@@ -5,7 +5,6 @@
 #ifndef PPAPI_CPP_FILE_REF_H_
 #define PPAPI_CPP_FILE_REF_H_
 
-#include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/ppb_file_ref.h"
 #include "ppapi/cpp/resource.h"
@@ -17,10 +16,8 @@
 
 namespace pp {
 
-class DirectoryEntry;
-class FileSystem;
 class CompletionCallback;
-template <typename T> class CompletionCallbackWithOutput;
+class FileSystem;
 
 /// The <code>FileRef</code> class represents a "weak pointer" to a file in
 /// a file system.
@@ -30,12 +27,15 @@ class FileRef : public Resource {
   /// object.
   FileRef() {}
 
-  /// A constructor used when you have an existing PP_Resource for a FileRef
-  /// and which to create a C++ object that takes an additional reference to
-  /// the resource.
+ /// A constructor used to create a <code>FileRef</code> and associate it with
+  /// the provided <code>Instance</code>.
   ///
-  /// @param[in] resource A PP_Resource corresponding to file reference.
+  /// @param[in] resource An <code>Instance</code>.
   explicit FileRef(PP_Resource resource);
+
+  /// A special structure used by the constructor that does not increment the
+  /// reference count of the underlying file reference.
+  struct PassRef {};
 
   /// A constructor used when you have received a PP_Resource as a return
   /// value that has already been reference counted.
@@ -46,12 +46,9 @@ class FileRef : public Resource {
   /// A constructor that creates a weak pointer to a file in the given file
   /// system. File paths are POSIX style.
   ///
-  /// If the <code>path</code> is malformed, the resulting <code>FileRef</code>
-  /// will have a null <code>PP_Resource</code>.
-  ///
   /// @param[in] file_system A <code>FileSystem</code> corresponding to a file
-  /// system type.
-  /// @param[in] path A path to the file. Must begin with a '/' character.
+  /// system typ.
+  /// @param[in] path A path to the file.
   FileRef(const FileSystem& file_system, const char* path);
 
   /// The copy constructor for <code>FileRef</code>.
@@ -99,9 +96,7 @@ class FileRef : public Resource {
   /// completion of MakeDirectory().
   ///
   /// @return An int32_t containing an error code from <code>pp_errors.h</code>.
-  /// Succeeds if the directory already exists. Fails if ancestor
-  /// directortories do not exist (see MakeDirectoryIncludingAncestors for the
-  /// alternative).
+  /// Fails if the directory already exists.
   int32_t MakeDirectory(const CompletionCallback& cc);
 
   /// MakeDirectoryIncludingAncestors() makes a new directory in the file
@@ -112,7 +107,7 @@ class FileRef : public Resource {
   /// completion of MakeDirectoryIncludingAncestors().
   ///
   /// @return An int32_t containing an error code from <code>pp_errors.h</code>.
-  /// Succeeds if the directory already exists.
+  /// Fails if the directory already exists.
   int32_t MakeDirectoryIncludingAncestors(const CompletionCallback& cc);
 
   /// Touch() Updates time stamps for a file.  You must have write access to the
@@ -151,39 +146,6 @@ class FileRef : public Resource {
   ///
   /// @return An int32_t containing an error code from <code>pp_errors.h</code>.
   int32_t Rename(const FileRef& new_file_ref, const CompletionCallback& cc);
-
-  /// Query() queries info about a file or directory. You must have access to
-  /// read this file or directory if it exists in the external filesystem.
-  ///
-  /// @param[in] callback A <code>CompletionCallbackWithOutput</code>
-  /// to be called upon completion of Query().
-  ///
-  /// @return An int32_t containing an error code from <code>pp_errors.h</code>.
-  int32_t Query(const CompletionCallbackWithOutput<PP_FileInfo>& callback);
-
-  /// ReadDirectoryEntries() Reads all entries in the directory.
-  ///
-  /// @param[in] cc A <code>CompletionCallbackWithOutput</code> to be called
-  /// upon completion of ReadDirectoryEntries(). On success, the
-  /// directory entries will be passed to the given function.
-  ///
-  /// Normally you would use a CompletionCallbackFactory to allow callbacks to
-  /// be bound to your class. See completion_callback_factory.h for more
-  /// discussion on how to use this. Your callback will generally look like:
-  ///
-  /// @code
-  ///   void OnReadDirectoryEntries(
-  ///       int32_t result,
-  ///       const std::vector<DirectoryEntry>& entries) {
-  ///     if (result == PP_OK)
-  ///       // use entries...
-  ///   }
-  /// @endcode
-  ///
-  /// @return An int32_t containing an error code from <code>pp_errors.h</code>.
-  int32_t ReadDirectoryEntries(
-      const CompletionCallbackWithOutput< std::vector<DirectoryEntry> >&
-          callback);
 };
 
 }  // namespace pp

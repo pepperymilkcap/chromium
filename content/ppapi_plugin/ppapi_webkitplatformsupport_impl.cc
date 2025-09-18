@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,40 +6,33 @@
 
 #include <map>
 
+#include "base/synchronization/lock.h"
 #include "base/logging.h"
-#include "base/strings/string16.h"
-#include "base/threading/platform_thread.h"
+#include "base/string16.h"
 #include "build/build_config.h"
-#include "content/child/child_thread.h"
 #include "content/common/child_process_messages.h"
-#include "ppapi/proxy/plugin_globals.h"
-#include "ppapi/shared_impl/proxy_lock.h"
-#include "third_party/WebKit/public/platform/WebString.h"
+#include "content/common/child_thread.h"
+#include "ipc/ipc_sync_message_filter.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 #if defined(OS_WIN)
-#include "third_party/WebKit/public/platform/win/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/win/WebSandboxSupport.h"
 #elif defined(OS_MACOSX)
-#include "third_party/WebKit/public/platform/mac/WebSandboxSupport.h"
-#elif defined(OS_ANDROID)
-#include "third_party/WebKit/public/platform/android/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/mac/WebSandboxSupport.h"
 #elif defined(OS_POSIX)
 #include "content/common/child_process_sandbox_support_impl_linux.h"
-#include "third_party/WebKit/public/platform/linux/WebFontFamily.h"
-#include "third_party/WebKit/public/platform/linux/WebSandboxSupport.h"
-#include "third_party/icu/source/common/unicode/utf16.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebFontFamily.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebSandboxSupport.h"
 #endif
 
-using blink::WebSandboxSupport;
-using blink::WebString;
-using blink::WebUChar;
-using blink::WebUChar32;
+using WebKit::WebSandboxSupport;
+using WebKit::WebString;
+using WebKit::WebUChar;
 
 typedef struct CGFont* CGFontRef;
 
-namespace content {
-
-class PpapiWebKitPlatformSupportImpl::SandboxSupport
-    : public WebSandboxSupport {
+class PpapiWebKitPlatformSupportImpl::SandboxSupport : public WebSandboxSupport {
  public:
   virtual ~SandboxSupport() {}
 
@@ -48,24 +41,22 @@ class PpapiWebKitPlatformSupportImpl::SandboxSupport
 #elif defined(OS_MACOSX)
   virtual bool loadFont(
       NSFont* srcFont, CGFontRef* out, uint32_t* fontID);
-#elif defined(OS_ANDROID)
-  // Empty class.
 #elif defined(OS_POSIX)
-  SandboxSupport();
-  virtual void getFontFamilyForCharacter(
-      WebUChar32 character,
+  virtual void getFontFamilyForCharacters(
+      const WebUChar* characters,
+      size_t numCharacters,
       const char* preferred_locale,
-      blink::WebFontFamily* family);
+      WebKit::WebFontFamily* family);
   virtual void getRenderStyleForStrike(
-      const char* family, int sizeAndStyle, blink::WebFontRenderStyle* out);
+      const char* family, int sizeAndStyle, WebKit::WebFontRenderStyle* out);
 
  private:
   // WebKit likes to ask us for the correct font family to use for a set of
   // unicode code points. It needs this information frequently so we cache it
-  // here.
-  std::map<int32_t, blink::WebFontFamily> unicode_font_families_;
-  // For debugging crbug.com/312965
-  base::PlatformThreadId creation_thread_;
+  // here. The key in this map is an array of 16-bit UTF16 values from WebKit.
+  // The value is a string containing the correct font family.
+  base::Lock unicode_font_families_mutex_;
+  std::map<string16, WebKit::WebFontFamily> unicode_font_families_;
 #endif
 };
 
@@ -76,9 +67,7 @@ bool PpapiWebKitPlatformSupportImpl::SandboxSupport::ensureFontLoaded(
   LOGFONT logfont;
   GetObject(font, sizeof(LOGFONT), &logfont);
 
-  // Use the proxy sender rather than going directly to the ChildThread since
-  // the proxy browser sender will properly unlock during sync messages.
-  return ppapi::proxy::PluginGlobals::Get()->GetBrowserSender()->Send(
+  return ChildThread::current()->sync_message_filter()->Send(
       new ChildProcessHostMsg_PreCacheFont(logfont));
 }
 
@@ -90,31 +79,22 @@ bool PpapiWebKitPlatformSupportImpl::SandboxSupport::loadFont(
     uint32_t* font_id) {
   // TODO(brettw) this should do the something similar to what
   // RendererWebKitClientImpl does and request that the browser load the font.
-  // Note: need to unlock the proxy lock like ensureFontLoaded does.
   NOTIMPLEMENTED();
   return false;
 }
 
-#elif defined(OS_ANDROID)
-
-// Empty class.
-
 #elif defined(OS_POSIX)
 
-PpapiWebKitPlatformSupportImpl::SandboxSupport::SandboxSupport()
-    : creation_thread_(base::PlatformThread::CurrentId()) {
-}
-
 void
-PpapiWebKitPlatformSupportImpl::SandboxSupport::getFontFamilyForCharacter(
-    WebUChar32 character,
+PpapiWebKitPlatformSupportImpl::SandboxSupport::getFontFamilyForCharacters(
+    const WebUChar* characters,
+    size_t num_characters,
     const char* preferred_locale,
-    blink::WebFontFamily* family) {
-  ppapi::ProxyLock::AssertAcquired();
-  // For debugging crbug.com/312965
-  CHECK_EQ(creation_thread_, base::PlatformThread::CurrentId());
-  const std::map<int32_t, blink::WebFontFamily>::const_iterator iter =
-      unicode_font_families_.find(character);
+    WebKit::WebFontFamily* family) {
+  base::AutoLock lock(unicode_font_families_mutex_);
+  const string16 key(characters, num_characters);
+  const std::map<string16, WebKit::WebFontFamily>::const_iterator iter =
+      unicode_font_families_.find(key);
   if (iter != unicode_font_families_.end()) {
     family->name = iter->second.name;
     family->isBold = iter->second.isBold;
@@ -122,13 +102,17 @@ PpapiWebKitPlatformSupportImpl::SandboxSupport::getFontFamilyForCharacter(
     return;
   }
 
-  GetFontFamilyForCharacter(character, preferred_locale, family);
-  unicode_font_families_.insert(std::make_pair(character, *family));
+  content::GetFontFamilyForCharacters(
+      characters,
+      num_characters,
+      preferred_locale,
+      family);
+  unicode_font_families_.insert(make_pair(key, *family));
 }
 
 void PpapiWebKitPlatformSupportImpl::SandboxSupport::getRenderStyleForStrike(
-    const char* family, int sizeAndStyle, blink::WebFontRenderStyle* out) {
-  GetRenderStyleForStrike(family, sizeAndStyle, out);
+    const char* family, int sizeAndStyle, WebKit::WebFontRenderStyle* out) {
+  content::GetRenderStyleForStrike(family, sizeAndStyle, out);
 }
 
 #endif
@@ -140,29 +124,22 @@ PpapiWebKitPlatformSupportImpl::PpapiWebKitPlatformSupportImpl()
 PpapiWebKitPlatformSupportImpl::~PpapiWebKitPlatformSupportImpl() {
 }
 
-void PpapiWebKitPlatformSupportImpl::Shutdown() {
-  // SandboxSupport contains a map of WebFontFamily objects, which hold
-  // WebCStrings, which become invalidated when blink is shut down. Hence, we
-  // need to clear that map now, just before blink::shutdown() is called.
-  sandbox_support_.reset();
-}
-
-blink::WebClipboard* PpapiWebKitPlatformSupportImpl::clipboard() {
+WebKit::WebClipboard* PpapiWebKitPlatformSupportImpl::clipboard() {
   NOTREACHED();
   return NULL;
 }
 
-blink::WebMimeRegistry* PpapiWebKitPlatformSupportImpl::mimeRegistry() {
+WebKit::WebMimeRegistry* PpapiWebKitPlatformSupportImpl::mimeRegistry() {
   NOTREACHED();
   return NULL;
 }
 
-blink::WebFileUtilities* PpapiWebKitPlatformSupportImpl::fileUtilities() {
+WebKit::WebFileUtilities* PpapiWebKitPlatformSupportImpl::fileUtilities() {
   NOTREACHED();
   return NULL;
 }
 
-blink::WebSandboxSupport* PpapiWebKitPlatformSupportImpl::sandboxSupport() {
+WebKit::WebSandboxSupport* PpapiWebKitPlatformSupportImpl::sandboxSupport() {
   return sandbox_support_.get();
 }
 
@@ -177,80 +154,104 @@ unsigned long long PpapiWebKitPlatformSupportImpl::visitedLinkHash(
   return 0;
 }
 
-bool PpapiWebKitPlatformSupportImpl::isLinkVisited(
-    unsigned long long link_hash) {
+bool PpapiWebKitPlatformSupportImpl::isLinkVisited(unsigned long long link_hash) {
   NOTREACHED();
   return false;
 }
 
-blink::WebMessagePortChannel*
+WebKit::WebMessagePortChannel*
 PpapiWebKitPlatformSupportImpl::createMessagePortChannel() {
   NOTREACHED();
   return NULL;
 }
 
 void PpapiWebKitPlatformSupportImpl::setCookies(
-    const blink::WebURL& url,
-    const blink::WebURL& first_party_for_cookies,
-    const blink::WebString& value) {
+    const WebKit::WebURL& url,
+    const WebKit::WebURL& first_party_for_cookies,
+    const WebKit::WebString& value) {
   NOTREACHED();
 }
 
-blink::WebString PpapiWebKitPlatformSupportImpl::cookies(
-    const blink::WebURL& url,
-    const blink::WebURL& first_party_for_cookies) {
+WebKit::WebString PpapiWebKitPlatformSupportImpl::cookies(
+    const WebKit::WebURL& url,
+    const WebKit::WebURL& first_party_for_cookies) {
   NOTREACHED();
-  return blink::WebString();
+  return WebKit::WebString();
 }
 
-blink::WebString PpapiWebKitPlatformSupportImpl::defaultLocale() {
+void PpapiWebKitPlatformSupportImpl::prefetchHostName(const WebKit::WebString&) {
   NOTREACHED();
-  return blink::WebString();
 }
 
-blink::WebThemeEngine* PpapiWebKitPlatformSupportImpl::themeEngine() {
+WebKit::WebString PpapiWebKitPlatformSupportImpl::defaultLocale() {
+  NOTREACHED();
+  return WebKit::WebString();
+}
+
+WebKit::WebThemeEngine* PpapiWebKitPlatformSupportImpl::themeEngine() {
   NOTREACHED();
   return NULL;
 }
 
-blink::WebURLLoader* PpapiWebKitPlatformSupportImpl::createURLLoader() {
+WebKit::WebURLLoader* PpapiWebKitPlatformSupportImpl::createURLLoader() {
   NOTREACHED();
   return NULL;
 }
 
-blink::WebSocketStreamHandle*
+WebKit::WebSocketStreamHandle*
     PpapiWebKitPlatformSupportImpl::createSocketStreamHandle() {
   NOTREACHED();
   return NULL;
 }
 
 void PpapiWebKitPlatformSupportImpl::getPluginList(bool refresh,
-    blink::WebPluginListBuilder* builder) {
+    WebKit::WebPluginListBuilder* builder) {
   NOTREACHED();
 }
 
-blink::WebData PpapiWebKitPlatformSupportImpl::loadResource(const char* name) {
+WebKit::WebData PpapiWebKitPlatformSupportImpl::loadResource(const char* name) {
   NOTREACHED();
-  return blink::WebData();
+  return WebKit::WebData();
 }
 
-blink::WebStorageNamespace*
-PpapiWebKitPlatformSupportImpl::createLocalStorageNamespace() {
+WebKit::WebStorageNamespace*
+PpapiWebKitPlatformSupportImpl::createLocalStorageNamespace(
+    const WebKit::WebString& path, unsigned quota) {
   NOTREACHED();
   return 0;
 }
 
 void PpapiWebKitPlatformSupportImpl::dispatchStorageEvent(
-    const blink::WebString& key, const blink::WebString& old_value,
-    const blink::WebString& new_value, const blink::WebString& origin,
-    const blink::WebURL& url, bool is_local_storage) {
+    const WebKit::WebString& key, const WebKit::WebString& old_value,
+    const WebKit::WebString& new_value, const WebKit::WebString& origin,
+    const WebKit::WebURL& url, bool is_local_storage) {
   NOTREACHED();
 }
 
+WebKit::WebSharedWorkerRepository*
+PpapiWebKitPlatformSupportImpl::sharedWorkerRepository() {
+  NOTREACHED();
+  return NULL;
+}
+
 int PpapiWebKitPlatformSupportImpl::databaseDeleteFile(
-    const blink::WebString& vfs_file_name, bool sync_dir) {
+    const WebKit::WebString& vfs_file_name, bool sync_dir) {
   NOTREACHED();
   return 0;
 }
 
-}  // namespace content
+void PpapiWebKitPlatformSupportImpl::createIDBKeysFromSerializedValuesAndKeyPath(
+    const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
+    const WebKit::WebString& keyPath,
+    WebKit::WebVector<WebKit::WebIDBKey>& keys) {
+  NOTREACHED();
+}
+
+WebKit::WebSerializedScriptValue
+PpapiWebKitPlatformSupportImpl::injectIDBKeyIntoSerializedValue(
+    const WebKit::WebIDBKey& key,
+    const WebKit::WebSerializedScriptValue& value,
+    const WebKit::WebString& keyPath) {
+  NOTREACHED();
+  return WebKit::WebSerializedScriptValue();
+}

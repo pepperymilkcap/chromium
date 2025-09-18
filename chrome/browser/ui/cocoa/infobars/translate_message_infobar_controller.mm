@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/infobars/translate_message_infobar_controller.h"
 
-#include "base/strings/sys_string_conversions.h"
-#import "chrome/browser/ui/cocoa/infobars/infobar_utilities.h"
+#include "base/sys_string_conversions.h"
 
-using InfoBarUtilities::MoveControl;
+using TranslateInfoBarUtilities::MoveControl;
 
 @implementation TranslateMessageInfobarController
 
@@ -17,7 +16,7 @@ using InfoBarUtilities::MoveControl;
       label1_, translateMessageButton_, spaceBetweenControls_ * 2, true);
   TranslateInfoBarDelegate* delegate = [self delegate];
   if ([self delegate]->ShouldShowMessageInfoBarButton()) {
-    base::string16 buttonText = delegate->GetMessageInfoBarButtonText();
+    string16 buttonText = delegate->GetMessageInfoBarButtonText();
     [translateMessageButton_ setTitle:base::SysUTF16ToNSString(buttonText)];
     [translateMessageButton_ sizeToFit];
   }
@@ -37,7 +36,7 @@ using InfoBarUtilities::MoveControl;
 
 - (void)loadLabelText {
   TranslateInfoBarDelegate* delegate = [self delegate];
-  base::string16 messageText = delegate->GetMessageInfoBarText();
+  string16 messageText = delegate->GetMessageInfoBarText();
   NSString* string1 = base::SysUTF16ToNSString(messageText);
   [label1_ setStringValue:string1];
 }

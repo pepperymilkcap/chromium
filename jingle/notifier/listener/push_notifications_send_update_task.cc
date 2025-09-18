@@ -29,10 +29,10 @@ int PushNotificationsSendUpdateTask::ProcessStart() {
   scoped_ptr<buzz::XmlElement> stanza(
       MakeUpdateMessage(notification_,
                         GetClient()->jid().BareJid()));
-  DVLOG(1) << "Sending notification " << notification_.ToString()
-           << " as stanza " << XmlElementToString(*stanza);
+  VLOG(1) << "Sending notification " << notification_.ToString()
+          << " as stanza " << XmlElementToString(*stanza);
   if (SendStanza(stanza.get()) != buzz::XMPP_RETURN_OK) {
-    DLOG(WARNING) << "Could not send stanza " << XmlElementToString(*stanza);
+    LOG(WARNING) << "Could not send stanza " << XmlElementToString(*stanza);
   }
   return STATE_DONE;
 }
@@ -71,14 +71,20 @@ buzz::XmlElement* PushNotificationsSendUpdateTask::MakeUpdateMessage(
     recipient_element->AddAttr(buzz::QN_TO, recipient.to);
     if (!recipient.user_specific_data.empty()) {
       std::string base64_data;
-      base::Base64Encode(recipient.user_specific_data, &base64_data);
-      recipient_element->SetBodyText(base64_data);
+      if (!base::Base64Encode(recipient.user_specific_data, &base64_data)) {
+        LOG(WARNING) << "Could not encode data "
+                     << recipient.user_specific_data;
+      } else {
+        recipient_element->SetBodyText(base64_data);
+      }
     }
   }
 
   buzz::XmlElement* data = new buzz::XmlElement(kQnData, true);
   std::string base64_data;
-  base::Base64Encode(notification.data, &base64_data);
+  if (!base::Base64Encode(notification.data, &base64_data)) {
+    LOG(WARNING) << "Could not encode data " << notification.data;
+  }
   data->SetBodyText(base64_data);
   push->AddElement(data);
 

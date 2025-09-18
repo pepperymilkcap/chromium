@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_url_request_info.idl modified Thu Mar 28 10:19:35 2013. */
+/* From ppb_url_request_info.idl modified Mon Nov 14 10:36:01 2011. */
 
 #ifndef PPAPI_C_PPB_URL_REQUEST_INFO_H_
 #define PPAPI_C_PPB_URL_REQUEST_INFO_H_
@@ -48,7 +48,7 @@ typedef enum {
    * This corresponds to a string (<code>PP_VARTYPE_STRING</code>); \n
    * delimited. Refer to the
    * <a href="http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html"Header
-   * Field Definitions</a> documentation for further information.
+   * Field Definitions</a> documentaiton for further information.
    */
   PP_URLREQUESTPROPERTY_HEADERS = 2,
   /**
@@ -78,7 +78,7 @@ typedef enum {
    * This corresponds to a <code>PP_Bool</code>
    * (default=<code>PP_FALSE</code>). Set this value to <code>PP_TRUE</code> if
    * you want to be able to poll the upload progress using
-   * PPB_URLLoader.GetUploadProgress().
+   * PPB_URLLoader.GetUplaodProgress().
    */
   PP_URLREQUESTPROPERTY_RECORDUPLOADPROGRESS = 6,
   /**
@@ -145,18 +145,7 @@ typedef enum {
    * <code>PP_URLREQUESTPROPERTY_PREFETCHBUFFERUPPERTHRESHOLD</code> must also
    * be set. Behavior is undefined if the former is >= the latter.
    */
-  PP_URLREQUESTPROPERTY_PREFETCHBUFFERLOWERTHRESHOLD = 12,
-  /**
-   * This corresponds to a string (<code>PP_VARTYPE_STRING</code>) or may be
-   * undefined (<code>PP_VARTYPE_UNDEFINED</code>; default). Set it to a string
-   * to set a custom user-agent header (if empty, that header will be omitted),
-   * or to undefined to use the default. Only loaders with universal access
-   * (only available on trusted implementations) will accept
-   * <code>URLRequestInfo</code> objects that try to set a custom user agent; if
-   * given to a loader without universal access, <code>PP_ERROR_NOACCESS</code>
-   * will result.
-   */
-  PP_URLREQUESTPROPERTY_CUSTOMUSERAGENT = 13
+  PP_URLREQUESTPROPERTY_PREFETCHBUFFERLOWERTHRESHOLD = 12
 } PP_URLRequestProperty;
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_URLRequestProperty, 4);
 /**

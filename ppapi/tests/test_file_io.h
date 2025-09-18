@@ -10,7 +10,6 @@
 #include "ppapi/tests/test_case.h"
 
 namespace pp {
-class FileIO;
 class FileSystem;
 }  // namespace pp
 
@@ -38,17 +37,13 @@ class TestFileIO : public TestCase {
   };
 
   std::string TestOpen();
-  std::string TestOpenDirectory();
   std::string TestReadWriteSetLength();
-  std::string TestReadToArrayWriteSetLength();
   std::string TestTouchQuery();
   std::string TestAbortCalls();
   std::string TestParallelReads();
   std::string TestParallelWrites();
   std::string TestNotAllowMixedReadWrite();
-  std::string TestRequestOSFileHandle();
-  std::string TestRequestOSFileHandleWithOpenExclusive();
-  std::string TestMmap();
+  std::string TestWillWriteWillSetLength();
 
   // Helper method used by TestOpen().
   // |expectations| is a combination of OpenExpectation values. The followings

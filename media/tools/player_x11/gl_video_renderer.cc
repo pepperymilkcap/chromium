@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 #include <X11/Xutil.h>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "media/base/buffers.h"
 #include "media/base/video_frame.h"
 #include "media/base/yuv_convert.h"
-#include "ui/gl/gl_implementation.h"
+#include "ui/gfx/gl/gl_implementation.h"
 
 enum { kNumYUVPlanes = 3 };
 
@@ -67,6 +67,14 @@ static const float kVertices[8] = {
   1.f, -1.f,
 };
 
+// Texture Coordinates mapping the entire texture.
+static const float kTextureCoords[8] = {
+  0, 0,
+  0, 1,
+  1, 0,
+  1, 1,
+};
+
 // Pass-through vertex shader.
 static const char kVertexShader[] =
     "varying vec2 interp_tc;\n"
@@ -113,7 +121,7 @@ GlVideoRenderer::~GlVideoRenderer() {
 
 void GlVideoRenderer::Paint(media::VideoFrame* video_frame) {
   if (!gl_context_)
-    Initialize(video_frame->coded_size(), video_frame->visible_rect());
+    Initialize(video_frame->width(), video_frame->height());
 
   // Convert YUV frame to RGB.
   DCHECK(video_frame->format() == media::VideoFrame::YV12 ||
@@ -138,12 +146,12 @@ void GlVideoRenderer::Paint(media::VideoFrame* video_frame) {
   glXSwapBuffers(display_, window_);
 }
 
-void GlVideoRenderer::Initialize(gfx::Size coded_size, gfx::Rect visible_rect) {
+void GlVideoRenderer::Initialize(int width, int height) {
   CHECK(!gl_context_);
-  VLOG(0) << "Initializing GL Renderer...";
+  LOG(INFO) << "Initializing GL Renderer...";
 
   // Resize the window to fit that of the video.
-  XResizeWindow(display_, window_, visible_rect.width(), visible_rect.height());
+  XResizeWindow(display_, window_, width, height);
 
   gl_context_ = InitGLContext(display_, window_);
   CHECK(gl_context_) << "Failed to initialize GL context";
@@ -232,16 +240,8 @@ void GlVideoRenderer::Initialize(gfx::Size coded_size, gfx::Rect visible_rect) {
 
   int tc_location = glGetAttribLocation(program, "in_tc");
   glEnableVertexAttribArray(tc_location);
-  float verts[8];
-  float x0 = static_cast<float>(visible_rect.x()) / coded_size.width();
-  float y0 = static_cast<float>(visible_rect.y()) / coded_size.height();
-  float x1 = static_cast<float>(visible_rect.right()) / coded_size.width();
-  float y1 = static_cast<float>(visible_rect.bottom()) / coded_size.height();
-  verts[0] = x0; verts[1] = y0;
-  verts[2] = x0; verts[3] = y1;
-  verts[4] = x1; verts[5] = y0;
-  verts[6] = x1; verts[7] = y1;
-  glVertexAttribPointer(tc_location, 2, GL_FLOAT, GL_FALSE, 0, verts);
+  glVertexAttribPointer(tc_location, 2, GL_FLOAT, GL_FALSE, 0,
+                        kTextureCoords);
 
   // We are getting called on a thread. Release the context so that it can be
   // made current on the main thread.

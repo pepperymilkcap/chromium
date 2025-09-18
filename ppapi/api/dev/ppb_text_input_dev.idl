@@ -8,8 +8,7 @@
  */
 
 label Chrome {
-  M16 = 0.1,
-  M19 = 0.2
+  M16 = 0.1
 };
 
 /**
@@ -17,25 +16,25 @@ label Chrome {
  * text input.
  */
 [assert_size(4)]
-enum PP_TextInput_Type_Dev {
+enum PP_TextInput_Type {
   /**
    * Input caret is not in an editable mode, no input method shall be used.
    */
-  PP_TEXTINPUT_TYPE_DEV_NONE = 0,
+  PP_TEXTINPUT_TYPE_NONE = 0,
   /**
    * Input caret is in a normal editable mode, any input method can be used.
    */
-  PP_TEXTINPUT_TYPE_DEV_TEXT = 1,
+  PP_TEXTINPUT_TYPE_TEXT = 1,
   /**
    * Input caret is in a password box, an input method may be used only if
    * it's suitable for password input.
    */
-  PP_TEXTINPUT_TYPE_DEV_PASSWORD = 2,
-  PP_TEXTINPUT_TYPE_DEV_SEARCH = 3,
-  PP_TEXTINPUT_TYPE_DEV_EMAIL = 4,
-  PP_TEXTINPUT_TYPE_DEV_NUMBER = 5,
-  PP_TEXTINPUT_TYPE_DEV_TELEPHONE = 6,
-  PP_TEXTINPUT_TYPE_DEV_URL = 7
+  PP_TEXTINPUT_TYPE_PASSWORD = 2,
+  PP_TEXTINPUT_TYPE_SEARCH = 3,
+  PP_TEXTINPUT_TYPE_EMAIL = 4,
+  PP_TEXTINPUT_TYPE_NUMBER = 5,
+  PP_TEXTINPUT_TYPE_TELEPHONE = 6,
+  PP_TEXTINPUT_TYPE_URL = 7
 };
 
 /**
@@ -52,7 +51,7 @@ interface PPB_TextInput_Dev {
    * used for composing East Asian characters).
    */
   void SetTextInputType([in] PP_Instance instance,
-                        [in] PP_TextInput_Type_Dev type);
+                        [in] PP_TextInput_Type type);
 
   /**
    * Informs the browser about the coordinates of the text input caret and the
@@ -67,43 +66,4 @@ interface PPB_TextInput_Dev {
    * Cancels the current composition in IME.
    */
   void CancelCompositionText([in] PP_Instance instance);
-
-  /**
-   * In response to the <code>PPP_TextInput_Dev::RequestSurroundingText</code>
-   * call, informs the browser about the current text selection and surrounding
-   * text. <code>text</code> is a UTF-8 string that contains the current range
-   * of text selection in the plugin. <code>caret</code> is the byte-index of
-   * the caret position within <code>text</code>. <code>anchor</code> is the
-   * byte-index of the anchor position (i.e., if a range of text is selected,
-   * it is the other edge of selection different from <code>caret</code>. If
-   * there are no selection, <code>anchor</code> is equal to <code>caret</code>.
-   *
-   * Typical use of this information in the browser is to enable "reconversion"
-   * features of IME that puts back the already committed text into the
-   * pre-commit composition state. Another use is to improve the precision
-   * of suggestion of IME by taking the context into account (e.g., if the caret
-   * looks to be on the beginning of a sentence, suggest capital letters in a
-   * virtual keyboard).
-   *
-   * When the focus is not on text, call this function setting <code>text</code>
-   * to an empty string and <code>caret</code> and <code>anchor</code> to zero.
-   * Also, the plugin should send the empty text when it does not want to reveal
-   * the selection to IME (e.g., when the surrounding text is containing
-   * password text).
-   */
-  [version=0.2]
-  void UpdateSurroundingText([in] PP_Instance instance,
-                             [in] str_t text,
-                             [in] uint32_t caret,
-                             [in] uint32_t anchor);
-
-  /**
-   * Informs the browser when a range of text selection is changed in a plugin.
-   * When the browser needs to know the content of the updated selection, it
-   * pings back by <code>PPP_TextInput_Dev::RequestSurroundingText</code>. The
-   * plugin then should send the information with
-   * <code>UpdateSurroundingText</code>.
-   */
-  [version=0.2]
-  void SelectionChanged([in] PP_Instance instance);
 };

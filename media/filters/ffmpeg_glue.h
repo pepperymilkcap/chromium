@@ -1,46 +1,51 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// FFmpegGlue is an interface between FFmpeg and Chrome used to proxy FFmpeg's
-// read and seek requests to Chrome's internal data structures.  The glue works
-// through the AVIO interface provided by FFmpeg.
+// FFmpegGlue is an adapter for FFmpeg's URLProtocol interface that allows us to
+// use a DataSource implementation with FFmpeg. For convenience we use FFmpeg's
+// av_open_input_file function, which analyzes the filename given to it and
+// automatically initializes the appropriate URLProtocol.
 //
-// AVIO works through a special AVIOContext created through avio_alloc_context()
-// which is attached to the AVFormatContext used for demuxing.  The AVIO context
-// is initialized with read and seek methods which FFmpeg calls when necessary.
+// Since the DataSource is already open by time we call av_open_input_file, we
+// need a way for av_open_input_file to find the correct DataSource instance.
+// The solution is to maintain a map of "filenames" to DataSource instances,
+// where filenames are actually just a unique identifier.  For simplicity,
+// FFmpegGlue is registered as an HTTP handler and generates filenames based on
+// the memory address of the DataSource, i.e., http://0xc0bf4870.  Since there
+// may be multiple FFmpegDemuxers active at one time, FFmpegGlue is a
+// thread-safe singleton.
 //
-// During OpenContext() FFmpegGlue will tell FFmpeg to use Chrome's AVIO context
-// by passing NULL in for the filename parameter to avformat_open_input().  All
-// FFmpeg operations using the configured AVFormatContext will then redirect
-// reads and seeks through the glue.
-//
-// The glue in turn processes those read and seek requests using the
-// FFmpegURLProtocol provided during construction.
-//
-// FFmpegGlue is also responsible for initializing FFmpeg, which is done once
-// per process.  Initialization includes: turning off log messages, registering
-// a lock manager, and finally registering all demuxers and codecs.
+// Usage: FFmpegDemuxer adds the DataSource to FFmpegGlue's map and is given a
+// filename to pass to av_open_input_file.  FFmpegDemuxer calls
+// av_open_input_file with the filename, which results in FFmpegGlue returning
+// the DataSource as a URLProtocol instance to FFmpeg.  Since FFmpegGlue is only
+// needed for opening files, when av_open_input_file returns FFmpegDemuxer
+// removes the DataSource from FFmpegGlue's map.
 
 #ifndef MEDIA_FILTERS_FFMPEG_GLUE_H_
 #define MEDIA_FILTERS_FFMPEG_GLUE_H_
 
-#include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
+#include <map>
+#include <string>
+
+#include "base/memory/singleton.h"
+#include "base/synchronization/lock.h"
 #include "media/base/media_export.h"
 
-struct AVFormatContext;
-struct AVIOContext;
+struct URLProtocol;
 
 namespace media {
 
-class ScopedPtrAVFree;
-
 class MEDIA_EXPORT FFmpegURLProtocol {
  public:
+  FFmpegURLProtocol() {}
+
+  virtual ~FFmpegURLProtocol() {}
+
   // Read the given amount of bytes into data, returns the number of bytes read
   // if successful, kReadError otherwise.
-  virtual int Read(int size, uint8* data) = 0;
+  virtual size_t Read(size_t size, uint8* data) = 0;
 
   // Returns true and the current file position for this file, false if the
   // file position could not be retrieved.
@@ -55,25 +60,48 @@ class MEDIA_EXPORT FFmpegURLProtocol {
 
   // Returns false if this protocol supports random seeking.
   virtual bool IsStreaming() = 0;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FFmpegURLProtocol);
 };
 
 class MEDIA_EXPORT FFmpegGlue {
  public:
-  static void InitializeFFmpeg();
+  // Returns the singleton instance.
+  static FFmpegGlue* GetInstance();
 
-  // See file documentation for usage.  |protocol| must outlive FFmpegGlue.
-  explicit FFmpegGlue(FFmpegURLProtocol* protocol);
-  ~FFmpegGlue();
+  // Adds a FFmpegProtocol to the FFmpeg glue layer and returns a unique string
+  // that can be passed to FFmpeg to identify the data source.
+  std::string AddProtocol(FFmpegURLProtocol* protocol);
 
-  // Opens an AVFormatContext specially prepared to process reads and seeks
-  // through the FFmpegURLProtocol provided during construction.
-  bool OpenContext();
-  AVFormatContext* format_context() { return format_context_; }
+  // Removes a FFmpegProtocol from the FFmpeg glue layer.  Using strings from
+  // previously added FFmpegProtocols will no longer work.
+  void RemoveProtocol(FFmpegURLProtocol* protocol);
+
+  // Assigns the FFmpegProtocol identified with by the given key to
+  // |protocol|, or assigns NULL if no such FFmpegProtocol could be found.
+  void GetProtocol(const std::string& key,
+                   FFmpegURLProtocol** protocol);
 
  private:
-  bool open_called_;
-  AVFormatContext* format_context_;
-  scoped_ptr_malloc<AVIOContext, ScopedPtrAVFree> avio_context_;
+  // Only allow Singleton to create and delete FFmpegGlue.
+  friend struct DefaultSingletonTraits<FFmpegGlue>;
+  FFmpegGlue();
+  virtual ~FFmpegGlue();
+
+  // Returns the unique key for this data source, which can be passed to
+  // av_open_input_file as the filename.
+  std::string GetProtocolKey(FFmpegURLProtocol* protocol);
+
+  // Mutual exclusion while adding/removing items from the map.
+  base::Lock lock_;
+
+  // Map between keys and FFmpegProtocol references.
+  typedef std::map<std::string, FFmpegURLProtocol*> ProtocolMap;
+  ProtocolMap protocols_;
+
+  friend class FFmpegGlueTest;
+  static URLProtocol* url_protocol();
 
   DISALLOW_COPY_AND_ASSIGN(FFmpegGlue);
 };

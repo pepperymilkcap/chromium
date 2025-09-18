@@ -14,7 +14,7 @@ function create(title, type, parent, callback) {
   }
 
   chrome.contextMenus.create(props, function() {
-    if (!chrome.runtime.lastError && callback) {
+    if (!chrome.extension.lastError && callback) {
       callback();
     }
   });

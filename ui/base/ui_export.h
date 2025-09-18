@@ -4,6 +4,7 @@
 
 #ifndef UI_UI_EXPORT_H_
 #define UI_UI_EXPORT_H_
+#pragma once
 
 // Defines UI_EXPORT so that functionality implemented by the UI module can be
 // exported to consumers.
@@ -18,11 +19,7 @@
 #endif  // defined(UI_IMPLEMENTATION)
 
 #else  // defined(WIN32)
-#if defined(UI_IMPLEMENTATION)
 #define UI_EXPORT __attribute__((visibility("default")))
-#else
-#define UI_EXPORT
-#endif
 #endif
 
 #else  // defined(COMPONENT_BUILD)

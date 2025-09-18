@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,7 @@
 #include "base/threading/simple_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-// Duplicated from base/threading/non_thread_safe.h so that we can be
-// good citizens there and undef the macro.
-#if (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
-#define ENABLE_NON_THREAD_SAFE 1
-#else
-#define ENABLE_NON_THREAD_SAFE 0
-#endif
-
 namespace base {
-
-namespace {
 
 // Simple class to exersice the basics of NonThreadSafe.
 // Both the destructor and DoStuff should verify that they were
@@ -47,12 +37,12 @@ class NonThreadSafeClass : public NonThreadSafe {
 // Calls NonThreadSafeClass::DoStuff on another thread.
 class CallDoStuffOnThread : public SimpleThread {
  public:
-  explicit CallDoStuffOnThread(NonThreadSafeClass* non_thread_safe_class)
+  CallDoStuffOnThread(NonThreadSafeClass* non_thread_safe_class)
       : SimpleThread("call_do_stuff_on_thread"),
         non_thread_safe_class_(non_thread_safe_class) {
   }
 
-  virtual void Run() OVERRIDE {
+  virtual void Run() {
     non_thread_safe_class_->DoStuff();
   }
 
@@ -65,13 +55,12 @@ class CallDoStuffOnThread : public SimpleThread {
 // Deletes NonThreadSafeClass on a different thread.
 class DeleteNonThreadSafeClassOnThread : public SimpleThread {
  public:
-  explicit DeleteNonThreadSafeClassOnThread(
-      NonThreadSafeClass* non_thread_safe_class)
+  DeleteNonThreadSafeClassOnThread(NonThreadSafeClass* non_thread_safe_class)
       : SimpleThread("delete_non_thread_safe_class_on_thread"),
         non_thread_safe_class_(non_thread_safe_class) {
   }
 
-  virtual void Run() OVERRIDE {
+  virtual void Run() {
     non_thread_safe_class_.reset();
   }
 
@@ -80,8 +69,6 @@ class DeleteNonThreadSafeClassOnThread : public SimpleThread {
 
   DISALLOW_COPY_AND_ASSIGN(DeleteNonThreadSafeClassOnThread);
 };
-
-}  // namespace
 
 TEST(NonThreadSafeTest, CallsAllowedOnSameThread) {
   scoped_ptr<NonThreadSafeClass> non_thread_safe_class(
@@ -108,7 +95,7 @@ TEST(NonThreadSafeTest, DetachThenDestructOnDifferentThread) {
   delete_on_thread.Join();
 }
 
-#if GTEST_HAS_DEATH_TEST || !ENABLE_NON_THREAD_SAFE
+#if GTEST_HAS_DEATH_TEST || NDEBUG
 
 void NonThreadSafeClass::MethodOnDifferentThreadImpl() {
   scoped_ptr<NonThreadSafeClass> non_thread_safe_class(
@@ -122,9 +109,9 @@ void NonThreadSafeClass::MethodOnDifferentThreadImpl() {
   call_on_thread.Join();
 }
 
-#if ENABLE_NON_THREAD_SAFE
+#ifndef NDEBUG
 TEST(NonThreadSafeDeathTest, MethodNotAllowedOnDifferentThreadInDebug) {
-  ASSERT_DEATH({
+  ASSERT_DEBUG_DEATH({
       NonThreadSafeClass::MethodOnDifferentThreadImpl();
     }, "");
 }
@@ -132,7 +119,7 @@ TEST(NonThreadSafeDeathTest, MethodNotAllowedOnDifferentThreadInDebug) {
 TEST(NonThreadSafeTest, MethodAllowedOnDifferentThreadInRelease) {
   NonThreadSafeClass::MethodOnDifferentThreadImpl();
 }
-#endif  // ENABLE_NON_THREAD_SAFE
+#endif  // NDEBUG
 
 void NonThreadSafeClass::DestructorOnDifferentThreadImpl() {
   scoped_ptr<NonThreadSafeClass> non_thread_safe_class(
@@ -147,9 +134,9 @@ void NonThreadSafeClass::DestructorOnDifferentThreadImpl() {
   delete_on_thread.Join();
 }
 
-#if ENABLE_NON_THREAD_SAFE
+#ifndef NDEBUG
 TEST(NonThreadSafeDeathTest, DestructorNotAllowedOnDifferentThreadInDebug) {
-  ASSERT_DEATH({
+  ASSERT_DEBUG_DEATH({
       NonThreadSafeClass::DestructorOnDifferentThreadImpl();
     }, "");
 }
@@ -157,11 +144,8 @@ TEST(NonThreadSafeDeathTest, DestructorNotAllowedOnDifferentThreadInDebug) {
 TEST(NonThreadSafeTest, DestructorAllowedOnDifferentThreadInRelease) {
   NonThreadSafeClass::DestructorOnDifferentThreadImpl();
 }
-#endif  // ENABLE_NON_THREAD_SAFE
+#endif  // NDEBUG
 
-#endif  // GTEST_HAS_DEATH_TEST || !ENABLE_NON_THREAD_SAFE
-
-// Just in case we ever get lumped together with other compilation units.
-#undef ENABLE_NON_THREAD_SAFE
+#endif  // GTEST_HAS_DEATH_TEST || NDEBUG
 
 }  // namespace base

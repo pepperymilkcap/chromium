@@ -29,6 +29,10 @@
 // TraceAnalyzer analyzer(json_events);
 // TraceEventVector events;
 //
+// During construction, TraceAnalyzer::SetDefaultAssociations is called to
+// associate all matching begin/end pairs similar to how they are shown in
+// about:tracing.
+//
 // EXAMPLE 1: Find events named "my_event".
 //
 // analyzer.FindEvents(Query(EVENT_NAME) == "my_event", &events);
@@ -75,11 +79,13 @@
 
 #ifndef BASE_TEST_TRACE_EVENT_ANALYZER_H_
 #define BASE_TEST_TRACE_EVENT_ANALYZER_H_
+#pragma once
 
 #include <map>
 
 #include "base/debug/trace_event.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/ref_counted_memory.h"
+#include "base/memory/scoped_ptr.h"
 
 namespace base {
 class Value;
@@ -146,8 +152,6 @@ struct TraceEvent {
   // Stored as double to match its JSON representation.
   double timestamp;
 
-  double duration;
-
   char phase;
 
   std::string category;
@@ -209,11 +213,6 @@ class Query {
   // Only works if Query::EventHasOther() == true.
   static Query EventDuration() { return Query(EVENT_DURATION); }
 
-  // Return the duration of a COMPLETE event.
-  static Query EventCompleteDuration() {
-    return Query(EVENT_COMPLETE_DURATION);
-  }
-
   static Query EventPhase() { return Query(EVENT_PHASE); }
 
   static Query EventCategory() { return Query(EVENT_CATEGORY); }
@@ -221,42 +220,6 @@ class Query {
   static Query EventName() { return Query(EVENT_NAME); }
 
   static Query EventId() { return Query(EVENT_ID); }
-
-  static Query EventPidIs(int process_id) {
-    return Query(EVENT_PID) == Query::Int(process_id);
-  }
-
-  static Query EventTidIs(int thread_id) {
-    return Query(EVENT_TID) == Query::Int(thread_id);
-  }
-
-  static Query EventThreadIs(const TraceEvent::ProcessThreadID& thread) {
-    return EventPidIs(thread.process_id) && EventTidIs(thread.thread_id);
-  }
-
-  static Query EventTimeIs(double timestamp) {
-    return Query(EVENT_TIME) == Query::Double(timestamp);
-  }
-
-  static Query EventDurationIs(double duration) {
-    return Query(EVENT_DURATION) == Query::Double(duration);
-  }
-
-  static Query EventPhaseIs(char phase) {
-    return Query(EVENT_PHASE) == Query::Phase(phase);
-  }
-
-  static Query EventCategoryIs(const std::string& category) {
-    return Query(EVENT_CATEGORY) == Query::String(category);
-  }
-
-  static Query EventNameIs(const std::string& name) {
-    return Query(EVENT_NAME) == Query::String(name);
-  }
-
-  static Query EventIdIs(const std::string& id) {
-    return Query(EVENT_ID) == Query::String(id);
-  }
 
   // Evaluates to true if arg exists and is a string.
   static Query EventHasStringArg(const std::string& arg_name) {
@@ -293,50 +256,14 @@ class Query {
 
   static Query OtherId() { return Query(OTHER_ID); }
 
-  static Query OtherPidIs(int process_id) {
-    return Query(OTHER_PID) == Query::Int(process_id);
-  }
-
-  static Query OtherTidIs(int thread_id) {
-    return Query(OTHER_TID) == Query::Int(thread_id);
-  }
-
-  static Query OtherThreadIs(const TraceEvent::ProcessThreadID& thread) {
-    return OtherPidIs(thread.process_id) && OtherTidIs(thread.thread_id);
-  }
-
-  static Query OtherTimeIs(double timestamp) {
-    return Query(OTHER_TIME) == Query::Double(timestamp);
-  }
-
-  static Query OtherPhaseIs(char phase) {
-    return Query(OTHER_PHASE) == Query::Phase(phase);
-  }
-
-  static Query OtherCategoryIs(const std::string& category) {
-    return Query(OTHER_CATEGORY) == Query::String(category);
-  }
-
-  static Query OtherNameIs(const std::string& name) {
-    return Query(OTHER_NAME) == Query::String(name);
-  }
-
-  static Query OtherIdIs(const std::string& id) {
-    return Query(OTHER_ID) == Query::String(id);
-  }
-
-  // Evaluates to true if arg exists and is a string.
   static Query OtherHasStringArg(const std::string& arg_name) {
     return Query(OTHER_HAS_STRING_ARG, arg_name);
   }
 
-  // Evaluates to true if arg exists and is a number.
-  // Number arguments include types double, int and bool.
   static Query OtherHasNumberArg(const std::string& arg_name) {
     return Query(OTHER_HAS_NUMBER_ARG, arg_name);
   }
 
-  // Evaluates to arg value (string or number).
   static Query OtherArg(const std::string& arg_name) {
     return Query(OTHER_ARG, arg_name);
   }
@@ -350,26 +277,15 @@ class Query {
            Query(EVENT_HAS_OTHER);
   }
 
-  // Find COMPLETE events.
-  static Query MatchComplete() {
-    return (Query(EVENT_PHASE) == Query::Phase(TRACE_EVENT_PHASE_COMPLETE));
-  }
-
-  // Find ASYNC_BEGIN events that have a corresponding ASYNC_END event.
-  static Query MatchAsyncBeginWithNext() {
-    return (Query(EVENT_PHASE) ==
-            Query::Phase(TRACE_EVENT_PHASE_ASYNC_BEGIN)) &&
+  // Find START events that have a corresponding FINISH event.
+  static Query MatchStartWithFinish() {
+    return (Query(EVENT_PHASE) == Query::Phase(TRACE_EVENT_PHASE_START)) &&
            Query(EVENT_HAS_OTHER);
   }
 
   // Find BEGIN events of given |name| which also have associated END events.
   static Query MatchBeginName(const std::string& name) {
-    return (Query(EVENT_NAME) == Query(name)) && MatchBeginWithEnd();
-  }
-
-  // Find COMPLETE events of given |name|.
-  static Query MatchCompleteName(const std::string& name) {
-    return (Query(EVENT_NAME) == Query(name)) && MatchComplete();
+    return (Query(EVENT_NAME) == name) && MatchBeginWithEnd();
   }
 
   // Match given Process ID and Thread ID.
@@ -419,7 +335,6 @@ class Query {
     EVENT_TID,
     EVENT_TIME,
     EVENT_DURATION,
-    EVENT_COMPLETE_DURATION,
     EVENT_PHASE,
     EVENT_CATEGORY,
     EVENT_NAME,
@@ -470,16 +385,16 @@ class Query {
   };
 
   // Compare with the given member.
-  explicit Query(TraceEventMember member);
+  Query(TraceEventMember member);
 
   // Compare with the given member argument value.
   Query(TraceEventMember member, const std::string& arg_name);
 
   // Compare with the given string.
-  explicit Query(const std::string& str);
+  Query(const std::string& str);
 
   // Compare with the given number.
-  explicit Query(double num);
+  Query(double num);
 
   // Construct a boolean Query that returns (left <binary_op> right).
   Query(const Query& left, const Query& right, Operator binary_op);
@@ -567,15 +482,13 @@ class TraceAnalyzer {
   // to access the associated event and enables Query(EVENT_DURATION).
   // An end event will match the most recent begin event with the same name,
   // category, process ID and thread ID. This matches what is shown in
-  // about:tracing. After association, the BEGIN event will point to the
-  // matching END event, but the END event will not point to the BEGIN event.
+  // about:tracing.
   void AssociateBeginEndEvents();
 
-  // Associate ASYNC_BEGIN, ASYNC_STEP and ASYNC_END events with each other.
-  // An ASYNC_END event will match the most recent ASYNC_BEGIN or ASYNC_STEP
-  // event with the same name, category, and ID. This creates a singly linked
-  // list of ASYNC_BEGIN->ASYNC_STEP...->ASYNC_END.
-  void AssociateAsyncBeginEndEvents();
+  // Associate START and FINISH events with each other.
+  // A FINISH event will match the most recent START event with the same name,
+  // category, and ID.
+  void AssociateStartFinishEvents();
 
   // AssociateEvents can be used to customize event associations by setting the
   // other_event member of TraceEvent. This should be used to associate two
@@ -591,16 +504,16 @@ class TraceAnalyzer {
   //            queries will point to an eligible |second| event. The query
   //            should evaluate to true if the |first|/|second| pair is a match.
   //
-  // When a match is found, the pair will be associated by having the first
-  // event's other_event member point to the other. AssociateEvents does not
-  // clear previous associations, so it is possible to associate multiple pairs
-  // of events by calling AssociateEvents more than once with different queries.
+  // When a match is found, the pair will be associated by having their
+  // other_event member point to each other. AssociateEvents does not clear
+  // previous associations, so it is possible to associate multiple pairs of
+  // events by calling AssociateEvents more than once with different queries.
   //
   // NOTE: AssociateEvents will overwrite existing other_event associations if
   // the queries pass for events that already had a previous association.
   //
-  // After calling any Find* method, it is not allowed to call AssociateEvents
-  // again.
+  // After calling FindEvents or FindOneEvent, it is not allowed to call
+  // AssociateEvents again.
   void AssociateEvents(const Query& first,
                        const Query& second,
                        const Query& match);
@@ -612,11 +525,8 @@ class TraceAnalyzer {
   // Find all events that match query and replace output vector.
   size_t FindEvents(const Query& query, TraceEventVector* output);
 
-  // Find first event that matches query or NULL if not found.
-  const TraceEvent* FindFirstOf(const Query& query);
-
-  // Find last event that matches query or NULL if not found.
-  const TraceEvent* FindLastOf(const Query& query);
+  // Helper method: find first event that matches query
+  const TraceEvent* FindOneEvent(const Query& query);
 
   const std::string& GetThreadName(const TraceEvent::ProcessThreadID& thread);
 
@@ -644,21 +554,9 @@ struct RateStats {
   double standard_deviation_us;
 };
 
-struct RateStatsOptions {
-  RateStatsOptions() : trim_min(0u), trim_max(0u) {}
-  // After the times between events are sorted, the number of specified elements
-  // will be trimmed before calculating the RateStats. This is useful in cases
-  // where extreme outliers are tolerable and should not skew the overall
-  // average.
-  size_t trim_min;  // Trim this many minimum times.
-  size_t trim_max;  // Trim this many maximum times.
-};
-
 // Calculate min/max/mean and standard deviation from the times between
 // adjacent events.
-bool GetRateStats(const TraceEventVector& events,
-                  RateStats* stats,
-                  const RateStatsOptions* options);
+bool GetRateStats(const TraceEventVector& events, RateStats* stats);
 
 // Starting from |position|, find the first event that matches |query|.
 // Returns true if found, false otherwise.

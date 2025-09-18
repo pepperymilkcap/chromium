@@ -4,7 +4,8 @@
 
 #include "base/threading/thread_restrictions.h"
 
-#if ENABLE_THREAD_RESTRICTIONS
+// This entire file is compiled out in Release mode.
+#ifndef NDEBUG
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -19,9 +20,6 @@ LazyInstance<ThreadLocalBoolean>::Leaky
 
 LazyInstance<ThreadLocalBoolean>::Leaky
     g_singleton_disallowed = LAZY_INSTANCE_INITIALIZER;
-
-LazyInstance<ThreadLocalBoolean>::Leaky
-    g_wait_disallowed = LAZY_INSTANCE_INITIALIZER;
 
 }  // anonymous namespace
 
@@ -44,7 +42,6 @@ void ThreadRestrictions::AssertIOAllowed() {
   }
 }
 
-// static
 bool ThreadRestrictions::SetSingletonAllowed(bool allowed) {
   bool previous_disallowed = g_singleton_disallowed.Get().Get();
   g_singleton_disallowed.Get().Set(!allowed);
@@ -61,25 +58,6 @@ void ThreadRestrictions::AssertSingletonAllowed() {
   }
 }
 
-// static
-void ThreadRestrictions::DisallowWaiting() {
-  g_wait_disallowed.Get().Set(true);
-}
-
-// static
-void ThreadRestrictions::AssertWaitAllowed() {
-  if (g_wait_disallowed.Get().Get()) {
-    LOG(FATAL) << "Waiting is not allowed to be used on this thread to prevent"
-               << "jank and deadlock.";
-  }
-}
-
-bool ThreadRestrictions::SetWaitAllowed(bool allowed) {
-  bool previous_disallowed = g_wait_disallowed.Get().Get();
-  g_wait_disallowed.Get().Set(!allowed);
-  return !previous_disallowed;
-}
-
 }  // namespace base
 
-#endif  // ENABLE_THREAD_RESTRICTIONS
+#endif  // NDEBUG

@@ -1,11 +1,7 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 [
   {
     "namespace": "proxy",
-    "description": "Use the <code>chrome.proxy</code> API to manage Chrome's proxy settings. This API relies on the <a href='types.html#ChromeSetting'>ChromeSetting prototype of the type API</a> for getting and setting the proxy configuration.",
+    "dependencies": [ "types" ],
     "types": [
       {
         "id": "ProxyServer",
@@ -57,7 +53,7 @@
     ],
     "properties": {
       "settings": {
-        "$ref": "types.ChromeSetting",
+        "$ref": "ChromeSetting",
         "description": "Proxy settings to be used. The value of this setting is a ProxyConfig object.",
         "value": [
           "proxy",

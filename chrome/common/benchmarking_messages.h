@@ -16,10 +16,7 @@
 
 // Message sent from the renderer to the browser to request that the browser
 // close all sockets.  Used for debugging/testing.
-//
-// This message must be synchronous so that the test harness can not
-// issue further network requests before it completes.
-IPC_SYNC_MESSAGE_CONTROL0_0(ChromeViewHostMsg_CloseCurrentConnections)
+IPC_MESSAGE_CONTROL0(ChromeViewHostMsg_CloseCurrentConnections)
 
 // Message sent from the renderer to the browser to request that the browser
 // enable or disable the cache.  Used for debugging/testing.
@@ -28,8 +25,11 @@ IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_SetCacheMode,
 
 // Message sent from the renderer to the browser to request that the browser
 // clear the cache.  Used for debugging/testing.
+// |preserve_ssl_host_info| controls whether clearing the cache will preserve
+// persisted SSL information stored in the cache.
 // |result| is the returned status from the operation.
-IPC_SYNC_MESSAGE_CONTROL0_1(ChromeViewHostMsg_ClearCache,
+IPC_SYNC_MESSAGE_CONTROL1_1(ChromeViewHostMsg_ClearCache,
+                            bool /* preserve_ssl_host_info */,
                             int /* result */)
 
 // Message sent from the renderer to the browser to request that the browser

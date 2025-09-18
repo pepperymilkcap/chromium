@@ -4,13 +4,14 @@
 
 #ifndef CHROME_BROWSER_INFOBARS_INFOBAR_EXTENSION_API_H_
 #define CHROME_BROWSER_INFOBARS_INFOBAR_EXTENSION_API_H_
+#pragma once
 
-#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "chrome/browser/extensions/extension_function.h"
 
-class InfobarsShowFunction : public ChromeSyncExtensionFunction {
-  virtual ~InfobarsShowFunction() {}
+class ShowInfoBarFunction : public SyncExtensionFunction {
+  virtual ~ShowInfoBarFunction() {}
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION("infobars.show", INFOBARS_SHOW)
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.infobars.show")
 };
 
 #endif  // CHROME_BROWSER_INFOBARS_INFOBAR_EXTENSION_API_H_

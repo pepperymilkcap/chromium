@@ -4,12 +4,13 @@
 
 #ifndef BASE_I18N_CHAR_ITERATOR_H_
 #define BASE_I18N_CHAR_ITERATOR_H_
+#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/i18n/base_i18n_export.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 // The CharIterator classes iterate through the characters in UTF8 and
 // UTF16 strings.  Example usage:
@@ -30,7 +31,7 @@ namespace i18n {
 class BASE_I18N_EXPORT UTF8CharIterator {
  public:
   // Requires |str| to live as long as the UTF8CharIterator does.
-  explicit UTF8CharIterator(const std::string* str);
+  UTF8CharIterator(const std::string* str);
   ~UTF8CharIterator();
 
   // Return the starting array index of the current character within the
@@ -76,7 +77,7 @@ class BASE_I18N_EXPORT UTF8CharIterator {
 class BASE_I18N_EXPORT UTF16CharIterator {
  public:
   // Requires |str| to live as long as the UTF16CharIterator does.
-  explicit UTF16CharIterator(const string16* str);
+  UTF16CharIterator(const string16* str);
   UTF16CharIterator(const char16* str, size_t str_len);
   ~UTF16CharIterator();
 

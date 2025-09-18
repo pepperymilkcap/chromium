@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/test/test_timeouts.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/dev/ppp_class_deprecated.h"
 #include "ppapi/c/pp_var.h"
@@ -13,9 +13,7 @@
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/private/ppp_instance_private.h"
 #include "ppapi/proxy/host_dispatcher.h"
-#include "ppapi/proxy/interface_list.h"
 #include "ppapi/proxy/ppapi_proxy_test.h"
-#include "ppapi/shared_impl/ppapi_permissions.h"
 #include "ppapi/shared_impl/ppb_var_shared.h"
 #include "ppapi/shared_impl/var.h"
 
@@ -60,31 +58,13 @@ PP_Var GetInstanceObject(PP_Instance /*instance*/) {
   // The 1 ref we got from CreateObject will be passed to the host. We want to
   // have a ref of our own.
   printf("GetInstanceObject called\n");
-  plugin_var_deprecated_if()->AddRef(instance_obj);
+  PpapiGlobals::Get()->GetVarTracker()->AddRefVar(instance_obj);
   return instance_obj;
 }
 
 PPP_Instance_Private ppp_instance_private_mock = {
   &GetInstanceObject
 };
-
-// We need to pass in a |PPP_Class_Deprecated| to
-// |PPB_Var_Deprecated->CreateObject| for a mock |Deallocate| method.
-void Deallocate(void* object) {
-}
-
-const PPP_Class_Deprecated ppp_class_deprecated_mock = {
-    NULL, // HasProperty
-    NULL, // HasMethod
-    NULL, // GetProperty
-    NULL, // GetAllPropertyNames
-    NULL, // SetProperty
-    NULL, // RemoveProperty
-    NULL, // Call
-    NULL, // Construct
-    &Deallocate
-};
-
 
 // We need to mock PPP_Instance, so that we can create and destroy the pretend
 // instance that PPP_Instance_Private uses.
@@ -93,9 +73,7 @@ PP_Bool DidCreate(PP_Instance /*instance*/, uint32_t /*argc*/,
   // Create an object var. This should exercise the typical path for creating
   // instance objects.
   instance_obj =
-      plugin_var_deprecated_if()->CreateObject(kInstance,
-                                               &ppp_class_deprecated_mock,
-                                               NULL);
+      plugin_var_deprecated_if()->CreateObject(kInstance, NULL, NULL);
   return PP_TRUE;
 }
 
@@ -132,6 +110,8 @@ const PPB_Var_Deprecated ppb_var_deprecated_mock = {
   &CreateObject
 };
 
+}  // namespace
+
 class PPP_Instance_Private_ProxyTest : public TwoWayTest {
  public:
    PPP_Instance_Private_ProxyTest()
@@ -145,17 +125,11 @@ class PPP_Instance_Private_ProxyTest : public TwoWayTest {
   }
 };
 
-}  // namespace
-
 TEST_F(PPP_Instance_Private_ProxyTest, PPPInstancePrivate) {
   // This test controls its own instance; we can't use the one that
   // PluginProxyTestHarness provides.
   ASSERT_NE(kInstance, pp_instance());
   HostDispatcher::SetForInstance(kInstance, host().host_dispatcher());
-
-  // Requires dev interfaces.
-  InterfaceList::SetProcessGlobalPermissions(
-      PpapiPermissions::AllPermissions());
 
   // This file-local global is used by the PPP_Instance mock above in order to
   // access PPB_Var_Deprecated.

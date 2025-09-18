@@ -4,10 +4,11 @@
 
 #ifndef CRYPTO_SHA2_H_
 #define CRYPTO_SHA2_H_
+#pragma once
 
 #include <string>
 
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 #include "crypto/crypto_export.h"
 
 namespace crypto {

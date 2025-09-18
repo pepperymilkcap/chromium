@@ -4,9 +4,10 @@
 
 #ifndef UI_GFX_SCOPED_NS_GRAPHICS_CONTEXT_SAVE_GSTATE_MAC_H_
 #define UI_GFX_SCOPED_NS_GRAPHICS_CONTEXT_SAVE_GSTATE_MAC_H_
+#pragma once
 
 #include "base/basictypes.h"
-#include "ui/gfx/gfx_export.h"
+#include "ui/base/ui_export.h"
 
 #if defined(__OBJC__)
 @class NSGraphicsContext;
@@ -17,7 +18,7 @@ class NSGraphicsContext;
 namespace gfx {
 
 // A class to save/restore the state of the current context.
-class GFX_EXPORT ScopedNSGraphicsContextSaveGState {
+class UI_EXPORT ScopedNSGraphicsContextSaveGState {
  public:
   ScopedNSGraphicsContextSaveGState();
   ~ScopedNSGraphicsContextSaveGState();

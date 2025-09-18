@@ -1,45 +1,44 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_GFX_SCOPED_SK_REGION_H_
-#define UI_GFX_SCOPED_SK_REGION_H_
+#ifndef UI_BASE_GFX_SCOPED_REGION_GFX_H_
+#define UI_BASE_GFX_SCOPED_REGION_GFX_H_
+#pragma once
 
+#include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/core/SkRegion.h"
 
 namespace gfx {
 
-// Wraps an SkRegion.
+// Wraps a Region. This class provides the same methods as ScopedGDIObject in
+// scoped_handle_win.
 class ScopedSkRegion {
  public:
-  ScopedSkRegion() : region_(NULL) {}
-  explicit ScopedSkRegion(SkRegion* region) : region_(region) {}
+  ScopedSkRegion() {}
+  explicit ScopedSkRegion(SkRegion* region) { region_.reset(region); }
 
   ~ScopedSkRegion() {
-    delete region_;
   }
 
   void Set(SkRegion* region) {
-    delete region_;
-    region_ = region;
+    region_.reset(region);
   }
 
   SkRegion* Get() {
-    return region_;
+    return region_.get();
   }
 
   SkRegion* release() {
-    SkRegion* region = region_;
-    region_ = NULL;
-    return region;
+    return region_.release();
   }
 
  private:
-  SkRegion* region_;
+  scoped_ptr<SkRegion> region_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedSkRegion);
 };
 
 }  // namespace gfx
 
-#endif  // UI_GFX_SCOPED_SK_REGION_H_
+#endif  // UI_BASE_GFX_SCOPED_REGION_GFX_H_

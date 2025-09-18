@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_CRITICAL_NOTIFICATION_BUBBLE_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_CRITICAL_NOTIFICATION_BUBBLE_VIEW_H_
+#pragma once
 
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
 
@@ -15,7 +16,7 @@ class Accelerator;
 
 namespace views {
 class Label;
-class LabelButton;
+class NativeTextButton;
 }
 
 class CriticalNotificationBubbleView : public views::BubbleDelegateView,
@@ -26,15 +27,10 @@ class CriticalNotificationBubbleView : public views::BubbleDelegateView,
 
   // views::ButtonListener overrides:
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
   // views::WidgetDelegate overrides:
   virtual void WindowClosing() OVERRIDE;
-
-  // views::View overrides:
-  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
 
  protected:
   // views::BubbleDelegateView overrides:
@@ -55,8 +51,8 @@ class CriticalNotificationBubbleView : public views::BubbleDelegateView,
 
   // The headline and buttons on the bubble.
   views::Label* headline_;
-  views::LabelButton* restart_button_;
-  views::LabelButton* dismiss_button_;
+  views::NativeTextButton* restart_button_;
+  views::NativeTextButton* dismiss_button_;
 
   // A timer to refresh the bubble to show new countdown value.
   base::RepeatingTimer<CriticalNotificationBubbleView> refresh_timer_;

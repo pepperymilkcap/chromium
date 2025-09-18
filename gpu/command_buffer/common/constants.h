@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GPU_COMMAND_BUFFER_COMMON_CONSTANTS_H_
 #define GPU_COMMAND_BUFFER_COMMON_CONSTANTS_H_
 
-#include "gpu/command_buffer/common/types.h"
+#include "../common/types.h"
 
 namespace gpu {
 
@@ -21,13 +21,12 @@ namespace error {
     kUnknownCommand,
     kInvalidArguments,
     kLostContext,
-    kGenericError,
-    kDeferCommandUntilLater
+    kGenericError
   };
 
   // Return true if the given error code is an actual error.
   inline bool IsError(Error error) {
-    return error != kNoError && error != kDeferCommandUntilLater;
+    return error != kNoError;
   }
 
   // Provides finer grained information about why the context was lost.
@@ -49,9 +48,6 @@ const int32 kInvalidSharedMemoryId = -1;
 
 // Common Command Buffer shared memory transfer buffer ID.
 const int32 kCommandBufferSharedMemoryId = 4;
-
-// The size to set for the program cache.
-const size_t kDefaultMaxProgramCacheMemoryBytes = 6 * 1024 * 1024;
 
 }  // namespace gpu
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,22 @@
 
 #include "content/common/geolocation_messages.h"
 #include "content/renderer/render_view_impl.h"
-#include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/web/WebGeolocationPermissionRequest.h"
-#include "third_party/WebKit/public/web/WebGeolocationPermissionRequestManager.h"
-#include "third_party/WebKit/public/web/WebGeolocationClient.h"
-#include "third_party/WebKit/public/web/WebGeolocationPosition.h"
-#include "third_party/WebKit/public/web/WebGeolocationError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationPermissionRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationPermissionRequestManager.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationPosition.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
-using blink::WebGeolocationController;
-using blink::WebGeolocationError;
-using blink::WebGeolocationPermissionRequest;
-using blink::WebGeolocationPermissionRequestManager;
-using blink::WebGeolocationPosition;
-
-namespace content {
+using WebKit::WebGeolocationController;
+using WebKit::WebGeolocationError;
+using WebKit::WebGeolocationPermissionRequest;
+using WebKit::WebGeolocationPermissionRequestManager;
+using WebKit::WebGeolocationPosition;
 
 GeolocationDispatcher::GeolocationDispatcher(RenderViewImpl* render_view)
-    : RenderViewObserver(render_view),
+    : content::RenderViewObserver(render_view),
       pending_permissions_(new WebGeolocationPermissionRequestManager()),
       enable_high_accuracy_(false),
       updating_(false) {
@@ -87,7 +86,7 @@ bool GeolocationDispatcher::lastPosition(WebGeolocationPosition&) {
 void GeolocationDispatcher::requestPermission(
     const WebGeolocationPermissionRequest& permissionRequest) {
   int bridge_id = pending_permissions_->add(permissionRequest);
-  base::string16 origin = permissionRequest.securityOrigin().toString();
+  string16 origin = permissionRequest.securityOrigin().toString();
   Send(new GeolocationHostMsg_RequestPermission(
       routing_id(), bridge_id, GURL(origin)));
 }
@@ -99,7 +98,7 @@ void GeolocationDispatcher::cancelPermissionRequest(
   int bridge_id;
   if (!pending_permissions_->remove(permissionRequest, bridge_id))
     return;
-  base::string16 origin = permissionRequest.securityOrigin().toString();
+  string16 origin = permissionRequest.securityOrigin().toString();
   Send(new GeolocationHostMsg_CancelPermissionRequest(
       routing_id(), bridge_id, GURL(origin)));
 }
@@ -113,28 +112,24 @@ void GeolocationDispatcher::OnPermissionSet(int bridge_id, bool is_allowed) {
 }
 
 // We have an updated geolocation position or error code.
-void GeolocationDispatcher::OnPositionUpdated(
-    const Geoposition& geoposition) {
+void GeolocationDispatcher::OnPositionUpdated(const Geoposition& geoposition) {
   // It is possible for the browser process to have queued an update message
   // before receiving the stop updating message.
   if (!updating_)
     return;
 
-  if (geoposition.Validate()) {
+  DCHECK(geoposition.IsInitialized());
+  if (geoposition.IsValidFix()) {
     controller_->positionChanged(
         WebGeolocationPosition(
             geoposition.timestamp.ToDoubleT(),
             geoposition.latitude, geoposition.longitude,
             geoposition.accuracy,
-            // Lowest point on land is at approximately -400 meters.
-            geoposition.altitude > -10000.,
-            geoposition.altitude,
-            geoposition.altitude_accuracy >= 0.,
+            geoposition.is_valid_altitude(), geoposition.altitude,
+            geoposition.is_valid_altitude_accuracy(),
             geoposition.altitude_accuracy,
-            geoposition.heading >= 0. && geoposition.heading <= 360.,
-            geoposition.heading,
-            geoposition.speed >= 0.,
-            geoposition.speed));
+            geoposition.is_valid_heading(), geoposition.heading,
+            geoposition.is_valid_speed(), geoposition.speed));
   } else {
     WebGeolocationError::Error code;
     switch (geoposition.error_code) {
@@ -145,13 +140,12 @@ void GeolocationDispatcher::OnPositionUpdated(
         code = WebGeolocationError::ErrorPositionUnavailable;
         break;
       default:
+        DCHECK(false);
         NOTREACHED() << geoposition.error_code;
         return;
     }
     controller_->errorOccurred(
         WebGeolocationError(
-            code, blink::WebString::fromUTF8(geoposition.error_message)));
+            code, WebKit::WebString::fromUTF8(geoposition.error_message)));
   }
 }
-
-}  // namespace content

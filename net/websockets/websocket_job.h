@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_WEBSOCKETS_WEBSOCKET_JOB_H_
 #define NET_WEBSOCKETS_WEBSOCKET_JOB_H_
+#pragma once
 
-#include <deque>
 #include <string>
 #include <vector>
 
@@ -13,7 +13,6 @@
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/socket_stream/socket_stream_job.h"
-#include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_websocket_stream.h"
 
 class GURL;
@@ -21,7 +20,7 @@ class GURL;
 namespace net {
 
 class DrainableIOBuffer;
-class SSLInfo;
+class WebSocketFrameHandler;
 class WebSocketHandshakeRequestHandler;
 class WebSocketHandshakeResponseHandler;
 
@@ -72,18 +71,15 @@ class NET_EXPORT WebSocketJob
   virtual void OnClose(SocketStream* socket) OVERRIDE;
   virtual void OnAuthRequired(
       SocketStream* socket, AuthChallengeInfo* auth_info) OVERRIDE;
-  virtual void OnSSLCertificateError(SocketStream* socket,
-                                     const SSLInfo& ssl_info,
-                                     bool fatal) OVERRIDE;
   virtual void OnError(const SocketStream* socket, int error) OVERRIDE;
 
   // SpdyWebSocketStream::Delegate methods.
   virtual void OnCreatedSpdyStream(int status) OVERRIDE;
-  virtual void OnSentSpdyHeaders() OVERRIDE;
-  virtual void OnSpdyResponseHeadersUpdated(
-      const SpdyHeaderBlock& response_headers) OVERRIDE;
-  virtual void OnSentSpdyData(size_t bytes_sent) OVERRIDE;
-  virtual void OnReceivedSpdyData(scoped_ptr<SpdyBuffer> buffer) OVERRIDE;
+  virtual void OnSentSpdyHeaders(int status) OVERRIDE;
+  virtual int OnReceivedSpdyResponseHeader(
+      const spdy::SpdyHeaderBlock& headers, int status) OVERRIDE;
+  virtual void OnSentSpdyData(int amount_sent) OVERRIDE;
+  virtual void OnReceivedSpdyData(const char* data, int length) OVERRIDE;
   virtual void OnCloseSpdyStream() OVERRIDE;
 
  private:
@@ -96,18 +92,11 @@ class NET_EXPORT WebSocketJob
   void LoadCookieCallback(const std::string& cookie);
 
   void OnSentHandshakeRequest(SocketStream* socket, int amount_sent);
-  // Parses received data into handshake_response_. When finished receiving the
-  // response, calls SaveCookiesAndNotifyHeadersComplete().
   void OnReceivedHandshakeResponse(
       SocketStream* socket, const char* data, int len);
-  // Saves received cookies to the cookie store, and then notifies the
-  // delegate_ of completion of handshake.
-  void SaveCookiesAndNotifyHeadersComplete();
+  void SaveCookiesAndNotifyHeaderComplete();
   void SaveNextCookie();
-  void OnCookieSaved(bool cookie_status);
-  // Clears variables for handling cookies, rebuilds handshake string excluding
-  // cookies, and then pass the handshake string to delegate_.
-  void NotifyHeadersComplete();
+  void SaveCookieCallback(bool cookie_status);
   void DoSendData();
 
   GURL GetURLForCookies() const;
@@ -141,16 +130,12 @@ class NET_EXPORT WebSocketJob
   std::vector<std::string> response_cookies_;
   size_t response_cookies_save_index_;
 
-  std::deque<scoped_refptr<IOBufferWithSize> > send_buffer_queue_;
-  scoped_refptr<DrainableIOBuffer> current_send_buffer_;
-  std::vector<char> received_data_after_handshake_;
+  scoped_ptr<WebSocketFrameHandler> send_frame_handler_;
+  scoped_refptr<DrainableIOBuffer> current_buffer_;
+  scoped_ptr<WebSocketFrameHandler> receive_frame_handler_;
 
-  int spdy_protocol_version_;
   scoped_ptr<SpdyWebSocketStream> spdy_websocket_stream_;
   std::string challenge_;
-
-  bool save_next_cookie_running_;
-  bool callback_pending_;
 
   base::WeakPtrFactory<WebSocketJob> weak_ptr_factory_;
   base::WeakPtrFactory<WebSocketJob> weak_ptr_factory_for_send_pending_;

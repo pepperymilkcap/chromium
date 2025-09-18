@@ -4,15 +4,14 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_ERROR_REPORTER_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_ERROR_REPORTER_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
-namespace base {
 class MessageLoop;
-}
 
 // Exposes an easy way for the various components of the extension system to
 // report errors. This is a singleton that lives on the UI thread, with the
@@ -33,10 +32,10 @@ class ExtensionErrorReporter {
 
   // Report an error. Errors always go to VLOG(1). Optionally, they can also
   // cause a noisy alert box. This method can be called from any thread.
-  void ReportError(const base::string16& message, bool be_noisy);
+  void ReportError(const string16& message, bool be_noisy);
 
   // Get the errors that have been reported so far.
-  const std::vector<base::string16>* GetErrors();
+  const std::vector<string16>* GetErrors();
 
   // Clear the list of errors reported so far.
   void ClearErrors();
@@ -47,8 +46,8 @@ class ExtensionErrorReporter {
   explicit ExtensionErrorReporter(bool enable_noisy_errors);
   ~ExtensionErrorReporter();
 
-  base::MessageLoop* ui_loop_;
-  std::vector<base::string16> errors_;
+  MessageLoop* ui_loop_;
+  std::vector<string16> errors_;
   bool enable_noisy_errors_;
 };
 

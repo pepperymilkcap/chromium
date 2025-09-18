@@ -1,42 +1,43 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/files/scoped_temp_dir.h"
-#include "base/run_loop.h"
+#include "base/file_path.h"
+#include "base/scoped_temp_dir.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "content/browser/download/mhtml_generation_manager.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/test_utils.h"
-#include "content/shell/browser/shell.h"
-#include "content/test/content_browser_test.h"
-#include "content/test/content_browser_test_utils.h"
-#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace content {
+using content::WebContents;
 
-class MHTMLGenerationTest : public ContentBrowserTest {
+namespace {
+
+class MHTMLGenerationTest : public InProcessBrowserTest {
  public:
   MHTMLGenerationTest() : mhtml_generated_(false), file_size_(0) {}
 
-  void MHTMLGenerated(int64 size) {
+  void MHTMLGenerated(const FilePath& path, int64 size) {
     mhtml_generated_ = true;
     file_size_ = size;
-    base::MessageLoopForUI::current()->Quit();
+    MessageLoopForUI::current()->Quit();
   }
 
  protected:
   virtual void SetUp() {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    ContentBrowserTest::SetUp();
+    InProcessBrowserTest::SetUp();
   }
 
   bool mhtml_generated() const { return mhtml_generated_; }
   int64 file_size() const { return file_size_; }
 
-  base::ScopedTempDir temp_dir_;
+  ScopedTempDir temp_dir_;
 
  private:
   bool mhtml_generated_;
@@ -48,26 +49,31 @@ class MHTMLGenerationTest : public ContentBrowserTest {
 // test is to ensure we were successfull in creating the MHTML data from the
 // renderer.
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTML) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(test_server()->Start());
 
-  base::FilePath path(temp_dir_.path());
+  FilePath path(temp_dir_.path());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
 
-  NavigateToURL(shell(), embedded_test_server()->GetURL("/simple_page.html"));
+  ui_test_utils::NavigateToURL(browser(),
+      test_server()->GetURL("files/google/google.html"));
 
-  shell()->web_contents()->GenerateMHTML(
-      path, base::Bind(&MHTMLGenerationTest::MHTMLGenerated, this));
+  WebContents* tab = browser()->GetSelectedWebContents();
+  MHTMLGenerationManager* mhtml_generation_manager =
+      g_browser_process->mhtml_generation_manager();
+
+  mhtml_generation_manager->GenerateMHTML(tab, path,
+      base::Bind(&MHTMLGenerationTest::MHTMLGenerated, this));
 
   // Block until the MHTML is generated.
-  RunMessageLoop();
+  ui_test_utils::RunMessageLoop();
 
   EXPECT_TRUE(mhtml_generated());
   EXPECT_GT(file_size(), 0);
 
   // Make sure the actual generated file has some contents.
   int64 file_size;
-  ASSERT_TRUE(base::GetFileSize(path, &file_size));
+  ASSERT_TRUE(file_util::GetFileSize(path, &file_size));
   EXPECT_GT(file_size, 100);
 }
 
-}  // namespace content
+}  // namespace

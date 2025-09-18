@@ -10,8 +10,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/run_loop.h"
-#include "printing/backend/printing_info_win.h"
 #include "printing/printing_test.h"
 #include "printing/printing_context.h"
 #include "printing/printing_context_win.h"
@@ -23,7 +21,6 @@ class PrintingContextTest : public PrintingTest<testing::Test> {
  public:
   void PrintSettingsCallback(printing::PrintingContext::Result result) {
     result_ = result;
-    base::MessageLoop::current()->QuitWhenIdle();
   }
 
  protected:
@@ -52,16 +49,19 @@ HRESULT WINAPI PrintDlgExMock(LPPRINTDLGEX lppd) {
   if (!OpenPrinter(const_cast<wchar_t*>(printer_name.c_str()), &printer, NULL))
     return E_FAIL;
 
-  scoped_ptr<uint8[]> buffer;
-  const DEVMODE* dev_mode = NULL;
+  scoped_array<uint8> buffer;
+  DEVMODE* dev_mode = NULL;
+  PRINTER_INFO_2* info_2 = NULL;
   HRESULT result = S_OK;
   lppd->hDC = NULL;
   lppd->hDevMode = NULL;
   lppd->hDevNames = NULL;
 
-  printing::PrinterInfo2 info_2;
-  if (info_2.Init(printer)) {
-    dev_mode = info_2.get()->pDevMode;
+  printing::PrintingContextWin::GetPrinterHelper(printer, 2, &buffer);
+  if (buffer.get()) {
+    info_2 = reinterpret_cast<PRINTER_INFO_2*>(buffer.get());
+    if (info_2->pDevMode != NULL)
+      dev_mode = info_2->pDevMode;
   }
   if (!dev_mode) {
     result = E_FAIL;
@@ -89,12 +89,11 @@ HRESULT WINAPI PrintDlgExMock(LPPRINTDLGEX lppd) {
   GlobalUnlock(lppd->hDevMode);
   dev_mode_ptr = NULL;
 
-  size_t driver_size = 2 + sizeof(wchar_t) * lstrlen(info_2.get()->pDriverName);
-  size_t printer_size = 2 + sizeof(wchar_t) *
-                            lstrlen(info_2.get()->pPrinterName);
-  size_t port_size = 2 + sizeof(wchar_t) * lstrlen(info_2.get()->pPortName);
+  size_t driver_size = 2 + sizeof(wchar_t) * lstrlen(info_2->pDriverName);
+  size_t printer_size = 2 + sizeof(wchar_t) * lstrlen(info_2->pPrinterName);
+  size_t port_size = 2 + sizeof(wchar_t) * lstrlen(info_2->pPortName);
   size_t dev_names_size = sizeof(DEVNAMES) + driver_size + printer_size +
-                          port_size;
+      port_size;
   lppd->hDevNames = GlobalAlloc(GHND, dev_names_size);
   if (!lppd->hDevNames) {
     result = E_FAIL;
@@ -107,17 +106,15 @@ HRESULT WINAPI PrintDlgExMock(LPPRINTDLGEX lppd) {
   }
   DEVNAMES* dev_names = reinterpret_cast<DEVNAMES*>(dev_names_ptr);
   dev_names->wDefault = 1;
-  dev_names->wDriverOffset = sizeof(DEVNAMES) / sizeof(wchar_t);
+  dev_names->wDriverOffset = sizeof(DEVNAMES);
   memcpy(reinterpret_cast<uint8*>(dev_names_ptr) + dev_names->wDriverOffset,
-         info_2.get()->pDriverName, driver_size);
-  dev_names->wDeviceOffset = dev_names->wDriverOffset +
-                             driver_size / sizeof(wchar_t);
+      info_2->pDriverName, driver_size);
+  dev_names->wDeviceOffset = dev_names->wDriverOffset + driver_size;
   memcpy(reinterpret_cast<uint8*>(dev_names_ptr) + dev_names->wDeviceOffset,
-         info_2.get()->pPrinterName, printer_size);
-  dev_names->wOutputOffset = dev_names->wDeviceOffset +
-                             printer_size / sizeof(wchar_t);
+      info_2->pPrinterName, printer_size);
+  dev_names->wOutputOffset = dev_names->wDeviceOffset + printer_size;
   memcpy(reinterpret_cast<uint8*>(dev_names_ptr) + dev_names->wOutputOffset,
-         info_2.get()->pPortName, port_size);
+      info_2->pPortName, port_size);
   GlobalUnlock(lppd->hDevNames);
   dev_names_ptr = NULL;
 
@@ -143,6 +140,7 @@ Cleanup:
 }
 
 TEST_F(PrintingContextTest, Base) {
+  // Sometimes ::GetDefaultPrinter() fails? bug 61509.
   if (IsTestCaseDisabled())
     return;
 
@@ -161,7 +159,7 @@ TEST_F(PrintingContextTest, Base) {
 }
 
 TEST_F(PrintingContextTest, PrintAll) {
-  base::MessageLoopForUI loop;
+  // Sometimes ::GetDefaultPrinter() fails? bug 61509.
   if (IsTestCaseDisabled())
     return;
 
@@ -171,9 +169,7 @@ TEST_F(PrintingContextTest, PrintAll) {
   context.AskUserForSettings(
       NULL, 123, false, base::Bind(&PrintingContextTest::PrintSettingsCallback,
                                    base::Unretained(this)));
-  base::RunLoop().Run();
   EXPECT_EQ(printing::PrintingContext::OK, result());
-
   printing::PrintSettings settings = context.settings();
-  EXPECT_EQ(settings.ranges().size(), 0);
+  EXPECT_EQ(settings.ranges.size(), 0);
 }

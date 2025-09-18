@@ -1,16 +1,13 @@
-// Copyright 2011 Google Inc. All Rights Reserved.
+// Copyright 2011 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 // Bit writing and boolean coder
 //
 // Author: Skal (pascal.massimino@gmail.com)
-//         Vikas Arora (vikaas.arora@gmail.com)
 
 #include <assert.h>
 #include <string.h>   // for memcpy()
@@ -27,23 +24,18 @@ extern "C" {
 static int BitWriterResize(VP8BitWriter* const bw, size_t extra_size) {
   uint8_t* new_buf;
   size_t new_size;
-  const uint64_t needed_size_64b = (uint64_t)bw->pos_ + extra_size;
-  const size_t needed_size = (size_t)needed_size_64b;
-  if (needed_size_64b != needed_size) {
-    bw->error_ = 1;
-    return 0;
-  }
+  const size_t needed_size = bw->pos_ + extra_size;
   if (needed_size <= bw->max_pos_) return 1;
-  // If the following line wraps over 32bit, the test just after will catch it.
   new_size = 2 * bw->max_pos_;
-  if (new_size < needed_size) new_size = needed_size;
+  if (new_size < needed_size)
+    new_size = needed_size;
   if (new_size < 1024) new_size = 1024;
   new_buf = (uint8_t*)malloc(new_size);
   if (new_buf == NULL) {
     bw->error_ = 1;
     return 0;
   }
-  memcpy(new_buf, bw->buf_, bw->pos_);
+  if (bw->pos_ > 0) memcpy(new_buf, bw->buf_, bw->pos_);
   free(bw->buf_);
   bw->buf_ = new_buf;
   bw->max_pos_ = new_size;
@@ -58,8 +50,10 @@ static void kFlush(VP8BitWriter* const bw) {
   bw->nb_bits_ -= 8;
   if ((bits & 0xff) != 0xff) {
     size_t pos = bw->pos_;
-    if (!BitWriterResize(bw, bw->run_ + 1)) {
-      return;
+    if (pos + bw->run_ >= bw->max_pos_) {  // reallocate
+      if (!BitWriterResize(bw,  bw->run_ + 1)) {
+        return;
+      }
     }
     if (bits & 0x100) {  // overflow -> propagate carry over pending 0xff's
       if (pos > 0) bw->buf_[pos - 1]++;
@@ -183,100 +177,6 @@ int VP8BitWriterAppend(VP8BitWriter* const bw,
   memcpy(bw->buf_ + bw->pos_, data, size);
   bw->pos_ += size;
   return 1;
-}
-
-void VP8BitWriterWipeOut(VP8BitWriter* const bw) {
-  if (bw) {
-    free(bw->buf_);
-    memset(bw, 0, sizeof(*bw));
-  }
-}
-
-//------------------------------------------------------------------------------
-// VP8LBitWriter
-
-// Returns 1 on success.
-static int VP8LBitWriterResize(VP8LBitWriter* const bw, size_t extra_size) {
-  uint8_t* allocated_buf;
-  size_t allocated_size;
-  const size_t current_size = VP8LBitWriterNumBytes(bw);
-  const uint64_t size_required_64b = (uint64_t)current_size + extra_size;
-  const size_t size_required = (size_t)size_required_64b;
-  if (size_required != size_required_64b) {
-    bw->error_ = 1;
-    return 0;
-  }
-  if (bw->max_bytes_ > 0 && size_required <= bw->max_bytes_) return 1;
-  allocated_size = (3 * bw->max_bytes_) >> 1;
-  if (allocated_size < size_required) allocated_size = size_required;
-  // make allocated size multiple of 1k
-  allocated_size = (((allocated_size >> 10) + 1) << 10);
-  allocated_buf = (uint8_t*)malloc(allocated_size);
-  if (allocated_buf == NULL) {
-    bw->error_ = 1;
-    return 0;
-  }
-  memcpy(allocated_buf, bw->buf_, current_size);
-  free(bw->buf_);
-  bw->buf_ = allocated_buf;
-  bw->max_bytes_ = allocated_size;
-  memset(allocated_buf + current_size, 0, allocated_size - current_size);
-  return 1;
-}
-
-int VP8LBitWriterInit(VP8LBitWriter* const bw, size_t expected_size) {
-  memset(bw, 0, sizeof(*bw));
-  return VP8LBitWriterResize(bw, expected_size);
-}
-
-void VP8LBitWriterDestroy(VP8LBitWriter* const bw) {
-  if (bw != NULL) {
-    free(bw->buf_);
-    memset(bw, 0, sizeof(*bw));
-  }
-}
-
-void VP8LWriteBits(VP8LBitWriter* const bw, int n_bits, uint32_t bits) {
-  if (n_bits < 1) return;
-#if !defined(__BIG_ENDIAN__)
-  // Technically, this branch of the code can write up to 25 bits at a time,
-  // but in prefix encoding, the maximum number of bits written is 18 at a time.
-  {
-    uint8_t* const p = &bw->buf_[bw->bit_pos_ >> 3];
-    uint32_t v = *(const uint32_t*)p;
-    v |= bits << (bw->bit_pos_ & 7);
-    *(uint32_t*)p = v;
-    bw->bit_pos_ += n_bits;
-  }
-#else  // BIG_ENDIAN
-  {
-    uint8_t* p = &bw->buf_[bw->bit_pos_ >> 3];
-    const int bits_reserved_in_first_byte = bw->bit_pos_ & 7;
-    const int bits_left_to_write = n_bits - 8 + bits_reserved_in_first_byte;
-    // implicit & 0xff is assumed for uint8_t arithmetics
-    *p++ |= bits << bits_reserved_in_first_byte;
-    bits >>= 8 - bits_reserved_in_first_byte;
-    if (bits_left_to_write >= 1) {
-      *p++ = bits;
-      bits >>= 8;
-      if (bits_left_to_write >= 9) {
-        *p++ = bits;
-        bits >>= 8;
-      }
-    }
-    assert(n_bits <= 25);
-    *p = bits;
-    bw->bit_pos_ += n_bits;
-  }
-#endif
-  if ((bw->bit_pos_ >> 3) > (bw->max_bytes_ - 8)) {
-    const uint64_t extra_size = 32768ULL + bw->max_bytes_;
-    if (extra_size != (size_t)extra_size ||
-        !VP8LBitWriterResize(bw, (size_t)extra_size)) {
-      bw->bit_pos_ = 0;
-      bw->error_ = 1;
-    }
-  }
 }
 
 //------------------------------------------------------------------------------

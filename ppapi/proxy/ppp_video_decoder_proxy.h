@@ -21,7 +21,7 @@ class PPP_VideoDecoder_Proxy : public InterfaceProxy {
   PPP_VideoDecoder_Proxy(Dispatcher* dispatcher);
   virtual ~PPP_VideoDecoder_Proxy();
 
-  static const PPP_VideoDecoder_Dev* GetProxyInterface();
+  static const Info* GetInfo();
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -30,8 +30,7 @@ class PPP_VideoDecoder_Proxy : public InterfaceProxy {
   // Message handlers.
   void OnMsgProvidePictureBuffers(const ppapi::HostResource& decoder,
                                   uint32_t req_num_of_buffers,
-                                  const PP_Size& dimensions,
-                                  uint32_t texture_target);
+                                  const PP_Size& dimensions);
   void OnMsgDismissPictureBuffer(const ppapi::HostResource& decoder,
                                  int32_t picture_id);
   void OnMsgPictureReady(const ppapi::HostResource& decoder,

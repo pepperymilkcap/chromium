@@ -1,8 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_change_notifier_factory.h"
 #include "net/base/network_change_notifier_win.h"
@@ -31,9 +31,8 @@ class TestNetworkChangeNotifierWin : public NetworkChangeNotifierWin {
   }
 
   // From NetworkChangeNotifier.
-  virtual NetworkChangeNotifier::ConnectionType
-      GetCurrentConnectionType() const OVERRIDE {
-    return NetworkChangeNotifier::CONNECTION_UNKNOWN;
+  virtual bool IsCurrentlyOffline() const OVERRIDE {
+    return false;
   }
 
   // From NetworkChangeNotifierWin.
@@ -61,7 +60,7 @@ class TestIPAddressObserver
 };
 
 bool ExitMessageLoopAndReturnFalse() {
-  base::MessageLoop::current()->Quit();
+  MessageLoop::current()->Quit();
   return false;
 }
 
@@ -89,7 +88,7 @@ class NetworkChangeNotifierWinTest : public testing::Test {
 
     // If a task to notify observers of the IP address change event was
     // incorrectly posted, make sure it gets run to trigger a failure.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
 
   // Calls WatchForAddressChange, and simulates a WatchForAddressChangeInternal
@@ -112,7 +111,7 @@ class NetworkChangeNotifierWinTest : public testing::Test {
 
     // If a task to notify observers of the IP address change event was
     // incorrectly posted, make sure it gets run.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
 
   // Simulates a network change event, resulting in a call to OnObjectSignaled.
@@ -132,7 +131,7 @@ class NetworkChangeNotifierWinTest : public testing::Test {
     EXPECT_EQ(0, network_change_notifier_.sequential_failures());
 
     // Run the task to notify observers of the IP address change event.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
 
   // Simulates a network change event, resulting in a call to OnObjectSignaled.
@@ -154,7 +153,7 @@ class NetworkChangeNotifierWinTest : public testing::Test {
     EXPECT_LT(0, network_change_notifier_.sequential_failures());
 
     // Run the task to notify observers of the IP address change event.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
 
   // Runs the message loop until WatchForAddressChange is called again, as a
@@ -165,13 +164,14 @@ class NetworkChangeNotifierWinTest : public testing::Test {
     EXPECT_FALSE(network_change_notifier_.is_watching());
     EXPECT_LT(0, network_change_notifier_.sequential_failures());
 
-    EXPECT_CALL(test_ip_address_observer_, OnIPAddressChanged()).Times(1)
-        .WillOnce(
-            Invoke(base::MessageLoop::current(), &base::MessageLoop::Quit));
+    EXPECT_CALL(test_ip_address_observer_, OnIPAddressChanged())
+        .Times(1)
+        .WillOnce(Invoke(MessageLoop::current(), &MessageLoop::Quit));
     EXPECT_CALL(network_change_notifier_, WatchForAddressChangeInternal())
-        .Times(1).WillOnce(Return(true));
+        .Times(1)
+        .WillOnce(Return(true));
 
-    base::MessageLoop::current()->Run();
+    MessageLoop::current()->Run();
 
     EXPECT_TRUE(network_change_notifier_.is_watching());
     EXPECT_EQ(0, network_change_notifier_.sequential_failures());
@@ -195,7 +195,7 @@ class NetworkChangeNotifierWinTest : public testing::Test {
         .Times(AtLeast(1))
         .WillRepeatedly(Invoke(ExitMessageLoopAndReturnFalse));
 
-    base::MessageLoop::current()->Run();
+    MessageLoop::current()->Run();
 
     EXPECT_FALSE(network_change_notifier_.is_watching());
     EXPECT_LT(initial_sequential_failures,
@@ -203,7 +203,7 @@ class NetworkChangeNotifierWinTest : public testing::Test {
 
     // If a task to notify observers of the IP address change event was
     // incorrectly posted, make sure it gets run.
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
 
  private:

@@ -1,14 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SKIA_EXT_BITMAP_PLATFORM_DEVICE_WIN_H_
 #define SKIA_EXT_BITMAP_PLATFORM_DEVICE_WIN_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "skia/ext/platform_device.h"
-#include "skia/ext/refptr.h"
 
 namespace skia {
 
@@ -19,32 +19,28 @@ namespace skia {
 // This pixel data is provided to the bitmap that the device contains so that it
 // can be shared.
 //
-// The GDI bitmap created for drawing is actually owned by a
-// PlatformBitmapPixelRef, and stored in an SkBitmap via the normal skia
-// SkPixelRef refcounting mechanism. In this way, the GDI bitmap can outlive
-// the device created to draw into it. So it is safe to call accessBitmap() on
-// the device, and retain the returned SkBitmap.
-class SK_API BitmapPlatformDevice : public SkBitmapDevice, public PlatformDevice {
+// The device owns the pixel data, when the device goes away, the pixel data
+// also becomes invalid. THIS IS DIFFERENT THAN NORMAL SKIA which uses
+// reference counting for the pixel data. In normal Skia, you could assign
+// another bitmap to this device's bitmap and everything will work properly.
+// For us, that other bitmap will become invalid as soon as the device becomes
+// invalid, which may lead to subtle bugs. Therefore, DO NOT ASSIGN THE
+// DEVICE'S PIXEL DATA TO ANOTHER BITMAP, make sure you copy instead.
+class SK_API BitmapPlatformDevice : public PlatformDevice, public SkDevice {
  public:
-  // Factory function. is_opaque should be set if the caller knows the bitmap
-  // will be completely opaque and allows some optimizations.
+  // Factory function. The screen DC is used to create the bitmap, and will not
+  // be stored beyond this function. is_opaque should be set if the caller
+  // knows the bitmap will be completely opaque and allows some optimizations.
   //
-  // The |shared_section| parameter is optional (pass NULL for default
-  // behavior). If |shared_section| is non-null, then it must be a handle to a
-  // file-mapping object returned by CreateFileMapping.  See CreateDIBSection
-  // for details. If |shared_section| is null, the bitmap backing store is not
-  // initialized.
-  static BitmapPlatformDevice* Create(int width, int height,
+  // The shared_section parameter is optional (pass NULL for default behavior).
+  // If shared_section is non-null, then it must be a handle to a file-mapping
+  // object returned by CreateFileMapping.  See CreateDIBSection for details.
+  static BitmapPlatformDevice* create(HDC screen_dc, int width, int height,
                                       bool is_opaque, HANDLE shared_section);
 
-  // Create a BitmapPlatformDevice with no shared section. The bitmap is not
-  // initialized to 0.
-  static BitmapPlatformDevice* Create(int width, int height, bool is_opaque);
-
-  // Creates a BitmapPlatformDevice instance respecting the parameters as above.
-  // If |is_opaque| is false, then the bitmap is initialzed to 0.
-  static BitmapPlatformDevice* CreateAndClear(int width, int height,
-                                              bool is_opaque);
+  // This version is the same as above but will get the screen DC itself.
+  static BitmapPlatformDevice* create(int width, int height, bool is_opaque,
+                                      HANDLE shared_section);
 
   virtual ~BitmapPlatformDevice();
 
@@ -58,62 +54,33 @@ class SK_API BitmapPlatformDevice : public SkBitmapDevice, public PlatformDevice
                                    const RECT* src_rect) OVERRIDE;
 
   // Loads the given transform and clipping region into the HDC. This is
-  // overridden from SkBaseDevice.
+  // overridden from SkDevice.
   virtual void setMatrixClip(const SkMatrix& transform, const SkRegion& region,
                              const SkClipStack&) OVERRIDE;
 
  protected:
   // Flushes the Windows device context so that the pixel data can be accessed
-  // directly by Skia. Overridden from SkBaseDevice, this is called when Skia
+  // directly by Skia. Overridden from SkDevice, this is called when Skia
   // starts accessing pixel data.
-  virtual const SkBitmap& onAccessBitmap() OVERRIDE;
+  virtual void onAccessBitmap(SkBitmap* bitmap) OVERRIDE;
 
-  virtual SkBaseDevice* onCreateCompatibleDevice(SkBitmap::Config, int width,
-                                                 int height, bool isOpaque,
-                                                 Usage usage) OVERRIDE;
+  virtual SkDevice* onCreateCompatibleDevice(SkBitmap::Config, int width,
+                                             int height, bool isOpaque,
+                                             Usage usage) OVERRIDE;
 
  private:
-  // Private constructor.
-  BitmapPlatformDevice(HBITMAP hbitmap, const SkBitmap& bitmap);
+  // Reference counted data that can be shared between multiple devices. This
+  // allows copy constructors and operator= for devices to work properly. The
+  // bitmaps used by the base device class are already refcounted and copyable.
+  class BitmapPlatformDeviceData;
 
-  // Bitmap into which the drawing will be done. This bitmap not owned by this
-  // class, but by the BitmapPlatformPixelRef inside the device's SkBitmap.
-  // It's only stored here in order to lazy-create the DC (below).
-  HBITMAP hbitmap_;
+  // Private constructor. The data should already be ref'ed for us.
+  BitmapPlatformDevice(BitmapPlatformDeviceData* data,
+                       const SkBitmap& bitmap);
 
-  // Previous bitmap held by the DC. This will be selected back before the
-  // DC is destroyed.
-  HBITMAP old_hbitmap_;
-
-  // Lazily-created DC used to draw into the bitmap; see GetBitmapDC().
-  HDC hdc_;
-
-  // True when there is a transform or clip that has not been set to the
-  // context.  The context is retrieved for every text operation, and the
-  // transform and clip do not change as much. We can save time by not loading
-  // the clip and transform for every one.
-  bool config_dirty_;
-
-  // Translation assigned to the context: we need to keep track of this
-  // separately so it can be updated even if the context isn't created yet.
-  SkMatrix transform_;
-
-  // The current clipping region.
-  SkRegion clip_region_;
-
-  // Create/destroy hdc_, which is the memory DC for our bitmap data.
-  HDC GetBitmapDC();
-  void ReleaseBitmapDC();
-  bool IsBitmapDCCreated() const;
-
-  // Sets the transform and clip operations. This will not update the DC,
-  // but will mark the config as dirty. The next call of LoadConfig will
-  // pick up these changes.
-  void SetMatrixClip(const SkMatrix& transform, const SkRegion& region);
-
-  // Loads the current transform and clip into the context. Can be called even
-  // when |hbitmap_| is NULL (will be a NOP).
-  void LoadConfig();
+  // Data associated with this device, guaranteed non-null. We hold a reference
+  // to this object.
+  BitmapPlatformDeviceData* data_;
 
 #ifdef SK_DEBUG
   int begin_paint_count_;

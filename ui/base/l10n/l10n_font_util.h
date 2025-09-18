@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_L10N_FONT_UTIL_H_
 #define UI_BASE_L10N_FONT_UTIL_H_
+#pragma once
 
 #include "ui/base/ui_export.h"
 #include "ui/gfx/size.h"

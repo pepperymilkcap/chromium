@@ -9,20 +9,10 @@
 #pragma comment(lib, "cryptui.lib")
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "net/cert/x509_certificate.h"
+#include "net/base/x509_certificate.h"
 
-#if defined(USE_AURA)
-#include "chrome/browser/ui/host_desktop.h"
-#include "ui/aura/root_window.h"
-#include "ui/aura/window.h"
-#endif
-
-namespace {
-
-void ShowCertificateViewerImpl(content::WebContents* web_contents,
-                               HWND parent,
-                               net::X509Certificate* cert) {
+void ShowCertificateViewer(gfx::NativeWindow parent,
+                           net::X509Certificate* cert) {
   // Create a new cert context and store containing just the certificate
   // and its intermediate certificates.
   PCCERT_CONTEXT cert_list = cert->CreateOSCertChainForCert();
@@ -41,37 +31,9 @@ void ShowCertificateViewerImpl(content::WebContents* web_contents,
   view_info.rghStores = &cert_store;
   BOOL properties_changed;
 
-  // We must allow nested tasks to dispatch so that, e.g. gpu tasks are
-  // processed for painting. This allows a second window to continue painting
-  // while the the certificate dialog is open.
-  base::MessageLoop::ScopedNestableTaskAllower allow(
-      base::MessageLoop::current());
   // This next call blocks but keeps processing windows messages, making it
   // modal to the browser window.
   BOOL rv = ::CryptUIDlgViewCertificate(&view_info, &properties_changed);
 
   CertFreeCertificateContext(cert_list);
 }
-
-}  // namespace
-
-#if defined(USE_AURA)
-void ShowCertificateViewer(content::WebContents* web_contents,
-                           gfx::NativeWindow parent,
-                           net::X509Certificate* cert) {
-  if (chrome::GetHostDesktopTypeForNativeWindow(parent) !=
-      chrome::HOST_DESKTOP_TYPE_ASH) {
-    ShowCertificateViewerImpl(
-        web_contents,
-        parent->GetDispatcher()->host()->GetAcceleratedWidget(), cert);
-  } else {
-    NOTIMPLEMENTED();
-  }
-}
-#else
-void ShowCertificateViewer(content::WebContents* web_contents,
-                           gfx::NativeWindow parent,
-                           net::X509Certificate* cert) {
-  ShowCertificateViewerImpl(web_contents, parent, cert);
-}
-#endif

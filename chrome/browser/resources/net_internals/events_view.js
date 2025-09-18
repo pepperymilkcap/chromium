@@ -19,8 +19,8 @@
  *  |                      ||                |
  *  |                      ||                |
  *  |                      ||                |
- *  |                      ||                |
- *  |                      ||                |
+ *  +----------------------++                |
+ *  |      action bar      ||                |
  *  +----------------------++----------------+
  */
 var EventsView = (function() {
@@ -42,15 +42,16 @@ var EventsView = (function() {
     superClass.call(this);
 
     // Initialize the sub-views.
-    var leftPane = new VerticalSplitView(new DivView(EventsView.TOPBAR_ID),
-                                         new DivView(EventsView.LIST_BOX_ID));
+    var leftPane = new TopMidBottomView(new DivView(EventsView.TOPBAR_ID),
+                                        new DivView(EventsView.MIDDLE_BOX_ID),
+                                        new DivView(EventsView.BOTTOM_BAR_ID));
 
     this.detailsView_ = new DetailsView(EventsView.DETAILS_LOG_BOX_ID);
 
     this.splitterView_ = new ResizableVerticalSplitView(
         leftPane, this.detailsView_, new DivView(EventsView.SIZER_ID));
 
-    SourceTracker.getInstance().addSourceEntryObserver(this);
+    g_browser.sourceTracker.addSourceEntryObserver(this);
 
     this.tableBody_ = $(EventsView.TBODY_ID);
 
@@ -59,6 +60,12 @@ var EventsView = (function() {
 
     this.filterInput_.addEventListener('search',
         this.onFilterTextChanged_.bind(this), true);
+
+    $(EventsView.DELETE_SELECTED_ID).onclick = this.deleteSelected_.bind(this);
+
+    $(EventsView.DELETE_ALL_ID).onclick =
+        g_browser.sourceTracker.deleteAllSourceEntries.bind(
+            g_browser.sourceTracker);
 
     $(EventsView.SELECT_ALL_ID).addEventListener(
         'click', this.selectAll_.bind(this), true);
@@ -72,32 +79,29 @@ var EventsView = (function() {
     $(EventsView.SORT_BY_DESCRIPTION_ID).addEventListener(
         'click', this.sortByDescription_.bind(this), true);
 
-    new MouseOverHelp(EventsView.FILTER_HELP_ID,
-                      EventsView.FILTER_HELP_HOVER_ID);
-
     // Sets sort order and filter.
     this.setFilter_('');
 
     this.initializeSourceList_();
   }
 
-  EventsView.TAB_ID = 'tab-handle-events';
-  EventsView.TAB_NAME = 'Events';
-  EventsView.TAB_HASH = '#events';
+  // ID for special HTML element in category_tabs.html
+  EventsView.TAB_HANDLE_ID = 'tab-handle-events';
 
   // IDs for special HTML elements in events_view.html
   EventsView.TBODY_ID = 'events-view-source-list-tbody';
   EventsView.FILTER_INPUT_ID = 'events-view-filter-input';
   EventsView.FILTER_COUNT_ID = 'events-view-filter-count';
-  EventsView.FILTER_HELP_ID = 'events-view-filter-help';
-  EventsView.FILTER_HELP_HOVER_ID = 'events-view-filter-help-hover';
+  EventsView.DELETE_SELECTED_ID = 'events-view-delete-selected';
+  EventsView.DELETE_ALL_ID = 'events-view-delete-all';
   EventsView.SELECT_ALL_ID = 'events-view-select-all';
   EventsView.SORT_BY_ID_ID = 'events-view-sort-by-id';
   EventsView.SORT_BY_SOURCE_TYPE_ID = 'events-view-sort-by-source';
   EventsView.SORT_BY_DESCRIPTION_ID = 'events-view-sort-by-description';
   EventsView.DETAILS_LOG_BOX_ID = 'events-view-details-log-box';
   EventsView.TOPBAR_ID = 'events-view-filter-box';
-  EventsView.LIST_BOX_ID = 'events-view-source-list';
+  EventsView.MIDDLE_BOX_ID = 'events-view-source-list';
+  EventsView.BOTTOM_BAR_ID = 'events-view-action-box';
   EventsView.SIZER_ID = 'events-view-splitter-box';
 
   cr.addSingletonGetter(EventsView);
@@ -144,16 +148,9 @@ var EventsView = (function() {
     },
 
     /**
-     * Updates text in the details view when privacy stripping is toggled.
+     * Updates text in the details view when security stripping is toggled.
      */
-    onPrivacyStrippingChanged: function() {
-      this.invalidateDetailsView_();
-    },
-
-    /**
-     * Updates text in the details view when time display mode is toggled.
-     */
-    onUseRelativeTimesChanged: function() {
+    onSecurityStrippingChanged: function() {
       this.invalidateDetailsView_();
     },
 
@@ -182,38 +179,160 @@ var EventsView = (function() {
       }
     },
 
+    /**
+     * Looks for the first occurence of |directive|:parameter in |sourceText|.
+     * Parameter can be an empty string.
+     *
+     * On success, returns an object with two fields:
+     *   |remainingText| - |sourceText| with |directive|:parameter removed,
+                           and excess whitespace deleted.
+     *   |parameter| - the parameter itself.
+     *
+     * On failure, returns null.
+     */
+    parseDirective_: function(sourceText, directive) {
+      // Adding a leading space allows a single regexp to be used, regardless of
+      // whether or not the directive is at the start of the string.
+      sourceText = ' ' + sourceText;
+      var regExp = new RegExp('\\s+' + directive + ':(\\S*)\\s*', 'i');
+      var matchInfo = regExp.exec(sourceText);
+      if (matchInfo == null)
+        return null;
+
+      return {'remainingText': sourceText.replace(regExp, ' ').trim(),
+              'parameter': matchInfo[1]};
+    },
+
+    /**
+     * Just like parseDirective_, except can optionally be a '-' before or
+     * the parameter, to negate it.  Before is more natural, after
+     * allows more convenient toggling.
+     *
+     * Returned value has the additional field |isNegated|, and a leading
+     * '-' will be removed from |parameter|, if present.
+     */
+    parseNegatableDirective_: function(sourceText, directive) {
+      var matchInfo = this.parseDirective_(sourceText, directive);
+      if (matchInfo == null)
+        return null;
+
+      // Remove any leading or trailing '-' from the directive.
+      var negationInfo = /^(-?)(\S*?)$/.exec(matchInfo.parameter);
+      matchInfo.parameter = negationInfo[2];
+      matchInfo.isNegated = (negationInfo[1] == '-');
+      return matchInfo;
+    },
+
+    /**
+     * Parse any "sort:" directives, and update |comparisonFunction_| and
+     * |doSortBackwards_|as needed.  Note only the last valid sort directive
+     * is used.
+     *
+     * Returns |filterText| with all sort directives removed, including
+     * invalid ones.
+     */
+    parseSortDirectives_: function(filterText) {
+      this.comparisonFunction_ = compareSourceId;
+      this.doSortBackwards_ = false;
+
+      while (true) {
+        var sortInfo = this.parseNegatableDirective_(filterText, 'sort');
+        if (sortInfo == null)
+          break;
+        var comparisonName = sortInfo.parameter.toLowerCase();
+        if (COMPARISON_FUNCTION_TABLE[comparisonName] != null) {
+          this.comparisonFunction_ = COMPARISON_FUNCTION_TABLE[comparisonName];
+          this.doSortBackwards_ = sortInfo.isNegated;
+        }
+        filterText = sortInfo.remainingText;
+      }
+
+      return filterText;
+    },
+
+    /**
+     * Parse any "is:" directives, and update |filter| accordingly.
+     *
+     * Returns |filterText| with all "is:" directives removed, including
+     * invalid ones.
+     */
+    parseRestrictDirectives_: function(filterText, filter) {
+      while (true) {
+        var filterInfo = this.parseNegatableDirective_(filterText, 'is');
+        if (filterInfo == null)
+          break;
+        if (filterInfo.parameter == 'active') {
+          if (!filterInfo.isNegated) {
+            filter.isActive = true;
+          } else {
+            filter.isInactive = true;
+          }
+        }
+        if (filterInfo.parameter == 'error') {
+          if (!filterInfo.isNegated) {
+            filter.isError = true;
+          } else {
+            filter.isNotError = true;
+          }
+        }
+        filterText = filterInfo.remainingText;
+      }
+      return filterText;
+    },
+
+    /**
+     * Parses all directives that take arbitrary strings as input,
+     * and updates |filter| accordingly.  Directives of these types
+     * are stored as lists.
+     *
+     * Returns |filterText| with all recognized directives removed.
+     */
+    parseStringDirectives_: function(filterText, filter) {
+      var directives = ['type', 'id'];
+      for (var i = 0; i < directives.length; ++i) {
+        while (true) {
+          var directive = directives[i];
+          var filterInfo = this.parseDirective_(filterText, directive);
+          if (filterInfo == null)
+            break;
+          if (!filter[directive])
+            filter[directive] = [];
+          filter[directive].push(filterInfo.parameter);
+          filterText = filterInfo.remainingText;
+        }
+      }
+      return filterText;
+    },
+
+    /*
+     * Converts |filterText| into an object representing the filter.
+     */
+    createFilter_: function(filterText) {
+      var filter = {};
+      filterText = filterText.toLowerCase();
+      filterText = this.parseRestrictDirectives_(filterText, filter);
+      filterText = this.parseStringDirectives_(filterText, filter);
+      filter.text = filterText.trim();
+      return filter;
+    },
+
     setFilter_: function(filterText) {
       var lastComparisonFunction = this.comparisonFunction_;
       var lastDoSortBackwards = this.doSortBackwards_;
 
-      var filterParser = new SourceFilterParser(filterText);
-      this.currentFilter_ = filterParser.filter;
-
-      this.pickSortFunction_(filterParser.sort);
+      filterText = this.parseSortDirectives_(filterText);
 
       if (lastComparisonFunction != this.comparisonFunction_ ||
           lastDoSortBackwards != this.doSortBackwards_) {
         this.sort_();
       }
 
+      this.currentFilter_ = this.createFilter_(filterText);
+
       // Iterate through all of the rows and see if they match the filter.
       for (var id in this.sourceIdToRowMap_) {
         var entry = this.sourceIdToRowMap_[id];
-        entry.setIsMatchedByFilter(this.currentFilter_(entry.getSourceEntry()));
-      }
-    },
-
-    /**
-     * Given a "sort" object with "method" and "backwards" keys, looks up and
-     * sets |comparisonFunction_| and |doSortBackwards_|.  If the ID does not
-     * correspond to a sort function, defaults to sorting by ID.
-     */
-    pickSortFunction_: function(sort) {
-      this.doSortBackwards_ = sort.backwards;
-      this.comparisonFunction_ = COMPARISON_FUNCTION_TABLE[sort.method];
-      if (!this.comparisonFunction_) {
-        this.doSortBackwards_ = false;
-        this.comparisonFunction_ = compareSourceId_;
+        entry.setIsMatchedByFilter(entry.matchesFilter(this.currentFilter_));
       }
     },
 
@@ -307,6 +426,22 @@ var EventsView = (function() {
     },
 
     /**
+     * Called whenever some log events are deleted.  |sourceIds| lists
+     * the source IDs of all deleted log entries.
+     */
+    onSourceEntriesDeleted: function(sourceIds) {
+      for (var i = 0; i < sourceIds.length; ++i) {
+        var id = sourceIds[i];
+        var sourceRow = this.sourceIdToRowMap_[id];
+        if (sourceRow) {
+          sourceRow.remove();
+          delete this.sourceIdToRowMap_[id];
+          this.incrementPrefilterCount(-1);
+        }
+      }
+    },
+
+    /**
      * Called whenever all log events are deleted.
      */
     onAllSourceEntriesDeleted: function() {
@@ -350,6 +485,15 @@ var EventsView = (function() {
       }
 
       this.onSelectionChanged();
+    },
+
+    deleteSelected_: function() {
+      var sourceIds = [];
+      for (var i = 0; i < this.currentSelectedRows_.length; ++i) {
+        var sourceRow = this.currentSelectedRows_[i];
+        sourceIds.push(sourceRow.getSourceEntry().getSourceId());
+      }
+      g_browser.sourceTracker.deleteSourceEntries(sourceIds);
     },
 
     selectAll_: function(event) {
@@ -401,18 +545,15 @@ var EventsView = (function() {
      * removes pre-existing sort parameter before adding the new one.
      */
     toggleSortMethod_: function(sortMethod) {
-      // Get old filter text and remove old sort directives, if any.
-      var filterParser = new SourceFilterParser(this.getFilterText_());
-      var filterText = filterParser.filterTextWithoutSort;
-
-      filterText = 'sort:' + sortMethod + ' ' + filterText;
+      // Remove old sort directives, if any.
+      var filterText = this.parseSortDirectives_(this.getFilterText_());
 
       // If already using specified sortMethod, sort backwards.
       if (!this.doSortBackwards_ &&
-          COMPARISON_FUNCTION_TABLE[sortMethod] == this.comparisonFunction_) {
-        filterText = '-' + filterText;
-      }
+          COMPARISON_FUNCTION_TABLE[sortMethod] == this.comparisonFunction_)
+        sortMethod = '-' + sortMethod;
 
+      filterText = 'sort:' + sortMethod + ' ' + filterText;
       this.setFilterText_(filterText.trim());
     },
 
@@ -491,14 +632,14 @@ var EventsView = (function() {
 
   var COMPARISON_FUNCTION_TABLE = {
     // sort: and sort:- are allowed
-    '': compareSourceId_,
-    'active': compareActive_,
-    'desc': compareDescription_,
-    'description': compareDescription_,
-    'duration': compareDuration_,
-    'id': compareSourceId_,
-    'source': compareSourceType_,
-    'type': compareSourceType_
+    '': compareSourceId,
+    'active': compareActive,
+    'desc': compareDescription,
+    'description': compareDescription,
+    'duration': compareDuration,
+    'id': compareSourceId,
+    'source': compareSourceType,
+    'type': compareSourceType
   };
 
   /**
@@ -507,13 +648,13 @@ var EventsView = (function() {
    * which puts longer lived events at the top, and behaves better than using
    * duration or time of first event.
    */
-  function compareActive_(source1, source2) {
+  function compareActive(source1, source2) {
     if (!source1.isInactive() && source2.isInactive())
       return -1;
     if (source1.isInactive() && !source2.isInactive())
-      return 1;
+      return  1;
     if (source1.isInactive()) {
-      var deltaEndTime = source1.getEndTicks() - source2.getEndTicks();
+      var deltaEndTime = source1.getEndTime() - source2.getEndTime();
       if (deltaEndTime != 0) {
         // The one that ended most recently (Highest end time) should be sorted
         // first.
@@ -522,25 +663,25 @@ var EventsView = (function() {
       // If both ended at the same time, then odds are they were related events,
       // started one after another, so sort in the opposite order of their
       // source IDs to get a more intuitive ordering.
-      return -compareSourceId_(source1, source2);
+      return -compareSourceId(source1, source2);
     }
-    return compareSourceId_(source1, source2);
+    return compareSourceId(source1, source2);
   }
 
-  function compareDescription_(source1, source2) {
+  function compareDescription(source1, source2) {
     var source1Text = source1.getDescription().toLowerCase();
     var source2Text = source2.getDescription().toLowerCase();
     var compareResult = source1Text.localeCompare(source2Text);
     if (compareResult != 0)
       return compareResult;
-    return compareSourceId_(source1, source2);
+    return compareSourceId(source1, source2);
   }
 
-  function compareDuration_(source1, source2) {
+  function compareDuration(source1, source2) {
     var durationDifference = source2.getDuration() - source1.getDuration();
     if (durationDifference)
       return durationDifference;
-    return compareSourceId_(source1, source2);
+    return compareSourceId(source1, source2);
   }
 
   /**
@@ -549,7 +690,7 @@ var EventsView = (function() {
    * before the sourceless entry. Any ambiguities are resolved by ordering
    * the entries without a source by the order in which they were received.
    */
-  function compareSourceId_(source1, source2) {
+  function compareSourceId(source1, source2) {
     var sourceId1 = source1.getSourceId();
     if (sourceId1 < 0)
       sourceId1 = source1.getMaxPreviousEntrySourceId();
@@ -565,13 +706,13 @@ var EventsView = (function() {
     return source2.getSourceId() - source1.getSourceId();
   }
 
-  function compareSourceType_(source1, source2) {
+  function compareSourceType(source1, source2) {
     var source1Text = source1.getSourceTypeString();
     var source2Text = source2.getSourceTypeString();
     var compareResult = source1Text.localeCompare(source2Text);
     if (compareResult != 0)
       return compareResult;
-    return compareSourceId_(source1, source2);
+    return compareSourceId(source1, source2);
   }
 
   return EventsView;

@@ -1,13 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_TOOLBAR_BACK_FORWARD_MENU_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_TOOLBAR_BACK_FORWARD_MENU_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 
@@ -27,7 +29,7 @@ const BackForwardMenuType BACK_FORWARD_MENU_TYPE_FORWARD =
   BackForwardMenuType type_;
   MenuButton* button_;  // Weak; comes from nib.
   scoped_ptr<BackForwardMenuModel> model_;
-  base::scoped_nsobject<NSMenu> backForwardMenu_;
+  scoped_nsobject<NSMenu> backForwardMenu_;
 }
 
 // Type (back or forwards); can only be set on initialization.

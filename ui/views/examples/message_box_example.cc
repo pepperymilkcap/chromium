@@ -1,16 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/examples/message_box_example.h"
 
-#include "base/strings/utf_string_conversions.h"
-#include "ui/views/controls/button/label_button.h"
+#include "base/utf_string_conversions.h"
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/view.h"
-
-using base::ASCIIToUTF16;
 
 namespace views {
 namespace examples {
@@ -23,9 +20,11 @@ MessageBoxExample::~MessageBoxExample() {
 
 void MessageBoxExample::CreateExampleView(View* container) {
   message_box_view_ = new MessageBoxView(
-      MessageBoxView::InitParams(ASCIIToUTF16("Hello, world!")));
-  status_ = new LabelButton(this, ASCIIToUTF16("Show Status"));
-  toggle_ = new LabelButton(this, ASCIIToUTF16("Toggle Checkbox"));
+      views::MessageBoxView::NO_OPTIONS,
+      ASCIIToUTF16("Message Box Message"),
+      ASCIIToUTF16("Default Prompt"));
+  status_ = new TextButton(this, ASCIIToUTF16("Show Status"));
+  toggle_ = new TextButton(this, ASCIIToUTF16("Toggle Checkbox"));
 
   GridLayout* layout = new GridLayout(container);
   container->SetLayoutManager(layout);
@@ -52,7 +51,7 @@ void MessageBoxExample::CreateExampleView(View* container) {
   layout->AddView(toggle_);
 }
 
-void MessageBoxExample::ButtonPressed(Button* sender, const ui::Event& event) {
+void MessageBoxExample::ButtonPressed(Button* sender, const Event& event) {
   if (sender == status_) {
     message_box_view_->SetCheckBoxLabel(
         ASCIIToUTF16(BoolToOnOff(message_box_view_->IsCheckBoxSelected())));

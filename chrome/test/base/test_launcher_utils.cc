@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,10 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-
-#if defined(USE_AURA)
-#include "ui/views/corewm/corewm_switches.h"
-#endif
+#include "ui/gfx/gl/gl_switches.h"
 
 namespace test_launcher_utils {
 
@@ -34,12 +31,9 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   // default browser) that could conflicts with some tests expectations.
   command_line->AppendSwitch(switches::kNoDefaultBrowserCheck);
 
-  // Enable info level logging to stderr by default so that we can see when
-  // bad stuff happens, but honor the flags specified from the command line.
-  if (!command_line->HasSwitch(switches::kEnableLogging))
-    command_line->AppendSwitchASCII(switches::kEnableLogging, "stderr");
-  if (!command_line->HasSwitch(switches::kLoggingLevel))
-    command_line->AppendSwitchASCII(switches::kLoggingLevel, "0");  // info
+  // Enable warning level logging so that we can see when bad stuff happens.
+  command_line->AppendSwitch(switches::kEnableLogging);
+  command_line->AppendSwitchASCII(switches::kLoggingLevel, "1");  // warning
 
   // Disable safebrowsing autoupdate.
   command_line->AppendSwitch(switches::kSbDisableAutoUpdate);
@@ -47,12 +41,12 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   // Don't install default apps.
   command_line->AppendSwitch(switches::kDisableDefaultApps);
 
-#if defined(USE_AURA)
-  // Disable window animations under Ash as the animations effect the
-  // coordinates returned and result in flake.
-  command_line->AppendSwitch(
-      views::corewm::switches::kWindowAnimationsDisabled);
-#endif
+  // Don't collect GPU info, load GPU blacklist, or schedule a GPU blacklist
+  // auto-update.
+  command_line->AppendSwitch(switches::kSkipGpuDataLoading);
+
+  // The tests assume that file:// URIs can freely access other file:// URIs.
+  command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
   // Don't use the native password stores on Linux since they may
@@ -68,10 +62,12 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kUseMockKeychain);
 #endif
 
-  command_line->AppendSwitch(switches::kDisableComponentUpdate);
+  // Disable the Instant field trial, which may cause unexpected page loads.
+  if (!command_line->HasSwitch(switches::kInstantFieldTrial))
+    command_line->AppendSwitchASCII(switches::kInstantFieldTrial, "disabled");
 }
 
-bool OverrideUserDataDir(const base::FilePath& user_data_dir) {
+bool OverrideUserDataDir(const FilePath& user_data_dir) {
   bool success = true;
 
   // PathService::Override() is the best way to change the user data directory.
@@ -90,6 +86,16 @@ bool OverrideUserDataDir(const base::FilePath& user_data_dir) {
 #endif
 
   return success;
+}
+
+bool OverrideGLImplementation(CommandLine* command_line,
+                              const std::string& implementation_name) {
+  if (command_line->HasSwitch(switches::kUseGL))
+    return false;
+
+  command_line->AppendSwitchASCII(switches::kUseGL, implementation_name);
+
+  return true;
 }
 
 }  // namespace test_launcher_utils

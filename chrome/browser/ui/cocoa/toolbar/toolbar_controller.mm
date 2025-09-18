@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,16 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/singleton.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/command_updater.h"
+#include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
@@ -35,29 +33,29 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
+#import "chrome/browser/ui/cocoa/menu_controller.h"
 #import "chrome/browser/ui/cocoa/toolbar/back_forward_menu_controller.h"
 #import "chrome/browser/ui/cocoa/toolbar/reload_button.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_button.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_view.h"
-#import "chrome/browser/ui/cocoa/toolbar/wrench_toolbar_button_cell.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
-#include "chrome/browser/ui/global_error/global_error_service.h"
-#include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/global_error_service.h"
+#include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/upgrade_detector.h"
-#include "chrome/common/net/url_fixer_upper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_details.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#import "ui/base/cocoa/menu_controller.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -71,7 +69,7 @@ using content::WebContents;
 namespace {
 
 // Height of the toolbar in pixels when the bookmark bar is closed.
-const CGFloat kBaseToolbarHeightNormal = 35.0;
+const CGFloat kBaseToolbarHeight = 35.0;
 
 // The minimum width of the location bar in pixels.
 const CGFloat kMinimumLocationBarWidth = 100.0;
@@ -88,7 +86,7 @@ const CGFloat kWrenchMenuLeftPadding = 3.0;
 @property(assign, nonatomic) Browser* browser;
 - (void)addAccessibilityDescriptions;
 - (void)initCommandStatus:(CommandUpdater*)commands;
-- (void)prefChanged:(const std::string&)prefName;
+- (void)prefChanged:(std::string*)prefName;
 - (BackgroundGradientView*)backgroundGradientView;
 - (void)toolbarFrameChanged;
 - (void)pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate;
@@ -98,7 +96,7 @@ const CGFloat kWrenchMenuLeftPadding = 3.0;
 - (void)browserActionsContainerDragFinished:(NSNotification*)notification;
 - (void)browserActionsVisibilityChanged:(NSNotification*)notification;
 - (void)adjustLocationSizeBy:(CGFloat)dX animate:(BOOL)animate;
-- (void)updateWrenchButtonSeverity;
+- (void)badgeWrenchMenuIfNeeded;
 @end
 
 namespace ToolbarControllerInternal {
@@ -106,8 +104,7 @@ namespace ToolbarControllerInternal {
 // A class registered for C++ notifications. This is used to detect changes in
 // preferences and upgrade available notifications. Bridges the notification
 // back to the ToolbarController.
-class NotificationBridge
-    : public content::NotificationObserver {
+class NotificationBridge : public content::NotificationObserver {
  public:
   explicit NotificationBridge(ToolbarController* controller)
       : controller_(controller) {
@@ -120,19 +117,18 @@ class NotificationBridge
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+                       const content::NotificationDetails& details) {
     switch (type) {
+      case chrome::NOTIFICATION_PREF_CHANGED:
+        [controller_ prefChanged:content::Details<std::string>(details).ptr()];
+        break;
       case chrome::NOTIFICATION_UPGRADE_RECOMMENDED:
       case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
-        [controller_ updateWrenchButtonSeverity];
+        [controller_ badgeWrenchMenuIfNeeded];
         break;
       default:
         NOTREACHED();
     }
-  }
-
-  void OnPreferenceChanged(const std::string& pref_name) {
-    [controller_ prefChanged:pref_name];
   }
 
  private:
@@ -147,14 +143,16 @@ class NotificationBridge
 
 @synthesize browser = browser_;
 
-- (id)initWithCommands:(CommandUpdater*)commands
-               profile:(Profile*)profile
-               browser:(Browser*)browser
-        resizeDelegate:(id<ViewResizer>)resizeDelegate
-          nibFileNamed:(NSString*)nibName {
-  DCHECK(commands && profile && [nibName length]);
+- (id)initWithModel:(ToolbarModel*)model
+           commands:(CommandUpdater*)commands
+            profile:(Profile*)profile
+            browser:(Browser*)browser
+     resizeDelegate:(id<ViewResizer>)resizeDelegate
+       nibFileNamed:(NSString*)nibName {
+  DCHECK(model && commands && profile && [nibName length]);
   if ((self = [super initWithNibName:nibName
                               bundle:base::mac::FrameworkBundle()])) {
+    toolbarModel_ = model;
     commands_ = commands;
     profile_ = profile;
     browser_ = browser;
@@ -173,15 +171,17 @@ class NotificationBridge
   return self;
 }
 
-- (id)initWithCommands:(CommandUpdater*)commands
-               profile:(Profile*)profile
-               browser:(Browser*)browser
-        resizeDelegate:(id<ViewResizer>)resizeDelegate {
-  if ((self = [self initWithCommands:commands
-                             profile:profile
-                             browser:browser
-                      resizeDelegate:resizeDelegate
-                        nibFileNamed:@"Toolbar"])) {
+- (id)initWithModel:(ToolbarModel*)model
+           commands:(CommandUpdater*)commands
+            profile:(Profile*)profile
+            browser:(Browser*)browser
+     resizeDelegate:(id<ViewResizer>)resizeDelegate {
+  if ((self = [self initWithModel:model
+                         commands:commands
+                          profile:profile
+                          browser:browser
+                   resizeDelegate:resizeDelegate
+                     nibFileNamed:@"Toolbar"])) {
   }
   return self;
 }
@@ -251,7 +251,7 @@ class NotificationBridge
   [[wrenchButton_ cell] setImageID:IDR_TOOLS_P
                     forButtonState:image_button_cell::kPressedState];
 
-  [self updateWrenchButtonSeverity];
+  [self badgeWrenchMenuIfNeeded];
 
   [wrenchButton_ setOpenMenuOnClick:YES];
 
@@ -264,8 +264,8 @@ class NotificationBridge
   [homeButton_ setHandleMiddleClick:YES];
 
   [self initCommandStatus:commands_];
-
-  locationBarView_.reset(new LocationBarViewMac(locationBar_, commands_,
+  locationBarView_.reset(new LocationBarViewMac(locationBar_,
+                                                commands_, toolbarModel_,
                                                 profile_, browser_));
   [locationBar_ setFont:[NSFont systemFontOfSize:[NSFont systemFontSize]]];
   // Register pref observers for the optional home and page/options buttons
@@ -273,11 +273,8 @@ class NotificationBridge
   notificationBridge_.reset(
       new ToolbarControllerInternal::NotificationBridge(self));
   PrefService* prefs = profile_->GetPrefs();
-  showHomeButton_.Init(
-      prefs::kShowHomeButton, prefs,
-      base::Bind(
-          &ToolbarControllerInternal::NotificationBridge::OnPreferenceChanged,
-          base::Unretained(notificationBridge_.get())));
+  showHomeButton_.Init(prefs::kShowHomeButton, prefs,
+                       notificationBridge_.get());
   [self showOptionalHomeButton];
   [self installWrenchMenu];
 
@@ -306,7 +303,7 @@ class NotificationBridge
                                            NSTrackingInVisibleRect |
                                            NSTrackingMouseEnteredAndExited |
                                            NSTrackingActiveAlways
-                                     owner:self
+                              proxiedOwner:self
                                   userInfo:nil]);
   NSView* toolbarView = [self view];
   [toolbarView addTrackingArea:trackingArea_.get()];
@@ -429,10 +426,11 @@ class NotificationBridge
   [homeButton_ setEnabled:commands->IsCommandEnabled(IDC_HOME) ? YES : NO];
 }
 
-- (void)updateToolbarWithContents:(WebContents*)tab {
-  locationBarView_->Update(tab);
+- (void)updateToolbarWithContents:(WebContents*)tab
+               shouldRestoreState:(BOOL)shouldRestore {
+  locationBarView_->Update(tab, shouldRestore ? true : false);
 
-  [locationBar_ updateMouseTracking];
+  [locationBar_ updateCursorAndToolTipRects];
 
   if (browserActionsController_.get()) {
     [browserActionsController_ update];
@@ -441,11 +439,6 @@ class NotificationBridge
 
 - (void)setStarredState:(BOOL)isStarred {
   locationBarView_->SetStarred(isStarred ? true : false);
-}
-
-- (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
-  locationBarView_->ZoomChangedForActiveTab(
-      canShowBubble && ![wrenchMenuController_ isMenuOpen]);
 }
 
 - (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
@@ -552,30 +545,22 @@ class NotificationBridge
   return wrenchMenuController_;
 }
 
-- (void)updateWrenchButtonSeverity {
-  WrenchToolbarButtonCell* cell =
-      base::mac::ObjCCastStrict<WrenchToolbarButtonCell>([wrenchButton_ cell]);
+- (void)badgeWrenchMenuIfNeeded {
   if (UpgradeDetector::GetInstance()->notify_upgrade()) {
-    UpgradeDetector::UpgradeNotificationAnnoyanceLevel level =
-        UpgradeDetector::GetInstance()->upgrade_notification_stage();
-    [cell setSeverity:WrenchIconPainter::SeverityFromUpgradeLevel(level)
-        shouldAnimate:WrenchIconPainter::ShouldAnimateUpgradeLevel(level)];
+    [[wrenchButton_ cell]
+        setOverlayImageID:UpgradeDetector::GetInstance()->GetIconResourceID(
+            UpgradeDetector::UPGRADE_ICON_TYPE_BADGE)];
     return;
   }
 
-  GlobalError* error = GlobalErrorServiceFactory::GetForProfile(
-      browser_->profile())->GetHighestSeverityGlobalErrorWithWrenchMenuItem();
-  if (error) {
-    [cell setSeverity:WrenchIconPainter::GlobalErrorSeverity()
-        shouldAnimate:YES];
-    return;
-  }
-
-  [cell setSeverity:WrenchIconPainter::SEVERITY_NONE shouldAnimate:YES];
+  int error_badge_id = GlobalErrorServiceFactory::GetForProfile(
+      browser_->profile())->GetFirstBadgeResourceID();
+  [[wrenchButton_ cell] setOverlayImageID:error_badge_id];
 }
 
-- (void)prefChanged:(const std::string&)prefName {
-  if (prefName == prefs::kShowHomeButton) {
+- (void)prefChanged:(std::string*)prefName {
+  if (!prefName) return;
+  if (*prefName == prefs::kShowHomeButton) {
     [self showOptionalHomeButton];
   }
 }
@@ -723,23 +708,13 @@ class NotificationBridge
 }
 
 - (NSPoint)bookmarkBubblePoint {
-  if (locationBarView_->IsStarEnabled())
-    return locationBarView_->GetBookmarkBubblePoint();
-
-  // Grab bottom middle of hotdogs.
-  NSRect frame = wrenchButton_.frame;
-  NSPoint point = NSMakePoint(NSMidX(frame), NSMinY(frame));
-  // Inset to account for the whitespace around the hotdogs.
-  point.y += wrench_menu_controller::kWrenchBubblePointOffsetY;
-  return [self.view convertPoint:point toView:nil];
+  return locationBarView_->GetBookmarkBubblePoint();
 }
 
 - (CGFloat)desiredHeightForCompression:(CGFloat)compressByHeight {
   // With no toolbar, just ignore the compression.
-  if (!hasToolbar_)
-    return NSHeight([locationBar_ frame]);
-
-  return kBaseToolbarHeightNormal - compressByHeight;
+  return hasToolbar_ ? kBaseToolbarHeight - compressByHeight :
+                       NSHeight([locationBar_ frame]);
 }
 
 - (void)setDividerOpacity:(CGFloat)opacity {
@@ -752,8 +727,6 @@ class NotificationBridge
     ToolbarView* toolbarView = (ToolbarView*)view;
     [toolbarView setDividerOpacity:opacity];
   }
-
-  [view setNeedsDisplay:YES];
 }
 
 - (BrowserActionsController*)browserActionsController {
@@ -782,13 +755,13 @@ class NotificationBridge
   GURL url(URLFixerUpper::FixupURL(
       base::SysNSStringToUTF8([urls objectAtIndex:0]), std::string()));
 
-  if (url.SchemeIs(content::kJavaScriptScheme)) {
-    browser_->window()->GetLocationBar()->GetOmniboxView()->SetUserText(
-          OmniboxView::StripJavascriptSchemas(base::UTF8ToUTF16(url.spec())));
+  if (url.SchemeIs(chrome::kJavaScriptScheme)) {
+    browser_->window()->GetLocationBar()->location_entry()->SetUserText(
+        OmniboxView::StripJavascriptSchemas(UTF8ToUTF16(url.spec())));
   }
   OpenURLParams params(
       url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-  browser_->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
+  browser_->GetSelectedWebContents()->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)
@@ -799,13 +772,13 @@ class NotificationBridge
 
   // If the input is plain text, classify the input and make the URL.
   AutocompleteMatch match;
-  AutocompleteClassifierFactory::GetForProfile(browser_->profile())->Classify(
-      base::SysNSStringToUTF16(text), false, false, &match, NULL);
+  browser_->profile()->GetAutocompleteClassifier()->Classify(
+      base::SysNSStringToUTF16(text), string16(), false, false, &match, NULL);
   GURL url(match.destination_url);
 
   OpenURLParams params(
       url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-  browser_->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
+  browser_->GetSelectedWebContents()->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)

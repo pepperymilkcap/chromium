@@ -1,6 +1,8 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+/**
+ * Copyright (c) 2010 The Chromium Authors. All rights reserved.  Use of this
+ * source code is governed by a BSD-style license that can be found in the
+ * LICENSE file.
+ */
 
 /**
  * Constructor - no need to invoke directly, call initBackgroundPage instead.
@@ -267,8 +269,8 @@ ChromeExOAuth.initCallbackPage = function() {
   oauth.initOAuthFlow(function (token, secret) {
     background_page.chromeExOAuthOnAuthorize(token, secret);
     background_page.chromeExOAuthRedirectStarted = false;
-    chrome.tabs.query({active: true, currentWindow: true}, function (tabs) {
-      chrome.tabs.remove(tabs[0].id);
+    chrome.tabs.getSelected(null, function (tab) {
+      chrome.tabs.remove(tab.id);
     });
   });
 };

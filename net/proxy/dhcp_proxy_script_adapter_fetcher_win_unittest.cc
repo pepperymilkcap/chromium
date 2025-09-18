@@ -4,16 +4,15 @@
 
 #include "net/proxy/dhcp_proxy_script_adapter_fetcher_win.h"
 
+#include "base/perftimer.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "base/timer/elapsed_timer.h"
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/proxy/mock_proxy_script_fetcher.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/test_server.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -34,12 +33,10 @@ const char* const kPacUrl = "http://pacserver/script.pac";
 class MockDhcpProxyScriptAdapterFetcher
     : public DhcpProxyScriptAdapterFetcher {
  public:
-  explicit MockDhcpProxyScriptAdapterFetcher(
-      URLRequestContext* context,
-      scoped_refptr<base::TaskRunner> task_runner)
-      : DhcpProxyScriptAdapterFetcher(context, task_runner),
-        dhcp_delay_(base::TimeDelta::FromMilliseconds(1)),
-        timeout_(TestTimeouts::action_timeout()),
+  explicit MockDhcpProxyScriptAdapterFetcher(URLRequestContext* context)
+      : DhcpProxyScriptAdapterFetcher(context),
+        dhcp_delay_ms_(1),
+        timeout_ms_(TestTimeouts::action_timeout_ms()),
         configured_url_(kPacUrl),
         fetcher_delay_ms_(1),
         fetcher_result_(OK),
@@ -72,26 +69,26 @@ class MockDhcpProxyScriptAdapterFetcher
 
     std::string ImplGetPacURLFromDhcp(
         const std::string& adapter_name) OVERRIDE {
-      base::ElapsedTimer timer;
+      PerfTimer timer;
       test_finished_event_.TimedWait(dhcp_delay_);
       return configured_url_;
     }
 
     base::WaitableEvent test_finished_event_;
-    base::TimeDelta dhcp_delay_;
+    TimeDelta dhcp_delay_;
     std::string configured_url_;
   };
 
   virtual DhcpQuery* ImplCreateDhcpQuery() OVERRIDE {
     dhcp_query_ = new DelayingDhcpQuery();
-    dhcp_query_->dhcp_delay_ = dhcp_delay_;
+    dhcp_query_->dhcp_delay_ = TimeDelta::FromMilliseconds(dhcp_delay_ms_);
     dhcp_query_->configured_url_ = configured_url_;
     return dhcp_query_;
   }
 
   // Use a shorter timeout so tests can finish more quickly.
   virtual base::TimeDelta ImplGetTimeout() const OVERRIDE {
-    return timeout_;
+    return base::TimeDelta::FromMilliseconds(timeout_ms_);
   }
 
   void OnFetcherTimer() {
@@ -120,8 +117,8 @@ class MockDhcpProxyScriptAdapterFetcher
     dhcp_query_->test_finished_event_.Signal();
   }
 
-  base::TimeDelta dhcp_delay_;
-  base::TimeDelta timeout_;
+  int dhcp_delay_ms_;
+  int timeout_ms_;
   std::string configured_url_;
   int fetcher_delay_ms_;
   int fetcher_result_;
@@ -135,16 +132,8 @@ class FetcherClient {
  public:
   FetcherClient()
       : url_request_context_(new TestURLRequestContext()),
-        worker_pool_(
-            new base::SequencedWorkerPool(4, "DhcpAdapterFetcherTest")),
-        fetcher_(new MockDhcpProxyScriptAdapterFetcher(
-            url_request_context_.get(),
-            worker_pool_->GetTaskRunnerWithShutdownBehavior(
-                base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN))) {
-  }
-
-  ~FetcherClient() {
-    worker_pool_->Shutdown();
+        fetcher_(
+            new MockDhcpProxyScriptAdapterFetcher(url_request_context_.get())) {
   }
 
   void WaitForResult(int expected_error) {
@@ -157,14 +146,13 @@ class FetcherClient {
 
   void FinishTestAllowCleanup() {
     fetcher_->FinishTest();
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
 
   TestCompletionCallback callback_;
-  scoped_ptr<URLRequestContext> url_request_context_;
-  scoped_refptr<base::SequencedWorkerPool> worker_pool_;
+  scoped_refptr<URLRequestContext> url_request_context_;
   scoped_ptr<MockDhcpProxyScriptAdapterFetcher> fetcher_;
-  base::string16 pac_text_;
+  string16 pac_text_;
 };
 
 TEST(DhcpProxyScriptAdapterFetcher, NormalCaseURLNotInDhcp) {
@@ -174,7 +162,7 @@ TEST(DhcpProxyScriptAdapterFetcher, NormalCaseURLNotInDhcp) {
   client.WaitForResult(ERR_PAC_NOT_IN_DHCP);
   ASSERT_TRUE(client.fetcher_->DidFinish());
   EXPECT_EQ(ERR_PAC_NOT_IN_DHCP, client.fetcher_->GetResult());
-  EXPECT_EQ(base::string16(L""), client.fetcher_->GetPacScript());
+  EXPECT_EQ(string16(L""), client.fetcher_->GetPacScript());
 }
 
 TEST(DhcpProxyScriptAdapterFetcher, NormalCaseURLInDhcp) {
@@ -183,7 +171,7 @@ TEST(DhcpProxyScriptAdapterFetcher, NormalCaseURLInDhcp) {
   client.WaitForResult(OK);
   ASSERT_TRUE(client.fetcher_->DidFinish());
   EXPECT_EQ(OK, client.fetcher_->GetResult());
-  EXPECT_EQ(base::string16(L"bingo"), client.fetcher_->GetPacScript());
+  EXPECT_EQ(string16(L"bingo"), client.fetcher_->GetPacScript());
   EXPECT_EQ(GURL(kPacUrl), client.fetcher_->GetPacURL());
 }
 
@@ -195,10 +183,10 @@ TEST(DhcpProxyScriptAdapterFetcher, TimeoutDuringDhcp) {
   // present on the network) accessing DHCP can take on the order of tens
   // of seconds.
   FetcherClient client;
-  client.fetcher_->dhcp_delay_ = TestTimeouts::action_max_timeout();
-  client.fetcher_->timeout_ = base::TimeDelta::FromMilliseconds(25);
+  client.fetcher_->dhcp_delay_ms_ = TestTimeouts::action_max_timeout_ms();
+  client.fetcher_->timeout_ms_ = 25;
 
-  base::ElapsedTimer timer;
+  PerfTimer timer;
   client.RunTest();
   // An error different from this would be received if the timeout didn't
   // kick in.
@@ -206,7 +194,7 @@ TEST(DhcpProxyScriptAdapterFetcher, TimeoutDuringDhcp) {
 
   ASSERT_TRUE(client.fetcher_->DidFinish());
   EXPECT_EQ(ERR_TIMED_OUT, client.fetcher_->GetResult());
-  EXPECT_EQ(base::string16(L""), client.fetcher_->GetPacScript());
+  EXPECT_EQ(string16(L""), client.fetcher_->GetPacScript());
   EXPECT_EQ(GURL(), client.fetcher_->GetPacURL());
   client.FinishTestAllowCleanup();
 }
@@ -215,11 +203,11 @@ TEST(DhcpProxyScriptAdapterFetcher, CancelWhileDhcp) {
   FetcherClient client;
   client.RunTest();
   client.fetcher_->Cancel();
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
   ASSERT_FALSE(client.fetcher_->DidFinish());
   ASSERT_TRUE(client.fetcher_->WasCancelled());
   EXPECT_EQ(ERR_ABORTED, client.fetcher_->GetResult());
-  EXPECT_EQ(base::string16(L""), client.fetcher_->GetPacScript());
+  EXPECT_EQ(string16(L""), client.fetcher_->GetPacScript());
   EXPECT_EQ(GURL(), client.fetcher_->GetPacURL());
   client.FinishTestAllowCleanup();
 }
@@ -233,14 +221,14 @@ TEST(DhcpProxyScriptAdapterFetcher, CancelWhileFetcher) {
   int max_loops = 4;
   while (!client.fetcher_->IsWaitingForFetcher() && max_loops--) {
     base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(10));
-    base::MessageLoop::current()->RunUntilIdle();
+    MessageLoop::current()->RunAllPending();
   }
   client.fetcher_->Cancel();
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
   ASSERT_FALSE(client.fetcher_->DidFinish());
   ASSERT_TRUE(client.fetcher_->WasCancelled());
   EXPECT_EQ(ERR_ABORTED, client.fetcher_->GetResult());
-  EXPECT_EQ(base::string16(L""), client.fetcher_->GetPacScript());
+  EXPECT_EQ(string16(L""), client.fetcher_->GetPacScript());
   // GetPacURL() still returns the URL fetched in this case.
   EXPECT_EQ(GURL(kPacUrl), client.fetcher_->GetPacURL());
   client.FinishTestAllowCleanup();
@@ -255,7 +243,7 @@ TEST(DhcpProxyScriptAdapterFetcher, CancelAtCompletion) {
   // are identical expectations to the NormalCaseURLInDhcp test.
   ASSERT_TRUE(client.fetcher_->DidFinish());
   EXPECT_EQ(OK, client.fetcher_->GetResult());
-  EXPECT_EQ(base::string16(L"bingo"), client.fetcher_->GetPacScript());
+  EXPECT_EQ(string16(L"bingo"), client.fetcher_->GetPacScript());
   EXPECT_EQ(GURL(kPacUrl), client.fetcher_->GetPacURL());
   client.FinishTestAllowCleanup();
 }
@@ -265,9 +253,8 @@ class MockDhcpRealFetchProxyScriptAdapterFetcher
     : public MockDhcpProxyScriptAdapterFetcher {
  public:
   explicit MockDhcpRealFetchProxyScriptAdapterFetcher(
-      URLRequestContext* context,
-      scoped_refptr<base::TaskRunner> task_runner)
-      : MockDhcpProxyScriptAdapterFetcher(context, task_runner),
+      URLRequestContext* context)
+      : MockDhcpProxyScriptAdapterFetcher(context),
         url_request_context_(context) {
   }
 
@@ -282,56 +269,28 @@ class MockDhcpRealFetchProxyScriptAdapterFetcher
 };
 
 TEST(DhcpProxyScriptAdapterFetcher, MockDhcpRealFetch) {
-  SpawnedTestServer test_server(
-      SpawnedTestServer::TYPE_HTTP,
-      SpawnedTestServer::kLocalhost,
-      base::FilePath(
-          FILE_PATH_LITERAL("net/data/proxy_script_fetcher_unittest")));
+  TestServer test_server(
+      TestServer::TYPE_HTTP,
+      FilePath(FILE_PATH_LITERAL("net/data/proxy_script_fetcher_unittest")));
   ASSERT_TRUE(test_server.Start());
 
   GURL configured_url = test_server.GetURL("files/downloadable.pac");
 
   FetcherClient client;
-  TestURLRequestContext url_request_context;
-  scoped_refptr<base::TaskRunner> runner =
-      client.worker_pool_->GetTaskRunnerWithShutdownBehavior(
-          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+  scoped_refptr<URLRequestContext> url_request_context(
+      new TestURLRequestContext());
   client.fetcher_.reset(
       new MockDhcpRealFetchProxyScriptAdapterFetcher(
-          &url_request_context, runner));
+          url_request_context.get()));
   client.fetcher_->configured_url_ = configured_url.spec();
   client.RunTest();
   client.WaitForResult(OK);
   ASSERT_TRUE(client.fetcher_->DidFinish());
   EXPECT_EQ(OK, client.fetcher_->GetResult());
-  EXPECT_EQ(base::string16(L"-downloadable.pac-\n"),
-            client.fetcher_->GetPacScript());
+  EXPECT_EQ(string16(L"-downloadable.pac-\n"), client.fetcher_->GetPacScript());
   EXPECT_EQ(configured_url,
             client.fetcher_->GetPacURL());
 }
-
-#define BASE_URL "http://corpserver/proxy.pac"
-
-TEST(DhcpProxyScriptAdapterFetcher, SanitizeDhcpApiString) {
-  const size_t kBaseUrlLen = strlen(BASE_URL);
-
-  // Default case.
-  EXPECT_EQ(BASE_URL,
-            DhcpProxyScriptAdapterFetcher::SanitizeDhcpApiString(
-                BASE_URL, kBaseUrlLen));
-
-  // Trailing \n and no null-termination.
-  EXPECT_EQ(BASE_URL,
-            DhcpProxyScriptAdapterFetcher::SanitizeDhcpApiString(
-                BASE_URL "\nblablabla", kBaseUrlLen + 1));
-
-  // Embedded NULLs.
-  EXPECT_EQ(BASE_URL,
-            DhcpProxyScriptAdapterFetcher::SanitizeDhcpApiString(
-                BASE_URL "\0foo\0blat", kBaseUrlLen + 9));
-}
-
-#undef BASE_URL
 
 }  // namespace
 

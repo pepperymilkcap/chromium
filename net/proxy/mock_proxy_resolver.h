@@ -4,17 +4,16 @@
 
 #ifndef NET_PROXY_MOCK_PROXY_RESOLVER_H_
 #define NET_PROXY_MOCK_PROXY_RESOLVER_H_
+#pragma once
 
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/proxy/proxy_resolver.h"
-#include "url/gurl.h"
 
-namespace base {
 class MessageLoop;
-}
 
 namespace net {
 
@@ -44,7 +43,7 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
     const GURL url_;
     ProxyInfo* results_;
     net::CompletionCallback callback_;
-    base::MessageLoop* origin_loop_;
+    MessageLoop* origin_loop_;
   };
 
   class SetPacScriptRequest {
@@ -55,9 +54,7 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
         const net::CompletionCallback& callback);
     ~SetPacScriptRequest();
 
-    const ProxyResolverScriptData* script_data() const {
-      return script_data_.get();
-    }
+    const ProxyResolverScriptData* script_data() const { return script_data_; }
 
     void CompleteNow(int rv);
 
@@ -65,7 +62,7 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
     MockAsyncProxyResolverBase* resolver_;
     const scoped_refptr<ProxyResolverScriptData> script_data_;
     net::CompletionCallback callback_;
-    base::MessageLoop* origin_loop_;
+    MessageLoop* origin_loop_;
   };
 
   typedef std::vector<scoped_refptr<Request> > RequestsList;
@@ -80,6 +77,8 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
                              const BoundNetLog& /*net_log*/) OVERRIDE;
   virtual void CancelRequest(RequestHandle request_handle) OVERRIDE;
   virtual LoadState GetLoadState(RequestHandle request_handle) const OVERRIDE;
+  virtual LoadState GetLoadStateThreadSafe(
+      RequestHandle request_handle) const OVERRIDE;
   virtual int SetPacScript(
       const scoped_refptr<ProxyResolverScriptData>& script_data,
       const net::CompletionCallback& callback) OVERRIDE;

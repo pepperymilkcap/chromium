@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,19 @@
 #include "base/stl_util.h"
 #include "chrome/browser/ui/views/tabs/native_view_photobooth.h"
 #include "third_party/skia/include/core/SkShader.h"
-#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
 #include "ui/views/widget/native_widget_aura.h"
 #elif defined(OS_WIN)
-#include "ui/gfx/win/dpi.h"
 #include "ui/views/widget/native_widget_win.h"
+#elif defined(TOOLKIT_USES_GTK)
+#include "ui/views/widget/native_widget_gtk.h"
 #endif
 
 static const int kTransparentAlpha = 200;
+static const int kOpaqueAlpha = 255;
 static const int kDragFrameBorderSize = 2;
 static const int kTwiceDragFrameBorderSize = 2 * kDragFrameBorderSize;
 static const float kScalingFactor = 0.5;
@@ -37,11 +39,11 @@ DraggedTabView::DraggedTabView(const std::vector<views::View*>& renderers,
       mouse_tab_offset_(mouse_tab_offset),
       photobooth_(photobooth),
       contents_size_(contents_size) {
-  set_owned_by_client();
+  set_parent_owned(false);
 
   container_.reset(new views::Widget);
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.transparent = true;
   params.keep_on_top = true;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(PreferredContainerSize());
@@ -49,7 +51,7 @@ DraggedTabView::DraggedTabView(const std::vector<views::View*>& renderers,
   container_->SetContentsView(this);
 #if defined(OS_WIN) && !defined(USE_AURA)
   static_cast<views::NativeWidgetWin*>(container_->native_widget())->
-      SetCanUpdateLayeredWindow(false);
+      set_can_update_layered_window(false);
 
   BOOL drag;
   if ((::SystemParametersInfo(SPI_GETDRAGFULLWINDOWS, 0, &drag, 0) != 0) &&
@@ -58,7 +60,7 @@ DraggedTabView::DraggedTabView(const std::vector<views::View*>& renderers,
   }
 #endif
   container_->SetOpacity(kTransparentAlpha);
-  container_->SetBounds(gfx::Rect(params.bounds.size()));
+  container_->SetBounds(gfx::Rect(gfx::Point(), params.bounds.size()));
 }
 
 DraggedTabView::~DraggedTabView() {
@@ -81,15 +83,12 @@ void DraggedTabView::MoveTo(const gfx::Point& screen_point) {
   int y = screen_point.y() - ScaleValue(mouse_tab_offset_.y());
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-  double scale = gfx::win::GetDeviceScaleFactor();
-  x = static_cast<int>(scale * screen_point.x());
-  y = static_cast<int>(scale * screen_point.y());
   // TODO(beng): make this cross-platform
   int show_flags = container_->IsVisible() ? SWP_NOZORDER : SWP_SHOWWINDOW;
   SetWindowPos(container_->GetNativeView(), HWND_TOP, x, y, 0, 0,
                SWP_NOSIZE | SWP_NOACTIVATE | show_flags);
 #else
-  gfx::Rect bounds = container_->GetWindowBoundsInScreen();
+  gfx::Rect bounds = container_->GetWindowScreenBounds();
   container_->SetBounds(gfx::Rect(x, y, bounds.width(), bounds.height()));
   if (!container_->IsVisible())
     container_->Show();
@@ -136,41 +135,48 @@ gfx::Size DraggedTabView::GetPreferredSize() {
 
 void DraggedTabView::PaintDetachedView(gfx::Canvas* canvas) {
   gfx::Size ps = GetPreferredSize();
-  // TODO(pkotwicz): DIP enable this class.
-  gfx::Canvas scale_canvas(ps, 1.0f, false);
+  gfx::CanvasSkia scale_canvas(ps, false);
   SkBitmap& bitmap_device = const_cast<SkBitmap&>(
       skia::GetTopDevice(*scale_canvas.sk_canvas())->accessBitmap(true));
   bitmap_device.eraseARGB(0, 0, 0, 0);
 
   int tab_height = renderer_bounds_.back().height();
-  scale_canvas.FillRect(gfx::Rect(0, tab_height - kDragFrameBorderSize,
-                                  ps.width(), ps.height() - tab_height),
-                        kDraggedTabBorderColor);
+  scale_canvas.FillRect(kDraggedTabBorderColor,
+                        gfx::Rect(0, tab_height - kDragFrameBorderSize,
+                                  ps.width(), ps.height() - tab_height));
   gfx::Rect image_rect(kDragFrameBorderSize,
                        tab_height,
                        ps.width() - kTwiceDragFrameBorderSize,
                        contents_size_.height());
-  scale_canvas.FillRect(image_rect, SK_ColorBLACK);
+  scale_canvas.FillRect(SK_ColorBLACK, image_rect);
   photobooth_->PaintScreenshotIntoCanvas(&scale_canvas, image_rect);
   for (size_t i = 0; i < renderers_.size(); ++i)
     renderers_[i]->Paint(&scale_canvas);
 
-  SkBitmap mipmap = scale_canvas.ExtractImageRep().sk_bitmap();
+  SkIRect subset;
+  subset.set(0, 0, ps.width(), ps.height());
+  SkBitmap mipmap = scale_canvas.ExtractBitmap();
   mipmap.buildMipMap(true);
 
-  skia::RefPtr<SkShader> bitmap_shader = skia::AdoptRef(
+  SkShader* bitmap_shader =
       SkShader::CreateBitmapShader(mipmap, SkShader::kClamp_TileMode,
-                                   SkShader::kClamp_TileMode));
+                                   SkShader::kClamp_TileMode);
 
   SkMatrix shader_scale;
   shader_scale.setScale(kScalingFactor, kScalingFactor);
   bitmap_shader->setLocalMatrix(shader_scale);
 
   SkPaint paint;
-  paint.setShader(bitmap_shader.get());
+  paint.setShader(bitmap_shader);
   paint.setAntiAlias(true);
+  bitmap_shader->unref();
 
-  canvas->DrawRect(gfx::Rect(ps), paint);
+  SkRect rc;
+  rc.fLeft = 0;
+  rc.fTop = 0;
+  rc.fRight = SkIntToScalar(ps.width());
+  rc.fBottom = SkIntToScalar(ps.height());
+  canvas->GetSkCanvas()->drawRect(rc, paint);
 }
 
 void DraggedTabView::PaintFocusRect(gfx::Canvas* canvas) {

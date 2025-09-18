@@ -1,27 +1,30 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/jankometer.h"
-
 #include <limits>
+
+#include "chrome/browser/jankometer.h"
 
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_counters.h"
-#include "base/pending_task.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/threading/watchdog.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/ui/gtk/gtk_util.h"
+#endif
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -48,10 +51,8 @@ const int kMaxIOMessageDelayMs = 400;
 // considering it delayed.
 const int kMaxMessageProcessingMs = 100;
 
-#if defined(OS_WIN)
 // TODO(brettw) Consider making this a pref.
 const bool kPlaySounds = false;
-#endif
 
 //------------------------------------------------------------------------------
 // Provide a special watchdog to make it easy to set the breakpoint on this
@@ -68,7 +69,7 @@ class JankWatchdog : public base::Watchdog {
 
   virtual ~JankWatchdog() {}
 
-  virtual void Alarm() OVERRIDE {
+  virtual void Alarm() {
     // Put break point here if you want to stop threads and look at what caused
     // the jankiness.
     alarm_count_++;
@@ -120,8 +121,8 @@ class JankObserverHelper {
   // Counters for the two types of jank we measure.
   base::StatsCounter slow_processing_counter_;  // Msgs w/ long proc time.
   base::StatsCounter queueing_delay_counter_;   // Msgs w/ long queueing delay.
-  base::HistogramBase* const process_times_;  // Time spent proc. task.
-  base::HistogramBase* const total_times_;  // Total queueing plus proc.
+  base::Histogram* const process_times_;  // Time spent proc. task.
+  base::Histogram* const total_times_;  // Total queueing plus proc.
   JankWatchdog total_time_watchdog_;  // Watching for excessive total_time.
 
   DISALLOW_COPY_AND_ASSIGN(JankObserverHelper);
@@ -212,26 +213,28 @@ int JankObserverHelper::discard_count_ = 99;  // Measure only 1 in 100.
 
 //------------------------------------------------------------------------------
 class IOJankObserver : public base::RefCountedThreadSafe<IOJankObserver>,
-                       public base::MessageLoopForIO::IOObserver,
-                       public base::MessageLoop::TaskObserver {
+                       public MessageLoopForIO::IOObserver,
+                       public MessageLoop::TaskObserver {
  public:
   IOJankObserver(const char* thread_name,
                  TimeDelta excessive_duration,
                  bool watchdog_enable)
       : helper_(thread_name, excessive_duration, watchdog_enable) {}
 
+  ~IOJankObserver() {}
+
   // Attaches the observer to the current thread's message loop. You can only
   // attach to the current thread, so this function can be invoked on another
   // thread to attach it.
   void AttachToCurrentThread() {
-    base::MessageLoop::current()->AddTaskObserver(this);
-    base::MessageLoopForIO::current()->AddIOObserver(this);
+    MessageLoop::current()->AddTaskObserver(this);
+    MessageLoopForIO::current()->AddIOObserver(this);
   }
 
   // Detaches the observer to the current thread's message loop.
   void DetachFromCurrentThread() {
-    base::MessageLoopForIO::current()->RemoveIOObserver(this);
-    base::MessageLoop::current()->RemoveTaskObserver(this);
+    MessageLoopForIO::current()->RemoveIOObserver(this);
+    MessageLoop::current()->RemoveTaskObserver(this);
   }
 
   virtual void WillProcessIOEvent() OVERRIDE {
@@ -244,22 +247,20 @@ class IOJankObserver : public base::RefCountedThreadSafe<IOJankObserver>,
     helper_.EndProcessingTimers();
   }
 
-  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  virtual void WillProcessTask(base::TimeTicks time_posted) OVERRIDE {
     if (!helper_.MessageWillBeMeasured())
       return;
     base::TimeTicks now = base::TimeTicks::Now();
-    const base::TimeDelta queueing_time = now - pending_task.time_posted;
+    const base::TimeDelta queueing_time = now - time_posted;
     helper_.StartProcessingTimers(queueing_time);
   }
 
-  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  virtual void DidProcessTask(base::TimeTicks time_posted) OVERRIDE {
     helper_.EndProcessingTimers();
   }
 
  private:
   friend class base::RefCountedThreadSafe<IOJankObserver>;
-
-  virtual ~IOJankObserver() {}
 
   JankObserverHelper helper_;
 
@@ -268,8 +269,8 @@ class IOJankObserver : public base::RefCountedThreadSafe<IOJankObserver>,
 
 //------------------------------------------------------------------------------
 class UIJankObserver : public base::RefCountedThreadSafe<UIJankObserver>,
-                       public base::MessageLoop::TaskObserver,
-                       public base::MessageLoopForUI::Observer {
+                       public MessageLoop::TaskObserver,
+                       public MessageLoopForUI::Observer {
  public:
   UIJankObserver(const char* thread_name,
                  TimeDelta excessive_duration,
@@ -280,27 +281,27 @@ class UIJankObserver : public base::RefCountedThreadSafe<UIJankObserver>,
   // attach to the current thread, so this function can be invoked on another
   // thread to attach it.
   void AttachToCurrentThread() {
-    DCHECK_EQ(base::MessageLoop::current()->type(), base::MessageLoop::TYPE_UI);
-    base::MessageLoopForUI::current()->AddObserver(this);
-    base::MessageLoop::current()->AddTaskObserver(this);
+    DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
+    MessageLoopForUI::current()->AddObserver(this);
+    MessageLoop::current()->AddTaskObserver(this);
   }
 
   // Detaches the observer to the current thread's message loop.
   void DetachFromCurrentThread() {
-    DCHECK_EQ(base::MessageLoop::current()->type(), base::MessageLoop::TYPE_UI);
-    base::MessageLoop::current()->RemoveTaskObserver(this);
-    base::MessageLoopForUI::current()->RemoveObserver(this);
+    DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
+    MessageLoop::current()->RemoveTaskObserver(this);
+    MessageLoopForUI::current()->RemoveObserver(this);
   }
 
-  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  virtual void WillProcessTask(base::TimeTicks time_posted) OVERRIDE {
     if (!helper_.MessageWillBeMeasured())
       return;
     base::TimeTicks now = base::TimeTicks::Now();
-    const base::TimeDelta queueing_time = now - pending_task.time_posted;
+    const base::TimeDelta queueing_time = now - time_posted;
     helper_.StartProcessingTimers(queueing_time);
   }
 
-  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  virtual void DidProcessTask(base::TimeTicks time_posted) OVERRIDE {
     helper_.EndProcessingTimers();
   }
 
@@ -338,8 +339,8 @@ class UIJankObserver : public base::RefCountedThreadSafe<UIJankObserver>,
 
   virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE {
   }
-#elif defined(TOOLKIT_GTK)
-  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE {
+#elif defined(TOOLKIT_USES_GTK)
+  virtual void WillProcessEvent(GdkEvent* event) {
     if (!helper_.MessageWillBeMeasured())
       return;
     // TODO(evanm): we want to set queueing_time_ using
@@ -350,7 +351,7 @@ class UIJankObserver : public base::RefCountedThreadSafe<UIJankObserver>,
     helper_.StartProcessingTimers(queueing_time);
   }
 
-  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE {
+  virtual void DidProcessEvent(GdkEvent* event) {
     helper_.EndProcessingTimers();
   }
 #endif
@@ -358,7 +359,7 @@ class UIJankObserver : public base::RefCountedThreadSafe<UIJankObserver>,
  private:
   friend class base::RefCountedThreadSafe<UIJankObserver>;
 
-  virtual ~UIJankObserver() {}
+  ~UIJankObserver() {}
 
   JankObserverHelper helper_;
 

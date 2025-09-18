@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_WORKER_WORKER_WEBAPPLICATIONCACHEHOST_IMPL_H_
 #define CHROME_WORKER_WORKER_WEBAPPLICATIONCACHEHOST_IMPL_H_
+#pragma once
 
-#include "content/child/appcache/web_application_cache_host_impl.h"
-
-namespace content {
+#include "webkit/appcache/web_application_cache_host_impl.h"
 
 // Information used to construct and initialize an appcache host
 // for a worker.
@@ -26,19 +25,20 @@ struct WorkerAppCacheInitInfo {
   }
 };
 
-class WorkerWebApplicationCacheHostImpl : public WebApplicationCacheHostImpl {
+class WorkerWebApplicationCacheHostImpl
+    : public appcache::WebApplicationCacheHostImpl {
  public:
   WorkerWebApplicationCacheHostImpl(
       const WorkerAppCacheInitInfo& init_info,
-      blink::WebApplicationCacheHostClient* client);
+      WebKit::WebApplicationCacheHostClient* client);
 
   // Main resource loading is different for workers. The resource is
   // loaded by the creator of the worker rather than the worker itself.
   // These overrides are stubbed out.
   virtual void willStartMainResourceRequest(
-      blink::WebURLRequest&, const blink::WebFrame*);
+      WebKit::WebURLRequest&, const WebKit::WebFrame*);
   virtual void didReceiveResponseForMainResource(
-      const blink::WebURLResponse&);
+      const WebKit::WebURLResponse&);
   virtual void didReceiveDataForMainResource(const char* data, int len);
   virtual void didFinishLoadingMainResource(bool success);
 
@@ -46,9 +46,7 @@ class WorkerWebApplicationCacheHostImpl : public WebApplicationCacheHostImpl {
   // time what cache to select and do so then.
   // These overrides are stubbed out.
   virtual void selectCacheWithoutManifest();
-  virtual bool selectCacheWithManifest(const blink::WebURL& manifestURL);
+  virtual bool selectCacheWithManifest(const WebKit::WebURL& manifestURL);
 };
-
-}  // namespace content
 
 #endif  // CHROME_WORKER_WORKER_WEBAPPLICATIONCACHEHOST_IMPL_H_

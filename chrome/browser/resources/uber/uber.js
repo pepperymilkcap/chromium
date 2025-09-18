@@ -3,21 +3,22 @@
 // found in the LICENSE file.
 
 cr.define('uber', function() {
+
   /**
    * Options for how web history should be handled.
-   */
+   **/
   var HISTORY_STATE_OPTION = {
     PUSH: 1,    // Push a new history state.
-    REPLACE: 2, // Replace the current history state.
-    NONE: 3,    // Ignore this history state change.
+    REPLACE: 2  // Replace the current history state.
   };
 
   /**
-   * We cache a reference to the #navigation frame here so we don't need to grab
-   * it from the DOM on each scroll.
-   * @type {Node}
-   * @private
-   */
+  * We cache a reference to the #navigation frame here to so we don't need to
+  * grab it from the DOM on each scroll.
+  * @type {Node}
+  * @private
+  * @static
+  */
   var navFrame;
 
   /**
@@ -25,39 +26,27 @@ cr.define('uber', function() {
    */
   function onLoad(e) {
     navFrame = $('navigation');
-    navFrame.dataset.width = navFrame.offsetWidth;
 
     // Select a page based on the page-URL.
-    var params = resolvePageInfo();
-    showPage(params.id, HISTORY_STATE_OPTION.NONE, params.path);
+    var params = resolvePageInfoFromPath(window.location.pathname);
+    showPage(params.id, HISTORY_STATE_OPTION.REPLACE, params.path);
 
     window.addEventListener('message', handleWindowMessage);
     window.setTimeout(function() {
       document.documentElement.classList.remove('loading');
     }, 0);
-
-    // HACK(dbeam): This makes the assumption that any second part to a path
-    // will result in needing background navigation. We shortcut it to avoid
-    // flicker on load.
-    // HACK(csilv): Search URLs aren't overlays, special case them.
-    if (params.id == 'settings' && params.path &&
-        params.path.indexOf('search') != 0) {
-      backgroundNavigation();
-    }
-
-    ensureNonSelectedFrameContainersAreHidden();
   }
 
   /**
-   * Find page information from window.location. If the location doesn't
-   * point to one of our pages, return default parameters.
-   * @return {Object} An object containing the following parameters:
+   * Find page information from the given path. If the path doesn't point to one
+   * of our pages, return default parameters.
+   * @param {string} path A path taken from the page URL.
+   * @return {Object} An object containining the following parameters:
    *     id - The 'id' of the page.
-   *     path - A path into the page, including search and hash. Optional.
+   *     path - A path into the page. Optional.
    */
-  function resolvePageInfo() {
+  function resolvePageInfoFromPath(path) {
     var params = {};
-    var path = window.location.pathname;
     if (path.length > 1) {
       // Split the path into id and the remaining path.
       path = path.slice(1);
@@ -68,14 +57,10 @@ cr.define('uber', function() {
       } else {
         params.id = path;
       }
-
+      // If the target sub-page does not exist, discard the params we
+      // generated.
       var container = $(params.id);
-      if (container) {
-        // The id is valid. Add the hash and search parts of the URL to path.
-        params.path = (params.path || '') + window.location.search +
-            window.location.hash;
-      } else {
-        // The target sub-page does not exist, discard the params we generated.
+      if (!container) {
         params.id = undefined;
         params.path = undefined;
       }
@@ -93,14 +78,16 @@ cr.define('uber', function() {
    */
   function onPopHistoryState(e) {
     if (e.state && e.state.pageId)
-      showPage(e.state.pageId, HISTORY_STATE_OPTION.NONE);
+      showPage(e.state.pageId, HISTORY_STATE_OPTION.PUSH);
   }
 
   /**
    * @return {Object} The default iframe container.
    */
   function getDefaultIframe() {
-    return $(loadTimeData.getString('helpHost'));
+    // TODO(csilv): This will select the first iframe as the default, but
+    // perhaps we want to use some other logic?
+    return document.querySelector('.iframe-container');
   }
 
   /**
@@ -130,20 +117,16 @@ cr.define('uber', function() {
       backgroundNavigation();
     else if (e.data.method === 'stopInterceptingEvents')
       foregroundNavigation();
-    else if (e.data.method === 'setPath')
-      setPath(e.origin, e.data.params.path);
     else if (e.data.method === 'setTitle')
-      setTitle(e.origin, e.data.params.title);
+      setTitle_(e.origin, e.data.params.title);
     else if (e.data.method === 'showPage')
       showPage(e.data.params.pageId, HISTORY_STATE_OPTION.PUSH);
     else if (e.data.method === 'navigationControlsLoaded')
       onNavigationControlsLoaded();
     else if (e.data.method === 'adjustToScroll')
       adjustToScroll(e.data.params);
-    else if (e.data.method === 'mouseWheel')
-      forwardMouseWheel(e.data.params);
     else
-      console.error('Received unexpected message', e.data);
+      console.error('Received unexpected message',  e.data);
   }
 
   /**
@@ -151,8 +134,6 @@ cr.define('uber', function() {
    */
   function backgroundNavigation() {
     navFrame.classList.add('background');
-    navFrame.firstChild.tabIndex = -1;
-    navFrame.firstChild.setAttribute('aria-hidden', true);
   }
 
   /**
@@ -160,67 +141,20 @@ cr.define('uber', function() {
    */
   function foregroundNavigation() {
     navFrame.classList.remove('background');
-    navFrame.firstChild.tabIndex = 0;
-    navFrame.firstChild.removeAttribute('aria-hidden');
   }
 
   /**
-   * Enables or disables animated transitions when changing content while
-   * horizontally scrolled.
-   * @param {boolean} enabled True if enabled, else false to disable.
+   * Enables animated transitions when horizontally scrolling.
    */
-  function setContentChanging(enabled) {
-    navFrame.classList[enabled ? 'add' : 'remove']('changing-content');
-
-    if (isRTL()) {
-      uber.invokeMethodOnWindow(navFrame.firstChild.contentWindow,
-                                'setContentChanging',
-                                enabled);
-    }
+  function enableScrollEasing() {
+    navFrame.classList.add('animating');
   }
 
   /**
-   * Get an iframe based on the origin of a received post message.
-   * @param {string} origin The origin of a post message.
-   * @return {!HTMLElement} The frame associated to |origin| or null.
+   * Disables animated transitions when horizontally scrolling.
    */
-  function getIframeFromOrigin(origin) {
-    assert(origin.substr(-1) != '/', 'invalid origin given');
-    var query = '.iframe-container > iframe[src^="' + origin + '/"]';
-    return document.querySelector(query);
-  }
-
-  /**
-   * Changes the path past the page title (i.e. chrome://chrome/settings/(.*)).
-   * @param {string} path The new /path/ to be set after the page name.
-   * @param {number} historyOption The type of history modification to make.
-   */
-  function changePathTo(path, historyOption) {
-    assert(!path || path.substr(-1) != '/', 'invalid path given');
-
-    var histFunc;
-    if (historyOption == HISTORY_STATE_OPTION.PUSH)
-      histFunc = window.history.pushState;
-    else if (historyOption == HISTORY_STATE_OPTION.REPLACE)
-      histFunc = window.history.replaceState;
-
-    assert(histFunc, 'invalid historyOption given ' + historyOption);
-
-    var pageId = getSelectedIframe().id;
-    var args = [{pageId: pageId}, '', '/' + pageId + '/' + (path || '')];
-    histFunc.apply(window.history, args);
-  }
-
-  /**
-   * Sets the "path" of the page (actually the path after the first '/' char).
-   * @param {Object} origin The origin of the source iframe.
-   * @param {string} title The new "path".
-   */
-  function setPath(origin, path) {
-    assert(!path || path[0] != '/', 'invalid path sent from ' + origin);
-    // Only update the currently displayed path if this is the visible frame.
-    if (getIframeFromOrigin(origin).parentNode == getSelectedIframe())
-      changePathTo(path, HISTORY_STATE_OPTION.REPLACE);
+  function disableScrollEasing() {
+    navFrame.classList.remove('animating');
   }
 
   /**
@@ -228,12 +162,16 @@ cr.define('uber', function() {
    * @param {Object} origin The origin of the source iframe.
    * @param {string} title The title of the page.
    */
-  function setTitle(origin, title) {
+  function setTitle_(origin, title) {
+    // |iframe.src| always contains a trailing backslash while |origin| does not
+    // so add the trailing source for normalization.
+    var query = '.iframe-container > iframe[src="' + origin + '/"]';
+
     // Cache the title for the client iframe, i.e., the iframe setting the
     // title. querySelector returns the actual iframe element, so use parentNode
     // to get back to the container.
-    var container = getIframeFromOrigin(origin).parentNode;
-    container.dataset.title = title;
+    var container = document.querySelector(query).parentNode;
+    container.title = title;
 
     // Only update the currently displayed title if this is the visible frame.
     if (container == getSelectedIframe())
@@ -242,65 +180,42 @@ cr.define('uber', function() {
 
   /**
    * Selects a subpage. This is called from uber-frame.
-   * @param {string} pageId Should matche an id of one of the iframe containers.
+   * @param {String} pageId Should matche an id of one of the iframe containers.
    * @param {integer} historyOption Indicates whether we should push or replace
    *     browser history.
-   * @param {string} path A sub-page path.
+   * @param {String=} path An optional sub-page path.
    */
   function showPage(pageId, historyOption, path) {
     var container = $(pageId);
     var lastSelected = document.querySelector('.iframe-container.selected');
-
-    // Lazy load of iframe contents.
-    var sourceUrl = container.dataset.url + (path || '');
-    var frame = container.querySelector('iframe');
-    if (!frame) {
-      frame = container.ownerDocument.createElement('iframe');
-      container.appendChild(frame);
-      frame.src = sourceUrl;
-    } else {
-      // There's no particularly good way to know what the current URL of the
-      // content frame is as we don't have access to its contentWindow's
-      // location, so just replace every time until necessary to do otherwise.
-      frame.contentWindow.location.replace(sourceUrl);
-    }
-
-    // If the last selected container is already showing, ignore the rest.
     if (lastSelected === container)
       return;
 
-    if (lastSelected) {
+    // Lazy load of iframe contents.
+    var frame = container.querySelector('iframe');
+    var sourceURL = frame.dataset.url;
+    if (!frame.getAttribute('src'))
+      frame.src = sourceURL;
+    // If there is a non-empty path, alter the location of the frame.
+    if (path && path.length)
+      frame.contentWindow.location.replace(sourceURL + path);
+
+    if (lastSelected)
       lastSelected.classList.remove('selected');
-      // Setting aria-hidden hides the container from assistive technology
-      // immediately. The 'hidden' attribute is set after the transition
-      // finishes - that ensures it's not possible to accidentally focus
-      // an element in an unselected container.
-      lastSelected.setAttribute('aria-hidden', 'true');
-    }
-
-    // Containers that aren't selected have to be hidden so that their
-    // content isn't focusable.
-    container.hidden = false;
-    container.setAttribute('aria-hidden', 'false');
-
-    // Trigger a layout after making it visible and before setting
-    // the class to 'selected', so that it animates in.
-    container.offsetTop;
     container.classList.add('selected');
+    document.title = container.title;
+    $('favicon').href = container.dataset.favicon;
 
-    setContentChanging(true);
+    enableScrollEasing();
     adjustToScroll(0);
 
     var selectedFrame = getSelectedIframe().querySelector('iframe');
     uber.invokeMethodOnWindow(selectedFrame.contentWindow, 'frameSelected');
 
-    if (historyOption != HISTORY_STATE_OPTION.NONE)
-      changePathTo(path, historyOption);
-
-    if (container.dataset.title)
-      document.title = container.dataset.title;
-    $('favicon').href = 'chrome://theme/' + container.dataset.favicon;
-    $('favicon2x').href = 'chrome://theme/' + container.dataset.favicon + '@2x';
+    if (historyOption == HISTORY_STATE_OPTION.PUSH)
+      window.history.pushState({pageId: pageId}, '', '/' + pageId);
+    else if (historyOption == HISTORY_STATE_OPTION.REPLACE)
+      window.history.replaceState({pageId: pageId}, '', '/' + pageId);
 
     updateNavigationControls();
   }
@@ -328,55 +243,16 @@ cr.define('uber', function() {
     // switches frames. If we receive a non-zero value it has to have come from
     // a real user scroll, so we disable easing when this happens.
     if (scrollOffset != 0)
-      setContentChanging(false);
-
-    if (isRTL()) {
-      uber.invokeMethodOnWindow(navFrame.firstChild.contentWindow,
-                                'adjustToScroll',
-                                scrollOffset);
-      var navWidth = Math.max(0, +navFrame.dataset.width + scrollOffset);
-      navFrame.style.width = navWidth + 'px';
-    } else {
-      navFrame.style.webkitTransform = 'translateX(' + -scrollOffset + 'px)';
-    }
-  }
-
-  /**
-   * Forward scroll wheel events to subpages.
-   * @param {Object} params Relevant parameters of wheel event.
-   */
-  function forwardMouseWheel(params) {
-    var iframe = getSelectedIframe().querySelector('iframe');
-    uber.invokeMethodOnWindow(iframe.contentWindow, 'mouseWheel', params);
-  }
-
-  /**
-   * Make sure that iframe containers that are not selected are
-   * hidden, so that elements in those frames aren't part of the
-   * focus order. Containers that are unselected later get hidden
-   * when the transition ends. We also set the aria-hidden attribute
-   * because that hides the container from assistive technology
-   * immediately, rather than only after the transition ends.
-   */
-  function ensureNonSelectedFrameContainersAreHidden() {
-    var containers = document.querySelectorAll('.iframe-container');
-    for (var i = 0; i < containers.length; i++) {
-      var container = containers[i];
-      if (!container.classList.contains('selected')) {
-        container.hidden = true;
-        container.setAttribute('aria-hidden', 'true');
-      }
-      container.addEventListener('webkitTransitionEnd', function(event) {
-        if (!event.target.classList.contains('selected'))
-          event.target.hidden = true;
-      });
-    }
+      disableScrollEasing();
+    navFrame.style.webkitTransform =
+        'translateX(' + (scrollOffset * -1) + 'px)';
   }
 
   return {
     onLoad: onLoad,
     onPopHistoryState: onPopHistoryState
   };
+
 });
 
 window.addEventListener('popstate', uber.onPopHistoryState);

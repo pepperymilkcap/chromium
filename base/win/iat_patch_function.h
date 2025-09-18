@@ -4,6 +4,7 @@
 
 #ifndef BASE_WIN_IAT_PATCH_FUNCTION_H_
 #define BASE_WIN_IAT_PATCH_FUNCTION_H_
+#pragma once
 
 #include <windows.h>
 

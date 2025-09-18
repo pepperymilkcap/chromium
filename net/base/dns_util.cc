@@ -50,8 +50,6 @@ bool DNSDomainFromDot(const base::StringPiece& dotted, std::string* out) {
 
   if (namelen + 1 > sizeof name)
     return false;
-  if (namelen == 0) // Empty names e.g. "", "." are not valid.
-    return false;
   name[namelen++] = 0;  // This is the root label (of length 0).
 
   *out = std::string(name, namelen);
@@ -64,20 +62,34 @@ std::string DNSDomainToString(const base::StringPiece& domain) {
   for (unsigned i = 0; i < domain.size() && domain[i]; i += domain[i] + 1) {
 #if CHAR_MIN < 0
     if (domain[i] < 0)
-      return std::string();
+      return "";
 #endif
     if (domain[i] > 63)
-      return std::string();
+      return "";
 
     if (i)
       ret += ".";
 
     if (static_cast<unsigned>(domain[i]) + i + 1 > domain.size())
-      return std::string();
+      return "";
 
     domain.substr(i + 1, domain[i]).AppendToString(&ret);
   }
   return ret;
+}
+
+bool IsSTD3ASCIIValidCharacter(char c) {
+  if (c <= 0x2c)
+    return false;
+  if (c >= 0x7b)
+    return false;
+  if (c >= 0x2e && c <= 0x2f)
+    return false;
+  if (c >= 0x3a && c <= 0x40)
+    return false;
+  if (c >= 0x5b && c <= 0x60)
+    return false;
+  return true;
 }
 
 std::string TrimEndingDot(const base::StringPiece& host) {

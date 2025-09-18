@@ -4,28 +4,21 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_CREATE_APPLICATION_SHORTCUT_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_CREATE_APPLICATION_SHORTCUT_VIEW_H_
+#pragma once
 
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/window/dialog_delegate.h"
 
-class FaviconDownloadHelper;
-class GURL;
-class Profile;
-class SkBitmap;
-
-namespace content {
-class WebContents;
-}
-
-namespace extensions {
 class Extension;
-}
+class Profile;
+class TabContentsWrapper;
+class SkBitmap;
 
 namespace views {
 class Checkbox;
@@ -50,20 +43,22 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
   // Overridden from views::DialogDelegate:
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
+  virtual bool CanResize() const OVERRIDE;
+  virtual bool CanMaximize() const OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual bool Accept() OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+                             const views::Event& event) OVERRIDE;
 
  protected:
   // Adds a new check-box as a child to the view.
-  views::Checkbox* AddCheckbox(const base::string16& text, bool checked);
+  views::Checkbox* AddCheckbox(const string16& text, bool checked);
 
   // Profile in which the shortcuts will be created.
   Profile* profile_;
@@ -77,8 +72,6 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
 
   // Target shortcut info.
   ShellIntegration::ShortcutInfo shortcut_info_;
-  // If false, the shortcut will be created in the root level of the Start Menu.
-  bool create_in_chrome_apps_subdir_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateApplicationShortcutView);
 };
@@ -86,7 +79,7 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
 // Create an application shortcut pointing to a URL.
 class CreateUrlApplicationShortcutView : public CreateApplicationShortcutView {
  public:
-  explicit CreateUrlApplicationShortcutView(content::WebContents* web_contents);
+  explicit CreateUrlApplicationShortcutView(TabContentsWrapper* tab_contents);
   virtual ~CreateUrlApplicationShortcutView();
 
   virtual bool Accept() OVERRIDE;
@@ -96,49 +89,40 @@ class CreateUrlApplicationShortcutView : public CreateApplicationShortcutView {
   // The first largest icon downloaded and decoded successfully will be used.
   void FetchIcon();
 
-  // Favicon download callback.
-  void DidDownloadFavicon(
-      int requested_size,
-      int id,
-      int http_status_code,
-      const GURL& image_url,
-      const std::vector<SkBitmap>& bitmaps,
-      const std::vector<gfx::Size>& original_bitmap_sizes);
+  // Callback of icon download.
+  void OnIconDownloaded(bool errored, const SkBitmap& image);
 
   // The tab whose URL is being turned into an app.
-  content::WebContents* web_contents_;
+  TabContentsWrapper* tab_contents_;
 
   // Pending app icon download tracked by us.
-  int pending_download_id_;
+  class IconDownloadCallbackFunctor;
+  IconDownloadCallbackFunctor* pending_download_;
 
   // Unprocessed icons from the WebApplicationInfo passed in.
   web_app::IconInfoList unprocessed_icons_;
-
-  base::WeakPtrFactory<CreateUrlApplicationShortcutView> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateUrlApplicationShortcutView);
 };
 
 // Create an application shortcut pointing to a chrome application.
 class CreateChromeApplicationShortcutView
-    : public CreateApplicationShortcutView {
+    : public CreateApplicationShortcutView,
+     public ImageLoadingTracker::Observer {
  public:
-  CreateChromeApplicationShortcutView(
-      Profile* profile,
-      const extensions::Extension* app,
-      const base::Closure& close_callback);
+  CreateChromeApplicationShortcutView(Profile* profile, const Extension* app);
   virtual ~CreateChromeApplicationShortcutView();
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
+
+  // Implement ImageLoadingTracker::Observer.  |tracker_| is used to
+  // load the app's icon.  This method recieves the icon, and adds
+  // it to the "Create Shortcut" dailog box.
+  virtual void OnImageLoaded(SkBitmap* image,
+                             const ExtensionResource& resource,
+                             int index) OVERRIDE;
 
  private:
-  void OnShortcutInfoLoaded(
-      const ShellIntegration::ShortcutInfo& shortcut_info);
-
-  const extensions::Extension* app_;
-  base::Closure close_callback_;
-
-  base::WeakPtrFactory<CreateChromeApplicationShortcutView> weak_ptr_factory_;
+  const Extension* app_;
+  ImageLoadingTracker tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateChromeApplicationShortcutView);
 };

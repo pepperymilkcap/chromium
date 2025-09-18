@@ -21,17 +21,17 @@
    function load() {
      state = 'initial';
      document.getElementById("mystatus").innerHTML = state;
-     document.title = "onload";
+     document.cookie = '__state=' + state + '; path=/';
    }
    function enter() {
      state += ',entered';
      document.getElementById("mystatus").innerHTML = state;
-     document.title = "entered";
+     document.cookie = '__state=' + state + '; path=/';
    }
    function leave() {
      state += ',left';
      document.getElementById("mystatus").innerHTML = state;
-     document.title = "left";
+     document.cookie = '__state=' + state + '; path=/';
    }
   </script>
  </head>

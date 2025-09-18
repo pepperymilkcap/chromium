@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_FRONTEND_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_FRONTEND_DATA_TYPE_CONTROLLER_H__
+#pragma once
 
 #include <string>
 
@@ -11,63 +12,55 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/glue/data_type_error_handler.h"
 
 class Profile;
 class ProfileSyncService;
 class ProfileSyncComponentsFactory;
-
-namespace base {
-class TimeDelta;
-}
-
-namespace syncer {
 class SyncError;
-}
 
+namespace base { class TimeDelta; }
 namespace browser_sync {
 
 class AssociatorInterface;
 class ChangeProcessor;
 
+// TODO(zea): have naming and style match NonFrontendDataTypeController.
+// TODO(zea): Rename frontend to UI (http://crbug.com/78833).
 // Implementation for datatypes that reside on the frontend thread
 // (UI thread). This is the same thread we perform initialization on, so we
 // don't have to worry about thread safety. The main start/stop funtionality is
 // implemented by default.
 // Derived classes must implement (at least):
-//    syncer::ModelType type() const
+//    syncable::ModelType type() const
 //    void CreateSyncComponents();
-// NOTE: This class is deprecated! New sync datatypes should be using the
-// syncer::SyncableService API and the UIDataTypeController instead.
-// TODO(zea): Delete this once all types are on the new API.
+//    void RecordUnrecoverableError(
+//        const tracked_objects::Location& from_here,
+//        const std::string& message);
+//    void RecordAssociationTime(base::TimeDelta time);
+//    void RecordStartFailure(StartResult result);
 class FrontendDataTypeController : public DataTypeController {
  public:
   FrontendDataTypeController(
       ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       ProfileSyncService* sync_service);
+  virtual ~FrontendDataTypeController();
 
   // DataTypeController interface.
-  virtual void LoadModels(
-      const ModelLoadCallback& model_load_callback) OVERRIDE;
-  virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
+  virtual void Start(const StartCallback& start_callback) OVERRIDE;
   virtual void Stop() OVERRIDE;
-  virtual syncer::ModelType type() const = 0;
-  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
+  virtual syncable::ModelType type() const = 0;
+  virtual browser_sync::ModelSafeGroup model_safe_group() const OVERRIDE;
   virtual std::string name() const OVERRIDE;
   virtual State state() const OVERRIDE;
 
-  // DataTypeErrorHandler interface.
-  virtual void OnSingleDatatypeUnrecoverableError(
-      const tracked_objects::Location& from_here,
-      const std::string& message) OVERRIDE;
+  // UnrecoverableErrorHandler interface.
+  virtual void OnUnrecoverableError(const tracked_objects::Location& from_here,
+                                    const std::string& message) OVERRIDE;
 
  protected:
-  friend class FrontendDataTypeControllerMock;
-
   // For testing only.
   FrontendDataTypeController();
-  virtual ~FrontendDataTypeController();
 
   // Kick off any dependent services that need to be running before we can
   // associate models. The default implementation is a no-op.
@@ -77,26 +70,34 @@ class FrontendDataTypeController : public DataTypeController {
   //           models are ready. Refer to Start(_) implementation.
   virtual bool StartModels();
 
+  // Build sync components and associate models.
+  // Return value:
+  //   True - if association was successful. FinishStart should have been
+  //          invoked.
+  //   False - if association failed. StartFailed should have been invoked.
+  virtual bool Associate();
+
   // Datatype specific creation of sync components.
   virtual void CreateSyncComponents() = 0;
-
-  // DataTypeController interface.
-  virtual void OnModelLoaded() OVERRIDE;
 
   // Perform any DataType controller specific state cleanup before stopping
   // the datatype controller. The default implementation is a no-op.
   virtual void CleanUpState();
 
-  // Helper method for cleaning up state and running the start callback.
-  virtual void StartDone(
-      StartResult start_result,
-      const syncer::SyncMergeResult& local_merge_result,
-      const syncer::SyncMergeResult& syncer_merge_result);
+  // Helper methods for cleaning up state an running the start callback.
+  virtual void StartFailed(StartResult result, const SyncError& error);
+  virtual void FinishStart(StartResult result);
 
+  // DataType specific histogram methods. Because histograms use static's, the
+  // specific datatype controllers must implement this themselves.
+  // Record unrecoverable errors.
+  virtual void RecordUnrecoverableError(
+      const tracked_objects::Location& from_here,
+      const std::string& message) = 0;
   // Record association time.
-  virtual void RecordAssociationTime(base::TimeDelta time);
+  virtual void RecordAssociationTime(base::TimeDelta time) = 0;
   // Record causes of start failure.
-  virtual void RecordStartFailure(StartResult result);
+  virtual void RecordStartFailure(StartResult result) = 0;
 
   virtual AssociatorInterface* model_associator() const;
   virtual void set_model_associator(AssociatorInterface* associator);
@@ -110,26 +111,10 @@ class FrontendDataTypeController : public DataTypeController {
   State state_;
 
   StartCallback start_callback_;
-  ModelLoadCallback model_load_callback_;
-
   // TODO(sync): transition all datatypes to SyncableService and deprecate
   // AssociatorInterface.
   scoped_ptr<AssociatorInterface> model_associator_;
   scoped_ptr<ChangeProcessor> change_processor_;
-
- private:
-  // Build sync components and associate models.
-  // Return value:
-  //   True - if association was successful. FinishStart should have been
-  //          invoked.
-  //   False - if association failed. StartFailed should have been invoked.
-  virtual bool Associate();
-
-  void AbortModelLoad();
-
-  // Clean up our state and state variables. Called in response
-  // to a failure or abort or stop.
-  void CleanUp();
 
   DISALLOW_COPY_AND_ASSIGN(FrontendDataTypeController);
 };

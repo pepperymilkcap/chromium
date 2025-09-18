@@ -1,16 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "base/mac/scoped_nsobject.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
+#import "base/memory/scoped_nsobject.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
-#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 @interface FakeBookmarkMenuController : BookmarkMenuCocoaController {
@@ -28,8 +26,8 @@
 
 - (id)initWithProfile:(Profile*)profile {
   if ((self = [super init])) {
-    base::string16 empty;
-    BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
+    string16 empty;
+    BookmarkModel* model = profile->GetBookmarkModel();
     const BookmarkNode* bookmark_bar = model->bookmark_bar_node();
     nodes_[0] = model->AddURL(bookmark_bar, 0, empty, GURL("http://0.com"));
     nodes_[1] = model->AddURL(bookmark_bar, 1, empty, GURL("http://1.com"));
@@ -77,7 +75,7 @@ class BookmarkMenuCocoaControllerTest : public CocoaProfileTest {
   FakeBookmarkMenuController* controller() { return controller_.get(); }
 
  private:
-  base::scoped_nsobject<FakeBookmarkMenuController> controller_;
+  scoped_nsobject<FakeBookmarkMenuController> controller_;
 };
 
 TEST_F(BookmarkMenuCocoaControllerTest, TestOpenItem) {

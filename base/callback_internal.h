@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,13 @@
 
 #ifndef BASE_CALLBACK_INTERNAL_H_
 #define BASE_CALLBACK_INTERNAL_H_
+#pragma once
 
 #include <stddef.h>
 
 #include "base/base_export.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-
-template <typename T>
-class ScopedVector;
 
 namespace base {
 namespace internal {
@@ -67,20 +65,6 @@ class BASE_EXPORT CallbackBase {
   InvokeFuncStorage polymorphic_invoke_;
 };
 
-// A helper template to determine if given type is non-const move-only-type,
-// i.e. if a value of the given type should be passed via .Pass() in a
-// destructive way.
-template <typename T> struct IsMoveOnlyType {
-  template <typename U>
-  static YesType Test(const typename U::MoveOnlyTypeForCPP03*);
-
-  template <typename U>
-  static NoType Test(...);
-
-  static const bool value = sizeof(Test<T>(0)) == sizeof(YesType) &&
-                            !is_const<T>::value;
-};
-
 // This is a typetraits object that's used to take an argument type, and
 // extract a suitable type for storing and forwarding arguments.
 //
@@ -92,7 +76,7 @@ template <typename T> struct IsMoveOnlyType {
 // parameters by const reference. In this case, we end up passing an actual
 // array type in the initializer list which C++ does not allow.  This will
 // break passing of C-string literals.
-template <typename T, bool is_move_only = IsMoveOnlyType<T>::value>
+template <typename T>
 struct CallbackParamTraits {
   typedef const T& ForwardType;
   typedef T StorageType;
@@ -104,7 +88,7 @@ struct CallbackParamTraits {
 //
 // The ForwardType should only be used for unbound arguments.
 template <typename T>
-struct CallbackParamTraits<T&, false> {
+struct CallbackParamTraits<T&> {
   typedef T& ForwardType;
   typedef T StorageType;
 };
@@ -115,14 +99,14 @@ struct CallbackParamTraits<T&, false> {
 // T[n]" does not seem to match correctly, so we are stuck with this
 // restriction.
 template <typename T, size_t n>
-struct CallbackParamTraits<T[n], false> {
+struct CallbackParamTraits<T[n]> {
   typedef const T* ForwardType;
   typedef const T* StorageType;
 };
 
 // See comment for CallbackParamTraits<T[n]>.
 template <typename T>
-struct CallbackParamTraits<T[], false> {
+struct CallbackParamTraits<T[]> {
   typedef const T* ForwardType;
   typedef const T* StorageType;
 };
@@ -140,10 +124,26 @@ struct CallbackParamTraits<T[], false> {
 // correctness, because we are implementing a destructive move.  A non-const
 // reference cannot be used with temporaries which means the result of a
 // function or a cast would not be usable with Callback<> or Bind().
+//
+// TODO(ajwong): We might be able to use SFINAE to search for the existence of
+// a Pass() function in the type and avoid the whitelist in CallbackParamTraits
+// and CallbackForward.
 template <typename T>
-struct CallbackParamTraits<T, true> {
-  typedef T ForwardType;
-  typedef T StorageType;
+struct CallbackParamTraits<scoped_ptr<T> > {
+  typedef scoped_ptr<T> ForwardType;
+  typedef scoped_ptr<T> StorageType;
+};
+
+template <typename T>
+struct CallbackParamTraits<scoped_array<T> > {
+  typedef scoped_array<T> ForwardType;
+  typedef scoped_array<T> StorageType;
+};
+
+template <typename T>
+struct CallbackParamTraits<scoped_ptr_malloc<T> > {
+  typedef scoped_ptr_malloc<T> ForwardType;
+  typedef scoped_ptr_malloc<T> StorageType;
 };
 
 // CallbackForward() is a very limited simulation of C++11's std::forward()
@@ -157,20 +157,17 @@ struct CallbackParamTraits<T, true> {
 // In C++11, std::forward would replace all uses of this function.  However, it
 // is impossible to implement a general std::forward with C++11 due to a lack
 // of rvalue references.
-//
-// In addition to Callback/Bind, this is used by PostTaskAndReplyWithResult to
-// simulate std::forward() and forward the result of one Callback as a
-// parameter to another callback. This is to support Callbacks that return
-// the movable-but-not-copyable types whitelisted above.
 template <typename T>
-typename enable_if<!IsMoveOnlyType<T>::value, T>::type& CallbackForward(T& t) {
-  return t;
-}
+T& CallbackForward(T& t) { return t; }
 
 template <typename T>
-typename enable_if<IsMoveOnlyType<T>::value, T>::type CallbackForward(T& t) {
-  return t.Pass();
-}
+scoped_ptr<T> CallbackForward(scoped_ptr<T>& p) { return p.Pass(); }
+
+template <typename T>
+scoped_ptr<T> CallbackForward(scoped_array<T>& p) { return p.Pass(); }
+
+template <typename T>
+scoped_ptr<T> CallbackForward(scoped_ptr_malloc<T>& p) { return p.Pass(); }
 
 }  // namespace internal
 }  // namespace base

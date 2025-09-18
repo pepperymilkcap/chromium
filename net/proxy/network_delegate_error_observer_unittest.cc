@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop_proxy.h"
 #include "base/threading/thread.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_delegate.h"
@@ -40,7 +40,7 @@ class TestNetworkDelegate : public net::NetworkDelegate {
   virtual int OnHeadersReceived(
       URLRequest* request,
       const CompletionCallback& callback,
-      const HttpResponseHeaders* original_response_headers,
+      HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers) OVERRIDE {
     return net::OK;
   }
@@ -53,7 +53,7 @@ class TestNetworkDelegate : public net::NetworkDelegate {
   virtual void OnURLRequestDestroyed(URLRequest* request) OVERRIDE {}
 
   virtual void OnPACScriptError(int line_number,
-                                const base::string16& error) OVERRIDE {
+                                const string16& error) OVERRIDE {
     got_pac_error_ = true;
   }
   virtual AuthRequiredResponse OnAuthRequired(
@@ -62,27 +62,6 @@ class TestNetworkDelegate : public net::NetworkDelegate {
       const AuthCallback& callback,
       AuthCredentials* credentials) OVERRIDE {
     return AUTH_REQUIRED_RESPONSE_NO_ACTION;
-  }
-  virtual bool OnCanGetCookies(const URLRequest& request,
-                               const CookieList& cookie_list) OVERRIDE {
-    return true;
-  }
-  virtual bool OnCanSetCookie(const URLRequest& request,
-                              const std::string& cookie_line,
-                              CookieOptions* options) OVERRIDE {
-    return true;
-  }
-  virtual bool OnCanAccessFile(const net::URLRequest& request,
-                               const base::FilePath& path) const OVERRIDE {
-    return true;
-  }
-  virtual bool OnCanThrottleRequest(const URLRequest& request) const OVERRIDE {
-    return false;
-  }
-  virtual int OnBeforeSocketStreamConnect(
-      SocketStream* stream,
-      const CompletionCallback& callback) OVERRIDE {
-    return OK;
   }
 
   bool got_pac_error_;
@@ -96,16 +75,15 @@ TEST(NetworkDelegateErrorObserverTest, CallOnThread) {
   base::Thread thread("test_thread");
   thread.Start();
   TestNetworkDelegate network_delegate;
-  NetworkDelegateErrorObserver observer(
-      &network_delegate, base::MessageLoopProxy::current().get());
-  thread.message_loop()
-      ->PostTask(FROM_HERE,
-                 base::Bind(&NetworkDelegateErrorObserver::OnPACScriptError,
-                            base::Unretained(&observer),
-                            42,
-                            base::string16()));
+  NetworkDelegateErrorObserver
+      observer(&network_delegate,
+               base::MessageLoopProxy::current());
+  thread.message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&NetworkDelegateErrorObserver::OnPACScriptError,
+                 base::Unretained(&observer), 42, string16()));
   thread.Stop();
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
   ASSERT_TRUE(network_delegate.got_pac_error());
 }
 
@@ -113,16 +91,14 @@ TEST(NetworkDelegateErrorObserverTest, CallOnThread) {
 TEST(NetworkDelegateErrorObserverTest, NoDelegate) {
   base::Thread thread("test_thread");
   thread.Start();
-  NetworkDelegateErrorObserver observer(
-      NULL, base::MessageLoopProxy::current().get());
-  thread.message_loop()
-      ->PostTask(FROM_HERE,
-                 base::Bind(&NetworkDelegateErrorObserver::OnPACScriptError,
-                            base::Unretained(&observer),
-                            42,
-                            base::string16()));
+  NetworkDelegateErrorObserver
+      observer(NULL, base::MessageLoopProxy::current());
+  thread.message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&NetworkDelegateErrorObserver::OnPACScriptError,
+                 base::Unretained(&observer), 42, string16()));
   thread.Stop();
-  base::MessageLoop::current()->RunUntilIdle();
+  MessageLoop::current()->RunAllPending();
   // Shouldn't have crashed until here...
 }
 

@@ -27,7 +27,7 @@
 ;     // pixels.
 ;   }
 ;
-  EXPORT    SYMBOL
+  global    mangle(SYMBOL) PRIVATE
   align     function_align
 
 mangle(SYMBOL):

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_CONTEXT_MENUS_CUSTOM_BINDINGS_H_
 #define CHROME_RENDERER_EXTENSIONS_CONTEXT_MENUS_CUSTOM_BINDINGS_H_
+#pragma once
 
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 
@@ -12,7 +13,10 @@ namespace extensions {
 // Implements custom bindings for the contextMenus API.
 class ContextMenusCustomBindings : public ChromeV8Extension {
  public:
-  ContextMenusCustomBindings(Dispatcher* dispatcher, ChromeV8Context* context);
+  ContextMenusCustomBindings(int dependency_count, const char** dependencies);
+
+  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
+      v8::Handle<v8::String> name) OVERRIDE;
 };
 
 }  // extensions

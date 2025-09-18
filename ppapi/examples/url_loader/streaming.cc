@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 // the plugin and the url_loader.html page in this directory to start the load
 // and to communicate the result.
 //
-// The other mode is to stream to a file instead. See stream_to_file.cc
+// The other mode is to stream to a file instead. For that mode, call
+// URLLoader.FinishSthreamingToFile once the "Open" callback is complete, and
+// then call URLResponseInfo.GetBodyAsFileRef once the file stream is complete.
 
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/module.h"
@@ -15,12 +17,6 @@
 #include "ppapi/cpp/url_request_info.h"
 #include "ppapi/cpp/url_response_info.h"
 #include "ppapi/utility/completion_callback_factory.h"
-
-// When compiling natively on Windows, PostMessage can be #define-d to
-// something else.
-#ifdef PostMessage
-#undef PostMessage
-#endif
 
 // Buffer size for reading network data.
 const int kBufSize = 1024;
@@ -86,7 +82,7 @@ void MyInstance::StartRequest(const std::string& url) {
 
   loader_ = pp::URLLoader(this);
   loader_.Open(request,
-               factory_.NewCallback(&MyInstance::OnOpenComplete));
+               factory_.NewRequiredCallback(&MyInstance::OnOpenComplete));
 }
 
 void MyInstance::OnOpenComplete(int32_t result) {

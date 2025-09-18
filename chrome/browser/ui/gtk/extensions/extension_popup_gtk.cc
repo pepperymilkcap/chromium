@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,25 +12,20 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/i18n/rtl.h"
-#include "base/message_loop/message_loop.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/extensions/extension_view_host.h"
-#include "chrome/browser/extensions/extension_view_host_factory.h"
+#include "base/message_loop.h"
+#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
-#include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_manager.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host_view.h"
-#include "url/gurl.h"
-
-using content::BrowserContext;
-using content::RenderViewHost;
+#include "googleurl/src/gurl.h"
 
 ExtensionPopupGtk* ExtensionPopupGtk::current_extension_popup_ = NULL;
 
@@ -43,18 +38,16 @@ const int ExtensionPopupGtk::kMaxWidth = 800;
 const int ExtensionPopupGtk::kMaxHeight = 600;
 
 ExtensionPopupGtk::ExtensionPopupGtk(Browser* browser,
-                                     extensions::ExtensionViewHost* host,
+                                     ExtensionHost* host,
                                      GtkWidget* anchor,
-                                     ShowAction show_action)
+                                     bool inspect)
     : browser_(browser),
       bubble_(NULL),
       host_(host),
       anchor_(anchor),
-      devtools_callback_(base::Bind(
-          &ExtensionPopupGtk::OnDevToolsStateChanged, base::Unretained(this))),
+      being_inspected_(inspect),
       weak_factory_(this) {
   host_->view()->SetContainer(this);
-  being_inspected_ = show_action == SHOW_AND_INSPECT;
 
   // If the host had somehow finished loading, then we'd miss the notification
   // and not show.  This seems to happen in single-process mode.
@@ -62,27 +55,28 @@ ExtensionPopupGtk::ExtensionPopupGtk(Browser* browser,
     ShowPopup();
   } else {
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-                   content::Source<BrowserContext>(host->browser_context()));
+                   content::Source<Profile>(host->profile()));
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-                 content::Source<BrowserContext>(host->browser_context()));
-  content::DevToolsManager::GetInstance()->AddAgentStateCallback(
-      devtools_callback_);
+                 content::Source<Profile>(host->profile()));
 }
 
 ExtensionPopupGtk::~ExtensionPopupGtk() {
-  content::DevToolsManager::GetInstance()->RemoveAgentStateCallback(
-      devtools_callback_);
 }
 
 // static
 void ExtensionPopupGtk::Show(const GURL& url, Browser* browser,
-    GtkWidget* anchor, ShowAction show_action) {
-  extensions::ExtensionViewHost* host =
-      extensions::ExtensionViewHostFactory::CreatePopupHost(url, browser);
+    GtkWidget* anchor, bool inspect) {
+  ExtensionProcessManager* manager =
+      browser->profile()->GetExtensionProcessManager();
+  DCHECK(manager);
+  if (!manager)
+    return;
+
+  ExtensionHost* host = manager->CreatePopupHost(url, browser);
   // This object will delete itself when the bubble is closed.
-  new ExtensionPopupGtk(browser, host, anchor, show_action);
+  new ExtensionPopupGtk(browser, host, anchor, inspect);
 }
 
 void ExtensionPopupGtk::Observe(int type,
@@ -90,37 +84,28 @@ void ExtensionPopupGtk::Observe(int type,
                                 const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
-      if (content::Details<extensions::ExtensionHost>(host_.get()) == details)
+      if (content::Details<ExtensionHost>(host_.get()) == details)
         ShowPopup();
       break;
     case chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE:
-      if (content::Details<extensions::ExtensionHost>(host_.get()) == details)
+      if (content::Details<ExtensionHost>(host_.get()) == details)
         DestroyPopup();
+      break;
+    case content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING:
+      // Make sure its the devtools window that inspecting our popup.
+      if (content::Details<RenderViewHost>(host_->render_view_host()) != details)
+        break;
+
+      // If the devtools window is closing, we post a task to ourselves to
+      // close the popup. This gives the devtools window a chance to finish
+      // detaching from the inspected RenderViewHost.
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&ExtensionPopupGtk::DestroyPopupWithoutResult,
+                     weak_factory_.GetWeakPtr()));
       break;
     default:
       NOTREACHED() << "Received unexpected notification";
-  }
-}
-
-void ExtensionPopupGtk::OnDevToolsStateChanged(
-    content::DevToolsAgentHost* agent_host, bool attached) {
-  // Make sure it's the devtools window that is inspecting our popup.
-  if (host_->render_view_host() != agent_host->GetRenderViewHost())
-    return;
-  if (attached) {
-    // Make sure that the popup won't go away when the inspector is activated.
-    if (bubble_)
-      bubble_->StopGrabbingInput();
-
-    being_inspected_ = true;
-  } else {
-    // If the devtools window is closing, we post a task to ourselves to
-    // close the popup. This gives the devtools window a chance to finish
-    // detaching from the inspected RenderViewHost.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&ExtensionPopupGtk::DestroyPopupWithoutResult,
-                   weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -130,13 +115,13 @@ void ExtensionPopupGtk::BubbleClosing(BubbleGtk* bubble,
   delete this;
 }
 
-void ExtensionPopupGtk::OnExtensionSizeChanged(
+void ExtensionPopupGtk::OnExtensionPreferredSizeChanged(
     ExtensionViewGtk* view,
     const gfx::Size& new_size) {
   int width = std::max(kMinWidth, std::min(kMaxWidth, new_size.width()));
   int height = std::max(kMinHeight, std::min(kMaxHeight, new_size.height()));
 
-  view->render_view_host()->GetView()->SetSize(gfx::Size(width, height));
+  view->render_view_host()->view()->SetSize(gfx::Size(width, height));
   gtk_widget_set_size_request(view->native_view(), width, height);
 }
 
@@ -156,8 +141,12 @@ void ExtensionPopupGtk::ShowPopup() {
     return;
   }
 
-  if (being_inspected_)
+  if (being_inspected_) {
     DevToolsWindow::OpenDevToolsWindow(host_->render_view_host());
+    // Listen for the the devtools window closing.
+    registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
+        content::Source<content::BrowserContext>(host_->profile()));
+  }
 
   // Only one instance should be showing at a time. Get rid of the old one, if
   // any. Typically, |current_extension_popup_| will be NULL, but it can be
@@ -167,21 +156,19 @@ void ExtensionPopupGtk::ShowPopup() {
     current_extension_popup_->DestroyPopup();
   current_extension_popup_ = this;
 
-  GtkWidget* border_box = gtk_alignment_new(0, 0, 1.0, 1.0);
-  // This border is necessary so the bubble's corners do not get cut off by the
-  // render view.
-  gtk_container_set_border_width(GTK_CONTAINER(border_box), 2);
-  gtk_container_add(GTK_CONTAINER(border_box), host_->view()->native_view());
-
   // We'll be in the upper-right corner of the window for LTR languages, so we
   // want to put the arrow at the upper-right corner of the bubble to match the
   // page and app menus.
+  BubbleGtk::ArrowLocationGtk arrow_location =
+      !base::i18n::IsRTL() ?
+      BubbleGtk::ARROW_LOCATION_TOP_RIGHT :
+      BubbleGtk::ARROW_LOCATION_TOP_LEFT;
   bubble_ = BubbleGtk::Show(anchor_,
                             NULL,
-                            border_box,
-                            BubbleGtk::ANCHOR_TOP_RIGHT,
-                            being_inspected_ ? 0 :
-                                BubbleGtk::POPUP_WINDOW | BubbleGtk::GRAB_INPUT,
+                            host_->view()->native_view(),
+                            arrow_location,
+                            false,  // match_system_theme
+                            !being_inspected_,  // grab_input
                             GtkThemeService::GetFrom(browser_->profile()),
                             this);
 }

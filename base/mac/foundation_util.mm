@@ -7,42 +7,42 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_logging.h"
-#include "base/strings/sys_string_conversions.h"
-
-#if !defined(OS_IOS)
-extern "C" {
-CFTypeID SecACLGetTypeID();
-CFTypeID SecTrustedApplicationGetTypeID();
-Boolean _CFIsObjC(CFTypeID typeID, CFTypeRef obj);
-}  // extern "C"
-#endif
+#include "base/sys_string_conversions.h"
 
 namespace base {
 namespace mac {
 
-namespace {
+static bool g_override_am_i_bundled = false;
+static bool g_override_am_i_bundled_value = false;
 
-bool g_override_am_i_bundled = false;
-bool g_override_am_i_bundled_value = false;
-
-bool UncachedAmIBundled() {
-#if defined(OS_IOS)
-  // All apps are bundled on iOS.
-  return true;
-#else
+// Adapted from http://developer.apple.com/carbon/tipsandtricks.html#AmIBundled
+static bool UncachedAmIBundled() {
   if (g_override_am_i_bundled)
     return g_override_am_i_bundled_value;
 
-  // Yes, this is cheap.
-  return [[base::mac::OuterBundle() bundlePath] hasSuffix:@".app"];
-#endif
-}
+  ProcessSerialNumber psn = {0, kCurrentProcess};
 
-}  // namespace
+  FSRef fsref;
+  OSStatus pbErr;
+  if ((pbErr = GetProcessBundleLocation(&psn, &fsref)) != noErr) {
+    OSSTATUS_DLOG(ERROR, pbErr) << "GetProcessBundleLocation failed";
+    return false;
+  }
+
+  FSCatalogInfo info;
+  OSErr fsErr;
+  if ((fsErr = FSGetCatalogInfo(&fsref, kFSCatInfoNodeFlags, &info,
+                                NULL, NULL, NULL)) != noErr) {
+    OSSTATUS_DLOG(ERROR, fsErr) << "FSGetCatalogInfo failed";
+    return false;
+  }
+
+  return info.nodeFlags & kFSNodeIsDirectoryMask;
+}
 
 bool AmIBundled() {
   // If the return value is not cached, this function will return different
@@ -57,11 +57,6 @@ bool AmIBundled() {
 }
 
 void SetOverrideAmIBundled(bool value) {
-#if defined(OS_IOS)
-  // It doesn't make sense not to be bundled on iOS.
-  if (!value)
-    NOTREACHED();
-#endif
   g_override_am_i_bundled = true;
   g_override_am_i_bundled_value = value;
 }
@@ -78,7 +73,9 @@ FilePath PathForFrameworkBundleResource(CFStringRef resourceName) {
   NSBundle* bundle = base::mac::FrameworkBundle();
   NSString* resourcePath = [bundle pathForResource:(NSString*)resourceName
                                             ofType:nil];
-  return NSStringToFilePath(resourcePath);
+  if (!resourcePath)
+    return FilePath();
+  return FilePath([resourcePath fileSystemRepresentation]);
 }
 
 OSType CreatorCodeForCFBundleRef(CFBundleRef bundle) {
@@ -104,7 +101,8 @@ bool GetSearchPathDirectory(NSSearchPathDirectory directory,
   if ([dirs count] < 1) {
     return false;
   }
-  *result = NSStringToFilePath([dirs objectAtIndex:0]);
+  NSString* path = [dirs objectAtIndex:0];
+  *result = FilePath([path fileSystemRepresentation]);
   return true;
 }
 
@@ -188,13 +186,6 @@ TYPE_NAME_FOR_CF_TYPE_DEFN(CFNull);
 TYPE_NAME_FOR_CF_TYPE_DEFN(CFNumber);
 TYPE_NAME_FOR_CF_TYPE_DEFN(CFSet);
 TYPE_NAME_FOR_CF_TYPE_DEFN(CFString);
-TYPE_NAME_FOR_CF_TYPE_DEFN(CFURL);
-TYPE_NAME_FOR_CF_TYPE_DEFN(CFUUID);
-
-TYPE_NAME_FOR_CF_TYPE_DEFN(CGColor);
-
-TYPE_NAME_FOR_CF_TYPE_DEFN(CTFont);
-TYPE_NAME_FOR_CF_TYPE_DEFN(CTRun);
 
 #undef TYPE_NAME_FOR_CF_TYPE_DEFN
 
@@ -291,31 +282,6 @@ CF_TO_NS_CAST_DEFN(CFWriteStream, NSOutputStream);
 CF_TO_NS_MUTABLE_CAST_DEFN(String);
 CF_TO_NS_CAST_DEFN(CFURL, NSURL);
 
-#if defined(OS_IOS)
-CF_TO_NS_CAST_DEFN(CTFont, UIFont);
-#else
-// The NSFont/CTFont toll-free bridging is broken when it comes to type
-// checking, so do some special-casing.
-// http://www.openradar.me/15341349 rdar://15341349
-NSFont* CFToNSCast(CTFontRef cf_val) {
-  NSFont* ns_val =
-      const_cast<NSFont*>(reinterpret_cast<const NSFont*>(cf_val));
-  DCHECK(!cf_val ||
-         CTFontGetTypeID() == CFGetTypeID(cf_val) ||
-         (_CFIsObjC(CTFontGetTypeID(), cf_val) &&
-          [ns_val isKindOfClass:NSClassFromString(@"NSFont")]));
-  return ns_val;
-}
-
-CTFontRef NSToCFCast(NSFont* ns_val) {
-  CTFontRef cf_val = reinterpret_cast<CTFontRef>(ns_val);
-  DCHECK(!cf_val ||
-         CTFontGetTypeID() == CFGetTypeID(cf_val) ||
-         [ns_val isKindOfClass:NSClassFromString(@"NSFont")]);
-  return cf_val;
-}
-#endif
-
 #undef CF_TO_NS_CAST_DEFN
 #undef CF_TO_NS_MUTABLE_CAST_DEFN
 
@@ -326,7 +292,7 @@ CFCast<TypeCF##Ref>(const CFTypeRef& cf_val) { \
     return NULL; \
   } \
   if (CFGetTypeID(cf_val) == TypeCF##GetTypeID()) { \
-    return (TypeCF##Ref)(cf_val); \
+    return reinterpret_cast<TypeCF##Ref>(cf_val); \
   } \
   return NULL; \
 } \
@@ -348,50 +314,6 @@ CF_CAST_DEFN(CFNull);
 CF_CAST_DEFN(CFNumber);
 CF_CAST_DEFN(CFSet);
 CF_CAST_DEFN(CFString);
-CF_CAST_DEFN(CFURL);
-CF_CAST_DEFN(CFUUID);
-
-CF_CAST_DEFN(CGColor);
-
-CF_CAST_DEFN(CTRun);
-
-#if defined(OS_IOS)
-CF_CAST_DEFN(CTFont);
-#else
-// The NSFont/CTFont toll-free bridging is broken when it comes to type
-// checking, so do some special-casing.
-// http://www.openradar.me/15341349 rdar://15341349
-template<> CTFontRef
-CFCast<CTFontRef>(const CFTypeRef& cf_val) {
-  if (cf_val == NULL) {
-    return NULL;
-  }
-  if (CFGetTypeID(cf_val) == CTFontGetTypeID()) {
-    return (CTFontRef)(cf_val);
-  }
-
-  if (!_CFIsObjC(CTFontGetTypeID(), cf_val))
-    return NULL;
-
-  id<NSObject> ns_val = reinterpret_cast<id>(const_cast<void*>(cf_val));
-  if ([ns_val isKindOfClass:NSClassFromString(@"NSFont")]) {
-    return (CTFontRef)(cf_val);
-  }
-  return NULL;
-}
-
-template<> CTFontRef
-CFCastStrict<CTFontRef>(const CFTypeRef& cf_val) {
-  CTFontRef rv = CFCast<CTFontRef>(cf_val);
-  DCHECK(cf_val == NULL || rv);
-  return rv;
-}
-#endif
-
-#if !defined(OS_IOS)
-CF_CAST_DEFN(SecACL);
-CF_CAST_DEFN(SecTrustedApplication);
-#endif
 
 #undef CF_CAST_DEFN
 
@@ -408,18 +330,6 @@ std::string GetValueFromDictionaryErrorMessage(
       " instead";
 }
 
-NSString* FilePathToNSString(const FilePath& path) {
-  if (path.empty())
-    return nil;
-  return [NSString stringWithUTF8String:path.value().c_str()];
-}
-
-FilePath NSStringToFilePath(NSString* str) {
-  if (![str length])
-    return FilePath();
-  return FilePath([str fileSystemRepresentation]);
-}
-
 }  // namespace mac
 }  // namespace base
 
@@ -428,8 +338,9 @@ std::ostream& operator<<(std::ostream& o, const CFStringRef string) {
 }
 
 std::ostream& operator<<(std::ostream& o, const CFErrorRef err) {
-  base::ScopedCFTypeRef<CFStringRef> desc(CFErrorCopyDescription(err));
-  base::ScopedCFTypeRef<CFDictionaryRef> user_info(CFErrorCopyUserInfo(err));
+  base::mac::ScopedCFTypeRef<CFStringRef> desc(CFErrorCopyDescription(err));
+  base::mac::ScopedCFTypeRef<CFDictionaryRef> user_info(
+      CFErrorCopyUserInfo(err));
   CFStringRef errorDesc = NULL;
   if (user_info.get()) {
     errorDesc = reinterpret_cast<CFStringRef>(

@@ -6,69 +6,87 @@
 
 namespace browser_defaults {
 
-#if defined(USE_X11)
+#if defined(USE_AURA) || defined(OS_CHROMEOS)
+const bool kOSSupportsOtherBrowsers = false;
+#else
+const bool kOSSupportsOtherBrowsers = true;
+#endif
+
+#if defined(OS_CHROMEOS)
+
+// Make the regular omnibox text two points larger than the nine-point font
+// used in the tab strip (11pt / 72pt/in * 96px/in = 14.667px).
+const int kAutocompleteEditFontPixelSize = 15;
+
+const int kAutocompleteEditFontPixelSizeInPopup = 10;
+
+const SessionStartupPref::Type kDefaultSessionStartupType =
+    SessionStartupPref::LAST;
+const int kMiniTabWidth = 64;
+const bool kCanToggleSystemTitleBar = false;
+const bool kRestorePopups = false;
+const bool kShowImportOnBookmarkBar = false;
+const bool kShowExitMenuItem = true;
+const bool kDownloadPageHasShowInFolder = true;
+const bool kSizeTabButtonToTopOfTabStrip = true;
+const bool kSyncAutoStarts = true;
+const bool kShowOtherBrowsersInAboutMemory = false;
+const bool kAlwaysOpenIncognitoWindow = true;
+
+#elif defined(TOOLKIT_USES_GTK)
+
+// 14px = 10.5pt @ 96dpi.
+const int kAutocompleteEditFontPixelSize = 14;
+
+// On Windows, popup windows' location text uses a font 5/6 the size of
+// that in a regular window, which we duplicate here for GTK.
+const int kAutocompleteEditFontPixelSizeInPopup =
+    kAutocompleteEditFontPixelSize * 5.0 / 6.0;
+
+const bool kShowCancelButtonInTaskManager = true;
+
 #if defined(TOOLKIT_VIEWS)
 const bool kCanToggleSystemTitleBar = false;
 #else
 const bool kCanToggleSystemTitleBar = true;
 #endif
-#endif
 
-const int kOmniboxFontPixelSize = 16;
-
-const bool kRestorePopups = false;
-
-#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
-const bool kBrowserAliveWithNoWindows = true;
-const bool kShowExitMenuItem = false;
-#else
-const bool kBrowserAliveWithNoWindows = false;
-const bool kShowExitMenuItem = true;
-#endif
-
-#if defined(OS_CHROMEOS)
-const bool kShowHelpMenuItemIcon = true;
-const bool kShowUpgradeMenuItem = false;
-const bool kShowImportOnBookmarkBar = false;
-const bool kAlwaysOpenIncognitoWindow = true;
-const bool kAlwaysCreateTabbedBrowserOnSessionRestore = false;
-#else
-const bool kShowHelpMenuItemIcon = false;
-const bool kShowUpgradeMenuItem = true;
-const bool kShowImportOnBookmarkBar = true;
-const bool kAlwaysOpenIncognitoWindow = false;
-const bool kAlwaysCreateTabbedBrowserOnSessionRestore = true;
-#endif
-
-const bool kDownloadPageHasShowInFolder = true;
-const bool kSizeTabButtonToTopOfTabStrip = false;
-
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
-const bool kSyncAutoStarts = true;
-const bool kShowOtherBrowsersInAboutMemory = false;
-#else
-const bool kSyncAutoStarts = false;
-const bool kShowOtherBrowsersInAboutMemory = true;
-#endif
-
-#if defined(TOOLKIT_GTK)
-const bool kShowCancelButtonInTaskManager = true;
 #else
 const bool kShowCancelButtonInTaskManager = false;
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-const bool kScrollEventChangesTab = true;
+#if !defined(OS_CHROMEOS)
+
+const SessionStartupPref::Type kDefaultSessionStartupType =
+    SessionStartupPref::DEFAULT;
+const int kMiniTabWidth = 56;
+const bool kRestorePopups = false;
+const bool kShowImportOnBookmarkBar = true;
+const bool kDownloadPageHasShowInFolder = true;
+#if defined(OS_MACOSX)
+const bool kShowExitMenuItem = false;
 #else
-const bool kScrollEventChangesTab = false;
+const bool kShowExitMenuItem = true;
 #endif
+const bool kSizeTabButtonToTopOfTabStrip = false;
+const bool kSyncAutoStarts = false;
+const bool kShowOtherBrowsersInAboutMemory = true;
+const bool kAlwaysOpenIncognitoWindow = false;
+#endif
+
+#if defined(OS_MACOSX)
+const bool kBrowserAliveWithNoWindows = true;
+#else
+const bool kBrowserAliveWithNoWindows = false;
+#endif
+
+const int kBookmarkBarHeight = 28;
+const int kNewtabBookmarkBarHeight = 57;
 
 const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle =
     ui::ResourceBundle::BoldFont;
 
-#if !defined(OS_ANDROID)
-const bool kPasswordEchoEnabled = false;
-#endif
+const int kInfoBarBorderPaddingVertical = 5;
 
 bool bookmarks_enabled = true;
 

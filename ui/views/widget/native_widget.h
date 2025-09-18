@@ -4,12 +4,9 @@
 
 #ifndef UI_VIEWS_WIDGET_NATIVE_WIDGET_H_
 #define UI_VIEWS_WIDGET_NATIVE_WIDGET_H_
+#pragma once
 
 #include "ui/views/widget/widget.h"
-
-namespace ui {
-class EventHandler;
-}
 
 namespace views {
 namespace internal {
@@ -29,9 +26,6 @@ class NativeWidgetPrivate;
 class VIEWS_EXPORT NativeWidget {
  public:
   virtual ~NativeWidget() {}
-
-  // Retrieves the event handler
-  virtual ui::EventHandler* GetEventHandler() = 0;
 
  private:
   friend class Widget;

@@ -1,61 +1,42 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
+/*
+Copyright (c) 2011 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+*/
+
+/**
+ * Act like a table to allow for vertical centering.
  */
-
-.capture-status-view {
-  background: rgb(238, 0, 0);
+#status-view {
+  display: table;
 }
 
-.halted-status-view {
-  background: rgb(0, 138, 0);
+#status-view-for-capture,
+#status-view-for-view,
+#status-view-for-file {
+  padding: 0 6px;
+  white-space: nowrap;
+  color: #eee;
+  display: table-cell;
+  vertical-align: middle;
 }
 
-.loaded-status-view {
-  background: rgb(113, 113, 171);
+#status-view-for-capture {
+  background: #f00;
 }
 
-#capture-status-view {
-  -webkit-align-items: center;
-  display: -webkit-flex;
+#status-view-for-view {
+  background: #0a0;
 }
 
-.capture-status-view-link,
-.capture-status-view-link:visited,
-.capture-status-view-link:active {
-  color: white;
-  text-decoration: none;
+#status-view-for-file {
+  background: #88c;
 }
 
-.capture-status-view-link:hover {
-  color: white;
-  text-decoration: underline;
-}
-
-/* Completely un-style the SELECT. Will place an arrow over it manually. */
-#capture-status-view-actions {
-  -webkit-appearance: none;
-  background: none;
-  border: none;
-  height: 25px;
-  outline: none;
-  width: 30px;
-}
-
-.capture-status-view-arrow {
-  display: inline-block;
-  position: relative;
-}
-
-.capture-status-view-arrow::after {
-  color: black;
-  content: '\25bc';
-  font-size: 9px;
-  left: 0;
-  line-height: 25px;
-  pointer-events: none;
-  position: absolute;
-  text-align: center;
-  top: 0;
+#status-view-for-capture-table {
   width: 100%;
+}
+  
+#status-view-for-capture-mutating-buttons {
+  text-align: right;
 }

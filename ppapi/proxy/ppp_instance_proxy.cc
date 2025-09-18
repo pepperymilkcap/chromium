@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,39 +6,47 @@
 
 #include <algorithm>
 
-#include "base/bind.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppb_fullscreen.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/private/ppb_flash_fullscreen.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_globals.h"
-#include "ppapi/proxy/plugin_proxy_delegate.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "ppapi/proxy/url_loader_resource.h"
+#include "ppapi/proxy/ppb_url_loader_proxy.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
-#include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/shared_impl/scoped_pp_resource.h"
 #include "ppapi/thunk/enter.h"
-#include "ppapi/thunk/ppb_flash_fullscreen_api.h"
 #include "ppapi/thunk/ppb_view_api.h"
 
 namespace ppapi {
 namespace proxy {
 
-using thunk::EnterInstanceAPINoLock;
-using thunk::EnterInstanceNoLock;
-using thunk::EnterResourceNoLock;
-using thunk::PPB_Flash_Fullscreen_API;
-using thunk::PPB_Instance_API;
-using thunk::PPB_View_API;
-
 namespace {
 
-#if !defined(OS_NACL)
+void GetFullscreenStates(PP_Instance instance,
+                         HostDispatcher* dispatcher,
+                         PP_Bool* fullscreen,
+                         PP_Bool* flash_fullscreen) {
+  const PPB_Fullscreen* fullscreen_interface =
+      static_cast<const PPB_Fullscreen*>(
+          dispatcher->local_get_interface()(PPB_FULLSCREEN_INTERFACE));
+  DCHECK(fullscreen_interface);
+  *fullscreen = fullscreen_interface->IsFullscreen(instance);
+}
+
+PP_Bool IsFlashFullscreen(PP_Instance instance,
+                          HostDispatcher* dispatcher) {
+  const PPB_FlashFullscreen* flash_fullscreen_interface =
+      static_cast<const PPB_FlashFullscreen*>(
+          dispatcher->local_get_interface()(PPB_FLASHFULLSCREEN_INTERFACE));
+  DCHECK(flash_fullscreen_interface);
+  return flash_fullscreen_interface->IsFullscreen(instance);
+}
+
 PP_Bool DidCreate(PP_Instance instance,
                   uint32_t argc,
                   const char* argn[],
@@ -65,19 +73,15 @@ void DidDestroy(PP_Instance instance) {
 void DidChangeView(PP_Instance instance, PP_Resource view_resource) {
   HostDispatcher* dispatcher = HostDispatcher::GetForInstance(instance);
 
-  EnterResourceNoLock<PPB_View_API> enter_view(view_resource, false);
-  if (enter_view.failed()) {
+  thunk::EnterResourceNoLock<thunk::PPB_View_API> enter(view_resource, false);
+  if (enter.failed()) {
     NOTREACHED();
     return;
   }
 
-  PP_Bool flash_fullscreen = PP_FALSE;
-  EnterInstanceNoLock enter_instance(instance);
-  if (!enter_instance.failed())
-    flash_fullscreen = enter_instance.functions()->FlashIsFullscreen(instance);
   dispatcher->Send(new PpapiMsg_PPPInstance_DidChangeView(
-      API_ID_PPP_INSTANCE, instance, enter_view.object()->GetData(),
-      flash_fullscreen));
+      API_ID_PPP_INSTANCE, instance, enter.object()->GetData(),
+      IsFlashFullscreen(instance, dispatcher)));
 }
 
 void DidChangeFocus(PP_Instance instance, PP_Bool has_focus) {
@@ -86,11 +90,36 @@ void DidChangeFocus(PP_Instance instance, PP_Bool has_focus) {
                                               instance, has_focus));
 }
 
-PP_Bool HandleDocumentLoad(PP_Instance instance, PP_Resource url_loader) {
-  // This should never get called. Out-of-process document loads are handled
-  // specially.
-  NOTREACHED();
-  return PP_FALSE;
+PP_Bool HandleDocumentLoad(PP_Instance instance,
+                           PP_Resource url_loader) {
+  PP_Bool result = PP_FALSE;
+  HostDispatcher* dispatcher = HostDispatcher::GetForInstance(instance);
+
+  // Set up the URLLoader for proxying.
+
+  PPB_URLLoader_Proxy* url_loader_proxy = static_cast<PPB_URLLoader_Proxy*>(
+      dispatcher->GetInterfaceProxy(API_ID_PPB_URL_LOADER));
+  url_loader_proxy->PrepareURLLoaderForSendingToPlugin(url_loader);
+
+  // PluginResourceTracker in the plugin process assumes that resources that it
+  // tracks have been addrefed on behalf of the plugin at the renderer side. So
+  // we explicitly do it for |url_loader| here.
+  //
+  // Please also see comments in PPP_Instance_Proxy::OnMsgHandleDocumentLoad()
+  // about releasing of this extra reference.
+  const PPB_Core* core = reinterpret_cast<const PPB_Core*>(
+      dispatcher->local_get_interface()(PPB_CORE_INTERFACE));
+  if (!core) {
+    NOTREACHED();
+    return PP_FALSE;
+  }
+  core->AddRefResource(url_loader);
+
+  HostResource serialized_loader;
+  serialized_loader.SetHostResource(instance, url_loader);
+  dispatcher->Send(new PpapiMsg_PPPInstance_HandleDocumentLoad(
+      API_ID_PPP_INSTANCE, instance, serialized_loader, &result));
+  return result;
 }
 
 static const PPP_Instance_1_1 instance_interface = {
@@ -100,7 +129,6 @@ static const PPP_Instance_1_1 instance_interface = {
   &DidChangeFocus,
   &HandleDocumentLoad
 };
-#endif  // !defined(OS_NACL)
 
 }  // namespace
 
@@ -116,25 +144,28 @@ PPP_Instance_Proxy::PPP_Instance_Proxy(Dispatcher* dispatcher)
     // the interface, we want to say it supports the 1.1 version since we'll
     // convert it here. This magic conversion code is hardcoded into
     // PluginDispatcher::OnMsgSupportsInterface.
-    combined_interface_.reset(PPP_Instance_Combined::Create(
-        base::Bind(dispatcher->local_get_interface())));
+    const PPP_Instance* instance = static_cast<const PPP_Instance*>(
+        dispatcher->local_get_interface()(PPP_INSTANCE_INTERFACE));
+    if (instance) {
+      combined_interface_.reset(new PPP_Instance_Combined(*instance));
+    } else {
+      const PPP_Instance_1_0* instance_1_0 =
+          static_cast<const PPP_Instance_1_0*>(
+              dispatcher->local_get_interface()(PPP_INSTANCE_INTERFACE_1_0));
+      combined_interface_.reset(new PPP_Instance_Combined(*instance_1_0));
+    }
   }
 }
 
 PPP_Instance_Proxy::~PPP_Instance_Proxy() {
 }
 
-#if !defined(OS_NACL)
 // static
 const PPP_Instance* PPP_Instance_Proxy::GetInstanceInterface() {
   return &instance_interface;
 }
-#endif  // !defined(OS_NACL)
 
 bool PPP_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  if (!dispatcher()->IsPlugin())
-    return false;
-
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_Instance_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPInstance_DidCreate,
@@ -188,11 +219,7 @@ void PPP_Instance_Proxy::OnPluginMsgDidCreate(
 
 void PPP_Instance_Proxy::OnPluginMsgDidDestroy(PP_Instance instance) {
   combined_interface_->DidDestroy(instance);
-
-  PpapiGlobals* globals = PpapiGlobals::Get();
-  globals->GetResourceTracker()->DidDeleteInstance(instance);
-  globals->GetVarTracker()->DidDeleteInstance(instance);
-
+  PpapiGlobals::Get()->GetResourceTracker()->DidDeleteInstance(instance);
   static_cast<PluginDispatcher*>(dispatcher())->DidDestroyInstance(instance);
 }
 
@@ -206,17 +233,13 @@ void PPP_Instance_Proxy::OnPluginMsgDidChangeView(
   InstanceData* data = dispatcher->GetInstanceData(instance);
   if (!data)
     return;
-  data->view = new_data;
 
-#if !defined(OS_NACL)
-  EnterInstanceAPINoLock<PPB_Flash_Fullscreen_API> enter(instance);
-  if (!enter.failed())
-    enter.functions()->SetLocalIsFullscreen(instance, flash_fullscreen);
-#endif  // !defined(OS_NACL)
+  data->view = new_data;
+  data->flash_fullscreen = flash_fullscreen;
 
   ScopedPPResource resource(
       ScopedPPResource::PassRef(),
-      (new PPB_View_Shared(OBJECT_IS_PROXY,
+      (new PPB_View_Shared(PPB_View_Shared::InitAsProxy(),
                            instance, new_data))->GetReference());
 
   combined_interface_->DidChangeView(instance, resource,
@@ -231,25 +254,19 @@ void PPP_Instance_Proxy::OnPluginMsgDidChangeFocus(PP_Instance instance,
 
 void PPP_Instance_Proxy::OnPluginMsgHandleDocumentLoad(
     PP_Instance instance,
-    int pending_loader_host_id,
-    const URLResponseInfoData& data) {
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
-  if (!dispatcher)
-    return;
-  Connection connection(PluginGlobals::Get()->GetBrowserSender(),
-                        dispatcher);
+    const HostResource& url_loader,
+    PP_Bool* result) {
+  PP_Resource plugin_loader =
+      PPB_URLLoader_Proxy::TrackPluginResource(url_loader);
+  *result = combined_interface_->HandleDocumentLoad(instance, plugin_loader);
 
-  scoped_refptr<URLLoaderResource> loader_resource(
-      new URLLoaderResource(connection, instance,
-                            pending_loader_host_id, data));
-
-  PP_Resource loader_pp_resource = loader_resource->GetReference();
-  if (!combined_interface_->HandleDocumentLoad(instance, loader_pp_resource))
-    loader_resource->Close();
-  // We don't pass a ref into the plugin, if it wants one, it will have taken
-  // an additional one.
-  PpapiGlobals::Get()->GetResourceTracker()->ReleaseResource(
-      loader_pp_resource);
+  // This balances the one reference that TrackPluginResource() initialized it
+  // with. The plugin will normally take an additional reference which will keep
+  // the resource alive in the plugin (and the one reference in the renderer
+  // representing all plugin references).
+  // Once all references at the plugin side are released, the renderer side will
+  // be notified and release the reference added in HandleDocumentLoad() above.
+  PpapiGlobals::Get()->GetResourceTracker()->ReleaseResource(plugin_loader);
 }
 
 }  // namespace proxy

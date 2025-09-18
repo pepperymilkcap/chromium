@@ -8,6 +8,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_WORK_ITEM_H_
 #define CHROME_INSTALLER_UTIL_WORK_ITEM_H_
+#pragma once
 
 #include <windows.h>
 
@@ -15,9 +16,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback_forward.h"
 
-class CallbackWorkItem;
 class CopyRegKeyWorkItem;
 class CopyTreeWorkItem;
 class CreateDirWorkItem;
@@ -25,14 +24,11 @@ class CreateRegKeyWorkItem;
 class DeleteTreeWorkItem;
 class DeleteRegKeyWorkItem;
 class DeleteRegValueWorkItem;
+class FilePath;
 class MoveTreeWorkItem;
 class SelfRegWorkItem;
 class SetRegValueWorkItem;
 class WorkItemList;
-
-namespace base {
-class FilePath;
-}
 
 // A base class that defines APIs to perform/rollback an action or a
 // sequence of actions during install/update/uninstall.
@@ -63,10 +59,6 @@ class WorkItem {
 
   virtual ~WorkItem();
 
-  // Create a CallbackWorkItem that invokes a callback.
-  static CallbackWorkItem* CreateCallbackWorkItem(
-      base::Callback<bool(const CallbackWorkItem&)> callback);
-
   // Create a CopyRegKeyWorkItem that recursively copies a given registry key.
   static CopyRegKeyWorkItem* CreateCopyRegKeyWorkItem(
       HKEY predefined_root,
@@ -81,14 +73,14 @@ class WorkItem {
   // * If overwrite_option is NEW_NAME_IF_IN_USE, file is copied with an
   //   alternate name specified by alternative_path.
   static CopyTreeWorkItem* CreateCopyTreeWorkItem(
-      const base::FilePath& source_path,
-      const base::FilePath& dest_path,
-      const base::FilePath& temp_dir,
+      const FilePath& source_path,
+      const FilePath& dest_path,
+      const FilePath& temp_dir,
       CopyOverWriteOption overwrite_option,
-      const base::FilePath& alternative_path);
+      const FilePath& alternative_path);
 
   // Create a CreateDirWorkItem that creates a directory at the given path.
-  static CreateDirWorkItem* CreateCreateDirWorkItem(const base::FilePath& path);
+  static CreateDirWorkItem* CreateCreateDirWorkItem(const FilePath& path);
 
   // Create a CreateRegKeyWorkItem that creates a registry key at the given
   // path.
@@ -110,16 +102,16 @@ class WorkItem {
   // hierarchy at the given root path. A key file can be optionally specified
   // by key_path.
   static DeleteTreeWorkItem* CreateDeleteTreeWorkItem(
-      const base::FilePath& root_path,
-      const base::FilePath& temp_path,
-      const std::vector<base::FilePath>& key_paths);
+      const FilePath& root_path,
+      const FilePath& temp_path,
+      const std::vector<FilePath>& key_paths);
 
   // Create a MoveTreeWorkItem that recursively moves a file system hierarchy
   // from source path to destination path.
   static MoveTreeWorkItem* CreateMoveTreeWorkItem(
-      const base::FilePath& source_path,
-      const base::FilePath& dest_path,
-      const base::FilePath& temp_dir,
+      const FilePath& source_path,
+      const FilePath& dest_path,
+      const FilePath& temp_dir,
       MoveTreeOption duplicate_option);
 
   // Create a SetRegValueWorkItem that sets a registry value with REG_SZ type
@@ -185,11 +177,6 @@ class WorkItem {
     ignore_failure_ = ignore_failure;
   }
 
-  // Returns true if this WorkItem should ignore failures.
-  bool ignore_failure() const {
-    return ignore_failure_;
-  }
-
   // Sets an optional log message that a work item may use to print additional
   // instance-specific information.
   void set_log_message(const std::string& log_message) {
@@ -197,7 +184,7 @@ class WorkItem {
   }
 
   // Retrieves the optional log message. The retrieved string may be empty.
-  const std::string& log_message() const { return log_message_; }
+  std::string log_message() { return log_message_; }
 
  protected:
   WorkItem();

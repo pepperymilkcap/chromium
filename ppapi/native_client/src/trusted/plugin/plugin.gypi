@@ -1,29 +1,29 @@
-# Copyright (c) 2012 The Native Client Authors. All rights reserved.
+# Copyright (c) 2011 The Native Client Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
   'variables': {
-    'chromium_code': 1,  # Use higher warning level.
     'common_sources': [
+      'array_ppapi.cc',
+      'browser_interface.cc',
+      'desc_based_handle.cc',
       'file_downloader.cc',
-      'file_utils.cc',
       'json_manifest.cc',
+      'method_map.cc',
       'module_ppapi.cc',
-      'nacl_http_response_headers.cc',
       'nacl_subprocess.cc',
+      'nexe_arch.cc',
       'plugin.cc',
       'pnacl_coordinator.cc',
-      'pnacl_options.cc',
       'pnacl_resources.cc',
-      'pnacl_translate_thread.cc',
-      'scriptable_plugin.cc',
-      'sel_ldr_launcher_chrome.cc',
+      'pnacl_srpc_lib.cc',
+      'scriptable_handle.cc',
       'service_runtime.cc',
       'srpc_client.cc',
-      'srpc_params.cc',
-      'temporary_file.cc',
+      'string_encoding.cc',
       'utility.cc',
+      'var_utils.cc',
     ],
     # Append the arch-specific ISA code to common_sources.
     'conditions': [
@@ -57,9 +57,6 @@
         'cflags': [
           '-Wno-long-long',
         ],
-        'cflags!': [
-          '-Wno-unused-parameter', # be a bit stricter to match NaCl flags.
-        ],
         'conditions': [
           ['asan!=1', {
             'ldflags': [
@@ -70,6 +67,8 @@
         ],
         'libraries': [
           '-ldl',
+          '-lX11',
+          '-lXt',
         ],
       }],
       ['OS=="mac"', {
@@ -82,9 +81,6 @@
         ],
         'cflags': [
           '-Wno-long-long',
-        ],
-        'cflags!': [
-          '-Wno-unused-parameter', # be a bit stricter to match NaCl flags.
         ],
         'link_settings': {
           'libraries': [

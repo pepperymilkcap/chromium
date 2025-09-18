@@ -1,13 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_AUTOCOMPLETE_TEXT_FIELD_H_
 #define CHROME_BROWSER_UI_COCOA_AUTOCOMPLETE_TEXT_FIELD_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/cocoa_protocols.h"
+#include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/styled_text_field.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 
@@ -48,12 +50,6 @@ class AutocompleteTextFieldObserver {
   // Called when the user does a copy or drag.
   virtual void CopyToPasteboard(NSPasteboard* pboard) = 0;
 
-  // Returns true if the Show URL option should be available.
-  virtual bool ShouldEnableShowURL() = 0;
-
-  // Shows the underlying URL.  See OmniboxView::ShowURL().
-  virtual void ShowURL() = 0;
-
   // Returns true if the current clipboard text supports paste and go
   // (or paste and search).
   virtual bool CanPasteAndGo() = 0;
@@ -82,6 +78,9 @@ class AutocompleteTextFieldObserver {
   virtual void OnDidChange() = 0;
   virtual void OnDidEndEditing() = 0;
 
+  // Called before input methods sets composition text in the field.
+  virtual void OnStartingIME() = 0;
+
   // NSResponder translates certain keyboard actions into selectors
   // passed to -doCommandBySelector:.  The selector is forwarded here,
   // return true if |cmd| is handled, false if the caller should
@@ -99,12 +98,6 @@ class AutocompleteTextFieldObserver {
   // Called whenever the autocomplete text field is losing focus.
   virtual void OnKillFocus() = 0;
 
-  // Called before the text field handles a mouse down event.
-  virtual void OnMouseDown(NSInteger button_number) = 0;
-
-  // Returns true if mouse down should select all.
-  virtual bool ShouldSelectAllOnMouseDown() = 0;
-
  protected:
   virtual ~AutocompleteTextFieldObserver() {}
 };
@@ -114,18 +107,15 @@ class AutocompleteTextFieldObserver {
  @private
   // Undo manager for this text field.  We use a specific instance rather than
   // the standard undo manager in order to let us clear the undo stack at will.
-  base::scoped_nsobject<NSUndoManager> undoManager_;
+  scoped_nsobject<NSUndoManager> undoManager_;
 
   AutocompleteTextFieldObserver* observer_;  // weak, owned by location bar.
 
   // Handles being a drag-and-drop target.
-  base::scoped_nsobject<URLDropTargetHandler> dropHandler_;
+  scoped_nsobject<URLDropTargetHandler> dropHandler_;
 
   // Holds current tooltip strings, to keep them from being dealloced.
-  base::scoped_nsobject<NSMutableArray> currentToolTips_;
-
-  base::scoped_nsobject<NSString> suggestText_;
-  base::scoped_nsobject<NSColor> suggestColor_;
+  scoped_nsobject<NSMutableArray> currentToolTips_;
 }
 
 @property(nonatomic) AutocompleteTextFieldObserver* observer;
@@ -144,7 +134,7 @@ class AutocompleteTextFieldObserver {
 // Updates cursor and tooltip rects depending on the contents of the text field
 // e.g. the security icon should have a default pointer shown on hover instead
 // of an I-beam.
-- (void)updateMouseTracking;
+- (void)updateCursorAndToolTipRects;
 
 // Return the appropriate menu for any decoration under |event|.
 - (NSMenu*)decorationMenuForEvent:(NSEvent*)event;
@@ -153,26 +143,6 @@ class AutocompleteTextFieldObserver {
 // via -[NSView addToolTipRect:owner:userData:].
 - (void)addToolTip:(NSString*)tooltip forRect:(NSRect)aRect;
 
-// Sets the suggest text that shows at the end of the field's normal text.
-// This can't be simply appended to the field's text storage because that
-// will end any pending IME session.
-- (void)setGrayTextAutocompletion:(NSString*)suggestText
-                        textColor:(NSColor*)suggestColor;
-
-- (NSString*)suggestText;
-- (NSColor*)suggestColor;
-
 @end
-
-namespace autocomplete_text_field {
-
-// Draw gray text suggestion in |controlView|.
-void DrawGrayTextAutocompletion(NSAttributedString* mainText,
-                                NSString* suggestText,
-                                NSColor* suggestColor,
-                                NSView* controlView,
-                                NSRect frame);
-
-}  // namespace autocomplete_text_field
 
 #endif  // CHROME_BROWSER_UI_COCOA_AUTOCOMPLETE_TEXT_FIELD_H_

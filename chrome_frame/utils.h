@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,38 +15,33 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/strings/string16.h"
+#include "base/threading/thread.h"
 #include "base/win/scoped_comptr.h"
+#include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
-#include "url/gurl.h"
 
-class RegistryListPreferencesHolder;
+class FilePath;
 interface IBrowserService;
 interface IWebBrowser2;
 struct ContextMenuModel;
 
-namespace base {
-class FilePath;
-}
-
 // utils.h : Various utility functions and classes
-extern const char kGCFProtocol[];
 
-extern const wchar_t kAllowUnsafeURLs[];
 extern const wchar_t kChromeContentPrefix[];
+extern const char kGCFProtocol[];
+extern const wchar_t kChromeProtocolPrefix[];
+extern const wchar_t kChromeFrameHeadlessMode[];
 extern const wchar_t kChromeFrameAccessibleMode[];
+extern const wchar_t kChromeFrameUnpinnedMode[];
+extern const wchar_t kAllowUnsafeURLs[];
+extern const wchar_t kEnableBuggyBhoIntercept[];
+extern const wchar_t kChromeMimeType[];
 extern const wchar_t kChromeFrameAttachTabPattern[];
 extern const wchar_t kChromeFrameConfigKey[];
-extern const wchar_t kChromeFrameHeadlessMode[];
-extern const wchar_t kChromeFrameUnpinnedMode[];
-extern const wchar_t kChromeMimeType[];
-extern const wchar_t kChromeProtocolPrefix[];
-extern const wchar_t kEnableBuggyBhoIntercept[];
-extern const wchar_t kEnableGCFRendererByDefault[];
-extern const wchar_t kExcludeUAFromDomainList[];
-extern const wchar_t kIexploreProfileName[];
 extern const wchar_t kRenderInGCFUrlList[];
 extern const wchar_t kRenderInHostUrlList[];
+extern const wchar_t kEnableGCFRendererByDefault[];
+extern const wchar_t kIexploreProfileName[];
 extern const wchar_t kRundllProfileName[];
 extern const wchar_t kUseBackgroundThreadForSubResources[];
 
@@ -169,7 +164,6 @@ typedef enum IEVersion {
   IE_8,
   IE_9,
   IE_10,
-  IE_11,
 };
 
 // The renderer to be used for a page.  Values for Chrome also convey the
@@ -211,7 +205,7 @@ IEVersion GetIEVersion();
 // hosted. Returns 0 if the current process is not IE or any other error occurs.
 uint32 GetIEMajorVersion();
 
-base::FilePath GetIETemporaryFilesFolder();
+FilePath GetIETemporaryFilesFolder();
 
 // Retrieves the file version from a module handle without extra round trips
 // to the disk (as happens with the regular GetFileVersionInfo API).
@@ -224,12 +218,18 @@ base::FilePath GetIETemporaryFilesFolder();
 // @returns true if the version info was successfully retrieved.
 bool GetModuleVersion(HMODULE module, uint32* high, uint32* low);
 
+// @returns the module handle to which an address belongs.
+HMODULE GetModuleFromAddress(void* address);
+
 // Return if the IEXPLORE is in private mode. The IEIsInPrivateBrowsing() checks
 // whether current process is IEXPLORE.
 bool IsIEInPrivate();
 
 // Calls [ieframe|shdocvw]!DoFileDownload to initiate a download.
 HRESULT DoFileDownloadInIE(const wchar_t* url);
+
+// Construct a menu from the model sent from Chrome.
+HMENU BuildContextMenu(const ContextMenuModel& menu_model);
 
 // Uses GURL internally to append 'relative' to 'document'
 std::string ResolveURL(const std::string& document,
@@ -244,17 +244,11 @@ bool GetConfigBool(bool default_value, const wchar_t* value_name);
 // Gets an integer configuration value from the registry.
 int GetConfigInt(int default_value, const wchar_t* value_name);
 
-// Gets a 64-bit integer configuration value from the registry.
-int64 GetConfigInt64(int64 default_value, const wchar_t* value_name);
-
 // Sets an integer configuration value in the registry.
 bool SetConfigInt(const wchar_t* value_name, int value);
 
 // Sets a boolean integer configuration value in the registry.
 bool SetConfigBool(const wchar_t* value_name, bool value);
-
-// Sets a 64-bit integer configuration value in the registry.
-bool SetConfigInt64(const wchar_t* value_name, int64 value);
 
 // Deletes the configuration value passed in.
 bool DeleteConfigValue(const wchar_t* value_name);
@@ -274,29 +268,12 @@ bool IsUnpinnedMode();
 // Returns true if all HTML pages should be rendered in GCF by default.
 bool IsGcfDefaultRenderer();
 
-// Returns true if the presence of
-// <meta http-equiv="X-UA-Compatible" content="chrome=1">
-// in HTML pages should be ignored
-bool SkipMetadataCheck();
-
 // Check if this url is opting into Chrome Frame based on static settings.
 // Returns one of:
 // - RENDERER_TYPE_UNDETERMINED if not opt-in or if explicit opt-out
 // - RENDERER_TYPE_CHROME_DEFAULT_RENDERER
 // - RENDERER_TYPE_CHROME_OPT_IN_URL
 RendererType RendererTypeForUrl(const std::wstring& url);
-
-// Check if we should try to remove the CF user agent based on registry
-// settings.
-bool ShouldRemoveUAForUrl(const base::string16& url);
-
-// Testing methods that return the backing stores behind RendererTypeForUrl and
-// ShouldRemoveUAForUrl. Intended to allow unit testing code that calls the
-// above methods.
-// TODO(robertshield): All of the FooForUrl code should be removed from here
-// and further refactored.
-RegistryListPreferencesHolder& GetRendererTypePreferencesHolderForTesting();
-RegistryListPreferencesHolder& GetUserAgentPreferencesHolderForTesting();
 
 // A shortcut for QueryService
 template <typename T>
@@ -406,6 +383,28 @@ STDMETHODIMP QueryInterfaceIfDelegateSupports(void* obj, REFIID iid,
 #define COM_INTERFACE_BLIND_DELEGATE() \
     COM_INTERFACE_ENTRY_FUNC_BLIND(0, CheckOutgoingInterface<_ComMapClass>)
 
+// Thread that enters STA and has a UI message loop.
+class STAThread : public base::Thread {
+ public:
+  explicit STAThread(const char *name) : Thread(name) {}
+  ~STAThread() {
+    Stop();
+  }
+  bool Start() {
+    return StartWithOptions(Options(MessageLoop::TYPE_UI, 0));
+  }
+ protected:
+  // Called just prior to starting the message loop
+  virtual void Init() {
+    ::CoInitialize(0);
+  }
+
+  // Called just after the message loop ends
+  virtual void CleanUp() {
+    ::CoUninitialize();
+  }
+};
+
 std::wstring GuidToString(const GUID& guid);
 
 // The urls retrieved from the IMoniker interface don't contain the anchor
@@ -425,6 +424,13 @@ HRESULT RewindStream(IStream* stream);
 
 // Fired when we want to notify IE about privacy changes.
 #define WM_FIRE_PRIVACY_CHANGE_NOTIFICATION (WM_APP + 1)
+
+// Sent (not posted) when a request needs to be downloaded in the host browser
+// instead of Chrome.  WPARAM is 0 and LPARAM is a pointer to an IMoniker
+// object.
+// NOTE: Since the message is sent synchronously, the handler should only
+// start asynchronous operations in order to not block the sender unnecessarily.
+#define WM_DOWNLOAD_IN_HOST (WM_APP + 2)
 
 // This structure contains the parameters sent over to initiate a download
 // request in the host browser.
@@ -550,6 +556,10 @@ class NavigationConstraints;
 bool CanNavigate(const GURL& url,
                  NavigationConstraints* navigation_constraints);
 
+// Utility function that prevents the current module from ever being unloaded.
+// Call if you make irreversible patches.
+void PinModule();
+
 // Helper function to spin a message loop and dispatch messages while waiting
 // for a handle to be signaled.
 void WaitWithMessageLoop(HANDLE* handles, int count, DWORD timeout);
@@ -598,10 +608,5 @@ bool IsChromeFrameDocument(IWebBrowser2* web_browser);
 // increase the connection count once per process.
 // Returns true on success.
 bool IncreaseWinInetConnections(DWORD connections);
-
-// Sets |profile_path| to the path for the Chrome Frame |profile_name|
-// profile.
-void GetChromeFrameProfilePath(const base::string16& profile_name,
-                               base::FilePath* profile_path);
 
 #endif  // CHROME_FRAME_UTILS_H_

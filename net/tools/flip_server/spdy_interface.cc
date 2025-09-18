@@ -4,30 +4,58 @@
 
 #include "net/tools/flip_server/spdy_interface.h"
 
-#include <algorithm>
 #include <string>
 
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/tools/dump_cache/url_utilities.h"
-#include "net/tools/flip_server/constants.h"
 #include "net/tools/flip_server/flip_config.h"
 #include "net/tools/flip_server/http_interface.h"
 #include "net/tools/flip_server/spdy_util.h"
 
+using spdy::kSpdyStreamMaximumWindowSize;
+using spdy::CONTROL_FLAG_NONE;
+using spdy::DATA_FLAG_COMPRESSED;
+using spdy::DATA_FLAG_FIN;
+using spdy::RST_STREAM;
+using spdy::SETTINGS_MAX_CONCURRENT_STREAMS;
+using spdy::SYN_REPLY;
+using spdy::SYN_STREAM;
+using spdy::BufferedSpdyFramer;
+using spdy::SettingsFlagsAndId;
+using spdy::SpdyControlFrame;
+using spdy::SpdySettingsControlFrame;
+using spdy::SpdyDataFlags;
+using spdy::SpdyDataFrame;
+using spdy::SpdyRstStreamControlFrame;
+using spdy::SpdyFrame;
+using spdy::SpdyFramer;
+using spdy::SpdyFramerVisitorInterface;
+using spdy::SpdyHeaderBlock;
+using spdy::SpdySetting;
+using spdy::SpdySettings;
+using spdy::SpdyStreamId;
+using spdy::SpdySynReplyControlFrame;
+using spdy::SpdySynStreamControlFrame;
+
 namespace net {
 
+// static
+bool SpdySM::disable_data_compression_ = true;
 // static
 std::string SpdySM::forward_ip_header_;
 
 class SpdyFrameDataFrame : public DataFrame {
  public:
-  explicit SpdyFrameDataFrame(SpdyFrame* spdy_frame) : frame(spdy_frame) {
+  SpdyFrameDataFrame(SpdyFrame* spdy_frame)
+    : frame(spdy_frame) {
     data = spdy_frame->data();
-    size = spdy_frame->size();
+    size = spdy_frame->length() + SpdyFrame::kHeaderSize;
   }
 
-  virtual ~SpdyFrameDataFrame() { delete frame; }
+  virtual ~SpdyFrameDataFrame() {
+    delete frame;
+  }
 
   const SpdyFrame* frame;
 };
@@ -36,9 +64,9 @@ SpdySM::SpdySM(SMConnection* connection,
                SMInterface* sm_http_interface,
                EpollServer* epoll_server,
                MemoryCache* memory_cache,
-               FlipAcceptor* acceptor,
-               SpdyMajorVersion spdy_version)
-    : buffered_spdy_framer_(new BufferedSpdyFramer(spdy_version, true)),
+               FlipAcceptor* acceptor)
+    : seq_num_(0),
+      buffered_spdy_framer_(new BufferedSpdyFramer),
       valid_spdy_session_(false),
       connection_(connection),
       client_output_list_(connection->output_list()),
@@ -51,7 +79,9 @@ SpdySM::SpdySM(SMConnection* connection,
   buffered_spdy_framer_->set_visitor(this);
 }
 
-SpdySM::~SpdySM() { delete buffered_spdy_framer_; }
+SpdySM::~SpdySM() {
+  delete buffered_spdy_framer_;
+}
 
 void SpdySM::InitSMConnection(SMConnectionPoolInterface* connection_pool,
                               SMInterface* sm_interface,
@@ -61,45 +91,44 @@ void SpdySM::InitSMConnection(SMConnectionPoolInterface* connection_pool,
                               std::string server_port,
                               std::string remote_ip,
                               bool use_ssl) {
-  VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Initializing server connection.";
-  connection_->InitSMConnection(connection_pool,
-                                sm_interface,
-                                epoll_server,
-                                fd,
-                                server_ip,
-                                server_port,
-                                remote_ip,
-                                use_ssl);
+  VLOG(2) << ACCEPTOR_CLIENT_IDENT
+          << "SpdySM: Initializing server connection.";
+  connection_->InitSMConnection(connection_pool, sm_interface,
+                                epoll_server, fd, server_ip, server_port,
+                                remote_ip, use_ssl);
 }
 
 SMInterface* SpdySM::NewConnectionInterface() {
   SMConnection* server_connection =
-      SMConnection::NewSMConnection(epoll_server_,
-                                    NULL,
-                                    memory_cache_,
-                                    acceptor_,
-                                    "http_conn: ");
+    SMConnection::NewSMConnection(epoll_server_,
+                                  NULL,
+                                  memory_cache_,
+                                  acceptor_,
+                                  "http_conn: ");
   if (server_connection == NULL) {
     LOG(ERROR) << "SpdySM: Could not create server connection";
     return NULL;
   }
   VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Creating new HTTP interface";
-  SMInterface* sm_http_interface =
-      new HttpSM(server_connection, this, memory_cache_, acceptor_);
+  SMInterface *sm_http_interface = new HttpSM(server_connection,
+                                              this,
+                                              epoll_server_,
+                                              memory_cache_,
+                                              acceptor_);
   return sm_http_interface;
 }
 
 SMInterface* SpdySM::FindOrMakeNewSMConnectionInterface(
-    const std::string& server_ip,
-    const std::string& server_port) {
-  SMInterface* sm_http_interface;
+    std::string server_ip, std::string server_port) {
+  SMInterface *sm_http_interface;
   int32 server_idx;
   if (unused_server_interface_list.empty()) {
     sm_http_interface = NewConnectionInterface();
     server_idx = server_interface_list.size();
     server_interface_list.push_back(sm_http_interface);
     VLOG(2) << ACCEPTOR_CLIENT_IDENT
-            << "SpdySM: Making new server connection on index: " << server_idx;
+            << "SpdySM: Making new server connection on index: "
+            << server_idx;
   } else {
     server_idx = unused_server_interface_list.back();
     unused_server_interface_list.pop_back();
@@ -109,108 +138,77 @@ SMInterface* SpdySM::FindOrMakeNewSMConnectionInterface(
   }
 
   sm_http_interface->InitSMInterface(this, server_idx);
-  sm_http_interface->InitSMConnection(NULL,
-                                      sm_http_interface,
-                                      epoll_server_,
-                                      -1,
-                                      server_ip,
-                                      server_port,
-                                      std::string(),
-                                      false);
+  sm_http_interface->InitSMConnection(NULL, sm_http_interface,
+                                      epoll_server_, -1,
+                                      server_ip, server_port, "", false);
 
   return sm_http_interface;
 }
 
-int SpdySM::SpdyHandleNewStream(SpdyStreamId stream_id,
-                                SpdyPriority priority,
-                                const SpdyHeaderBlock& headers,
-                                std::string& http_data,
-                                bool* is_https_scheme) {
+int SpdySM::SpdyHandleNewStream(const SpdyControlFrame* frame,
+                                std::string &http_data,
+                                bool *is_https_scheme) {
+  bool parsed_headers = false;
+  SpdyHeaderBlock headers;
+  const SpdySynStreamControlFrame* syn_stream =
+    reinterpret_cast<const SpdySynStreamControlFrame*>(frame);
+
   *is_https_scheme = false;
-  VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnSyn(" << stream_id << ")";
-  VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: # headers: " << headers.size();
-
-  SpdyHeaderBlock supplement;
-  SpdyHeaderBlock::const_iterator method = headers.end();
-  SpdyHeaderBlock::const_iterator host = headers.end();
-  SpdyHeaderBlock::const_iterator path = headers.end();
-  SpdyHeaderBlock::const_iterator scheme = headers.end();
-  SpdyHeaderBlock::const_iterator version = headers.end();
-  SpdyHeaderBlock::const_iterator url = headers.end();
-
-  if (spdy_version() == SPDY2) {
-    url = headers.find("url");
-    method = headers.find("method");
-    version = headers.find("version");
-    scheme = headers.find("scheme");
-    if (url == headers.end() || method == headers.end() ||
-        version == headers.end() || scheme == headers.end()) {
-      VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: A mandatory header is "
-              << "missing. Not creating stream";
-      return 0;
-    }
-    // url->second here only ever seems to contain just the path. When this
-    // path contains a query string with a http:// in one of its values,
-    // UrlUtilities::GetUrlPath will fail and always return a / breaking
-    // the request. GetUrlPath assumes the absolute URL is being passed in.
-    std::string path_string = UrlUtilities::GetUrlPath(url->second);
-    std::string host_string = UrlUtilities::GetUrlHost(url->second);
-    path = supplement.insert(std::make_pair(":path", path_string)).first;
-    host = supplement.insert(std::make_pair(":host", host_string)).first;
-  } else {
-    method = headers.find(":method");
-    host = headers.find(":host");
-    path = headers.find(":path");
-    scheme = headers.find(":scheme");
-    version = supplement.insert(std::make_pair(":version", "HTTP/1.1")).first;
-    if (method == headers.end() || host == headers.end() ||
-        path == headers.end() || scheme == headers.end()) {
-      VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: A mandatory header is "
-              << "missing. Not creating stream";
-      return 0;
-    }
+  parsed_headers = buffered_spdy_framer_->ParseHeaderBlock(frame, &headers);
+  VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnSyn("
+          << syn_stream->stream_id() << ")";
+  VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: headers parsed?: "
+          << (parsed_headers? "yes": "no");
+  if (parsed_headers) {
+    VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: # headers: "
+            << headers.size();
+  }
+  SpdyHeaderBlock::iterator url = headers.find("url");
+  SpdyHeaderBlock::iterator method = headers.find("method");
+  if (url == headers.end() || method == headers.end()) {
+    VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: didn't find method or url "
+            << "or method. Not creating stream";
+    return 0;
   }
 
+  SpdyHeaderBlock::iterator scheme = headers.find("scheme");
   if (scheme->second.compare("https") == 0) {
     *is_https_scheme = true;
   }
 
+  // url->second here only ever seems to contain just the path. When this
+  // path contains a query string with a http:// in one of its values,
+  // UrlUtilities::GetUrlPath will fail and always return a / breaking
+  // the request. GetUrlPath assumes the absolute URL is being passed in.
+  std::string uri;
+  if (url->second.compare(0,4,"http") == 0)
+    uri = UrlUtilities::GetUrlPath(url->second);
+  else
+    uri = std::string(url->second);
   if (acceptor_->flip_handler_type_ == FLIP_HANDLER_SPDY_SERVER) {
+    std::string host = UrlUtilities::GetUrlHost(url->second);
     VLOG(1) << ACCEPTOR_CLIENT_IDENT << "Request: " << method->second
-            << " " << path->second;
-    std::string filename = EncodeURL(path->second,
-                                     host->second,
-                                     method->second);
-    NewStream(stream_id, priority, filename);
+            << " " << uri;
+    std::string filename = EncodeURL(uri, host, method->second);
+    NewStream(syn_stream->stream_id(),
+              reinterpret_cast<const SpdySynStreamControlFrame*>
+                  (frame)->priority(),
+              filename);
   } else {
-    http_data +=
-        method->second + " " + path->second + " " + version->second + "\r\n";
+    SpdyHeaderBlock::iterator version = headers.find("version");
+    http_data += method->second + " " + uri + " " + version->second + "\r\n";
     VLOG(1) << ACCEPTOR_CLIENT_IDENT << "Request: " << method->second << " "
-            << path->second << " " << version->second;
-    http_data += "Host: " + (*is_https_scheme ?
-                             acceptor_->https_server_ip_ :
-                             acceptor_->http_server_ip_) + "\r\n";
-    for (SpdyHeaderBlock::const_iterator i = headers.begin();
+            << uri << " " << version->second;
+    for (SpdyHeaderBlock::iterator i = headers.begin();
          i != headers.end(); ++i) {
-      if ((i->first.size() > 0 && i->first[0] == ':') ||
-          i->first == "host" ||
-          i == method ||
-          i == host ||
-          i == path ||
-          i == scheme ||
-          i == version ||
-          i == url) {
-        // Ignore the entry.
-      } else {
-        http_data += i->first + ": " + i->second + "\r\n";
-        VLOG(2) << ACCEPTOR_CLIENT_IDENT << i->first.c_str() << ":"
-                << i->second.c_str();
-      }
+      http_data += i->first + ": " + i->second + "\r\n";
+      VLOG(2) << ACCEPTOR_CLIENT_IDENT << i->first.c_str() << ":"
+              << i->second.c_str();
     }
     if (forward_ip_header_.length()) {
       // X-Client-Cluster-IP header
       http_data += forward_ip_header_ + ": " +
-          connection_->client_ip() + "\r\n";
+                    connection_->client_ip() + "\r\n";
     }
     http_data += "\r\n";
   }
@@ -219,10 +217,84 @@ int SpdySM::SpdyHandleNewStream(SpdyStreamId stream_id,
   return 1;
 }
 
+void SpdySM::OnControl(const SpdyControlFrame* frame) {
+  SpdyHeaderBlock headers;
+  bool parsed_headers = false;
+  switch (frame->type()) {
+    case SYN_STREAM:
+      {
+      const SpdySynStreamControlFrame* syn_stream =
+          reinterpret_cast<const SpdySynStreamControlFrame*>(frame);
+
+        std::string http_data;
+        bool is_https_scheme;
+        int ret = SpdyHandleNewStream(frame, http_data, &is_https_scheme);
+        if (!ret) {
+          LOG(ERROR) << "SpdySM: Could not convert spdy into http.";
+          break;
+        }
+        // We've seen a valid looking SYN_STREAM, consider this to have
+        // been a real spdy session.
+        valid_spdy_session_ = true;
+
+        if (acceptor_->flip_handler_type_ == FLIP_HANDLER_PROXY) {
+          std::string server_ip;
+          std::string server_port;
+          if (is_https_scheme) {
+            server_ip = acceptor_->https_server_ip_;
+            server_port = acceptor_->https_server_port_;
+          } else {
+            server_ip = acceptor_->http_server_ip_;
+            server_port = acceptor_->http_server_port_;
+          }
+          SMInterface *sm_http_interface =
+            FindOrMakeNewSMConnectionInterface(server_ip, server_port);
+          stream_to_smif_[syn_stream->stream_id()] = sm_http_interface;
+          sm_http_interface->SetStreamID(syn_stream->stream_id());
+          sm_http_interface->ProcessWriteInput(http_data.c_str(),
+                                               http_data.size());
+        }
+      }
+      break;
+
+    case SYN_REPLY:
+      parsed_headers = buffered_spdy_framer_->ParseHeaderBlock(frame, &headers);
+      DCHECK(parsed_headers);
+      // TODO(willchan): if there is an error parsing headers, we
+      // should send a RST_STREAM.
+      VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnSynReply(" <<
+        reinterpret_cast<const SpdySynReplyControlFrame*>(frame)->stream_id()
+        << ")";
+      break;
+    case RST_STREAM:
+      {
+      const SpdyRstStreamControlFrame* rst_stream =
+          reinterpret_cast<const SpdyRstStreamControlFrame*>(frame);
+        VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnRst("
+                << rst_stream->stream_id() << ")";
+        client_output_ordering_.RemoveStreamId(rst_stream ->stream_id());
+      }
+      break;
+
+    default:
+      LOG(ERROR) << "SpdySM: Unknown control frame type";
+  }
+}
+
+bool SpdySM::OnControlFrameHeaderData(
+    const spdy::SpdyControlFrame* control_frame,
+    const char* header_data,
+    size_t len) {
+  DCHECK(false);
+  return false;
+}
+
+void SpdySM::OnDataFrameHeader(const spdy::SpdyDataFrame* frame) {
+  buffered_spdy_framer_->OnDataFrameHeader(frame);
+}
+
 void SpdySM::OnStreamFrameData(SpdyStreamId stream_id,
-                               const char* data,
-                               size_t len,
-                               bool fin) {
+                               const char* data, size_t len) {
   VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: StreamData(" << stream_id
           << ", [" << len << "])";
   StreamToSmif::iterator it = stream_to_smif_.find(stream_id);
@@ -238,68 +310,30 @@ void SpdySM::OnStreamFrameData(SpdyStreamId stream_id,
     interface->ProcessWriteInput(data, len);
 }
 
-void SpdySM::OnSynStream(SpdyStreamId stream_id,
-                         SpdyStreamId associated_stream_id,
-                         SpdyPriority priority,
-                         uint8 credential_slot,
-                         bool fin,
-                         bool unidirectional,
-                         const SpdyHeaderBlock& headers) {
-  std::string http_data;
-  bool is_https_scheme;
-  int ret = SpdyHandleNewStream(
-      stream_id, priority, headers, http_data, &is_https_scheme);
-  if (!ret) {
-    LOG(ERROR) << "SpdySM: Could not convert spdy into http.";
-    return;
-  }
-  // We've seen a valid looking SYN_STREAM, consider this to have
-  // been a real spdy session.
-  valid_spdy_session_ = true;
-
-  if (acceptor_->flip_handler_type_ == FLIP_HANDLER_PROXY) {
-    std::string server_ip;
-    std::string server_port;
-    if (is_https_scheme) {
-      server_ip = acceptor_->https_server_ip_;
-      server_port = acceptor_->https_server_port_;
-    } else {
-      server_ip = acceptor_->http_server_ip_;
-      server_port = acceptor_->http_server_port_;
-    }
-    SMInterface* sm_http_interface =
-        FindOrMakeNewSMConnectionInterface(server_ip, server_port);
-    stream_to_smif_[stream_id] = sm_http_interface;
-    sm_http_interface->SetStreamID(stream_id);
-    sm_http_interface->ProcessWriteInput(http_data.c_str(), http_data.size());
-  }
+bool SpdySM::OnCredentialFrameData(const char* frame_data,
+                                     size_t len) {
+  return false;
 }
 
-void SpdySM::OnSynReply(SpdyStreamId stream_id,
-                        bool fin,
-                        const SpdyHeaderBlock& headers) {
-  // TODO(willchan): if there is an error parsing headers, we
-  // should send a RST_STREAM.
-  VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnSynReply(" << stream_id << ")";
+void SpdySM::OnSyn(const spdy::SpdySynStreamControlFrame& frame,
+                   const linked_ptr<spdy::SpdyHeaderBlock>& headers) {
 }
 
-void SpdySM::OnHeaders(SpdyStreamId stream_id,
-                       bool fin,
-                       const SpdyHeaderBlock& headers) {
-  VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnHeaders(" << stream_id << ")";
+void SpdySM::OnSynReply(const spdy::SpdySynReplyControlFrame& frame,
+                        const linked_ptr<spdy::SpdyHeaderBlock>& headers) {
 }
 
-void SpdySM::OnRstStream(SpdyStreamId stream_id, SpdyRstStreamStatus status) {
-  VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnRstStream(" << stream_id
-          << ")";
-  client_output_ordering_.RemoveStreamId(stream_id);
+void SpdySM::OnHeaders(const spdy::SpdyHeadersControlFrame& frame,
+                       const linked_ptr<spdy::SpdyHeaderBlock>& headers) {
 }
 
 size_t SpdySM::ProcessReadInput(const char* data, size_t len) {
   return buffered_spdy_framer_->ProcessInput(data, len);
 }
 
-size_t SpdySM::ProcessWriteInput(const char* data, size_t len) { return 0; }
+size_t SpdySM::ProcessWriteInput(const char* data, size_t len) {
+  return 0;
+}
 
 bool SpdySM::MessageFullyRead() const {
   return buffered_spdy_framer_->MessageFullyRead();
@@ -323,7 +357,7 @@ void SpdySM::ResetForNewInterface(int32 server_idx) {
 void SpdySM::ResetForNewConnection() {
   // seq_num is not cleared, intentionally.
   delete buffered_spdy_framer_;
-  buffered_spdy_framer_ = new BufferedSpdyFramer(SPDY2, true);
+  buffered_spdy_framer_ = new BufferedSpdyFramer;
   buffered_spdy_framer_->set_visitor(this);
   valid_spdy_session_ = false;
   client_output_ordering_.Reset();
@@ -332,10 +366,11 @@ void SpdySM::ResetForNewConnection() {
 
 // Send a settings frame
 int SpdySM::PostAcceptHook() {
-  SettingsMap settings;
-  settings[SETTINGS_MAX_CONCURRENT_STREAMS] =
-      SettingsFlagsAndValue(SETTINGS_FLAG_NONE, 100);
-  SpdyFrame* settings_frame = buffered_spdy_framer_->CreateSettings(settings);
+  SpdySettings settings;
+  SettingsFlagsAndId settings_id(SETTINGS_MAX_CONCURRENT_STREAMS);
+  settings.push_back(SpdySetting(settings_id, 100));
+  SpdySettingsControlFrame* settings_frame =
+      SpdyFramer::CreateSettings(settings);
 
   VLOG(1) << ACCEPTOR_CLIENT_IDENT << "Sending Settings Frame";
   EnqueueDataFrame(new SpdyFrameDataFrame(settings_frame));
@@ -348,9 +383,6 @@ void SpdySM::NewStream(uint32 stream_id,
   MemCacheIter mci;
   mci.stream_id = stream_id;
   mci.priority = priority;
-  // TODO(yhirano): The program will crash when
-  // acceptor_->flip_handler_type_ != FLIP_HANDLER_SPDY_SERVER.
-  // It should be fixed or an assertion should be placed.
   if (acceptor_->flip_handler_type_ == FLIP_HANDLER_SPDY_SERVER) {
     if (!memory_cache_->AssignFileData(filename, &mci)) {
       // error creating new stream.
@@ -368,10 +400,16 @@ void SpdySM::AddToOutputOrder(const MemCacheIter& mci) {
   client_output_ordering_.AddToOutputOrder(mci);
 }
 
-void SpdySM::SendEOF(uint32 stream_id) { SendEOFImpl(stream_id); }
+void SpdySM::SendEOF(uint32 stream_id) {
+  SendEOFImpl(stream_id);
+}
 
 void SpdySM::SendErrorNotFound(uint32 stream_id) {
   SendErrorNotFoundImpl(stream_id);
+}
+
+void SpdySM::SendOKResponse(uint32 stream_id, std::string* output) {
+  SendOKResponseImpl(stream_id, output);
 }
 
 size_t SpdySM::SendSynStream(uint32 stream_id, const BalsaHeaders& headers) {
@@ -382,11 +420,8 @@ size_t SpdySM::SendSynReply(uint32 stream_id, const BalsaHeaders& headers) {
   return SendSynReplyImpl(stream_id, headers);
 }
 
-void SpdySM::SendDataFrame(uint32 stream_id,
-                           const char* data,
-                           int64 len,
-                           uint32 flags,
-                           bool compress) {
+void SpdySM::SendDataFrame(uint32 stream_id, const char* data, int64 len,
+                   uint32 flags, bool compress) {
   SpdyDataFlags spdy_flags = static_cast<SpdyDataFlags>(flags);
   SendDataFrameImpl(stream_id, data, len, spdy_flags, compress);
 }
@@ -406,13 +441,22 @@ void SpdySM::SendErrorNotFoundImpl(uint32 stream_id) {
   client_output_ordering_.RemoveStreamId(stream_id);
 }
 
+void SpdySM::SendOKResponseImpl(uint32 stream_id, std::string* output) {
+  BalsaHeaders my_headers;
+  my_headers.SetFirstlineFromStringPieces("HTTP/1.1", "200", "OK");
+  SendSynReplyImpl(stream_id, my_headers);
+  SendDataFrame(
+      stream_id, output->c_str(), output->size(), DATA_FLAG_FIN, false);
+  client_output_ordering_.RemoveStreamId(stream_id);
+}
+
 void SpdySM::KillStream(uint32 stream_id) {
   client_output_ordering_.RemoveStreamId(stream_id);
 }
 
 void SpdySM::CopyHeaders(SpdyHeaderBlock& dest, const BalsaHeaders& headers) {
   for (BalsaHeaders::const_header_lines_iterator hi =
-           headers.header_lines_begin();
+       headers.header_lines_begin();
        hi != headers.header_lines_end();
        ++hi) {
     // It is illegal to send SPDY headers with empty value or header
@@ -420,58 +464,40 @@ void SpdySM::CopyHeaders(SpdyHeaderBlock& dest, const BalsaHeaders& headers) {
     if (!hi->first.length() || !hi->second.length())
       continue;
 
-    // Key must be all lower case in SPDY headers.
-    std::string key = hi->first.as_string();
-    std::transform(key.begin(), key.end(), key.begin(), ::tolower);
-    SpdyHeaderBlock::iterator fhi = dest.find(key);
+    SpdyHeaderBlock::iterator fhi = dest.find(hi->first.as_string());
     if (fhi == dest.end()) {
-      dest[key] = hi->second.as_string();
+      dest[hi->first.as_string()] = hi->second.as_string();
     } else {
-      dest[key] = (std::string(fhi->second.data(), fhi->second.size()) + "\0" +
-                   std::string(hi->second.data(), hi->second.size()));
+      dest[hi->first.as_string()] = (
+          std::string(fhi->second.data(), fhi->second.size()) + "\0" +
+          std::string(hi->second.data(), hi->second.size()));
     }
   }
 
   // These headers have no value
   dest.erase("X-Associated-Content");  // TODO(mbelshe): case-sensitive
-  dest.erase("X-Original-Url");        // TODO(mbelshe): case-sensitive
+  dest.erase("X-Original-Url");  // TODO(mbelshe): case-sensitive
 }
 
 size_t SpdySM::SendSynStreamImpl(uint32 stream_id,
                                  const BalsaHeaders& headers) {
   SpdyHeaderBlock block;
-  CopyHeaders(block, headers);
-  if (spdy_version() == SPDY2) {
-    block["method"] = headers.request_method().as_string();
-    if (!headers.HasHeader("version"))
-      block["version"] = headers.request_version().as_string();
-    if (headers.HasHeader("X-Original-Url")) {
-      std::string original_url =
-          headers.GetHeader("X-Original-Url").as_string();
-      block["url"] = UrlUtilities::GetUrlPath(original_url);
-    } else {
-      block["url"] = headers.request_uri().as_string();
-    }
+  block["method"] = headers.request_method().as_string();
+  if (!headers.HasHeader("status"))
+    block["status"] = headers.response_code().as_string();
+  if (!headers.HasHeader("version"))
+    block["version"] =headers.response_version().as_string();
+  if (headers.HasHeader("X-Original-Url")) {
+    std::string original_url = headers.GetHeader("X-Original-Url").as_string();
+    block["path"] = UrlUtilities::GetUrlPath(original_url);
   } else {
-    block[":method"] = headers.request_method().as_string();
-    block[":version"] = headers.request_version().as_string();
-    if (headers.HasHeader("X-Original-Url")) {
-      std::string original_url =
-          headers.GetHeader("X-Original-Url").as_string();
-      block[":path"] = UrlUtilities::GetUrlPath(original_url);
-      block[":host"] = UrlUtilities::GetUrlPath(original_url);
-    } else {
-      block[":path"] = headers.request_uri().as_string();
-      if (block.find("host") != block.end()) {
-        block[":host"] = headers.GetHeader("Host").as_string();
-        block.erase("host");
-      }
-    }
+    block["path"] = headers.request_uri().as_string();
   }
+  CopyHeaders(block, headers);
 
-  SpdyFrame* fsrcf = buffered_spdy_framer_->CreateSynStream(
-      stream_id, 0, 0, 0, CONTROL_FLAG_NONE, &block);
-  size_t df_size = fsrcf->size();
+  SpdySynStreamControlFrame* fsrcf = buffered_spdy_framer_->CreateSynStream(
+      stream_id, 0, 0, CONTROL_FLAG_NONE, true, &block);
+  size_t df_size = fsrcf->length() + SpdyFrame::kHeaderSize;
   EnqueueDataFrame(new SpdyFrameDataFrame(fsrcf));
 
   VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending SynStreamheader "
@@ -482,19 +508,13 @@ size_t SpdySM::SendSynStreamImpl(uint32 stream_id,
 size_t SpdySM::SendSynReplyImpl(uint32 stream_id, const BalsaHeaders& headers) {
   SpdyHeaderBlock block;
   CopyHeaders(block, headers);
-  if (spdy_version() == SPDY2) {
-    block["status"] = headers.response_code().as_string() + " " +
-        headers.response_reason_phrase().as_string();
-    block["version"] = headers.response_version().as_string();
-  } else {
-    block[":status"] = headers.response_code().as_string() + " " +
-        headers.response_reason_phrase().as_string();
-    block[":version"] = headers.response_version().as_string();
-  }
+  block["status"] = headers.response_code().as_string() + " " +
+                    headers.response_reason_phrase().as_string();
+  block["version"] = headers.response_version().as_string();
 
-  SpdyFrame* fsrcf = buffered_spdy_framer_->CreateSynReply(
-      stream_id, CONTROL_FLAG_NONE, &block);
-  size_t df_size = fsrcf->size();
+  SpdySynReplyControlFrame* fsrcf = buffered_spdy_framer_->CreateSynReply(
+      stream_id, CONTROL_FLAG_NONE, true, &block);
+  size_t df_size = fsrcf->length() + SpdyFrame::kHeaderSize;
   EnqueueDataFrame(new SpdyFrameDataFrame(fsrcf));
 
   VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending SynReplyheader "
@@ -502,17 +522,18 @@ size_t SpdySM::SendSynReplyImpl(uint32 stream_id, const BalsaHeaders& headers) {
   return df_size;
 }
 
-void SpdySM::SendDataFrameImpl(uint32 stream_id,
-                               const char* data,
-                               int64 len,
-                               SpdyDataFlags flags,
-                               bool compress) {
+void SpdySM::SendDataFrameImpl(uint32 stream_id, const char* data, int64 len,
+                       SpdyDataFlags flags, bool compress) {
+  // Force compression off if disabled via command line.
+  if (disable_data_compression())
+    flags = static_cast<SpdyDataFlags>(flags & ~DATA_FLAG_COMPRESSED);
+
   // TODO(mbelshe):  We can't compress here - before going into the
   //                 priority queue.  Compression needs to be done
   //                 with late binding.
   if (len == 0) {
-    SpdyFrame* fdf =
-        buffered_spdy_framer_->CreateDataFrame(stream_id, data, len, flags);
+    SpdyDataFrame* fdf = buffered_spdy_framer_->CreateDataFrame(
+        stream_id, data, len, flags);
     EnqueueDataFrame(new SpdyFrameDataFrame(fdf));
     return;
   }
@@ -528,13 +549,13 @@ void SpdySM::SendDataFrameImpl(uint32 stream_id,
     if ((size < len) && (flags & DATA_FLAG_FIN))
       chunk_flags = static_cast<SpdyDataFlags>(chunk_flags & ~DATA_FLAG_FIN);
 
-    SpdyFrame* fdf = buffered_spdy_framer_->CreateDataFrame(
+    SpdyDataFrame* fdf = buffered_spdy_framer_->CreateDataFrame(
         stream_id, data, size, chunk_flags);
     EnqueueDataFrame(new SpdyFrameDataFrame(fdf));
 
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending data frame "
-            << stream_id << " [" << size << "] shrunk to "
-            << (fdf->size() - kSpdyOverhead) << ", flags=" << flags;
+            << stream_id << " [" << size << "] shrunk to " << fdf->length()
+            << ", flags=" << flags;
 
     data += size;
     len -= size;
@@ -561,45 +582,44 @@ void SpdySM::GetOutput() {
         // this is a server initiated stream.
         // Ideally, we'd do a 'syn-push' here, instead of a syn-reply.
         BalsaHeaders headers;
-        headers.CopyFrom(*(mci->file_data->headers()));
+        headers.CopyFrom(*(mci->file_data->headers));
         headers.ReplaceOrAppendHeader("status", "200");
         headers.ReplaceOrAppendHeader("version", "http/1.1");
-        headers.SetRequestFirstlineFromStringPieces(
-            "PUSH", mci->file_data->filename(), "");
+        headers.SetRequestFirstlineFromStringPieces("PUSH",
+                                                    mci->file_data->filename,
+                                                    "");
         mci->bytes_sent = SendSynStream(mci->stream_id, headers);
       } else {
         BalsaHeaders headers;
-        headers.CopyFrom(*(mci->file_data->headers()));
+        headers.CopyFrom(*(mci->file_data->headers));
         mci->bytes_sent = SendSynReply(mci->stream_id, headers);
       }
       return;
     }
-    if (mci->body_bytes_consumed >= mci->file_data->body().size()) {
+    if (mci->body_bytes_consumed >= mci->file_data->body.size()) {
       VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: GetOutput "
               << "remove_stream_id: [" << mci->stream_id << "]";
       SendEOF(mci->stream_id);
       return;
     }
     size_t num_to_write =
-        mci->file_data->body().size() - mci->body_bytes_consumed;
+      mci->file_data->body.size() - mci->body_bytes_consumed;
     if (num_to_write > mci->max_segment_size)
       num_to_write = mci->max_segment_size;
 
     bool should_compress = false;
-    if (!mci->file_data->headers()->HasHeader("content-encoding")) {
-      if (mci->file_data->headers()->HasHeader("content-type")) {
+    if (!mci->file_data->headers->HasHeader("content-encoding")) {
+      if (mci->file_data->headers->HasHeader("content-type")) {
         std::string content_type =
-            mci->file_data->headers()->GetHeader("content-type").as_string();
+            mci->file_data->headers->GetHeader("content-type").as_string();
         if (content_type.find("image") == content_type.npos)
           should_compress = true;
       }
     }
 
     SendDataFrame(mci->stream_id,
-                  mci->file_data->body().data() + mci->body_bytes_consumed,
-                  num_to_write,
-                  0,
-                  should_compress);
+                  mci->file_data->body.data() + mci->body_bytes_consumed,
+                  num_to_write, 0, should_compress);
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: GetOutput SendDataFrame["
             << mci->stream_id << "]: " << num_to_write;
     mci->body_bytes_consumed += num_to_write;

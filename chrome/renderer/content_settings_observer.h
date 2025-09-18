@@ -1,40 +1,31 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_CONTENT_SETTINGS_OBSERVER_H_
 #define CHROME_RENDERER_CONTENT_SETTINGS_OBSERVER_H_
+#pragma once
 
 #include <map>
-#include <set>
 
 #include "chrome/common/content_settings.h"
-#include "content/public/renderer/render_frame_observer.h"
-#include "content/public/renderer/render_frame_observer_tracker.h"
-#include "extensions/common/permissions/api_permission.h"
-#include "third_party/WebKit/public/web/WebPermissionClient.h"
+#include "content/public/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer_tracker.h"
 
 class GURL;
 
-namespace blink {
+namespace WebKit {
 class WebFrame;
 class WebSecurityOrigin;
 class WebURL;
 }
 
-namespace extensions {
-class Dispatcher;
-class Extension;
-}
-
-// Handles blocking content per content settings for each RenderFrame.
+// Handles blocking content per content settings for each RenderView.
 class ContentSettingsObserver
-    : public content::RenderFrameObserver,
-      public content::RenderFrameObserverTracker<ContentSettingsObserver>,
-      public blink::WebPermissionClient {
+    : public content::RenderViewObserver,
+      public content::RenderViewObserverTracker<ContentSettingsObserver> {
  public:
-  ContentSettingsObserver(content::RenderFrame* render_frame,
-                          extensions::Dispatcher* extension_dispatcher);
+  explicit ContentSettingsObserver(content::RenderView* render_view);
   virtual ~ContentSettingsObserver();
 
   // Sets the content setting rules which back |AllowImage()|, |AllowScript()|,
@@ -43,97 +34,61 @@ class ContentSettingsObserver
   void SetContentSettingRules(
       const RendererContentSettingRules* content_setting_rules);
 
-  bool IsPluginTemporarilyAllowed(const std::string& identifier);
+  bool plugins_temporarily_allowed() {
+    return plugins_temporarily_allowed_;
+  }
 
   // Sends an IPC notification that the specified content type was blocked.
-  void DidBlockContentType(ContentSettingsType settings_type);
+  // If the content type requires it, |resource_identifier| names the specific
+  // resource that was blocked (the plugin path in the case of plugins),
+  // otherwise it's the empty string.
+  void DidBlockContentType(ContentSettingsType settings_type,
+                           const std::string& resource_identifier);
 
-  // blink::WebPermissionClient implementation.
-  virtual bool allowDatabase(blink::WebFrame* frame,
-                             const blink::WebString& name,
-                             const blink::WebString& display_name,
-                             unsigned long estimated_size);
-  virtual bool allowFileSystem(blink::WebFrame* frame);
-  virtual bool allowImage(blink::WebFrame* frame,
-                          bool enabled_per_settings,
-                          const blink::WebURL& image_url);
-  virtual bool allowIndexedDB(blink::WebFrame* frame,
-                              const blink::WebString& name,
-                              const blink::WebSecurityOrigin& origin);
-  virtual bool allowPlugins(blink::WebFrame* frame,
-                            bool enabled_per_settings);
-  virtual bool allowScript(blink::WebFrame* frame,
-                           bool enabled_per_settings);
-  virtual bool allowScriptFromSource(blink::WebFrame* frame,
-                                     bool enabled_per_settings,
-                                     const blink::WebURL& script_url);
-  virtual bool allowStorage(blink::WebFrame* frame, bool local);
-  virtual bool allowReadFromClipboard(blink::WebFrame* frame,
-                                      bool default_value);
-  virtual bool allowWriteToClipboard(blink::WebFrame* frame,
-                                     bool default_value);
-  virtual bool allowWebComponents(blink::WebFrame* frame, bool);
-  virtual bool allowMutationEvents(blink::WebFrame* frame,
-                                   bool default_value);
-  virtual bool allowPushState(blink::WebFrame* frame);
-  virtual bool allowWebGLDebugRendererInfo(blink::WebFrame* frame);
-  virtual void didNotAllowPlugins(blink::WebFrame* frame);
-  virtual void didNotAllowScript(blink::WebFrame* frame);
-  virtual bool allowDisplayingInsecureContent(
-      blink::WebFrame* frame,
-      bool allowed_per_settings,
-      const blink::WebSecurityOrigin& context,
-      const blink::WebURL& url);
-  virtual bool allowRunningInsecureContent(
-      blink::WebFrame* frame,
-      bool allowed_per_settings,
-      const blink::WebSecurityOrigin& context,
-      const blink::WebURL& url);
+  // These correspond to WebKit::WebPermissionClient methods.
+  bool AllowDatabase(WebKit::WebFrame* frame,
+                     const WebKit::WebString& name,
+                     const WebKit::WebString& display_name,
+                     unsigned long estimated_size);
+  bool AllowFileSystem(WebKit::WebFrame* frame);
+  bool AllowImage(WebKit::WebFrame* frame,
+                  bool enabled_per_settings,
+                  const WebKit::WebURL& image_url);
+  bool AllowIndexedDB(WebKit::WebFrame* frame,
+                      const WebKit::WebString& name,
+                      const WebKit::WebSecurityOrigin& origin);
+  bool AllowPlugins(WebKit::WebFrame* frame, bool enabled_per_settings);
+  bool AllowScript(WebKit::WebFrame* frame, bool enabled_per_settings);
+  bool AllowScriptFromSource(WebKit::WebFrame* frame, bool enabled_per_settings,
+                             const WebKit::WebURL& script_url);
+  bool AllowStorage(WebKit::WebFrame* frame, bool local);
+  void DidNotAllowPlugins(WebKit::WebFrame* frame);
+  void DidNotAllowScript(WebKit::WebFrame* frame);
 
-  // This is used for cases when the NPAPI plugins malfunction if used.
-  bool AreNPAPIPluginsBlocked() const;
+  // Used for allowing scripts and images on views displaying interstitial
+  // pages.
+  void SetAsInterstitial();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ContentSettingsObserverTest, WhitelistedSchemes);
-  FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest,
-                           ContentSettingsInterstitialPages);
-  FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest, PluginsTemporarilyAllowed);
 
-  // RenderFrameObserver implementation.
-  virtual void WebFrameCreated(blink::WebFrame* frame) OVERRIDE;
+  // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidCommitProvisionalLoad(blink::WebFrame* frame,
+  virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
                                         bool is_new_navigation) OVERRIDE;
 
   // Message handlers.
-  void OnLoadBlockedPlugins(const std::string& identifier);
-  void OnSetAsInterstitial();
-  void OnNPAPINotSupported();
-  void OnSetAllowDisplayingInsecureContent(bool allow);
-  void OnSetAllowRunningInsecureContent(bool allow);
-  void OnReloadFrame();
+  void OnLoadBlockedPlugins();
 
   // Resets the |content_blocked_| array.
   void ClearBlockedContentSettings();
 
-  // If |origin| corresponds to an installed extension, returns that extension.
-  // Otherwise returns NULL.
-  const extensions::Extension* GetExtension(
-      const blink::WebSecurityOrigin& origin) const;
-
   // Helpers.
   // True if |frame| contains content that is white-listed for content settings.
-  static bool IsWhitelistedForContentSettings(blink::WebFrame* frame);
+  static bool IsWhitelistedForContentSettings(WebKit::WebFrame* frame);
   static bool IsWhitelistedForContentSettings(
-      const blink::WebSecurityOrigin& origin,
+      const WebKit::WebSecurityOrigin& origin,
       const GURL& document_url);
-
-  // Owned by ChromeContentRendererClient and outlive us.
-  extensions::Dispatcher* extension_dispatcher_;
-
-  // Insecure content may be permitted for the duration of this render view.
-  bool allow_displaying_insecure_content_;
-  bool allow_running_insecure_content_;
 
   // A pointer to content setting rules stored by the renderer. Normally, the
   // |RendererContentSettingRules| object is owned by
@@ -149,11 +104,10 @@ class ContentSettingsObserver
   std::map<StoragePermissionsKey, bool> cached_storage_permissions_;
 
   // Caches the result of |AllowScript|.
-  std::map<blink::WebFrame*, bool> cached_script_permissions_;
+  std::map<WebKit::WebFrame*, bool> cached_script_permissions_;
 
-  std::set<std::string> temporarily_allowed_plugins_;
+  bool plugins_temporarily_allowed_;
   bool is_interstitial_page_;
-  bool npapi_plugins_blocked_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingsObserver);
 };

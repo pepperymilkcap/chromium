@@ -7,7 +7,6 @@
 
 import glob
 import os
-import re
 import sys
 
 from idl_log import ErrOut, InfoOut, WarnOut
@@ -18,54 +17,19 @@ from idl_outfile import IDLOutFile
 from idl_parser import ParseFiles
 from idl_c_proto import CGen, GetNodeComments, CommentLines, Comment
 from idl_generator import Generator, GeneratorByFile
-from idl_visitor import IDLVisitor
 
 Option('dstroot', 'Base directory of output', default=os.path.join('..', 'c'))
 Option('guard', 'Include guard prefix', default=os.path.join('ppapi', 'c'))
+Option('out', 'List of output files', default='')
 
 
-#
-# PrototypeResolver
-#
-# A specialized visitor which traverses the AST, building a mapping of
-# Release names to Versions numbers and calculating a min version.
-# The mapping is applied to the File nodes within the AST.
-#
-class ProtoResolver(IDLVisitor):
-  def __init__(self):
-    IDLVisitor.__init__(self)
-    self.struct_map = {}
-    self.interface_map = {}
-
-  def Arrive(self, node, ignore):
-    if node.IsA('Member') and node.GetProperty('ref'):
-      typeref = node.typelist.GetReleases()[0]
-      if typeref.IsA('Struct'):
-        nodelist = self.struct_map.get(typeref.GetName(), [])
-        nodelist.append(node)
-        self.struct_map[typeref.GetName()] = nodelist
-
-    if node.IsA('Param'):
-      typeref = node.typelist.GetReleases()[0]
-      if typeref.IsA('Interface'):
-        nodelist = self.struct_map.get(typeref.GetName(), [])
-        nodelist.append(node)
-        self.interface_map[typeref.GetName()] = nodelist
-
-    return None
-
-
-def GetPathFromNode(filenode, relpath=None, ext=None):
+def GetOutFileName(filenode, relpath=None, prefix=None):
   path, name = os.path.split(filenode.GetProperty('NAME'))
-  if ext: name = os.path.splitext(name)[0] + ext
+  name = os.path.splitext(name)[0] + '.h'
+  if prefix: name = '%s%s' % (prefix, name)
   if path: name = os.path.join(path, name)
   if relpath: name = os.path.join(relpath, name)
-  name = os.path.normpath(name)
   return name
-
-
-def GetHeaderFromNode(filenode, relpath=None):
-  return GetPathFromNode(filenode, relpath, ext='.h')
 
 
 def WriteGroupMarker(out, node, last_group):
@@ -107,7 +71,7 @@ def GenerateHeader(out, filenode, releases):
       item = node.GetProperty('VALUE')
       # If 'C++' use __cplusplus wrapper
       if node.GetName() == 'cc':
-        item = '#ifdef __cplusplus\n%s\n#endif  /* __cplusplus */\n\n' % item
+        item = '#ifdef __cplusplus\n%s\n#endif  // __cplusplus\n\n' % item
       # If not C++ or C, then skip it
       elif not node.GetName() == 'c':
         continue
@@ -139,65 +103,14 @@ def GenerateHeader(out, filenode, releases):
     out.Write(CommentLines(['*',' @}', '']) + '\n')
 
 
-def CheckTypedefs(filenode, releases):
-  """Checks that typedefs don't specify callbacks that take some structs.
-
-  See http://crbug.com/233439 for details.
-  """
-  cgen = CGen()
-  for node in filenode.GetListOf('Typedef'):
-    build_list = node.GetUniqueReleases(releases)
-    callnode = node.GetOneOf('Callspec')
-    if callnode:
-      for param in callnode.GetListOf('Param'):
-        if param.GetListOf('Array'):
-          continue
-        if cgen.GetParamMode(param) != 'in':
-          continue
-        t = param.GetType(build_list[0])
-        while t.IsA('Typedef'):
-          t = t.GetType(build_list[0])
-        if t.IsA('Struct') and t.GetProperty('passByValue'):
-          raise Exception('%s is a struct in callback %s. '
-                          'See http://crbug.com/233439' %
-                          (t.GetName(), node.GetName()))
-
-
-def CheckPassByValue(filenode, releases):
-  """Checks that new pass-by-value structs are not introduced.
-
-  See http://crbug.com/233439 for details.
-  """
-  cgen = CGen()
-  # DO NOT add any more entries to this whitelist.
-  # http://crbug.com/233439
-  type_whitelist = ['PP_ArrayOutput', 'PP_CompletionCallback',
-                    'PP_Ext_EventListener', 'PP_FloatPoint',
-                    'PP_Point', 'PP_TouchPoint', 'PP_Var']
-  nodes_to_check = filenode.GetListOf('Struct')
-  nodes_to_check.extend(filenode.GetListOf('Union'))
-  for node in nodes_to_check:
-    if node.GetName() in type_whitelist:
-      continue
-    build_list = node.GetUniqueReleases(releases)
-    if node.GetProperty('passByValue'):
-      raise Exception('%s is a new passByValue struct or union. '
-                      'See http://crbug.com/233439' % node.GetName())
-    if node.GetProperty('returnByValue'):
-      raise Exception('%s is a new returnByValue struct or union. '
-                      'See http://crbug.com/233439' % node.GetName())
-
-
 class HGen(GeneratorByFile):
   def __init__(self):
     Generator.__init__(self, 'C Header', 'cgen', 'Generate the C headers.')
 
   def GenerateFile(self, filenode, releases, options):
-    CheckTypedefs(filenode, releases)
-    CheckPassByValue(filenode, releases)
-    savename = GetHeaderFromNode(filenode, GetOption('dstroot'))
-    my_min, my_max = filenode.GetMinMax(releases)
-    if my_min > releases[-1] or my_max < releases[0]:
+    savename = GetOutFileName(filenode, GetOption('dstroot'))
+    unique_releases = filenode.GetUniqueReleases(releases)
+    if not unique_releases:
       if os.path.isfile(savename):
         print "Removing stale %s for this range." % filenode.GetName()
         os.remove(os.path.realpath(savename))
@@ -211,13 +124,9 @@ class HGen(GeneratorByFile):
 
   def GenerateHead(self, out, filenode, releases, options):
     __pychecker__ = 'unusednames=options'
-
-    proto = ProtoResolver()
-    proto.Visit(filenode, None)
-
     cgen = CGen()
     gpath = GetOption('guard')
-    def_guard = GetHeaderFromNode(filenode, relpath=gpath)
+    def_guard = GetOutFileName(filenode, relpath=gpath)
     def_guard = def_guard.replace(os.sep,'_').replace('.','_').upper() + '_'
 
     cright_node = filenode.GetChildren()[0]
@@ -228,7 +137,8 @@ class HGen(GeneratorByFile):
     out.Write('%s\n' % cgen.Copyright(cright_node))
 
     # Wrap the From ... modified ... comment if it would be >80 characters.
-    from_text = 'From %s' % GetPathFromNode(filenode).replace(os.sep, '/')
+    from_text = 'From %s' % (
+        filenode.GetProperty('NAME').replace(os.sep,'/'))
     modified_text = 'modified %s.' % (
         filenode.GetProperty('DATETIME'))
     if len(from_text) + len(modified_text) < 74:
@@ -248,7 +158,7 @@ class HGen(GeneratorByFile):
       depfile = dep.GetProperty('FILE')
       if depfile:
         includes.add(depfile)
-    includes = [GetHeaderFromNode(
+    includes = [GetOutFileName(
         include, relpath=gpath).replace(os.sep, '/') for include in includes]
     includes.append('ppapi/c/pp_macros.h')
 
@@ -257,26 +167,10 @@ class HGen(GeneratorByFile):
       includes.append('ppapi/c/pp_stdint.h')
 
     includes = sorted(set(includes))
-    cur_include = GetHeaderFromNode(filenode,
-                                    relpath=gpath).replace(os.sep, '/')
+    cur_include = GetOutFileName(filenode, relpath=gpath).replace(os.sep, '/')
     for include in includes:
       if include == cur_include: continue
       out.Write('#include "%s"\n' % include)
-
-    # Generate Prototypes
-    if proto.struct_map:
-      out.Write('\n/* Struct prototypes */\n')
-      for struct in proto.struct_map:
-        out.Write('struct %s;\n' % struct)
-
-    # Create a macro for the highest available release number.
-    if filenode.GetProperty('NAME').endswith('pp_macros.idl'):
-      releasestr = ' '.join(releases)
-      if releasestr:
-        release_numbers = re.findall('[\d\_]+', releasestr)
-        release = re.findall('\d+', release_numbers[-1])[0]
-        if release:
-          out.Write('\n#define PPAPI_RELEASE %s\n' % release)
 
     # Generate all interface defines
     out.Write('\n')
@@ -288,33 +182,12 @@ class HGen(GeneratorByFile):
       # Skip this interface if there are no matching versions
       if not unique: continue
 
-      last_stable_ver = None
-      last_dev_rel = None
-      for rel in unique:
-        channel = node.GetProperty('FILE').release_map.GetChannel(rel)
-        if channel == 'dev':
-          last_dev_rel = rel
-
       for rel in unique:
         version = node.GetVersion(rel)
         name = cgen.GetInterfaceString(node, version)
         strver = str(version).replace('.', '_')
-        channel = node.GetProperty('FILE').release_map.GetChannel(rel)
-        if channel == 'dev':
-          # Skip dev channel interface versions that are
-          #   Not the newest version, and
-          #   Don't have an equivalent stable version.
-          if rel != last_dev_rel and not node.DevInterfaceMatchesStable(rel):
-            continue
-          value_string = '"%s" /* dev */' % name
-        else:
-          value_string = '"%s"' % name
-          last_stable_ver = strver
-        idefs += cgen.GetDefine('%s_%s' % (macro, strver), value_string)
-      if last_stable_ver:
-        idefs += cgen.GetDefine(macro, '%s_%s' % (macro, last_stable_ver))
-        idefs += '\n'
-
+        idefs += cgen.GetDefine('%s_%s' % (macro, strver), '"%s"' % name)
+      idefs += cgen.GetDefine(macro, '%s_%s' % (macro, strver)) + '\n'
       out.Write(idefs)
 
     # Generate the @file comment
@@ -327,14 +200,14 @@ class HGen(GeneratorByFile):
   def GenerateTail(self, out, filenode, releases, options):
     __pychecker__ = 'unusednames=options,releases'
     gpath = GetOption('guard')
-    def_guard = GetPathFromNode(filenode, relpath=gpath, ext='.h')
+    def_guard = GetOutFileName(filenode, relpath=gpath)
     def_guard = def_guard.replace(os.sep,'_').replace('.','_').upper() + '_'
     out.Write('#endif  /* %s */\n\n' % def_guard)
 
 
 hgen = HGen()
 
-def main(args):
+def Main(args):
   # Default invocation will verify the golden files are unchanged.
   failed = 0
   if not args:
@@ -358,14 +231,14 @@ def main(args):
   filenames = glob.glob(idldir)
 
   ast = ParseFiles(filenames)
-  if hgen.GenerateRange(ast, ['M13', 'M14', 'M15', 'M16', 'M17'], {}):
-    print "Golden file for M13-M17 failed."
+  if hgen.GenerateRange(ast, ['M13', 'M14', 'M15'], {}):
+    print "Golden file for M13-M15 failed."
     failed =1
   else:
-    print "Golden file for M13-M17 passed."
+    print "Golden file for M13-M15 passed."
 
   return failed
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv[1:]))
+  sys.exit(Main(sys.argv[1:]))
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,23 @@
 #include <string>
 
 #include "base/location.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/password_model_associator.h"
+#include "chrome/browser/sync/internal_api/change_record.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/write_node.h"
+#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "components/autofill/core/common/password_form.h"
+#include "chrome/browser/sync/protocol/password_specifics.pb.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "sync/internal_api/public/change_record.h"
-#include "sync/internal_api/public/read_node.h"
-#include "sync/internal_api/public/write_node.h"
-#include "sync/internal_api/public/write_transaction.h"
-#include "sync/protocol/password_specifics.pb.h"
+#include "webkit/forms/password_form.h"
 
 using content::BrowserThread;
 
@@ -31,12 +32,12 @@ namespace browser_sync {
 PasswordChangeProcessor::PasswordChangeProcessor(
     PasswordModelAssociator* model_associator,
     PasswordStore* password_store,
-    DataTypeErrorHandler* error_handler)
+    UnrecoverableErrorHandler* error_handler)
     : ChangeProcessor(error_handler),
       model_associator_(model_associator),
       password_store_(password_store),
-      expected_loop_(base::MessageLoop::current()),
-      disconnected_(false) {
+      observing_(false),
+      expected_loop_(MessageLoop::current()) {
   DCHECK(model_associator);
   DCHECK(error_handler);
 #if defined(OS_MACOSX)
@@ -44,29 +45,29 @@ PasswordChangeProcessor::PasswordChangeProcessor(
 #else
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
 #endif
+  StartObserving();
 }
 
 PasswordChangeProcessor::~PasswordChangeProcessor() {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(expected_loop_ == MessageLoop::current());
 }
 
 void PasswordChangeProcessor::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(expected_loop_ == MessageLoop::current());
   DCHECK(chrome::NOTIFICATION_LOGINS_CHANGED == type);
-
-  base::AutoLock lock(disconnect_lock_);
-  if (disconnected_)
+  if (!observing_)
     return;
 
-  syncer::WriteTransaction trans(FROM_HERE, share_handle());
+  DCHECK(running());
 
-  syncer::ReadNode password_root(&trans);
-  if (password_root.InitByTagLookup(kPasswordTag) !=
-          syncer::BaseNode::INIT_OK) {
-    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
+
+  sync_api::ReadNode password_root(&trans);
+  if (!password_root.InitByTagLookup(kPasswordTag)) {
+    error_handler()->OnUnrecoverableError(FROM_HERE,
         "Server did not create the top-level password node. "
         "We might be running against an out-of-date server.");
     return;
@@ -79,11 +80,9 @@ void PasswordChangeProcessor::Observe(
     std::string tag = PasswordModelAssociator::MakeTag(change->form());
     switch (change->type()) {
       case PasswordStoreChange::ADD: {
-        syncer::WriteNode sync_node(&trans);
-        syncer::WriteNode::InitUniqueByCreationResult result =
-            sync_node.InitUniqueByCreation(syncer::PASSWORDS, password_root,
-                                           tag);
-        if (result == syncer::WriteNode::INIT_SUCCESS) {
+        sync_api::WriteNode sync_node(&trans);
+        if (sync_node.InitUniqueByCreation(syncable::PASSWORDS,
+                                           password_root, tag)) {
           PasswordModelAssociator::WriteToSyncNode(change->form(), &sync_node);
           model_associator_->Associate(&tag, sync_node.GetId());
           break;
@@ -99,17 +98,14 @@ void PasswordChangeProcessor::Observe(
           //
           // TODO: Remove this.  See crbug.com/87855.
           int64 sync_id = model_associator_->GetSyncIdFromChromeId(tag);
-          if (syncer::kInvalidId == sync_id) {
-            error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          if (sync_api::kInvalidId == sync_id) {
+            error_handler()->OnUnrecoverableError(FROM_HERE,
                 "Unable to create or retrieve password node");
-            LOG(ERROR) << "Invalid sync id.";
             return;
           }
-          if (sync_node.InitByIdLookup(sync_id) !=
-                  syncer::BaseNode::INIT_OK) {
-            error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
-                "Password node lookup failed.");
-            LOG(ERROR) << "Password node lookup failed.";
+          if (!sync_node.InitByIdLookup(sync_id)) {
+            error_handler()->OnUnrecoverableError(FROM_HERE,
+                "Unable to create or retrieve password node");
             return;
           }
           PasswordModelAssociator::WriteToSyncNode(change->form(), &sync_node);
@@ -117,19 +113,16 @@ void PasswordChangeProcessor::Observe(
         }
       }
       case PasswordStoreChange::UPDATE: {
-        syncer::WriteNode sync_node(&trans);
+        sync_api::WriteNode sync_node(&trans);
         int64 sync_id = model_associator_->GetSyncIdFromChromeId(tag);
-        if (syncer::kInvalidId == sync_id) {
-          error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
-              "Invalid sync id");
-          LOG(ERROR) << "Invalid sync id.";
+        if (sync_api::kInvalidId == sync_id) {
+          error_handler()->OnUnrecoverableError(FROM_HERE,
+              "Unexpected notification for: ");
           return;
         } else {
-          if (sync_node.InitByIdLookup(sync_id) !=
-                  syncer::BaseNode::INIT_OK) {
-            error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          if (!sync_node.InitByIdLookup(sync_id)) {
+            error_handler()->OnUnrecoverableError(FROM_HERE,
                 "Password node lookup failed.");
-            LOG(ERROR) << "Password node lookup failed.";
             return;
           }
         }
@@ -138,23 +131,22 @@ void PasswordChangeProcessor::Observe(
         break;
       }
       case PasswordStoreChange::REMOVE: {
-        syncer::WriteNode sync_node(&trans);
+        sync_api::WriteNode sync_node(&trans);
         int64 sync_id = model_associator_->GetSyncIdFromChromeId(tag);
-        if (syncer::kInvalidId == sync_id) {
+        if (sync_api::kInvalidId == sync_id) {
           // We've been asked to remove a password that we don't know about.
           // That's weird, but apparently we were already in the requested
           // state, so it's not really an unrecoverable error. Just return.
           LOG(WARNING) << "Trying to delete nonexistent password sync node!";
           return;
         } else {
-          if (sync_node.InitByIdLookup(sync_id) !=
-                  syncer::BaseNode::INIT_OK) {
-            error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          if (!sync_node.InitByIdLookup(sync_id)) {
+            error_handler()->OnUnrecoverableError(FROM_HERE,
                 "Password node lookup failed.");
             return;
           }
           model_associator_->Disassociate(sync_node.GetId());
-          sync_node.Tombstone();
+          sync_node.Remove();
         }
         break;
       }
@@ -163,18 +155,15 @@ void PasswordChangeProcessor::Observe(
 }
 
 void PasswordChangeProcessor::ApplyChangesFromSyncModel(
-    const syncer::BaseTransaction* trans,
-    int64 model_version,
-    const syncer::ImmutableChangeRecordList& changes) {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
-  base::AutoLock lock(disconnect_lock_);
-  if (disconnected_)
+    const sync_api::BaseTransaction* trans,
+    const sync_api::ImmutableChangeRecordList& changes) {
+  DCHECK(expected_loop_ == MessageLoop::current());
+  if (!running())
     return;
 
-  syncer::ReadNode password_root(trans);
-  if (password_root.InitByTagLookup(kPasswordTag) !=
-          syncer::BaseNode::INIT_OK) {
-    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+  sync_api::ReadNode password_root(trans);
+  if (!password_root.InitByTagLookup(kPasswordTag)) {
+    error_handler()->OnUnrecoverableError(FROM_HERE,
         "Password root node lookup failed.");
     return;
   }
@@ -182,65 +171,60 @@ void PasswordChangeProcessor::ApplyChangesFromSyncModel(
   DCHECK(deleted_passwords_.empty() && new_passwords_.empty() &&
          updated_passwords_.empty());
 
-  for (syncer::ChangeRecordList::const_iterator it =
+  for (sync_api::ChangeRecordList::const_iterator it =
            changes.Get().begin(); it != changes.Get().end(); ++it) {
-    if (syncer::ChangeRecord::ACTION_DELETE ==
+    if (sync_api::ChangeRecord::ACTION_DELETE ==
         it->action) {
-      DCHECK(it->specifics.has_password())
+      DCHECK(it->specifics.HasExtension(sync_pb::password))
           << "Password specifics data not present on delete!";
       DCHECK(it->extra.get());
-      syncer::ExtraPasswordChangeRecordData* extra =
+      sync_api::ExtraPasswordChangeRecordData* extra =
           it->extra.get();
       const sync_pb::PasswordSpecificsData& password = extra->unencrypted();
-      autofill::PasswordForm form;
+      webkit::forms::PasswordForm form;
       PasswordModelAssociator::CopyPassword(password, &form);
       deleted_passwords_.push_back(form);
       model_associator_->Disassociate(it->id);
       continue;
     }
 
-    syncer::ReadNode sync_node(trans);
-    if (sync_node.InitByIdLookup(it->id) != syncer::BaseNode::INIT_OK) {
-      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+    sync_api::ReadNode sync_node(trans);
+    if (!sync_node.InitByIdLookup(it->id)) {
+      error_handler()->OnUnrecoverableError(FROM_HERE,
           "Password node lookup failed.");
       return;
     }
 
     // Check that the changed node is a child of the passwords folder.
     DCHECK_EQ(password_root.GetId(), sync_node.GetParentId());
-    DCHECK_EQ(syncer::PASSWORDS, sync_node.GetModelType());
+    DCHECK_EQ(syncable::PASSWORDS, sync_node.GetModelType());
 
     const sync_pb::PasswordSpecificsData& password_data =
         sync_node.GetPasswordSpecifics();
-    autofill::PasswordForm password;
+    webkit::forms::PasswordForm password;
     PasswordModelAssociator::CopyPassword(password_data, &password);
 
-    if (syncer::ChangeRecord::ACTION_ADD == it->action) {
+    if (sync_api::ChangeRecord::ACTION_ADD == it->action) {
       std::string tag(PasswordModelAssociator::MakeTag(password));
       model_associator_->Associate(&tag, sync_node.GetId());
       new_passwords_.push_back(password);
     } else {
-      DCHECK_EQ(syncer::ChangeRecord::ACTION_UPDATE, it->action);
+      DCHECK_EQ(sync_api::ChangeRecord::ACTION_UPDATE, it->action);
       updated_passwords_.push_back(password);
     }
   }
 }
 
 void PasswordChangeProcessor::CommitChangesFromSyncModel() {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
-  base::AutoLock lock(disconnect_lock_);
-  if (disconnected_)
+  DCHECK(expected_loop_ == MessageLoop::current());
+  if (!running())
     return;
-
   ScopedStopObserving<PasswordChangeProcessor> stop_observing(this);
 
-  syncer::SyncError error = model_associator_->WriteToPasswordStore(
-      &new_passwords_,
-      &updated_passwords_,
-      &deleted_passwords_);
-  if (error.IsSet()) {
-    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
-        "Error writing passwords");
+  if (!model_associator_->WriteToPasswordStore(&new_passwords_,
+                                               &updated_passwords_,
+                                               &deleted_passwords_)) {
+    error_handler()->OnUnrecoverableError(FROM_HERE, "Error writing passwords");
     return;
   }
 
@@ -249,38 +233,26 @@ void PasswordChangeProcessor::CommitChangesFromSyncModel() {
   updated_passwords_.clear();
 }
 
-void PasswordChangeProcessor::Disconnect() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  base::AutoLock lock(disconnect_lock_);
-  disconnected_ = true;
-  password_store_ = NULL;
-}
-
 void PasswordChangeProcessor::StartImpl(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  password_store_->ScheduleTask(
-      base::Bind(&PasswordChangeProcessor::InitObserving,
-                 base::Unretained(this)));
+  DCHECK(expected_loop_ == MessageLoop::current());
+  observing_ = true;
 }
 
-void PasswordChangeProcessor::InitObserving() {
-  base::AutoLock lock(disconnect_lock_);
-  if (disconnected_)
-    return;
-  StartObserving();
+void PasswordChangeProcessor::StopImpl() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  observing_ = false;
 }
+
 
 void PasswordChangeProcessor::StartObserving() {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
-  disconnect_lock_.AssertAcquired();
+  DCHECK(expected_loop_ == MessageLoop::current());
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_LOGINS_CHANGED,
                               content::Source<PasswordStore>(password_store_));
 }
 
 void PasswordChangeProcessor::StopObserving() {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
-  disconnect_lock_.AssertAcquired();
+  DCHECK(expected_loop_ == MessageLoop::current());
   notification_registrar_.Remove(
       this,
       chrome::NOTIFICATION_LOGINS_CHANGED,

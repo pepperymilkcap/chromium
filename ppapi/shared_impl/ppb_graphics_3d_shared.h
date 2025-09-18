@@ -15,7 +15,6 @@
 
 namespace gpu {
 class CommandBuffer;
-class GpuControl;
 class TransferBuffer;
 namespace gles2 {
 class GLES2CmdHelper;
@@ -33,13 +32,11 @@ class PPAPI_SHARED_EXPORT PPB_Graphics3D_Shared
   virtual thunk::PPB_Graphics3D_API* AsPPB_Graphics3D_API() OVERRIDE;
 
   // PPB_Graphics3D_API implementation.
-  virtual int32_t GetAttribs(int32_t attrib_list[]) OVERRIDE;
-  virtual int32_t SetAttribs(const int32_t attrib_list[]) OVERRIDE;
+  virtual int32_t GetAttribs(int32_t* attrib_list) OVERRIDE;
+  virtual int32_t SetAttribs(int32_t* attrib_list) OVERRIDE;
   virtual int32_t GetError() OVERRIDE;
   virtual int32_t ResizeBuffers(int32_t width, int32_t height) OVERRIDE;
-  virtual int32_t SwapBuffers(scoped_refptr<TrackedCallback> callback) OVERRIDE;
-  virtual int32_t GetAttribMaxValue(int32_t attribute, int32_t* value) OVERRIDE;
-
+  virtual int32_t SwapBuffers(PP_CompletionCallback callback) OVERRIDE;
   virtual void* MapTexSubImage2DCHROMIUM(GLenum target,
                                          GLint level,
                                          GLint xoffset,
@@ -64,13 +61,11 @@ class PPAPI_SHARED_EXPORT PPB_Graphics3D_Shared
   virtual ~PPB_Graphics3D_Shared();
 
   virtual gpu::CommandBuffer* GetCommandBuffer() = 0;
-  virtual gpu::GpuControl* GetGpuControl() = 0;
   virtual int32 DoSwapBuffers() = 0;
 
   bool HasPendingSwap() const;
   bool CreateGLES2Impl(int32 command_buffer_size,
-                       int32 transfer_buffer_size,
-                       gpu::gles2::GLES2Implementation* share_gles2);
+                       int32 transfer_buffer_size);
   void DestroyGLES2Impl();
 
  private:

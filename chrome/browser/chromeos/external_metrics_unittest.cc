@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #include <sys/file.h>
 
 #include "base/basictypes.h"
-#include "base/containers/hash_tables.h"
+#include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/external_metrics.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,11 +24,10 @@ class ExternalMetricsTest : public testing::Test {
 static void SendMessage(const char* path, const char* name, const char* value) {
   int fd = open(path, O_CREAT | O_APPEND | O_WRONLY, 0666);
   int32 l = strlen(name) + strlen(value) + 2 + sizeof(l);
-  size_t num_bytes = 0;
-  num_bytes += write(fd, &l, sizeof(l));
-  num_bytes += write(fd, name, strlen(name) + 1);
-  num_bytes += write(fd, value, strlen(value) + 1);
-  EXPECT_EQ(num_bytes, sizeof(l) + strlen(name) + strlen(value) + 2);
+  int num_bytes;
+  num_bytes = write(fd, &l, sizeof(l));
+  num_bytes = write(fd, name, strlen(name) + 1);
+  num_bytes = write(fd, value, strlen(value) + 1);
   close(fd);
 }
 
@@ -73,7 +72,7 @@ TEST(ExternalMetricsTest, ParseExternalMetricsFile) {
   scoped_refptr<chromeos::ExternalMetrics>
       external_metrics(new chromeos::ExternalMetrics());
   external_metrics->test_recorder_ = &ReceiveMessage;
-  external_metrics->test_path_ = base::FilePath(path);
+  external_metrics->test_path_ = FilePath(path);
   EXPECT_TRUE(unlink(path) == 0 || errno == ENOENT);
 
   // Sends a few valid messages.  Once in a while, collects them and checks the

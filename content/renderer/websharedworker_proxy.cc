@@ -3,25 +3,20 @@
 // found in the LICENSE file.
 
 #include "content/renderer/websharedworker_proxy.h"
-
-#include "content/child/child_thread.h"
-#include "content/child/webmessageportchannel_impl.h"
+#include "content/common/child_thread.h"
 #include "content/common/view_messages.h"
+#include "content/common/webmessageportchannel_impl.h"
 #include "content/common/worker_messages.h"
-#include "third_party/WebKit/public/platform/WebURL.h"
-#include "third_party/WebKit/public/web/WebSharedWorkerClient.h"
-
-namespace content {
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorkerClient.h"
 
 WebSharedWorkerProxy::WebSharedWorkerProxy(ChildThread* child_thread,
                                            unsigned long long document_id,
                                            bool exists,
                                            int route_id,
-                                           int render_view_route_id,
-                                           int render_frame_route_id)
+                                           int render_view_route_id)
     : route_id_(exists ? route_id : MSG_ROUTING_NONE),
       render_view_route_id_(render_view_route_id),
-      render_frame_route_id_(render_frame_route_id),
       child_thread_(child_thread),
       document_id_(document_id),
       pending_route_id_(route_id),
@@ -53,11 +48,11 @@ void WebSharedWorkerProxy::Disconnect() {
 void WebSharedWorkerProxy::CreateWorkerContext(
     const GURL& script_url,
     bool is_shared,
-    const base::string16& name,
-    const base::string16& user_agent,
-    const base::string16& source_code,
-    const base::string16& content_security_policy,
-    blink::WebContentSecurityPolicyType policy_type,
+    const string16& name,
+    const string16& user_agent,
+    const string16& source_code,
+    const string16& content_security_policy,
+    WebKit::WebContentSecurityPolicyType policy_type,
     int pending_route_id,
     int64 script_resource_appcache_id) {
   DCHECK(route_id_ == MSG_ROUTING_NONE);
@@ -66,7 +61,6 @@ void WebSharedWorkerProxy::CreateWorkerContext(
   params.name = name;
   params.document_id = document_id_;
   params.render_view_route_id = render_view_route_id_;
-  params.render_frame_route_id = render_frame_route_id_;
   params.route_id = pending_route_id;
   params.script_resource_appcache_id = script_resource_appcache_id;
   IPC::Message* create_message = new ViewHostMsg_CreateWorker(
@@ -124,12 +118,12 @@ bool WebSharedWorkerProxy::isStarted() {
 }
 
 void WebSharedWorkerProxy::startWorkerContext(
-    const blink::WebURL& script_url,
-    const blink::WebString& name,
-    const blink::WebString& user_agent,
-    const blink::WebString& source_code,
-    const blink::WebString& content_security_policy,
-    blink::WebContentSecurityPolicyType policy_type,
+    const WebKit::WebURL& script_url,
+    const WebKit::WebString& name,
+    const WebKit::WebString& user_agent,
+    const WebKit::WebString& source_code,
+    const WebKit::WebString& content_security_policy,
+    WebKit::WebContentSecurityPolicyType policy_type,
     long long script_resource_appcache_id) {
   DCHECK(!isStarted());
   CreateWorkerContext(
@@ -137,7 +131,17 @@ void WebSharedWorkerProxy::startWorkerContext(
       policy_type, pending_route_id_, script_resource_appcache_id);
 }
 
-void WebSharedWorkerProxy::connect(blink::WebMessagePortChannel* channel,
+void WebSharedWorkerProxy::terminateWorkerContext() {
+  // This API should only be invoked from worker context.
+  NOTREACHED();
+}
+
+void WebSharedWorkerProxy::clientDestroyed() {
+  // This API should only be invoked from worker context.
+  NOTREACHED();
+}
+
+void WebSharedWorkerProxy::connect(WebKit::WebMessagePortChannel* channel,
                                    ConnectListener* listener) {
   WebMessagePortChannelImpl* webchannel =
         static_cast<WebMessagePortChannelImpl*>(channel);
@@ -176,5 +180,3 @@ void WebSharedWorkerProxy::OnWorkerCreated() {
     connect_listener_->connected();
   }
 }
-
-}  // namespace content

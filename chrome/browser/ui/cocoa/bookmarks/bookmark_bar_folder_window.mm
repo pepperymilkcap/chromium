@@ -5,11 +5,12 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_window.h"
 
 #import "base/logging.h"
-#import "base/mac/scoped_nsobject.h"
+#import "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_controller.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSBezierPath+RoundRect.h"
-#import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSColor+Luminance.h"
+#import "chrome/browser/ui/cocoa/image_utils.h"
+#import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
+#import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
 
 using bookmarks::kBookmarkBarMenuCornerRadius;
 
@@ -60,13 +61,13 @@ using bookmarks::kBookmarkBarMenuCornerRadius;
   NSColor* endColor =
       [startColor gtm_colorAdjustedFor:GTMColorationLightPenumbra faded:YES];
 
-  base::scoped_nsobject<NSGradient> gradient(
-      [[NSGradient alloc] initWithColorsAndLocations:startColor, 0.0,
-                                                     midColor, 0.25,
-                                                     endColor, 0.5,
-                                                     midColor, 0.75,
-                                                     startColor, 1.0,
-                                                     nil]);
+  scoped_nsobject<NSGradient> gradient(
+    [[NSGradient alloc] initWithColorsAndLocations:startColor, 0.0,
+                        midColor, 0.25,
+                        endColor, 0.5,
+                        midColor, 0.75,
+                        startColor, 1.0,
+                        nil]);
   [gradient drawInBezierPath:bezier angle:0.0];
 }
 

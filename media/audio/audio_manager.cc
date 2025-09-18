@@ -1,48 +1,43 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/audio/audio_manager.h"
 
-#include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/lazy_instance.h"
+#include "base/at_exit.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "media/audio/fake_audio_log_factory.h"
+#include "base/message_loop.h"
 
-namespace media {
-namespace {
-AudioManager* g_last_created = NULL;
-}
+// Used only to make sure we never create more than one instance.
+static AudioManager* g_audio_manager = NULL;
 
 // Forward declaration of the platform specific AudioManager factory function.
-AudioManager* CreateAudioManager(AudioLogFactory* audio_log_factory);
+AudioManager* CreateAudioManager();
 
-AudioManager::AudioManager() {}
+AudioManager::AudioManager() {
+  CHECK(g_audio_manager == NULL);
+  g_audio_manager = this;
+}
 
 AudioManager::~AudioManager() {
-  CHECK(!g_last_created || g_last_created == this);
-  g_last_created = NULL;
+  CHECK(g_audio_manager == this);
+  g_audio_manager = NULL;
 }
+
+#ifndef NDEBUG
+void AudioManager::AddRef() const {
+  base::RefCountedThreadSafe<AudioManager>::AddRef();
+}
+
+void AudioManager::Release() const {
+  base::RefCountedThreadSafe<AudioManager>::Release();
+}
+#endif
 
 // static
-AudioManager* AudioManager::Create(AudioLogFactory* audio_log_factory) {
-  CHECK(!g_last_created);
-  g_last_created = CreateAudioManager(audio_log_factory);
-  return g_last_created;
+scoped_refptr<AudioManager> AudioManager::Create() {
+  AudioManager* ret = CreateAudioManager();
+  DCHECK(ret == g_audio_manager);
+  ret->Init();
+  return ret;
 }
-
-// static
-AudioManager* AudioManager::CreateForTesting() {
-  static base::LazyInstance<FakeAudioLogFactory>::Leaky fake_log_factory =
-      LAZY_INSTANCE_INITIALIZER;
-  return Create(fake_log_factory.Pointer());
-}
-
-// static
-AudioManager* AudioManager::Get() {
-  return g_last_created;
-}
-
-}  // namespace media

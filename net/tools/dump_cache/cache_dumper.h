@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_TOOLS_DUMP_CACHE_CACHE_DUMPER_H_
 #define NET_TOOLS_DUMP_CACHE_CACHE_DUMPER_H_
+#pragma once
 
 #include <string>
-
-#include "base/files/file_path.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "net/disk_cache/backend_impl.h"
 
 #ifdef WIN32
@@ -45,15 +46,15 @@ class CacheDumpWriter {
 // Writes data to a cache.
 class CacheDumper : public CacheDumpWriter {
  public:
-  explicit CacheDumper(disk_cache::Backend* cache);
+  explicit CacheDumper(disk_cache::Backend* cache) : cache_(cache) {}
 
   virtual int CreateEntry(const std::string& key, disk_cache::Entry** entry,
-                          const net::CompletionCallback& callback) OVERRIDE;
+                          const net::CompletionCallback& callback);
   virtual int WriteEntry(disk_cache::Entry* entry, int stream, int offset,
                          net::IOBuffer* buf, int buf_len,
-                         const net::CompletionCallback& callback) OVERRIDE;
+                         const net::CompletionCallback& callback);
   virtual void CloseEntry(disk_cache::Entry* entry, base::Time last_used,
-                          base::Time last_modified) OVERRIDE;
+                          base::Time last_modified);
 
  private:
   disk_cache::Backend* cache_;
@@ -62,22 +63,23 @@ class CacheDumper : public CacheDumpWriter {
 // Writes data to a disk.
 class DiskDumper : public CacheDumpWriter {
  public:
-  explicit DiskDumper(const base::FilePath& path);
-
+  explicit DiskDumper(const std::wstring& path) : path_(path), entry_(NULL) {
+    file_util::CreateDirectory(FilePath(path));
+  }
   virtual int CreateEntry(const std::string& key, disk_cache::Entry** entry,
-                          const net::CompletionCallback& callback) OVERRIDE;
+                          const net::CompletionCallback& callback);
   virtual int WriteEntry(disk_cache::Entry* entry, int stream, int offset,
                          net::IOBuffer* buf, int buf_len,
-                         const net::CompletionCallback& callback) OVERRIDE;
+                         const net::CompletionCallback& callback);
   virtual void CloseEntry(disk_cache::Entry* entry, base::Time last_used,
-                          base::Time last_modified) OVERRIDE;
+                          base::Time last_modified);
 
  private:
-  base::FilePath path_;
+  std::wstring path_;
   // This is a bit of a hack.  As we get a CreateEntry, we coin the current
   // entry_path_ where we write that entry to disk.  Subsequent calls to
   // WriteEntry() utilize this path for writing to disk.
-  base::FilePath entry_path_;
+  FilePath entry_path_;
   std::string entry_url_;
 #ifdef WIN32_LARGE_FILENAME_SUPPORT
   HANDLE entry_;

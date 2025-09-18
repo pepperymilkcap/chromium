@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_util.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/message_loop.h"
+#include "base/string_util.h"
 #include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
@@ -29,18 +29,19 @@
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/gtk/notifications/balloon_view_host_gtk.h"
 #include "chrome/browser/ui/gtk/rounded_window.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "extensions/browser/process_manager.h"
-#include "extensions/common/extension.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
@@ -54,6 +55,10 @@ const int kBottomMargin = 1;
 const int kLeftMargin = 1;
 const int kRightMargin = 1;
 
+// How many pixels of overlap there is between the shelf top and the
+// balloon bottom.
+const int kShelfBorderTopOverlap = 0;
+
 // Properties of the origin label.
 const int kLeftLabelMargin = 8;
 
@@ -64,14 +69,15 @@ const int kTopShadowWidth = 0;
 const int kBottomShadowWidth = 0;
 
 // Space in pixels between text and icon on the buttons.
-const int kButtonSpacing = 3;
+const int kButtonSpacing = 4;
 
 // Number of characters to show in the origin label before ellipsis.
 const int kOriginLabelCharacters = 18;
 
 // The shelf height for the system default font size.  It is scaled
 // with changes in the default font size.
-const int kDefaultShelfHeight = 25;
+const int kDefaultShelfHeight = 21;
+const int kShelfVerticalMargin = 4;
 
 // The amount that the bubble collections class offsets from the side of the
 // screen.
@@ -94,14 +100,14 @@ const char* kLabelMarkup = "<span size=\"small\" color=\"%s\">%s</span>";
 
 BalloonViewImpl::BalloonViewImpl(BalloonCollection* collection)
     : balloon_(NULL),
-      theme_service_(NULL),
       frame_container_(NULL),
-      shelf_(NULL),
-      hbox_(NULL),
       html_container_(NULL),
+      weak_factory_(this),
+      close_button_(NULL),
+      animation_(NULL),
       menu_showing_(false),
-      pending_close_(false),
-      weak_factory_(this) {}
+      pending_close_(false) {
+}
 
 BalloonViewImpl::~BalloonViewImpl() {
   if (frame_container_) {
@@ -116,7 +122,7 @@ void BalloonViewImpl::Close(bool by_user) {
   if (!by_user && menu_showing_) {
     pending_close_ = true;
   } else {
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&BalloonViewImpl::DelayedClose,
                    weak_factory_.GetWeakPtr(),
@@ -173,11 +179,11 @@ void BalloonViewImpl::RepositionToBalloon() {
 
   anim_frame_start_ = gfx::Rect(start_x, start_y, start_w, start_h);
   anim_frame_end_ = gfx::Rect(end_x, end_y, end_w, end_h);
-  animation_.reset(new gfx::SlideAnimation(this));
+  animation_.reset(new ui::SlideAnimation(this));
   animation_->Show();
 }
 
-void BalloonViewImpl::AnimationProgressed(const gfx::Animation* animation) {
+void BalloonViewImpl::AnimationProgressed(const ui::Animation* animation) {
   DCHECK_EQ(animation, animation_.get());
 
   // Linear interpolation from start to end position.
@@ -216,11 +222,6 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   balloon_ = balloon;
   frame_container_ = gtk_window_new(GTK_WINDOW_POPUP);
 
-  g_signal_connect(frame_container_, "expose-event",
-                   G_CALLBACK(OnExposeThunk), this);
-  g_signal_connect(frame_container_, "destroy",
-                   G_CALLBACK(OnDestroyThunk), this);
-
   // Construct the options menu.
   options_menu_model_.reset(new NotificationOptionsMenuModel(balloon_));
   options_menu_.reset(new MenuGtk(this, options_menu_model_.get()));
@@ -236,10 +237,27 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   GtkWidget* vbox = gtk_vbox_new(0, 0);
   gtk_container_add(GTK_CONTAINER(frame_container_), vbox);
 
-  // Create the toolbar.
-  shelf_ = gtk_hbox_new(FALSE, 0);
-  gtk_widget_set_size_request(GTK_WIDGET(shelf_), -1, GetShelfHeight());
+  shelf_ = gtk_hbox_new(0, 0);
   gtk_container_add(GTK_CONTAINER(vbox), shelf_);
+
+  GtkWidget* alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
+  gtk_alignment_set_padding(
+      GTK_ALIGNMENT(alignment),
+      kTopMargin, kBottomMargin, kLeftMargin, kRightMargin);
+  gtk_widget_show_all(alignment);
+  gtk_container_add(GTK_CONTAINER(alignment), contents);
+  gtk_container_add(GTK_CONTAINER(vbox), alignment);
+
+  // Create a toolbar and add it to the shelf.
+  hbox_ = gtk_hbox_new(FALSE, 0);
+  gtk_widget_set_size_request(GTK_WIDGET(hbox_), -1, GetShelfHeight());
+  gtk_container_add(GTK_CONTAINER(shelf_), hbox_);
+  gtk_widget_show_all(vbox);
+
+  g_signal_connect(frame_container_, "expose-event",
+                   G_CALLBACK(OnExposeThunk), this);
+  g_signal_connect(frame_container_, "destroy",
+                   G_CALLBACK(OnDestroyThunk), this);
 
   // Create a label for the source of the notification and add it to the
   // toolbar.
@@ -252,28 +270,33 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   gtk_label_set_max_width_chars(GTK_LABEL(source_label_),
                                 kOriginLabelCharacters);
   gtk_label_set_ellipsize(GTK_LABEL(source_label_), PANGO_ELLIPSIZE_END);
-  GtkWidget* label_alignment = gtk_alignment_new(0, 0.5, 0, 0);
+  GtkWidget* label_alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_alignment_set_padding(GTK_ALIGNMENT(label_alignment),
-                            0, 0, kLeftLabelMargin, 0);
+                            kShelfVerticalMargin, kShelfVerticalMargin,
+                            kLeftLabelMargin, 0);
   gtk_container_add(GTK_CONTAINER(label_alignment), source_label_);
-  gtk_box_pack_start(GTK_BOX(shelf_), label_alignment, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(hbox_), label_alignment, FALSE, FALSE, 0);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   // Create a button to dismiss the balloon and add it to the toolbar.
-  close_button_.reset(CustomDrawButton::CloseButtonBar(theme_service_));
-  close_button_->SetBackground(
-      SK_ColorBLACK,
-      rb.GetImageNamed(IDR_CLOSE_1).AsBitmap(),
-      rb.GetImageNamed(IDR_CLOSE_1_MASK).AsBitmap());
+  close_button_.reset(new CustomDrawButton(IDR_TAB_CLOSE,
+                                           IDR_TAB_CLOSE_P,
+                                           IDR_TAB_CLOSE_H,
+                                           IDR_TAB_CLOSE));
+  close_button_->SetBackground(SK_ColorBLACK,
+                               rb.GetBitmapNamed(IDR_TAB_CLOSE),
+                               rb.GetBitmapNamed(IDR_TAB_CLOSE_MASK));
   gtk_widget_set_tooltip_text(close_button_->widget(), dismiss_text.c_str());
   g_signal_connect(close_button_->widget(), "clicked",
                    G_CALLBACK(OnCloseButtonThunk), this);
   gtk_widget_set_can_focus(close_button_->widget(), FALSE);
-  GtkWidget* close_alignment = gtk_alignment_new(0.0, 0.5, 0, 0);
+  GtkWidget* close_alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
+  gtk_alignment_set_padding(GTK_ALIGNMENT(close_alignment),
+                            kShelfVerticalMargin, kShelfVerticalMargin,
+                            0, kButtonSpacing);
   gtk_container_add(GTK_CONTAINER(close_alignment), close_button_->widget());
-  gtk_box_pack_end(GTK_BOX(shelf_), close_alignment, FALSE, FALSE,
-                   kButtonSpacing);
+  gtk_box_pack_end(GTK_BOX(hbox_), close_alignment, FALSE, FALSE, 0);
 
   // Create a button for showing the options menu, and add it to the toolbar.
   options_menu_button_.reset(new CustomDrawButton(IDR_BALLOON_WRENCH,
@@ -285,20 +308,13 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   g_signal_connect(options_menu_button_->widget(), "button-press-event",
                    G_CALLBACK(OnOptionsMenuButtonThunk), this);
   gtk_widget_set_can_focus(options_menu_button_->widget(), FALSE);
-  GtkWidget* options_alignment = gtk_alignment_new(0.0, 0.5, 0, 0);
+  GtkWidget* options_alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
+  gtk_alignment_set_padding(GTK_ALIGNMENT(options_alignment),
+                            kShelfVerticalMargin, kShelfVerticalMargin,
+                            0, kButtonSpacing);
   gtk_container_add(GTK_CONTAINER(options_alignment),
                     options_menu_button_->widget());
-  gtk_box_pack_end(GTK_BOX(shelf_), options_alignment, FALSE, FALSE, 0);
-
-  // Add main contents to bubble.
-  GtkWidget* alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
-  gtk_alignment_set_padding(
-      GTK_ALIGNMENT(alignment),
-      kTopMargin, kBottomMargin, kLeftMargin, kRightMargin);
-  gtk_widget_show_all(alignment);
-  gtk_container_add(GTK_CONTAINER(alignment), contents);
-  gtk_container_add(GTK_CONTAINER(vbox), alignment);
-  gtk_widget_show_all(vbox);
+  gtk_box_pack_end(GTK_BOX(hbox_), options_alignment, FALSE, FALSE, 0);
 
   notification_registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                               content::Source<ThemeService>(theme_service_));
@@ -399,7 +415,7 @@ void BalloonViewImpl::OnCloseButton(GtkWidget* widget) {
 gboolean BalloonViewImpl::OnContentsExpose(GtkWidget* sender,
                                            GdkEventExpose* event) {
   TRACE_EVENT0("ui::gtk", "BalloonViewImpl::OnContentsExpose");
-  cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(sender));
+  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
   gdk_cairo_rectangle(cr, &event->area);
   cairo_clip(cr);
 
@@ -423,7 +439,7 @@ gboolean BalloonViewImpl::OnContentsExpose(GtkWidget* sender,
 
 gboolean BalloonViewImpl::OnExpose(GtkWidget* sender, GdkEventExpose* event) {
   TRACE_EVENT0("ui::gtk", "BalloonViewImpl::OnExpose");
-  cairo_t* cr = gdk_cairo_create(gtk_widget_get_window(sender));
+  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
   gdk_cairo_rectangle(cr, &event->area);
   cairo_clip(cr);
 
@@ -460,10 +476,11 @@ void BalloonViewImpl::OnOptionsMenuButton(GtkWidget* widget,
 void BalloonViewImpl::StoppedShowing() {
   menu_showing_ = false;
   if (pending_close_) {
-    base::MessageLoop::current()->PostTask(
+    MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(
-            &BalloonViewImpl::DelayedClose, weak_factory_.GetWeakPtr(), false));
+        base::Bind(&BalloonViewImpl::DelayedClose,
+                   weak_factory_.GetWeakPtr(),
+                   false));
   }
 }
 

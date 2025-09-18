@@ -4,15 +4,14 @@
 
 #ifndef CHROME_TOOLS_CONVERT_DICT_DIC_READER_H__
 #define CHROME_TOOLS_CONVERT_DICT_DIC_READER_H__
+#pragma once
 
 #include <stdio.h>
 
 #include <string>
 #include <vector>
 
-namespace base {
 class FilePath;
-}
 
 namespace convert_dict {
 
@@ -27,7 +26,7 @@ class DicReader {
   typedef std::pair<std::string, std::vector<int> > WordEntry;
   typedef std::vector<WordEntry> WordList;
 
-  explicit DicReader(const base::FilePath& path);
+  explicit DicReader(const FilePath& path);
   ~DicReader();
 
   // Non-numeric affixes will be added to the given AffReader and converted into

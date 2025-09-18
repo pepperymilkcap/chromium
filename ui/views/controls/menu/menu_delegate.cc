@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,29 +13,17 @@ bool MenuDelegate::IsItemChecked(int id) const {
   return false;
 }
 
-base::string16 MenuDelegate::GetLabel(int id) const {
-  return base::string16();
+string16 MenuDelegate::GetLabel(int id) const {
+  return string16();
 }
 
-const gfx::Font* MenuDelegate::GetLabelFont(int id) const {
-  return NULL;
+const gfx::Font& MenuDelegate::GetLabelFont(int id) const {
+  return MenuConfig::instance().font;
 }
 
-bool MenuDelegate::GetBackgroundColor(int command_id,
-                                      bool is_hovered,
-                                      SkColor* override_color) const {
-  return false;
-}
-
-bool MenuDelegate::GetForegroundColor(int command_id,
-                                      bool is_hovered,
-                                      SkColor* override_color) const {
-  return false;
-}
-
-base::string16 MenuDelegate::GetTooltipText(int id,
+string16 MenuDelegate::GetTooltipText(int id,
                                       const gfx::Point& screen_loc) const {
-  return base::string16();
+  return string16();
 }
 
 bool MenuDelegate::GetAccelerator(int id, ui::Accelerator* accelerator) {
@@ -45,7 +33,7 @@ bool MenuDelegate::GetAccelerator(int id, ui::Accelerator* accelerator) {
 bool MenuDelegate::ShowContextMenu(MenuItemView* source,
                                    int id,
                                    const gfx::Point& p,
-                                   ui::MenuSourceType source_type) {
+                                   bool is_mouse_gesture) {
   return false;
 }
 
@@ -57,7 +45,7 @@ bool MenuDelegate::IsCommandEnabled(int id) const {
   return true;
 }
 
-bool MenuDelegate::GetContextualLabel(int id, base::string16* out) const {
+bool MenuDelegate::GetContextualLabel(int id, string16* out) const {
   return false;
 }
 
@@ -69,17 +57,9 @@ void MenuDelegate::ExecuteCommand(int id, int mouse_event_flags) {
   ExecuteCommand(id);
 }
 
-bool MenuDelegate::ShouldExecuteCommandWithoutClosingMenu(int id,
-                                                          const ui::Event& e) {
-  return false;
-}
-
 bool MenuDelegate::IsTriggerableEvent(MenuItemView* source,
-                                      const ui::Event& e) {
-  return e.type() == ui::ET_GESTURE_TAP ||
-         e.type() == ui::ET_GESTURE_TAP_DOWN ||
-         (e.IsMouseEvent() && (e.flags() &
-              (ui::EF_LEFT_MOUSE_BUTTON | ui::EF_RIGHT_MOUSE_BUTTON)));
+                                      const MouseEvent& e) {
+  return e.IsLeftMouseButton() || e.IsRightMouseButton();
 }
 
 bool MenuDelegate::CanDrop(MenuItemView* menu, const OSExchangeData& data) {
@@ -98,7 +78,7 @@ bool MenuDelegate::AreDropTypesRequired(MenuItemView* menu) {
 }
 
 int MenuDelegate::GetDropOperation(MenuItemView* item,
-                                   const ui::DropTargetEvent& event,
+                                   const DropTargetEvent& event,
                                    DropPosition* position) {
   NOTREACHED() << "If you override CanDrop, you need to override this too";
   return ui::DragDropTypes::DRAG_NONE;
@@ -106,7 +86,7 @@ int MenuDelegate::GetDropOperation(MenuItemView* item,
 
 int MenuDelegate::OnPerformDrop(MenuItemView* menu,
                                 DropPosition position,
-                                const ui::DropTargetEvent& event) {
+                                const DropTargetEvent& event) {
   NOTREACHED() << "If you override CanDrop, you need to override this too";
   return ui::DragDropTypes::DRAG_NONE;
 }
@@ -142,18 +122,6 @@ void MenuDelegate::WillShowMenu(MenuItemView* menu) {
 }
 
 void MenuDelegate::WillHideMenu(MenuItemView* menu) {
-}
-
-void MenuDelegate::GetHorizontalIconMargins(int command_id,
-                                            int icon_size,
-                                            int* left_margin,
-                                            int* right_margin) const {
-  *left_margin = 0;
-  *right_margin = 0;
-}
-
-bool MenuDelegate::ShouldReserveSpaceForSubmenuIndicator() const {
-  return true;
 }
 
 }  // namespace views

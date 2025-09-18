@@ -1,34 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/shell/toplevel_window.h"
 
-#include "ash/display/display_controller.h"
-#include "ash/screen_ash.h"
-#include "ash/shell.h"
-#include "ash/wm/window_positioner.h"
-#include "ash/wm/window_state.h"
-#include "base/strings/utf_string_conversions.h"
-#include "ui/aura/root_window.h"
+#include "ash/wm/toplevel_frame_view.h"
+#include "base/utf_string_conversions.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace shell {
-namespace {
-
-struct SavedState {
-  gfx::Rect bounds;
-  ui::WindowShowState show_state;
-};
-
-// The last window state in ash_shell. We don't bother deleting
-// this on shutdown.
-SavedState* saved_state = NULL;
-
-}  // namespace
 
 ToplevelWindow::CreateParams::CreateParams()
     : can_resize(false),
@@ -36,21 +19,12 @@ ToplevelWindow::CreateParams::CreateParams()
 }
 
 // static
-views::Widget* ToplevelWindow::CreateToplevelWindow(
-    const CreateParams& params) {
-  views::Widget* widget = views::Widget::CreateWindowWithContext(
-      new ToplevelWindow(params), Shell::GetPrimaryRootWindow());
+void ToplevelWindow::CreateToplevelWindow(const CreateParams& params) {
+  views::Widget* widget =
+      views::Widget::CreateWindowWithBounds(new ToplevelWindow(params),
+                                            gfx::Rect(120, 150, 400, 300));
   widget->GetNativeView()->SetName("Examples:ToplevelWindow");
-  wm::WindowState* window_state = wm::GetWindowState(widget->GetNativeView());
-  window_state->set_window_position_managed(true);
   widget->Show();
-  return widget;
-}
-
-// static
-void ToplevelWindow::ClearSavedStateForTest() {
-  delete saved_state;
-  saved_state = NULL;
 }
 
 ToplevelWindow::ToplevelWindow(const CreateParams& params) : params_(params) {
@@ -60,41 +34,11 @@ ToplevelWindow::~ToplevelWindow() {
 }
 
 void ToplevelWindow::OnPaint(gfx::Canvas* canvas) {
-  canvas->FillRect(GetLocalBounds(), SK_ColorDKGRAY);
+  canvas->FillRect(SK_ColorDKGRAY, GetLocalBounds());
 }
 
-base::string16 ToplevelWindow::GetWindowTitle() const {
-  return base::ASCIIToUTF16("Examples: Toplevel Window");
-}
-
-void ToplevelWindow::SaveWindowPlacement(const gfx::Rect& bounds,
-                                         ui::WindowShowState show_state) {
-  if (!saved_state)
-    saved_state = new SavedState;
-  saved_state->bounds = bounds;
-  saved_state->show_state = show_state;
-}
-
-bool ToplevelWindow::GetSavedWindowPlacement(
-    const views::Widget* widget,
-    gfx::Rect* bounds,
-    ui::WindowShowState* show_state) const {
-  bool is_saved_bounds = !!saved_state;
-  if (saved_state) {
-    *bounds = saved_state->bounds;
-    *show_state = saved_state->show_state;
-  } else {
-    // Initial default bounds.
-    bounds->SetRect(10, 150, 300, 300);
-  }
-  ash::WindowPositioner::GetBoundsAndShowStateForNewWindow(
-      ash::Shell::GetScreen(),
-      NULL,
-      is_saved_bounds,
-      *show_state,
-      bounds,
-      show_state);
-  return true;
+string16 ToplevelWindow::GetWindowTitle() const {
+  return ASCIIToUTF16("Examples: Toplevel Window");
 }
 
 views::View* ToplevelWindow::GetContentsView() {
@@ -107,6 +51,10 @@ bool ToplevelWindow::CanResize() const {
 
 bool ToplevelWindow::CanMaximize() const {
   return params_.can_maximize;
+}
+
+views::NonClientFrameView* ToplevelWindow::CreateNonClientFrameView() {
+  return new ash::internal::ToplevelFrameView;
 }
 
 }  // namespace shell

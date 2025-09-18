@@ -1,29 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "chrome/browser/bookmarks/bookmark_index.h"
 
 #include <string>
 #include <vector>
 
-#include "base/message_loop/message_loop.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/message_loop.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/bookmarks/bookmark_index.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
-#include "chrome/browser/bookmarks/bookmark_title_match.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/url_database.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/history/history_database.h"
+#include "chrome/browser/history/in_memory_database.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::ASCIIToUTF16;
+using content::BrowserThread;
 
 class BookmarkIndexTest : public testing::Test {
  public:
@@ -53,8 +49,8 @@ class BookmarkIndexTest : public testing::Test {
   }
 
   void ExpectMatches(const std::string& query,
-                     const std::vector<std::string>& expected_titles) {
-    std::vector<BookmarkTitleMatch> matches;
+                     const std::vector<std::string> expected_titles) {
+    std::vector<bookmark_utils::TitleMatch> matches;
     model_->GetBookmarksWithTitlesMatching(ASCIIToUTF16(query), 1000, &matches);
     ASSERT_EQ(expected_titles.size(), matches.size());
     for (size_t i = 0; i < expected_titles.size(); ++i) {
@@ -71,14 +67,14 @@ class BookmarkIndexTest : public testing::Test {
   }
 
   void ExtractMatchPositions(const std::string& string,
-                             BookmarkTitleMatch::MatchPositions* matches) {
+                             Snippet::MatchPositions* matches) {
     std::vector<std::string> match_strings;
     base::SplitString(string, ':', &match_strings);
     for (size_t i = 0; i < match_strings.size(); ++i) {
       std::vector<std::string> chunks;
       base::SplitString(match_strings[i], ',', &chunks);
       ASSERT_EQ(2U, chunks.size());
-      matches->push_back(BookmarkTitleMatch::MatchPosition());
+      matches->push_back(Snippet::MatchPosition());
       int chunks0, chunks1;
       base::StringToInt(chunks[0], &chunks0);
       base::StringToInt(chunks[1], &chunks1);
@@ -87,13 +83,12 @@ class BookmarkIndexTest : public testing::Test {
     }
   }
 
-  void ExpectMatchPositions(
-      const std::string& query,
-      const BookmarkTitleMatch::MatchPositions& expected_positions) {
-    std::vector<BookmarkTitleMatch> matches;
+  void ExpectMatchPositions(const std::string& query,
+                            const Snippet::MatchPositions& expected_positions) {
+    std::vector<bookmark_utils::TitleMatch> matches;
     model_->GetBookmarksWithTitlesMatching(ASCIIToUTF16(query), 1000, &matches);
     ASSERT_EQ(1U, matches.size());
-    const BookmarkTitleMatch& match = matches[0];
+    const bookmark_utils::TitleMatch& match = matches[0];
     ASSERT_EQ(expected_positions.size(), match.match_positions.size());
     for (size_t i = 0; i < expected_positions.size(); ++i) {
       EXPECT_EQ(expected_positions[i].first, match.match_positions[i].first);
@@ -138,9 +133,6 @@ TEST_F(BookmarkIndexTest, Tests) {
 
     // Make sure quotes don't do a prefix match.
     { "think",                      "\"thi\"",  ""},
-
-    // Prefix matches against multiple candidates.
-    { "abc1 abc2 abc3 abc4", "abc", "abc1 abc2 abc3 abc4"},
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
     std::vector<std::string> titles;
@@ -168,18 +160,13 @@ TEST_F(BookmarkIndexTest, MatchPositions) {
     { "a",                        "A",        "0,1" },
     { "foo bar",                  "bar",      "4,7" },
     { "fooey bark",               "bar foo",  "0,3:6,9"},
-    // Non-trivial tests.
-    { "foobar foo",               "foobar foo",   "0,6:7,10" },
-    { "foobar foo",               "foo foobar",   "0,6:7,10" },
-    { "foobar foobar",            "foobar foo",   "0,6:7,13" },
-    { "foobar foobar",            "foo foobar",   "0,6:7,13" },
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
     std::vector<std::string> titles;
     titles.push_back(data[i].title);
     AddBookmarksWithTitles(titles);
 
-    BookmarkTitleMatch::MatchPositions expected_matches;
+    Snippet::MatchPositions expected_matches;
     ExtractMatchPositions(data[i].expected, &expected_matches);
     ExpectMatchPositions(data[i].query, expected_matches);
 
@@ -213,7 +200,7 @@ TEST_F(BookmarkIndexTest, HonorMax) {
   const char* input[] = { "abcd", "abcde" };
   AddBookmarksWithTitles(input, ARRAYSIZE_UNSAFE(input));
 
-  std::vector<BookmarkTitleMatch> matches;
+  std::vector<bookmark_utils::TitleMatch> matches;
   model_->GetBookmarksWithTitlesMatching(ASCIIToUTF16("ABc"), 1, &matches);
   EXPECT_EQ(1U, matches.size());
 }
@@ -222,10 +209,10 @@ TEST_F(BookmarkIndexTest, HonorMax) {
 // than the upper case string no match positions are returned.
 TEST_F(BookmarkIndexTest, EmptyMatchOnMultiwideLowercaseString) {
   const BookmarkNode* n1 = model_->AddURL(model_->other_node(), 0,
-                                          base::WideToUTF16(L"\u0130 i"),
+                                          WideToUTF16(L"\u0130 i"),
                                           GURL("http://www.google.com"));
 
-  std::vector<BookmarkTitleMatch> matches;
+  std::vector<bookmark_utils::TitleMatch> matches;
   model_->GetBookmarksWithTitlesMatching(ASCIIToUTF16("i"), 100, &matches);
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].node == n1);
@@ -235,18 +222,20 @@ TEST_F(BookmarkIndexTest, EmptyMatchOnMultiwideLowercaseString) {
 TEST_F(BookmarkIndexTest, GetResultsSortedByTypedCount) {
   // This ensures MessageLoop::current() will exist, which is needed by
   // TestingProfile::BlockUntilHistoryProcessesPendingRequests().
-  content::TestBrowserThreadBundle thread_bundle;
+  MessageLoop loop(MessageLoop::TYPE_DEFAULT);
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &loop);
+  content::TestBrowserThread file_thread(BrowserThread::FILE, &loop);
 
   TestingProfile profile;
-  ASSERT_TRUE(profile.CreateHistoryService(true, false));
+  profile.CreateHistoryService(true, false);
   profile.BlockUntilHistoryProcessesPendingRequests();
   profile.CreateBookmarkModel(true);
+  profile.BlockUntilBookmarkModelLoaded();
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(&profile);
-  test::WaitForBookmarkModelToLoad(model);
+  BookmarkModel* model = profile.GetBookmarkModel();
 
   HistoryService* const history_service =
-      HistoryServiceFactory::GetForProfile(&profile, Profile::EXPLICIT_ACCESS);
+      profile.GetHistoryService(Profile::EXPLICIT_ACCESS);
 
   history::URLDatabase* url_db = history_service->InMemoryDatabase();
 
@@ -263,34 +252,34 @@ TEST_F(BookmarkIndexTest, GetResultsSortedByTypedCount) {
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
     history::URLRow info(data[i].url);
-    info.set_title(base::UTF8ToUTF16(data[i].title));
+    info.set_title(UTF8ToUTF16(data[i].title));
     info.set_typed_count(data[i].typed_count);
     // Populate the InMemoryDatabase....
     url_db->AddURL(info);
     // Populate the BookmarkIndex.
-    model->AddURL(model->other_node(), i, base::UTF8ToUTF16(data[i].title),
+    model->AddURL(model->other_node(), i, UTF8ToUTF16(data[i].title),
                   data[i].url);
   }
 
   // Check that the InMemoryDatabase stored the URLs properly.
   history::URLRow result1;
   url_db->GetRowForURL(data[0].url, &result1);
-  EXPECT_EQ(data[0].title, base::UTF16ToUTF8(result1.title()));
+  EXPECT_EQ(data[0].title, UTF16ToUTF8(result1.title()));
 
   history::URLRow result2;
   url_db->GetRowForURL(data[1].url, &result2);
-  EXPECT_EQ(data[1].title, base::UTF16ToUTF8(result2.title()));
+  EXPECT_EQ(data[1].title, UTF16ToUTF8(result2.title()));
 
   history::URLRow result3;
   url_db->GetRowForURL(data[2].url, &result3);
-  EXPECT_EQ(data[2].title, base::UTF16ToUTF8(result3.title()));
+  EXPECT_EQ(data[2].title, UTF16ToUTF8(result3.title()));
 
   history::URLRow result4;
   url_db->GetRowForURL(data[3].url, &result4);
-  EXPECT_EQ(data[3].title, base::UTF16ToUTF8(result4.title()));
+  EXPECT_EQ(data[3].title, UTF16ToUTF8(result4.title()));
 
   // Populate match nodes.
-  std::vector<BookmarkTitleMatch> matches;
+  std::vector<bookmark_utils::TitleMatch> matches;
   model->GetBookmarksWithTitlesMatching(ASCIIToUTF16("google"), 4, &matches);
 
   // The resulting order should be:

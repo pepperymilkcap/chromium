@@ -1,17 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Multiply-included message file, hence no include guard.
 #include <vector>
 
-#include "content/common/content_export.h"
+#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_param_traits.h"
-#include "url/gurl.h"
 
-#undef IPC_MESSAGE_EXPORT
-#define IPC_MESSAGE_EXPORT CONTENT_EXPORT
 #define IPC_MESSAGE_START SocketStreamMsgStart
 
 // Web Sockets messages sent from the renderer to the browser.
@@ -21,10 +18,7 @@
 // The browser starts connecting asynchronously.
 // Once Socket Stream connection is established, the browser will send
 // SocketStreamMsg_Connected back.
-// |render_frame_id| must be the routing id of RenderFrameImpl to which the
-// Socket Stream belongs.
-IPC_MESSAGE_CONTROL3(SocketStreamHostMsg_Connect,
-                     int /* render_frame_id */,
+IPC_MESSAGE_CONTROL2(SocketStreamHostMsg_Connect,
                      GURL /* socket_url */,
                      int /* socket_id */)
 
@@ -73,8 +67,3 @@ IPC_MESSAGE_CONTROL2(SocketStreamMsg_SentData,
 // The Socket Stream is closed.
 IPC_MESSAGE_CONTROL1(SocketStreamMsg_Closed,
                      int /* socket_id */)
-
-// The Socket Stream is failed.
-IPC_MESSAGE_CONTROL2(SocketStreamMsg_Failed,
-                     int /* socket_id */,
-                     int /* error_code */)

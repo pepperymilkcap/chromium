@@ -13,7 +13,7 @@ chrome.test.getConfig(function(config) {
 
       req.onload = function() {
         chrome.test.assertEq("Hello!", req.responseText);
-        chrome.test.succeed();
+        chrome.test.runNextTest();
       }
       req.onerror = function() {
         chrome.test.log("status: " + req.status);

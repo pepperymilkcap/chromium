@@ -5,19 +5,17 @@
 #import "chrome/browser/ui/cocoa/first_run_bubble_controller.h"
 
 #include "base/logging.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/first_run/first_run.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/search_engines/util.h"
-#include "chrome/browser/ui/chrome_pages.h"
-#import "chrome/browser/ui/cocoa/info_bubble_view.h"
+#include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
+#import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 @interface FirstRunBubbleController(Private)
 - (id)initRelativeToView:(NSView*)view
                   offset:(NSPoint)offset
-                 browser:(Browser*)browser
                  profile:(Profile*)profile;
 - (void)closeIfNotKey;
 @end
@@ -26,23 +24,19 @@
 
 + (FirstRunBubbleController*) showForView:(NSView*)view
                                    offset:(NSPoint)offset
-                                  browser:(Browser*)browser
                                   profile:(Profile*)profile {
   // Autoreleases itself on bubble close.
   return [[FirstRunBubbleController alloc] initRelativeToView:view
                                                        offset:offset
-                                                      browser:browser
                                                       profile:profile];
 }
 
 - (id)initRelativeToView:(NSView*)view
                   offset:(NSPoint)offset
-                 browser:(Browser*)browser
                  profile:(Profile*)profile {
   if ((self = [super initWithWindowNibPath:@"FirstRunBubble"
                             relativeToView:view
                                     offset:offset])) {
-    browser_ = browser;
     profile_ = profile;
     [self showWindow:nil];
 
@@ -57,8 +51,6 @@
 }
 
 - (void)awakeFromNib {
-  first_run::LogFirstRunMetric(first_run::FIRST_RUN_BUBBLE_SHOWN);
-
   DCHECK(header_);
   [header_ setStringValue:cocoa_l10n_util::ReplaceNSStringPlaceholders(
       [header_ stringValue], GetDefaultSearchEngineName(profile_), NULL)];
@@ -89,12 +81,10 @@
 }
 
 - (IBAction)onChange:(id)sender {
-  first_run::LogFirstRunMetric(first_run::FIRST_RUN_BUBBLE_CHANGE_INVOKED);
-
-  Browser* browser = browser_;
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
   [self close];
   if (browser)
-    chrome::ShowSearchEngineSettings(browser);
+    browser->OpenSearchEngineOptionsDialog();
 }
 
 @end  // FirstRunBubbleController

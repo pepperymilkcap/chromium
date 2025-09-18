@@ -4,10 +4,11 @@
 
 #ifndef NET_FTP_FTP_DIRECTORY_LISTING_PARSER_UNITTEST_H_
 #define NET_FTP_FTP_DIRECTORY_LISTING_PARSER_UNITTEST_H_
+#pragma once
 
 #include <vector>
 
-#include "base/strings/utf_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "net/ftp/ftp_directory_listing_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,9 +31,9 @@ class FtpDirectoryListingParserTest : public testing::Test {
  protected:
   FtpDirectoryListingParserTest() {}
 
-  std::vector<base::string16> GetSingleLineTestCase(const std::string& text) {
-    std::vector<base::string16> lines;
-    lines.push_back(base::UTF8ToUTF16(text));
+  std::vector<string16> GetSingleLineTestCase(const std::string& text) {
+    std::vector<string16> lines;
+    lines.push_back(UTF8ToUTF16(text));
     return lines;
   }
 
@@ -43,7 +44,7 @@ class FtpDirectoryListingParserTest : public testing::Test {
 
     FtpDirectoryListingEntry entry = entries[0];
     EXPECT_EQ(test_case.type, entry.type);
-    EXPECT_EQ(base::UTF8ToUTF16(test_case.filename), entry.name);
+    EXPECT_EQ(UTF8ToUTF16(test_case.filename), entry.name);
     EXPECT_EQ(test_case.size, entry.size);
 
     base::Time::Exploded time_exploded;

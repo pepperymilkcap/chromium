@@ -1,9 +1,10 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_OMNIBOX_OMNIBOX_VIEW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_OMNIBOX_OMNIBOX_VIEW_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -12,29 +13,43 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
+#include "base/string_util.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
-#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/rect.h"
+#include "webkit/glue/window_open_disposition.h"
 
-class Browser;
-class OmniboxPopupView;
+class AutocompleteEditController;
+class AutocompleteEditModel;
+class AutocompletePopupView;
 class Profile;
 
 namespace gfx {
 class Font;
 }
 
+namespace ui {
+class MultiAnimation;
+}
+
+namespace views {
+class View;
+}
+
+#if !defined(TOOLKIT_VIEWS)
 class GtkThemeService;
+#endif
 
 class OmniboxViewGtk : public OmniboxView,
-                       public content::NotificationObserver {
+                       public content::NotificationObserver,
+                       public ui::AnimationDelegate {
  public:
   // Modeled like the Windows CHARRANGE.  Represent a pair of cursor position
   // offsets.  Since GtkTextIters are invalid after the buffer is changed, we
@@ -52,68 +67,94 @@ class OmniboxViewGtk : public OmniboxView,
     int cp_max;  // For a selection: Represents the end (insert position).
   };
 
-  // profile parameter is introduced for unittests which can not instantiate
-  // browser object and pass NULL to the browser parameter.
-  // In other use case, you should pass browser->profile() object as
-  // profile parameter.
-  OmniboxViewGtk(OmniboxEditController* controller,
-                 Browser* browser,
+  OmniboxViewGtk(AutocompleteEditController* controller,
+                 ToolbarModel* toolbar_model,
                  Profile* profile,
                  CommandUpdater* command_updater,
                  bool popup_window_mode,
-                 GtkWidget* location_bar);
+#if defined(TOOLKIT_VIEWS)
+                 views::View* location_bar
+#else
+                 GtkWidget* location_bar
+#endif
+                          );
   virtual ~OmniboxViewGtk();
 
   // Initialize, create the underlying widgets, etc.
   void Init();
+  // Returns the width in pixels needed to display the text from one character
+  // before the caret to the end of the string. See comments in
+  // LocationBarView::Layout as to why this uses -1.
+  int WidthOfTextAfterCursor();
 
   // OmniboxView:
+  virtual AutocompleteEditModel* model() OVERRIDE;
+  virtual const AutocompleteEditModel* model() const OVERRIDE;
   virtual void SaveStateToTab(content::WebContents* tab) OVERRIDE;
-  virtual void OnTabChanged(const content::WebContents* web_contents) OVERRIDE;
-  virtual void Update() OVERRIDE;
-  virtual base::string16 GetText() const OVERRIDE;
-  virtual void SetWindowTextAndCaretPos(const base::string16& text,
-                                        size_t caret_pos,
-                                        bool update_popup,
-                                        bool notify_text_changed) OVERRIDE;
+  virtual void Update(
+      const content::WebContents* tab_for_state_restoring) OVERRIDE;
+  virtual void OpenMatch(const AutocompleteMatch& match,
+                         WindowOpenDisposition disposition,
+                         const GURL& alternate_nav_url,
+                         size_t index,
+                         const string16& keyword) OVERRIDE;
+  virtual string16 GetText() const OVERRIDE;
+  virtual bool IsEditingOrEmpty() const OVERRIDE;
+  virtual int GetIcon() const OVERRIDE;
+  virtual void SetUserText(const string16& text) OVERRIDE;
+  virtual void SetUserText(const string16& text,
+                           const string16& display_text,
+                           bool update_popup) OVERRIDE;
+  virtual void SetWindowTextAndCaretPos(const string16& text,
+                                        size_t caret_pos) OVERRIDE;
   virtual void SetForcedQuery() OVERRIDE;
-  virtual bool IsSelectAll() const OVERRIDE;
+  virtual bool IsSelectAll() OVERRIDE;
   virtual bool DeleteAtEndPressed() OVERRIDE;
-  virtual void GetSelectionBounds(
-      base::string16::size_type* start,
-      base::string16::size_type* end) const OVERRIDE;
+  virtual void GetSelectionBounds(string16::size_type* start,
+                                  string16::size_type* end) const OVERRIDE;
   virtual void SelectAll(bool reversed) OVERRIDE;
+  virtual void RevertAll() OVERRIDE;
   virtual void UpdatePopup() OVERRIDE;
+  virtual void ClosePopup() OVERRIDE;
   virtual void SetFocus() OVERRIDE;
-  virtual void ApplyCaretVisibility() OVERRIDE;
   virtual void OnTemporaryTextMaybeChanged(
-      const base::string16& display_text,
-      bool save_original_selection,
-      bool notify_text_changed) OVERRIDE;
+      const string16& display_text,
+      bool save_original_selection) OVERRIDE;
   virtual bool OnInlineAutocompleteTextMaybeChanged(
-      const base::string16& display_text, size_t user_text_length) OVERRIDE;
-  virtual void OnInlineAutocompleteTextCleared() OVERRIDE;
+      const string16& display_text, size_t user_text_length) OVERRIDE;
   virtual void OnRevertTemporaryText() OVERRIDE;
   virtual void OnBeforePossibleChange() OVERRIDE;
   virtual bool OnAfterPossibleChange() OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE;
-  virtual void SetGrayTextAutocompletion(
-      const base::string16& suggestion) OVERRIDE;
-  virtual base::string16 GetGrayTextAutocompletion() const OVERRIDE;
-  virtual int GetTextWidth() const OVERRIDE;
-  virtual int GetWidth() const OVERRIDE;
+  virtual CommandUpdater* GetCommandUpdater() OVERRIDE;
+  virtual void SetInstantSuggestion(const string16& suggestion,
+                                    bool animate_to_complete) OVERRIDE;
+  virtual string16 GetInstantSuggestion() const OVERRIDE;
+  virtual int TextWidth() const OVERRIDE;
   virtual bool IsImeComposing() const OVERRIDE;
+
+#if defined(TOOLKIT_VIEWS)
+  virtual int GetMaxEditWidth(int entry_width) const OVERRIDE;
+  virtual views::View* AddToView(views::View* parent) OVERRIDE;
+  virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
+#endif
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Overridden from ui::AnimationDelegate.
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE;
+
   // Sets the colors of the text view according to the theme.
   void SetBaseColor();
-  // Sets the colors of the gray text suggestion view according to the theme.
-  void UpdateGrayTextViewColors();
+  // Sets the colors of the instant suggestion view according to the theme and
+  // the animation state.
+  void UpdateInstantViewColors();
 
   // Returns the text view gtk widget. May return NULL if the widget
   // has already been destroyed.
@@ -122,8 +163,6 @@ class OmniboxViewGtk : public OmniboxView,
   }
 
  private:
-  friend class OmniboxViewGtkTest;
-
   CHROMEG_CALLBACK_0(OmniboxViewGtk, void, HandleBeginUserAction,
                      GtkTextBuffer*);
   CHROMEG_CALLBACK_0(OmniboxViewGtk, void, HandleEndUserAction, GtkTextBuffer*);
@@ -161,9 +200,8 @@ class OmniboxViewGtk : public OmniboxView,
   CHROMEGTK_CALLBACK_1(OmniboxViewGtk, void, HandleViewSizeRequest,
                        GtkRequisition*);
   CHROMEGTK_CALLBACK_1(OmniboxViewGtk, void, HandlePopulatePopup, GtkMenu*);
-  CHROMEGTK_CALLBACK_0(OmniboxViewGtk, void, HandlePasteAndGo);
-  CHROMEGTK_CALLBACK_0(OmniboxViewGtk, void, HandleShowURL);
   CHROMEGTK_CALLBACK_0(OmniboxViewGtk, void, HandleEditSearchEngines);
+  CHROMEGTK_CALLBACK_0(OmniboxViewGtk, void, HandlePasteAndGo);
   CHROMEGTK_CALLBACK_6(OmniboxViewGtk, void, HandleDragDataReceived,
                        GdkDragContext*, gint, gint, GtkSelectionData*,
                        guint, guint);
@@ -213,12 +251,8 @@ class OmniboxViewGtk : public OmniboxView,
 
   void HandleCopyOrCutClipboard(bool copy);
 
-  // OmniboxView overrides.
-  virtual int GetOmniboxTextLength() const OVERRIDE;
-  virtual void EmphasizeURLComponents() OVERRIDE;
-
   // Common implementation for performing a drop on the edit view.
-  bool OnPerformDropImpl(const base::string16& text);
+  bool OnPerformDropImpl(const string16& text);
 
   // Returns the font used in |text_view_|.
   gfx::Font GetFont();
@@ -256,15 +290,27 @@ class OmniboxViewGtk : public OmniboxView,
                           GtkTextIter* iter_min,
                           GtkTextIter* iter_max);
 
+  // Return the number of characters in the current buffer.
+  int GetTextLength() const;
+
+  // Places the caret at the given position. This clears any selection.
+  void PlaceCaretAt(int pos);
+
   // Returns true if the caret is at the end of the content.
   bool IsCaretAtEnd() const;
+
+  // Try to parse the current text as a URL and colorize the components.
+  void EmphasizeURLComponents();
+
+  // Internally invoked whenever the text changes in some way.
+  void TextChanged();
 
   // Save |selected_text| as the PRIMARY X selection. Unlike
   // OwnPrimarySelection(), this won't set an owner or use callbacks.
   void SavePrimarySelection(const std::string& selected_text);
 
   // Update the field with |text| and set the selection.
-  void SetTextAndSelectedRange(const base::string16& text,
+  void SetTextAndSelectedRange(const string16& text,
                                const CharRange& range);
 
   // Set the selection to |range|.
@@ -286,19 +332,19 @@ class OmniboxViewGtk : public OmniboxView,
   void UpdatePrimarySelectionIfValidURL();
 
   // Retrieves the first and last iterators in the |text_buffer_|, but excludes
-  // the anchor holding the |gray_text_view_| widget.
+  // the anchor holding the |instant_view_| widget.
   void GetTextBufferBounds(GtkTextIter* start, GtkTextIter* end) const;
 
   // Validates an iterator in the |text_buffer_|, to make sure it doesn't go
-  // beyond the anchor for holding the |gray_text_view_| widget.
+  // beyond the anchor for holding the |instant_view_| widget.
   void ValidateTextBufferIter(GtkTextIter* iter) const;
 
-  // Adjusts vertical alignment of the |gray_text_view_| in the |text_view_|, to
+  // Adjusts vertical alignment of the |instant_view_| in the |text_view_|, to
   // make sure they have the same baseline.
-  void AdjustVerticalAlignmentOfGrayTextView();
+  void AdjustVerticalAlignmentOfInstantView();
 
-  // The Browser that contains this omnibox.
-  Browser* browser_;
+  // Stop showing the instant suggest auto-commit animation.
+  void StopAnimation();
 
   // The widget we expose, used for vertically centering the real text edit,
   // since the height will change based on the font / font size, etc.
@@ -317,19 +363,29 @@ class OmniboxViewGtk : public OmniboxView,
   GtkTextTag* security_error_scheme_tag_;
   GtkTextTag* normal_text_tag_;
 
-  // Objects for the gray suggestion text view.
-  GtkTextTag* gray_text_anchor_tag_;
+  // Objects for the instant suggestion text view.
+  GtkTextTag* instant_anchor_tag_;
 
-  // A widget for displaying gray autocompletion text. It'll be attached to a
+  // A widget for displaying instant suggestion text. It'll be attached to a
   // child anchor in the |text_buffer_| object.
-  GtkWidget* gray_text_view_;
+  GtkWidget* instant_view_;
+  // Animation from instant suggest (faded text) to autocomplete (selected
+  // text).
+  scoped_ptr<ui::MultiAnimation> instant_animation_;
 
-  // A mark to split the content and the gray text anchor. Wherever the end
+  // A mark to split the content and the instant anchor. Wherever the end
   // iterator of the text buffer is required, the iterator to this mark should
   // be used.
-  GtkTextMark* gray_text_mark_;
+  GtkTextMark* instant_mark_;
 
-  scoped_ptr<OmniboxPopupView> popup_view_;
+  scoped_ptr<AutocompleteEditModel> model_;
+  scoped_ptr<AutocompletePopupView> popup_view_;
+  AutocompleteEditController* controller_;
+  ToolbarModel* toolbar_model_;
+
+  // The object that handles additional command functionality exposed on the
+  // edit, such as invoking the keyword editor.
+  CommandUpdater* command_updater_;
 
   // When true, the location bar view is read only and also is has a slightly
   // different presentation (smaller font size). This is used for popups.
@@ -342,7 +398,7 @@ class OmniboxViewGtk : public OmniboxView,
   CharRange saved_temporary_selection_;
 
   // Tracking state before and after a possible change.
-  base::string16 text_before_change_;
+  string16 text_before_change_;
   CharRange sel_before_change_;
 
   // The most-recently-selected text from the entry that was copied to the
@@ -367,10 +423,30 @@ class OmniboxViewGtk : public OmniboxView,
   // -- if so, we avoid selecting all the text on mouse-up.
   bool button_1_pressed_;
 
+#if defined(OS_CHROMEOS)
+  // The following variables are used to implement select-all-on-mouse-up, which
+  // is disabled in the standard Linux build due to poor interaction with the
+  // PRIMARY X selection.
+
+  // Did the user change the selected text in the middle of the current click?
+  // If so, we don't select all of the text when the button is released -- we
+  // don't want to blow away their selection.
+  bool text_selected_during_click_;
+
+  // Was the text view already focused before the user clicked in it?  We use
+  // this to figure out whether we should select all of the text when the button
+  // is released (we only do so if the view was initially unfocused).
+  bool text_view_focused_before_button_press_;
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+  views::View* location_bar_view_;
+#else
   // Supplies colors, et cetera.
   GtkThemeService* theme_service_;
 
   content::NotificationRegistrar registrar_;
+#endif
 
   // Indicates if Enter key was pressed.
   //
@@ -385,19 +461,10 @@ class OmniboxViewGtk : public OmniboxView,
   // during sync dispatch of "move-focus" signal.
   bool tab_was_pressed_;
 
-  // Indicates if Shift key was pressed.
-  // Used in conjunction with the Tab key to determine if either traversal
-  // needs to move up the results or if the keyword needs to be cleared.
-  bool shift_was_pressed_;
-
   // Indicates that user requested to paste clipboard.
   // The actual paste clipboard action might be performed later if the
   // clipboard is not empty.
   bool paste_clipboard_requested_;
-
-  // Text to "Paste and go"; set by HandlePopulatePopup() and consumed by
-  // HandlePasteAndGo().
-  base::string16 sanitized_text_for_paste_and_go_;
 
   // Indicates if an Enter key press is inserted as text.
   // It's used in the key press handler to determine if an Enter key event is
@@ -444,7 +511,7 @@ class OmniboxViewGtk : public OmniboxView,
   const bool supports_pre_edit_;
 
   // Stores the text being composed by the input method.
-  base::string16 pre_edit_;
+  string16 pre_edit_;
 
   // Tracking pre-edit state before and after a possible change. We don't need
   // to track pre-edit_'s content, as it'll be treated as part of text content.

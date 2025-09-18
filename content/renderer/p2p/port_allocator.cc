@@ -5,26 +5,26 @@
 #include "content/renderer/p2p/port_allocator.h"
 
 #include "base/bind.h"
-#include "base/command_line.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
-#include "content/public/common/content_switches.h"
-#include "net/base/escape.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/string_util.h"
+#include "content/renderer/p2p/host_address_request.h"
+#include "jingle/glue/utils.h"
 #include "net/base/ip_endpoint.h"
-#include "third_party/WebKit/public/platform/WebURLError.h"
-#include "third_party/WebKit/public/platform/WebURLLoader.h"
-#include "third_party/WebKit/public/platform/WebURLRequest.h"
-#include "third_party/WebKit/public/platform/WebURLResponse.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebURLLoaderOptions.h"
+#include "ppapi/c/dev/ppb_transport_dev.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 
-using blink::WebString;
-using blink::WebURL;
-using blink::WebURLLoader;
-using blink::WebURLLoaderOptions;
-using blink::WebURLRequest;
-using blink::WebURLResponse;
+using WebKit::WebString;
+using WebKit::WebURL;
+using WebKit::WebURLLoader;
+using WebKit::WebURLLoaderOptions;
+using WebKit::WebURLRequest;
+using WebKit::WebURLResponse;
 
 namespace content {
 
@@ -50,28 +50,12 @@ bool ParsePortNumber(
 
 }  // namespace
 
-P2PPortAllocator::Config::Config()
-    : stun_server_port(0),
-      legacy_relay(true),
-      disable_tcp_transport(false) {
-}
-
-P2PPortAllocator::Config::~Config() {
-}
-
-P2PPortAllocator::Config::RelayServerConfig::RelayServerConfig()
-    : port(0) {
-}
-
-P2PPortAllocator::Config::RelayServerConfig::~RelayServerConfig() {
-}
-
 P2PPortAllocator::P2PPortAllocator(
-    blink::WebFrame* web_frame,
+    WebKit::WebFrame* web_frame,
     P2PSocketDispatcher* socket_dispatcher,
     talk_base::NetworkManager* network_manager,
     talk_base::PacketSocketFactory* socket_factory,
-    const Config& config)
+    const webkit_glue::P2PTransport::Config& config)
     : cricket::BasicPortAllocator(network_manager, socket_factory),
       web_frame_(web_frame),
       socket_dispatcher_(socket_dispatcher),
@@ -80,44 +64,32 @@ P2PPortAllocator::P2PPortAllocator(
   if (config_.disable_tcp_transport)
     flags |= cricket::PORTALLOCATOR_DISABLE_TCP;
   set_flags(flags);
-  // TODO(ronghuawu): crbug/138185 add ourselves to the firewall list in browser
-  // process and then remove below line.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWebRtcTcpServerSocket)) {
-    set_allow_tcp_listen(false);
-  }
 }
 
 P2PPortAllocator::~P2PPortAllocator() {
 }
 
-cricket::PortAllocatorSession* P2PPortAllocator::CreateSessionInternal(
-    const std::string& content_name,
-    int component,
-    const std::string& ice_username_fragment,
-    const std::string& ice_password) {
-  return new P2PPortAllocatorSession(
-      this, content_name, component, ice_username_fragment, ice_password);
+cricket::PortAllocatorSession* P2PPortAllocator::CreateSession(
+    const std::string& name,
+    const std::string& session_type) {
+  return new P2PPortAllocatorSession(this, name, session_type);
 }
 
 P2PPortAllocatorSession::P2PPortAllocatorSession(
     P2PPortAllocator* allocator,
-    const std::string& content_name,
-    int component,
-    const std::string& ice_username_fragment,
-    const std::string& ice_password)
-    : cricket::BasicPortAllocatorSession(
-        allocator, content_name, component,
-        ice_username_fragment, ice_password),
+    const std::string& name,
+    const std::string& session_type)
+    : cricket::BasicPortAllocatorSession(allocator, name, session_type),
       allocator_(allocator),
       relay_session_attempts_(0),
       relay_udp_port_(0),
       relay_tcp_port_(0),
-      relay_ssltcp_port_(0),
-      pending_relay_requests_(0) {
+      relay_ssltcp_port_(0) {
 }
 
 P2PPortAllocatorSession::~P2PPortAllocatorSession() {
+  if (stun_address_request_)
+    stun_address_request_->Cancel();
 }
 
 void P2PPortAllocatorSession::didReceiveData(
@@ -138,31 +110,64 @@ void P2PPortAllocatorSession::didFinishLoading(WebURLLoader* loader,
   ParseRelayResponse();
 }
 
-void P2PPortAllocatorSession::didFail(blink::WebURLLoader* loader,
-                                      const blink::WebURLError& error) {
+void P2PPortAllocatorSession::didFail(WebKit::WebURLLoader* loader,
+                                      const WebKit::WebURLError& error) {
   DCHECK_EQ(loader, relay_session_request_.get());
   DCHECK_NE(error.reason, 0);
 
   LOG(ERROR) << "Relay session request failed.";
 
   // Retry the request.
-  AllocateLegacyRelaySession();
+  AllocateRelaySession();
 }
 
 void P2PPortAllocatorSession::GetPortConfigurations() {
-  if (allocator_->config_.legacy_relay) {
-    AllocateLegacyRelaySession();
+  // Add an empty configuration synchronously, so a local connection
+  // can be started immediately.
+  ConfigReady(new cricket::PortConfiguration(
+      talk_base::SocketAddress(), "", "", ""));
+
+  ResolveStunServerAddress();
+  AllocateRelaySession();
+}
+
+void P2PPortAllocatorSession::ResolveStunServerAddress() {
+ if (allocator_->config_.stun_server.empty())
+   return;
+
+ DCHECK(!stun_address_request_);
+ stun_address_request_ =
+     new P2PHostAddressRequest(allocator_->socket_dispatcher_);
+ stun_address_request_->Request(allocator_->config_.stun_server, base::Bind(
+     &P2PPortAllocatorSession::OnStunServerAddress,
+     base::Unretained(this)));
+}
+
+void P2PPortAllocatorSession::OnStunServerAddress(
+    const net::IPAddressNumber& address) {
+  if (address.empty()) {
+    LOG(ERROR) << "Failed to resolve STUN server address "
+               << allocator_->config_.stun_server;
+    return;
   }
+
+  if (!jingle_glue::IPEndPointToSocketAddress(
+          net::IPEndPoint(address, allocator_->config_.stun_server_port),
+          &stun_server_address_)) {
+    return;
+  }
+
   AddConfig();
 }
 
-void P2PPortAllocatorSession::AllocateLegacyRelaySession() {
-  if (allocator_->config_.relays.empty())
+void P2PPortAllocatorSession::AllocateRelaySession() {
+  if (allocator_->config_.relay_server.empty())
     return;
-  // If we are using legacy relay, we will have only one entry in relay server
-  // list.
-  P2PPortAllocator::Config::RelayServerConfig relay_config =
-      allocator_->config_.relays[0];
+
+  if (!allocator_->config_.legacy_relay) {
+    NOTIMPLEMENTED() << " TURN support is not implemented yet.";
+    return;
+  }
 
   if (relay_session_attempts_ > kRelaySessionRetries)
     return;
@@ -173,35 +178,36 @@ void P2PPortAllocatorSession::AllocateLegacyRelaySession() {
   WebURLLoaderOptions options;
   options.allowCredentials = false;
 
+  // TODO(sergeyu): Set to CrossOriginRequestPolicyUseAccessControl
+  // when this code can be used by untrusted plugins.
+  // See http://crbug.com/104195 .
   options.crossOriginRequestPolicy =
-      WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl;
+      WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
 
   relay_session_request_.reset(
       allocator_->web_frame_->createAssociatedURLLoader(options));
-  if (!relay_session_request_) {
+  if (!relay_session_request_.get()) {
     LOG(ERROR) << "Failed to create URL loader.";
     return;
   }
 
-  std::string url = "https://" + relay_config.server_address +
-      kCreateRelaySessionURL +
-      "?username=" + net::EscapeUrlEncodedData(username(), true) +
-      "&password=" + net::EscapeUrlEncodedData(password(), true);
-
   WebURLRequest request;
   request.initialize();
-  request.setURL(WebURL(GURL(url)));
+  request.setURL(WebURL(GURL(
+      "https://" + allocator_->config_.relay_server + kCreateRelaySessionURL)));
   request.setAllowStoredCredentials(false);
   request.setCachePolicy(WebURLRequest::ReloadIgnoringCacheData);
   request.setHTTPMethod("GET");
   request.addHTTPHeaderField(
       WebString::fromUTF8("X-Talk-Google-Relay-Auth"),
-      WebString::fromUTF8(relay_config.password));
+      WebString::fromUTF8(allocator_->config_.relay_password));
   request.addHTTPHeaderField(
       WebString::fromUTF8("X-Google-Relay-Auth"),
-      WebString::fromUTF8(relay_config.username));
+      WebString::fromUTF8(allocator_->config_.relay_password));
+  request.addHTTPHeaderField(WebString::fromUTF8("X-Session-Type"),
+                             WebString::fromUTF8(session_type()));
   request.addHTTPHeaderField(WebString::fromUTF8("X-Stream-Type"),
-                             WebString::fromUTF8("chromoting"));
+                             WebString::fromUTF8(name()));
 
   relay_session_request_->loadAsynchronously(request, this);
 }
@@ -214,6 +220,8 @@ void P2PPortAllocatorSession::ParseRelayResponse() {
     return;
   }
 
+  relay_username_.clear();
+  relay_password_.clear();
   relay_ip_.Clear();
   relay_udp_port_ = 0;
   relay_tcp_port_ = 0;
@@ -228,17 +236,9 @@ void P2PPortAllocatorSession::ParseRelayResponse() {
     TrimWhitespaceASCII(it->second, TRIM_ALL, &value);
 
     if (key == "username") {
-      if (value != username()) {
-        LOG(ERROR) << "When creating relay session received user name "
-            " that was different from the value specified in the query.";
-        return;
-      }
+      relay_username_ = value;
     } else if (key == "password") {
-      if (value != password()) {
-        LOG(ERROR) << "When creating relay session received password "
-            "that was different from the value specified in the query.";
-        return;
-      }
+      relay_password_ = value;
     } else if (key == "relay.ip") {
       relay_ip_.SetIP(value);
       if (relay_ip_.ip() == 0) {
@@ -261,35 +261,28 @@ void P2PPortAllocatorSession::ParseRelayResponse() {
 }
 
 void P2PPortAllocatorSession::AddConfig() {
-  const P2PPortAllocator::Config& config = allocator_->config_;
-  cricket::PortConfiguration* port_config = new cricket::PortConfiguration(
-      talk_base::SocketAddress(config.stun_server, config.stun_server_port),
-      std::string(), std::string());
+  cricket::PortConfiguration* config =
+      new cricket::PortConfiguration(stun_server_address_,
+                                     relay_username_, relay_password_, "");
 
-  for (size_t i = 0; i < config.relays.size(); ++i) {
-    cricket::RelayCredentials credentials(config.relays[i].username,
-                                          config.relays[i].password);
-    cricket::RelayServerConfig relay_server(cricket::RELAY_TURN);
-    cricket::ProtocolType protocol;
-    if (!cricket::StringToProto(config.relays[i].transport_type.c_str(),
-                                &protocol)) {
-      DLOG(WARNING) << "Ignoring TURN server "
-                    << config.relays[i].server_address << ". "
-                    << "Reason= Incorrect "
-                    << config.relays[i].transport_type
-                    << " transport parameter.";
-      continue;
+  if (relay_ip_.ip() != 0) {
+    cricket::PortConfiguration::PortList ports;
+    if (relay_udp_port_ > 0) {
+      talk_base::SocketAddress address(relay_ip_.ip(), relay_udp_port_);
+      ports.push_back(cricket::ProtocolAddress(address, cricket::PROTO_UDP));
     }
-
-    relay_server.ports.push_back(cricket::ProtocolAddress(
-        talk_base::SocketAddress(config.relays[i].server_address,
-                                 config.relays[i].port),
-        protocol,
-        config.relays[i].secure));
-    relay_server.credentials = credentials;
-    port_config->AddRelay(relay_server);
+    if (relay_tcp_port_ > 0 && !allocator_->config_.disable_tcp_transport) {
+      talk_base::SocketAddress address(relay_ip_.ip(), relay_tcp_port_);
+      ports.push_back(cricket::ProtocolAddress(address, cricket::PROTO_TCP));
+    }
+    if (relay_ssltcp_port_ > 0 && !allocator_->config_.disable_tcp_transport) {
+      talk_base::SocketAddress address(relay_ip_.ip(), relay_ssltcp_port_);
+      ports.push_back(cricket::ProtocolAddress(address, cricket::PROTO_SSLTCP));
+    }
+    if (!ports.empty())
+      config->AddRelay(ports, 0.0f);
   }
-  ConfigReady(port_config);
+  ConfigReady(config);
 }
 
 }  // namespace content

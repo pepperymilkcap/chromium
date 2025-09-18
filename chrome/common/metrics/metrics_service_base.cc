@@ -10,45 +10,34 @@
 
 using base::Histogram;
 
-MetricsServiceBase::MetricsServiceBase()
-    : histogram_snapshot_manager_(this) {
+MetricsServiceBase::MetricsServiceBase() {
 }
 
 MetricsServiceBase::~MetricsServiceBase() {
 }
 
-// static
-const char MetricsServiceBase::kServerUrl[] =
-    "https://clients4.google.com/uma/v2";
-
-// static
-const char MetricsServiceBase::kMimeType[] = "application/vnd.chrome.uma";
-
 void MetricsServiceBase::RecordCurrentHistograms() {
   DCHECK(log_manager_.current_log());
-  histogram_snapshot_manager_.PrepareDeltas(base::Histogram::kNoFlags, true);
+  TransmitAllHistograms(base::Histogram::kNoFlags, true);
 }
 
-void MetricsServiceBase::RecordDelta(
-    const base::HistogramBase& histogram,
-    const base::HistogramSamples& snapshot) {
-  log_manager_.current_log()->RecordHistogramDelta(histogram.histogram_name(),
-                                                   snapshot);
+void MetricsServiceBase::TransmitHistogramDelta(
+    const base::Histogram& histogram,
+    const base::Histogram::SampleSet& snapshot) {
+  log_manager_.current_log()->RecordHistogramDelta(histogram, snapshot);
 }
 
-void MetricsServiceBase::InconsistencyDetected(
-    base::HistogramBase::Inconsistency problem) {
+void MetricsServiceBase::InconsistencyDetected(int problem) {
   UMA_HISTOGRAM_ENUMERATION("Histogram.InconsistenciesBrowser",
-                            problem, base::HistogramBase::NEVER_EXCEEDED_VALUE);
+                            problem, Histogram::NEVER_EXCEEDED_VALUE);
 }
 
-void MetricsServiceBase::UniqueInconsistencyDetected(
-    base::HistogramBase::Inconsistency problem) {
+void MetricsServiceBase::UniqueInconsistencyDetected(int problem) {
   UMA_HISTOGRAM_ENUMERATION("Histogram.InconsistenciesBrowserUnique",
-                            problem, base::HistogramBase::NEVER_EXCEEDED_VALUE);
+                            problem, Histogram::NEVER_EXCEEDED_VALUE);
 }
 
-void MetricsServiceBase::InconsistencyDetectedInLoggedCount(int amount) {
+void MetricsServiceBase::SnapshotProblemResolved(int amount) {
   UMA_HISTOGRAM_COUNTS("Histogram.InconsistentSnapshotBrowser",
                        std::abs(amount));
 }

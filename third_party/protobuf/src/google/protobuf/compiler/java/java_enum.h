@@ -73,8 +73,6 @@ class EnumGenerator {
   };
   vector<Alias> aliases_;
 
-  bool CanUseEnumValues();
-
   GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(EnumGenerator);
 };
 

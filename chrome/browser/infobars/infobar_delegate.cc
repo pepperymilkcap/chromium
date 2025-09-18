@@ -6,26 +6,17 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
-#include "chrome/browser/infobars/infobar.h"
-#include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-#include "ui/base/resource/resource_bundle.h"
 
 using content::NavigationEntry;
 
 // InfoBarDelegate ------------------------------------------------------------
 
-const int InfoBarDelegate::kNoIconID = 0;
-
 InfoBarDelegate::~InfoBarDelegate() {
-}
-
-InfoBarDelegate::InfoBarAutomationType
-    InfoBarDelegate::GetInfoBarAutomationType() const {
-  return UNKNOWN_INFOBAR;
 }
 
 bool InfoBarDelegate::EqualsDelegate(InfoBarDelegate* delegate) const {
@@ -43,16 +34,16 @@ bool InfoBarDelegate::ShouldExpire(
 void InfoBarDelegate::InfoBarDismissed() {
 }
 
-int InfoBarDelegate::GetIconID() const {
-  return kNoIconID;
+void InfoBarDelegate::InfoBarClosed() {
+  delete this;
+}
+
+gfx::Image* InfoBarDelegate::GetIcon() const {
+  return NULL;
 }
 
 InfoBarDelegate::Type InfoBarDelegate::GetInfoBarType() const {
   return WARNING_TYPE;
-}
-
-AutoLoginInfoBarDelegate* InfoBarDelegate::AsAutoLoginInfoBarDelegate() {
-  return NULL;
 }
 
 ConfirmInfoBarDelegate* InfoBarDelegate::AsConfirmInfoBarDelegate() {
@@ -68,11 +59,7 @@ InsecureContentInfoBarDelegate*
   return NULL;
 }
 
-MediaStreamInfoBarDelegate* InfoBarDelegate::AsMediaStreamInfoBarDelegate() {
-  return NULL;
-}
-
-PopupBlockedInfoBarDelegate* InfoBarDelegate::AsPopupBlockedInfoBarDelegate() {
+LinkInfoBarDelegate* InfoBarDelegate::AsLinkInfoBarDelegate() {
   return NULL;
 }
 
@@ -81,17 +68,8 @@ RegisterProtocolHandlerInfoBarDelegate*
   return NULL;
 }
 
-ScreenCaptureInfoBarDelegate*
-    InfoBarDelegate::AsScreenCaptureInfoBarDelegate() {
-  return NULL;
-}
-
 ThemeInstalledInfoBarDelegate*
     InfoBarDelegate::AsThemePreviewInfobarDelegate() {
-  return NULL;
-}
-
-ThreeDAPIInfoBarDelegate* InfoBarDelegate::AsThreeDAPIInfoBarDelegate() {
   return NULL;
 }
 
@@ -99,33 +77,29 @@ TranslateInfoBarDelegate* InfoBarDelegate::AsTranslateInfoBarDelegate() {
   return NULL;
 }
 
-void InfoBarDelegate::StoreActiveEntryUniqueID() {
-  DCHECK(web_contents());
+InfoBarDelegate::InfoBarDelegate(InfoBarTabHelper* infobar_helper)
+    : contents_unique_id_(0),
+      owner_(infobar_helper) {
+  if (infobar_helper)
+    StoreActiveEntryUniqueID(infobar_helper);
+}
+
+void InfoBarDelegate::StoreActiveEntryUniqueID(
+    InfoBarTabHelper* infobar_helper) {
   NavigationEntry* active_entry =
-      web_contents()->GetController().GetActiveEntry();
+      infobar_helper->web_contents()->GetController().GetActiveEntry();
   contents_unique_id_ = active_entry ? active_entry->GetUniqueID() : 0;
-}
-
-gfx::Image InfoBarDelegate::GetIcon() const {
-  int icon_id = GetIconID();
-  return (icon_id == kNoIconID) ? gfx::Image() :
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(icon_id);
-}
-
-content::WebContents* InfoBarDelegate::web_contents() {
-  return (infobar_ && infobar_->owner()) ?
-      infobar_->owner()->web_contents() : NULL;
-}
-
-InfoBarDelegate::InfoBarDelegate() : contents_unique_id_(0) {
 }
 
 bool InfoBarDelegate::ShouldExpireInternal(
     const content::LoadCommittedDetails& details) const {
-  // NOTE: If you change this, be sure to check and adjust the behavior of
-  // anyone who overrides this as necessary!
   return (contents_unique_id_ != details.entry->GetUniqueID()) ||
       (content::PageTransitionStripQualifier(
           details.entry->GetTransitionType()) ==
               content::PAGE_TRANSITION_RELOAD);
+}
+
+void InfoBarDelegate::RemoveSelf() {
+  if (owner_)
+    owner_->RemoveInfoBar(this);  // Clears |owner_|.
 }

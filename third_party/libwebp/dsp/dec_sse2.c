@@ -1,10 +1,8 @@
-// Copyright 2011 Google Inc. All Rights Reserved.
+// Copyright 2011 Google Inc.
 //
-// Use of this source code is governed by a BSD-style license
-// that can be found in the COPYING file in the root of the source
-// tree. An additional intellectual property rights grant can be found
-// in the file PATENTS. All contributing project authors may
-// be found in the AUTHORS file in the root of the source tree.
+// This code is licensed under the same terms as WebM:
+//  Software License Agreement:  http://www.webmproject.org/license/software/
+//  Additional IP Rights Grant:  http://www.webmproject.org/license/additional/
 // -----------------------------------------------------------------------------
 //
 // SSE2 version of some decoding functions (idct, loop filtering).
@@ -12,16 +10,14 @@
 // Author: somnath@google.com (Somnath Banerjee)
 //         cduvivier@google.com (Christian Duvivier)
 
-#include "./dsp.h"
+#if defined(__SSE2__) || defined(_MSC_VER)
+
+#include <emmintrin.h>
+#include "../dec/vp8i.h"
 
 #if defined(__cplusplus) || defined(c_plusplus)
 extern "C" {
 #endif
-
-#if defined(WEBP_USE_SSE2)
-
-#include <emmintrin.h>
-#include "../dec/vp8i.h"
 
 //------------------------------------------------------------------------------
 // Transforms (Paragraph 14.4)
@@ -196,7 +192,7 @@ static void TransformSSE2(const int16_t* in, uint8_t* dst, int do_two) {
 
   // Add inverse transform to 'dst' and store.
   {
-    const __m128i zero = _mm_setzero_si128();
+    const __m128i zero = _mm_set1_epi16(0);
     // Load the reference(s).
     __m128i dst0, dst1, dst2, dst3;
     if (do_two) {
@@ -280,14 +276,14 @@ static void TransformSSE2(const int16_t* in, uint8_t* dst, int do_two) {
 
 #define GET_NOTHEV(p1, p0, q0, q1, hev_thresh, not_hev) {                      \
   const __m128i zero = _mm_setzero_si128();                                    \
-  const __m128i t_1 = MM_ABS(p1, p0);                                          \
-  const __m128i t_2 = MM_ABS(q1, q0);                                          \
+  const __m128i t1 = MM_ABS(p1, p0);                                           \
+  const __m128i t2 = MM_ABS(q1, q0);                                           \
                                                                                \
   const __m128i h = _mm_set1_epi8(hev_thresh);                                 \
-  const __m128i t_3 = _mm_subs_epu8(t_1, h);  /* abs(p1 - p0) - hev_tresh */   \
-  const __m128i t_4 = _mm_subs_epu8(t_2, h);  /* abs(q1 - q0) - hev_tresh */   \
+  const __m128i t3 = _mm_subs_epu8(t1, h);  /* abs(p1 - p0) - hev_tresh */     \
+  const __m128i t4 = _mm_subs_epu8(t2, h);  /* abs(q1 - q0) - hev_tresh */     \
                                                                                \
-  not_hev = _mm_or_si128(t_3, t_4);                                            \
+  not_hev = _mm_or_si128(t3, t4);                                              \
   not_hev = _mm_cmpeq_epi8(not_hev, zero); /* not_hev <= t1 && not_hev <= t2 */\
 }
 
@@ -316,13 +312,13 @@ static void TransformSSE2(const int16_t* in, uint8_t* dst, int do_two) {
 
 // Updates values of 2 pixels at MB edge during complex filtering.
 // Update operations:
-// q = q - delta and p = p + delta; where delta = [(a_hi >> 7), (a_lo >> 7)]
+// q = q - a and p = p + a; where a = [(a_hi >> 7), (a_lo >> 7)]
 #define UPDATE_2PIXELS(pi, qi, a_lo, a_hi) {                                   \
   const __m128i a_lo7 = _mm_srai_epi16(a_lo, 7);                               \
   const __m128i a_hi7 = _mm_srai_epi16(a_hi, 7);                               \
-  const __m128i delta = _mm_packs_epi16(a_lo7, a_hi7);                         \
-  pi = _mm_adds_epi8(pi, delta);                                               \
-  qi = _mm_subs_epi8(qi, delta);                                               \
+  const __m128i a = _mm_packs_epi16(a_lo7, a_hi7);                             \
+  pi = _mm_adds_epi8(pi, a);                                                   \
+  qi = _mm_subs_epi8(qi, a);                                                   \
 }
 
 static void NeedsFilter(const __m128i* p1, const __m128i* p0, const __m128i* q0,
@@ -345,8 +341,8 @@ static void NeedsFilter(const __m128i* p1, const __m128i* p0, const __m128i* q0,
 // Edge filtering functions
 
 // Applies filter on 2 pixels (p0 and q0)
-static WEBP_INLINE void DoFilter2(const __m128i* p1, __m128i* p0, __m128i* q0,
-                                  const __m128i* q1, int thresh) {
+static inline void DoFilter2(const __m128i* p1, __m128i* p0, __m128i* q0,
+                             const __m128i* q1, int thresh) {
   __m128i a, mask;
   const __m128i sign_bit = _mm_set1_epi8(0x80);
   const __m128i p1s = _mm_xor_si128(*p1, sign_bit);
@@ -366,9 +362,8 @@ static WEBP_INLINE void DoFilter2(const __m128i* p1, __m128i* p0, __m128i* q0,
 }
 
 // Applies filter on 4 pixels (p1, p0, q0 and q1)
-static WEBP_INLINE void DoFilter4(__m128i* p1, __m128i *p0,
-                                  __m128i* q0, __m128i* q1,
-                                  const __m128i* mask, int hev_thresh) {
+static inline void DoFilter4(__m128i* p1, __m128i *p0, __m128i* q0, __m128i* q1,
+                             const __m128i* mask, int hev_thresh) {
   __m128i not_hev;
   __m128i t1, t2, t3;
   const __m128i sign_bit = _mm_set1_epi8(0x80);
@@ -413,9 +408,9 @@ static WEBP_INLINE void DoFilter4(__m128i* p1, __m128i *p0,
 }
 
 // Applies filter on 6 pixels (p2, p1, p0, q0, q1 and q2)
-static WEBP_INLINE void DoFilter6(__m128i *p2, __m128i* p1, __m128i *p0,
-                                  __m128i* q0, __m128i* q1, __m128i *q2,
-                                  const __m128i* mask, int hev_thresh) {
+static inline void DoFilter6(__m128i *p2, __m128i* p1, __m128i *p0,
+                             __m128i* q0, __m128i* q1, __m128i *q2,
+                             const __m128i* mask, int hev_thresh) {
   __m128i a, not_hev;
   const __m128i sign_bit = _mm_set1_epi8(0x80);
 
@@ -471,8 +466,8 @@ static WEBP_INLINE void DoFilter6(__m128i *p2, __m128i* p1, __m128i *p0,
 //
 // TODO(somnath): Investigate _mm_shuffle* also see if it can be broken into
 // two Load4x4() to avoid code duplication.
-static WEBP_INLINE void Load8x4(const uint8_t* b, int stride,
-                                __m128i* p, __m128i* q) {
+static inline void Load8x4(const uint8_t* b, int stride,
+                           __m128i* p, __m128i* q) {
   __m128i t1, t2;
 
   // Load 0th, 1st, 4th and 5th rows
@@ -511,10 +506,9 @@ static WEBP_INLINE void Load8x4(const uint8_t* b, int stride,
   *q = _mm_unpackhi_epi32(t1, t2);
 }
 
-static WEBP_INLINE void Load16x4(const uint8_t* r0, const uint8_t* r8,
-                                 int stride,
-                                 __m128i* p1, __m128i* p0,
-                                 __m128i* q0, __m128i* q1) {
+static inline void Load16x4(const uint8_t* r0, const uint8_t* r8, int stride,
+                            __m128i* p1, __m128i* p0,
+                            __m128i* q0, __m128i* q1) {
   __m128i t1, t2;
   // Assume the pixels around the edge (|) are numbered as follows
   //                00 01 | 02 03
@@ -546,7 +540,7 @@ static WEBP_INLINE void Load16x4(const uint8_t* r0, const uint8_t* r8,
   *q1 = _mm_unpackhi_epi64(t2, *q1);
 }
 
-static WEBP_INLINE void Store4x4(__m128i* x, uint8_t* dst, int stride) {
+static inline void Store4x4(__m128i* x, uint8_t* dst, int stride) {
   int i;
   for (i = 0; i < 4; ++i, dst += stride) {
     *((int32_t*)dst) = _mm_cvtsi128_si32(*x);
@@ -555,9 +549,8 @@ static WEBP_INLINE void Store4x4(__m128i* x, uint8_t* dst, int stride) {
 }
 
 // Transpose back and store
-static WEBP_INLINE void Store16x4(uint8_t* r0, uint8_t* r8, int stride,
-                                  __m128i* p1, __m128i* p0,
-                                  __m128i* q0, __m128i* q1) {
+static inline void Store16x4(uint8_t* r0, uint8_t* r8, int stride, __m128i* p1,
+                             __m128i* p0, __m128i* q0, __m128i* q1) {
   __m128i t1;
 
   // p0 = 71 70 61 60 51 50 41 40 31 30 21 20 11 10 01 00
@@ -878,15 +871,9 @@ static void HFilter8iSSE2(uint8_t* u, uint8_t* v, int stride,
   Store16x4(u, v, stride, &p1, &p0, &q0, &q1);
 }
 
-#endif   // WEBP_USE_SSE2
-
-//------------------------------------------------------------------------------
-// Entry point
-
 extern void VP8DspInitSSE2(void);
 
 void VP8DspInitSSE2(void) {
-#if defined(WEBP_USE_SSE2)
   VP8Transform = TransformSSE2;
 
   VP8VFilter16 = VFilter16SSE2;
@@ -902,9 +889,10 @@ void VP8DspInitSSE2(void) {
   VP8SimpleHFilter16 = SimpleHFilter16SSE2;
   VP8SimpleVFilter16i = SimpleVFilter16iSSE2;
   VP8SimpleHFilter16i = SimpleHFilter16iSSE2;
-#endif   // WEBP_USE_SSE2
 }
 
 #if defined(__cplusplus) || defined(c_plusplus)
 }    // extern "C"
 #endif
+
+#endif   //__SSE2__ || _MSC_VER

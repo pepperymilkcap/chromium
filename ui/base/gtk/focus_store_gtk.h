@@ -4,6 +4,7 @@
 
 #ifndef UI_BASE_GTK_FOCUS_STORE_GTK_H_
 #define UI_BASE_GTK_FOCUS_STORE_GTK_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "ui/base/ui_export.h"

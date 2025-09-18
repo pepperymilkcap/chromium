@@ -1,20 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_DOWNLOAD_SAVE_TYPES_H_
 #define CONTENT_BROWSER_DOWNLOAD_SAVE_TYPES_H_
+#pragma once
 
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/files/file_path.h"
-#include "url/gurl.h"
+#include "base/file_path.h"
+#include "googleurl/src/gurl.h"
 
-namespace content {
-typedef std::vector<std::pair<int, base::FilePath> > FinalNameList;
+typedef std::vector<std::pair<int, FilePath> > FinalNameList;
 typedef std::vector<int> SaveIDList;
 
 // This structure is used to handle and deliver some info
@@ -33,7 +33,7 @@ struct SaveFileCreateInfo {
     SAVE_FILE_FROM_FILE
   };
 
-  SaveFileCreateInfo(const base::FilePath& path,
+  SaveFileCreateInfo(const FilePath& path,
                      const GURL& url,
                      SaveFileSource save_source,
                      int32 save_id);
@@ -44,7 +44,7 @@ struct SaveFileCreateInfo {
 
   // SaveItem fields.
   // The local file path of saved file.
-  base::FilePath path;
+  FilePath path;
   // Original URL of the saved resource.
   GURL url;
   // Final URL of the saved resource since some URL might be redirected.
@@ -52,7 +52,7 @@ struct SaveFileCreateInfo {
   // The unique identifier for saving job, assigned at creation by
   // the SaveFileManager for its internal record keeping.
   int save_id;
-  // IDs for looking up the contents we are associated with.
+  // IDs for looking up the tab we are associated with.
   int render_process_id;
   int render_view_id;
   // Handle for informing the ResourceDispatcherHost of a UI based cancel.
@@ -64,7 +64,5 @@ struct SaveFileCreateInfo {
   // Source type of saved file.
   SaveFileSource save_source;
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_SAVE_TYPES_H_

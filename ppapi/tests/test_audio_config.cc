@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,20 +19,8 @@ bool TestAudioConfig::Init() {
 }
 
 void TestAudioConfig::RunTests(const std::string& filter) {
-  RUN_TEST(RecommendSampleRate, filter);
   RUN_TEST(ValidConfigs, filter);
   RUN_TEST(InvalidConfigs, filter);
-}
-
-std::string TestAudioConfig::TestRecommendSampleRate() {
-  // Ask PPB_AudioConfig about the recommended sample rate.
-  PP_AudioSampleRate sample_rate = audio_config_interface_->RecommendSampleRate(
-      instance_->pp_instance());
-  ASSERT_TRUE(sample_rate == PP_AUDIOSAMPLERATE_NONE ||
-              sample_rate == PP_AUDIOSAMPLERATE_44100 ||
-              sample_rate == PP_AUDIOSAMPLERATE_48000);
-
-  PASS();
 }
 
 std::string TestAudioConfig::TestValidConfigs() {
@@ -53,14 +41,14 @@ std::string TestAudioConfig::TestValidConfigs() {
     PP_AudioSampleRate sample_rate = kSampleRates[i];
 
     for (size_t j = 0;
-         j < sizeof(kRequestFrameCounts)/sizeof(kRequestFrameCounts[0]);
+         j < sizeof(kRequestFrameCounts)/sizeof(kRequestFrameCounts);
          j++) {
       uint32_t request_frame_count = kRequestFrameCounts[j];
       ASSERT_TRUE(request_frame_count >= PP_AUDIOMINSAMPLEFRAMECOUNT);
       ASSERT_TRUE(request_frame_count <= PP_AUDIOMAXSAMPLEFRAMECOUNT);
 
       uint32_t frame_count = audio_config_interface_->RecommendSampleFrameCount(
-          instance_->pp_instance(), sample_rate, request_frame_count);
+          sample_rate, request_frame_count);
       ASSERT_TRUE(frame_count >= PP_AUDIOMINSAMPLEFRAMECOUNT);
       ASSERT_TRUE(frame_count <= PP_AUDIOMAXSAMPLEFRAMECOUNT);
 

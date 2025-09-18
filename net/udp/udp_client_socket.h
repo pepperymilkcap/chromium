@@ -4,6 +4,7 @@
 
 #ifndef NET_SOCKET_UDP_CLIENT_SOCKET_H_
 #define NET_SOCKET_UDP_CLIENT_SOCKET_H_
+#pragma once
 
 #include "net/base/net_log.h"
 #include "net/base/rand_callback.h"

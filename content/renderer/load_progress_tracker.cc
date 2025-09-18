@@ -5,11 +5,10 @@
 #include "content/renderer/load_progress_tracker.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/render_view_impl.h"
 
-namespace content {
 namespace {
 
 const int kMinimumDelayBetweenUpdatesMS = 100;
@@ -20,7 +19,7 @@ LoadProgressTracker::LoadProgressTracker(RenderViewImpl* render_view)
     : render_view_(render_view),
       tracked_frame_(NULL),
       progress_(0.0),
-      weak_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 LoadProgressTracker::~LoadProgressTracker() {
@@ -38,7 +37,7 @@ void LoadProgressTracker::DidStopLoading() {
   ResetStates();
 }
 
-void LoadProgressTracker::DidChangeLoadProgress(blink::WebFrame* frame,
+void LoadProgressTracker::DidChangeLoadProgress(WebKit::WebFrame* frame,
                                                 double progress) {
   if (tracked_frame_ && frame != tracked_frame_)
     return;
@@ -68,7 +67,7 @@ void LoadProgressTracker::DidChangeLoadProgress(blink::WebFrame* frame,
   if (weak_factory_.HasWeakPtrs())
     return;
 
-  base::MessageLoop::current()->PostDelayedTask(
+  MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&LoadProgressTracker::SendChangeLoadProgress,
                  weak_factory_.GetWeakPtr()),
@@ -88,5 +87,3 @@ void LoadProgressTracker::ResetStates() {
   weak_factory_.InvalidateWeakPtrs();
   last_time_progress_sent_ = base::TimeTicks();
 }
-
-}  // namespace content

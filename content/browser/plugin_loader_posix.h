@@ -5,24 +5,22 @@
 #ifndef CONTENT_BROWSER_PLUGIN_LOADER_POSIX_H_
 #define CONTENT_BROWSER_PLUGIN_LOADER_POSIX_H_
 
-#include <deque>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/time/time.h"
+#include "base/time.h"
 #include "content/browser/plugin_service_impl.h"
-#include "content/public/browser/utility_process_host_client.h"
-#include "content/public/common/webplugininfo.h"
-#include "ipc/ipc_sender.h"
+#include "content/browser/utility_process_host.h"
+#include "ipc/ipc_message.h"
+#include "webkit/plugins/webplugininfo.h"
+
+class FilePath;
+class UtilityProcessHost;
 
 namespace base {
 class MessageLoopProxy;
 }
-
-namespace content {
-class UtilityProcessHost;
 
 // This class is responsible for managing the out-of-process plugin loading on
 // POSIX systems. It primarily lives on the IO thread, but has a brief stay on
@@ -45,32 +43,31 @@ class UtilityProcessHost;
 // 5. This algorithm continues until the canonical list has been walked to the
 //    end, after which the list of loaded plugins is set on the PluginList and
 //    the completion callback is run.
-class CONTENT_EXPORT PluginLoaderPosix
-    : public NON_EXPORTED_BASE(UtilityProcessHostClient),
-      public IPC::Sender {
+class CONTENT_EXPORT PluginLoaderPosix : public UtilityProcessHost::Client,
+                                                IPC::Message::Sender {
  public:
   PluginLoaderPosix();
 
   // Must be called from the IO thread.
   void LoadPlugins(
       scoped_refptr<base::MessageLoopProxy> target_loop,
-      const PluginService::GetPluginsCallback& callback);
+      const content::PluginService::GetPluginsCallback& callback);
 
-  // UtilityProcessHostClient:
+  // UtilityProcessHost::Client:
   virtual void OnProcessCrashed(int exit_code) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  // IPC::Sender:
+  // IPC::Message::Sender:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
  private:
   struct PendingCallback {
     PendingCallback(scoped_refptr<base::MessageLoopProxy> target_loop,
-                    const PluginService::GetPluginsCallback& callback);
+                    const content::PluginService::GetPluginsCallback& callback);
     ~PendingCallback();
 
     scoped_refptr<base::MessageLoopProxy> target_loop;
-    PluginService::GetPluginsCallback callback;
+    content::PluginService::GetPluginsCallback callback;
   };
 
   virtual ~PluginLoaderPosix();
@@ -82,12 +79,12 @@ class CONTENT_EXPORT PluginLoaderPosix
   virtual void LoadPluginsInternal();
 
   // Message handlers.
-  void OnPluginLoaded(uint32 index, const WebPluginInfo& plugin);
-  void OnPluginLoadFailed(uint32 index, const base::FilePath& plugin_path);
+  void OnPluginLoaded(uint32 index, const webkit::WebPluginInfo& plugin);
+  void OnPluginLoadFailed(uint32 index, const FilePath& plugin_path);
 
   // Checks if the plugin path is an internal plugin, and, if it is, adds it to
   // |loaded_plugins_|.
-  bool MaybeAddInternalPlugin(const base::FilePath& plugin_path);
+  bool MaybeAddInternalPlugin(const FilePath& plugin_path);
 
   // Runs all the registered callbacks on each's target loop if the condition
   // for ending the load process is done (i.e. the |next_load_index_| is outside
@@ -99,21 +96,21 @@ class CONTENT_EXPORT PluginLoaderPosix
 
   // A list of paths to plugins which will be loaded by the utility process, in
   // the order specified by this vector.
-  std::vector<base::FilePath> canonical_list_;
+  std::vector<FilePath> canonical_list_;
 
   // The index in |canonical_list_| of the plugin that the child process will
   // attempt to load next.
   size_t next_load_index_;
 
   // Internal plugins that have been registered at the time of loading.
-  std::vector<WebPluginInfo> internal_plugins_;
+  std::vector<webkit::WebPluginInfo> internal_plugins_;
 
   // A vector of plugins that have been loaded successfully.
-  std::vector<WebPluginInfo> loaded_plugins_;
+  std::vector<webkit::WebPluginInfo> loaded_plugins_;
 
   // The callback and message loop on which the callback will be run when the
   // plugin loading process has been completed.
-  std::deque<PendingCallback> callbacks_;
+  std::vector<PendingCallback> callbacks_;
 
   // The time at which plugin loading started.
   base::TimeTicks load_start_time_;
@@ -121,7 +118,5 @@ class CONTENT_EXPORT PluginLoaderPosix
   friend class MockPluginLoaderPosix;
   DISALLOW_COPY_AND_ASSIGN(PluginLoaderPosix);
 };
-
-}  // namespace content
 
 #endif  // CONTENT_BROWSER_PLUGIN_LOADER_POSIX_H_

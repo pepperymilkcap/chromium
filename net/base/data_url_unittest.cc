@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/data_url.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/gurl.h"
 
 namespace {
 
@@ -147,20 +147,6 @@ TEST(DataURLTest, Parse) {
       "text/plain",
       "utf-8",
       "Hell\xC3\xB6" },
-
-    // Not sufficiently padded.
-    { "data:;base64,aGVsbG8gd29ybGQ",
-      true,
-      "text/plain",
-      "US-ASCII",
-      "hello world" },
-
-    // Bad encoding (truncated).
-    { "data:;base64,aGVsbG8gd29yb",
-      false,
-      "",
-      "",
-      "" },
 
     // TODO(darin): add more interesting tests
   };

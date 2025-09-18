@@ -6,23 +6,17 @@
 
 #include <string>
 
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/api/tabs/tabs_constants.h"
+#include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "extensions/browser/extension_function.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/id_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::WebContents;
-using extensions::Extension;
-using extensions::Manifest;
-namespace keys = extensions::tabs_constants;
 
 namespace {
 
@@ -34,9 +28,8 @@ class TestFunctionDispatcherDelegate
   virtual ~TestFunctionDispatcherDelegate() {}
 
  private:
-  virtual extensions::WindowController* GetExtensionWindowController()
-      const OVERRIDE {
-    return browser_->extension_window_controller();
+  virtual Browser* GetBrowser() OVERRIDE {
+    return browser_;
   }
 
   virtual WebContents* GetAssociatedWebContents() const OVERRIDE {
@@ -51,7 +44,8 @@ class TestFunctionDispatcherDelegate
 namespace extension_function_test_utils {
 
 base::Value* ParseJSON(const std::string& data) {
-  return base::JSONReader::Read(data);
+  const bool kAllowTrailingComma = false;
+  return base::JSONReader::Read(data, kAllowTrailingComma);
 }
 
 base::ListValue* ParseList(const std::string& data) {
@@ -105,57 +99,18 @@ base::ListValue* ToList(base::Value* val) {
 }
 
 scoped_refptr<Extension> CreateEmptyExtension() {
-  return CreateEmptyExtensionWithLocation(Manifest::INTERNAL);
-}
-
-scoped_refptr<Extension> CreateEmptyExtensionWithLocation(
-    Manifest::Location location) {
-  scoped_ptr<base::DictionaryValue> test_extension_value(
-      ParseDictionary("{\"name\": \"Test\", \"version\": \"1.0\"}"));
-  return CreateExtension(location, test_extension_value.get(), std::string());
-}
-
-scoped_refptr<Extension> CreateEmptyExtension(
-    const std::string& id_input) {
-  scoped_ptr<base::DictionaryValue> test_extension_value(
-      ParseDictionary("{\"name\": \"Test\", \"version\": \"1.0\"}"));
-  return CreateExtension(Manifest::INTERNAL, test_extension_value.get(),
-                         id_input);
-}
-
-scoped_refptr<Extension> CreateExtension(
-    base::DictionaryValue* test_extension_value) {
-  return CreateExtension(Manifest::INTERNAL, test_extension_value,
-                         std::string());
-}
-
-scoped_refptr<Extension> CreateExtension(
-    Manifest::Location location,
-    base::DictionaryValue* test_extension_value,
-    const std::string& id_input) {
   std::string error;
-  const base::FilePath test_extension_path;
-  std::string id;
-  if (!id_input.empty())
-    id = extensions::id_util::GenerateId(id_input);
+  const FilePath test_extension_path;
+  scoped_ptr<base::DictionaryValue> test_extension_value(
+      ParseDictionary("{\"name\": \"Test\", \"version\": \"1.0\"}"));
   scoped_refptr<Extension> extension(Extension::Create(
       test_extension_path,
-      location,
-      *test_extension_value,
+      Extension::INTERNAL,
+      *test_extension_value.get(),
       Extension::NO_FLAGS,
-      id,
       &error));
   EXPECT_TRUE(error.empty()) << "Could not parse test extension " << error;
   return extension;
-}
-
-bool HasPrivacySensitiveFields(base::DictionaryValue* val) {
-  std::string result;
-  if (val->GetString(keys::kUrlKey, &result) ||
-      val->GetString(keys::kTitleKey, &result) ||
-      val->GetString(keys::kFaviconUrlKey, &result))
-    return true;
-  return false;
 }
 
 std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
@@ -168,39 +123,30 @@ std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
                                       Browser* browser,
                                       RunFunctionFlags flags) {
   scoped_refptr<ExtensionFunction> function_owner(function);
-  // Without a callback the function will not generate a result.
-  function->set_has_callback(true);
   RunFunction(function, args, browser, flags);
-  EXPECT_FALSE(function->GetResultList()) << "Did not expect a result";
+  EXPECT_FALSE(function->GetResultValue()) << "Unexpected function result " <<
+      function->GetResult();
   return function->GetError();
 }
 
-base::Value* RunFunctionAndReturnSingleResult(
-    UIThreadExtensionFunction* function,
-    const std::string& args,
-    Browser* browser) {
-  return RunFunctionAndReturnSingleResult(function, args, browser, NONE);
+base::Value* RunFunctionAndReturnResult(UIThreadExtensionFunction* function,
+                                        const std::string& args,
+                                        Browser* browser) {
+  return RunFunctionAndReturnResult(function, args, browser, NONE);
 }
-base::Value* RunFunctionAndReturnSingleResult(
-    UIThreadExtensionFunction* function,
-    const std::string& args,
-    Browser* browser,
-    RunFunctionFlags flags) {
+base::Value* RunFunctionAndReturnResult(UIThreadExtensionFunction* function,
+                                        const std::string& args,
+                                        Browser* browser,
+                                        RunFunctionFlags flags) {
   scoped_refptr<ExtensionFunction> function_owner(function);
-  // Without a callback the function will not generate a result.
-  function->set_has_callback(true);
   RunFunction(function, args, browser, flags);
   EXPECT_TRUE(function->GetError().empty()) << "Unexpected error: "
       << function->GetError();
-  const base::Value* single_result = NULL;
-  if (function->GetResultList() != NULL &&
-      function->GetResultList()->Get(0, &single_result)) {
-    return single_result->DeepCopy();
-  }
-  return NULL;
+  return (function->GetResultValue() == NULL) ? NULL :
+      function->GetResultValue()->DeepCopy();
 }
 
-// This helps us be able to wait until an UIThreadExtensionFunction calls
+// This helps us be able to wait until an AsyncExtensionFunction calls
 // SendResponse.
 class SendResponseDelegate
     : public UIThreadExtensionFunction::DelegateForTests {
@@ -223,14 +169,12 @@ class SendResponseDelegate
   }
 
   virtual void OnSendResponse(UIThreadExtensionFunction* function,
-                              bool success,
-                              bool bad_message) OVERRIDE {
-    ASSERT_FALSE(bad_message);
+                              bool success) {
     ASSERT_FALSE(HasResponse());
     response_.reset(new bool);
     *response_ = success;
     if (should_post_quit_) {
-      base::MessageLoopForUI::current()->Quit();
+      MessageLoopForUI::current()->Quit();
     }
   }
 
@@ -255,7 +199,7 @@ bool RunFunction(UIThreadExtensionFunction* function,
       browser->profile(), &dispatcher_delegate);
   function->set_dispatcher(dispatcher.AsWeakPtr());
 
-  function->set_context(browser->profile());
+  function->set_profile(browser->profile());
   function->set_include_incognito(flags & INCLUDE_INCOGNITO);
   function->Run();
 
@@ -263,7 +207,7 @@ bool RunFunction(UIThreadExtensionFunction* function,
   // message loop until they do.
   if (!response_delegate.HasResponse()) {
     response_delegate.set_should_post_quit(true);
-    content::RunMessageLoop();
+    ui_test_utils::RunMessageLoop();
   }
 
   EXPECT_TRUE(response_delegate.HasResponse());

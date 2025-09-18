@@ -6,21 +6,15 @@
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_CANDIDATE_WINDOW_VIEW_H_
 
 #include "base/gtest_prod_util.h"
-#include "base/memory/scoped_ptr.h"
-#include "chromeos/ime/candidate_window.h"
+#include "chrome/browser/chromeos/input_method/ibus_ui_controller.h"
 #include "ui/views/view.h"
-
-namespace gfx {
-class Font;
-}
 
 namespace chromeos {
 namespace input_method {
 
 class CandidateView;
-class CandidateWindow;
-class HidableArea;
 class InformationTextArea;
+class HidableArea;
 
 // CandidateWindowView is the main container of the candidate window UI.
 class CandidateWindowView : public views::View {
@@ -30,7 +24,9 @@ class CandidateWindowView : public views::View {
    public:
     virtual ~Observer() {}
     // The function is called when a candidate is committed.
-    virtual void OnCandidateCommitted(int index) = 0;
+    // See comments at NotifyCandidateClicked() in chromeos_input_method_ui.h
+    // for details about the parameters.
+    virtual void OnCandidateCommitted(int index, int button, int flag) = 0;
 
     virtual void OnCandidateWindowOpened() = 0;
     virtual void OnCandidateWindowClosed() = 0;
@@ -84,6 +80,9 @@ class CandidateWindowView : public views::View {
   // Shows the preedit text.
   void ShowPreeditText();
 
+  // Updates the auxiliary text.
+  void UpdateAuxiliaryText(const std::string& utf8_text);
+
   // Updates the preedit text.
   void UpdatePreeditText(const std::string& utf8_text);
 
@@ -92,12 +91,12 @@ class CandidateWindowView : public views::View {
   // don't have to update candidate views. This happens when the user just
   // moves the cursor in the same page in the candidate window.
   static bool ShouldUpdateCandidateViews(
-      const CandidateWindow& old_candidate_window,
-      const CandidateWindow& new_candidate_window);
+      const InputMethodLookupTable& old_table,
+      const InputMethodLookupTable& new_table);
 
-  // Updates candidates of the candidate window from |candidate_window|.
+  // Updates candidates of the candidate window from |lookup_table|.
   // Candidates are arranged per |orientation|.
-  void UpdateCandidates(const CandidateWindow& candidate_window);
+  void UpdateCandidates(const InputMethodLookupTable& lookup_table);
 
   // Resizes and moves the parent frame. The two actions should be
   // performed consecutively as resizing may require the candidate window
@@ -121,19 +120,11 @@ class CandidateWindowView : public views::View {
   // Returns 0 if no candidate is present.
   int GetHorizontalOffset();
 
-  void set_cursor_bounds(const gfx::Rect& cursor_bounds) {
-    cursor_bounds_ = cursor_bounds;
+  void set_cursor_location(const gfx::Rect& cursor_location) {
+    cursor_location_ = cursor_location;
   }
 
-  void set_composition_head_bounds(
-      const gfx::Rect& composition_head_bounds) {
-    composition_head_bounds_ = composition_head_bounds;
-  }
-
-  const gfx::Rect& cursor_bounds() const { return cursor_bounds_; }
-  const gfx::Rect& composition_head_bounds() const {
-    return composition_head_bounds_;
-  }
+  const gfx::Rect& cursor_location() const { return cursor_location_; }
 
  protected:
   // Override View::VisibilityChanged()
@@ -143,14 +134,11 @@ class CandidateWindowView : public views::View {
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(CandidateWindowViewTest,
-                           UpdateCandidatesTest_CursorVisibility);
-  FRIEND_TEST_ALL_PREFIXES(CandidateWindowViewTest, ShortcutSettingTest);
-  FRIEND_TEST_ALL_PREFIXES(CandidateWindowViewTest,
-                           DoNotChangeRowHeightWithLabelSwitchTest);
+  FRIEND_TEST_ALL_PREFIXES(CandidateWindowViewTest, MozcUpdateCandidateTest);
 
   // Initializes the candidate views if needed.
-  void MaybeInitializeCandidateViews(const CandidateWindow& candidate_window);
+  void MaybeInitializeCandidateViews(
+      const InputMethodLookupTable& lookup_table);
 
   // Returns the appropriate area (header or footer) to put auxiliary texts.
   InformationTextArea* GetAuxiliaryTextArea();
@@ -163,8 +151,8 @@ class CandidateWindowView : public views::View {
   // changed from the previous call to this function.
   void NotifyIfCandidateWindowOpenedOrClosed();
 
-  // The candidate window.
-  CandidateWindow candidate_window_;
+  // The lookup table (candidates).
+  InputMethodLookupTable lookup_table_;
 
   // The index in the current page of the candidate currently being selected.
   int selected_candidate_index_in_page_;
@@ -195,24 +183,23 @@ class CandidateWindowView : public views::View {
   // showing candidate number information like 2/19.
   InformationTextArea* footer_area_;
 
-  // Current columns size in |candidate_area_|.
-  gfx::Size previous_shortcut_column_size_;
-  gfx::Size previous_candidate_column_size_;
-  gfx::Size previous_annotation_column_size_;
+  // Current columns width in |candidate_area_|.
+  int previous_shortcut_column_width_;
+  int previous_candidate_column_width_;
+  int previous_annotation_column_width_;
 
-  // The last cursor bounds.
-  gfx::Rect cursor_bounds_;
+  // The last cursor location.
+  gfx::Rect cursor_location_;
 
-  // The last compostion head bounds.
-  gfx::Rect composition_head_bounds_;
+  // This location is used by suggestion window rendering which is mostly used
+  // by ibus-mozc. The suggestion window should be aligned with the composition
+  // text as opposed to the cursor. In case of ibus-mozc, suggestion window
+  // location is calculated by engine and it carried by update_lookup_table
+  // signal as additional information. This value is available when
+  // is_suggestion_window_available is true.
+  gfx::Rect suggestion_window_location_;
 
-  // True if the candidate window should be shown with aligning with composition
-  // text as opposed to the cursor.
-  bool should_show_at_composition_head_;
-
-  // True if the candidate window should be shonw on the upper side of
-  // composition text.
-  bool should_show_upper_side_;
+  bool is_suggestion_window_location_available_;
 
   // True if the candidate window was open.  This is used to determine when to
   // send OnCandidateWindowOpened and OnCandidateWindowClosed events.

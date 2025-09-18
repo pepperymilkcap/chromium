@@ -6,8 +6,8 @@
 #define CONTENT_COMMON_HANDLE_ENUMERATOR_WIN_H_
 
 #include "base/memory/ref_counted.h"
-#include "base/process/process.h"
-#include "base/strings/string16.h"
+#include "base/process.h"
+#include "base/string16.h"
 
 namespace content {
 
@@ -31,10 +31,9 @@ enum HandleType {
   OtherHandle
 };
 
-static HandleType StringToHandleType(const base::string16& type);
+static HandleType StringToHandleType(const string16& type);
 
-static base::string16 GetAccessString(HandleType handle_type,
-                                      ACCESS_MASK access);
+static string16 GetAccessString(HandleType handle_type, ACCESS_MASK access);
 
 class HandleEnumerator : public base::RefCountedThreadSafe<HandleEnumerator> {
  public:

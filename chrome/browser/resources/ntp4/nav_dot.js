@@ -8,7 +8,7 @@
  * of the NTP.
  */
 
-cr.define('ntp', function() {
+cr.define('ntp4', function() {
   'use strict';
 
   /**
@@ -73,7 +73,8 @@ cr.define('ntp', function() {
     },
 
     /**
-     * @return {TilePage} The associated TilePage.
+     * Gets the associated TilePage.
+     * @return {TilePage}
      */
     get page() {
       return this.page_;
@@ -81,7 +82,7 @@ cr.define('ntp', function() {
 
     /**
      * Sets/gets the display title.
-     * @type {string} title The display name for this nav dot.
+     * @type {String} title The display name for this nav dot.
      */
     get displayTitle() {
       return this.title;
@@ -106,7 +107,7 @@ cr.define('ntp', function() {
      * Navigates the card slider to the page for this dot.
      */
     switchToPage: function() {
-      ntp.getCardSlider().selectCardByValue(this.page_, true);
+      ntp4.getCardSlider().selectCardByValue(this.page_, true);
     },
 
     /**
@@ -132,6 +133,7 @@ cr.define('ntp', function() {
       if (this.ownerDocument.activeElement != this.input_)
         this.focus();
 
+      chrome.send('introMessageDismissed');
       e.stopPropagation();
     },
 
@@ -181,7 +183,7 @@ cr.define('ntp', function() {
     onInputBlur_: function(e) {
       window.getSelection().removeAllRanges();
       this.displayTitle = this.input_.value;
-      ntp.saveAppPageName(this.page_, this.displayTitle);
+      ntp4.saveAppPageName(this.page_, this.displayTitle);
       this.input_.disabled = true;
     },
 
@@ -217,7 +219,7 @@ cr.define('ntp', function() {
       e.preventDefault();
 
       if (!this.dragWrapper_.isCurrentDragTarget)
-        ntp.setCurrentDropEffect(e.dataTransfer, 'none');
+        ntp4.setCurrentDropEffect(e.dataTransfer, 'none');
       else
         this.page_.setDropEffect(e.dataTransfer);
     },
@@ -230,7 +232,7 @@ cr.define('ntp', function() {
      */
     doDrop: function(e) {
       e.stopPropagation();
-      var tile = ntp.getCurrentlyDraggingTile();
+      var tile = ntp4.getCurrentlyDraggingTile();
       if (tile && tile.tilePage != this.page_)
         this.page_.appendDraggingTile();
       // TODO(estade): handle non-tile drags.

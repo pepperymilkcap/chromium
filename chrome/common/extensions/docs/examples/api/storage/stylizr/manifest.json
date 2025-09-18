@@ -4,8 +4,9 @@
   "version": "1.0",
 
   "permissions": [
-    "activeTab",
-    "storage"
+    "tabs",
+    "<all_urls>",
+    "experimental"
   ],
 
   "options_page": "options.html",

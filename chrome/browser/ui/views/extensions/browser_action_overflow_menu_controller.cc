@@ -1,34 +1,31 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/extensions/browser_action_overflow_menu_controller.h"
 
-#include "base/message_loop/message_loop.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
-#include "chrome/browser/ui/views/toolbar/browser_action_view.h"
-#include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
-#include "extensions/common/extension.h"
-#include "ui/gfx/canvas.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_action.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/menu/submenu_view.h"
 #include "ui/views/widget/widget.h"
 
 BrowserActionOverflowMenuController::BrowserActionOverflowMenuController(
     BrowserActionsContainer* owner,
-    Browser* browser,
     views::MenuButton* menu_button,
     const std::vector<BrowserActionView*>& views,
     int start_index)
     : owner_(owner),
-      browser_(browser),
       observer_(NULL),
       menu_button_(menu_button),
       menu_(NULL),
@@ -42,16 +39,16 @@ BrowserActionOverflowMenuController::BrowserActionOverflowMenuController(
   size_t command_id = 1;  // Menu id 0 is reserved, start with 1.
   for (size_t i = start_index; i < views_->size(); ++i) {
     BrowserActionView* view = (*views_)[i];
+    scoped_ptr<gfx::Canvas> canvas(view->GetIconWithBadge());
     menu_->AppendMenuItemWithIcon(
         command_id,
-        base::UTF8ToUTF16(view->button()->extension()->name()),
-        view->GetIconWithBadge());
+        UTF8ToUTF16(view->button()->extension()->name()),
+        canvas->AsCanvasSkia()->ExtractBitmap());
 
     // Set the tooltip for this item.
-    base::string16 tooltip = base::UTF8ToUTF16(
-        extensions::ExtensionActionManager::Get(owner_->profile())->
-        GetBrowserAction(*view->button()->extension())->
-        GetTitle(owner_->GetCurrentTabId()));
+    string16 tooltip = UTF8ToUTF16(
+        view->button()->extension()->browser_action()->GetTitle(
+            owner_->GetCurrentTabId()));
     menu_->SetTooltip(tooltip, command_id);
 
     ++command_id;
@@ -76,11 +73,11 @@ bool BrowserActionOverflowMenuController::RunMenu(views::Widget* window,
   views::MenuItemView::AnchorPosition anchor = views::MenuItemView::TOPRIGHT;
   // As we maintain our own lifetime we can safely ignore the result.
   ignore_result(menu_runner_->RunMenuAt(window, menu_button_, bounds, anchor,
-      ui::MENU_SOURCE_NONE, for_drop_ ? views::MenuRunner::FOR_DROP : 0));
+      for_drop_ ? views::MenuRunner::FOR_DROP : 0));
   if (!for_drop_) {
     // Give the context menu (if any) a chance to execute the user-selected
     // command.
-    base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   }
   return true;
 }
@@ -89,37 +86,34 @@ void BrowserActionOverflowMenuController::CancelMenu() {
   menu_->Cancel();
 }
 
-bool BrowserActionOverflowMenuController::IsCommandEnabled(int id) const {
-  BrowserActionView* view = (*views_)[start_index_ + id - 1];
-  return view->button()->IsEnabled(owner_->GetCurrentTabId());
-}
-
 void BrowserActionOverflowMenuController::ExecuteCommand(int id) {
   BrowserActionView* view = (*views_)[start_index_ + id - 1];
-  owner_->OnBrowserActionExecuted(view->button());
+  owner_->OnBrowserActionExecuted(view->button(),
+                                  false);  // inspect_with_devtools
 }
 
 bool BrowserActionOverflowMenuController::ShowContextMenu(
     views::MenuItemView* source,
     int id,
     const gfx::Point& p,
-    ui::MenuSourceType source_type) {
-  const extensions::Extension* extension =
+    bool is_mouse_gesture) {
+  const Extension* extension =
       (*views_)[start_index_ + id - 1]->button()->extension();
   if (!extension->ShowConfigureContextMenus())
     return false;
 
   scoped_refptr<ExtensionContextMenuModel> context_menu_contents =
-      new ExtensionContextMenuModel(extension, browser_, owner_);
-  views::MenuRunner context_menu_runner(context_menu_contents.get());
+      new ExtensionContextMenuModel(extension, owner_->browser(), owner_);
+  views::MenuModelAdapter context_menu_model_adapter(
+      context_menu_contents.get());
+  views::MenuRunner context_menu_runner(
+      context_menu_model_adapter.CreateMenu());
 
   // We can ignore the result as we delete ourself.
   // This blocks until the user choses something or dismisses the menu.
   ignore_result(context_menu_runner.RunMenuAt(menu_button_->GetWidget(),
       NULL, gfx::Rect(p, gfx::Size()), views::MenuItemView::TOPLEFT,
-      source_type,
-      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::IS_NESTED |
-      views::MenuRunner::CONTEXT_MENU));
+      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::IS_NESTED));
 
   // The user is done with the context menu, so we can close the underlying
   // menu.
@@ -156,7 +150,7 @@ bool BrowserActionOverflowMenuController::CanDrop(
 
 int BrowserActionOverflowMenuController::GetDropOperation(
     views::MenuItemView* item,
-    const ui::DropTargetEvent& event,
+    const views::DropTargetEvent& event,
     DropPosition* position) {
   // Don't allow dropping from the BrowserActionContainer into slot 0 of the
   // overflow menu since once the move has taken place the item you are dragging
@@ -177,7 +171,7 @@ int BrowserActionOverflowMenuController::GetDropOperation(
 int BrowserActionOverflowMenuController::OnPerformDrop(
     views::MenuItemView* menu,
     DropPosition position,
-    const ui::DropTargetEvent& event) {
+    const views::DropTargetEvent& event) {
   BrowserActionDragData drop_data;
   if (!drop_data.Read(event.data()))
     return ui::DragDropTypes::DRAG_NONE;

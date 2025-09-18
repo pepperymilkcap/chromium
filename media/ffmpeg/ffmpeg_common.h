@@ -9,11 +9,9 @@
 #include <cerrno>
 
 #include "base/compiler_specific.h"
-#include "base/time/time.h"
-#include "media/base/audio_decoder_config.h"
+#include "base/time.h"
 #include "media/base/channel_layout.h"
 #include "media/base/media_export.h"
-#include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
 
 // Include FFmpeg header files.
@@ -24,11 +22,9 @@ MSVC_PUSH_DISABLE_WARNING(4244);
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
-#include <libavutil/audioconvert.h>
 #include <libavutil/avutil.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/log.h>
-#include <libavutil/imgutils.h>
 MSVC_POP_WARNING();
 }  // extern "C"
 
@@ -58,28 +54,6 @@ class ScopedPtrAVFreePacket {
   }
 };
 
-// Frees an AVCodecContext object in a class that can be passed as a Deleter
-// argument to scoped_ptr_malloc.
-class ScopedPtrAVFreeContext {
- public:
-  inline void operator()(void* x) const {
-    AVCodecContext* codec_context = static_cast<AVCodecContext*>(x);
-    av_free(codec_context->extradata);
-    avcodec_close(codec_context);
-    av_free(codec_context);
-  }
-};
-
-// Frees an AVFrame object in a class that can be passed as a Deleter argument
-// to scoped_ptr_malloc.
-class ScopedPtrAVFreeFrame {
- public:
-  inline void operator()(void* x) const {
-    AVFrame* frame = static_cast<AVFrame*>(x);
-    avcodec_free_frame(&frame);
-  }
-};
-
 // Converts an int64 timestamp in |time_base| units to a base::TimeDelta.
 // For example if |timestamp| equals 11025 and |time_base| equals {1, 44100}
 // then the return value will be a base::TimeDelta for 0.25 seconds since that
@@ -94,18 +68,16 @@ MEDIA_EXPORT base::TimeDelta ConvertFromTimeBase(const AVRational& time_base,
 MEDIA_EXPORT int64 ConvertToTimeBase(const AVRational& time_base,
                                      const base::TimeDelta& timestamp);
 
-void AVStreamToAudioDecoderConfig(
-    const AVStream* stream,
-    AudioDecoderConfig* config,
-    bool record_stats);
+void AVCodecContextToAudioDecoderConfig(
+    const AVCodecContext* codec_context,
+    AudioDecoderConfig* config);
 void AudioDecoderConfigToAVCodecContext(
     const AudioDecoderConfig& config,
     AVCodecContext* codec_context);
 
 void AVStreamToVideoDecoderConfig(
     const AVStream* stream,
-    VideoDecoderConfig* config,
-    bool record_stats);
+    VideoDecoderConfig* config);
 void VideoDecoderConfigToAVCodecContext(
     const VideoDecoderConfig& config,
     AVCodecContext* codec_context);
@@ -116,15 +88,19 @@ void VideoDecoderConfigToAVCodecContext(
 ChannelLayout ChannelLayoutToChromeChannelLayout(int64_t layout,
                                                  int channels);
 
-// Converts FFmpeg's audio sample format to Chrome's SampleFormat.
-MEDIA_EXPORT SampleFormat
-    AVSampleFormatToSampleFormat(AVSampleFormat sample_format);
-
 // Converts FFmpeg's pixel formats to its corresponding supported video format.
 VideoFrame::Format PixelFormatToVideoFormat(PixelFormat pixel_format);
 
 // Converts video formats to its corresponding FFmpeg's pixel formats.
 PixelFormat VideoFormatToPixelFormat(VideoFrame::Format video_format);
+
+// Calculates the duration of one frame based on the frame rate specified by
+// |config|.
+base::TimeDelta GetFrameDuration(const VideoDecoderConfig& config);
+
+// Closes & destroys all AVStreams in the context and then closes &
+// destroys the AVFormatContext.
+void DestroyAVFormatContext(AVFormatContext* format_context);
 
 }  // namespace media
 

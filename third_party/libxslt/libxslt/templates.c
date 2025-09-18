@@ -18,7 +18,6 @@
 #include <libxml/globals.h>
 #include <libxml/xmlerror.h>
 #include <libxml/tree.h>
-#include <libxml/dict.h>
 #include <libxml/xpathInternals.h>
 #include <libxml/parserInternals.h>
 #include "xslt.h"
@@ -573,8 +572,7 @@ xsltAttrTemplateProcess(xsltTransformContextPtr ctxt, xmlNodePtr target,
 		}
 	    } else if ((ctxt->internalized) && (target != NULL) &&
 	               (target->doc != NULL) &&
-		       (target->doc->dict == ctxt->dict) &&
-		       xmlDictOwns(ctxt->dict, value)) {
+		       (target->doc->dict == ctxt->dict)) {
 		text->content = (xmlChar *) value;
 	    } else {
 		text->content = xmlStrdup(value);
@@ -759,8 +757,7 @@ xsltAttrListTemplateProcess(xsltTransformContextPtr ctxt,
 		}
 	    } else if ((ctxt->internalized) &&
 		(target->doc != NULL) &&
-		(target->doc->dict == ctxt->dict) &&
-		xmlDictOwns(ctxt->dict, value))
+		(target->doc->dict == ctxt->dict))
 	    {
 		text->content = (xmlChar *) value;
 	    } else {

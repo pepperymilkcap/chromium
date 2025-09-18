@@ -4,18 +4,19 @@
 
 #ifndef NET_HTTP_HTTP_RESPONSE_BODY_DRAINER_H_
 #define NET_HTTP_HTTP_RESPONSE_BODY_DRAINER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/timer/timer.h"
+#include "base/timer.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/http/http_network_session.h"
 
 namespace net {
 
-class HttpStreamBase;
+class HttpStream;
 class IOBuffer;
 
 class NET_EXPORT_PRIVATE HttpResponseBodyDrainer {
@@ -27,7 +28,7 @@ class NET_EXPORT_PRIVATE HttpResponseBodyDrainer {
   static const int kDrainBodyBufferSize = 16384;
   static const int kTimeoutInSeconds = 5;
 
-  explicit HttpResponseBodyDrainer(HttpStreamBase* stream);
+  explicit HttpResponseBodyDrainer(HttpStream* stream);
   ~HttpResponseBodyDrainer();
 
   // Starts reading the body until completion, or we hit the buffer limit, or we
@@ -56,7 +57,7 @@ class NET_EXPORT_PRIVATE HttpResponseBodyDrainer {
 
   int read_size_;
   scoped_refptr<IOBuffer> read_buf_;
-  const scoped_ptr<HttpStreamBase> stream_;
+  const scoped_ptr<HttpStream> stream_;
   State next_state_;
   int total_read_;
   CompletionCallback user_callback_;

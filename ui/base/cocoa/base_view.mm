@@ -8,16 +8,27 @@ NSString* kViewDidBecomeFirstResponder =
     @"Chromium.kViewDidBecomeFirstResponder";
 NSString* kSelectionDirection = @"Chromium.kSelectionDirection";
 
-const int kTrackingOptions = NSTrackingMouseMoved |
-                             NSTrackingMouseEnteredAndExited |
-                             NSTrackingActiveAlways;
-
 @implementation BaseView
 
+- (id)initWithFrame:(NSRect)frame {
+  self = [super initWithFrame:frame];
+  if (self) {
+    trackingArea_ =
+        [[NSTrackingArea alloc] initWithRect:frame
+                                     options:NSTrackingMouseMoved |
+                                             NSTrackingMouseEnteredAndExited |
+                                             NSTrackingActiveInActiveApp |
+                                             NSTrackingInVisibleRect
+                                       owner:self
+                                    userInfo:nil];
+    [self addTrackingArea:trackingArea_];
+  }
+  return self;
+}
+
 - (void)dealloc {
-  if (trackingArea_.get())
-    [self removeTrackingArea:trackingArea_.get()];
-  trackingArea_.reset(nil);
+  [self removeTrackingArea:trackingArea_];
+  [trackingArea_ release];
 
   [super dealloc];
 }
@@ -26,11 +37,8 @@ const int kTrackingOptions = NSTrackingMouseMoved |
   // This method left intentionally blank.
 }
 
-- (EventHandled)keyEvent:(NSEvent*)theEvent {
-  // The default implementation of this method does not handle any key events.
-  // Derived classes should return kEventHandled if they handled an event,
-  // otherwise it will be forwarded on to |super|.
-  return kEventNotHandled;
+- (void)keyEvent:(NSEvent*)theEvent {
+  // This method left intentionally blank.
 }
 
 - (void)mouseDown:(NSEvent*)theEvent {
@@ -112,45 +120,28 @@ const int kTrackingOptions = NSTrackingMouseMoved |
 }
 
 - (void)keyDown:(NSEvent*)theEvent {
-  if ([self keyEvent:theEvent] != kEventHandled)
-    [super keyDown:theEvent];
+  [self keyEvent:theEvent];
 }
 
 - (void)keyUp:(NSEvent*)theEvent {
-  if ([self keyEvent:theEvent] != kEventHandled)
-    [super keyUp:theEvent];
+  [self keyEvent:theEvent];
 }
 
 - (void)flagsChanged:(NSEvent*)theEvent {
-  if ([self keyEvent:theEvent] != kEventHandled)
-    [super flagsChanged:theEvent];
+  [self keyEvent:theEvent];
 }
 
 - (gfx::Rect)flipNSRectToRect:(NSRect)rect {
   gfx::Rect new_rect(NSRectToCGRect(rect));
-  new_rect.set_y(NSHeight([self bounds]) - new_rect.bottom());
+  new_rect.set_y([self bounds].size.height - new_rect.y() - new_rect.height());
   return new_rect;
 }
 
 - (NSRect)flipRectToNSRect:(gfx::Rect)rect {
   NSRect new_rect(NSRectFromCGRect(rect.ToCGRect()));
-  new_rect.origin.y = NSHeight([self bounds]) - NSMaxY(new_rect);
+  new_rect.origin.y =
+      [self bounds].size.height - new_rect.origin.y - new_rect.size.height;
   return new_rect;
-}
-
-- (void)updateTrackingAreas {
-  [super updateTrackingAreas];
-
-  // NSTrackingInVisibleRect doesn't work correctly with Lion's window resizing,
-  // http://crbug.com/176725 / http://openradar.appspot.com/radar?id=2773401 .
-  // Tear down old tracking area and create a new one as workaround.
-  if (trackingArea_.get())
-    [self removeTrackingArea:trackingArea_.get()];
-  trackingArea_.reset([[CrTrackingArea alloc] initWithRect:[self bounds]
-                                                   options:kTrackingOptions
-                                                     owner:self
-                                                  userInfo:nil]);
-  [self addTrackingArea:trackingArea_.get()];
 }
 
 @end

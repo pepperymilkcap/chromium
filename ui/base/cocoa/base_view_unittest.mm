@@ -4,7 +4,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 #include "ui/base/cocoa/base_view.h"
@@ -16,8 +16,7 @@ class BaseViewTest : public ui::CocoaTest {
  public:
   BaseViewTest() {
     NSRect frame = NSMakeRect(0, 0, 100, 100);
-    base::scoped_nsobject<BaseView> view(
-        [[BaseView alloc] initWithFrame:frame]);
+    scoped_nsobject<BaseView> view([[BaseView alloc] initWithFrame:frame]);
     view_ = view.get();
     [[test_window() contentView] addSubview:view_];
   }
@@ -35,15 +34,15 @@ TEST_F(BaseViewTest, flipNSRectToRect) {
   gfx::Rect converted = [view_ flipNSRectToRect:convert];
   EXPECT_EQ(converted.x(), 10);
   EXPECT_EQ(converted.y(), 40);  // Due to view being 100px tall.
-  EXPECT_EQ(converted.width(), NSWidth(convert));
-  EXPECT_EQ(converted.height(), NSHeight(convert));
+  EXPECT_EQ(converted.width(), convert.size.width);
+  EXPECT_EQ(converted.height(), convert.size.height);
 
   // Go back the other way.
   NSRect back_again = [view_ flipRectToNSRect:converted];
-  EXPECT_EQ(NSMinX(back_again), NSMinX(convert));
-  EXPECT_EQ(NSMinY(back_again), NSMinY(convert));
-  EXPECT_EQ(NSWidth(back_again), NSWidth(convert));
-  EXPECT_EQ(NSHeight(back_again), NSHeight(convert));
+  EXPECT_EQ(back_again.origin.x, convert.origin.x);
+  EXPECT_EQ(back_again.origin.y, convert.origin.y);
+  EXPECT_EQ(back_again.size.width, convert.size.width);
+  EXPECT_EQ(back_again.size.height, convert.size.height);
 }
 
 }  // namespace

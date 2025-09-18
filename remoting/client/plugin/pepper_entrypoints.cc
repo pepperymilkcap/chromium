@@ -4,7 +4,7 @@
 
 #include "remoting/client/plugin/pepper_entrypoints.h"
 
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
@@ -27,7 +27,7 @@ namespace remoting {
 
 class ChromotingModule : public pp::Module {
  protected:
-  virtual ChromotingInstance* CreateInstance(PP_Instance instance) OVERRIDE {
+  virtual ChromotingInstance* CreateInstance(PP_Instance instance) {
     return new ChromotingInstance(instance);
   }
 };
@@ -36,15 +36,16 @@ class ChromotingModule : public pp::Module {
 int32_t PPP_InitializeModule(PP_Module module_id,
                              PPB_GetInterface get_browser_interface) {
   ChromotingModule* module = new ChromotingModule();
+  if (!module)
+    return PP_ERROR_FAILED;
+
   if (!module->InternalInit(module_id, get_browser_interface)) {
     delete module;
     return PP_ERROR_FAILED;
   }
 
-#if !defined(NDEBUG)
-  // Register a global log handler, but only in Debug builds.
+  // Register a global log handler.
   ChromotingInstance::RegisterLogMessageHandler();
-#endif
 
   g_module_singleton = module;
   return PP_OK;

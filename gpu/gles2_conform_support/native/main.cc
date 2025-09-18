@@ -1,17 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/at_exit.h"
-#include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
-#if defined(OS_MACOSX)
-#include "base/mac/scoped_nsautorelease_pool.h"
-#endif
-#include "ui/gl/gl_surface.h"
+#include "base/message_loop.h"
 
-#if defined(TOOLKIT_GTK)
-#include "ui/gfx/gtk_util.h"
+#if defined(TOOLKIT_USES_GTK)
+#include <gtk/gtk.h>
 #endif
 
 extern "C" {
@@ -23,16 +18,12 @@ extern "C" {
 }
 
 int main(int argc, char *argv[]) {
-  base::AtExitManager at_exit;
-  CommandLine::Init(argc, argv);
-  base::MessageLoopForUI message_loop;
+#if defined(TOOLKIT_USES_GTK)
+  gtk_init(&argc, &argv);
+#endif
 
-#if defined(OS_MACOSX)
-  base::mac::ScopedNSAutoreleasePool pool;
-#endif
-#if defined(TOOLKIT_GTK)
-  gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
-#endif
+  base::AtExitManager at_exit;
+  MessageLoopForUI message_loop;
 
   GTFMain(argc, argv);
 

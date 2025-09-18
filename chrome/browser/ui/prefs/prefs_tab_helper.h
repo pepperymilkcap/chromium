@@ -4,61 +4,58 @@
 
 #ifndef CHROME_BROWSER_UI_PREFS_PREFS_TAB_HELPER_H_
 #define CHROME_BROWSER_UI_PREFS_PREFS_TAB_HELPER_H_
+#pragma once
 
-#include "base/callback_list.h"
-#include "base/compiler_specific.h"
-#include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
+#include "base/memory/scoped_ptr.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/web_contents_user_data.h"
+#include "content/public/browser/web_contents_observer.h"
 
 class OverlayUserPrefStore;
 class PrefService;
 class Profile;
-
-namespace content {
-class WebContents;
-}
-
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
+struct WebPreferences;
 
 // Per-tab class to handle user preferences.
-class PrefsTabHelper : public content::NotificationObserver,
-                       public content::WebContentsUserData<PrefsTabHelper> {
+class PrefsTabHelper : public content::WebContentsObserver,
+                       public content::NotificationObserver {
  public:
+  explicit PrefsTabHelper(content::WebContents* contents);
   virtual ~PrefsTabHelper();
 
   static void InitIncognitoUserPrefStore(OverlayUserPrefStore* pref_store);
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void InitPerTabUserPrefStore(OverlayUserPrefStore* pref_store);
+  static void RegisterUserPrefs(PrefService* prefs);
+
+  PrefService* per_tab_prefs() { return per_tab_prefs_.get(); }
 
  protected:
   // Update the RenderView's WebPreferences. Exposed as protected for testing.
   virtual void UpdateWebPreferences();
 
+  // content::WebContentsObserver overrides, exposed as protected for testing.
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+
  private:
-  explicit PrefsTabHelper(content::WebContents* contents);
-  friend class content::WebContentsUserData<PrefsTabHelper>;
+  // content::WebContentsObserver overrides:
+  virtual void WebContentsDestroyed(content::WebContents* tab) OVERRIDE;
 
   // content::NotificationObserver overrides:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Update the WebContents's RendererPreferences.
+  // Update the TabContents's RendererPreferences.
   void UpdateRendererPreferences();
 
   Profile* GetProfile();
-  void OnWebPrefChanged(const std::string& pref_name);
 
-  content::WebContents* web_contents_;
   content::NotificationRegistrar registrar_;
+
+  scoped_ptr<PrefService> per_tab_prefs_;
   PrefChangeRegistrar pref_change_registrar_;
-  scoped_ptr<base::CallbackList<void(void)>::Subscription>
-      style_sheet_subscription_;
-  base::WeakPtrFactory<PrefsTabHelper> weak_ptr_factory_;
+  PrefChangeRegistrar per_tab_pref_change_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(PrefsTabHelper);
 };

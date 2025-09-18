@@ -1,43 +1,179 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/path_service.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
-#include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/web_contents/web_contents_impl.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/content_paths.h"
-#include "content/public/test/browser_test_utils.h"
-#include "content/shell/browser/shell.h"
-#include "content/test/content_browser_test.h"
-#include "content/test/content_browser_test_utils.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
-#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/test_server.h"
 
-namespace content {
+using content::WebContents;
 
-class RenderViewHostTest : public ContentBrowserTest {
+class RenderViewHostTest : public InProcessBrowserTest {
  public:
   RenderViewHostTest() {}
 };
 
-class RenderViewHostTestWebContentsObserver : public WebContentsObserver {
+
+IN_PROC_BROWSER_TEST_F(RenderViewHostTest,
+                       ExecuteJavascriptAndGetValue) {
+  ASSERT_TRUE(test_server()->Start());
+  GURL empty_url(test_server()->GetURL("files/empty.html"));
+  ui_test_utils::NavigateToURL(browser(), empty_url);
+
+  RenderViewHost* rvh =
+      browser()->GetSelectedWebContents()->GetRenderViewHost();
+
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+                                                     ASCIIToUTF16("!false;"));
+    EXPECT_EQ(Value::TYPE_BOOLEAN, value->GetType());
+    bool bool_value;
+    EXPECT_TRUE(value->GetAsBoolean(&bool_value));
+    EXPECT_TRUE(bool_value);
+  }
+
+  // Execute the script 'true' and make sure we get back true.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+                                                     ASCIIToUTF16("true;"));
+    EXPECT_EQ(Value::TYPE_BOOLEAN, value->GetType());
+    bool bool_value;
+    EXPECT_TRUE(value->GetAsBoolean(&bool_value));
+    EXPECT_TRUE(bool_value);
+  }
+
+  // Execute the script 'false' and make sure we get back false.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+                                                     ASCIIToUTF16("false;"));
+    EXPECT_EQ(Value::TYPE_BOOLEAN, value->GetType());
+    bool bool_value;
+    EXPECT_TRUE(value->GetAsBoolean(&bool_value));
+    EXPECT_FALSE(bool_value);
+  }
+
+  // And now, for something completely different, try a number.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+                                                     ASCIIToUTF16("42;"));
+    EXPECT_EQ(Value::TYPE_INTEGER, value->GetType());
+    int int_value;
+    EXPECT_TRUE(value->GetAsInteger(&int_value));
+    EXPECT_EQ(42, int_value);
+  }
+
+  // Try a floating point number.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+                                                     ASCIIToUTF16("42.2;"));
+    EXPECT_EQ(Value::TYPE_DOUBLE, value->GetType());
+    double double_value;
+    EXPECT_TRUE(value->GetAsDouble(&double_value));
+    EXPECT_EQ(42.2, double_value);
+  }
+
+  // Let's check out string.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+        ASCIIToUTF16("\"something completely different\";"));
+    EXPECT_EQ(Value::TYPE_STRING, value->GetType());
+    std::string string_value;
+    EXPECT_TRUE(value->GetAsString(&string_value));
+    EXPECT_EQ(std::string("something completely different"), string_value);
+  }
+
+  // Regular expressions might be fun.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+        ASCIIToUTF16("/finder.*foo/g;"));
+    EXPECT_EQ(Value::TYPE_STRING, value->GetType());
+    std::string string_value;
+    EXPECT_TRUE(value->GetAsString(&string_value));
+    EXPECT_EQ(std::string("/finder.*foo/g"), string_value);
+  }
+
+  // Let's test some date conversions.  First up, epoch.  Can't use 0 because
+  // that means uninitialized, so use the next best thing.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+        ASCIIToUTF16("new Date(1);"));
+    EXPECT_EQ(Value::TYPE_DOUBLE, value->GetType());
+    double date_seconds;
+    EXPECT_TRUE(value->GetAsDouble(&date_seconds));
+
+    base::Time time = base::Time::FromDoubleT(date_seconds);
+
+    base::Time::Exploded time_exploded;
+    time.UTCExplode(&time_exploded);
+    EXPECT_EQ(1970, time_exploded.year);
+    EXPECT_EQ(1, time_exploded.month);
+    EXPECT_EQ(1, time_exploded.day_of_month);
+    EXPECT_EQ(0, time_exploded.hour);
+    EXPECT_EQ(0, time_exploded.minute);
+    EXPECT_EQ(0, time_exploded.second);
+  }
+
+  // Test date with a real date input.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+        ASCIIToUTF16("new Date(Date.UTC(2006, 7, 16, 12, 0, 15));"));
+    EXPECT_EQ(Value::TYPE_DOUBLE, value->GetType());
+    double date_seconds;
+    EXPECT_TRUE(value->GetAsDouble(&date_seconds));
+
+    base::Time time = base::Time::FromDoubleT(date_seconds);
+
+    base::Time::Exploded time_exploded;
+    time.UTCExplode(&time_exploded);
+    EXPECT_EQ(2006, time_exploded.year);
+    // Subtle; 0 based in JS, 1 based in base::Time:
+    EXPECT_EQ(8, time_exploded.month);
+    EXPECT_EQ(16, time_exploded.day_of_month);
+    EXPECT_EQ(12, time_exploded.hour);
+    EXPECT_EQ(0, time_exploded.minute);
+    EXPECT_EQ(15, time_exploded.second);
+  }
+
+  // And something more complicated - get an array back as a list.
+  {
+    Value* value = rvh->ExecuteJavascriptAndGetValue(string16(),
+        ASCIIToUTF16("new Array(\"one\", 2, false);"));
+    EXPECT_EQ(Value::TYPE_LIST, value->GetType());
+    ListValue* list_value;
+    EXPECT_TRUE(value->GetAsList(&list_value));
+    EXPECT_EQ(3U, list_value->GetSize());
+    Value* element_value;
+    EXPECT_TRUE(list_value->Get(0, &element_value));
+    EXPECT_EQ(Value::TYPE_STRING, element_value->GetType());
+    EXPECT_TRUE(list_value->Get(1, &element_value));
+    EXPECT_EQ(Value::TYPE_INTEGER, element_value->GetType());
+    EXPECT_TRUE(list_value->Get(2, &element_value));
+    EXPECT_EQ(Value::TYPE_BOOLEAN, element_value->GetType());
+  }
+}
+
+class RenderViewHostTestWebContentsObserver
+    : public content::WebContentsObserver {
  public:
   explicit RenderViewHostTestWebContentsObserver(WebContents* web_contents)
-      : WebContentsObserver(web_contents),
+      : content::WebContentsObserver(web_contents),
         navigation_count_(0) {}
   virtual ~RenderViewHostTestWebContentsObserver() {}
 
   virtual void DidNavigateMainFrame(
-      const LoadCommittedDetails& details,
-      const FrameNavigateParams& params) OVERRIDE {
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) OVERRIDE {
     observed_socket_address_ = params.socket_address;
     base_url_ = params.base_url;
     ++navigation_count_;
@@ -62,58 +198,32 @@ class RenderViewHostTestWebContentsObserver : public WebContentsObserver {
 };
 
 IN_PROC_BROWSER_TEST_F(RenderViewHostTest, FrameNavigateSocketAddress) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
-  RenderViewHostTestWebContentsObserver observer(shell()->web_contents());
+  ASSERT_TRUE(test_server()->Start());
+  RenderViewHostTestWebContentsObserver observer(
+      browser()->GetSelectedWebContents());
 
-  GURL test_url = embedded_test_server()->GetURL("/simple_page.html");
-  NavigateToURL(shell(), test_url);
+  GURL test_url = test_server()->GetURL("files/simple.html");
+  ui_test_utils::NavigateToURL(browser(), test_url);
 
-  EXPECT_EQ(net::HostPortPair::FromURL(
-                embedded_test_server()->base_url()).ToString(),
+  EXPECT_EQ(test_server()->host_port_pair().ToString(),
             observer.observed_socket_address().ToString());
   EXPECT_EQ(1, observer.navigation_count());
 }
 
 IN_PROC_BROWSER_TEST_F(RenderViewHostTest, BaseURLParam) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
-  RenderViewHostTestWebContentsObserver observer(shell()->web_contents());
+  ASSERT_TRUE(test_server()->Start());
+  RenderViewHostTestWebContentsObserver observer(
+      browser()->GetSelectedWebContents());
 
   // Base URL is not set if it is the same as the URL.
-  GURL test_url = embedded_test_server()->GetURL("/simple_page.html");
-  NavigateToURL(shell(), test_url);
+  GURL test_url = test_server()->GetURL("files/simple.html");
+  ui_test_utils::NavigateToURL(browser(), test_url);
   EXPECT_TRUE(observer.base_url().is_empty());
   EXPECT_EQ(1, observer.navigation_count());
 
   // But should be set to the original page when reading MHTML.
-  base::FilePath content_test_data_dir;
-  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &content_test_data_dir));
-  test_url = net::FilePathToFileURL(
-      content_test_data_dir.AppendASCII("google.mht"));
-  NavigateToURL(shell(), test_url);
+  test_url = net::FilePathToFileURL(test_server()->document_root().Append(
+      FILE_PATH_LITERAL("google.mht")));
+  ui_test_utils::NavigateToURL(browser(), test_url);
   EXPECT_EQ("http://www.google.com/", observer.base_url().spec());
 }
-
-// This test ensures a RenderFrameHost object is created for the top level frame
-// in each RenderViewHost.
-IN_PROC_BROWSER_TEST_F(RenderViewHostTest, BasicRenderFrameHost) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
-
-  GURL test_url = embedded_test_server()->GetURL("/simple_page.html");
-  NavigateToURL(shell(), test_url);
-
-  FrameTreeNode* old_root = static_cast<WebContentsImpl*>(
-      shell()->web_contents())->GetFrameTree()->root();
-  EXPECT_TRUE(old_root->current_frame_host());
-
-  ShellAddedObserver new_shell_observer;
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), "window.open();"));
-  Shell* new_shell = new_shell_observer.GetShell();
-  FrameTreeNode* new_root = static_cast<WebContentsImpl*>(
-      new_shell->web_contents())->GetFrameTree()->root();
-
-  EXPECT_TRUE(new_root->current_frame_host());
-  EXPECT_NE(old_root->current_frame_host()->routing_id(),
-            new_root->current_frame_host()->routing_id());
-}
-
-}  // namespace content

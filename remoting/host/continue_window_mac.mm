@@ -1,27 +1,32 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "remoting/host/continue_window.h"
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/mac/scoped_nsobject.h"
-#include "base/strings/sys_string_conversions.h"
-#include "remoting/base/string_resources.h"
-#include "remoting/host/continue_window.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#include "base/memory/scoped_nsobject.h"
+#include "base/sys_string_conversions.h"
+#include "remoting/host/chromoting_host.h"
+
+typedef remoting::ContinueWindow::ContinueSessionCallback
+    ContinueSessionCallback;
 
 // Handles the ContinueWindow.
 @interface ContinueWindowMacController : NSObject {
  @private
-  base::scoped_nsobject<NSMutableArray> shades_;
-  base::scoped_nsobject<NSAlert> continue_alert_;
-  remoting::ContinueWindow* continue_window_;
+  scoped_nsobject<NSMutableArray> shades_;
+  scoped_nsobject<NSAlert> continue_alert_;
+  remoting::ChromotingHost* host_;
+  ContinueSessionCallback callback_;
 }
 
-- (id)initWithWindow:(remoting::ContinueWindow*)continue_window;
+- (id)initWithHost:(remoting::ChromotingHost*)host
+          callback:(const ContinueSessionCallback&)callback;
 - (void)show;
 - (void)hide;
 - (void)onCancel:(id)sender;
@@ -32,57 +37,49 @@ namespace remoting {
 
 // A bridge between C++ and ObjC implementations of ContinueWindow.
 // Everything important occurs in ContinueWindowMacController.
-class ContinueWindowMac : public ContinueWindow {
+class ContinueWindowMac : public remoting::ContinueWindow {
  public:
-  ContinueWindowMac();
-  virtual ~ContinueWindowMac();
+  ContinueWindowMac() {}
+  virtual ~ContinueWindowMac() {}
 
- protected:
-  // ContinueWindow overrides.
-  virtual void ShowUi() OVERRIDE;
-  virtual void HideUi() OVERRIDE;
+  virtual void Show(remoting::ChromotingHost* host,
+                    const ContinueSessionCallback& callback) OVERRIDE;
+  virtual void Hide() OVERRIDE;
 
  private:
-  base::scoped_nsobject<ContinueWindowMacController> controller_;
+  scoped_nsobject<ContinueWindowMacController> controller_;
+  ContinueSessionCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(ContinueWindowMac);
 };
 
-ContinueWindowMac::ContinueWindowMac() {
-}
-
-ContinueWindowMac::~ContinueWindowMac() {
-  DCHECK(CalledOnValidThread());
-}
-
-void ContinueWindowMac::ShowUi() {
-  DCHECK(CalledOnValidThread());
-
+void ContinueWindowMac::Show(remoting::ChromotingHost* host,
+                             const ContinueSessionCallback& callback) {
   base::mac::ScopedNSAutoreleasePool pool;
   controller_.reset(
-      [[ContinueWindowMacController alloc] initWithWindow:this]);
+      [[ContinueWindowMacController alloc] initWithHost:host
+                                               callback:callback]);
   [controller_ show];
 }
 
-void ContinueWindowMac::HideUi() {
-  DCHECK(CalledOnValidThread());
-
+void ContinueWindowMac::Hide() {
   base::mac::ScopedNSAutoreleasePool pool;
   [controller_ hide];
 }
 
-// static
-scoped_ptr<HostWindow> HostWindow::CreateContinueWindow() {
-  return scoped_ptr<HostWindow>(new ContinueWindowMac());
+ContinueWindow* ContinueWindow::Create() {
+  return new ContinueWindowMac();
 }
 
 }  // namespace remoting
 
 @implementation ContinueWindowMacController
 
-- (id)initWithWindow:(remoting::ContinueWindow*)continue_window {
+- (id)initWithHost:(remoting::ChromotingHost*)host
+          callback:(const ContinueSessionCallback&)callback {
   if ((self = [super init])) {
-    continue_window_ = continue_window;
+    host_ = host;
+    callback_ = callback;
   }
   return self;
 }
@@ -111,24 +108,28 @@ scoped_ptr<HostWindow> HostWindow::CreateContinueWindow() {
   }
 
   // Create alert.
+  const remoting::UiStrings& strings = host_->ui_strings();
+  NSString* message = base::SysUTF16ToNSString(strings.continue_prompt);
+  NSString* continue_button_string = base::SysUTF16ToNSString(
+      strings.continue_button_text);
+  NSString* cancel_button_string = base::SysUTF16ToNSString(
+      strings.stop_sharing_button_text);
   continue_alert_.reset([[NSAlert alloc] init]);
-  [continue_alert_ setMessageText:l10n_util::GetNSString(IDR_CONTINUE_PROMPT)];
+  [continue_alert_ setMessageText:message];
 
   NSButton* continue_button =
-      [continue_alert_ addButtonWithTitle:l10n_util::GetNSString(
-          IDR_CONTINUE_BUTTON)];
+      [continue_alert_ addButtonWithTitle:continue_button_string];
   [continue_button setAction:@selector(onContinue:)];
   [continue_button setTarget:self];
 
   NSButton* cancel_button =
-      [continue_alert_ addButtonWithTitle:l10n_util::GetNSString(
-          IDR_STOP_SHARING_BUTTON)];
+      [continue_alert_ addButtonWithTitle:cancel_button_string];
   [cancel_button setAction:@selector(onCancel:)];
   [cancel_button setTarget:self];
 
   NSBundle *bundle = [NSBundle bundleForClass:[self class]];
   NSString *imagePath = [bundle pathForResource:@"chromoting128" ofType:@"png"];
-  base::scoped_nsobject<NSImage> image(
+  scoped_nsobject<NSImage> image(
       [[NSImage alloc] initByReferencingFile:imagePath]);
   [continue_alert_ setIcon:image];
   [continue_alert_ layout];
@@ -153,12 +154,14 @@ scoped_ptr<HostWindow> HostWindow::CreateContinueWindow() {
 
 - (void)onCancel:(id)sender {
   [self hide];
-  continue_window_->DisconnectSession();
+  callback_.Run(false);
+  host_ = nil;
 }
 
 - (void)onContinue:(id)sender {
   [self hide];
-  continue_window_->ContinueSession();
+  callback_.Run(true);
+  host_ = nil;
 }
 
 @end

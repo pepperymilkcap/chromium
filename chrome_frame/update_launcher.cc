@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,7 @@
 #include <windows.h>
 #include <Shellapi.h>
 
-#include "base/win/scoped_com_initializer.h"
-#include "base/win/scoped_comptr.h"
-#include "base/win/scoped_handle.h"
-#include "google_update/google_update_idl.h"
+#include "google_update_idl.h"  // NOLINT
 
 namespace {
 
@@ -24,9 +21,13 @@ const wchar_t kUpdateCommandFlag[] = L"--update-cmd";
 // exit code, or kLaunchFailureExitCode if an error occurs in the waiting.
 DWORD WaitForProcessExitCode(HANDLE handle) {
   DWORD exit_code = 0;
-  return ((::WaitForSingleObject(handle, INFINITE) == WAIT_OBJECT_0) &&
-          ::GetExitCodeProcess(handle, &exit_code)) ?
-      exit_code : kLaunchFailureExitCode;
+
+  DWORD wait_result = ::WaitForSingleObject(handle, INFINITE);
+
+  if (wait_result == WAIT_OBJECT_0 && ::GetExitCodeProcess(handle, &exit_code))
+    return exit_code;
+
+  return kLaunchFailureExitCode;
 }
 
 }  // namespace
@@ -51,22 +52,43 @@ std::wstring GetUpdateCommandFromArguments(const wchar_t* command_line) {
   return command;
 }
 
+// Because we do not have 'base' and all of its pretty RAII helpers, please
+// ensure that this function only ever contains a single 'return', in order
+// to reduce the chance of introducing a leak.
 DWORD LaunchUpdateCommand(const std::wstring& command) {
-  base::win::ScopedCOMInitializer com_initializer;
-  if (!com_initializer.succeeded())
-    return kLaunchFailureExitCode;
+  DWORD exit_code = kLaunchFailureExitCode;
 
-  base::win::ScopedComPtr<IProcessLauncher> ipl;
-  if (FAILED(ipl.CreateInstance(__uuidof(ProcessLauncherClass))))
-    return kLaunchFailureExitCode;
+  HRESULT hr = ::CoInitialize(NULL);
 
-  ULONG_PTR phandle = NULL;
-  if (FAILED(ipl->LaunchCmdElevated(kChromeFrameGuid, command.c_str(),
-                                    ::GetCurrentProcessId(), &phandle)))
-    return kLaunchFailureExitCode;
+  if (SUCCEEDED(hr)) {
+    IProcessLauncher* ipl = NULL;
+    HANDLE process = NULL;
 
-  base::win::ScopedHandle process(reinterpret_cast<HANDLE>(phandle));
-  return WaitForProcessExitCode(process);
+    hr = ::CoCreateInstance(__uuidof(ProcessLauncherClass), NULL,
+                            CLSCTX_ALL, __uuidof(IProcessLauncher),
+                            reinterpret_cast<void**>(&ipl));
+
+    if (SUCCEEDED(hr)) {
+      ULONG_PTR phandle = NULL;
+      DWORD id = ::GetCurrentProcessId();
+
+      hr = ipl->LaunchCmdElevated(kChromeFrameGuid,
+                                  command.c_str(), id, &phandle);
+      if (SUCCEEDED(hr)) {
+        process = reinterpret_cast<HANDLE>(phandle);
+        exit_code = WaitForProcessExitCode(process);
+      }
+    }
+
+    if (process)
+      ::CloseHandle(process);
+    if (ipl)
+      ipl->Release();
+
+    ::CoUninitialize();
+  }
+
+  return exit_code;
 }
 
 }  // namespace process_launcher

@@ -5,11 +5,9 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 
 #include "base/logging.h"
-#import "chrome/browser/ui/cocoa/fast_resize_view.h"
-#import "chrome/browser/ui/cocoa/framed_browser_window.h"
+#import "chrome/browser/ui/cocoa/focus_tracker.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
-#import "ui/base/cocoa/focus_tracker.h"
 #include "ui/base/theme_provider.h"
 
 @interface TabWindowController(PRIVATE)
@@ -33,61 +31,58 @@
   return NO;
 }
 
-- (NSPoint)themeImagePositionForAlignment:(ThemeImageAlignment)alignment {
-  if ([self parentWindow]) {
-    return [[[self parentWindow] windowController]
-        themeImagePositionForAlignment:alignment];
-  }
+- (NSPoint)themePatternPhase {
+  if ([self parentWindow])
+    return [[[self parentWindow] windowController] themePatternPhase];
   return NSZeroPoint;
 }
 
 @end
 
 @implementation TabWindowController
+@synthesize tabContentArea = tabContentArea_;
 
-- (id)initTabWindowControllerWithTabStrip:(BOOL)hasTabStrip {
-  NSRect contentRect = NSMakeRect(60, 229, 750, 600);
-  base::scoped_nsobject<FramedBrowserWindow> window(
-      [[FramedBrowserWindow alloc] initWithContentRect:contentRect
-                                           hasTabStrip:hasTabStrip]);
-  [window setReleasedWhenClosed:YES];
-  [window setAutorecalculatesKeyViewLoop:YES];
-
-  if ((self = [super initWithWindow:window])) {
-    [[self window] setDelegate:self];
-
-    tabContentArea_.reset([[FastResizeView alloc] initWithFrame:
-        NSMakeRect(0, 0, 750, 600)]);
-    [tabContentArea_ setAutoresizingMask:NSViewWidthSizable |
-                                         NSViewHeightSizable];
-    [[[self window] contentView] addSubview:tabContentArea_];
-
-    tabStripView_.reset([[TabStripView alloc] initWithFrame:
-        NSMakeRect(0, 0, 750, 37)]);
-    [tabStripView_ setAutoresizingMask:NSViewWidthSizable |
-                                       NSViewMinYMargin];
-    if (hasTabStrip)
-      [self addTabStripToWindow];
+- (id)initWithWindow:(NSWindow*)window {
+  if ((self = [super initWithWindow:window]) != nil) {
+    lockedTabs_.reset([[NSMutableSet alloc] initWithCapacity:10]);
   }
   return self;
-}
-
-- (TabStripView*)tabStripView {
-  return tabStripView_;
-}
-
-- (FastResizeView*)tabContentArea {
-  return tabContentArea_;
 }
 
 // Add the top tab strop to the window, above the content box and add it to the
 // view hierarchy as a sibling of the content view so it can overlap with the
 // window frame.
 - (void)addTabStripToWindow {
-  // The frame doesn't matter. This class relies on subclasses to do tab strip
-  // layout.
+  NSRect contentFrame = [tabContentArea_ frame];
+  NSRect tabFrame =
+      NSMakeRect(0, NSMaxY(contentFrame),
+                 NSWidth(contentFrame),
+                 NSHeight([tabStripView_ frame]));
+  [tabStripView_ setFrame:tabFrame];
   NSView* contentParent = [[[self window] contentView] superview];
   [contentParent addSubview:tabStripView_];
+}
+
+- (void)windowDidLoad {
+  // Cache the difference in height between the window content area and the
+  // tab content area.
+  NSRect tabFrame = [tabContentArea_ frame];
+  NSRect contentFrame = [[[self window] contentView] frame];
+  contentAreaHeightDelta_ = NSHeight(contentFrame) - NSHeight(tabFrame);
+
+  if ([self hasTabStrip]) {
+    [self addTabStripToWindow];
+  } else {
+    // No top tabstrip so remove the tabContentArea offset.
+    tabFrame.size.height = contentFrame.size.height;
+    [tabContentArea_ setFrame:tabFrame];
+  }
+}
+
+// Return the appropriate tab strip based on whether or not side tabs are
+// enabled.
+- (TabStripView*)tabStripView {
+  return tabStripView_;
 }
 
 - (void)removeOverlay {
@@ -103,6 +98,27 @@
   [self setUseOverlay:YES];
 }
 
+// if |useOverlay| is true, we're moving views into the overlay's content
+// area. If false, we're moving out of the overlay back into the window's
+// content.
+- (void)moveViewsBetweenWindowAndOverlay:(BOOL)useOverlay {
+  if (useOverlay) {
+    [[[overlayWindow_ contentView] superview] addSubview:[self tabStripView]];
+    // Add the original window's content view as a subview of the overlay
+    // window's content view.  We cannot simply use setContentView: here because
+    // the overlay window has a different content size (due to it being
+    // borderless).
+    [[overlayWindow_ contentView] addSubview:cachedContentView_];
+  } else {
+    [[self window] setContentView:cachedContentView_];
+    // The TabStripView always needs to be in front of the window's content
+    // view and therefore it should always be added after the content view is
+    // set.
+    [[[[self window] contentView] superview] addSubview:[self tabStripView]];
+    [[[[self window] contentView] superview] updateTrackingAreas];
+  }
+}
+
 // If |useOverlay| is YES, creates a new overlay window and puts the tab strip
 // and the content area inside of it. This allows it to have a different opacity
 // from the title bar. If NO, returns everything to the previous state and
@@ -114,8 +130,7 @@
                                              object:nil];
   NSWindow* window = [self window];
   if (useOverlay && !overlayWindow_) {
-    DCHECK(!originalContentView_);
-
+    DCHECK(!cachedContentView_);
     overlayWindow_ = [[TabWindowOverlayWindow alloc]
                          initWithContentRect:[window frame]
                                    styleMask:NSBorderlessWindowMask
@@ -125,47 +140,29 @@
     [overlayWindow_ setBackgroundColor:[NSColor clearColor]];
     [overlayWindow_ setOpaque:NO];
     [overlayWindow_ setDelegate:self];
-
-    originalContentView_ = [window contentView];
+    cachedContentView_ = [window contentView];
     [window addChildWindow:overlayWindow_ ordered:NSWindowAbove];
-
-    // Explicitly set the responder to be nil here (for restoring later).
-    // If the first responder were to be left non-nil here then
-    // [RenderWidgethostViewCocoa resignFirstResponder] would be called,
-    // followed by RenderWidgetHost::Blur(), which would result in an unexpected
-    // loss of focus.
+    // Sets explictly nil to the responder and then restores it.
+    // Leaving the first responder non-null here
+    // causes [RenderWidgethostViewCocoa resignFirstResponder] and
+    // following RenderWidgetHost::Blur(), which results unexpected
+    // focus lost.
     focusBeforeOverlay_.reset([[FocusTracker alloc] initWithWindow:window]);
     [window makeFirstResponder:nil];
-
-    // Move the original window's tab strip view and content view to the overlay
-    // window. The content view is added as a subview of the overlay window's
-    // content view (rather than using setContentView:) because the overlay
-    // window has a different content size (due to it being borderless).
-    [[[overlayWindow_ contentView] superview] addSubview:[self tabStripView]];
-    [[overlayWindow_ contentView] addSubview:originalContentView_];
-
+    [self moveViewsBetweenWindowAndOverlay:useOverlay];
     [overlayWindow_ orderFront:nil];
   } else if (!useOverlay && overlayWindow_) {
-    DCHECK(originalContentView_);
-
-    // Return the original window's tab strip view and content view to their
-    // places. The TabStripView always needs to be in front of the window's
-    // content view and therefore it should always be added after the content
-    // view is set.
-    [window setContentView:originalContentView_];
-    [[[window contentView] superview] addSubview:[self tabStripView]];
-    [[[window contentView] superview] updateTrackingAreas];
-
+    DCHECK(cachedContentView_);
+    [window setContentView:cachedContentView_];
+    [self moveViewsBetweenWindowAndOverlay:useOverlay];
     [focusBeforeOverlay_ restoreFocusInWindow:window];
-    focusBeforeOverlay_.reset();
-
+    focusBeforeOverlay_.reset(nil);
     [window display];
     [window removeChildWindow:overlayWindow_];
-
     [overlayWindow_ orderOut:nil];
     [overlayWindow_ release];
     overlayWindow_ = nil;
-    originalContentView_ = nil;
+    cachedContentView_ = nil;
   } else {
     NOTREACHED();
   }
@@ -273,9 +270,14 @@
 }
 
 - (BOOL)isTabDraggable:(NSView*)tabView {
-  // Subclasses should implement this.
-  NOTIMPLEMENTED();
-  return YES;
+  return ![lockedTabs_ containsObject:tabView];
+}
+
+- (void)setTab:(NSView*)tabView isDraggable:(BOOL)draggable {
+  if (draggable)
+    [lockedTabs_ removeObject:tabView];
+  else
+    [lockedTabs_ addObject:tabView];
 }
 
 // Tell the window that it needs to call performClose: as soon as the current

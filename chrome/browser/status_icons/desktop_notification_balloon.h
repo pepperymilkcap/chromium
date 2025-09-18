@@ -1,19 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_STATUS_ICONS_DESKTOP_NOTIFICATION_BALLOON_H_
 #define CHROME_BROWSER_STATUS_ICONS_DESKTOP_NOTIFICATION_BALLOON_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 class Notification;
-
-namespace gfx {
-class ImageSkia;
-}
+class SkBitmap;
 
 // Provides the notification balloon functionality by using desktop
 // notifications to platforms that don't have a specific native API.
@@ -22,12 +20,13 @@ class DesktopNotificationBalloon {
   DesktopNotificationBalloon();
   virtual ~DesktopNotificationBalloon();
 
-  void DisplayBalloon(const gfx::ImageSkia& icon,
-                      const base::string16& title,
-                      const base::string16& contents);
+  void DisplayBalloon(const SkBitmap& icon,
+                      const string16& title,
+                      const string16& contents);
 
  private:
-  std::string notification_id_;
+  // Notification balloon.
+  scoped_ptr<Notification> notification_;
 
   // Counter to provide unique ids to notifications.
   static int id_count_;

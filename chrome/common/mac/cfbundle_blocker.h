@@ -4,6 +4,7 @@
 
 #ifndef CHROME_COMMON_MAC_CFBUNDLE_BLOCKER_H_
 #define CHROME_COMMON_MAC_CFBUNDLE_BLOCKER_H_
+#pragma once
 
 #if defined(__OBJC__)
 @class NSString;

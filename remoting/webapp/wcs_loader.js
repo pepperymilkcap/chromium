@@ -19,6 +19,7 @@ remoting.wcsLoader = null;
 
 /**
  * @constructor
+ * @private
  */
 remoting.WcsLoader = function() {
   /**
@@ -30,6 +31,32 @@ remoting.WcsLoader = function() {
 };
 
 /**
+ * Load WCS if necessary, then invoke the callback with an access token.
+ *
+ * @param {function(string?): void} onReady The callback function, called with
+ *     an OAuth2 access token when WCS has been loaded, or with null on error.
+ * @return {void} Nothing.
+ */
+remoting.WcsLoader.load = function(onReady) {
+  if (!remoting.wcsLoader) {
+    remoting.wcsLoader = new remoting.WcsLoader();
+  }
+  /** @param {string} token The OAuth2 access token. */
+  var start = function(token) {
+    remoting.wcsLoader.start_(token, onReady);
+  };
+  remoting.oauth2.callWithToken(start);
+};
+
+/**
+ * The URL of the GTalk gadget.
+ * @type {string}
+ * @private
+ */
+remoting.WcsLoader.prototype.TALK_GADGET_URL_ =
+    'https://talkgadget.google.com/talkgadget/';
+
+/**
  * The id of the script node.
  * @type {string}
  * @private
@@ -37,110 +64,69 @@ remoting.WcsLoader = function() {
 remoting.WcsLoader.prototype.SCRIPT_NODE_ID_ = 'wcs-script-node';
 
 /**
+ * The attribute name indicating that the WCS has finished loading.
+ * @type {string}
+ * @private
+ */
+remoting.WcsLoader.prototype.SCRIPT_NODE_LOADED_FLAG_ = 'wcs-script-loaded';
+
+/**
  * Starts loading the WCS IQ client.
  *
  * When it's loaded, construct remoting.wcs as a wrapper for it.
- * When the WCS connection is ready, or on error, call |onReady| or |onError|,
- * respectively.
+ * When the WCS connection is ready, or on error, call |onReady|.
  *
  * @param {string} token An OAuth2 access token.
- * @param {function(string): void} onReady The callback function, called with
- *     a client JID when WCS has been loaded.
- * @param {function(remoting.Error):void} onError Function to invoke with an
- *     error code on failure.
+ * @param {function(string?): void} onReady The callback function, called with
+ *     an OAuth2 access token when WCS has been loaded, or with null on error.
  * @return {void} Nothing.
+ * @private
  */
-remoting.WcsLoader.prototype.start = function(token, onReady, onError) {
+remoting.WcsLoader.prototype.start_ = function(token, onReady) {
   var node = document.getElementById(this.SCRIPT_NODE_ID_);
-  if (node) {
-    console.error('Multiple calls to WcsLoader.start are not allowed.');
-    onError(remoting.Error.UNEXPECTED);
+  if (!node) {
+    // The first time, there will be no script node, so create one.
+    node = document.createElement('script');
+    node.id = this.SCRIPT_NODE_ID_;
+    node.src = this.TALK_GADGET_URL_ + 'iq?access_token=' + token;
+    node.type = 'text/javascript';
+    document.body.insertBefore(node, document.body.firstChild);
+  } else if (node.hasAttribute(this.SCRIPT_NODE_LOADED_FLAG_)) {
+    // Subsequently, explicitly invoke onReady if onload has already fired.
+    // TODO(jamiewalch): It's possible that the WCS client has not finished
+    // initializing. Add support for multiple callbacks to the remoting.Wcs
+    // class to address this.
+    onReady(token);
     return;
   }
-
-  // Create a script node to load the WCS driver.
-  node = document.createElement('script');
-  node.id = this.SCRIPT_NODE_ID_;
-  node.src = remoting.settings.TALK_GADGET_URL + 'iq?access_token=' + token;
-  node.type = 'text/javascript';
-  document.body.insertBefore(node, document.body.firstChild);
-
   /** @type {remoting.WcsLoader} */
   var that = this;
   var onLoad = function() {
+    var typedNode = /** @type {Element} */ (node);
+    typedNode.setAttribute(that.SCRIPT_NODE_LOADED_FLAG_, true);
     that.constructWcs_(token, onReady);
   };
-  var onLoadError = function(event) {
-    // The DOM Event object has no detail on the nature of the error, so try to
-    // validate the token to get a better idea.
-    /** @param {remoting.Error} error Error code. */
-    var onValidateError = function(error) {
-      var typedNode = /** @type {Element} */ (node);
-      typedNode.parentNode.removeChild(node);
-      onError(error);
-    };
-    var onValidateOk = function() {
-      // We can reach the authentication server and validate the token. Either
-      // there's something wrong with the talkgadget service, or there is a
-      // cookie problem. Only the cookie problem can be fixed by the user, so
-      // suggest that fix.
-      onValidateError(remoting.Error.AUTHENTICATION_FAILED);
-    }
-    that.validateToken(token, onValidateOk, onValidateError);
-  }
+  var onError = function() {
+    var typedNode = /** @type {Element} */ (node);
+    typedNode.parentNode.removeChild(node);
+    onReady(null);
+  };
   node.addEventListener('load', onLoad, false);
-  node.addEventListener('error', onLoadError, false);
+  node.addEventListener('error', onError, false);
 };
 
 /**
  * Constructs the remoting.wcs object.
  *
  * @param {string} token An OAuth2 access token.
- * @param {function(string): void} onReady The callback function, called with
- *     an OAuth2 access token when WCS has been loaded.
+ * @param {function(string?): void} onReady The callback function, called with
+ *     an OAuth2 access token when WCS has been loaded, or with null on error.
  * @return {void} Nothing.
  * @private
  */
 remoting.WcsLoader.prototype.constructWcs_ = function(token, onReady) {
   remoting.wcs = new remoting.Wcs(
-      remoting.wcsLoader.wcsIqClient, token, onReady);
-};
-
-/**
- * Validates an OAuth2 access token.
- *
- * @param {string} token The access token.
- * @param {function():void} onOk Callback to invoke if the token is valid.
- * @param {function(remoting.Error):void} onError Function to invoke with an
- *     error code on failure.
- * @return {void} Nothing.
- */
-remoting.WcsLoader.prototype.validateToken = function(token, onOk, onError) {
-  /** @type {XMLHttpRequest} */
-  var xhr = new XMLHttpRequest();
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState != 4) {
-      return;
-    }
-    if (xhr.status == 200) {
-      onOk();
-    } else {
-      var error = remoting.Error.AUTHENTICATION_FAILED;
-      switch (xhr.status) {
-        case 0:
-          error = remoting.Error.NETWORK_FAILURE;
-          break;
-        case 502: // No break
-        case 503:
-          error = remoting.Error.SERVICE_UNAVAILABLE;
-          break;
-      }
-      onError(error);
-    }
-  };
-  var parameters = '?access_token=' + encodeURIComponent(token);
-  xhr.open('GET',
-           remoting.settings.OAUTH2_API_BASE_URL + '/v1/tokeninfo' + parameters,
-           true);
-  xhr.send(null);
+      remoting.wcsLoader.wcsIqClient,
+      token,
+      function() { onReady(token); });
 };

@@ -8,29 +8,37 @@
 label Chrome {
   M13 = 0.0,
   M14 = 1.0,
-  M15 = 2.0,
-  M16 = 3.0,
-  M17 = 4.0
+  M15 = 2.0
 };
 
 describe {
   int32_t;
 };
 
-/* Bogus Interface Foo */
+
+/* Bogus Struct Foo */
 [version=0.0]
-interface Foo {
+struct Foo {
   /**
    * Comment for function x
    */
-  [version=0.0] int32_t Bar(int32_t x);
+  [version=0.0] int32_t Foo(int32_t x);
   /**
    * Comment for function x,y
    */
-  [version=1.0] int32_t Bar(int32_t x, int32_t y);
+  [version=1.0] int32_t Foo(int32_t x, int32_t y);
   /**
    * Comment for function x,y,z
    */
-  [version=2.0] int32_t Bar(int32_t x, int32_t y, int32_t z);
+  [version=2.0] int32_t Foo(int32_t x, int32_t y, int32_t z);
 };
 
+
+/* Inherit revisions thanks to Foo */
+[version=0.0]
+interface Bar {
+  /**
+   * Comment for function
+   */
+  int32_t UseFoo(Foo val);
+};

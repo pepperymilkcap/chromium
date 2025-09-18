@@ -4,31 +4,24 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SESSION_CHANGE_PROCESSOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_SESSION_CHANGE_PROCESSOR_H_
-
-#include <vector>
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/glue/change_processor.h"
-#include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 
 class Profile;
 
-namespace content {
-class WebContents;
-}
-
 namespace browser_sync {
 
-class DataTypeErrorHandler;
 class SessionModelAssociator;
-class SyncedTabDelegate;
+class UnrecoverableErrorHandler;
 
 // This class is responsible for taking changes from the
-// SessionService and applying them to the sync API 'syncable'
+// SessionService and applying them to the sync_api 'syncable'
 // model, and vice versa. All operations and use of this class are
 // from the UI thread.
 class SessionChangeProcessor : public ChangeProcessor,
@@ -36,40 +29,37 @@ class SessionChangeProcessor : public ChangeProcessor,
  public:
   // Does not take ownership of either argument.
   SessionChangeProcessor(
-      DataTypeErrorHandler* error_handler,
+      UnrecoverableErrorHandler* error_handler,
       SessionModelAssociator* session_model_associator);
   // For testing only.
   SessionChangeProcessor(
-      DataTypeErrorHandler* error_handler,
+      UnrecoverableErrorHandler* error_handler,
       SessionModelAssociator* session_model_associator,
       bool setup_for_test);
   virtual ~SessionChangeProcessor();
 
   // content::NotificationObserver implementation.
-  // BrowserSessionProvider -> sync API model change application.
+  // BrowserSessionProvider -> sync_api model change application.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // ChangeProcessor implementation.
-  // sync API model -> BrowserSessionProvider change application.
+  // sync_api model -> BrowserSessionProvider change application.
   virtual void ApplyChangesFromSyncModel(
-      const syncer::BaseTransaction* trans,
-      int64 model_version,
-      const syncer::ImmutableChangeRecordList& changes) OVERRIDE;
+      const sync_api::BaseTransaction* trans,
+      const sync_api::ImmutableChangeRecordList& changes) OVERRIDE;
 
  protected:
   // ChangeProcessor implementation.
   virtual void StartImpl(Profile* profile) OVERRIDE;
+  virtual void StopImpl() OVERRIDE;
 
  private:
-  void OnNavigationBlocked(content::WebContents* web_contents);
-
-  // Utility method to handle reassociation of tabs and windows.
-  void ProcessModifiedTabs(
-      const std::vector<SyncedTabDelegate*>& modified_tabs);
+  friend class ScopedStopObserving<SessionChangeProcessor>;
 
   void StartObserving();
+  void StopObserving();
 
   SessionModelAssociator* session_model_associator_;
   content::NotificationRegistrar notification_registrar_;
@@ -79,8 +69,6 @@ class SessionChangeProcessor : public ChangeProcessor,
 
   // To bypass some checks/codepaths not applicable in tests.
   bool setup_for_test_;
-
-  base::WeakPtrFactory<SessionChangeProcessor> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionChangeProcessor);
 };

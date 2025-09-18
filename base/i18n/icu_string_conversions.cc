@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,18 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "third_party/icu/source/common/unicode/ucnv.h"
-#include "third_party/icu/source/common/unicode/ucnv_cb.h"
-#include "third_party/icu/source/common/unicode/ucnv_err.h"
-#include "third_party/icu/source/common/unicode/unorm.h"
-#include "third_party/icu/source/common/unicode/ustring.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "unicode/ucnv.h"
+#include "unicode/ucnv_cb.h"
+#include "unicode/ucnv_err.h"
+#include "unicode/unorm.h"
+#include "unicode/ustring.h"
 
 namespace base {
 
 namespace {
-// ToUnicodeCallbackSubstitute() is based on UCNV_TO_U_CALLBACK_SUBSTITUTE
+// ToUnicodeCallbackSubstitute() is based on UCNV_TO_U_CALLBACK_SUSBSTITUTE
 // in source/common/ucnv_err.c.
 
 // Copyright (c) 1995-2006 International Business Machines Corporation
@@ -144,6 +144,11 @@ inline UConverterType utf32_platform_endian() {
 
 }  // namespace
 
+const char kCodepageLatin1[] = "ISO-8859-1";
+const char kCodepageUTF8[] = "UTF-8";
+const char kCodepageUTF16BE[] = "UTF-16BE";
+const char kCodepageUTF16LE[] = "UTF-16LE";
+
 // Codepage <-> Wide/UTF-16  ---------------------------------------------------
 
 bool UTF16ToCodepage(const string16& utf16,
@@ -183,7 +188,7 @@ bool CodepageToUTF16(const std::string& encoded,
   size_t uchar_max_length = encoded.length() + 1;
 
   SetUpErrorHandlerForToUChars(on_error, converter, &status);
-  scoped_ptr<char16[]> buffer(new char16[uchar_max_length]);
+  scoped_array<char16> buffer(new char16[uchar_max_length]);
   int actual_size = ucnv_toUChars(converter, buffer.get(),
       static_cast<int>(uchar_max_length), encoded.data(),
       static_cast<int>(encoded.length()), &status);
@@ -248,7 +253,7 @@ bool CodepageToWide(const std::string& encoded,
   size_t wchar_max_length = encoded.length() + 1;
 
   SetUpErrorHandlerForToUChars(on_error, converter, &status);
-  scoped_ptr<wchar_t[]> buffer(new wchar_t[wchar_max_length]);
+  scoped_array<wchar_t> buffer(new wchar_t[wchar_max_length]);
   int actual_size = ucnv_toAlgorithmic(utf32_platform_endian(), converter,
       reinterpret_cast<char*>(buffer.get()),
       static_cast<int>(wchar_max_length) * sizeof(wchar_t), encoded.data(),
@@ -277,7 +282,7 @@ bool ConvertToUtf8AndNormalize(const std::string& text,
   UErrorCode status = U_ZERO_ERROR;
   size_t max_length = utf16.length() + 1;
   string16 normalized_utf16;
-  scoped_ptr<char16[]> buffer(new char16[max_length]);
+  scoped_array<char16> buffer(new char16[max_length]);
   int actual_length = unorm_normalize(
       utf16.c_str(), utf16.length(), UNORM_NFC, 0,
       buffer.get(), static_cast<int>(max_length), &status);

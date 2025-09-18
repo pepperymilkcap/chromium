@@ -4,6 +4,7 @@
 
 #ifndef BASE_MAC_OBJC_PROPERTY_RELEASER_H_
 #define BASE_MAC_OBJC_PROPERTY_RELEASER_H_
+#pragma once
 
 #import <Foundation/Foundation.h>
 

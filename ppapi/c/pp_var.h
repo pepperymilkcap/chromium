@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From pp_var.idl modified Thu Sep 12 16:41:36 2013. */
+/* From pp_var.idl modified Wed Dec 14 18:08:00 2011. */
 
 #ifndef PPAPI_C_PP_VAR_H_
 #define PPAPI_C_PP_VAR_H_
@@ -53,46 +53,30 @@ typedef enum {
   /**
    * The Var represents a string. The <code>as_id</code> field is used to
    * identify the string, which may be created and retrieved from the
-   * <code>PPB_Var</code> interface. These objects are reference counted, so
-   * AddRef and Release must be used properly to avoid memory leaks.
+   * <code>PPB_Var</code> interface.
    */
   PP_VARTYPE_STRING = 5,
   /**
    * Represents a JavaScript object. This vartype is not currently usable
-   * from modules, although it is used internally for some tasks. These objects
-   * are reference counted, so AddRef and Release must be used properly to avoid
-   * memory leaks.
+   * from modules, although it is used internally for some tasks.
    */
   PP_VARTYPE_OBJECT = 6,
   /**
-   * Represents an array of Vars. The <code>as_id</code> field is used to
-   * identify the array, which may be created and manipulated from the
-   * <code>PPB_VarArray</code> interface. These objects are reference counted,
-   * so AddRef and Release must be used properly to avoid memory leaks.
+   * Arrays and dictionaries are not currently supported but will be added
+   * in future revisions. These objects are reference counted so be sure
+   * to properly AddRef/Release them as you would with strings to ensure your
+   * module will continue to work with future versions of the API.
    */
   PP_VARTYPE_ARRAY = 7,
-  /**
-   * Represents a mapping from strings to Vars. The <code>as_id</code> field is
-   * used to identify the dictionary, which may be created and manipulated from
-   * the <code>PPB_VarDictionary</code> interface. These objects are reference
-   * counted, so AddRef and Release must be used properly to avoid memory leaks.
-   */
   PP_VARTYPE_DICTIONARY = 8,
   /**
    * ArrayBuffer represents a JavaScript ArrayBuffer. This is the type which
    * represents Typed Arrays in JavaScript. Unlike JavaScript 'Array', it is
    * only meant to contain basic numeric types, and is always stored
    * contiguously. See PPB_VarArrayBuffer_Dev for functions special to
-   * ArrayBuffer vars. These objects are reference counted, so AddRef and
-   * Release must be used properly to avoid memory leaks.
+   * ArrayBuffer vars.
    */
-  PP_VARTYPE_ARRAY_BUFFER = 9,
-  /**
-   * Resources are not currently supported but will be added in the future
-   * These objects are reference counted, so AddRef and Release must be used
-   * properly to avoid memory leaks.
-   */
-  PP_VARTYPE_RESOURCE = 10
+  PP_VARTYPE_ARRAY_BUFFER = 9
 } PP_VarType;
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_VarType, 4);
 /**
@@ -128,12 +112,12 @@ union PP_VarValue {
   double as_double;
   /**
    * If <code>type</code> is <code>PP_VARTYPE_STRING</code>,
-   * <code>PP_VARTYPE_OBJECT</code>, <code>PP_VARTYPE_ARRAY</code>,
-   * <code>PP_VARTYPE_DICTIONARY</code>, <code>PP_VARTYPE_ARRAY_BUFFER</code>,
-   * or <code>PP_VARTYPE_RESOURCE</code>, <code>as_id</code> represents the
-   * value of this <code>PP_Var</code> as an opaque handle assigned by the
-   * browser. This handle is guaranteed never to be 0, so a module can
-   * initialize this ID to 0 to indicate a "NULL handle."
+   * <code>PP_VARTYPE_OBJECT</code>, <code>PP_VARTYPE_ARRAY</code>, or
+   * <code>PP_VARTYPE_DICTIONARY</code>,
+   * <code>as_id</code> represents the value of this <code>PP_Var</code> as
+   * an opaque handle assigned by the browser. This handle is guaranteed
+   * never to be 0, so a module can initialize this ID to 0 to indicate a
+   * "NULL handle."
    */
   int64_t as_id;
 };
@@ -184,7 +168,7 @@ PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_Var, 16);
  *
  * @return A <code>PP_Var</code> structure.
  */
-PP_INLINE struct PP_Var PP_MakeUndefined(void) {
+PP_INLINE struct PP_Var PP_MakeUndefined() {
   struct PP_Var result = { PP_VARTYPE_UNDEFINED, 0, {PP_FALSE} };
   return result;
 }
@@ -195,7 +179,7 @@ PP_INLINE struct PP_Var PP_MakeUndefined(void) {
  *
  * @return A <code>PP_Var</code> structure,
  */
-PP_INLINE struct PP_Var PP_MakeNull(void) {
+PP_INLINE struct PP_Var PP_MakeNull() {
   struct PP_Var result = { PP_VARTYPE_NULL, 0, {PP_FALSE} };
   return result;
 }

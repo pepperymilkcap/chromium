@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,25 +13,24 @@
 
 #ifndef NET_HTTP_HTTP_CACHE_H_
 #define NET_HTTP_HTTP_CACHE_H_
+#pragma once
 
 #include <list>
 #include <set>
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/containers/hash_tables.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
+#include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop_proxy.h"
+#include "base/time.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/time/time.h"
 #include "net/base/cache_type.h"
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
-#include "net/base/request_priority.h"
-#include "net/http/http_network_session.h"
 #include "net/http/http_transaction_factory.h"
 
 class GURL;
@@ -52,7 +51,7 @@ class HttpServerProperties;
 class IOBuffer;
 class NetLog;
 class NetworkDelegate;
-class ServerBoundCertService;
+class OriginBoundCertService;
 class ProxyService;
 class SSLConfigService;
 class TransportSecurityState;
@@ -89,7 +88,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
     // The implementation must not access the factory object after invoking the
     // |callback| because the object can be deleted from within the callback.
     virtual int CreateBackend(NetLog* net_log,
-                              scoped_ptr<disk_cache::Backend>* backend,
+                              disk_cache::Backend** backend,
                               const CompletionCallback& callback) = 0;
   };
 
@@ -99,8 +98,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
     // |path| is the destination for any files used by the backend, and
     // |cache_thread| is the thread where disk operations should take place. If
     // |max_bytes| is  zero, a default value will be calculated automatically.
-    DefaultBackend(CacheType type, BackendType backend_type,
-                   const base::FilePath& path, int max_bytes,
+    DefaultBackend(CacheType type, const FilePath& path, int max_bytes,
                    base::MessageLoopProxy* thread);
     virtual ~DefaultBackend();
 
@@ -109,20 +107,29 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
 
     // BackendFactory implementation.
     virtual int CreateBackend(NetLog* net_log,
-                              scoped_ptr<disk_cache::Backend>* backend,
+                              disk_cache::Backend** backend,
                               const CompletionCallback& callback) OVERRIDE;
 
    private:
     CacheType type_;
-    BackendType backend_type_;
-    const base::FilePath path_;
+    const FilePath path_;
     int max_bytes_;
     scoped_refptr<base::MessageLoopProxy> thread_;
   };
 
   // The disk cache is initialized lazily (by CreateTransaction) in this case.
   // The HttpCache takes ownership of the |backend_factory|.
-  HttpCache(const net::HttpNetworkSession::Params& params,
+  HttpCache(HostResolver* host_resolver,
+            CertVerifier* cert_verifier,
+            OriginBoundCertService* origin_bound_cert_service,
+            TransportSecurityState* transport_security_state,
+            ProxyService* proxy_service,
+            const std::string& ssl_session_cache_shard,
+            SSLConfigService* ssl_config_service,
+            HttpAuthHandlerFactory* http_auth_handler_factory,
+            NetworkDelegate* network_delegate,
+            HttpServerProperties* http_server_properties,
+            NetLog* net_log,
             BackendFactory* backend_factory);
 
   // The disk cache is initialized lazily (by CreateTransaction) in  this case.
@@ -164,11 +171,8 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // referenced by |url|, as long as the entry's |expected_response_time| has
   // not changed. This method returns without blocking, and the operation will
   // be performed asynchronously without any completion notification.
-  void WriteMetadata(const GURL& url,
-                     RequestPriority priority,
-                     base::Time expected_response_time,
-                     IOBuffer* buf,
-                     int buf_len);
+  void WriteMetadata(const GURL& url, base::Time expected_response_time,
+                     IOBuffer* buf, int buf_len);
 
   // Get/Set the cache's mode.
   void set_mode(Mode value) { mode_ = value; }
@@ -186,12 +190,8 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // referred to by |url| and |http_method|.
   void OnExternalCacheHit(const GURL& url, const std::string& http_method);
 
-  // Initializes the Infinite Cache, if selected by the field trial.
-  void InitializeInfiniteCache(const base::FilePath& path);
-
   // HttpTransactionFactory implementation:
-  virtual int CreateTransaction(RequestPriority priority,
-                                scoped_ptr<HttpTransaction>* trans) OVERRIDE;
+  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans) OVERRIDE;
   virtual HttpCache* GetCache() OVERRIDE;
   virtual HttpNetworkSession* GetSession() OVERRIDE;
 
@@ -211,6 +211,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // Types --------------------------------------------------------------------
 
   class MetadataWriter;
+  class SSLHostInfoFactoryAdaptor;
   class Transaction;
   class WorkItem;
   friend class Transaction;
@@ -253,10 +254,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // Generates the cache key for this request.
   std::string GenerateCacheKey(const HttpRequestInfo*);
 
-  // Dooms the entry selected by |key|, if it is currently in the list of active
-  // entries.
-  void DoomActiveEntry(const std::string& key);
-
   // Dooms the entry selected by |key|. |trans| will be notified via its IO
   // callback if this method returns ERR_IO_PENDING. The entry can be
   // currently in use or not.
@@ -266,9 +263,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // callback if this method returns ERR_IO_PENDING. The entry should not
   // be currently in use.
   int AsyncDoomEntry(const std::string& key, Transaction* trans);
-
-  // Dooms the entry associated with a GET for a given |url|.
-  void DoomMainEntryForUrl(const GURL& url);
 
   // Closes a previously doomed entry.
   void FinalizeDoomedEntry(ActiveEntry* entry);
@@ -380,6 +374,8 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   bool building_backend_;
 
   Mode mode_;
+
+  const scoped_ptr<SSLHostInfoFactoryAdaptor> ssl_host_info_factory_;
 
   const scoped_ptr<HttpTransactionFactory> network_layer_;
   scoped_ptr<disk_cache::Backend> disk_cache_;

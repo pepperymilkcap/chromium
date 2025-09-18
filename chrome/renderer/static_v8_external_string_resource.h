@@ -4,9 +4,10 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_STATIC_V8_EXTERNAL_STRING_RESOURCE_H_
 #define CHROME_RENDERER_EXTENSIONS_STATIC_V8_EXTERNAL_STRING_RESOURCE_H_
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "base/strings/string_piece.h"
+#include "base/string_piece.h"
 #include "v8/include/v8.h"
 
 // A very simple implementation of v8::ExternalAsciiStringResource that just

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,18 @@
 
 #include "base/atomicops.h"
 #include "base/command_line.h"
-#include "base/files/file_path.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/process/process_metrics.h"
+#include "base/process_util.h"
 #include "base/rand_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/stringprintf.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "content/common/child_process_messages.h"
-#include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 #include "content/public/common/child_process_host_delegate.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
-#include "ipc/ipc_channel.h"
 #include "ipc/ipc_logging.h"
 
 #if defined(OS_LINUX)
@@ -39,25 +37,25 @@ namespace {
 // path for feature "NP" would be
 // ".../Chromium Helper NP.app/Contents/MacOS/Chromium Helper NP". The new
 // path is returned.
-base::FilePath TransformPathForFeature(const base::FilePath& path,
+FilePath TransformPathForFeature(const FilePath& path,
                                  const std::string& feature) {
   std::string basename = path.BaseName().value();
 
-  base::FilePath macos_path = path.DirName();
+  FilePath macos_path = path.DirName();
   const char kMacOSName[] = "MacOS";
   DCHECK_EQ(kMacOSName, macos_path.BaseName().value());
 
-  base::FilePath contents_path = macos_path.DirName();
+  FilePath contents_path = macos_path.DirName();
   const char kContentsName[] = "Contents";
   DCHECK_EQ(kContentsName, contents_path.BaseName().value());
 
-  base::FilePath helper_app_path = contents_path.DirName();
+  FilePath helper_app_path = contents_path.DirName();
   const char kAppExtension[] = ".app";
   std::string basename_app = basename;
   basename_app.append(kAppExtension);
   DCHECK_EQ(basename_app, helper_app_path.BaseName().value());
 
-  base::FilePath root_path = helper_app_path.DirName();
+  FilePath root_path = helper_app_path.DirName();
 
   std::string new_basename = basename;
   new_basename.append(1, ' ');
@@ -65,7 +63,7 @@ base::FilePath TransformPathForFeature(const base::FilePath& path,
   std::string new_basename_app = new_basename;
   new_basename_app.append(kAppExtension);
 
-  base::FilePath new_path = root_path.Append(new_basename_app)
+  FilePath new_path = root_path.Append(new_basename_app)
                                .Append(kContentsName)
                                .Append(kMacOSName)
                                .Append(new_basename);
@@ -78,16 +76,14 @@ base::FilePath TransformPathForFeature(const base::FilePath& path,
 
 namespace content {
 
-int ChildProcessHostImpl::kInvalidChildProcessId = -1;
-
 // static
 ChildProcessHost* ChildProcessHost::Create(ChildProcessHostDelegate* delegate) {
   return new ChildProcessHostImpl(delegate);
 }
 
 // static
-base::FilePath ChildProcessHost::GetChildPath(int flags) {
-  base::FilePath child_path;
+FilePath ChildProcessHost::GetChildPath(int flags) {
+  FilePath child_path;
 
   child_path = CommandLine::ForCurrentProcess()->GetSwitchValuePath(
       switches::kBrowserSubprocessPath);
@@ -99,13 +95,13 @@ base::FilePath ChildProcessHost::GetChildPath(int flags) {
   // Valgrind executable, which then crashes. However, it's almost safe to
   // assume that the updates won't happen while testing with Valgrind tools.
   if (child_path.empty() && flags & CHILD_ALLOW_SELF && !RunningOnValgrind())
-    child_path = base::FilePath(base::kProcSelfExe);
+    child_path = FilePath("/proc/self/exe");
 #endif
 
   // On most platforms, the child executable is the same as the current
   // executable.
   if (child_path.empty())
-    PathService::Get(CHILD_PROCESS_EXE, &child_path);
+    PathService::Get(content::CHILD_PROCESS_EXE, &child_path);
 
 #if defined(OS_MACOSX)
   DCHECK(!(flags & CHILD_NO_PIE && flags & CHILD_ALLOW_HEAP_EXECUTION));
@@ -150,7 +146,7 @@ ChildProcessHostImpl::~ChildProcessHostImpl() {
 void ChildProcessHostImpl::AddFilter(IPC::ChannelProxy::MessageFilter* filter) {
   filters_.push_back(filter);
 
-  if (channel_)
+  if (channel_.get())
     filter->OnFilterAdded(channel_.get());
 }
 
@@ -159,7 +155,7 @@ void ChildProcessHostImpl::ForceShutdown() {
 }
 
 std::string ChildProcessHostImpl::CreateChannel() {
-  channel_id_ = IPC::Channel::GenerateVerifiedChannelID(std::string());
+  channel_id_ = GenerateRandomChannelID(this);
   channel_.reset(new IPC::Channel(
       channel_id_, IPC::Channel::MODE_SERVER, this));
   if (!channel_->Connect())
@@ -190,7 +186,7 @@ int ChildProcessHostImpl::TakeClientFileDescriptor() {
 #endif
 
 bool ChildProcessHostImpl::Send(IPC::Message* message) {
-  if (!channel_) {
+  if (!channel_.get()) {
     delete message;
     return false;
   }
@@ -198,27 +194,33 @@ bool ChildProcessHostImpl::Send(IPC::Message* message) {
 }
 
 void ChildProcessHostImpl::AllocateSharedMemory(
-      size_t buffer_size, base::ProcessHandle child_process_handle,
+      uint32 buffer_size, base::ProcessHandle child_process_handle,
       base::SharedMemoryHandle* shared_memory_handle) {
   base::SharedMemory shared_buf;
-  if (!shared_buf.CreateAnonymous(buffer_size)) {
+  if (!shared_buf.CreateAndMapAnonymous(buffer_size)) {
     *shared_memory_handle = base::SharedMemory::NULLHandle();
-    NOTREACHED() << "Cannot create shared memory buffer";
+    NOTREACHED() << "Cannot map shared memory buffer";
     return;
   }
   shared_buf.GiveToProcess(child_process_handle, shared_memory_handle);
 }
 
+std::string ChildProcessHostImpl::GenerateRandomChannelID(void* instance) {
+  // Note: the string must start with the current process id, this is how
+  // child processes determine the pid of the parent.
+  // Build the channel ID.  This is composed of a unique identifier for the
+  // parent browser process, an identifier for the child instance, and a random
+  // component. We use a random component so that a hacked child process can't
+  // cause denial of service by causing future named pipe creation to fail.
+  return base::StringPrintf("%d.%p.%d",
+                            base::GetCurrentProcId(), instance,
+                            base::RandInt(0, std::numeric_limits<int>::max()));
+}
+
 int ChildProcessHostImpl::GenerateChildProcessUniqueId() {
   // This function must be threadsafe.
-  //
-  // TODO(ajwong): Why not StaticAtomicSequenceNumber?
   static base::subtle::Atomic32 last_unique_child_id = 0;
-  int id = base::subtle::NoBarrier_AtomicIncrement(&last_unique_child_id, 1);
-
-  CHECK_NE(kInvalidChildProcessId, id);
-
-  return id;
+  return base::subtle::NoBarrier_AtomicIncrement(&last_unique_child_id, 1);
 }
 
 bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
@@ -248,8 +250,6 @@ bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
                           OnShutdownRequest)
       IPC_MESSAGE_HANDLER(ChildProcessHostMsg_SyncAllocateSharedMemory,
                           OnAllocateSharedMemory)
-      IPC_MESSAGE_HANDLER(ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer,
-                          OnAllocateGpuMemoryBuffer)
       IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP()
 
@@ -265,7 +265,7 @@ bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void ChildProcessHostImpl::OnChannelConnected(int32 peer_pid) {
-  if (!base::OpenPrivilegedProcessHandle(peer_pid, &peer_handle_)) {
+  if (!base::OpenProcessHandle(peer_pid, &peer_handle_)) {
     NOTREACHED();
   }
   opening_channel_ = false;
@@ -294,18 +294,6 @@ void ChildProcessHostImpl::OnAllocateSharedMemory(
 void ChildProcessHostImpl::OnShutdownRequest() {
   if (delegate_->CanShutdown())
     Send(new ChildProcessMsg_Shutdown());
-}
-
-void ChildProcessHostImpl::OnAllocateGpuMemoryBuffer(
-    uint32 width,
-    uint32 height,
-    uint32 internalformat,
-    gfx::GpuMemoryBufferHandle* handle) {
-  handle->type = gfx::SHARED_MEMORY_BUFFER;
-  AllocateSharedMemory(
-      width * height * GpuMemoryBufferImpl::BytesPerPixel(internalformat),
-      peer_handle_,
-      &handle->handle);
 }
 
 }  // namespace content

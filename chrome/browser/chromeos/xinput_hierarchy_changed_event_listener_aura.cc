@@ -7,11 +7,11 @@
 namespace chromeos {
 
 void XInputHierarchyChangedEventListener::Init() {
-  base::MessageLoopForUI::current()->AddObserver(this);
+  MessageLoopForUI::current()->AddObserver(this);
 }
 
 void XInputHierarchyChangedEventListener::StopImpl() {
-  base::MessageLoopForUI::current()->RemoveObserver(this);
+  MessageLoopForUI::current()->RemoveObserver(this);
 }
 
 base::EventStatus XInputHierarchyChangedEventListener::WillProcessEvent(

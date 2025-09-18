@@ -4,112 +4,69 @@
 
 #include "chrome/browser/download/download_shelf_context_menu.h"
 
-#include "base/command_line.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/safe_browsing/download_feedback_service.h"
-#include "chrome/browser/safe_browsing/download_protection_service.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/page_navigator.h"
-#include "content/public/common/content_switches.h"
-#include "extensions/common/extension.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::DownloadItem;
-using extensions::Extension;
+using content::OpenURLParams;
 
-namespace {
-
-// Returns true if downloads resumption is enabled.
-bool IsDownloadResumptionEnabled() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  return command_line.HasSwitch(switches::kEnableDownloadResumption);
-}
-
-}  // namespace
-
-DownloadShelfContextMenu::~DownloadShelfContextMenu() {
-  DetachFromDownloadItem();
-}
+DownloadShelfContextMenu::~DownloadShelfContextMenu() {}
 
 DownloadShelfContextMenu::DownloadShelfContextMenu(
-    DownloadItem* download_item,
-    content::PageNavigator* navigator)
-    : download_item_(download_item),
-      navigator_(navigator) {
-  DCHECK(download_item_);
-  download_item_->AddObserver(this);
+    BaseDownloadItemModel* download_model)
+    : download_model_(download_model),
+      download_item_(download_model->download()) {
 }
 
 ui::SimpleMenuModel* DownloadShelfContextMenu::GetMenuModel() {
   ui::SimpleMenuModel* model = NULL;
 
-  if (!download_item_)
-    return NULL;
-
-  DownloadItemModel download_model(download_item_);
-  // We shouldn't be opening a context menu for a dangerous download, unless it
-  // is a malicious download.
-  DCHECK(!download_model.IsDangerous() || download_model.MightBeMalicious());
-
-  if (download_model.IsMalicious())
-    model = GetMaliciousMenuModel();
-  else if (download_model.MightBeMalicious())
-    model = GetMaybeMaliciousMenuModel();
-  else if (download_item_->GetState() == DownloadItem::COMPLETE)
+  if (download_item_->GetSafetyState() == DownloadItem::DANGEROUS) {
+    if (download_item_->GetDangerType() ==
+            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
+        download_item_->GetDangerType() ==
+            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT) {
+      model = GetMaliciousMenuModel();
+    } else {
+      NOTREACHED();
+    }
+  } else if (download_item_->IsComplete()) {
     model = GetFinishedMenuModel();
-  else if (download_item_->GetState() == DownloadItem::INTERRUPTED)
-    model = GetInterruptedMenuModel();
-  else
+  } else {
     model = GetInProgressMenuModel();
+  }
   return model;
 }
 
 bool DownloadShelfContextMenu::IsCommandIdEnabled(int command_id) const {
-  if (!download_item_)
-    return false;
-
-  switch (static_cast<ContextMenuCommands>(command_id)) {
+  switch (command_id) {
     case SHOW_IN_FOLDER:
-      return download_item_->CanShowInFolder();
     case OPEN_WHEN_COMPLETE:
-    case PLATFORM_OPEN:
-      return download_item_->CanOpenDownload() &&
-          !download_crx_util::IsExtensionDownload(*download_item_);
+      return download_item_->CanShowInFolder();
     case ALWAYS_OPEN_TYPE:
-      // For temporary downloads, the target filename might be a temporary
-      // filename. Don't base an "Always open" decision based on it. Also
-      // exclude extensions.
       return download_item_->CanOpenDownload() &&
-          !download_crx_util::IsExtensionDownload(*download_item_);
+          !Extension::IsExtension(download_item_->GetTargetName());
     case CANCEL:
-      return !download_item_->IsDone();
+      return download_item_->IsPartialDownload();
     case TOGGLE_PAUSE:
-      return !download_item_->IsDone();
-    case DISCARD:
-    case KEEP:
-    case REPORT:
-    case LEARN_MORE_SCANNING:
-    case LEARN_MORE_INTERRUPTED:
-      return true;
+      return download_item_->IsInProgress();
+    default:
+      return command_id > 0 && command_id < MENU_LAST;
   }
-  return false;
 }
 
 bool DownloadShelfContextMenu::IsCommandIdChecked(int command_id) const {
-  if (!download_item_)
-    return false;
-
   switch (command_id) {
     case OPEN_WHEN_COMPLETE:
-      return download_item_->GetOpenWhenComplete() ||
-          download_crx_util::IsExtensionDownload(*download_item_);
+      return download_item_->GetOpenWhenComplete();
     case ALWAYS_OPEN_TYPE:
       return download_item_->ShouldOpenFileBasedOnExtension();
     case TOGGLE_PAUSE:
@@ -118,11 +75,8 @@ bool DownloadShelfContextMenu::IsCommandIdChecked(int command_id) const {
   return false;
 }
 
-void DownloadShelfContextMenu::ExecuteCommand(int command_id, int event_flags) {
-  if (!download_item_)
-    return;
-
-  switch (static_cast<ContextMenuCommands>(command_id)) {
+void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
+  switch (command_id) {
     case SHOW_IN_FOLDER:
       download_item_->ShowDownloadInShell();
       break;
@@ -132,77 +86,40 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id, int event_flags) {
     case ALWAYS_OPEN_TYPE: {
       DownloadPrefs* prefs = DownloadPrefs::FromBrowserContext(
           download_item_->GetBrowserContext());
-      base::FilePath path = download_item_->GetTargetFilePath();
+      FilePath path = download_item_->GetUserVerifiedFilePath();
       if (!IsCommandIdChecked(ALWAYS_OPEN_TYPE))
         prefs->EnableAutoOpenBasedOnExtension(path);
       else
         prefs->DisableAutoOpenBasedOnExtension(path);
       break;
     }
-    case PLATFORM_OPEN:
-      DownloadItemModel(download_item_).OpenUsingPlatformHandler();
-      break;
     case CANCEL:
-      download_item_->Cancel(true /* Cancelled by user */);
+      download_model_->CancelTask();
       break;
     case TOGGLE_PAUSE:
-      if (download_item_->GetState() == DownloadItem::IN_PROGRESS &&
-          !download_item_->IsPaused()) {
-        download_item_->Pause();
-      } else {
-        download_item_->Resume();
-      }
+      // It is possible for the download to complete before the user clicks the
+      // menu item, recheck if the download is in progress state before toggling
+      // pause.
+      if (download_item_->IsPartialDownload())
+        download_item_->TogglePause();
       break;
     case DISCARD:
-      download_item_->Remove();
+      download_item_->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
       break;
     case KEEP:
-      download_item_->ValidateDangerousDownload();
+      download_item_->DangerousDownloadValidated();
       break;
-    case REPORT: {
-#if defined(FULL_SAFE_BROWSING)
-      using safe_browsing::DownloadProtectionService;
-      DownloadItemModel download_model(download_item_);
-      if (!download_model.ShouldAllowDownloadFeedback())
-        break;
-      SafeBrowsingService* sb_service =
-          g_browser_process->safe_browsing_service();
-      DownloadProtectionService* protection_service =
-          (sb_service ? sb_service->download_protection_service() : NULL);
-      if (protection_service) {
-        protection_service->feedback_service()->BeginFeedbackForDownload(
-            download_item_);
-      }
-#else
-      // Should only be getting invoked if we are using safe browsing.
-      NOTREACHED();
-#endif
+    case LEARN_MORE: {
+      Browser* browser = BrowserList::GetLastActive();
+      DCHECK(browser && browser->is_type_tabbed());
+      OpenURLParams params(GURL(chrome::kDownloadScanningLearnMoreURL),
+                           content::Referrer(), NEW_FOREGROUND_TAB,
+                           content::PAGE_TRANSITION_TYPED, false);
+      browser->OpenURL(params);
       break;
     }
-    case LEARN_MORE_SCANNING: {
-#if defined(FULL_SAFE_BROWSING)
-      using safe_browsing::DownloadProtectionService;
-      SafeBrowsingService* sb_service =
-          g_browser_process->safe_browsing_service();
-      DownloadProtectionService* protection_service =
-          (sb_service ? sb_service->download_protection_service() : NULL);
-      if (protection_service) {
-        protection_service->ShowDetailsForDownload(*download_item_, navigator_);
-      }
-#else
-      // Should only be getting invoked if we are using safe browsing.
+    default:
       NOTREACHED();
-#endif
-      break;
-    }
-    case LEARN_MORE_INTERRUPTED:
-      navigator_->OpenURL(
-          content::OpenURLParams(GURL(chrome::kDownloadInterruptedLearnMoreURL),
-                                 content::Referrer(),
-                                 NEW_FOREGROUND_TAB,
-                                 content::PAGE_TRANSITION_LINK,
-                                 false));
-      break;
   }
 }
 
@@ -215,58 +132,38 @@ bool DownloadShelfContextMenu::IsItemForCommandIdDynamic(int command_id) const {
   return command_id == TOGGLE_PAUSE;
 }
 
-base::string16 DownloadShelfContextMenu::GetLabelForCommandId(
-    int command_id) const {
-  switch (static_cast<ContextMenuCommands>(command_id)) {
+string16 DownloadShelfContextMenu::GetLabelForCommandId(int command_id) const {
+  switch (command_id) {
     case SHOW_IN_FOLDER:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_SHOW);
     case OPEN_WHEN_COMPLETE:
-      if (download_item_ && !download_item_->IsDone())
+      if (download_item_->IsInProgress())
         return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_OPEN_WHEN_COMPLETE);
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_OPEN);
     case ALWAYS_OPEN_TYPE:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_ALWAYS_OPEN_TYPE);
-    case PLATFORM_OPEN:
-      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_PLATFORM_OPEN);
     case CANCEL:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_CANCEL);
-    case TOGGLE_PAUSE:
-      if (download_item_ &&
-          download_item_->GetState() == DownloadItem::IN_PROGRESS &&
-          !download_item_->IsPaused())
-        return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_PAUSE_ITEM);
-      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_RESUME_ITEM);
+    case TOGGLE_PAUSE: {
+      if (download_item_->IsPaused())
+        return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_RESUME_ITEM);
+      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_PAUSE_ITEM);
+    }
     case DISCARD:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_DISCARD);
-    case REPORT:
-      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_REPORT);
     case KEEP:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_KEEP);
-    case LEARN_MORE_SCANNING:
-      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_LEARN_MORE_SCANNING);
-    case LEARN_MORE_INTERRUPTED:
-      return l10n_util::GetStringUTF16(
-          IDS_DOWNLOAD_MENU_LEARN_MORE_INTERRUPTED);
+    case LEARN_MORE:
+      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_LEARN_MORE);
+    default:
+      NOTREACHED();
+      break;
   }
-  NOTREACHED();
-  return base::string16();
-}
-
-void DownloadShelfContextMenu::DetachFromDownloadItem() {
-  if (!download_item_)
-    return;
-
-  download_item_->RemoveObserver(this);
-  download_item_ = NULL;
-}
-
-void DownloadShelfContextMenu::OnDownloadDestroyed(DownloadItem* download) {
-  DCHECK(download_item_ == download);
-  DetachFromDownloadItem();
+  return string16();
 }
 
 ui::SimpleMenuModel* DownloadShelfContextMenu::GetInProgressMenuModel() {
-  if (in_progress_download_menu_model_)
+  if (in_progress_download_menu_model_.get())
     return in_progress_download_menu_model_.get();
 
   in_progress_download_menu_model_.reset(new ui::SimpleMenuModel(this));
@@ -275,12 +172,12 @@ ui::SimpleMenuModel* DownloadShelfContextMenu::GetInProgressMenuModel() {
       OPEN_WHEN_COMPLETE, IDS_DOWNLOAD_MENU_OPEN_WHEN_COMPLETE);
   in_progress_download_menu_model_->AddCheckItemWithStringId(
       ALWAYS_OPEN_TYPE, IDS_DOWNLOAD_MENU_ALWAYS_OPEN_TYPE);
-  in_progress_download_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+  in_progress_download_menu_model_->AddSeparator();
   in_progress_download_menu_model_->AddItemWithStringId(
       TOGGLE_PAUSE, IDS_DOWNLOAD_MENU_PAUSE_ITEM);
   in_progress_download_menu_model_->AddItemWithStringId(
       SHOW_IN_FOLDER, IDS_DOWNLOAD_MENU_SHOW);
-  in_progress_download_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+  in_progress_download_menu_model_->AddSeparator();
   in_progress_download_menu_model_->AddItemWithStringId(
       CANCEL, IDS_DOWNLOAD_MENU_CANCEL);
 
@@ -288,7 +185,7 @@ ui::SimpleMenuModel* DownloadShelfContextMenu::GetInProgressMenuModel() {
 }
 
 ui::SimpleMenuModel* DownloadShelfContextMenu::GetFinishedMenuModel() {
-  if (finished_download_menu_model_)
+  if (finished_download_menu_model_.get())
     return finished_download_menu_model_.get();
 
   finished_download_menu_model_.reset(new ui::SimpleMenuModel(this));
@@ -297,82 +194,29 @@ ui::SimpleMenuModel* DownloadShelfContextMenu::GetFinishedMenuModel() {
       OPEN_WHEN_COMPLETE, IDS_DOWNLOAD_MENU_OPEN);
   finished_download_menu_model_->AddCheckItemWithStringId(
       ALWAYS_OPEN_TYPE, IDS_DOWNLOAD_MENU_ALWAYS_OPEN_TYPE);
-  if (DownloadItemModel(download_item_).ShouldPreferOpeningInBrowser())
-    finished_download_menu_model_->AddItemWithStringId(
-        PLATFORM_OPEN, IDS_DOWNLOAD_MENU_PLATFORM_OPEN);
-  finished_download_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+  finished_download_menu_model_->AddSeparator();
   finished_download_menu_model_->AddItemWithStringId(
       SHOW_IN_FOLDER, IDS_DOWNLOAD_MENU_SHOW);
-  finished_download_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+  finished_download_menu_model_->AddSeparator();
   finished_download_menu_model_->AddItemWithStringId(
       CANCEL, IDS_DOWNLOAD_MENU_CANCEL);
 
   return finished_download_menu_model_.get();
 }
 
-ui::SimpleMenuModel* DownloadShelfContextMenu::GetInterruptedMenuModel() {
-#if !defined(OS_WIN)
-  // If resumption isn't enabled and we aren't on Windows, then none of the
-  // options here are applicable.
-  if (!IsDownloadResumptionEnabled())
-    return GetInProgressMenuModel();
-#endif
-
-  if (interrupted_download_menu_model_)
-    return interrupted_download_menu_model_.get();
-
-  interrupted_download_menu_model_.reset(new ui::SimpleMenuModel(this));
-
-  if (IsDownloadResumptionEnabled()) {
-    interrupted_download_menu_model_->AddItemWithStringId(
-        TOGGLE_PAUSE, IDS_DOWNLOAD_MENU_RESUME_ITEM);
-  }
-#if defined(OS_WIN)
-  // The Help Center article is currently Windows specific.
-  // TODO(asanka): Enable this for other platforms when the article is expanded
-  // for other platforms.
-  interrupted_download_menu_model_->AddItemWithStringId(
-      LEARN_MORE_INTERRUPTED, IDS_DOWNLOAD_MENU_LEARN_MORE_INTERRUPTED);
-#endif
-  if (IsDownloadResumptionEnabled()) {
-    interrupted_download_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
-    interrupted_download_menu_model_->AddItemWithStringId(
-        CANCEL, IDS_DOWNLOAD_MENU_CANCEL);
-  }
-
-  return interrupted_download_menu_model_.get();
-}
-
-ui::SimpleMenuModel* DownloadShelfContextMenu::GetMaybeMaliciousMenuModel() {
-  if (maybe_malicious_download_menu_model_)
-    return maybe_malicious_download_menu_model_.get();
-
-  maybe_malicious_download_menu_model_.reset(new ui::SimpleMenuModel(this));
-
-  maybe_malicious_download_menu_model_->AddItemWithStringId(
-      DISCARD, IDS_DOWNLOAD_MENU_DISCARD);
-  maybe_malicious_download_menu_model_->AddItemWithStringId(
-      KEEP, IDS_DOWNLOAD_MENU_KEEP);
-  maybe_malicious_download_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
-  maybe_malicious_download_menu_model_->AddItemWithStringId(
-      LEARN_MORE_SCANNING, IDS_DOWNLOAD_MENU_LEARN_MORE_SCANNING);
-  return maybe_malicious_download_menu_model_.get();
-}
-
-ui::SimpleMenuModel*
-DownloadShelfContextMenu::GetMaliciousMenuModel() {
-  if (malicious_download_menu_model_)
+ui::SimpleMenuModel* DownloadShelfContextMenu::GetMaliciousMenuModel() {
+  if (malicious_download_menu_model_.get())
     return malicious_download_menu_model_.get();
 
   malicious_download_menu_model_.reset(new ui::SimpleMenuModel(this));
 
-  DownloadItemModel download_model(download_item_);
-  if (download_model.ShouldAllowDownloadFeedback()) {
-    malicious_download_menu_model_->AddItemWithStringId(
-        REPORT, IDS_DOWNLOAD_MENU_REPORT);
-  }
   malicious_download_menu_model_->AddItemWithStringId(
-      LEARN_MORE_SCANNING, IDS_DOWNLOAD_MENU_LEARN_MORE_SCANNING);
+      DISCARD, IDS_DOWNLOAD_MENU_DISCARD);
+  malicious_download_menu_model_->AddItemWithStringId(
+      KEEP, IDS_DOWNLOAD_MENU_KEEP);
+  malicious_download_menu_model_->AddSeparator();
+  malicious_download_menu_model_->AddItemWithStringId(
+      LEARN_MORE, IDS_DOWNLOAD_MENU_LEARN_MORE);
 
   return malicious_download_menu_model_.get();
 }

@@ -11,12 +11,10 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/time/time.h"
+#include "base/stringprintf.h"
+#include "base/string_number_conversions.h"
+#include "base/string_piece.h"
+#include "base/string_util.h"
 
 using std::string;
 
@@ -114,8 +112,8 @@ void HttpUtil::ParseContentType(const string& content_type_str,
   // Iterate over parameters
   size_t param_start = content_type_str.find_first_of(';', type_end);
   if (param_start != string::npos) {
-    base::StringTokenizer tokenizer(begin + param_start, content_type_str.end(),
-                                    ";");
+    StringTokenizer tokenizer(begin + param_start, content_type_str.end(),
+                              ";");
     tokenizer.set_quote_chars("\"");
     while (tokenizer.GetNext()) {
       string::const_iterator equals_sign =
@@ -318,8 +316,6 @@ namespace {
 const char* const kForbiddenHeaderFields[] = {
   "accept-charset",
   "accept-encoding",
-  "access-control-request-headers",
-  "access-control-request-method",
   "connection",
   "content-length",
   "cookie",
@@ -393,10 +389,7 @@ bool HttpUtil::IsNonCoalescingHeader(string::const_iterator name_begin,
     // The format of auth-challenges mixes both space separated tokens and
     // comma separated properties, so coalescing on comma won't work.
     "www-authenticate",
-    "proxy-authenticate",
-    // STS specifies that UAs must not process any STS headers after the first
-    // one.
-    "strict-transport-security"
+    "proxy-authenticate"
   };
   for (size_t i = 0; i < arraysize(kNonCoalescingHeaders); ++i) {
     if (LowerCaseEqualsASCII(name_begin, name_end, kNonCoalescingHeaders[i]))
@@ -601,7 +594,7 @@ std::string HttpUtil::AssembleRawHeaders(const char* input_begin,
   // line's field-value.
 
   // TODO(ericroman): is this too permissive? (delimits on [\r\n]+)
-  base::CStringTokenizer lines(status_line_end, input_end, "\r\n");
+  CStringTokenizer lines(status_line_end, input_end, "\r\n");
 
   // This variable is true when the previous line was continuable.
   bool prev_line_continuable = false;
@@ -640,7 +633,7 @@ std::string HttpUtil::AssembleRawHeaders(const char* input_begin,
 
 std::string HttpUtil::ConvertHeadersBackToHTTPResponse(const std::string& str) {
   std::string disassembled_headers;
-  base::StringTokenizer tokenizer(str, std::string(1, '\0'));
+  StringTokenizer tokenizer(str, std::string(1, '\0'));
   while (tokenizer.GetNext()) {
     disassembled_headers.append(tokenizer.token_begin(), tokenizer.token_end());
     disassembled_headers.append("\r\n");
@@ -665,7 +658,7 @@ std::string HttpUtil::GenerateAcceptLanguageHeader(
   // two floating point numbers.
   const unsigned int kQvalueDecrement10 = 2;
   unsigned int qvalue10 = 10;
-  base::StringTokenizer t(raw_language_list, ",");
+  StringTokenizer t(raw_language_list, ",");
   std::string lang_list_with_q;
   while (t.GetNext()) {
     std::string language = t.token();
@@ -684,6 +677,16 @@ std::string HttpUtil::GenerateAcceptLanguageHeader(
   return lang_list_with_q;
 }
 
+std::string HttpUtil::GenerateAcceptCharsetHeader(const std::string& charset) {
+  std::string charset_with_q = charset;
+  if (LowerCaseEqualsASCII(charset, "utf-8")) {
+    charset_with_q += ",*;q=0.5";
+  } else {
+    charset_with_q += ",utf-8;q=0.7,*;q=0.3";
+  }
+  return charset_with_q;
+}
+
 void HttpUtil::AppendHeaderIfMissing(const char* header_name,
                                      const std::string& header_value,
                                      std::string* headers) {
@@ -692,66 +695,6 @@ void HttpUtil::AppendHeaderIfMissing(const char* header_name,
   if (net::HttpUtil::HasHeader(*headers, header_name))
     return;
   *headers += std::string(header_name) + ": " + header_value + "\r\n";
-}
-
-bool HttpUtil::HasStrongValidators(HttpVersion version,
-                                   const std::string& etag_header,
-                                   const std::string& last_modified_header,
-                                   const std::string& date_header) {
-  if (version < HttpVersion(1, 1))
-    return false;
-
-  if (!etag_header.empty()) {
-    size_t slash = etag_header.find('/');
-    if (slash == std::string::npos || slash == 0)
-      return true;
-
-    std::string::const_iterator i = etag_header.begin();
-    std::string::const_iterator j = etag_header.begin() + slash;
-    TrimLWS(&i, &j);
-    if (!LowerCaseEqualsASCII(i, j, "w"))
-      return true;
-  }
-
-  base::Time last_modified;
-  if (!base::Time::FromString(last_modified_header.c_str(), &last_modified))
-    return false;
-
-  base::Time date;
-  if (!base::Time::FromString(date_header.c_str(), &date))
-    return false;
-
-  return ((date - last_modified).InSeconds() >= 60);
-}
-
-// Functions for histogram initialization.  The code 0 is put in the map to
-// track status codes that are invalid.
-// TODO(gavinp): Greatly prune the collected codes once we learn which
-// ones are not sent in practice, to reduce upload size & memory use.
-
-enum {
-  HISTOGRAM_MIN_HTTP_STATUS_CODE = 100,
-  HISTOGRAM_MAX_HTTP_STATUS_CODE = 599,
-};
-
-// static
-std::vector<int> HttpUtil::GetStatusCodesForHistogram() {
-  std::vector<int> codes;
-  codes.reserve(
-      HISTOGRAM_MAX_HTTP_STATUS_CODE - HISTOGRAM_MIN_HTTP_STATUS_CODE + 2);
-  codes.push_back(0);
-  for (int i = HISTOGRAM_MIN_HTTP_STATUS_CODE;
-       i <= HISTOGRAM_MAX_HTTP_STATUS_CODE; ++i)
-    codes.push_back(i);
-  return codes;
-}
-
-// static
-int HttpUtil::MapStatusCodeForHistogram(int code) {
-  if (HISTOGRAM_MIN_HTTP_STATUS_CODE <= code &&
-      code <= HISTOGRAM_MAX_HTTP_STATUS_CODE)
-    return code;
-  return 0;
 }
 
 // BNF from section 4.2 of RFC 2616:
@@ -847,6 +790,8 @@ HttpUtil::NameValuePairsIterator::NameValuePairsIterator(
     char delimiter)
     : props_(begin, end, delimiter),
       valid_(true),
+      begin_(begin),
+      end_(end),
       name_begin_(end),
       name_end_(end),
       value_begin_(end),

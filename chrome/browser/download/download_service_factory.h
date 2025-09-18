@@ -7,27 +7,26 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class DownloadService;
+class Profile;
 
 // Singleton that owns all DownloadServices and associates them with
 // Profiles. Listens for the Profile's destruction notification and cleans up
 // the associated DownloadService.
-class DownloadServiceFactory : public BrowserContextKeyedServiceFactory {
+class DownloadServiceFactory : public ProfileKeyedServiceFactory {
  public:
-  // Returns the DownloadService for |context|, creating if not yet created.
-  static DownloadService* GetForBrowserContext(
-      content::BrowserContext* context);
+  // Returns the DownloadService for |profile|, creating if not yet created.
+  static DownloadService* GetForProfile(Profile* profile);
 
   static DownloadServiceFactory* GetInstance();
 
  protected:
-  // BrowserContextKeyedServiceFactory:
-  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  // ProfileKeyedServiceFactory:
+  virtual ProfileKeyedService* BuildServiceInstanceFor(
+      Profile* profile) const OVERRIDE;
+  virtual bool ServiceHasOwnInstanceInIncognito() OVERRIDE;
 
  private:
   friend struct DefaultSingletonTraits<DownloadServiceFactory>;

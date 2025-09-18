@@ -6,23 +6,23 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "base/string_tokenizer.h"
+#include "base/string_util.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/system/statistics_provider.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chromeos/network/network_state.h"
-#include "chromeos/network/network_state_handler.h"
-#include "chromeos/system/statistics_provider.h"
 #include "content/public/browser/browser_thread.h"
-#include "net/url_request/url_fetcher.h"
+#include "content/public/common/url_fetcher.h"
 
 using content::BrowserThread;
 
@@ -46,6 +46,8 @@ const char kInitialStartPageAttr[] = "initial_start_page";
 const char kSupportPageAttr[] = "support_page";
 
 const char kAcceptedManifestVersion[] = "1.0";
+
+const char kHardwareClass[] = "hardware_class";
 
 // Path to OEM partner startup customization manifest.
 const char kStartupCustomizationManifestPath[] =
@@ -78,9 +80,9 @@ CustomizationDocument::CustomizationDocument(
 CustomizationDocument::~CustomizationDocument() {}
 
 bool CustomizationDocument::LoadManifestFromFile(
-    const base::FilePath& manifest_path) {
+    const FilePath& manifest_path) {
   std::string manifest;
-  if (!base::ReadFileToString(manifest_path, &manifest))
+  if (!file_util::ReadFileToString(manifest_path, &manifest))
     return false;
   return LoadManifestFromString(manifest);
 }
@@ -89,16 +91,18 @@ bool CustomizationDocument::LoadManifestFromString(
     const std::string& manifest) {
   int error_code = 0;
   std::string error;
-  scoped_ptr<base::Value> root(base::JSONReader::ReadAndReturnError(manifest,
-      base::JSON_ALLOW_TRAILING_COMMAS, &error_code, &error));
+  scoped_ptr<Value> root(base::JSONReader::ReadAndReturnError(manifest,
+                                                              true,
+                                                              &error_code,
+                                                              &error));
   if (error_code != base::JSONReader::JSON_NO_ERROR)
     LOG(ERROR) << error;
   DCHECK(root.get() != NULL);
   if (root.get() == NULL)
     return false;
-  DCHECK(root->GetType() == base::Value::TYPE_DICTIONARY);
-  if (root->GetType() == base::Value::TYPE_DICTIONARY) {
-    root_.reset(static_cast<base::DictionaryValue*>(root.release()));
+  DCHECK(root->GetType() == Value::TYPE_DICTIONARY);
+  if (root->GetType() == Value::TYPE_DICTIONARY) {
+    root_.reset(static_cast<DictionaryValue*>(root.release()));
     std::string result;
     if (root_->GetString(kVersionAttr, &result) &&
         result == accepted_version_)
@@ -114,19 +118,19 @@ std::string CustomizationDocument::GetLocaleSpecificString(
     const std::string& locale,
     const std::string& dictionary_name,
     const std::string& entry_name) const {
-  base::DictionaryValue* dictionary_content = NULL;
+  DictionaryValue* dictionary_content = NULL;
   if (!root_.get() ||
       !root_->GetDictionary(dictionary_name, &dictionary_content))
     return std::string();
 
-  base::DictionaryValue* locale_dictionary = NULL;
+  DictionaryValue* locale_dictionary = NULL;
   if (dictionary_content->GetDictionary(locale, &locale_dictionary)) {
     std::string result;
     if (locale_dictionary->GetString(entry_name, &result))
       return result;
   }
 
-  base::DictionaryValue* default_dictionary = NULL;
+  DictionaryValue* default_dictionary = NULL;
   if (dictionary_content->GetDictionary(kDefaultAttr, &default_dictionary)) {
     std::string result;
     if (default_dictionary->GetString(entry_name, &result))
@@ -144,7 +148,7 @@ StartupCustomizationDocument::StartupCustomizationDocument()
     // Loading manifest causes us to do blocking IO on UI thread.
     // Temporarily allow it until we fix http://crosbug.com/11103
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    LoadManifestFromFile(base::FilePath(kStartupCustomizationManifestPath));
+    LoadManifestFromFile(FilePath(kStartupCustomizationManifestPath));
   }
   Init(chromeos::system::StatisticsProvider::GetInstance());
 }
@@ -173,12 +177,11 @@ void StartupCustomizationDocument::Init(
     root_->GetString(kRegistrationUrlAttr, &registration_url_);
 
     std::string hwid;
-    if (statistics_provider->GetMachineStatistic(
-            chromeos::system::kHardwareClassKey, &hwid)) {
-      base::ListValue* hwid_list = NULL;
+    if (statistics_provider->GetMachineStatistic(kHardwareClass, &hwid)) {
+      ListValue* hwid_list = NULL;
       if (root_->GetList(kHwidMapAttr, &hwid_list)) {
         for (size_t i = 0; i < hwid_list->GetSize(); ++i) {
-          base::DictionaryValue* hwid_dictionary = NULL;
+          DictionaryValue* hwid_dictionary = NULL;
           std::string hwid_mask;
           if (hwid_list->GetDictionary(i, &hwid_dictionary) &&
               hwid_dictionary->GetString(kHwidMaskAttr, &hwid_mask)) {
@@ -247,9 +250,9 @@ ServicesCustomizationDocument* ServicesCustomizationDocument::GetInstance() {
 }
 
 // static
-void ServicesCustomizationDocument::RegisterPrefs(
-    PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(kServicesCustomizationAppliedPref, false);
+void ServicesCustomizationDocument::RegisterPrefs(PrefService* local_state) {
+  local_state->RegisterBooleanPref(kServicesCustomizationAppliedPref, false,
+                                   PrefService::UNSYNCABLE_PREF);
 }
 
 // static
@@ -269,18 +272,17 @@ void ServicesCustomizationDocument::StartFetching() {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
         base::Bind(&ServicesCustomizationDocument::ReadFileInBackground,
                    base::Unretained(this),  // this class is a singleton.
-                   base::FilePath(url_.path())));
+                   FilePath(url_.path())));
   } else {
     StartFileFetch();
   }
 }
 
-void ServicesCustomizationDocument::ReadFileInBackground(
-    const base::FilePath& file) {
+void ServicesCustomizationDocument::ReadFileInBackground(const FilePath& file) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   std::string manifest;
-  if (base::ReadFileToString(file, &manifest)) {
+  if (file_util::ReadFileToString(file, &manifest)) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
         base::Bind(
            base::IgnoreResult(
@@ -295,24 +297,22 @@ void ServicesCustomizationDocument::ReadFileInBackground(
 
 void ServicesCustomizationDocument::StartFileFetch() {
   DCHECK(url_.is_valid());
-  url_fetcher_.reset(net::URLFetcher::Create(
-      url_, net::URLFetcher::GET, this));
+  url_fetcher_.reset(content::URLFetcher::Create(
+      url_, content::URLFetcher::GET, this));
   url_fetcher_->SetRequestContext(
       ProfileManager::GetDefaultProfile()->GetRequestContext());
   url_fetcher_->Start();
 }
 
 void ServicesCustomizationDocument::OnURLFetchComplete(
-    const net::URLFetcher* source) {
+    const content::URLFetcher* source) {
   if (source->GetResponseCode() == 200) {
     std::string data;
     source->GetResponseAsString(&data);
     LoadManifestFromString(data);
   } else {
-    const NetworkState* default_network =
-        NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-    if (default_network && default_network->IsConnectedState() &&
-        num_retries_ < kMaxFetchRetries) {
+    NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
+    if (!network->Connected() && num_retries_ < kMaxFetchRetries) {
       num_retries_++;
       retry_timer_.Start(FROM_HERE,
                          base::TimeDelta::FromSeconds(kRetriesDelayInSec),

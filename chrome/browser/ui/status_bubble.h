@@ -4,10 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_STATUS_BUBBLE_H_
 #define CHROME_BROWSER_UI_STATUS_BUBBLE_H_
+#pragma once
 
 #include <string>
 
-#include "base/strings/string16.h"
+#include "base/string16.h"
 
 class GURL;
 namespace gfx {
@@ -31,7 +32,7 @@ class StatusBubble {
   // when the cursor exits a link) will set the status bubble back to its
   // status text. To hide the status bubble again, either call SetStatus
   // with an empty string, or call Hide().
-  virtual void SetStatus(const base::string16& status) = 0;
+  virtual void SetStatus(const string16& status) = 0;
 
   // Sets the bubble text to a URL - if given a non-empty URL, this will cause
   // the bubble to fade in and remain open until given an empty URL or until

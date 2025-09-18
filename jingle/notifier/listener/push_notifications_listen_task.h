@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -28,10 +28,9 @@ class PushNotificationsListenTask : public buzz::XmppTask {
  public:
   class Delegate {
    public:
-    virtual void OnNotificationReceived(const Notification& notification) = 0;
-
-   protected:
-    virtual ~Delegate();
+     virtual ~Delegate() {}
+     virtual void OnNotificationReceived(
+        const Notification& notification) = 0;
   };
 
   PushNotificationsListenTask(buzz::XmppTaskParentInterface* parent,

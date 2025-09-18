@@ -4,10 +4,8 @@
 
 #include "ui/aura/test/test_windows.h"
 
-#include "base/strings/string_number_conversions.h"
-#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
-#include "ui/compositor/layer.h"
+#include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/rect.h"
 
 namespace aura {
@@ -34,23 +32,35 @@ Window* CreateTestWindowWithDelegate(WindowDelegate* delegate,
                                      const gfx::Rect& bounds,
                                      Window* parent) {
   return CreateTestWindowWithDelegateAndType(
-      delegate, ui::wm::WINDOW_TYPE_NORMAL, id, bounds, parent);
+      delegate,
+      aura::client::WINDOW_TYPE_NORMAL,
+      id,
+      bounds,
+      parent);
 }
 
 Window* CreateTestWindowWithDelegateAndType(WindowDelegate* delegate,
-                                            ui::wm::WindowType type,
+                                            client::WindowType type,
                                             int id,
                                             const gfx::Rect& bounds,
                                             Window* parent) {
   Window* window = new Window(delegate);
   window->set_id(id);
   window->SetType(type);
-  window->Init(ui::LAYER_TEXTURED);
+  window->Init(ui::Layer::LAYER_TEXTURED);
   window->SetBounds(bounds);
   window->Show();
-  if (parent)
-    parent->AddChild(window);
-  window->SetProperty(aura::client::kCanMaximizeKey, true);
+  window->SetParent(parent);
+  return window;
+}
+
+Window* CreateTransientChild(int id, Window* parent) {
+  Window* window = new Window(NULL);
+  window->set_id(id);
+  window->SetType(aura::client::WINDOW_TYPE_NORMAL);
+  window->Init(ui::Layer::LAYER_TEXTURED);
+  window->SetParent(NULL);
+  parent->AddTransientChild(window);
   return window;
 }
 
@@ -72,17 +82,6 @@ bool WindowIsAbove(Window* upper, Window* lower) {
 
 bool LayerIsAbove(Window* upper, Window* lower) {
   return ObjectIsAbove<ui::Layer>(upper->layer(), lower->layer());
-}
-
-std::string ChildWindowIDsAsString(aura::Window* parent) {
-  std::string result;
-  for (Window::Windows::const_iterator i = parent->children().begin();
-       i != parent->children().end(); ++i) {
-    if (!result.empty())
-      result += " ";
-    result += base::IntToString((*i)->id());
-  }
-  return result;
 }
 
 }  // namespace test

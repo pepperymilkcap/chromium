@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,25 +10,23 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_BRIDGE_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_BRIDGE_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 
-class Profile;
+class Browser;
 @class BookmarkBarController;
 
 class BookmarkBarBridge : public BookmarkModelObserver {
  public:
-  BookmarkBarBridge(Profile* profile,
-                    BookmarkBarController* controller,
+  BookmarkBarBridge(BookmarkBarController* controller,
                     BookmarkModel* model);
   virtual ~BookmarkBarBridge();
 
-  // Overridden from BookmarkModelObserver:
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
+  // Overridden from BookmarkModelObserver
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
   virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,
@@ -42,26 +40,19 @@ class BookmarkBarBridge : public BookmarkModelObserver {
                                    const BookmarkNode* parent,
                                    int old_index,
                                    const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkAllNodesRemoved(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    const BookmarkNode* node) OVERRIDE;
   virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
                                           const BookmarkNode* node) OVERRIDE;
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
                                              const BookmarkNode* node) OVERRIDE;
-  virtual void ExtensiveBookmarkChangesBeginning(BookmarkModel* model) OVERRIDE;
-  virtual void ExtensiveBookmarkChangesEnded(BookmarkModel* model) OVERRIDE;
+  virtual void BookmarkImportBeginning(BookmarkModel* model) OVERRIDE;
+  virtual void BookmarkImportEnding(BookmarkModel* model) OVERRIDE;
 
  private:
   BookmarkBarController* controller_;  // weak; owns me
   BookmarkModel* model_;  // weak; it is owned by a Profile.
   bool batch_mode_;
-
-  // Needed to react to kShowAppsShortcutInBookmarkBar changes.
-  PrefChangeRegistrar profile_pref_registrar_;
-
-  // Updates the visibility of the apps shortcut based on the pref value.
-  void OnAppsPageShortcutVisibilityPrefChanged();
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkBarBridge);
 };

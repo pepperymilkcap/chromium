@@ -1,20 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/gtk/gtk_chrome_cookie_view.h"
 
 #include "base/i18n/time_formatting.h"
-#include "base/strings/utf_string_conversions.h"
-#include "content/public/browser/indexed_db_context.h"
+#include "base/utf_string_conversions.h"
 #include "grit/generated_resources.h"
-#include "net/cookies/canonical_cookie.h"
-#include "net/cookies/parsed_cookie.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
-
-using base::UTF16ToUTF8;
 
 namespace {
 
@@ -468,7 +463,7 @@ void gtk_chrome_cookie_view_clear(GtkChromeCookieView* self) {
 void gtk_chrome_cookie_view_display_cookie(
     GtkChromeCookieView* self,
     const std::string& domain,
-    const net::CanonicalCookie& cookie) {
+    const net::CookieMonster::CanonicalCookie& cookie) {
   UpdateVisibleDetailedInfo(self, self->cookie_details_table_);
 
   gtk_entry_set_text(GTK_ENTRY(self->cookie_name_entry_),
@@ -483,7 +478,7 @@ void gtk_chrome_cookie_view_display_cookie(
                      UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
                          cookie.CreationDate())).c_str());
 
-  std::string expire_text = cookie.IsPersistent() ?
+  std::string expire_text = cookie.DoesExpire() ?
       UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(cookie.ExpiryDate())) :
       l10n_util::GetStringUTF8(IDS_COOKIES_COOKIE_EXPIRES_SESSION);
 
@@ -495,7 +490,7 @@ void gtk_chrome_cookie_view_display_cookie(
     GtkTreeIter iter;
     gtk_list_store_clear(store);
 
-    if (cookie.IsPersistent()) {
+    if (cookie.DoesExpire()) {
       gtk_list_store_append(store, &iter);
       gtk_list_store_set(store, &iter, 0, expire_text.c_str(), -1);
     }
@@ -522,8 +517,8 @@ void gtk_chrome_cookie_view_display_cookie_string(
     GtkChromeCookieView* self,
     const GURL& url,
     const std::string& cookie_line) {
-  net::ParsedCookie pc(cookie_line);
-  net::CanonicalCookie cookie(url, pc);
+  net::CookieMonster::ParsedCookie pc(cookie_line);
+  net::CookieMonster::CanonicalCookie cookie(url, pc);
 
   gtk_chrome_cookie_view_display_cookie(
       self,
@@ -561,7 +556,7 @@ void gtk_chrome_cookie_view_display_local_storage(
   UpdateVisibleDetailedInfo(self, self->local_storage_details_table_);
 
   gtk_entry_set_text(GTK_ENTRY(self->local_storage_origin_entry_),
-                     local_storage_info.origin_url.spec().c_str());
+                     local_storage_info.origin.c_str());
   gtk_entry_set_text(GTK_ENTRY(self->local_storage_size_entry_),
                      UTF16ToUTF8(ui::FormatBytes(
                          local_storage_info.size)).c_str());
@@ -593,25 +588,25 @@ void gtk_chrome_cookie_view_display_app_cache(
 // Switches the display to showing the passed in IndexedDB data.
 void gtk_chrome_cookie_view_display_indexed_db(
     GtkChromeCookieView* self,
-    const content::IndexedDBInfo& indexed_db_info) {
+    const BrowsingDataIndexedDBHelper::IndexedDBInfo& indexed_db_info) {
   UpdateVisibleDetailedInfo(self, self->indexed_db_details_table_);
 
   gtk_entry_set_text(GTK_ENTRY(self->indexed_db_origin_entry_),
-                     indexed_db_info.origin_.spec().c_str());
+                     indexed_db_info.origin.spec().c_str());
   gtk_entry_set_text(GTK_ENTRY(self->indexed_db_size_entry_),
                      UTF16ToUTF8(ui::FormatBytes(
-                         indexed_db_info.size_)).c_str());
+                         indexed_db_info.size)).c_str());
   gtk_entry_set_text(GTK_ENTRY(self->indexed_db_last_modified_entry_),
                      UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
-                         indexed_db_info.last_modified_)).c_str());
+                         indexed_db_info.last_modified)).c_str());
   SetLocalStorageDetailsSensitivity(self, TRUE);
 }
 
 void gtk_chrome_cookie_view_display_local_storage_item(
     GtkChromeCookieView* self,
     const std::string& host,
-    const base::string16& key,
-    const base::string16& value) {
+    const string16& key,
+    const string16& value) {
   UpdateVisibleDetailedInfo(self, self->local_storage_item_table_);
 
   gtk_entry_set_text(GTK_ENTRY(self->local_storage_item_origin_entry_),
@@ -626,8 +621,8 @@ void gtk_chrome_cookie_view_display_local_storage_item(
 void gtk_chrome_cookie_view_display_database_accessed(
     GtkChromeCookieView* self,
     const std::string& host,
-    const base::string16& database_name,
-    const base::string16& display_name,
+    const string16& database_name,
+    const string16& display_name,
     unsigned long estimated_size) {
   UpdateVisibleDetailedInfo(self, self->database_accessed_table_);
 

@@ -9,16 +9,19 @@
 #include <sstream>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop.h"
+#include "base/process_util.h"
 #include "base/threading/thread.h"
-#include "ipc/ipc_test_base.h"
+#include "ipc/ipc_channel_proxy.h"
+#include "ipc/ipc_tests.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/multiprocess_func_list.h"
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
 #endif
 
-// IPC messages for testing ----------------------------------------------------
+// IPC messages for testing ---------------------------------------------------
 
 #define IPC_MESSAGE_IMPL
 #include "ipc/ipc_message_macros.h"
@@ -40,16 +43,16 @@ IPC_MESSAGE_CONTROL1(MsgClassResponse, std::string)
 // Message class to tell the server to shut down.
 IPC_MESSAGE_CONTROL0(MsgClassShutdown)
 
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
 namespace {
-
 const char kHelloString[] = "Hello, SyncSocket Client";
 const size_t kHelloStringLength = arraysize(kHelloString);
+}  // namespace
 
 // The SyncSocket server listener class processes two sorts of
 // messages from the client.
-class SyncSocketServerListener : public IPC::Listener {
+class SyncSocketServerListener : public IPC::Channel::Listener {
  public:
   SyncSocketServerListener() : chan_(NULL) {
   }
@@ -58,7 +61,7 @@ class SyncSocketServerListener : public IPC::Listener {
     chan_ = chan;
   }
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
+  virtual bool OnMessageReceived(const IPC::Message& msg) {
     if (msg.routing_id() == MSG_ROUTING_CONTROL) {
       IPC_BEGIN_MESSAGE_MAP(SyncSocketServerListener, msg)
         IPC_MESSAGE_HANDLER(MsgClassSetHandle, OnMsgClassSetHandle)
@@ -86,8 +89,8 @@ class SyncSocketServerListener : public IPC::Listener {
 
   void SetHandle(base::SyncSocket::Handle handle) {
     base::SyncSocket sync_socket(handle);
-    EXPECT_EQ(sync_socket.Send(kHelloString, kHelloStringLength),
-              kHelloStringLength);
+    EXPECT_EQ(sync_socket.Send(static_cast<const void*>(kHelloString),
+                               kHelloStringLength), kHelloStringLength);
     IPC::Message* msg = new MsgClassResponse(kHelloString);
     EXPECT_TRUE(chan_->Send(msg));
   }
@@ -95,7 +98,7 @@ class SyncSocketServerListener : public IPC::Listener {
   // When the client responds, it sends back a shutdown message,
   // which causes the message loop to exit.
   void OnMsgClassShutdown() {
-    base::MessageLoop::current()->Quit();
+    MessageLoop::current()->Quit();
   }
 
   IPC::Channel* chan_;
@@ -103,23 +106,21 @@ class SyncSocketServerListener : public IPC::Listener {
   DISALLOW_COPY_AND_ASSIGN(SyncSocketServerListener);
 };
 
-// Runs the fuzzing server child mode. Returns when the preset number of
-// messages have been received.
-MULTIPROCESS_IPC_TEST_CLIENT_MAIN(SyncSocketServerClient) {
-  base::MessageLoopForIO main_message_loop;
+// Runs the fuzzing server child mode. Returns when the preset number
+// of messages have been received.
+MULTIPROCESS_TEST_MAIN(RunSyncSocketServer) {
+  MessageLoopForIO main_message_loop;
   SyncSocketServerListener listener;
-  IPC::Channel channel(IPCTestBase::GetChannelName("SyncSocketServerClient"),
-                       IPC::Channel::MODE_CLIENT,
-                       &listener);
-  EXPECT_TRUE(channel.Connect());
-  listener.Init(&channel);
-  base::MessageLoop::current()->Run();
+  IPC::Channel chan(kSyncSocketChannel, IPC::Channel::MODE_CLIENT, &listener);
+  EXPECT_TRUE(chan.Connect());
+  listener.Init(&chan);
+  MessageLoop::current()->Run();
   return 0;
 }
 
 // The SyncSocket client listener only processes one sort of message,
 // a response from the server.
-class SyncSocketClientListener : public IPC::Listener {
+class SyncSocketClientListener : public IPC::Channel::Listener {
  public:
   SyncSocketClientListener() {
   }
@@ -129,7 +130,7 @@ class SyncSocketClientListener : public IPC::Listener {
     chan_ = chan;
   }
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
+  virtual bool OnMessageReceived(const IPC::Message& msg) {
     if (msg.routing_id() == MSG_ROUTING_CONTROL) {
       IPC_BEGIN_MESSAGE_MAP(SyncSocketClientListener, msg)
         IPC_MESSAGE_HANDLER(MsgClassResponse, OnMsgClassResponse)
@@ -153,7 +154,7 @@ class SyncSocketClientListener : public IPC::Listener {
     EXPECT_EQ(0U, socket_->Peek());
     IPC::Message* msg = new MsgClassShutdown();
     EXPECT_TRUE(chan_->Send(msg));
-    base::MessageLoop::current()->Quit();
+    MessageLoop::current()->Quit();
   }
 
   base::SyncSocket* socket_;
@@ -162,15 +163,15 @@ class SyncSocketClientListener : public IPC::Listener {
   DISALLOW_COPY_AND_ASSIGN(SyncSocketClientListener);
 };
 
-class SyncSocketTest : public IPCTestBase {
+class SyncSocketTest : public IPCChannelTest {
 };
 
 TEST_F(SyncSocketTest, SanityTest) {
-  Init("SyncSocketServerClient");
-
   SyncSocketClientListener listener;
-  CreateChannel(&listener);
-  ASSERT_TRUE(StartClient());
+  IPC::Channel chan(kSyncSocketChannel, IPC::Channel::MODE_SERVER,
+                    &listener);
+  base::ProcessHandle server_process = SpawnChild(SYNC_SOCKET_SERVER, &chan);
+  ASSERT_TRUE(server_process);
   // Create a pair of SyncSockets.
   base::SyncSocket pair[2];
   base::SyncSocket::CreatePair(&pair[0], &pair[1]);
@@ -179,12 +180,12 @@ TEST_F(SyncSocketTest, SanityTest) {
   EXPECT_EQ(0U, pair[1].Peek());
   base::SyncSocket::Handle target_handle;
   // Connect the channel and listener.
-  ASSERT_TRUE(ConnectChannel());
-  listener.Init(&pair[0], channel());
+  ASSERT_TRUE(chan.Connect());
+  listener.Init(&pair[0], &chan);
 #if defined(OS_WIN)
   // On windows we need to duplicate the handle into the server process.
   BOOL retval = DuplicateHandle(GetCurrentProcess(), pair[1].handle(),
-                                client_process(), &target_handle,
+                                server_process, &target_handle,
                                 0, FALSE, DUPLICATE_SAME_ACCESS);
   EXPECT_TRUE(retval);
   // Set up a message to pass the handle to the server.
@@ -195,24 +196,21 @@ TEST_F(SyncSocketTest, SanityTest) {
   base::FileDescriptor filedesc(target_handle, false);
   IPC::Message* msg = new MsgClassSetHandle(filedesc);
 #endif  // defined(OS_WIN)
-  EXPECT_TRUE(sender()->Send(msg));
+  EXPECT_TRUE(chan.Send(msg));
   // Use the current thread as the I/O thread.
-  base::MessageLoop::current()->Run();
+  MessageLoop::current()->Run();
   // Shut down.
   pair[0].Close();
   pair[1].Close();
-  EXPECT_TRUE(WaitForClientShutdown());
-  DestroyChannel();
+  EXPECT_TRUE(base::WaitForSingleProcess(server_process, 5000));
+  base::CloseProcessHandle(server_process);
 }
 
-// A blocking read operation that will block the thread until it receives
-// |length| bytes of packets or Shutdown() is called on another thread.
-static void BlockingRead(base::SyncSocket* socket, char* buf,
-                         size_t length, size_t* received) {
-  DCHECK(buf != NULL);
+static void BlockingRead(base::SyncSocket* socket, size_t* received) {
   // Notify the parent thread that we're up and running.
   socket->Send(kHelloString, kHelloStringLength);
-  *received = socket->Receive(buf, length);
+  char buf[0xff]; // Won't ever be filled.
+  *received = socket->Receive(buf, arraysize(buf));
 }
 
 // Tests that we can safely end a blocking Receive operation on one thread
@@ -225,15 +223,14 @@ TEST_F(SyncSocketTest, DisconnectTest) {
   worker.Start();
 
   // Try to do a blocking read from one of the sockets on the worker thread.
-  char buf[0xff];
   size_t received = 1U;  // Initialize to an unexpected value.
   worker.message_loop()->PostTask(FROM_HERE,
-      base::Bind(&BlockingRead, &pair[0], &buf[0], arraysize(buf), &received));
+      base::Bind(&BlockingRead, &pair[0], &received));
 
   // Wait for the worker thread to say hello.
   char hello[kHelloStringLength] = {0};
   pair[1].Receive(&hello[0], sizeof(hello));
-  EXPECT_EQ(0, strcmp(hello, kHelloString));
+  VLOG(1) << "Received: " << hello;
   // Give the worker a chance to start Receive().
   base::PlatformThread::YieldCurrentThread();
 
@@ -245,64 +242,3 @@ TEST_F(SyncSocketTest, DisconnectTest) {
 
   EXPECT_EQ(0U, received);
 }
-
-// Tests that read is a blocking operation.
-TEST_F(SyncSocketTest, BlockingReceiveTest) {
-  base::CancelableSyncSocket pair[2];
-  ASSERT_TRUE(base::CancelableSyncSocket::CreatePair(&pair[0], &pair[1]));
-
-  base::Thread worker("BlockingThread");
-  worker.Start();
-
-  // Try to do a blocking read from one of the sockets on the worker thread.
-  char buf[kHelloStringLength] = {0};
-  size_t received = 1U;  // Initialize to an unexpected value.
-  worker.message_loop()->PostTask(FROM_HERE,
-      base::Bind(&BlockingRead, &pair[0], &buf[0],
-                 kHelloStringLength, &received));
-
-  // Wait for the worker thread to say hello.
-  char hello[kHelloStringLength] = {0};
-  pair[1].Receive(&hello[0], sizeof(hello));
-  EXPECT_EQ(0, strcmp(hello, kHelloString));
-  // Give the worker a chance to start Receive().
-  base::PlatformThread::YieldCurrentThread();
-
-  // Send a message to the socket on the blocking thead, it should free the
-  // socket from Receive().
-  pair[1].Send(kHelloString, kHelloStringLength);
-  worker.Stop();
-
-  // Verify the socket has received the message.
-  EXPECT_TRUE(strcmp(buf, kHelloString) == 0);
-  EXPECT_EQ(kHelloStringLength, received);
-}
-
-// Tests that the write operation is non-blocking and returns immediately
-// when there is insufficient space in the socket's buffer.
-TEST_F(SyncSocketTest, NonBlockingWriteTest) {
-  base::CancelableSyncSocket pair[2];
-  ASSERT_TRUE(base::CancelableSyncSocket::CreatePair(&pair[0], &pair[1]));
-
-  // Fill up the buffer for one of the socket, Send() should not block the
-  // thread even when the buffer is full.
-  while (pair[0].Send(kHelloString, kHelloStringLength) != 0) {}
-
-  // Data should be avialble on another socket.
-  size_t bytes_in_buffer = pair[1].Peek();
-  EXPECT_NE(bytes_in_buffer, 0U);
-
-  // No more data can be written to the buffer since socket has been full,
-  // verify that the amount of avialble data on another socket is unchanged.
-  EXPECT_EQ(0U, pair[0].Send(kHelloString, kHelloStringLength));
-  EXPECT_EQ(bytes_in_buffer, pair[1].Peek());
-
-  // Read from another socket to free some space for a new write.
-  char hello[kHelloStringLength] = {0};
-  pair[1].Receive(&hello[0], sizeof(hello));
-
-  // Should be able to write more data to the buffer now.
-  EXPECT_EQ(kHelloStringLength, pair[0].Send(kHelloString, kHelloStringLength));
-}
-
-}  // namespace

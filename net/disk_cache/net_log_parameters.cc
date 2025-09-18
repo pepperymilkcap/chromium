@@ -1,133 +1,100 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/disk_cache/net_log_parameters.h"
 
-#include "base/bind.h"
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
-#include "net/disk_cache/disk_cache.h"
-
-namespace {
-
-base::Value* NetLogEntryCreationCallback(
-    const disk_cache::Entry* entry,
-    bool created,
-    net::NetLog::LogLevel /* log_level */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  dict->SetString("key", entry->GetKey());
-  dict->SetBoolean("created", created);
-  return dict;
-}
-
-base::Value* NetLogReadWriteDataCallback(
-    int index,
-    int offset,
-    int buf_len,
-    bool truncate,
-    net::NetLog::LogLevel /* log_level */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  dict->SetInteger("index", index);
-  dict->SetInteger("offset", offset);
-  dict->SetInteger("buf_len", buf_len);
-  if (truncate)
-    dict->SetBoolean("truncate", truncate);
-  return dict;
-}
-
-base::Value* NetLogReadWriteCompleteCallback(
-    int bytes_copied,
-    net::NetLog::LogLevel /* log_level */) {
-  DCHECK_NE(bytes_copied, net::ERR_IO_PENDING);
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  if (bytes_copied < 0) {
-    dict->SetInteger("net_error", bytes_copied);
-  } else {
-    dict->SetInteger("bytes_copied", bytes_copied);
-  }
-  return dict;
-}
-
-base::Value* NetLogSparseOperationCallback(
-    int64 offset,
-    int buff_len,
-    net::NetLog::LogLevel /* log_level */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  // Values can only be created with at most 32-bit integers.  Using a string
-  // instead circumvents that restriction.
-  dict->SetString("offset", base::Int64ToString(offset));
-  dict->SetInteger("buff_len", buff_len);
-  return dict;
-}
-
-base::Value* NetLogSparseReadWriteCallback(
-    const net::NetLog::Source& source,
-    int child_len,
-    net::NetLog::LogLevel /* log_level */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  source.AddToEventParameters(dict);
-  dict->SetInteger("child_len", child_len);
-  return dict;
-}
-
-base::Value* NetLogGetAvailableRangeResultCallback(
-    int64 start,
-    int result,
-    net::NetLog::LogLevel /* log_level */) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  if (result > 0) {
-    dict->SetInteger("length", result);
-    dict->SetString("start",  base::Int64ToString(start));
-  } else {
-    dict->SetInteger("net_error", result);
-  }
-  return dict;
-}
-
-}  // namespace
 
 namespace disk_cache {
 
-net::NetLog::ParametersCallback CreateNetLogEntryCreationCallback(
-    const Entry* entry,
-    bool created) {
-  DCHECK(entry);
-  return base::Bind(&NetLogEntryCreationCallback, entry, created);
+EntryCreationParameters::EntryCreationParameters(
+    const std::string& key, bool created)
+    : key_(key), created_(created) {
 }
 
-net::NetLog::ParametersCallback CreateNetLogReadWriteDataCallback(
-    int index,
-    int offset,
-    int buf_len,
-    bool truncate) {
-  return base::Bind(&NetLogReadWriteDataCallback,
-                    index, offset, buf_len, truncate);
+Value* EntryCreationParameters::ToValue() const {
+  DictionaryValue* dict = new DictionaryValue();
+  dict->SetString("key", key_);
+  dict->SetBoolean("created", created_);
+  return dict;
 }
 
-net::NetLog::ParametersCallback CreateNetLogReadWriteCompleteCallback(
-    int bytes_copied) {
-  return base::Bind(&NetLogReadWriteCompleteCallback, bytes_copied);
+ReadWriteDataParameters::ReadWriteDataParameters(
+    int index, int offset, int buf_len, bool truncate)
+    : index_(index), offset_(offset), buf_len_(buf_len), truncate_(truncate) {
 }
 
-net::NetLog::ParametersCallback CreateNetLogSparseOperationCallback(
-    int64 offset,
-    int buff_len) {
-  return base::Bind(&NetLogSparseOperationCallback, offset, buff_len);
+Value* ReadWriteDataParameters::ToValue() const {
+  DictionaryValue* dict = new DictionaryValue();
+  dict->SetInteger("index", index_);
+  dict->SetInteger("offset", offset_);
+  dict->SetInteger("buf_len", buf_len_);
+  if (truncate_)
+    dict->SetBoolean("truncate", truncate_);
+  return dict;
 }
 
-net::NetLog::ParametersCallback CreateNetLogSparseReadWriteCallback(
-    const net::NetLog::Source& source,
-    int child_len) {
-  return base::Bind(&NetLogSparseReadWriteCallback, source, child_len);
+
+// NetLog parameters logged when non-sparse reads and writes complete.
+ReadWriteCompleteParameters::ReadWriteCompleteParameters(int bytes_copied)
+    : bytes_copied_(bytes_copied) {
 }
 
-net::NetLog::ParametersCallback CreateNetLogGetAvailableRangeResultCallback(
-    int64 start,
-    int result) {
-  return base::Bind(&NetLogGetAvailableRangeResultCallback, start, result);
+Value* ReadWriteCompleteParameters::ToValue() const {
+  DCHECK_NE(bytes_copied_, net::ERR_IO_PENDING);
+  DictionaryValue* dict = new DictionaryValue();
+  if (bytes_copied_ < 0) {
+    dict->SetInteger("net_error", bytes_copied_);
+  } else {
+    dict->SetInteger("bytes_copied", bytes_copied_);
+  }
+  return dict;
+}
+
+SparseOperationParameters::SparseOperationParameters(
+    int64 offset, int buff_len)
+    : offset_(offset), buff_len_(buff_len) {
+}
+
+Value* SparseOperationParameters::ToValue() const {
+  DictionaryValue* dict = new DictionaryValue();
+  // Values can only be created with at most 32-bit integers.  Using a string
+  // instead circumvents that restriction.
+  dict->SetString("offset", base::Int64ToString(offset_));
+  dict->SetInteger("buff_len", buff_len_);
+  return dict;
+}
+
+SparseReadWriteParameters::SparseReadWriteParameters(
+    const net::NetLog::Source& source, int child_len)
+    : source_(source), child_len_(child_len) {
+}
+
+Value* SparseReadWriteParameters::ToValue() const {
+  DictionaryValue* dict = new DictionaryValue();
+  dict->Set("source_dependency", source_.ToValue());
+  dict->SetInteger("child_len", child_len_);
+  return dict;
+}
+
+GetAvailableRangeResultParameters::GetAvailableRangeResultParameters(
+    int64 start, int result)
+    : start_(start), result_(result) {
+}
+
+Value* GetAvailableRangeResultParameters::ToValue() const {
+  DictionaryValue* dict = new DictionaryValue();
+  if (result_ > 0) {
+    dict->SetInteger("length", result_);
+    dict->SetString("start",  base::Int64ToString(start_));
+  } else {
+    dict->SetInteger("net_error", result_);
+  }
+  return dict;
 }
 
 }  // namespace disk_cache
